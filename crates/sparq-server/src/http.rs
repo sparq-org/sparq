@@ -6993,12 +6993,67 @@ enum SendStop {
 }
 
 impl SendStop {
+    /// The engine's abort message for this stop, so the response side reports it with the
+    /// same reason vocabulary as an engine-side trip. `None` for a disconnect: nobody is left
+    /// to tell.
+    fn engine_reason(self) -> Option<&'static str> {
+        match self {
+            SendStop::Closed => None,
+            SendStop::Deadline => Some("query budget exceeded (timeout)"),
+            SendStop::Cancelled => Some("query budget exceeded (cancelled)"),
+        }
+    }
+
     fn message(self) -> &'static str {
         match self {
             SendStop::Closed => "client disconnected",
             SendStop::Deadline => "client stopped reading before the query deadline",
             SendStop::Cancelled => "query cancelled while the client was not reading",
         }
+    }
+}
+
+/// What a streaming worker leaves for the response side besides the channel items.
+///
+/// The worker's terminal outcome normally travels as the last channel item, but a stopped
+/// send cannot deliver it: the channel is full (a stalled reader) or the cancel flag refuses
+/// every send. The worker therefore records the reason here BEFORE it drops its sender, and
+/// the response side reads it when the channel closes without a terminal item. Only when
+/// nothing was recorded is the closed channel a dead worker (`panic`).
+#[derive(Default)]
+struct StreamOutcome {
+    /// The whole document was handed over (graph streams; SELECT uses its `Done` marker).
+    complete: std::sync::atomic::AtomicBool,
+    /// The engine-style abort message for a stream that ended without a terminal item.
+    stop: std::sync::OnceLock<String>,
+}
+
+impl StreamOutcome {
+    fn record(&self, reason: impl Into<String>) {
+        let _ = self.stop.set(reason.into());
+    }
+
+    fn record_stop(&self, stop: SendStop) {
+        if let Some(reason) = stop.engine_reason() {
+            self.record(reason);
+        }
+    }
+
+    fn reason(&self) -> Option<&str> {
+        self.stop.get().map(String::as_str)
+    }
+
+    /// The `X-Sparq-Truncated` reason for a channel that closed without a terminal item.
+    fn truncation(&self) -> &'static str {
+        self.reason().map(truncation_reason).unwrap_or("panic")
+    }
+
+    fn mark_complete(&self) {
+        self.complete.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn is_complete(&self) -> bool {
+        self.complete.load(std::sync::atomic::Ordering::Acquire)
     }
 }
 
@@ -7224,6 +7279,8 @@ struct StreamingJsonBody {
     /// The client negotiated `TE: trailers`.
     trailers_ok: bool,
     state: BodyState,
+    /// Why the worker stopped, when it could not post a terminal item (see [`StreamOutcome`]).
+    outcome: Arc<StreamOutcome>,
 }
 
 impl StreamingJsonBody {
@@ -7310,10 +7367,11 @@ impl http_body::Body for StreamingJsonBody {
                             }
                         }
                     };
-                    // The worker vanished without a terminal marker — a panic in the engine
-                    // or the serialiser. Truncated, never "complete".
+                    // The worker ended without a terminal marker: a stopped send (cancel or
+                    // deadline, recorded in the outcome) or a panic. Truncated, never "complete".
                     let Some(item) = next else {
-                        match this.truncate("panic") {
+                        let reason = this.outcome.truncation();
+                        match this.truncate(reason) {
                             Some(e) => return Poll::Ready(Some(Err(e))),
                             None => continue,
                         }
@@ -7426,6 +7484,8 @@ async fn stream_select_json(
     let StreamShape { head_only, trailers_ok } = shape;
     let limits = SendLimits::for_budget(&budget);
     let read_deadline = limits.deadline;
+    let outcome = Arc::new(StreamOutcome::default());
+    let worker_outcome = Arc::clone(&outcome);
     let ct = Format::Json.select_content_type();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamItem>(STREAM_CHANNEL_CAP);
     tokio::task::spawn_blocking(move || {
@@ -7437,26 +7497,34 @@ async fn stream_select_json(
             let mut sink = |chunk: String| match limits.send(&tx, StreamItem::Chunk(Bytes::from(chunk.into_bytes()))) {
                 Ok(()) => std::ops::ControlFlow::Continue(()),
                 // The client disconnected (or a HEAD request stopped reading), or it stopped
-                // reading past the deadline, or the query was cancelled. Abandon the rest.
-                Err(_) => {
+                // reading past the deadline, or the query was cancelled. Record why and
+                // abandon the rest.
+                Err(stop) => {
                     stopped = true;
+                    worker_outcome.record_stop(stop);
                     std::ops::ControlFlow::Break(())
                 }
             };
-            let outcome = sparq_engine::query_json_stream_prepared_with_budget(graph, &query, &budget, &mut sink);
+            let result = sparq_engine::query_json_stream_prepared_with_budget(graph, &query, &budget, &mut sink);
             // A stopped stream is missing chunks, so it must never claim completion: post no
-            // marker and let the body report the closed channel as a truncation.
+            // marker and let the body report the closed channel with the recorded reason.
             if stopped {
                 return;
             }
             // [SONNET-4.6] (sq-7d3dj.26) ALWAYS post a terminal marker: the body side treats
-            // "channel closed without one" as a truncation (a panicking worker), so the
-            // completion claim can only ever come from the engine actually returning `Ok`.
-            // A send failure here just means the client went away or stopped reading.
-            let _ = limits.send(&tx, match outcome {
-                Ok(()) => StreamItem::Done,
-                Err(e) => StreamItem::Failed(e),
-            });
+            // "channel closed without one" as a truncation, so the completion claim can only
+            // ever come from the engine actually returning `Ok`. If the marker cannot be
+            // delivered (cancelled, past the deadline), record the reason instead.
+            let (item, failure) = match result {
+                Ok(()) => (StreamItem::Done, None),
+                Err(e) => (StreamItem::Failed(e.clone()), Some(e)),
+            };
+            if let Err(stop) = limits.send(&tx, item) {
+                match failure {
+                    Some(e) => worker_outcome.record(e),
+                    None => worker_outcome.record_stop(stop),
+                }
+            }
             // `gen` (the generation pin) is held until the worker returns, so every snapshot
             // borrow above is valid for the whole streamed evaluation.
         });
@@ -7467,6 +7535,10 @@ async fn stream_select_json(
     let first = match recv_first_chunk(&mut rx, config).await {
         Ok(Some(StreamItem::Chunk(bytes))) => bytes,
         Ok(Some(StreamItem::Failed(e))) => return engine_error_response(&e, config, true),
+        // The worker stopped before the first chunk and recorded why (cancel / deadline).
+        Ok(None) if outcome.reason().is_some() => {
+            return engine_error_response(outcome.reason().unwrap_or_default(), config, true)
+        }
         // The engine reported completion without emitting anything, or the worker died before
         // the first chunk. Nothing is committed, so this is still an honest 500.
         Ok(Some(StreamItem::Done)) | Ok(None) => {
@@ -7508,7 +7580,10 @@ async fn stream_select_json(
         // the engine or the serialiser) having produced exactly one chunk. Nothing has been
         // flushed to the socket, so the status is NOT yet committed: answer with the honest
         // 500 rather than a truncated 200.
-        None => execution_error("streaming query worker ended before completing the result"),
+        None => match outcome.reason() {
+            Some(reason) => engine_error_response(reason, config, true),
+            None => execution_error("streaming query worker ended before completing the result"),
+        },
         Some(StreamItem::Chunk(second)) => {
             if head_only {
                 // HEAD: status + headers only. Dropping the receiver stops the worker.
@@ -7533,6 +7608,7 @@ async fn stream_select_json(
                 held: None,
                 trailers_ok,
                 state: BodyState::Streaming,
+                outcome,
             });
             let builder = Response::builder()
                 .status(StatusCode::OK)
@@ -7619,6 +7695,8 @@ struct ChunkSink {
     /// The deadline / cancellation that bound every send, so a client that stops reading
     /// cannot block the serialiser forever.
     limits: SendLimits,
+    /// Why a send stopped, if one did — the worker records it for the response side.
+    stopped: Option<SendStop>,
     buf: Vec<u8>,
     /// Whether any chunk has been handed over yet — [`ChunkSink::finish`] uses it to guarantee
     /// at least one (possibly empty) chunk, so an empty CONSTRUCT still answers `200` with an
@@ -7628,19 +7706,20 @@ struct ChunkSink {
 
 impl ChunkSink {
     fn new(tx: tokio::sync::mpsc::Sender<Result<Bytes, String>>, limits: SendLimits) -> Self {
-        Self { tx, limits, buf: Vec::with_capacity(GRAPH_STREAM_CHUNK_BYTES), sent: false }
+        Self { tx, limits, stopped: None, buf: Vec::with_capacity(GRAPH_STREAM_CHUNK_BYTES), sent: false }
     }
 
     fn send(&mut self, chunk: Vec<u8>) -> std::io::Result<()> {
         self.sent = true;
-        self.limits
-            .send(&self.tx, Ok(Bytes::from(chunk)))
-            .map_err(|stop| std::io::Error::other(stop.message()))
+        self.limits.send(&self.tx, Ok(Bytes::from(chunk))).map_err(|stop| {
+            self.stopped = Some(stop);
+            std::io::Error::other(stop.message())
+        })
     }
 
-    /// Hands over the trailing partial chunk. Consumes the sink so the sender is dropped
-    /// afterwards, which is what closes the response stream.
-    fn finish(mut self) -> std::io::Result<()> {
+    /// Hands over the trailing partial chunk. The caller then drops the sink; dropping its
+    /// sender is what closes the response stream.
+    fn finish(&mut self) -> std::io::Result<()> {
         if !self.buf.is_empty() || !self.sent {
             let chunk = std::mem::take(&mut self.buf);
             self.send(chunk)?;
@@ -7709,8 +7788,8 @@ async fn stream_graph_result(
     // Set by the worker only once the whole document has been handed over. The channel closes
     // the same way after a finished render and after an aborted one (stalled reader past the
     // deadline, cancellation, panic), so the body consults this before ending cleanly.
-    let complete = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let worker_complete = Arc::clone(&complete);
+    let outcome = Arc::new(StreamOutcome::default());
+    let worker_outcome = Arc::clone(&outcome);
     tokio::task::spawn_blocking(move || {
         let _held = held;
         with_engine_scope_allow(&allow, || {
@@ -7720,25 +7799,31 @@ async fn stream_graph_result(
                 &budget,
             ) {
                 // Nothing has been rendered yet, so this still maps to the right status.
+                // If the error cannot be delivered (cancelled, past the deadline), record it.
                 Err(e) => {
-                    let _ = limits.send(&tx, Err(e));
+                    if limits.send(&tx, Err(e.clone())).is_err() {
+                        worker_outcome.record(e);
+                    }
                 }
                 Ok(triples) => {
                     let mut sink = ChunkSink::new(tx.clone(), limits.clone());
-                    match serialise_graph_triples_to(&triples, gfmt, &mut sink) {
-                        Ok(()) => {
-                            if sink.finish().is_ok() {
-                                worker_complete.store(true, std::sync::atomic::Ordering::Release);
-                            }
-                        }
+                    let rendered =
+                        serialise_graph_triples_to(&triples, gfmt, &mut sink).and_then(|()| sink.finish());
+                    let stopped = sink.stopped;
+                    drop(sink);
+                    match (rendered, stopped) {
+                        (Ok(()), _) => worker_outcome.mark_complete(),
+                        // A send stopped (cancel / deadline / disconnect): record why.
+                        (Err(_), Some(stop)) => worker_outcome.record_stop(stop),
                         // A writer can refuse a legal graph (RDF/XML cannot encode some
                         // predicates). Report it instead of closing the channel, so the
                         // response is an error status (nothing sent yet, or one chunk held)
                         // or an aborted chunked body, never a 200 with a truncated document.
-                        // After a client disconnect this send fails too, which is harmless.
-                        Err(e) => {
-                            drop(sink);
-                            let _ = limits.send(&tx, Err(format!("serialising the graph result: {e}")));
+                        (Err(e), None) => {
+                            let msg = format!("serialising the graph result: {e}");
+                            if limits.send(&tx, Err(msg.clone())).is_err() {
+                                worker_outcome.record(msg);
+                            }
                         }
                     }
                 }
@@ -7748,7 +7833,7 @@ async fn stream_graph_result(
         });
     });
 
-    graph_stream_response(rx, complete, ct, read_deadline, config).await
+    graph_stream_response(rx, outcome, ct, read_deadline, config).await
 }
 
 /// The response side of [`stream_graph_result`]: waits for the first one or two chunks (no
@@ -7759,7 +7844,7 @@ async fn stream_graph_result(
 /// RDF/XML literal, say) still ends in the timeout response instead of holding the request.
 async fn graph_stream_response(
     mut rx: tokio::sync::mpsc::Receiver<Result<Bytes, String>>,
-    complete: Arc<std::sync::atomic::AtomicBool>,
+    outcome: Arc<StreamOutcome>,
     ct: &'static str,
     deadline: Option<std::time::Instant>,
     config: &ServerConfig,
@@ -7770,7 +7855,12 @@ async fn graph_stream_response(
         Ok(Some(Ok(bytes))) => bytes,
         // CONSTRUCT/DESCRIBE used `make_budget(_, true)` → max_results applied.
         Ok(Some(Err(e))) => return engine_error_response(&e, config, true),
-        Ok(None) => return execution_error("query produced no result stream"),
+        Ok(None) => {
+            return match outcome.reason() {
+                Some(reason) => engine_error_response(reason, config, true),
+                None => execution_error("query produced no result stream"),
+            }
+        }
         Err(()) => return timeout_response(config),
     };
 
@@ -7779,11 +7869,12 @@ async fn graph_stream_response(
         Err(()) => return timeout_response(config),
     };
     match second {
-        // The worker stopped after one chunk without finishing (a panic): nothing is
-        // committed yet, so this is still an honest 500 rather than a truncated 200.
-        None if !complete.load(std::sync::atomic::Ordering::Acquire) => {
-            execution_error("streaming query worker ended before completing the result")
-        }
+        // The worker stopped after one chunk without finishing: nothing is committed yet, so
+        // answer with the recorded reason (cancel / deadline), or an honest 500 for a panic.
+        None if !outcome.is_complete() => match outcome.reason() {
+            Some(reason) => engine_error_response(reason, config, true),
+            None => execution_error("streaming query worker ended before completing the result"),
+        },
         // One chunk only: answer exactly as the buffered path did, Content-Length and all.
         None => {
             let len = first.len();
@@ -7804,7 +7895,7 @@ async fn graph_stream_response(
             let body = axum::body::Body::from_stream(futures_util::stream::unfold(
                 (prefix, Some(rx)),
                 move |(mut prefix, rx)| {
-                    let complete = Arc::clone(&complete);
+                    let outcome = Arc::clone(&outcome);
                     async move {
                         let mut rx = rx?;
                         let item = match prefix.pop_front() {
@@ -7813,8 +7904,11 @@ async fn graph_stream_response(
                                 Some(it) => it,
                                 // A worker that stopped without finishing must abort the chunked
                                 // body, never end it as if the document were complete.
-                                None if !complete.load(std::sync::atomic::Ordering::Acquire) => {
-                                    let e = std::io::Error::other("graph result stream ended before the document was complete");
+                                None if !outcome.is_complete() => {
+                                    let e = std::io::Error::other(format!(
+                                        "graph result stream truncated ({}) before the document was complete",
+                                        outcome.truncation()
+                                    ));
                                     return Some((Err(e), (prefix, None)));
                                 }
                                 None => return None,
@@ -7866,7 +7960,7 @@ mod chunk_sink_tests {
     fn an_empty_document_still_yields_exactly_one_empty_chunk() {
         // Load-bearing: the response builder treats "no chunk at all" as a worker that died,
         // so an empty CONSTRUCT must still produce a chunk to answer 200 with an empty body.
-        let (s, rx) = sink();
+        let (mut s, rx) = sink();
         s.finish().unwrap();
         assert_eq!(drain(rx), vec![Vec::<u8>::new()]);
     }
@@ -7966,7 +8060,7 @@ mod chunk_sink_tests {
     async fn a_stall_after_the_first_graph_chunk_ends_in_the_timeout_response() {
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, String>>(STREAM_CHANNEL_CAP);
         tx.send(Ok(Bytes::from_static(b"<a> <b> <c> .\n"))).await.unwrap();
-        let complete = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let complete = Arc::new(StreamOutcome::default());
         let deadline = Some(std::time::Instant::now() + Duration::from_millis(200));
         let config = ServerConfig::default();
         let resp = tokio::time::timeout(
@@ -8036,6 +8130,71 @@ mod stalled_reader_tests {
     async fn a_stalled_select_reader_does_not_pin_the_worker() {
         assert_worker_released("SELECT * WHERE { ?s ?p ?o }").await;
     }
+
+    /// Starts a streamed SELECT that negotiated trailers and returns the held response.
+    async fn start_select_with_trailers(state: &AppState) -> Response {
+        let uri = format!("/sparql?query={}", urlencoding_min("SELECT * WHERE { ?s ?p ?o }"));
+        let req = axum::http::Request::builder()
+            .uri(uri)
+            .header("te", "trailers")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let resp = router(state.clone()).oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        resp
+    }
+
+    async fn wait_for_worker_exit(state: &AppState) {
+        let limit = std::time::Instant::now() + TIMEOUT_GRACE + Duration::from_secs(10);
+        while state.stream_workers_in_flight() != 0 {
+            assert!(std::time::Instant::now() < limit, "the streaming worker never stopped");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Reads the whole body and returns its `X-Sparq-Truncated` trailer.
+    async fn truncated_trailer(resp: Response) -> Option<String> {
+        use http_body::Body as _;
+        let mut body = resp.into_body();
+        let mut reason = None;
+        loop {
+            match std::future::poll_fn(|cx| std::pin::Pin::new(&mut body).poll_frame(cx)).await {
+                None => return reason,
+                Some(Err(e)) => panic!("a client that negotiated trailers gets them, not an abort: {e}"),
+                Some(Ok(frame)) => {
+                    if let Ok(trailers) = frame.into_trailers() {
+                        reason = trailers.get(TRAILER_TRUNCATED).map(|v| v.to_str().unwrap().to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    /// The worker stops on the deadline while the reader is not draining (backpressure). The
+    /// truncation must be reported as `deadline`, not as a dead worker (`panic`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_deadline_stop_during_backpressure_reports_deadline() {
+        let state = state();
+        let resp = start_select_with_trailers(&state).await;
+        wait_for_worker_exit(&state).await;
+        assert_eq!(truncated_trailer(resp).await.as_deref(), Some("deadline"));
+    }
+
+    /// `DELETE /queries/{id}` on a streamed SELECT whose worker is waiting on a full channel:
+    /// the truncation must be reported as `cancelled`, not `panic`.
+    #[cfg(feature = "query-registry")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_registry_cancel_during_a_streamed_select_reports_cancelled() {
+        let config = ServerConfig { query_timeout: Some(Duration::from_secs(60)), ..ServerConfig::default() };
+        let state = AppState::with_config(big_graph(), config);
+        let resp = start_select_with_trailers(&state).await;
+        let listed = state.running_queries.list();
+        assert_eq!(listed.len(), 1, "the streamed SELECT is registered: {listed:?}");
+        let id = listed[0]["id"].as_str().unwrap().to_owned();
+        assert!(state.running_queries.cancel_query(&id));
+        wait_for_worker_exit(&state).await;
+        assert_eq!(truncated_trailer(resp).await.as_deref(), Some("cancelled"));
+    }
 }
 
 #[cfg(test)]
@@ -8087,6 +8246,7 @@ mod truncation_safety_tests {
             held: None,
             trailers_ok,
             state: BodyState::Streaming,
+            outcome: Arc::default(),
         };
         let mut out = Drained { body: Vec::new(), trailers: None, failed: false };
         loop {
