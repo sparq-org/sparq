@@ -1,6 +1,12 @@
 // [SONNET-4.6] #3602 — pure SELECT-result to node-link graph derivation for the workbench.
 
-import { COMMON_PREFIXES, type SparqlResults, type SparqlTerm } from "@sparq/client";
+import {
+  COMMON_PREFIXES,
+  formatTerm,
+  termValue,
+  type SparqlResults,
+  type SparqlTerm,
+} from "@sparq/client";
 
 export const MAX_SELECT_GRAPH_NODES = 24;
 
@@ -47,6 +53,7 @@ function iriLabel(iri: string): string {
 function termLabel(term: SparqlTerm): string {
   if (term.type === "uri") return iriLabel(term.value);
   if (term.type === "bnode") return `_:${term.value}`;
+  if (term.type === "triple") return formatTerm(term);
   return `"${term.value}"`;
 }
 
@@ -65,7 +72,7 @@ export function deriveSelectResultGraph(results: SparqlResults): SelectResultGra
     allNodes.add(id);
     if (!nodes.has(id)) {
       if (nodes.size >= MAX_SELECT_GRAPH_NODES) return null;
-      nodes.set(id, { id, label: termLabel(term), kind: term.type, value: term.value });
+      nodes.set(id, { id, label: termLabel(term), kind: term.type, value: termValue(term) ?? "" });
     }
     return id;
   };

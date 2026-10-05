@@ -53,12 +53,17 @@ test("SPARQL-JSON and parsed-N-Triples keys agree for every term shape", () => {
     datatype: "http://www.w3.org/2001/XMLSchema#integer",
   };
   const escaped: SparqlTerm = { type: "literal", value: 'a"b\nc' };
+  // RDF 1.2 triple term (#6044): SPARQL 1.2 JSON nests the triple under `value`.
+  const tripleTerm: SparqlTerm = {
+    type: "triple",
+    value: { subject: iri, predicate: iri, object: escaped },
+  };
 
   // xml:lang / datatype normalisation: an explicit ^^xsd:string equals a plain literal.
   assert.equal(keyOfSparqlTerm(plain), keyOfSparqlTerm(typedString));
 
-  for (const t of [iri, bnode, plain, typedString, langed, typed, escaped]) {
-    const line = `${termToNT(iri)} ${termToNT(iri)} ${termToNT(t)} .`;
+  for (const t of [iri, bnode, plain, typedString, langed, typed, escaped, tripleTerm]) {
+    const line: string = `${termToNT(iri)} ${termToNT(iri)} ${termToNT(t)} .`;
     const { statements } = parseNTriples(line);
     assert.equal(statements.length, 1, `round-trip parse: ${line}`);
     assert.equal(

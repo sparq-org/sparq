@@ -85,6 +85,33 @@ test("rowsToNQuads emits a triple line for default-graph rows (no ?g)", () => {
   );
 });
 
+// #6044: SPARQL 1.2 JSON nests an RDF 1.2 triple term under `value`. The old local
+// writer had no "triple" case and wrote the string "undefined" into the snapshot.
+test("rowsToNQuads writes an RDF 1.2 triple term as <<( s p o )>>", () => {
+  const rows = [
+    {
+      s: { type: "bnode", value: "r1" },
+      p: { type: "uri", value: "http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies" },
+      o: {
+        type: "triple",
+        value: {
+          subject: { type: "uri", value: "http://ex/alice" },
+          predicate: { type: "uri", value: "http://ex/says" },
+          object: { type: "literal", value: 'hi "there"', "xml:lang": "en" },
+        },
+      },
+      g: { type: "uri", value: "http://ex/g1" },
+    },
+  ];
+  const out = rowsToNQuads(rows);
+  assert.equal(
+    out,
+    '_:r1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies> ' +
+      '<<( <http://ex/alice> <http://ex/says> "hi \\"there\\""@en )>> <http://ex/g1> .',
+  );
+  assert.ok(!out.includes("undefined"));
+});
+
 test("rowsToNQuads emits a quad line (with the graph) for named-graph rows", () => {
   const rows = [
     {

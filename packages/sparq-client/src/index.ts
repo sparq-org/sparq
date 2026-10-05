@@ -101,11 +101,84 @@ export interface WasmModule {
 // SPARQL 1.1 JSON + SHACL report shapes (for rendering).
 // ---------------------------------------------------------------------------
 
-export interface SparqlTerm {
+/** An IRI, blank node or literal in SPARQL-JSON form (`value` is the decoded lexical form). */
+export interface SparqlAtomicTerm {
   type: "uri" | "literal" | "bnode";
   value: string;
   datatype?: string;
   "xml:lang"?: string;
+}
+
+/**
+ * An RDF 1.2 triple term in SPARQL 1.2 Query Results JSON form:
+ * `{"type":"triple","value":{"subject":…,"predicate":…,"object":…}}`. The engine emits this
+ * for a `<<( s p o )>>` binding, so `value` is NOT a string: narrow on `type` (or use
+ * {@link isTripleTerm}) before reading it.
+ */
+export interface SparqlTripleTerm {
+  type: "triple";
+  value: { subject: SparqlTerm; predicate: SparqlTerm; object: SparqlTerm };
+  datatype?: undefined;
+  "xml:lang"?: undefined;
+}
+
+/** One SPARQL-JSON term: an IRI / blank node / literal, or an RDF 1.2 triple term. */
+export type SparqlTerm = SparqlAtomicTerm | SparqlTripleTerm;
+
+/** True when `t` is an RDF 1.2 triple term (whose `value` is a nested triple). */
+export function isTripleTerm(t: SparqlTerm): t is SparqlTripleTerm {
+  return t.type === "triple";
+}
+
+/**
+ * A term's plain string value: the lexical form / IRI / blank-node label for an atomic term,
+ * or the N-Triples `<<( s p o )>>` form for a triple term (which has no single lexical value).
+ * `undefined` for an unbound variable.
+ */
+export function termValue(t: SparqlTerm | undefined): string | undefined {
+  if (!t) return undefined;
+  return t.type === "triple" ? termToNTriples(t) : t.value;
+}
+
+const XSD_STRING_IRI = "http://www.w3.org/2001/XMLSchema#string";
+
+function escapeNTriplesString(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r");
+}
+
+/**
+ * Serialises one SPARQL-JSON term to its N-Triples / N-Quads token, including an RDF 1.2
+ * triple term as `<<( s p o )>>`. The single shared term writer: every N-Triples/N-Quads
+ * snapshot built from SPARQL-JSON bindings should route through this so a new term kind
+ * cannot be silently dropped by one writer. A literal's lexical form is escaped the way the
+ * engine's own serialiser does (backslash, double-quote, LF, CR); `xsd:string` is implicit.
+ */
+export function termToNTriples(t: SparqlTerm): string {
+  switch (t.type) {
+    case "uri":
+      return `<${t.value}>`;
+    case "bnode":
+      return `_:${t.value}`;
+    case "triple": {
+      const { subject, predicate, object } = t.value;
+      return `<<( ${termToNTriples(subject)} ${termToNTriples(predicate)} ${termToNTriples(object)} )>>`;
+    }
+    case "literal": {
+      const quoted = `"${escapeNTriplesString(t.value)}"`;
+      const lang = t["xml:lang"];
+      if (lang) return `${quoted}@${lang}`;
+      if (t.datatype && t.datatype !== XSD_STRING_IRI) return `${quoted}^^<${t.datatype}>`;
+      return quoted;
+    }
+    default: {
+      const unknown: never = t;
+      throw new Error(`termToNTriples: unsupported SPARQL-JSON term ${JSON.stringify(unknown)}`);
+    }
+  }
 }
 
 export interface SparqlResults {
@@ -896,6 +969,10 @@ export function formatTerm(t: SparqlTerm | undefined): string {
   if (!t) return "";
   if (t.type === "uri") return `<${t.value}>`;
   if (t.type === "bnode") return `_:${t.value}`;
+  if (t.type === "triple") {
+    const { subject, predicate, object } = t.value;
+    return `<<( ${formatTerm(subject)} ${formatTerm(predicate)} ${formatTerm(object)} )>>`;
+  }
   if (t["xml:lang"]) return `"${t.value}"@${t["xml:lang"]}`;
   if (t.datatype && t.datatype !== "http://www.w3.org/2001/XMLSchema#string") {
     const short = t.datatype.replace("http://www.w3.org/2001/XMLSchema#", "xsd:");

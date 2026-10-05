@@ -13,7 +13,7 @@
 // this file cannot canonicalise — RDF-star triple terms — falls back to its verbatim `nt`
 // on both sides, which only ever errs towards NO affordance).
 
-import { parseNTriples, type RdfTerm, type SparqlTerm } from "@sparq/client";
+import { parseNTriples, termToNTriples, type RdfTerm, type SparqlTerm } from "@sparq/client";
 
 const XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
 /** Key-field separator: a control char no IRI / lang tag / decoded lexical form contains
@@ -43,30 +43,16 @@ export interface EntailedFacts {
 // click-to-explain path and the snapshot writer share ONE writer.
 // ---------------------------------------------------------------------------
 
-/** Escape a literal lexical form for an N-Triples/N-Quads double-quoted string. */
-export function escapeNTLiteral(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r")
-    .replace(/\t/g, "\\t");
-}
-
 /**
- * Emit a single canonical N-Triples/N-Quads TERM (IRI / blank node / literal) from a
- * SPARQL-JSON term. Unlike a DISPLAY helper this writes the FULL datatype IRI and escapes
- * the lexical form, so it round-trips losslessly through the engine's parsers — and it is
- * exactly the term form the reasoner's `why()` expects for the clicked triple.
+ * Emit a single canonical N-Triples/N-Quads TERM (IRI / blank node / literal / RDF 1.2
+ * triple term) from a SPARQL-JSON term. Unlike a DISPLAY helper this writes the FULL
+ * datatype IRI and escapes the lexical form, so it round-trips losslessly through the
+ * engine's parsers — and it is exactly the term form the reasoner's `why()` expects for the
+ * clicked triple. Delegates to the shared `@sparq/client` writer so every snapshot writer
+ * handles every term kind (#6044).
  */
 export function termToNT(t: SparqlTerm): string {
-  if (t.type === "uri") return `<${t.value}>`;
-  if (t.type === "bnode") return `_:${t.value}`;
-  // Literal.
-  const lex = `"${escapeNTLiteral(t.value)}"`;
-  if (t["xml:lang"]) return `${lex}@${t["xml:lang"]}`;
-  if (t.datatype && t.datatype !== XSD_STRING) return `${lex}^^<${t.datatype}>`;
-  return lex;
+  return termToNTriples(t);
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +131,8 @@ export function keyOfRdfTerm(t: RdfTerm): string {
 export function keyOfSparqlTerm(t: SparqlTerm): string {
   if (t.type === "uri") return `I${SEP}${t.value}`;
   if (t.type === "bnode") return `B${SEP}${t.value}`;
+  // RDF 1.2 triple term: its N-Triples form, mirroring keyOfRdfTerm's verbatim `nt` fallback.
+  if (t.type === "triple") return `T${SEP}${termToNTriples(t)}`;
   const lang = t["xml:lang"];
   if (lang) return `L${SEP}${t.value}${SEP}@${lang.toLowerCase()}`;
   return `L${SEP}${t.value}${SEP}${t.datatype ?? XSD_STRING}`;
