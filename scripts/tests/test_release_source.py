@@ -337,22 +337,10 @@ class TestBootstrapMode(unittest.TestCase):
         self.assertNotIn("bootstrap", json.dumps(tag_job))
         self.assertNotIn("needs", tag_job)
 
-        for git_only, publish, expected in (("true", "false", "ready=false"),
-                                            ("false", "true", "ready=true"),
-                                            ('"true"', "false", None)):
-            with self.subTest(git_only=git_only, publish=publish), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                (root / "release-plz.toml").write_text(
-                    f"[workspace]\ngit_only={git_only}\npublish={publish}\n")
-                output = root / "output"
-                result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", check["run"]],
-                                        cwd=root, env=os.environ | {"GITHUB_OUTPUT": str(output)},
-                                        capture_output=True, text=True, timeout=10)
-                if expected is None:
-                    self.assertNotEqual(result.returncode, 0)
-                else:
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(output.read_text().strip(), expected)
+        # [OPUS-5.5] readiness is a registry fact computed by the shared mode script
+        # (unit-tested in test_release_plz_publish_mode.py); the PR job consumes its config.
+        self.assertIn("scripts/release-plz-publish-mode.py --purpose pr", check["run"])
+        self.assertIn('--config "${{ steps.bootstrap.outputs.config }}"', update["run"])
 
 
 if __name__ == "__main__":

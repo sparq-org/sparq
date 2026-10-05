@@ -342,7 +342,19 @@ def crates_io_publish_enabled(repo_root: Path) -> bool:
     workspace = config.get("workspace")
     if not isinstance(workspace, dict):
         return True
-    return workspace.get("publish") is not False
+    if workspace.get("publish") is not False:
+        return True
+    # [OPUS-5.5] v0.1.4 release path: a per-package `publish` key overrides the workspace
+    # default, so ANY package not explicitly `publish = false` keeps the strict reading.
+    # (release.yml / release-plz.yml additionally gate the live publish on registry state
+    # via scripts/release-plz-publish-mode.py; this guard stays config-strict.)
+    packages = config.get("package", [])
+    if not isinstance(packages, list):
+        return True
+    return any(
+        not isinstance(pkg, dict) or ("publish" in pkg and pkg["publish"] is not False)
+        for pkg in packages
+    )
 
 
 def version_group_members(repo_root: Path) -> set[str]:

@@ -91,6 +91,13 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    # [OPUS-5.5] v0.1.4 release path: only the tiers the /download page links (the site alias
+    # contract: arm64-darwin, x64-darwin, x64-baseline, win-x64-baseline) are BLOCKING. The extra
+    # microarch tiers and arches (x64-v2/v3/v4, arm64-linux, win-x64-v3, win-arm64) are `soft`:
+    # a failed soft row reports success to `needs`, uploads neither its digests nor its archive
+    # (digests are uploaded before the archive, so a published archive always has a subject),
+    # and the release ships without it. The `hashes` job re-checks the blocking set by name.
+    continue-on-error: ${{ matrix.soft }}
     strategy:
       fail-fast: false
       matrix:
@@ -98,24 +105,24 @@ jobs:
           # ---- Apple ----
           # Apple silicon (M1-M4): ONE binary, no target-cpu (Darwin baseline already enables
           # every Apple-silicon feature - measured; see research/hardware/optimization-findings.md).
-          - { tier: arm64-darwin,     os: macos-14,         target: aarch64-apple-darwin,      cpu: "",          ext: "" }
+          - { tier: arm64-darwin,     os: macos-14,         target: aarch64-apple-darwin,      cpu: "",          ext: "", soft: false }
           # Intel Macs: x86-64-v3 (every Intel Mac since ~2015 / Haswell has AVX2).
           # macos-*-intel is the supported Intel runner line (the retired macos-13 label is gone).
-          - { tier: x64-darwin,       os: macos-15-intel,   target: x86_64-apple-darwin,       cpu: x86-64-v3,   ext: "" }
+          - { tier: x64-darwin,       os: macos-15-intel,   target: x86_64-apple-darwin,       cpu: x86-64-v3,   ext: "", soft: false }
           # ---- x86-64 Linux ----
           # baseline (SSE2) + v2 (SSE4.2) + v3 (AVX2/BMI2/FMA) + v4 (AVX-512). The launcher
           # picks the tier by /proc/cpuinfo.
-          - { tier: x64-baseline,     os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64,      ext: "" }
-          - { tier: x64-v2,           os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64-v2,   ext: "" }
-          - { tier: x64-v3,           os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64-v3,   ext: "" }
-          - { tier: x64-v4,           os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64-v4,   ext: "" }
+          - { tier: x64-baseline,     os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64,      ext: "", soft: false }
+          - { tier: x64-v2,           os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64-v2,   ext: "", soft: true }
+          - { tier: x64-v3,           os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64-v3,   ext: "", soft: true }
+          - { tier: x64-v4,           os: ubuntu-latest,    target: x86_64-unknown-linux-gnu,  cpu: x86-64-v4,   ext: "", soft: true }
           # Generic aarch64 Linux (Graviton/Ampere, Raspberry Pi 4+): neoverse-n1 + LSE.
-          - { tier: arm64-linux,      os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, cpu: neoverse-n1, ext: "" }
+          - { tier: arm64-linux,      os: ubuntu-24.04-arm, target: aarch64-unknown-linux-gnu, cpu: neoverse-n1, ext: "", soft: true }
           # ---- Windows ----
-          - { tier: win-x64-baseline, os: windows-latest,   target: x86_64-pc-windows-msvc,    cpu: x86-64,      ext: ".exe" }
-          - { tier: win-x64-v3,       os: windows-latest,   target: x86_64-pc-windows-msvc,    cpu: x86-64-v3,   ext: ".exe" }
+          - { tier: win-x64-baseline, os: windows-latest,   target: x86_64-pc-windows-msvc,    cpu: x86-64,      ext: ".exe", soft: false }
+          - { tier: win-x64-v3,       os: windows-latest,   target: x86_64-pc-windows-msvc,    cpu: x86-64-v3,   ext: ".exe", soft: true }
           # Windows on ARM - cross-compiled from the x64 runner (MSVC cross-links; no cross/QEMU).
-          - { tier: win-arm64,        os: windows-latest,   target: aarch64-pc-windows-msvc,   cpu: "",          ext: ".exe" }
+          - { tier: win-arm64,        os: windows-latest,   target: aarch64-pc-windows-msvc,   cpu: "",          ext: ".exe", soft: true }
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -338,6 +345,15 @@ jobs:
             echo "ERROR: no archive-hashes-* artifact was produced by the build matrix" >&2
             exit 1
           fi
+          # [OPUS-5.5] soft tiers may be absent; the site-linked BLOCKING tiers may not.
+          # Suffix + extension pairs: the Linux/macOS archives are .tar.gz, Windows is .zip,
+          # so `-x64-baseline.tar.gz` cannot be satisfied by `-win-x64-baseline.zip`.
+          for suffix in -arm64-darwin.tar.gz -x64-darwin.tar.gz -x64-baseline.tar.gz -win-x64-baseline.zip; do
+            if ! awk -v s="$suffix" 'index($2, "sparq-cli-") == 1 && substr($2, length($2) - length(s) + 1) == s { f = 1 } END { exit f ? 0 : 1 }' "${parts[@]}"; then
+              echo "ERROR: blocking archive '*${suffix}' produced no digest" >&2
+              exit 1
+            fi
+          done
           cat -- "${parts[@]}" > all.sha256
           if ! [ -s all.sha256 ]; then
             echo "ERROR: the combined subjects list is empty" >&2

@@ -398,10 +398,13 @@ jobs:
         run: |
           rustup default stable
           rustup show active-toolchain
-      # Package every publishable crate (publish = false crates are skipped by the loop).
+      # Package every publishable crate (publish = false crates are skipped).
       # --no-verify avoids a full from-scratch compile of every crate on the runner; the bytes
-      # are identical to `cargo publish`'s upload (publish runs verify itself). We package each
-      # publishable crate individually so every failure is reported before the job fails closed.
+      # are identical to `cargo publish`'s upload (publish runs verify itself).
+      # [OPUS-5.5] ONE multi-package `cargo package` invocation, not a per-crate loop: a lone
+      # `cargo package -p sparq-substrate` must resolve `sparq-core` from crates.io and fails
+      # before (or without) the bootstrap, whereas a multi-package run resolves sibling crates
+      # through Cargo's local overlay registry. Every expected `.crate` is then required.
       - name: Package publishable crates
         run: |
           set -euo pipefail
@@ -421,19 +424,23 @@ jobs:
             echo "::error::Cargo metadata reported no publishable crates"
             exit 1
           fi
+          args=()
+          for pkg in "${packages[@]}"; do args+=(-p "$pkg"); done
+          if ! cargo package "${args[@]}" --no-verify --locked 2>&1; then
+            echo "::error::multi-package cargo package failed"
+            exit 1
+          fi
+          version=$(cargo metadata --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "sparq-core") | .version')
           for pkg in "${packages[@]}"; do
-            echo "::group::cargo package -p $pkg"
-            # --no-verify: skip the rebuild-from-extracted-tarball check (CI already builds/tests
-            # the workspace); --allow-dirty is unnecessary on a clean checkout. [GPT-5.6]
-            # Continue through the set to expose every bad package, then fail if any is missing.
-            if cargo package -p "$pkg" --no-verify --locked 2>&1; then
-              find target/package -maxdepth 1 -name "${pkg}-*.crate" -exec cp {} crate-pkgs/ \;
+            crate="target/package/${pkg}-${version}.crate"
+            if [ -f "$crate" ]; then
+              cp "$crate" crate-pkgs/
               packaged=$((packaged + 1))
             else
-              echo "::error::cargo package failed for $pkg"
+              echo "::error::cargo package produced no $crate"
               failures+=("$pkg")
             fi
-            echo "::endgroup::"
           done
           echo "Packaged crates:"; ls -l crate-pkgs/ || true
           if [ "${#failures[@]}" -ne 0 ]; then

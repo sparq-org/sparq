@@ -38,8 +38,9 @@ here for the runbook:
 
 The old 2026-06-14 availability snapshot covered only part of the current workspace and
 must not be used to authorize a publish. [GPT-5.6] The authoritative Rust set is derived
-from the manifests by `scripts/release-interval-guard.py`: **37 crates**, including every
-normal/optional workspace dependency needed by the public front doors. Re-run the registry
+from the manifests by `scripts/release-interval-guard.py`: **28 crates** since the v0.1.4
+release path (§4), including every normal/optional workspace dependency needed by the public
+front doors. Re-run the registry
 checks immediately before the bootstrap because names can be claimed at any time.
 
 **Live re-check, 2026-08-31:** all 37 exact crates.io names returned 404;
@@ -57,7 +58,7 @@ taken name itself.
 
 | Name | Registry | Required preflight |
 |---|---|---|
-| the 37 names printed by `python3 scripts/release-interval-guard.py --dry-run` | crates.io | available on 2026-08-31; re-check before bootstrap |
+| the 28 names printed by `python3 scripts/release-interval-guard.py --dry-run` | crates.io | available on 2026-08-31; re-check before bootstrap |
 | `@sparq-org/sparq` | npm | 0.1.1 exists without provenance; check new-version availability and Trusted Publisher |
 | `@sparq-org/solid-server` | npm | 0.1.1 exists without provenance; check new-version availability and Trusted Publisher |
 | `@sparq-org/eyereasoner-compat` | npm | already published at 0.1.0; no bootstrap needed |
@@ -110,11 +111,12 @@ The recovery version PR must set these files explicitly to **0.1.3**. This is de
 release-plz-generated PR: before the first dependency-first crates.io bootstrap,
 `release-plz update` runs `cargo package` while calculating changes and Cargo cannot resolve
 the unpublished inter-crate registry dependencies, including in its temporary package graph.
-While `release-plz.toml` has `git_only = true` and `publish = false`, the Release-PR job
-explicitly skips automatic version calculation. The separate tag job remains active and
-creates the new version's tag after the manual version PR merges.
-After all 37 crates exist, flip `git_only = false` only in the same change that enables
-crates.io OIDC publishing. A generated release-plz PR can resume Cargo versioning then,
+Until every publish-set crate exists on crates.io, `scripts/release-plz-publish-mode.py`
+reports `bootstrapped=false` and the Release-PR job skips automatic version calculation.
+The separate tag job remains active and creates the new version's tag after the manual
+version PR merges. [OPUS-5.5] After all 28 crates exist, the same script hands both
+release-plz jobs the effective `git_only = false` config and (when a version is pending)
+enables crates.io OIDC publishing — no hand flip (§8c). A generated release-plz PR can resume Cargo versioning then,
 but it is **not merge-ready** until the same PR also aligns every public npm manifest and
 its shared root-lock workspace record. Keep the manual cross-ecosystem version-PR review
 step until that augmentation is automated; the source guard refuses a mismatched tag.
@@ -320,71 +322,76 @@ and both isolated provenance dependencies in every recovery path.
 
 ## 4. crates.io publication
 
-**37 crates publish.** [GPT-5.6] This is the complete crates.io dependency closure, not
-just the top-level product crates. `scripts/release-interval-guard.py` derives the set and
-the dependency-first order directly from the workspace manifests, refuses public-to-private
-path edges, and requires a registry version on every shipped workspace dependency.
-Versioned dev-dependencies are shipped and therefore participate in the derived order.
-The `sparq-introspect` test-only edge back to `sparq-engine` is deliberately path-only;
-publishing it with a version would create an impossible first-release dependency cycle.
+**28 crates publish.** [OPUS-5.5] v0.1.4 release path: the publish set is the core front
+doors — `sparq-substrate`, `sparq-core`, `sparq-engine` (+ `sparq-engine-serialize`,
+`sparq-engine-service`), `sparq-reason`, `sparq-shacl`, `sparq-hdt`, `sparq-cli`,
+`sparq-server` — plus their full registry closure. crates.io rejects a manifest that names
+an unknown crate even when the dependency is optional or a versioned dev-dependency, so
+every crate reachable through a normal, optional (non-default feature) or versioned dev
+edge must exist first. Default features alone need only `sparq-jsonld` and `sparq-serve`
+in addition; the optional `sparq-server` / `sparq-cli` / `sparq-engine` feature edges pull
+in `sparq-geo`, `sparq-http3`, `sparq-introspect`, `sparq-policy`, `sparq-solid`,
+`sparq-terse`, `sparq-text`, `sparq-trust`, `sparq-zk`, `sparq-reason-el`, and through them
+`sparq-canon`, `sparq-nlq`, `sparq-secprop-vocab`, `sparq-sim`, `sparq-vc`, `sparq-vectors`.
+The other nine former members (`sparq-algos`, `sparq-arrow`, `sparq-fedplan`, `sparq-forms`,
+`sparq-mcp`, `sparq-reason-ql`, `sparq-rsp`, `sparq-shaclc`, `sparq-wrapper`) are not
+reachable from that set and carry `publish = false`. `scripts/release-interval-guard.py`
+derives the set and the dependency-first order directly from the workspace manifests,
+refuses public-to-private path edges, and requires a registry version on every shipped
+workspace dependency. The `sparq-introspect` test-only edge back to `sparq-engine` is
+deliberately path-only; publishing it with a version would create an impossible
+first-release dependency cycle.
 
-Exact bootstrap commands, from a clean checkout of the new tagged **v0.1.3** commit,
+Exact bootstrap commands, from a clean checkout of the new tagged **v0.1.4** commit,
 after the recovery version PR has merged and the tag's release workflow is green:
 
 ```sh
-cargo publish -p sparq-core
-cargo publish -p sparq-fedplan
-cargo publish -p sparq-http3
-cargo publish -p sparq-jsonld
-cargo publish -p sparq-reason-ql
-cargo publish -p sparq-secprop-vocab
-cargo publish -p sparq-shaclc
-cargo publish -p sparq-algos
-cargo publish -p sparq-canon
-cargo publish -p sparq-engine-serialize
-cargo publish -p sparq-engine-service
-cargo publish -p sparq-hdt
-cargo publish -p sparq-introspect
-cargo publish -p sparq-sim
-cargo publish -p sparq-substrate
-cargo publish -p sparq-wrapper
-
+cargo publish -p sparq-core --locked
+cargo publish -p sparq-http3 --locked
+cargo publish -p sparq-jsonld --locked
+cargo publish -p sparq-secprop-vocab --locked
+cargo publish -p sparq-canon --locked
+cargo publish -p sparq-engine-serialize --locked
+cargo publish -p sparq-engine-service --locked
+cargo publish -p sparq-hdt --locked
+cargo publish -p sparq-introspect --locked
+cargo publish -p sparq-sim --locked
+cargo publish -p sparq-substrate --locked
 # CHECKPOINT before sparq-engine: the crates.io package resolves UPSTREAM spargebra 0.4.6,
 # not the vendored copy (the [patch]/path override is stripped on publish). Dry-run it
 # against upstream first — it must package + compile cleanly:
-#   cargo publish --dry-run -p sparq-engine
-cargo publish -p sparq-engine
-cargo publish -p sparq-reason-el
-cargo publish -p sparq-vc
-cargo publish -p sparq-arrow
-cargo publish -p sparq-nlq
-cargo publish -p sparq-policy
-cargo publish -p sparq-reason
-cargo publish -p sparq-rsp
-cargo publish -p sparq-serve
-cargo publish -p sparq-shacl
-cargo publish -p sparq-text
-cargo publish -p sparq-zk
-cargo publish -p sparq-forms
-cargo publish -p sparq-geo
-cargo publish -p sparq-trust
-cargo publish -p sparq-vectors
-cargo publish -p sparq-solid
-cargo publish -p sparq-terse
-cargo publish -p sparq-mcp
-cargo publish -p sparq-server
-cargo publish -p sparq-cli
+#   cargo publish --dry-run -p sparq-engine --locked
+cargo publish -p sparq-engine --locked
+cargo publish -p sparq-reason-el --locked
+cargo publish -p sparq-vc --locked
+cargo publish -p sparq-nlq --locked
+cargo publish -p sparq-policy --locked
+cargo publish -p sparq-reason --locked
+cargo publish -p sparq-serve --locked
+cargo publish -p sparq-shacl --locked
+cargo publish -p sparq-text --locked
+cargo publish -p sparq-zk --locked
+cargo publish -p sparq-geo --locked
+cargo publish -p sparq-trust --locked
+cargo publish -p sparq-vectors --locked
+cargo publish -p sparq-solid --locked
+cargo publish -p sparq-terse --locked
+cargo publish -p sparq-server --locked
+cargo publish -p sparq-cli --locked
 ```
 
 - Modern cargo **waits for index propagation** after each publish, so the commands can be
   run back-to-back; if an older cargo complains a dependency isn't found, wait ~a minute
-  and retry.
-- Before uploading anything, run `cargo package --list -p <crate>` across the set. During
-  bootstrap, `cargo publish --dry-run -p <crate>` becomes meaningful only after that crate's
-  internal prerequisites exist on crates.io, so run it immediately before each real publish.
-  After all 37 bootstraps, run `publish.yml`'s packaging/attestation lane; it now fails unless
-  every `.crate` file is produced.
-- Crates still marked `publish = false` are outside the registry closure. In particular,
+  and retry. Equivalent single command (cargo >= 1.90 orders and waits itself):
+  `cargo publish --locked` followed by one `-p <crate>` per line above.
+- Before uploading anything, `cargo package --locked` with every `-p` above packages and
+  verifies the whole set against a local overlay registry. A single-crate
+  `cargo publish --dry-run -p <crate>` becomes meaningful only after that crate's internal
+  prerequisites exist on crates.io. After the bootstrap, register a crates.io Trusted
+  Publisher (repository `sparq-org/sparq`, workflow `release-plz.yml`, no environment) on
+  each of the 28 crates: from v0.1.5, `release-plz.yml` publishes them itself once
+  `scripts/release-plz-publish-mode.py` sees every crate on crates.io.
+- Crates marked `publish = false` are outside the registry closure. In particular,
   `sparq-py` ships through PyPI and `sparq-wasm` ships through npm.
 - Publishing is **permanent** (versions can only be yanked, not deleted/reused).
 
@@ -552,27 +559,32 @@ for a **pending** publisher) → **Add a new publisher** → *GitHub*:
 
 Because PyPI allows a *pending* publisher, no manual bootstrap upload is required.
 
-### 8c. crates.io (37 crates) — CI side PRE-WIRED, flip follows the bootstrap
+### 8c. crates.io (28 crates) — CI side PRE-WIRED, flip follows the bootstrap
 
 crates.io Trusted Publishing (GA 2025-07, RFC 3691) supplies a short-lived OIDC token via
-`rust-lang/crates-io-auth-action` — no `CARGO_REGISTRY_TOKEN`. The CI side is pre-wired as a
-commented block on `release-plz.yml`'s `release-plz-release` job; `release-plz.toml` keeps
-`publish = false` until the trust config exists (so a `publish=true` with no credential can't break
-tag-cutting). This is the "config-flip" the design record (§6 item 4) calls "the point of adoption".
+`rust-lang/crates-io-auth-action` — no `CARGO_REGISTRY_TOKEN`. [OPUS-5.5] The flip is wired
+and **self-activating**: `release-plz.toml` names the 28-crate publish set with per-package
+`publish = true` keys (workspace default `publish = false`, `git_only = true`), and
+`release-plz.yml` runs `scripts/release-plz-publish-mode.py` before `release-plz`:
 
-**needs:user (crates.io), per the 37 publishable crates (`docs/release.md` §4), leaf-first:**
+| registry state | mode | effect |
+|---|---|---|
+| no publish-set crate on crates.io (pre-bootstrap) | `tag-only` | every `publish` forced false; tag only, no token |
+| all exist, current version already on crates.io | `tag-only` | nothing to publish |
+| all exist, current version missing | `publish` | `git_only = false`, OIDC token minted, release-plz publishes then tags |
+| some exist, others missing | refuse | job fails before tagging |
+
+So v0.1.4 is tagged exactly as before; v0.1.5 is the first CI crates.io publish.
+
+**needs:user (crates.io), for the 28 publishable crates (§4), after the v0.1.4 bootstrap:**
 1. ONE bootstrap `cargo publish` per crate (crates.io requires each crate to already exist).
 2. For **each** crate: crates.io → crate → **Settings → Trusted Publishing → Add** → *GitHub*:
    - Repository owner: **`sparq-org`**, Repository name: **`sparq`**
    - Workflow filename: **`release-plz.yml`**
    - Environment: **leave blank** (the `release-plz-release` job uses no GitHub Environment)
 
-**Then flip (three coordinated edits):**
-- `release-plz.yml`: uncomment `id-token: write`, the `rust-lang/crates-io-auth-action` step
-  (SHA-pinned `c6f97d4…` # v1.0.5), and the `CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}` env.
-- `release-plz.toml`: set `publish = true` and `git_only = false` together.
-- `publish.yml`'s `crates` job then reverts to attest-only over the `.crate` bytes (release-plz
-  becomes the publisher; the out-of-band attestation stays as the verifiable-bytes evidence).
+`publish.yml`'s `crates` job stays attest-only over the `.crate` bytes (release-plz is the
+publisher; the out-of-band attestation remains the verifiable-bytes evidence).
 
 > Provenance honesty: crates.io trusted publishing is an **auth** mechanism only — it does **not**
 > put a provenance link on the crates.io page (no upstream scheme exists, unlike npm/PyPI). The

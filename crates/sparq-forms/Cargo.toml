@@ -10,6 +10,11 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
+# [OPUS-5.5] v0.1.4 release path: outside the crates.io core publish set (it is not a
+# normal, optional, or versioned-dev dependency of any core crate). Kept workspace-only so
+# the registry closure stays the 28 crates docs/release.md §4 bootstraps; flip back to
+# publish in a reviewed change that also adds it to release-plz.toml's publish set.
+publish = false
 
 # [FABLE-5] sq-lsp7k.1.1 (forms F1): OPT-IN crate (the sparq-shacl isolation pattern) —
 # nothing in the default workspace depends on it, so sparq-core/sparq-engine carry zero
