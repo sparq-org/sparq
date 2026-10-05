@@ -7019,39 +7019,53 @@ impl SendLimits {
         Self { deadline: budget.deadline.map(|d| d + TIMEOUT_GRACE), cancel: budget.cancel.clone() }
     }
 
+    /// The stop that applies right now, if any: the query was cancelled, or the deadline has
+    /// passed. Otherwise how long a send may wait before checking again.
+    fn check(&self) -> Result<Duration, SendStop> {
+        if self.cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
+            return Err(SendStop::Cancelled);
+        }
+        match self.deadline {
+            Some(d) => match d.checked_duration_since(std::time::Instant::now()) {
+                Some(left) if !left.is_zero() => Ok(left.min(STREAM_SEND_POLL)),
+                _ => Err(SendStop::Deadline),
+            },
+            None => Ok(STREAM_SEND_POLL),
+        }
+    }
+
     /// Sends `item`, waiting while the channel is full, until the receiver is dropped, the
     /// deadline passes or the query is cancelled. The shared replacement for `blocking_send`
     /// on both streamed read paths (SELECT JSON and CONSTRUCT / DESCRIBE).
-    fn send<T>(&self, tx: &tokio::sync::mpsc::Sender<T>, mut item: T) -> Result<(), SendStop> {
-        use tokio::sync::mpsc::error::TrySendError;
+    ///
+    /// The cancel flag and the deadline are checked before EVERY send, not only while waiting:
+    /// a client that keeps draining must not let a cancelled or over-time render run on and
+    /// still report completion.
+    fn send<T>(&self, tx: &tokio::sync::mpsc::Sender<T>, item: T) -> Result<(), SendStop> {
         loop {
-            match tx.try_send(item) {
-                Ok(()) => return Ok(()),
-                Err(TrySendError::Closed(_)) => return Err(SendStop::Closed),
-                Err(TrySendError::Full(back)) => item = back,
-            }
-            if self.cancel.as_ref().is_some_and(|c| c.load(std::sync::atomic::Ordering::Acquire)) {
-                return Err(SendStop::Cancelled);
-            }
-            let wait = match self.deadline {
-                Some(d) => match d.checked_duration_since(std::time::Instant::now()) {
-                    Some(left) if !left.is_zero() => left.min(STREAM_SEND_POLL),
-                    _ => return Err(SendStop::Deadline),
-                },
-                None => STREAM_SEND_POLL,
-            };
+            let wait = self.check()?;
             // Wait for a free slot (or the poll interval) without sending, so the item is kept
-            // for the retry. Off a runtime (unit tests), park briefly instead.
-            match tokio::runtime::Handle::try_current() {
-                Ok(rt) => {
-                    if let Ok(Ok(permit)) = rt.block_on(tokio::time::timeout(wait, tx.reserve())) {
-                        permit.send(item);
-                        return Ok(());
+            // for the retry. Off a runtime (unit tests), poll with `try_reserve` instead.
+            let permit = match tokio::runtime::Handle::try_current() {
+                Ok(rt) => match rt.block_on(tokio::time::timeout(wait, tx.reserve())) {
+                    Ok(Ok(permit)) => permit,
+                    Ok(Err(_)) => return Err(SendStop::Closed),
+                    Err(_elapsed) => continue,
+                },
+                Err(_) => match tx.try_reserve() {
+                    Ok(permit) => permit,
+                    Err(tokio::sync::mpsc::error::TrySendError::Closed(())) => return Err(SendStop::Closed),
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(())) => {
+                        std::thread::sleep(wait.min(Duration::from_millis(1)));
+                        continue;
                     }
-                    // A closed channel or an elapsed wait: the next `try_send` sorts them out.
-                }
-                Err(_) => std::thread::sleep(wait.min(Duration::from_millis(1))),
-            }
+                },
+            };
+            // The wait for the slot may have outlived the deadline or crossed a cancel:
+            // check again before the item is handed over (dropping the permit frees the slot).
+            self.check()?;
+            permit.send(item);
+            return Ok(());
         }
     }
 }
@@ -7411,6 +7425,7 @@ async fn stream_select_json(
 ) -> Response {
     let StreamShape { head_only, trailers_ok } = shape;
     let limits = SendLimits::for_budget(&budget);
+    let read_deadline = limits.deadline;
     let ct = Format::Json.select_content_type();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamItem>(STREAM_CHANNEL_CAP);
     tokio::task::spawn_blocking(move || {
@@ -7461,8 +7476,12 @@ async fn stream_select_json(
     };
 
     // Peek the second item: a single-chunk result is returned buffered (Content-Length);
-    // a multi-chunk result streams.
-    match rx.recv().await {
+    // a multi-chunk result streams. Bounded by the request deadline, as nothing is committed.
+    let second = match recv_until(&mut rx, read_deadline).await {
+        Ok(item) => item,
+        Err(()) => return timeout_response(config),
+    };
+    match second {
         Some(StreamItem::Done) => {
             let len = first.len();
             let body = if head_only {
@@ -7541,6 +7560,23 @@ async fn stream_select_json(
 /// Generic over the channel's item so both streamed paths share the one cap: the SELECT stream
 /// carries [`StreamItem`] (chunk / done / failed), the CONSTRUCT-DESCRIBE stream of
 /// [`stream_graph_result`] carries `Result<Bytes, String>`.
+/// Receives the next streamed item, or `Err(())` once `deadline` (the request's read cap:
+/// the budget deadline plus [`TIMEOUT_GRACE`]) passes first. Used for the receive that
+/// follows the first chunk: until it returns, no header is committed, so a worker that is
+/// slow to produce its second chunk must still end in the timeout response, not hold the
+/// request (and its concurrency slot) past the cap.
+async fn recv_until<T>(
+    rx: &mut tokio::sync::mpsc::Receiver<T>,
+    deadline: Option<std::time::Instant>,
+) -> Result<Option<T>, ()> {
+    match deadline {
+        Some(d) => tokio::time::timeout_at(tokio::time::Instant::from_std(d), rx.recv())
+            .await
+            .map_err(|_elapsed| ()),
+        None => Ok(rx.recv().await),
+    }
+}
+
 async fn recv_first_chunk<T>(
     rx: &mut tokio::sync::mpsc::Receiver<T>,
     config: &ServerConfig,
@@ -7668,7 +7704,8 @@ async fn stream_graph_result(
 ) -> Response {
     let ct = gfmt.content_type();
     let limits = SendLimits::for_budget(&budget);
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<Bytes, String>>(STREAM_CHANNEL_CAP);
+    let read_deadline = limits.deadline;
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, String>>(STREAM_CHANNEL_CAP);
     // Set by the worker only once the whole document has been handed over. The channel closes
     // the same way after a finished render and after an aborted one (stalled reader past the
     // deadline, cancellation, panic), so the body consults this before ending cleanly.
@@ -7711,9 +7748,25 @@ async fn stream_graph_result(
         });
     });
 
-    // Await the first item under the same wall-clock cap the buffered path uses, so a
-    // pre-first-byte failure still maps to the right status.
-    let first = match recv_first_chunk(&mut rx, config).await {
+    graph_stream_response(rx, complete, ct, read_deadline, config).await
+}
+
+/// The response side of [`stream_graph_result`]: waits for the first one or two chunks (no
+/// header is committed until then), then answers buffered or streams the rest.
+///
+/// `deadline` is the request's read cap (budget deadline plus [`TIMEOUT_GRACE`]). Both
+/// pre-commit receives obey it, so a serialiser that emits one chunk and then stalls (a huge
+/// RDF/XML literal, say) still ends in the timeout response instead of holding the request.
+async fn graph_stream_response(
+    mut rx: tokio::sync::mpsc::Receiver<Result<Bytes, String>>,
+    complete: Arc<std::sync::atomic::AtomicBool>,
+    ct: &'static str,
+    deadline: Option<std::time::Instant>,
+    config: &ServerConfig,
+) -> Response {
+    // Await the first item under the wall-clock cap, so a pre-first-byte failure still maps
+    // to the right status.
+    let first = match recv_until(&mut rx, deadline).await {
         Ok(Some(Ok(bytes))) => bytes,
         // CONSTRUCT/DESCRIBE used `make_budget(_, true)` → max_results applied.
         Ok(Some(Err(e))) => return engine_error_response(&e, config, true),
@@ -7721,7 +7774,11 @@ async fn stream_graph_result(
         Err(()) => return timeout_response(config),
     };
 
-    match rx.recv().await {
+    let second = match recv_until(&mut rx, deadline).await {
+        Ok(item) => item,
+        Err(()) => return timeout_response(config),
+    };
+    match second {
         // The worker stopped after one chunk without finishing (a panic): nothing is
         // committed yet, so this is still an honest 500 rather than a truncated 200.
         None if !complete.load(std::sync::atomic::Ordering::Acquire) => {
@@ -7880,6 +7937,46 @@ mod chunk_sink_tests {
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let limits = SendLimits { deadline: None, cancel: Some(cancel) };
         assert_eq!(limits.send(&tx, 1), Err(SendStop::Cancelled));
+    }
+
+    /// A reader that keeps draining must not let a cancelled render carry on: the cancel flag
+    /// stops the send even though the channel has room.
+    #[test]
+    fn a_cancelled_query_stops_a_send_even_with_room() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<u8>(4);
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let limits = SendLimits { deadline: None, cancel: Some(cancel) };
+        assert_eq!(limits.send(&tx, 1), Err(SendStop::Cancelled));
+        assert!(rx.try_recv().is_err(), "nothing may be handed over after the cancel");
+    }
+
+    /// Likewise past the deadline: a free slot does not let the render overrun the cap.
+    #[test]
+    fn a_send_past_the_deadline_fails_even_with_room() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<u8>(4);
+        let limits = SendLimits { deadline: Some(std::time::Instant::now()), cancel: None };
+        assert_eq!(limits.send(&tx, 1), Err(SendStop::Deadline));
+        assert!(rx.try_recv().is_err(), "nothing may be handed over past the deadline");
+    }
+
+    /// A serialiser that emits one chunk and then stalls before the second: the response must
+    /// still be the timeout status at the deadline (no header is committed yet), not a request
+    /// held open until the worker finally produces more.
+    #[tokio::test]
+    async fn a_stall_after_the_first_graph_chunk_ends_in_the_timeout_response() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, String>>(STREAM_CHANNEL_CAP);
+        tx.send(Ok(Bytes::from_static(b"<a> <b> <c> .\n"))).await.unwrap();
+        let complete = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let deadline = Some(std::time::Instant::now() + Duration::from_millis(200));
+        let config = ServerConfig::default();
+        let resp = tokio::time::timeout(
+            Duration::from_secs(10),
+            graph_stream_response(rx, complete, "application/n-triples", deadline, &config),
+        )
+        .await
+        .expect("the second receive must be bounded by the request deadline");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        drop(tx);
     }
 }
 
