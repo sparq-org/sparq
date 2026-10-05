@@ -128,9 +128,10 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_OWNER`: the storage owner's agent IRI;
     /// - `SOLID_SERVER_LWS_OPEN=1`: no authentication (development only);
     /// - `SOLID_SERVER_LWS_PAGE_SIZE`: members per container page (default 100);
-    /// - `SOLID_SERVER_LWS_AS_KEY_FILE`: a private P-256 JWK that signs access tokens (default: a
-    ///   fresh key per boot, so tokens do not survive a restart);
-    /// - `SOLID_SERVER_LWS_NOTIFY_KEY_FILE`: a private P-256 JWK that signs notifications;
+    /// - `SOLID_SERVER_LWS_AS_KEY_FILE`: a private P-256 JWK that signs access tokens, created
+    ///   with a fresh key when the file does not exist (default: a fresh key per boot, so tokens do
+    ///   not survive a restart);
+    /// - `SOLID_SERVER_LWS_NOTIFY_KEY_FILE`: the same for the key that signs notifications;
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
@@ -155,12 +156,25 @@ impl LwsConfig {
                 None => Ok(None),
             }
         };
-        if let Some(jwk) = read("SOLID_SERVER_LWS_AS_KEY_FILE")? {
-            cfg.as_key = jose::EcKey::from_jwk(&jwk).map_err(|e| format!("SOLID_SERVER_LWS_AS_KEY_FILE: {e}"))?;
+        // A key file that does not exist yet is created with a fresh key, so a deployment keeps its
+        // keys across restarts by naming a path once.
+        let key = |k: &str, kid: &str| -> Result<Option<jose::EcKey>, String> {
+            let Some(path) = var(k) else { return Ok(None) };
+            match std::fs::read_to_string(&path) {
+                Ok(jwk) => jose::EcKey::from_jwk(&jwk).map(Some).map_err(|e| format!("{k}: {e}")),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    let fresh = jose::EcKey::generate(kid);
+                    write_private(&path, &fresh.private_jwk().to_string()).map_err(|e| format!("{k}: cannot write {path}: {e}"))?;
+                    Ok(Some(fresh))
+                }
+                Err(e) => Err(format!("{k}: cannot read {path}: {e}")),
+            }
+        };
+        if let Some(k) = key("SOLID_SERVER_LWS_AS_KEY_FILE", "lws-as-1")? {
+            cfg.as_key = k;
         }
-        if let Some(jwk) = read("SOLID_SERVER_LWS_NOTIFY_KEY_FILE")? {
-            cfg.notify_key =
-                jose::EcKey::from_jwk(&jwk).map_err(|e| format!("SOLID_SERVER_LWS_NOTIFY_KEY_FILE: {e}"))?;
+        if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", "notify-key")? {
+            cfg.notify_key = k;
         }
         if let Some(idps) = read("SOLID_SERVER_LWS_SAML_IDPS_FILE")? {
             cfg.saml_idps =
@@ -188,6 +202,19 @@ impl LwsConfig {
     pub fn absolute(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
+}
+
+/// Write a private key file readable by its owner only.
+fn write_private(path: &str, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    opts.open(path)?.write_all(contents.as_bytes())
 }
 
 /// Who is asking: the access token's subject and client, or nobody.
