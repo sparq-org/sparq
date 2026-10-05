@@ -50,7 +50,9 @@ pub struct EcKey {
 
 impl std::fmt::Debug for EcKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EcKey").field("kid", &self.kid).finish_non_exhaustive()
+        f.debug_struct("EcKey")
+            .field("kid", &self.kid)
+            .finish_non_exhaustive()
     }
 }
 
@@ -59,7 +61,10 @@ impl EcKey {
     pub fn generate(kid: impl Into<String>) -> Self {
         loop {
             if let Ok(secret) = SecretKey::from_slice(&random_bytes(32)) {
-                return Self { secret, kid: kid.into() };
+                return Self {
+                    secret,
+                    kid: kid.into(),
+                };
             }
         }
     }
@@ -69,7 +74,11 @@ impl EcKey {
     pub fn from_jwk(jwk: &str) -> Result<Self, String> {
         let v: Value = serde_json::from_str(jwk).map_err(|e| format!("not JSON: {e}"))?;
         let public = ec_public_from_jwk(&v).ok_or("not a P-256 JWK")?;
-        let d = v.get("d").and_then(Value::as_str).and_then(b64url_decode).ok_or("no private key (d)")?;
+        let d = v
+            .get("d")
+            .and_then(Value::as_str)
+            .and_then(b64url_decode)
+            .ok_or("no private key (d)")?;
         let secret = SecretKey::from_slice(&d).map_err(|_| "invalid private key (d)")?;
         if secret.public_key() != public {
             return Err("the private key (d) does not match x and y".into());
@@ -147,8 +156,17 @@ pub fn thumbprint(jwk: &Value) -> String {
     let get = |k: &str| jwk.get(k).and_then(Value::as_str).unwrap_or_default();
     let canonical = match get("kty") {
         "RSA" => format!(r#"{{"e":"{}","kty":"RSA","n":"{}"}}"#, get("e"), get("n")),
-        "OKP" => format!(r#"{{"crv":"{}","kty":"OKP","x":"{}"}}"#, get("crv"), get("x")),
-        _ => format!(r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#, get("crv"), get("x"), get("y")),
+        "OKP" => format!(
+            r#"{{"crv":"{}","kty":"OKP","x":"{}"}}"#,
+            get("crv"),
+            get("x")
+        ),
+        _ => format!(
+            r#"{{"crv":"{}","kty":"EC","x":"{}","y":"{}"}}"#,
+            get("crv"),
+            get("x"),
+            get("y")
+        ),
     };
     use sha2::Digest;
     b64url(&sha2::Sha256::digest(canonical.as_bytes()))
@@ -164,7 +182,8 @@ pub fn ec_public_from_jwk(jwk: &Value) -> Option<PublicKey> {
     if x.len() != 32 || y.len() != 32 {
         return None;
     }
-    let point = EncodedPoint::from_affine_coordinates(x.as_slice().into(), y.as_slice().into(), false);
+    let point =
+        EncodedPoint::from_affine_coordinates(x.as_slice().into(), y.as_slice().into(), false);
     Option::from(PublicKey::from_encoded_point(&point))
 }
 
@@ -198,7 +217,12 @@ impl Jws {
             Value::Object(m) => m,
             _ => return None,
         };
-        Some(Self { header, claims, signing_input: format!("{h}.{p}"), signature: b64url_decode(s)? })
+        Some(Self {
+            header,
+            claims,
+            signing_input: format!("{h}.{p}"),
+            signature: b64url_decode(s)?,
+        })
     }
 
     pub fn alg(&self) -> Option<&str> {
@@ -219,14 +243,20 @@ impl Jws {
 
     /// A NumericDate claim (seconds since the epoch).
     pub fn claim_time(&self, name: &str) -> Option<i64> {
-        self.claims.get(name).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+        self.claims
+            .get(name)
+            .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
     }
 
     /// The `aud` claim as a list (a single string is a one-element list).
     pub fn audiences(&self) -> Vec<String> {
         match self.claims.get("aud") {
             Some(Value::String(s)) => vec![s.clone()],
-            Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+            Some(Value::Array(a)) => a
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -239,7 +269,9 @@ impl Jws {
         let Ok(sig) = Signature::from_slice(&self.signature) else {
             return false;
         };
-        VerifyingKey::from(key).verify(self.signing_input.as_bytes(), &sig).is_ok()
+        VerifyingKey::from(key)
+            .verify(self.signing_input.as_bytes(), &sig)
+            .is_ok()
     }
 
     /// Verify with a public JWK: ES256 for a P-256 key, RS256 for an RSA key. The JWK's own `alg`,
@@ -256,7 +288,11 @@ impl Jws {
             ("RS256", Some("RSA")) => self.verify_rs256(jwk),
             ("EdDSA" | "Ed25519", Some("OKP")) => {
                 jwk.get("crv").and_then(Value::as_str) == Some("Ed25519")
-                    && jwk.get("x").and_then(Value::as_str).and_then(b64url_decode).is_some_and(|x| self.verify_ed25519(&x))
+                    && jwk
+                        .get("x")
+                        .and_then(Value::as_str)
+                        .and_then(b64url_decode)
+                        .is_some_and(|x| self.verify_ed25519(&x))
             }
             _ => false,
         }
@@ -265,7 +301,10 @@ impl Jws {
     /// Verify an EdDSA (Ed25519) signature with a raw 32-byte public key. Fails for any other
     /// `alg`.
     pub fn verify_ed25519(&self, key: &[u8]) -> bool {
-        if !matches!(self.alg(), Some("EdDSA" | "Ed25519")) || key.len() != 32 || self.signature.len() != 64 {
+        if !matches!(self.alg(), Some("EdDSA" | "Ed25519"))
+            || key.len() != 32
+            || self.signature.len() != 64
+        {
             return false;
         }
         aws_lc_rs::signature::UnparsedPublicKey::new(&aws_lc_rs::signature::ED25519, key)
@@ -314,7 +353,9 @@ mod tests {
         let mut parts: Vec<&str> = token.split('.').collect();
         let forged = b64url(br#"{"sub":"b"}"#);
         parts[1] = &forged;
-        assert!(!Jws::parse(&parts.join(".")).unwrap().verify_es256(&key.public_key()));
+        assert!(!Jws::parse(&parts.join("."))
+            .unwrap()
+            .verify_es256(&key.public_key()));
     }
 
     #[test]
@@ -328,7 +369,11 @@ mod tests {
     #[test]
     fn alg_none_never_verifies() {
         let key = EcKey::generate("k");
-        let token = format!("{}.{}.", b64url(br#"{"alg":"none"}"#), b64url(br#"{"sub":"a"}"#));
+        let token = format!(
+            "{}.{}.",
+            b64url(br#"{"alg":"none"}"#),
+            b64url(br#"{"sub":"a"}"#)
+        );
         let jws = Jws::parse(&token).unwrap();
         assert!(!jws.verify_es256(&key.public_key()));
         assert!(!jws.verify_jwk(&key.public_jwk()));

@@ -19,7 +19,10 @@ pub const LEEWAY_SECS: i64 = 30;
 /// The agent the request authenticates as. No `Authorization` header (or a non-Bearer one) is
 /// anonymous; a Bearer token that does not validate is an error, answered with
 /// `error="invalid_token"`. In open mode nobody is authenticated and nothing is refused.
-pub fn authenticate<S: Store>(state: &LwsState<S>, req: &LwsRequest) -> Result<Agent, &'static str> {
+pub fn authenticate<S: Store>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+) -> Result<Agent, &'static str> {
     let Some(value) = req.header(header::AUTHORIZATION) else {
         return Ok(Agent::anonymous());
     };
@@ -44,7 +47,9 @@ pub fn bearer(value: &str) -> Option<&str> {
 pub fn validate(cfg: &LwsConfig, token: &str) -> Result<Agent, String> {
     let jws = Jws::parse(token).ok_or("not a JWS")?;
     match jws.typ() {
-        Some(t) if t.eq_ignore_ascii_case("at+jwt") || t.eq_ignore_ascii_case("application/at+jwt") => {}
+        Some(t)
+            if t.eq_ignore_ascii_case("at+jwt") || t.eq_ignore_ascii_case("application/at+jwt") => {
+        }
         Some(t) if t.eq_ignore_ascii_case("jwt") => {}
         None => {}
         Some(_) => return Err("wrong typ".into()),
@@ -70,15 +75,28 @@ pub fn validate(cfg: &LwsConfig, token: &str) -> Result<Agent, String> {
         Some(exp) if exp + LEEWAY_SECS > now => {}
         _ => return Err("expired".into()),
     }
-    if jws.claim_time("nbf").is_some_and(|nbf| nbf > now + LEEWAY_SECS) {
+    if jws
+        .claim_time("nbf")
+        .is_some_and(|nbf| nbf > now + LEEWAY_SECS)
+    {
         return Err("not yet valid".into());
     }
-    if jws.claim_time("iat").is_some_and(|iat| iat > now + LEEWAY_SECS) {
+    if jws
+        .claim_time("iat")
+        .is_some_and(|iat| iat > now + LEEWAY_SECS)
+    {
         return Err("issued in the future".into());
     }
-    let subject = jws.claim_str("sub").filter(|s| !s.is_empty()).ok_or("no subject")?.to_string();
+    let subject = jws
+        .claim_str("sub")
+        .filter(|s| !s.is_empty())
+        .ok_or("no subject")?
+        .to_string();
     let client = jws.claim_str("client_id").map(str::to_string);
-    Ok(Agent { subject: Some(subject), client })
+    Ok(Agent {
+        subject: Some(subject),
+        client,
+    })
 }
 
 /// Mint an access token for `subject` (and `client`) to the storage `resource`.

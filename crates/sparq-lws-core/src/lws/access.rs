@@ -21,8 +21,9 @@ use bytes::Bytes;
 use serde_json::{json, Value};
 
 use super::{
-    add_link, has_type, is_uri, jose, json_is_uri, method_not_allowed, problem, set, Agent, LwsConfig,
-    LwsRequest, LwsState, FOAF_AGENT, GRANTS_PATH, LWS_CONTEXT, LWS_JSON, LWS_NS, REQUESTS_PATH,
+    add_link, has_type, is_uri, jose, json_is_uri, method_not_allowed, problem, set, Agent,
+    LwsConfig, LwsRequest, LwsState, FOAF_AGENT, GRANTS_PATH, LWS_CONTEXT, LWS_JSON, LWS_NS,
+    REQUESTS_PATH,
 };
 use crate::store::Store;
 
@@ -87,7 +88,9 @@ impl Constraint {
             "client" => ctx.client.is_some_and(|c| self.matches(c)),
             "format" => ctx.format.is_some_and(|f| self.matches(f)),
             "type" => ctx.types.iter().any(|t| {
-                self.matches(t) || t.strip_prefix(LWS_NS).is_some_and(|short| self.matches(short))
+                self.matches(t)
+                    || t.strip_prefix(LWS_NS)
+                        .is_some_and(|short| self.matches(short))
             }),
             _ => false,
         }
@@ -96,7 +99,10 @@ impl Constraint {
     fn matches(&self, actual: &str) -> bool {
         match self.operator.as_str() {
             "eq" => self.right.as_str() == Some(actual),
-            "isAnyOf" => self.right.as_array().is_some_and(|a| a.iter().any(|v| v.as_str() == Some(actual))),
+            "isAnyOf" => self
+                .right
+                .as_array()
+                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(actual))),
             _ => false,
         }
     }
@@ -122,11 +128,24 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     // YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)
     let s = s.trim();
     let b = s.as_bytes();
-    if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || !matches!(b[10], b'T' | b't' | b' ') || b[13] != b':' || b[16] != b':' {
+    if b.len() < 20
+        || b[4] != b'-'
+        || b[7] != b'-'
+        || !matches!(b[10], b'T' | b't' | b' ')
+        || b[13] != b':'
+        || b[16] != b':'
+    {
         return None;
     }
     let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
-    let (y, mo, d, h, mi, sec) = (num(0..4)?, num(5..7)?, num(8..10)?, num(11..13)?, num(14..16)?, num(17..19)?);
+    let (y, mo, d, h, mi, sec) = (
+        num(0..4)?,
+        num(5..7)?,
+        num(8..10)?,
+        num(11..13)?,
+        num(14..16)?,
+        num(17..19)?,
+    );
     let mut rest = &s[19..];
     if let Some(frac) = rest.strip_prefix('.') {
         let digits = frac.bytes().take_while(u8::is_ascii_digit).count();
@@ -144,7 +163,11 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
         return None;
     }
     // Days from civil (Howard Hinnant).
-    let (y2, m2) = if mo <= 2 { (y - 1, mo + 9) } else { (y, mo - 3) };
+    let (y2, m2) = if mo <= 2 {
+        (y - 1, mo + 9)
+    } else {
+        (y, mo - 3)
+    };
     let era = y2.div_euclid(400);
     let yoe = y2 - era * 400;
     let doy = (153 * m2 + 2) / 5 + d - 1;
@@ -166,7 +189,12 @@ pub fn format_rfc3339(secs: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// One AccessPolicy of a grant.
@@ -220,15 +248,40 @@ impl AccessStore {
         for grants in [true, false] {
             let container = cfg.absolute(if grants { GRANTS_PATH } else { REQUESTS_PATH });
             ensure_container(store, &container).await?;
-            let children = store.list_children(&container).await.map_err(|e| format!("store: {e}"))?;
+            let children = store
+                .list_children(&container)
+                .await
+                .map_err(|e| format!("store: {e}"))?;
             for child in children {
-                let Ok(r) = store.read(child.as_str()).await else { continue };
-                let Ok(stored) = serde_json::from_slice::<Value>(&r.body) else { continue };
-                let id = child.as_str().rsplit('/').next().unwrap_or_default().to_string();
+                let Ok(r) = store.read(child.as_str()).await else {
+                    continue;
+                };
+                let Ok(stored) = serde_json::from_slice::<Value>(&r.body) else {
+                    continue;
+                };
+                let id = child
+                    .as_str()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
                 let document = stored.get("document").cloned().unwrap_or(Value::Null);
-                let author = stored.get("author").and_then(Value::as_str).map(str::to_string);
-                let policies = if grants { policies(document.get("access").unwrap_or(&Value::Null)).unwrap_or_default() } else { Vec::new() };
-                let record = Record { id: id.clone(), document, policies, author, etag: new_etag() };
+                let author = stored
+                    .get("author")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let policies = if grants {
+                    policies(document.get("access").unwrap_or(&Value::Null)).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let record = Record {
+                    id: id.clone(),
+                    document,
+                    policies,
+                    author,
+                    etag: new_etag(),
+                };
                 me.map(grants).write().expect("lock").insert(id, record);
             }
         }
@@ -236,28 +289,51 @@ impl AccessStore {
     }
 
     fn map(&self, grants: bool) -> &RwLock<BTreeMap<String, Record>> {
-        if grants { &self.grants } else { &self.requests }
+        if grants {
+            &self.grants
+        } else {
+            &self.requests
+        }
     }
 
     fn bump(&self, grants: bool) {
-        *(if grants { &self.grants_etag } else { &self.requests_etag }).write().expect("lock") = new_etag();
+        *(if grants {
+            &self.grants_etag
+        } else {
+            &self.requests_etag
+        })
+        .write()
+        .expect("lock") = new_etag();
     }
 
     /// Every policy of every grant, for an authorization decision.
     pub fn grant_policies(&self) -> Vec<Policy> {
-        self.grants.read().expect("lock").values().flat_map(|r| r.policies.clone()).collect()
+        self.grants
+            .read()
+            .expect("lock")
+            .values()
+            .flat_map(|r| r.policies.clone())
+            .collect()
     }
 }
 
 async fn ensure_container<S: Store>(store: &S, iri: &str) -> Result<(), String> {
     if !store.exists(iri).await.map_err(|e| format!("store: {e}"))? {
-        store.write(iri, Bytes::new(), LWS_JSON).await.map_err(|e| format!("store: {e}"))?;
+        store
+            .write(iri, Bytes::new(), LWS_JSON)
+            .await
+            .map_err(|e| format!("store: {e}"))?;
     }
     Ok(())
 }
 
 /// Whether `agent` may perform `action` on the resource at `uri`.
-pub async fn allowed<S: Store + 'static>(state: &LwsState<S>, action: Action, uri: &str, agent: &Agent) -> bool {
+pub async fn allowed<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> bool {
     if state.cfg.open {
         return true;
     }
@@ -269,8 +345,12 @@ pub async fn allowed<S: Store + 'static>(state: &LwsState<S>, action: Action, ur
     if subject.is_some() && subject == meta.creator.as_deref() {
         return true;
     }
-    let candidates: Vec<Policy> =
-        state.access.grant_policies().into_iter().filter(|p| p.applies(subject, action, uri)).collect();
+    let candidates: Vec<Policy> = state
+        .access
+        .grant_policies()
+        .into_iter()
+        .filter(|p| p.applies(subject, action, uri))
+        .collect();
     if candidates.is_empty() {
         return false;
     }
@@ -278,12 +358,31 @@ pub async fn allowed<S: Store + 'static>(state: &LwsState<S>, action: Action, ur
     let format = if is_container {
         Some(LWS_JSON.to_string())
     } else {
-        state.store.meta(uri).await.ok().flatten().map(|m| m.content_type)
+        state
+            .store
+            .meta(uri)
+            .await
+            .ok()
+            .flatten()
+            .map(|m| m.content_type)
     };
-    let mut types = vec![format!("{LWS_NS}{}", if is_container { "Container" } else { "DataResource" })];
+    let mut types = vec![format!(
+        "{LWS_NS}{}",
+        if is_container {
+            "Container"
+        } else {
+            "DataResource"
+        }
+    )];
     types.extend(meta.types.iter().cloned());
-    let ctx = ConstraintContext { client: agent.client.as_deref(), format: format.as_deref(), types: &types };
-    candidates.iter().any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
+    let ctx = ConstraintContext {
+        client: agent.client.as_deref(),
+        format: format.as_deref(),
+        types: &types,
+    };
+    candidates
+        .iter()
+        .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx)))
 }
 
 /// The AccessPolicy entries of `access`, or `None` when they are malformed.
@@ -303,13 +402,23 @@ pub fn policies(access: &Value) -> Option<Vec<Policy>> {
             Some(Value::Array(cs)) => {
                 let mut out = Vec::new();
                 for c in cs {
-                    let left = c.get("leftOperand").and_then(Value::as_str).unwrap_or_default();
-                    let op = c.get("operator").and_then(Value::as_str).unwrap_or_default();
+                    let left = c
+                        .get("leftOperand")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+                    let op = c
+                        .get("operator")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
                     if !LEFT_OPERANDS.contains(&left) || !OPERATORS.contains(&op) {
                         return None;
                     }
                     let right = c.get("rightOperand")?.clone();
-                    out.push(Constraint { left: left.into(), operator: op.into(), right });
+                    out.push(Constraint {
+                        left: left.into(),
+                        operator: op.into(),
+                        right,
+                    });
                 }
                 out
             }
@@ -324,22 +433,39 @@ pub fn policies(access: &Value) -> Option<Vec<Policy>> {
         for a in action_values {
             actions.push(Action::parse(a.as_str()?)?);
         }
-        let assignee = p.get("assignee").and_then(Value::as_str).unwrap_or_default().to_string();
+        let assignee = p
+            .get("assignee")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         let targets: Vec<String> = match p.get("target").and_then(|t| t.get("value")) {
-            Some(Value::Array(a)) => a.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+            Some(Value::Array(a)) => a
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
             Some(Value::String(s)) => vec![s.clone()],
             _ => Vec::new(),
         };
         if actions.is_empty() || assignee.is_empty() || targets.is_empty() {
             return None;
         }
-        out.push(Policy { actions, assignee, targets, constraints });
+        out.push(Policy {
+            actions,
+            assignee,
+            targets,
+            constraints,
+        });
     }
     Some(out)
 }
 
 /// The access grant service and the access request service.
-pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, agent: &Agent) -> Response {
+pub async fn handle<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+) -> Response {
     let grants = req.path.starts_with(GRANTS_PATH);
     let base = if grants { GRANTS_PATH } else { REQUESTS_PATH };
     let id = &req.path[base.len()..];
@@ -361,9 +487,19 @@ pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, a
             _ => method_not_allowed("GET, HEAD, POST"),
         };
     }
-    let record = state.access.map(grants).read().expect("lock").get(id).cloned();
+    let record = state
+        .access
+        .map(grants)
+        .read()
+        .expect("lock")
+        .get(id)
+        .cloned();
     let Some(record) = record else {
-        return if state.needs_auth(agent) { state.challenge(None) } else { problem(StatusCode::NOT_FOUND, None) };
+        return if state.needs_auth(agent) {
+            state.challenge(None)
+        } else {
+            problem(StatusCode::NOT_FOUND, None)
+        };
     };
     let mine = owner || (agent.subject.is_some() && agent.subject == record.author);
     if !mine {
@@ -374,12 +510,20 @@ pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, a
             let mut resp = super::json_response(StatusCode::OK, LWS_JSON, &record.document);
             set(resp.headers_mut(), header::ETAG, &record.etag);
             add_link(resp.headers_mut(), &state.cfg.absolute(base), "up", None);
-            add_link(resp.headers_mut(), &state.cfg.storage(), &format!("{LWS_NS}storage"), None);
+            add_link(
+                resp.headers_mut(),
+                &state.cfg.storage(),
+                &format!("{LWS_NS}storage"),
+                None,
+            );
             resp
         }
         Method::DELETE => {
             let iri = state.cfg.absolute(&format!("{base}{id}"));
-            let _ = state.store.delete(&iri, Some(&state.cfg.absolute(base))).await;
+            let _ = state
+                .store
+                .delete(&iri, Some(&state.cfg.absolute(base)))
+                .await;
             state.access.map(grants).write().expect("lock").remove(id);
             state.access.bump(grants);
             problem(StatusCode::NO_CONTENT, None)
@@ -406,25 +550,54 @@ fn listing<S: Store + 'static>(state: &LwsState<S>, grants: bool) -> Response {
         "items": items,
     });
     let mut resp = super::json_response(StatusCode::OK, LWS_JSON, &body);
-    let etag = (if grants { &state.access.grants_etag } else { &state.access.requests_etag }).read().expect("lock").clone();
+    let etag = (if grants {
+        &state.access.grants_etag
+    } else {
+        &state.access.requests_etag
+    })
+    .read()
+    .expect("lock")
+    .clone();
     set(resp.headers_mut(), header::ETAG, &etag);
-    add_link(resp.headers_mut(), &format!("{LWS_NS}Container"), "type", None);
-    add_link(resp.headers_mut(), &state.cfg.storage(), &format!("{LWS_NS}storage"), None);
+    add_link(
+        resp.headers_mut(),
+        &format!("{LWS_NS}Container"),
+        "type",
+        None,
+    );
+    add_link(
+        resp.headers_mut(),
+        &state.cfg.storage(),
+        &format!("{LWS_NS}storage"),
+        None,
+    );
     resp
 }
 
-async fn create<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, agent: &Agent, grants: bool) -> Response {
+async fn create<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    grants: bool,
+) -> Response {
     let Ok(body) = serde_json::from_slice::<Value>(&req.body) else {
         return problem(StatusCode::BAD_REQUEST, Some("the body is not JSON"));
     };
-    let wanted = if grants { "AccessGrant" } else { "AccessRequest" };
+    let wanted = if grants {
+        "AccessGrant"
+    } else {
+        "AccessRequest"
+    };
     // The access data model: type, storage and access are REQUIRED, and an inbox, when given, MUST
     // be a URI. A document that breaks them is refused rather than stored.
     let valid = body.is_object()
         && has_type(body.get("type").unwrap_or(&Value::Null), wanted)
         && body.get("storage").is_some_and(Value::is_string)
         && body.get("inbox").is_none_or(json_is_uri);
-    let Some(parsed) = valid.then(|| policies(body.get("access").unwrap_or(&Value::Null))).flatten() else {
+    let Some(parsed) = valid
+        .then(|| policies(body.get("access").unwrap_or(&Value::Null)))
+        .flatten()
+    else {
         return problem(StatusCode::BAD_REQUEST, Some("not a valid access document"));
     };
     let id = jose::random_id();
@@ -435,7 +608,12 @@ async fn create<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, agent
     let stored = json!({"document": document, "author": agent.subject});
     if let Err(e) = state
         .store
-        .create_in_container(&state.cfg.absolute(base), &iri, Bytes::from(stored.to_string()), LWS_JSON)
+        .create_in_container(
+            &state.cfg.absolute(base),
+            &iri,
+            Bytes::from(stored.to_string()),
+            LWS_JSON,
+        )
         .await
     {
         return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
@@ -447,11 +625,20 @@ async fn create<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest, agent
         author: agent.subject.clone(),
         etag: new_etag(),
     };
-    state.access.map(grants).write().expect("lock").insert(id, record);
+    state
+        .access
+        .map(grants)
+        .write()
+        .expect("lock")
+        .insert(id, record);
     state.access.bump(grants);
     // "When an inbox property is present on an access request or access grant, the server SHOULD
     // deliver notifications to that endpoint" (section 11.6).
-    if let Some(inbox) = body.get("inbox").and_then(Value::as_str).filter(|i| is_uri(i)) {
+    if let Some(inbox) = body
+        .get("inbox")
+        .and_then(Value::as_str)
+        .filter(|i| is_uri(i))
+    {
         let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
         state.notify.deliver(state, inbox, activity, None);
     }
@@ -467,8 +654,16 @@ mod tests {
     #[test]
     fn rfc3339_round_trip() {
         assert_eq!(parse_rfc3339("1970-01-01T00:00:00Z"), Some(0));
-        assert_eq!(parse_rfc3339("2026-10-05T16:20:08Z").map(format_rfc3339).as_deref(), Some("2026-10-05T16:20:08Z"));
-        assert_eq!(parse_rfc3339("2026-10-05T18:20:08.123+02:00"), parse_rfc3339("2026-10-05T16:20:08Z"));
+        assert_eq!(
+            parse_rfc3339("2026-10-05T16:20:08Z")
+                .map(format_rfc3339)
+                .as_deref(),
+            Some("2026-10-05T16:20:08Z")
+        );
+        assert_eq!(
+            parse_rfc3339("2026-10-05T18:20:08.123+02:00"),
+            parse_rfc3339("2026-10-05T16:20:08Z")
+        );
         assert_eq!(parse_rfc3339("yesterday"), None);
     }
 
@@ -487,13 +682,41 @@ mod tests {
 
     #[test]
     fn constraints() {
-        let c = Constraint { left: "client".into(), operator: "eq".into(), right: json!("app") };
+        let c = Constraint {
+            left: "client".into(),
+            operator: "eq".into(),
+            right: json!("app"),
+        };
         let types = vec![format!("{LWS_NS}DataResource")];
-        assert!(c.satisfied(&ConstraintContext { client: Some("app"), format: None, types: &types }));
-        assert!(!c.satisfied(&ConstraintContext { client: Some("other"), format: None, types: &types }));
-        let t = Constraint { left: "type".into(), operator: "eq".into(), right: json!("DataResource") };
-        assert!(t.satisfied(&ConstraintContext { client: None, format: None, types: &types }));
-        let past = Constraint { left: "dateTime".into(), operator: "lt".into(), right: json!("2000-01-01T00:00:00Z") };
-        assert!(!past.satisfied(&ConstraintContext { client: None, format: None, types: &types }));
+        assert!(c.satisfied(&ConstraintContext {
+            client: Some("app"),
+            format: None,
+            types: &types
+        }));
+        assert!(!c.satisfied(&ConstraintContext {
+            client: Some("other"),
+            format: None,
+            types: &types
+        }));
+        let t = Constraint {
+            left: "type".into(),
+            operator: "eq".into(),
+            right: json!("DataResource"),
+        };
+        assert!(t.satisfied(&ConstraintContext {
+            client: None,
+            format: None,
+            types: &types
+        }));
+        let past = Constraint {
+            left: "dateTime".into(),
+            operator: "lt".into(),
+            right: json!("2000-01-01T00:00:00Z"),
+        };
+        assert!(!past.satisfied(&ConstraintContext {
+            client: None,
+            format: None,
+            types: &types
+        }));
     }
 }

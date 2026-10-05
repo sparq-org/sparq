@@ -140,21 +140,36 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML IdP entity ids to PEM.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
-        let var = |k: &str| std::env::var(k).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        let flag = |k: &str| var(k).is_some_and(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"));
+        let var = |k: &str| {
+            std::env::var(k)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        let flag =
+            |k: &str| var(k).is_some_and(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"));
         cfg.owner = var("SOLID_SERVER_LWS_OWNER");
         cfg.open = flag("SOLID_SERVER_LWS_OPEN");
         cfg.allow_insecure_fetch = flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
-            cfg.page_size = n.parse().ok().filter(|n| *n > 0).ok_or("SOLID_SERVER_LWS_PAGE_SIZE must be a positive integer")?;
+            cfg.page_size = n
+                .parse()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or("SOLID_SERVER_LWS_PAGE_SIZE must be a positive integer")?;
         }
         if let Some(n) = var("SOLID_SERVER_LWS_TOKEN_TTL_SECS") {
-            cfg.token_ttl_secs =
-                n.parse().ok().filter(|n| *n > 0).ok_or("SOLID_SERVER_LWS_TOKEN_TTL_SECS must be a positive integer")?;
+            cfg.token_ttl_secs = n
+                .parse()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or("SOLID_SERVER_LWS_TOKEN_TTL_SECS must be a positive integer")?;
         }
         let read = |k: &str| -> Result<Option<String>, String> {
             match var(k) {
-                Some(path) => std::fs::read_to_string(&path).map(Some).map_err(|e| format!("{k}: cannot read {path}: {e}")),
+                Some(path) => std::fs::read_to_string(&path)
+                    .map(Some)
+                    .map_err(|e| format!("{k}: cannot read {path}: {e}")),
                 None => Ok(None),
             }
         };
@@ -163,10 +178,13 @@ impl LwsConfig {
         let key = |k: &str, kid: &str| -> Result<Option<jose::EcKey>, String> {
             let Some(path) = var(k) else { return Ok(None) };
             match std::fs::read_to_string(&path) {
-                Ok(jwk) => jose::EcKey::from_jwk(&jwk).map(Some).map_err(|e| format!("{k}: {e}")),
+                Ok(jwk) => jose::EcKey::from_jwk(&jwk)
+                    .map(Some)
+                    .map_err(|e| format!("{k}: {e}")),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     let fresh = jose::EcKey::generate(kid);
-                    write_private(&path, &fresh.private_jwk().to_string()).map_err(|e| format!("{k}: cannot write {path}: {e}"))?;
+                    write_private(&path, &fresh.private_jwk().to_string())
+                        .map_err(|e| format!("{k}: cannot write {path}: {e}"))?;
                     Ok(Some(fresh))
                 }
                 Err(e) => Err(format!("{k}: cannot read {path}: {e}")),
@@ -179,8 +197,8 @@ impl LwsConfig {
             cfg.notify_key = k;
         }
         if let Some(idps) = read("SOLID_SERVER_LWS_SAML_IDPS_FILE")? {
-            cfg.saml_idps =
-                serde_json::from_str(&idps).map_err(|e| format!("SOLID_SERVER_LWS_SAML_IDPS_FILE: {e}"))?;
+            cfg.saml_idps = serde_json::from_str(&idps)
+                .map_err(|e| format!("SOLID_SERVER_LWS_SAML_IDPS_FILE: {e}"))?;
         }
         Ok(cfg)
     }
@@ -279,7 +297,9 @@ pub struct LwsState<S: Store> {
 
 impl<S: Store> Clone for LwsState<S> {
     fn clone(&self) -> Self {
-        Self { inner: Arc::clone(&self.inner) }
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 
@@ -309,12 +329,27 @@ impl<S: Store + 'static> LwsState<S> {
             .build()
             .map_err(|e| format!("http client: {e}"))?;
         let root = cfg.storage();
-        if !store.exists(&root).await.map_err(|e| format!("store: {e}"))? {
-            store.write(&root, Bytes::new(), LWS_JSON).await.map_err(|e| format!("store: {e}"))?;
+        if !store
+            .exists(&root)
+            .await
+            .map_err(|e| format!("store: {e}"))?
+        {
+            store
+                .write(&root, Bytes::new(), LWS_JSON)
+                .await
+                .map_err(|e| format!("store: {e}"))?;
         }
         let access = access::AccessStore::load(&store, &cfg).await?;
         let notify = notify::Notifier::load(&store, &cfg).await?;
-        Ok(Self { inner: Arc::new(Inner { store, cfg, access, notify, http }) })
+        Ok(Self {
+            inner: Arc::new(Inner {
+                store,
+                cfg,
+                access,
+                notify,
+                http,
+            }),
+        })
     }
 
     /// Whether `agent` may perform `action` on the resource at `uri` (see [`access::allowed`]).
@@ -330,21 +365,37 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    pub async fn put_resource_meta(&self, iri: &str, meta: &ResourceMeta) -> Result<(), crate::error::ServerError> {
+    pub async fn put_resource_meta(
+        &self,
+        iri: &str,
+        meta: &ResourceMeta,
+    ) -> Result<(), crate::error::ServerError> {
         let body = serde_json::to_vec(meta).unwrap_or_default();
-        self.store.write(&meta_key(iri), Bytes::from(body), JSON).await.map(|_| ())
+        self.store
+            .write(&meta_key(iri), Bytes::from(body), JSON)
+            .await
+            .map(|_| ())
     }
 
     /// A 401 with the Bearer challenge naming this authorization server and realm, and the storage
     /// link (section 9.2).
     pub fn challenge(&self, error: Option<&str>) -> Response {
-        let mut c = format!("Bearer as_uri=\"{}\", realm=\"{}\"", self.cfg.issuer(), self.cfg.realm());
+        let mut c = format!(
+            "Bearer as_uri=\"{}\", realm=\"{}\"",
+            self.cfg.issuer(),
+            self.cfg.realm()
+        );
         if let Some(e) = error {
             c.push_str(&format!(", error=\"{e}\""));
         }
         let mut resp = problem(StatusCode::UNAUTHORIZED, None);
         set(resp.headers_mut(), header::WWW_AUTHENTICATE, &c);
-        add_link(resp.headers_mut(), &self.cfg.storage(), &format!("{LWS_NS}storage"), None);
+        add_link(
+            resp.headers_mut(),
+            &self.cfg.storage(),
+            &format!("{LWS_NS}storage"),
+            None,
+        );
         resp
     }
 
@@ -380,12 +431,19 @@ impl LwsRequest {
 
     /// Every value of a header, comma-joined.
     pub fn header_all(&self, name: impl header::AsHeaderName) -> String {
-        self.headers.get_all(name).iter().filter_map(|v| v.to_str().ok()).collect::<Vec<_>>().join(", ")
+        self.headers
+            .get_all(name)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub fn query_param(&self, name: &str) -> Option<String> {
         let q = self.query.as_deref()?;
-        url::form_urlencoded::parse(q.as_bytes()).find(|(k, _)| k == name).map(|(_, v)| v.into_owned())
+        url::form_urlencoded::parse(q.as_bytes())
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.into_owned())
     }
 
     pub fn is_head(&self) -> bool {
@@ -395,7 +453,13 @@ impl LwsRequest {
     /// The media type essence of Content-Type, lower-cased.
     pub fn content_type(&self) -> Option<String> {
         self.header(header::CONTENT_TYPE)
-            .map(|v| v.split(';').next().unwrap_or_default().trim().to_ascii_lowercase())
+            .map(|v| {
+                v.split(';')
+                    .next()
+                    .unwrap_or_default()
+                    .trim()
+                    .to_ascii_lowercase()
+            })
             .filter(|v| !v.is_empty())
     }
 }
@@ -441,7 +505,10 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
     if matches!(path, "/livez" | "/readyz") && matches!(req.method, Method::GET | Method::HEAD) {
         return (StatusCode::OK, "ok").into_response();
     }
-    if matches!(path, AS_METADATA_PATH | AS_METADATA_OAUTH_PATH | AS_JWKS_PATH | AS_TOKEN_PATH) {
+    if matches!(
+        path,
+        AS_METADATA_PATH | AS_METADATA_OAUTH_PATH | AS_JWKS_PATH | AS_TOKEN_PATH
+    ) {
         return authz_server::handle(state, &req).await;
     }
     if path.starts_with("/.well-known/") {
@@ -527,7 +594,9 @@ pub fn is_uri(v: &str) -> bool {
     chars.next().is_some_and(|c| c.is_ascii_alphabetic())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
         && !rest.is_empty()
-        && !v.chars().any(|c| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`'))
+        && !v.chars().any(|c| {
+            c.is_whitespace() || matches!(c, '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`')
+        })
 }
 
 /// A JSON value that is a string holding an absolute URI.
@@ -537,7 +606,10 @@ pub fn json_is_uri(v: &Value) -> bool {
 
 /// Whether a JSON `type` value (a string or an array) names `wanted`, short or in the LWS namespace.
 pub fn has_type(v: &Value, wanted: &str) -> bool {
-    let matches = |t: &Value| t.as_str().is_some_and(|t| t == wanted || t.strip_prefix(LWS_NS) == Some(wanted));
+    let matches = |t: &Value| {
+        t.as_str()
+            .is_some_and(|t| t == wanted || t.strip_prefix(LWS_NS) == Some(wanted))
+    };
     match v {
         Value::Array(a) => a.iter().any(matches),
         other => matches(other),
@@ -549,7 +621,9 @@ pub fn parse_links(value: &str) -> Vec<(String, BTreeMap<String, String>)> {
     let mut out = Vec::new();
     let mut rest = value;
     while let Some(start) = rest.find('<') {
-        let Some(end) = rest[start..].find('>') else { break };
+        let Some(end) = rest[start..].find('>') else {
+            break;
+        };
         let target = rest[start + 1..start + end].trim().to_string();
         rest = &rest[start + end + 1..];
         let mut params = BTreeMap::new();
@@ -567,7 +641,10 @@ pub fn parse_links(value: &str) -> Vec<(String, BTreeMap<String, String>)> {
         }
         for p in rest[..i].split(';') {
             if let Some((k, v)) = p.split_once('=') {
-                params.insert(k.trim().to_ascii_lowercase(), v.trim().trim_matches('"').to_string());
+                params.insert(
+                    k.trim().to_ascii_lowercase(),
+                    v.trim().trim_matches('"').to_string(),
+                );
             }
         }
         rest = &rest[i.min(rest.len())..];
