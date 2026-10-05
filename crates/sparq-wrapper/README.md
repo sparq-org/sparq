@@ -78,16 +78,16 @@ hatch.
 - `proposed-async-node` adds `proposed::async_node`: `required` / `optional` /
   `many` mapped reads over an `AsyncNode` (singular reads stop after the second
   streamed value) and the write-through `AsyncLiveSet`. This proposal follows
-  rdfjs/wrapper draft PR #98. <!-- [FABLE-5] sq-1rg2q.9 -->
+  rdfjs/wrapper draft PR #98. <!-- [OPUS-5.5] sq-1rg2q.9 -->
 - `proposed-async-events` adds `proposed::async_events::AsyncObservableStore`,
   whose effective mutations await every listener in subscription order before
   resolving. This proposal follows rdfjs/wrapper draft PR #99.
-  <!-- [FABLE-5] sq-1rg2q.10 -->
+  <!-- [OPUS-5.5] sq-1rg2q.10 -->
 - `proposed-graph-scope-events` adds
   `proposed::graph_scope_events::ObservableDataset`, whose listeners see a
   graph scope's projected union change: add at the first in-scope copy, delete
   at the last. This proposal follows rdfjs/wrapper draft PR #96.
-  <!-- [FABLE-5] sq-1rg2q.7 -->
+  <!-- [OPUS-5.5] sq-1rg2q.7 -->
 - All crate features are off by default, and the dependency on `sparq-core`
   disables its default features to keep this capability isolated.
 

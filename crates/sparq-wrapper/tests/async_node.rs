@@ -1,4 +1,4 @@
-// [FABLE-5] sq-1rg2q.9: async mapped cardinality reads and live mapped sets, observed
+// [OPUS-5.5] sq-1rg2q.9: async mapped cardinality reads and live mapped sets, observed
 // through the shared poll-counting fake backend so the assertions see how much of the
 // stream the wrapper actually pulled.
 

@@ -1,4 +1,4 @@
-// [FABLE-5] sq-1rg2q.10: awaited effective-change listeners. Gated listeners prove the
+// [OPUS-5.5] sq-1rg2q.10: awaited effective-change listeners. Gated listeners prove the
 // mutation future stays pending until every listener, in subscription order, releases.
 
 #![cfg(feature = "proposed-async-events")]

@@ -18,9 +18,9 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 # [GPT-5.6] sq-1rg2q: proposed rdfjs/wrapper parity remains explicitly opt-in.
 default = []
-# [FABLE-5] sq-1rg2q.10: awaited effective-change listeners (rdfjs/wrapper #99).
+# [OPUS-5.5] sq-1rg2q.10: awaited effective-change listeners (rdfjs/wrapper #99).
 proposed-async-events = ["proposed-async-store", "proposed-observe"]
-# [FABLE-5] sq-1rg2q.9: async mapped cardinality reads + live sets (rdfjs/wrapper #98).
+# [OPUS-5.5] sq-1rg2q.9: async mapped cardinality reads + live sets (rdfjs/wrapper #98).
 proposed-async-node = ["proposed-async-store", "proposed-cardinality"]
 # [SONNET-4.6] sq-1rg2q.8: streaming async store wrapper (rdfjs/wrapper #10, #97).
 proposed-async-store = []
@@ -29,7 +29,7 @@ proposed-codecs = []
 proposed-distinct = []
 # [GPT-5.6] sq-1rg2q.6: read-many/write-one named-graph views (rdfjs/wrapper #95).
 proposed-graph-scope = []
-# [FABLE-5] sq-1rg2q.7: projected union-boundary change events (rdfjs/wrapper #96).
+# [OPUS-5.5] sq-1rg2q.7: projected union-boundary change events (rdfjs/wrapper #96).
 proposed-graph-scope-events = ["proposed-graph-scope", "proposed-observe"]
 # [SONNET-4.6] sq-1rg2q.11: cycle-safe JSON projection (rdfjs/wrapper #23).
 proposed-json = []

@@ -11,7 +11,7 @@
 //! Listener futures are boxed without a `Send` bound, matching the crate's
 //! executor-free, single-threaded async surface.
 
-// [FABLE-5] sq-1rg2q.10: sequentially awaited listeners over the observe.rs machinery.
+// [OPUS-5.5] sq-1rg2q.10: sequentially awaited listeners over the observe.rs machinery.
 
 use super::async_store::{AsyncStore, AsyncStoreBackend, AsyncStoreError};
 use super::observe::{ChangeEvent, ChangeKind, Subscribers, SubscriptionId};

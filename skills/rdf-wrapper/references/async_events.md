@@ -9,4 +9,4 @@ resolves. Presence is checked first, so a duplicate add or an absent delete
 performs no write and notifies nobody. Events reuse `proposed::observe`'s
 `ChangeEvent`, `ChangeKind` and `SubscriptionId`. The feature implies
 `proposed-async-store` and `proposed-observe`. Source: rdfjs/wrapper draft
-PR #99. <!-- [FABLE-5] sq-1rg2q.10 -->
+PR #99. <!-- [OPUS-5.5] sq-1rg2q.10 -->

@@ -1,4 +1,4 @@
-// [FABLE-5] sq-1rg2q.7: projected change events fire only at the first/last in-scope
+// [OPUS-5.5] sq-1rg2q.7: projected change events fire only at the first/last in-scope
 // copy of a triple and stay silent for graphs outside the projection.
 
 #![cfg(feature = "proposed-graph-scope-events")]

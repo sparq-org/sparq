@@ -44,7 +44,7 @@ impl fmt::Debug for GraphScope<'_> {
 ///
 /// Repeated graph names are kept once, in first-seen order. The default graph
 /// is excluded unless [`with_default_graph`](Self::with_default_graph) is called.
-// [FABLE-5] sq-1rg2q.7: shared by scoped reads and projected change events.
+// [OPUS-5.5] sq-1rg2q.7: shared by scoped reads and projected change events.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Projection {
     readable_named_graphs: Vec<Term>,

@@ -11,4 +11,4 @@ set is abandoned, not drained) and reuse the crate's `CardinalityError`;
 `values` / `contains` / `insert` / `remove` await the backend on every call.
 Mappers receive an `AsyncNode`, so term identity stays synchronous. The
 feature implies `proposed-async-store` and `proposed-cardinality`. Source:
-rdfjs/wrapper draft PR #98. <!-- [FABLE-5] sq-1rg2q.9 -->
+rdfjs/wrapper draft PR #98. <!-- [OPUS-5.5] sq-1rg2q.9 -->

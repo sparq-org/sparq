@@ -78,7 +78,7 @@ impl ChangeKind {
 }
 
 /// An ordered subscriber registry shared by every observed wrapper surface.
-// [FABLE-5] sq-1rg2q.7/.9/.10: the async and graph-scope event surfaces reuse this.
+// [OPUS-5.5] sq-1rg2q.7/.9/.10: the async and graph-scope event surfaces reuse this.
 pub(crate) struct Subscribers<F: ?Sized> {
     entries: Vec<(SubscriptionId, Box<F>)>,
     next: u64,
