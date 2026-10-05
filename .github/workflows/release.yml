@@ -454,7 +454,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # [OPUS-5.5] v0.1.4 release path: GUI installers are OPTIONAL release artefacts, so
+          # v0.1.4 release path: GUI installers are OPTIONAL release artefacts, so
           # every row is soft — a GUI bundler failure can no longer block the CLI/server
           # Release. Linux stays proven green in gui.yml; its absence is reported, not fatal.
           - { os: ubuntu-latest, label: x64-linux, soft: true }
@@ -805,7 +805,7 @@ jobs:
           done
           gui=( subject-hashes-gui-*.txt )
           if [ "${#gui[@]}" -eq 0 ]; then
-            # [OPUS-5.5] every GUI row is soft: no GUI digests means no GUI assets are
+            # every GUI row is soft: no GUI digests means no GUI assets are
             # published either (digests are uploaded before bundles), so coverage still holds.
             echo "::warning::no subject-hashes-gui-* list — this release ships no GUI installers"
           fi
@@ -984,7 +984,7 @@ jobs:
         run: |
           set -euo pipefail
           ls -1 assets > "$RUNNER_TEMP/release-asset-list.txt"
-          # [OPUS-5.5] GUI installers are optional (all gui-bundle rows are soft): a missing GUI
+          # GUI installers are optional (all gui-bundle rows are soft): a missing GUI
           # alias is a warning; every CLI archive alias stays fail-closed.
           RELEASE_OPTIONAL_ALIAS_PREFIXES="sparq-gui-" \
             bash scripts/check-release-aliases.sh "$RUNNER_TEMP/release-asset-list.txt"

@@ -127,7 +127,7 @@ class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
 class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
     """A missing `.crate` must stop provenance generation, not merely warn."""
 
-    def test_packaging_collects_failures_and_refuses_incomplete_output(self) -> None:
+    def test_packaging_strips_then_refuses_incomplete_output(self) -> None:
         workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["crates"]["steps"]
         matches = [step for step in steps if step.get("name") == "Package publishable crates"]
@@ -138,9 +138,14 @@ class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
         run = step["run"]
         self.assertIn("cargo metadata --no-deps --format-version 1", run)
         self.assertIn("select(.publish != [])", run)
-        self.assertIn("failures=()", run)
-        self.assertIn('failures+=("$pkg")', run)
-        self.assertIn('if [ "${#failures[@]}" -ne 0 ]; then', run)
+        # One `cargo package --workspace` under `set -e`: any crate failing to package
+        # stops the step before attestation.
+        self.assertIn("set -euo pipefail", run)
+        self.assertIn("python3 scripts/publish-strip.py --with-vendored", run)
+        self.assertIn("cargo package --workspace --no-verify --allow-dirty", run)
+        self.assertLess(
+            run.index("scripts/publish-strip.py"), run.index("cargo package --workspace")
+        )
         self.assertIn('if [ "$packaged" -ne "$expected" ]; then', run)
         self.assertGreaterEqual(run.count("exit 1"), 2)
 
@@ -1167,16 +1172,6 @@ class TestUnknownsRefuseRatherThanPublish(unittest.TestCase):
                 ("[workspace]\n", True),  # missing key -> strict
                 ("", True),  # missing table -> strict
                 ('[workspace]\npublish = "maybe"\n', True),  # non-boolean -> strict
-                # [OPUS-5.5] a per-package publish key overrides the workspace default.
-                (
-                    '[workspace]\npublish = false\n[[package]]\nname = "a"\npublish = true\n',
-                    True,
-                ),
-                (
-                    '[workspace]\npublish = false\n[[package]]\nname = "a"\npublish = false\n',
-                    False,
-                ),
-                ('[workspace]\npublish = false\n[[package]]\nname = "a"\n', False),
             ):
                 with self.subTest(body=body):
                     (root / "release-plz.toml").write_text(body, encoding="utf-8")
@@ -1577,11 +1572,14 @@ class TestPublishableDependencyClosure(unittest.TestCase):
         crates = interval_guard.publishable_crates(REPO_ROOT)
         expected = [crate.name for crate in interval_guard.publish_order(crates)]
         documented = re.findall(
-            r"^cargo publish -p ([A-Za-z0-9_-]+)(?: --locked)?$",
+            r"^cargo publish --allow-dirty -p ([A-Za-z0-9_-]+)$",
             (REPO_ROOT / "docs" / "release.md").read_text(encoding="utf-8"),
             flags=re.MULTILINE,
         )
-        self.assertEqual(documented, expected)
+        # The vendored parser fork is published first and outside the version group, so
+        # the guard (workspace members only) does not derive it.
+        self.assertEqual(documented[:1], ["sparq-spargebra"])
+        self.assertEqual(documented[1:], expected)
 
     @staticmethod
     def _fixture(
@@ -1902,36 +1900,18 @@ class TestDryRunIsInert(unittest.TestCase):
             self.assertTrue(any("REFUSE" in line for line in log), log)
 
 
-class TestLivePublishSetIsBootstrapGated(unittest.TestCase):
-    """A tripwire, not a policy. [OPUS-5.5] The maintainer chose (v0.1.4 release path) to
-    name the crates.io publish set in release-plz.toml with per-package keys and let CI
-    publish from v0.1.5, after a manual v0.1.4 bootstrap. That is only safe while (a) the
-    named set is exactly cargo's publishable set and (b) the release job hands release-plz
-    the registry-gated effective config. Widening either is a reviewed maintainer change."""
+class TestLivePublishFlagIsStillFalse(unittest.TestCase):
+    """A tripwire, not a policy: flipping `publish = true` is a MAINTAINER decision and
+    must be a deliberate, reviewed diff — not something that rides in on an unrelated PR.
+    When the maintainer flips it, this test is updated in the SAME commit."""
 
-    def test_publish_set_matches_cargo_publishable_set(self) -> None:
-        config = tomllib.loads((REPO_ROOT / "release-plz.toml").read_text(encoding="utf-8"))
-        self.assertIs(config["workspace"].get("publish"), False)
-        self.assertIs(config["workspace"].get("git_only"), True)
-        named = sorted(p["name"] for p in config["package"] if p.get("publish") is True)
-        cargo = sorted(c.name for c in interval_guard.publishable_crates(REPO_ROOT))
-        self.assertEqual(named, cargo)
-        for package in config["package"]:
-            self.assertIn(package.get("publish"), (True, False), package["name"])
-
-    def test_release_job_uses_registry_gated_config(self) -> None:
-        steps = _release_job_steps()
-        names = [step.get("name", "") for step in steps]
-        mode = names.index("Resolve crates.io publish mode (fail-closed)")
-        mint = names.index("Mint short-lived crates.io token (OIDC trusted publishing)")
-        release = next(i for i, s in enumerate(steps) if "release-plz/action" in s.get("uses", ""))
-        self.assertLess(mode, mint)
-        self.assertLess(mint, release)
-        self.assertNotIn("if", steps[mode])
-        self.assertNotIn("continue-on-error", steps[mode])
-        self.assertEqual(steps[mint].get("if"), "steps.publish-mode.outputs.mode == 'publish'")
-        self.assertEqual(
-            steps[release]["with"].get("config"), "${{ steps.publish-mode.outputs.config }}"
+    def test_release_plz_toml_still_has_publish_false(self) -> None:
+        self.assertFalse(
+            interval_guard.crates_io_publish_enabled(REPO_ROOT),
+            "release-plz.toml now enables crates.io publishing. If that is intended, the "
+            "maintainer checklist in the #1135 PR body must be complete (version_group "
+            "reconciled, Trusted Publishing configured) and this test updated in the "
+            "same commit.",
         )
 
 

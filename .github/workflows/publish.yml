@@ -398,22 +398,20 @@ jobs:
         run: |
           rustup default stable
           rustup show active-toolchain
-      # Package every publishable crate (publish = false crates are skipped).
-      # --no-verify avoids a full from-scratch compile of every crate on the runner; the bytes
-      # are identical to `cargo publish`'s upload (publish runs verify itself).
-      # [OPUS-5.5] ONE multi-package `cargo package` invocation, not a per-crate loop: a lone
-      # `cargo package -p sparq-substrate` must resolve `sparq-core` from crates.io and fails
-      # before (or without) the bootstrap, whereas a multi-package run resolves sibling crates
-      # through Cargo's local overlay registry. Every expected `.crate` is then required.
+      # Package the crates.io publish set exactly as `cargo publish` would upload it:
+      # scripts/publish-strip.py first removes the research-only optional feature edges
+      # (and makes the vendored `sparq-spargebra` fork a member, so the set resolves before
+      # anything exists on crates.io); then one `cargo package --workspace` packages every
+      # publishable member in dependency order against a local overlay of the others.
+      # --no-verify skips the rebuild-from-tarball (publish runs verify itself); the bytes are
+      # identical to `cargo publish`'s upload. --allow-dirty because the strip edits manifests.
       - name: Package publishable crates
         run: |
           set -euo pipefail
-          mkdir -p crate-pkgs
-          packaged=0
-          failures=()
+          python3 -m pip install --quiet --require-hashes -r .github/requirements/publish-strip.txt
+          python3 scripts/publish-strip.py --with-vendored
           # Ask Cargo which workspace packages are publishable. In metadata,
-          # `publish = false` is represented as an empty registry list; parsing TOML
-          # with grep would drift on whitespace or alternate valid syntax. [GPT-5.6]
+          # `publish = false` is represented as an empty registry list. [GPT-5.6]
           mapfile -t packages < <(
             cargo metadata --no-deps --format-version 1 |
               jq -r '.packages[] | select(.publish != []) | .name' |
@@ -424,29 +422,13 @@ jobs:
             echo "::error::Cargo metadata reported no publishable crates"
             exit 1
           fi
-          args=()
-          for pkg in "${packages[@]}"; do args+=(-p "$pkg"); done
-          if ! cargo package "${args[@]}" --no-verify --locked 2>&1; then
-            echo "::error::multi-package cargo package failed"
-            exit 1
-          fi
-          version=$(cargo metadata --no-deps --format-version 1 |
-            jq -r '.packages[] | select(.name == "sparq-core") | .version')
+          cargo package --workspace --no-verify --allow-dirty
+          mkdir -p crate-pkgs
           for pkg in "${packages[@]}"; do
-            crate="target/package/${pkg}-${version}.crate"
-            if [ -f "$crate" ]; then
-              cp "$crate" crate-pkgs/
-              packaged=$((packaged + 1))
-            else
-              echo "::error::cargo package produced no $crate"
-              failures+=("$pkg")
-            fi
+            find target/package -maxdepth 1 -name "${pkg}-[0-9]*.crate" -exec cp {} crate-pkgs/ \;
           done
-          echo "Packaged crates:"; ls -l crate-pkgs/ || true
-          if [ "${#failures[@]}" -ne 0 ]; then
-            echo "::error::${#failures[@]} of ${expected} publishable crates failed to package: ${failures[*]}"
-            exit 1
-          fi
+          echo "Packaged crates:"; ls -l crate-pkgs/
+          packaged=$(find crate-pkgs -name '*.crate' | wc -l)
           if [ "$packaged" -ne "$expected" ]; then
             echo "::error::packaged count ${packaged} does not match expected count ${expected}"
             exit 1

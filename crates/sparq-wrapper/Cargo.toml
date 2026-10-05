@@ -1,5 +1,9 @@
 [package]
 name = "sparq-wrapper"
+# Not in the crates.io publish set (release-plz.toml). Published crates reach this crate only
+# through optional features, which scripts/publish-strip.py removes from their packaged
+# manifests; see docs/release.md "crates.io publish set".
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,11 +14,6 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# [OPUS-5.5] v0.1.4 release path: outside the crates.io core publish set (it is not a
-# normal, optional, or versioned-dev dependency of any core crate). Kept workspace-only so
-# the registry closure stays the 28 crates docs/release.md §4 bootstraps; flip back to
-# publish in a reviewed change that also adds it to release-plz.toml's publish set.
-publish = false
 
 [package.metadata.docs.rs]
 all-features = true

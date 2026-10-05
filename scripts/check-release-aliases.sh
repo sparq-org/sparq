@@ -103,7 +103,7 @@ cli_count=$(printf '%s' "$cli_aliases" | grep -c . || true)
 echo "site-referenced alias contract ($((gui_count + cli_count)) aliases) from $CLIENT:"
 printf '%s\n%s\n' "$gui_aliases" "$cli_aliases" | sed 's/^/  - /'
 
-# [OPUS-5.5] RELEASE_OPTIONAL_ALIAS_PREFIXES (space-separated, e.g. "sparq-gui-") names alias
+# RELEASE_OPTIONAL_ALIAS_PREFIXES (space-separated, e.g. "sparq-gui-") names alias
 # families whose source lane is optional (release.yml's soft GUI rows). A missing optional
 # alias warns (the site button 404s for this release) instead of blocking the whole release.
 optional_alias() {

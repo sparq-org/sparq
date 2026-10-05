@@ -3,6 +3,10 @@
 # VoID + mined characteristic-set stats) — pure, deterministic, NO network I/O.
 [package]
 name = "sparq-fedplan"
+# Not in the crates.io publish set (release-plz.toml). Published crates reach this crate only
+# through optional features, which scripts/publish-strip.py removes from their packaged
+# manifests; see docs/release.md "crates.io publish set".
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,15 +17,6 @@ keywords.workspace = true
 categories.workspace = true
 description = "Cost-based federated source selection (HiBISCuS prune + CostFed cardinality) and bind-vs-hash join planning over served source descriptors — opt-in, no network I/O"
 readme = "README.md"
-# [SONNET-4.6] sq-my8wd.3: Graduate from publish=false to publishable. The
-# select_sources + plan_bgp planner is feature-complete (HiBISCuS + CostFed +
-# StreamJoin + AdaptiveExecutor). Flip, add the criterion micro-bench and the
-# docs.rs all-features metadata (mirrors sq-qonbz.4 / sparq-substrate).
-# [OPUS-5.5] v0.1.4 release path: outside the crates.io core publish set (it is not a
-# normal, optional, or versioned-dev dependency of any core crate). Kept workspace-only so
-# the registry closure stays the 28 crates docs/release.md §4 bootstraps; flip back to
-# publish in a reviewed change that also adds it to release-plz.toml's publish set.
-publish = false
 
 # OPT-IN, lean core. NOTHING in the workspace's default build depends on this crate:
 # it is a standalone member (like `sparq-canon` / `sparq-prov`), so `sparq-core`'s

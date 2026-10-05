@@ -347,7 +347,7 @@ jobs:
             echo "ERROR: no archive-hashes-* artifact was produced by the build matrix" >&2
             exit 1
           fi
-          # [OPUS-5.5] soft tiers may be absent; the site-linked BLOCKING tiers may not.
+          # soft tiers may be absent; the site-linked BLOCKING tiers may not.
           # Suffix + extension pairs: the Linux/macOS archives are .tar.gz, Windows is .zip,
           # so `-x64-baseline.tar.gz` cannot be satisfied by `-win-x64-baseline.zip`.
           for suffix in -arm64-darwin.tar.gz -x64-darwin.tar.gz -x64-baseline.tar.gz -win-x64-baseline.zip; do
