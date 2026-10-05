@@ -451,20 +451,10 @@ fn key_of(graph: &Graph, id: Id) -> JKey {
                     _ => JKey::Term(id),
                 };
             }
-            // A NUMERIC datatype reaching here missed the `numeric_value` cache. As of
-            // sq-9781x + sq-6b1lj the cache is aligned with the DATATYPE-AWARE
-            // `Num::of_literal` acceptance set (the same set `values_equal` uses): it trims
-            // (XSD `collapse` facet) and gates on per-datatype well-formedness, so a
-            // whitespace-padded `" 1"^^xsd:integer` HITS the cache above (→ `JKey::Num`), the
-            // `inf`/`nan` Rust-only spellings MISS, AND a lexical ill-formed FOR its datatype
-            // (`"1.5"^^xsd:integer`, `"1E2"^^xsd:decimal`, an i128-overflow `xsd:decimal`)
-            // now MISSES too — reaching THIS branch. Such a lexical is a SPARQL type error
-            // under `values_equal`/`of_literal`, so `Hard` (defer to the exact evaluator,
-            // which pairs it against nothing on `=`) is the correct backstop: the fast
-            // `JKey::Num` route and `values_equal` now AGREE for every numeric lexical (the
-            // pre-fix `JKey::Num`-vs-`values_equal` residual is closed). A numeric datatype
-            // reaching `Hard` is exactly the ill-formed/`NaN`-sentinel case the exact
-            // evaluator also type-errors — no false negative.
+            // [GPT-6] Numeric cache misses include raw invalid lexicals, NaN,
+            // and representation limits. Padding is not normalized for typed RDF.
+            // Defer these values to the exact evaluator: it can retain identical
+            // terms without incorrectly pairing padded and valid numeric lexicals.
             if is_numeric_datatype(datatype) {
                 return JKey::Hard;
             }
@@ -531,7 +521,7 @@ fn value_join(
     let scratch = Bindings::unsorted(vec![lv.clone(), rv.clone()], Vec::new());
     let (ea, eb) = (Expression::Variable(lv.clone()), Expression::Variable(rv.clone()));
     let pair_true = |ida: Id, idb: Id| -> Result<bool, String> {
-        Ok(effective_boolean(&equal_expr(graph, local, &scratch, &[ida, idb], &ea, &eb)?))
+        Ok(effective_boolean(&equal_expr(graph, local, &scratch, &[ida, idb], &ea, &eb)?, local.ebv_semantics))
     };
     for (li, lk) in lkeys.iter().enumerate() {
         if !matches!(lk, JKey::Hard) {
@@ -717,12 +707,10 @@ mod tests {
         assert!(on[0].iter().any(|c| c.contains("1.000000000000000010")), "bag: {:?}", on);
     }
 
-    // ---- a numeric lexical the CACHE rejects but the evaluator's fallback accepts:
-    // `Num::of_literal` TRIMS, so " 1"^^xsd:integer is a cache miss yet value-equal
-    // to "1"^^xsd:integer under a different id. Keying it by term identity would
-    // silently DROP the pair; it must take the Hard (exact-evaluator) class. ----
+    // [GPT-6] Raw padded typed lexicals miss both the cache and numeric parser.
+    // The Hard fallback must not invent equality to a distinct plain literal.
     #[test]
-    fn whitespace_padded_numeric_pairs_by_value() {
+    fn whitespace_padded_numeric_does_not_pair_with_plain_value() {
         let g = load(concat!(
             "<http://ex/a> <http://ex/p> \" 1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
             "<http://ex/b> <http://ex/q> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
@@ -732,7 +720,7 @@ mod tests {
             "{PFX} SELECT ?x ?y WHERE {{ <http://ex/a> ex:p ?x . <http://ex/b> ex:q ?y . FILTER(?x = ?y) }}"
         );
         let on = assert_on_off_equal(&g, &q);
-        assert_eq!(on.len(), 1, "bag: {:?}", on);
+        assert!(on.is_empty(), "bag: {:?}", on);
     }
 
     // ---- plain literal and explicit ^^xsd:string are the same value ----
@@ -955,13 +943,11 @@ mod tests {
         assert_eq!(key_of(&g, id_of("\"1\"^^<http://www.w3.org/2001/XMLSchema#boolean>")), JKey::Bool(true));
         // Value-comparable temporals are the Hard class.
         assert_eq!(key_of(&g, id_of("2020-01-01T00:00:00Z")), JKey::Hard);
-        // [FABLE-5] (sq-9781x) A whitespace-padded numeric lexical now HITS the aligned
-        // numeric cache (trim-then-parse via the shared `parse_xsd_f64`) and keys as
-        // `JKey::Num(7.0)` — the SAME key the inline id `7` gets — instead of the former
-        // `Hard` (the cache/evaluator acceptance sets are now aligned, so it no longer needs
-        // the exact-evaluator backstop for the whitespace case).
-        assert_eq!(key_of(&g, id_of("\" 7\"")), JKey::Num(7.0f64.to_bits()));
-        assert_eq!(key_of(&g, id_of("\" 7\"")), key_of(&g, dict::INLINE_BASE + 7));
+        // [GPT-6] Raw padding is invalid. The exact fallback differs from the
+        // ordinary numeric key; term identity remains available through Hard.
+        assert_eq!(key_of(&g, id_of("\" 7\"")), JKey::Hard);
+        assert_eq!(key_of(&g, dict::INLINE_BASE + 7), JKey::Num(7.0f64.to_bits()));
+        assert_ne!(key_of(&g, id_of("\" 7\"")), key_of(&g, dict::INLINE_BASE + 7));
         // Unknown datatype: identity key. IRIs: identity key.
         let uid = id_of("unknownDt");
         assert_eq!(key_of(&g, uid), JKey::Term(uid));

@@ -105,7 +105,7 @@ every update is WAL-fsync'd **before the `204` ack** (restart replays the WAL, n
 - **How-to** — [`skills/http-server/SKILL.md`](../../skills/http-server/SKILL.md) (every endpoint,
   status code, the full auth × bind matrix, each hardening cap's honest semantics, CORS, audit
   sinks, TPF/brTPF, SHACL, federation discovery, the container image) and
-  [`SUBSCRIPTIONS.md`](SUBSCRIPTIONS.md) (the subscription protocol).
+  [`SUBSCRIPTIONS.md`](SUBSCRIPTIONS.md) (the subscription protocol). [GPT-6] Query VERSION metadata survives protocol dataset rewrites. UPDATE remains REC 2013 only, including with a USING override; service-description version labels do not assert full 1.2 conformance. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **Wire contract** — [`docs/http-wire-contract.md`](../../docs/http-wire-contract.md): the versioned v1
   HTTP surface + wire-semver policy, pinned by `tests/wire_contract.rs` (ratification pending, gh-1416). **API reference** — [docs.rs/sparq-server](https://docs.rs/sparq-server).
 - **Design** — [`research/concurrent-serving.md`](../../research/concurrent-serving.md)

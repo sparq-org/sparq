@@ -1,5 +1,21 @@
 [workspace]
 members = [
+    # [GPT-6] Wider private integers and complete status-tree capacities.
+    "result_v2_k1_n16_p3_r4_f2_i64_d10",
+    "result_v2_k1_n16_p3_r4_f0_i0_d17",
+    "result_v2_k1_n16_p3_r4_f2_i8_d17",
+    "result_v2_k1_n16_p3_r4_f2_i64_d17",
+    "result_v2_k1_n16_p3_r4_f0_i0_d20",
+    "result_v2_k1_n16_p3_r4_f2_i8_d20",
+    "result_v2_k1_n16_p3_r4_f2_i64_d20",
+    "result_v2_k2_n16_p3_r4_f2_i64_d10",
+    "result_v2_k2_n16_p3_r4_f0_i0_d17",
+    "result_v2_k2_n16_p3_r4_f2_i8_d17",
+    "result_v2_k2_n16_p3_r4_f2_i64_d17",
+    "result_v2_k2_n16_p3_r4_f0_i0_d20",
+    "result_v2_k2_n16_p3_r4_f2_i8_d20",
+    "result_v2_k2_n16_p3_r4_f2_i64_d20",
+
     "compose_core",
     # [GPT-6] Successful-result proofs, separate from complete-scan v1.
     "result_v1_k1_n16_p3_r4_f0",
@@ -93,4 +109,16 @@ members = [
     "path_reach_d4_k1_n16",
     "path_reach_d8_k1_n16",
     "path_reach_d4_k2_n16",
+    "result_v3_k1_n16_p3_r4_f0_s0_d10",
+    "result_v3_k1_n16_p3_r4_f0_s0_d17",
+    "result_v3_k1_n16_p3_r4_f0_s0_d20",
+    "result_v3_k1_n16_p3_r4_f2_s64_d10",
+    "result_v3_k1_n16_p3_r4_f2_s64_d17",
+    "result_v3_k1_n16_p3_r4_f2_s64_d20",
+    "result_v3_k2_n16_p3_r4_f0_s0_d10",
+    "result_v3_k2_n16_p3_r4_f0_s0_d17",
+    "result_v3_k2_n16_p3_r4_f0_s0_d20",
+    "result_v3_k2_n16_p3_r4_f2_s64_d10",
+    "result_v3_k2_n16_p3_r4_f2_s64_d17",
+    "result_v3_k2_n16_p3_r4_f2_s64_d20",
 ]

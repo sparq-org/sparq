@@ -21,10 +21,10 @@
 //! `exact_cmp` f64-collapse recheck exact for integers beyond 2^53 / high-precision
 //! decimals / the mixed exact-vs-double tie — and within the other kinds strict
 //! typed/temporal (`xsd:dateTime`/`xsd:date` by TIMELINE via the shared
-//! `sparq_core::temporal::Timeline`, same-tag language strings and same-other-XSD
+//! `sparq_core::temporal::ExactTimeline`, same-tag language strings and same-other-XSD
 //! lexically), then the lexical fallback); triple terms component-wise
 //! recursively. Every observation hook mirrors the engine's `Value` impl over the SAME
-//! shared machinery (`Timeline`, the substrate `Num`/`Dec` tower, `parse_xsd_f64`), and the
+//! shared machinery (`ExactTimeline`, the substrate `Num`/`Dec` tower, `parse_xsd_f64`), and the
 //! full-multiset parity is pinned against a REAL engine `ORDER BY` over the same
 //! materialised closure by `tests/compare_parity.rs`; the `exact_cmp` collapse-recheck
 //! for distinct integers beyond 2^53 is pinned by the unit test
@@ -55,9 +55,11 @@
 use std::cmp::Ordering;
 
 use sparq_core::dict::{is_inline, split_lang_dir, Dict, Id, TermParts, INLINE_BASE};
-use sparq_core::temporal::Timeline;
+use sparq_core::temporal::{ExactTemporal, ExactTimeline};
 use sparq_substrate::compare::{compare_terms, CompareTerm, LiteralKind, TermClass};
-use sparq_substrate::numeric::{parse_xsd_f32, parse_xsd_f64, Dec, Num};
+use sparq_substrate::numeric::{parse_xsd_f64, Num};
+#[cfg(test)]
+use sparq_substrate::numeric::Dec;
 
 /// The XSD namespace prefix — the engine's `lit_kind` "other XSD datatype" family test.
 const XSD_PREFIX: &str = "http://www.w3.org/2001/XMLSchema#";
@@ -139,9 +141,9 @@ impl<'a> IdTerm<'a> {
                 } else if datatype == XSD_BOOLEAN {
                     Kind::Bool(parse_bool(value))
                 } else if datatype == XSD_DATE_TIME || datatype == XSD_DATE_TIME_STAMP {
-                    Kind::DateTime(Timeline::parse_datetime(value))
+                    Kind::DateTime(ExactTemporal::of_lit(value, datatype).map(|value| value.timeline))
                 } else if datatype == XSD_DATE {
-                    Kind::Date(Timeline::parse_date(value))
+                    Kind::Date(ExactTimeline::parse_date(value))
                 } else if datatype.starts_with(XSD_PREFIX) {
                     Kind::OtherXsd(datatype, value)
                 } else {
@@ -164,9 +166,9 @@ enum Kind<'a> {
     /// `xsd:boolean`; `None` = ill-formed lexical.
     Bool(Option<bool>),
     /// `xsd:dateTime` / `xsd:dateTimeStamp` on the timeline; `None` = ill-formed.
-    DateTime(Option<Timeline>),
+    DateTime(Option<ExactTimeline<'a>>),
     /// `xsd:date` on the timeline (midnight); `None` = ill-formed.
-    Date(Option<Timeline>),
+    Date(Option<ExactTimeline<'a>>),
     /// Another XSD datatype (time, gYear, duration, …): (datatype IRI, lexical).
     OtherXsd(&'a str, &'a str),
     /// Language-tagged: (lowercased BCP47 tag, lexical value).
@@ -196,33 +198,10 @@ fn parse_bool(v: &str) -> Option<bool> {
     }
 }
 
-/// `Num::of_literal` over borrowed `(value, datatype)` parts — the identical dispatch and
-/// parsers (substrate `Dec::parse` / `Dec::parse_lexical` / `parse_xsd_f32` /
-/// `parse_xsd_f64`) without materialising an `oxrdf::Literal`. Anti-drift is pinned by a
-/// unit test comparing this against `Num::of_literal` itself over a lexical×datatype matrix.
+/// [GPT-6] Borrowed literal parsing shares the substrate implementation and validity rules.
 #[inline]
 fn num_of_parts(value: &str, datatype: &str) -> Option<Num> {
-    let v = value.trim();
-    if sparq_core::is_integer_datatype(datatype) {
-        if let Ok(i) = v.parse::<i64>() {
-            return Some(Num::Int(i));
-        }
-        // Integer beyond i64: exact i128 mantissa if it fits (scale 0 = integer lexical).
-        return match Dec::parse(v) {
-            Some(d) if d.scale == 0 => Some(Num::Dec(d)),
-            _ => None, // "1.5"^^xsd:integer is ill-formed; overflow is not representable
-        };
-    }
-    if datatype == XSD_DECIMAL {
-        return Dec::parse_lexical(v).map(Num::Dec);
-    }
-    if datatype == XSD_FLOAT {
-        return parse_xsd_f32(v).map(Num::Float);
-    }
-    if datatype == XSD_DOUBLE {
-        return parse_xsd_f64(v).map(Num::Double);
-    }
-    None
+    Num::of_parts(value, datatype)
 }
 
 /// The numeric relational comparison for `strict_cmp` — delegates to
@@ -277,17 +256,11 @@ impl CompareTerm for IdTerm<'_> {
             return None;
         }
         match self.dict.term_parts(self.id) {
-            // [FABLE-5] sq-74oy4 / sq-6b1lj: the engine's lenient `as_num` arm, now
-            // DATATYPE-AWARE and TRIMMED to match `Num::of_literal`: accept iff the lexical is
-            // well-formed FOR its datatype (`num_of_parts` — the borrowed-parts twin of
-            // `of_literal`), imaged by `parse_xsd_f64` on the trimmed value. A padded
-            // `" 1"^^xsd:integer` is value-1; a per-datatype-ill-formed `"1.5"^^xsd:integer`
-            // is `None` (type error), mirroring the engine seam and the graph cache. The XSD
-            // f64 spellings (INF/-INF/NaN, not inf/infinity) are enforced by `parse_xsd_f64`.
+            // [GPT-6] Use the same raw lexical/facet gate as engine comparisons.
             TermParts::Lit { value, datatype, lang: None }
                 if is_numeric_dt(datatype) && num_of_parts(value, datatype).is_some() =>
             {
-                parse_xsd_f64(value.trim())
+                parse_xsd_f64(value)
             }
             _ => None,
         }
@@ -340,12 +313,12 @@ impl CompareTerm for IdTerm<'_> {
             (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
             // [SONNET-4.6] sq-2k5py: the TOTAL timeline order, mirroring the engine's
             // `CompareTerm::strict_cmp` (which extends `value_compare_strict` the same way).
-            // `Timeline::cmp_tl`'s indeterminate mixed-timezone window would drop the pair to
+            // `ExactTimeline::compare`'s indeterminate mixed-timezone window would drop the pair to
             // `compare_terms`' lexical fallback INSIDE the DateTime/Date kind, which is
             // intransitive; the reasoner has no relational operators, so the total order is
             // the only consumer here.
-            (DateTime(Some(a)), DateTime(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
-            (Date(Some(a)), Date(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
+            (DateTime(Some(a)), DateTime(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
+            (Date(Some(a)), Date(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
             // Same language tag (case-insensitive): compare values (the suites' lenient
             // extension the engine applies).
             (Lang(t1, v1), Lang(t2, v2)) if t1 == t2 => Some(v1.cmp(v2)),
@@ -562,6 +535,21 @@ mod tests {
         assert_eq!(compare_ids(&d, u1, u2), Ordering::Less);
     }
 
+    #[test]
+    fn temporal_fraction_order_preserves_exact_instants() {
+        let mut dictionary = Dict::new();
+        for (left, right) in [
+            ("2024-01-01T00:00:00Z", "2024-01-01T00:00:00.000000001Z"),
+            ("2024-01-01T00:00:59.999999999999999999Z", "2024-01-01T00:01:00Z"),
+            ("1000000000-01-01T00:00:00Z", "1000000000-01-01T00:00:01Z"),
+        ] {
+            let left = lit(&mut dictionary, left, XSD_DATE_TIME);
+            let right = lit(&mut dictionary, right, XSD_DATE_TIME);
+            assert_eq!(compare_ids(&dictionary, left, right), Ordering::Less);
+            assert_eq!(compare_ids(&dictionary, right, left), Ordering::Greater);
+        }
+    }
+
     /// Cross-class precedence over real ids: blank < IRI < literal < triple term.
     #[test]
     fn cross_class_precedence_over_ids() {
@@ -635,7 +623,7 @@ mod tests {
         let cases: &[(&str, &str)] = &[
             ("9", "http://www.w3.org/2001/XMLSchema#integer"),
             ("-3", "http://www.w3.org/2001/XMLSchema#integer"),
-            (" 12 ", "http://www.w3.org/2001/XMLSchema#integer"), // trimmed
+            (" 12 ", "http://www.w3.org/2001/XMLSchema#integer"), // invalid raw whitespace
             ("99999999999999999999999999", "http://www.w3.org/2001/XMLSchema#integer"), // beyond i64
             ("1.5", "http://www.w3.org/2001/XMLSchema#integer"),  // ill-formed integer
             ("9.50", XSD_DECIMAL), // scale-preserving
@@ -646,6 +634,14 @@ mod tests {
             ("2.5", XSD_FLOAT),
             ("hello", XSD_STRING), // non-numeric datatype
             ("7", "http://www.w3.org/2001/XMLSchema#byte"), // derived integer type
+            // [GPT-6] Facets and raw lexical rejection must match the shared parser.
+            ("1200", "http://www.w3.org/2001/XMLSchema#byte"),
+            ("5.0", "http://www.w3.org/2001/XMLSchema#integer"),
+            ("-1", "http://www.w3.org/2001/XMLSchema#unsignedLong"),
+            ("\u{a0}5", "http://www.w3.org/2001/XMLSchema#integer"),
+            ("\u{a0}5", XSD_DECIMAL),
+            ("\u{a0}5", XSD_DOUBLE),
+            ("é", "http://www.w3.org/2001/XMLSchema#integer"),
         ];
         for (v, dt) in cases {
             let l = Literal::new_typed_literal(*v, NamedNode::new_unchecked(*dt));
@@ -656,6 +652,16 @@ mod tests {
                 v,
                 dt
             );
+        }
+    }
+
+    // [GPT-6] Pin rejection independently of the cross-layer parity oracle.
+    #[test]
+    fn raw_numeric_whitespace_is_not_a_reasoner_number() {
+        for dt in ["http://www.w3.org/2001/XMLSchema#integer", XSD_DECIMAL, XSD_FLOAT, XSD_DOUBLE] {
+            for lexical in [" 1 ", "\t1\r\n", "\u{a0}1"] {
+                assert!(num_of_parts(lexical, dt).is_none());
+            }
         }
     }
 

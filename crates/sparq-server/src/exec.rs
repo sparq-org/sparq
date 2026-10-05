@@ -130,8 +130,7 @@ pub fn prepare_with_dataset(
     sparql: &str,
     over: &DatasetOverride,
 ) -> Result<Prepared, PrepareError> {
-    let mut parsed = SparqlParser::new()
-        .parse_query(sparql)
+    let (mut parsed, version) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql)
         .map_err(|e| PrepareError::Malformed(e.to_string()))?;
     let form = match parsed {
         Query::Select { .. } => QueryForm::Select,
@@ -145,13 +144,15 @@ pub fn prepare_with_dataset(
         set_query_dataset(&mut parsed, over.to_query_dataset()?);
         // Re-serialise the rewritten algebra: spargebra's `Display` re-emits the FROM / FROM
         // NAMED clauses, and the engine re-parses this string (the CONSTRUCT / DESCRIBE path).
-        parsed.to_string()
+        let announcements = version.iter().map(|label| format!("VERSION \"{label}\"\n")).collect::<String>();
+        format!("{announcements}{parsed}")
     };
     // [OPUS-4.8] (sq-7d3dj.34.1) Carry the algebra we JUST parsed (the original query, or — under
     // a dataset override — the rewritten one, which `runnable` was serialised FROM, so the two
     // denote the same query) so the SELECT / ASK floor path executes it prepared, without the
     // engine re-parsing `runnable`.
-    let query = sparq_engine::PreparedQuery::from(parsed);
+    let query = sparq_engine::PreparedQuery::from_query_with_versions(parsed, version)
+        .map_err(PrepareError::Malformed)?;
     Ok(Prepared {
         form,
         runnable,
@@ -239,8 +240,7 @@ pub fn apply_update_dataset(
     if over.is_empty() {
         return Ok(update.to_string());
     }
-    let mut parsed: Update = SparqlParser::new()
-        .parse_update(update)
+    let mut parsed: Update = sparq_engine::parse_update_rec2013(update)
         .map_err(|e| UpdateDatasetError::Malformed(e.to_string()))?;
     // §2.2: it is an error to supply the protocol params when ANY operation already names its WHERE
     // dataset in-string (USING / USING NAMED / WITH — all encoded as `using: Some(..)`).
@@ -432,6 +432,29 @@ mod tests {
         );
     }
 
+    // [GPT-6] Protocol dataset rewriting must retain query VERSION metadata.
+    #[test]
+    fn version_survives_protocol_dataset_rewrite_and_conflicts_reject() {
+        let over = DatasetOverride { default: vec!["http://ex/absent".into()], named: vec![] };
+        for override_dataset in [&DatasetOverride::default(), &over] {
+            for label in ["1.1", "1.2", "1.2-basic"] {
+                let p = prepare_with_dataset(&format!("VERSION '{label}' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {{}}"), override_dataset).unwrap();
+                assert_eq!(p.query.versions(), [label]);
+                let from_text = sparq_engine::PreparedQuery::parse(&p.runnable).unwrap();
+                assert_eq!(from_text.versions(), [label]);
+                let pin = sparq_engine::QueryBudget { ebv_semantics: Some(sparq_engine::EbvSemantics::Rec2013), ..Default::default() };
+                let pinned = sparq_engine::query_prepared_with_budget(&g(), &p.query, &pin);
+                assert_eq!(pinned.is_ok(), label == "1.1");
+                let rows = sparq_engine::query_prepared(&g(), &p.query).unwrap().rows;
+                assert_eq!(rows[0][0].is_none(), label != "1.1");
+            }
+            let p = prepare_with_dataset("VERSION '1.2' VERSION '1.2-basic' VERSION '1.2' ASK {}", override_dataset).unwrap();
+            assert_eq!(p.query.versions(), ["1.2", "1.2-basic", "1.2"]);
+            assert_eq!(sparq_engine::PreparedQuery::parse(&p.runnable).unwrap().versions(), p.query.versions());
+        }
+        assert!(prepare("VERSION 'unsupported' ASK {}").is_err());
+    }
+
     // ---------------------------------------------------------------------------
     // [OPUS-4.8] sq-z33x — SPARQL 1.1 Protocol §2.2 UPDATE dataset override
     // ---------------------------------------------------------------------------
@@ -443,6 +466,21 @@ mod tests {
             apply_update_dataset(u, &UsingOverride::default()).unwrap(),
             u
         );
+    }
+
+    #[test]
+    fn using_override_cannot_erase_unsupported_update_version() {
+        // [GPT-6] Protocol dataset rewriting must reject before serialization
+        // could discard a VERSION announcement. Empty overrides retain text
+        // for the engine's same REC-only validation.
+        let over = UsingOverride { default: vec!["urn:g".into()], named: vec![] };
+        for label in ["1.2", "1.2-basic", "unknown"] {
+            let text = format!("VERSION '{label}' INSERT {{?s <urn:q> ?o}} WHERE {{?s <urn:p> ?o}}");
+            assert!(matches!(apply_update_dataset(&text, &over), Err(UpdateDatasetError::Malformed(_))));
+            let retained = apply_update_dataset(&text, &UsingOverride::default()).unwrap();
+            assert!(sparq_engine::parse_update_rec2013(&retained).is_err());
+        }
+        assert!(apply_update_dataset("VERSION '1.1' INSERT {?s <urn:q> ?o} WHERE {?s <urn:p> ?o}", &over).is_ok());
     }
 
     #[test]

@@ -50,6 +50,9 @@
 
 use std::collections::BTreeSet;
 
+// [GPT-6] Structured replay reuses this generator and these independent comparators.
+pub(crate) mod replay;
+
 use oxigraph::store::Store;
 // The ENGINE-INDEPENDENT comparators (bead sq-qcnn.4). See the VALUE-LEVEL CROSS-ORACLE
 // COMPARISON section below for why every value decision has to be made here rather than by

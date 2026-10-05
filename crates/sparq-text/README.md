@@ -107,7 +107,7 @@ let r = query_text(&graph, r#"
 ## 📚 Learn more
 
 - **How-to** — [`skills/full-text-search/SKILL.md`](../../skills/full-text-search/SKILL.md)
-  (the full predicate table, tokenizer/scoring semantics, and the durability contract).
+  (the full predicate table, tokenizer/scoring semantics, and the durability contract). [GPT-6] Text rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — [docs.rs/sparq-text](https://docs.rs/sparq-text).
 - **Benchmark** — `cargo run --release -p sparq-text --example bench_text` (no figures
   baked in here; query cost is dominated by hits scored — a short prefix over the

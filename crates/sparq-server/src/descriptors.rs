@@ -71,26 +71,21 @@ const SD_SPARQL_UPDATE: &str = "http://www.w3.org/ns/sparql-service-description#
 /// namespace (`http://www.w3.org/ns/sparql#`), advertised via `sd:supportedVersion`. These are
 /// the version IRIs the SPARQL 1.2 SD (ED) defines: `version-1.0`, `version-1.1`,
 /// `version-1.2-basic` (SPARQL 1.2 Query with RDF 1.2 BASIC conformance) and `version-1.2` (full
-/// RDF 1.2 conformance). sparq advertises exactly the versions whose W3C conformance suite this
-/// build genuinely passes — see [`Capabilities::sparql_versions`] for the honesty gate.
+/// RDF 1.2 conformance). See [`Capabilities::sparql_versions`] for the emitted labels.
 const SPARQL_VERSION_1_0: &str = "http://www.w3.org/ns/sparql#version-1.0";
 /// [OPUS-4.8] sq-2msb: `sparql:version-1.1`.
 const SPARQL_VERSION_1_1: &str = "http://www.w3.org/ns/sparql#version-1.1";
-/// [OPUS-4.8] sq-2msb: `sparql:version-1.2` — FULL SPARQL 1.2 / RDF 1.2 conformance.
+/// [GPT-6] Existing `sparql:version-1.2` service label; see the scoped contract below.
 const SPARQL_VERSION_1_2: &str = "http://www.w3.org/ns/sparql#version-1.2";
 
-/// [OPUS-4.8] sq-2msb (gh-917): the SPARQL language VERSIONS this build conformance-verifies, in
-/// ascending order — the single documented source of truth for the `sd:supportedVersion`
-/// posture, so the honesty gate lives in ONE place.
+/// Existing service-description version labels, in ascending order.
 ///
-/// HONESTY GATE: this advertises `version-1.0`, `version-1.1` AND the FULL `version-1.2` (not the
-/// `version-1.2-basic` profile) because the engine PASSES the complete official W3C suites for
-/// all three — SPARQL 1.0/1.1 query+update and the SPARQL 1.2 evaluation + syntax groups (triple
-/// terms, `dir`-tagged literals, codepoint escapes, the version functions) — at 100% in this
-/// repo's tracked `conformance-report.md`. SPARQL 1.2 evaluation is compiled into the base engine
-/// (no `sparql12`/`rdf12` cargo feature to key off), so the gate IS this conformance state, not a
-/// `cfg!`. If any 1.2 group ever regressed to a partial pass, the honest edit is to drop
-/// `version-1.2` to `version-1.2-basic` (or remove it) HERE — never to keep over-promising.
+/// [GPT-6] The legacy public constant name and emitted IRIs are retained for
+/// compatibility, not a claim of complete SPARQL 1.2 conformance. Unannounced
+/// queries retain REC 2013 expression semantics; `VERSION "1.2"` selects only
+/// the implemented, pinned 2026-09-12 WD EBV behavior. UPDATE remains REC 2013
+/// only and refuses 1.2 announcements. Suite totals and documented divergences
+/// are evidence for their tested scope, not blanket language-version support.
 pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] =
     &[SPARQL_VERSION_1_0, SPARQL_VERSION_1_1, SPARQL_VERSION_1_2];
 
@@ -921,15 +916,15 @@ mod tests {
                 "must advertise sd:supportedVersion <{ver}>: {b}"
             );
         }
-        // Full SPARQL 1.2 (not the -basic profile) is advertised — the engine passes the full
-        // sparql12 suite (see CONFORMANCE_VERIFIED_VERSIONS). The -basic IRI must NOT appear.
+        // [GPT-6] Preserve the existing label serialization, independently of
+        // the explicitly scoped execution contract above.
         assert!(
             b.contains("<http://www.w3.org/ns/sparql#version-1.2>"),
-            "full version-1.2 must be advertised: {b}"
+            "existing version-1.2 label must be serialized: {b}"
         );
         assert!(
             !b.contains("version-1.2-basic"),
-            "must advertise full version-1.2, NOT the -basic profile: {b}"
+            "existing label set does not include version-1.2-basic: {b}"
         );
         for r in oxttl::NTriplesParser::new().for_slice(b.as_bytes()) {
             r.expect("SD with sd:supportedVersion must be valid N-Triples");

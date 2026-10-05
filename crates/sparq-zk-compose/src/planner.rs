@@ -27,11 +27,14 @@ use sparq_zk::verify::{fragment_filters, FilterCmp};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod optimize;
+/// Separately admitted canonical signed-integer disclosure planning.
+pub mod signed;
 #[doc(inline)]
 pub use optimize::{
     optimize_disclosure, optimize_disclosure_admitted, OptimizationCompletion, OptimizationLimits,
     OptimizationReport, OptimizationStats, PlanObjective,
 };
+use signed::NumericProfile;
 
 /// Maximum query text size before invoking the shared SPARQL parser.
 pub const MAX_DISCLOSURE_QUERY_BYTES: usize = 8192;
@@ -106,6 +109,11 @@ impl DisclosureQuery {
     /// expression projections, blank-node syntax, unsupported FILTERs, and resource
     /// limits. Raw punctuation in public literals and IRIs counts toward the cap.
     pub fn parse(sparql: &str) -> Result<Self, PlanError> {
+        Self::parse_numeric(sparql, NumericProfile::Unsigned)
+    }
+
+    // [GPT-6] Signed bounds use a private typed wrapper; unsigned admission is unchanged.
+    fn parse_numeric(sparql: &str, numeric: NumericProfile) -> Result<Self, PlanError> {
         if sparql.len() > MAX_DISCLOSURE_QUERY_BYTES {
             return Err(PlanError::LimitExceeded("query text bytes"));
         }
@@ -153,23 +161,26 @@ impl DisclosureQuery {
             _ => return Err(unsupported("only SELECT DISTINCT and true ASK")),
         };
         let mut patterns = Vec::new();
-        collect_patterns(inner, &mut patterns)?;
-        let filters = fragment_filters(sparql)
-            .map_err(|e| unsupported(&e.to_string()))?
-            .into_iter()
-            .map(|f| IntegerFilter {
-                variable: f.variable,
-                op: match f.op {
-                    FilterCmp::Lt => FilterOp::Lt,
-                    FilterCmp::Le => FilterOp::Le,
-                    FilterCmp::Gt => FilterOp::Gt,
-                    FilterCmp::Ge => FilterOp::Ge,
-                    FilterCmp::Eq => FilterOp::Eq,
-                    FilterCmp::Ne => FilterOp::Ne,
-                },
-                bound: f.bound,
-            })
-            .collect();
+        collect_patterns(inner, &mut patterns, numeric)?;
+        let filters = match numeric {
+            NumericProfile::Signed => signed::collect_filters(inner)?,
+            NumericProfile::Unsigned => fragment_filters(sparql)
+                .map_err(|e| unsupported(&e.to_string()))?
+                .into_iter()
+                .map(|f| IntegerFilter {
+                    variable: f.variable,
+                    op: match f.op {
+                        FilterCmp::Lt => FilterOp::Lt,
+                        FilterCmp::Le => FilterOp::Le,
+                        FilterCmp::Gt => FilterOp::Gt,
+                        FilterCmp::Ge => FilterOp::Ge,
+                        FilterCmp::Eq => FilterOp::Eq,
+                        FilterCmp::Ne => FilterOp::Ne,
+                    },
+                    bound: f.bound,
+                })
+                .collect(),
+        };
         let query = Self {
             kind,
             projection,
@@ -253,6 +264,7 @@ fn term_slot(term: &TermPattern) -> Result<QuerySlot, PlanError> {
 fn collect_patterns(
     pattern: &GraphPattern,
     out: &mut Vec<[QuerySlot; 3]>,
+    numeric: NumericProfile,
 ) -> Result<BTreeSet<String>, PlanError> {
     enum Visit<'a> {
         Pattern(&'a GraphPattern),
@@ -315,7 +327,7 @@ fn collect_patterns(
                     .last()
                     .ok_or_else(|| unsupported("missing FILTER input scope"))?;
                 let mut filter_variables = BTreeSet::new();
-                collect_filter_variables(expr, &mut filter_variables)?;
+                collect_filter_variables(expr, &mut filter_variables, numeric)?;
                 // Flattening FILTERs is only valid when their variables are bound
                 // by the FILTER's own input, not by a sibling join added later.
                 if !filter_variables.is_subset(variables) {
@@ -333,6 +345,7 @@ fn collect_patterns(
 fn collect_filter_variables(
     expr: &Expression,
     out: &mut BTreeSet<String>,
+    numeric: NumericProfile,
 ) -> Result<(), PlanError> {
     use Expression as E;
     let mut pending = vec![expr];
@@ -357,6 +370,9 @@ fn collect_filter_variables(
                 pending.push(a);
             }
             E::Not(inner) => pending.push(inner),
+            E::UnaryMinus(inner) if matches!(numeric, NumericProfile::Signed) => {
+                pending.push(inner);
+            }
             _ => return Err(unsupported("FILTER expression")),
         }
     }
@@ -578,6 +594,27 @@ pub fn plan_disclosure_admitted<A>(
 where
     A: Fn(usize, MembershipRef, &Triple) -> bool,
 {
+    plan_disclosure_numeric(
+        query,
+        credentials,
+        released,
+        limits,
+        admit,
+        NumericProfile::Unsigned,
+    )
+}
+
+fn plan_disclosure_numeric<A>(
+    query: &DisclosureQuery,
+    credentials: &[GraphCommitment],
+    released: &[BTreeMap<String, Term>],
+    limits: PlannerLimits,
+    admit: A,
+    numeric: NumericProfile,
+) -> Result<DisclosurePlan, PlanError>
+where
+    A: Fn(usize, MembershipRef, &Triple) -> bool,
+{
     if credentials.len() > MAX_DISCLOSURE_CREDENTIALS {
         return Err(PlanError::LimitExceeded("input credentials"));
     }
@@ -598,6 +635,7 @@ where
     let mut budget = SearchBudget {
         used: 0,
         limit: limits.max_search_steps,
+        numeric,
     };
     let mut selected = Vec::with_capacity(released.len());
     for (row_index, release) in released.iter().enumerate() {
@@ -729,6 +767,7 @@ fn triple_terms(triple: &Triple) -> [Term; 3] {
 struct SearchBudget {
     used: usize,
     limit: usize,
+    numeric: NumericProfile,
 }
 
 fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
@@ -740,11 +779,12 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
     budget: &mut SearchBudget,
     admit: &A,
 ) -> Result<bool, PlanError> {
+    let numeric = budget.numeric;
     if pattern_index == query.patterns.len() {
         return Ok(query.filters.iter().all(|filter| {
             bindings
                 .get(&filter.variable)
-                .and_then(|v| canonical_integer(&v.term))
+                .and_then(|v| numeric.value(&v.term))
                 .is_some_and(|value| integer_comparison(value, filter.op, filter.bound))
         }));
     }
@@ -757,7 +797,8 @@ fn find_witness<A: Fn(usize, MembershipRef, &Triple) -> bool>(
             if !admit(pattern_index, MembershipRef { credential, leaf }, triple) {
                 continue;
             }
-            if let Some(next) = extend_bindings(query, pattern_index, credential, triple, bindings)
+            if let Some(next) =
+                extend_bindings(query, pattern_index, credential, triple, bindings, numeric)
             {
                 witnesses.push(MembershipRef { credential, leaf });
                 if find_witness(
@@ -786,6 +827,7 @@ fn extend_bindings(
     credential: usize,
     triple: &Triple,
     bindings: &BTreeMap<String, ScopedTerm>,
+    numeric: NumericProfile,
 ) -> Option<BTreeMap<String, ScopedTerm>> {
     let mut next = bindings.clone();
     for (slot, term) in query.patterns[pattern_index]
@@ -818,7 +860,8 @@ fn extend_bindings(
         .iter()
         .all(|filter| {
             next.get(&filter.variable).is_none_or(|value| {
-                canonical_integer(&value.term)
+                numeric
+                    .value(&value.term)
                     .is_some_and(|v| integer_comparison(v, filter.op, filter.bound))
             })
         })

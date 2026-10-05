@@ -1,0 +1,5 @@
+{
+  "pr": 6500,
+  "date": "2026-09-13",
+  "reason": "[GPT-6] The synthetic selected-support experiment and optional local driver metrics are confined to the default-off sparq-zk-compose capability crate, its example, tests, workflow and evidence. They add no always-compiled engine/core implementation or dependency. This records feature-OFF intent for the stacked PR, not measured byte neutrality; the independent hosted byte comparison and WASM size ratchet remain required."
+}

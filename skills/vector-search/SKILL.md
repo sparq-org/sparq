@@ -13,6 +13,10 @@ cosine-identical so their scores are directly comparable. Embeddings are produce
 **out-of-process** (you supply the `Embedder`); the crate never runs a model and the
 default engine build does not even compile it.
 
+[GPT-6] Query rewrites and pre-binding retain VERSION announcements and their
+[version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unknown labels follow
+the surface's existing query/ill-formed-input error policy.
+
 ## Quickstart
 
 `crates/sparq-vectors/Cargo.toml` (it consumes `sparq-core`; no features needed for the
@@ -1738,3 +1742,10 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
 - `hdt-format`, `fused-decompress-parse`, `rust-parallel-parsing` — getting RDF into the
   `Graph` you then embed.
 - `mpc-protocols`, `noir-circuit-patterns` — unrelated sibling skills in this workspace.
+
+### Temporal year parsing (GPT-6)
+
+The `gYear` epoch lane preserves the four-digit year width, including the sign,
+when constructing the civil-date input. Conversion to epoch seconds is checked;
+invalid lexicals and unrepresentable values return `None`. The shared civil-date
+parser remains strict, and the existing global ordering regression stays intact.

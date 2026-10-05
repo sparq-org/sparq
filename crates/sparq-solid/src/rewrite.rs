@@ -46,7 +46,7 @@ use spargebra::{Query, SparqlParser};
 /// # Errors
 ///
 /// Returns `Err` if `sparql` is not a valid SPARQL query (SELECT / ASK / CONSTRUCT /
-/// DESCRIBE). The rewrite itself cannot fail.
+/// DESCRIBE), or its VERSION announcements are unsupported or incompatible.
 ///
 /// # Examples
 ///
@@ -65,7 +65,7 @@ use spargebra::{Query, SparqlParser};
 /// # Ok::<(), String>(())
 /// ```
 pub fn rewrite_for(sparql: &str, allowed: &[NamedNode]) -> Result<String, String> {
-    let mut q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+    let (mut q, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     let dataset = match &mut q {
         Query::Select { dataset, .. }
         | Query::Construct { dataset, .. }
@@ -85,7 +85,7 @@ pub fn rewrite_for(sparql: &str, allowed: &[NamedNode]) -> Result<String, String
     }
     *dataset = Some(QueryDataset { default: Vec::new(), named: Some(named) });
     wrap_query(&mut q, sparql);
-    Ok(q.to_string())
+    serialize_with_versions(q, versions)
 }
 
 /// Rewrite step 1 ONLY — wrap every default-graph triple/path pattern in
@@ -100,8 +100,7 @@ pub fn rewrite_for(sparql: &str, allowed: &[NamedNode]) -> Result<String, String
 ///
 /// # Errors
 ///
-/// Returns `Err` if `sparql` is not a valid SPARQL query. The rewrite itself cannot
-/// fail.
+/// Returns `Err` for invalid syntax or unsupported/incompatible VERSION announcements.
 ///
 /// # Examples
 ///
@@ -112,9 +111,9 @@ pub fn rewrite_for(sparql: &str, allowed: &[NamedNode]) -> Result<String, String
 /// # Ok::<(), String>(())
 /// ```
 pub fn wrap_for_view(sparql: &str) -> Result<String, String> {
-    let mut q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+    let (mut q, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     wrap_query(&mut q, sparql);
-    Ok(q.to_string())
+    serialize_with_versions(q, versions)
 }
 
 /// [OPUS-4.8] sq-gq28y (issue #1546). The spec-minted reserved IRI a client uses to opt a
@@ -191,7 +190,7 @@ fn take_union_default_opt_in(q: &mut Query) -> bool {
 ///
 /// # Errors
 ///
-/// Returns `Err` if `sparql` is not a valid SPARQL query. The rewrite itself cannot fail.
+/// Returns `Err` for invalid syntax or unsupported/incompatible VERSION announcements.
 ///
 /// # Examples
 ///
@@ -212,11 +211,20 @@ fn take_union_default_opt_in(q: &mut Query) -> bool {
 /// assert!(!opted.contains(UNION_DEFAULT_GRAPH_IRI));
 /// ```
 pub fn wrap_for_view_opt_in(sparql: &str) -> Result<String, String> {
-    let mut q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
+    let (mut q, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), sparql).map_err(|e| e.to_string())?;
     if take_union_default_opt_in(&mut q) {
         wrap_query(&mut q, sparql);
     }
-    Ok(q.to_string())
+    serialize_with_versions(q, versions)
+}
+
+// [GPT-6] Query Display omits VERSION metadata. Validate labels before emitting
+// the retained announcements, so unknown text cannot enter the serialized prologue.
+fn serialize_with_versions(query: Query, versions: Vec<String>) -> Result<String, String> {
+    let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)?;
+    let announcements = prepared.versions().iter()
+        .map(|label| format!("VERSION \"{label}\"\n")).collect::<String>();
+    Ok(format!("{announcements}{}", prepared.query()))
 }
 
 /// Apply the per-pattern GRAPH wrap to a parsed query, with a graph-variable prefix

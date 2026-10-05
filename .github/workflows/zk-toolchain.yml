@@ -71,6 +71,10 @@ on:
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
       # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree left.
       - "zk/compose/**"
+      - "bench/zk-compose/campaigns/**"
+      - "bench/zk-bindings/**"
+      - "crates/sparq-conformance/examples/proof_corpus.rs"
+      - "zk/sparql-evaluator/model/**"
       - ".github/workflows/zk-toolchain.yml"
   # [FABLE-5] (2026-07-18 maintainer directive, merge-queue subset) merge_group
   # REMOVED: the forge suite already ran + gated on any zk-touching PR (paths filter
@@ -89,6 +93,10 @@ on:
       # [OPUS-4.8] sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
       - "zk/compose/**"
+      - "bench/zk-compose/campaigns/**"
+      - "bench/zk-bindings/**"
+      - "crates/sparq-conformance/examples/proof_corpus.rs"
+      - "zk/sparql-evaluator/model/**"
       - ".github/workflows/zk-toolchain.yml"
 
 # Least-privilege: this lane only reads the repo + runs tests.
@@ -191,7 +199,7 @@ jobs:
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
               # [OPUS-4.8] sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '^(crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|\.github/workflows/zk-toolchain\.yml$)'; then
+                '^(crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$)'; then
                 zk=true
               else
                 zk=false
@@ -280,6 +288,29 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         run: cargo build -p sparq-zk -p sparq-zk-compose --all-targets
 
+      # [GPT-6] Dedicated invocation supplies inputs to the ignored adapter; the
+      # generic result sweep below still runs every preexisting result test.
+      - name: Replay complete bounded binding domains (native and real proofs)
+        id: binding-corpus
+        if: steps.changes.outputs.zk == 'true'
+        timeout-minutes: 20
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: |
+          python3 -m unittest discover -s bench/zk-bindings -p 'test_*.py'
+          cargo check --locked -p sparq-conformance --example proof_corpus
+          cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator-model --features evaluate --example proof_bindings
+          python3 bench/zk-bindings/ci.py --output "${RUNNER_TEMP}/proof-binding-evidence"
+
+      - name: Retain binding corpus evidence including partial failures
+        if: always() && steps.changes.outputs.zk == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: proof-bindings-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/proof-binding-evidence
+          if-no-files-found: error
+          retention-days: 30
+
       # [OPUS-4.8] sq-kep2 — recurrence guard for the STANDALONE family_curve harness.
       # `bench/zk-compose/family_curve` is a detached cargo project (own `[workspace]`,
       # `lto = "fat"` release profile) deliberately kept OUT of the root workspace so it
@@ -355,11 +386,28 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1
 
+      # [GPT-6] Rebuild the immutable foundation separately from the PR candidate.
+      # This independently checks the provenance of all four legacy key goldens.
+      - name: Rebuild fixed foundation result keys independently
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          set -euo pipefail
+          baseline_dir="$(mktemp -d)"
+          trap 'rm -rf "$baseline_dir"' EXIT
+          git fetch --no-tags --depth=1 origin 713025dc0fcdcbdcd070ba4dcbde524be50ba055
+          git archive 713025dc0fcdcbdcd070ba4dcbde524be50ba055 zk/compose | tar -x -C "$baseline_dir"
+          python3 bench/zk-compose/scripts/verify_result_evidence.py --baseline-root "$baseline_dir"
+
       # [GPT-6] The additive result contract is default-off, so it needs explicit
       # feature coverage: real private-witness rejection, ZK proofs and ABI anchors.
       - name: Run selected-result private-witness and verifier tests (real bb)
         if: steps.changes.outputs.zk == 'true'
         run: |
-          cargo test -p sparq-zk-compose --features successful-results --lib result::tests -- --include-ignored --test-threads=1
+          cargo test -p sparq-zk-compose --features successful-results --lib result:: -- --include-ignored --test-threads=1 --skip result::proof_bindings::run_job
+          python3 bench/zk-compose/campaigns/test_campaign.py
+          cargo test -p sparq-zk-compose --features successful-results --example result_experiment
+          cargo test -p sparq-zk-compose --features successful-results --lib driver::
           cd zk/compose
           nargo test --package sparq_zk_compose_core result::
+          nargo test --package sparq_zk_compose_core result_integer::
+          nargo test --package sparq_zk_compose_core result_signed_integer::

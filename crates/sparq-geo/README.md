@@ -106,7 +106,7 @@ upstream to [georust/geo](https://github.com/georust/geo) (bead `sq-fxv3`).
 ## 📚 Learn more
 
 - **How-to** — [`skills/geosparql/SKILL.md`](../../skills/geosparql/SKILL.md) (the full
-  `geof:` IRI list, the set-operation operand matrix, and the index design).
+  `geof:` IRI list, the set-operation operand matrix, and the index design). [GPT-6] GeoSPARQL rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — [docs.rs/sparq-geo](https://docs.rs/sparq-geo).
 - **Spec** — GeoSPARQL 1.0/1.1; the implemented requirement subset is pinned by
   [`tests/ogc_geosparql_requirements.rs`](tests/ogc_geosparql_requirements.rs).

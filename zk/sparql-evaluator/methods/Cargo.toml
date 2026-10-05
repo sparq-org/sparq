@@ -1,0 +1,22 @@
+[package]
+name = "sparq-proved-evaluator-methods"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# [OPUS-5.5] zkp-14.5: also build the separately pinned V5 guest and generate
+# SPARQ_AUTHRDF_GUEST_{ELF,ID} in their own file. Off by default; the exact
+# guest's flags, target subdirectory, manifest, lock and constants never depend on it.
+[features]
+default = []
+authenticated-rdf = []
+
+[build-dependencies]
+risc0-build = { version = "=3.0.6", features = ["unstable"] }
+risc0-binfmt = "=3.0.5"
+
+# Both guest workspaces. This crate's `build.rs` builds them, not risc0-build's
+# `embed_methods`; `guest-authrdf` is built only with `authenticated-rdf`.
+[package.metadata.risc0]
+methods = ["guest", "guest-authrdf"]

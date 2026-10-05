@@ -8,8 +8,9 @@
 #                                        PR on any advisory not on this list.
 #   • supply-chain/vex.cdx.json        — the PUBLISHED VEX (Vulnerability
 #                                        Exploitability eXchange) that tells a
-#                                        downstream consumer *why* each tolerated
-#                                        advisory is `not_affected`.
+#                                        downstream consumer the scope of each
+#                                        tolerated advisory and any established
+#                                        exploitability analysis.
 # If an advisory is added to one but not the other, the public VEX and the real
 # gate DISAGREE — either the SBOM/VEX claims an exploitability verdict for an
 # advisory the gate no longer suppresses, or the gate silently suppresses an

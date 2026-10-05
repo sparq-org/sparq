@@ -1,0 +1,177 @@
+{
+  "schema": "sparq.engine-replay.matrix.v1",
+  "recorded_by": "GPT-6",
+  "profiles": [
+    "shipped",
+    "optimized"
+  ],
+  "profile_features": {
+    "shipped": [],
+    "optimized": [
+      "sparq-engine/vectorized",
+      "sparq-engine/value-join",
+      "sparq-engine/id-filter-fastpath"
+    ]
+  },
+  "categories": [
+    "bgp",
+    "filter",
+    "equality",
+    "optional",
+    "union",
+    "minus",
+    "limit",
+    "distinct",
+    "order",
+    "path",
+    "aggregate",
+    "subquery",
+    "exists",
+    "values",
+    "bind",
+    "graph",
+    "antijoin",
+    "typed",
+    "strfn",
+    "ask",
+    "construct"
+  ],
+  "seeds": [
+    0,
+    4695
+  ],
+  "storage": [
+    "dense",
+    "fork",
+    "compressed",
+    "mmap",
+    "mmap-compressed",
+    "dict-spill"
+  ],
+  "configured_native_cells": 504,
+  "executed_native_cells": 0,
+  "proof_count": 0,
+  "seed_scope": "Two retained representatives drawn from existing fixed windows; not exhaustive original windows or random universe.",
+  "base_source": "1e53e59b0a5f54ba1aed4ddeb6c05b91835886ed",
+  "proof_targets": [
+    "noir_legacy",
+    "noir_unsigned",
+    "noir_signed",
+    "native_rdf",
+    "native_tuple",
+    "exact_v1",
+    "exact_v2",
+    "exact_v3"
+  ],
+  "proof_target_status": "Unclassified until actual per-backend admission/preparation; no unsupported label inferred from generator category.",
+  "authority_targets": [
+    "holder_declared",
+    "verifier_agreed"
+  ],
+  "authority_status": "Not constructed or executed by native replay.",
+  "build_contract": "Caller-accepted binary and build-record hashes are required. Each feature profile needs its own remotely built namespace; compiling a feature does not establish runtime branch firing.",
+  "original_generator_sha256": "077272fc8112b8ff85b789ef7cb64c93e8234aceb620a671830afb68e8cd0ed6",
+  "original_registry_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
+  "original_windows": {
+    "source": ".github/workflows/fuzz.yml",
+    "broad": {
+      "category": "all",
+      "start": 0,
+      "count": 2000
+    },
+    "known_decimal": [
+      {
+        "category": "equality",
+        "start": 4695,
+        "count": 2200
+      },
+      {
+        "category": "filter",
+        "start": 4695,
+        "count": 2200
+      }
+    ],
+    "expanded_categories": {
+      "categories": [
+        "path",
+        "aggregate",
+        "subquery",
+        "exists",
+        "values",
+        "bind",
+        "graph",
+        "antijoin",
+        "typed",
+        "strfn",
+        "ask",
+        "construct"
+      ],
+      "start": 0,
+      "count": 10000
+    },
+    "status": "Retained existing mandatory suite; not replaced or claimed executed by this small matrix."
+  },
+  "variant_inventory": [
+    {
+      "axis": "algebra rewrite",
+      "source": "crates/sparq-engine/tests/rewrite_pass.rs",
+      "status": "Existing sparq-bench enables algebra-rewrite in both profiles; no rewrite-OFF comparison claimed."
+    },
+    {
+      "axis": "vectorized and ID filter",
+      "source": "crates/sparq-engine/tests/differentials/vectorized_exec_differential.rs",
+      "status": "Optimized profile compiled separately; small generated inputs do not certify threshold crossing or branch firing."
+    },
+    {
+      "axis": "value joins / SIP / theta anti-join",
+      "sources": [
+        "crates/sparq-engine/tests/eqjoin_value_join.rs",
+        "crates/sparq-engine/tests/sip_join.rs",
+        "crates/sparq-engine/tests/theta_antijoin.rs"
+      ],
+      "status": "Existing firing and decline regressions remain required; compiled feature parity is a separate matrix axis."
+    },
+    {
+      "axis": "join planners",
+      "sources": [
+        "crates/sparq-engine/tests/differentials/semijoin_differential.rs",
+        "crates/sparq-engine/tests/differentials/yannakakis_differential.rs",
+        "crates/sparq-engine/tests/query_features/dp_planner_differential.rs"
+      ],
+      "status": "Not yet driven by this replay entry point; existing tests and future explicit bridge cells remain separate."
+    },
+    {
+      "axis": "parallel threshold",
+      "source": "crates/sparq-engine/tests/ebv_dialects.rs",
+      "status": "Existing large-threshold controls retained; small seed graph is not evidence of worker execution."
+    },
+    {
+      "axis": "compressed and mmap formats",
+      "source": "crates/sparq-engine/tests/storage/compressed_build_differential.rs",
+      "status": "This slice observes default emit format only; explicit SPQCPRM2 and external one-pass builds remain separate."
+    },
+    {
+      "axis": "dictionary spill",
+      "source": "crates/sparq-engine/tests/storage/dict_spill_differential.rs",
+      "status": "Replay uses original tiny spill configuration; larger unchanged epoch/byte-inventory tests remain required."
+    },
+    {
+      "axis": "fork generations",
+      "source": "crates/sparq-engine/tests/storage/fork_generations.rs",
+      "status": "This slice queries an unchanged fork; append/update/compaction and snapshot isolation remain original suite cells."
+    },
+    {
+      "axis": "named graph storage",
+      "source": "crates/sparq-engine/tests/storage/named_graph_persistence.rs",
+      "status": "Original generator is default graph only. Named catalog persistence comes from the original suite, not fabricated replay data."
+    },
+    {
+      "axis": "proof execution trace",
+      "sources": [
+        "crates/sparq-engine/tests/differentials/zk_trace_differential.rs",
+        "crates/sparq-engine/tests/differentials/zk_trace_operators.rs"
+      ],
+      "status": "Trace/witness parity is not exercised by native semantic comparison; real backend bridge must prepare and identify both relation inputs."
+    }
+  ]
+}

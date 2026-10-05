@@ -87,6 +87,8 @@ g.ask("PREFIX ex: <http://ex/> ASK { ex:alice ex:knows ex:bob }")   # -> True
   baked in is the broader release-matrix question (sq-v286); until then, build/install
   an `--features arrow` wheel yourself.
 
+[GPT-6] `Graph.ask` retains VERSION announcements for ASK and SELECT-count queries; unknown or incompatible labels raise `ValueError`. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
+
 ## 📚 Learn more
 
 - **How-to** — [`skills/python/SKILL.md`](../../skills/python/SKILL.md).

@@ -1,0 +1,26 @@
+# [OPUS-5.5] zkp-14.5: separately pinned V5 authenticated-RDF guest image.
+# Independent workspace and lock; the exact V1-V3 guest is never replaced by it.
+[package]
+name = "sparq-authrdf-guest"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[workspace]
+
+[dependencies]
+risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
+sparq-proved-evaluator-model = { path = "../../model", features = ["graph-results", "authenticated-rdf"] }
+
+[patch.crates-io]
+risc0-zkvm = { path = "../../../../vendor/zk-sdk/risc0-zkvm-3.0.6" }
+risc0-zkos-v1compat = { path = "../../../../vendor/zk-sdk/risc0-zkos-v1compat-2.2.3" }
+ark-crypto-primitives = { path = "../../../../vendor/zk-sdk/ark-crypto-primitives-0.5.0" }
+# [GPT-6] Exact upstream archives with narrowly recorded dependency/feature patches.
+ark-relations = { path = "../../../../vendor/zk-sdk/ark-relations-0.5.1" }
+spargebra = { path = "../../../../vendor/spargebra" }
+
+[profile.release]
+debug = 0
+lto = "thin"

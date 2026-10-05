@@ -7,6 +7,10 @@ description: "Use when adding GeoSPARQL spatial support to the sparq RDF/SPARQL 
 
 `sparq-geo` is the OPT-IN GeoSPARQL 1.0/1.1 **core** for the sparq engine: it parses `geo:wktLiteral` and `geo:gmlLiteral` (the GML Simple-Features geometry profile) lexical forms, evaluates the `geof:` spatial functions, packages those functions as a `sparq_engine::FunctionRegistry` so they run inside real SPARQL `FILTER`/`BIND`/`SELECT`, and builds an R-tree `GeoIndex` over a `sparq_core::Graph` for distance/nearest/intersection queries. It is a separate crate so the core engine and the wasm build carry zero geometry code — you engage spatial support only by depending on `sparq-geo`.
 
+[GPT-6] Query entry points and structural rewrites retain VERSION announcements;
+see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
+or incompatible labels do not silently select REC 2013.
+
 ## Quickstart
 
 `Cargo.toml`:

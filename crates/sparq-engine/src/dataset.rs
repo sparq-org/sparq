@@ -17,6 +17,9 @@ use sparq_core::store::Pattern as IdPattern;
 use sparq_core::Graph;
 use spargebra::algebra::QueryDataset;
 
+#[path = "dataset_merge.rs"]
+mod merge;
+
 pub(crate) type TripleTerms = [Term; 3];
 pub(crate) type TripleSet = FxHashSet<TripleTerms>;
 
@@ -43,6 +46,7 @@ pub(crate) fn build(triples: &TripleSet) -> Graph {
     Graph::from_parts(dict, ids)
 }
 
+#[cfg(test)]
 pub(crate) fn empty_graph() -> Graph {
     Graph::from_parts(Dict::new(), Vec::new())
 }
@@ -71,27 +75,34 @@ fn find_named<'a>(graph: &'a Graph, name: &NamedNode) -> Option<&'a Graph> {
 /// never pays for this.
 pub(crate) fn build_active(graph: &Graph, ds: &QueryDataset) -> Graph {
     let visible = |n: &NamedNode| crate::exec::view::allows(&Term::NamedNode(n.clone()));
+    // [GPT-6] Named graph identity is preserved; only FROM's RDF merge renames
+    // source nodes. Inspect selected named graphs before choosing a disjoint prefix.
+    let mut named = Vec::new();
+    for n in ds.named.as_deref().unwrap_or_default() {
+        if named.iter().any(|(name, _)| name == n) {
+            continue;
+        }
+        let triples = find_named(graph, n).filter(|_| visible(n)).map(decode_triples).unwrap_or_default();
+        named.push((n.clone(), triples));
+    }
+    let namespace = merge::namespace(named.iter().map(|(_, triples)| triples));
     let mut default = TripleSet::default();
+    let mut seen = FxHashSet::default();
     for n in &ds.default {
-        if !visible(n) {
+        if !visible(n) || !seen.insert(n) {
             continue; // view: non-visible ≡ absent
         }
         if let Some(g) = find_named(graph, n) {
-            default.extend(decode_triples(g));
+            // [GPT-6] One snapshot per distinct IRI; SPARQL 1.1 §13.2.3 does not
+            // prescribe acquisition identity for repeated dataset-clause IRIs.
+            let index = seen.len() - 1;
+            default.extend(decode_triples(g).into_iter().map(|triple| {
+                triple.map(|term| merge::rename(term, namespace, index))
+            }));
         }
     }
     let mut out = build(&default);
-    for n in ds.named.as_deref().unwrap_or_default() {
-        let name = Term::NamedNode(n.clone());
-        if out.named.iter().any(|(g, _)| *g == name) {
-            continue; // a repeated FROM NAMED still names ONE graph
-        }
-        let g = match find_named(graph, n).filter(|_| visible(n)) {
-            Some(g) => build(&decode_triples(g)),
-            None => empty_graph(),
-        };
-        out.named.push((name, g));
-    }
+    out.named = named.into_iter().map(|(n, triples)| (Term::NamedNode(n), build(&triples))).collect();
     out
 }
 

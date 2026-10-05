@@ -44,6 +44,13 @@
   features: "zk"
   test: true
 
+# [GPT-6] Entropy-free parser intermediates and result-local CONSTRUCT nodes.
+# This runs the feature-gated identity, collision and output-budget regressions.
+- name: "sparq-engine (deterministic-blank-nodes)"
+  crate: "sparq-engine"
+  features: "deterministic-blank-nodes"
+  test: true
+
 # [FABLE-5] sq-7d3dj.32.2.7: runs the SPQCPRM2 format-migration cross-version storage
 # differentials (v2_saved_store_is_query_equivalent_to_v1 / cross_version_resave_round_trips_
 # losslessly) through the real save_compressed → open → query path in V2 emit mode. `spqcprm2`

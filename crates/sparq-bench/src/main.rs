@@ -46,6 +46,14 @@ const QUERIES: &[(&str, &str)] = &[
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // [GPT-6] Explicit retained native observations; this command produces no proofs.
+    if args.get(1).map(String::as_str) == Some("fuzz-replay") {
+        if let Err(error) = fuzz::replay::run(&args[2..]) {
+            eprintln!("fuzz-replay: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let scale: u32 = arg_val(&args, "--scale").and_then(|s| s.parse().ok()).unwrap_or(20_000);
     let iters: usize = arg_val(&args, "--iters").and_then(|s| s.parse().ok()).unwrap_or(5);
 

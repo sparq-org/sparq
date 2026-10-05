@@ -6,6 +6,17 @@ use sparq_engine::{explain_paths, query, query_paths};
 
 const PATHS: &str = "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = ex:a END ?e = ex:d VIA ex:p";
 
+// [GPT-6] Inner PATHS patterns use the REC-only extension contract.
+#[test]
+fn paths_refuses_unimplemented_version_announcements() {
+    let graph = diamond();
+    let baseline = query_paths(&graph, PATHS).unwrap();
+    assert_eq!(query_paths(&graph, &format!("VERSION '1.1' {PATHS}")).unwrap().rows, baseline.rows);
+    for label in ["1.2", "1.2-basic", "unknown"] {
+        assert!(query_paths(&graph, &format!("VERSION '{label}' {PATHS}")).is_err());
+    }
+}
+
 fn diamond() -> Graph {
     Graph::load_str(
         "@prefix ex: <http://ex/> . ex:a ex:p ex:b, ex:c . ex:b ex:p ex:d . ex:c ex:p ex:d .",

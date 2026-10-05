@@ -32,7 +32,7 @@ use sparq_core::store::{Pattern as IdPattern, Perm, BUILT};
 use sparq_core::Graph;
 use spargebra::algebra::GraphPattern;
 use spargebra::term::TriplePattern;
-use spargebra::{Query, SparqlParser};
+use spargebra::Query;
 
 use crate::exec::{self, Prepared, ScanCmp};
 use crate::QueryBudget;
@@ -42,16 +42,13 @@ use crate::QueryBudget;
 /// filters — WITHOUT executing the query (a planning-only dry run; see the
 /// module docs for the one runtime-dependent caveat).
 pub fn explain(graph: &Graph, sparql: &str) -> Result<String, String> {
-    let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
-    // [OPUS-4.8] (sq-7d3dj.30.1) EXPLAIN the ACTUAL executed plan: apply the same
-    // pre-execution algebra rewrite `PreparedQuery::parse` does (feature-gated).
-    #[cfg(feature = "algebra-rewrite")]
-    let q = crate::rewrite::rewrite_query(q);
-    let active = crate::active_dataset(graph, &q);
+    let prepared = crate::PreparedQuery::parse(sparql)?;
+    let q = prepared.query();
+    let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    let (form, pattern) = query_form_pattern(&q);
+    let (form, pattern) = query_form_pattern(q);
     let mut out = String::new();
     let _ = writeln!(out, "EXPLAIN ({form}) — planning-only dry run; nothing is executed.");
     let _ = writeln!(
@@ -71,15 +68,13 @@ pub fn explain_analyze(graph: &Graph, sparql: &str) -> Result<String, String> {
 
 /// [`explain_analyze`] under a cooperative [`QueryBudget`] (deadline / max rows).
 pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<String, String> {
-    let q = SparqlParser::new().parse_query(sparql).map_err(|e| e.to_string())?;
-    // [OPUS-4.8] (sq-7d3dj.30.1) ANALYZE the ACTUAL executed plan (feature-gated rewrite).
-    #[cfg(feature = "algebra-rewrite")]
-    let q = crate::rewrite::rewrite_query(q);
-    let active = crate::active_dataset(graph, &q);
+    let prepared = crate::PreparedQuery::parse(sparql)?;
+    let q = prepared.query();
+    let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    let (form, pattern) = query_form_pattern(&q);
+    let (form, pattern) = query_form_pattern(q);
     if !matches!(q, Query::Select { .. } | Query::Ask { .. }) {
         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use EXPLAIN for CONSTRUCT/DESCRIBE)".into());
     }
@@ -89,8 +84,9 @@ pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBu
     let _ = writeln!(out, "Plan:");
     render_pattern(graph, pattern, &mut out, 1)?;
 
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics)?;
     // Execute under the budget with the operator trace installed.
-    exec::budget::with_budget(budget, || {
+    exec::budget::with_query_budget(budget, semantics, || {
         let _tguard = exec::trace::install();
         #[cfg(not(target_arch = "wasm32"))]
         let start = std::time::Instant::now();

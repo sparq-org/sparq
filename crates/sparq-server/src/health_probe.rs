@@ -185,6 +185,29 @@ mod tests {
     // covered by the sync tests above; these pin the I/O path that surrounds it.
 
     #[cfg(feature = "server")]
+    async fn read_mock_request(conn: &mut tokio::net::TcpStream) {
+        use tokio::io::AsyncReadExt;
+        // [GPT-6] Closing with unread request bytes can reset TCP on macOS. Read
+        // only the bounded GET headers, not EOF: the probe waits for our reply.
+        tokio::time::timeout(PROBE_TIMEOUT, async {
+            let mut request = [0u8; 1024];
+            let mut used = 0;
+            loop {
+                assert!(used < request.len(), "mock request exceeds header limit");
+                let read = conn.read(&mut request[used..]).await.unwrap();
+                assert_ne!(read, 0, "probe closed before sending complete headers");
+                used += read;
+                if request[..used].windows(4).any(|w| w == b"\r\n\r\n") {
+                    assert!(request[..used].starts_with(b"GET /health HTTP/1.0\r\n"));
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("mock request timed out");
+    }
+
+    #[cfg(feature = "server")]
     #[tokio::test]
     async fn run_probe_unhealthy_response_returns_descriptive_err() {
         use tokio::io::AsyncWriteExt;
@@ -192,8 +215,9 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap().to_string();
         // Spawn a mock server that returns one non-200 response then shuts down cleanly.
-        tokio::spawn(async move {
+        let server = tokio::spawn(async move {
             if let Ok((mut conn, _)) = listener.accept().await {
+                read_mock_request(&mut conn).await;
                 let _ = conn
                     .write_all(b"HTTP/1.1 503 Service Unavailable\r\n\r\n")
                     .await;
@@ -202,6 +226,10 @@ mod tests {
             }
         });
         let result = run_probe(&addr).await;
+        tokio::time::timeout(PROBE_TIMEOUT, server)
+            .await
+            .expect("mock response task timed out")
+            .unwrap();
         assert!(result.is_err(), "non-200 response must be an Err");
         let msg = result.unwrap_err();
         assert!(
@@ -224,8 +252,9 @@ mod tests {
         let addr = listener.local_addr().unwrap().to_string();
         // Send a healthy status line followed by >4 KiB of padding so the buffer-cap
         // `break` at line 104 triggers before the stream reaches EOF.
-        tokio::spawn(async move {
+        let server = tokio::spawn(async move {
             if let Ok((mut conn, _)) = listener.accept().await {
+                read_mock_request(&mut conn).await;
                 let mut response = b"HTTP/1.1 200 OK\r\n\r\nok".to_vec();
                 response.extend(std::iter::repeat_n(b'x', 5000));
                 let _ = conn.write_all(&response).await;
@@ -234,6 +263,10 @@ mod tests {
             }
         });
         let result = run_probe(&addr).await;
+        tokio::time::timeout(PROBE_TIMEOUT, server)
+            .await
+            .expect("mock response task timed out")
+            .unwrap();
         // The 200 status line is in the first chunk, so the probe should succeed.
         assert!(result.is_ok(), "healthy large response must succeed: {:?}", result);
     }

@@ -2,8 +2,8 @@
 
 use super::{
     assemble_plan, extend_bindings, released_bindings, validate_released, DisclosurePlan,
-    DisclosureQuery, MembershipRef, PlanError, PlannerLimits, QueryKind, ScopedTerm,
-    MAX_DISCLOSURE_CREDENTIALS,
+    DisclosureQuery, MembershipRef, NumericProfile, PlanError, PlannerLimits, QueryKind,
+    ScopedTerm, MAX_DISCLOSURE_CREDENTIALS,
 };
 use oxrdf::{Term, Triple};
 use sparq_zk::commit::GraphCommitment;
@@ -153,6 +153,27 @@ pub fn optimize_disclosure_admitted<A>(
 where
     A: Fn(usize, MembershipRef, &Triple) -> bool,
 {
+    optimize_disclosure_numeric(
+        query,
+        credentials,
+        released,
+        limits,
+        admit,
+        NumericProfile::Unsigned,
+    )
+}
+
+pub(super) fn optimize_disclosure_numeric<A>(
+    query: &DisclosureQuery,
+    credentials: &[GraphCommitment],
+    released: &[BTreeMap<String, Term>],
+    limits: OptimizationLimits,
+    admit: A,
+    numeric: NumericProfile,
+) -> Result<OptimizationReport, PlanError>
+where
+    A: Fn(usize, MembershipRef, &Triple) -> bool,
+{
     // Cheap bounds precede validation of caller-constructed public query shapes.
     if credentials.len() > MAX_DISCLOSURE_CREDENTIALS {
         return Err(PlanError::LimitExceeded("input credentials"));
@@ -184,6 +205,7 @@ where
     })?;
     let mut search = JointSearch {
         query,
+        numeric,
         credentials,
         released,
         admit: &admit,
@@ -242,6 +264,7 @@ where
 
 struct JointSearch<'a, A> {
     query: &'a DisclosureQuery,
+    numeric: NumericProfile,
     credentials: &'a [GraphCommitment],
     released: &'a [BTreeMap<String, Term>],
     admit: &'a A,
@@ -279,8 +302,14 @@ impl<A: Fn(usize, MembershipRef, &Triple) -> bool> JointSearch<'_, A> {
                 if !(self.admit)(pattern, witness, triple) {
                     continue;
                 }
-                let Some(next) = extend_bindings(self.query, pattern, credential, triple, bindings)
-                else {
+                let Some(next) = extend_bindings(
+                    self.query,
+                    pattern,
+                    credential,
+                    triple,
+                    bindings,
+                    self.numeric,
+                ) else {
                     continue;
                 };
                 self.selected.push(witness);

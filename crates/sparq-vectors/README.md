@@ -104,7 +104,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
 ## 📚 Learn more
 
 - **How-to** — [`skills/vector-search/SKILL.md`](../../skills/vector-search/SKILL.md) (label /
-  verbalized / hybrid pipelines, DiskANN, quantization, bulk import, API surface, `.spqv`/`.spqg`).
+  verbalized / hybrid pipelines, DiskANN, quantization, bulk import, API surface, `.spqv`/`.spqg`). [GPT-6] Vector-predicate rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — [docs.rs/sparq-vectors](https://docs.rs/sparq-vectors); **design** —
   [`research/genai-text-embedding-practices.md`](../../research/genai-text-embedding-practices.md).
 - **Accuracy & throughput** — not baked into docs; the recall / DiskANN / PQ / throughput gates are
