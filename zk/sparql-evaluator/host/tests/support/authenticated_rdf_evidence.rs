@@ -144,9 +144,11 @@ impl Evidence {
     /// Re-verifies against the approved V5 pin, then writes the complete case record.
     ///
     /// Returns the record without the receipt body, for the run summary.
+    /// `fixture` names the signed credential's source for this case.
     pub fn record(
         &self,
         case: &str,
+        fixture: &str,
         request: &Request,
         presentation: &Presentation,
         details: Value,
@@ -167,7 +169,7 @@ impl Evidence {
         let summary = json!({
             "schema": RECORD_SCHEMA,
             "case": case,
-            "fixture": "published W3C vc-di-eddsa eddsa-rdfc-2022 vector; public data only",
+            "fixture": fixture,
             "guest": GUEST_PACKAGE,
             "pin": self.pin,
             "artifact_sha256": hex(&self.pin.sha256),

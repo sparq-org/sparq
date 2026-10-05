@@ -102,3 +102,27 @@ fn parallel_threshold_cannot_hide_numeric_capacity() {
     assert!(error.contains("numeric-representation"), "{error}");
     assert_eq!(sparq_engine::query(&graph, q).unwrap().rows.len(), 50_010);
 }
+
+#[cfg(feature = "result-cache")]
+#[test]
+fn result_cache_keys_on_semantic_capacity_limits() {
+    let graph = Graph::load_str("", "n-triples").unwrap();
+    let prepared = sparq_engine::PreparedQuery::parse(&query("9223372036854775807 + 1")).unwrap();
+    let cache = sparq_engine::ResultCache::new(4);
+    cache
+        .get_or_eval(&graph, prepared.query(), 0, &QueryBudget::unlimited())
+        .unwrap();
+    assert!(cache.get_or_eval(&graph, prepared.query(), 0, &bounded()).is_err());
+    let years = QueryBudget {
+        temporal_year_range: Some((1900, 2100)),
+        ..QueryBudget::unlimited()
+    };
+    let dated = sparq_engine::PreparedQuery::parse(
+        "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(\"3000-01-01T00:00:00Z\"^^xsd:dateTime) AS ?v) {}",
+    )
+    .unwrap();
+    cache
+        .get_or_eval(&graph, dated.query(), 0, &QueryBudget::unlimited())
+        .unwrap();
+    assert!(cache.get_or_eval(&graph, dated.query(), 0, &years).is_err());
+}

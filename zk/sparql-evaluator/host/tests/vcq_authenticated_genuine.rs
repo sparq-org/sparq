@@ -1090,7 +1090,7 @@ fn run_case(s: &Setup, case: &Case) -> Value {
         "files": proved.files,
         "controls_create_proofs": false,
     });
-    s.evidence.record(case.id, &proved.expected, &proved.receipt, details)
+    s.evidence.record(case.id, case.dataset.source().0, &proved.expected, &proved.receipt, details)
 }
 
 #[test]

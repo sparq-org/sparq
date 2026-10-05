@@ -72,6 +72,7 @@ pub fn construct_prepared_with_budget_detailed(
     match q {
         Query::Construct { template, pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
+                crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
                 let result = (|| {
                     let solutions = crate::exec::eval_select(graph, pattern)?;
                     instantiate(template, &solutions, graph)
@@ -127,6 +128,7 @@ pub fn describe_prepared_with_budget_detailed(
     match q {
         Query::Describe { pattern, .. } => {
             crate::exec::budget::with_query_budget(budget, semantics, || {
+                crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
                 let result = (|| {
                     let solutions = crate::exec::eval_select(graph, pattern)?;
                     cbd(graph, &solutions)
@@ -160,6 +162,7 @@ pub fn construct_or_describe_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
     crate::exec::budget::with_query_budget(budget, semantics, || {
+        crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Construct { template, pattern, .. } => {
                 let solutions = crate::exec::eval_select(graph, pattern)?;
@@ -432,6 +435,21 @@ mod tests {
 
     fn nts(ts: &[Triple]) -> Vec<String> {
         ts.iter().map(|t| format!("{} {} {} .", t.subject, t.predicate, t.object)).collect()
+    }
+
+    #[test]
+    fn graph_queries_resolve_iri_against_their_own_base() {
+        let g = Graph::load_str("", "n-triples").unwrap();
+        // A previous query's BASE must not leak into a later graph query.
+        crate::query(&g, "BASE <https://other.example/> SELECT (IRI(\"x\") AS ?v) {}").unwrap();
+        let q = |form: &str| format!("BASE <https://example.org/> {form} WHERE {{ BIND(IRI(\"s\") AS ?s) }}");
+        let built = construct(&g, &q("CONSTRUCT { ?s <urn:p> <urn:o> }")).unwrap();
+        assert_eq!(nts(&built), ["<https://example.org/s> <urn:p> <urn:o> ."]);
+        crate::query(&g, "BASE <https://other.example/> SELECT (IRI(\"x\") AS ?v) {}").unwrap();
+        let none = construct(&g, "CONSTRUCT { ?s <urn:p> <urn:o> } WHERE { BIND(IRI(\"s\") AS ?s) }").unwrap();
+        assert!(none.is_empty(), "no BASE: a relative IRI() is a type error, so nothing is built");
+        let both = construct_or_describe(&g, &q("CONSTRUCT { ?s <urn:p> <urn:o> }")).unwrap();
+        assert_eq!(nts(&both), ["<https://example.org/s> <urn:p> <urn:o> ."]);
     }
 
     #[test]

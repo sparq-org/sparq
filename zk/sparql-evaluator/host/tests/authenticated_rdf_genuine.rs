@@ -512,7 +512,10 @@ fn run_case(s: &Setup, case: &Case) -> Value {
         "controls": controls,
         "controls_create_proofs": false,
     });
-    s.evidence.record(case.id, &request, &presentation, details)
+    s.evidence.record(
+        case.id,
+        "published W3C vc-di-eddsa eddsa-rdfc-2022 vector; public data only",
+        &request, &presentation, details)
 }
 
 #[test]

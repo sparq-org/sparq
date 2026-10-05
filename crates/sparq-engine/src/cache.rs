@@ -209,6 +209,10 @@ struct Key {
     version: u64,
     query: Query,
     ebv_semantics: crate::EbvSemantics,
+    // Semantic capacity limits change the result (a capacity error versus a value),
+    // so a result cached under one setting must never answer another.
+    temporal_year_range: Option<(i64, i64)>,
+    strict_numeric_capacity: bool,
 }
 
 struct Entry {
@@ -291,6 +295,8 @@ impl ResultCache {
             version,
             query: query.clone(),
             ebv_semantics: budget.ebv_semantics.unwrap_or_default(),
+            temporal_year_range: budget.temporal_year_range,
+            strict_numeric_capacity: budget.strict_numeric_capacity,
         };
 
         // Fast path: a hit at the current version.
