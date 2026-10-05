@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-vw3ax.11.3 — fail-closed release alias contract check.
+# sq-vw3ax.11.3 — fail-closed release alias contract check.
 #
 # The /download page (site/src/app/download/download-client.tsx) renders direct-download
 # buttons against version-STABLE alias assets served at

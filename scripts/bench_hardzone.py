@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Hard-zone benchmark gate — median-of-history regression check (bench.yml, main pushes).
+# Hard-zone benchmark gate — median-of-history regression check (bench.yml, main pushes).
 #
 # WHY — github-action-benchmark's fail-on-alert compares each metric against the SINGLE previous
 # benchmark-data point. On shared GitHub-hosted runners a one-off slow-runner environment shift
@@ -261,7 +261,7 @@ def log(msg: str) -> None:
 def _is_num(v) -> bool:
     """A finite real number (bool excluded — json true/false must not pass as 1/0).
 
-    [FABLE-5 round 4] the float() probe is guarded: math.isfinite on an out-of-float-range
+    the float() probe is guarded: math.isfinite on an out-of-float-range
     int (e.g. 10**400, which JSON happily round-trips) raises OverflowError, and a gate
     CRASH is neither fail-open nor fail-closed — such a value is simply not a usable
     measurement, so this reports False and evaluate() fails closed with the per-metric
@@ -1263,7 +1263,7 @@ def self_test() -> int:
     check(code == 1 and len(rep["invalid"]) == 1, "non-numeric current value fails closed")
     code, rep = evaluate(_cur([("a", -1.0)]), history_values(series))
     check(code == 1 and len(rep["invalid"]) == 1, "negative current value fails closed")
-    #    [FABLE-5 round 4] bool and out-of-float-range int currents: isinstance(int,float)
+    #    bool and out-of-float-range int currents: isinstance(int,float)
     #    admits bool, and math.isfinite(10**400) raises OverflowError — both must land in
     #    the fail-closed invalid list, never pass as 1/0 and never crash the gate.
     code, rep = evaluate(_cur([("a", True)]), history_values(series))
@@ -1696,7 +1696,7 @@ def self_test() -> int:
     check(code == 1 and len(rep["hard"]) == 1 and not rep["floor_exempt"],
           "sub-floor DETERMINISTIC metric at 2.0x still hard-fails (floor never applies)")
 
-    # 15b. UNIT-AWARE floor ([FABLE-5] round-2 review): the floor is an explicit per-unit
+    # 15b. UNIT-AWARE floor (round-2 review): the floor is an explicit per-unit
     #      allow-list ("us"/"milli"), NOT a raw magnitude comparison. The published history
     #      carries nine `s`-unit series (load_s, text_build_s, rdfs_infer_s, ... at ~0.4-15 s)
     #      whose RAW medians sit under 20 — a raw floor wrongly exempted ALL of them, so a
@@ -1769,7 +1769,7 @@ def self_test() -> int:
           "uniform-shift annotation reports the gated numerator/denominator + GATED wording")
     check("5 of 9" not in out and "no metric reached" not in out,
           "uniform-shift annotation no longer reports total-row numbers")
-    # [FABLE-5 round 3] the stdout report AND the step-summary prose use the gated-only cap
+    # the stdout report AND the step-summary prose use the gated-only cap
     # wording too — the floor-exempt tiny0_us sits at exactly 4.0x in this fixture, so the
     # old unqualified "no >= 4x outlier" claim would be FALSE in both sinks.
     check("no GATED metric reached" in summary and summary.strip() != "",

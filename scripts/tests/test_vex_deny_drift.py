@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.29 (GS-5): hermetic tests for scripts/check-vex-deny-drift.py.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-toze.29 (GS-5): hermetic tests for scripts/check-vex-deny-drift.py.
 #
 # Hermetic w.r.t. git/network: imports the drift-check module and drives its pure
 # evaluate() + the file parsers against in-tmpdir fixtures. NO subprocess, NO live

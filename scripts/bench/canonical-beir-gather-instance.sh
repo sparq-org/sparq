@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-tvzyi — INSTANCE-side canonical BEIR IR-quality gather (FTS quality axis).
+# sq-tvzyi — INSTANCE-side canonical BEIR IR-quality gather (FTS quality axis).
 #
 # 🤖 SPARQ agent. Runs ON the dedicated EC2 gather box (launched by
 # scripts/bench/canonical-beir-bench.sh) from a cloned sparq checkout, as root.
@@ -51,7 +51,7 @@
 #                                   hermetic self-test (test_beir_gather_sentinel.sh)
 set -uo pipefail   # NOT -e: one failed cut/provision step must never kill the gather
 
-# [FABLE-5] DEFINE HOME/USER/LOGNAME BEFORE ANYTHING ELSE — cloud-init's root
+# DEFINE HOME/USER/LOGNAME BEFORE ANYTHING ELSE — cloud-init's root
 # scripts_user context exports none of them, and under `set -u` the first bare $HOME
 # aborts the gather (the sq-hmd7l.32 wave-2 stall). cargo/rustup/java/pip also read
 # $HOME at runtime for their caches.
@@ -88,7 +88,7 @@ SENTINEL_DIR="${SENTINEL_DIR:-/root}"
 
 step() { echo "[STEP $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$SENTINEL_DIR/GATHER_STEP" >&2; }
 
-# [OPUS-5] sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
+# sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
 # unless the launcher passed BENCH_RESULTS_S3_URI in, so a run without the instance
 # profile attached behaves exactly as before (console + SSH pull only).
 . "$HERE/bench-result-egress.sh"

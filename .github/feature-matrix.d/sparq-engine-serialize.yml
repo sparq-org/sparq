@@ -1,6 +1,6 @@
 # Feature-matrix fragment for `sparq-engine-serialize`.
 #
-# [OPUS-4.8] (sq-6vshe.4) Seam 1 of the sparq-engine facade split (RFC
+# (sq-6vshe.4) Seam 1 of the sparq-engine facade split (RFC
 # research/engine-split-rfc.md §4 Option A / §7 Phase A1): the RDF writer matrix — and its
 # in-src tests — moved OUT of `sparq-engine` into this internal sub-crate. So the two legs
 # that used to run `cargo test -p sparq-engine --features {serialize-rdf,streaming-serialization}`
@@ -9,10 +9,10 @@
 # `sparq_engine::serialize`, so the public API + the forwarded feature NAMES are unchanged.
 #
 # CONTRACT (gate-critical, see sparq-engine.yml header): each leg's emitted check-run NAME is
-# `opt-in <name>`, discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME
+# `opt-in <name>`
 # and pinned in scripts/tests/feature-matrix-legnames.golden.txt. Keep `name` free of the whole
 # words "advisory"/"informational" or the leg stops gating.
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file

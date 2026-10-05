@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] #3767: CI drift-check — supply-chain/npm-advisories.md vs package-lock.json.
+# #3767: CI drift-check — supply-chain/npm-advisories.md vs package-lock.json.
 #
 # WHY. Dependabot repeatedly concludes `security_update_not_possible` on this repo's
 # npm graph: a patched release exists for `brace-expansion` / `postcss`, but the

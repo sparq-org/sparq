@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-vw3ax.12.1 — dedicated same-box Apache Jena Fuseki load->serve->query->teardown
-# recipe. Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-vw3ax.12.1 — dedicated same-box Apache Jena Fuseki load->serve->query->teardown
+# recipe.
 #
 # WHY THIS SCRIPT EXISTS
 #   Fuseki (competitors.json id `fuseki`, kind `http-sparql`) is the Tier-1 SPARQL-1.1
@@ -23,7 +23,7 @@
 #             FUSEKI_CACHE_DIR. This is Fuseki's INTENDED bulk path (offline
 #             tdb2.tdbloader, then serve) and the exact competitors.json run_recipe.
 #   * docker: a community Fuseki image (default stain/jena-fuseki). CAUTION — root-caused
-#             [FABLE-5] sq-7d3dj.34: that image (a) ships NO tdb2.tdbloader at all (only
+#             sq-7d3dj.34: that image (a) ships NO tdb2.tdbloader at all (only
 #             TDB1 tdbloader/tdbloader2, not on PATH), and (b) its /docker-entrypoint.sh
 #             does `exec "$@" &` then polls http://localhost:3030 in an UNBOUNDED loop —
 #             so a one-shot loader command never exits and the container hangs forever.
@@ -93,7 +93,7 @@ FUSEKI_JENA_VERSION="${FUSEKI_JENA_VERSION:-6.1.0}"
 FUSEKI_CACHE_DIR="${FUSEKI_CACHE_DIR:-/tmp/sparq-jena-cache}"
 HTTP_PROFILE="${HTTP_PROFILE:-0}"
 
-# [FABLE-5] sq-7d3dj.34 — sha512 pins for the auto-fetched Apache tarballs (Jena 6.1.0,
+# sq-7d3dj.34 — sha512 pins for the auto-fetched Apache tarballs (Jena 6.1.0,
 # from downloads.apache.org/jena/binaries/*.sha512, verified 2026-07-07). Overriding
 # FUSEKI_JENA_VERSION requires overriding BOTH pins too (the fetch refuses unpinned bits).
 FUSEKI_JENA_SHA512="${FUSEKI_JENA_SHA512:-6aa4bb8eeb41c0d05c30f3c91a7eb065bd867af00a6a95fd10f7873b90271c62734b28aebd7ae648d5be6b1e185c9037df90633c471a68b791b19026fd03ea3a}"
@@ -115,7 +115,7 @@ have python3 || die "python3 required (http_sparql_adapter client)"
 [ -f "$ADAPTER" ] || die "shared adapter not found: $ADAPTER"
 
 # ---- auto-fetch the pinned Apache tarballs (jena backend) -------------------------------
-# [FABLE-5] sq-7d3dj.34: makes the INTENDED bulk path (offline tdb2.tdbloader -> serve)
+# sq-7d3dj.34: makes the INTENDED bulk path (offline tdb2.tdbloader -> serve)
 # self-contained on a fresh gather box: download the two official Apache tarballs,
 # sha512-verify against the pins above, extract into FUSEKI_CACHE_DIR (idempotent across
 # recipe invocations — the canonical gather runs this 4x). Refuses unpinned bits.
@@ -227,7 +227,7 @@ start_jena() {
     die "tdb2.tdbloader failed (rc=$rc)"
   fi
   log "starting fuseki-server on :$FUSEKI_PORT over the TDB2 store"
-  # [OPUS-4.8] FUSEKI_BASE into the scratch dir so fuseki-server does NOT litter the caller's
+  # FUSEKI_BASE into the scratch dir so fuseki-server does NOT litter the caller's
   # cwd with a `run/` working area (backups/logs/system_files/templates). Without this the repo
   # root gets polluted every run; the scratch dir is removed by the EXIT trap.
   export FUSEKI_BASE="$STORE_DIR/fuseki-base"
@@ -245,7 +245,7 @@ start_docker() {
   log "pulling $FUSEKI_IMAGE (<= ${FUSEKI_PULL_TIMEOUT}s)"
   timeout "$FUSEKI_PULL_TIMEOUT" docker pull -q "$FUSEKI_IMAGE" >/dev/null \
     || log "pull failed/slow — continuing with any locally cached image"
-  # [FABLE-5] sq-7d3dj.34 — PREFLIGHT + ENTRYPOINT BYPASS (the 2026-07-07 canonical-run
+  # sq-7d3dj.34 — PREFLIGHT + ENTRYPOINT BYPASS (the 2026-07-07 canonical-run
   # root cause). stain/jena-fuseki's /docker-entrypoint.sh does `exec "$@" &` then polls
   # http://localhost:3030 in an UNBOUNDED `until curl` loop, so a one-shot loader command
   # hangs the container FOREVER; and that image ships no tdb2.tdbloader anyway (TDB1
@@ -302,7 +302,7 @@ done
 log "server ready at $ENDPOINT"
 
 # ---- run queries over HTTP via the SHARED adapter, emit TSV ----------------------------
-# [FABLE-5] sq-7d3dj.34: HTTP_PROFILE=1 switches the adapter to --profile (6-col rows:
+# sq-7d3dj.34: HTTP_PROFILE=1 switches the adapter to --profile (6-col rows:
 # keep-alive + fresh-connect full-request latency AND TTFB); the awk below renames col1
 # and reprints ALL columns, so it serves both the 3-col and 6-col contracts.
 PROFILE_FLAG=""
@@ -314,7 +314,7 @@ for q in "$QUERIES_DIR"/*.rq; do
   name="$(basename "$q" .rq)"
   # http_sparql_adapter.py emits `<engine>\t<count>\t<cols...>`; rename col1 to the query name.
   # A transport/parse error (adapter exit 1) or a per-query timeout becomes an ERROR row.
-  # [OPUS-4.8] The brace-group `|| true` is LOAD-BEARING under `set -euo pipefail`: without it a
+  # The brace-group `|| true` is LOAD-BEARING under `set -euo pipefail`: without it a
   # per-query `timeout` firing (rc=124) propagates through `pipefail` and set -e ABORTS the whole
   # script mid-loop (observed on a slow large-result query like SP2Bench q04) instead of recording
   # a single ERROR row and moving on. The group makes the left side of the pipe always exit 0.

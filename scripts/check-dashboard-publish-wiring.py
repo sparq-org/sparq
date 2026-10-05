@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] CI lint (bead sq-53cq): anti-drift guard that every served-class
+# CI lint (bead sq-53cq): anti-drift guard that every served-class
 # source asset under bench/dashboard/ is actually WIRED into the Pages publisher.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
 #
 # WHY THIS GATE EXISTS — the two-hop dashboard publish has no propagation check:
 #   bench/dashboard/* is the in-repo SOURCE OF TRUTH for the public benchmark

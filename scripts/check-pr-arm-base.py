@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] PreToolUse arm guard (bead sq-u59rq): NEVER auto-merge a PR whose BASE
-# is another PR's branch (a "stacked" PR). Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# PreToolUse arm guard (bead sq-u59rq): NEVER auto-merge a PR whose BASE
+# is another PR's branch (a "stacked" PR).
 #
 # WHY THIS GUARD EXISTS — the stacked-PR auto-merge trap (observed 2026-06-21, #1023):
 # When you chain PR B onto PR A's branch to avoid a re-conflict (B's base = A's head
@@ -9,14 +8,13 @@
 # its STACKED BASE (A's branch), not `main`, the moment A merges first. GitHub marks
 # B "merged" and auto-deletes B's head branch (unreopenable) — but B's content never
 # reaches `main`. The fix that day was to re-land identical content as a fresh PR
-# (#1028). The standing rule (AGENTS.md, *Arming model* / *Stacked PRs*): do NOT arm
+# (#1028). The standing rule (AGENTS.md, *Contribution workflow*): do NOT arm
 # auto-merge on a PR whose base is not `main`. Stack strictly sequentially, or retarget
 # the upper PR's base back to `main` (`gh pr edit <n> --base main`) once the lower PR
 # lands, THEN arm it.
 #
 # WHAT THIS DOES: it is a deterministic, network-light **PreToolUse hook** on `Bash`
-# (sibling to the sparq-perf-reviewer agent-hook in .claude/settings.json) that fires
-# on the arming step. It:
+# (wired in .claude/settings.json) that fires on the arming step. It:
 #   1. reads the PreToolUse hook JSON from stdin (tool_input.command),
 #   2. ALLOWs untouched anything that is NOT a `gh pr merge … --auto` arming command,
 #   3. for an arming command, parses the PR number, asks `gh pr view <n> --json
@@ -25,22 +23,19 @@
 #      (default `main`) — i.e. the PR is stacked on another branch — with a 🤖 SPARQ
 #      reason telling the operator to retarget the base to `main` (or land sequentially)
 #      before arming; otherwise ALLOWs.
-# It is cheap (no model spend) and complements the perf-reviewer: both run on the same
-# matcher and BOTH must allow for the arm to proceed (any deny blocks the tool call).
+# It is cheap (no model spend).
 #
-# [OPUS-5] SECOND GUARD, issue #1135 — NEVER let an agent arm the release-plz RELEASE PR.
-# This hook is the choke point for AGENT-typed arms (`.claude/workflows/*.js`, hand-written
-# `gh pr merge … --auto`), which bypass scripts/auto-arm.py and scripts/rearm-sweeper.py
-# entirely. Merging the Release PR cuts a `v*` tag and — once `publish = true` lands in
+# SECOND GUARD, issue #1135 — NEVER let an agent arm the release-plz RELEASE PR.
+# This hook is the choke point for agent-typed arms (hand-written `gh pr merge … --auto`). Merging the Release PR cuts a `v*` tag and — once `publish = true` lands in
 # release-plz.toml — `cargo publish`es 37 crates. A crates.io version can NEVER be
 # unpublished, so this branch is FAIL-CLOSED, keyed on branch/author/title
 # (scripts/release_pr_guard.py) and never on a label.
 #
 # FAILURE DISPOSITION — DIFFERENT PER AXIS, deliberately:
 #   * STACKED-BASE axis: unchanged, FAIL-OPEN on this guard's own errors. A wrongly-merged
-#     stacked PR is recoverable (#1023 was re-landed as #1028), and the perf-reviewer +
-#     ci-summary + branch protection still gate the merge.
-#   * RELEASE-PR axis: FAIL-CLOSED. [OPUS-5] #1135 CHANGES THE PRE-EXISTING BEHAVIOUR: a
+#     stacked PR is recoverable (#1023 was re-landed as #1028), and the required
+#     `ci-fast` check + branch protection still gate the merge.
+#   * RELEASE-PR axis: FAIL-CLOSED. #1135 CHANGES THE PRE-EXISTING BEHAVIOUR: a
 #     failed `gh pr view` now DENIES instead of allowing. Rationale: the outcome it
 #     protects against is irreversible, and the cost of the deny is near zero — if `gh pr
 #     view` cannot answer, the very next `gh pr merge` almost certainly cannot either, so
@@ -53,8 +48,7 @@
 #   * `gh pr merge <n> --squash` (no `--auto`) and `--admin` — a DIRECT merge, which is
 #     the more dangerous operation; the deliberate scope choice is that this hook governs
 #     ARMING, and the self-test pins it,
-#   * `gh api graphql … enablePullRequestAutoMerge(…)` — the shape scripts/auto-arm.py
-#     itself uses — and `gh api -X PUT repos/:o/:r/pulls/<n>/merge`,
+#   * `gh api graphql … enablePullRequestAutoMerge(…)` and `gh api -X PUT repos/:o/:r/pulls/<n>/merge`,
 #   * backslash line-continuation between `gh` and `pr merge`, and shell-variable
 #     indirection (`M="pr merge"; gh $M <n> --auto`).
 # What actually bounds all of those is the BELT, not this hook:
@@ -91,7 +85,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# [OPUS-5] #1135. A missing guard module must NOT degrade to "allow": the stub denies
+# #1135. A missing guard module must NOT degrade to "allow": the stub denies
 # every arm. This hook is imported from an ordinary (non-sparse) checkout, so the stub
 # is a last-resort safety net, not an expected path.
 try:
@@ -218,7 +212,7 @@ def pr_facts(pr: str, trunk: str) -> tuple[dict | None, str | None]:
                 "view",
                 pr,
                 "--json",
-                # [OPUS-5] #1135: headRefName/author/title are the release-PR guard's
+                # #1135: headRefName/author/title are the release-PR guard's
                 # inputs. Dropping one makes the guard fail CLOSED, never open.
                 "baseRefName,headRefName,number,author,title",
             ],
@@ -263,7 +257,7 @@ def decide(command: str, trunk: str, base_lookup) -> dict:
         return _allow("not a `gh pr merge … --auto` arming command; base guard N/A")
     pr = parse_pr_number(command)
     if pr is None:
-        # [OPUS-5] #1135: an UNIDENTIFIABLE PR cannot be proven not to be the Release PR,
+        # #1135: an UNIDENTIFIABLE PR cannot be proven not to be the Release PR,
         # and this is an arm command, so the release axis fails CLOSED here — a change
         # from the previous allow. Denying costs one retry; admitting can publish.
         return _deny(
@@ -273,7 +267,7 @@ def decide(command: str, trunk: str, base_lookup) -> dict:
         )
     facts, error = base_lookup(pr)
     if error is not None:
-        # [OPUS-5] #1135: the release axis fails CLOSED on a lookup failure. See the
+        # #1135: the release axis fails CLOSED on a lookup failure. See the
         # header — a `gh pr view` that cannot answer means the following `gh pr merge`
         # almost certainly cannot either, so the deny forfeits little and the outcome it
         # prevents (an irreversible crates.io publish) cannot be undone at all.
@@ -286,7 +280,7 @@ def decide(command: str, trunk: str, base_lookup) -> dict:
         facts = {"base": facts, "head_ref": None, "author_login": None, "title": None}
     base = facts.get("base")
 
-    # [OPUS-5] #1135 — the RELEASE-PR axis, checked BEFORE the stacked-base axis because
+    # #1135 — the RELEASE-PR axis, checked BEFORE the stacked-base axis because
     # the Release PR's base IS the trunk (so the stacked check would happily allow it).
     release_reason = release_pr_guard.arm_block_reason(
         head_ref=facts.get("head_ref"),
@@ -339,7 +333,7 @@ def self_test() -> int:
     def base_error(_pr):
         return None, "gh CLI not found"
 
-    # [OPUS-5] #1135: the release-plz Release PR — base IS `main`, so ONLY the release
+    # #1135: the release-plz Release PR — base IS `main`, so ONLY the release
     # axis can catch it. Its head branch, author, and title are all release-plz's.
     def base_release_pr(_pr):
         return (
@@ -398,7 +392,7 @@ def self_test() -> int:
             "deny",
         ),
         (
-            # [OPUS-5] #1135 BEHAVIOUR CHANGE (was: fail OPEN / allow). An arm whose PR
+            # #1135 BEHAVIOUR CHANGE (was: fail OPEN / allow). An arm whose PR
             # cannot be resolved cannot be proven not to be the Release PR, and the
             # outcome that admits — a crates.io publish — is irreversible.
             "arm, gh lookup error → fail CLOSED (deny, #1135)",
@@ -474,7 +468,7 @@ def self_test() -> int:
         if not ok:
             failures += 1
 
-    # [GPT-5.6] #3605: exercise the real hook command with fixture input from both
+    # #3605: exercise the real hook command with fixture input from both
     # the repository root and an unrelated cwd. Claude Code deliberately runs hooks
     # in the shell's current cwd, so the settings entry MUST anchor the guard through
     # CLAUDE_PROJECT_DIR. The launcher's own missing/unreadable/script-error path is
@@ -507,7 +501,7 @@ def self_test() -> int:
         )
         fake_gh.chmod(0o755)
 
-        # [OPUS-5] #1135 END-TO-END: a second fake `gh` that answers with the LIVE Release
+        # #1135 END-TO-END: a second fake `gh` that answers with the LIVE Release
         # PR shape — base `main` (so the stacked axis allows it), head branch
         # `release-plz-main`, author github-actions, title `chore: release …`. Running the
         # REAL settings hook command against it proves the deny travels the whole wired
@@ -617,7 +611,7 @@ def self_test() -> int:
         #  (a) EXIT ZERO WITH AN EXPLICIT DECISION, always. A non-zero PreToolUse hook
         #      exit is fail-closed in Claude Code across the whole `Bash` matcher and
         #      caused a live all-Bash deadlock; that is what the exit-0 half protects.
-        #  (b) DENY THE ARM. [OPUS-5] PR #4192 review: the wrapper used to answer `allow`
+        #  (b) DENY THE ARM. PR #4192 review: the wrapper used to answer `allow`
         #      here, which inverted this script's deliberate fail-closed release axis at
         #      the exact moment there is no guard at all — an agent in a checkout where
         #      the script is missing could arm the Release PR. It now denies.

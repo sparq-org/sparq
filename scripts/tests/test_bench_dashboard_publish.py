@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6-ASTRA] Execute the real dashboard shell step against local Git races.
+"""Execute the real dashboard shell step against local Git races.
 
 Only file:// transport is enabled. A Git wrapper inserts deterministic competing
 commits before the publisher's push; the publisher itself is extracted unchanged

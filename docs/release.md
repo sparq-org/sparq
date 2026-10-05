@@ -644,9 +644,9 @@ automated pipeline and the registry. All four are already in place; none of them
 you flip.
 
 1. **The Release PR can never be armed.** `scripts/release_pr_guard.py` is the single
-   predicate every arming/merging path consults — `auto-arm.py`, `rearm-sweeper.py`, the
-   `check-pr-arm-base.py` PreToolUse hook (which is where agent-typed `gh pr merge --auto`
-   goes), `batch-merge.py`, `pr-backlog.py`. It keys on **head branch, author and title —
+   predicate the arming path consults — the `check-pr-arm-base.py` PreToolUse hook (which
+   is where agent-typed `gh pr merge --auto` goes; the automated arm/merge sweeps were
+   removed). It keys on **head branch, author and title —
    never a label**, because anything holding `pull-requests: write` can add or remove a
    label. Adding `review:pass` to the Release PR does not make it armable. It fails closed:
    an unknown head branch refuses rather than admits. The Release PR is merged by a
@@ -747,7 +747,8 @@ when that probe succeeds.
 
 **Recovery if that App credential is removed or expires — do exactly one:**
 1. Provision `ORCHESTRATOR_APP_ID` + `ORCHESTRATOR_APP_PRIVATE_KEY` (the App used by
-   `batch-merge.yml`; install it on this repo with contents + pull-requests write), **or**
+   `release-plz.yml`'s token mint; install it on this repo with contents + pull-requests
+   write), **or**
 2. add a `RELEASE_PLZ_TOKEN` repo secret (fine-grained PAT, same two permissions), **or**
 3. enable the repo setting above.
 

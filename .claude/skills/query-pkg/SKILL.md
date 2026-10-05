@@ -5,7 +5,7 @@ description: Answer a "what does the repo say about X, where was Y decided, what
 
 # Query the PKG — introspect → ground → ask
 
-[OPUS-4.8] Bead **sq-2m6zm.3** (epic sq-2m6zm). Design record:
+Bead **sq-2m6zm.3** (epic sq-2m6zm). Design record:
 `research/dogfooding-sparq-knowledge-graph.md` (§4.1 frontier queries, §6 worked
 questions). 🤖 SPARQ agent — dogfooding sparq as a project knowledge graph.
 
@@ -55,7 +55,7 @@ arms, overlays, and tasks live in `bench/fo-km/`.
 
 ## Cheap-model NL-tool — the DEFAULT path (delegate to Haiku)
 
-[OPUS-4.8] **For a PKG-answerable question, do NOT run the round-trip yourself in the
+**For a PKG-answerable question, do NOT run the round-trip yourself in the
 expensive orchestrator. DELEGATE it as a natural-language tool call to a `model:haiku`
 sub-agent.** The cheap model does the whole `introspect → ground → SPARQL → run → NL`
 loop; the orchestrator (Opus) only emits the question and reads the answer back. It
@@ -85,7 +85,7 @@ the answer was computed from a real query over the data, not guessed — the sou
 echo. If the returned SPARQL does not match the question, re-ask or fall back; never
 accept a bare NL answer with no query behind it.
 
-**Abstain → fall back (the safe-default rule).** [OPUS-4.8] The PKG is a Phase-1 head
+**Abstain → fall back (the safe-default rule).** The PKG is a Phase-1 head
 slice, so it cannot answer every question — and the safe behaviour is to **abstain, not
 guess**. An empty / 0-row result (or an explicit `NOT_IN_PKG` from the sub-agent) is the
 honest "not in the head slice / none outstanding" answer; the sub-agent brief above
@@ -95,7 +95,7 @@ scoped to PKG-answerable questions *by construction*, so a miss is expected and 
 failure of the flow. Never paper over an abstain with a fabricated answer.
 
 **Tier escalation — Haiku by default, escalate only when accuracy is critical.**
-[OPUS-4.8] The cheap-model NL-tool (Haiku, arm **C**) is the default precisely because
+The cheap-model NL-tool (Haiku, arm **C**) is the default precisely because
 it is the cheapest arm at equal quality on PKG-answerable tasks. For an
 **accuracy-critical** lookup — one where a cheap-model misread would be costly — escalate
 a model tier: run the round-trip on a Sonnet/Opus `pkg-query` (this is arm **B**, which
@@ -186,10 +186,10 @@ Returned answer (sourced + confidence-tagged):
 
 ```text
 label  |  section  |  conf
-A PR merges only when ci-summary is green and every review thread is resolved
-    |  AGENTS.md#contribution-workflow--prs-reviews-resolved-the-ci-summary-gate  |  0.98
-A verified-clean non-perf PR auto-arms; never arm auto-merge on a stacked PR whose base is not main
-    |  AGENTS.md#contribution-workflow--prs-reviews-resolved-the-ci-summary-gate  |  0.93
+A PR merges only when ci-fast is green and every review thread is resolved
+    |  AGENTS.md#contribution-workflow--prs-reviews-resolved-ci-fast  |  0.98
+Never merge a stacked PR whose base is not main; retarget it first
+    |  AGENTS.md#contribution-workflow--prs-reviews-resolved-ci-fast  |  0.93
 2 row(s).
 ```
 
@@ -289,7 +289,7 @@ follow-up — only the **agent flavor** (no API key) ships here.
 
 ## Authoring new Findings — the write-path (`sq-mztg8.2`)
 
-[OPUS-4.8] The `pkg:Finding` tier this skill queries is **authored**, not hand-written as
+The `pkg:Finding` tier this skill queries is **authored**, not hand-written as
 raw Turtle. To add or edit a Finding, edit the compact, IRI-free YAML-LD source
 `crates/sparq-kb/ingest/agents-findings.yaml.ld` (generalising the shipped
 `sec-prop.yaml.ld` pattern), then recompile:
@@ -315,7 +315,7 @@ parser + resolver are self-tested by `scripts/tests/test_yamlld_compile.py`). Se
 
 ## Literature-ingestion scaffolding — fixtures only (`literature` feature, `sq-2489d.5`)
 
-[OPUS-4.8] The **scaffolding** for the scaled, provenance-stamped literature-trawling tier
+The **scaffolding** for the scaled, provenance-stamped literature-trawling tier
 (GenAI-KB Phase 5, design `research/provenance-driven-genai-kb.md` §4/§5) lives behind the
 default-OFF `literature` feature in `crates/sparq-kb/src/literature/`. It exercises the
 `[connector] → [normalise] → [extract (record/replay)] → [ground] → [emit TTL] →

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Per-crate test-PRESENCE gate (sq-hbg7).
+# Per-crate test-PRESENCE gate (sq-hbg7).
 #
 # A line-% ratchet can MISS a whole crate going untested: delete every test in a crate
 # and its line% just drops a little (or, for a subprocess-driven crate like sparq-cli,
@@ -88,7 +88,7 @@ def seed(path, allow_lower):
         res[crate] = entry
     doc = {
         "_comment": [
-            "[OPUS-4.8] TEST-PRESENCE gate (sq-hbg7). Per-crate FLOOR on the number of "
+            "TEST-PRESENCE gate (sq-hbg7). Per-crate FLOOR on the number of "
             "#[test]/#[tokio::test]/#[rstest] functions + whether the crate keeps its "
             "tests/ integration dir. Catches a whole crate losing its tests — which the "
             "line-% ratchet (bench/coverage-floor.json) can miss (esp. the subprocess-"

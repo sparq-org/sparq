@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Disk guard — the per-tick disk-pressure broom (bead sq-4vo9m).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Disk guard — the per-tick disk-pressure broom (bead sq-4vo9m).
 #
 # disk-guard.sh [--dry-run | --apply] [--warn-gb N] [--critical-gb N]
 #               [--mount PATH] [--main PATH] [--root DIR] [--base REF]

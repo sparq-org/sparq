@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.26 (GS-1 / NTIA N1): assert every cargo component in a normalized
-# CycloneDX SBOM carries a per-component `supplier` (NTIA "Supplier Name" slot). Authored
-# by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-toze.26 (GS-1 / NTIA N1): assert every cargo component in a normalized
+# CycloneDX SBOM carries a per-component `supplier` (NTIA "Supplier Name" slot).
 #
 # WHY: cargo-cyclonedx 0.5.9 leaves `supplier`/`publisher` empty on every component, so the
 # literal NTIA minimum-element "Supplier Name" slot was unpopulated (gap GS-1). The

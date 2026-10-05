@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.25 — bin-packed MULTI-AXIS canonical EC2 bench runner.
+# sq-hmd7l.25 — bin-packed MULTI-AXIS canonical EC2 bench runner.
 #
 # WHY: the workload-triage cost discipline says small benchmark axes do NOT get one
 # EC2 box each (research/comparative-benchmarking-everything.md §4, point 5). This

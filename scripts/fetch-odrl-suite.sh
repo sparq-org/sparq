@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-tmsd6: Fetches the SolidLab ODRL-Test-Suite at a PINNED commit into
+# sq-tmsd6: Fetches the SolidLab ODRL-Test-Suite at a PINNED commit into
 # the gitignored tests/odrl-test-suite/ directory. Test data is FETCHED, never
 # committed to this repo (mirrors scripts/fetch-conformance.sh / the W3C suites) —
 # run this before `cargo test -p sparq-policy --test odrl_test_suite`.
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# [OPUS-4.8] sq-nj0pd: retry the shallow clone/fetch (shared helper) so a transient
+# sq-nj0pd: retry the shallow clone/fetch (shared helper) so a transient
 # GitHub reset doesn't red-gate the ODRL conformance lane. Pin check unchanged.
 # shellcheck source=scripts/lib/fetch-retry.sh
 . "$ROOT/scripts/lib/fetch-retry.sh"

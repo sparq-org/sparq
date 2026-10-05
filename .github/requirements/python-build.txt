@@ -1,4 +1,4 @@
-# Hash-pinned build/test tools for the Python-bindings CI (python.yml). [OPUS-4.8]
+# Hash-pinned build/test tools for the Python-bindings CI (python.yml).
 #
 # Scorecard PinnedDependenciesID requires CI pip installs be pinned by HASH, not
 # just `==` version. Installed with `pip install --require-hashes -r`, which

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-d8or — anti-drift CI glue: offline link-check over the BUILT docs-site HTML.
+# sq-d8or — anti-drift CI glue: offline link-check over the BUILT docs-site HTML.
 #
 # WHY: the docs-quality `internal-links` job (bead sq-5fd1) runs lychee --offline over the
 # repo's MARKDOWN, but the published GitHub Pages site (the Next.js static export under
@@ -12,7 +12,7 @@
 # WHAT: lychee --offline (no network, deterministic) over every *.html under the export,
 # validating relative links AND heading anchors (--include-fragments).
 #
-# [OPUS-4.8] sq-uj38w — the org-migration Pages cutover moved the site to the ROOT of the custom
+# sq-uj38w — the org-migration Pages cutover moved the site to the ROOT of the custom
 # domain https://sparq.jeswr.org/, so the Pages build is now ROOT-RELATIVE (basePath '',
 # trailingSlash:true — site/next.config.ts + the pages.yml "Build static site" step set
 # NEXT_PUBLIC_BASE_PATH=''). Every INTERNAL link in the emitted HTML is now an absolute path like
@@ -21,7 +21,7 @@
 # fragment-FREE directory link (/about/) straight to <out>/about/index.html — so NO prefix-strip
 # remap is needed any more (the old `/sparq` rules 1 & 2 are gone with the sub-path).
 #
-# [OPUS-4.8] sq-bpoey / sq-uj38w — ONE remap survives, for CROSS-PAGE path+fragment links like
+# sq-bpoey / sq-uj38w — ONE remap survives, for CROSS-PAGE path+fragment links like
 # `/capabilities/#privacy` (homepage theme grid + the removed /surface/* redirect stubs point at
 # /capabilities/#<theme>). With `--root-dir`, lychee resolves a *directory* link that carries a
 # fragment to the bare directory path (e.g. file://<out>/capabilities) and does NOT fall through to
@@ -70,6 +70,10 @@ echo "check-site-links: lychee --offline over ${OUT_ABS}/**/*.html (root-relativ
 #      fragment. `/?` makes it match both `/#frag` and the slashless `#frag` normalisation.
 # `dev/` (the overlaid benchmark dashboard, a separate first-party artifact written by bench.yml
 # onto benchmark-data) is excluded: it is not part of THIS site's source and carries its own links.
+# `guide/` (the overlaid mdBook guide, issue #5022) is excluded as an INPUT for the same reason: its
+# broken-include gate is scripts/build-guide.sh, and its link-fixup output is not lychee-offline
+# shaped. It must still EXIST under the export when this runs (pages.yml overlays it first), so the
+# site's own links INTO /guide/ (the app-shell Docs link) are resolved and checked against it.
 lychee \
   --offline \
   --include-fragments \
@@ -78,4 +82,5 @@ lychee \
   --remap "file://${OUT_ABS}/((?:[^#]*/)?[^#/.]+)/?#(.+) file://${OUT_ABS}/\$1/index.html#\$2" \
   --remap "file://${OUT_ABS}/?#(.+) file://${OUT_ABS}/index.html#\$1" \
   --exclude-path "${OUT_ABS}/dev" \
+  --exclude-path "${OUT_ABS}/guide" \
   "${OUT_ABS}/**/*.html"

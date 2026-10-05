@@ -1,4 +1,4 @@
-# [OPUS-4.8] Governance: bug-report issue form (bead sq-rau7).
+# Governance: bug-report issue form (bead sq-rau7).
 name: Bug report
 description: Report a reproducible problem in sparq (engine, CLI, server, or a binding).
 title: "[bug]: "

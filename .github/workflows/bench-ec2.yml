@@ -2,7 +2,7 @@ name: Benchmarks (EC2)
 
 # Cost-capped EC2-deferred benchmark (roadmap G3).
 #
-# ═══ RETIRED AS AN AUTOMATED LANE — MANUAL DISPATCH ONLY ([OPUS-5] #3784) ═══
+# ═══ RETIRED AS AN AUTOMATED LANE — MANUAL DISPATCH ONLY (#3784) ═══
 # The AWS OIDC role this workflow assumes (`vars.AWS_BENCH_ROLE_ARN`) was DELIBERATELY
 # DESCOPED by the orchestration design ("NO EC2, and NO billable runners… the EC2
 # build-farm, EC2 codex worker, LOCAL-vs-EC2 tiering, and the AWS OIDC role are all out
@@ -18,8 +18,7 @@ name: Benchmarks (EC2)
 #     only the nightly would have left the same bug on a slower clock.
 #   * NOT declared advisory. Muting a permanently-broken gate to green a dashboard is
 #     exactly what #3774's declared-not-inferred rule exists to prevent; a registry entry
-#     here would have been the easy path, not the honest one. Pinned by a test
-#     (scripts/tests/test_ci_summary_gate.py::TestDescopedEc2Lane).
+#     here would have been the easy path, not the honest one.
 #   * MAINTAINER-RUN EC2 BENCHMARKING IS NOT DESCOPED and is NOT removed. Both campaigns
 #     stay reachable via `workflow_dispatch` (pick the lane with the `lane` input), and
 #     every EC2 bench script + doc is untouched — notably scripts/ec2-bench.sh and the
@@ -44,7 +43,7 @@ name: Benchmarks (EC2)
 # i-00f76802f345b6b77). Select with the `lane` dispatch input:
 #   * ec2-bench (`lane: heavy`) — the HEAVY campaign at the ~2M-triple scale (the
 #     roadmap-G3 large-hardware run). Publishes to dev/bench-ec2.
-#   * nightly-full-bench (`lane: full-suite`) — [FABLE-5] sq-6vshe.6, MAINTAINER-DIRECTED. Runs the
+#   * nightly-full-bench (`lane: full-suite`) — sq-6vshe.6, MAINTAINER-DIRECTED. Runs the
 #     FULL NOISY TIMING SUITE (query latencies + well-known sp2b/dbpsb/watdiv/bsbm/lubm + the cargo-only
 #     fts/geo/vector/rsp/hdt/solid/nlq/zk hooks) at the SAME 200k CI scale the per-commit series used, on
 #     a quiet dedicated spot instance (contention-free wall-clock, unlike a shared GitHub runner). This is
@@ -54,7 +53,7 @@ name: Benchmarks (EC2)
 #     dir, so it collides with neither the per-commit dev/bench nor the heavy dev/bench-ec2). The job id
 #     and the `sparq engine (nightly full suite)` series name are KEPT so the published dashboard history
 #     stays continuous; its DISPLAY name no longer claims a nightly cadence it does not have.
-#     HONEST STATUS ([OPUS-5] #3784): with the cron retired and the OIDC role descoped, the at-scale
+#     HONEST STATUS (#3784): with the cron retired and the OIDC role descoped, the at-scale
 #     timing series is NOT being collected — it is dispatch-on-demand, not automated. Saying otherwise
 #     would be the doc drift this change exists to remove.
 #
@@ -64,7 +63,7 @@ name: Benchmarks (EC2)
 # $5/month EC2 bench cap at their original weekly+nightly cadence; back any revived cadence with an AWS
 # Budgets alarm on the purpose=sparq-ci-bench tag.
 on:
-  # [OPUS-5] #3784: NO `schedule:` — see the RETIRED note above. A cron tick against a
+  # #3784: NO `schedule:` — see the RETIRED note above. A cron tick against a
   # descoped OIDC role is a guaranteed gating failure on `main`, every night.
   workflow_dispatch:
     inputs:
@@ -77,7 +76,7 @@ on:
           - heavy
           - full-suite
 
-# [OPUS-4.8] Least-privilege default (Scorecard TokenPermissions): top-level read-only;
+# Least-privilege default (Scorecard TokenPermissions): top-level read-only;
 # the single ec2-bench job opts into the writes it genuinely needs (per-job below).
 permissions:
   contents: read
@@ -89,8 +88,8 @@ concurrency:
 jobs:
   ec2-bench:
     name: heavy benchmark on EC2 (spot, manual dispatch)
-    # [FABLE-5] sq-6vshe.6: the HEAVY campaign, now maintainer-dispatched (`lane: heavy`, the
-    # default). [OPUS-5] #3784: the `vars.AWS_BENCH_ROLE_ARN != ''` clause is the ROLE-PRESENT
+    # sq-6vshe.6: the HEAVY campaign, now maintainer-dispatched (`lane: heavy`, the
+    # default). #3784: the `vars.AWS_BENCH_ROLE_ARN != ''` clause is the ROLE-PRESENT
     # GUARD — while the AWS OIDC role is descoped this job SKIPS visibly instead of burning 12
     # credential retries and posting a gating failure. It is not a mute: `skipped` here means
     # "the descoped infrastructure was not there", the guard is one reviewable clause naming the
@@ -100,7 +99,7 @@ jobs:
       github.event.inputs.lane == 'heavy' &&
       vars.AWS_BENCH_ROLE_ARN != ''
     runs-on: ubuntu-latest
-    # [OPUS-4.8] Job-scoped writes (least privilege):
+    # Job-scoped writes (least privilege):
     #   id-token: write — assume the short-lived, tag-scoped IAM role via OIDC
     #   contents: write — github-action-benchmark pushes to the benchmark-data branch (and
     #                     the bootstrap step creates that orphan branch if absent)
@@ -117,7 +116,7 @@ jobs:
           aws-region: eu-west-2
       - name: Launch spot, benchmark, always-terminate
         run: bash scripts/ec2-bench.sh
-      # [OPUS-4.8] First-run bootstrap (same rationale as bench.yml): create the
+      # First-run bootstrap (same rationale as bench.yml): create the
       # shared benchmark-data history branch on origin if it does not exist yet,
       # so github-action-benchmark's `git fetch ... benchmark-data:benchmark-data`
       # does not hard-fail with "couldn't find remote ref". Idempotent.
@@ -151,7 +150,7 @@ jobs:
           auto-push: true
           gh-pages-branch: benchmark-data
           benchmark-data-dir-path: dev/bench-ec2
-          # [OPUS-4.8] (noise-reduction-bench-selfmonitor) NO alert-comment-cc-users — the maintainer
+          # (noise-reduction-bench-selfmonitor) NO alert-comment-cc-users — the maintainer
           # is never @-mentioned on a benchmark alert. This WEEKLY heavy lane is a cron run with no PR
           # to block, so it stays comment-only (fail-on-alert: false) and does not hard-fail; the
           # nightly full-suite lane below carries the two-zone gating + auto-attribution. This is a
@@ -162,21 +161,21 @@ jobs:
           comment-on-alert: true
           fail-on-alert: false
 
-  # [FABLE-5] (sq-6vshe.6 heavy-lane placement, MAINTAINER-DIRECTED) The FULL-SUITE lane —
+  # (sq-6vshe.6 heavy-lane placement, MAINTAINER-DIRECTED) The FULL-SUITE lane —
   # the destination for the noisy timing benchmarks moved OFF the per-PR / merge_group bench gate. It
   # runs ci-bench.sh's FULL suite (query latencies + all well-known + cargo-only latency suites) at the
   # 200k CI scale on a QUIET dedicated spot instance (contention-free wall-clock, unlike a shared GitHub
   # runner), reusing the SAME cost-capped EC2 rails as ec2-bench (spot + purpose=sparq-ci-bench tag + the
   # always-run terminate/delete cleanup trap in scripts/ec2-bench.sh). Publishes the full series to
   # dev/bench-nightly.
-  # [OPUS-5] #3784 HONEST STATUS: this lane's cron is RETIRED and its OIDC role is descoped, so the
+  # #3784 HONEST STATUS: this lane's cron is RETIRED and its OIDC role is descoped, so the
   # at-scale timing series is collected ONLY when a maintainer dispatches `lane: full-suite` with
   # vars.AWS_BENCH_ROLE_ARN provisioned. The dashboard trend is therefore NOT currently being
   # maintained — the previous "the tracking is MOVED, not lost" claim no longer holds and has been
   # removed rather than left to rot. Reviving the cadence = re-adding a `schedule:` block AND the role.
   nightly-full-bench:
     name: full-suite benchmark on EC2 (spot, manual dispatch)
-    # [OPUS-5] #3784: dispatched with `lane: full-suite`. The old check name — `nightly full-suite
+    # #3784: dispatched with `lane: full-suite`. The old check name — `nightly full-suite
     # benchmark on EC2 (spot)` — is deliberately gone: it was the permanently-failing GATING
     # check-run that made `main` unable to go green, and it named a nightly cadence this lane no
     # longer has. `lane: heavy` routes to ec2-bench above instead, so the two never double-launch.
@@ -189,7 +188,7 @@ jobs:
     # Job-scoped writes (least privilege):
     #   id-token: write — assume the short-lived, tag-scoped IAM role via OIDC
     #   contents: write — github-action-benchmark pushes to the benchmark-data branch
-    #   issues: write   — [OPUS-4.8] the nightly-attribution step files a `bench-regression` issue
+    #   issues: write   — the nightly-attribution step files a `bench-regression` issue
     #                     (P1, role:impl) naming the ranked suspect commits — instead of @-mentioning
     #                     anyone — so the regression enters the autonomous dispatch frontier.
     permissions:
@@ -236,7 +235,7 @@ jobs:
               benchmark-data:benchmark-data
             echo "Created and pushed orphan benchmark-data branch."
           fi
-      # [OPUS-4.8] (noise-reduction-bench-selfmonitor) Capture the previously-published nightly point
+      # (noise-reduction-bench-selfmonitor) Capture the previously-published nightly point
       # BEFORE the track step pushes the new one. github-action-benchmark only auto-pushes on a green
       # run, so the latest published point IS the "last green nightly baseline": its data.js gives the
       # previous per-metric values (for the regression comparison) and its newest entry's commit id is
@@ -268,7 +267,7 @@ jobs:
           auto-push: true
           gh-pages-branch: benchmark-data
           benchmark-data-dir-path: dev/bench-nightly
-          # [OPUS-4.8] (noise-reduction-bench-selfmonitor) Two-zone thresholds (soft 175% / hard 200%)
+          # (noise-reduction-bench-selfmonitor) Two-zone thresholds (soft 175% / hard 200%)
           # derived by scripts/bench-thresholds.py from the per-commit benchmark-data history (the
           # nightly runs the SAME suite at the same 200k scale, so the same noise envelope applies; the
           # quiet EC2 box is if anything less noisy, so these are conservative). comment-only here
@@ -279,7 +278,7 @@ jobs:
           fail-threshold: '200%'
           comment-on-alert: true
           fail-on-alert: false
-      # [OPUS-4.8] NIGHTLY ATTRIBUTION (noise-reduction-bench-selfmonitor). On a HARD-zone regression
+      # NIGHTLY ATTRIBUTION (noise-reduction-bench-selfmonitor). On a HARD-zone regression
       # (>=200%) vs the last green nightly baseline, rank the most-likely culprit commits by
       # intersecting each commit's touched crate paths with the crates the regressed suite exercises,
       # and file ONE `bench-regression` issue per cluster (P1, role:impl, area:<crate>) with the
@@ -314,14 +313,14 @@ jobs:
             --repo-url "${{ github.server_url }}/${{ github.repository }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             || echo "::warning::nightly attribution filer failed (non-fatal)"
-      # [FABLE-5] DEMOTION AUTO-BEAD PROTOCOL (research/ci-structural-speedup.md §7; mirrors fuzz.yml +
+      # DEMOTION AUTO-BEAD PROTOCOL (research/ci-structural-speedup.md §7; mirrors fuzz.yml +
       # differential.yml). The full noisy timing suite was DEMOTED off per-PR/merge_group to this
       # lane. If a dispatched run FAILS (a suite correctness diff regressed, or the run itself broke) that
       # failure must not silently rot — it auto-files a standing P1 bead + a GitHub issue naming the lane
       # + run, so a finding the fast per-PR deterministic slice could not have caught is tracked to
       # closure. gh failures degrade to warnings (the lane is already red); the JSONL append is
       # best-effort (protected-main GH013 push may decline — the issue is the reliable channel).
-      # [OPUS-5] #3784: unreachable while the OIDC role is descoped — the role-present guard skips the
+      # #3784: unreachable while the OIDC role is descoped — the role-present guard skips the
       # whole job, so a credentials failure can no longer manufacture a demoted-lane bead every night.
       - name: File a demoted-lane bead + issue on a full-suite run failure
         if: failure()

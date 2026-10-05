@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] sq-ffaa9 — hermetic self-test for the durable S3 result-egress channel
+# sq-ffaa9 — hermetic self-test for the durable S3 result-egress channel
 # (scripts/bench/bench-result-egress.sh + scripts/bench/bootstrap-bench-iam.sh).
 #
 # 🤖 SPARQ agent. NO AWS ACCOUNT, NO NETWORK, NO /root: `aws` is PATH-shadowed by a stub

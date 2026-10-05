@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.10 (epic sq-hmd7l) — same-box OWL DL CONSISTENCY comparison:
+# sq-hmd7l.10 (epic sq-hmd7l) — same-box OWL DL CONSISTENCY comparison:
 # sparq-reason-dl (scoped ALCH tableau) vs HermiT and Openllet (full OWL 2 DL tableau
 # reasoners) on ORE (OWL Reasoner Evaluation) competition corpus ontologies, emitting one
 # competitor-results ENVELOPE per ontology. Mirrors scripts/bench/reason-el-same-box.sh.

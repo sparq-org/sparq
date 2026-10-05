@@ -204,8 +204,8 @@ python3 scripts/tests/test_vex_deny_drift.py   # hermetic self-test (11 cases in
 ```
 
 Wired as `.github/workflows/supply-chain.yml#vex-deny-sync` (job name
-`VEX ↔ deny.toml sync (GS-5) — GATING`; no `advisory`/`informational` whole word, so ci-summary gates
-it). Recorded this branch: both = `{RUSTSEC-2024-0436, RUSTSEC-2025-0141, RUSTSEC-2026-0194,
+`VEX ↔ deny.toml sync (GS-5) — GATING`; no `advisory`/`informational` whole word; now a step of the
+`supply-chain-gates` job, run on push to `main` + nightly — post-merge detection, not a PR gate). Recorded this branch: both = `{RUSTSEC-2024-0436, RUSTSEC-2025-0141, RUSTSEC-2026-0194,
 RUSTSEC-2026-0195}` — **in sync** (no drift to resolve). ([OPUS-5] sq-5ah3p removed
 `RUSTSEC-2025-0134` from both sides in one change, which is exactly the edit shape this gate exists to
 police.) Negative test: temporarily dropping any one of the four deny.toml ignores makes the check exit 1 and name
@@ -258,8 +258,8 @@ Recorded this branch (2026-06-16): **PASS** — all purls canonical (`sparq-serv
 `?download_url=file://…` qualifier, a `#src/main.rs` subpath, a *hypothetical future*
 `?repository_url=…` qualifier, a non-cargo purl, and an empty purl-set each FAIL the check. Wired as
 the GATING job `.github/workflows/supply-chain.yml#sbom-purl-canonical` (job name
-`SBOM purl-canonicality assertion (GS-6/GS-7) — GATING`; no `advisory`/`informational` whole word, so
-ci-summary gates it), which runs the self-test then the live regenerate→normalize→assert.
+`SBOM purl-canonicality assertion (GS-6/GS-7) — GATING`; no `advisory`/`informational` whole word; now a step of the
+`supply-chain-gates` job, push to `main` + nightly — not a PR gate), which runs the self-test then the live regenerate→normalize→assert.
 
 ## 7. JS / npm SBOM — shipped clients (GS-3 — [OPUS-4.8], sq-toze.27; [GPT-5.6], sq-epbw4)
 
@@ -294,7 +294,7 @@ root workspace lock and no dependency resolution):
 `CycloneDX/specification` `bom-1.5.schema.json` (+ referenced `spdx`/`jsf` schemas): **VALID**, root
 root components `pkg:npm/%40sparq-org/sparq@0.1.0` and `pkg:npm/%40sparq/client@0.1.0`, all component
 purls `pkg:npm/…`. The generator also fails unless the shared-client runtime SBOM contains both
-lazy codecs. Wired as the per-PR GATING
+lazy codecs. Wired as the GATING (push to `main` + nightly, not per-PR)
 job `.github/workflows/supply-chain.yml#js-sbom` (uploads `sbom-js-cyclonedx`) + the per-release step
 `.github/workflows/release.yml#sbom` "Generate per-release JS/npm SBOM" (the `sbom/*.sbom.cdx.json`
 attest + attach + checksum globs already cover the JS SBOMs, so they are SLSA-attested and on the
@@ -361,8 +361,8 @@ python3 scripts/tests/test_sbom_supplier.py          # hermetic self-test + live
 ```
 
 Wired as the GATING job `.github/workflows/supply-chain.yml#sbom-supplier` (job name
-`SBOM per-component supplier-name assertion (GS-1) — GATING`; no `advisory`/`informational` whole word,
-so ci-summary gates it), which regenerates+normalizes the SBOM and asserts every cargo component carries
+`SBOM per-component supplier-name assertion (GS-1) — GATING`; no `advisory`/`informational` whole word;
+now a step of `supply-chain-gates`, push to `main` + nightly — not a PR gate), which regenerates+normalizes the SBOM and asserts every cargo component carries
 a `supplier.name` — so a future cargo-cyclonedx bump that changes the component shape and silently stops
 the derivation FAILS the PR rather than shipping an SBOM regressed to the empty-supplier state. Negative
 coverage (self-test): a component missing its supplier, a blank/`name`-less supplier object, and a

@@ -1611,42 +1611,16 @@ impl Graph {
         std::thread::scope(|scope| -> Result<(), String> {
             // Stage 1 — read (the caller's decompressor) on its own thread, emitting
             // newline-aligned FULL blocks: loop `read()` until the block is full or EOF.
-            let producer = scope.spawn(move || -> Result<(), String> {
-                let mut reader = reader;
-                let mut readbuf = vec![0u8; block_size];
-                let mut carry: Vec<u8> = Vec::new();
-                loop {
-                    let mut filled = 0;
-                    while filled < block_size {
-                        let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                        if n == 0 {
-                            break;
-                        }
-                        filled += n;
-                    }
-                    if filled == 0 {
-                        // EOF: a final line without a trailing newline lives in `carry`.
-                        if !carry.is_empty() {
-                            let _ = tx.send(std::mem::take(&mut carry));
-                        }
-                        return Ok(());
-                    }
-                    // Emit `carry + readbuf[..filled]` up to the last newline; carry the
-                    // remainder (a partial line split across the block boundary) forward.
-                    let mut block = std::mem::take(&mut carry);
-                    block.extend_from_slice(&readbuf[..filled]);
-                    let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                    carry = block[cut..].to_vec();
-                    block.truncate(cut);
-                    if !block.is_empty() && tx.send(block).is_err() {
-                        return Ok(()); // a downstream stage errored and dropped the receiver
-                    }
-                }
+            let producer = scope.spawn(move || {
+                read_line_blocks(reader, block_size, |block| tx.send(block).is_ok())
             });
             // Stage 2 — parse+intern each block in parallel (per-chunk local dicts, no
             // shared state), forwarding the partials to the merge stage.
             let parser = scope.spawn(move || -> Result<(), String> {
                 for block in rx {
+                    if block.is_empty() {
+                        continue; // a liveness probe from a newline-free round
+                    }
                     let partials = parse_block(&block)?;
                     if ptx.send(partials).is_err() {
                         return Ok(()); // the merge stage errored and dropped the receiver
@@ -5612,39 +5586,8 @@ fn build_external_ntriples_parallel<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress + read on its own thread, emitting newline-aligned blocks.
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                // Fill the read buffer (a single read may return less than requested).
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    // EOF: a final line without a trailing newline lives in `carry`.
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                // Emit `carry + readbuf[..filled]` up to the last newline; carry the
-                // remainder (a partial line split across the read boundary) to the next.
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(()); // a downstream stage errored and dropped the receiver
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
 
         // Stage 2 — parse+intern each block in parallel (per-chunk local dicts, no shared
         // state), forwarding the partials to the merge stage. Concurrent with stage 3.
@@ -5722,35 +5665,8 @@ fn build_external_ntriples_sharded<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress (identical to the non-sharded pipeline).
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(());
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
         // Stage 2 — parse (identical).
         // [OPUS-4.8] (sq-t3rt) The sharded consolidation now handles RDF 1.2 triple terms
         // (`ShardedDict::intern_partials` interns them structurally into a dedicated triple
@@ -5876,35 +5792,8 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress (identical to the sharded pipeline).
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(());
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
         // Stage 2 — parse (identical).
         let parser = scope.spawn(move || -> Result<(), String> {
             for block in rx {
@@ -5930,6 +5819,79 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
         parser.join().map_err(|_| "parse thread panicked".to_string())??;
         producer.join().map_err(|_| "decompression thread panicked".to_string())?
     })
+}
+
+/// Stage 1 of every pipelined N-Triples ingest: reads `reader` in rounds of up to
+/// `block_size` fresh bytes (looping over short `read()`s — a gzip/zstd decoder returns
+/// 0.4–1.6 MB per call) and hands `emit` each newline-aligned block, in document order.
+///
+/// A block is `carry + fresh` cut after its LAST `\n`; the remainder (a line split
+/// across the boundary) is carried into the next round. Fresh bytes are read straight
+/// into the block being built (no separate read buffer, so no full-block copy); only the
+/// sub-line carry is copied, via one reused scratch `Vec` (no per-block carry allocation),
+/// into the head of the next block's buffer. Each block buffer is a fresh zeroed allocation
+/// (`calloc`: large sizes are lazily-zeroed pages, no memset), so any `Read` works without
+/// `read_buf` support. A round with no `\n` (a line longer than a block) grows the same
+/// buffer in place and emits an EMPTY block as a liveness probe (consumers skip empty
+/// blocks), so a downstream hang-up still stops the read. At EOF a final line without a
+/// trailing newline is emitted as-is. `emit` returns `false` when the downstream stage hung up (it errored
+/// and dropped its receiver), which stops reading with `Ok(())`; the final EOF emit ignores
+/// it. Read errors propagate as `Err`.
+#[cfg(feature = "parallel")]
+fn read_line_blocks<R: std::io::Read>(
+    mut reader: R,
+    block_size: usize,
+    mut emit: impl FnMut(Vec<u8>) -> bool,
+) -> Result<(), String> {
+    // Invariant: `buf[..carried]` is the carry (no `\n`) and `buf.len() >= carried + block_size`.
+    let mut buf = vec![0u8; block_size];
+    let mut carried = 0;
+    let mut tail: Vec<u8> = Vec::new();
+    loop {
+        let mut filled = 0;
+        while filled < block_size {
+            let n = reader
+                .read(&mut buf[carried + filled..carried + block_size])
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        if filled == 0 {
+            if carried > 0 {
+                buf.truncate(carried);
+                let _ = emit(buf);
+            }
+            return Ok(());
+        }
+        let end = carried + filled;
+        // The carry holds no `\n`, so only the fresh bytes need scanning.
+        let Some(nl) = buf[carried..end].iter().rposition(|&b| b == b'\n') else {
+            // Nothing to send, but probe the consumer with an empty (non-allocating) block so
+            // a downstream that errored still stops a long newline-free read.
+            if !emit(Vec::new()) {
+                return Ok(());
+            }
+            carried = end;
+            if buf.len() < carried + block_size {
+                buf.resize(carried + block_size, 0);
+            }
+            continue;
+        };
+        let cut = carried + nl + 1;
+        // Park the (sub-line) tail in the reused `tail` buffer and allocate the next block
+        // only AFTER the send, so a producer blocked on a full channel holds no extra block.
+        tail.clear();
+        tail.extend_from_slice(&buf[cut..end]);
+        buf.truncate(cut);
+        if !emit(buf) {
+            return Ok(());
+        }
+        carried = tail.len();
+        buf = vec![0u8; carried + block_size];
+        buf[..carried].copy_from_slice(&tail);
+    }
 }
 
 /// Parses one (complete-line) N-Triples byte block in parallel into per-chunk partial
@@ -9470,6 +9432,148 @@ mod tests {
         // A malformed document must surface the parse error, not hang the pipeline.
         let bad = Graph::load_reader_parallel(ShortReader { data: b"not ntriples\n", pos: 0, max: 5 }, "ntriples");
         assert!(bad.is_err());
+    }
+
+    /// `read_line_blocks` (stage 1 of every pipelined N-Triples ingest) must cut blocks
+    /// exactly where the former fixed-read-buffer loop did — `carry + up to block_size fresh
+    /// bytes`, cut after the last `\n` — minus that loop's empty blocks: covering short
+    /// reads, no trailing newline, a line longer than a block, empty input, CRLF lines,
+    /// downstream hang-up and read-error propagation.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn read_line_blocks_cuts_at_newlines() {
+        struct ShortReader<'a> {
+            data: &'a [u8],
+            pos: usize,
+            max: usize,
+        }
+        impl std::io::Read for ShortReader<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = (self.data.len() - self.pos).min(self.max).min(buf.len());
+                buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+                self.pos += n;
+                Ok(n)
+            }
+        }
+        fn run(data: &[u8], block: usize, max: usize) -> Vec<Vec<u8>> {
+            let mut out = Vec::new();
+            read_line_blocks(ShortReader { data, pos: 0, max }, block, |b| {
+                if !b.is_empty() {
+                    out.push(b);
+                }
+                true
+            })
+            .unwrap();
+            out
+        }
+        // The pre-refactor algorithm (fixed read buffer + `carry.to_vec()`), as the oracle.
+        fn reference(data: &[u8], block: usize) -> Vec<Vec<u8>> {
+            let (mut out, mut carry, mut pos) = (Vec::new(), Vec::new(), 0);
+            loop {
+                let filled = (data.len() - pos).min(block);
+                if filled == 0 {
+                    if !carry.is_empty() {
+                        out.push(carry);
+                    }
+                    return out;
+                }
+                let mut b = std::mem::take(&mut carry);
+                b.extend_from_slice(&data[pos..pos + filled]);
+                pos += filled;
+                let cut = b.iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1);
+                carry = b[cut..].to_vec();
+                b.truncate(cut);
+                if !b.is_empty() {
+                    out.push(b);
+                }
+            }
+        }
+        let mut lines = String::new();
+        for i in 0..500u32 {
+            lines.push_str(&format!(
+                "<http://ex/s{i}> <http://ex/p> \"{}\" .\n",
+                "x".repeat((i % 37) as usize)
+            ));
+        }
+        let crlf = lines.replace('\n', "\r\n");
+        let no_trailing = format!("{lines}<http://ex/last> <http://ex/p> \"tail\" .");
+        let long_line = format!(
+            "{lines}<http://ex/s> <http://ex/p> \"{}\" .\n{lines}",
+            "L".repeat(10_000)
+        );
+        for (name, data) in [
+            ("lf", lines.as_str()),
+            ("crlf", crlf.as_str()),
+            ("no trailing newline", no_trailing.as_str()),
+            ("line longer than a block", long_line.as_str()),
+            ("empty", ""),
+            ("newline only", "\n"),
+        ] {
+            let data = data.as_bytes();
+            for block in [1usize, 64, 4096, 1 << 20] {
+                for max in [1usize, 7, 1000, usize::MAX] {
+                    let got = run(data, block, max);
+                    let ctx = format!("{name} block={block} max={max}");
+                    let want = reference(data, block);
+                    assert_eq!(got, want, "{ctx}: blocks differ from the reference cut");
+                    assert_eq!(got.concat(), data, "{ctx}: blocks do not reassemble");
+                    assert!(got.iter().all(|b| !b.is_empty()), "{ctx}: empty block");
+                    if let Some((last, init)) = got.split_last() {
+                        let aligned = init.iter().all(|b| b.ends_with(b"\n"));
+                        assert!(aligned, "{ctx}: block not newline-aligned");
+                        let ends_nl = last.ends_with(b"\n");
+                        assert_eq!(ends_nl, data.ends_with(b"\n"), "{ctx}: final partial line");
+                    }
+                    if name == "crlf" {
+                        let pairs = got.iter().all(|b| b.ends_with(b"\r\n"));
+                        assert!(pairs, "{ctx}: CRLF pair split");
+                    }
+                }
+            }
+        }
+        assert!(run(b"", 64, 7).is_empty(), "empty input must emit nothing");
+        // Downstream hang-up: `emit` returning false stops reading cleanly after that block.
+        let mut calls = 0;
+        read_line_blocks(lines.as_bytes(), 64, |_| {
+            calls += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        // A read error propagates as `Err`.
+        struct Failing;
+        impl std::io::Read for Failing {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("boom"))
+            }
+        }
+        let err = read_line_blocks(Failing, 64, |_| true).unwrap_err();
+        assert!(err.contains("boom"), "{err}");
+        // A hang-up during a newline-free run stops the read: "!\n" then an endless line.
+        struct Endless {
+            head: &'static [u8],
+            served: usize,
+        }
+        impl std::io::Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = buf.len().min(4096);
+                for (i, b) in buf[..n].iter_mut().enumerate() {
+                    *b = self.head.get(self.served + i).copied().unwrap_or(b'a');
+                }
+                self.served += n;
+                assert!(self.served < 1 << 20, "reader kept going after the hang-up");
+                Ok(n)
+            }
+        }
+        // The first block is accepted (sent), then the parser rejects it and hangs up, so
+        // every later emit fails; only the empty probes can observe that.
+        let mut calls = 0;
+        read_line_blocks(Endless { head: b"!\n", served: 0 }, 64, |_| {
+            calls += 1;
+            calls == 1
+        })
+        .unwrap();
+        assert_eq!(calls, 2);
     }
 
     #[test]

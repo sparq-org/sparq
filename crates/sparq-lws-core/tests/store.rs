@@ -100,8 +100,8 @@ async fn rewrite_replaces_the_bytes() {
 async fn each_write_to_the_same_iri_mints_a_distinct_blob_key() {
     // The ROOT fix, observed at the Store seam: two successive writes to the SAME IRI must land their
     // bytes under DISTINCT blob keys (no deterministic key reuse). The metadata pointer moves to the
-    // newest key, a read resolves the latest committed blob through it, and BOTH writes' bytes coexist
-    // in the blob store (the old key's bytes are an orphan for the reconciler — never clobbered).
+    // newest key, a read resolves the latest committed blob through it, and the first write's key is
+    // reclaimed once the index has moved off it (its bytes were never overwritten in place).
     let inner = Arc::new(InMemoryBlobStore::new());
     let blob = SharedBlob {
         inner: inner.clone(),
@@ -121,11 +121,10 @@ async fn each_write_to_the_same_iri_mints_a_distinct_blob_key() {
         m1.blob_key, m2.blob_key,
         "two writes to the same IRI must mint DISTINCT blob keys (no deterministic reuse)"
     );
-    // Both writes' bytes physically coexist — the first write's bytes were NOT clobbered by the second.
-    assert_eq!(
-        inner.get(&m1.blob_key).await.unwrap(),
-        Bytes::from_static(b"<a> <b> <v1> ."),
-        "the first write's bytes survive under its own key (orphaned, not clobbered)"
+    // The superseded key is reclaimed after the index commit; it is never reused for the new bytes.
+    assert!(
+        matches!(inner.get(&m1.blob_key).await, Err(BlobError::NotFound)),
+        "the first write's key is reclaimed once the index no longer references it"
     );
     assert_eq!(
         inner.get(&m2.blob_key).await.unwrap(),
@@ -143,8 +142,9 @@ async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key() {
     // must each land their bytes under a DIFFERENT key, so no two writes can collide / interleave on a
     // shared object. We assert:
     //   (1) every concurrent write minted a UNIQUE blob key (no two share one),
-    //   (2) every write's bytes are physically present under its OWN key and byte-for-byte intact (no
-    //       write clobbered another's bytes on a shared key — the old deterministic-key collision), and
+    //   (2) every key still in the blob store holds exactly the bytes ITS write put there (no write
+    //       clobbered another's bytes on a shared key — the old deterministic-key collision), and every
+    //       superseded key has been reclaimed (only the winner's bytes remain), and
     //   (3) a read after the burst returns the LATEST COMMITTED blob — the bytes whose metadata pointer
     //       won the index `put_meta` race — resolved through that pointer.
     //
@@ -182,14 +182,21 @@ async fn concurrent_writes_to_the_same_iri_do_not_collide_on_a_blob_key() {
         "every concurrent write to the same IRI must mint a UNIQUE blob key (no collision)"
     );
 
-    // (2) Each write's bytes are present under its own key, byte-for-byte intact (no clobber).
+    // (2) Whatever is still stored under a key is that write's own bytes (no clobber), and the
+    // in-memory index's atomic replace lets every superseded key be reclaimed.
     for (key, body) in &keys_to_bodies {
-        assert_eq!(
-            inner.get(key).await.unwrap(),
-            *body,
-            "each concurrent write's bytes must be intact under its own key — never clobbered"
-        );
+        if let Ok(stored) = inner.get(key).await {
+            assert_eq!(
+                stored, *body,
+                "each concurrent write's bytes must be intact under its own key — never clobbered"
+            );
+        }
     }
+    assert_eq!(
+        inner.usage().unwrap().resource_count,
+        1,
+        "every superseded key is reclaimed; only the winning write's bytes remain"
+    );
 
     // (3) A read returns the latest committed blob, resolved through the surviving metadata pointer.
     let resource = s.read(IRI).await.unwrap();
@@ -768,17 +775,13 @@ impl BlobStore for CountingBlob {
 
 #[tokio::test]
 async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recreate() {
-    // Regression: deleting a container must NOT remove a concurrent same-IRI recreate's bytes. Two
-    // defences now compose:
-    //   1. `delete_container_if_empty` still leaves the container's bytes for the reconciler (no inline
-    //      blob delete) — so `deletes_seen == 0` here, and
-    //   2. (the ROOT fix) blob keys are now UNIQUE PER WRITE, so a recreate mints a DIFFERENT key from
-    //      the original. There is no longer a shared deterministic key for an inline delete to clobber
-    //      even in principle — the recreate's bytes live under their own key.
+    // Regression: deleting a container must NOT remove a concurrent same-IRI recreate's bytes. Blob
+    // keys are UNIQUE PER WRITE, so a recreate mints a DIFFERENT key from the original, and the inline
+    // reclaim after the index delete removes exactly the key the index held — the original's — never
+    // the recreate's.
     //
     // We model the concurrent recreate writing its bytes (under its own unique key) before the index
-    // delete returns. The recreate's bytes must survive. The test is NON-VACUOUS: it FAILS against the
-    // old inline-delete code (`deletes_seen == 1`).
+    // delete returns. The recreate's bytes must survive; the original's are reclaimed (one delete).
     let deletes_seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let inner = Arc::new(InMemoryBlobStore::new());
     let blob = CountingBlob {
@@ -821,12 +824,15 @@ async fn delete_container_if_empty_does_not_clobber_a_concurrent_same_iri_recrea
     let outcome = s.delete_container_if_empty(container, None).await.unwrap();
     assert_eq!(outcome, DeleteOutcome::Deleted);
 
-    // The fixed delete leaves the container's bytes for the reconciler — NO inline blob delete. Under
-    // the OLD inline-delete code this would be 1.
+    // Exactly one inline reclaim, of the key the deleted index row referenced.
     assert_eq!(
         deletes_seen.load(std::sync::atomic::Ordering::SeqCst),
-        0,
-        "the fixed delete_container_if_empty must NOT delete bytes inline (reconciler GCs orphans)"
+        1,
+        "delete_container_if_empty reclaims the deleted container's own bytes inline"
+    );
+    assert!(
+        matches!(inner.get(&original_key).await, Err(BlobError::NotFound)),
+        "the deleted container's bytes are reclaimed"
     );
 
     // The concurrent recreate's bytes (under their own unique key) are intact — never clobbered, because
@@ -923,4 +929,213 @@ fn rejects_malformed_jsonld() {
     let bad = b"{ not valid json";
     let err = validate_rdf(RdfFormat::JsonLd, bad, IRI).unwrap_err();
     assert!(matches!(err, ServerError::BadRequest(_)));
+}
+
+// ---- Superseded-blob reclamation (the rewrite/delete storage leak) ----
+//
+// Every write mints a fresh blob key. Before the fix, the superseded key was left for the reconciler
+// (off by default, one-hour grace), so sustained rewrites filled the in-memory blob quota with dead
+// bodies and writes started failing with 507. These pin that the store reclaims the old key inline
+// once the index no longer references it.
+
+/// A deliberately tight quota: 50 stored entries. Without inline reclamation the 51st rewrite fails.
+fn tight_store() -> CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
+    CompositeStore::in_memory_with_limits(InMemoryStoreLimits::new(1024 * 1024, 50))
+}
+
+#[tokio::test]
+async fn sustained_rewrites_of_one_resource_never_exhaust_the_blob_quota() {
+    let s = tight_store();
+    for i in 0..1000 {
+        let body = Bytes::from(format!("<a> <b> \"v{i}\" ."));
+        s.write(IRI, body, "text/turtle")
+            .await
+            .unwrap_or_else(|e| panic!("rewrite {i} failed: {e:?}"));
+        let usage = s.usage().unwrap();
+        assert!(
+            usage.resource_count <= 1,
+            "rewrite {i}: superseded blobs must be reclaimed, got {} stored entries",
+            usage.resource_count
+        );
+    }
+    let latest = s.read(IRI).await.unwrap();
+    assert_eq!(latest.body, Bytes::from_static(b"<a> <b> \"v999\" ."));
+}
+
+#[tokio::test]
+async fn create_delete_cycles_never_exhaust_the_blob_quota() {
+    let s = tight_store();
+    let container = "https://pod.example/alice/c/";
+    s.write(container, Bytes::new(), "text/turtle")
+        .await
+        .unwrap();
+    for i in 0..1000 {
+        // A document created into the container, then deleted.
+        let child = format!("{container}doc-{i}");
+        s.create_in_container(container, &child, Bytes::from_static(b"x"), "text/plain")
+            .await
+            .unwrap_or_else(|e| panic!("create {i} failed: {e:?}"));
+        s.delete(&child, Some(container))
+            .await
+            .unwrap_or_else(|e| panic!("delete {i} failed: {e:?}"));
+        // A root-level resource written then deleted.
+        s.write(IRI, Bytes::from_static(b"y"), "text/plain")
+            .await
+            .unwrap_or_else(|e| panic!("write {i} failed: {e:?}"));
+        s.delete(IRI, None).await.unwrap();
+        // A child container created then deleted through the atomic empty-container path.
+        let sub = format!("{container}sub-{i}/");
+        s.create_in_container(container, &sub, Bytes::new(), "text/turtle")
+            .await
+            .unwrap_or_else(|e| panic!("create container {i} failed: {e:?}"));
+        let outcome = s
+            .delete_container_if_empty(&sub, Some(container))
+            .await
+            .unwrap();
+        assert_eq!(outcome, DeleteOutcome::Deleted);
+        let usage = s.usage().unwrap();
+        assert!(
+            usage.resource_count <= 1,
+            "cycle {i}: deleted blobs must be reclaimed, got {} stored entries",
+            usage.resource_count
+        );
+    }
+}
+
+/// A [`SparqClient`] whose `get_meta` answers ONCE with a staged stale record, then forwards. It
+/// replays deterministically the reader that read the metadata just before a rewrite's index commit
+/// and reached the blob only after that rewrite reclaimed it.
+struct StaleOnceSparq {
+    inner: InMemorySparqClient,
+    stale: Arc<std::sync::Mutex<Option<ResourceMeta>>>,
+}
+
+#[async_trait]
+impl SparqClient for StaleOnceSparq {
+    async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+        if let Some(stale) = self.stale.lock().unwrap().take() {
+            return Ok(stale);
+        }
+        self.inner.get_meta(iri).await
+    }
+    async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+        self.inner.put_meta(iri, meta).await
+    }
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        self.inner.replace_meta(iri, meta).await
+    }
+    async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+        self.inner.exists(iri).await
+    }
+    async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+        self.inner.delete_meta(iri).await
+    }
+    async fn delete_meta_if_empty(
+        &self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<DeleteOutcome, SparqError> {
+        self.inner.delete_meta_if_empty(iri, parent).await
+    }
+    async fn create_child(
+        &self,
+        container: &str,
+        child: &str,
+        meta: ResourceMeta,
+    ) -> Result<(), SparqError> {
+        self.inner.create_child(container, child, meta).await
+    }
+    async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+        self.inner.remove_child(container, child).await
+    }
+    async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+        self.inner.list_children(container).await
+    }
+    async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
+        self.inner.referenced_blob_keys().await
+    }
+}
+
+type StaleSlot = Arc<std::sync::Mutex<Option<ResourceMeta>>>;
+
+fn stale_once_store() -> (CompositeStore<StaleOnceSparq, InMemoryBlobStore>, StaleSlot) {
+    let slot = StaleSlot::default();
+    let store = CompositeStore::with_body_cache(
+        StaleOnceSparq {
+            inner: InMemorySparqClient::new(),
+            stale: slot.clone(),
+        },
+        InMemoryBlobStore::new(),
+        sparq_lws_core::store::BodyCache::disabled(),
+    );
+    (store, slot)
+}
+
+#[tokio::test]
+async fn a_reclaimed_blob_is_retried_by_read_but_never_substituted_by_read_at() {
+    let (s, stale) = stale_once_store();
+    let v1 = s
+        .write(IRI, Bytes::from_static(b"<a> <b> \"v1\" ."), "text/turtle")
+        .await
+        .unwrap();
+    let v2 = s
+        .write(IRI, Bytes::from_static(b"<a> <b> \"v22\" ."), "text/turtle")
+        .await
+        .unwrap();
+    assert_ne!(v1.etag, v2.etag);
+
+    // `read`: its first metadata read sees v1, whose blob the second write already reclaimed.
+    *stale.lock().unwrap() = Some(v1.clone());
+    let r = s
+        .read(IRI)
+        .await
+        .expect("a reclaimed blob is retried, not an error");
+    assert_eq!(r.body, Bytes::from_static(b"<a> <b> \"v22\" ."));
+    assert_eq!(
+        r.meta.etag, v2.etag,
+        "validators must match the bytes returned"
+    );
+    assert_eq!(r.meta.blob_key, v2.blob_key);
+
+    // `read_at`: the caller holds (and authorized) v1 from its read plan. Its blob is reclaimed; the
+    // store must NOT hand back v2's bytes in its place — v2 was never authorized (a rewrite can
+    // change the ACL with it). It reports `ResourceChanged` so the caller restarts, authz included.
+    let err = s.read_at(IRI, &v1).await.unwrap_err();
+    assert!(
+        matches!(err, ServerError::ResourceChanged),
+        "read_at must never substitute a newer version's bytes, got {err:?}"
+    );
+    // Through the CURRENT pointer it serves exactly that version.
+    assert_eq!(
+        s.read_at(IRI, &v2).await.unwrap(),
+        Bytes::from_static(b"<a> <b> \"v22\" .")
+    );
+
+    // Deleted in the window ⇒ NotFound, not a storage error.
+    s.delete(IRI, None).await.unwrap();
+    let err = s.read_at(IRI, &v2).await.unwrap_err();
+    assert!(matches!(err, ServerError::NotFound), "got {err:?}");
+}
+
+#[tokio::test]
+async fn read_reports_inconsistency_when_the_index_still_points_at_a_missing_blob() {
+    // Not a race: the current pointer itself names a missing blob. The retry must not loop or mask it.
+    let inner = Arc::new(InMemoryBlobStore::new());
+    let s = CompositeStore::new(
+        InMemorySparqClient::new(),
+        SharedBlob {
+            inner: inner.clone(),
+        },
+    );
+    let m = s
+        .write(IRI, Bytes::from_static(b"x"), "text/plain")
+        .await
+        .unwrap();
+    inner.delete(&m.blob_key).await.unwrap();
+    let err = s.read(IRI).await.unwrap_err();
+    assert!(matches!(err, ServerError::Storage(_)), "got {err:?}");
 }

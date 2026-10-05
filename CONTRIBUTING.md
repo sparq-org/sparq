@@ -166,8 +166,9 @@ reproducible between CI and a local checkout even while it is non-blocking.
 Security-specific lanes also run: **CodeQL** SAST
 ([`codeql.yml`](./.github/workflows/codeql.yml), `security-and-quality` queries), **miri**,
 **fuzz**, **supply-chain**, and the **OpenSSF Scorecard** analysis
-([`scorecard.yml`](./.github/workflows/scorecard.yml)). The aggregate `ci-summary` check
-gates the merge.
+([`scorecard.yml`](./.github/workflows/scorecard.yml)). The one required check is `ci-fast`;
+the heavy suites run nightly and on `workflow_dispatch` (see
+[`docs/branch-protection.md`](./docs/branch-protection.md)).
 
 ### Reporting a vulnerability you find while contributing
 
