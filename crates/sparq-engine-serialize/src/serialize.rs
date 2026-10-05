@@ -56,6 +56,7 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
 const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
 const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
 
 /// A prefix map (`prefix` → namespace IRI) for Turtle / TriG compaction. The empty
 /// string key is the default (`@prefix : <…>`) namespace.
@@ -121,14 +122,21 @@ where
 /// passes through verbatim, matching oxrdf's own IRI rendering.
 fn escape_iri(iri: &str, out: &mut String) {
     out.push('<');
-    for c in iri.chars() {
-        match c {
-            '\u{00}'..='\u{20}' | '<' | '>' | '"' | '{' | '}' | '|' | '^' | '`' | '\\' => {
-                let _ = write!(out, "\\u{:04X}", c as u32);
-            }
-            _ => out.push(c),
+    // (#4898) Every escaped character is ASCII, so scan BYTES and copy the
+    // unescaped runs in bulk (a byte index of an ASCII byte is always a char boundary).
+    // Byte-identical to the former per-`char` loop.
+    let mut start = 0;
+    for (i, &b) in iri.as_bytes().iter().enumerate() {
+        if matches!(
+            b,
+            0x00..=0x20 | b'<' | b'>' | b'"' | b'{' | b'}' | b'|' | b'^' | b'`' | b'\\'
+        ) {
+            out.push_str(&iri[start..i]);
+            let _ = write!(out, "\\u{:04X}", b as u32);
+            start = i + 1;
         }
     }
+    out.push_str(&iri[start..]);
     out.push('>');
 }
 
@@ -139,23 +147,41 @@ fn escape_iri(iri: &str, out: &mut String) {
 /// emitted verbatim. This matches oxrdf's canonical N-Triples literal escaping, so a
 /// re-parse is exact.
 fn escape_string(value: &str, out: &mut String) {
-    for c in value.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            _ => out.push(c),
-        }
+    // (#4898) Byte scan + bulk copy of the unescaped runs (the four escaped
+    // characters are ASCII, so every split point is a char boundary). Byte-identical to the
+    // former per-`char` push loop; matters on long document-text literals.
+    let mut start = 0;
+    for (i, &b) in value.as_bytes().iter().enumerate() {
+        let rep = match b {
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            b'\n' => "\\n",
+            b'\r' => "\\r",
+            _ => continue,
+        };
+        out.push_str(&value[start..i]);
+        out.push_str(rep);
+        start = i + 1;
     }
+    out.push_str(&value[start..]);
 }
 
 /// True if `s` is a valid Turtle `PN_LOCAL` body that needs no escaping — a
-/// conservative ASCII subset (`A–Z a–z 0–9 _ -`, and interior `.`) so the compaction
-/// is always *correct*; anything outside it falls back to a full `<IRI>`. Empty is
-/// allowed (`prefix:` with an empty local name is valid Turtle).
+/// conservative ASCII subset (`A–Z a–z 0–9 _`, plus `-` and `.` after the first char,
+/// with no trailing `.`) so the compaction is always *correct*; anything outside it
+/// falls back to a shorter prefix or a full `<IRI>`. Empty is allowed (`prefix:` with an
+/// empty local name is valid Turtle).
+///
+/// Grammar: `PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS | '.' | ':' | PLX)*
+/// (PN_CHARS | ':' | PLX))?`, so `-` (a `PN_CHARS` but not `PN_CHARS_U`) and `.` may not
+/// start a local name, and `.` may not end one.
 fn is_simple_pn_local(s: &str) -> bool {
     let bytes = s.as_bytes();
+    if let Some(&first) = bytes.first() {
+        if first == b'-' || first == b'.' {
+            return false;
+        }
+    }
     for (i, &b) in bytes.iter().enumerate() {
         let ok = b.is_ascii_alphanumeric()
             || b == b'_'
@@ -179,21 +205,169 @@ fn is_simple_pn_local(s: &str) -> bool {
 fn write_iri(iri: &str, prefixes: &Prefixes, out: &mut String) {
     // Longest-namespace-first so `…#` beats `…` etc.; deterministic on ties via the
     // prefix name (BTreeMap iteration order).
-    let mut best: Option<(&str, &str)> = None;
+    //
+    // (#4898) The tie-break used to compare the best match's LOCAL part length
+    // against the candidate's NAMESPACE length, so it neither kept the longest namespace
+    // nor broke equal-length ties by label order as documented. It now tracks the best
+    // namespace length; `PrefixTable::compact` (the Turtle hot path) makes the same choice.
+    let mut best: Option<(&str, &str, usize)> = None;
     for (pfx, ns) in prefixes {
         if let Some(local) = iri.strip_prefix(ns.as_str()) {
             if is_simple_pn_local(local) {
                 match best {
-                    Some((_, bns)) if bns.len() >= ns.len() => {}
-                    _ => best = Some((pfx.as_str(), local)),
+                    Some((_, _, best_ns_len)) if best_ns_len >= ns.len() => {}
+                    _ => best = Some((pfx.as_str(), local, ns.len())),
                 }
             }
         }
     }
-    if let Some((pfx, local)) = best {
+    if let Some((pfx, local, _)) = best {
         let _ = write!(out, "{pfx}:{local}");
     } else {
         escape_iri(iri, out);
+    }
+}
+
+/// (#4898) A [`Prefixes`] map compiled ONCE per document for the Turtle hot
+/// path: entries ordered longest-namespace-first (a stable sort, so equal-length namespaces
+/// keep the `BTreeMap` label order). The first entry whose namespace is a proper prefix of
+/// an IRI with a [simple](is_simple_pn_local) local part is therefore EXACTLY the choice
+/// [`write_iri`] makes (longest namespace wins, ties broken by label order), and the match
+/// reports WHICH prefix was used directly, so the `@prefix` header no longer needs a dry
+/// render + re-parse of every IRI.
+struct PrefixTable<'a> {
+    /// `(label, namespace)`, longest namespace first.
+    entries: Vec<(&'a str, &'a str)>,
+}
+
+impl<'a> PrefixTable<'a> {
+    fn new(prefixes: &'a Prefixes) -> Self {
+        let mut entries: Vec<(&str, &str)> =
+            prefixes.iter().map(|(p, n)| (p.as_str(), n.as_str())).collect();
+        entries.sort_by_key(|e| std::cmp::Reverse(e.1.len()));
+        PrefixTable { entries }
+    }
+
+    /// The chosen `(entry index, local part)` for `iri`, or `None` → full `<IRI>`.
+    fn compact<'i>(&self, iri: &'i str) -> Option<(usize, &'i str)> {
+        self.entries.iter().enumerate().find_map(|(i, (_, ns))| {
+            iri.strip_prefix(ns).filter(|local| is_simple_pn_local(local)).map(|local| (i, local))
+        })
+    }
+
+    /// Marks the prefix `iri` compacts to (if any) as used — the header's view of an IRI.
+    fn note(&self, iri: &str, used: &mut [bool]) {
+        if let Some((i, _)) = self.compact(iri) {
+            used[i] = true;
+        }
+    }
+
+    /// Renders `iri` exactly as [`write_iri`] would, marking the prefix it used.
+    fn write_iri(&self, iri: &str, used: &mut [bool], out: &mut String) {
+        match self.compact(iri) {
+            Some((i, local)) => {
+                used[i] = true;
+                out.push_str(self.entries[i].0);
+                out.push(':');
+                out.push_str(local);
+            }
+            None => escape_iri(iri, out),
+        }
+    }
+
+    /// Emits the `@prefix` lines (label order) for the used entries, then a blank line;
+    /// nothing at all when no prefix is used.
+    fn write_header(&self, used: &[bool], out: &mut String) {
+        let labels = self.used_labels(used);
+        if labels.is_empty() {
+            return;
+        }
+        for (pfx, ns) in labels {
+            out.push_str("@prefix ");
+            out.push_str(pfx);
+            out.push_str(": ");
+            escape_iri(ns, out);
+            out.push_str(" .\n");
+        }
+        out.push('\n');
+    }
+
+    /// The used `(label, namespace)` entries in label order.
+    fn used_labels(&self, used: &[bool]) -> Vec<(&'a str, &'a str)> {
+        let mut labels: Vec<(&str, &str)> = self
+            .entries
+            .iter()
+            .zip(used)
+            .filter(|(_, u)| **u)
+            .map(|(e, _)| *e)
+            .collect();
+        labels.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        labels
+    }
+
+    /// The used-prefix set for a dataset: one flag per entry, set for every prefix that
+    /// [`note_dataset_iris`] reports as the compaction of some IRI the writer emits.
+    fn used_in(&self, graphs: &[NamedGraph<'_>], flavour: IriPositions) -> Vec<bool> {
+        let mut used = vec![false; self.entries.len()];
+        note_dataset_iris(graphs, flavour, &mut |iri: &str| self.note(iri, &mut used));
+        used
+    }
+}
+
+/// Which IRI positions a writer renders through prefix compaction — the knob that keeps a
+/// writer's used-prefix set EXACTLY the set of prefixes its body can emit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IriPositions {
+    /// Compact Turtle / TriG: every subject / predicate / object IRI and every literal
+    /// datatype (an implicit `xsd:string` / `rdf:langString` or an `rdf:type` predicate
+    /// rendered as `a` may over-declare — harmless, and kept for byte stability). Named
+    /// graphs with no triples are not emitted, so their names are skipped.
+    Compact,
+    /// Pretty Turtle / TriG: as [`IriPositions::Compact`] but without the `rdf:type`
+    /// predicate (always `a`) or an implicit literal datatype (never written).
+    Pretty,
+    /// Compacted JSON-LD: as [`IriPositions::Compact`], but EVERY named graph's `@id` is
+    /// emitted, empty or not.
+    JsonLd,
+}
+
+/// The single walk over every IRI a dataset writer may prefix-compact, shared by the
+/// `@prefix` header / `@context` of every writer: each emitted graph's subject, predicate
+/// and object IRIs (recursing into triple terms, including literal datatypes) AND the NAME
+/// of every emitted named graph. Collecting the used-prefix set anywhere else is how a
+/// rendered prefix ends up undeclared (a `GRAPH b:x` with only `a:` declared), so every
+/// header goes through here.
+fn note_dataset_iris(
+    graphs: &[NamedGraph<'_>],
+    flavour: IriPositions,
+    note: &mut impl FnMut(&str),
+) {
+    let pretty = flavour == IriPositions::Pretty;
+    for (name, ts) in graphs {
+        if ts.is_empty() && flavour != IriPositions::JsonLd {
+            continue;
+        }
+        if let Some(Term::NamedNode(g)) = name {
+            note(g.as_str());
+        }
+        for t in *ts {
+            note_subject_iri(&t.subject, note);
+            if !(pretty && t.predicate.as_str() == RDF_TYPE) {
+                note(t.predicate.as_str());
+            }
+            if pretty {
+                collect_pretty_iris(&t.object, note);
+            } else {
+                collect_iris(&t.object, note);
+            }
+        }
+    }
+}
+
+/// Notes a subject's IRI (blank nodes have none).
+fn note_subject_iri(subj: &NamedOrBlankNode, note: &mut impl FnMut(&str)) {
+    if let NamedOrBlankNode::NamedNode(n) = subj {
+        note(n.as_str());
     }
 }
 
@@ -207,6 +381,11 @@ fn write_literal(lit: &oxrdf::Literal, prefixes: &Prefixes, out: &mut String) {
     if let Some(lang) = lit.language() {
         out.push('@');
         out.push_str(lang);
+        // (#4898) RDF 1.2 base direction (`@ar--rtl`): previously dropped,
+        // so a directional literal re-parsed as a plain language-tagged one.
+        if let Some(dir) = lit.direction() {
+            let _ = write!(out, "--{dir}");
+        }
     } else {
         let dt = lit.datatype().as_str();
         // xsd:string and rdf:langString are the implicit datatypes — omit them.
@@ -280,37 +459,20 @@ pub fn write_turtle(triples: &[Triple], prefixes: &Prefixes) -> String {
 
 /// Emits the `@prefix` lines for exactly the prefixes whose namespace is the chosen
 /// compaction for at least one IRI in `triples` (so an unused prefix never clutters the
-/// header). Determined by a dry render of every IRI position.
+/// header).
 fn write_prefix_header(triples: &[Triple], prefixes: &Prefixes, out: &mut String) {
-    let mut used: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-    let mut probe = String::new();
-    let mut note = |iri: &str| {
-        probe.clear();
-        write_iri(iri, prefixes, &mut probe);
-        // A prefixed name (`pfx:local`) — not a full `<…>` IRIREF.
-        if !probe.starts_with('<') {
-            if let Some((pfx, _)) = probe.split_once(':') {
-                if let Some((k, _)) = prefixes.get_key_value(pfx) {
-                    used.insert(k.as_str());
-                }
-            }
-        }
-    };
-    for t in triples {
-        collect_iris(&Term::from(t.subject.clone()), &mut note);
-        note(t.predicate.as_str());
-        collect_iris(&t.object, &mut note);
-    }
-    if used.is_empty() {
-        return;
-    }
-    for pfx in &used {
-        let ns = &prefixes[*pfx];
-        let mut ns_esc = String::new();
-        escape_iri(ns, &mut ns_esc);
-        let _ = writeln!(out, "@prefix {pfx}: {ns_esc} .");
-    }
-    out.push('\n');
+    write_dataset_prefix_header(&[(None, triples)], prefixes, out);
+}
+
+/// The TriG form of [`write_prefix_header`]: the used-prefix set covers every graph's
+/// triples AND every emitted named graph's NAME (see [`note_dataset_iris`]). Shared by the
+/// buffered and streaming TriG writers.
+fn write_dataset_prefix_header(graphs: &[NamedGraph<'_>], prefixes: &Prefixes, out: &mut String) {
+    // (#4898) One compiled-table match per IRI position (no dry render into a
+    // probe string, no `Term` clone of every subject, no cloned union of the graphs).
+    let table = PrefixTable::new(prefixes);
+    let used = table.used_in(graphs, IriPositions::Compact);
+    table.write_header(&used, out);
 }
 
 /// Walks every IRI reachable in a term (recursing through triple terms), invoking `note`.
@@ -319,7 +481,7 @@ fn collect_iris(term: &Term, note: &mut impl FnMut(&str)) {
         Term::NamedNode(n) => note(n.as_str()),
         Term::Literal(l) => note(l.datatype().as_str()),
         Term::Triple(t) => {
-            collect_iris(&Term::from(t.subject.clone()), note);
+            note_subject_iri(&t.subject, note);
             note(t.predicate.as_str());
             collect_iris(&t.object, note);
         }
@@ -557,12 +719,8 @@ pub type NamedGraph<'a> = (Option<&'a Term>, &'a [Triple]);
 /// prefix used across all graphs.
 pub fn write_trig(graphs: &[NamedGraph<'_>], prefixes: &Prefixes) -> String {
     let mut out = String::new();
-    // Header over the union of every graph's triples.
-    let all: Vec<Triple> = graphs
-        .iter()
-        .flat_map(|(_, ts)| ts.iter().cloned())
-        .collect();
-    write_prefix_header(&all, prefixes, &mut out);
+    // Header over every graph's triples and every emitted graph name.
+    write_dataset_prefix_header(graphs, prefixes, &mut out);
 
     let mut first = true;
     for (name, ts) in graphs {
@@ -620,13 +778,10 @@ pub fn write_trig_streaming<W: std::io::Write>(
     prefixes: &Prefixes,
     w: &mut W,
 ) -> std::io::Result<()> {
-    // Header over the union of every graph's triples — one pass, matching `write_trig`.
-    let all: Vec<Triple> = graphs
-        .iter()
-        .flat_map(|(_, ts)| ts.iter().cloned())
-        .collect();
+    // Header over every graph's triples and every emitted graph name — one pass, matching
+    // `write_trig`.
     let mut header = String::new();
-    write_prefix_header(&all, prefixes, &mut header);
+    write_dataset_prefix_header(graphs, prefixes, &mut header);
     w.write_all(header.as_bytes())?;
 
     let mut first = true;
@@ -726,12 +881,260 @@ fn triple_from_ids(
 
 /// Serializes a [`Graph`]'s default graph as Turtle with the [`default_prefixes`].
 pub fn graph_to_turtle(graph: &Graph) -> String {
-    write_turtle(&graph_triples(graph), &default_prefixes())
+    graph_to_turtle_ids(graph, &default_prefixes())
 }
 
 /// Serializes a [`Graph`]'s default graph as Turtle with a caller-supplied prefix map.
 pub fn graph_to_turtle_with(graph: &Graph, prefixes: &Prefixes) -> String {
-    write_turtle(&graph_triples(graph), prefixes)
+    graph_to_turtle_ids(graph, prefixes)
+}
+
+// ---------------------------------------------------------------------------
+// (#4898) Id-level Turtle writer for the `graph_to_turtle` family.
+//
+// The generic path (`write_turtle(&graph_triples(g), …)`) first decodes EVERY triple into
+// owned `oxrdf` terms (three `String` allocations per row, plus the literal's datatype),
+// then clones each subject several times, renders every predicate into a fresh `String`
+// key, hashes those keys per row, and renders every IRI twice (header dry-run + body).
+// On a document-shaped graph (many short subjects, a handful of predicates, long text
+// literals) that bookkeeping dominated. This writer works on dictionary ids instead:
+//
+// * subject / predicate / IRI-object renderings are cached PER ID (rendered once);
+// * literals render straight from the borrowed `term_parts` record (zero-copy), with the
+//   datatype suffix cached per datatype;
+// * the used-prefix set is collected while rendering, so the header needs no second pass;
+// * grouping keys are `u32` ids (Fx-hashed), not rendered strings.
+//
+// It produces BYTE-IDENTICAL output to `write_turtle(&graph_triples(g), prefixes)` — same
+// header, same subject / predicate first-seen order, same objects in input order — which
+// `id_writer_matches_generic_writer` pins over a corpus exercising every term kind.
+// Anything unusual (inline integers excepted, triple terms, directional language tags)
+// falls back to the generic term renderer for that one object, so correctness never
+// depends on the fast path covering a case.
+// ---------------------------------------------------------------------------
+
+/// The per-document render state of the id-level Turtle writer.
+struct IdTurtleWriter<'g> {
+    graph: &'g Graph,
+    prefixes: &'g Prefixes,
+    table: PrefixTable<'g>,
+    /// Which [`PrefixTable`] entries the document uses (drives the header).
+    used: Vec<bool>,
+    /// Rendered IRI / blank-node text per id: `(start, end, is_rdf_type)` into `arena`.
+    nodes: rustc_hash::FxHashMap<sparq_core::dict::Id, (usize, usize, bool)>,
+    /// Rendered datatype suffix (`""` or `^^dt`) per datatype string (by address+len,
+    /// stable for the dictionary's lifetime): `(start, end)` into `arena`.
+    datatypes: rustc_hash::FxHashMap<(usize, usize), (usize, usize)>,
+    arena: String,
+    /// Scratch for joining a dictionary IRI's `prefix + suffix`.
+    iri: String,
+    lang_noted: bool,
+}
+
+impl<'g> IdTurtleWriter<'g> {
+    fn new(graph: &'g Graph, prefixes: &'g Prefixes) -> Self {
+        let table = PrefixTable::new(prefixes);
+        let used = vec![false; table.entries.len()];
+        IdTurtleWriter {
+            graph,
+            prefixes,
+            table,
+            used,
+            nodes: Default::default(),
+            datatypes: Default::default(),
+            arena: String::new(),
+            iri: String::new(),
+            lang_noted: false,
+        }
+    }
+
+    /// The cached rendering of an IRI / blank-node id, rendering it on first sight.
+    /// `None` for any other kind of id (literal, triple term, inline integer).
+    fn node(&mut self, id: sparq_core::dict::Id) -> Option<(usize, usize, bool)> {
+        use sparq_core::dict::TermParts;
+        if let Some(&hit) = self.nodes.get(&id) {
+            return Some(hit);
+        }
+        if sparq_core::dict::is_inline(id) {
+            return None;
+        }
+        let start = self.arena.len();
+        let is_type = match self.graph.dict.term_parts(id) {
+            TermParts::Iri { prefix, suffix } => {
+                self.iri.clear();
+                self.iri.push_str(prefix);
+                self.iri.push_str(suffix);
+                self.table.write_iri(&self.iri, &mut self.used, &mut self.arena);
+                self.iri == RDF_TYPE
+            }
+            TermParts::Blank(label) => {
+                self.arena.push_str("_:");
+                self.arena.push_str(label);
+                false
+            }
+            TermParts::Lit { .. } | TermParts::Triple(_) => return None,
+        };
+        let entry = (start, self.arena.len(), is_type);
+        self.nodes.insert(id, entry);
+        Some(entry)
+    }
+
+    /// The cached `""` / `^^dt` suffix for a non-language literal's datatype; notes the
+    /// datatype IRI for the header exactly like `collect_iris` (even when it is implicit).
+    fn datatype_suffix(&mut self, dt: &str) -> (usize, usize) {
+        let key = (dt.as_ptr() as usize, dt.len());
+        if let Some(&hit) = self.datatypes.get(&key) {
+            return hit;
+        }
+        let start = self.arena.len();
+        if dt != "http://www.w3.org/2001/XMLSchema#string"
+            && dt != "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
+        {
+            self.arena.push_str("^^");
+            self.table.write_iri(dt, &mut self.used, &mut self.arena);
+        } else {
+            self.table.note(dt, &mut self.used);
+        }
+        let entry = (start, self.arena.len());
+        self.datatypes.insert(key, entry);
+        entry
+    }
+
+    /// Renders a subject or object id into `out`.
+    fn write_id(&mut self, id: sparq_core::dict::Id, out: &mut String) {
+        use sparq_core::dict::TermParts;
+        if let Some((a, b, _)) = self.node(id) {
+            out.push_str(&self.arena[a..b]);
+            return;
+        }
+        if sparq_core::dict::is_inline(id) {
+            // An inline `xsd:integer` (what `Dict::term` would rebuild, without the alloc).
+            let _ = write!(out, "\"{}\"", id - sparq_core::dict::INLINE_BASE);
+            let (a, b) = self.datatype_suffix(XSD_INTEGER);
+            out.push_str(&self.arena[a..b]);
+            return;
+        }
+        let graph = self.graph;
+        match graph.dict.term_parts(id) {
+            TermParts::Lit { value, datatype, lang: None } => {
+                out.push('"');
+                escape_string(value, out);
+                out.push('"');
+                let (a, b) = self.datatype_suffix(datatype);
+                out.push_str(&self.arena[a..b]);
+            }
+            // A plain language tag (no `--dir` slot, whose decoding is the generic path's).
+            TermParts::Lit { value, lang: Some(lang), .. } if !lang.contains("--") => {
+                out.push('"');
+                escape_string(value, out);
+                out.push_str("\"@");
+                out.push_str(lang);
+                if !self.lang_noted {
+                    self.lang_noted = true;
+                    self.table.note(RDF_LANG_STRING, &mut self.used);
+                }
+            }
+            _ => {
+                // Triple terms / directional language tags: the generic renderer + header walk.
+                let term = graph.dict.term(id);
+                write_term(&term, self.prefixes, out);
+                let (table, used) = (&self.table, &mut self.used);
+                collect_iris(&term, &mut |iri: &str| table.note(iri, used));
+            }
+        }
+    }
+
+    fn finish(self, body: String) -> String {
+        let mut out = String::new();
+        self.table.write_header(&self.used, &mut out);
+        if out.is_empty() {
+            return body;
+        }
+        out.reserve(body.len());
+        out.push_str(&body);
+        out
+    }
+}
+
+/// Orders default-graph id rows the way [`write_turtle_body`] groups them: subjects in
+/// first-seen order, each subject's predicates in first-seen order, objects in input
+/// order. `iter_ids` (SPO order) is already grouped, so the common case is a single linear
+/// check with no reordering; anything else gets a stable sort by those first-seen ranks.
+fn turtle_row_order(rows: Vec<[sparq_core::dict::Id; 3]>) -> Vec<[sparq_core::dict::Id; 3]> {
+    use sparq_core::dict::Id;
+    let mut subject_rank: rustc_hash::FxHashMap<Id, u32> = Default::default();
+    let mut pred_rank: rustc_hash::FxHashMap<(u32, Id), u32> = Default::default();
+    let mut preds_per_subject: Vec<u32> = Vec::new();
+    let mut keys: Vec<(u32, u32)> = Vec::with_capacity(rows.len());
+    let mut grouped = true;
+    let (mut cur_s, mut cur_p): (Option<Id>, Option<Id>) = (None, None);
+    let (mut sr, mut pr) = (0u32, 0u32);
+    for &[s, p, _] in &rows {
+        if cur_s != Some(s) {
+            sr = *subject_rank.entry(s).or_insert_with(|| {
+                preds_per_subject.push(0);
+                (preds_per_subject.len() - 1) as u32
+            });
+            cur_s = Some(s);
+            cur_p = None;
+        }
+        if cur_p != Some(p) {
+            pr = *pred_rank.entry((sr, p)).or_insert_with(|| {
+                let n = &mut preds_per_subject[sr as usize];
+                *n += 1;
+                *n - 1
+            });
+            cur_p = Some(p);
+        }
+        if keys.last().is_some_and(|&last| (sr, pr) < last) {
+            grouped = false;
+        }
+        keys.push((sr, pr));
+    }
+    if grouped {
+        return rows;
+    }
+    let mut idx: Vec<usize> = (0..rows.len()).collect();
+    idx.sort_by_key(|&i| keys[i]); // stable: objects keep input order
+    idx.into_iter().map(|i| rows[i]).collect()
+}
+
+/// The id-level `graph_to_turtle` body (see the section note above).
+fn graph_to_turtle_ids(graph: &Graph, prefixes: &Prefixes) -> String {
+    let rows = turtle_row_order(graph.iter_ids().collect());
+    let mut w = IdTurtleWriter::new(graph, prefixes);
+    let mut body = String::with_capacity(rows.len() * 48);
+    let (mut cur_s, mut cur_p) = (None, None);
+    for [s, p, o] in rows {
+        if cur_s != Some(s) {
+            if cur_s.is_some() {
+                body.push_str(" .\n");
+            }
+            w.write_id(s, &mut body);
+            body.push(' ');
+            cur_s = Some(s);
+            cur_p = None;
+        }
+        if cur_p != Some(p) {
+            if cur_p.is_some() {
+                body.push_str(" ;\n    ");
+            }
+            match w.node(p) {
+                Some((_, _, true)) => body.push('a'),
+                Some((a, b, false)) => body.push_str(&w.arena[a..b]),
+                None => unreachable!("non-IRI predicate in store"),
+            }
+            body.push(' ');
+            cur_p = Some(p);
+        } else {
+            body.push_str(", ");
+        }
+        w.write_id(o, &mut body);
+    }
+    if cur_s.is_some() {
+        body.push_str(" .\n");
+    }
+    w.finish(body)
 }
 
 /// [OPUS-4.8] (sq-townn, survey §A7) Streams a [`Graph`]'s default graph as Turtle into `w`
@@ -1021,6 +1424,11 @@ fn write_term_full(term: &Term, out: &mut String) {
             if let Some(lang) = l.language() {
                 out.push('@');
                 out.push_str(lang);
+                // (#4898) RDF 1.2 base direction (`@ar--rtl`): previously dropped,
+                // so a directional literal re-parsed as a plain language-tagged one.
+                if let Some(dir) = l.direction() {
+                    let _ = write!(out, "--{dir}");
+                }
             } else {
                 let dt = l.datatype().as_str();
                 if dt != "http://www.w3.org/2001/XMLSchema#string"
@@ -1055,7 +1463,7 @@ pub fn write_turtle_pretty(triples: &[Triple], prefixes: &Prefixes, opts: &Prett
     let body = pretty_graph_body(triples, "", opts, prefixes);
     let mut sections: Vec<String> = Vec::new();
     if opts.abbreviate {
-        if let Some(header) = pretty_prefix_header(triples, prefixes, "") {
+        if let Some(header) = pretty_prefix_header(&[(None, triples)], prefixes, "") {
             sections.push(header);
         }
     }
@@ -1066,43 +1474,35 @@ pub fn write_turtle_pretty(triples: &[Triple], prefixes: &Prefixes, opts: &Prett
 }
 
 /// Builds the `@prefix` header for the pretty writers: prefix-alphabetical, listing only
-/// the prefixes whose namespace is the chosen compaction for at least one IRI in
-/// `triples`. Returns `None` when nothing compacts. `indent` prefixes each line (a TriG
-/// shared-header indent — currently always empty, kept for symmetry with the site).
-fn pretty_prefix_header(triples: &[Triple], prefixes: &Prefixes, indent: &str) -> Option<String> {
-    let mut used: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-    let mut probe = String::new();
-    let mut note = |iri: &str| {
-        probe.clear();
-        write_iri(iri, prefixes, &mut probe);
-        if !probe.starts_with('<') {
-            if let Some((pfx, _)) = probe.split_once(':') {
-                if let Some((k, _)) = prefixes.get_key_value(pfx) {
-                    used.insert(k.as_str());
-                }
-            }
-        }
-    };
-    for t in triples {
-        collect_pretty_iris(&Term::from(t.subject.clone()), &mut note);
-        // `rdf:type` renders as `a` — never declares the rdf: prefix on its own account.
-        if t.predicate.as_str() != RDF_TYPE {
-            note(t.predicate.as_str());
-        }
-        collect_pretty_iris(&t.object, &mut note);
-    }
-    if used.is_empty() {
+/// the prefixes whose namespace is the chosen compaction for at least one IRI the pretty
+/// body renders (every graph's triples and every emitted named graph's NAME — see
+/// [`note_dataset_iris`]). Returns `None` when nothing compacts. `indent` prefixes each
+/// line (a TriG shared-header indent — currently always empty, kept for symmetry with the
+/// site).
+fn pretty_prefix_header(
+    graphs: &[NamedGraph<'_>],
+    prefixes: &Prefixes,
+    indent: &str,
+) -> Option<String> {
+    // [`PrefixTable::compact`] makes exactly [`write_iri`]'s choice, which the pretty body
+    // renders with; no probe render per IRI.
+    let table = PrefixTable::new(prefixes);
+    let used = table.used_in(graphs, IriPositions::Pretty);
+    let labels = table.used_labels(&used);
+    if labels.is_empty() {
         return None;
     }
     let mut out = String::new();
-    for (i, pfx) in used.iter().enumerate() {
+    for (i, (pfx, ns)) in labels.into_iter().enumerate() {
         if i > 0 {
             out.push('\n');
         }
-        let ns = &prefixes[*pfx];
-        let mut ns_esc = String::new();
-        escape_iri(ns, &mut ns_esc);
-        let _ = write!(out, "{}@prefix {}: {} .", indent, pfx, ns_esc);
+        out.push_str(indent);
+        out.push_str("@prefix ");
+        out.push_str(pfx);
+        out.push_str(": ");
+        escape_iri(ns, &mut out);
+        out.push_str(" .");
     }
     Some(out)
 }
@@ -1124,7 +1524,7 @@ fn collect_pretty_iris(term: &Term, note: &mut impl FnMut(&str)) {
             }
         }
         Term::Triple(t) => {
-            collect_pretty_iris(&Term::from(t.subject.clone()), note);
+            note_subject_iri(&t.subject, note);
             note(t.predicate.as_str());
             collect_pretty_iris(&t.object, note);
         }
@@ -1161,13 +1561,6 @@ pub fn write_trig_pretty(
     prefixes: &Prefixes,
     opts: &PrettyOptions,
 ) -> String {
-    // The shared header is computed over the union of every graph's triples (every IRI
-    // that appears anywhere in the dataset).
-    let all: Vec<Triple> = graphs
-        .iter()
-        .flat_map(|(_, ts)| ts.iter().cloned())
-        .collect();
-
     // Partition: default graph (name `None`) first, then named graphs sorted by their
     // N-Triples spelling.
     let mut named: Vec<&NamedGraph<'_>> = graphs.iter().filter(|(n, _)| n.is_some()).collect();
@@ -1175,7 +1568,9 @@ pub fn write_trig_pretty(
 
     let mut sections: Vec<String> = Vec::new();
     if opts.abbreviate {
-        if let Some(header) = pretty_prefix_header(&all, prefixes, "") {
+        // The shared header covers every IRI the body renders: every graph's triples AND
+        // every emitted named graph's name.
+        if let Some(header) = pretty_prefix_header(graphs, prefixes, "") {
             sections.push(header);
         }
     }
@@ -1749,7 +2144,7 @@ fn write_node_array(triples: &[Triple], prefixes: Option<&Prefixes>, out: &mut S
 /// Writes the `@context` object mapping each prefix to its namespace IRI (compacted form only).
 /// Only prefixes that actually abbreviate at least one IRI in the dataset are emitted, so the
 /// context never carries dead declarations.
-fn write_context(all: &[Triple], prefixes: &Prefixes, out: &mut String) {
+fn write_context(graphs: &[NamedGraph<'_>], prefixes: &Prefixes, out: &mut String) {
     let mut used: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     let mut note = |iri: &str| {
         if let Some(curie) = compact_iri(iri, prefixes) {
@@ -1760,11 +2155,8 @@ fn write_context(all: &[Triple], prefixes: &Prefixes, out: &mut String) {
             }
         }
     };
-    for t in all {
-        collect_iris(&Term::from(t.subject.clone()), &mut note);
-        note(t.predicate.as_str());
-        collect_iris(&t.object, &mut note);
-    }
+    // Every graph's triples AND every named graph's `@id` (see [`note_dataset_iris`]).
+    note_dataset_iris(graphs, IriPositions::JsonLd, &mut note);
     out.push('{');
     for (i, pfx) in used.iter().enumerate() {
         if i > 0 {
@@ -1818,12 +2210,8 @@ pub fn write_jsonld(graphs: &[NamedGraph<'_>], form: JsonLdForm, prefixes: &Pref
     // sub-objects).
     out.push('{');
     if form == JsonLdForm::Compacted {
-        let all: Vec<Triple> = graphs
-            .iter()
-            .flat_map(|(_, ts)| ts.iter().cloned())
-            .collect();
         out.push_str("\"@context\":");
-        write_context(&all, prefixes, &mut out);
+        write_context(graphs, prefixes, &mut out);
         out.push(',');
     }
     out.push_str("\"@graph\":[");
@@ -2208,6 +2596,74 @@ mod tests {
         );
     }
 
+    // ---- (#4898) Id-level graph_to_turtle == generic write_turtle. ----
+
+    /// A corpus exercising every term kind the id-level writer special-cases: inline and
+    /// non-inline integers, plain / typed / custom-datatype / language / directional
+    /// literals, escape-heavy strings, blank nodes, triple terms, rdf:type, IRIs whose
+    /// local part is not a simple PN_LOCAL, and nested + equal-length namespaces.
+    const ID_WRITER_CORPUS: &str = r#"
+        @prefix ex: <http://ex/> .
+        @prefix exa: <http://ex/a/> .
+        @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+        ex:doc a ex:Document ; ex:title "Readme" ; ex:order 1, 42, -7, 99999999999999 ;
+            ex:text "quote \" back \\ nl \n cr \r tab \t é ☃" ;
+            ex:label "bonjour"@fr, "hello"@en-GB, "arabic"@ar--rtl ;
+            ex:custom "x"^^ex:dt, "1.5"^^xsd:decimal, "true"^^xsd:boolean ;
+            ex:ref exa:child, <http://ex/a/b/c>, <http://ex/ends.>, <http://other.org/x#y> ;
+            ex:blank [ ex:p "in blank" ; a ex:Inner ] ;
+            ex:stmt <<( ex:s ex:p "o" )>> .
+        exa:child ex:next _:b1 .
+        _:b1 a ex:Tail ; ex:order 3 .
+        <http://ex/a/b/c> ex:empty "" .
+    "#;
+
+    fn generic_turtle(g: &Graph, prefixes: &Prefixes) -> String {
+        write_turtle(&graph_triples(g), prefixes)
+    }
+
+    #[test]
+    fn id_writer_matches_generic_writer() {
+        let g = Graph::load_str(ID_WRITER_CORPUS, "turtle").unwrap();
+        let mut same_len = ex_prefixes();
+        same_len.insert("exb".into(), "http://ex/a/".into()); // equal-length tie with `exa`
+        same_len.insert("exa".into(), "http://ex/a/".into());
+        let maps = [default_prefixes(), ex_prefixes(), Prefixes::new(), same_len];
+        for prefixes in &maps {
+            let fast = graph_to_turtle_with(&g, prefixes);
+            assert_eq!(fast, generic_turtle(&g, prefixes), "prefixes {prefixes:?}");
+            // And the output round-trips to the same triple set.
+            let back = Graph::load_str(&fast, "turtle").unwrap();
+            assert_eq!(nt_sorted(&g), nt_sorted(&back), "round-trip\n{fast}");
+        }
+        assert_eq!(graph_to_turtle(&g), generic_turtle(&g, &default_prefixes()));
+        // Sanity: the corpus really reaches the fast paths and the fallbacks.
+        let out = graph_to_turtle_with(&g, &ex_prefixes());
+        assert!(out.contains("\"42\"^^xsd:integer"), "{out}");
+        assert!(out.contains("<<( "), "{out}");
+        assert!(out.contains("\"bonjour\"@fr"), "{out}");
+    }
+
+    #[test]
+    fn id_writer_empty_graph_is_empty() {
+        let g = Graph::load_str("", "turtle").unwrap();
+        assert_eq!(graph_to_turtle(&g), "");
+        assert_eq!(graph_to_turtle(&g), generic_turtle(&g, &default_prefixes()));
+    }
+
+    #[test]
+    fn turtle_row_order_groups_like_write_turtle_body() {
+        // Already grouped (the `iter_ids` shape): returned unchanged.
+        let grouped = vec![[1, 2, 3], [1, 2, 4], [1, 5, 6], [7, 2, 3]];
+        assert_eq!(turtle_row_order(grouped.clone()), grouped);
+        // Interleaved: subjects / predicates in first-seen order, objects in input order.
+        let rows = vec![[1, 2, 10], [7, 2, 11], [1, 5, 12], [1, 2, 13], [7, 2, 14], [1, 5, 15]];
+        assert_eq!(
+            turtle_row_order(rows),
+            vec![[1, 2, 10], [1, 2, 13], [1, 5, 12], [1, 5, 15], [7, 2, 11], [7, 2, 14]]
+        );
+    }
+
     #[test]
     fn roundtrip_basic_prefixed() {
         assert_iso(
@@ -2505,6 +2961,161 @@ ex:bob
         assert!(is_simple_pn_local(""));
         assert!(!is_simple_pn_local("has space"));
         assert!(!is_simple_pn_local("q?x=1"));
+    }
+
+    #[test]
+    fn pn_local_rejects_leading_hyphen_and_dot() {
+        // Turtle PN_LOCAL: the first char is PN_CHARS_U | ':' | [0-9] | PLX, so an
+        // unescaped leading '-' or '.' is invalid.
+        assert!(!is_simple_pn_local("-foo"));
+        assert!(!is_simple_pn_local(".foo"));
+        assert!(!is_simple_pn_local("-"));
+        assert!(!is_simple_pn_local("."));
+        assert!(is_simple_pn_local("0foo"));
+        assert!(is_simple_pn_local("_foo"));
+        assert!(is_simple_pn_local("f-o.o"));
+    }
+
+    /// Overlapping namespaces where the LONGEST match leaves a local part starting with
+    /// '-' or '.': every Turtle/TriG writer must fall back to a shorter prefix whose local
+    /// part is valid (or the full IRI), so the output parses back to the same graph.
+    #[test]
+    fn overlapping_namespaces_round_trip() {
+        let data = r#"
+            <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.bar> .
+            <http://ex/ns-foo> <http://ex/nsq> <http://ex/ns-> .
+            <http://ex/ns.x> <http://ex/nsp> <http://ex/nsok> .
+            GRAPH <http://ex/ns-g> { <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.> . }
+        "#;
+        let ds = Graph::load_dataset(data, "trig").unwrap();
+        let ttl_src = r#"
+            <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.bar> .
+            <http://ex/ns-foo> <http://ex/nsq> <http://ex/ns-> .
+            <http://ex/ns.x> <http://ex/nsp> <http://ex/nsok> .
+            <http://ex/ns-foo> <http://ex/nsp> <http://ex/ns.> .
+        "#;
+        let g = Graph::load_str(ttl_src, "turtle").unwrap();
+        // `a` (longer) shadows `z` (shorter) for every IRI above; and a lone overlapping
+        // namespace with no shorter fallback must give a full IRI.
+        let overlap = prefixes_from_pairs([("a", "http://ex/ns"), ("z", "http://ex/")]);
+        let only_long = prefixes_from_pairs([("a", "http://ex/ns")]);
+        let pretty = PrettyOptions::default();
+        for prefixes in [&overlap, &only_long] {
+            let outs = [
+                ("id writer", graph_to_turtle_with(&g, prefixes)),
+                ("generic turtle", generic_turtle(&g, prefixes)),
+                ("pretty turtle", graph_to_turtle_pretty_with(&g, prefixes, &pretty)),
+            ];
+            for (name, ttl) in outs {
+                assert!(!ttl.contains(":-") && !ttl.contains(":."), "{name}\n{ttl}");
+                let back = Graph::load_str(&ttl, "turtle")
+                    .unwrap_or_else(|e| panic!("{name} output does not parse: {e}\n{ttl}"));
+                assert_eq!(nt_sorted(&g), nt_sorted(&back), "{name} round-trip\n{ttl}");
+            }
+            // The shorter namespace still compacts when a longer one is invalid.
+            if prefixes == &overlap {
+                assert!(graph_to_turtle_with(&g, prefixes).contains("z:ns-foo"));
+            }
+            let trigs = [
+                ("trig", graph_to_trig_with(&ds, prefixes)),
+                ("pretty trig", graph_to_trig_pretty_with(&ds, prefixes, &pretty)),
+            ];
+            for (name, tg) in trigs {
+                assert!(!tg.contains(":-") && !tg.contains(":."), "{name}\n{tg}");
+                let back = Graph::load_dataset(&tg, "trig")
+                    .unwrap_or_else(|e| panic!("{name} output does not parse: {e}\n{tg}"));
+                assert_dataset_iso(&ds, &back, &tg);
+            }
+        }
+    }
+
+    /// A named graph's NAME is a compactable IRI position too: the `@prefix` header must
+    /// declare every prefix a `GRAPH` name is rendered with, not only the prefixes the
+    /// triples use. With `a` → `http://ex/` and `b` → `http://ex/ns`, the longest-namespace
+    /// rule renders the graph name below as `b:LongEnoughLocalPart` while every triple IRI
+    /// compacts to `a:`; a header collected from the triples alone declares only `a:`, and
+    /// the output is invalid TriG. Covers the buffered, streaming and pretty writers (the
+    /// `write_*` slice entry points and the `graph_to_*` ones), plus a graph name that is
+    /// the ONLY user of its prefix.
+    #[test]
+    fn trig_declares_prefixes_used_only_by_graph_names() {
+        let data = r#"
+            GRAPH <http://ex/nsLongEnoughLocalPart> { <http://ex/s> <http://ex/p> <http://ex/o> . }
+            GRAPH <http://other/g> { <http://ex/s> <http://ex/p> "v" . }
+            <http://ex/s> <http://ex/p> <http://ex/o> .
+        "#;
+        let ds = Graph::load_dataset(data, "trig").unwrap();
+        let overlap = prefixes_from_pairs([("a", "http://ex/"), ("b", "http://ex/ns")]);
+        let only_graph = prefixes_from_pairs([
+            ("a", "http://ex/"),
+            ("b", "http://ex/ns"),
+            ("o", "http://other/"),
+        ]);
+        let pretty = PrettyOptions::default();
+        for prefixes in [&overlap, &only_graph] {
+            let owned = dataset_graphs(&ds);
+            let view: Vec<NamedGraph<'_>> = owned
+                .iter()
+                .map(|(n, ts)| (n.as_ref(), ts.as_slice()))
+                .collect();
+            #[allow(unused_mut)]
+            let mut outs = vec![
+                (
+                    "buffered graph_to_trig_with",
+                    graph_to_trig_with(&ds, prefixes),
+                ),
+                ("buffered write_trig", write_trig(&view, prefixes)),
+                (
+                    "pretty graph_to_trig_pretty_with",
+                    graph_to_trig_pretty_with(&ds, prefixes, &pretty),
+                ),
+                (
+                    "pretty write_trig_pretty",
+                    write_trig_pretty(&view, prefixes, &pretty),
+                ),
+            ];
+            #[cfg(feature = "streaming-serialization")]
+            {
+                let mut buf = Vec::new();
+                graph_to_trig_streaming(&ds, prefixes, &mut buf).unwrap();
+                outs.push((
+                    "streaming graph_to_trig_streaming",
+                    String::from_utf8(buf).unwrap(),
+                ));
+                let mut buf = Vec::new();
+                write_trig_streaming(&view, prefixes, &mut buf).unwrap();
+                outs.push((
+                    "streaming write_trig_streaming",
+                    String::from_utf8(buf).unwrap(),
+                ));
+            }
+            for (name, tg) in outs {
+                // The longest-namespace rule is retained for the graph name.
+                assert!(tg.contains("GRAPH b:LongEnoughLocalPart"), "{name}\n{tg}");
+                let back = Graph::load_dataset(&tg, "trig")
+                    .unwrap_or_else(|e| panic!("{name} output does not parse: {e}\n{tg}"));
+                assert_dataset_iso(&ds, &back, &tg);
+            }
+        }
+    }
+
+    /// The compacted JSON-LD `@context` must likewise cover a named graph's `@id`: a CURIE
+    /// whose prefix is missing from the context re-expands to a different IRI (`o:g` read
+    /// as an absolute IRI with scheme `o`). Here `o:` is used ONLY by the graph name.
+    #[test]
+    fn jsonld_context_declares_prefixes_used_only_by_graph_names() {
+        let ds = Graph::load_dataset(
+            r#"GRAPH <http://other/g> { <http://ex/s> <http://ex/p> <http://ex/o> . }"#,
+            "trig",
+        )
+        .unwrap();
+        let prefixes = prefixes_from_pairs([("a", "http://ex/"), ("o", "http://other/")]);
+        let doc = graph_to_jsonld_with(&ds, JsonLdForm::Compacted, &prefixes);
+        assert!(doc.contains(r#""@id":"o:g""#), "{doc}");
+        assert!(
+            doc.contains(r#""o":"http://other/""#),
+            "context lacks o:\n{doc}"
+        );
     }
 
     #[test]
@@ -5027,24 +5638,26 @@ ex:bob
     // exact byte values (non-vacuous) and exercises the REAL writer path.
     // =======================================================================
 
-    /// write_iri keep-existing-best arm: fires when the existing local part is longer
-    /// than the next namespace being considered, so the current best is retained.
-    ///
-    /// Prefix `"a"` → `"ns1/"` (len 4) is iterated first (BTreeMap order), producing
-    /// local `"longlocal"` (len 9).  Prefix `"b"` → `"ns1/lon"` (len 7) arrives second;
-    /// the guard `bns.len() >= ns.len()` (9 >= 7 = true) keeps the existing match,
-    /// so the result is `"a:longlocal"`.
+    /// write_iri longest-namespace rule. (#4898): this test used to pin a
+    /// tie-break that compared the best match's LOCAL length against the next NAMESPACE
+    /// length (keeping `a:longlocal`); the documented rule — and `PrefixTable::compact` —
+    /// is longest namespace wins, equal-length namespaces broken by label order.
     #[test]
-    fn write_iri_keep_existing_best_arm() {
+    fn write_iri_longest_namespace_wins() {
         let mut prefixes: Prefixes = std::collections::BTreeMap::new();
-        // "a" iterates before "b" in BTreeMap order.
         prefixes.insert("a".to_string(), "ns1/".to_string());
         prefixes.insert("b".to_string(), "ns1/lon".to_string());
         let mut out = String::new();
         write_iri("ns1/longlocal", &prefixes, &mut out);
-        // Both "a:longlocal" and "b:glocal" are valid compactions; the existing-best
-        // guard keeps "a" because "longlocal" (len 9) >= "ns1/lon" (len 7).
-        assert_eq!(out, "a:longlocal", "keep-existing-best arm result: {}", out);
+        assert_eq!(out, "b:glocal");
+        // Equal-length namespaces: the first label (BTreeMap order) wins.
+        prefixes.insert("c".to_string(), "ns1/lon".to_string());
+        out.clear();
+        write_iri("ns1/longlocal", &prefixes, &mut out);
+        assert_eq!(out, "b:glocal");
+        let table = PrefixTable::new(&prefixes);
+        let chosen = table.compact("ns1/longlocal").map(|(i, l)| (table.entries[i].0, l));
+        assert_eq!(chosen, Some(("b", "glocal")));
     }
 
     /// escape_iri control-char / delimiter arm: a `>` in the IRI path must be emitted
