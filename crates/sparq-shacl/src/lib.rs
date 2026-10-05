@@ -50,8 +50,9 @@ pub use imports::{resolve_imports, resolve_shapes_graph, ShapesGraphResolution};
 // [OPUS-4.8] SHACL-AF rules + node-expression public surface (feature `shacl-af`).
 #[cfg(feature = "shacl-af")]
 pub use rules::{
-    apply_rules, apply_rules_with_model, conforms, eval_node_expression,
-    eval_node_expression_with_scope, expand, ConformanceCheck, Inference, Scope,
+    apply_rules, apply_rules_in_scope, apply_rules_in_scope_with_model, apply_rules_with_model,
+    conforms, eval_node_expression, eval_node_expression_with_scope, expand, expand_dataset,
+    ConformanceCheck, DatasetExpansion, Destination, GraphScope, Inference, Scope,
 };
 
 use oxrdf::Triple;
