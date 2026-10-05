@@ -39,7 +39,10 @@ impl std::fmt::Display for CompareError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CompareError::BudgetExhausted => {
-                write!(f, "blank-node isomorphism budget exhausted before a verdict (unverified)")
+                write!(
+                    f,
+                    "blank-node isomorphism budget exhausted before a verdict (unverified)"
+                )
             }
         }
     }
@@ -64,7 +67,10 @@ impl<'a> DiffParser<'a> {
         name: &'a str,
         parse: impl Fn(&str, &str) -> Result<Vec<[String; 4]>, String> + 'a,
     ) -> Self {
-        DiffParser { name, parse: Box::new(parse) }
+        DiffParser {
+            name,
+            parse: Box::new(parse),
+        }
     }
 }
 
@@ -168,9 +174,10 @@ pub fn compare_doc(
     match ((candidate.parse)(text, base), (incumbent.parse)(text, base)) {
         (Ok(c), Ok(i)) => match compare_quad_sets(&c, &i) {
             SetCompare::Equal => Ok(None),
-            SetCompare::Different { only_a, only_b } => {
-                Ok(Some(DivergenceKind::QuadSet { only_candidate: only_a, only_incumbent: only_b }))
-            }
+            SetCompare::Different { only_a, only_b } => Ok(Some(DivergenceKind::QuadSet {
+                only_candidate: only_a,
+                only_incumbent: only_b,
+            })),
             SetCompare::Unverified => Err(CompareError::BudgetExhausted),
         },
         (Err(e), Ok(_)) => Ok(Some(DivergenceKind::CandidateRejects(e))),
@@ -187,7 +194,12 @@ fn is_divergent(candidate: &DiffParser, incumbent: &DiffParser, text: &str, base
 /// chunks of lines (halving chunk size down to single lines), keeping any subset that
 /// still diverges, under a bounded number of re-comparisons. Sound (returns a diverging
 /// document, the original at worst), minimal for most line-oriented repros.
-pub fn shrink_repro(candidate: &DiffParser, incumbent: &DiffParser, text: &str, base: &str) -> String {
+pub fn shrink_repro(
+    candidate: &DiffParser,
+    incumbent: &DiffParser,
+    text: &str,
+    base: &str,
+) -> String {
     const EVAL_BUDGET: usize = 400;
     let mut evals = 0usize;
     let mut lines: Vec<&str> = text.lines().collect();
@@ -256,7 +268,9 @@ pub fn run_dir(
     let mut stack = vec![dir.to_path_buf()];
     let mut files = Vec::new();
     while let Some(d) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        let Ok(entries) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -268,11 +282,20 @@ pub fn run_dir(
     }
     files.sort();
     for p in files {
-        let Ok(bytes) = std::fs::read(&p) else { continue };
+        let Ok(bytes) = std::fs::read(&p) else {
+            continue;
+        };
         let text = String::from_utf8_lossy(&bytes).into_owned();
         let base = crate::rdf::file_iri(&p);
         let outcome = compare_doc(candidate, incumbent, &text, &base);
-        report.record(&p.display().to_string(), &text, &base, candidate, incumbent, outcome);
+        report.record(
+            &p.display().to_string(),
+            &text,
+            &base,
+            candidate,
+            incumbent,
+            outcome,
+        );
     }
     report
 }
@@ -294,16 +317,29 @@ pub fn run_suite_actions(
         if t.predicate.as_str() != mf_action {
             continue;
         }
-        let oxrdf::Term::NamedNode(n) = &t.object else { continue };
-        let Some(path) = crate::rdf::iri_to_path(n.as_str()) else { continue };
+        let oxrdf::Term::NamedNode(n) = &t.object else {
+            continue;
+        };
+        let Some(path) = crate::rdf::iri_to_path(n.as_str()) else {
+            continue;
+        };
         if !seen.insert(path.clone()) {
             continue;
         }
-        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
         let text = String::from_utf8_lossy(&bytes).into_owned();
         let base = crate::rdf::file_iri(&path);
         let outcome = compare_doc(candidate, incumbent, &text, &base);
-        report.record(&path.display().to_string(), &text, &base, candidate, incumbent, outcome);
+        report.record(
+            &path.display().to_string(),
+            &text,
+            &base,
+            candidate,
+            incumbent,
+            outcome,
+        );
     }
     Ok(report)
 }
@@ -335,7 +371,10 @@ mod tests {
         let doc = "<http://ex/s> <http://ex/p> \"v\" .\n";
         assert!(matches!(compare_doc(&a, &b, doc, "http://ex/"), Ok(None)));
         // Both-reject is also agreement.
-        assert!(matches!(compare_doc(&a, &b, "not rdf\n", "http://ex/"), Ok(None)));
+        assert!(matches!(
+            compare_doc(&a, &b, "not rdf\n", "http://ex/"),
+            Ok(None)
+        ));
     }
 
     #[test]
@@ -352,6 +391,9 @@ mod tests {
         }
         doc.push_str("<http://ex/s> <http://ex/p> \"x-marks-the-spot\" .\n");
         let repro = shrink_repro(&mutant, &incumbent, &doc, "http://ex/");
-        assert_eq!(repro, "<http://ex/s> <http://ex/p> \"x-marks-the-spot\" .\n");
+        assert_eq!(
+            repro,
+            "<http://ex/s> <http://ex/p> \"x-marks-the-spot\" .\n"
+        );
     }
 }

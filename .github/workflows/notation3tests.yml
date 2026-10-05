@@ -10,8 +10,9 @@
 # suite's own expectation, keyed by its name: `success-*` must derive its pass
 # signal, `fail-*` (negative) must derive no verdict, `crash-*` input must be
 # rejected. Buckets follow the reference harness (pass / nonconform /
-# incomplete / crashed, plus timeout); each case runs in its own process with a
-# timeout. A missing tests/ directory exits the runner with an error, which this
+# incomplete / crashed), plus timeout and unavailable (the case needed an
+# external resource the offline runner cannot serve); each case runs in its
+# own process with a timeout. A missing tests/ directory exits the runner with an error, which this
 # advisory step tolerates.
 #
 # ADVISORY: this lane measures, it does not gate. The run step never fails on

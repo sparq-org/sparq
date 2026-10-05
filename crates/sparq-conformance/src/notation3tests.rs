@@ -72,6 +72,10 @@ pub enum Verdict {
     Crashed(String),
     /// Exceeded the per-test timeout.
     Timeout,
+    /// Not met, and the document asked `log:content` / `log:semantics` for an
+    /// external resource the offline runner cannot serve (the IRI is kept). A
+    /// harness limitation, reported apart from engine failures.
+    Unavailable(String),
 }
 
 impl Verdict {
@@ -87,6 +91,9 @@ impl Verdict {
             Verdict::Incomplete => "FAIL incomplete".into(),
             Verdict::Timeout => "FAIL timeout".into(),
             Verdict::Crashed(e) => format!("FAIL crashed {}", e.replace(['\n', '\r'], " ")),
+            Verdict::Unavailable(iri) => {
+                format!("SKIP unavailable {}", iri.replace(['\n', '\r'], " "))
+            }
         }
     }
 
@@ -98,10 +105,15 @@ impl Verdict {
             "FAIL nonconform" => Verdict::Nonconform,
             "FAIL incomplete" => Verdict::Incomplete,
             "FAIL timeout" => Verdict::Timeout,
-            _ => match line.strip_prefix("FAIL crashed ") {
-                Some(e) => Verdict::Crashed(e.to_string()),
-                None => Verdict::Crashed(format!("unrecognised child output: {line:?}")),
-            },
+            _ => {
+                if let Some(e) = line.strip_prefix("FAIL crashed ") {
+                    Verdict::Crashed(e.to_string())
+                } else if let Some(iri) = line.strip_prefix("SKIP unavailable ") {
+                    Verdict::Unavailable(iri.to_string())
+                } else {
+                    Verdict::Crashed(format!("unrecognised child output: {line:?}"))
+                }
+            }
         }
     }
 
@@ -112,6 +124,7 @@ impl Verdict {
             Verdict::Incomplete => "incomplete",
             Verdict::Crashed(_) => "crashed",
             Verdict::Timeout => "timeout",
+            Verdict::Unavailable(_) => "unavailable",
         }
     }
 
@@ -119,6 +132,7 @@ impl Verdict {
     fn rank(&self) -> u8 {
         match self {
             Verdict::Pass => 0,
+            Verdict::Unavailable(_) => 1,
             Verdict::Incomplete => 1,
             Verdict::Nonconform => 2,
             Verdict::Timeout => 3,
@@ -128,7 +142,14 @@ impl Verdict {
 }
 
 /// Report buckets, in display order.
-const BUCKETS: [&str; 5] = ["pass", "nonconform", "incomplete", "crashed", "timeout"];
+const BUCKETS: [&str; 6] = [
+    "pass",
+    "nonconform",
+    "incomplete",
+    "crashed",
+    "timeout",
+    "unavailable",
+];
 
 /// Whether a test file is a `crash-*` case: the input must be rejected.
 pub fn expects_rejection(path: &Path) -> bool {
@@ -261,9 +282,40 @@ fn file_iri_path(iri: &str) -> Option<PathBuf> {
     String::from_utf8(out).ok().map(PathBuf::from)
 }
 
+/// Where the suite publishes its own files: cases fetch fixtures such as
+/// `HELLO.n3` from `<SUITE_RAW>/<branch>/<path>` (or `raw/commit/<sha>/`).
+const SUITE_RAW: [&str; 2] = [
+    "https://codeberg.org/phochste/notation3tests/raw/branch/",
+    "https://codeberg.org/phochste/notation3tests/raw/commit/",
+];
+
+/// The checkout-relative path a canonical suite fixture URL denotes (the
+/// branch or commit segment dropped, then percent-decoded like a `file://`
+/// path). `None` when the IRI is not one of the suite's raw URLs.
+fn suite_fixture_path(iri: &str) -> Option<PathBuf> {
+    let rest = SUITE_RAW.iter().find_map(|p| iri.strip_prefix(p))?;
+    let (_rev, rel) = rest.split_once('/')?;
+    let rel = file_iri_path(&format!("file://{rel}"))?;
+    (!rel.as_os_str().is_empty()).then_some(rel)
+}
+
+/// Resolve a `log:content` / `log:semantics` IRI to a file inside `root`: a
+/// `file://` IRI by its path, a canonical suite fixture URL by its path in the
+/// checkout. Either way the canonical result must stay inside `root`.
+fn resolve_in_suite(iri: &str, root: &Path) -> Option<PathBuf> {
+    let p = match suite_fixture_path(iri) {
+        Some(rel) => root.join(rel),
+        None => file_iri_path(iri)?,
+    };
+    let p = std::fs::canonicalize(p).ok()?;
+    p.starts_with(root).then_some(p)
+}
+
 /// Run sparq's N3 reasoner over one test document. `log:semantics` /
-/// `log:content` may read `file://` documents, but only inside `suite_root`
-/// (strictly offline; nothing outside the fetched suite is readable). The
+/// `log:content` may read `file://` documents and the suite's own published
+/// fixtures (`https://codeberg.org/phochste/notation3tests/raw/...`, mapped into
+/// the checkout), but only inside `suite_root` (strictly offline; nothing
+/// outside the fetched suite is readable). The
 /// test document itself is held to the same rule: it is canonicalized (which
 /// resolves symlinks) and refused, without being read, unless it lies inside
 /// the canonical `suite_root`. Whether the document must be rejected comes
@@ -293,17 +345,27 @@ pub fn run_one(path: &Path, suite_root: &Path) -> Verdict {
 /// error is the PASS outcome; otherwise it is CRASHED.
 pub fn run_source(src: &str, base: &str, suite_root: &Path, expect_rejection: bool) -> Verdict {
     let root = std::fs::canonicalize(suite_root).unwrap_or_else(|_| suite_root.to_path_buf());
+    // The first external (non-file, non-suite) IRI the document asked for.
+    // (`Resolver` is `'static`, so the slot is shared rather than borrowed.)
+    let unavailable = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let seen = std::rc::Rc::clone(&unavailable);
     let resolver = move |iri: &str| -> Option<String> {
-        let p = std::fs::canonicalize(file_iri_path(iri)?).ok()?;
-        if !p.starts_with(&root) {
+        if !iri.starts_with("file://") && suite_fixture_path(iri).is_none() {
+            seen.borrow_mut().get_or_insert_with(|| iri.to_string());
             return None;
         }
-        std::fs::read_to_string(p).ok()
+        std::fs::read_to_string(resolve_in_suite(iri, &root)?).ok()
     };
-    match sparq_reason::n3::reason_n3_terms_with_resolver(src, Some(base), Some(&resolver)) {
-        Ok(c) => verdict_from_facts(&c.facts, expect_rejection),
-        Err(_) if expect_rejection => Verdict::Pass,
-        Err(e) => Verdict::Crashed(e),
+    let verdict =
+        match sparq_reason::n3::reason_n3_terms_with_resolver(src, Some(base), Some(&resolver)) {
+            Ok(c) => verdict_from_facts(&c.facts, expect_rejection),
+            Err(_) if expect_rejection => Verdict::Pass,
+            Err(e) => Verdict::Crashed(e),
+        };
+    let unavailable = unavailable.borrow_mut().take();
+    match (verdict, unavailable) {
+        (v, Some(iri)) if !v.is_pass() => Verdict::Unavailable(iri),
+        (v, _) => v,
     }
 }
 
@@ -714,6 +776,91 @@ mod tests {
             Verdict::Incomplete
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The suite's cases read fixtures by their published codeberg URL; those
+    /// map into the checkout (any branch or commit), still confined to it.
+    #[test]
+    fn suite_fixture_urls_resolve_into_checkout() {
+        let dir = tmp("fixture");
+        std::fs::create_dir_all(dir.join("suite/sub")).unwrap();
+        let data = "@prefix : <urn:example:>.\n:a :b :c.\n";
+        std::fs::write(dir.join("suite/HELLO.n3"), data).unwrap();
+        std::fs::write(dir.join("suite/sub/a b.n3"), data).unwrap();
+        std::fs::write(dir.join("outside.n3"), data).unwrap();
+        let suite = dir.join("suite");
+        let doc = |iri: &str| {
+            format!(
+                "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+                case(
+                    "success-semantics-1",
+                    &format!(
+                        "<{iri}> log:semantics ?f. ?f log:includes {{ <urn:example:a> <urn:example:b> <urn:example:c> }}"
+                    ),
+                    "true"
+                )
+            )
+        };
+        let base = file_iri(&suite.join("t.n3"));
+        let raw = "https://codeberg.org/phochste/notation3tests/raw";
+        for iri in [
+            format!("{raw}/branch/main/HELLO.n3"),
+            format!("{raw}/branch/dev/HELLO.n3"),
+            format!("{raw}/commit/0123abc/HELLO.n3"),
+            format!("{raw}/branch/main/sub/a%20b.n3"),
+        ] {
+            assert_eq!(
+                run_source(&doc(&iri), &base, &suite, false),
+                Verdict::Pass,
+                "{iri}"
+            );
+        }
+        // `..` (literal or encoded) cannot climb out of the checkout, and a
+        // missing fixture is an engine-visible miss, not an unavailable resource.
+        for iri in [
+            format!("{raw}/branch/main/%2E%2E/outside.n3"),
+            format!("{raw}/branch/main/sub/%2E%2E/%2E%2E/outside.n3"),
+            format!("{raw}/branch/main/NoSuchFile.n3"),
+        ] {
+            assert_eq!(
+                run_source(&doc(&iri), &base, &suite, false),
+                Verdict::Incomplete,
+                "{iri}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A case that needs an external resource the offline runner cannot serve
+    /// is reported as unavailable, apart from engine failures; one that passes
+    /// anyway stays a pass.
+    #[test]
+    fn external_resources_are_reported_unavailable() {
+        let ext = "https://example.net/data.n3";
+        let needs = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+            case(
+                "success-ext-1",
+                &format!("<{ext}> log:semantics ?f. ?f log:includes {{ <urn:example:a> <urn:example:b> <urn:example:c> }}"),
+                "true"
+            )
+        );
+        let v = run(&needs);
+        assert_eq!(v, Verdict::Unavailable(ext.into()));
+        assert_eq!(Verdict::from_line(&v.to_line()), v);
+        assert!(!v.is_pass());
+        let tolerant = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+            case("fail-ext-1", &format!("<{ext}> log:semantics ?f"), "false")
+        );
+        assert_eq!(run(&tolerant), Verdict::Pass);
+        let rows = [Row {
+            test: "t".into(),
+            verdict: v,
+        }];
+        let js: serde_json::Value = serde_json::from_str(&report_json(&rows, "r")).unwrap();
+        assert_eq!(js["buckets"]["unavailable"], 1);
+        assert!(report_markdown(&rows, "r").contains("| unavailable | 1 |"));
     }
 
     #[test]
