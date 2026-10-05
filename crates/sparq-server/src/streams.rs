@@ -22,10 +22,21 @@
 //! to resume exactly where it left off (resumable across a process restart — the on-disk log is the
 //! source of truth). The start offset comes from the `iteratorType`:
 //!
-//!   * `TRIM_HORIZON` — from the OLDEST retained record (seq 0): replay the whole stream.
+//!   * `TRIM_HORIZON` — from the OLDEST RETAINED record: replay everything the log still holds.
 //!   * `AT_SEQUENCE_NUMBER` (`at=N`) — from record `N` inclusive.
 //!   * `AFTER_SEQUENCE_NUMBER` (`after=N`) — from record `N+1` (resume after the last one seen).
 //!   * `LATEST` — only records committed strictly after this call (start at `next_seq`): a tail.
+//!
+//! [OPUS-5] (sq-iz7ag) "Oldest retained" is literal: retention (`ChangeLog::apply_retention`,
+//! sq-n9s4d) drops whole old segments, moving the **trim horizon**
+//! ([`ChangeLog::first_seq`](sparq_serve::ChangeLog::first_seq)) forward off seq 0. So
+//! `TRIM_HORIZON` resolves to the horizon, NOT to 0 — a poll below the horizon fails closed in the
+//! durable log (it never silently skips dropped records), which would otherwise turn the one
+//! iterator type meaning "replay everything retained" into a `500` on any trimmed log. An `at` /
+//! `after` anchor resolving below the horizon is the honest
+//! [`TrimmedOffset`](crate::streams::TrimmedOffset) rejection instead:
+//! the records that consumer asked for are gone, and quietly restarting it at the horizon would
+//! skip records it believes it still had coming.
 //!
 //! `limit` caps the number of **change records (commits)** in one response (a bounded page — the
 //! whole point of a poll API); the continuation token (`nextSequenceNumber`) is the seq to pass as
@@ -79,7 +90,8 @@ pub const MAX_LIMIT: usize = 10_000;
 /// The Neptune-style stream iterator type — where a poll starts reading from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IteratorType {
-    /// From the OLDEST retained record (seq 0): replay the whole stream.
+    /// From the OLDEST RETAINED record (the log's trim horizon — seq 0 until retention drops a
+    /// segment): replay everything the log still holds.
     TrimHorizon,
     /// From record `seq` INCLUSIVE (`at=N`).
     AtSequenceNumber(u64),
@@ -98,6 +110,39 @@ pub struct ParamError(pub String);
 impl std::fmt::Display for ParamError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+/// [OPUS-5] (sq-iz7ag) A resolved start offset that retention has already trimmed away — the
+/// fail-closed rejection [`IteratorType::from_seq`] returns for an `AT_SEQUENCE_NUMBER` /
+/// `AFTER_SEQUENCE_NUMBER` anchor below the log's trim horizon.
+///
+/// The HTTP layer maps it to a `410 Gone` — the requested records are permanently gone, the same
+/// posture (and status) the server already uses for a time-travel `from` outside the retention
+/// window. Without it the poll reaches the durable log, which fails it closed as an unreadable
+/// offset, and the operator sees an opaque `500` for what is really a caller-recoverable
+/// "your checkpoint is older than what we still keep — re-bootstrap" condition.
+///
+/// Both fields are parsed `u64` sequence numbers — never raw caller text — so rendering them to
+/// the client echoes no unbounded caller input (the #241 info-leak posture).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TrimmedOffset {
+    /// The start offset the request resolved to (`at=N` ⇒ `N`; `after=N` ⇒ `N + 1`).
+    pub requested: u64,
+    /// The trim horizon — the oldest seq the log still retains.
+    pub horizon: u64,
+}
+
+impl std::fmt::Display for TrimmedOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // [OPUS-4.8] positional format args (CodeQL rust/unused-variable false-positive).
+        write!(
+            f,
+            "start offset {} precedes the change-stream trim horizon {} — retention dropped those \
+             records; resume at or after {}, or use iteratorType=TRIM_HORIZON to replay from the \
+             horizon",
+            self.requested, self.horizon, self.horizon
+        )
     }
 }
 
@@ -159,15 +204,33 @@ impl IteratorType {
     }
 
     /// The first sequence number this iterator reads (the `from_seq` to poll the log with), given
-    /// the log's current `next_seq` (used only by `LATEST`, which starts at the tail).
-    pub fn from_seq(self, next_seq: u64) -> u64 {
-        match self {
-            IteratorType::TrimHorizon => 0,
+    /// the log's current `next_seq` (used only by `LATEST`, which starts at the tail) and its
+    /// `trim_horizon` — the oldest seq still retained
+    /// ([`ChangeLog::first_seq`](sparq_serve::ChangeLog::first_seq); `0` for a never-trimmed log).
+    ///
+    /// [OPUS-5] (sq-iz7ag) `TRIM_HORIZON` resolves to `trim_horizon`, not to seq 0: the older
+    /// records are gone, and polling the durable log below its horizon fails closed (a `500`) — so
+    /// pinning the whole-stream replay at 0 makes it impossible to replay a trimmed log at all.
+    /// A sequence-anchored type whose resolved start is below the horizon is a [`TrimmedOffset`]
+    /// error rather than a silent bump up to the horizon, which would skip records the consumer
+    /// believes it has not received yet.
+    pub fn from_seq(self, next_seq: u64, trim_horizon: u64) -> Result<u64, TrimmedOffset> {
+        let requested = match self {
+            // Everything still retained — by definition at or after the horizon.
+            IteratorType::TrimHorizon => return Ok(trim_horizon),
             IteratorType::AtSequenceNumber(n) => n,
             // Saturating so `after=u64::MAX` does not wrap to 0 and replay everything.
             IteratorType::AfterSequenceNumber(n) => n.saturating_add(1),
-            IteratorType::Latest => next_seq,
+            // The tail is never behind the horizon: retention never drops the active segment.
+            IteratorType::Latest => return Ok(next_seq),
+        };
+        if requested < trim_horizon {
+            return Err(TrimmedOffset {
+                requested,
+                horizon: trim_horizon,
+            });
         }
+        Ok(requested)
     }
 }
 
@@ -333,15 +396,66 @@ mod tests {
 
     #[test]
     fn from_seq_maps_each_iterator_type() {
-        assert_eq!(IteratorType::TrimHorizon.from_seq(9), 0);
-        assert_eq!(IteratorType::AtSequenceNumber(4).from_seq(9), 4);
-        assert_eq!(IteratorType::AfterSequenceNumber(4).from_seq(9), 5);
-        assert_eq!(IteratorType::Latest.from_seq(9), 9);
+        // An untrimmed log: the horizon is 0 and every offset resolves as before.
+        assert_eq!(IteratorType::TrimHorizon.from_seq(9, 0), Ok(0));
+        assert_eq!(IteratorType::AtSequenceNumber(4).from_seq(9, 0), Ok(4));
+        assert_eq!(IteratorType::AfterSequenceNumber(4).from_seq(9, 0), Ok(5));
+        assert_eq!(IteratorType::Latest.from_seq(9, 0), Ok(9));
         // `after=u64::MAX` saturates rather than wrapping to 0.
         assert_eq!(
-            IteratorType::AfterSequenceNumber(u64::MAX).from_seq(9),
-            u64::MAX
+            IteratorType::AfterSequenceNumber(u64::MAX).from_seq(9, 0),
+            Ok(u64::MAX)
         );
+    }
+
+    /// [OPUS-5] (sq-iz7ag) THE retention regression guard: on a trimmed log `TRIM_HORIZON` must
+    /// resolve to the horizon, not to seq 0. Pinning it at 0 sends the poll below the log's
+    /// earliest retained record, which the durable log rejects fail-closed — i.e. a `500` on the
+    /// one iterator type that means "replay everything retained". Change the `TrimHorizon` arm
+    /// back to `Ok(0)` and this goes red.
+    #[test]
+    fn trim_horizon_resolves_to_the_oldest_retained_record_not_zero() {
+        assert_eq!(IteratorType::TrimHorizon.from_seq(9, 4), Ok(4));
+        // `LATEST` is still the tail — retention never drops the active segment.
+        assert_eq!(IteratorType::Latest.from_seq(9, 4), Ok(9));
+    }
+
+    /// [OPUS-5] (sq-iz7ag) An `at` / `after` anchor resolving BELOW the horizon is rejected with
+    /// the offsets the HTTP layer turns into a `410` — never silently bumped up to the horizon
+    /// (that would skip dropped records the consumer still believes are coming).
+    #[test]
+    fn anchored_offset_below_the_trim_horizon_is_rejected_with_both_offsets() {
+        assert_eq!(
+            IteratorType::AtSequenceNumber(1).from_seq(9, 4),
+            Err(TrimmedOffset {
+                requested: 1,
+                horizon: 4
+            })
+        );
+        // `after=2` starts at 3, still below the horizon.
+        assert_eq!(
+            IteratorType::AfterSequenceNumber(2).from_seq(9, 4),
+            Err(TrimmedOffset {
+                requested: 3,
+                horizon: 4
+            })
+        );
+        // The boundary is the RESOLVED start, not the anchor: `after=3` starts exactly AT the
+        // horizon, so nothing was dropped from under that consumer and the poll is fine.
+        assert_eq!(IteratorType::AfterSequenceNumber(3).from_seq(9, 4), Ok(4));
+        assert_eq!(IteratorType::AtSequenceNumber(4).from_seq(9, 4), Ok(4));
+    }
+
+    #[test]
+    fn trimmed_offset_message_names_both_offsets_and_the_recovery() {
+        let msg = TrimmedOffset {
+            requested: 1,
+            horizon: 4,
+        }
+        .to_string();
+        assert!(msg.contains("trim horizon"), "{}", msg);
+        assert!(msg.contains('1') && msg.contains('4'), "{}", msg);
+        assert!(msg.contains("TRIM_HORIZON"), "{}", msg);
     }
 
     #[test]

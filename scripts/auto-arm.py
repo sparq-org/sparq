@@ -257,7 +257,7 @@ except ImportError as _gh_retry_missing:  # pragma: no cover - see the wiring te
 # exclusion of any kind — unlike scripts/batch-merge.py and scripts/pr-backlog.py, which
 # both exclude it. So anything that put `review:pass` on the release-plz **Release PR**
 # armed it, and merging that PR cuts a `v*` tag and (once `publish = true` in
-# release-plz.toml) `cargo publish`es 17 crates. A crates.io version CANNOT be unpublished.
+# release-plz.toml) `cargo publish`es 37 crates. A crates.io version CANNOT be unpublished.
 #
 # The predicate lives in scripts/release_pr_guard.py and is keyed on BRANCH / AUTHOR /
 # TITLE — never on a label, because a label can be added or removed by anything holding
@@ -639,7 +639,7 @@ class AutoArmer:
             return f"not-open ({pr.state or 'unknown'})"
         # [OPUS-5] #1135: the release-plz Release PR is NEVER armed by an automated path.
         # Checked BEFORE every label-derived rule and independent of them: merging that PR
-        # cuts a `v*` tag and (with `publish = true`) publishes 17 crates to crates.io,
+        # cuts a `v*` tag and (with `publish = true`) publishes 37 crates to crates.io,
         # which cannot be undone. Keyed on branch/author/title, so relabelling the PR — in
         # either direction — cannot change this answer. FAIL-CLOSED on an unknown branch.
         release_reason = release_pr_guard.arm_block_reason(
@@ -1287,7 +1287,7 @@ def self_test() -> None:
     # ---------------------------------------------------------------- #1135 Release PR
     # THE GAP THIS CLOSES: before #1135 this sweep had NO release-plz exclusion, so a
     # `review:pass` on the Release PR armed it — and merging it tags + (once
-    # `publish = true`) publishes 17 crates to crates.io, irreversibly.
+    # `publish = true`) publishes 37 crates to crates.io, irreversibly.
     #
     # Every case below asserts NO GraphQL mutation was issued. The `clean` fixture above
     # DOES arm, so "no mutation" is a discriminating outcome, not the fixture's default.

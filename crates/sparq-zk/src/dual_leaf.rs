@@ -53,11 +53,45 @@
 //!
 //! The whole ZK estate is remediated + internally re-audited but **NOT externally
 //! audited** (sq-qhy4, P0). Nothing here is a soundness or privacy guarantee.
+//!
+//! # The `DualLeafV1` whole-graph host commitment builder (sq-vvfte, §11 bead 2)
+//!
+//! [`encode_term_dual`] / [`encode_triple_dual`] / [`commit_triples_dual`] /
+//! [`commit_graph_dual`] are the DualLeafV1 mirror of `encode.rs`/`commit.rs`:
+//! the same RDFC10 canonicalization, the same canonical leaf ORDER, the same
+//! flat per-graph Poseidon2 sponge — only the per-term leaf SHAPE differs
+//! (`research/zk-field-native-encoding.md` §3.2/§3.5). The default
+//! `string-canonical` pipeline is untouched and byte-identical; nothing in
+//! `encode.rs`/`commit.rs` calls into this module.
+//!
+//! Leaf shapes (the §3.2 table):
+//!
+//! ```text
+//! IRI          h3(NO_VALUE,        blake3(iri),                     TYPE_CODE_IRI)
+//! blank node   h3(NO_VALUE,        h2(salt_G, blake3(label)),       TYPE_CODE_BLANK_NODE)
+//! hookable     h3(value_component, blake3(N-Triples token),         TYPE_CODE_LITERAL)
+//!   literal      value_component = h3(VALUE_HOOK, DATATYPE_CONST, LANG_NONE)
+//! string /     h3(degenerate,      blake3(N-Triples token),         TYPE_CODE_LITERAL)
+//!   langString / degenerate      = h3(VALUE_NONE, DATATYPE_CONST, LANG_CONST)
+//!   opaque
+//! ```
+//!
+//! The slot-1 lexical component is, for EVERY term class, byte-identical to the
+//! string-canonical scheme's `h_s` — so a DualLeafV1 graph carries exactly the
+//! same term identity as the same graph committed under `StringCanonicalV1`.
+//!
+//! **FAIL-CLOSED ingest (§6, load-bearing).** A literal whose datatype IS on a
+//! hookable value lane but whose lexical form the lane encoder REJECTS is an
+//! ERROR for the whole graph commitment ([`DualCommitError::Leaf`]) — it is
+//! **NEVER** silently downgraded onto the string lane. A silent downgrade is
+//! precisely the §6 value↔lexical desync this method's host mitigation exists to
+//! prevent.
 
-use crate::encode::TYPE_CODE_LITERAL;
+use crate::canon::{self, CanonError, CanonicalGraph};
+use crate::encode::{TYPE_CODE_BLANK_NODE, TYPE_CODE_IRI, TYPE_CODE_LITERAL};
 use crate::field::{field_from_hash_bytes, Fr};
 use crate::poseidon2;
-use oxrdf::Literal;
+use oxrdf::{Literal, NamedOrBlankNode, Term, Triple};
 
 /// The reserved "no language" sentinel for the `LANG_NONE` slot — mirrors the
 /// Noir `filter_value::LANG_NONE` global. A real language tag would be
@@ -384,6 +418,266 @@ fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
     Some((neg, scaled, fd))
 }
 
+// ---------------------------------------------------------------------------
+// sq-vvfte — the DualLeafV1 WHOLE-GRAPH host commitment builder (§11 bead 2).
+// Host slice only: NO circuit / verifier change (the scan.nr + join.nr leaf
+// recompute, `reconstruct_public_inputs`, and the cross-vectors are §11 bead 3).
+// ---------------------------------------------------------------------------
+
+/// The reserved **no-value** field tag (`VALUE_NONE`, §3.2). It occupies slot 0
+/// of the DEGENERATE `value_component` a term with no numeric handle folds:
+/// `h3(VALUE_NONE, DATATYPE_CONST, LANG_CONST)`.
+///
+/// **Distinctness does NOT rest on this tag's numeric value** (Q1, resolved
+/// proceed-and-document under epic-owner sq-1s2.1). A `VALUE_HOOK` is an
+/// arbitrary field element — for `xsd:integer` it is the integer itself — so no
+/// small reserved tag can be globally disjoint from every real hook. What keeps
+/// a degenerate `value_component` from ever colliding a real one is the
+/// **datatype-folded tuple plus the routing discipline**:
+///
+/// 1. every datatype on a hookable value lane in this build is routed to its
+///    lane encoder by [`encode_literal_dual`], so a hookable `DATATYPE_CONST`
+///    **never** carries a degenerate `value_component`; and
+/// 2. no real `VALUE_HOOK` is ever emitted under a NON-hookable
+///    `DATATYPE_CONST` (`xsd:string`, `rdf:langString`, an opaque datatype),
+///    so a degenerate const never carries a real hook.
+///
+/// The two sets are therefore separated by slot 1 (`DATATYPE_CONST`), not by
+/// slot 0. The tag is nonetheless chosen distinct from the small hooks the
+/// not-yet-routed lanes use (see [`is_hookable_datatype`]'s seam note), and
+/// distinct from a real `VALUE_HOOK = 0`, so `literal_shapes_are_distinguished`
+/// (`encode.rs`) stays true without leaning on the lexical lane alone.
+pub const VALUE_NONE: u64 = 2;
+
+/// The §3.2 table's **flat slot-0 `NO_VALUE` sentinel** for IRI and blank-node
+/// leaves: `h3(NO_VALUE, lexical, TYPE_CODE)`. Non-literals have neither a
+/// datatype nor a language to fold, so the table gives them the flat sentinel
+/// rather than the datatype-folded degenerate tuple — this is the same reserved
+/// no-value tag ([`VALUE_NONE`]), used unfolded. IRI / blank-node / literal
+/// leaves are separated by the `TYPE_CODE` in slot 2 regardless.
+pub const NO_VALUE: u64 = VALUE_NONE;
+
+/// The `LANG_CONST` for a language tag: `blake3_field(lang)` — the `rdf:langString`
+/// slot-2 constant of the degenerate `value_component` (§3.3). A literal with no
+/// language folds the reserved [`LANG_NONE`] sentinel instead, so a language-tagged
+/// literal can never share a `value_component` with an un-tagged one.
+pub fn lang_const(language: &str) -> Fr {
+    blake3_field(language.as_bytes())
+}
+
+/// Whether a datatype IRI is on a HOOKABLE value lane **in this build** — i.e.
+/// whether [`encode_literal_dual`] routes it to a value-lane encoder (and so
+/// applies the §6 fail-closed rule) rather than to the degenerate string lane.
+///
+/// SEAM (sq-vvfte): the `xsd:boolean` lane (`dual_leaf_boolean`) and the
+/// `xsd:dateTime`/`xsd:date` lanes (`dual_leaf_datetime`) are deliberately NOT
+/// joined here — joining them is a follow-on, because it narrows what a
+/// DualLeafV1 graph may CONTAIN (e.g. the XSD-legal but non-canonical
+/// `"1"^^xsd:boolean` becomes uncommittable) and re-bases those leaves. Until
+/// they join, those literals take the degenerate string lane, and the §3.2
+/// no-collision property still holds by construction:
+/// - `xsd:boolean`'s real hooks are `{0, 1}` and [`VALUE_NONE`] is neither;
+/// - the `xsd:dateTime`/`xsd:date` lanes fold their epoch SCALE into their
+///   `DATATYPE_CONST` (`blake3("<iri>@epochscale=3")`), which is not the bare
+///   `blake3(iri)` the degenerate folds — so the consts are disjoint outright.
+pub fn is_hookable_datatype(datatype_iri: &str) -> bool {
+    matches!(datatype_iri, XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE)
+}
+
+/// The DEGENERATE, datatype-folded `value_component` of §3.2:
+/// `h3(VALUE_NONE, blake3(datatype IRI), LANG_CONST)`, where `LANG_CONST` is
+/// [`lang_const`] of the language tag for `rdf:langString` and the reserved
+/// [`LANG_NONE`] sentinel otherwise. Used for `xsd:string`, `rdf:langString` and
+/// every opaque (non-hookable) datatype — the terms that have no numeric handle
+/// and whose `lexical_component` is the sole binding.
+pub fn degenerate_value_component(datatype_iri: &str, language: Option<&str>) -> Fr {
+    let lang = match language {
+        Some(l) => lang_const(l),
+        None => Fr::from(LANG_NONE),
+    };
+    poseidon2::hash(&[Fr::from(VALUE_NONE), datatype_const(datatype_iri), lang])
+}
+
+/// Encodes a literal to its DualLeafV1 leaf, routing by datatype (§3.2/§3.3).
+///
+/// - a HOOKABLE datatype ([`is_hookable_datatype`]) goes to its value-lane
+///   encoder and the leaf is that encoder's [`DualLeafComponents::leaf`];
+/// - everything else (`xsd:string`, `rdf:langString`, opaque datatypes) takes
+///   the degenerate string lane
+///   `h3(degenerate_value_component, h_s, TYPE_CODE_LITERAL)`.
+///
+/// **Fail-closed (§6):** a hookable-datatyped literal whose lexical form the lane
+/// encoder rejects returns the encoder's [`DualLeafError`]. It is NEVER
+/// downgraded onto the string lane — that silent downgrade is the §6 desync.
+pub fn encode_literal_dual(literal: &Literal) -> Result<Fr, DualLeafError> {
+    let datatype = literal.datatype();
+    let components = match datatype.as_str() {
+        XSD_INTEGER => Some(encode_literal(literal)?),
+        XSD_DECIMAL => Some(encode_decimal(literal)?),
+        XSD_DOUBLE => Some(encode_double(literal)?),
+        // SEAM (sq-vvfte): the `xsd:boolean` (`dual_leaf_boolean`) and
+        // `xsd:dateTime`/`xsd:date` (`dual_leaf_datetime`) lanes join here as a
+        // follow-on — see `is_hookable_datatype` for why they are not routed yet
+        // and why the §3.2 no-collision property holds meanwhile. Adding an arm
+        // here MUST also extend `is_hookable_datatype` (a test pins the two
+        // together).
+        _ => None,
+    };
+    Ok(match components {
+        Some(c) => c.leaf(),
+        None => poseidon2::hash(&[
+            degenerate_value_component(datatype.as_str(), literal.language()),
+            // The lexical slot is EXACTLY the string-canonical `h_s` over the
+            // canonical N-Triples token — byte-identical to `encode.rs`'s.
+            blake3_field(literal.to_string().as_bytes()),
+            Fr::from(TYPE_CODE_LITERAL),
+        ]),
+    })
+}
+
+/// Encodes a term to its DualLeafV1 leaf under a graph salt — the DualLeafV1
+/// mirror of [`crate::encode::encode_term`] (§3.2 table). Blank-node labels are
+/// expected to be the RDFC10 canonical labels (encode after canonicalization),
+/// and the salt-scoped inner `h2(salt_G, blake3(label))` is retained verbatim
+/// from the string-canonical scheme (Q6 cross-graph correlation guard).
+///
+/// Returns `Ok(None)` for RDF 1.2 triple terms — outside the committed data
+/// model, exactly as [`crate::encode::encode_term`] does, so callers fail
+/// closed. Returns `Err` for a hookable literal the value lane rejects (§6).
+pub fn encode_term_dual(term: &Term, salt: &Fr) -> Result<Option<Fr>, DualLeafError> {
+    Ok(match term {
+        Term::NamedNode(n) => Some(poseidon2::hash(&[
+            Fr::from(NO_VALUE),
+            blake3_field(n.as_str().as_bytes()),
+            Fr::from(TYPE_CODE_IRI),
+        ])),
+        Term::BlankNode(b) => {
+            let inner = poseidon2::hash(&[*salt, blake3_field(b.as_str().as_bytes())]);
+            Some(poseidon2::hash(&[
+                Fr::from(NO_VALUE),
+                inner,
+                Fr::from(TYPE_CODE_BLANK_NODE),
+            ]))
+        }
+        Term::Literal(l) => Some(encode_literal_dual(l)?),
+        Term::Triple(_) => None,
+    })
+}
+
+/// Encodes a triple to its DualLeafV1 commitment leaf:
+/// `h3(Enc(s), Enc(p), Enc(o))` — the same outer shape (and the same argument
+/// order) as [`crate::encode::encode_triple`], over DualLeafV1 term leaves.
+///
+/// `Ok(None)` if any position is an RDF 1.2 triple term (fail closed); `Err` if
+/// a hookable literal fails its lane's §6 canonical-lexical predicate.
+pub fn encode_triple_dual(triple: &Triple, salt: &Fr) -> Result<Option<Fr>, DualLeafError> {
+    let s = match &triple.subject {
+        NamedOrBlankNode::NamedNode(n) => encode_term_dual(&Term::NamedNode(n.clone()), salt)?,
+        NamedOrBlankNode::BlankNode(b) => encode_term_dual(&Term::BlankNode(b.clone()), salt)?,
+    };
+    let p = encode_term_dual(&Term::NamedNode(triple.predicate.clone()), salt)?;
+    let o = encode_term_dual(&triple.object, salt)?;
+    Ok(match (s, p, o) {
+        (Some(s), Some(p), Some(o)) => Some(poseidon2::hash(&[s, p, o])),
+        _ => None,
+    })
+}
+
+/// A DualLeafV1 whole-graph commitment failure. Mirrors `commit::CommitError`
+/// and adds the [`Leaf`](Self::Leaf) arm that carries the §6 fail-closed
+/// value-lane rejection.
+#[derive(Debug)]
+pub enum DualCommitError {
+    /// RDFC10 canonicalization failed.
+    Canon(CanonError),
+    /// A canonical triple contained a term outside the committed data model
+    /// (an RDF 1.2 triple term).
+    UncommittableTerm(String),
+    /// A hookable-datatyped literal failed its value lane's §6 canonical-lexical
+    /// predicate. **Fail-closed for the WHOLE graph** — never a silent
+    /// string-lane downgrade of the offending literal.
+    Leaf(DualLeafError),
+}
+
+impl std::fmt::Display for DualCommitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DualCommitError::Canon(e) => write!(f, "{e}"),
+            DualCommitError::UncommittableTerm(t) => write!(f, "uncommittable term: {t}"),
+            DualCommitError::Leaf(e) => write!(f, "dual-leaf value lane rejected a literal: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for DualCommitError {}
+
+impl From<CanonError> for DualCommitError {
+    fn from(e: CanonError) -> Self {
+        DualCommitError::Canon(e)
+    }
+}
+
+impl From<DualLeafError> for DualCommitError {
+    fn from(e: DualLeafError) -> Self {
+        DualCommitError::Leaf(e)
+    }
+}
+
+/// A graph committed under `DualLeafV1`: canonical form, ordered leaves, and the
+/// commitment. Field-for-field the shape of `commit::GraphCommitment`, and the
+/// leaf ORDER is identical (`canonical.lines` order) — only the per-term leaf
+/// encoding differs.
+#[derive(Debug, Clone)]
+pub struct DualGraphCommitment {
+    /// The RDFC10 canonical form (leaf order = `canonical.lines` order).
+    pub canonical: CanonicalGraph,
+    /// Per-triple DualLeafV1 leaf hashes, in canonical order.
+    pub leaves: Vec<Fr>,
+    /// `C(G)`: Poseidon2 sponge over `leaves`.
+    pub commitment: Fr,
+    /// The per-graph salt the leaves were encoded under (`zk:rdfc10Salt`).
+    pub salt: Fr,
+}
+
+/// Canonicalizes and commits one named graph's content under `salt`, using the
+/// `DualLeafV1` leaf shape — the DualLeafV1 mirror of `commit::commit_triples`.
+///
+/// The ordering contract is `commit.rs`'s, unchanged: RDFC10-canonicalize, then
+/// one leaf per canonical triple in canonical N-Quads order (index = leaf
+/// index), then ONE flat Poseidon2 sponge over the leaf sequence.
+pub fn commit_triples_dual(
+    triples: &[Triple],
+    salt: Fr,
+) -> Result<DualGraphCommitment, DualCommitError> {
+    commit_canonical_dual(canon::canonicalize_triples(triples)?, salt)
+}
+
+/// Commits the content of a `sparq_core::Graph` under `salt` using the
+/// `DualLeafV1` leaf shape — the DualLeafV1 mirror of
+/// `commit::commit_graph_content`.
+pub fn commit_graph_dual(
+    g: &sparq_core::Graph,
+    salt: Fr,
+) -> Result<DualGraphCommitment, DualCommitError> {
+    commit_canonical_dual(canon::canonicalize_graph_content(g)?, salt)
+}
+
+fn commit_canonical_dual(
+    canonical: CanonicalGraph,
+    salt: Fr,
+) -> Result<DualGraphCommitment, DualCommitError> {
+    let mut leaves = Vec::with_capacity(canonical.triples.len());
+    for t in &canonical.triples {
+        // `?` on the value-lane rejection is the §6 FAIL-CLOSED ingest rule: the
+        // whole commitment fails, the offending literal is never downgraded.
+        let leaf = encode_triple_dual(t, &salt)?
+            .ok_or_else(|| DualCommitError::UncommittableTerm(t.to_string()))?;
+        leaves.push(leaf);
+    }
+    let commitment = poseidon2::hash(&leaves);
+    Ok(DualGraphCommitment { canonical, leaves, commitment, salt })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,5 +945,441 @@ mod tests {
         ));
         // Lone "0.0" is canonical (non-negative zero).
         assert_eq!(encode_decimal(&dec_lit("0.0")).unwrap().value_hook, Fr::from(0u64));
+    }
+
+    // ---- sq-vvfte: the DualLeafV1 whole-graph host commitment builder ----
+
+    use crate::encode::salt_from_bytes;
+    use oxrdf::BlankNode;
+
+    const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
+    const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+    fn graph_triples() -> Vec<Triple> {
+        let b = BlankNode::new("x").unwrap();
+        vec![
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                NamedNode::new("http://ex/p").unwrap(),
+                Term::Literal(Literal::new_simple_literal("v")),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b),
+                NamedNode::new("http://ex/q").unwrap(),
+                Term::NamedNode(NamedNode::new("http://ex/o").unwrap()),
+            ),
+        ]
+    }
+
+    #[test]
+    fn dual_iri_leaf_pins_the_flat_no_value_slot0_shape() {
+        // §3.2 table: Enc(IRI) = h3(NO_VALUE, blake3(iri), TYPE_CODE_IRI) — the
+        // value-first / type-last tuple, NOT the string-canonical h2 pair.
+        let salt = salt_from_bytes(&[7u8; 32]);
+        let iri = Term::NamedNode(NamedNode::new("http://ex/a").unwrap());
+        let expected = poseidon2::hash(&[
+            Fr::from(NO_VALUE),
+            blake3_field(b"http://ex/a"),
+            Fr::from(TYPE_CODE_IRI),
+        ]);
+        assert_eq!(encode_term_dual(&iri, &salt).unwrap(), Some(expected));
+        // Salt-independent, exactly like the string-canonical IRI leaf.
+        let other = salt_from_bytes(&[9u8; 32]);
+        assert_eq!(
+            encode_term_dual(&iri, &salt).unwrap(),
+            encode_term_dual(&iri, &other).unwrap()
+        );
+    }
+
+    #[test]
+    fn dual_bnode_leaf_retains_the_q6_salt_scoped_inner() {
+        // §3.2 table: Enc(bnode) = h3(NO_VALUE, h2(salt_G, blake3(label)),
+        // TYPE_CODE_BLANK_NODE). The salt-scoped inner is retained VERBATIM from
+        // the string-canonical scheme (Q6 cross-graph correlation guard).
+        let salt = salt_from_bytes(&[7u8; 32]);
+        let b = Term::BlankNode(BlankNode::new("c14n0").unwrap());
+        let inner = poseidon2::hash(&[salt, blake3_field(b"c14n0")]);
+        let expected =
+            poseidon2::hash(&[Fr::from(NO_VALUE), inner, Fr::from(TYPE_CODE_BLANK_NODE)]);
+        assert_eq!(encode_term_dual(&b, &salt).unwrap(), Some(expected));
+        // Different graphs (different salts) -> different leaves (the Q6 property).
+        let other = salt_from_bytes(&[8u8; 32]);
+        assert_ne!(
+            encode_term_dual(&b, &salt).unwrap(),
+            encode_term_dual(&b, &other).unwrap()
+        );
+    }
+
+    #[test]
+    fn lexical_slot_is_byte_identical_to_the_string_canonical_h_s_per_term_class() {
+        // THE INVARIANT: for EVERY term class the dual leaf's slot-1 lexical
+        // component is exactly the `h_s` the string-canonical encoder hashes, so
+        // a DualLeafV1 graph carries the same term identity. Each case binds ONE
+        // `hs` value into BOTH compositions, so a divergence in either is caught.
+        let salt = salt_from_bytes(&[3u8; 32]);
+
+        let iri = NamedNode::new("http://ex/a").unwrap();
+        let hs = blake3_field(iri.as_str().as_bytes());
+        assert_eq!(
+            crate::encode::encode_term(&Term::NamedNode(iri.clone()), &salt).unwrap(),
+            poseidon2::hash(&[Fr::from(TYPE_CODE_IRI), hs]),
+        );
+        assert_eq!(
+            encode_term_dual(&Term::NamedNode(iri), &salt).unwrap(),
+            Some(poseidon2::hash(&[Fr::from(NO_VALUE), hs, Fr::from(TYPE_CODE_IRI)])),
+        );
+
+        let b = BlankNode::new("c14n0").unwrap();
+        let hs = poseidon2::hash(&[salt, blake3_field(b.as_str().as_bytes())]);
+        assert_eq!(
+            crate::encode::encode_term(&Term::BlankNode(b.clone()), &salt).unwrap(),
+            poseidon2::hash(&[Fr::from(TYPE_CODE_BLANK_NODE), hs]),
+        );
+        assert_eq!(
+            encode_term_dual(&Term::BlankNode(b), &salt).unwrap(),
+            Some(poseidon2::hash(&[Fr::from(NO_VALUE), hs, Fr::from(TYPE_CODE_BLANK_NODE)])),
+        );
+
+        // Both literal lanes: the degenerate string lane AND a hookable lane.
+        for lit in [Literal::new_simple_literal("v"), int_lit("18")] {
+            let hs = blake3_field(lit.to_string().as_bytes());
+            assert_eq!(
+                crate::encode::encode_term(&Term::Literal(lit.clone()), &salt).unwrap(),
+                poseidon2::hash(&[Fr::from(TYPE_CODE_LITERAL), hs]),
+                "string-canonical h_s drifted for {lit}"
+            );
+            let value_component = if is_hookable_datatype(lit.datatype().as_str()) {
+                encode_literal(&lit).unwrap().value_component()
+            } else {
+                degenerate_value_component(lit.datatype().as_str(), lit.language())
+            };
+            assert_eq!(
+                encode_term_dual(&Term::Literal(lit.clone()), &salt).unwrap(),
+                Some(poseidon2::hash(&[value_component, hs, Fr::from(TYPE_CODE_LITERAL)])),
+                "dual lexical slot drifted for {lit}"
+            );
+        }
+    }
+
+    #[test]
+    fn degenerate_lane_folds_the_datatype_and_the_language() {
+        // §3.2: the string/opaque lane's value_component is the DATATYPE-FOLDED
+        // degenerate h3(VALUE_NONE, DATATYPE_CONST, LANG_CONST) — Q1 resolved.
+        let plain = Literal::new_simple_literal("v"); // datatype xsd:string
+        assert_eq!(plain.datatype().as_str(), XSD_STRING);
+        assert_eq!(
+            encode_literal_dual(&plain).unwrap(),
+            poseidon2::hash(&[
+                poseidon2::hash(&[
+                    Fr::from(VALUE_NONE),
+                    datatype_const(XSD_STRING),
+                    Fr::from(LANG_NONE),
+                ]),
+                blake3_field(plain.to_string().as_bytes()),
+                Fr::from(TYPE_CODE_LITERAL),
+            ]),
+        );
+
+        // rdf:langString folds blake3(lang) into the LANG_CONST slot.
+        let en = Literal::new_language_tagged_literal("v", "en").unwrap();
+        assert_eq!(en.datatype().as_str(), RDF_LANG_STRING);
+        assert_eq!(
+            encode_literal_dual(&en).unwrap(),
+            poseidon2::hash(&[
+                poseidon2::hash(&[
+                    Fr::from(VALUE_NONE),
+                    datatype_const(RDF_LANG_STRING),
+                    lang_const("en"),
+                ]),
+                blake3_field(en.to_string().as_bytes()),
+                Fr::from(TYPE_CODE_LITERAL),
+            ]),
+        );
+
+        // The §3.2 distinctness the degeneracy must preserve (the encode.rs
+        // `literal_shapes_are_distinguished` property, on the dual lane): a plain
+        // string, an opaque-datatyped literal, a langString, and a hookable
+        // integer over the SAME lexical are pairwise distinct.
+        let opaque = Literal::new_typed_literal("v", NamedNode::new("http://ex/dt").unwrap());
+        let one_plain = Literal::new_simple_literal("1");
+        let one_lang = Literal::new_language_tagged_literal("1", "en").unwrap();
+        let leaves = [
+            encode_literal_dual(&plain).unwrap(),
+            encode_literal_dual(&opaque).unwrap(),
+            encode_literal_dual(&en).unwrap(),
+            encode_literal_dual(&one_plain).unwrap(),
+            encode_literal_dual(&one_lang).unwrap(),
+            encode_literal_dual(&int_lit("1")).unwrap(),
+        ];
+        for (i, a) in leaves.iter().enumerate() {
+            for b in &leaves[i + 1..] {
+                assert_ne!(a, b, "dual literal leaves must be pairwise distinct");
+            }
+        }
+        // A different language is a different value_component (LANG_CONST is
+        // load-bearing, not decorative).
+        assert_ne!(
+            degenerate_value_component(RDF_LANG_STRING, Some("en")),
+            degenerate_value_component(RDF_LANG_STRING, Some("fr")),
+        );
+        assert_ne!(
+            degenerate_value_component(RDF_LANG_STRING, Some("en")),
+            degenerate_value_component(RDF_LANG_STRING, None),
+        );
+    }
+
+    #[test]
+    fn hookable_literals_route_to_their_value_lane_encoder() {
+        // The routing contract: a hookable datatype's leaf IS its lane encoder's
+        // `.leaf()` (the value_component carries a REAL hook), never the
+        // degenerate string-lane leaf.
+        for (lit, components) in [
+            (int_lit("18"), encode_literal(&int_lit("18")).unwrap()),
+            (dec_lit("2.50"), encode_decimal(&dec_lit("2.50")).unwrap()),
+            (dbl_lit("2.5E0"), encode_double(&dbl_lit("2.5E0")).unwrap()),
+        ] {
+            assert!(is_hookable_datatype(lit.datatype().as_str()));
+            assert_eq!(encode_literal_dual(&lit).unwrap(), components.leaf());
+            // NOT the degenerate lane.
+            let degenerate = poseidon2::hash(&[
+                degenerate_value_component(lit.datatype().as_str(), lit.language()),
+                blake3_field(lit.to_string().as_bytes()),
+                Fr::from(TYPE_CODE_LITERAL),
+            ]);
+            assert_ne!(encode_literal_dual(&lit).unwrap(), degenerate);
+        }
+    }
+
+    #[test]
+    fn hookable_datatype_predicate_agrees_with_the_routing_match() {
+        // Pins `is_hookable_datatype` to the arms `encode_literal_dual` actually
+        // routes: a datatype the predicate calls hookable MUST reject a lexical
+        // its lane rejects (fail-closed), and a datatype it calls non-hookable
+        // MUST take the degenerate lane. Adding a lane arm without updating the
+        // predicate turns this red.
+        for iri in [XSD_INTEGER, XSD_DECIMAL, XSD_DOUBLE] {
+            assert!(is_hookable_datatype(iri));
+            let bogus = Literal::new_typed_literal("!!", NamedNode::new(iri).unwrap());
+            assert!(
+                encode_literal_dual(&bogus).is_err(),
+                "hookable {iri} must fail closed on a bad lexical"
+            );
+        }
+        for iri in [XSD_STRING, RDF_LANG_STRING, "http://ex/dt"] {
+            assert!(!is_hookable_datatype(iri));
+            let lit = Literal::new_typed_literal("!!", NamedNode::new(iri).unwrap());
+            assert_eq!(
+                encode_literal_dual(&lit).unwrap(),
+                poseidon2::hash(&[
+                    degenerate_value_component(iri, lit.language()),
+                    blake3_field(lit.to_string().as_bytes()),
+                    Fr::from(TYPE_CODE_LITERAL),
+                ]),
+            );
+        }
+    }
+
+    #[test]
+    fn unrouted_lane_hooks_cannot_collide_the_degenerate_component() {
+        // The §3.2 no-collision obligation for the lanes NOT yet routed (the
+        // documented seam). `xsd:boolean` shares the bare `blake3(IRI)`
+        // DATATYPE_CONST with its degenerate form, so distinctness there rests on
+        // VALUE_NONE differing from both boolean hooks {0, 1}. The dateTime/date
+        // lanes fold their epoch scale into the const, so the consts are disjoint
+        // outright and the hook value is irrelevant.
+        assert_ne!(VALUE_NONE, 0);
+        assert_ne!(VALUE_NONE, 1);
+        let boolean_iri = crate::dual_leaf_boolean::XSD_BOOLEAN;
+        assert!(!is_hookable_datatype(boolean_iri));
+        for lexical in ["true", "false"] {
+            let lit = Literal::new_typed_literal(lexical, NamedNode::new(boolean_iri).unwrap());
+            let real = crate::dual_leaf_boolean::encode_boolean(&lit).unwrap();
+            assert_eq!(real.datatype_const, datatype_const(boolean_iri));
+            assert_ne!(real.value_component(), degenerate_value_component(boolean_iri, None));
+        }
+        for (iri, real_const) in [
+            (
+                crate::dual_leaf_datetime::XSD_DATE_TIME,
+                crate::dual_leaf_datetime::datetime_datatype_const(),
+            ),
+            (
+                crate::dual_leaf_datetime::XSD_DATE,
+                crate::dual_leaf_datetime::date_datatype_const(),
+            ),
+        ] {
+            assert!(!is_hookable_datatype(iri));
+            assert_ne!(real_const, datatype_const(iri), "{iri} const must be scale-folded");
+        }
+    }
+
+    #[test]
+    fn rdf12_triple_terms_are_fail_closed_none() {
+        let salt = salt_from_bytes(&[1u8; 32]);
+        let inner = Triple::new(
+            NamedOrBlankNode::NamedNode(NamedNode::new("http://ex/s").unwrap()),
+            NamedNode::new("http://ex/p").unwrap(),
+            Term::NamedNode(NamedNode::new("http://ex/o").unwrap()),
+        );
+        let quoted = Term::Triple(Box::new(inner.clone()));
+        assert_eq!(encode_term_dual(&quoted, &salt).unwrap(), None);
+        // A triple whose object is a quoted triple has no leaf either, and the
+        // whole-graph builder turns that into UncommittableTerm.
+        let outer = Triple::new(
+            NamedOrBlankNode::NamedNode(NamedNode::new("http://ex/s").unwrap()),
+            NamedNode::new("http://ex/p").unwrap(),
+            quoted,
+        );
+        assert_eq!(encode_triple_dual(&outer, &salt).unwrap(), None);
+        assert_eq!(
+            encode_triple_dual(&inner, &salt).unwrap(),
+            Some(poseidon2::hash(&[
+                encode_term_dual(&Term::NamedNode(NamedNode::new("http://ex/s").unwrap()), &salt)
+                    .unwrap()
+                    .unwrap(),
+                encode_term_dual(&Term::NamedNode(NamedNode::new("http://ex/p").unwrap()), &salt)
+                    .unwrap()
+                    .unwrap(),
+                encode_term_dual(&Term::NamedNode(NamedNode::new("http://ex/o").unwrap()), &salt)
+                    .unwrap()
+                    .unwrap(),
+            ])),
+        );
+    }
+
+    #[test]
+    fn encode_triple_dual_is_position_sensitive() {
+        let salt = salt_from_bytes(&[9u8; 32]);
+        let s = NamedNode::new("http://ex/s").unwrap();
+        let p = NamedNode::new("http://ex/p").unwrap();
+        let o = NamedNode::new("http://ex/o").unwrap();
+        let t = Triple::new(
+            NamedOrBlankNode::NamedNode(s.clone()),
+            p.clone(),
+            Term::NamedNode(o.clone()),
+        );
+        let swapped = Triple::new(NamedOrBlankNode::NamedNode(s), o, Term::NamedNode(p));
+        assert_ne!(
+            encode_triple_dual(&t, &salt).unwrap(),
+            encode_triple_dual(&swapped, &salt).unwrap()
+        );
+    }
+
+    #[test]
+    fn ingest_is_fail_closed_on_a_rejected_hookable_lexical() {
+        // THE LOAD-BEARING §6 RULE: a hookable-datatyped literal whose lexical the
+        // lane rejects ("05"^^xsd:integer is non-canonical) is an ERROR for the
+        // WHOLE dual-leaf commitment — NEVER a silent string-lane downgrade.
+        let salt = salt_from_bytes(&[7u8; 32]);
+        let bad = int_lit("05");
+        assert!(matches!(
+            encode_literal_dual(&bad),
+            Err(DualLeafError::NonCanonicalValue(_))
+        ));
+        let triples = vec![Triple::new(
+            NamedOrBlankNode::NamedNode(NamedNode::new("http://ex/s").unwrap()),
+            NamedNode::new("http://ex/p").unwrap(),
+            Term::Literal(bad.clone()),
+        )];
+        let err = commit_triples_dual(&triples, salt).unwrap_err();
+        assert!(
+            matches!(err, DualCommitError::Leaf(DualLeafError::NonCanonicalValue(_))),
+            "expected a fail-closed value-lane rejection, got {err}"
+        );
+        // And the downgrade the rule forbids is genuinely a DIFFERENT leaf — the
+        // rejection is not a no-op dressed up as a guard.
+        let downgraded = poseidon2::hash(&[
+            degenerate_value_component(XSD_INTEGER, None),
+            blake3_field(bad.to_string().as_bytes()),
+            Fr::from(TYPE_CODE_LITERAL),
+        ]);
+        let canonical = encode_literal_dual(&int_lit("5")).unwrap();
+        assert_ne!(downgraded, canonical);
+        // The canonical sibling commits fine, so the failure is about the lexical,
+        // not about the datatype being uncommittable.
+        let ok = vec![Triple::new(
+            NamedOrBlankNode::NamedNode(NamedNode::new("http://ex/s").unwrap()),
+            NamedNode::new("http://ex/p").unwrap(),
+            Term::Literal(int_lit("5")),
+        )];
+        assert!(commit_triples_dual(&ok, salt).is_ok());
+    }
+
+    #[test]
+    fn commit_dual_mirrors_commit_rs_ordering_and_the_flat_sponge() {
+        // The ordering contract is `commit.rs`'s, unchanged: same RDFC10 canonical
+        // form, same leaf INDEX per canonical triple, one flat Poseidon2 sponge
+        // over the leaf sequence. Only the per-term leaf SHAPE differs.
+        let salt = salt_from_bytes(&[7u8; 32]);
+        let g = graph_triples();
+        let dual = commit_triples_dual(&g, salt).unwrap();
+        let string_canonical = crate::commit::commit_triples(&g, salt).unwrap();
+
+        assert_eq!(dual.canonical.lines, string_canonical.canonical.lines);
+        assert_eq!(dual.canonical.triples, string_canonical.canonical.triples);
+        assert_eq!(dual.leaves.len(), string_canonical.leaves.len());
+        assert_eq!(dual.salt, salt);
+
+        let recomputed: Vec<Fr> = dual
+            .canonical
+            .triples
+            .iter()
+            .map(|t| encode_triple_dual(t, &salt).unwrap().unwrap())
+            .collect();
+        assert_eq!(dual.leaves, recomputed, "leaves must be encode_triple_dual in canonical order");
+        assert_eq!(dual.commitment, poseidon2::hash(&recomputed));
+
+        // The two methods are genuinely different commitments over the same graph
+        // (the leaf re-base of §3.5) — so a verifier MUST dispatch on zk:scheme.
+        assert_ne!(dual.commitment, string_canonical.commitment);
+        for (d, s) in dual.leaves.iter().zip(&string_canonical.leaves) {
+            assert_ne!(d, s);
+        }
+
+        // Input order does not matter (RDFC10 fixes the order), and the salt
+        // separates graphs exactly as in the string-canonical pipeline.
+        let mut reversed = g.clone();
+        reversed.reverse();
+        assert_eq!(commit_triples_dual(&reversed, salt).unwrap().commitment, dual.commitment);
+        assert_ne!(
+            commit_triples_dual(&g, salt_from_bytes(&[8u8; 32])).unwrap().commitment,
+            dual.commitment
+        );
+    }
+
+    #[test]
+    fn commit_graph_dual_matches_commit_triples_dual() {
+        use sparq_core::Graph;
+        let salt = salt_from_bytes(&[5u8; 32]);
+        let g = Graph::load_str(
+            "<http://ex/s> <http://ex/p> \"o\" .\n<http://ex/s> <http://ex/q> <http://ex/o2> .",
+            "turtle",
+        )
+        .unwrap();
+        let from_store = commit_graph_dual(&g, salt).unwrap();
+        let from_triples =
+            commit_triples_dual(&crate::canon::graph_triples(&g).unwrap(), salt).unwrap();
+        assert_eq!(from_store.commitment, from_triples.commitment);
+        assert_eq!(from_store.leaves, from_triples.leaves);
+        assert_eq!(from_store.canonical.lines, from_triples.canonical.lines);
+    }
+
+    #[test]
+    fn dual_commit_error_display_is_exact() {
+        assert_eq!(
+            DualCommitError::UncommittableTerm("http://ex/quoted".to_string()).to_string(),
+            "uncommittable term: http://ex/quoted"
+        );
+        let leaf = DualLeafError::NonCanonicalValue("\"05\"".to_string());
+        let leaf_msg = leaf.to_string();
+        let wrapped: DualCommitError = leaf.into();
+        assert_eq!(
+            wrapped.to_string(),
+            format!("dual-leaf value lane rejected a literal: {leaf_msg}")
+        );
+        let canon_err = CanonError::Bridge("boom".to_string());
+        let canon_msg = canon_err.to_string();
+        let wrapped: DualCommitError = canon_err.into();
+        assert!(matches!(wrapped, DualCommitError::Canon(_)));
+        assert_eq!(wrapped.to_string(), canon_msg);
     }
 }

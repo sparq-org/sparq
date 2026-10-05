@@ -22,7 +22,7 @@
 //! hook can run (debug builds, `wasm-bindgen-test`). In `panic=abort` release builds the hook
 //! fires before the abort and the message appears in the browser or Node console.
 //!
-//! The Node host (`@jeswr/solid-server`) catches the resulting `WebAssembly.RuntimeError` and
+//! The Node host (`@sparq-org/solid-server`) catches the resulting `WebAssembly.RuntimeError` and
 //! recreates the `SolidServer` before the next request, so a single trap does not permanently
 //! brick the process. See `packages/solid-server/src/index.js`.
 //!
@@ -33,14 +33,30 @@
 //! global allocator that tracks live bytes, and `handleRequest` refuses a request whose projected
 //! peak would cross the configured ceiling with a clean HTTP 507 before the router ever runs. See
 //! the [`memory`] module documentation for what that does and does not cover.
+//!
+//! # Persistence
+//!
+//! A pod built with `SolidServer::new` is ephemeral: its contents live in linear memory and are
+//! gone when the host drops the instance. `SolidServer::withSnapshot` opts into the [`persist`]
+//! seam instead — the same pod behind a journaling `Store`
+//! decorator, restored from bytes the host kept and re-exportable through `snapshot()`. The host
+//! owns the durable medium (`node:fs`, IndexedDB); this crate owns only the byte format and the
+//! replay. See the [`persist`] module documentation, including why the store cannot call
+//! JavaScript per operation.
 
 // The `#[allow]` also has to cover the `#[global_allocator]` registration, whose expansion emits
 // `unsafe` allocator shims — hence the whole module, not a single item, is the exemption.
 #[allow(unsafe_code)]
 pub mod memory;
 
+// [GPT-5.6] sq-6xasp.7: the opt-in persistence seam. Nothing here is reachable from
+// `SolidServer::new`, which stays purely in-memory; only `SolidServer::withSnapshot` journals.
+pub mod persist;
+
 #[cfg(target_arch = "wasm32")]
 mod wasm {
+    use std::sync::Arc;
+
     use axum::body::{to_bytes, Body, Bytes};
     use axum::response::{IntoResponse, Response};
     use http::header::{HeaderName, HeaderValue};
@@ -55,6 +71,7 @@ mod wasm {
     use wasm_bindgen::prelude::*;
 
     use crate::memory;
+    use crate::persist::{self, Journal, PersistentStore};
 
     type MemoryStore = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
 
@@ -145,6 +162,8 @@ mod wasm {
     #[wasm_bindgen]
     pub struct SolidServer {
         router: axum::Router,
+        /// `Some` only for a pod built by `withSnapshot`; `new` journals nothing at all.
+        journal: Option<Arc<Journal>>,
     }
 
     #[wasm_bindgen]
@@ -152,18 +171,84 @@ mod wasm {
         /// Create an isolated in-memory pod and provision its owner ACL.
         #[wasm_bindgen(constructor)]
         pub fn new(base_url: String, owner_webid: String) -> Result<SolidServer, JsError> {
-            let base_url = base_url.trim_end_matches('/').to_owned();
-            if base_url.is_empty() {
-                return Err(JsError::new("base_url must not be empty"));
-            }
+            let base_url = normalize_base_url(base_url)?;
 
             let store = MemoryStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
-            futures_executor::block_on(seed_owner_acl(&store, &base_url, &owner_webid))
+            futures_executor::block_on(ensure_owner_acl(&store, &base_url, &owner_webid))
                 .map_err(|error| JsError::new(&error))?;
             let ldp = LdpState::new(store, base_url);
             Ok(Self {
                 router: build_router(AppState::new(ldp)),
+                journal: None,
             })
+        }
+
+        /// Create a pod that can be snapshotted, restoring `snapshot` if it carries one.
+        ///
+        /// This is the opt-in persistent constructor: the pod is the same in-memory store behind a
+        /// journaling decorator, so a host that keeps the bytes from `snapshot()` in `node:fs` or
+        /// IndexedDB can rebuild the pod's contents after a listener restart. Pass an empty array
+        /// for a fresh persistent pod.
+        ///
+        /// The owner ACL is provisioned only when the restored pod does not already carry one, so a
+        /// restart never overwrites an ACL the owner edited. Rejects a snapshot it cannot decode or
+        /// replay rather than silently booting a pod with part of its data.
+        // [GPT-5.6] sq-6xasp.7: `Vec<u8>` copies the host's `Uint8Array` in; the encoded journal is
+        // bounded by the store's own 64 MiB blob quota.
+        #[wasm_bindgen(js_name = withSnapshot)]
+        pub fn with_snapshot(
+            base_url: String,
+            owner_webid: String,
+            snapshot: Vec<u8>,
+        ) -> Result<SolidServer, JsError> {
+            let base_url = normalize_base_url(base_url)?;
+            let records = if snapshot.is_empty() {
+                Vec::new()
+            } else {
+                persist::decode(&snapshot)
+                    .map_err(|error| JsError::new(&format!("invalid pod snapshot: {}", error)))?
+            };
+
+            let journal = Arc::new(Journal::new());
+            let store = PersistentStore::new(
+                MemoryStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new()),
+                Arc::clone(&journal),
+            );
+            futures_executor::block_on(async {
+                // Replay through the journaling decorator, so the restored pod's journal is rebuilt
+                // as a side effect and it is immediately snapshottable again.
+                persist::replay(&store, records)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                ensure_owner_acl(&store, &base_url, &owner_webid).await
+            })
+            .map_err(|error| JsError::new(&error))?;
+
+            let ldp = LdpState::new(store, base_url);
+            Ok(Self {
+                router: build_router(AppState::new(ldp)),
+                journal: Some(journal),
+            })
+        }
+
+        /// The pod's contents as bytes to persist, or `undefined` for a non-persistent pod.
+        ///
+        /// Feed the result back to `withSnapshot` on the next boot. The encoding folds superseded
+        /// writes and deleted resources away, so it tracks what the pod currently holds rather than
+        /// everything that ever happened to it.
+        #[wasm_bindgen(js_name = snapshot)]
+        pub fn snapshot(&self) -> Option<Vec<u8>> {
+            self.journal.as_ref().map(|journal| journal.encode())
+        }
+
+        /// How many mutations this pod has recorded; `0` for a non-persistent pod.
+        ///
+        /// Monotonic, so a host can skip rewriting its snapshot file while the value is unchanged.
+        #[wasm_bindgen(js_name = snapshotRevision)]
+        pub fn snapshot_revision(&self) -> f64 {
+            self.journal
+                .as_ref()
+                .map_or(0, |journal| journal.revision()) as f64
         }
 
         /// Drive one request through the real axum router and its LDP, WAC, CORS, and body-limit
@@ -270,8 +355,37 @@ mod wasm {
         Ok(flat)
     }
 
-    async fn seed_owner_acl(
-        store: &MemoryStore,
+    fn normalize_base_url(base_url: String) -> Result<String, JsError> {
+        let base_url = base_url.trim_end_matches('/').to_owned();
+        if base_url.is_empty() {
+            return Err(JsError::new("base_url must not be empty"));
+        }
+        Ok(base_url)
+    }
+
+    /// Provision the owner ACL unless the pod already carries one.
+    ///
+    /// A fresh pod has none, so this is the constructor's seeding step. A pod restored from a
+    /// snapshot already replayed whichever ACL it last held — possibly one the owner edited — so
+    /// re-seeding it would silently revert that edit on every restart.
+    async fn ensure_owner_acl<S: Store>(
+        store: &S,
+        base_url: &str,
+        owner_webid: &str,
+    ) -> Result<(), String> {
+        let acl_doc = format!("{}/.acl", base_url);
+        let present = store
+            .exists(&acl_doc)
+            .await
+            .map_err(|error| format!("could not read the owner ACL: {}", error))?;
+        if present {
+            return Ok(());
+        }
+        seed_owner_acl(store, base_url, owner_webid).await
+    }
+
+    async fn seed_owner_acl<S: Store>(
+        store: &S,
         base_url: &str,
         owner_webid: &str,
     ) -> Result<(), String> {

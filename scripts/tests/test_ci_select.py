@@ -520,9 +520,52 @@ class ChangeClassTests(unittest.TestCase):
             cs.classify_change(["scripts/triage.py", "crates/app/src/lib.rs"]), "mixed"
         )
 
-    def test_classify_mixed_docs_plus_orchestration(self):
+    def test_classify_inert_mixed_docs_plus_orchestration(self):
+        # [OPUS-5] sq-g25hr: a diff confined to inert surfaces but SPANNING two of
+        # them is `inert-mixed`, NOT `mixed`. It used to collapse into `mixed` — the
+        # same token an engine+docs diff produces — so the consumers' skip case-arm
+        # could not tell "provably nothing for the Rust matrix" from "some Rust
+        # changed too" and conservatively ran the full suite.
         self.assertEqual(
-            cs.classify_change(["docs/x.md", "scripts/triage.py"]), "mixed"
+            cs.classify_change(["docs/x.md", "scripts/triage.py"]), "inert-mixed"
+        )
+
+    def test_classify_deploy_only(self):
+        self.assertEqual(
+            cs.classify_change(["deploy/helm/quickstart/values.yaml",
+                                "deploy/aws/sparq-server.yaml"]),
+            "deploy-only",
+        )
+
+    def test_classify_deploy_only_covers_the_deploy_lint_workflows(self):
+        # The two deploy lint workflows live under `.github/`, an unconditional
+        # full-run TRIGGER — the deploy allowlist is their only rescue.
+        self.assertEqual(
+            cs.classify_change([".github/workflows/deploy-lint.yml",
+                                ".github/workflows/deploy-terraform-lint.yml"]),
+            "deploy-only",
+        )
+
+    def test_classify_inert_mixed_on_the_observed_cloud_deploy_batch(self):
+        # The sq-g25hr motivating class (PRs #2314-2322): manifests + their READMEs
+        # + the deploy lint workflow + repo-level prose. Zero Rust => inert-mixed.
+        self.assertEqual(
+            cs.classify_change([
+                "deploy/gcp/sparq-lws.yaml",
+                "deploy/gcp/README.md",
+                ".github/workflows/deploy-lint.yml",
+                "docs/branch-protection.md",
+            ]),
+            "inert-mixed",
+        )
+
+    def test_classify_mixed_deploy_plus_engine(self):
+        # FAIL-CLOSED: one crate path taints the whole batch back to `mixed` (=> the
+        # consumers' wildcard arm => full suite). This is the "a code change cannot
+        # be mislabelled as docs-only" obligation, at the classifier level.
+        self.assertEqual(
+            cs.classify_change(["deploy/aws/sparq-server.yaml", "crates/app/src/lib.rs"]),
+            "mixed",
         )
 
     def test_classify_engine_on_ci_gate_script(self):
@@ -548,6 +591,28 @@ class ChangeClassTests(unittest.TestCase):
         self.assertEqual(sel.mode, "selected")
         self.assertEqual(sel.affected, [])
         self.assertEqual(sel.change_class, "docs-only")
+
+    def test_deploy_only_diff_selects_empty_closure(self):
+        # [OPUS-5] sq-g25hr: a deploy-only PR — including the `.github/workflows/
+        # deploy-*.yml` files, which would otherwise hit the `.github/` full-run
+        # trigger — selects mode=selected with an EMPTY affected set, so every Rust
+        # lane (incl. the bench/fuzz/wasm seed lanes) skips.
+        sel = self._select([
+            "deploy/helm/quickstart/values.yaml",
+            ".github/workflows/deploy-lint.yml",
+        ])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, [])
+        self.assertEqual(sel.change_class, "deploy-only")
+        self.assertIn("skipped-by-class: deploy-only", sel.reason)
+
+    def test_deploy_path_with_a_crate_change_still_narrows_not_fulls(self):
+        # A deploy path must never FORCE full; the crate change narrows normally and
+        # the class taints to `mixed` (=> the workflow wildcard arm => full suite).
+        sel = self._select(["deploy/aws/sparq-server.yaml", "crates/app/src/lib.rs"])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, ["app"])
+        self.assertEqual(sel.change_class, "mixed")
 
     def test_orchestration_safe_never_triggers_full(self):
         # Even paired with a crate change, the orch-safe path must not FORCE full;
@@ -604,6 +669,140 @@ class ChangeClassTests(unittest.TestCase):
         # And the REAL classifier keeps the engine crate selected (red-on-wrong-answer).
         good = cs.select(["crates/app/src/lib.rs"], self.meta)
         self.assertEqual(good.affected, ["app"])
+
+
+# [OPUS-5] ---- #5249: the ownership map's `safe = true` verdicts at the CLASS layer --
+class MapSafeChangeClassTests(unittest.TestCase):
+    """#5249: `classify_change` consulted only the built-in allowlists, never the
+    ownership map, so the two layers DISAGREED about the same diff — `site/**` is
+    `safe = true` in ci/path-ownership.toml ("Owns its own CI lane (pages.yml)"), so
+    the closure layer selected an EMPTY affected set while the class layer said
+    `engine` and the merge_group batch paid the full Rust matrix + CodeQL. The class
+    now reads the map (`_CLASS_MAP_SAFE`), and every fail-closed carve-out that keeps
+    it from being MORE permissive than the selector is pinned below."""
+
+    def setUp(self):
+        self.meta = _synthetic_meta()
+        self.real_map = cs.load_ownership_map(str(MAP_FILE))
+
+    # --- the reported bug ---
+    def test_site_only_diff_classifies_map_safe_not_engine(self):
+        # The issue's exact reproduction (it returned `engine` before #5249).
+        self.assertEqual(
+            cs.classify_change(["site/index.tsx"], self.real_map), "map-safe"
+        )
+
+    def test_class_and_closure_agree_on_a_site_only_diff(self):
+        # THE POINT of the fix: one notion of "inert". The closure was already
+        # empty; the class is now inert too, so the merge_group gate can skip.
+        sel = cs.select(["site/index.tsx"], self.meta, [{"pattern": "site/**", "safe": True}])
+        self.assertEqual(sel.mode, "selected")
+        self.assertEqual(sel.affected, [])
+        self.assertEqual(sel.change_class, "map-safe")
+        self.assertIn(sel.change_class, cs._INERT_CLASSES)
+        self.assertIn("skipped-by-class: map-safe", sel.reason)
+
+    # --- fail-closed carve-outs (each can only ever run MORE) ---
+    def test_no_map_keeps_the_pre_fix_engine_class(self):
+        # Absent map => no safe-listed rescue => `engine` (a full run), exactly the
+        # pre-#5249 behaviour. Absence of proof means run (design §2).
+        self.assertEqual(cs.classify_change(["site/index.tsx"]), "engine")
+        self.assertEqual(cs.classify_change(["site/index.tsx"], []), "engine")
+
+    def test_first_match_wins_keeps_the_zk_anchor_engine(self):
+        # sq-1s2.4 attributes two site/ files to sparq-zk-compose with entries that
+        # sit BEFORE the `site/**` safe entry. A `crates = [...]` first match is not
+        # a safe verdict, so the anchor edit still classifies engine and re-runs the
+        # drift guard.
+        self.assertEqual(
+            cs.classify_change(["site/src/lib/zk-prover.ts"], self.real_map), "engine"
+        )
+        self.assertEqual(
+            cs.classify_change(["site/scripts/capture-zk-manifest.mjs"], self.real_map),
+            "engine",
+        )
+
+    def test_a_safe_entry_cannot_rescue_a_full_run_trigger(self):
+        # The selector resolves §4.1 triggers BEFORE the map (step 1 wins over step
+        # 3), so a (bogus) safe entry covering a trigger must not make the class
+        # inert — otherwise the class would be MORE permissive than the mode.
+        bogus = [{"pattern": ".github/**", "safe": True},
+                 {"pattern": "Cargo.lock", "safe": True}]
+        self.assertEqual(cs.classify_change([".github/workflows/ci.yml"], bogus), "engine")
+        self.assertEqual(cs.classify_change(["Cargo.lock"], bogus), "engine")
+
+    def test_a_safe_entry_cannot_rescue_a_crate_owned_path(self):
+        # Crate-prefix ownership (step 2) also wins over the map (step 3). The
+        # classifier has no cargo metadata by design, so it uses the `crates/`
+        # prefix — every workspace member lives there (root Cargo.toml `members`).
+        bogus = [{"pattern": "crates/**", "safe": True}]
+        self.assertEqual(cs.classify_change(["crates/app/src/lib.rs"], bogus), "engine")
+
+    def test_malformed_map_entry_fails_closed_to_engine(self):
+        # A matched entry that is neither safe, crates, nor readers makes
+        # apply_ownership_map raise; the classifier must swallow it as "not proven
+        # inert" rather than propagate a class.
+        broken = [{"pattern": "site/**", "crates": "not-a-list"}]
+        self.assertEqual(cs.classify_change(["site/index.tsx"], broken), "engine")
+
+    # --- composition with the other inert surfaces ---
+    def test_map_safe_plus_engine_is_mixed(self):
+        self.assertEqual(
+            cs.classify_change(["site/index.tsx", "crates/app/src/lib.rs"], self.real_map),
+            "mixed",
+        )
+
+    def test_map_safe_plus_docs_is_inert_mixed(self):
+        self.assertEqual(
+            cs.classify_change(["site/index.tsx", "docs/x.md"], self.real_map),
+            "inert-mixed",
+        )
+
+    def test_docs_and_research_still_classify_docs_only(self):
+        # research/** and docs/** are safe-listed in the map AND on
+        # _DOCS_ONLY_PREFIXES; the earlier arm must keep winning so the existing
+        # token (and the batcher/gate attribution built on it) does not churn.
+        self.assertEqual(
+            cs.classify_change(["docs/x.md", "research/y.md"], self.real_map), "docs-only"
+        )
+
+    def test_every_reachable_safe_pattern_in_the_real_map_classifies_inert(self):
+        # DRIFT GUARD: the class layer must stay wired to the map. If
+        # classify_change ever stops consulting it, a safe-listed sample path falls
+        # back to `engine` and this reddens. Patterns the selector resolves BEFORE
+        # the map (triggers / crates/**) are excluded — for those the two layers
+        # already agree on `engine`.
+        checked = 0
+        for entry in self.real_map:
+            if entry.get("safe") is not True:
+                continue
+            pattern = entry["pattern"]
+            sample = pattern[:-3] + "/__probe__.txt" if pattern.endswith("/**") else pattern
+            if sample.startswith("crates/") or cs._trigger_match(sample) is not None:
+                continue
+            checked += 1
+            self.assertIn(
+                cs.classify_change([sample], self.real_map), cs._INERT_CLASSES,
+                f"safe-listed {pattern!r} is inert for the closure but not for the class",
+            )
+        self.assertGreater(checked, 0, "no reachable safe entries found — map moved?")
+
+    def test_mutation_always_map_safe_reddens_the_engine_fixture(self):
+        # MUTATION SPOT-CHECK: break _map_safe_match to always-True and the engine
+        # fixture must wrongly go inert — proving the real (False) path is what keeps
+        # an engine diff running, i.e. these assertions are not vacuous.
+        orig = cs._map_safe_match
+        try:
+            cs._map_safe_match = lambda _p, _m: True
+            self.assertEqual(
+                cs.classify_change(["crates/app/src/lib.rs"], self.real_map), "map-safe",
+                "mutation should swallow the engine path as inert",
+            )
+        finally:
+            cs._map_safe_match = orig
+        self.assertEqual(
+            cs.classify_change(["crates/app/src/lib.rs"], self.real_map), "engine"
+        )
 
 
 # [FABLE-5] ---- classify-only mode (merge-group change-class gate; #3420/#3421 follow-up)
@@ -720,6 +919,46 @@ class ClassifyOnlyMainTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "engine")
 
+    # [OPUS-5] #5249: the classify-only entry point now loads the ownership map
+    # (still no cargo metadata / toolchain) so a `safe = true` batch is inert at the
+    # class layer too — this is the CLI contract the three `changes` pre-jobs consume.
+    def test_site_only_batch_classifies_map_safe_via_the_default_map(self):
+        # --repo-root pins the map discovery the CI step gets from `git rev-parse`,
+        # so the test does not depend on the runner's CWD.
+        changed = self._write("site/index.tsx\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed,
+                                    "--repo-root", str(REPO_ROOT)])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "map-safe")
+
+    def test_explicit_map_is_honoured(self):
+        changed = self._write("site/index.tsx\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed, "--map", str(MAP_FILE)])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "map-safe")
+
+    def test_unreadable_map_degrades_to_engine_not_to_a_crash(self):
+        # A missing/malformed map must degrade to the pre-#5249 classifier (no safe
+        # rescue => engine => full run), never abort the gate.
+        changed = self._write("site/index.tsx\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed, "--map", "/no/such/map.toml"])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "engine")
+
+    def test_a_malformed_map_does_not_taint_an_orchestration_batch(self):
+        # The map load is BEST-EFFORT here (unlike the selector's fail-closed raise):
+        # a broken map must not reclassify an unrelated orchestration-only batch as
+        # engine — degrading to no-map is already the conservative direction.
+        bad_map = self._write("this is not = valid toml [[[\n", suffix=".toml")
+        changed = self._write("orchestration/routing.toml\nscripts/triage.py\n")
+        code, out = self._run_main(["--classify-only", "--event", "merge_group",
+                                    "--changed-file", changed, "--map", bad_map])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "orchestration-only")
+
 
 class OrchestrationSafeInertnessTests(unittest.TestCase):
     """[OPUS-4.8] THE INERTNESS OBLIGATION: every _ORCHESTRATION_SAFE entry must be
@@ -737,6 +976,7 @@ class OrchestrationSafeInertnessTests(unittest.TestCase):
         "metamorph.yml", "vectorized-feature-off.yml", "ci-select.yml",
         "ci-summary.yml", "formal-verification.yml", "differential.yml",
         "shacl-diff-fuzz.yml", "nightly-full-sweep.yml",
+        "datalog-souffle.yml",
     ]
 
     def test_no_orch_safe_script_is_referenced_by_a_rust_ci_workflow(self):
@@ -774,6 +1014,75 @@ class OrchestrationSafeInertnessTests(unittest.TestCase):
                 path.exists(),
                 f"orchestration-safe entry {entry} does not exist on disk (stale allowlist)",
             )
+
+
+class DeployOnlyInertnessTests(unittest.TestCase):
+    """[OPUS-5] sq-g25hr: THE INERTNESS OBLIGATION for `_DEPLOY_ONLY`, the same
+    contract OrchestrationSafeInertnessTests enforces for the orchestration
+    allowlist. Every entry must be PROVEN not read by any Rust-CI workflow, so an
+    entry can never silently become unsound when a deploy path is later wired into
+    a Rust gate."""
+
+    _RUST_CI_WORKFLOWS = OrchestrationSafeInertnessTests._RUST_CI_WORKFLOWS
+
+    def test_no_deploy_entry_is_referenced_by_a_rust_ci_workflow(self):
+        wf_dir = REPO_ROOT / ".github" / "workflows"
+        corpus = []
+        for name in self._RUST_CI_WORKFLOWS:
+            p = wf_dir / name
+            if p.exists():
+                corpus.append(p.read_text(encoding="utf-8"))
+        blob = "\n".join(corpus)
+        for entry in cs._DEPLOY_ONLY:
+            if entry.startswith(".github/workflows/"):
+                # A deploy WORKFLOW file: it must not itself be a Rust-CI workflow.
+                self.assertNotIn(
+                    Path(entry).name, self._RUST_CI_WORKFLOWS,
+                    f"{entry} is listed as deploy-only but is a Rust-CI workflow",
+                )
+                continue
+            if entry.endswith("/"):
+                # Directory prefixes: same convention as the orchestration allowlist
+                # (a bare substring grep would match the word in a Rust-CI workflow's
+                # own PROSE). `deploy/` is instead enforced LIVE by two stronger,
+                # non-textual checks: scripts/ci_audit_inputs.py fails if any crate
+                # reads a SAFE-listed path, and test_no_crate_lives_under_a_deploy_entry
+                # below fails if a workspace member ever appears there.
+                continue
+            self.assertNotIn(
+                entry, blob,
+                f"deploy-only {entry} IS referenced by a Rust-CI workflow — it is NOT "
+                f"inert; remove it from _DEPLOY_ONLY (fail-closed: a referenced path "
+                f"must keep triggering the full matrix).",
+            )
+
+    def test_deploy_entries_exist_on_disk(self):
+        for entry in cs._DEPLOY_ONLY:
+            path = REPO_ROOT / entry.rstrip("/")
+            self.assertTrue(
+                path.exists(),
+                f"deploy-only entry {entry} does not exist on disk (stale allowlist)",
+            )
+
+    def test_no_crate_lives_under_a_deploy_entry(self):
+        # A workspace crate under deploy/ would make the whole allowlist unsound.
+        # (The complementary "no crate READS deploy/" claim is enforced live by
+        # scripts/ci_audit_inputs.py via the `deploy/**  safe = true` map entry.)
+        self.assertEqual(
+            list((REPO_ROOT / "deploy").rglob("Cargo.toml")), [],
+            "a Cargo manifest appeared under deploy/ — it is no longer inert for the "
+            "Rust matrix; remove deploy/ from _DEPLOY_ONLY and from the SAFE list",
+        )
+
+    def test_deploy_only_is_disjoint_from_orchestration_safe(self):
+        # One path, one class: an overlap would make the change-class ambiguous
+        # (classify_change consults orchestration FIRST, so the overlap would be
+        # silently mislabelled rather than caught).
+        self.assertEqual(
+            set(cs._DEPLOY_ONLY) & set(cs._ORCHESTRATION_SAFE), set(),
+            "an entry is on BOTH inert allowlists — pick one so the audit-trail "
+            "class is unambiguous",
+        )
 
 
 class RealMetadataShapeTests(unittest.TestCase):
@@ -823,21 +1132,40 @@ class RealMetadataShapeTests(unittest.TestCase):
         self.assertNotIn("sparq-parse", sel.affected)  # parse does not depend on geo
 
     # ---- sq-m4bxc additional-readers acceptance, REAL metadata + REAL map ------
-    # These use the SHIPPED ci/path-ownership.toml `readers` entries against live
-    # cargo metadata: a change to sparq-trust's shared secprop vocab must select
-    # sparq-zk (a sparq-zk->sparq-trust dep is a cycle, so the reverse closure
-    # cannot reach it), and a change to sparq-solid's rule corpus must select
+    # This uses the SHIPPED ci/path-ownership.toml `readers` entry against live
+    # cargo metadata: a change to sparq-solid's rule corpus must select
     # sparq-reason (sparq-solid depends on sparq-reason — the reverse cycle).
-    def test_secprop_ext_change_selects_zk_and_trust(self):
+    #
+    # [OPUS-5] sq-3705: the secprop vocabulary needs NO map entry any more. It was
+    # the other residual — sparq-zk `include_str!`d sparq-trust's secprop-ext.ttl
+    # because a sparq-zk->sparq-trust edge is a cycle — and it is now closed
+    # structurally instead, by a real dependency on a zero-dep leaf crate.
+    def test_secprop_vocab_change_selects_its_consumers(self):
         real_map = cs.load_ownership_map(str(MAP_FILE))
         sel = cs.select(
-            ["crates/sparq-trust/ontologies/zkp-sparql/secprop-ext.ttl"],
+            ["crates/sparq-secprop-vocab/ontologies/secprop-ext.ttl"],
             self.meta, real_map,
         )
         self.assertEqual(sel.mode, "selected")
-        self.assertIn("sparq-zk", sel.affected,
-                      "a secprop-ext.ttl change must run sparq-zk's cross-crate drift test")
-        self.assertIn("sparq-trust", sel.affected)
+        # Reached by the ORDINARY reverse-dependency closure: each consumer takes
+        # an (optional) `sparq-secprop-vocab` edge, and the selector's graph is
+        # feature-blind, so all three are attributed with no `readers` entry.
+        for consumer in ("sparq-zk", "sparq-trust", "sparq-policy"):
+            self.assertIn(
+                consumer, sel.affected,
+                f"a secprop-ext.ttl change must run {consumer}'s secprop tests",
+            )
+
+    def test_secprop_vocab_needs_no_readers_entry(self):
+        # The same selection holds with an EMPTY map — proof it is the cargo
+        # edges doing the work, not a path-ownership patch (sq-3705).
+        sel = cs.select(
+            ["crates/sparq-secprop-vocab/ontologies/secprop-ext.ttl"],
+            self.meta, [],
+        )
+        self.assertEqual(sel.mode, "selected")
+        for consumer in ("sparq-zk", "sparq-trust", "sparq-policy"):
+            self.assertIn(consumer, sel.affected)
 
     def test_solid_rules_change_selects_reason(self):
         real_map = cs.load_ownership_map(str(MAP_FILE))

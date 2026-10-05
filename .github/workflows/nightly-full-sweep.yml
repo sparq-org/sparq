@@ -188,7 +188,9 @@ jobs:
       # absent — a presence check, not a feature check. The lean bundle omits the `shacl` feature,
       # so `sparqShaclValidate` is undefined at runtime → the validator can't run → the report
       # never renders → the specs fail (this was the a11y-sweep red, issue #1738). The full bundle
-      # (js `build:wasm`, features shacl,jsonld,serialize-rdf,scs,canon) makes those engine-gated
+      # (js `build:wasm` — js/package.json is the single source of truth for the published
+      # feature list; as of #3546 it is shacl,jsonld,serialize-rdf,scs,canon,explain-json,
+      # native-ttl,bytes-ingest,forms) makes those engine-gated
       # SHACL states actually execute — exactly the wider net this nightly lane is meant to be. The
       # Typst → spec/paper fragments the surface-sweep asserts on (mirrors site-e2e.yml) build
       # below, then the chromium suite runs.

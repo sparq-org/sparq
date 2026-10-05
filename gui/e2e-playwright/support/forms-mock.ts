@@ -1,6 +1,11 @@
-// [GPT-5.6] sq-3eukz — one deterministic FormDescription factory shared by the mocked Tauri
-// command and the structurally mocked sparq-wasm method. Both hosts therefore render equivalent
-// content while still echoing focus/mode/shape so re-derivation assertions are non-vacuous.
+// [GPT-5.6] sq-3eukz — one deterministic FormDescription factory for the mocked Tauri
+// `derive_form` command, echoing focus/mode/shape so re-derivation assertions are non-vacuous.
+//
+// [OPUS-5] sq-q4apb (#2644): the companion `wasmFormsMockScript` — a structural `deriveForm`
+// installed on `Object.prototype` — is DELETED. js `build:wasm` now enables the opt-in `forms`
+// cargo feature, so the served bundle defines a real `Store.prototype.deriveForm` that shadows
+// any `Object.prototype` stand-in; the mock could no longer be reached, and the hosted-web
+// journeys (specs/forms-tool.web.spec.ts) now drive the real derivation instead.
 
 export const formsMockPrelude = `
   function formsMockDescription(focus, mode, selectedShape) {
@@ -35,23 +40,4 @@ export const formsMockPrelude = `
       }]
     });
   }
-`;
-
-/** Install a non-enumerable mock method where every wasm-bindgen Store can structurally see it. */
-export const wasmFormsMockScript = `
-(function () {
-  "use strict";
-  ${formsMockPrelude}
-  var LOG = [];
-  Object.defineProperty(Object.prototype, "deriveForm", {
-    configurable: true,
-    enumerable: false,
-    value: function (data, shapes, focus, format, optionsJson) {
-      var options = JSON.parse(optionsJson || "{}");
-      LOG.push({ data: data, shapes: shapes, focus: focus, format: format, optionsJson: optionsJson });
-      return formsMockDescription(focus, options.mode || "edit", options.shape);
-    }
-  });
-  window.__SPARQ_FORMS_WASM_LOG__ = LOG;
-})();
 `;

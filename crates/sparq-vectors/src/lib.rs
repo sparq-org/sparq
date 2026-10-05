@@ -73,6 +73,16 @@ pub mod verify;
 #[cfg(feature = "compose")]
 pub mod compose;
 pub mod fuse;
+// [SONNET-4.6] sq-lhcot.4 (GenAI review gap 6; spec estate sq-rvgr2.4): the HYBRID RETRIEVAL +
+// RERANKING core behind the `vec:hybrid` magic predicate — named weighted-RRF arms carrying
+// per-rank PROVENANCE, an out-of-process second-stage `Reranker` with an explicit
+// fail-open/fail-closed policy, and the dense/sparse/structural/fused/reranked ablation harness.
+// `vec-predicate` feature only: the module exists to serve that query surface and ships with it,
+// so the default build carries zero hybrid code. It adds NO new dependency (weighted RRF is the
+// in-tree `fuse` algorithm plus bookkeeping) and NO accuracy claim — `ablate` reports, it never
+// asserts that fusion or reranking wins.
+#[cfg(feature = "vec-predicate")]
+pub mod hybrid;
 pub mod import;
 pub mod labels;
 // [GPT-5.6] sq-lsp7k.25: deterministic `.spqv` v4 metadata-block codec. Private implementation;
@@ -163,6 +173,23 @@ pub mod vocab {
     /// `( ?node ?score ) vec:search ( <query> <k> )` — like [`NEAREST`] but also
     /// binds `?score` to each neighbour's cosine similarity (`xsd:double`).
     pub const SEARCH: &str = "http://sparq.dev/vec#search";
+    /// [SONNET-4.6] (sq-lhcot.4) `( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )` —
+    /// **hybrid retrieval**: the dense k-NN fused (deterministic weighted RRF) with the caller's
+    /// other retrieval arms and optionally reranked, binding the final score, the final 1-based
+    /// rank, and the per-arm rank PROVENANCE. See the `hybrid` and `rewrite` modules (both
+    /// `vec-predicate`-gated, hence code spans rather than intra-doc links here: this constant is
+    /// always compiled).
+    ///
+    /// **PROVISIONAL** — listed in [`PROVISIONAL`], NOT in revision [`VOCAB_REVISION`]: the term
+    /// is implemented ahead of the matching amendment to the SPARQL Vector+GenAI extension draft,
+    /// and its shape may change when that spec revision lands.
+    pub const HYBRID: &str = "http://sparq.dev/vec#hybrid";
+    /// [SONNET-4.6] (sq-lhcot.4) `vec:` terms this build implements that are **not yet part of a
+    /// published spec revision**. They are usable (behind their feature) but unfrozen: a
+    /// provisional term may change shape without a [`VOCAB_REVISION`] bump, so a query relying on
+    /// one is relying on an unstable surface. A term moves out of this list, and the revision
+    /// bumps, only when the spec draft is amended.
+    pub const PROVISIONAL: &[&str] = &[HYBRID];
 }
 
 /// [FABLE-5] (sq-lhcot.1) The `spqvp:` **embedding-provenance vocabulary** — the RDF terms a caller
@@ -238,6 +265,19 @@ pub use quant::{
 };
 #[cfg(feature = "vec-predicate")]
 pub use rewrite::{prepare_vec, query_vec, query_vec_with_budget, rewrite_query};
+// [SONNET-4.6] sq-lhcot.4: the `vec:hybrid` entry points + the fusion/rerank surface they consume.
+// `vec-predicate` only, like the rest of the magic-predicate API.
+#[cfg(feature = "vec-predicate")]
+pub use hybrid::{
+    ablate, apply_rerank, evaluate, fuse_arms, parse_provenance, validate_arms, AblationRow,
+    ArmFn, ArmQuery, ArmRanking, FusedHit, HybridConfig, QueryEmbedder, RerankPolicy, Reranker,
+    Rescored, RetrievalMetrics, DEFAULT_OVER_FETCH, FUSED_ROW, MAX_ARM_PAGE, RERANKED_ROW,
+    RERANK_KEY, VECTOR_ARM,
+};
+#[cfg(feature = "vec-predicate")]
+pub use rewrite::{
+    prepare_vec_hybrid, query_vec_hybrid, query_vec_hybrid_with_budget, rewrite_query_hybrid,
+};
 // [OPUS-4.8] (sq-z589, epic sq-3183) The APPROXIMATE `vec:` entry points — the unfiltered k-NN runs
 // through an on-disk `DiskAnnIndex` (Vamana) instead of the exact full scan, for large `.spqv`
 // stores. APPROXIMATE (recall < 1.0); gated on `approx-ann` (the only feature that compiles an
@@ -281,11 +321,12 @@ pub use provenance::{ProvenanceWeights, WeightConfig, WeightMode};
 // harness surface — `kge` feature only.
 #[cfg(feature = "kge")]
 pub use eval::{
-    run_ablation, run_ablation_multiseed, run_ablation_multiseed_paired, run_quoted_ablation,
-    run_weight_ablation, synthetic_gufo_ttl, synthetic_gufo_ttl_sized, synthetic_provenance_ttl,
-    synthetic_rdf12_parts, synthetic_rdf12_ttl, synthetic_relational_ttl, AblationCell, CellStats,
-    EvalConfig, LongTail, MeanStd, Metrics, MultiSeedCell, PairedAblation, PairedDelta,
-    QuotedAblation, Rdf12Parts, Splits, WeightAblation, SCHEMA_PREDICATES,
+    run_ablation, run_ablation_multiseed, run_ablation_multiseed_paired, run_pooling_ablation,
+    run_quoted_ablation, run_weight_ablation, synthetic_gufo_ttl, synthetic_gufo_ttl_sized,
+    synthetic_provenance_ttl, synthetic_rdf12_parts, synthetic_rdf12_ttl, synthetic_relational_ttl,
+    AblationCell, CellStats, EvalConfig, LongTail, MeanStd, Metrics, MultiSeedCell, PairedAblation,
+    PairedDelta, PoolingAblation, QuotedAblation, Rdf12Parts, Splits, WeightAblation,
+    SCHEMA_PREDICATES,
 };
 #[cfg(feature = "kge")]
 pub use train::{train, ModelKind, TrainConfig, TrainReport, TrainedModel};
@@ -328,8 +369,8 @@ pub use ufo_priors::{MetaType, Nature, Rigidity, UfoPriors, GUFO_NS};
 // flexible minimal-and-complete grounding selector + verbaliser. `structure` feature only.
 #[cfg(feature = "structure")]
 pub use grounding::{
-    ground, reconcile_quantity, GroundFact, Grounding, GroundingConfig, Modality, OutputType,
-    TypedValue,
+    ground, ground_weighted, reconcile_quantity, sketch_predicate, GroundFact, Grounding,
+    GroundingConfig, Modality, NodeWeighting, OutputType, TypedValue,
 };
 pub use verbalize::{
     description_predicates, embed_entities, label_predicates, verbalize, EntityTextConfig,

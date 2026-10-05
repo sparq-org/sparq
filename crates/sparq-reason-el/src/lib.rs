@@ -246,7 +246,11 @@ impl ClassHierarchy {
 /// use sparq_core::Graph;
 /// use sparq_reason_el::Classifier;
 ///
-/// // A ⊑ ∃r.B, B ⊑ C, ∃r.C ⊑ D  ⊨  A ⊑ D  (the CR4 subsumption OWL 2 RL cannot derive).
+/// // A ⊑ ∃r.B, B ⊑ C, ∃r.C ⊑ D  ⊨  A ⊑ D  (CR4 — reasoning through an ∃r successor).
+/// // [OPUS-5] sq-2ch27: the "…which OWL 2 RL cannot derive" gloss this line used to carry was
+/// // measured WRONG for THIS shape — sparq's RL implements `scm-svf1`, and both restriction
+/// // nodes appear syntactically, so RL closes it too. The RL gap that does hold is pinned in
+/// // `crates/sparq-cli/tests/el_cli.rs::el_derives_what_rl_cannot` (TBox conjunction).
 /// let ttl = r#"
 ///   @prefix : <http://ex/> .
 ///   @prefix owl: <http://www.w3.org/2002/07/owl#> .

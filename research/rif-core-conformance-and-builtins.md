@@ -18,7 +18,7 @@ The epic said "there is no RIF conformance-suite arm today". That is **half righ
 | RIF/XML presentation-syntax importer | **ABSENT** | listed in `rif::UNIMPLEMENTED` — the front-end takes the in-engine model only |
 | W3C **RIF WG test-suite** arm (the actual Core test cases) | **ABSENT** | nothing consumes the RIF WG test repository |
 | Builtins over the **shared** `sparq_substrate::numeric` tower | **ABSENT** | RIF builtins lower to N3 `math:`/`string:`/`list:` builtins, which the chainer evaluates with its own **private** `NumVal` tower (`n3/mod.rs`, `enum NumVal { Int(i128), Dec(i128,u32), F64 }`, EYE-parity semantics) — this private tower is the real seam-2 gap |
-| Value-space comparator (seam-2 remainder) | **OPEN** (sq-v5evr, un-parked; RIF is a named consumer) | `sparq-substrate` — not landed; anything needing value-space *equality of distinct constants* stays deferred behind it |
+| Value-space comparator (seam-2 remainder) | **NUMERIC half LANDED** (sq-v5evr `Num::cmp_relational`, #1646), adopted by the RIF Equal path in sq-anyad; the **non-numeric** half is still OPEN | `sparq-substrate::numeric` — distinct ground *numeric* constants are now decided (value-equal → eliminated, value-unequal → vacuous rule); boolean/string/temporal literal equality stays deferred behind a non-numeric value-space comparator |
 
 So the two genuinely greenfield items are (i) the RIF/XML importer + the W3C RIF WG
 suite arm on top of it, and (ii) the seam-2 numeric-tower adoption *inside the N3
@@ -86,7 +86,7 @@ documented deferral, never a close-enough mapping.
 | `func:numeric-integer-divide` | F&O `op:numeric-integer-divide` **truncates toward zero**; EYE/N3 `math:integerQuotient` is **floor** division. They differ on any negative operand (`-7 idiv 2` = `-3` vs `floor(-3.5)` = `-4`). Mapping would derive wrong values silently. Needs either a truncating N3-side builtin or RIF-side compilation — deferred, tracked in `UNIMPLEMENTED`. |
 | `func:numeric-mod` | F&O `op:numeric-mod` result follows the **dividend** sign; `math:remainder` is integer-only with **divisor**-sign semantics. Mixed-sign operands diverge. Same deferral rationale. |
 | `pred:matches` | XPath/XSD regex dialect ≠ Rust `regex` dialect (e.g. XSD character-class subtraction `[a-z-[aeiou]]`). A mapping cannot fail closed on dialect-divergent patterns without a real XSD-regex front-end. Deferred; a future opus bead may add a translated-subset with fail-closed detection. |
-| `pred:boolean-equal`, `pred:literal-not-identical`, equality of *distinct* value-equal constants | need value-space equality beyond the numeric tower — this is exactly the **sq-v5evr** comparator; RIF is its named consumer. Deferred pending that seam. |
+| `pred:boolean-equal`, `pred:literal-not-identical`, equality of *distinct* value-equal constants | **PARTLY RESOLVED (sq-anyad).** The NUMERIC half is implemented: distinct ground numeric literals are decided by the shared `Num::cmp_relational` (sq-v5evr, #1646). The NON-numeric half (booleans, strings, temporal literals) needs value-space equality beyond the numeric tower and stays deferred, fail-closed with `DistinctGroundEqual`. |
 | guard predicates (`pred:is-literal-integer`, `pred:is-literal-string`, …) | would require *inventing* non-EYE N3 builtins, polluting the chainer's EYE-differential story. Deferred; the conformance arm skips guard-using cases under a named category. |
 | `func:substring`, `func:substring-before/-after`, `func:string-join`, `func:compare` | no semantically-matching N3 target exists today (`string:scrape` is regex capture, not substring). Deferred rather than approximated. |
 | `func:get`, `func:sublist`, `func:reverse`, `func:index-of`, `func:insert-before`, `func:remove`, `func:union`, `func:distinct-values`, `func:except`, `pred:is-list` | no 1:1 N3 target; multi-triple lowerings (e.g. `list:iterate` + filter) change the producer/consumer shape and its safety analysis — not worth the risk for the test coverage they buy. Deferred. |
@@ -242,5 +242,9 @@ tiny additive blocks — rebase-trivial, but the beads note them.
   reasoned non-adoption as the honest fallback outcome.
 - **sq-v5evr remains the gate** for value-space equality (boolean-equal,
   literal-not-identical, distinct-constant `=`); nothing here pre-claims it.
+  *(Update, sq-anyad: sq-v5evr has since landed and the RIF Equal path adopted its
+  `Num::cmp_relational` for the NUMERIC half only — distinct ground numeric constants
+  are decided, everything non-numeric is still fail-closed. The remaining gate is a
+  non-numeric value-space comparator.)*
 - **This document contains no performance numbers**; quantitative floors live in the
   CI-checked ratchet files.

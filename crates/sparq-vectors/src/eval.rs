@@ -1060,6 +1060,180 @@ pub fn run_weight_ablation(
     })
 }
 
+// ---- Phase-4 confidence-weighted POOLING ablation (sq-w2af4) ------------------------------------
+
+/// The result of a paired **confidence-weighted structural-sketch pooling** ablation
+/// ([`run_pooling_ablation`], sq-w2af4 — design §USE-1 integration point 2): the two per-arm metric
+/// aggregates (uniform-mean pooling OFF vs provenance-weighted pooling ON) plus the **paired**
+/// per-seed MRR / Hits@10 deltas.
+///
+/// This is the instrument for the *pooling* axis, the sibling of [`WeightAblation`]'s *training*
+/// axis. Per seed the two arms share the parse, closure, split, restricted train graph, type
+/// constraints **and the trained model itself** — the trainer runs exactly **once** per seed and
+/// both arms post-process the *same* parameters — so the delta isolates the pooling weights and
+/// nothing else. On a provenance-free graph both arms pool with identical (all-`1.0`) weights and
+/// every delta is exactly zero (the honest no-op, the same invariant [`WeightAblation`] documents).
+/// **No bar is hard-coded and no accuracy claim is made.**
+#[derive(Clone, Debug)]
+pub struct PoolingAblation {
+    /// Confidence-weighting OFF ([`WeightMode::Uniform`] — the plain arithmetic mean of the
+    /// neighbour sketch), aggregated over seeds.
+    pub off: CellStats,
+    /// Confidence-weighting ON ([`WeightMode::Provenance`]), aggregated over seeds.
+    pub on: CellStats,
+    /// Paired per-seed MRR delta `MRR(on) − MRR(off)` (variance-reduced). The headline statistic.
+    pub mrr: PairedDelta,
+    /// Paired per-seed Hits@10 delta `Hits@10(on) − Hits@10(off)`.
+    pub hits10: PairedDelta,
+}
+
+impl PoolingAblation {
+    /// Convenience: is the weighted-pooling MRR lift significant at `k` standard errors of its
+    /// paired spread (`n ≥ 2` required)? `false` means the honest verdict is **no measured lift**
+    /// — abandon weighted pooling for that dataset, per the pre-registered-bar discipline.
+    pub fn mrr_significant_at(&self, k: f64) -> bool {
+        self.mrr.significant_at(k)
+    }
+}
+
+/// Run the **confidence-weighted pooling ON vs OFF** ablation per seed and return the paired
+/// MRR / Hits@10 deltas (sq-w2af4, GenAI-KB Phase 4, design §USE-1 integration point 2).
+///
+/// Each seed trains **one** model (at `template.train`, with `weight_mode` forced to
+/// [`WeightMode::Uniform`] so the *training* axis is held fixed and cannot confound), then builds
+/// two **structural-sketch-augmented** copies of it that differ only in the pooling mode: every
+/// entity's embedding is blended with the pool of its train-graph object-neighbours' embeddings,
+/// pooled through [`ProvenanceWeights::pool_weighted`](crate::provenance::ProvenanceWeights::pool_weighted)
+/// — a uniform mean in the OFF arm, `w(t)`-weighted in the ON arm. The augmented models are then
+/// scored with the same filtered link-prediction protocol as every other axis.
+///
+/// **What this axis can and cannot measure.** The pool is keyed by the *asserting triple*, so the
+/// two arms can only differ where `w(t)` differs *within* one subject's edges — i.e. where the
+/// graph carries **statement-level** provenance (a reified statement; see
+/// [`ProvenanceWeights::annotated_statements`](crate::provenance::ProvenanceWeights::annotated_statements)).
+/// On a graph with only entity-level provenance every one of a subject's edges falls back to the
+/// same head weight, the weighted pool IS the uniform mean, and every delta is **exactly zero** —
+/// the same honest no-op [`run_weight_ablation`] documents for provenance-free graphs. A zero delta
+/// here therefore means "this graph has no per-statement signal", not "weighting did not help".
+///
+/// **No leakage**: the sketch is pooled over the *restricted train graph* only (the same graph the
+/// trainer saw), so a held-out edge can never enter an entity's sketch. The provenance is mined
+/// from that same train graph.
+///
+/// `blend` scales the pooled sketch before it is added to the entity embedding (`e + blend·pool`).
+/// It is a **sweepable, non-canonical** knob, not a tuned constant; `0.0` makes both arms identical
+/// by construction (a useful degenerate sanity check). A non-finite or negative `blend` is an `Err`.
+pub fn run_pooling_ablation(
+    text: &str,
+    format: &str,
+    template: EvalConfig,
+    seeds: &[u64],
+    blend: f32,
+) -> Result<PoolingAblation, String> {
+    assert!(!seeds.is_empty(), "need at least one seed");
+    if !blend.is_finite() || blend < 0.0 {
+        return Err(format!("run_pooling_ablation: blend must be finite and >= 0 (got {})", blend));
+    }
+    let (base_dict, base_triples) = Graph::parse_to_triples(text, format)?;
+
+    let mut off = BucketSamples::default();
+    let mut on = BucketSamples::default();
+    let mut mrr_deltas: Vec<f64> = Vec::with_capacity(seeds.len());
+    let mut hits10_deltas: Vec<f64> = Vec::with_capacity(seeds.len());
+
+    for &seed in seeds {
+        let closed: ClosedGraph =
+            materialise_closure(base_dict.clone(), base_triples.clone(), template.profile);
+        let graph = &closed.graph;
+        let splits = Splits::split(graph, template.train_frac, template.valid_frac, seed ^ 0xF00D);
+        let train_graph = restrict_to_train(graph, &splits);
+        let train_tc = TypeConstraints::mine(&train_graph);
+
+        // ONE training run per seed: the pooling axis post-processes identical parameters, so the
+        // paired delta cannot be contaminated by trainer noise.
+        let mut tcfg = template.train;
+        tcfg.seed = seed;
+        tcfg.weight_mode = WeightMode::Uniform;
+        let (model, _report) = train(&train_graph, &train_tc, tcfg);
+
+        let prov = crate::provenance::ProvenanceWeights::mine(&train_graph);
+        let metric_for = |mode: WeightMode| -> Result<Metrics, String> {
+            let sketched =
+                sketch_augmented(&model, &train_graph, &splits, &prov, mode, blend)?;
+            let (metrics, _long_tail) =
+                evaluate(&sketched, &splits, template.long_tail_threshold, None);
+            Ok(metrics)
+        };
+
+        let m_off = metric_for(WeightMode::Uniform)?;
+        let m_on = metric_for(WeightMode::Provenance)?;
+
+        mrr_deltas.push(m_on.mrr - m_off.mrr);
+        hits10_deltas.push(m_on.hits10 - m_off.hits10);
+        off.push(&m_off);
+        on.push(&m_on);
+    }
+
+    Ok(PoolingAblation {
+        off: off.finish(),
+        on: on.finish(),
+        mrr: PairedDelta::of(&mrr_deltas),
+        hits10: PairedDelta::of(&hits10_deltas),
+    })
+}
+
+/// One sketch contribution: the **asserting triple** (what `w(t)` is keyed on) and the neighbour
+/// embedding it pools in. Named so the per-subject contribution map stays readable.
+type SketchContribution = ([Id; 3], Vec<f32>);
+
+/// A copy of `model` whose entity embeddings are blended with each entity's
+/// **assertion-weighted structural sketch**: the pool of its outgoing non-schema object-neighbours'
+/// embeddings in `graph`, each contribution keyed on **the asserting triple** (so the weight is the
+/// reified statement's provenance where the graph carries it, the head's otherwise — see
+/// [`sketch_predicate`](crate::grounding::sketch_predicate)), pooled through
+/// [`ProvenanceWeights::pool_weighted`](crate::provenance::ProvenanceWeights::pool_weighted) under
+/// `mode`. Deterministic: each row is written independently from a contribution list built in
+/// `graph.iter_ids()` order, so hash-map iteration order cannot affect the result. [OPUS-5] sq-w2af4
+fn sketch_augmented(
+    model: &TrainedModel,
+    graph: &Graph,
+    splits: &Splits,
+    prov: &crate::provenance::ProvenanceWeights,
+    mode: WeightMode,
+    blend: f32,
+) -> Result<TrainedModel, String> {
+    let dim = model.dim;
+    // Per subject, the (asserting triple, neighbour embedding) contributions that feed its sketch.
+    let mut contributions: FxHashMap<Id, Vec<SketchContribution>> = FxHashMap::default();
+    for [s, p, o] in graph.iter_ids() {
+        if splits.schema_preds.contains(&p) {
+            continue;
+        }
+        let (Some(_), Some(o_row)) = (model.entity_row(s), model.entity_row(o)) else {
+            continue;
+        };
+        contributions
+            .entry(s)
+            .or_default()
+            .push(([s, p, o], model.entity_vec(o_row).to_vec()));
+    }
+
+    let mut out = model.clone();
+    for (&subject, contribs) in &contributions {
+        let Some(row) = model.entity_row(subject) else {
+            continue;
+        };
+        let Some(pooled) = prov.pool_weighted(contribs, mode)? else {
+            continue;
+        };
+        let dst = &mut out.entity_emb[row * dim..row * dim + dim];
+        for (d, p) in dst.iter_mut().zip(pooled.iter()) {
+            *d += blend * *p;
+        }
+    }
+    Ok(out)
+}
+
 // ---- RDF 1.2 QUOTED-TERMS visibility ablation ---------------------------------------------------
 
 /// The result of a paired **quoted-terms visibility** ablation ([`run_quoted_ablation`]): the two
@@ -1509,6 +1683,17 @@ pub fn synthetic_relational_ttl(n_entities: usize, seed: u64) -> String {
 /// recover the cluster signal regardless), so the measurement is honest. Deterministic in `seed`,
 /// sized by `n_entities`. The vocabulary mirrors the real `pkg.ttl` predicate set so the reader
 /// exercises the REAL provenance path, not a mock.
+///
+/// [OPUS-5] sq-w2af4: the slice also carries **statement-level** provenance — a share of the noise
+/// edges are asserted by an otherwise-*good* head and their doubt is expressed on an RDF 1.2
+/// reifier (`:st rdf:reifies <<( s p o )>>` + a low `pkg:confidence`). That is the case entity-level
+/// provenance structurally cannot express, and it is what gives one subject's edges *differing*
+/// `w(t)` — without it every `(s, ·, ·)` weight is identical and the pooling axis is an exact no-op
+/// (see [`run_pooling_ablation`]). **No leakage:** the reifier's quoted triple is a TERM, never an
+/// assertion; triple terms are outside the [`TermScope::IriBlank`] pool so they enter neither the
+/// split, the ranking pool, nor training; the reifier is annotated with a LITERAL only, so it never
+/// becomes a prediction target itself; and the sketch pools only over edges present in the
+/// restricted train graph.
 pub fn synthetic_provenance_ttl(n_entities: usize, seed: u64) -> String {
     let mut state = seed ^ 0x0BAD_F00D_C0FF_EE11;
     let mut next = |m: usize| -> usize { (splitmix64(&mut state) as usize) % m.max(1) };
@@ -1564,7 +1749,8 @@ pub fn synthetic_provenance_ttl(n_entities: usize, seed: u64) -> String {
 
         // NOISE edge (minority): a random cross-cluster pair, annotated LOW assurance so the ON arm
         // down-weights it. We annotate a DISTINCT noise-head node so the clean head keeps its high
-        // assurance (a head carries one assurance basis in this slice).
+        // assurance (a head carries one assurance basis in this slice) — this is the ENTITY-level
+        // arm, which only the head fallback of `w(t)` can read.
         if next(4) == 0 {
             let t = next(n);
             if t != i {
@@ -1572,6 +1758,21 @@ pub fn synthetic_provenance_ttl(n_entities: usize, seed: u64) -> String {
                 out.push_str(&format!(
                     "ex:noise{} pkg:assurance secx:Conjectured ; pkg:confidence \"0.2\" ; prov:wasDerivedFrom ex:src-weak .\n",
                     i
+                ));
+            }
+        }
+
+        // STATEMENT-level noise (minority): the SAME, high-assurance head `ex:e{i}` asserts a
+        // cross-cluster edge that is itself dubious. The head is a fine entity, so entity-level
+        // provenance says nothing; the doubt lives on the RDF 1.2 reifier of that one statement.
+        // This is what makes `w(t)` vary WITHIN a subject's edges (see the fn doc).
+        if next(4) == 0 {
+            let t = next(n);
+            if t != i && cluster(t) != cluster(i) {
+                out.push_str(&format!("ex:e{} ex:rel ex:e{} .\n", i, t));
+                out.push_str(&format!(
+                    "ex:st{} rdf:reifies <<( ex:e{} ex:rel ex:e{} )>> ; pkg:confidence \"0.15\" .\n",
+                    i, i, t
                 ));
             }
         }

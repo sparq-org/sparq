@@ -159,6 +159,22 @@ pub mod secprop;
 #[cfg(feature = "framework-vocab")]
 #[cfg_attr(docsrs, doc(cfg(feature = "framework-vocab")))]
 pub mod framework_vocab;
+/// Holder-side trust-expression contract evaluation, CLEAR path (`expression` module,
+/// `sq-6syab.4`; issue #1592, design `research/trust-expression-spec.md` §3.1–3.5): parse
+/// the verifier→holder request (SPARQL query + trust-requirements graph + nonce),
+/// generate the §3.1 normative reference rewrite Q→Q' (conjoining issuer-membership /
+/// positive-status-attestation-validity-at-t / certification-scope-conformance patterns),
+/// evaluate Q' via `sparq-engine` over the holder's attested named-graph dataset, and
+/// assemble the provenance-encoded response (RDF 1.2 reifier normative form + the
+/// named-graph/PROV-O runnable-today mapping). Fail-closed: no admissible derivation ⇒ no
+/// binding, and the response provenance suffices for an independent verifier re-check
+/// (Q' over R — `verify_response` in plain code-span; feature-gated item). Behind the
+/// default-OFF `expression` feature (which enables `framework-vocab` + `status-list` +
+/// `did` + `secprop-admissibility` for the surfaces it REUSES, and pulls `sparq-engine` +
+/// the vendored `spargebra` parser): nothing in the lean default build depends on it.
+#[cfg(feature = "expression")]
+#[cfg_attr(docsrs, doc(cfg(feature = "expression")))]
+pub mod expression;
 /// The depth-bounded certification-edge trust-graph closure (`graph` module): a pure,
 /// **fail-closed, attenuation-only** pre-processing step that derives additional
 /// `TrustRule`s from signed `trustx:Certification` edges AHEAD of — and consumed verbatim
@@ -218,6 +234,12 @@ pub use delegation_prov::{
 pub use did::{
     did_key_for, Did, DidDocumentFetcher, DidError, DidKeyResolver, DidResolver, DidWebResolver,
 };
+#[cfg(feature = "expression")]
+pub use expression::{
+    evaluate_contract, mint_status_attestation, parse_request, rewrite_query, verify_response,
+    ChallengeNonce, ContractAnswer, ContractOutcome, ContractRequest, ExpressionError,
+    MethodPrecheck, ProvenanceResponse, TrustRequirements,
+};
 #[cfg(feature = "cert-graph")]
 pub use graph::{
     certification_message, derive_effective_rules, explain_edge, Certification, CertScope,
@@ -237,8 +259,9 @@ pub use store::{
 };
 #[cfg(feature = "status-list")]
 pub use status_list::{
-    decode_encoded_list, justify_status_decision, GzipDecoder, IdentityGzipDecoder, LiveStatus,
-    LiveStatusCheck, SignedStatusList, StatusBitstring, StatusJustification, StatusListEntry,
-    StatusListResolver, StatusPurpose, VerifiedStatusListResolver, VerifyingLiveStatusCheck,
+    decode_encoded_list, justify_status_decision, DeltaUnbounded, GzipDecoder, IdentityGzipDecoder,
+    LiveStatus, LiveStatusCheck, SignedStatusList, StatusBitstring, StatusDelta,
+    StatusJustification, StatusListEntry, StatusListResolver, StatusPurpose,
+    VerifiedStatusListResolver, VerifyingLiveStatusCheck, DEFAULT_MAX_CHANGED_INDICES,
 };
 pub use wire::{derive_conditional_grants, derive_grants, ConditionalGrant};

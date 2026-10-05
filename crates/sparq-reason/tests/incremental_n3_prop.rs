@@ -6,8 +6,10 @@
 //! recursive-SCC layer (transitive ancestry), input-stratified negation (`?UNSCOPED
 //! log:notIncludes` over an input-only predicate — mutations of it must REBUILD), the
 //! whitelisted builtins (log:uri both directions, string:scrape, string:encodeForUri,
-//! string:concatenation), the rules-level fallback (an unsupported builtin), and the sticky
-//! data-level fallback (decimal literals reaching string:concatenation).
+//! string:concatenation), the rules-level fallback (an unsupported builtin), the sticky
+//! data-level fallback (decimal literals reaching string:concatenation), and the base↔layer
+//! OWNERSHIP TRANSFER (asserting/retracting a fact the recursive layer also derives — which
+//! must stay incremental, never re-materialize; `sq-6tykl.6`).
 //!
 //! It also asserts the REAL sparq-solid rule sets' qualification: common.n3 + wac.n3 (and
 //! each ACP stratum + common.n3) must take the counting fast path.
@@ -398,10 +400,14 @@ fn delete_of_asserted_layer_derivable_fact_is_an_ownership_transfer() {
     ];
     let mut g = MaterializedN3Graph::new(rules, &base).unwrap();
     assert_eq!(g.mode(), N3Mode::Counting);
+    let before = g.full_rebuilds();
     g.delete(&[[ex("a"), ex("ancestor"), ex("c")]]);
     assert!(g.contains(&[ex("a"), ex("ancestor"), ex("c")]), "fact stays via the layer");
     assert_eq!(g.mode(), N3Mode::Counting, "no sticky fallback for an ownership transfer");
     assert!(g.fallback_reason().is_none(), "not a data disqualification");
+    // sq-6tykl.6: the hand-off is settled by the layer's own local re-derivation — it must
+    // NOT cost a full re-materialization.
+    assert_eq!(g.full_rebuilds(), before, "ownership transfer must not rebuild");
     // Oracle: closure equals a from-scratch run on the current base.
     let mirror: FxHashSet<[Term; 3]> = base[..2].iter().cloned().collect();
     let src = format!("{rules}\n{}", serialize(&mirror));
@@ -410,9 +416,154 @@ fn delete_of_asserted_layer_derivable_fact_is_an_ownership_transfer() {
     let got: FxHashSet<[Term; 3]> = g.closure().into_iter().collect();
     assert_eq!(got, oracle, "closure must equal the from-scratch oracle");
     // And the INSERT direction of the transfer: asserting an already-derived fact.
+    let before = g.full_rebuilds();
     g.insert(&[[ex("a"), ex("ancestor"), ex("c")]]);
     assert!(g.contains(&[ex("a"), ex("ancestor"), ex("c")]));
     assert_eq!(g.mode(), N3Mode::Counting);
+    assert_eq!(g.full_rebuilds(), before, "the insert direction must not rebuild either");
+
+    // BEHAVIOURAL WITNESS for the insert direction (review round 2). Membership + mode +
+    // rebuild count all hold vacuously here: asserting a fact the closure already has adds
+    // nothing to `pending`, so this call propagates nothing and the layer keeps its copy
+    // alongside the new base copy. That double ownership must be INERT — the only way to see
+    // it is to make the two owners disagree. Break the layer's derivation and check the fact
+    // survives on its BASE copy alone, then retract that copy and check nothing else keeps it
+    // alive. A layer entry that were genuinely stale would show up as the fact outliving its
+    // own retraction here.
+    g.delete(&[[ex("a"), ex("parent"), ex("b")]]);
+    assert!(
+        g.contains(&[ex("a"), ex("ancestor"), ex("c")]),
+        "the asserted base copy alone must keep it in the closure"
+    );
+    assert!(
+        !g.contains(&[ex("a"), ex("ancestor"), ex("b")]),
+        "the derivation through the retracted edge is gone"
+    );
+    g.delete(&[[ex("a"), ex("ancestor"), ex("c")]]);
+    assert!(
+        !g.contains(&[ex("a"), ex("ancestor"), ex("c")]),
+        "no owner is left — a stale layer entry would wrongly keep it"
+    );
+    assert_eq!(g.mode(), N3Mode::Counting, "still no fallback");
+    assert_eq!(g.full_rebuilds(), before, "and still no re-materialization");
+    let mirror: FxHashSet<[Term; 3]> = [base[1].clone()].into_iter().collect();
+    let src = format!("{rules}\n{}", serialize(&mirror));
+    let oracle: FxHashSet<[Term; 3]> =
+        reason_n3_terms(&src, None).unwrap().facts.into_iter().collect();
+    let got: FxHashSet<[Term; 3]> = g.closure().into_iter().collect();
+    assert_eq!(got, oracle, "closure must equal the from-scratch oracle");
+}
+
+/// sq-6tykl.6: randomized differential over a schedule that DELIBERATELY asserts facts the
+/// recursive layer also derives, so base↔layer ownership transfers fire in both directions and
+/// in batches (several transfers per round, transfers mixed with real deletions, transfers that
+/// cascade into a counted rule). The closure must track the from-scratch oracle AND the graph
+/// must never leave the incremental path — a transfer is a state hand-off the layer's own local
+/// re-derivation settles, not a reason to re-materialize.
+///
+/// The generator in `counting_with_layer_guard_and_builtins_matches_from_scratch` only ever
+/// asserts `:parent`, so it cannot reach this case; this test exists to cover it.
+#[test]
+fn ownership_transfer_deltas_stay_incremental_and_match_from_scratch() {
+    const TRANSFER_RULES: &str = r#"
+@prefix : <http://ex/> .
+
+# recursive layer (SCC {ancestor}) — :ancestor is BOTH assertable and layer-derivable
+{ ?x :parent ?p . } => { ?x :ancestor ?p . } .
+{ ?x :ancestor ?p . ?p :ancestor ?a . } => { ?x :ancestor ?a . } .
+
+# counted rule FEEDING the layer: :parent is a layer premise predicate that is itself
+# counted-derived, so a round's layer recompute and its count decrements interleave.
+{ ?x :sire ?p . } => { ?x :parent ?p . } .
+
+# counted rule consuming the layer, so a spurious retraction would show up downstream
+{ ?x :ancestor ?a . ?a :status :archived . } => { ?x :flagged true . } .
+"#;
+    let mut rng = Rng(0x0BAD_C0DE_6714_6006);
+    // A small world keeps `:ancestor` edges densely re-derivable, so a large share of the
+    // asserted `:ancestor` facts are genuine ownership transfers rather than plain base facts.
+    let world = World { nodes: (0..7).map(|i| ex(&format!("n{i}"))).collect() };
+    let pick = |rng: &mut Rng| world.nodes[rng.below(world.nodes.len())].clone();
+    let gen_fact = |rng: &mut Rng| -> [Term; 3] {
+        let a = pick(rng);
+        let b = pick(rng);
+        match rng.below(10) {
+            0..=2 => [a, ex("parent"), b],
+            3..=7 => [a, ex("ancestor"), b], // asserted AND (usually) layer-derivable
+            8 => [a, ex("sire"), b],         // counted-derives a layer premise fact
+            _ => [a, ex("status"), ex("archived")],
+        }
+    };
+
+    let mut base: FxHashSet<[Term; 3]> = FxHashSet::default();
+    for _ in 0..25 {
+        base.insert(gen_fact(&mut rng));
+    }
+    let base_vec: Vec<[Term; 3]> = base.iter().cloned().collect();
+    let mut g = MaterializedN3Graph::new(TRANSFER_RULES, &base_vec).expect("rules parse");
+    assert_eq!(g.mode(), N3Mode::Counting, "must qualify: {:?}", g.fallback_reason());
+    assert_equal(&g, TRANSFER_RULES, &base, "initial");
+    let rebuilds = g.full_rebuilds();
+
+    let mut transfers = 0usize;
+    let mut insert_transfers = 0usize;
+    for batch in 0..150 {
+        if rng.below(2) == 0 {
+            let n = 1 + rng.below(4);
+            let delta: Vec<[Term; 3]> = (0..n).map(|_| gen_fact(&mut rng)).collect();
+            // Count the INSERT direction of the transfer before it happens: an `:ancestor`
+            // fact that is not yet asserted but IS already in the closure. No counted rule
+            // concludes `:ancestor`, so the layer is what currently owns it, and asserting it
+            // moves that ownership to the base.
+            insert_transfers += delta
+                .iter()
+                .filter(|t| t[1] == ex("ancestor") && !base.contains(*t) && g.contains(t))
+                .count();
+            g.insert(&delta);
+            base.extend(delta);
+        } else {
+            let current: Vec<[Term; 3]> = base.iter().cloned().collect();
+            if current.is_empty() {
+                continue;
+            }
+            let n = 1 + rng.below(4);
+            let delta: Vec<[Term; 3]> =
+                (0..n).map(|_| current[rng.below(current.len())].clone()).collect();
+            let still: Vec<bool> = delta.iter().map(|t| g.contains(t)).collect();
+            g.delete(&delta);
+            for t in &delta {
+                base.remove(t);
+            }
+            // Count the genuine ownership transfers: an `:ancestor` fact left the base but
+            // stayed in the closure. No counted rule concludes `:ancestor`, so the only thing
+            // that can still support it is the layer.
+            for (t, was) in delta.iter().zip(still) {
+                if was && t[1] == ex("ancestor") && !base.contains(t) && g.contains(t) {
+                    transfers += 1;
+                }
+            }
+        }
+        assert_eq!(g.mode(), N3Mode::Counting, "must stay on the fast path (batch {batch})");
+        assert_eq!(
+            g.full_rebuilds(),
+            rebuilds,
+            "ownership transfers must not re-materialize (batch {batch})"
+        );
+        assert_eq!(g.base_len(), base.len(), "base drifted at batch {batch}");
+        assert_equal(&g, TRANSFER_RULES, &base, &format!("batch {batch}"));
+    }
+    assert!(
+        transfers > 0,
+        "schedule should have exercised the delete direction of the transfer"
+    );
+    // Review round 2: state the insert direction's coverage explicitly rather than leaving it
+    // incidental. The per-batch `full_rebuilds` assertion above is what makes this direction
+    // NON-vacuous — replacing the hand-off branch in `propagate`'s inserting arm with a plain
+    // `removed.is_empty()` bail (its pre-`sq-6tykl.6` behaviour) reds this test at batch 0.
+    assert!(
+        insert_transfers > 0,
+        "schedule should have exercised the insert direction of the transfer"
+    );
 }
 
 // [OPUS-4.8] Regression for reviews 1868 / 1884: a rule with NO plain join atom — an empty `{}`

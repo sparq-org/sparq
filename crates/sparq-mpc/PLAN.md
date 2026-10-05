@@ -249,7 +249,11 @@ not a silent hole (architecture §4.2 guarantee (D), §5.2 Q2; sq-uu0u DESIGN
    SPIKE — the Q1 research risk), `sq-f7bu` (the buildable M4-v1: verifier-side
    authenticated-input attestation gate, Dutta/Artemis commit-and-prove anchor),
    and `sq-34ml` (the M4-v1 freshness/replay binding + federated
-   `reconstruct_public_inputs` layout prerequisites). Feasibility record (the
+   `reconstruct_public_inputs` layout prerequisites) — **`sq-34ml` LANDED** as
+   `src/federated_binding.rs`: it is the *scoping + out-of-circuit binding* half
+   only (a deterministic multi-source public-input byte layout and a fail-closed
+   freshness/replay transcript), it closes **no** ZK-audit item, and `proof.rs`
+   remains an honest `NotYetImplemented`. Feasibility record (the
    EdDSA-Poseidon / Schnorr-Baby-JubJub constraint sizing):
    `research/mpc-m4-distributed-sig-feasibility.md`.
 

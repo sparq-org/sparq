@@ -79,12 +79,42 @@ jobs:
   #     ONLY (docs/branch-protection.md §Draft-tier CI, last paragraph): a draft head
   #     already carries no PR CodeQL analysis and the rule tolerates that absence.
   #     A non-Rust PR is the same posture — there is genuinely no Rust to analyse.
-  #   * SAFE-BY-DEFAULT: rust_changed is forced 'true' on EVERY event except a
-  #     `pull_request` (push-to-main, merge_group, weekly schedule all run CodeQL in
-  #     full), and the Rust path set is broad: any *.rs / **/Cargo.toml / Cargo.lock /
-  #     rust-toolchain* / any build.rs (covered by *.rs? build.rs IS a .rs file) /
-  #     the codeql wiring itself. If the diff cannot be computed, we never silently
-  #     skip: off the PR path we hard-force 'true'.
+  #   * SAFE-BY-DEFAULT: rust_changed is forced 'true' on every event except a
+  #     `pull_request` and a `merge_group` (push-to-main + the weekly schedule always
+  #     run CodeQL in full), and the Rust path set is broad: any *.rs / **/Cargo.toml /
+  #     Cargo.lock / rust-toolchain* / any build.rs (covered by *.rs? build.rs IS a .rs
+  #     file) / the codeql wiring itself. If the diff cannot be computed, we never
+  #     silently skip: off the PR/merge_group path we hard-force 'true'.
+  #
+  # [OPUS-5] sq-g25hr — MERGE-GROUP CHANGE-CLASS GATE (the path-filtered fast lane).
+  # merge_group used to hard-force rust_changed=true here, so a queued batch with ZERO
+  # Rust still paid the full CodeQL analysis on every enqueue — reported in the
+  # sq-g25hr bead as the longest merge_group pole of the observed cloud-deploy drain
+  # (7 deploy PRs whose diffs were manifests + prose only). ci.yml and
+  # feature-matrix.yml already class-gate their merge_group batches; this job now does
+  # the same, with the IDENTICAL mechanism (the batch's base_sha..head_sha diff
+  # classified by `scripts/ci_select.py --classify-only`, the single source of truth —
+  # no path list is re-encoded here).
+  #
+  # HONESTY NOTE: this workflow is currently OPERATIONALLY DISABLED
+  # (`disabled_manually`, docs/branch-protection.md) — GitHub schedules no run on any
+  # trigger, so this gate buys nothing today. It is the correct merge_group posture
+  # for whenever CodeQL is re-enabled, and it costs nothing while disabled.
+  #
+  # WHY THE MERGE-GROUP SKIP IS SOUND (beyond the three bullets above, which already
+  # cover the PR tier):
+  #   * The class is computed from the AUTHORITATIVE queued diff, not from a label,
+  #     a title or a PR body — there is no input a PR author controls that can make a
+  #     Rust change classify inert. Every path outside the audited inert allowlists
+  #     (incl. every crates/** path and everything the dorny `rust` filter above
+  #     matches) classifies `engine`/`mixed` => the wildcard arm => full analysis.
+  #   * CodeQL analyses the Rust workspace; an inert batch changes no Rust, so the
+  #     analysis result is a pure function of inputs that did not move.
+  #   * push-to-main still analyses every merged commit in full, so the default
+  #     branch's code-scanning database never goes stale even if a batch skipped.
+  #   * FAIL-SAFE at every step: the branch defaults rust=true, an unresolvable SHA
+  #     pair or ANY classifier error falls back to `engine` => full analysis. Cost,
+  #     never soundness.
   changes:
     name: detect rust changes (codeql)
     runs-on: ubuntu-latest
@@ -111,14 +141,49 @@ jobs:
               - '.github/codeql/**'
       - name: Decide rust_changed (safe-by-default off the PR path)
         id: decide
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
-            echo "event=${{ github.event_name }} -> forcing rust_changed=true (full CodeQL)"
-          else
+          if [ "${EVENT_NAME}" = "pull_request" ]; then
             echo "rust_changed=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
             echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}"
+          elif [ "${EVENT_NAME}" = "merge_group" ]; then
+            # [OPUS-5] sq-g25hr MERGE-GROUP CHANGE-CLASS GATE (see the job header note).
+            rust=true
+            ok=true
+            # --depth=2147483647 (git's INFINITE_DEPTH; --unshallow that is also valid
+            # on a complete repo): this checkout is depth-1, and the classifier's
+            # three-dot diff needs the merge-base — a shallow SHA fetch leaves both
+            # commits PRESENT (the cat-file guards pass) but unconnected, so the diff
+            # dies and the fail-safe would force class=engine on EVERY batch, reducing
+            # this gate to a no-op. Same rationale as ci.yml's decide step.
+            git fetch --no-tags --quiet --depth=2147483647 origin "${MG_BASE_SHA}" "${MG_HEAD_SHA}" 2>/dev/null \
+              || git fetch --no-tags --quiet --depth=2147483647 origin "${MG_BASE_SHA}" 2>/dev/null \
+              || ok=false
+            git cat-file -e "${MG_BASE_SHA}^{commit}" 2>/dev/null || ok=false
+            git cat-file -e "${MG_HEAD_SHA}^{commit}" 2>/dev/null || ok=false
+            if [ "${ok}" = "true" ]; then
+              cls="$(python3 scripts/ci_select.py --classify-only --event merge_group \
+                       --base "${MG_BASE_SHA}" --head "${MG_HEAD_SHA}")" || cls=engine
+              # Lists ci_select.py `_INERT_CLASSES` verbatim (pinned by
+              # scripts/tests/test_ci_select_wiring.py so the two cannot drift).
+              # [OPUS-5] #5249: `map-safe` = every path resolves to an ownership-map
+              # `safe = true` verdict (today site/** + ci/formal-verification.toml).
+              case "${cls}" in
+                docs-only|orchestration-only|deploy-only|map-safe|inert-mixed) rust=false ;;
+                *) rust=true ;;
+              esac
+            else
+              echo "::warning::could not resolve merge_group base/head SHAs for the batch diff — running the full CodeQL analysis (fail-safe)."
+            fi
+            echo "rust_changed=${rust}" >> "$GITHUB_OUTPUT"
+            echo "merge_group -> change_class=${cls:-<unresolved>} rust_changed=${rust}"
+          else
+            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
+            echo "event=${EVENT_NAME} -> forcing rust_changed=true (full CodeQL)"
           fi
 
   analyze:
@@ -133,10 +198,12 @@ jobs:
     # branch-protection `code_scanning` alert rule therefore still sees a CodeQL
     # analysis of the head before any merge. Fail-open off the PR path: any
     # non-pull_request event satisfies the first disjunct => RUN.
-    # [OPUS-4.8] path-aware CI: ALSO skipped when the PR diff touches no Rust
+    # [OPUS-4.8] path-aware CI: ALSO skipped when the diff touches no Rust
     # (needs.changes.outputs.rust_changed == 'false') — nothing for CodeQL to
-    # analyse. rust_changed is forced 'true' off the PR path (see `changes`), so
-    # merge_group / push-to-main / schedule always analyse in full.
+    # analyse. [OPUS-5] sq-g25hr: that now covers a merge_group batch whose
+    # change-class is proven inert as well as a non-Rust PR; rust_changed is still
+    # forced 'true' on push-to-main + the weekly schedule, so the default branch is
+    # always analysed in full (see the `changes` job header for the soundness case).
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&
       needs.changes.outputs.rust_changed == 'true'
@@ -163,7 +230,7 @@ jobs:
 
       # Initialise the CodeQL tooling + database for the matrix language.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -184,6 +251,6 @@ jobs:
       # add the `cargo build --workspace` here.
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           category: "/language:${{ matrix.language }}"

@@ -1,0 +1,9 @@
+# Design §6 case 1 — mode 1 (enumerated parties). The verifier trusts exactly one
+# issuer and pins the status instant t; scope conformance is irrelevant to mode 1.
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:tr:mode1-pass> a trustx:TrustRequirements ;
+    trustx:question              <urn:question:jesse-has-an-age> ;
+    trustx:trustsIssuer          <did:web:dvla.example> ;
+    trustx:requiresValidStatusAt "2026-07-05T00:00:00Z"^^xsd:dateTime .

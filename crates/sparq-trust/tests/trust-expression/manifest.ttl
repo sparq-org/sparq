@@ -1,0 +1,217 @@
+# Trust-expression conformance manifest — the verifier-to-holder contract of
+# issue #1592 (design record `research/trust-expression-spec.md` §6, bead
+# `sq-6syab.3`).
+#
+# Every entry is a self-contained triple of files — the SPARQL query `Q`, the RDF
+# trust-requirements document `TR`, and the holder's attested dataset — plus the
+# outcome the specification requires. That is deliberately the whole contract of
+# design D1: the verifier sends `Q`, `TR` and a nonce, and nothing else.
+#
+# The directory is authored to lift VERBATIM into the specification's own upstream
+# repository once its home is chosen (design §9.3), which is why it uses the W3C
+# `mf:`/`qt:` manifest vocabulary and relative IRIs against `@base` rather than
+# anything sparq-specific.
+#
+# NON-STANDARD NAMESPACE BANNER: `tec:` below is a PLACEHOLDER minted for this
+# suite. It is not a registered namespace and carries no standing; it rehomes with
+# `trustx:` when the maintainer mints a w3id namespace for the specification.
+#
+# HONESTY: every expectation here is a SPECIFICATION-CONFORMANCE expectation
+# ("matches this contract" / "fails closed"). None of them is a cryptographic
+# soundness or privacy claim: the clear path verifies issuer attestations but the
+# sparq ZK estate has no external accredited-cryptographer sign-off (`sq-qhy4`
+# open) and `sparq-mpc` is honest-majority semi-honest only. Framework trust is
+# ANCHORED, not proven (design §7.2).
+#
+# There are zero known-failing entries: sparq passes every case in this suite. (The
+# marker token itself is deliberately not written anywhere in this directory — a
+# fixtures test scans the whole tree for it.)
+
+@base <https://sparq.dev/tests/trust-expression/> .
+
+@prefix mf:   <http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#> .
+@prefix qt:   <http://www.w3.org/2001/sw/DataAccess/tests/test-query#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix tec:  <https://sparq.dev/ns/trust-expression-conformance#> .
+
+<manifest.ttl> a mf:Manifest ;
+    rdfs:label "Trust-expression verifier-to-holder contract conformance suite" ;
+    rdfs:comment """The eight case classes of design §6 across ten entries. Case 6
+        carries an extra POSITIVE entry — the same certification asked about the
+        predicate it does cover — so the scope-violation case cannot pass merely
+        because the certification admits nothing at all; case 7 carries both of the
+        halves its design text names, expired AND revoked.""" ;
+    mf:entries (
+        <#mode1-pass>
+        <#revoked>
+        <#stale-window>
+        <#untrusted-issuer>
+        <#mode2-pass>
+        <#scope-violation>
+        <#scope-conformant>
+        <#certification-expired>
+        <#certification-revoked>
+        <#encoding-roundtrip>
+    ) .
+
+# ── §6 case 1 ────────────────────────────────────────────────────────────────
+<#mode1-pass> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "mode 1 pass — enumerated issuer, covering status window" ;
+    rdfs:comment """Design §6 case 1. Every contributing statement is attributed to an
+        issuer TR enumerates and is covered by a positive status attestation valid at
+        t. The contract binds.""" ;
+    tec:caseClass 1 ;
+    mf:action [
+        qt:query         <case-01-mode1-pass/query.rq> ;
+        qt:data          <case-01-mode1-pass/holder.trig> ;
+        tec:requirements <case-01-mode1-pass/requirements.ttl> ;
+        tec:nonce        "tec-nonce-01"
+    ] ;
+    mf:result tec:Admitted ;
+    tec:contributingStatements 1 .
+
+# ── §6 case 2 ────────────────────────────────────────────────────────────────
+<#revoked> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "revoked — no positive status attestation covers the bundle" ;
+    rdfs:comment """Design §6 case 2. The status bit is set at the authoritative
+        snapshot, so no covering attestation could be minted. The answer is absent,
+        never 'false because revoked': the rewrite has no negation, so rejection is
+        always the absence of an admissible derivation.""" ;
+    tec:caseClass 2 ;
+    mf:action [
+        qt:query         <case-02-revoked/query.rq> ;
+        qt:data          <case-02-revoked/holder.trig> ;
+        tec:requirements <case-02-revoked/requirements.ttl> ;
+        tec:nonce        "tec-nonce-02"
+    ] ;
+    mf:result tec:NoBinding ;
+    tec:contributingStatements 0 .
+
+# ── §6 case 3 ────────────────────────────────────────────────────────────────
+<#stale-window> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "stale window — status attestation does not cover t" ;
+    rdfs:comment """Design §6 case 3. A covering attestation exists but its validity
+        window closes before the verifier-chosen instant t. Freshness is a TR
+        parameter, never a spec constant (design §7.4).""" ;
+    tec:caseClass 3 ;
+    mf:action [
+        qt:query         <case-03-stale-window/query.rq> ;
+        qt:data          <case-03-stale-window/holder.trig> ;
+        tec:requirements <case-03-stale-window/requirements.ttl> ;
+        tec:nonce        "tec-nonce-03"
+    ] ;
+    mf:result tec:NoBinding ;
+    tec:contributingStatements 0 .
+
+# ── §6 case 4 ────────────────────────────────────────────────────────────────
+<#untrusted-issuer> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "untrusted issuer — attribution outside the enumerated set" ;
+    rdfs:comment """Design §6 case 4. The status stratum is impeccable; the sole
+        defect is that TR enumerates neither this issuer nor any framework that could
+        certify it.""" ;
+    tec:caseClass 4 ;
+    mf:action [
+        qt:query         <case-04-untrusted-issuer/query.rq> ;
+        qt:data          <case-04-untrusted-issuer/holder.trig> ;
+        tec:requirements <case-04-untrusted-issuer/requirements.ttl> ;
+        tec:nonce        "tec-nonce-04"
+    ] ;
+    mf:result tec:NoBinding ;
+    tec:contributingStatements 0 .
+
+# ── §6 case 5 ────────────────────────────────────────────────────────────────
+<#mode2-pass> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "mode 2 pass — framework-certified issuer, service-level scope" ;
+    rdfs:comment """Design §6 case 5. TR enumerates NO issuer: admissibility comes
+        entirely from a valid, status-covered eIDAS 2 certification carrying
+        trustx:AnyServiceScope. Framework trust is anchored, not proven (§7.2).""" ;
+    tec:caseClass 5 ;
+    mf:action [
+        qt:query         <case-05-mode2-pass/query.rq> ;
+        qt:data          <case-05-mode2-pass/holder.trig> ;
+        tec:requirements <case-05-mode2-pass/requirements.ttl> ;
+        tec:nonce        "tec-nonce-05"
+    ] ;
+    mf:result tec:Admitted ;
+    tec:contributingStatements 1 .
+
+# ── §6 case 6 (negative + its positive twin over the SAME fixture) ───────────
+<#scope-violation> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "scope violation — certified issuer attested outside its certified scope" ;
+    rdfs:comment """Design §6 case 6, the 'issuers only issue what they are certified
+        to issue' clause. The certification is valid and status-covered but scopes the
+        issuer to foaf:age; the queried foaf:name statement is outside it.""" ;
+    tec:caseClass 6 ;
+    mf:action [
+        qt:query         <case-06-scope-violation/query.rq> ;
+        qt:data          <case-06-scope-violation/holder.trig> ;
+        tec:requirements <case-06-scope-violation/requirements.ttl> ;
+        tec:nonce        "tec-nonce-06"
+    ] ;
+    mf:result tec:NoBinding ;
+    tec:contributingStatements 0 .
+
+<#scope-conformant> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "scope conformant — the same certification admits its in-scope statement" ;
+    rdfs:comment """The positive twin of #scope-violation over the SAME holder graph,
+        requirements and certification. Without it, #scope-violation could pass because
+        the certification admits nothing at all rather than because scope conformance
+        filters per statement.""" ;
+    tec:caseClass 6 ;
+    mf:action [
+        qt:query         <case-06-scope-violation/query-in-scope.rq> ;
+        qt:data          <case-06-scope-violation/holder.trig> ;
+        tec:requirements <case-06-scope-violation/requirements.ttl> ;
+        tec:nonce        "tec-nonce-06b"
+    ] ;
+    mf:result tec:Admitted ;
+    tec:contributingStatements 1 .
+
+# ── §6 case 7 (both halves: expired AND revoked) ─────────────────────────────
+<#certification-expired> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "certification expired at t" ;
+    rdfs:comment """Design §6 case 7(a). Case 5 with the certification's validUntil
+        closed before t. The credential itself is still live, so the rejection is
+        attributable to the certification window alone.""" ;
+    tec:caseClass 7 ;
+    mf:action [
+        qt:query         <case-07-certification-expired/query.rq> ;
+        qt:data          <case-07-certification-expired/holder.trig> ;
+        tec:requirements <case-07-certification-expired/requirements.ttl> ;
+        tec:nonce        "tec-nonce-07"
+    ] ;
+    mf:result tec:NoBinding ;
+    tec:contributingStatements 0 .
+
+<#certification-revoked> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "certification revoked at t — no positive status attestation covers it" ;
+    rdfs:comment """Design §6 case 7(b). Certifications are status-checked exactly like
+        credentials, through the SAME positive-attestation machinery: an in-window
+        certification with no covering status attestation admits nothing.""" ;
+    tec:caseClass 7 ;
+    mf:action [
+        qt:query         <case-07-certification-expired/query.rq> ;
+        qt:data          <case-07-certification-expired/holder-cert-revoked.trig> ;
+        tec:requirements <case-07-certification-expired/requirements.ttl> ;
+        tec:nonce        "tec-nonce-07b"
+    ] ;
+    mf:result tec:NoBinding ;
+    tec:contributingStatements 0 .
+
+# ── §6 case 8 ────────────────────────────────────────────────────────────────
+<#encoding-roundtrip> a mf:ManifestEntry, tec:ContractEvaluationTest ;
+    mf:name "encoding — two-bundle response round-trips (a) <-> (b) losslessly" ;
+    rdfs:comment """Design §6 case 8. A two-pattern SELECT whose response carries two
+        bundles from two issuers, so the normative RDF 1.2 reifier form and the
+        runnable-today named-graph/PROV-O mapping are compared over a response with
+        real structure. The runner checks that correspondence on EVERY admitted case;
+        this entry is the one built to make it bite.""" ;
+    tec:caseClass 8 ;
+    mf:action [
+        qt:query         <case-08-encoding-roundtrip/query.rq> ;
+        qt:data          <case-08-encoding-roundtrip/holder.trig> ;
+        tec:requirements <case-08-encoding-roundtrip/requirements.ttl> ;
+        tec:nonce        "tec-nonce-08"
+    ] ;
+    mf:result tec:Admitted ;
+    tec:contributingStatements 2 .

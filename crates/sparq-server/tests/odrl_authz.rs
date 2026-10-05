@@ -192,7 +192,7 @@ fn matrix() -> Vec<MatrixRow> {
             now: None,
         },
         MatrixRow {
-            name: "count constraint on the stateless lane (fail-closed, sq-snopa.8)",
+            name: "count constraint on the stateless lane (fail-closed; stateful budgets unimplemented)",
             policy_nq: permit(
                 ALICE,
                 &constraint(
@@ -549,4 +549,72 @@ async fn lane_is_dormant_without_odrl_in_the_dataset() {
     // And the static WAC grant still works untouched.
     let resp = query_as(&base, wac, Some(ALICE), None, None).await;
     assert_eq!(row_count(resp).await, 1, "static WAC grant admits alice as before");
+}
+
+// ---------------------------------------------------------------------------
+// [SONNET-4.6] sq-snopa.8 — the stateful lane REFUSES an ODRL-carrying server store.
+//
+// The ODRL lane reads the request-body dataset; `"source":"server"` carries none. If the
+// server's OWN store held ODRL rules and the stateful lane simply ignored them, a PROHIBITION
+// would be silently dropped — fail-OPEN. So the lane refuses the request outright instead.
+// ---------------------------------------------------------------------------
+
+/// Boots a server whose own loaded store IS `dataset`.
+async fn spawn_pod(dataset: &str) -> String {
+    let graph = Graph::load_dataset(dataset, "nquads").unwrap();
+    let config = ServerConfig { solid_authz: true, ..ServerConfig::default() };
+    let app = router(AppState::with_config(graph, config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+/// A server store carrying an ODRL PROHIBITION is refused by the stateful lane (400) rather
+/// than authorised as if the prohibition were absent.
+///
+/// MUTATION SPOT-CHECK: delete the `graph_carries_odrl` refusal in `build_server_view` and this
+/// test goes red — the request would be answered from a view that never saw the prohibition.
+#[tokio::test]
+async fn stateful_lane_refuses_an_odrl_carrying_server_store() {
+    let dataset = format!("{}{}", CONTENT, prohibit(ALICE));
+    let base = spawn_pod(&dataset).await;
+    let resp = client()
+        .post(format!("{}/authz/query", base))
+        .json(&serde_json::json!({
+            "source": "server",
+            "session": { "agent": ALICE },
+            "query": QUERY,
+            "view": "wac",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        400,
+        "an ODRL-carrying server store must be refused, never silently un-enforced"
+    );
+}
+
+/// The refusal is SCOPED to ODRL-carrying stores: a plain WAC pod still serves the stateful
+/// lane normally (the guard is not a blanket disable of `"source":"server"`).
+#[tokio::test]
+async fn stateful_lane_still_serves_a_plain_server_store_under_odrl_authz() {
+    let base = spawn_pod(&wac_dataset("")).await;
+    let resp = client()
+        .post(format!("{}/authz/query", base))
+        .json(&serde_json::json!({
+            "source": "server",
+            "session": { "agent": ALICE },
+            "query": QUERY,
+            "view": "wac",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200, "a plain WAC server store is not refused");
+    assert_eq!(row_count(resp).await, 1, "alice's static WAC grant still admits her");
 }

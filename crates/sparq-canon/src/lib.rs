@@ -60,10 +60,10 @@
 //! natively re-implements the RDFC-1.0 algorithm over oxrdf-0.3 and **descends
 //! the Hash-N-Degree-Quads gossip into triple-term objects**, so blank nodes
 //! nested inside triple terms get relabelled. It is byte-identical to the
-//! standard path on triple-term-free input. This is **not** W3C RDFC-1.0
-//! (RDF-1.2 canonicalization is unsettled upstream); see the `rdf12` module
-//! (only present with the feature on). With the feature OFF the crate is
-//! byte-identical to before — the standard surface still returns
+//! standard path on triple-term-free input. This is **not** W3C RDFC-1.0;
+//! W3C has published no RDF-1.2 dataset canonicalization specification. See the
+//! `rdf12` module (only present with the feature on). With the feature OFF the
+//! crate is byte-identical to before — the standard surface still returns
 //! [`CanonError::TripleTerm`] on triple terms.
 //!
 //! The same feature also carries a **constrained ground-triple-term** variant
@@ -85,7 +85,7 @@ use std::collections::HashMap;
 // Text-in / text-out API ([OPUS-4.8] sq-1dd5t). A self-contained N-Quads
 // document is the interchange form RDFC-1.0 is defined over, so a `&str` ->
 // `String` entry point is the natural seam for callers that already hold
-// serialized RDF (the @jeswr/sparq RDF/JS `Dataset` wasm binding) and do not
+// serialized RDF (the @sparq-org/sparq RDF/JS `Dataset` wasm binding) and do not
 // want to reconstruct oxrdf term graphs across a language boundary.
 // ---------------------------------------------------------------------------
 
@@ -146,6 +146,16 @@ pub use rdf12::{
     issue_dataset_rdf12, issue_dataset_rdf12_ground_terms, issue_dataset_rdf12_ground_terms_with,
     issue_dataset_rdf12_with,
 };
+
+// **Opt-in (`concept` feature).** `urn:concept:` content-addressed record
+// verification — the multibase/multihash envelope plus the
+// recompute-and-byte-compare ingestion guard over this crate's RDFC-1.0 digest.
+// Documented entirely by its own `//!` module docs (which is also where its
+// intra-doc links must resolve): an outer doc comment here would be merged into
+// them and resolved in *this* module's scope instead, breaking every link to a
+// `concept`-module item under `cargo doc --all-features`.
+#[cfg(feature = "concept")]
+pub mod concept;
 
 /// The hash-function trait RDFC-1.0 is parameterized over (`digest::Digest`),
 /// re-exported so callers of [`canonicalize_quads_with`], [`digest_quads_with`],
@@ -880,7 +890,7 @@ mod tests {
     }
 
     /// [OPUS-4.8] sq-1dd5t: the text-in/text-out `canonicalize_nquads` entry point
-    /// (what the @jeswr/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
+    /// (what the @sparq-org/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
     /// documents that are RDF-isomorphic but differ in blank-node labels AND quad
     /// order canonicalize to byte-identical output; a label-only diff that is NOT
     /// isomorphic (an extra edge) does not.

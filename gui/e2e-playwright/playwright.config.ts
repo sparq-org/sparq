@@ -88,7 +88,11 @@ export default defineConfig({
     // `npm install`; --no-install makes the dependency on that being true explicit + hermetic.
     command: `npx --no-install serve -l ${SERVE_PORT} -s ../app/out`,
     url: `http://127.0.0.1:${SERVE_PORT}`,
-    reuseExistingServer: !process.env.CI,
+    // [SONNET-4.6] sq-vgq0o — never reuse a listener on this fixed port. In local multi-worktree
+    // development it may belong to another checkout and serve stale gui/app/out content. Let
+    // Playwright fail loudly on a port collision; PLAYWRIGHT_PORT remains available for parallel
+    // runs that intentionally need distinct servers.
+    reuseExistingServer: false,
     timeout: 15_000,
   },
 });

@@ -1353,6 +1353,29 @@ impl Dict {
     // flat by invariant), then the table (blob base + appended arena). On a plain
     // arena dict only the table branch does work, so the bulk-load hot path keeps its
     // shape (two predictable never-taken branches).
+    //
+    // [OPUS-5] (sq-7d3dj.21b) HASH-BEFORE-MEMCMP — SCOPED HONESTLY, PER PATH. The bead asked to
+    // compare a stored 64-bit hash before falling through to the string compare ("skip if
+    // already done — verify first"). It is in place on the MMAP path only; the in-memory path
+    // keeps a weaker, tag-only prefilter BY CHOICE. What each dedup path actually does:
+    //   * `mapped_find` — FULL 64-bit gate. It binary-searches the SORTED 64-bit `dict-hash.bin`
+    //     array and calls `eq` only on entries whose FULL 64-bit hash matches; a miss costs zero
+    //     string compares. Pinned by `mapped_find_compares_full_hash_before_eq`.
+    //   * `self.table` (blob base + appended arena) — NO full-hash gate. It is a
+    //     `hashbrown::HashTable<Id>` storing bare ids, so there is no stored 64-bit hash to
+    //     compare: `find(hash, eq)` matches only the hash's top-7-bit `h2` tag against a SIMD
+    //     control group, so `eq` — and its string compare — CAN run for a probed entry whose
+    //     other 57 hash bits differ (~1 in 128 of probed slots). Correctness therefore rests on
+    //     `eq` itself, not on the tag. Pinned by `in_memory_dedup_has_only_the_h2_tag_prefilter`.
+    //   * the sharded merge (`ShardedDict::intern_partials`/`intern_terms`) and the spill path
+    //     (`dictspill`) route by `hash % n_leaf` — a shard SELECTOR, not a hash-equality gate —
+    //     and then land in one of the two above, inheriting whichever prefilter that path has.
+    // The in-memory full gate is deliberately not implemented: a per-entry stored `u64` means
+    // `HashTable<(Id, u64)>` — 4 → 16 bytes per entry after padding, i.e. ~3-4x the lookup table
+    // on a 100M-term dict (a `dict_bytes_per_term` ratchet regression) — to filter the ~0.8% of
+    // probes the `h2` tag already lets through. Rejected on that trade, not on effort. So: the
+    // bead's requirement is MET on the mmap path and CONSCIOUSLY DECLINED in memory; do not read
+    // the mmap guarantee as covering every dedup path.
 
     #[inline]
     fn find_iri(&self, hash: u64, iri: &str) -> Option<Id> {
@@ -3573,6 +3596,125 @@ mod tests {
         let mut sdok = ShardedDict::new(4);
         sdok.intern_partials(&[(pdok, Vec::<[Id; 3]>::new())])
             .expect("a well-formed triple-term partial must intern without error");
+    }
+
+    /// [OPUS-5] sq-7d3dj.21b — HASH-BEFORE-MEMCMP on the MMAP dedup path (and that path only —
+    /// the in-memory table's weaker tag-only prefilter is pinned separately by
+    /// `in_memory_dedup_has_only_the_h2_tag_prefilter`). Here it holds in its strongest form:
+    /// `mapped_find` binary-searches the sorted 64-bit hash array and calls the `eq`
+    /// (string-compare) closure ONLY for entries whose FULL 64-bit hash matches. The bead asked
+    /// for this filter to be added; the verification says it already exists here, so this test
+    /// pins it instead — a refactor that dropped the hash gate and linearly `eq`-scanned would
+    /// turn every miss from O(log n) hash probes + 0 compares into O(n) compares, which this
+    /// catches by COUNTING `eq` invocations rather than by timing.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn mapped_find_compares_full_hash_before_eq() {
+        use std::cell::Cell;
+        let mut d = Dict::new();
+        for i in 0..64 {
+            d.intern(&Term::NamedNode(NamedNode::new_unchecked(format!("http://ex/t{}", i))));
+        }
+        let dir = std::env::temp_dir().join(format!("sparq-dict-hashfirst-{}", std::process::id()));
+        d.save_mmap(&dir).unwrap();
+        let m = Dict::open_mmap(&dir).unwrap();
+
+        // (a) A hash that is present: `eq` runs for exactly the entries carrying that hash.
+        //     With 64 distinct terms and a 64-bit hash that is one entry, so one compare —
+        //     NOT the 64 a compare-everything scan would make.
+        let present = hash_iri("http://ex/t7");
+        let calls = Cell::new(0usize);
+        let found = m.mapped_find(present, |s| {
+            calls.set(calls.get() + 1);
+            stored_ref_is_iri(s, "http://ex/t7", &m.prefixes)
+        });
+        assert!(found.is_some(), "the term must be found through the mapped index");
+        assert_eq!(calls.get(), 1, "eq must run once — only for the entry whose 64-bit hash matched");
+
+        // (b) A hash that is absent: `eq` must NEVER run. This is the load-bearing half — it is
+        //     what makes a dictionary MISS cost zero string compares.
+        let calls = Cell::new(0usize);
+        let found = m.mapped_find(hash_iri("http://ex/absent"), |_| {
+            calls.set(calls.get() + 1);
+            true // would report a bogus hit if the hash gate were ever removed
+        });
+        assert_eq!(found, None, "an absent hash must not resolve to any id");
+        assert_eq!(calls.get(), 0, "eq must not run at all when no stored 64-bit hash matches");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// [OPUS-5] sq-7d3dj.21b — the OTHER half of the HASH-BEFORE-MEMCMP scope note on
+    /// `find_iri` & co., pinned so the mmap guarantee is never read as covering every dedup
+    /// path. The in-memory `self.table` stores bare ids and so has NO full-64-bit hash gate:
+    /// hashbrown matches only the top-7-bit `h2` tag, which means
+    ///   (a) `eq` DOES run for a probed entry whose remaining 57 hash bits differ, and
+    ///   (b) correctness therefore rests entirely on `eq` — an `h2` collision must never dedup
+    ///       two distinct terms onto one id.
+    /// Both are asserted below on a deterministically-found tag-colliding IRI pair (FxHasher is
+    /// seedless, so the search result is stable across runs and hosts).
+    #[test]
+    fn in_memory_dedup_has_only_the_h2_tag_prefilter() {
+        use std::cell::Cell;
+        use std::collections::HashMap;
+
+        // hashbrown's `h2` tag is the top 7 bits of the 64-bit hash.
+        let tag = |h: u64| h >> 57;
+        let mut first_per_tag: HashMap<u64, (String, u64)> = HashMap::new();
+        let mut pair = None;
+        for i in 0..4096u32 {
+            let iri = format!("http://ex/h{}", i);
+            let h = hash_iri(&iri);
+            match first_per_tag.get(&tag(h)) {
+                Some((prev_iri, prev_h)) if *prev_h != h => {
+                    pair = Some((prev_iri.clone(), *prev_h, iri, h));
+                    break;
+                }
+                Some(_) => {}
+                None => {
+                    first_per_tag.insert(tag(h), (iri, h));
+                }
+            }
+        }
+        let (a, ha, b, hb) =
+            pair.expect("two IRIs sharing the 7-bit h2 tag must exist among 4096 candidates");
+        assert_eq!(tag(ha), tag(hb), "the pair must share the h2 tag: {} / {}", a, b);
+        assert_ne!(ha, hb, "the pair must differ in the FULL 64-bit hash: {} / {}", a, b);
+
+        // (a) The in-memory prefilter is tag-only. Probing a `HashTable<Id>` exactly as
+        //     `find_iri` does (`table.find(hash, eq)`) invokes `eq` for the tag-colliding entry
+        //     even though the full hashes differ — a stored-full-hash gate would call it zero
+        //     times. This is the claim the source comment makes, asserted rather than asserted-
+        //     by-prose.
+        let mut table: HashTable<Id> = HashTable::new();
+        table.insert_unique(ha, 1, |_| ha);
+        let calls = Cell::new(0usize);
+        let hit = table.find(hb, |_| {
+            calls.set(calls.get() + 1);
+            false
+        });
+        assert!(hit.is_none(), "a tag-only collision must not resolve to an id");
+        assert_eq!(
+            calls.get(),
+            1,
+            "eq must run for the h2-tag-colliding entry — the in-memory path has no full-hash gate"
+        );
+
+        // (b) So `eq` is load-bearing for correctness: the colliding pair must intern to two
+        //     distinct ids, and each must still look up to its own id.
+        let (ta, tb) = (
+            Term::NamedNode(NamedNode::new_unchecked(a.clone())),
+            Term::NamedNode(NamedNode::new_unchecked(b.clone())),
+        );
+        let mut d = Dict::new();
+        let (ia, ib) = (d.intern(&ta), d.intern(&tb));
+        assert_ne!(ia, ib, "an h2-tag collision must not dedup {} and {} onto one id", a, b);
+        assert_eq!(d.intern(&ta), ia, "re-interning must dedup to the same id");
+        assert_eq!(d.intern(&tb), ib, "re-interning must dedup to the same id");
+        assert_eq!(d.lookup(&ta), ia);
+        assert_eq!(d.lookup(&tb), ib);
+        assert_eq!(d.term(ia), ta);
+        assert_eq!(d.term(ib), tb);
     }
 
     #[cfg(feature = "mmap")]

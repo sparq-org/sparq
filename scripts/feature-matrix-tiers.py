@@ -25,7 +25,11 @@
 #       Exit non-zero if:
 #         (1) any leg carries tier: check AND detector says sensitive AND
 #             the fragment has no tier-reason: override; OR
-#         (2) any sensitive feature has no test:true leg (sq-vya1 guard)
+#         (2) any sensitive (crate, feature) has no test:true leg IN THAT
+#             CRATE and no written test-reason: override (sq-vya1 guard).
+#             Cargo feature names are crate-local, so both invariants key on
+#             the (crate, feature) PAIR — a test:true leg for feature F in
+#             crate A must never satisfy a sensitive F in crate B.
 #   python3 scripts/feature-matrix-tiers.py --report-unlegged
 #       Advisory: features with no leg, against the SCOPE allowlist.
 #
@@ -809,14 +813,26 @@ def cmd_enforce(legs: List[dict]) -> int:
     (1) A leg may carry tier: check only if the detector says non-sensitive
         OR the fragment carries an explicit tier-reason: override.
         tier: check + sensitive + no tier-reason => VIOLATION.
-    (2) Every feature whose leg is sensitive must appear in some test:true leg.
-        A sensitive feature with no test:true leg => VIOLATION (sq-vya1 guard).
+    (2) Every (crate, feature) whose leg is sensitive must appear in some
+        test:true leg FOR THAT CRATE. A sensitive (crate, feature) with no
+        test:true leg => VIOLATION (sq-vya1 guard), unless a leg for that
+        (crate, feature) carries a written `test-reason:` override.
+
+    Both invariants key on the (crate, feature) PAIR, never the bare feature
+    name: cargo feature names are crate-LOCAL, so a `test: true` leg for
+    feature F in crate A says nothing about a sensitive F in crate B. Keying
+    on the bare name let exactly that cross-crate collision silently satisfy
+    the guard (15 feature names are shared across crates in the live
+    fragments), which is the coverage gap this guard exists to catch.
     """
     violations: List[str] = []
 
-    # Map feature -> has_test_true_leg (for sq-vya1 guard)
+    # Map (crate, feature) -> has_test_true_leg (for the sq-vya1 guard)
     feature_has_test_leg: dict = {}
     sensitive_features: set = set()
+    # (crate, feature) pairs exempted by a written `test-reason:` on a leg —
+    # the coverage lives outside `cargo test` (see the fragment's reason).
+    test_reason_exempt: dict = {}
 
     for leg in legs:
         name = leg.get("name", "<unnamed>")
@@ -824,22 +840,25 @@ def cmd_enforce(legs: List[dict]) -> int:
         features = _features_from_leg(leg)
         declared_tier = str(leg.get("tier", "test") or "test").strip()
         tier_reason = leg.get("tier-reason", "") or ""
+        test_reason = str(leg.get("test-reason", "") or "").strip()
         test_flag = bool(leg.get("test", True))
 
         clf = classify_leg(_crate_dir(crate), features)
 
         if clf.sensitive:
             for f in features:
-                sensitive_features.add(f)
+                sensitive_features.add((crate, f))
 
         # Track test:true coverage for all features in this leg
         if test_flag:
             for f in features:
-                feature_has_test_leg[f] = True
+                feature_has_test_leg[(crate, f)] = True
         else:
             for f in features:
-                if f not in feature_has_test_leg:
-                    feature_has_test_leg[f] = False
+                if (crate, f) not in feature_has_test_leg:
+                    feature_has_test_leg[(crate, f)] = False
+                if test_reason:
+                    test_reason_exempt[(crate, f)] = test_reason
 
         # Invariant (1): tier: check + sensitive + no override => VIOLATION
         if declared_tier == "check" and clf.sensitive and not tier_reason.strip():
@@ -852,14 +871,21 @@ def cmd_enforce(legs: List[dict]) -> int:
                 )
             )
 
-    # Invariant (2): every sensitive feature must have a test:true leg
-    for f in sorted(sensitive_features):
-        if not feature_has_test_leg.get(f, False):
-            violations.append(
-                "VIOLATION(2) feature {!r} is sensitive (has feature-gated "
-                "tests) but appears in no test:true leg — the sq-vya1 guard. "
-                "Add or restore a test:true leg for this feature.".format(f)
-            )
+    # Invariant (2): every sensitive (crate, feature) must have a test:true leg
+    # in ITS OWN crate — a same-named feature elsewhere does not count.
+    for crate, f in sorted(sensitive_features):
+        if feature_has_test_leg.get((crate, f), False):
+            continue
+        if (crate, f) in test_reason_exempt:
+            continue
+        violations.append(
+            "VIOLATION(2) feature {!r} of crate {!r} is sensitive (has "
+            "feature-gated tests) but appears in no test:true leg for that "
+            "crate — the sq-vya1 guard. Add or restore a test:true leg for "
+            "this crate's feature, or declare a written `test-reason:` on "
+            "the leg if the coverage genuinely lives outside `cargo "
+            "test`.".format(f, crate)
+        )
 
     if violations:
         for v in violations:
@@ -961,8 +987,8 @@ def main() -> None:
         action="store_true",
         help=(
             "Exit non-zero if any tier:check leg is sensitive (no tier-reason "
-            "override), or if any sensitive feature has no test:true leg "
-            "(sq-vya1 guard)."
+            "override), or if any sensitive (crate, feature) has no test:true "
+            "leg in that crate and no test-reason override (sq-vya1 guard)."
         ),
     )
     group.add_argument(

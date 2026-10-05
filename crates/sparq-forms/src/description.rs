@@ -90,6 +90,14 @@ pub enum ShapeVia {
     TargetClass,
     /// `dash:applicableToClass` matches an `rdf:type` of the focus node.
     ApplicableToClass,
+    /// `sh:targetSubjectsOf` names a predicate the focus node is a subject of.
+    /// Ranked BELOW [`Self::ApplicableToClass`] in the switcher: a predicate
+    /// target says the node participates in a relation, not that the shape
+    /// describes what the node *is*. [OPUS-4.8] sq-vfcxv
+    TargetSubjectsOf,
+    /// `sh:targetObjectsOf` names a predicate the focus node is an object of
+    /// (ranked below [`Self::TargetSubjectsOf`]). [OPUS-4.8] sq-vfcxv
+    TargetObjectsOf,
     /// Explicitly requested via [`crate::FormOptions::shape`].
     Explicit,
 }

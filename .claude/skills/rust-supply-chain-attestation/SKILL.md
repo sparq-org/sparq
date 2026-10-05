@@ -37,7 +37,9 @@ advisories/licenses). The `supply-chain.yml` `audit` job runs on the **host
 stable toolchain** (not the EmbarkStudios Docker action — its bundled cargo 1.83
 can't parse the vendored `spargebra`, which needs `edition2024` / cargo >= 1.85).
 
-- **GATING now:** `cargo deny check bans sources licenses` (every push/PR/merge_group).
+- **GATING now:** all four checks — `cargo deny check advisories bans sources licenses`
+  — on push + PR, skipped only when the PR touches no Rust/dependency-graph file
+  (the `rust_changed` step guard; `merge_group` is deliberately excluded).
 - **Licenses:** an allowlist of permissive licenses only (MIT, Apache-2.0, BSD-*,
   ISC, Unicode-3.0, CC0-1.0, Zlib, BlueOak-1.0.0) plus **per-crate exceptions**
   (CeCILL-B for the sophia/HDT tree, AFL-3.0 for `ntriple`, MPL-2.0 for `resiter`,
@@ -47,26 +49,35 @@ can't parse the vendored `spargebra`, which needs `edition2024` / cargo >= 1.85)
   crates.io allowed. The vendored `spargebra` is a `[patch.crates-io]` PATH source
   (a path patch is not a registry/git source, so it doesn't trip the gate);
   `allow-git = []` is the hook for any deliberately-allowed future git source.
-- **Advisories ignore list:** currently **empty** — reserved for `unmaintained`
-  *informational* advisories on transitive deps with no safe upgrade, each with a
-  `reason` + tracking bead. A real **vulnerability** or a **yanked** crate FAILS the
-  gate. Both former ignores were retired: `paste` via wgpu (sq-l8bv, RUSTSEC-2024-0436)
-  left the tree when the GPU stack dropped it; `rustls-pemfile` via ureq (sq-g2xs,
-  RUSTSEC-2025-0134) was eliminated by migrating the federation HTTP client ureq 2 →
-  ureq 3 (whose `rustls-native-certs 0.8` no longer depends on the archived crate). The
-  gate now re-flags any regression that reintroduces either.
+- **Advisories ignore list:** reserved for `unmaintained` *informational* advisories,
+  and for advisories reachable only through a transitive dep with no fixed upstream
+  release — each with a `reason` + tracking bead. A real, fixable **vulnerability** or a
+  **yanked** crate FAILS the gate. Read `deny.toml [advisories].ignore` for the live set;
+  do not quote a count from here. **Prefer removing the dependency to ignoring it** —
+  the ignore list has shrunk that way three times: `paste` via wgpu (sq-l8bv,
+  RUSTSEC-2024-0436) left when the GPU stack dropped it (it later returned via parquet);
+  `rustls-pemfile` via ureq (sq-g2xs, RUSTSEC-2025-0134) left when the federation HTTP
+  client moved ureq 2 → ureq 3; and when the solid-server-rs import brought
+  `rustls-pemfile` back for its mTLS PEM parse, sq-5ah3p ([OPUS-5]) removed it again by
+  migrating that parse to `rustls-pki-types`' `PemObject` — dropping the ignore, the VEX
+  statement and the cargo-vet exemption in ONE change, which is what the `vex-deny-sync`
+  gate requires. The gate re-flags any regression that reintroduces the crate.
 
-### The advisories-gate gap (GX-1 — know this)
-`cargo deny check advisories` is currently **`continue-on-error` (non-gating)**:
-cargo-deny 0.19.x can't parse RustSec advisories that use **CVSS v4.0** — it
-fails *loading* the freshly-cloned advisory DB ("unsupported CVSS version: 4.0"),
-a DB-wide parse error before any per-advisory `ignore` applies, so it can't be
-configured around. The **real** advisory gate today is the daily watchdog
-(`dependency-monitoring.yml`), which runs advisories-only off-peak and
-opens/updates a single idempotent `security:dependency-vuln` tracking issue.
-Flip the PR-time advisories check back to gating once cargo-deny ships CVSS-4.0
-support — **bead sq-q8de tracks it**. When an auditor asks "is there PR-time vuln
-gating?", the honest answer is *no, the daily watchdog is the gate* — say so.
+### The advisories PR-gate (GX-1 — closed)
+`cargo deny check advisories` is **GATING** — `supply-chain.yml`'s
+`cargo-deny check (advisories) — GATING` step carries no `continue-on-error`
+(the file contains none). The CVSS-4.0 parse blocker that once forced
+`continue-on-error` — cargo-deny failing to *load* the freshly-cloned RustSec DB
+("unsupported CVSS version: 4.0"), a DB-wide error before any per-advisory
+`ignore` applied — is **resolved** (bead **sq-q8de**): cargo-deny >= 0.19 parses
+CVSS v4.0, so the DB loads and the `ignore` rules apply as intended. The policy
+is fail-closed (`deny.toml`: `yanked = "deny"`, advisories v2 ⇒ every unignored
+advisory fails), so a real vulnerability or a yanked crate blocks the PR. The
+daily watchdog (`dependency-monitoring.yml`) is **defence in depth**, not the
+gate: it runs advisories-only off-peak and opens/updates a single idempotent
+`security:dependency-vuln` tracking issue for advisories disclosed *between* PRs
+on an unchanged graph. When an auditor asks "is there PR-time vuln gating?", the
+honest answer is *yes* — cite that step.
 
 ### CycloneDX SBOM — `supply-chain.yml` `sbom` job
 `cargo cyclonedx --all --format json` emits one SBOM per workspace member plus an
@@ -107,15 +118,15 @@ questionnaire isn't filled (GX-4), and there's no `.well-known/security.txt`
    the provenance attestation + the honest level statement; SSDF → map PO/PS/PW/RV
    to these tools; CRA → SBOM + coordinated-disclosure discoverability +
    security-update channel; OpenSSF → Scorecard score + Best-Practices badge.
-4. **Honesty contract.** Never let a control table launder a gap (the degraded
-   advisories PR-gate, the missing per-release SBOM/VEX, the SLSA-L2-not-L3
-   reality) into a "done". Record each gap as a bead, not a silent pass.
+4. **Honesty contract.** Never let a control table launder a gap (the missing
+   per-release SBOM/VEX, the SLSA-L2-not-L3 reality) into a "done". Record each
+   gap as a bead, not a silent pass.
 
 ## Local commands
 ```
 cargo install --locked cargo-deny cargo-cyclonedx cargo-auditable cargo-audit
 cargo deny check                 # advisories + bans + sources + licenses
-cargo deny check bans sources licenses   # the currently-gating subset
+cargo deny check bans sources licenses   # the non-advisory-DB subset (offline)
 cargo cyclonedx --all --format json      # CycloneDX SBOMs
 gh attestation verify <archive> --owner jeswr   # SLSA provenance check
 ```

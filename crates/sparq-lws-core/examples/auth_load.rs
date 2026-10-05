@@ -167,16 +167,18 @@ struct Config {
     /// pre-flight then asserts 200 anonymously (a public resource) instead of the authed 200/anon-401
     /// privacy assertion. Used by run-auth.sh's apples-to-apples auth-overhead comparison sweep.
     anon: bool,
-    /// AUTHED-PUBLIC mode (EXPLORATORY only — `decisions/0002`): send a DPoP-bound token but target a
-    /// PUBLIC resource. This INVERTS the privacy assertion — the pre-flight asserts the target IS
-    /// public (anonymous GET 200) — so the sweep measures a PROOF-CARRYING GET of a public document.
+    /// AUTHED-PUBLIC mode (EXPLORATORY only — `research/lws-design-records.md` §5): send a
+    /// DPoP-bound token but target a PUBLIC resource. This INVERTS the privacy assertion — the
+    /// pre-flight asserts the target IS public (anonymous GET 200) — so the sweep measures a
+    /// PROOF-CARRYING GET of a public document.
     ///
-    /// NOTE: the implemented opt-3 skip does NOT short-circuit this path — the middleware falls through
-    /// whenever an `Authorization`/`DPoP` header is present (the credentialed variant is unsafe:
-    /// `WAC-Allow user=` is identity-dependent and a forged proof is indistinguishable from an owner's;
-    /// see `decisions/0002`). So this mode measures the UNCHANGED proof-carrying auth path; it is
-    /// retained ONLY to demonstrate that the ES256 verify is the cost, NOT as a shippable result. The
-    /// scenario is named `authed-public-doc`. Ignored in `anon` mode (the path opt-3 actually changes).
+    /// NOTE: the implemented opt-3 skip does NOT short-circuit this path — the middleware falls
+    /// through whenever an `Authorization`/`DPoP` header is present (the credentialed variant is
+    /// unsafe: `WAC-Allow user=` is identity-dependent and a forged proof is indistinguishable from
+    /// an owner's; see `research/lws-design-records.md` §5). So this mode measures the UNCHANGED
+    /// proof-carrying auth path; it is retained ONLY to demonstrate that the ES256 verify is the
+    /// cost, NOT as a shippable result. The scenario is named `authed-public-doc`. Ignored in
+    /// `anon` mode (the path opt-3 actually changes).
     expect_public: bool,
     duration: Duration,
     warmup: Duration,
@@ -611,7 +613,8 @@ async fn main() -> Result<(), String> {
 
     // Scenario naming: authed vs anon prefix so the two runs' JSON files never collide in one out dir.
     // `authed-public-doc` is the EXPLORATORY proof-carrying public read (the middleware does NOT skip
-    // a credentialed request — see decisions/0002); `anon-public-doc` is the path opt-3 implements.
+    // a credentialed request — see `research/lws-design-records.md` §5); `anon-public-doc` is the
+    // path opt-3 implements.
     let doc_name = if cfg.anon {
         "anon-public-doc"
     } else if cfg.expect_public {

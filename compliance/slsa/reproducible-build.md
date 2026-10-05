@@ -112,7 +112,9 @@ Closing the residual 22-byte delta to a genuine byte-for-byte claim needs all of
    rather than over-claimed here.
 
 Steps 1–3 are small, mechanical workflow edits; step 4 is a new CI lane. None is aspirational
-(contrast GX-11 / Build L3, which needs an isolated trusted builder). The reason this PR does
+(contrast GX-11 / Build L3, whose isolated trusted builder is now wired for the archives — sq-toze.25 —
+and for the GUI bundles, SBOM/VEX, conformance report and `dist.yml` binaries — #4570 — but
+unexercised on every lane, and still absent for the ghcr container image). The reason this PR does
 **not** also flip the gap to closed is the honesty contract: a *documented* near-reproducibility
 finding with a named cause is exactly what `sq-toze.9` asked for, but a *closed* `build_reproducible`
 control requires the enforced rebuild-and-diff to actually exist in CI — which is follow-up work,

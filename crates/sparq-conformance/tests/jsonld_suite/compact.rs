@@ -51,12 +51,17 @@ pub struct CompactScores {
 /// the floor (see `floors::compact`); list-order fidelity is also covered by the crate-local
 /// `tests/compact.rs` unit tests, which assert exact shapes.
 ///
+/// ## NegativeEvaluationTests are RUN, not skipped ([OPUS-5] sq-gzsky)
+///
+/// The 17-case negative SKIP bucket is closed (bead sq-oy1f.31's compact half). A negative
+/// passes iff `compact()` — expansion + context processing + compaction — errors with
+/// EXACTLY the manifest's `expectErrorCode`; a WRONG code is a FAIL, never a pass. Both
+/// the semantic and the advisory strict-order tallies score negatives identically (the
+/// comparator plays no part when the expectation is an error code).
+///
 /// ## Honest SKIP buckets (recorded, not passed, not failed)
 ///
 /// * `requires` optional-feature cases — out of the gated surface.
-/// * NegativeEvaluationTests — compaction raises `invalid @nest value`, but error-code
-///   completeness across context processing/expansion/compaction is unverified; the
-///   negative lanes are bead sq-oy1f.31. SKIP (honest), never a counted pass.
 /// * `#t0038` — the ONE narrowly-pinned 1.0-only skip; see
 ///   [`is_pinned_1_0_only_skip`] for the justification and
 ///   [`t0038_skip_is_narrowly_scoped`] for the test enforcing its scope. NOT a
@@ -65,7 +70,8 @@ pub struct CompactScores {
 ///   added at a suite-pin bump RUNS (and fails loudly) rather than being silently
 ///   skipped.
 /// * Remote `input` URL — no network.
-/// * No `expect` / no `context` member — nothing to compare / compact against.
+/// * No `context` member — nothing to compact against; and, for a POSITIVE case only, no
+///   `expect` document — nothing to compare. (A negative's expectation is its error code.)
 pub fn run_compact(root: &Path) -> CompactScores {
     let mut s = Score::default();
     let mut strict = Score::default();
@@ -92,11 +98,7 @@ pub fn run_compact(root: &Path) -> CompactScores {
             strict.skip();
             continue;
         }
-        if e.is_negative {
-            s.skip();
-            strict.skip();
-            continue;
-        }
+        let is_negative = e.is_negative || e.expect_error_code.is_some();
         // The ONE narrowly-pinned 1.0-only skip (#t0038) — see
         // `is_pinned_1_0_only_skip`; scope enforced by `t0038_skip_is_narrowly_scoped`.
         if is_pinned_1_0_only_skip(e) {
@@ -104,11 +106,12 @@ pub fn run_compact(root: &Path) -> CompactScores {
             strict.skip();
             continue;
         }
-        let Some(expect_rel) = &e.expect else {
+        // A positive case with no `expect` document has nothing to compare.
+        if !is_negative && e.expect.is_none() {
             s.skip();
             strict.skip();
             continue;
-        };
+        }
         let Some(ctx_rel) = &e.context else {
             s.skip();
             strict.skip();
@@ -177,16 +180,45 @@ pub fn run_compact(root: &Path) -> CompactScores {
         }
 
         // 4. The native document-level Compaction Algorithm.
-        let compacted =
-            match sparq_jsonld::compact::compact(&input_json, &ctx_json, &opts, &loader) {
-                Ok(j) => j,
-                Err(why) => {
-                    let why = format!("compact() error: {}", why);
+        let outcome = sparq_jsonld::compact::compact(&input_json, &ctx_json, &opts, &loader);
+
+        // 4b. NegativeEvaluationTest: pass iff compact() (expansion + context
+        //     processing + compaction) raises EXACTLY the manifest's
+        //     `expectErrorCode` — the same shape as the frame and expand lanes.
+        if is_negative {
+            let want_code = e.expect_error_code.as_deref().unwrap_or("");
+            match &outcome {
+                Err(err) if err.code().as_str() == want_code => {
+                    s.pass();
+                    strict.pass();
+                }
+                Err(err) => {
+                    let why =
+                        format!("expected error {want_code:?}, got {:?}", err.code().as_str());
                     s.fail(&e.id, why.clone());
                     strict.fail(&e.id, why);
-                    continue;
                 }
-            };
+                Ok(_) => {
+                    let why = format!("expected error {want_code:?}, got success");
+                    s.fail(&e.id, why.clone());
+                    strict.fail(&e.id, why);
+                }
+            }
+            continue;
+        }
+
+        let Some(expect_rel) = &e.expect else {
+            unreachable!("positive cases without an `expect` document are skipped above")
+        };
+        let compacted = match outcome {
+            Ok(j) => j,
+            Err(why) => {
+                let why = format!("compact() error: {}", why);
+                s.fail(&e.id, why.clone());
+                strict.fail(&e.id, why);
+                continue;
+            }
+        };
 
         // 5. Compare against the suite's NORMATIVE expected document.
         let got: Value = match sparq_json_to_serde(&compacted) {
@@ -384,4 +416,47 @@ fn t0038_skip_is_narrowly_scoped() {
         ["#t0038"],
         "a new specVersion=json-ld-1.0 positive appeared — decide it explicitly"
     );
+}
+
+/// [OPUS-5] sq-gzsky — scope pin for the compact negative lane, the sibling of the expand
+/// lane's `expand_negatives_all_run_with_an_expected_code`. Every `NegativeEvaluationTest`
+/// in the pinned `compact` manifest must carry an `expectErrorCode` (without one the runner
+/// compares against `""`, which no spec code equals, so the case could only ever FAIL) and
+/// must clear every skip gate `run_compact` applies — including the `context` member the
+/// compaction call needs. A suite-pin bump that adds a negative behind `requires`, at a
+/// remote URL, or without a caller context fails HERE rather than quietly shrinking the
+/// gated set.
+#[test]
+fn compact_negatives_all_run_with_an_expected_code() {
+    let root = suite_root();
+    if !root.exists() {
+        eprintln!(
+            "SKIP: W3C JSON-LD suite not present at {} — run scripts/fetch-jsonld-tests.sh",
+            root.display()
+        );
+        return;
+    }
+    let entries = read_manifest(&root, "compact").expect("read compact manifest");
+    let negatives: Vec<_> = entries.iter().filter(|e| e.is_negative).collect();
+    assert!(
+        !negatives.is_empty(),
+        "the pinned compact manifest must contain NegativeEvaluationTests — an empty set \
+         would make the negative lane vacuous"
+    );
+    for e in negatives {
+        assert!(
+            e.expect_error_code.is_some(),
+            "{} is a NegativeEvaluationTest with no expectErrorCode — it could never pass",
+            e.id
+        );
+        assert!(
+            e.requires.is_none()
+                && e.context.is_some()
+                && !is_pinned_1_0_only_skip(e)
+                && !e.input.starts_with("http://")
+                && !e.input.starts_with("https://"),
+            "{} would be SKIPPED rather than run — decide it explicitly",
+            e.id
+        );
+    }
 }

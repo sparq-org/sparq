@@ -1,0 +1,137 @@
+{
+  "focus": {
+    "kind": "iri",
+    "value": "http://example.org/alice"
+  },
+  "mode": "edit",
+  "shapes": [
+    {
+      "shape": {
+        "kind": "iri",
+        "value": "http://example.org/PersonCardShape"
+      },
+      "label": "Person card",
+      "via": "applicable-to-class"
+    },
+    {
+      "shape": {
+        "kind": "iri",
+        "value": "http://example.org/KnowerShape"
+      },
+      "label": "Knower",
+      "via": "target-subjects-of"
+    },
+    {
+      "shape": {
+        "kind": "iri",
+        "value": "http://example.org/KnownShape"
+      },
+      "label": "Known by others",
+      "via": "target-objects-of"
+    }
+  ],
+  "shape": {
+    "kind": "iri",
+    "value": "http://example.org/PersonCardShape"
+  },
+  "groups": [
+    {
+      "kind": "default",
+      "fields": [
+        {
+          "property_shape": {
+            "kind": "bnode",
+            "value": "b0"
+          },
+          "path": "<http://example.org/name>",
+          "label": "Name",
+          "order": 1.0,
+          "required": true,
+          "multi": false,
+          "editable": true,
+          "widget": {
+            "editor": "http://datashapes.org/dash#TextFieldEditor",
+            "viewer": "http://datashapes.org/dash#LiteralViewer",
+            "score": 10,
+            "editor_alternatives": [
+              "http://datashapes.org/dash#TextAreaEditor"
+            ],
+            "viewer_alternatives": [
+              "http://datashapes.org/dash#HyperlinkViewer",
+              "http://datashapes.org/dash#ValueTableViewer"
+            ]
+          },
+          "values": [
+            {
+              "term": {
+                "kind": "literal",
+                "value": "Alice"
+              }
+            }
+          ],
+          "constraints": {
+            "min_count": 1,
+            "max_count": 1,
+            "datatype": [
+              "http://www.w3.org/2001/XMLSchema#string"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "kind": "other",
+      "label": "Other properties",
+      "fields": [
+        {
+          "path": "<http://example.org/knows>",
+          "label": "knows",
+          "multi": true,
+          "editable": false,
+          "widget": {
+            "viewer": "http://datashapes.org/dash#LabelViewer",
+            "score": 5,
+            "viewer_alternatives": [
+              "http://datashapes.org/dash#URIViewer",
+              "http://datashapes.org/dash#DetailsViewer",
+              "http://datashapes.org/dash#ValueTableViewer"
+            ]
+          },
+          "values": [
+            {
+              "term": {
+                "kind": "iri",
+                "value": "http://example.org/bob"
+              }
+            }
+          ],
+          "constraints": {}
+        },
+        {
+          "path": "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>",
+          "label": "Type",
+          "multi": true,
+          "editable": false,
+          "widget": {
+            "viewer": "http://datashapes.org/dash#LabelViewer",
+            "score": 5,
+            "viewer_alternatives": [
+              "http://datashapes.org/dash#URIViewer",
+              "http://datashapes.org/dash#DetailsViewer",
+              "http://datashapes.org/dash#ValueTableViewer"
+            ]
+          },
+          "values": [
+            {
+              "term": {
+                "kind": "iri",
+                "value": "http://example.org/Person"
+              }
+            }
+          ],
+          "constraints": {}
+        }
+      ]
+    }
+  ]
+}

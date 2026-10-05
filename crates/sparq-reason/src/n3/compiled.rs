@@ -32,6 +32,19 @@
 //!
 //! * plain triple-pattern join atoms (variables allowed in any position, including
 //!   predicate);
+//! * **RDF 1.2 / RDF-star quoted triples** (`<< s p o >>` / `<<( s p o )>>`) in any
+//!   PREMISE position and as a ground constant anywhere. A ground quoted triple is an
+//!   ordinary symbol-table constant — [`Dict`] content-addresses a triple term by its
+//!   component ids, so it binds to the SAME id a store-loaded `<<( s p o )>>` has. A
+//!   quoted triple that still contains variables compiles to a component-indexed
+//!   `UnpackTriple` step: the enclosing join binds the candidate's term id, then the
+//!   unpack step reads its three component ids straight out of the dictionary record
+//!   (no term reconstruction, no allocation) and binds/filters each — the id-level
+//!   analogue of the text engine's structural quoted-triple unification. Nesting is
+//!   admitted through the OBJECT, which is the only nesting a dictionary triple term
+//!   has: RDF 1.2 gives a triple term an IRI-or-blank subject and an IRI predicate, so a
+//!   pattern quoting a nested triple in SUBJECT position (which the term-level engine
+//!   does match) is a loud compile error here rather than a rule that never fires;
 //! * **store-scoped `log:notIncludes`** — negation as failure against the current fact
 //!   store, with the engine's no-retraction semantics. Set-equivalence with
 //!   [`crate::reason_n3`] therefore requires every negated predicate to be
@@ -46,6 +59,16 @@
 //! (`<=`) rules, conclusion existentials (blank nodes), `log:includes`/`log:supports`,
 //! list builtins/generators, `math:`/`time:` builtins, the remaining `string:` builtins,
 //! formula- or list-valued facts, and rules whose builtin inputs no premise can bind.
+//! Two quoted-triple shapes are deliberately out too, each for a stated reason:
+//!
+//! * a quoted triple with variables inside a **`log:notIncludes` body** — the anti-join
+//!   runs a flat list of plain patterns, with no place to interleave an unpack step;
+//! * a quoted triple with variables in a **conclusion** — minting a triple term from
+//!   bound components can violate RDF 1.2's structural constraints (a component may
+//!   bind to a literal subject or a non-IRI predicate) at derivation time, and
+//!   [`BoundRuleSet::eval`] has no channel to report that failure, so it would have to
+//!   choose between a panic and a silent drop. The text engine derives those heads.
+//!
 //! Full-N3 conformance stays with the text engine.
 //!
 //! The result-equivalence oracle is `tests/compiled_equivalence.rs`: on the WAC/ACP/
@@ -55,7 +78,7 @@
 use super::model::Term;
 use super::parser;
 use rustc_hash::{FxHashMap, FxHashSet};
-use sparq_core::dict::{Dict, Id};
+use sparq_core::dict::{is_inline, Dict, Id, TermParts};
 use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget};
 use sparq_substrate::rows::{Row, NO_ID};
 
@@ -87,6 +110,15 @@ struct PatternStep {
     consts: [Option<u32>; 3],
 }
 
+/// One component position of a [`Step::UnpackTriple`]: bind the component id into a
+/// slot the quotation is the FIRST premise occurrence of, or match it against an
+/// already-bound variable / a constant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TripleSlot {
+    Bind(u32),
+    Check(CTerm),
+}
+
 /// One ordered premise step of a compiled rule.
 #[derive(Clone, Debug)]
 enum Step {
@@ -101,6 +133,14 @@ enum Step {
         pats: Vec<PatternStep>,
         wildcards: Vec<usize>,
     },
+    /// Component-indexed match through an RDF 1.2 quoted triple that still contains
+    /// variables. The enclosing [`Step::Pattern`] (or an outer `UnpackTriple`) writes
+    /// the candidate term's id into `src`; this step keeps the row only if that id is
+    /// really a triple term and each of its three component ids binds or matches per
+    /// `comps`. Components apply LEFT TO RIGHT, so `<< ?x :p ?x >>` binds on the
+    /// subject and filters on the object — the text engine's unification order.
+    /// Nested quotation emits a further `UnpackTriple` over a component slot.
+    UnpackTriple { src: u32, comps: [TripleSlot; 3] },
     /// `log:equalTo` / `log:notEqualTo` — exact term (id) comparison.
     IdCompare { a: CTerm, b: CTerm, negate: bool },
     /// `string:notGreaterThan` — LEXICAL `a <= b` over two literals' lexical forms.
@@ -349,9 +389,17 @@ impl Compiler {
     fn sym(&mut self, t: &Term) -> Result<u32, String> {
         match t {
             Term::Iri(_) | Term::Lit(..) | Term::Blank(_) => {}
+            // A GROUND quoted triple is an ordinary constant: `Dict` content-addresses
+            // an RDF 1.2 triple term by its component ids, so `bind` resolves it to the
+            // same id a store-loaded `<<( s p o )>>` carries. Validate RDF 1.2's
+            // structural constraints HERE, at compile time, so `intern_ground` can never
+            // fail at bind time.
+            Term::Triple(_) if t.is_ground() => {
+                super::n3_term_to_oxrdf(t).map_err(|e| format!("compiled-rules: {e}"))?;
+            }
             other => {
                 return Err(format!(
-                    "compiled-rules: term {other:?} is not a compilable constant (quoted formulae / lists / RDF-star quoted triples / variables are outside the compiled subset — the text engine handles them)"
+                    "compiled-rules: term {other:?} is not a compilable constant (quoted formulae / lists / variables — and a quoted triple that still contains variables — are outside the compiled subset here; the text engine handles them)"
                 ))
             }
         }
@@ -406,6 +454,12 @@ impl Compiler {
     /// this negation's wildcard rename map), variables that the OUTER premise has bound
     /// are correlated columns; everything else is a per-negation wildcard slot whose
     /// binding is discarded after the existence check.
+    ///
+    /// A quoted-triple position that still contains variables cannot be a candidate
+    /// pre-filter, so it binds the candidate's TERM id into a fresh anonymous slot and
+    /// defers the component match to a [`Step::UnpackTriple`] appended to `pending`
+    /// (which the caller pushes AFTER this pattern's join step — the component ids only
+    /// exist once the join has chosen a candidate).
     #[allow(clippy::type_complexity)]
     fn lower_pattern(
         &mut self,
@@ -416,10 +470,12 @@ impl Compiler {
             &mut FxHashMap<String, u32>,
             &mut Vec<usize>,
         )>,
+        pending: &mut Vec<Step>,
     ) -> Result<PatternStep, String> {
         let mut key_cols = Vec::new();
         let mut new_writes = Vec::new();
         let mut consts = [None, None, None];
+        let mut quoted: Vec<(u32, &[Term; 3])> = Vec::new();
         // Wildcard/local bound-tracking for a negation body lives in `ctx.bound` too:
         // the caller snapshots and restores it around the whole body.
         let mut naf = naf;
@@ -451,21 +507,106 @@ impl Compiler {
                     }
                 }
                 Term::Iri(_) | Term::Lit(..) | Term::Blank(_) => consts[i] = Some(self.sym(t)?),
+                // A GROUND quoted triple is just a constant id — an ordinary candidate
+                // pre-filter, no unpacking needed.
+                Term::Triple(_) if t.is_ground() => consts[i] = Some(self.sym(t)?),
+                Term::Triple(tr) => {
+                    if naf.is_some() {
+                        return Err(format!(
+                            "compiled-rules: quoted triple {t:?} with variables inside a log:notIncludes body is not in the compiled subset (the anti-join runs a flat list of plain patterns, with no place for a component-unpack step)"
+                        ));
+                    }
+                    // Bind the candidate's TERM id into a fresh anonymous slot; the
+                    // deferred unpack step decomposes it after the join.
+                    let dst = ctx.fresh();
+                    new_writes.push((dst as usize, i));
+                    quoted.push((dst, tr.as_ref()));
+                }
                 other => {
                     return Err(format!(
-                        "compiled-rules: {other:?} in a triple pattern is not in the compiled subset (quoted formulae / lists / RDF-star quoted triples are matched by the text engine only)"
+                        "compiled-rules: {other:?} in a triple pattern is not in the compiled subset (quoted formulae / lists are matched by the text engine only)"
                     ))
                 }
             }
         }
+        // Bind every new variable only AFTER the whole atom is analysed, so a variable
+        // that also occurs in a plain position of this same atom binds from the join
+        // (which runs first) and the unpack merely CHECKS it.
         for &(s, _) in &new_writes {
             ctx.bound.insert(s as u32);
+        }
+        for (dst, tr) in quoted {
+            self.lower_quoted(tr, dst, ctx, pending)?;
         }
         Ok(PatternStep {
             key_cols,
             new_writes,
             consts,
         })
+    }
+
+    /// Lower a quoted-triple PATTERN that still contains variables. The term id lands in
+    /// `src` (written by the enclosing pattern join, or by an outer unpack) and this
+    /// emits the [`Step::UnpackTriple`] that decomposes it: a first-occurrence variable
+    /// binds, an already-bound variable or a constant filters, and a nested quotation
+    /// takes a fresh slot plus its own (later) unpack step. Components are lowered
+    /// left-to-right and evaluated in that same order.
+    fn lower_quoted(
+        &mut self,
+        tr: &[Term; 3],
+        src: u32,
+        ctx: &mut RuleCtx,
+        pending: &mut Vec<Step>,
+    ) -> Result<(), String> {
+        let mut comps = [TripleSlot::Bind(0); 3];
+        let mut nested: Vec<(u32, &[Term; 3])> = Vec::new();
+        for (i, t) in tr.iter().enumerate() {
+            // RDF 1.2's structural constraints, checked STATICALLY — the same ones
+            // `super::n3_term_to_oxrdf` enforces when interning a ground quotation. A
+            // dictionary triple term's subject is an IRI or blank node and its predicate
+            // an IRI, so a pattern quoting anything else (a literal, or — the one that
+            // bites — a NESTED quotation in subject position, which the id-level
+            // representation nests only through the OBJECT) could never match any id.
+            // Loud here, rather than a rule that silently never fires.
+            match (i, t) {
+                (0, Term::Lit(..) | Term::Triple(_)) => {
+                    return Err(format!(
+                        "compiled-rules: quoted-triple subject {t:?} is not an IRI, a blank node or a variable (RDF 1.2 triple terms admit no other subject kind, so no dictionary triple term can match)"
+                    ))
+                }
+                (1, Term::Lit(..) | Term::Blank(_) | Term::Triple(_)) => {
+                    return Err(format!(
+                        "compiled-rules: quoted-triple predicate {t:?} is not an IRI or a variable (RDF 1.2 triple terms admit no other predicate kind, so no dictionary triple term can match)"
+                    ))
+                }
+                _ => {}
+            }
+            comps[i] = match t {
+                Term::Var(v) => {
+                    let s = ctx.slot(v);
+                    if ctx.bound.contains(&s) {
+                        TripleSlot::Check(CTerm::Var(s))
+                    } else {
+                        ctx.bound.insert(s);
+                        TripleSlot::Bind(s)
+                    }
+                }
+                Term::Triple(inner) if !t.is_ground() => {
+                    let s = ctx.fresh();
+                    ctx.bound.insert(s);
+                    nested.push((s, inner.as_ref()));
+                    TripleSlot::Bind(s)
+                }
+                // Ground terms (incl. a ground nested quotation) are constants; a
+                // formula / list component is `sym`'s loud error.
+                other => TripleSlot::Check(CTerm::Const(self.sym(other)?)),
+            };
+        }
+        pending.push(Step::UnpackTriple { src, comps });
+        for (s, inner) in nested {
+            self.lower_quoted(inner, s, ctx, pending)?;
+        }
+        Ok(())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -505,6 +646,9 @@ impl Compiler {
                 let mut rename: FxHashMap<String, u32> = FxHashMap::default();
                 let mut wildcards: Vec<usize> = Vec::new();
                 let mut pats = Vec::with_capacity(inner.len());
+                // The anti-join runs plain patterns only; `lower_pattern` rejects the
+                // one shape that would want a deferred step, so this stays empty.
+                let mut naf_pending: Vec<Step> = Vec::new();
                 for ia in inner {
                     if !super::is_join_atom(ia) {
                         return Err(
@@ -515,8 +659,13 @@ impl Compiler {
                         ia,
                         &mut ctx,
                         Some((&outer_bound, &mut rename, &mut wildcards)),
+                        &mut naf_pending,
                     )?);
                 }
+                debug_assert!(
+                    naf_pending.is_empty(),
+                    "a log:notIncludes body must not produce deferred steps"
+                );
                 ctx.bound = outer_bound;
                 steps.push(Step::NotIncludes { pats, wildcards });
                 needs_full = true;
@@ -656,10 +805,14 @@ impl Compiler {
                 }
                 continue;
             }
-            // A plain join atom.
+            // A plain join atom. Any quoted-triple position defers a component-unpack
+            // step, which must run immediately AFTER this pattern's join (the semi-naive
+            // delta position stays the `Step::Pattern` index recorded above).
             join_steps.push(steps.len());
-            let ps = self.lower_pattern(atom, &mut ctx, None)?;
+            let mut pending: Vec<Step> = Vec::new();
+            let ps = self.lower_pattern(atom, &mut ctx, None, &mut pending)?;
             steps.push(Step::Pattern(ps));
+            steps.append(&mut pending);
         }
 
         // Conclusions: every variable must be bound by the (positive part of the)
@@ -680,6 +833,11 @@ impl Compiler {
                     Term::Blank(b) => {
                         return Err(format!(
                             "compiled-rules: existential blank _:{b} in a conclusion is not in the compiled subset (no per-firing skolemization)"
+                        ))
+                    }
+                    Term::Triple(_) if !term.is_ground() => {
+                        return Err(format!(
+                            "compiled-rules: quoted triple {term:?} with variables in a conclusion is not in the compiled subset (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which eval() has no channel to report — the text engine derives it)"
                         ))
                     }
                     other => CTerm::Const(self.sym(other)?),
@@ -704,17 +862,47 @@ fn intern_ground(dict: &mut Dict, t: &Term) -> Id {
         Term::Iri(i) => dict.intern_iri(i),
         Term::Lit(v, dt, lang) => dict.intern_lit(v, dt, lang.as_deref()),
         Term::Blank(b) => dict.intern_blank(b),
-        // compile()/intern_facts() admit only atomic ground symbols.
-        _ => unreachable!("compiled-rules symbol tables hold only atomic ground terms"),
+        // A ground quoted triple interns through `Dict`'s content-addressed RDF 1.2
+        // triple-term path — the SAME id a store-loaded `<<( s p o )>>` gets. `sym` /
+        // `intern_ground_checked` already rejected every shape the conversion cannot
+        // represent, so it cannot fail here.
+        Term::Triple(_) => match super::n3_term_to_oxrdf(t) {
+            Ok(ox) => dict.intern(&ox),
+            Err(e) => {
+                unreachable!("compiled-rules symbol tables hold only representable ground terms: {e}")
+            }
+        },
+        // compile()/intern_facts() admit only ground symbols.
+        _ => unreachable!("compiled-rules symbol tables hold only ground terms"),
     }
 }
 
 fn intern_ground_checked(dict: &mut Dict, t: &Term) -> Result<Id, String> {
     match t {
         Term::Iri(_) | Term::Lit(..) | Term::Blank(_) => Ok(intern_ground(dict, t)),
+        Term::Triple(_) if t.is_ground() => {
+            let ox = super::n3_term_to_oxrdf(t).map_err(|e| format!("intern_facts: {e}"))?;
+            Ok(dict.intern(&ox))
+        }
         other => Err(format!(
             "intern_facts: term {other:?} has no dictionary representation"
         )),
+    }
+}
+
+/// The component ids of an RDF 1.2 quoted-triple id, or `None` for any other term kind.
+///
+/// [`Dict`] stores a triple term STRUCTURALLY — as the ids of its three already-interned
+/// components — so this is a record read, with no term reconstruction and no allocation:
+/// exactly the id-level accessor a component-indexed quoted-triple match needs. Inline
+/// integer ids and [`NO_ID`] carry no record, so they answer `None` rather than probing.
+fn triple_components(dict: &Dict, id: Id) -> Option<[Id; 3]> {
+    if id == NO_ID || is_inline(id) {
+        return None;
+    }
+    match dict.term_parts(id) {
+        TermParts::Triple(ids) => Some(ids),
+        _ => None,
     }
 }
 
@@ -869,6 +1057,27 @@ impl BoundRuleSet<'_> {
                 }
                 Step::NotIncludes { pats, wildcards } => {
                     rows = self.anti_join(rows, pats, wildcards, store, rule.n_slots);
+                }
+                Step::UnpackTriple { src, comps } => {
+                    let mut next = Vec::with_capacity(rows.len());
+                    'unpack: for mut row in rows {
+                        // Not a triple term (or unbound): the quotation cannot match.
+                        let Some(ids) = triple_components(dict, row[*src as usize]) else {
+                            continue;
+                        };
+                        for (c, id) in comps.iter().zip(ids) {
+                            match c {
+                                TripleSlot::Bind(s) => row[*s as usize] = id,
+                                TripleSlot::Check(t) => {
+                                    if self.resolve(*t, &row) != id {
+                                        continue 'unpack;
+                                    }
+                                }
+                            }
+                        }
+                        next.push(row);
+                    }
+                    rows = next;
                 }
                 Step::IdCompare { a, b, negate } => {
                     rows.retain(|r| {
@@ -1407,6 +1616,237 @@ mod tests {
             "@prefix : <http://ex/> . {} => { :a :b :c } .",
         );
         assert!(has(&s, "http://ex/a", "http://ex/b", "http://ex/c"));
+    }
+
+    // -----------------------------------------------------------------------
+    // RDF 1.2 / RDF-star quoted triples (sq-6d43t)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn ground_quoted_triple_is_a_plain_constant() {
+        // A ground `<< … >>` is an ordinary symbol-table constant: it interns to the
+        // dictionary's content-addressed triple-term id, so it works as a fact term, a
+        // candidate pre-filter in a pattern, and a conclusion term.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . << :a :p :b >> :says :alice . << :a :p :c >> :says :bob .",
+            "@prefix : <http://ex/> . { << :a :p :b >> :says ?w } => { ?w :vouches :a . :meta :about << :a :p :b >> } .",
+        );
+        assert!(has(&s, "http://ex/alice", "http://ex/vouches", "http://ex/a"));
+        assert!(
+            !has(&s, "http://ex/bob", "http://ex/vouches", "http://ex/a"),
+            "the ground quotation must filter candidates: {s:?}"
+        );
+        assert!(
+            s.iter().any(|t| t.starts_with("<http://ex/meta> <http://ex/about> <<")),
+            "a ground quoted triple must be derivable as a conclusion constant: {s:?}"
+        );
+    }
+
+    #[test]
+    fn ground_quoted_triple_is_a_builtin_argument() {
+        // "a ground constant ANYWHERE" includes a builtin's operand — `log:notEqualTo`
+        // compares the two ids, and the quotation's id is just another symbol.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . << :a :p :b >> :says :alice . << :a :p :c >> :says :bob .",
+            "@prefix : <http://ex/> . @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             { ?q :says ?w . ?q log:notEqualTo << :a :p :c >> . } => { ?w :nonMatching true } .",
+        );
+        assert!(s.contains("<http://ex/alice> <http://ex/nonMatching> \"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"));
+        assert!(
+            !s.iter().any(|t| t.starts_with("<http://ex/bob> <http://ex/nonMatching>")),
+            "the quoted-triple operand must compare equal to its own id: {s:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_triple_pattern_binds_inner_variables() {
+        // The component-indexed match: the join binds the quoted TERM id, the unpack
+        // step decomposes it into component ids and binds ?s / ?o from them.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . << :a :p :b >> :says :alice . :a :p :b . << :a :q :d >> :says :bob .",
+            "@prefix : <http://ex/> . { << ?s :p ?o >> :says ?w } => { ?s :linked ?o . ?w :vouches ?s } .",
+        );
+        assert!(has(&s, "http://ex/a", "http://ex/linked", "http://ex/b"));
+        assert!(has(&s, "http://ex/alice", "http://ex/vouches", "http://ex/a"));
+        // The `:q` quotation does not match the `:p` component constant, and the plain
+        // `:a :p :b` triple is not a triple TERM, so neither fires the rule.
+        assert!(
+            !has(&s, "http://ex/bob", "http://ex/vouches", "http://ex/a"),
+            "constant component must filter: {s:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_triple_pattern_correlates_with_outer_bindings() {
+        // ?s / ?o are bound by a PRECEDING plain atom, so the unpack step must CHECK
+        // them against the components rather than rebind — the join direction the
+        // access-control shape ("is this asserted triple vouched for?") needs.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> .\n\
+             :a :p :b . :a :p :c .\n\
+             << :a :p :b >> :assertedBy :alice .",
+            "@prefix : <http://ex/> . { ?s :p ?o . << ?s :p ?o >> :assertedBy ?w . } => { ?o :sourced ?w } .",
+        );
+        assert!(has(&s, "http://ex/b", "http://ex/sourced", "http://ex/alice"));
+        assert!(
+            !has(&s, "http://ex/c", "http://ex/sourced", "http://ex/alice"),
+            "only the quoted-AND-asserted triple is sourced — the unpack must CHECK the \
+             already-bound ?s/?o against the components, not wave them through: {s:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_triple_repeated_inner_variable() {
+        // `<< ?x :p ?x >>` binds on the subject component and FILTERS on the object —
+        // the left-to-right component order the text engine unifies in.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . << :a :p :a >> :says :alice . << :a :p :b >> :says :bob .",
+            "@prefix : <http://ex/> . { << ?x :p ?x >> :says ?w } => { ?x :selfAsserted ?w } .",
+        );
+        assert!(has(
+            &s,
+            "http://ex/a",
+            "http://ex/selfAsserted",
+            "http://ex/alice"
+        ));
+        assert!(
+            !s.iter().any(|t| t.contains("<http://ex/selfAsserted> <http://ex/bob>")),
+            "the repeated inner variable must filter: {s:?}"
+        );
+    }
+
+    #[test]
+    fn nested_quoted_triple_pattern() {
+        // Two levels of quotation, nested through the OBJECT (the only nesting RDF 1.2
+        // triple terms admit): the outer unpack binds the inner triple TERM id into a
+        // fresh slot, and a second unpack step decomposes that.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> .\n\
+             :m1 :meta << :a :r << :b :q :c >> >> .\n\
+             :m2 :meta << :a :r << :b :q :d >> >> .",
+            "@prefix : <http://ex/> . { ?m :meta << ?a :r << ?b :q :c >> >> } => { ?m :outer ?a . ?m :inner ?b } .",
+        );
+        assert!(has(&s, "http://ex/m1", "http://ex/outer", "http://ex/a"));
+        assert!(has(&s, "http://ex/m1", "http://ex/inner", "http://ex/b"));
+        assert!(
+            !s.iter().any(|t| t.starts_with("<http://ex/m2> <http://ex/inner>")),
+            "the innermost object constant must filter the nested match: {s:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_triple_in_subject_and_object_positions() {
+        // A quotation in SUBJECT position of the atom (the common annotation shape) and
+        // one in OBJECT position, in the same rule.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . << :a :p :b >> :because << :c :q :d >> .",
+            "@prefix : <http://ex/> . { << ?s :p ?o >> :because << ?s2 :q ?o2 >> } => { ?s :chain ?o2 . ?s2 :grounds ?o } .",
+        );
+        assert!(has(&s, "http://ex/a", "http://ex/chain", "http://ex/d"));
+        assert!(has(&s, "http://ex/c", "http://ex/grounds", "http://ex/b"));
+    }
+
+    #[test]
+    fn quoted_pattern_does_not_match_an_asserted_triple() {
+        // RDF-star OPACITY, at the id level: `<< ?s ?p ?o >>` matches a triple TERM,
+        // never a plain asserted triple. With every component a variable, the only thing
+        // standing between the two is the unpack step's term-KIND check.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . :a :p :b . :a :says :alice .",
+            "@prefix : <http://ex/> . { << ?s ?p ?o >> :says ?w } => { ?s :fromQuote ?o } .",
+        );
+        assert!(
+            !s.iter().any(|t| t.contains("<http://ex/fromQuote>")),
+            "a quoted pattern fired on an asserted triple: {s:?}"
+        );
+    }
+
+    #[test]
+    fn quoted_triple_rule_is_semi_naive_over_derived_facts() {
+        // The quoted-triple atom is an ordinary delta position: a fact DERIVED in round
+        // 1 must still drive the quotation match in round 2.
+        let s = assert_equivalent(
+            "@prefix : <http://ex/> . :seed :trusts :alice . << :a :p :b >> :says :alice .",
+            "@prefix : <http://ex/> .\n\
+             { :seed :trusts ?w } => { ?w :active true } .\n\
+             { << ?s :p ?o >> :says ?w . ?w :active true . } => { ?s :accepted ?o } .",
+        );
+        assert!(has(&s, "http://ex/a", "http://ex/accepted", "http://ex/b"));
+    }
+
+    #[test]
+    fn intern_facts_accepts_ground_quoted_triples() {
+        let mut dict = Dict::new();
+        let facts = intern_facts(
+            &mut dict,
+            "@prefix : <http://ex/> . << :a :p :b >> :says :alice .",
+        )
+        .unwrap();
+        assert_eq!(facts.len(), 1);
+        // The subject id is the dictionary's content-addressed triple term, and it
+        // decomposes back into exactly the component ids.
+        let comps = triple_components(&dict, facts[0][0]).expect("subject is a triple term");
+        assert_eq!(
+            comps,
+            [
+                dict.intern_iri("http://ex/a"),
+                dict.intern_iri("http://ex/p"),
+                dict.intern_iri("http://ex/b"),
+            ]
+        );
+        // …and a NON-triple id decomposes to None (the unpack step's row filter).
+        assert!(triple_components(&dict, facts[0][2]).is_none());
+        assert!(triple_components(&dict, NO_ID).is_none());
+    }
+
+    #[test]
+    fn quoted_triple_shapes_outside_the_subset_error_loudly() {
+        // Variables inside a quotation in a CONCLUSION: minting can violate RDF 1.2's
+        // structural constraints at derivation time, with no channel to report it.
+        assert!(compile(
+            "@prefix : <http://ex/> . { ?x :p ?y } => { << ?x :p ?y >> :derivedFrom :rule1 } ."
+        )
+        .unwrap_err()
+        .contains("in a conclusion is not in the compiled subset"));
+        // …but a GROUND quotation in a conclusion is fine.
+        assert!(compile(
+            "@prefix : <http://ex/> . { ?x :p ?y } => { << :a :p :b >> :derivedFrom :rule1 } ."
+        )
+        .is_ok());
+        // Variables inside a quotation in a log:notIncludes body: the anti-join runs a
+        // flat list of plain patterns.
+        assert!(compile(
+            "@prefix : <http://ex/> . @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             { ?x :p ?y . ?S log:notIncludes { << ?a :q ?b >> :says ?x . } . } => { ?x :ok true } ."
+        )
+        .unwrap_err()
+        .contains("log:notIncludes body"));
+        // A quoted FORMULA inside a quotation is still outside the subset.
+        assert!(compile(
+            "@prefix : <http://ex/> . { << ?s :p { :a :b :c } >> :says ?w } => { ?s :ok true } ."
+        )
+        .unwrap_err()
+        .contains("not a compilable constant"));
+        // A quoted triple whose subject is a literal has no RDF 1.2 representation.
+        assert!(compile(
+            "@prefix : <http://ex/> . { << \"lit\" :p :o >> :says ?w } => { ?w :ok true } ."
+        )
+        .unwrap_err()
+        .contains("is not an IRI or blank node"));
+        // A quotation NESTED IN SUBJECT POSITION: the text engine matches it at the term
+        // level, but no dictionary triple term can have a triple-term subject, so the
+        // id-level path says so at compile time instead of never firing.
+        assert!(compile(
+            "@prefix : <http://ex/> . { << << ?x :q ?y >> :r ?z >> :meta ?m } => { ?x :ok ?y } ."
+        )
+        .unwrap_err()
+        .contains("no other subject kind"));
+        // Same for a variable predicate's sibling: a literal in predicate position.
+        assert!(compile(
+            "@prefix : <http://ex/> . { << ?s \"lit\" ?o >> :says ?w } => { ?w :ok true } ."
+        )
+        .unwrap_err()
+        .contains("no other predicate kind"));
     }
 
     #[test]

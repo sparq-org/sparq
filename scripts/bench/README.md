@@ -176,3 +176,62 @@ cross-checked before any timing is trusted). The committed harness
 - `ingest-canonical-competitors.mjs` — envelopes → the dashboard's
   `same_box_comparisons` (asserts cross-gather count stability; carries the
   keep-alive-vs-fresh `connection` note + `values_ttfb`/`values_fresh` columns).
+
+## Getting results OFF a self-terminating box (sq-ffaa9)
+
+A canonical gather box is orphan-proof: it self-terminates, so a result that never
+left the box is gone. There are three channels, and only the third is independent of
+the AMI:
+
+1. **SSH pull** — incremental, but SSH has broken on a saturated build box.
+2. **Serial console** — `aws ec2 get-console-output`, parsed back by
+   `extract-console-envelopes.sh`. This is what the committed launchers rely on today,
+   and it works because they pin the **Ubuntu 24.04 server** images. It is **not**
+   universal: the 2026-07-10 x86_64 attempt on an AL2023/Nitro image got no application
+   output back through the API at all, and that whole gather was unrecoverable
+   (`research/gap-vector-2026-07.md`). If you change the AMI, verify this channel first.
+3. **Durable S3 egress** (opt-in, `bench-result-egress.sh`) — the box uploads to a
+   run-scoped S3 prefix as each **unit of work** finishes (per suite for the HTTP gather,
+   per cut for BEIR, per LUBM scale and then the HDT stage for materialization) rather
+   than once at the end, and the launcher syncs the prefix back. That granularity is the
+   point: a box that self-terminates or dies partway through has already made its
+   *completed* results durable. The end-of-gather call is a retry sweep for uploads that
+   failed earlier — `bench_egress_sweep` skips what already landed. Survives a dead SSH
+   path, an unusable console, and the box terminating mid-run.
+
+**One-time maintainer setup.** Creating the bucket + role + instance profile needs IAM/S3
+permissions the bench role does not hold — that is why sq-ffaa9 is a maintainer task.
+Read the exact calls first, then run it:
+
+```sh
+scripts/bench/bootstrap-bench-iam.sh --print-policy   # the JSON documents, no AWS call
+scripts/bench/bootstrap-bench-iam.sh --dry-run        # the exact aws commands, no AWS call
+scripts/bench/bootstrap-bench-iam.sh                  # create (idempotent)
+```
+
+The role it creates is **write-only and prefix-scoped**: `s3:PutObject` (+ the multipart
+abort a retry needs) on `arn:aws:s3:::<bucket>/<prefix>/*` and nothing else — no read, no
+delete, no list, no second bucket. The bucket blocks public access and expires objects
+after 90 days (`--expire-days`).
+
+**Per-gather usage.** Export the two knobs the bootstrap prints; the three
+`canonical-*-bench.sh` launchers then attach the profile and pull the prefix back at the
+end (`multi-axis-box.sh` is not wired yet):
+
+```sh
+export BENCH_IAM_PROFILE=sparq-bench-results
+export BENCH_RESULTS_S3=s3://<bucket>/gathers
+AWS_PROFILE=pss scripts/bench/canonical-materialize-bench.sh main
+```
+
+Unset, every launcher behaves exactly as before (console + SSH only). Setting
+`BENCH_RESULTS_S3` **without** `BENCH_IAM_PROFILE` is refused up front: the box would have
+no credentials, every upload would 403, and a self-terminating gather would lose its
+results silently — the failure this channel exists to prevent.
+
+**Reader access.** The launcher's own role may be able to write (via the instance profile)
+but not *read* the bucket; the `bench_egress_pull` step then warns and the results stay
+durable in S3 for retrieval with maintainer credentials. Pass
+`--reader-arn <launcher-role-arn>` to `bootstrap-bench-iam.sh` to grant the read-back
+directly. Behaviour is pinned by `scripts/tests/test_bench_result_egress.sh` (hermetic:
+`aws` is PATH-shadowed, no account, no network).

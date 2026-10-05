@@ -10,6 +10,22 @@ Kern/PSS #1746 profile + fixture freeze and is deliberately NOT implemented here
 **Status:** **DESIGN ONLY — NOT IMPLEMENTED, AND DELIBERATELY SO.** The gate this work is
 conditioned on has not been observed to close (§1). Nothing in `crates/` changes with this record.
 
+> **AMENDMENT — [SONNET-4.6], issue #1746.** The *profile-independent* part of phase 3 has since
+> landed as `crates/sparq-canon`'s opt-in, off-by-default **`concept`** feature: the
+> multibase/multihash envelope (both published multiformats specs, not Kern's to freeze) and the
+> fail-closed, constant-time, full-multihash-prefix recompute-and-byte-compare of §5.2, over a
+> **caller-supplied** quad set. The gate of §1 is NOT treated as closed: the scope-extraction rule
+> (§3, §5.1) is still Kern's, is still not vendored, and is deliberately absent from the
+> implementation — which is why the caller passes the quads. **Still blocked:** phase 1 (vendor the
+> frozen profile + authoritative corpus), phase 2 (a scope-canonicalization primitive, which
+> presupposes a scope rule), and the phase-4 wiring of the guard into an actual ingestion path. The
+> §2 independence caveat and the §3 not-whole-graph-RDFC-1.0 statement are carried verbatim into
+> the module rustdoc, the crate README, and `skills/rdf-canon/SKILL.md` (phase 5, partial).
+> Open questions **Q1, Q2 and Q4-for-the-scope-primitive remain open**; **Q3 is answered only for
+> this implementation's own conventions** (trailing newline hashed; empty scope rejected rather
+> than hashed; permitted codes = sha2-256/384/512 at full length), stated as conventions so a
+> disagreement with the frozen profile shows up as a visible difference, not a silent one.
+
 ## 1. Gate status: the freeze has not landed in this repository
 
 The bead is explicit: *"gated on the #1746 profile/fixture freeze — do NOT implement ahead of the

@@ -25,6 +25,7 @@
 //! (the TurtleTests suite passes 297/297 in this mode).
 
 use super::model::{Rule, Term};
+use super::serialize::PREMISE_BLANK_VAR;
 
 pub const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 pub const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
@@ -124,6 +125,14 @@ pub fn parse_with_base(src: &str, base: &str) -> Result<Parsed, String> {
     // existentials belong to that graph (log:includes scoping needs them as
     // graph-local terms, not rule variables); blanks appearing ONLY in a
     // conclusion also stay blanks (instantiated fresh per firing).
+    //
+    // The generated name is UNFORGEABLE in source, which is what lets
+    // [`super::serialize::write_rule`] undo the rewrite from the name alone:
+    // `read_name` never accepts a `.`, so no `?…` a document can write is ever
+    // spelled `__bn.<i>.<label>` — whereas an underscore form like `__bn0_x` IS
+    // a legal source variable and would make the reverse mapping a guess. Both halves are
+    // pinned by
+    // `tests/n3_pass_all.rs::a_source_variable_spelled_like_the_rewrite_stays_a_variable`.
     for (ri, r) in rules.iter_mut().chain(backward_rules.iter_mut()).enumerate() {
         let mut premise_blanks: std::collections::HashSet<String> = Default::default();
         collect_blanks(&r.premise, false, &mut premise_blanks);
@@ -133,7 +142,7 @@ pub fn parse_with_base(src: &str, base: &str) -> Result<Parsed, String> {
         let rename = |t: &mut Term| {
             if let Term::Blank(l) = t {
                 if premise_blanks.contains(l.as_str()) {
-                    *t = Term::Var(format!("__bn{ri}_{l}"));
+                    *t = Term::Var(format!("{}{}.{}", PREMISE_BLANK_VAR, ri, l));
                 }
             }
         };

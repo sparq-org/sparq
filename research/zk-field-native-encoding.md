@@ -210,7 +210,7 @@ load-bearing.
 | `xsd:boolean` | `0` / `1` | yes (`"true"`/`"1"` → same) | injective on the two values |
 | `xsd:integer` (incl. signed) | signed value in the `u64` magnitude + sign domain `filter_signed.nr` uses (NOT raw wrapping `Field`) | yes (`"05"`/`"5"` → same) | no leading zeros, no `-0` (`filter_int.nr:58-64`, `filter_signed.nr:142-158`) |
 | `xsd:decimal` | canonical scaled integer at the member-fixed `FD` scale (matching `filter_decimal_check`) | **yes — `"5.0"`/`"5.00"` collide at a fixed `FD`** | `filter_decimal` digit-canonicality asserts (`filter_signed.nr:215-246`) |
-| `xsd:double` / `xsd:float` | IEEE-754 bit pattern as a field | **yes — `-0.0`/`+0.0` compare EQUAL (`tests.nr:379-380`); NaN payloads** | canonical IEEE bits at ingest (may obsolete sq-mslu's in-circuit RNE parser for the *comparison* — §10 Q3) |
+| `xsd:double` / `xsd:float` | IEEE-754 bit pattern as a field | **yes — `-0.0`/`+0.0` compare EQUAL (`tests.nr:379-380`); NaN payloads** | canonical IEEE bits — §14.2 resolves §10 Q3: the fold is applied IN-CIRCUIT before the value component is formed, not ingest-only, and it does obsolete sq-mslu's RNE parser for the *comparison* |
 | `xsd:dateTime` / `xsd:date` | signed scaled-epoch scalar at a member-fixed `FS` sub-second scale, timezoned-`Z` canonical lexicals ONLY (§13 — resolves §10 Q2) | not in the slice-1 `Z`-only domain; becomes yes if the §13.6 offset-normalisation widening lands | §13.4 fail-closed canonical predicate (bare / non-`Z` / `24:00:00` / over-`FS`-precision lexicals rejected); NOT in the first slice |
 | `xsd:string`, `rdf:langString`, opaque | `VALUE_NONE` (no handle) | — | the §3.2 fallback; lexical lane only |
 
@@ -614,7 +614,11 @@ instantiation) verdicts. Obligation-/negation-framed to pass
 ## 10. Open questions (need the maintainer)
 
 1. **`value_component` degeneracy shape (§3.2):** global `NO_VALUE` vs datatype-folded
-   `Poseidon2([VALUE_NONE, DT_CONST, LANG_CONST])`? Recommendation: the latter. Confirm.
+   `Poseidon2([VALUE_NONE, DT_CONST, LANG_CONST])`? Recommendation: the latter.
+   **RESOLVED — §14.1** (proceed-and-document, sq-vvfte): datatype-folded, per this
+   record's own recommendation, with `VALUE_NONE` constrained to fall outside the
+   reachable handle band; maintainer can steer post-hoc via the steer-me issue opened
+   by the sq-vvfte PR.
 2. **dateTime/date VALUE_HOOK:** canonical epoch vs component tuple; timezone-
    normalisation rule. Deferred from the first slice. **RESOLVED — §13**
    (proceed-and-document, spike sq-fvztj): signed scaled-epoch scalar, timezoned-`Z`
@@ -623,7 +627,12 @@ instantiation) verdicts. Obligation-/negation-framed to pass
 3. **Double bits vs sq-mslu parser:** confirm against `filter_float.nr` /
    `sparq_ieee754` that the IEEE-bit VALUE_HOOK obsoletes the in-circuit RNE parser for
    the *comparison*, AND decide the `-0.0`/`+0.0`/NaN canonicalisation rule at ingest
-   (§3.3 many-to-one), before closing/superseding sq-mslu.
+   (§3.3 many-to-one), before closing/superseding sq-mslu. **RESOLVED — §14.2**: it
+   does, for the comparison — `filter_value_dl_f64` commits the IEEE bits, so no
+   in-circuit parse occurs at all; the canonicalisation is the in-circuit
+   `canonical_f64_bits` fold (any NaN → the canonical quiet NaN, `-0.0` → `+0.0`);
+   sq-mslu is **re-scoped** to the string-canonical residual for the single-leaf blake3
+   lane and demoted **P4**, NOT closed.
 4. **One-time recommit (§3.5):** confirm the value-first re-base of all persisted
    commitments/vectors/snapshot is acceptable now (research grade).
 5. **B4 in-circuit vs ingest (§5.4):** is the cost of an in-circuit canonicalising
@@ -895,3 +904,154 @@ The §13 rule set — `Z`-only domain, member-fixed `FS`, epoch mapping, the rej
 list, and both §13.6 widenings — is registered as an OPEN external-audit obligation
 under CR-G8 / sq-qhy4 alongside the rest of this record. No soundness or privacy
 property is claimed for the dateTime/date lane pending the external sign-off.
+
+## 14. §10 Q1 + Q3 RESOLVED: the degenerate `value_component`, and the double lane vs the sq-mslu parser (proceed-and-document)
+
+Design-only resolution of the two remaining §10 questions a spike could settle without
+the maintainer. Made under the standing proceed-and-document rule (best-judgment call,
+steerable post-hoc via the steer-me issue opened by the sq-vvfte PR); both inherit every
+honesty caveat of this record — the removed INV-VL, the issuer-honesty assumption on the
+value lane, and the CR-G8 / sq-qhy4 external-audit obligation. **Nothing below is a
+soundness claim**; both rules are themselves registered as OPEN audit obligations
+(§14.3).
+
+### 14.1 Q1 — the degenerate `value_component` is DATATYPE-FOLDED, not a global `NO_VALUE`
+
+**Decision: `value_component = h3(VALUE_NONE, DATATYPE_CONST, LANG_CONST)`** — the shape
+§3.2 already recommended, now confirmed against the single-global alternative. The
+implementation is carried by **sq-vvfte**.
+
+**The deciding reason is that it is the SAME shape the value lanes already ship.** Every
+dual-leaf member that exists today forms its value component identically —
+`h3(VALUE_HOOK, DATATYPE_CONST, LANG_NONE)`, in the int / f64 / decimal / dateTime
+members of `filter_value.nr` — so the degenerate case is that one permutation with a
+reserved tag in the value slot, not a second encoding shape. A global `NO_VALUE` would
+add a branch to leaf reconstruction that the host AND every circuit that recomputes a
+leaf (`scan.nr` / `join.nr`, §11 bead 3) must agree on, for no structural gain. One
+shape is one audit surface.
+
+Two secondary points, at their real weight:
+
+- **It keeps the datatype/lang separation in the value slot too.** Under a global
+  `NO_VALUE` every non-hookable literal shares ONE value component, so
+  `literal_shapes_are_distinguished` (`encode.rs`) rests on the lexical lane ALONE. The
+  folded form is *redundant with* the lexical hash rather than load-bearing over it —
+  defence in depth, NOT an independent security property, and it must not be written up
+  as one.
+- **It is the more expensive option, honestly.** A global `NO_VALUE` is a compile-time
+  constant: no permutation at commit for strings / IRIs / blank nodes. The folded form
+  costs one Poseidon2 per degenerate literal at commit. In-circuit cost is unchanged
+  either way, because a degenerate value component is never an in-circuit operand:
+  identity ops are structurally barred from the value slot (reject-list (v)) and a
+  FILTER member has nothing to bind for a term with no handle. The choice is therefore
+  shape uniformity bought with commit-time work, and §7's "dual-leaf is MORE expensive
+  than value-only" framing stands unrevised.
+
+**For non-literals the two alternatives coincide.** IRIs and blank nodes have no datatype
+and no language, so with reserved constants in the unused slots the folded component is
+a fixed value the host and circuit can precompute — the global `NO_VALUE` in all but
+name. The choice therefore only bites for LITERALS; the §3.2 table's IRI and blank-node
+rows are unaffected either way.
+
+**The reserved-tag constraint — pick `VALUE_NONE` outside the reachable handle band.**
+§3.2 motivates the tag as "distinct from a real `VALUE_HOOK = 0`". Sharpened: under the
+datatype fold a degenerate component and a real one *already* differ in the
+`DATATYPE_CONST` slot, and fail-closed ingest (§6, §13.2 — a non-hookable lexical on a
+hookable datatype is REJECTED, never silently downgraded to the string lane) means no
+term is ever degenerate under a *hookable* datatype const. So the tag's value is not
+load-bearing today; it becomes load-bearing the moment any lane degrades instead of
+rejecting. Since the tag is free to choose, choose it so the separation does not depend
+on that rule holding everywhere, forever:
+
+`LANG_NONE = 1` is separated from a real `LANG_CONST` only **probabilistically**, and this
+record must not say otherwise. A real `LANG_CONST` is `blake3_field(lang)` — a hash
+*reduced into the circuit field*, which CAN equal `1`. Picking a small reserved tag makes
+that collision negligible, not impossible; the language slot is collision-resistant and
+domain-separated, never provably disjoint. The enforceable sharpening is the same shape
+§14.1 demands of the value slot — a fail-closed `assert(lang_const != LANG_NONE)` at
+ingest, mirrored wherever a witnessed `LANG_CONST` enters a circuit — and until that
+ships, "no committed language tag hashes to `LANG_NONE`" is a **retained assumption**,
+registered as an OPEN audit obligation in §14.3. (The shipped host and Noir constants
+today assert nothing and their doc comments overclaim; captured as follow-up work, not
+fixed by this record.)
+
+The value slot is worse than probabilistic, which is why it gets an assert and not a
+caveat: its real occupants ARE small field elements, so a `0`/`1` tag collides with
+certainty rather than negligibly. Every shipped member B1-range-decomposes its handle
+(`assert_max_bit_size::<64>()`), and the signed lanes fold the sign by field negation
+(`0 - magnitude`, in the decimal and dateTime members), so the reachable handle band is
+
+```text
+[0, 2^64)  ∪  (p − 2^64, p)          (p = the field modulus)
+```
+
+and a `VALUE_NONE` of `0` or `1` sits inside it. So: **derive `VALUE_NONE` as a
+domain-separated `blake3_field` constant and ASSERT it falls in neither band** — a host
+test plus a Noir compile-time check. Asserting the exclusion is what makes this a
+checkable invariant rather than a probabilistic argument about where a hash output lands.
+
+### 14.2 Q3 — `filter_value_dl_f64` obsoletes the in-circuit RNE parser FOR THE COMPARISON; sq-mslu keeps the string-canonical residual
+
+**Confirmed against the code Q3 named.** `filter_float.nr`'s own status note records that
+it is a gate-counted building block that cannot be composed, because binding a hidden
+operand would require re-deriving the canonical `xsd:double` lexical form from the bit
+pattern in-circuit (float-to-canonical-decimal printing, unbudgeted); and that the general
+fractional/scientific fragment (sq-lxi7) additionally needs a decimal→IEEE
+round-to-nearest-even parser whose cross-base big-integer interval check was never
+`bb gates`-measured — so it was honestly left unshipped rather than approximated with a
+shortcut that loses RNE.
+
+**The dual leaf removes that requirement structurally, for the comparison.** Under
+dual-leaf commitments the value handle IS the IEEE-754 bit pattern, so
+`filter_value_dl_f64` (`zk/compose/filter_value_dl_f64`, relation
+`sparq_zk_compose_core::filter_value::filter_value_dl_f64`) binds the operand through the
+two Poseidon2 permutations over the witnessed bits and carries `lexical_component` as a
+free witness. No decimal→IEEE parse, no canonical-lexical printing and no RNE interval check
+occurs in-circuit at all: the parser is not made cheaper, it is made **unnecessary for
+this lane**. The parse moves to the host (`dual_leaf::encode_double`, fail-closed per §6 —
+handle and lexical hash derived from the same bytes, or nothing is committed), which is
+exactly the §5.4 trade this record already names: an in-circuit obligation exchanged for
+an ingest one, not eliminated.
+
+**The `-0.0`/`+0.0`/NaN rule Q3 asked for is decided, and it is stronger than §3.3
+recorded.** The canonicalisation is `canonical_f64_bits`: any NaN → the canonical quiet
+NaN, `-0.0` → `+0.0`, everything else unchanged. It is applied **in-circuit, before the
+value component is formed** (`filter_value.nr`) and mirrored host-side by
+`dual_leaf::canonical_f64_bits`. B4 for the double lane is therefore an enforced
+in-circuit fold, not the ingest-only assumption §3.3's original "canonical IEEE bits at
+ingest" wording implied. What this does NOT change: the handle stays MANY-TO-ONE on the
+term — that is the *purpose* of the fold — so the §3.3 hazard row and reject-list (v)
+remain fully load-bearing: for the signed zeros, whose two canonical spellings `"0.0E0"`
+and `"-0.0E0"` are both accepted by `parse_xsd_double_bits`, only the `lexical_component`
+keeps them apart for an identity op. NaN is NOT symmetric with that and the §8 guard
+list should not be read as if it were: canonical `xsd:double` has a single `NaN` lexical,
+so distinct payloads are unreachable through sparq's own ingest and the lexical lane
+cannot disambiguate them either. The payload fold defends only against a committer who
+witnesses a non-canonical payload directly — an issuer-side capability, which lands it
+back under the same unverified issuer-honesty assumption as the rest of the value lane.
+
+**sq-mslu is re-scoped, not closed** (verdict recorded in the sq-mslu notes; **demoted
+P4**). What survives is the **string-canonical residual**: reconstructing `xsd:double`'s
+canonical lexical form in-circuit — and with it the RNE interval check — for the
+SINGLE-leaf blake3 lane, which binds a hidden operand through the lexical token and so
+still cannot express a fractional/scientific double filter. That residual matters only to
+deployments that do not adopt the dual leaf, which is why it drops to P4 rather than being
+superseded outright. `filter_float.nr`'s measure-then-ship-or-documented-reject discipline
+applies to it unchanged; no affordability claim is made for it here.
+
+### 14.3 What stays open, and the audit registration
+
+§10 Q4 (the one-time recommit), Q5 (B1/B4 in-circuit vs ingest) and Q6 (canonical-issuance
+conformance on the roadmap) are maintainer calls and remain OPEN. Neither resolution above
+settles them: §14.2 narrows Q5 for the double lane's B4 only (the IEEE-bit fold is
+in-circuit) and leaves the question standing for the other lanes' range and canonical-form
+obligations.
+
+Both §14 rules — the reserved-tag band exclusion on `VALUE_NONE`, and the double lane's
+in-circuit canonical fold together with the residual it leaves to sq-mslu — are registered
+as OPEN external-audit obligations under CR-G8 / sq-qhy4 alongside the rest of this
+record. So is the §14.1 **`LANG_NONE` separation assumption**: unlike `VALUE_NONE`'s
+exclusion it is today *unasserted*, resting on collision-resistance of `blake3_field` over
+the language-tag domain rather than on a check, and it stays an assumption until the
+fail-closed ingest/circuit assert §14.1 names actually ships. No soundness or privacy
+property is claimed for any of the three, pending the external sign-off.

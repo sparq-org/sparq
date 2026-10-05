@@ -1,0 +1,15 @@
+[req]
+distinguished_name = dn
+x509_extensions = v3
+prompt = no
+[dn]
+CN = host.docker.internal
+[v3]
+subjectAltName = @alt
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+[alt]
+DNS.1 = host.docker.internal
+DNS.2 = localhost
+IP.1 = 127.0.0.1

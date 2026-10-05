@@ -1,6 +1,6 @@
 ---
 name: e2ee-ng
-description: Build the low-level primitives of the NextGraph-style E2EE-queryable profile for sparq with the opt-in sparq-e2ee-ng crate — deterministic capability encoding with strict read/publish/admin separation, recipient-wrapped secrets (X25519 sealed-box), randomized padded block/commit envelopes (XChaCha20-Poly1305) under a domain-separated HKDF-SHA-256 key schedule, Ed25519 author/publisher/admin signatures, signed epoch transitions (the revocation mechanism), a fail-closed deterministic-CBOR codec with explicit parser limits, and golden test vectors. Use when constructing/parsing capabilities, sealing/opening encrypted blocks, minting commit ids, or authoring epoch transitions for the E2EE-NG profile. RESEARCH-GRADE, NOT externally audited — every confidentiality/integrity/authorization/revocation property is designed/intended, not proven; production use is gated by sq-qhy4. This crate is the capability/envelope/epoch layer ONLY — sync, broker protocol, CRDT, and materialization are NOT implemented here, and it does NOT make SPARQL run over ciphertext (querying stays local over decrypted, materialized state).
+description: Build the low-level primitives of the NextGraph-style E2EE-queryable profile for sparq with the opt-in sparq-e2ee-ng crate — deterministic capability encoding with strict read/publish/admin separation, recipient-wrapped secrets (X25519 sealed-box), randomized padded block/commit envelopes (XChaCha20-Poly1305) under a domain-separated HKDF-SHA-256 key schedule, an object chunker that splits a large object into Merkle-linked multi-block sets, Ed25519 author/publisher/admin signatures, signed epoch transitions (the revocation mechanism), a fail-closed deterministic-CBOR codec with explicit parser limits, and golden test vectors. Use when constructing/parsing capabilities, sealing/opening encrypted blocks or chunked multi-block objects, minting commit ids, or authoring epoch transitions for the E2EE-NG profile. RESEARCH-GRADE, NOT externally audited — every confidentiality/integrity/authorization/revocation property is designed/intended, not proven; production use is gated by sq-qhy4. This crate is the capability/envelope/epoch layer ONLY — sync, broker protocol, CRDT, and materialization are NOT implemented here, and it does NOT make SPARQL run over ciphertext (querying stays local over decrypted, materialized state).
 ---
 
 # sparq-e2ee-ng — E2EE-NG profile primitives (capability / envelope / epoch)
@@ -99,11 +99,24 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
   ephemeral-*static* ECDH: **not forward-secret** — compromise of the recipient's
   long-term private key exposes previously recorded wraps.
 - **`capability`** — `PublicGrant` (deterministic encode/decode, `cap_id`,
-  admin `sign`/`verify`), `Capability` (`new_read`/`new_write`/`new_admin`,
-  `validate`, `encode_secret`/`decode_secret`), and `delegate` (narrow-only).
+  admin `sign`/`verify`, and a **branch set**: `ScopedBranch` +
+  `branch_scope`/`set_branch_scope`/`covers_branch`), `Capability`
+  (`new_read`/`new_write`/`new_admin`, `validate`,
+  `encode_secret`/`decode_secret`), `wrap_capability`/`unwrap_capability` (the
+  typed §4.2 secret-transfer path: encode-secret + recipient-wrap under the fixed
+  `CAPABILITY_WRAP_AAD`, plaintext never handed to the caller), and `delegate`
+  (narrow-only).
 - **`envelope`** — `BlockEnvelope` (`seal_block`/`seal_block_random`/`open_block`,
-  padded to `PAD_CLASSES`, `commit_id`) and `Commit` (author `sign`/`verify`,
+  padded to `PAD_CLASSES`, `digest`/`commit_id`) and `Commit` (author `sign`/`verify`,
   `encode`/`decode`).
+- **`object`** — the object chunker for objects too large for one block:
+  `seal_object`/`seal_object_with` split a plaintext into randomized leaf blocks
+  and link them with internal **Merkle node** blocks whose child links
+  (`{block id, chunk index, SHA-256(child envelope)}`) are authenticated *inside*
+  the encrypted parent; `open_object` / `SealedObject::open` verify the whole tree
+  and reassemble. `ObjectLayout` shapes it (`chunk_size`/`arity`), `ObjectLimits`
+  bounds an untrusted block set, and `SealedObject::merkle_root`/`commit_id` is
+  the root block's digest.
 - **`epoch`** — `EpochTransition` (`sign`/`verify`, monotonic-epoch check,
   `HistoryPolicy::{ForwardOnly, HistoryRekeyed}`) — the revocation mechanism.
 
@@ -111,22 +124,45 @@ read.validate()?; write.validate()?; adm.validate()?;                     // sep
 
 - **Secrets never go on the wire in the clear.** `K_read` and private keys live in
   the secret-bearing `Capability::encode_secret` output (a bearer secret) — wrap it
-  with `wrap` before it leaves protected local storage. `PublicGrant::encode` (what
+  with `wrap` before it leaves protected local storage. Prefer
+  `wrap_capability`/`unwrap_capability`: same two steps, but the AAD is the fixed
+  `CAPABILITY_WRAP_AAD` (so a capability wrapping cannot be confused with a DEK or
+  bare-`K_read` wrapping made under a caller-chosen label), the capability is
+  `validate`d before it is wrapped, and the plaintext is zeroized rather than
+  handed to you. `PublicGrant::encode` (what
   a broker sees) carries **no** secret field and `PublicGrant::decode` **rejects** a
   secret field if one is present.
 - **The opaque header is AD-bound, not serialized.** `open_block` needs the same
   `BlockContext` (repo/branch/epoch/kind) used to seal; those fields are
   authenticated but never appear in `BlockEnvelope` (design §5). A wrong context
   fails closed as `Error::Decrypt`.
+- **A chunked object's block set is exact, and chunk 0 is the root.** `open_object`
+  wants *exactly* the object's blocks (root included) — an extra, missing, or
+  duplicated block is rejected, not ignored, so filter a larger store by
+  `object_id` first. Only the Merkle root may occupy `ROOT_CHUNK_INDEX` (0), and a
+  child that disagrees with the digest/position its encrypted parent recorded fails
+  with `Error::Integrity` *before* its plaintext is used. Chunking is deliberately
+  **not** content-defined: boundaries and block ids never derive from plaintext, so
+  cross-object deduplication is intentionally sacrificed (design §2).
 - **Revocation is not retroactive.** An `EpochTransition` mints a fresh topic/key
   set and re-keys *future* writes; it cannot erase plaintext or keys a former member
   already obtained. `HistoryPolicy` is an honest disclosure of that, not a secrecy
   guarantee.
 - **Delegation only narrows.** `delegate` rejects any child grant that widens the
-  authority set, validity window, or epoch bound relative to its parent. The epoch
-  bound is the child's own signed `PublicGrant::max_epoch` ceiling — the child keeps
-  the parent's exact `epoch` and its epoch-specific `topic`, so a narrowed grant
-  never claims an epoch that disagrees with the topic it carries.
+  branch set, authority set, validity window, or epoch bound relative to its parent.
+  The epoch bound is the child's own signed `PublicGrant::max_epoch` ceiling — the
+  child keeps the parent's exact `epoch`, so a narrowed grant never claims an epoch
+  that disagrees with the topics it carries.
+- **A branch set is authorization, not key distribution.** A grant is scoped to one
+  or more branches (`Delegation::branches` selects a subset out of the parent's set;
+  `None` inherits it), and each branch in scope carries its own epoch-specific topic,
+  so delegation never invents routing material and re-delegation can never recover a
+  branch an ancestor dropped. But a `Capability` still bears exactly **one** branch
+  read secret (design §8.2 field 10), so a multi-branch grant needs the other
+  branches' key material delivered separately — per §4.2, "cryptographic key
+  possession remains necessary; the signed grant alone is not a decryption key". The
+  set is canonical (ascending, primary = lowest, topics distinct) and is admin-signed;
+  a single-branch grant omits the field and encodes exactly as it always did.
 - **Determinism is load-bearing.** `cap_id` and `CommitId` are hashes of canonical
   bytes; the golden vectors in `tests/vectors.rs` pin the exact wire format. A
   change to those bytes is a wire-format break, not a refactor.

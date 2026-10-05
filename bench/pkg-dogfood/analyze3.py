@@ -62,7 +62,9 @@ NEG_RE = re.compile(
 def load_tokens(paths: list[str]) -> dict[tuple[str, str], dict]:
     tok: dict[tuple[str, str], dict] = {}
     for p in paths:
-        for r in json.load(open(p, encoding="utf-8")):
+        with open(p, encoding="utf-8") as fh:
+            rows = json.load(fh)
+        for r in rows:
             if r.get("task") and r.get("arm"):
                 tok[(r["task"], r["arm"])] = r
     return tok
@@ -73,7 +75,8 @@ def load_answers(paths: list[str]) -> dict[tuple[str, str], str]:
     list of {"task","arm","answer"} records (the raw workflow result rows)."""
     answers: dict[tuple[str, str], str] = {}
     for p in paths:
-        data = json.load(open(p, encoding="utf-8"))
+        with open(p, encoding="utf-8") as fh:
+            data = json.load(fh)
         if isinstance(data, dict):
             # Possibly nested under result.results (a raw workflow .output dump).
             recs = data.get("result", {}).get("results") if "result" in data else None

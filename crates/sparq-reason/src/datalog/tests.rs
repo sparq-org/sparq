@@ -3,7 +3,7 @@
 //! them red), and the DIFFERENTIAL harness against the independent naive oracle
 //! (`super::oracle`) on fixed programs × seed-randomised graphs.
 
-use super::{eval, oracle, parse_program, stratify};
+use super::{eval, oracle, parse_program, souffle, stratify};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::{Dict, Id};
 
@@ -2021,4 +2021,250 @@ fn incr_accessors_direct() {
     assert!(m.contains(&[a, q, b]) && !m.contains(&[a, p, b]));
     assert_eq!(m.delete(&mut d, &[[a, q, b]]), 1);
     assert!(m.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// [SONNET-4.6] sq-xzb9p — differential vs the EXTERNAL Soufflé engine
+// ---------------------------------------------------------------------------
+// `oracle` is an independent implementation, but it is still OUR reading of the
+// semantics. These fixtures put the same programs through Soufflé — which stratifies
+// them ITSELF, so this arm can catch a stratification bug the in-tree oracle cannot.
+// The translation is pinned by a golden test that runs with or without the binary;
+// the engine comparison skips (loudly, "not checked") when Soufflé is absent. See
+// `super::souffle` for the fragment this arm covers and why it stops where it does.
+
+/// The Soufflé closure and ours must agree on every triple the program's relations
+/// cover, over the same seed-randomised graphs the oracle arm uses.
+fn assert_souffle_agrees(src: &str, seeds: std::ops::Range<u64>) {
+    let Some(bin) = souffle::binary() else {
+        return;
+    };
+    for seed in seeds {
+        let mut d = Dict::new();
+        let program = parse_program(&mut d, src).expect("parse");
+        let facts = random_graph(&mut d, seed, 6, 9);
+        let translation = souffle::translate(&d, &program, &facts).expect("in fragment");
+        let external = translation.run(&bin).expect("souffle run");
+        let ours: FxHashSet<[Id; 3]> = eval(&mut d, &facts, &program)
+            .unwrap()
+            .into_iter()
+            .filter(|&t| translation.covers(t))
+            .collect();
+        assert_eq!(
+            ours, external,
+            "sparq/souffle divergence: seed {seed} program:\n{src}"
+        );
+    }
+}
+
+#[test]
+fn souffle_recursion_plus_naf() {
+    assert_souffle_agrees(
+        &format!(
+            "{P}[?x, ex:reach, \"y\"] :- [?x, ex:seed, \"y\"] .\n\
+             [?y, ex:reach, \"y\"] :- [?x, ex:reach, \"y\"], [?x, ex:edge, ?y] .\n\
+             [?x, ex:unreach, \"y\"] :- [?x, a, ex:Node], NOT [?x, ex:reach, \"y\"] ."
+        ),
+        0..15,
+    );
+}
+
+/// The grouped `NOT` is one existential conjunction; the aux-relation encoding has to
+/// preserve that, so an external engine disagreeing here would mean our join-inside-the-
+/// group semantics is wrong.
+#[test]
+fn souffle_naf_conjunction() {
+    assert_souffle_agrees(
+        &format!(
+            "{P}[?x, ex:noCycle, \"y\"] :- [?x, a, ex:Node], \
+             NOT {{ [?x, ex:edge, ?y], [?y, ex:edge, ?x] }} ."
+        ),
+        0..15,
+    );
+}
+
+/// Transitive closure, a multi-atom head, and an UNCORRELATED wildcard `NOT` with a
+/// repeated variable (`[?z, ex:edge, ?z]`) — which translates to a NULLARY auxiliary
+/// relation, the encoding's most easily-broken corner.
+///
+/// The guarded rule must actually be EXERCISED both ways or this fixture would pass
+/// with the negation dropped entirely (an earlier draft used a guard atom the random
+/// graph never produces, and survived exactly that mutation). So the seed range is
+/// required to contain a graph with a self-loop and one without, and the derivation is
+/// asserted to track it.
+#[test]
+fn souffle_multi_head_and_wildcard_naf() {
+    let src = format!(
+        "{P}[?x, ex:reach, ?y] :- [?x, ex:edge, ?y] .\n\
+         [?x, ex:reach, ?z] :- [?x, ex:reach, ?y], [?y, ex:edge, ?z] .\n\
+         [?x, ex:out, ?y], [?y, ex:in, ?x] :- [?x, ex:edge, ?y] .\n\
+         [?x, ex:loopFree, \"y\"] :- [?x, a, ex:Node], NOT [?z, ex:edge, ?z] ."
+    );
+    assert_souffle_agrees(&src, 0..15);
+    // Witness that the nullary NOT gates the rule in BOTH directions across the range.
+    let (mut fired, mut blocked) = (0, 0);
+    for seed in 0..15 {
+        let mut d = Dict::new();
+        let program = parse_program(&mut d, &src).unwrap();
+        let facts = random_graph(&mut d, seed, 6, 9);
+        let edge = iri(&mut d, "edge");
+        let loop_free = iri(&mut d, "loopFree");
+        let self_loop = facts.iter().any(|&[s, p, o]| p == edge && s == o);
+        let derived_any = eval(&mut d, &facts, &program)
+            .unwrap()
+            .iter()
+            .any(|&[_, p, _]| p == loop_free);
+        assert_eq!(
+            derived_any, !self_loop,
+            "seed {seed}: ex:loopFree must be derived exactly when no self-loop exists"
+        );
+        if derived_any {
+            fired += 1;
+        } else {
+            blocked += 1;
+        }
+    }
+    assert!(
+        fired > 0 && blocked > 0,
+        "the seed range must exercise the nullary NOT both ways (fired {fired}, blocked {blocked})"
+    );
+}
+
+/// The class-granularity decision, externally corroborated: `NOT [?x, a, ex:Hub]`
+/// feeding an `ex:Leaf` head is stratifiable ONLY if `rdf:type` nodes are per-CLASS.
+/// A predicate-granular encoding would make Soufflé reject this program outright, so
+/// Soufflé accepting it is independent evidence for the design record's §3 choice.
+#[test]
+fn souffle_accepts_class_granular_negation() {
+    assert_souffle_agrees(
+        &format!(
+            "{P}[?x, a, ex:Hub] :- [?x, ex:edge, ?y] .\n\
+             [?x, a, ex:Leaf] :- [?x, a, ex:Node], NOT [?x, a, ex:Hub] ."
+        ),
+        0..15,
+    );
+}
+
+/// Rejection parity: the textbook `win(X) :- move(X,Y), NOT win(Y)` has no stratified
+/// model, and BOTH engines must say so. Agreeing only on accepted programs would let a
+/// too-permissive checker pass unnoticed.
+#[test]
+fn souffle_rejects_what_our_checker_rejects() {
+    let src = format!(
+        "{P}[?x, ex:win, \"y\"] :- [?x, ex:move, ?y], NOT [?y, ex:win, \"y\"] ."
+    );
+    let mut d = Dict::new();
+    let program = parse_program(&mut d, &src).expect("parse");
+    assert!(
+        stratify(&d, &program).is_err(),
+        "our checker must reject the negation cycle"
+    );
+    let Some(bin) = souffle::binary() else {
+        return;
+    };
+    let facts = random_graph(&mut d, 0, 6, 9);
+    let translation = souffle::translate(&d, &program, &facts).expect("in fragment");
+    let err = translation
+        .run(&bin)
+        .expect_err("souffle must also refuse to stratify this program");
+    assert!(
+        err.contains("stratify"),
+        "souffle refused for an unexpected reason: {err}"
+    );
+}
+
+/// The fragment boundary is a LOUD error naming the construct, never a silent partial
+/// translation that would quietly compare fewer rules than the program has.
+#[test]
+fn souffle_translation_rejects_out_of_fragment_constructs() {
+    let cases = [
+        (
+            format!("{P}[?x, ex:deg, ?c] :- AGGREGATE([?x, ex:edge, ?y] ON ?x BIND COUNT(?y) AS ?c) ."),
+            "AGGREGATE",
+        ),
+        (
+            format!("{P}[?x, ex:big, \"y\"] :- [?x, ex:deg, ?c], FILTER(?c >= 2) ."),
+            "FILTER",
+        ),
+        (
+            format!("{P}[?p, ex:observed, ?y] :- [?x, ?p, ?y] ."),
+            "variable predicates",
+        ),
+        (
+            format!("{P}[?x, ex:typed, \"y\"] :- [?x, a, ?c] ."),
+            "variable-class",
+        ),
+    ];
+    for (src, needle) in cases {
+        let mut d = Dict::new();
+        let program = parse_program(&mut d, &src).expect("parse");
+        let err = souffle::translate(&d, &program, &[]).expect_err("out of fragment");
+        assert!(
+            err.contains(needle),
+            "expected the error to name {needle:?}, got: {err}"
+        );
+    }
+}
+
+/// The run path up to the process spawn — scratch directory, program file, and one
+/// `.facts` table per relation — is exercised even on a box with no Soufflé, so an
+/// ordinary CI run still covers it and a spawn failure is reported, never swallowed.
+#[test]
+fn souffle_run_reports_an_unrunnable_binary() {
+    let mut d = Dict::new();
+    let src = format!("{P}[?x, ex:q, ?y] :- [?x, ex:p, ?y] .");
+    let program = parse_program(&mut d, &src).unwrap();
+    let (a, p, b) = (iri(&mut d, "a"), iri(&mut d, "p"), iri(&mut d, "b"));
+    let t = souffle::translate(&d, &program, &[[a, p, b]]).unwrap();
+    let err = t
+        .run("sparq-no-such-souffle-binary")
+        .expect_err("an absent binary must be an error, not an empty closure");
+    assert!(
+        err.contains("failed to run"),
+        "expected a spawn-failure report, got: {err}"
+    );
+}
+
+/// Golden translation: the emitted Soufflé source is the artifact a reviewer reads and
+/// the CI lane runs, so it is pinned exactly. This runs whether or not Soufflé is
+/// installed, which is what keeps the translator covered on an ordinary CI box.
+#[test]
+fn souffle_translation_is_pinned() {
+    let mut d = Dict::new();
+    let src = format!(
+        "{P}[?y, ex:reach, \"y\"] :- [?x, ex:reach, \"y\"], [?x, ex:edge, ?y] .\n\
+         [?x, ex:lonely, \"y\"] :- [?x, a, ex:Node], NOT {{ [?x, ex:edge, ?w] }} ."
+    );
+    let program = parse_program(&mut d, &src).unwrap();
+    let (a, b) = (iri(&mut d, "a"), iri(&mut d, "b"));
+    let (edge, ty, node) = (
+        iri(&mut d, "edge"),
+        d.intern_iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+        iri(&mut d, "Node"),
+    );
+    let t = souffle::translate(&d, &program, &[[a, edge, b], [a, ty, node]]).unwrap();
+    assert_eq!(
+        t.source,
+        "// Generated by sparq-reason datalog::souffle (sq-xzb9p). Do not edit.\n\
+         // One relation per stratification node; Soufflé stratifies this itself.\n\
+         .decl p0_reach(s: symbol, o: symbol)\n\
+         .input p0_reach\n\
+         .decl p1_edge(s: symbol, o: symbol)\n\
+         .input p1_edge\n\
+         .decl c2_Node(s: symbol)\n\
+         .input c2_Node\n\
+         .decl p3_lonely(s: symbol, o: symbol)\n\
+         .input p3_lonely\n\
+         .decl neg1_0(v0: symbol)\n\
+         p0_reach(v0, \"\\\"y\\\"\") :- p0_reach(v1, \"\\\"y\\\"\"), p1_edge(v1, v0).\n\
+         neg1_0(v0) :- p1_edge(v0, v1).\n\
+         p3_lonely(v0, \"\\\"y\\\"\") :- c2_Node(v0), !neg1_0(v0).\n\
+         .output p0_reach\n\
+         .output p1_edge\n\
+         .output c2_Node\n\
+         .output p3_lonely\n"
+    );
+    // A triple under a predicate no atom reads is outside the comparison projection.
+    assert!(t.covers([a, edge, b]) && t.covers([a, ty, node]));
+    assert!(!t.covers([a, iri(&mut d, "weight"), b]));
 }

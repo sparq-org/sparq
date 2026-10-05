@@ -92,6 +92,16 @@ env:
   # Same per-harness wall-clock ceiling as the nightly kani.yml lane: a runaway proof
   # is cut with a clean red TIMEOUT record instead of exhausting the runner.
   KANI_HARNESS_TIMEOUT: "20m"
+  # [OPUS-5] sq-ko0jt — SUITE-LEVEL budget; see kani.yml's identical block for the full
+  # rationale. It matters MORE here because this leg GATES: the biggest pr_gate suite
+  # (compare ORDER laws) has 26 harnesses, so its worst case is 26 × 20m = 520m against a
+  # `timeout-minutes: 120` backstop. A backstop hit CANCELS the job, which reds the
+  # required `ci-summary / gate` with no attribution at all — the author is told a proof
+  # leg died, not WHICH proof, on a PR that may be entirely innocent. With the budget the
+  # loop always emits a per-harness table naming exactly what ran, timed out, was cut, or
+  # never started. Sized as the 120m backstop − the same ~15m setup allowance − reserve;
+  # the relation is pinned by rule D5 in scripts/check-fv-manifest.py.
+  KANI_STEP_BUDGET: "100m"
 
 jobs:
   # The selector + the manifest gate ([FABLE-5] sq-6vshe.20: two former sub-minute
@@ -215,6 +225,19 @@ jobs:
           set -u
           summary="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
           tmo="${KANI_HARNESS_TIMEOUT:-20m}"
+          budget="${KANI_STEP_BUDGET:-100m}"
+          # `timeout(1)` duration syntax -> seconds (h/m/s suffix; bare number = seconds).
+          to_seconds() {
+            case "$1" in
+              *h) echo $(( ${1%h} * 3600 )) ;;
+              *m) echo $(( ${1%m} * 60 )) ;;
+              *s) echo "${1%s}" ;;
+              *)  echo "$1" ;;
+            esac
+          }
+          tmo_s=$(to_seconds "$tmo")
+          budget_s=$(to_seconds "$budget")
+          step_start=$(date +%s)
           {
             echo "### 🤖 Kani change-coupled proof results — ${SUITE_NAME}"
             echo ""
@@ -222,18 +245,36 @@ jobs:
             echo "bounded proofs are re-obligated here and GATE the merge. Each harness runs as its"
             echo "own \`cargo kani --harness\` invocation under a \`${tmo}\` wall-clock ceiling."
             echo ""
+            echo "The suite as a whole is bounded by a \`${budget}\` step budget, so this table is"
+            echo "always produced — a slow suite reds the gate with a named harness rather than"
+            echo "being CANCELLED at the job backstop and telling you nothing."
+            echo ""
             echo "| Harness | Result | Wall time |"
             echo "| --- | --- | --- |"
           } >> "$summary"
 
           had_fail=0
           had_timeout=0
+          had_unrun=0
           for h in $SUITE_HARNESSES; do
+            # STEP-BUDGET GUARD — see kani.yml. Never start a harness we cannot record a verdict
+            # for; a job cancellation would erase this whole table on a GATING check.
+            left=$(( budget_s - ($(date +%s) - step_start) ))
+            if [ "$left" -le 60 ]; then
+              had_unrun=1
+              echo "::error title=Kani harness NOT RUN::${SUITE_CRATE}::${h} never ran — the ${budget} step budget was exhausted by earlier harnesses in this suite, so this PR's change to the proved source is UNVERIFIED here."
+              echo "| \`${h}\` | ⏭️ NOT RUN (\`${budget}\` step budget exhausted) | — |" >> "$summary"
+              continue
+            fi
+            this_tmo=$tmo_s
+            if [ "$left" -lt "$this_tmo" ]; then
+              this_tmo=$left
+            fi
             log="kani-${SUITE_CRATE}-${h}.log"
             start=$(date +%s)
             # shellcheck disable=SC2086  # SUITE_FEATURES is an intentional word-split arg list.
             # `&& ec=0 || ec=$?` — capture exit code without triggering `set -e` (bash -e {0}).
-            timeout -k 30s "$tmo" cargo kani -p "$SUITE_CRATE" $SUITE_FEATURES --harness "$h" \
+            timeout -k 30s "${this_tmo}s" cargo kani -p "$SUITE_CRATE" $SUITE_FEATURES --harness "$h" \
               > "$log" 2>&1 && ec=0 || ec=$?
             # Anti-OOM invariant: reap any orphaned solver before the next harness starts.
             pkill -9 -x cbmc 2>/dev/null || true
@@ -246,9 +287,19 @@ jobs:
                 res="✅ PASS"
                 ;;
               124 | 137)
-                res="⏱️ TIMEOUT (>${tmo})"
-                had_timeout=1
-                echo "::error title=Kani timeout::${SUITE_CRATE}::${h} exceeded ${tmo} on the PR tier — the changed code's proof no longer fits its budget (see step summary)."
+                # CUT (clamped by the remaining step budget) vs TIMEOUT (full ${tmo} spent) are
+                # different findings and get different messages — on a gating leg the author
+                # needs to know whether THEIR change blew the proof budget or the suite simply
+                # no longer fits the runner. Both are red here (this leg has no debt tier).
+                if [ "$this_tmo" -lt "$tmo_s" ]; then
+                  res="⏱️ CUT (only ${this_tmo}s of the \`${budget}\` step budget left)"
+                  had_unrun=1
+                  echo "::error title=Kani harness cut by the step budget::${SUITE_CRATE}::${h} was cut after ${this_tmo}s — earlier harnesses consumed the ${budget} step budget, so this proof has NO verdict on this PR."
+                else
+                  res="⏱️ TIMEOUT (>${tmo})"
+                  had_timeout=1
+                  echo "::error title=Kani timeout::${SUITE_CRATE}::${h} exceeded ${tmo} on the PR tier — the changed code's proof no longer fits its budget (see step summary)."
+                fi
                 ;;
               *)
                 res="❌ FAIL (exit ${ec})"
@@ -276,6 +327,8 @@ jobs:
             echo ""
             if [ "$had_fail" -eq 1 ]; then
               echo "**Overall: ❌ FAIL** — this PR's changes break a bounded proof; fix the code or re-derive the harness honestly (never weaken the property to pass)."
+            elif [ "$had_unrun" -eq 1 ]; then
+              echo "**Overall: ❌ NO VERDICT for part of this suite** — the \`${budget}\` step budget ran out, so the harnesses marked **NOT RUN** / **CUT** above did not re-prove this PR's change. Every harness that DID run is recorded above, so if none of them failed this is a suite-cost problem rather than a defect in this PR — re-bound the slow harnesses or split the suite."
             elif [ "$had_timeout" -eq 1 ]; then
               echo "**Overall: ⏱️ TIMEOUT** — every harness that finished passed, but this PR pushed one or more proofs past the \`${tmo}\` budget; re-bound the harness or simplify the change."
             else
@@ -283,6 +336,6 @@ jobs:
             fi
           } >> "$summary"
 
-          if [ "$had_fail" -eq 1 ] || [ "$had_timeout" -eq 1 ]; then
+          if [ "$had_fail" -eq 1 ] || [ "$had_unrun" -eq 1 ] || [ "$had_timeout" -eq 1 ]; then
             exit 1
           fi

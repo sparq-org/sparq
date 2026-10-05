@@ -480,7 +480,8 @@ sites; tripping it fails with `"query budget exceeded (timeout)"` / `"... (max-r
 evaluation (`sq-yfcu2`): a SELECT-JSON body whose deadline falls due while the (already
 materialised) result is being written out is reported as the budget error, not returned as a
 complete-but-late result — on the streamed entry points some chunks may already have reached the
-sink when the trip is detected:
+sink when the trip is detected. [GPT-6] A SELECT-JSON budget already expired or cancelled
+at evaluator entry refuses before scanning, queuing Rayon work, or emitting any chunks:
 
 ```rust
 use sparq_engine::QueryBudget;
@@ -497,6 +498,14 @@ let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budg
 // Another thread may call cancel.store(true, std::sync::atomic::Ordering::Relaxed).
 // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
 ```
+
+[GPT-6 Astra] A nested public query from an extension callback uses an independent child
+budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
+budget rather than combining limits. After the child returns, returns an error, or unwinds,
+the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
+and any previously recorded budget error restored. Its deadline and cancellation are checked
+at the next outer poll. This does not interrupt arbitrary callback work or pool resource limits
+across nested queries; an aborting panic has no continuation.
 
 **Named-graph dataset view** (zero-copy restriction; a non-visible graph is indistinguishable from
 an absent one):
@@ -680,12 +689,14 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   `f64::NAN` sentinel for a non-numeric cell, with a gather-free fast path for an all-inline-integer
   column — the SIMD enabler, M4 Phase 2 `sq-pntvh.2`), a numeric FILTER comparison kernel
   (`DataChunk::select_numeric` → a `SelVec`), a **compare-over-decoded-column** kernel
-  (`DataChunk::select_decoded`, the branchless auto-vectorising compare that consumes the decode
-  kernel's output — M4 Phase 3 `sq-pntvh.3`), and a selection/gather kernel
+  (`DataChunk::select_decoded`, the contiguous-memory, auto-vectorisable compare that consumes the
+  decode kernel's output — M4 Phase 3 `sq-pntvh.3`), and a selection/gather kernel
   (`DataChunk::apply_selection`). When off, zero columnar code compiles and the default native + wasm
   builds are byte-identical (no new dependencies; no `unsafe`).
-  **`query`/`query_json`/etc. return byte-identical results whether the feature is on or off** — it
-  is a perf optimisation, never a semantics change. The first evaluator wiring landed in Phase 3
+  **`query`/`query_json`/etc. return identical results whether the feature is on or off** — the same
+  bindings/rows in the same order (byte-identical for the serialising entry points such as
+  `query_json`; `query` returns a structured result, so the equality is over its rows, not bytes).
+  It is a perf optimisation, never a semantics change. The first evaluator wiring landed in Phase 3
   (`sq-pntvh.3`): a **columnar residual-FILTER seam** inside `apply_filter` (Seam A) that, for an
   eligible single sargable-numeric residual `?v OP const`, decodes the column once and runs the
   **hybrid tri-mask** (`src/chunk_select.rs`, bead `sq-y5ew5`): each lane is classified Confident
@@ -1047,6 +1058,24 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
+- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
+  direct core dependency:
+
+  ```toml
+  sparq-core = { version = "0.1", features = ["overlay-deleted-projections"] }
+  ```
+
+  Cargo unifies this feature for engine queries using that same core package.
+  No engine, CLI or runtime flag is required or added. It is off in default builds,
+  which keep linear deletion counting and no deletion-cache state. The experiment
+  sorts all tombstones on first use of each permutation; actual tombstone changes
+  invalidate projections, and concurrent first readers share a blocking initializer.
+  Each requested vector retains twelve bytes per tombstone plus capacity slack,
+  in addition to the hash set. Every live fork/snapshot copies initialized vectors;
+  retained generations multiply this cost. No cap or eviction is provided. Cold
+  reads and update/read cycles can regress; measure the intended workload using
+  `bench/overlay-count` before choosing this opt-in. No universal crossover or
+  canonical speedup is claimed.
 - **Sharing one `Graph` across server threads** — a `sparq_core::Graph` (and its read-only
   `GraphSnapshot`) is **`Send + Sync`** (guaranteed by a compile-time assertion in `sparq-core`), so
   it can be shared across the async handlers of an axum/actix/tower server directly with

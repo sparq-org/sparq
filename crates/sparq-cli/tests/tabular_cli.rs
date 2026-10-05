@@ -199,7 +199,7 @@ fn r2rml_fixture_suite() {
         .filter(|p| p.is_dir())
         .collect();
     cases.sort();
-    assert!(cases.len() >= 9, "expected the full fixture suite, found {}", cases.len());
+    assert!(cases.len() >= 10, "expected the full fixture suite, found {}", cases.len());
     for case in cases {
         let name = case.file_name().unwrap().to_str().unwrap().to_owned();
         let mapping = case.join("mapping.ttl");
@@ -255,6 +255,129 @@ fn r2rml_explicit_table_binding() {
     assert_eq!(code, 0, "stderr: {err}");
     let got = triple_set(&std::fs::read_to_string(&out_nt).unwrap());
     assert_eq!(got.len(), 1, "{got:?}");
+}
+
+// ---------------------------------------------------------------------------
+// [OPUS-5] (sq-u1z86) joins, named graphs, row provenance
+// ---------------------------------------------------------------------------
+
+/// The join fixture is executed through the binary by `r2rml_fixture_suite`; here the same
+/// mapping is LOADED and queried, so the join survives the ingest as well as the emitter.
+#[test]
+fn r2rml_join_one_shot_query() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/r2rml/join");
+    let (code, out, err) = run3(&[
+        "tabular",
+        s(&root.join("sport.csv")),
+        s(&root.join("student.csv")),
+        "--mapping",
+        s(&root.join("mapping.ttl")),
+        "--query",
+        "SELECT ?n WHERE { ?s <http://example.com/plays> <http://example.com/sport/100> ; <http://example.com/name> ?n }",
+        "--format",
+        "tsv",
+    ]);
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(out.contains("\"Venus\""), "{out}");
+    assert!(!out.contains("\"Fred\""), "only the joining row: {out}");
+}
+
+const GRAPH_MAPPING: &str = r#"@prefix rr: <http://www.w3.org/ns/r2rml#> .
+@prefix ex: <http://example.com/> .
+<#T> rr:logicalTable [ rr:tableName "t" ] ;
+  rr:subjectMap [ rr:template "http://example.com/r/{id}" ; rr:graphMap [ rr:template "http://example.com/g/{cat}" ] ] ;
+  rr:predicateObjectMap [ rr:predicate ex:v ; rr:objectMap [ rr:column "v" ] ] .
+"#;
+
+/// `rr:graphMap` switches the emitter to N-Quads: `--out` writes real quads (and the summary
+/// line says "quads", not "triples").
+#[test]
+fn r2rml_graph_map_out_nquads() {
+    let dir = scratch("r2rml-graphmap-out");
+    let csv = write(&dir, "t.csv", "id,v,cat\n1,x,red\n2,y,blue\n");
+    let mapping = write(&dir, "m.ttl", GRAPH_MAPPING);
+    let out_nq = dir.join("out.nq");
+    let (code, _, err) = run3(&["tabular", s(&csv), "--mapping", s(&mapping), "--out", s(&out_nq)]);
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(err.contains("wrote 2 quads"), "quad wording: {err}");
+    let got = triple_set(&std::fs::read_to_string(&out_nq).unwrap());
+    let expected = triple_set(
+        r#"<http://example.com/r/1> <http://example.com/v> "x" <http://example.com/g/red> .
+<http://example.com/r/2> <http://example.com/v> "y" <http://example.com/g/blue> ."#,
+    );
+    assert_eq!(got, expected);
+}
+
+/// …and the LOAD path takes the dataset loader, so the named graphs are queryable with
+/// `GRAPH ?g { … }` rather than being flattened into the default graph.
+#[test]
+fn r2rml_graph_map_loads_named_graphs() {
+    let dir = scratch("r2rml-graphmap-query");
+    let csv = write(&dir, "t.csv", "id,v,cat\n1,x,red\n2,y,blue\n");
+    let mapping = write(&dir, "m.ttl", GRAPH_MAPPING);
+    let (code, out, err) = run3(&[
+        "tabular",
+        s(&csv),
+        "--mapping",
+        s(&mapping),
+        "--query",
+        "SELECT ?g WHERE { GRAPH ?g { ?s <http://example.com/v> \"x\" } }",
+        "--format",
+        "tsv",
+    ]);
+    assert_eq!(code, 0, "stderr: {err}");
+    assert!(err.contains("loaded 2 quads"), "{err}");
+    assert!(out.contains("<http://example.com/g/red>"), "named graph must survive the load: {out}");
+    assert!(!out.contains("g/blue"), "{out}");
+}
+
+/// `--row-provenance` links each subject back to its source row, in both modes.
+#[test]
+fn row_provenance_direct_and_r2rml() {
+    let dir = scratch("row-provenance");
+    let csv = write(&dir, "emp.csv", "ID,name\n7,Ann\n");
+    let out_nt = dir.join("direct.nt");
+    let (code, _, err) = run3(&[
+        "tabular",
+        s(&csv),
+        "--template",
+        "http://example.com/emp/{ID}",
+        "--class",
+        "none",
+        "--row-provenance",
+        "--out",
+        s(&out_nt),
+    ]);
+    assert_eq!(code, 0, "stderr: {err}");
+    let got = triple_set(&std::fs::read_to_string(&out_nt).unwrap());
+    assert!(
+        got.contains(
+            &"<http://example.com/emp/7> <http://www.w3.org/ns/prov#wasDerivedFrom> <http://example.com/emp/row/1> ."
+                .to_string()
+        ),
+        "{got:?}"
+    );
+
+    let mapping = write(
+        &dir,
+        "m.ttl",
+        "@prefix rr: <http://www.w3.org/ns/r2rml#> .\n@prefix ex: <http://example.com/> .\n\
+         <#T> rr:logicalTable [ rr:tableName \"emp\" ] ;\n\
+           rr:subjectMap [ rr:template \"http://example.com/e/{ID}\" ] ;\n\
+           rr:predicateObjectMap [ rr:predicate ex:name ; rr:objectMap [ rr:column \"name\" ] ] .\n",
+    );
+    let out_nt = dir.join("r2rml.nt");
+    let (code, _, err) =
+        run3(&["tabular", s(&csv), "--mapping", s(&mapping), "--row-provenance", "--out", s(&out_nt)]);
+    assert_eq!(code, 0, "stderr: {err}");
+    let got = triple_set(&std::fs::read_to_string(&out_nt).unwrap());
+    assert_eq!(
+        got,
+        triple_set(
+            r#"<http://example.com/e/7> <http://example.com/name> "Ann" .
+<http://example.com/e/7> <http://www.w3.org/ns/prov#wasDerivedFrom> <http://example.com/emp/row/1> ."#
+        )
+    );
 }
 
 // ---------------------------------------------------------------------------

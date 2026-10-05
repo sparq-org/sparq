@@ -236,6 +236,7 @@ fn join_manifest() -> ProofManifest {
         // value in ZK. (Before sq-en5dx the Q6 gate was inert for cross-scan joins,
         // so this vec was empty; the `finding_a_*` negative test pins that fix.)
         attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![("p".to_string(), 0, 1)],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
@@ -338,6 +339,7 @@ fn multi_scan_manifest() -> ProofManifest {
             attest_full(cb, sb, &sk),
         ],
         attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
         // Cross-graph `?p` join (distinct commitments) ⇒ sq-en5dx Q6 obligation.
         join_obligations: vec![("p".to_string(), 0, 1)],
         entailment_regime: EntailmentRegime::Simple,
@@ -646,6 +648,7 @@ fn chain_manifest(shared_commitment: bool) -> ProofManifest {
             attest_full(gc.commitment, gc.salt, &sk),
         ],
         attributions: vec![vec![0], vec![0], vec![0]],
+        pattern_scans: vec![],
         // `?p` is joined cross-graph across ALL THREE distinct-commitment patterns,
         // so sq-en5dx's Q6 gate requires the non-bnode obligation on every pair.
         join_obligations: vec![
@@ -932,6 +935,7 @@ fn full_bb_join_accept_real_proof() {
             attest_full(gb.commitment, gb.salt, &sk),
         ],
         attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
         // Cross-graph `?p` join (distinct commitments) ⇒ sq-en5dx Q6 obligation.
         join_obligations: vec![("p".to_string(), 0, 1)],
         entailment_regime: EntailmentRegime::Simple,

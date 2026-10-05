@@ -18,10 +18,13 @@
 #   * REFUSES to touch the protected prod/dev instances.
 #   * results are ALSO cat'd to the console log by the instance script, so
 #     `aws ec2 get-console-output` recovers the envelopes even with no SSH pull.
+#   * [OPUS-5] sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
+#     uploads every envelope to a run-scoped S3 prefix (durable even when the AMI's serial
+#     console yields nothing, the AL2023/Nitro failure mode). Opt-in; inert without them.
 #
 # Usage:  AWS_PROFILE=pss scripts/bench/canonical-materialize-bench.sh [<branch>]
 #   env: REGION ITYPE LUBM_UNIVS MAT_ITERS TIMEOUT_S JAVA_XMX HDT WATCHDOG_S EBS_GB
-#        RESULTS_LOCAL
+#        RESULTS_LOCAL BENCH_IAM_PROFILE BENCH_RESULTS_S3
 # Results (materialize-lubm*/hdt-* envelopes) are SSH-pulled incrementally into
 # RESULTS_LOCAL (default ~/sparq-bench-results/canonical-<UTC-date>-materialize/);
 # vendor reviewed envelopes into bench/canonical-competitor-results/<date>/ + run
@@ -55,12 +58,20 @@ die() { printf '[canonical-materialize] ERROR: %s\n' "$*" >&2; exit 1; }
 command -v aws >/dev/null || die "aws CLI not found"
 mkdir -p "$RESULTS_LOCAL"
 
+# [OPUS-5] sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
+# Inert unless BOTH are exported; half-configured fails fast here rather than after a
+# multi-hour gather. See scripts/bench/bootstrap-bench-iam.sh (one-time maintainer setup).
+. "$SCRIPT_DIR/bench-result-egress.sh"
+bench_egress_preflight || die "S3 result egress is misconfigured (see the message above)"
+
 WORK="$(mktemp -d)"
 KEYFILE="$WORK/key"
 KEY_NAME="sparq-bench-canonical-mat-$$-${RANDOM}"
 INSTANCE_ID=""; SG_ID=""
 ssh-keygen -t ed25519 -N '' -f "$KEYFILE" -q
 SSHO="-i $KEYFILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
+# Run-scoped S3 prefix (empty when egress is off). KEY_NAME is already unique per run.
+EGRESS_URI="$(bench_egress_run_uri "$KEY_NAME")" || die "could not derive the S3 run prefix"
 
 cleanup() {
   set +e
@@ -129,6 +140,7 @@ echo "[user-data] checked out \$(git rev-parse --short HEAD)" | tee /dev/console
 # NOTE: this is an UNQUOTED heredoc, so keep comments free of backticks and dollar signs
 # or the launcher shell expands them into the rendered user-data.
 setsid nohup env HOME=/root USER=root LOGNAME=root \
+  BENCH_RESULTS_S3_URI="$EGRESS_URI" BENCH_EGRESS_REGION="$REGION" \
   LUBM_UNIVS="$LUBM_UNIVS" MAT_ITERS="$MAT_ITERS" TIMEOUT_S=$TIMEOUT_S JAVA_XMX=$JAVA_XMX HDT=$HDT \
   bash scripts/bench/canonical-materialize-gather-instance.sh >/var/log/gather.log 2>&1 < /dev/null &
 echo "[user-data] gather backgrounded (pid \$!); cloud-final returning" | tee /dev/console
@@ -141,10 +153,14 @@ UD_RAW=$(wc -c < "$WORK/userdata.sh")
 log "user-data raw=${UD_RAW}B (limit 16384B)"
 [ "$UD_RAW" -le 16384 ] || die "user-data ${UD_RAW}B exceeds 16384B — trim it"
 LAUNCH_ERR="$WORK/launch.err"
+# shellcheck disable=SC2046  # intentional word-split: bench_egress_launch_args emits either
+# nothing (egress off — the launch command is then byte-identical to before) or the two
+# words `--iam-instance-profile Name=<profile>`.
 INSTANCE_ID=$(aws ec2 run-instances --region "$REGION" --image-id "$AMI" --instance-type "$ITYPE" \
   --instance-initiated-shutdown-behavior terminate \
   --key-name "$KEY_NAME" --security-group-ids "$SG_ID" \
   --subnet-id "$SUBNET" --associate-public-ip-address \
+  $(bench_egress_launch_args) \
   --block-device-mappings "[{\"DeviceName\":\"/dev/sda1\",\"Ebs\":{\"VolumeSize\":${EBS_GB},\"VolumeType\":\"gp3\",\"DeleteOnTermination\":true}}]" \
   --tag-specifications "$TAGSPEC" \
   --user-data "file://$WORK/userdata.sh" \
@@ -192,6 +208,12 @@ while :; do
   fi
   [ "$STATE" = "terminated" ] && { log "instance terminated before sentinel — results may be partial"; break; }
 done
+
+# [OPUS-5] sq-ffaa9 — durable channel FIRST when configured: the box uploaded each
+# envelope to the run-scoped S3 prefix as it was produced, so this survives both a dead
+# SSH path AND an AMI whose serial console returns nothing usable (the AL2023/Nitro case
+# that left the x86_64 DiskANN gather unrecoverable). No-op when egress is off.
+bench_egress_pull "$EGRESS_URI" "$RESULTS_LOCAL/gather-out"
 
 # Recover the envelopes from the serial console (authoritative when SSH failed): each
 # envelope was cat'd between ===ENVELOPE-BEGIN <name>=== / ===ENVELOPE-END=== markers.

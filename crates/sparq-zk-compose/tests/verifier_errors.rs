@@ -124,6 +124,34 @@ fn check_error_display_covers_query_correctness_reasons() {
         &CheckError::AttributionMalformed { proof: 0, expected: 2, got: 1 },
         &["2", "1"],
     );
+    // [OPUS-5] sq-q9r5e follow-up: the explicit pattern→scan mapping's rejections.
+    assert_display_carries(
+        &CheckError::PatternScanArityMismatch { patterns: 2, declared: 1 },
+        &["pattern_scans", "2", "1"],
+    );
+    assert_display_carries(
+        &CheckError::PatternScanUnbound { pattern: 1 },
+        &["pattern_scans", "1"],
+    );
+    assert_display_carries(
+        &CheckError::PatternScanMismatch { pattern: 0, proof: 4 },
+        &["pattern_scans", "0", "4"],
+    );
+    assert_display_carries(
+        &CheckError::PatternScanUndeclared { proof: 3 },
+        &["pattern_scans", "3"],
+    );
+    // [OPUS-5] #5240: within-pattern repeated-variable slot equality.
+    assert_display_carries(
+        &CheckError::RepeatedSlotMismatch {
+            pattern: 0,
+            proof: 1,
+            row: 2,
+            variable: "v".into(),
+            slots: (0, 2),
+        },
+        &["v", "pattern", "row"],
+    );
 }
 
 #[test]

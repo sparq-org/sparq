@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — the published @jeswr/sparq browser/WASM bundle. -->
+<!-- [OPUS-4.8] sq-inzv: full-template README — the published @sparq-org/sparq browser/WASM bundle. -->
 # sparq-wasm
 
 The sparq parser + triplestore + SPARQL engine compiled to WebAssembly for the
@@ -8,7 +8,7 @@ with a minimal bundle (no rayon, no serde; results are serialised by hand to
 SPARQL 1.1 JSON).
 
 > Distributed via npm, not crates.io (`publish = false`). It is the source of the
-> published npm `@jeswr/sparq` bundle, packaged via `wasm-pack`, not a Rust library
+> published npm `@sparq-org/sparq` bundle, packaged via `wasm-pack`, not a Rust library
 > dependency.
 
 ## 🚀 Quickstart
@@ -48,11 +48,11 @@ const n = store.count("SELECT ?s WHERE { ?s a <http://ex/Person> }"); // lazy, n
   `REGEX`/`REPLACE` query is **rejected** (an `"unsupported SPARQL function"`
   `JsError`, not a silently-empty result). Build with `--features regex`, or prefer
   `CONTAINS` / `STRSTARTS` / `STRENDS`.
-- **Opt-in JSON-LD, SHACL, lazy counts.** `"jsonld"` parsing links `oxjsonld` and is
-  **OFF by default** to keep the lean bundle small (`--features jsonld`). The
-  `shacl` feature exposes a stateless `Store.validate(data, shapes, format)`
-  (a drop-in for `rdf-validate-shacl`), also OFF by default. The `count()` family is
-  **lazy** — counted straight from the sorted indexes with no per-solution row.
+- **Opt-in JSON-LD, SHACL, lazy counts.** `"jsonld"` parsing links `oxjsonld` and is **OFF by default** to keep the
+  lean bundle small (`--features jsonld`). The `shacl` feature (also OFF) exposes the stateless
+  `Store.validate(data, shapes, format)` (a drop-in for `rdf-validate-shacl`) and the store-backed
+  `Store.validateStore(shapes, format)`, which validates the triples the store ALREADY holds (repeat validation
+  re-parses only the shapes). The `count()` family is **lazy** — counted from the sorted indexes, no per-row work.
 - **Opt-in serialiser.** The `serialize-rdf` feature (OFF by default) exposes
   `Store.serialize(format, pretty, indent, abbreviate, prefixes?)` — the store's contents
   as a **Turtle** (default graph), **TriG** (whole dataset), or **JSON-LD** (whole dataset)

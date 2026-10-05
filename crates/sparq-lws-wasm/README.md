@@ -6,8 +6,9 @@ owns a single-threaded in-memory pod and drives the real axum router as a Tower
 service. The JavaScript host supplies the HTTP listener and authenticated WebID.
 
 > This local-development adapter is not a production Solid server. Storage is
-> process-local and ephemeral; TLS and OIDC verification stay in the host; PoP,
-> notifications, networking, and persistent backends are excluded from wasm.
+> in linear memory and ephemeral unless the host opts into snapshots; TLS and
+> OIDC verification stay in the host; PoP, notifications, networking, and remote
+> storage backends are excluded from wasm.
 
 ## 🚀 Quickstart
 
@@ -15,12 +16,12 @@ service. The JavaScript host supplies the HTTP listener and authenticated WebID.
 wasm-pack build crates/sparq-lws-wasm --target web
 ```
 
-The `@jeswr/solid-server` workspace package stages the generated JavaScript,
+The `@sparq-org/solid-server` workspace package stages the generated JavaScript,
 TypeScript declarations, and wasm binary in its own `wasm/` directory:
 
 ```sh
-npm --workspace @jeswr/solid-server run build:lws-wasm
-npm --workspace @jeswr/solid-server run build:lws-wasm-core
+npm --workspace @sparq-org/solid-server run build:lws-wasm
+npm --workspace @sparq-org/solid-server run build:lws-wasm-core
 ```
 
 The first command enables the [GPT-5.6] `sparql-endpoint` passthrough and stages
@@ -66,6 +67,14 @@ console.log(response.status);
   the counters and the knob. The total is of live bytes rather than pages ever grown, so
   bytes returned to the allocator restore headroom — but that an LDP `DELETE` frees enough
   to re-admit a refused request is not yet demonstrated end to end.
+- [GPT-5.6] Persistence is opt-in and lives behind the same `Store` trait.
+  `SolidServer.withSnapshot(baseUrl, ownerWebid, bytes)` builds the pod behind a
+  journaling store decorator; `snapshot()` returns the bytes the host writes to
+  `node:fs` or IndexedDB, and handing them back to `withSnapshot` rebuilds the
+  pod's contents after a listener restart. `new SolidServer(...)` is unchanged
+  and journals nothing, so `snapshot()` is `undefined` for it. Restart preserves
+  the content-derived `ETag` but re-stamps `Last-Modified`; the host owns the
+  durable medium and the flush policy.
 - No Tokio reactor, native listener, filesystem, TLS, OIDC verifier, PoP,
   notifications, or network backend is linked into the wasm artifact.
 
@@ -75,7 +84,7 @@ console.log(response.status);
   [`skills/javascript-wasm/SKILL.md`](../../skills/javascript-wasm/SKILL.md).
 - Portable request core: [`sparq-lws-core`](../sparq-lws-core/README.md), built
   with its default-off `wasm` feature.
-- [GPT-5.6] The [`@jeswr/solid-server`](../../packages/solid-server/) package owns
+- [GPT-5.6] The [`@sparq-org/solid-server`](../../packages/solid-server/) package owns
   the loopback Node listener and `npx` entry. Its fixed-owner mode is for local
   development only; OIDC verification remains outside this wasm crate.
 - [SONNET-4.6] The Node host catches `WebAssembly.RuntimeError` and recycles the

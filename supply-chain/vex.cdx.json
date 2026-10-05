@@ -12,7 +12,7 @@
     "supplier": {
       "name": "Jesse Wright",
       "url": [
-        "https://github.com/jeswr/sparq"
+        "https://github.com/sparq-org/sparq"
       ]
     }
   },
@@ -20,11 +20,16 @@
     "[OPUS-4.8] sq-toze.3 (GX-2): VEX justifying the advisories that cargo-deny is configured",
     "to ignore in deny.toml. KEEP THIS IN SYNC WITH deny.toml [advisories].ignore — each entry",
     "here corresponds 1:1 to an ignore there, with the same justification.",
-    "[OPUS-4.8] sq-g2xs: the sole prior entry, RUSTSEC-2025-0134 (`rustls-pemfile`), was REMOVED:",
-    "the federation HTTP client was migrated ureq 2 -> ureq 3, whose rustls-native-certs 0.8 no",
-    "longer depends on the archived `rustls-pemfile` (its code moved into rustls-pki-types'",
-    "PemObject). The crate left the tree, the deny.toml ignore was dropped, and this VEX entry was",
-    "removed to keep the 1:1 invariant. When a future advisory needs a justified ignore, add the",
+    "[OPUS-5] sq-5ah3p: RUSTSEC-2025-0134 (`rustls-pemfile`) is REMOVED AGAIN, and for the second",
+    "time by deletion rather than tolerance. It first left under sq-g2xs when the federation HTTP",
+    "client moved ureq 2 -> ureq 3 (rustls-native-certs 0.8 dropped the archived crate); it returned",
+    "with the solid-server-rs import, which parsed its mTLS PEM material through rustls-pemfile 2.",
+    "sparq-lws-core's `tls.rs` and sparq-server's `main.rs` now call rustls-pki-types' `PemObject`",
+    "directly through rustls' own `pki_types` re-export, so no workspace crate declares the archived",
+    "shim and it is absent from Cargo.lock. The deny.toml ignore, the cargo-vet exemption and this",
+    "VEX statement were dropped together to keep the 1:1 invariant, and the gate now re-flags any",
+    "regression that reintroduces the crate.",
+    "When a future advisory needs a justified ignore, add the",
     "deny.toml ignore AND the matching VEX statement here together, with the HONEST analysis.state",
     "(`not_affected` ONLY when genuinely so; `exploitable` when the vulnerable code is present and",
     "reachable but cannot be fixed at sparq's level yet).",
@@ -62,36 +67,6 @@
           "will_not_fix"
         ],
         "detail": "The advisory describes project maintenance status rather than vulnerable behavior, so there is no exploit path to reach. The proc macro is present only while compiling the opt-in parquet dependency closure and is absent from default sparq-arrow, lean core, and WebAssembly builds. Follow-up bead sq-cx4w2 tracks parquet upstream; remove this statement and the matching deny.toml ignore together once parquet drops paste."
-      },
-      "affects": [
-        {
-          "ref": "pkg:cargo/sparq"
-        }
-      ]
-    },
-    {
-      "id": "RUSTSEC-2025-0134",
-      "source": {
-        "name": "RustSec",
-        "url": "https://rustsec.org/advisories/RUSTSEC-2025-0134"
-      },
-      "ratings": [
-        {
-          "source": {
-            "name": "RustSec"
-          },
-          "severity": "none"
-        }
-      ],
-      "description": "rustls-pemfile is unmaintained (archived): its PEM-parsing functionality moved into rustls-pki-types' PemObject API. This is an informational 'unmaintained' advisory - there is no vulnerability, no CVE, and no known exploit; the crate is a small, stable PEM decoder.",
-      "detail": "Re-added for the solid-server-rs import pre-flight (bead sq-gg0qq.1, epic sq-gg0qq): the imported server's mTLS serve path parses the PEM certificate chain + private key via rustls-pemfile 2 into the DER types that rustls' with_client_cert_verifier(..).with_single_cert(..) builder needs, exactly as upstream jeswr/solid-server-rs ships it. The crate was previously in the tree via ureq 2 and this same advisory was tolerated until sq-g2xs removed it (ureq 3 dropped the dep); this statement restores the same justification for the incoming crates.",
-      "analysis": {
-        "state": "not_affected",
-        "justification": "code_not_reachable",
-        "response": [
-          "will_not_fix"
-        ],
-        "detail": "Honest scope: 'unmaintained' is an advisory ABOUT maintenance status, not an exploitable flaw - there is no vulnerable code path to reach. The parser handles operator-supplied local PEM files (TLS cert/key material), not untrusted network input. Planned remediation: migrate the imported mTLS path to rustls-pki-types' PemObject (the maintained successor API, already in the tree) in follow-up bead sq-5ah3p, then remove this statement AND the matching deny.toml [advisories].ignore entry together. Mirrors the deny.toml ignore entry (same reason)."
       },
       "affects": [
         {

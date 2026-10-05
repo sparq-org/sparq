@@ -127,13 +127,20 @@ fn reason_n3_query_selects_over_closure() {
     assert!(nt.contains(SOC_HUMAN_NT), "asserted Human selected: {nt}");
 }
 
-/// A query using an unsupported builtin fails closed in wasm too.
+/// [OPUS-5] sq-xqchl.1 (GH #3144) — a builtin in the query premise is EVALUATED in wasm too
+/// (it used to fail closed), and it FILTERS: `:b` is 12, so only `:a` answers.
 #[wasm_bindgen_test]
-fn reason_n3_query_builtin_fails_closed() {
+fn reason_n3_query_evaluates_a_premise_builtin() {
     let q = r#"@prefix math: <http://www.w3.org/2000/10/swap/math#>.
 @prefix : <http://ex/>.
-{ ?x :age ?a. ?a math:greaterThan 18 } => { ?x a :Adult }."#;
-    assert!(Reasoner::reason_n3_query("@prefix : <http://ex/>. :a :age 21 .", q).is_err());
+{ ?x :age ?n. ?n math:greaterThan 18 } => { ?x a :Adult }."#;
+    let nt = Reasoner::reason_n3_query("@prefix : <http://ex/>. :a :age 21 . :b :age 12 .", q)
+        .expect("builtin query filter in wasm");
+    assert!(
+        nt.contains("<http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://ex/Adult> ."),
+        "{nt}"
+    );
+    assert!(!nt.contains("<http://ex/b>"), ":b is 12 — the builtin must filter it out: {nt}");
 }
 
 /// `why` (only compiled with the `explain` feature) returns a proof tree for the entailed

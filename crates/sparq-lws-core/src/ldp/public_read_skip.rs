@@ -1,5 +1,6 @@
 // AUTHORED-BY Claude Opus 4.8
-//! Pre-crypto PUBLIC-READ skip (skip-crypto optimization, opt 3 of `decisions/0002`).
+//! Pre-crypto PUBLIC-READ skip (skip-crypto optimization, opt 3 of `research/lws-design-records.md`
+//! §5; RSS `decisions/0002`).
 //!
 //! For a read whose response is **fully identity-independent** — there is no caller identity to
 //! resolve (no `Authorization` header) and the effective ACL grants the PUBLIC `acl:Read` — this thin
@@ -28,10 +29,11 @@
 //!    and safe (forged WebID is ignored): the two collapse without the verify.
 //!
 //! Therefore opt-3 is scoped to the genuinely-anonymous case. (Why opt-3-for-CREDENTIALED-reads is
-//! UNSAFE — and opt 1/2 — is recorded in full in `decisions/0002`.) The `DPoP` header is ALSO a
-//! fall-through trigger so a no-`Authorization` GET carrying a malformed `DPoP` header keeps the auth
-//! path's canonical `400` (which it rejects even without `Authorization`) rather than being served as
-//! anonymous here.
+//! UNSAFE — and opt 1/2 — is recorded in full in RSS `decisions/0002`, which is NOT in this tree
+//! and is NOT reconstructed by `research/lws-design-records.md` §5.) The `DPoP` header is ALSO a
+//! fall-through trigger so a no-`Authorization` GET carrying a malformed `DPoP` header keeps the
+//! auth path's canonical `400` (which it rejects even without `Authorization`) rather than being
+//! served as anonymous here.
 //!
 //! ## Method scope — GET/HEAD ONLY
 //! Even within the no-`Authorization` case it fires for GET/HEAD only; every other verb passes

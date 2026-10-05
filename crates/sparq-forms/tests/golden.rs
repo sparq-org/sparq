@@ -58,3 +58,12 @@ fn golden_enum_nested() {
 fn golden_inverse_multi() {
     check("inverse_multi", "apollo", &FormOptions::default());
 }
+
+/// [OPUS-4.8] sq-vfcxv: predicate-target applicability — sh:targetSubjectsOf
+/// and sh:targetObjectsOf join the switcher, ranked below
+/// dash:applicableToClass (which therefore stays the selected shape), and a
+/// predicate target whose predicate the focus node does not carry stays out.
+#[test]
+fn golden_predicate_targets() {
+    check("predicate_targets", "alice", &FormOptions::default());
+}

@@ -1,9 +1,9 @@
 // [OPUS-4.8] sq-jpki.2 — single-source-of-truth conformance assertion for the wasm `Store`
-// surface, from the `js/` (`@jeswr/sparq`) side.
+// surface, from the `js/` (`@sparq-org/sparq`) side.
 //
-// `@jeswr/sparq` types the wasm engine against the generated `Store` surface it SHIPS
+// `@sparq-org/sparq` types the wasm engine against the generated `Store` surface it SHIPS
 // (`js/wasm/sparq_wasm.d.ts`, in the publish `files` allowlist), so a TypeScript consumer of
-// `@jeswr/sparq` needs no other package. The shared `@sparq/client` workspace package
+// `@sparq-org/sparq` needs no other package. The shared `@sparq/client` workspace package
 // re-exports the SAME generated surface (from its tracked `src/generated/sparq_wasm.d.ts`) so
 // the site and the (proposed) GUI consume one canonical type (research/gui-design.md §0/§4).
 //
@@ -18,7 +18,7 @@
 //
 // It is DEV-ONLY: typechecked via `tsconfig.conformance.json` (`noEmit`) and EXCLUDED from the
 // published `tsc` emit (`tsconfig.json`), so nothing here reaches `js/dist/` and the published
-// `@jeswr/sparq` never references the private `@sparq/client` package. No runtime code.
+// `@sparq-org/sparq` never references the private `@sparq/client` package. No runtime code.
 
 import type { Store as ShippedStore, SolutionCursor as ShippedCursor } from '../wasm/sparq_wasm.js';
 import type {
@@ -38,13 +38,13 @@ type Interchangeable<A, B> = Assignable<A, B> extends true
   : false;
 
 // `Expect<true>` fails to typecheck if its argument is not exactly `true` — so each surface
-// below must be interchangeable between the shipped (`@jeswr/sparq`) and shared
+// below must be interchangeable between the shipped (`@sparq-org/sparq`) and shared
 // (`@sparq/client`) copies.
 type Expect<T extends true> = T;
 
 // The `Store` instance surface, the `SolutionCursor` it returns, and the static (constructor)
 // surface — the `new Store()` constructor plus the `load` / `loadWithBase` / `loadDataset` /
-// `loadCompressed` factories `@jeswr/sparq`'s `SparqStore` invokes — must all match across the
+// `loadCompressed` factories `@sparq-org/sparq`'s `SparqStore` invokes — must all match across the
 // two copies.
 type _StoreConforms = Expect<Interchangeable<ShippedStore, SharedStore>>;
 type _CursorConforms = Expect<Interchangeable<ShippedCursor, SharedCursor>>;

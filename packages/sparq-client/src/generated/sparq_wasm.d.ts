@@ -119,6 +119,30 @@ export class Store {
      */
     count(sparql: string): number;
     /**
+     * [SONNET-4.6] sq-q4apb (#2396): derives one complete `FormDescription`
+     * (SHACL-to-form, DASH widget scoring) from serialized workspace snapshots —
+     * the hosted-web half of the GUI forms bridge (desktop uses the Tauri
+     * `derive_form` command; `forms-bridge.ts` feature-detects this method).
+     *
+     * `data` / `shapes` are RDF documents in `format` (the syntaxes
+     * [`Store::load`] accepts; named graphs are preserved dataset-style).
+     * `focus` is an absolute IRI or a `_:`-prefixed blank-node label.
+     * `options_json` is the snake_case `{"mode": "edit"|"view", "shape"?: …}`
+     * object described in the module docs. Stateless one-shot: the receiver's
+     * stored triples are not consulted.
+     *
+     * Returns the derived `FormDescription` as its serde JSON string, verbatim
+     * (`JSON.parse` it on the JS side; the frontend must not reconstruct keys,
+     * groups, or widgets). Errors — an unparseable graph, focus, shape, or
+     * options document — throw a `JsError`; there is no demo-data fallback.
+     *
+     * Available only when the crate is built with the OPT-IN `forms` feature —
+     * the hosted `/app` + site bundle (js `build:wasm`) enables it; the lean
+     * default bundle does not, and there this method is simply absent (which is
+     * exactly what `forms-bridge.ts` feature-detects).
+     */
+    deriveForm(data: string, shapes: string, focus: string, format: string, options_json: string): string;
+    /**
      * [OPUS-4.8] sq-ncvq.14: query-plan introspection — `EXPLAIN`.
      *
      * Returns the engine's plan for `sparql` as a human-readable string — the
@@ -461,7 +485,9 @@ export class Store {
      * stateless one-shot — it does not consult the receiver's stored triples —
      * so it is the drop-in replacement for `rdf-validate-shacl`'s
      * `validate(dataDataset, { shapes })`: validation runs through
-     * `sparq-shacl`'s SHACL Core + SHACL-SPARQL (`sh:sparql`, §5.2) engine.
+     * `sparq-shacl`'s SHACL Core + SHACL-SPARQL (`sh:sparql`, §5.2) engine. To
+     * validate the triples the store already holds instead, use
+     * [`validate_store`](Self::validate_store) (`validateStore`).
      *
      * Returns a JSON object `{ conforms: boolean, results: [...] }`; each result
      * has `focusNode`, `path`, `value`, `sourceShape`,
@@ -480,6 +506,34 @@ export class Store {
      * graphs are dropped when the call returns.
      */
     validate(data: string, shapes: string, format: string): string;
+    /**
+     * [SONNET-4.6] gh-2520: validates the triples **already loaded in this
+     * store** against a SHACL shapes document, returning the same JSON report
+     * [`validate`](Self::validate) does.
+     *
+     * This is the stateful counterpart of [`validate`](Self::validate): the data
+     * graph is the receiver's own contents (whatever `load` / `loadDataset` /
+     * `update` / `applyDelta` left in it), so a repeat validation — the same
+     * store re-checked as shapes are edited — parses only the *shapes* document
+     * per call instead of re-parsing the data document every time. `shapes` is an
+     * RDF document in any syntax [`Store::load`] accepts (`"turtle"` |
+     * `"ntriples"` | `"nquads"` | `"trig"`); the report shape, `sh:conforms`
+     * semantics and error behaviour are identical to
+     * [`validate`](Self::validate)'s (only a shapes parse failure errors —
+     * malformed shapes are skipped by the engine, never surfaced). Given the same
+     * two documents the two methods report the same results, *up to blank-node
+     * labels*: parsing a shapes document mints fresh labels, so a `sourceShape`
+     * naming an anonymous property shape (`_:…`) differs between any two calls —
+     * of either method. Treat those labels as per-call identifiers, not stable keys.
+     *
+     * **Scope:** validation observes the store's **default graph** only. Triples
+     * loaded into named graphs by [`load_dataset`](Self::load_dataset) are not
+     * focus-node candidates or value nodes here — `load` folds named graphs into
+     * the default graph, so a store built that way validates in full. The wasm
+     * linear-memory ceiling still applies: validating a very large store is
+     * better done server-side (the `sparq-server` HTTP `validate` path).
+     */
+    validateStore(shapes: string, format: string): string;
     /**
      * The number of (deduplicated) triples in the store.
      */
@@ -518,6 +572,7 @@ export interface InitOutput {
     readonly store_ask: (a: number, b: number, c: number) => [number, number, number];
     readonly store_askWithMaxRows: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly store_count: (a: number, b: number, c: number) => [number, number, number];
+    readonly store_deriveForm: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number, number, number];
     readonly store_explain: (a: number, b: number, c: number) => [number, number, number, number];
     readonly store_explainAnalyze: (a: number, b: number, c: number) => [number, number, number, number];
     readonly store_explainPlanAnalyzeJson: (a: number, b: number, c: number) => [number, number, number, number];
@@ -542,6 +597,7 @@ export interface InitOutput {
     readonly store_update: (a: number, b: number, c: number) => [number, number, number];
     readonly store_updateInPlace: (a: number, b: number, c: number) => [number, number];
     readonly store_validate: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number, number, number];
+    readonly store_validateStore: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly querychunks_next: (a: number) => [number, number];
     readonly __wbg_querychunks_free: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

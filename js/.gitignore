@@ -1,6 +1,9 @@
 node_modules/
 dist/
 wasm/
+# The `--target nodejs` (CommonJS) sibling of `wasm/`, built by `build:wasm:node`
+# and shipped in the tarball for `require()` consumers. [OPUS-5] sq-2hk
+wasm-node/
 *.tgz
 # Agent-Skills usage docs copied in at prepack time (single-sourced at repo root:
 # ../skills, ../AGENTS.md) so they ship in the npm tarball. [OPUS-4.8]

@@ -214,8 +214,39 @@ jobs:
             # derives ci-fix admission from the PR's gate STATE and treats
             # needs:* PR labels as human-owned holds that EXCLUDE the PR from
             # the repair enumeration — a label here would suppress the fix.
-            echo "::notice::REGISTRY_RING_TOKEN unavailable (secret unconfigured) — cannot ring; the registry cron (every ~10 min) is the backstop."
-            exit 0
+            #
+            # FAIL LOUD (#4966), was `::notice::` + exit 0. REGISTRY_RING_TOKEN has
+            # never existed at repo or org level — MEASURED from a runtime env dump
+            # (`GH_TOKEN: ***` masked-and-present vs `REGISTRY_RING_TOKEN:` empty) —
+            # so this branch has taken EVERY ring this workflow ever computed: ~130
+            # suppressed across 1969 runs, each reporting SUCCESS. A control that is
+            # disabled by missing configuration and green about it is indistinguishable
+            # from one that works, which is exactly how this stayed invisible.
+            #
+            # This is the LAST guard, after every eligibility check above has already
+            # passed, so a non-zero exit here means precisely "a ring was warranted and
+            # could not be sent" — a true positive every time, never a false alarm on an
+            # ineligible PR.
+            #
+            # BLAST RADIUS (why a hard failure is safe here). This job is DECLARED in
+            # .github/advisory-registry.json ("fast-fix ring (advisory)"), the only
+            # thing that makes a check-run non-gating since #3773, so it cannot red
+            # `ci-summary / gate`. And `workflow_run` runs execute on the DEFAULT
+            # BRANCH: this run's check-run lands on the main head SHA, never on a PR or
+            # merge_group head — MEASURED on main head 2cbf37359, where both this lane
+            # and `ring registry dispatcher` are present. So no PR is redded by this.
+            # Pinned by scripts/tests/test_ring_credential_loud.py.
+            echo "::error title=fast-fix ring suppressed::REGISTRY_RING_TOKEN is not configured, so the cross-repo doorbell for PR #${PR_NUMBER} could NOT be sent. This job's ONE write capability is unavailable; the registry cron (~10 min) is the only remaining backstop. Provision the secret (or switch this lane to the ORCHESTRATOR_APP_* credentials already present in this repo) — or delete this job if the ring is no longer wanted."
+            {
+              echo "### fast-fix ring SUPPRESSED — REGISTRY_RING_TOKEN unset"
+              echo
+              echo "| field | value |"
+              echo "| --- | --- |"
+              echo "| PR | #${PR_NUMBER} |"
+              echo "| failing run head | \`${HEAD_SHA}\` |"
+              echo "| effect | repair sweep waits for the next ~10-min registry cron |"
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 1
           fi
           GH_TOKEN="${REGISTRY_RING_TOKEN}" gh workflow run dispatch.yml -R jeswr/agent-account-registry
           echo "rang jeswr/agent-account-registry dispatch for PR #${PR_NUMBER} — the repair sweep runs now instead of on the next cron tick."

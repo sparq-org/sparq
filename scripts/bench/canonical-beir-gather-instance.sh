@@ -21,7 +21,11 @@
 # scripts/gather-competitors.sh) + $RESULTS_DIR/gather-meta.json (box provenance).
 # Every envelope is ALSO cat'd into the gather log between ===ENVELOPE-BEGIN/END===
 # markers so `aws ec2 get-console-output` can recover results even if the SSH pull
-# path dies (envelopes are a few KB; recovered by scripts/bench/extract-console-envelopes.sh).
+# path dies (envelopes are a few KB; recovered by scripts/bench/extract-console-envelopes.sh)
+# and — when the launcher passed BENCH_RESULTS_S3_URI (sq-ffaa9) — uploaded to the
+# run-scoped S3 prefix as each CUT finishes, so a box that dies mid-gather has already
+# made its completed cuts durable; that is the one channel that survives an unusable
+# serial console.
 #
 # SENTINEL PROTOCOL (machine-enforced honesty): /root/GATHER_DONE is written ONLY
 # after every requested cut has a VALID-JSON envelope for BOTH engines (the
@@ -83,6 +87,11 @@ VENV="${BEIR_VENV_DIR:-/root/beir-venv}"
 SENTINEL_DIR="${SENTINEL_DIR:-/root}"
 
 step() { echo "[STEP $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a "$SENTINEL_DIR/GATHER_STEP" >&2; }
+
+# [OPUS-5] sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
+# unless the launcher passed BENCH_RESULTS_S3_URI in, so a run without the instance
+# profile attached behaves exactly as before (console + SSH pull only).
+. "$HERE/bench-result-egress.sh"
 
 mkdir -p "$RESULTS_DIR" "$BEIR_DATA_DIR"
 step "canonical BEIR gather start: cuts='$BEIR_CUTS' k=$BEIR_K commit=$(git rev-parse --short HEAD 2>/dev/null || echo '?')"
@@ -161,6 +170,10 @@ for cut in $BEIR_CUTS; do
   else
     step "WARN: gather exited non-zero for cut $cut — that cut stays NOT-MEASURED (a re-run action, never a sparq win)"
   fi
+  # Durable egress AS SOON AS this cut's envelopes exist — the box self-terminates, so a
+  # completed cut that waited for the remaining cuts (and for the validation/meta stages)
+  # would be LOST if the box died in between. No-op unless the launcher configured it.
+  bench_egress_sweep "$RESULTS_DIR"
 done
 
 # ---- 4. machine-enforced outcome validation (per cut, BOTH engines) ------------------
@@ -270,12 +283,16 @@ if [ "$META_OK" != 1 ]; then
   [ "$GATHER_STATUS" = "complete" ] && GATHER_STATUS="partial"
   step "WARN: gather-meta.json write/re-parse FAILED — no durable provenance, demoted to status=$GATHER_STATUS (NOT canonical)"
 fi
+bench_egress_sweep "$RESULTS_DIR"   # provenance out too, before the sentinel branch
 
-# ---- 6. console-output backstop + sentinel protocol ----------------------------------
+# ---- 6. egress RETRY sweep + console-output backstop + sentinel protocol --------------
 # The envelope dump runs in EVERY outcome — partial evidence must stay recoverable
 # from the serial console (scripts/bench/extract-console-envelopes.sh parses it).
+# The sweep here is the RETRY pass for uploads that failed at their per-cut attempt
+# (bench_egress_sweep skips what already landed), never the first attempt.
 step "envelopes in $RESULTS_DIR:"
 ls -la "$RESULTS_DIR" >&2 || true
+bench_egress_sweep "$RESULTS_DIR"
 for f in "$RESULTS_DIR"/*.json; do
   [ -f "$f" ] || continue
   echo "===ENVELOPE-BEGIN $(basename "$f")==="

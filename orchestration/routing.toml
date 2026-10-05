@@ -124,10 +124,52 @@ escalate = true                        # consumed by dispatch: on chain-exhausti
 # Cross-provider review flips automatically: opus5-authored implementation receives codex review,
 # and vice versa — so leading with opus5 also moves the review load onto sol, which is where the
 # spare credit actually is.
+
+# [OPUS-5] `role:impl` IS OPUS5-ONLY SINCE 2026-07-26 — sol was REMOVED, not demoted.
+#
+# MAINTAINER DECISION 2026-07-26, taken on the measurement in registry #738: "Remove sol from impl
+# fallback." This is a deliberate change from PREFERENCE to EXCLUSION and it applies to `role:impl`
+# AND NOTHING ELSE. The standing directive above still governs every other route: `role:site`,
+# `role:ci` and `role:perf` keep sol as a cross-provider fallback, `role:docs` keeps its sol LEAD
+# (the separate docs-writing directive), `role:gui` keeps its sol LEAD, and the review/soundness/
+# security lanes are untouched.
+#
+# WHAT WAS MEASURED (registry #738; `worker.yml`, n=74 runs in a 3h24m window, each issue's labels
+# reconstructed AS OF its run's timestamp so the #733 role-swap cannot manufacture the result):
+#   * `role:impl` first-attempt yield, SAME route, same agent brief, same prompt:
+#     sol 7/40 = 18%, opus5 12/14 = 86%.
+#   * 4 of 4 issues where sol left the tree unchanged and opus5 later ran THAT SAME issue, opus5
+#     produced a PR (#2411 -> PR #4271, #2639 -> #4234, #3110 -> #4294, #3210 -> #4226). No
+#     counterexample in either direction.
+#   * Every issue-side axis is ~4x weaker than the model axis. opus5 converted 6/7 on its own
+#     shortest-body quartile, MEDIAN BODY LENGTH 26 CHARACTERS — so "the issues are
+#     underspecified" does not explain the gap.
+#   * Budget exhaustion is REFUTED: the longest no-diff model step in the window was 177s against a
+#     90-minute worker timeout. sol stops VOLUNTARILY at ~60s median.
+#
+# WHY EXCLUSION RATHER THAN SECOND PLACE. The registry's `select-and-claim.choose_account` walks
+# `model_chain` IN ORDER and claims the first AVAILABLE account, so a second rung is not a
+# tie-break — it is what serves the request whenever the first rung is busy. opus5 holds an account
+# ~17 minutes per run and sol clears in ~1 minute, so during any dispatch burst the low-yield rung
+# served the majority of `role:impl` work. Re-ordering could not fix that; only removal can.
+#
+# THE EXIT — the same shape `role:research` uses, for the same reason. A single-rung chain with no
+# `escalate` has NO exit: on an opus5 capacity outage the item defers, and defers again, forever,
+# with nobody notified. So this route escalates. `escalate = true` is consumed by the registry's
+# `dispatch-claim.escalate_starved` + `escalate_persist_decision`: the FIRST starved tick counts
+# `escalate-tier-starved-transient`, keeps the issue `status:deferred`, and auto-retries as capacity
+# recovers; only CONTINUOUS starvation past the bounded grace is promoted to the MACHINE-owned
+# `status:parked` soft hold, which lifts by itself when capacity returns. It is NEVER `needs:user` —
+# capacity starvation is not a human question.
+#
+# COST, STATED SO IT IS NOT A SURPRISE: this converts a fast-failing fallback into queueing pressure
+# on a slower, scarcer tier. See the PR body for the measured opus5 concurrency and the honest
+# steady-state projection.
 [[route]]
 role = "impl"
-model_chain = ["opus5", "sol"]
+model_chain = ["opus5"]
 agent = "sparq-rust-impl"
+escalate = true
 
 # [FABLE-5] UI/front-end ownership (maintainer decision 2026-07-17): GPT-5.6 codex (openai; alias
 # `terra`) implemented the original registry dashboard UI (jeswr/agent-account-registry e4098b9)
@@ -273,13 +315,31 @@ escalate = true
 #             so this is PREFERENCE, NOT EXCLUSION and the chain still terminates cross-provider.
 #   requires  the rule fires ONLY when the chain ALREADY contains all of these — the directive's
 #             own "tasks for which they are BOTH possible implementors" qualifier. `lead` must be
-#             one of them, which is what makes RE-ORDER the only possible effect: the preference
-#             can never INJECT sol into `role:research` (["opus5"], deliberately anthropic-side and
-#             escalating) and turn a visible stall into a silent cross-provider hop.
+#             one of them, which is what makes RE-ORDER the only effect available WITHOUT an
+#             explicit `inject_roles` opt-in: the preference can never INJECT sol into
+#             `role:research` (["opus5"], deliberately anthropic-side and escalating) and turn a
+#             visible stall into a silent cross-provider hop.
+#   inject_roles
+#             the EXACT roles for which `lead` may be ADDED to a chain that lacks it, rather than
+#             only re-ordered. Absent => none, i.e. the original re-order-only rule.
+#
+# WHY `inject_roles` IS NOW REQUIRED HERE (registry #738, 2026-07-26). Re-ordering was sufficient
+# only while every affected route still HAD sol in its chain. `role:impl` is now `["opus5"]`, and a
+# `["opus5"]` chain does not contain sol — so the both-implementors condition DECLINES and the
+# carve-out goes INERT for all 33 open `area:gui` + `role:impl` issues, resolving them opus5-only.
+# That is the exact inversion of the maintainer's one stated exception that PR #4211 fixed, and it
+# has NO SYMPTOM: both resolvers agree on the wrong answer, so the PLAN/CLAIM agreement harness
+# reports nothing. `inject_roles = ["impl"]` is what keeps `area:gui` sol-first across that edit.
+#
+# The allow-list is deliberately minimal. `role:perf` / `role:site` / `role:ci` / `role:docs` still
+# contain sol, so they take the RE-ORDER path and are absent here. The registry mechanism REFUSES to
+# parse `research` / `review` / `soundness` in this field (chain_preference.INJECT_FORBIDDEN_ROLES),
+# so the escalating single-provider lanes cannot be made cross-provider even by editing this table.
 #
 # A SECURITY-override route is exempt on both sides: `area:gui` + `area:sparq-zk` is a ZK issue
-# first, and an implementor preference must never re-order a soundness chain.
+# first, and an implementor preference must never re-order OR extend a soundness chain.
 [[chain_preference]]
-labels   = ["area:gui"]
-lead     = "sol"
-requires = ["sol", "opus5"]
+labels       = ["area:gui"]
+lead         = "sol"
+requires     = ["sol", "opus5"]
+inject_roles = ["impl"]

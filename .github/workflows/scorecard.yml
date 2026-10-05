@@ -9,10 +9,11 @@
 # a solo-maintained, agent-driven repo with ruleset-based (not 2-reviewer) protection
 # — they are not actionable code-scanning alerts and merely polluted the dashboard
 # (the standing requirement is ZERO open code-scanning alerts). The `Vulnerabilities`
-# check likewise only re-surfaces the `unmaintained` RustSec advisory already
-# triaged-with-a-bead in `deny.toml` (RUSTSEC-2025-0134 rustls-pemfile / sq-g2xs)
-# — no fixable advisory. (RUSTSEC-2024-0436 `paste` / sq-l8bv was dropped: the GPU
-# stack no longer pulls `paste`, so it left the tree and the ignore was removed.)
+# check likewise only re-surfaces the `unmaintained`/availability RustSec advisories
+# already triaged-with-a-bead in `deny.toml` (RUSTSEC-2024-0436 `paste`, RUSTSEC-2025-0141
+# `bincode`, RUSTSEC-2026-0194/0195 `quick-xml`) — no fixable advisory. ([OPUS-5]
+# RUSTSEC-2025-0134 `rustls-pemfile` / sq-5ah3p is gone from this list: the mTLS PEM parse
+# migrated to `rustls-pki-types`' `PemObject`, so the archived crate left the tree.)
 # So Scorecard stays as
 # the badge/score; it no longer feeds code-scanning. See compliance/openssf/
 # gap-register.md (GX-OSSF-3) and compliance/cis/gap-register.md.
@@ -51,7 +52,7 @@ jobs:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:
           results_file: results.sarif
           results_format: sarif

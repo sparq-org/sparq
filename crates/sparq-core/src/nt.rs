@@ -101,6 +101,9 @@ fn as_nquads_err(e: String) -> String {
 #[cfg(feature = "parallel")]
 #[allow(clippy::type_complexity)]
 pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Vec<[Id; 3]>)>, String> {
+    // [OPUS-5] (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
+    // is scanned — the safety precondition of every `str_of` span extraction below. See `str_of`.
+    validate_chunk_utf8(bytes, "N-Quads")?;
     // `buckets` is in first-occurrence order of graph keys (push-on-first-sight); `index` maps a
     // key to its slot so repeated references to the same graph append to the one existing bucket.
     use std::collections::HashMap;
@@ -179,7 +182,7 @@ fn graph_key(b: &[u8], i: usize) -> Result<GraphKey, String> {
             }
             let start = i + 2;
             let j = blank_label_end(b, start);
-            Ok(GraphKey::Blank(str_of(&b[start..j])?.to_owned()))
+            Ok(GraphKey::Blank(str_of(&b[start..j]).to_owned()))
         }
         _ => Err(format!("N-Quads: graph name must be an IRI or blank node at byte {i}")),
     }
@@ -294,6 +297,9 @@ pub(crate) const SUBJ_PRED_CACHE_LEN: usize = 128;
 /// Parses a slice of complete N-Triples lines, interning each term and returning the
 /// id-triples. Errors carry the byte offset.
 pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String> {
+    // [OPUS-5] (sq-7d3dj.21) Establish the module's `CHUNK-UTF8` invariant ONCE, before any byte
+    // is scanned — the safety precondition of every `str_of` span extraction below. See `str_of`.
+    validate_chunk_utf8(bytes, "N-Triples")?;
     // [OPUS-4.8] (sq-7d3dj.2) Pre-size the id-triple output from the chunk's byte length so the
     // Vec does not re-grow (and copy) through ~log2(triples) doublings while parsing. Pure
     // capacity hint (see `AVG_NT_LINE_BYTES`); a tiny chunk (`< AVG_NT_LINE_BYTES` bytes) yields
@@ -432,9 +438,91 @@ fn next_line(b: &[u8], mut i: usize) -> usize {
     i
 }
 
+/// [OPUS-5] (sq-7d3dj.21) Establishes the module's `CHUNK-UTF8` invariant: proves the WHOLE
+/// chunk buffer is valid UTF-8 in ONE contiguous pass, so every subsequent span extraction
+/// (`str_of`) is O(1) instead of O(span). This is the safety precondition of the whole
+/// module — see the `CHUNK-UTF8` block on `str_of` — and is called at the TOP of both public
+/// entry points (`parse_chunk`, `parse_quads_chunk`) before any byte is scanned.
+///
+/// This is also STRICTER than the per-span validation it replaces: bytes OUTSIDE a term span
+/// (comments, the inter-term filler) are now validated too. N-Triples/N-Quads documents are
+/// defined to be UTF-8 (RDF 1.1 N-Triples §2, RDF 1.2 N-Quads §2), so rejecting a chunk with
+/// invalid UTF-8 anywhere is the conformant answer; the serial `oxttl` loader rejects such a
+/// document as well, so this moves the byte-level fast path TOWARD parity, not away from it.
+///
+/// Under the chunk-parallel loader each worker validates only ITS chunk. That is equivalent to
+/// validating the whole file, because the splitter (`newline_chunk_bounds`) cuts exclusively at
+/// `\n` — an ASCII byte, so no multi-byte character can straddle a cut. And it is fail-SAFE if
+/// that ever changed: a straddling character would make both chunks fail validation (a spurious
+/// rejection), never let an unvalidated span reach `str_of`.
+///
+/// `format` is the caller's grammar label (`"N-Triples"` / `"N-Quads"`) so the error message
+/// matches the rest of that entry point's diagnostics.
 #[inline]
-fn str_of(raw: &[u8]) -> Result<&str, String> {
-    std::str::from_utf8(raw).map_err(|_| "N-Triples: invalid UTF-8".to_string())
+fn validate_chunk_utf8(bytes: &[u8], format: &str) -> Result<(), String> {
+    if let Err(e) = std::str::from_utf8(bytes) {
+        // Positional `format!` args: the CodeQL `rust/unused-variable` query false-positives on
+        // inline captures. [OPUS-5]
+        return Err(format!("{}: invalid UTF-8 at byte {}", format, e.valid_up_to()));
+    }
+    Ok(())
+}
+
+/// Converts a term span of the chunk buffer to `&str` in O(1).
+///
+/// # `CHUNK-UTF8` — unsafe justification (sq-7d3dj.21; register row `src/nt.rs`)
+///
+/// This is NOT a threat-model **B5** site (hostile on-disk file → mmap → unchecked reinterpret).
+/// The input is an in-memory chunk that this process fully validates before any unchecked
+/// access, so hostile bytes produce a clean `Err` carrying a byte offset, never UB.
+///
+/// **Precondition.** `raw` is a subslice `b[x..y]` of the chunk buffer `b` that the calling
+/// entry point already proved valid UTF-8 via `validate_chunk_utf8`, and `x`/`y` are UTF-8
+/// character boundaries of `b`.
+///
+/// **Why the boundaries hold — the ASCII-delimiter argument.** Every span index this module
+/// produces is `0`, `b.len()`, or an index *at* or *immediately after* a byte the scanner
+/// matched literally against an ASCII constant: `<` `>` `"` `\` `_` `:` `.` `@`, the four
+/// whitespace bytes, or an `is_ascii_alphanumeric()` / `-` test. UTF-8 is self-synchronising —
+/// in a valid encoding every byte `< 0x80` is a complete one-byte character and can never be a
+/// continuation byte — so any position at or just past such a byte is a character boundary.
+/// Concretely, the four call sites, grouped by the scanner that produced the span:
+///
+/// * `decode` via `scan_delim` — `x = open + 1` where `b[open]` is `<` or `"`; `y` is the
+///   index where the scan found the ASCII closer (the only other loop exit runs off the end and
+///   returns `Err` before any span is taken). The `\` escape skip can only ever step over bytes,
+///   never change which byte the closer test matched.
+/// * `blank` and `graph_key` — `x = i + 2` past the ASCII `_:`; `y` from `blank_label_end`,
+///   which stops at an ASCII whitespace byte (or `b.len()`) and then backs over ASCII `.` bytes.
+/// * `literal`'s `@lang` tag — `x = after + 1` past the ASCII `@`; `y` is the first index whose
+///   byte fails `is_ascii_alphanumeric() || == b'-'`, i.e. either `b.len()` or the index OF a
+///   non-ASCII byte. A non-ASCII byte reached by scanning forward over ASCII bytes in a valid
+///   encoding is a LEAD byte, which is a character boundary.
+///
+/// Both halves of the precondition are therefore structural, not incidental. The invariant is
+/// module-local and cheap to audit: `nt` has exactly two public entry points and both validate
+/// on their first line.
+///
+/// **How it is bounded.** The `debug_assert!` below re-checks the full precondition on every
+/// call in every debug/test build; the nightly `miri` lane interprets this module's tests under
+/// Tree Borrows, where an invalid `&str` produced here is caught as UB; and the
+/// `parse_chunk_rejects_invalid_utf8` / `parse_quads_chunk_rejects_invalid_utf8` tests pin the
+/// entry-point validation while `multibyte_spans_at_every_delimiter_round_trip`,
+/// `escaped_and_multibyte_literal_span_round_trips` and
+/// `language_tag_terminated_by_multibyte_errors_cleanly` pin the boundary argument at each
+/// delimiter (each mutation-checked: mis-cutting a span end by one byte reds them).
+#[inline]
+fn str_of(raw: &[u8]) -> &str {
+    debug_assert!(
+        std::str::from_utf8(raw).is_ok(),
+        "nt CHUNK-UTF8 invariant violated: a term span was not valid UTF-8 — the entry point \
+         must call validate_chunk_utf8 before any span is taken (sq-7d3dj.21)"
+    );
+    // SAFETY: `raw` is an ASCII-delimited span of a buffer `validate_chunk_utf8` already proved
+    // is valid UTF-8, so both span ends are character boundaries and the span is itself valid
+    // UTF-8 — see the `CHUNK-UTF8` justification above for the per-call-site argument. The
+    // `debug_assert!` re-checks it on every debug/test call and the `miri` lane interprets it.
+    unsafe { std::str::from_utf8_unchecked(raw) }
 }
 
 fn term(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
@@ -526,7 +614,7 @@ fn scan_delim(b: &[u8], open: usize, close: u8) -> Result<(usize, usize, bool, u
 }
 
 fn decode<'a>(raw: &'a [u8], esc: bool) -> Result<Cow<'a, str>, String> {
-    let s = str_of(raw)?;
+    let s = str_of(raw);
     if esc {
         Ok(Cow::Owned(unescape(s)?))
     } else {
@@ -587,7 +675,7 @@ fn blank(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     }
     let start = i + 2;
     let j = blank_label_end(b, start);
-    Ok((dict.intern_blank(str_of(&b[start..j])?), j))
+    Ok((dict.intern_blank(str_of(&b[start..j])), j))
 }
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
@@ -631,7 +719,7 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
             }
             // RDF 1.2 `@lang--dir` keeps the combined slot (the dict's stored encoding)
             // but is typed rdf:dirLangString.
-            let raw = str_of(&b[lstart..j])?;
+            let raw = str_of(&b[lstart..j]);
             let dt = if raw.contains("--") { RDF_DIR_LANG_STRING } else { RDF_LANG_STRING };
             // [OPUS-4.8] (sq-langcase / KamiQuasi #1119) NORMALISE the language tag to ASCII
             // lowercase, matching the oxttl/oxrdf paths (`Literal::new_language_tagged_literal`
@@ -1237,6 +1325,143 @@ mod tests {
             triples[0][2], triples[1][2],
             "distinct objects must get distinct ids"
         );
+    }
+
+    // ---- sq-7d3dj.21 — the `CHUNK-UTF8` unsafe invariant ---------------------------------
+    // `str_of` converts a term span with `from_utf8_unchecked`, relying on (i) the entry point
+    // having proved the WHOLE chunk is valid UTF-8 and (ii) every span end being an ASCII
+    // delimiter, hence a character boundary. These tests pin BOTH halves. Under the nightly
+    // `miri` lane they are also the UB canary: an invalid `&str` minted here is caught as UB,
+    // and in any debug/test build `str_of`'s `debug_assert!` re-checks the precondition on
+    // every single call — so every test in this module is really an invariant check too.
+
+    /// Multi-byte UTF-8 pressed directly against EVERY span delimiter the parser cuts on
+    /// (`<`/`>`, `"`/`"`, `_:`, `^^<>`), round-tripping byte-exactly. If any span end were
+    /// mis-computed to land mid-codepoint, `str_of`'s `debug_assert!` fires here (and Miri
+    /// reports UB in a release-shaped interpretation). [OPUS-5]
+    #[test]
+    fn multibyte_spans_at_every_delimiter_round_trip() {
+        // `é` (U+00E9, 2 bytes), `→` (U+2192, 3 bytes), `𝔄` (U+1D504, 4 bytes) — one of each
+        // UTF-8 length, each adjacent to a delimiter.
+        let input = concat!(
+            "<http://ex/é> <http://ex/→> \"𝔄\" .\n",
+            "_:é <http://ex/p> \"é→𝔄\"@en .\n",
+            "<http://ex/𝔄> <http://ex/p> \"→\"^^<http://ex/dt𝔄> .\n",
+        );
+        let mut dict = Dict::new();
+        let triples = parse_chunk(input.as_bytes(), &mut dict).expect("multi-byte terms must parse");
+        assert_eq!(triples.len(), 3);
+        // Reconstruct every term and compare against the exact source text: a mis-cut span
+        // would surface as a truncated / replacement-charred string, not just as UB.
+        assert_eq!(dict.term(triples[0][0]), iri("http://ex/é"));
+        assert_eq!(dict.term(triples[0][1]), iri("http://ex/→"));
+        assert_eq!(dict.term(triples[0][2]), Term::Literal(Literal::new_simple_literal("𝔄")));
+        assert_eq!(dict.term(triples[1][0]), Term::BlankNode(BlankNode::new_unchecked("é")));
+        assert_eq!(
+            dict.term(triples[1][2]),
+            Term::Literal(Literal::new_language_tagged_literal_unchecked("é→𝔄", "en"))
+        );
+        assert_eq!(dict.term(triples[2][0]), iri("http://ex/𝔄"));
+        assert_eq!(
+            dict.term(triples[2][2]),
+            Term::Literal(Literal::new_typed_literal("→", NamedNode::new_unchecked("http://ex/dt𝔄")))
+        );
+    }
+
+    /// The escape slow path (`decode` with `esc == true`) over a span that ALSO carries raw
+    /// multi-byte bytes: the `\` skip in `scan_delim` must not move the closer match off a
+    /// character boundary. [OPUS-5]
+    #[test]
+    fn escaped_and_multibyte_literal_span_round_trips() {
+        let input = "<http://ex/s> <http://ex/p> \"caf\\u00E9 → \\\"é\\\"\" .\n";
+        let mut dict = Dict::new();
+        let triples = parse_chunk(input.as_bytes(), &mut dict).expect("escaped multi-byte literal must parse");
+        assert_eq!(
+            dict.term(triples[0][2]),
+            Term::Literal(Literal::new_simple_literal("café → \"é\""))
+        );
+    }
+
+    /// A language tag terminated by a MULTI-BYTE byte is the one span end that is not an ASCII
+    /// delimiter but the index OF a non-ASCII lead byte — still a character boundary. The parse
+    /// must fail CLEANLY (the byte is not a valid statement terminator), never trip the
+    /// `debug_assert!` and never mis-slice. [OPUS-5]
+    #[test]
+    fn language_tag_terminated_by_multibyte_errors_cleanly() {
+        let input = "<http://ex/s> <http://ex/p> \"x\"@ené .\n";
+        let mut dict = Dict::new();
+        let err = parse_chunk(input.as_bytes(), &mut dict).expect_err("a non-terminator after @lang must error");
+        assert!(err.contains("expected '.'"), "unexpected error: {}", err);
+    }
+
+    /// Entry-point validation, half (i): a chunk carrying invalid UTF-8 is REJECTED before any
+    /// span is taken, with the offending byte offset. Covers a bad byte inside an IRI, inside a
+    /// literal, and — the deliberately STRICTER case — inside a comment, i.e. outside any term
+    /// span. N-Triples documents are defined to be UTF-8, so all three are conformant
+    /// rejections and match what the serial `oxttl` loader does. [OPUS-5]
+    #[test]
+    fn parse_chunk_rejects_invalid_utf8() {
+        // (label, prefix, the invalid byte, suffix) — the expected `valid_up_to` offset is
+        // `prefix.len()`, derived rather than hand-counted so the cases cannot drift.
+        let cases: [(&str, &[u8], u8, &[u8]); 3] = [
+            // A byte that is never valid anywhere in UTF-8.
+            ("inside an IRI", b"<http://ex/", 0xFF, b"> <http://ex/p> <http://ex/o> .\n"),
+            // A lone continuation byte with no lead byte.
+            ("inside a literal", b"<http://ex/s> <http://ex/p> \"a", 0x80, b"b\" .\n"),
+            // A truncated 2-byte sequence, OUTSIDE any term span — the deliberately stricter case.
+            ("inside a comment (outside every term span)", b"# note ", 0xC3, b"\n<http://ex/s> <http://ex/p> <http://ex/o> .\n"),
+        ];
+        for (label, prefix, bad, suffix) in cases {
+            let at = prefix.len();
+            let mut bytes = prefix.to_vec();
+            bytes.push(bad);
+            bytes.extend_from_slice(suffix);
+            let mut dict = Dict::new();
+            let err = parse_chunk(&bytes, &mut dict).expect_err(label);
+            assert_eq!(
+                err,
+                format!("N-Triples: invalid UTF-8 at byte {}", at),
+                "wrong rejection for the case: {}",
+                label
+            );
+            // Nothing may have been interned: validation runs before any byte is scanned.
+            assert!(dict.is_empty(), "chunk rejected for {} must not have interned anything", label);
+        }
+    }
+
+    /// The N-Quads entry point carries the SAME validation, labelled for its own grammar. [OPUS-5]
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parse_quads_chunk_rejects_invalid_utf8() {
+        let mut bytes = b"<http://ex/s> <http://ex/p> <http://ex/o> <http://ex/".to_vec();
+        let at = bytes.len();
+        bytes.push(0xFE);
+        bytes.extend_from_slice(b"g> .\n");
+        // `Dict` is not `Debug`, so unwrap the `Err` by hand rather than via `expect_err`.
+        let err = match parse_quads_chunk(&bytes) {
+            Err(e) => e,
+            Ok(_) => panic!("invalid UTF-8 must be rejected"),
+        };
+        assert_eq!(err, format!("N-Quads: invalid UTF-8 at byte {}", at));
+    }
+
+    /// The N-Quads path takes spans through its own `graph_key` / re-scan route; multi-byte
+    /// graph names and terms must survive it byte-exactly. [OPUS-5]
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parse_quads_chunk_multibyte_graph_and_terms_round_trip() {
+        let input = "<http://ex/s> <http://ex/p> \"é\" <http://ex/g𝔄> .\n_:é <http://ex/p> \"→\" _:g→ .\n";
+        let buckets = parse_quads_chunk(input.as_bytes()).expect("multi-byte quads must parse");
+        let keys: Vec<Option<GraphKey>> = buckets.iter().map(|(g, _, _)| g.clone()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                Some(GraphKey::Iri("http://ex/g𝔄".to_string())),
+                Some(GraphKey::Blank("g→".to_string())),
+            ]
+        );
+        assert_eq!(buckets[0].1.term(buckets[0].2[0][2]), Term::Literal(Literal::new_simple_literal("é")));
+        assert_eq!(buckets[1].1.term(buckets[1].2[0][0]), Term::BlankNode(BlankNode::new_unchecked("é")));
     }
 }
 

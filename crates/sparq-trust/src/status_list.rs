@@ -44,13 +44,45 @@
 //! `cred.revoked` guard — a revoked / unknown / stale credential is dropped exactly where
 //! the `revoked` flag dropped it, with NO change to the rest of the gate.
 //!
-//! ## Re-materialise on change — full re-run, not incremental (design §3.3 / G5)
+//! ## Re-materialise on change — with a bounded incremental *selection* step (design §3.3 / G5)
 //!
-//! v1 is **full re-materialisation**: a status change (or a snapshot ageing past
-//! `max_age_secs`) invalidates the admission verdict and the caller re-runs the gate; there
-//! is **no** in-reasoner incremental retraction (the §4.4 stale-authority window is
-//! *bounded* by `max_age_secs`, not closed). This is the SAME discipline the `store` module
-//! documents for trust-document revocation: revocation propagates by re-materialise.
+//! Retraction is still **re-materialisation**: a status change invalidates the admission
+//! verdict and the caller re-runs the UNCHANGED gate; there is **no** in-reasoner
+//! incremental retraction (`sq-tu4e` forbids NAF over derived facts, so nothing here
+//! retracts a derived grant in place).
+//!
+//! What [`StatusDelta`] (`sq-pfae.14`) adds is the cheap half: on a **status-list epoch
+//! bump** (a strictly newer snapshot of the SAME list) it diffs the two snapshots and names
+//! the bit indices that actually changed, so the caller re-runs the gate over **only the
+//! affected grants** instead of all of them. It is a **selection** step over two *input*
+//! snapshots — it computes no verdict, reads no derived fact, and changes no admission
+//! rule, so the input-stratified / one-side-bound seeding discipline is untouched (the
+//! re-check is still [`LiveStatusCheck::check`], bit for bit).
+//!
+//! It is **fail-closed**: anything the bit-diff cannot bound — a successor that is not
+//! newer, a change in the list's coverage (a longer/shorter bitstring moves indices in or
+//! out of range), or more changes than the caller's limit — yields
+//! [`StatusDelta::requires_full_recheck`], i.e. *re-check everything on this list*.
+//!
+//! The skip contract has **two** halves and both are required:
+//! `delta.valid_at(now, max_age_secs) && !delta.affects(entry)`. [`StatusDelta::affects`] is
+//! the per-slot bit selection; [`StatusDelta::valid_at`] is the whole-list freshness
+//! precondition, because staleness is a property of the *snapshot*, not of a slot — most
+//! sharply when the successor is future-dated, where an unchanged slot moves from `Live`
+//! under the old snapshot to [`LiveStatus::Stale`] under the new one.
+//!
+//! **Honest residue (`sq-pfae.14`), what this does NOT do:**
+//! - It does **not** close the §4.4 stale-authority window. The window is still bounded by
+//!   `max_age_secs`, not by the delta: a grant whose bit did **not** change still ages into
+//!   [`LiveStatus::Stale`], and [`StatusDelta::affects`] will say `false` for it — which is
+//!   exactly what [`StatusDelta::valid_at`] exists to force the caller to confront. The
+//!   delta makes an epoch bump cheaper; it does not replace the caller's freshness-driven
+//!   re-check.
+//! - It is **per list**. A delta binds one `statusListCredential`; grants on other lists are
+//!   reported unaffected by construction, so a caller holding grants across N lists must
+//!   apply N deltas.
+//! - It gives **no incremental retraction inside the reasoner**, and no deep-chain
+//!   delegation revocation (§4.4) — the affected grants are re-derived, not patched.
 //!
 //! ## Why a separate decoder (NOT the ZK `StatusListSnapshot`)
 //!
@@ -588,6 +620,224 @@ fn status_from_snapshot(
     }
 }
 
+// --- incremental status delta: re-check only the affected grants (sq-pfae.14) ------------
+
+/// The default cap on how many changed indices a [`StatusDelta`] will enumerate before it
+/// gives up and demands a full re-check. Past this point the delta has stopped being a
+/// saving (and an unbounded `Vec<u64>` is an attacker-chosen allocation), so falling back
+/// is both cheaper and fail-closed.
+pub const DEFAULT_MAX_CHANGED_INDICES: usize = 4096;
+
+/// Why an epoch bump could **not** be reduced to a bounded set of affected indices — the
+/// caller must re-check every grant on the list (fail-closed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeltaUnbounded {
+    /// The successor snapshot is not strictly newer than the predecessor (equal or older
+    /// `as_of`): this is not an epoch bump, so the diff is not a meaningful delta.
+    NotNewer,
+    /// The two snapshots cover a different number of bits. A longer/shorter bitstring moves
+    /// indices in or out of range — a `Live`/`Set` ⇄ `Unknown` verdict change a bit-diff
+    /// over the common prefix cannot see.
+    CoverageChanged,
+    /// More indices changed than the caller's limit allows.
+    LimitExceeded,
+}
+
+impl DeltaUnbounded {
+    /// A short machine-readable reason token (for logs / an audit record).
+    pub fn reason(self) -> &'static str {
+        match self {
+            DeltaUnbounded::NotNewer => "delta-not-newer",
+            DeltaUnbounded::CoverageChanged => "delta-coverage-changed",
+            DeltaUnbounded::LimitExceeded => "delta-limit-exceeded",
+        }
+    }
+}
+
+/// Either the bounded set of changed indices, or the reason we could not bound it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DeltaBody {
+    /// Exactly these bit indices differ between the two snapshots (ascending).
+    Changed(Vec<u64>),
+    /// Unbounded ⇒ every grant on this list must be re-checked.
+    Unbounded(DeltaUnbounded),
+}
+
+/// The change between two snapshots of **one** status list across an epoch bump
+/// (`sq-pfae.14`): which slots moved, so the caller re-runs the admission gate over only
+/// the grants bound to those slots.
+///
+/// This is a **selection** step, not a verdict: it is computed from two *input* snapshots
+/// and hands back indices. The verdict for an affected grant still comes from the unchanged
+/// [`LiveStatusCheck::check`] / [`VerifyingLiveStatusCheck::check`], so the input-stratified
+/// seeding discipline is preserved and nothing is retracted inside the reasoner
+/// (`sq-tu4e`).
+///
+/// **The skip contract — both halves are required.** A caller may skip an entry's re-check at
+/// `now` **only** when `delta.valid_at(now, max_age_secs) && !delta.affects(entry)`:
+/// - [`Self::valid_at`] is the **whole-list** precondition (the successor snapshot is itself
+///   fresh at `now`). If it is `false`, every grant on the list is [`LiveStatus::Stale`] and
+///   the per-slot selection says nothing — re-check them all.
+/// - [`Self::affects`] is the **per-slot** selection over the bits.
+///
+/// **Soundness obligation it meets.** Under that contract, for a skipped entry
+/// `verdict(prev).admits() ⇒ verdict(next).admits()` — so skipping can never leave admitted a
+/// grant the full re-run would have denied. (The stronger `verdict(prev) == verdict(next)`
+/// holds when *both* snapshots are fresh at `now`; when only the successor is, a skipped entry
+/// can only have been *denied* under `prev`, so the skip stays fail-closed.) Every case the
+/// bit-diff cannot establish this for — not-newer, coverage change, over-limit — collapses to
+/// [`Self::requires_full_recheck`].
+///
+/// **What it does NOT do** — see the module docs: it does not close the §4.4 stale-authority
+/// window (an unchanged bit still ages into [`LiveStatus::Stale`], which is exactly what
+/// [`Self::valid_at`] forces the caller to confront), and it binds exactly one list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusDelta {
+    status_list_credential: NamedNode,
+    /// The successor snapshot's `as_of` — the anchor [`StatusDelta::valid_at`] tests, so the
+    /// caller cannot use a per-slot selection at an instant where the whole list is stale.
+    successor_as_of_unix_secs: i64,
+    body: DeltaBody,
+}
+
+impl StatusDelta {
+    /// Diff two snapshots of the list at `status_list_credential`, enumerating at most
+    /// [`DEFAULT_MAX_CHANGED_INDICES`] changed indices. See [`Self::between_with_limit`].
+    pub fn between(
+        status_list_credential: NamedNode,
+        prev: &StatusBitstring,
+        next: &StatusBitstring,
+    ) -> StatusDelta {
+        StatusDelta::between_with_limit(
+            status_list_credential,
+            prev,
+            next,
+            DEFAULT_MAX_CHANGED_INDICES,
+        )
+    }
+
+    /// Diff two snapshots of the list at `status_list_credential`, enumerating at most
+    /// `max_changed_indices` changed indices before falling back to
+    /// [`DeltaUnbounded::LimitExceeded`].
+    ///
+    /// `prev` is the snapshot the caller's current verdicts rest on and `next` the freshly
+    /// resolved one. Fails closed (an unbounded delta ⇒ re-check everything on the list)
+    /// when `next` is not strictly newer than `prev`, when the two cover a different number
+    /// of bits, or when more than `max_changed_indices` slots moved.
+    pub fn between_with_limit(
+        status_list_credential: NamedNode,
+        prev: &StatusBitstring,
+        next: &StatusBitstring,
+        max_changed_indices: usize,
+    ) -> StatusDelta {
+        let unbounded = |reason| StatusDelta {
+            status_list_credential: status_list_credential.clone(),
+            successor_as_of_unix_secs: next.as_of_unix_secs(),
+            body: DeltaBody::Unbounded(reason),
+        };
+        // An epoch bump is a strictly NEWER snapshot of the same list. Anything else is not
+        // a bump we can reason about (a replayed or reordered snapshot) ⇒ fail closed.
+        if next.as_of_unix_secs() <= prev.as_of_unix_secs() {
+            return unbounded(DeltaUnbounded::NotNewer);
+        }
+        // Coverage must be identical: an index that moves in or out of range flips between
+        // a bit verdict and `Unknown`, which a diff over the common prefix cannot see.
+        if prev.len_bytes() != next.len_bytes() {
+            return unbounded(DeltaUnbounded::CoverageChanged);
+        }
+        let mut changed: Vec<u64> = Vec::new();
+        for (byte_index, (a, b)) in prev.bits.iter().zip(next.bits.iter()).enumerate() {
+            let mut diff = a ^ b;
+            while diff != 0 {
+                // MSB-first within the byte (§3.2), so the leading-zero count IS the bit's
+                // index within the byte — the same convention `StatusBitstring::is_set` reads.
+                let bit_in_byte = diff.leading_zeros() as u64;
+                changed.push(((byte_index as u64) << 3) | bit_in_byte);
+                if changed.len() > max_changed_indices {
+                    return unbounded(DeltaUnbounded::LimitExceeded);
+                }
+                diff &= !(0x80u8 >> bit_in_byte);
+            }
+        }
+        StatusDelta {
+            status_list_credential,
+            successor_as_of_unix_secs: next.as_of_unix_secs(),
+            body: DeltaBody::Changed(changed),
+        }
+    }
+
+    /// The list this delta binds. A delta says nothing about any other list.
+    pub fn status_list_credential(&self) -> &NamedNode {
+        &self.status_list_credential
+    }
+
+    /// When the successor snapshot was observed (Unix seconds) — the freshness anchor
+    /// [`Self::valid_at`] tests.
+    pub fn successor_as_of_unix_secs(&self) -> i64 {
+        self.successor_as_of_unix_secs
+    }
+
+    /// The **whole-list precondition** on skipping any re-check: is the successor snapshot
+    /// itself fresh at `now_unix_secs` under `max_age_secs`?
+    ///
+    /// This is the SAME freshness test [`LiveStatusCheck::check`] applies (a non-positive
+    /// `max_age_secs`, an aged-out snapshot, or a future-dated one all fail it). It is
+    /// separate from [`Self::affects`] because staleness is a property of the **snapshot**,
+    /// not of a slot: when this is `false` EVERY grant on the list is [`LiveStatus::Stale`]
+    /// and no per-slot skip is sound — most sharply when the successor is *future*-dated,
+    /// where an unchanged slot moves from `Live` under `prev` to `Stale` under `next`.
+    ///
+    /// Skip an entry's re-check only when `valid_at(now, max_age) && !affects(entry)`.
+    pub fn valid_at(&self, now_unix_secs: i64, max_age_secs: i64) -> bool {
+        let age = now_unix_secs.saturating_sub(self.successor_as_of_unix_secs);
+        max_age_secs > 0 && age >= 0 && age <= max_age_secs
+    }
+
+    /// The changed bit indices in ascending order, or `None` when the delta is unbounded
+    /// (⇒ [`Self::requires_full_recheck`]).
+    pub fn changed_indices(&self) -> Option<&[u64]> {
+        match &self.body {
+            DeltaBody::Changed(ix) => Some(ix),
+            DeltaBody::Unbounded(_) => None,
+        }
+    }
+
+    /// Why the delta is unbounded, or `None` when it is bounded.
+    pub fn unbounded_reason(&self) -> Option<DeltaUnbounded> {
+        match &self.body {
+            DeltaBody::Changed(_) => None,
+            DeltaBody::Unbounded(r) => Some(*r),
+        }
+    }
+
+    /// `true` when the delta could not be bounded and the caller must re-check **every**
+    /// grant on this list (the fail-closed fallback — the pre-`sq-pfae.14` behaviour).
+    pub fn requires_full_recheck(&self) -> bool {
+        matches!(self.body, DeltaBody::Unbounded(_))
+    }
+
+    /// Whether `entry`'s status verdict may have changed across the epoch bump.
+    ///
+    /// `true` ⇒ re-run the gate for the grants bound to this entry. `false` ⇒ the entry's
+    /// verdict against the new snapshot is identical to its verdict against the old one, so
+    /// the re-check can be skipped.
+    ///
+    /// An entry on a **different** list is reported unaffected — a delta binds exactly one
+    /// `statusListCredential`. And `false` speaks only to the **bits**: an entry whose bit
+    /// did not change can still have aged into [`LiveStatus::Stale`], which is the caller's
+    /// freshness-driven re-check, not this delta's job (the §4.4 residue).
+    pub fn affects(&self, entry: &StatusListEntry) -> bool {
+        if entry.status_list_credential != self.status_list_credential {
+            return false;
+        }
+        match &self.body {
+            DeltaBody::Unbounded(_) => true,
+            // `changed` is built in ascending index order, so a binary search is exact.
+            DeltaBody::Changed(ix) => ix.binary_search(&entry.status_list_index).is_ok(),
+        }
+    }
+}
+
 // --- minimal PROV-O justification (the "minimal justification" half of sq-pfae.7) --------
 
 /// A minimal PROV-O justification for a status DECISION over a single grant — an **audit
@@ -1058,6 +1308,274 @@ mod tests {
         assert!(!bs.is_set(1));
         assert!(!bs.is_set(8), "byte 1 is 0x00 ⇒ index 8 unset");
         assert_eq!(bs.len_bytes(), 2);
+    }
+
+    // --- incremental status delta (sq-pfae.14) -------------------------------------------
+
+    /// The list IRI the delta tests bind (the same one `entry()` uses).
+    fn list_iri() -> NamedNode {
+        NamedNode::new_unchecked("https://issuer.ex/status/list#list")
+    }
+
+    #[test]
+    fn delta_enumerates_the_changed_indices_msb_first() {
+        // 0x80 → 0x81: index 0 unchanged (both set), index 7 flipped 0→1.
+        let prev = StatusBitstring::from_bits(vec![0x80, 0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0x81, 0x40], 1100);
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        // byte 0 bit 7 = index 7; byte 1 bit 1 = index 9.
+        assert_eq!(d.changed_indices(), Some(&[7u64, 9][..]));
+        assert!(!d.requires_full_recheck());
+        assert_eq!(d.unbounded_reason(), None);
+        assert_eq!(d.status_list_credential(), &list_iri());
+    }
+
+    #[test]
+    fn delta_affects_only_the_changed_slots() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0x01], 1100); // index 7 revoked
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        assert!(d.affects(&entry(7)), "the revoked slot must be re-checked");
+        for i in 0..7 {
+            assert!(!d.affects(&entry(i)), "index {} is untouched", i);
+        }
+    }
+
+    #[test]
+    fn delta_affects_a_reinstatement_too() {
+        // 1→0 (a lifted suspension) WIDENS: it must be re-checked just like a revocation,
+        // else a reinstated grant stays denied forever.
+        let prev = StatusBitstring::from_bits(vec![0xff], 1000);
+        let next = StatusBitstring::from_bits(vec![0xfe], 1100); // index 7 cleared
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        assert_eq!(d.changed_indices(), Some(&[7u64][..]));
+        assert!(d.affects(&entry(7)));
+    }
+
+    #[test]
+    fn delta_binds_one_list_only() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0x80], 1100);
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        let other = StatusListEntry {
+            status_list_credential: NamedNode::new_unchecked("https://other.ex/status#l"),
+            status_list_index: 0,
+            purpose: StatusPurpose::Revocation,
+        };
+        assert!(d.affects(&entry(0)), "same list, changed slot");
+        assert!(!d.affects(&other), "a delta says nothing about another list");
+    }
+
+    #[test]
+    fn delta_not_newer_snapshot_demands_full_recheck() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        // Same as_of ⇒ not an epoch bump ⇒ fail closed.
+        let same = StatusBitstring::from_bits(vec![0xff], 1000);
+        let d = StatusDelta::between(list_iri(), &prev, &same);
+        assert!(d.requires_full_recheck());
+        assert_eq!(d.unbounded_reason(), Some(DeltaUnbounded::NotNewer));
+        assert_eq!(d.changed_indices(), None);
+        // Unbounded ⇒ EVERY entry on the list is affected (never silently skipped).
+        assert!(d.affects(&entry(3)));
+        // An older successor likewise.
+        let older = StatusBitstring::from_bits(vec![0x00], 900);
+        assert_eq!(
+            StatusDelta::between(list_iri(), &prev, &older).unbounded_reason(),
+            Some(DeltaUnbounded::NotNewer)
+        );
+    }
+
+    #[test]
+    fn delta_coverage_change_demands_full_recheck() {
+        // A grown list moves indices 8..=15 from Unknown into range — a verdict change a
+        // common-prefix diff cannot see ⇒ fail closed.
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0x00, 0x00], 1100);
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        assert!(d.requires_full_recheck());
+        assert_eq!(d.unbounded_reason(), Some(DeltaUnbounded::CoverageChanged));
+        assert!(d.affects(&entry(9)));
+        // A shrunk list is equally unbounded.
+        let shrunk = StatusBitstring::from_bits(vec![0x00], 1200);
+        assert_eq!(
+            StatusDelta::between(list_iri(), &next, &shrunk).unbounded_reason(),
+            Some(DeltaUnbounded::CoverageChanged)
+        );
+    }
+
+    #[test]
+    fn delta_over_the_limit_demands_full_recheck() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0xff], 1100); // 8 changes
+        // A limit of 7 is exceeded by 8 changes ⇒ fail closed rather than enumerate.
+        let d = StatusDelta::between_with_limit(list_iri(), &prev, &next, 7);
+        assert!(d.requires_full_recheck());
+        assert_eq!(d.unbounded_reason(), Some(DeltaUnbounded::LimitExceeded));
+        // Exactly at the limit still enumerates.
+        let at = StatusDelta::between_with_limit(list_iri(), &prev, &next, 8);
+        assert_eq!(at.changed_indices().map(<[u64]>::len), Some(8));
+        // The default limit comfortably covers this case (checked at compile time — the
+        // operand is a `const`, so a runtime `assert!` is a constant assertion).
+        const { assert!(DEFAULT_MAX_CHANGED_INDICES >= 8) };
+    }
+
+    #[test]
+    fn delta_of_an_unchanged_list_is_empty() {
+        let prev = StatusBitstring::from_bits(vec![0xa5, 0x5a], 1000);
+        let next = StatusBitstring::from_bits(vec![0xa5, 0x5a], 1100);
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        assert_eq!(d.changed_indices(), Some(&[][..]));
+        for i in 0..16 {
+            assert!(!d.affects(&entry(i)), "index {} unaffected", i);
+        }
+    }
+
+    #[test]
+    fn delta_unbounded_reason_tokens_are_distinct() {
+        assert_eq!(DeltaUnbounded::NotNewer.reason(), "delta-not-newer");
+        assert_eq!(
+            DeltaUnbounded::CoverageChanged.reason(),
+            "delta-coverage-changed"
+        );
+        assert_eq!(DeltaUnbounded::LimitExceeded.reason(), "delta-limit-exceeded");
+    }
+
+    /// **The load-bearing soundness guard.** Exhaustively over every pair of single-byte
+    /// snapshots, every in-range index, and a `now` sweep that covers both-fresh,
+    /// prev-aged-out, and future-successor instants, assert the documented skip contract:
+    ///
+    /// - under `valid_at(now, max_age) && !affects(entry)`, `verdict(prev).admits()` implies
+    ///   `verdict(next).admits()` — skipping never leaves a grant admitted that the full
+    ///   re-run would deny (the property that actually matters);
+    /// - when BOTH snapshots are fresh, the stronger equality `verdict(prev) == verdict(next)`
+    ///   holds;
+    /// - a flagged slot really did move, so the selection is not a trivially-sound
+    ///   over-approximation.
+    #[test]
+    fn unaffected_entries_are_safe_to_skip_across_the_bump() {
+        const MAX_AGE: i64 = 3600;
+        const PREV_AS_OF: i64 = 1000;
+        const NEXT_AS_OF: i64 = 1100;
+        // 1500: both fresh. 5000: prev aged out, successor still fresh. 900: successor is
+        // FUTURE-dated (and prev fresh) — the case that breaks a naive `same verdict` claim.
+        // 1_000_000: both aged out.
+        for now in [1500i64, 5000, 900, 1_000_000] {
+            for a in 0u16..=0xff {
+                for b in 0u16..=0xff {
+                    let prev = StatusBitstring::from_bits(vec![a as u8], PREV_AS_OF);
+                    let next = StatusBitstring::from_bits(vec![b as u8], NEXT_AS_OF);
+                    let d = StatusDelta::between(list_iri(), &prev, &next);
+                    assert!(!d.requires_full_recheck(), "same-length newer snapshot");
+                    let prev_fresh = (now - PREV_AS_OF) >= 0 && (now - PREV_AS_OF) <= MAX_AGE;
+                    for index in 0..8u64 {
+                        let e = entry(index);
+                        let before = status_from_snapshot(&prev, &e, MAX_AGE, now);
+                        let after = status_from_snapshot(&next, &e, MAX_AGE, now);
+                        if d.affects(&e) {
+                            // A flagged slot really did move (at an instant where the bits
+                            // are what decides — i.e. both snapshots fresh).
+                            if prev_fresh && d.valid_at(now, MAX_AGE) {
+                                assert_ne!(
+                                    before, after,
+                                    "index {} flagged but unchanged for {:#04x}→{:#04x}",
+                                    index, a, b
+                                );
+                            }
+                            continue;
+                        }
+                        // Not flagged. The skip is only claimed under `valid_at`.
+                        if !d.valid_at(now, MAX_AGE) {
+                            // Whole list is stale — nothing may be skipped, and indeed the
+                            // successor verdict is Stale for every slot.
+                            assert_eq!(after, LiveStatus::Stale, "stale successor at {}", now);
+                            continue;
+                        }
+                        assert!(
+                            !before.admits() || after.admits(),
+                            "skipping index {} at now={} would keep {:#04x}→{:#04x} admitted \
+                             while the full re-run denies it",
+                            index,
+                            now,
+                            a,
+                            b
+                        );
+                        if prev_fresh {
+                            assert_eq!(
+                                before, after,
+                                "skipped index {} changed verdict for {:#04x}→{:#04x}",
+                                index, a, b
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The precise case that makes [`StatusDelta::valid_at`] load-bearing rather than
+    /// decorative: a FUTURE-dated successor. No bit moved, so `affects` is `false` for every
+    /// slot — yet the verdict flips `Live` → `Stale`. `valid_at` is what stops a caller
+    /// skipping the re-check and keeping a now-stale grant admitted.
+    #[test]
+    fn valid_at_rejects_a_future_dated_successor_that_affects_cannot_see() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0x00], 2000); // future relative to `now`
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        let e = entry(1);
+        assert!(!d.affects(&e), "no bit moved, so the per-slot selection is silent");
+        // Against `prev` the grant is Live; against `next` it is Stale — a skip would be wrong.
+        assert_eq!(status_from_snapshot(&prev, &e, 3600, 1500), LiveStatus::Live);
+        assert_eq!(status_from_snapshot(&next, &e, 3600, 1500), LiveStatus::Stale);
+        // The whole-list precondition catches it: no skip is permitted at this instant.
+        assert!(!d.valid_at(1500, 3600), "future successor is not valid to skip against");
+        assert_eq!(d.successor_as_of_unix_secs(), 2000);
+        // …and once `now` catches up, the delta becomes usable again.
+        assert!(d.valid_at(2500, 3600));
+        // A non-positive max_age is never valid (matching the gate's maximal fail-closed).
+        assert!(!d.valid_at(2500, 0));
+        // An aged-out successor is likewise not valid to skip against.
+        assert!(!d.valid_at(1_000_000, 3600));
+    }
+
+    /// The delta is a SELECTION, not a verdict: `affects` cannot see staleness. An unchanged
+    /// list whose snapshot has aged out flags NOTHING, yet every verdict flips to `Stale` —
+    /// the documented §4.4 residue, pinned so it cannot be quietly overclaimed as closed.
+    #[test]
+    fn delta_does_not_capture_staleness_the_documented_residue() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next = StatusBitstring::from_bits(vec![0x00], 1100);
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        assert_eq!(d.changed_indices(), Some(&[][..]), "no bit moved");
+        assert!(!d.affects(&entry(1)));
+        // `affects` stays silent even at an instant where everything is stale — which is
+        // precisely why `valid_at` is the required other half of the skip contract.
+        assert!(!d.affects(&entry(1)));
+        assert!(!d.valid_at(1_000_000, 3600));
+        // …yet at a far-future `now` the same entry is Stale against BOTH snapshots.
+        assert_eq!(
+            status_from_snapshot(&next, &entry(1), 3600, 1_000_000),
+            LiveStatus::Stale
+        );
+        assert_eq!(
+            status_from_snapshot(&next, &entry(1), 3600, 1500),
+            LiveStatus::Live
+        );
+    }
+
+    /// The delta composes with the REAL gate: an epoch bump that revokes one slot flags
+    /// exactly that slot, and re-running the unchanged `LiveStatusCheck` over it denies.
+    #[test]
+    fn delta_selects_the_grant_the_real_gate_then_denies() {
+        let prev = StatusBitstring::from_bits(vec![0x00], 1000);
+        let next_bits = [0x40u8]; // index 1 revoked
+        let next = StatusBitstring::from_bits(next_bits.to_vec(), 1100);
+        let d = StatusDelta::between(list_iri(), &prev, &next);
+        assert!(d.affects(&entry(1)));
+        assert!(!d.affects(&entry(2)));
+        // Re-check ONLY the affected entry through the unchanged gate ⇒ Set (deny).
+        assert_eq!(check_with(&next_bits, 1100, 3600, 1500, 1), LiveStatus::Set);
+        // The skipped entry is still Live, exactly as a full re-run would have found it.
+        assert_eq!(check_with(&next_bits, 1100, 3600, 1500, 2), LiveStatus::Live);
     }
 
     // --- verified status-list VC: the list's OWN issuer signature (sq-pfae.13) ------------

@@ -4,7 +4,7 @@ description: Verify and sign RDF graphs with W3C Data Integrity (eddsa-rdfc-2022
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq verifiable-credentials (Data Integrity)

@@ -2,7 +2,7 @@
 
 // [OPUS-4.8] sq-tp1m (#757) — the per-workspace INFERENCE toggle + the workspace⇄engine sync.
 //
-// The selector chooses the entailment regime (Off / RDFS / OWL 2 RL) for the ACTIVE workspace;
+// The selector chooses the entailment regime (Off / RDFS / OWL 2 RL / N3) for the ACTIVE workspace;
 // the choice is PERSISTED on the workspace (survives a restart) and applied to queries by the
 // engine's REAL forward-chaining reasoner (sparq-reason, via the tier-b W-reason wasm bundle) —
 // never a mock. Reasoning is a query-time regime: it never mutates the persisted store, only what
@@ -85,7 +85,7 @@ export function InferenceStatusPill() {
 }
 
 /**
- * The compact per-workspace INFERENCE selector for the query toolbar: Off / RDFS / OWL 2 RL.
+ * The compact per-workspace INFERENCE selector for the query toolbar: Off / RDFS / OWL 2 RL / N3.
  * Reads the persisted mode from the workspace and the live reasoning status from the engine;
  * applies the choice to the engine immediately AND persists it on the workspace.
  */

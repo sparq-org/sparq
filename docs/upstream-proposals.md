@@ -29,7 +29,10 @@ defective expected-results files in w3c/rdf-tests (reported as documented
 divergences by `sparq-conformance`). This file holds ready-to-submit PR
 descriptions for oxigraph/oxigraph and issue drafts for w3c/rdf-tests; § D
 tracks the maintainer-namespace (`jeswr/*`) SHACL-CS submissions, which are
-already filed and awaiting maintainer review. Every item in § A and § B was
+already filed and awaiting maintainer review; **§ E (added 2026-07-28, bead
+sq-tonhr.12) holds two unfiled `oxttl` RDF 1.2 Turtle parser issues** found by
+the Shuttle generate-mode harvest — unlike § A they are NOT fixed on oxigraph
+main, and they affect sparq's default Turtle path. Every item in § A and § B was
 verified against w3c/rdf-tests @ `f25dbc092c654d792974848e81bb519d7328f0e8`;
 sparq's full run is 1225 pass + 4 documented divergences / 0 fail / 0 skip over
 the 1229-test scope.
@@ -362,3 +365,71 @@ two `leak-*-only.*` pairs that pin the strict/extended split from sparq's side),
 `tests/conformance.rs` already asserts that sparq's strict profile rejects every
 extended fixture. Landing #3 unlocks *sharing* fixtures with upstream, not
 sparq's own coverage.
+
+---
+
+## E. oxigraph/oxigraph issues (`oxttl`, RDF 1.2 Turtle parser) — epic sq-tonhr, bead sq-tonhr.12
+
+**Not filed; ready to submit.** Both were found by the interim Shuttle generate-mode harvest
+(`scripts/shuttle-generate-harvest.mjs`) and are recorded, with the method and its limits, in
+[`research/shuttle-generate-mode-harvest-2026-07.md`](../research/shuttle-generate-mode-harvest-2026-07.md).
+Each was reduced to a minimal repro, checked against the W3C grammar
+(<https://www.w3.org/TR/rdf12-turtle/>, fetched 2026-07-28), and **confirmed in `oxttl`'s source**
+rather than inferred from behaviour. Both reproduce on the newest release (`oxttl 0.2.3`; crates.io
+has nothing above it) and are **still present on oxigraph `main`** (`lib/oxttl/src/terse.rs`, read
+2026-07-28). sparq is affected on its default Turtle path, which is `oxttl` (`Cargo.lock`:
+`oxigraph 0.5.9 → oxrdfio 0.2.5 → oxttl 0.2.3`).
+
+### Issue 1 — Turtle 1.2: `~ []` (anonymous blank node as reifier) is rejected
+
+**Title**: <code>oxttl: RDF 1.2 reifier does not accept ANON (~ [])</code>
+
+**Body**:
+
+> `reifier ::= '~' (iri | BlankNode)?` with `BlankNode ::= BLANK_NODE_LABEL | ANON`, so an
+> anonymous blank node is a legal reifier. `oxttl` rejects it in both positions:
+>
+> ```turtle
+> @prefix ex: <http://example.org/> .
+> ex:s ex:p ex:o ~ [] .                    # "A dot is expected at the end of statements"
+> << ex:s ex:p ex:o ~ [] >> ex:q ex:r .    # "Expecting '>>' to close a reified triple, found ["
+> ```
+>
+> Controls that parse today: `~ _:r`, `~ ex:r`, and a bare `~`.
+>
+> `TriGState::Reifier` matches `N3Token::IriRef`, `N3Token::PrefixedName` and
+> `N3Token::BlankNodeLabel`; there is no `Punctuation("[")` arm, so the `_` fallback treats `[` as
+> "no reifier written", mints a fresh blank node and re-dispatches `[` into a state that cannot
+> accept it — which is why the error surfaces at the following token rather than at the `[`.
+>
+> Fix shape: add a `Punctuation("[")` arm that emits the `rdf:reifies` quad with a fresh blank node
+> and pushes the existing `TriGState::QuotedAnonEnd` (the same handling `ReifiedTripleSubject` /
+> `ReifiedTripleObject` already use for `[`), so `'[' WS* ']'` is consumed as one ANON.
+
+### Issue 2 — Turtle 1.2: long-quoted literals rejected in triple-term / reified-triple object position
+
+**Title**: <code>oxttl: """…""" / '''…''' literals rejected inside &lt;&lt;( … )&gt;&gt; and &lt;&lt; … &gt;&gt;</code>
+
+**Body**:
+
+> `ttObject ::= iri | BlankNode | literal | tripleTerm` and
+> `rtObject ::= iri | BlankNode | literal | tripleTerm | reifiedTriple`, and `String` includes
+> `STRING_LITERAL_LONG_QUOTE` and `STRING_LITERAL_LONG_SINGLE_QUOTE` — so a long-quoted literal is
+> legal in both positions. `oxttl` rejects it:
+>
+> ```turtle
+> @prefix ex: <http://example.org/> .
+> ex:s ex:p <<( ex:a ex:b """ab""" )>> .   # verbatim oxttl error, quoted so the issue is searchable — terminology-allow: third-party error string reproduced exactly
+> << ex:s ex:p '''ab''' >> ex:q ex:r .     # same
+> ```
+>
+> Controls that parse today: the same literals in ordinary object position, and `"ab"` / `'ab'`
+> inside the same `<<( … )>>`.
+>
+> The lexer emits two distinct tokens, `N3Token::String` and `N3Token::LongString`. The ordinary
+> object state matches `N3Token::String(value) | N3Token::LongString(value)`, but
+> `TriGState::ReifiedTripleObject` — used for **both** `<< … >>` and `<<( … )>>` objects — matches
+> `N3Token::String(value)` only.
+>
+> Fix shape: widen that arm to `N3Token::String(value) | N3Token::LongString(value)`, matching the
+> ordinary object state.

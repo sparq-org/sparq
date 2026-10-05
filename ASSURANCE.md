@@ -16,8 +16,9 @@ and [`CONTRIBUTING.md`](CONTRIBUTING.md) (the contributor-facing gate).
 **One check summarizes tree health: `ci-summary / gate`.** It is the single required
 branch-protection status on `main` ([`docs/branch-protection.md`](docs/branch-protection.md)):
 it polls **every other check-run on the same commit** — build + tests, `clippy -D warnings`,
-the conformance / coverage / unsafe-count ratchets, the opt-in feature matrix, supply-chain
-and CodeQL, and the docs-honesty gates — and passes only when none failed. So:
+the conformance / coverage / unsafe-count ratchets, the opt-in feature matrix, supply-chain,
+and the docs-honesty gates — and passes only when none failed. (**CodeQL is NOT among them** —
+it has been disabled since 2026-07-18; see §11.) So:
 
 1. Open any merged PR (or the latest commit on `main`) and look at its **checks list** —
    green `ci-summary / gate` ≈ everything below in this document that gates was green.
@@ -51,7 +52,7 @@ see [What green does *not* mean](#what-green-does-not-mean).
 | [Both-feature-state builds](#8-both-feature-state-builds) | Does every opt-in feature build, on and off? | yes |
 | [End-to-end personas](#9-end-to-end-product-journeys-playwright-personas) | Does the product work for a user? | yes |
 | [Docs honesty gates](#10-docs-honesty-gates) | Do the docs overclaim? | yes |
-| [Supply chain + SAST](#11-supply-chain--static-analysis) | Are the dependencies and the build attested? | yes |
+| [Supply chain + SAST](#11-supply-chain--static-analysis) | Are the dependencies and the build attested? | yes — **but SAST is disabled**, see §11 |
 
 ## 1. W3C conformance ratchets
 
@@ -68,7 +69,7 @@ source of truth as they ratchet up), and a guard test
 the central board matches the constants each runner actually enforces, so it cannot silently
 drift from CI. The OWL 2 **Direct-Semantics** arm is pinned even harder:
 [`tests/dl_suite.rs`](crates/sparq-conformance/tests/dl_suite.rs) asserts **exact equality**
-(68 profile-lane passes, 184 direct consistency/entailment passes) rather than `>=`, because
+(94 profile-lane passes, 186 direct consistency/entailment passes) rather than `>=`, because
 its invariant is *"an abstention is never counted as a pass"* — a floor cannot catch that.
 
 - **See it run:** the conformance jobs in [`ci.yml`](.github/workflows/ci.yml); the scoreboard
@@ -153,7 +154,7 @@ flagged by TLP, NoREC and the differential oracle, or the tests fail
 
 ## 4. Fuzzing
 
-Hostile bytes must produce a clean `Err`, never a panic, OOM or undefined behaviour. Five
+Hostile bytes must produce a clean `Err`, never a panic, OOM or undefined behaviour. Thirteen
 libFuzzer targets under [`fuzz/fuzz_targets/`](fuzz/fuzz_targets/) cover the RDF text parsers,
 the parallel N-Triples reader, the SPARQL parser, SHACL parsing/traversal, and — load-bearing —
 the **mmap on-disk store loader** (`graph_open`), which is exactly the surface Miri cannot
@@ -230,7 +231,8 @@ execute a line but never assert on it.
 - **Green means:** no crate below floor, no floor lowered vs `main`, presence counts met; no
   crate above its mutant ceiling.
 - **Limits:** the mutation ratchet is **advisory** while its baseline seeds across the
-  workspace (it is named so `ci-summary` excludes it); a few driver-style crates carry floor 0
+  workspace (it is **declared** in [`.github/advisory-registry.json`](.github/advisory-registry.json), which is
+  the only thing that makes a check non-gating — naming alone does nothing since #3773); a few driver-style crates carry floor 0
   by design but remain presence-gated.
 
 ## 8. Both-feature-state builds
@@ -298,10 +300,42 @@ licenses, sources — policy in [`deny.toml`](deny.toml), where any tolerated ad
 written justification), **cargo-vet** (per-dependency audit attestations — an unaudited crate
 cannot enter silently), a CycloneDX **SBOM**, and a VEX↔deny.toml drift check. Per release
 ([`release.yml`](.github/workflows/release.yml)): SBOM + VEX per artifact and **SLSA build
-provenance** attestations (verifiable with `gh attestation verify`). Continuously: **CodeQL**
-SAST ([`codeql.yml`](.github/workflows/codeql.yml), kept at zero open alerts), a daily
+provenance** attestations (verifiable with `gh attestation verify`). Continuously: a daily
 advisory watchdog ([`dependency-monitoring.yml`](.github/workflows/dependency-monitoring.yml)),
 and the public **OpenSSF Scorecard** ([`scorecard.yml`](.github/workflows/scorecard.yml)).
+
+> **CodeQL SAST is currently DISABLED — this section previously claimed otherwise.**
+>
+> It read: *"Continuously: **CodeQL** SAST ([`codeql.yml`](.github/workflows/codeql.yml), kept at
+> zero open alerts)"*. **Both halves of that were false.** The workflow has been
+> `disabled_manually` since **2026-07-18** (a deliberate, recorded decision taken to cut merge
+> latency), its last run was 2026-07-18T14:01Z, and code scanning currently reports **35 open
+> alerts, all `critical`** — every one `rust/hard-coded-cryptographic-value`, the oldest opened
+> **2026-07-11**, in two files: `crates/sparq-lws-core/tests/pop_dpop_sk.rs` (25) and
+> `crates/sparq-lws-core/src/store/sparql.rs` (10).
+>
+> **All 35 have since been triaged (sparq-org/sparq#4615): none is exploitable.** Every one is a
+> false positive of a single query-model defect — the query models its sink by *parameter name*
+> while classifying test code by *file path*, and Rust colocates unit tests inside source files.
+> Both clusters sit inside `#[cfg(test)] mod tests` (the `sparql.rs` module spans lines 740–1370,
+> i.e. to EOF), and in most cases the flagged value is not a cryptographic nonce at all. Production
+> never hard-codes these: the marker is generated per operation and session keys are drawn from the
+> OS CSPRNG.
+>
+> **"Triaged" is not "covered."** These 35 being benign says nothing about what an enabled scanner
+> would find; SAST remains off. The durable posture is under decision in
+> sparq-org/sparq#4620, and one real (latent, unexploited) finding surfaced during triage is
+> sparq-org/sparq#4621.
+>
+> The correction is quoted rather than deleted because this document is what a reader would rely
+> on: a stated control that is switched off is worse than an acknowledged gap, since it stops
+> anyone looking.
+>
+> **There is currently no compensating SAST control.** `clippy -D warnings`, the unsafe-count
+> ratchet, `cargo-deny`/`cargo-vet` and the fuzz lanes all remain green and are genuine, but none
+> of them is a substitute for taint/crypto-misuse analysis. The durable decision (re-enable
+> advisory-only, re-enable on a schedule, or accept and document no SAST) is still open in
+> sparq-org/sparq#4620.
 
 - **Green means:** license/advisory/source policy holds, every dependency carries an audit
   attestation, and released artifacts have verifiable provenance.

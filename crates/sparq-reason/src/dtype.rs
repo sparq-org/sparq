@@ -66,6 +66,29 @@
 //!   tightening** for those four spellings — the reasoner was more lenient than the
 //!   evaluator, the exact anti-pattern the module-doc warned against. D-entailment
 //!   conformance suite stays green (no W3C test uses those forbidden spellings).
+//! - **The integer/decimal KEY stays `canon_decimal`; it does NOT delegate to
+//!   `Num::cmp_relational` (sq-fvxko, issue #3137) [SONNET-4.6].** That follow-on was
+//!   proposed as behaviour-neutral. It is not, in three measured ways — pinned by
+//!   `tests::cmp_relational_delegation_would_change_behaviour`:
+//!   1. **Magnitude.** `as_numeric` routes `xsd:decimal` through `Dec::parse_lexical`,
+//!      whose `i128` mantissa overflows past ~38 significant digits and yields `None`.
+//!      `canon_decimal` is pure-string and unbounded, so a 43-digit decimal keys today
+//!      and would silently LOSE its D-value under the delegation.
+//!   2. **Value-space disjointness.** `cmp_relational` implements the XPath promotion
+//!      tower behind SPARQL `=`, so it reports `"1"^^xsd:integer` = `"1.0"^^xsd:double`.
+//!      Under D these are DIFFERENT value spaces (`DValue::Decimal` vs `DValue::F64` —
+//!      see "Why NOT an f64 fast path" above); equating them is exactly the unsound
+//!      aliasing this module is built to avoid.
+//!   3. **Range facets.** `as_numeric` parses magnitude only, so `cmp_relational`
+//!      equates `"200"^^xsd:byte` with `"200"^^xsd:integer` — but 200 is outside the
+//!      `byte` value space, so rdfD1 must not type it (see `integer_subtype_ok` below).
+//!
+//!   There is also a structural blocker: `d_value_key` must return a standalone `Eq` KEY
+//!   (`DValue`), and a pairwise `Option<Ordering>` comparator cannot produce one — only
+//!   `d_value_eq` could delegate at all. The seam that IS shared, and is the right one, is
+//!   `split_decimal`: the reasoner and the engine already agree on which decimal
+//!   lexicals are well-formed and on their canonical form, WITHOUT the reasoner
+//!   inheriting the engine's `=` semantics where D requires value identity.
 //!
 //! ## Single-table discipline
 //!
@@ -602,6 +625,12 @@ fn integer_subtype_ok(dt: &str, v: i128) -> bool {
 /// comparator concern. `split_decimal` trims leading/trailing ASCII whitespace whereas the
 /// old hand-rolled splitter did NOT; to keep behaviour byte-identical (a padded decimal
 /// lexical was rejected before), reject any surrounding whitespace up front.
+///
+/// [SONNET-4.6] sq-fvxko (issue #3137): do NOT "simplify" this into a delegation to
+/// `Num::cmp_relational`. That comparator loses arbitrary-magnitude decimals, promotes
+/// across the decimal/IEEE-754 boundary D keeps disjoint, and ignores the integer-subtype
+/// range facets — see the module doc's ledger and
+/// `tests::cmp_relational_delegation_would_change_behaviour`, which turns red on each.
 fn canon_decimal(lex: &str) -> Option<String> {
     // Preserve the pre-migration no-trim contract: `split_decimal` calls `s.trim()`, so
     // `" 1"` would become `"1"` (Some) there; the old splitter's digit-check rejected the
@@ -1551,6 +1580,70 @@ mod tests {
         assert!(d_value_eq(big, &decimal, big, &decimal));
         let neighbour = "123456789012345678901234567890123456789012.6";
         assert!(!d_value_eq(big, &decimal, neighbour, &decimal));
+    }
+
+    /// [SONNET-4.6] sq-fvxko (issue #3137): the REFUSED-delegation guard.
+    ///
+    /// The follow-on proposed replacing the `canon_decimal` numeric arm with a delegation to
+    /// `Num::cmp_relational`, claimed behaviour-neutral. It is NOT. This test pins the three
+    /// concrete divergences so the migration cannot be re-attempted silently — each assertion
+    /// is exactly the point where `d_value_key`/`d_value_eq` and `cmp_relational` disagree,
+    /// and a delegating rewrite turns each one red.
+    ///
+    /// (The fourth objection is structural, not testable here: `d_value_key` must return a
+    /// standalone `Eq` KEY — `DValue` — and a pairwise `Option<Ordering>` comparator cannot
+    /// produce one. Only `d_value_eq` could delegate at all.)
+    #[test]
+    fn cmp_relational_delegation_would_change_behaviour() {
+        let integer = format!("{}integer", XSD);
+        let decimal = format!("{}decimal", XSD);
+        let double = format!("{}double", XSD);
+        let byte = format!("{}byte", XSD);
+
+        // (1) UNBOUNDED MAGNITUDE. `as_numeric` routes xsd:decimal through
+        // `Dec::parse_lexical`, whose i128 mantissa overflows past ~38 digits → the value is
+        // not numeric there at all. `canon_decimal` is pure-string and keys it exactly.
+        let big = "123456789012345678901234567890123456789012.5"; // 43 significant digits
+        assert!(
+            d_value_key(big, &decimal).is_some(),
+            "dtype keys an arbitrary-magnitude decimal"
+        );
+        assert_eq!(
+            as_numeric(&slit(big, "decimal")).map(|_| ()),
+            None,
+            "substrate cannot represent it — a delegation would DROP this D-value"
+        );
+
+        // (2) DISJOINT VALUE SPACES. Under D, xsd:decimal and xsd:double are distinct value
+        // spaces (`DValue::Decimal` vs `DValue::F64`), so "1"^^xsd:integer and
+        // "1.0"^^xsd:double are NOT the same D-value. `cmp_relational` implements the XPath
+        // promotion tower used by SPARQL `=`, which equates them.
+        assert!(
+            !d_value_eq("1", &integer, "1.0", &double),
+            "D keeps the decimal and IEEE-754 value spaces disjoint"
+        );
+        assert_eq!(
+            substrate_cmp("1", &integer, "1.0", &double),
+            Some(Ordering::Equal),
+            "substrate promotes across the tower — a delegation would ALIAS the two spaces"
+        );
+
+        // (3) RANGE FACETS. rdfD1 must not type a literal outside its datatype's value
+        // space, so "200"^^xsd:byte has NO D-value. `as_numeric` parses magnitude only, so
+        // `cmp_relational` happily equates it with "200"^^xsd:integer.
+        assert!(
+            d_value_key("200", &byte).is_none(),
+            "200 is outside the xsd:byte value space — no D-value"
+        );
+        assert!(
+            !d_value_eq("200", &byte, "200", &integer),
+            "an ill-formed literal is never D-value-equal to anything"
+        );
+        assert_eq!(
+            substrate_cmp("200", &byte, "200", &integer),
+            Some(Ordering::Equal),
+            "substrate ignores the facet — a delegation would type an out-of-range literal"
+        );
     }
 
     /// The no-trim contract of the canonical decimal key is preserved after delegating to

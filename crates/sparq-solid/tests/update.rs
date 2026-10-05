@@ -557,3 +557,157 @@ fn positive_control_fully_authorized_multi_op_body_applies() {
     assert_eq!(graph_len(&s, g1), before1 + 1, "first op applied");
     assert_eq!(graph_len(&s, g2), before2 + 1, "second op applied");
 }
+
+// ─── [FABLE-5] sq-yhlf0: the BUDGETED write path (`update_as_with_budget`) ───────────
+//
+// The read entry points have taken a `QueryBudget` for a long time; the write path had no
+// budgeted variant at all, so a caller obliged to bound EVERY evaluation it issues (an
+// agent tool surface, an HTTP handler) had no bounded way to apply an update. These tests
+// pin the two properties that variant must have:
+//
+//   1. an EXHAUSTED budget aborts the update as an error and mutates NOTHING, at BOTH
+//      evaluation sites — the authorization check's `GRAPH ?var` binding SELECT and the
+//      apply's `DELETE`/`INSERT … WHERE`;
+//   2. an UNLIMITED budget is the unbudgeted path, byte for byte.
+//
+// The deadline is set to an ALREADY-PASSED `Instant` rather than racing a real
+// combinatorial blow-up: the abort is then deterministic and instant in CI, and it is the
+// SAME cooperative check a genuine blow-up trips at. Property (1) is what makes the abort
+// meaningful; the row-cap case below is the non-degenerate twin that trips on the actual
+// size of an intermediate result rather than on a clock that had already run out.
+//
+// The deadline-based cases carry `#[cfg(not(target_arch = "wasm32"))]`:
+// `QueryBudget::deadline` does not EXIST on `wasm32-unknown-unknown` (the field is
+// `#[cfg(not(target_arch = "wasm32"))]` in sparq-engine, because `std::time::Instant`
+// panics there), and this crate's test targets are COMPILED for wasm32 by the CI wasm lane
+// (`cargo clippy -p sparq-solid --target wasm32-unknown-unknown --all-targets` and
+// `wasm-pack test --node crates/sparq-solid`). No coverage is lost: a plain `#[test]` is
+// never RUN by `wasm-pack test`, which executes only the `#[wasm_bindgen_test]`s in
+// tests/wasm_materialize.rs. The row-cap, unlimited and denial cases are portable and stay
+// ungated, so the budgeted write path keeps a compiled twin on wasm32.
+
+use sparq_engine::QueryBudget;
+
+/// A budget whose wall-clock deadline is already in the past, so the FIRST cooperative
+/// poll site the evaluator reaches aborts. NON-wasm32 (see the section note above).
+#[cfg(not(target_arch = "wasm32"))]
+fn expired() -> QueryBudget {
+    let mut b = QueryBudget::unlimited();
+    b.deadline = Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    b
+}
+
+/// A `DELETE`/`INSERT … WHERE` over `doc` — the shape whose WHERE the engine evaluates
+/// (and therefore budgets). `INSERT DATA` deliberately is NOT used here: the engine
+/// documents that its bulk-data operations do not consult the budget at all.
+fn tag_where(doc: &str) -> String {
+    format!(
+        "INSERT {{ GRAPH <{doc}> {{ <{doc}#it> <{TAG}> \"budgeted\" }} }} \
+         WHERE {{ GRAPH <{doc}> {{ ?s ?p ?o }} }}"
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_exhausted_deadline_aborts_the_apply_and_leaves_the_store_unchanged() {
+    let mut s = wac_store();
+    // ALICE genuinely MAY write priv0 (see `write_with_permission_succeeds_and_mutates`),
+    // so an error here can only be the budget — not a denial in disguise.
+    let doc = "https://pod.ex/priv0/c4/g0/d0.ttl";
+    let before = store_snapshot(&s);
+
+    let r = s.update_as_with_budget(&sess(Some(ALICE)), &tag_where(doc), &expired());
+    let e = r.expect_err("an exhausted deadline must abort the update");
+    assert!(
+        e.contains("query budget exceeded"),
+        "the abort must report the budget, not a denial: {e}"
+    );
+    assert_eq!(store_snapshot(&s), before, "an aborted update mutates nothing");
+}
+
+#[test]
+fn a_row_cap_aborts_the_apply_and_leaves_the_store_unchanged() {
+    // The non-degenerate twin of the deadline case: the limit trips on the SIZE of the
+    // WHERE's intermediate result, with a clock that has not run out.
+    let mut s = wac_store();
+    let doc = "https://pod.ex/priv0/c4/g0/d0.ttl";
+    let before = store_snapshot(&s);
+    let mut budget = QueryBudget::unlimited();
+    budget.max_rows = Some(1);
+
+    // A self-cross-product of the document: more than one row, so the cap bites.
+    let sparql = format!(
+        "INSERT {{ GRAPH <{doc}> {{ <{doc}#it> <{TAG}> \"budgeted\" }} }} \
+         WHERE {{ GRAPH <{doc}> {{ ?s ?p ?o }} GRAPH <{doc}> {{ ?s2 ?p2 ?o2 }} }}"
+    );
+    let e = s
+        .update_as_with_budget(&sess(Some(ALICE)), &sparql, &budget)
+        .expect_err("the row cap must abort the update");
+    assert!(e.contains("query budget exceeded"), "{e}");
+    assert_eq!(store_snapshot(&s), before, "an aborted update mutates nothing");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_exhausted_budget_also_bounds_the_authorization_checks_binding_select() {
+    // The check path evaluates a SELECT of its own to resolve a `GRAPH ?g` template slot
+    // precisely. That evaluation is on the write path too, so it must be bounded — and its
+    // exhaustion must surface as the budget error rather than silently degrading to the
+    // (cheaper) all-graphs wildcard, which could permit an update whose apply would then
+    // have to re-run the very WHERE that just ran out of budget.
+    let mut s = wac_store();
+    let before = store_snapshot(&s);
+    let sparql = format!(
+        "INSERT {{ GRAPH ?g {{ <urn:x> <{TAG}> \"budgeted\" }} }} \
+         WHERE {{ GRAPH ?g {{ ?s <{TITLE}> ?o }} }}"
+    );
+
+    let e = s
+        .update_as_with_budget(&sess(Some(ALICE)), &sparql, &expired())
+        .expect_err("the binding SELECT must be bounded too");
+    assert!(
+        e.contains("query budget exceeded"),
+        "an exhausted check must report the budget, not fall back silently: {e}"
+    );
+    assert_eq!(store_snapshot(&s), before, "nothing is mutated on the check path");
+}
+
+#[test]
+fn an_unlimited_budget_is_the_unbudgeted_write_path() {
+    // Positive control for all three aborts above: the SAME updates are permitted and DO
+    // apply under an unlimited budget, so the tests exercise the budget boundary rather
+    // than a path that fails regardless. And `update_as_with_budget(unlimited)` reaches the
+    // identical store state as `update_as`.
+    let doc = "https://pod.ex/priv0/c4/g0/d0.ttl";
+
+    let mut budgeted = wac_store();
+    budgeted
+        .update_as_with_budget(&sess(Some(ALICE)), &tag_where(doc), &QueryBudget::unlimited())
+        .expect("alice may write priv0 under an unlimited budget");
+
+    let mut plain = wac_store();
+    plain.update_as(&sess(Some(ALICE)), &tag_where(doc)).expect("alice may write priv0");
+
+    assert_eq!(
+        store_snapshot(&budgeted),
+        store_snapshot(&plain),
+        "an unlimited budget is byte-for-byte `update_as`"
+    );
+    // …and it really did something (guards against both sides no-opping identically).
+    assert_ne!(store_snapshot(&budgeted), store_snapshot(&wac_store()), "the write applied");
+}
+
+#[test]
+fn the_budget_cannot_turn_a_denial_into_a_write() {
+    // Authorization is checked BEFORE the budget can matter: an actor without the grant is
+    // still denied under an unlimited budget, and the deny message is the authorization
+    // one — the budget only ever adds a failure mode, never removes one.
+    let mut s = wac_store();
+    let doc = "https://pod.ex/priv0/c4/g0/d0.ttl";
+    let before = store_snapshot(&s);
+    let e = s
+        .update_as_with_budget(&sess(Some(BOB)), &tag_where(doc), &QueryBudget::unlimited())
+        .expect_err("bob has no write grant on priv0");
+    assert!(e.contains("update denied"), "{e}");
+    assert_eq!(store_snapshot(&s), before);
+}

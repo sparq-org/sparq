@@ -657,6 +657,25 @@ records_to  = "stdout; analysis research/custom-parsers-D4-compressed-serializat
 status      = "ok"
 
 [[benchmark]]
+# [OPUS-5] (sq-98w7z.3) A DEPENDENCY A/B, not a sparq benchmark: it compares two
+# oxttl revisions against each other, with no sparq crate in the loop. It lives here
+# so the comparison is reproducible rather than a one-off in a research record.
+id          = "oxttl-prefix-alloc"
+name        = "oxttl prefixed-name expansion A/B (released vs oxigraph git)"
+category    = "parse"
+measures    = "Turtle parse wall (s, MB/s, Mtriples/s, min-of-N) and DETERMINISTIC allocation counts (allocs/reallocs per parse and per triple) for oxttl 0.2.3 vs an arbitrary oxigraph commit; plus an order-sensitive FNV digest over every parsed triple as the byte/count-identical differential"
+invoke      = "cd bench/parse/oxttl-prefix-alloc && ./ab.sh   # --corpus <file.ttl>, --iters N, --attribute <oxigraph-sha>; HARNESS_TOOLCHAIN=<tc> to override the pinned toolchain"
+source      = "bench/parse/oxttl-prefix-alloc/{README.md,ab.sh,src/main.rs}; released/ and upstream/ wrapper manifests sharing one [[bin]] path"
+dataset     = "data/ (gitignored): deterministic wd:/wdt:-shaped prefixed Turtle from `gen 60` (~60MB, ~1.92M triples), standing in for the gitignored sq-wrn61 wikidata-slice.ttl; --corpus takes the real slice"
+quiet_box_sensitive = true
+pinning     = "oxttl =0.2.3 exactly on the released leg and a pinned git rev on the upstream leg (never a branch); fat LTO to match shipped sparq-cli; feature legs mimalloc / rdf-12 / count-alloc"
+records_to  = "stdout; analysis research/oxttl-prefixed-name-alloc-2026-07.md"
+# Internal dependency-comparison harness like parse-baseline/dict-baseline — it measures
+# a third-party crate, not a sparq capability, so it is not a dashboard card.
+featured    = false
+status      = "ok"
+
+[[benchmark]]
 id          = "wikidata-8b"
 name        = "Wikidata full-truthy (~8-9.4B) low-resource external build"
 category    = "ingest"
@@ -1972,6 +1991,21 @@ status      = "ok"
 # Internal throughput smoke for the import path, no head-to-head capability claim yet
 # (competitor CSV-import comparisons belong to the sq-hmd7l comparative program).
 featured    = false
+
+# [GPT-6 Astra] Bounded local diagnostic for deletion projection caching (#4246).
+[[benchmark]]
+id = "overlay-count-diagnostic"
+name = "Overlay bound-range counting, cold and warm"
+category = "query"
+measures = "whole SELECT and bound scan latency, requested allocations, store heap, cumulative process RSS"
+invoke = "cargo run --locked --offline --release --manifest-path bench/overlay-count/Cargo.toml"
+source = "bench/overlay-count/; crates/sparq-core/src/store.rs"
+dataset = "deterministic generated subjects with four predicates; fixed deletion curve and insert-only control"
+quiet_box_sensitive = true
+pinning = "exact source/harness/binary hashes; fixed dimensions and sampling in README"
+records_to = "stdout JSON lines"
+status = "diagnostic"
+featured = false
 
 # [GPT-5.6] sq-vwnzh — correctness-gated Arrow/tabular export interop panel.
 [[benchmark]]

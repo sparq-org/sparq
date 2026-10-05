@@ -1,0 +1,31 @@
+# Feature-matrix fragment for `sparq-fedplan-mpc`.
+#
+# One self-contained leg mapping per opt-in feature(group). Assembled into the
+# feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
+# (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
+# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
+#
+# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
+# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
+# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# Fields: name (required -> check-run name), crate (required), features (required,
+# non-empty comma list), test (bool — run `cargo test` for the leg).
+
+# sq-vm6jj: sparq-fedplan-mpc had NO leg here. The crate is `default = []` and every
+# module (and therefore every `#[cfg(feature = "fedplan-mpc")] mod tests`) is behind
+# the single `fedplan-mpc` feature, so ci.yml's featureless workspace archive compiled
+# it EMPTY and listed ZERO of its in-src `#[test]`s. `fedplan-mpc` is the crate's only
+# feature and it enables the whole surface (it also turns on `sparq-fedplan/fedplan`),
+# so ONE leg covers everything there is to cover. Verified on this checkout:
+# `cargo test -p sparq-fedplan-mpc --features fedplan-mpc` => 64 tests run, 64 passed,
+# while the default-off `cargo test -p sparq-fedplan-mpc` runs 0 (the crate stays empty).
+- name: "sparq-fedplan-mpc (fedplan-mpc)"
+  crate: "sparq-fedplan-mpc"
+  features: "fedplan-mpc"
+  test: true

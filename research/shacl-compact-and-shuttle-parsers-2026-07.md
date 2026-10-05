@@ -119,7 +119,10 @@ Never replace a parser blind. Every Shuttle-generated parser:
    non-vacuity** (a seeded divergent parser must be caught).
 3. **Is benchmark-gated**: bench/parse competitor rows vs the incumbent (and external
    reference parsers) on the canonical corpus, canonical runs on quiet EC2 per
-   feedback-ec2-benchmarks; the deterministic `parse_ns_per_byte` CI floor stays gated.
+   feedback-ec2-benchmarks; the `parse_ns_per_byte` CI floor stays watched as an advisory
+   timing signal (tracked/warned, non-blocking — it is the sole `mode: noise` metric in
+   `bench/perf-baseline.json`; every `mode: auto` metric there hard-fails
+   `scripts/perf-gate.py`).
 4. **Default flips per-syntax, only on a documented verdict** (sq-tonhr.11): conformance
    set-identity evidence + bench ≥ incumbent on BOTH 1T and 16T, each flip its own PR,
    incumbent kept reachable behind a fallback feature for ≥ one release, maintainer

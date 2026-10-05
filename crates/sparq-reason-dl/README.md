@@ -91,14 +91,14 @@ constructs implicated in the documented RL rule-set divergences), **EL** (`sparq
 classification; verdicts only for a pure ⊤-free EL+⊥ TBox with zero skipped axioms), **QL**
 (opt-in `dispatch_ql`, sq-fj8lj: `sparq-reason-ql`'s DL-Lite_R violation-query checker, whose
 OWN capture accounting owns the verdict; without it, always `Unknown(QlConsistencyPending)`), or the
-**ALCH tableau** (complete for the fragment). `check::DirectChecker::entailment` decides
-premise ⊨ conclusion per conclusion-axiom by sound refutation encodings on the tableau
-(GCI / class-assertion / the fresh-class trick, its sq-pbz04.4.9 role-subsumption lift for
-`SubObjectPropertyOf`, the sq-zfwzq transitivity lift when enabled, + the record's
-desugarings); a future unencoded kind abstains. A **blank-node individual in the conclusion is read EXISTENTIALLY**
-(sq-pbz04.4.13): a tree-shaped anonymous assertion set rolls up into an `∃`-class assertion
-decided soundly, and a non-rollable shape (shared / cyclic / nominal / free-root) abstains
-`ConclusionAnonymousIndividual` — never a skolem-constant `NotEntailed`. Every verdict carries its producing `Branch`; every guard fails
+**ALCH tableau** (complete for the fragment). A profile branch that ABSTAINS falls through to that tableau (sq-pbz04.4.8) — sound with no new argument, since every L1-extracted
+ontology is inside the ALCH fragment by construction; a branch that DECIDED is never preempted, an abstaining tableau returns the branch's own reason unchanged, and the PR1 punning
+abstention (ill-posed input, not an incompleteness guard) does not fall through. `check::DirectChecker::entailment` decides premise ⊨ conclusion per conclusion-axiom by sound refutation
+encodings on the tableau (GCI / class-assertion / the fresh-class trick, its sq-pbz04.4.9 role-subsumption lift for `SubObjectPropertyOf`, the sq-zfwzq transitivity lift when enabled, + the record's
+desugarings); a future unencoded kind abstains. A **blank-node individual in the conclusion is read EXISTENTIALLY** (sq-pbz04.4.13): a tree-shaped anonymous assertion set rolls up into an `∃`-class assertion
+decided soundly, and a non-rollable shape (shared / cyclic / nominal / free-root) abstains `ConclusionAnonymousIndividual` — never a skolem-constant `NotEntailed`. A refutation that exhausts the
+tableau's deterministic count budget — and ONLY then — is re-asked of the RL/EL branches under their own unchanged guards (sq-pbz04.4.10): strictly abstention-reducing, it can replace
+`Unknown(ResourceBudget)` with a definitive verdict but never widen one a guard refused. Every verdict carries its producing `Branch`; every guard fails
 closed (`Unknown(reason)`, never a guess). The `dispatch` feature pulls `sparq-reason` +
 `sparq-reason-el` as optional deps — **off by default**, so L1–L3 stay dependency-light.
 

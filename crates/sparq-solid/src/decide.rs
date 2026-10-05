@@ -20,7 +20,7 @@
 //! This is the authorization-**decision** surface only — it does not authenticate and makes
 //! no cryptographic claim (a `Session` is a caller-asserted claim; see the crate README).
 //!
-//! [API stability & deprecation policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+//! [API stability & deprecation policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 //!
 //! # Security posture — fail-CLOSED, never fail-OPEN (FR-6, sq-snopa.2)
 //!
@@ -68,11 +68,34 @@ impl AclScope {
 /// The typed fail-closed load/error contract for a decision (FR-6, sq-snopa.2).
 ///
 /// Carries over the hard-won fail-OPEN lessons: it lets a resource server distinguish a
-/// *definitive* deny (map to **401/403**) from a *retryable* one (map to **503**) —
+/// *definitive* deny (map to **403**) from a *retryable* one (map to **503**) —
 /// **without ever failing open**. The [`WacDecision::allow`] flag is `false` for every
 /// status except [`AclStatus::Resolved`], and `Resolved` only ever carries the verdict
 /// the materialized auth view actually supports. A server that ignores `status` entirely
 /// still gets the correct allow/deny; `status` only refines the *HTTP code*.
+///
+/// # The uniform **403**: a known limitation, NOT a permitted stricter choice (sq-qonip)
+///
+/// `AclStatus` deliberately carries **no** authentication state — this crate takes an
+/// already-resolved [`crate::Session`] and answers a graph-set question, leaving the
+/// 401-vs-403 split to the HTTP shell (`research/sparq-solid-scope.md` § *Scope boundary —
+/// what stays in PSS no matter what*). The shipped shell (`sparq-server`'s `solid-authz`
+/// `deny_status_code`) accordingly maps every definitive deny to a **403**, whether or not
+/// the requester presented a WebID.
+///
+/// That uniform 403 is fine for its current caller, `POST /authz/decide`, which *reports* a
+/// decision rather than serving a protected resource (the API caller's own authentication is
+/// gated separately and does answer 401 + `WWW-Authenticate`). It is **not** conformant on an
+/// LDP resource-serving path: the [Solid Protocol](https://solidproject.org/TR/protocol)
+/// § *Authentication* requires a server to answer a request that lacks the credentials a
+/// protected resource needs with **401** (unless 404 is preferred for security reasons), and
+/// Solid-OIDC requires the accompanying `WWW-Authenticate` challenge so the client can start
+/// authentication. A resource server built on this crate MUST add that lane from its own
+/// authentication state; reusing `deny_status_code` unchanged there is a known
+/// non-conformance, not a stricter-but-permitted alternative.
+///
+/// Fail-closed is orthogonal and unaffected: the HTTP code only ever refines a deny that is
+/// already `allow == false`, so withholding the challenge cannot widen a deny into a grant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AclStatus {
     /// A governing ACL was discovered and the auth view is loaded: the decision is
@@ -81,8 +104,9 @@ pub enum AclStatus {
     Resolved,
     /// No governing ACL exists anywhere up the container chain (the resource is
     /// **un-protected by any discoverable ACL**). Fail-closed ⇒ `allow == false`. A
-    /// Solid server treats this as a definitive deny — map to **403** (or **401** for an
-    /// anonymous principal that might succeed once authenticated).
+    /// Solid server treats this as a definitive deny — the shipped shell maps it to **403**
+    /// for every requester, though an LDP resource server owes an *anonymous* one the
+    /// Solid-required **401** challenge instead (see the enum docs).
     NoAcl,
     /// A governing ACL was discovered, but the authorization view is **not loaded**
     /// (`materialize_wac` / `materialize_acp` has not been run, so no verdict can be
@@ -98,10 +122,12 @@ pub enum AclStatus {
 
 impl AclStatus {
     /// Whether this status denotes a **retryable** (operational/transient) condition a
-    /// server should map to **503**, rather than a definitive permission outcome
-    /// (401/403). Convenience for the resource-server status mapping; `Unloaded` and
-    /// `Transient` are retryable, `Resolved` and `NoAcl` are definitive. Fail-closed is
-    /// orthogonal — every non-`Resolved` status still carries `allow == false`.
+    /// server should map to **503**, rather than a definitive permission outcome (the
+    /// shipped shell's **403**; see the enum docs for the **401** an LDP resource server
+    /// owes an anonymous requester instead). Convenience for the resource-server status
+    /// mapping; `Unloaded` and `Transient` are retryable, `Resolved` and `NoAcl` are
+    /// definitive. Fail-closed is orthogonal — every non-`Resolved` status still carries
+    /// `allow == false`.
     pub fn is_retryable(self) -> bool {
         matches!(self, AclStatus::Unloaded | AclStatus::Transient)
     }
@@ -133,7 +159,7 @@ pub struct EffectiveAcl {
 /// **API tier-1 (proposed-stable)** — the return type of the proposed semver-stable
 /// per-resource decision surface; see the module docs and the [API stability policy].
 ///
-/// [API stability policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+/// [API stability policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 ///
 /// # Examples
 ///
@@ -344,6 +370,189 @@ pub(crate) fn decide_one(
     }
 }
 
+/// How many percent-decoding rounds [`is_control_document_name`] will unwrap before it
+/// gives up and refuses. A legitimate child name is at a fixpoint within one round; a
+/// name still decoding after this many is a deliberately obfuscated one, and refusing it
+/// is the fail-closed direction.
+const DECODE_ROUNDS: usize = 8;
+
+/// [OPUS-5] sq-gg0qq.5 (issue #2571) — whether `name`, a single child-name path segment a
+/// create request would MINT inside a container, names an access-control document
+/// (`.acl` / `.acr`) and so must never be created through the child-minting path.
+///
+/// # Why this exists (the POST-`Slug` privilege-escalation class)
+///
+/// Creating a child of a container requires only `acl:Append`, but an access-control
+/// document is governed by `acl:Control`. If the name a create request mints is taken at
+/// face value, an Append-only principal can POST `Slug: secret.acl` and have the server
+/// mint `<container>/secret.acl` — which the ACL resolver will afterwards consult as
+/// `<container>/secret`'s own governing ACL. The principal has then authored access rules
+/// it holds no `acl:Control` over. The mode check on the container is *correct* and still
+/// misses this, because the escalation is in the NAME, not the mode.
+///
+/// So the guard lives in the decision engine ([`crate::PodStore::decide_create`]), not
+/// only at an HTTP handler's mint site: any resource server that delegates its
+/// authorization decision to this crate inherits the refusal instead of having to
+/// re-derive it. This predicate is public so a server can apply the SAME rule at its own
+/// mint chokepoint and the two can never drift.
+///
+/// # What it refuses
+///
+/// The check is deliberately BROADER than the exact-case `.acl` the resolver derives, so
+/// no spelling of the same intent slips past:
+///
+/// - case variants — `secret.ACL`, `secret.Acl`;
+/// - a container child — `secret.acl/` (one trailing slash is stripped first);
+/// - the bare own-ACL name — `.acl`, `.acr`;
+/// - percent-encoded spellings — `secret%2Eacl`, `secret.ac%6C`, and a name that only
+///   reveals the suffix after several decoding rounds. Each round re-extracts the final
+///   path segment, so a smuggled `%2F` cannot hide the suffix behind a slash either.
+///
+/// It does NOT refuse a `.acl` appearing only MID-path (`x.acl/child` mints `child`), nor
+/// a name that merely contains `acl` (`aclremap`) — those have no security effect.
+///
+/// # Scope: `.acl`/`.acr` only, deliberately
+///
+/// These are the two suffixes this crate's ACL discovery actually consults
+/// ([`crate::PodStore::resolve_acl`]). `.meta` and friends are not load-bearing here, so
+/// guarding them would cost create-path compatibility for no security gain. **Forward
+/// invariant:** if another auxiliary ever becomes load-bearing for discovery, it must be
+/// added HERE (the discovery side and the create side must name the same set).
+///
+/// # Examples
+///
+/// ```
+/// use sparq_solid::is_control_document_name;
+///
+/// assert!(is_control_document_name("secret.acl"));
+/// assert!(is_control_document_name("secret.ACL"));   // case variant
+/// assert!(is_control_document_name("secret.acl/"));  // container child
+/// assert!(is_control_document_name(".acl"));         // a container's own ACL
+/// assert!(is_control_document_name("secret%2Eacl")); // percent-encoded dot
+/// assert!(is_control_document_name("policy.acr"));   // the ACP spelling
+///
+/// assert!(!is_control_document_name("note.ttl"));
+/// assert!(!is_control_document_name("aclremap"));
+/// ```
+pub fn is_control_document_name(name: &str) -> bool {
+    let mut form = name.to_owned();
+    for _ in 0..DECODE_ROUNDS {
+        if has_control_suffix(&form) {
+            return true;
+        }
+        match percent_decode_once(&form) {
+            // The name changed — re-check the decoded spelling.
+            Some(next) => form = next,
+            // A fixpoint with no match: the name is genuinely not a control document.
+            None => return false,
+        }
+    }
+    // Still decoding after the bound: obfuscated past any legitimate use — refuse.
+    true
+}
+
+/// Whether the FINAL path segment of `s` ends in `.acl`/`.acr`, matched case-insensitively.
+/// One trailing `/` is stripped first so a CONTAINER child (`secret.acl/`) is caught, and
+/// only the leaf segment is examined so a mid-path `.acl` cannot false-positive.
+fn has_control_suffix(s: &str) -> bool {
+    let trimmed = s.strip_suffix('/').unwrap_or(s);
+    let segment = trimmed.rsplit('/').next().unwrap_or(trimmed);
+    let lower = segment.to_ascii_lowercase();
+    lower.ends_with(ACL_SUFFIX) || lower.ends_with(ACR_SUFFIX)
+}
+
+/// One round of RFC 3986 percent-decoding. `None` when nothing decoded (a fixpoint), so
+/// the caller can stop. Invalid escapes are left verbatim rather than rejected — this is
+/// a normaliser for a REFUSAL predicate, so the only effect of decoding more is refusing
+/// more, and a decoding disagreement with the server can never open a hole here.
+///
+/// Decoding is UTF-8-lossy: a non-UTF-8 byte sequence becomes U+FFFD, which cannot end in
+/// `.acl`/`.acr` any more than the bytes could, and cannot mask a suffix that follows it.
+fn percent_decode_once(s: &str) -> Option<String> {
+    if !s.contains('%') {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    let mut decoded_any = false;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                decoded_any = true;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    if !decoded_any {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+/// Whether `name` is a usable SINGLE child-name segment: non-empty, not a path-traversal
+/// dot segment, and containing no path separator in any decoded spelling. Fail-closed —
+/// anything this cannot vouch for is refused, because a create request whose minted name
+/// is ambiguous is a request whose governing ACL is ambiguous.
+fn is_safe_child_segment(name: &str) -> bool {
+    let mut form = name.to_owned();
+    for _ in 0..DECODE_ROUNDS {
+        let trimmed = form.strip_suffix('/').unwrap_or(&form);
+        if trimmed.is_empty() || trimmed == "." || trimmed == ".." || trimmed.contains('/') {
+            return false;
+        }
+        match percent_decode_once(&form) {
+            Some(next) => form = next,
+            None => return true,
+        }
+    }
+    false
+}
+
+/// The decision for "may `session` MINT a child named `child_name` inside `container`?"
+/// Shared by [`crate::PodStore::decide_create`]. [OPUS-5]
+pub(crate) fn decide_create_one(
+    index: &AclIndex,
+    auth: &AuthIndex,
+    session: &Session,
+    container: &str,
+    child_name: &str,
+    mode: Mode,
+) -> WacDecision {
+    // The NAME guard runs FIRST and its refusal is DEFINITIVE (map to 403), never
+    // retryable: it does not depend on the ACL state, so it must not be reported as
+    // `Unloaded`/`Transient` — a client retrying an escalation attempt must keep losing.
+    // Ordering matters: checking the container's ACL first would let a transient ACL
+    // condition downgrade a permanent refusal into "try again".
+    if !container.ends_with('/')
+        || !is_safe_child_segment(child_name)
+        || is_control_document_name(child_name)
+    {
+        // The governing ACL is still surfaced (when discoverable) so the refusal can
+        // carry the `Link: rel="acl"` provenance; `granted_modes` stays EMPTY because no
+        // mode grants this operation.
+        let (governing_acl, scope) = match index.resolve_acl(container) {
+            Some(e) => (Some(e.acl), Some(e.scope)),
+            None => (None, None),
+        };
+        return WacDecision {
+            allow: false,
+            granted_modes: Vec::new(),
+            governing_acl,
+            scope,
+            status: AclStatus::Resolved,
+        };
+    }
+    // The name is benign: the decision is exactly the container's own mode decision.
+    decide_one(index, auth, session, container, mode)
+}
+
 /// The sorted set of modes `session` holds on `resource`, via the fail-closed oracle.
 /// The point-query analogue of `PodStore::modes_held`, over the index directly (no
 /// per-session cache here — `decide` is a single index walk).
@@ -536,6 +745,185 @@ mod tests {
         let transient = decide_one(&ix, &auth, &alice, "not a valid iri", Mode::Read);
         assert_eq!(transient.status, AclStatus::Transient);
         assert!(transient.acl_link_header().is_none());
+    }
+
+    // ── the control-document create guard (the POST-`Slug` escalation class) ──────────
+
+    #[test]
+    fn control_document_names_are_refused_in_every_spelling() {
+        // Exact-case, the two suffixes the resolver consults.
+        assert!(is_control_document_name("secret.acl"));
+        assert!(is_control_document_name("policy.acr"));
+        // A container's OWN control document (the bare suffix as the whole name).
+        assert!(is_control_document_name(".acl"));
+        assert!(is_control_document_name(".acr"));
+        // Case variants.
+        assert!(is_control_document_name("secret.ACL"));
+        assert!(is_control_document_name("secret.Acl"));
+        assert!(is_control_document_name("secret.AcR"));
+        // A CONTAINER child minted from the slug (one trailing slash).
+        assert!(is_control_document_name("secret.acl/"));
+        assert!(is_control_document_name("secret.ACL/"));
+        // Percent-encoded spellings: the dot, the suffix letters, and a smuggled slash
+        // that would otherwise hide the suffix behind a path separator.
+        assert!(is_control_document_name("secret%2Eacl"));
+        assert!(is_control_document_name("secret%2eacl"));
+        assert!(is_control_document_name("secret.ac%6C"));
+        assert!(is_control_document_name("secret%2Facl%2Ex.acl"));
+        assert!(is_control_document_name("secret.acl%2F"));
+        // Double-encoded — unwrapped over successive rounds.
+        assert!(is_control_document_name("secret%252Eacl"));
+    }
+
+    #[test]
+    fn benign_names_are_not_refused() {
+        assert!(!is_control_document_name("note.ttl"));
+        assert!(!is_control_document_name("note1"));
+        assert!(!is_control_document_name("photo.jpg"));
+        assert!(!is_control_document_name("child/"));
+        // Merely CONTAINING "acl" is not the suffix.
+        assert!(!is_control_document_name("aclremap"));
+        assert!(!is_control_document_name("acl"));
+        assert!(!is_control_document_name("myacl"));
+        // A `.acl` only MID-path: the leaf segment (`child`) is what gets minted.
+        assert!(!is_control_document_name("x.acl/child"));
+        // `.meta` is not load-bearing for discovery in this crate, so it is not guarded.
+        assert!(!is_control_document_name("secret.meta"));
+    }
+
+    #[test]
+    fn a_name_that_never_stops_decoding_is_refused() {
+        // Nine rounds of encoding outlasts the eight-round bound; the fail-closed branch
+        // refuses rather than giving up and allowing. Built by re-encoding `%` each round.
+        let mut name = String::from("secret.acl");
+        for _ in 0..DECODE_ROUNDS + 1 {
+            name = name.replace('%', "%25").replace('.', "%2E");
+        }
+        assert!(
+            is_control_document_name(&name),
+            "a name still decoding past the bound must be refused, not allowed"
+        );
+    }
+
+    #[test]
+    fn unsafe_child_segments_are_rejected() {
+        assert!(!is_safe_child_segment(""));
+        assert!(!is_safe_child_segment("/"));
+        assert!(!is_safe_child_segment("."));
+        assert!(!is_safe_child_segment(".."));
+        assert!(!is_safe_child_segment("a/b"));
+        assert!(!is_safe_child_segment("a%2Fb")); // encoded separator
+        assert!(!is_safe_child_segment("%2E%2E")); // encoded dot segment
+        // Benign single segments, with or without the container trailing slash.
+        assert!(is_safe_child_segment("note1"));
+        assert!(is_safe_child_segment("note.ttl"));
+        assert!(is_safe_child_segment("child/"));
+        assert!(is_safe_child_segment("a%20b")); // an encoded SPACE is fine
+    }
+
+    #[test]
+    fn percent_decode_once_reports_its_fixpoint() {
+        // No `%` at all, and a `%` that is not a valid escape, are both fixpoints.
+        assert_eq!(percent_decode_once("plain"), None);
+        assert_eq!(percent_decode_once("100%"), None);
+        assert_eq!(percent_decode_once("%zz"), None);
+        // A valid escape decodes exactly once, leaving the rest verbatim.
+        assert_eq!(percent_decode_once("a%2Fb").as_deref(), Some("a/b"));
+        assert_eq!(percent_decode_once("%252E").as_deref(), Some("%2E"));
+    }
+
+    #[test]
+    fn create_refusal_is_definitive_and_carries_the_acl_link() {
+        let g = graph(ROOT_ACL);
+        let ix = AclIndex::build(&g);
+        let auth = AuthIndex::default();
+        let alice = Session {
+            agent: Some("https://alice.ex/card#me"),
+            client: None,
+            issuer: None,
+            now: None,
+        };
+        let d = decide_create_one(
+            &ix,
+            &auth,
+            &alice,
+            "https://pod.ex/notes/",
+            "secret.acl",
+            Mode::Append,
+        );
+        assert!(!d.allow);
+        assert!(d.granted_modes.is_empty(), "no mode grants this operation");
+        assert_eq!(d.status, AclStatus::Resolved);
+        assert!(
+            !d.status.is_retryable(),
+            "the name refusal is permanent — a client must not be told to retry"
+        );
+        // The governing ACL is still advertised so the refusal can carry Link: rel="acl".
+        assert_eq!(
+            d.acl_link_header().as_deref(),
+            Some(r#"<https://pod.ex/.acl>; rel="acl""#)
+        );
+    }
+
+    #[test]
+    fn create_refusal_outranks_an_unloaded_view() {
+        // The view is NOT materialized, so the container decision alone would be the
+        // retryable `Unloaded`. The name refusal must still win and stay definitive —
+        // otherwise a 503 invites the escalation attempt to be retried until it lands.
+        let g = graph(ROOT_ACL);
+        let ix = AclIndex::build(&g);
+        assert!(!ix.materialized, "fixture is deliberately unmaterialized");
+        let auth = AuthIndex::default();
+        let alice = Session {
+            agent: Some("https://alice.ex/card#me"),
+            client: None,
+            issuer: None,
+            now: None,
+        };
+        let benign = decide_create_one(
+            &ix,
+            &auth,
+            &alice,
+            "https://pod.ex/notes/",
+            "note1",
+            Mode::Append,
+        );
+        assert_eq!(benign.status, AclStatus::Unloaded, "control: retryable");
+
+        let refused = decide_create_one(
+            &ix,
+            &auth,
+            &alice,
+            "https://pod.ex/notes/",
+            "secret.acl",
+            Mode::Append,
+        );
+        assert_eq!(refused.status, AclStatus::Resolved);
+        assert!(!refused.status.is_retryable());
+    }
+
+    #[test]
+    fn create_into_a_non_container_is_refused() {
+        let g = graph(ROOT_ACL);
+        let ix = AclIndex::build(&g);
+        let auth = AuthIndex::default();
+        let alice = Session {
+            agent: Some("https://alice.ex/card#me"),
+            client: None,
+            issuer: None,
+            now: None,
+        };
+        // `notes/n1` is a document, not a slash-terminated container.
+        let d = decide_create_one(
+            &ix,
+            &auth,
+            &alice,
+            "https://pod.ex/notes/n1",
+            "child",
+            Mode::Append,
+        );
+        assert!(!d.allow);
+        assert_eq!(d.status, AclStatus::Resolved);
     }
 
     #[test]

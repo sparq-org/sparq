@@ -893,3 +893,350 @@ async fn partial_failure_batch_cred_a_admits_cred_b_fails_alice_gets_read() {
         "trustJustification must be present when at least one credential admitted"
     );
 }
+
+// ---------------------------------------------------------------------------
+// SHAPE-SCOPE CERTIFICATION WIRE FORMAT (sq-sllu4)
+//
+// `"scopeKind": "shape"` + `"scopeShapePredicateIri"` projects
+// `sparq_trust::graph::CertScope::Shape` onto the wire. These tests pin BOTH halves:
+//   * the fail-closed parse matrix (a shape kind with no predicate / a non-IRI predicate),
+//   * and — the load-bearing one — that a certifier can actually SIGN a shape-scoped edge
+//     this endpoint verifies: the wire desugaring is canonical, so the signature the
+//     certifier makes over its own copy of the scope shape reproduces the server's preimage.
+//     A fresh-blank-node desugaring would make every shape-scoped edge unverifiable.
+// ---------------------------------------------------------------------------
+
+/// The certifier (framework operator) that anchors the certification edges below.
+const GOV_IRI: &str = "https://gov.example/framework";
+
+/// Seed for the certifier's key (distinct from `TEST_KEY_SEED`, the certified issuer's).
+const GOV_KEY_SEED: u64 = 0x0060_0DCE_2717_1E52;
+
+/// The certifier's secret key.
+fn gov_secret_key() -> SecretKey {
+    SecretKey::from_seed(GOV_KEY_SEED)
+}
+
+/// The CANONICAL shape-scope desugaring a certifier must sign over — the client-side mirror
+/// of `solid_authz::cert_scope_predicate_shape`. It is duplicated here ON PURPOSE: this is
+/// exactly the reconstruction a real certifier performs, so the e2e test below fails if the
+/// server's canonical form ever drifts from the documented one.
+fn canonical_cert_scope_shape(predicate_iri: &str) -> sparq_trust::policy::ShapeRef {
+    use oxrdf::{BlankNode, Literal};
+    let pred = NamedNode::new(predicate_iri).unwrap();
+    let root = BlankNode::new("certScopeShape").unwrap();
+    let prop = BlankNode::new("certScopeProperty").unwrap();
+    let sh = |local: &str| NamedNode::new(format!("http://www.w3.org/ns/shacl#{}", local)).unwrap();
+    sparq_trust::policy::ShapeRef {
+        root: Term::BlankNode(root.clone()),
+        triples: vec![
+            Triple::new(root.clone(), sh("targetSubjectsOf"), pred.clone()),
+            Triple::new(root, sh("property"), prop.clone()),
+            Triple::new(prop.clone(), sh("path"), pred),
+            Triple::new(prop, sh("minCount"), Literal::new_simple_literal("1")),
+        ],
+    }
+}
+
+/// A shape-scoped certification GOV → the credential issuer, signed by GOV over the canonical
+/// scope shape for `predicate_iri`, as the JSON wire object.
+fn signed_shape_cert_json(predicate_iri: &str) -> serde_json::Value {
+    use sparq_trust::graph::{certification_message, CertScope, Certification};
+    let gov_sk = gov_secret_key();
+    let issuer_pk = SecretKey::from_seed(TEST_KEY_SEED).public_key();
+    let mut cert = Certification {
+        certifier: NamedNode::new(GOV_IRI).unwrap(),
+        certifier_key: gov_sk.public_key(),
+        certified_issuer: NamedNode::new(ISSUER_IRI).unwrap(),
+        certified_key: issuer_pk,
+        scope: CertScope::Shape(canonical_cert_scope_shape(predicate_iri)),
+        valid_from_unix_secs: 0,
+        valid_until_unix_secs: NOW_SECS + 86_400,
+        signature_hex: String::new(),
+    };
+    cert.signature_hex = gov_sk.sign_commitment(&certification_message(&cert));
+    serde_json::json!({
+        "certifierIri": GOV_IRI,
+        "certifierKeyHex": sig_public_key_to_hex(&cert.certifier_key),
+        "certifiedIssuerIri": ISSUER_IRI,
+        "certifiedKeyHex": sig_public_key_to_hex(&cert.certified_key),
+        "validFromUnixSecs": cert.valid_from_unix_secs,
+        "validUntilUnixSecs": cert.valid_until_unix_secs,
+        "signatureHex": cert.signature_hex,
+        "scopeKind": "shape",
+        "scopeShapePredicateIri": predicate_iri
+    })
+}
+
+/// A decide body whose ONLY anchor rule is the CERTIFIER (GOV) — the credential issuer is not
+/// anchored directly, so Alice can only be granted through a derived rule the certification
+/// closure produces.
+fn decide_body_with_certification(
+    certifications: Vec<serde_json::Value>,
+    creds: &[WireCred<'_>],
+) -> serde_json::Value {
+    let creds_json: Vec<serde_json::Value> = creds
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "graphNquads": c.nquads,
+                "issuerSignatureHex": c.sig_hex,
+                "saltHex": c.salt_hex,
+                "issuedAtUnixSecs": c.issued_at,
+                "revoked": c.revoked
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "dataset": WAC_NQUADS_GROUP,
+        "session": { "agent": ALICE },
+        "resource": RESOURCE,
+        "mode": "read",
+        "view": "wac",
+        "trust": {
+            "agentIri": ALICE,
+            "nowUnixSecs": NOW_SECS,
+            "rules": [
+                {
+                    "source": GOV_IRI,
+                    "issuerKeyHex": sig_public_key_to_hex(&gov_secret_key().public_key()),
+                    "scopeIri": RESOURCE,
+                    "freshWithinSecs": 86400_i64,
+                    "shapePredicateIri": VCARD_HAS_MEMBER
+                }
+            ],
+            "certifications": certifications,
+            "credentials": creds_json
+        }
+    })
+}
+
+/// POST a decide body and return `(status, json)`.
+async fn post_decide(base: &str, body: &serde_json::Value) -> (u16, serde_json::Value) {
+    let resp = client()
+        .post(format!("{}/authz/decide", base))
+        .json(body)
+        .send()
+        .await
+        .unwrap();
+    let status = resp.status().as_u16();
+    (status, resp.json().await.unwrap())
+}
+
+/// A `"shape"` scope with NO `scopeShapePredicateIri` => 403 DENY. A shape kind without a
+/// predicate is an UNSPECIFIED scope, and an unspecified scope is never treated as a wider one.
+#[tokio::test]
+async fn trust_certification_shape_scope_without_predicate_is_403() {
+    let base = spawn_trust_on().await;
+    let zero_key = "00".repeat(33);
+    let body = serde_json::json!({
+        "dataset": WAC_NQUADS,
+        "session": { "agent": ALICE },
+        "resource": RESOURCE,
+        "mode": "read",
+        "view": "wac",
+        "trust": {
+            "agentIri": ALICE,
+            "nowUnixSecs": NOW_SECS,
+            "rules": [],
+            "certifications": [
+                {
+                    "certifierIri": GOV_IRI,
+                    "certifierKeyHex": zero_key,
+                    "certifiedIssuerIri": ISSUER_IRI,
+                    "certifiedKeyHex": zero_key,
+                    "validFromUnixSecs": 0_i64,
+                    "validUntilUnixSecs": 9_999_999_999_i64,
+                    "signatureHex": "aabbcc",
+                    "scopeKind": "shape"
+                }
+            ],
+            "credentials": []
+        }
+    });
+    let (status, resp_body) = post_decide(&base, &body).await;
+    assert_eq!(status, 403, "'shape' scope with no predicate IRI => 403");
+    assert_eq!(
+        resp_body.get("trustDenied").and_then(|v| v.as_bool()),
+        Some(true),
+    );
+}
+
+/// A `"shape"` scope whose `scopeShapePredicateIri` is not a valid IRI => 403 DENY.
+#[tokio::test]
+async fn trust_certification_shape_scope_invalid_predicate_iri_is_403() {
+    let base = spawn_trust_on().await;
+    let zero_key = "00".repeat(33);
+    let body = serde_json::json!({
+        "dataset": WAC_NQUADS,
+        "session": { "agent": ALICE },
+        "resource": RESOURCE,
+        "mode": "read",
+        "view": "wac",
+        "trust": {
+            "agentIri": ALICE,
+            "nowUnixSecs": NOW_SECS,
+            "rules": [],
+            "certifications": [
+                {
+                    "certifierIri": GOV_IRI,
+                    "certifierKeyHex": zero_key,
+                    "certifiedIssuerIri": ISSUER_IRI,
+                    "certifiedKeyHex": zero_key,
+                    "validFromUnixSecs": 0_i64,
+                    "validUntilUnixSecs": 9_999_999_999_i64,
+                    "signatureHex": "aabbcc",
+                    "scopeKind": "shape",
+                    "scopeShapePredicateIri": "definitely not an IRI"
+                }
+            ],
+            "credentials": []
+        }
+    });
+    let (status, resp_body) = post_decide(&base, &body).await;
+    assert_eq!(status, 403, "'shape' scope with a non-IRI predicate => 403");
+    assert_eq!(
+        resp_body.get("trustDenied").and_then(|v| v.as_bool()),
+        Some(true),
+    );
+}
+
+/// END TO END: a GOV-signed, SHAPE-scoped certification of the credential issuer derives a
+/// rule the admission gate consumes => the issuer's credential is admitted => WAC grants
+/// Alice Read (200 allow, `certGraphDerived: true`, `admittedSource` = the CERTIFIED issuer).
+///
+/// The credential issuer is NOT anchored in the trust block — only GOV is — so the grant can
+/// come ONLY from the derived rule. That makes this the direct proof that the shape-scope wire
+/// format is signable and verifiable end to end: the certifier signed
+/// `certification_message` over ITS OWN reconstruction of the canonical scope shape
+/// (`canonical_cert_scope_shape`), and the server reproduced the same preimage from the
+/// predicate IRI alone.
+///
+/// MUTATION-VERIFY NOTE: changing either canonical blank-node label (server-side, or in the
+/// test's mirror) makes the certifier's signature no longer verify → the edge contributes
+/// nothing → Alice is DENIED → this test goes RED.
+#[tokio::test]
+async fn shape_scoped_certification_derives_rule_and_grants() {
+    let base = spawn_trust_on().await;
+    let (sig_hex, signed_graph) = sign_test_graph(vec![alice_member_triple()]);
+    let nquads = triple_to_nquads_line(&signed_graph[0]);
+    let salt_hex = test_salt_hex();
+    let body = decide_body_with_certification(
+        vec![signed_shape_cert_json(VCARD_HAS_MEMBER)],
+        &[WireCred {
+            nquads: &nquads,
+            sig_hex: &sig_hex,
+            salt_hex: &salt_hex,
+            issued_at: ISSUED_AT_SECS,
+            revoked: false,
+        }],
+    );
+    let (status, resp_body) = post_decide(&base, &body).await;
+    // [SONNET-4.6] POSITIONAL format args (CodeQL guard).
+    assert_eq!(
+        status, 200,
+        "a signed shape-scoped certification derives the issuer's rule => 200 allow"
+    );
+    assert_eq!(
+        resp_body.get("allow").and_then(|v| v.as_bool()),
+        Some(true),
+        "the derived rule admits the credential => allow:true"
+    );
+    let tj = resp_body
+        .get("trustJustification")
+        .expect("trustJustification must be present on a trust-admitted GRANT");
+    assert_eq!(
+        tj.get("certGraphDerived").and_then(|v| v.as_bool()),
+        Some(true),
+        "the grant went through the cert-graph closure"
+    );
+    assert_eq!(
+        tj.get("admittedSource").and_then(|v| v.as_str()),
+        Some(ISSUER_IRI),
+        "the admitting rule is the DERIVED one (source = the certified issuer)"
+    );
+}
+
+/// The shape scope actually SCOPES: the same signed edge, scoped to a DIFFERENT predicate
+/// than the certifier's anchor covers, is not a provable narrowing of that anchor, so it
+/// derives NOTHING and the credential is never admitted => 403 DENY.
+///
+/// This is the non-vacuous companion to the grant test above: without it, a shape scope that
+/// was silently ignored (or widened to `anyService`) would look identical from the outside.
+#[tokio::test]
+async fn shape_scope_for_an_uncertified_predicate_derives_nothing_and_denies() {
+    let base = spawn_trust_on().await;
+    let (sig_hex, signed_graph) = sign_test_graph(vec![alice_member_triple()]);
+    let nquads = triple_to_nquads_line(&signed_graph[0]);
+    let salt_hex = test_salt_hex();
+    // The anchor rule covers `vcard:hasMember`; this edge is scoped to `schema:age`, which the
+    // certifier never held authority over.
+    let body = decide_body_with_certification(
+        vec![signed_shape_cert_json("https://schema.org/age")],
+        &[WireCred {
+            nquads: &nquads,
+            sig_hex: &sig_hex,
+            salt_hex: &salt_hex,
+            issued_at: ISSUED_AT_SECS,
+            revoked: false,
+        }],
+    );
+    let (status, resp_body) = post_decide(&base, &body).await;
+    assert_eq!(
+        status, 403,
+        "a shape scope outside the certifier's anchor derives nothing => deny"
+    );
+    assert_eq!(
+        resp_body.get("allow").and_then(|v| v.as_bool()),
+        Some(false),
+        "no derived rule => no admitted fact => WAC denies"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// [SONNET-4.6] sq-snopa.8 — the trust extension does NOT compose with the stateful lane.
+//
+// `trust_authz_decide` decides over its OWN store, built by injecting admitted facts into the
+// request-BODY dataset. `"source":"server"` supplies no such dataset, so combining the two
+// would silently authorise over a pod the caller did not name. Refused up front instead.
+// ---------------------------------------------------------------------------
+
+/// A `"source":"server"` decide body carrying a `"trust"` block — the unsupported combination.
+fn server_source_decide_body_with_trust(resource: &str) -> serde_json::Value {
+    serde_json::json!({
+        "source": "server",
+        "session": { "agent": "https://alice.ex/card#me" },
+        "resource": resource,
+        "mode": "read",
+        "view": "wac",
+        "trust": {
+            "agentIri": "https://alice.ex/card#me",
+            "nowUnixSecs": 1_720_000_000_i64,
+            "rules": [],
+            "certifications": [],
+            "credentials": []
+        }
+    })
+}
+
+/// FAIL-CLOSED: `"source":"server"` + a `"trust"` block is refused (400), never answered from
+/// whichever pod the server happened to pick.
+///
+/// MUTATION SPOT-CHECK: delete the `req.source == AuthzSource::Server` refusal in
+/// `decide_endpoint` and this test goes red (the request would fall into the trust lane over an
+/// EMPTY body dataset).
+#[tokio::test]
+async fn trust_block_is_refused_with_the_stateful_source() {
+    let base = spawn_trust_on().await;
+    let resp = client()
+        .post(format!("{}/authz/decide", base))
+        .json(&server_source_decide_body_with_trust("https://pod.ex/notes/n1"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        400,
+        "the trust extension must not silently combine with 'source':'server'"
+    );
+}

@@ -188,8 +188,8 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C JSON-LD 1.1 compact",
-      "note": "native document-level Compaction Algorithm (sparq-jsonld), compared against the W3C EXPECTED compacted document (json_ld_equal — the normative document oracle)",
-      "ratchet_floor": 228,
+      "note": "native document-level Compaction Algorithm (sparq-jsonld), compared against the W3C EXPECTED compacted document (json_ld_equal — the normative document oracle); NegativeEvaluationTests RUN against the manifest expectErrorCode since sq-gzsky (a wrong code is a FAIL)",
+      "ratchet_floor": 243,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "jsonld-suite",
@@ -220,8 +220,8 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C JSON-LD 1.1 expand",
-      "note": "native sparq_jsonld::expand() + json_ld_equal semantic-equivalence comparator (sq-kk1mq; NOT structural identity — ~18/240 passes are reordered, strict-ordered count 222; re-baseline from 247 under RDF-equivalence oracle sq-oy1f); options forwarded (base, expandContext, processingMode)",
-      "ratchet_floor": 276,
+      "note": "native sparq_jsonld::expand() + json_ld_equal semantic-equivalence comparator (sq-kk1mq; NOT structural identity — ~18/240 passes are reordered, strict-ordered count 222; re-baseline from 247 under RDF-equivalence oracle sq-oy1f); options forwarded (base, expandContext, processingMode); NegativeEvaluationTests RUN against the manifest expectErrorCode since sq-gzsky (a wrong code is a FAIL, never a pass)",
+      "ratchet_floor": 381,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "jsonld-suite",
@@ -394,7 +394,7 @@
       "is_extension": true,
       "label": "RIF-Core expressivity (monotone Horn subset)",
       "note": "EXTENSION ratchet — sparq's own faithful expressivity battery over the RIF-CORE (monotone Horn) subset implemented by sparq-reason's rif:: front-end (frame/membership/subclass/equality, recursion, numeric/string/list builtins with range-restriction safety, monotonicity, the canonical rif01 uncle rule); the normative SPARQL-RIF Core Entailment Regime + full RIF-BLD/PRD are documented out-of-scope, asserted genuinely-rejected, never faked as passes",
-      "ratchet_floor": 73,
+      "ratchet_floor": 76,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "rif-core",
@@ -454,11 +454,11 @@
       "ci_job": "inference-conformance",
       "command": "cargo test -p sparq-conformance --features dl-direct --test dl_suite",
       "family": "sparq extension",
-      "floor_basis": "positive-tag membership passes, EXACT-pinned (sparq EXTENSION over the L1/L2 ALCH-fragment checker — scoped fragment, NOT full OWL 2 DL and NOT a W3C ProfileIdentificationTest conformance claim); re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization: +27, 68 -> 95); re-pinned by sq-pbz04.4.9 (L1 datatype-map-IRI refusal: -1, 95 -> 94 — the WebOnt-I5.3-015 EL profile row whose premise carries xsd:integer/xsd:string ranges now refuses extraction and honestly abstains, was a pass under the old opaque-datatype reading)",
+      "floor_basis": "positive-tag membership passes, EXACT-pinned (sparq EXTENSION over the L1/L2 ALCH-fragment checker — scoped fragment, NOT full OWL 2 DL and NOT a W3C ProfileIdentificationTest conformance claim); re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization: +27, 68 -> 95); re-pinned by sq-pbz04.4.9 (L1 datatype-map-IRI refusal: -1, 95 -> 94 — the WebOnt-I5.3-015 EL profile row whose premise carries xsd:integer/xsd:string ranges now refuses extraction and honestly abstains, was a pass under the old opaque-datatype reading); re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal: -1, 94 -> 93 — the New-Feature-BottomObjectProperty-001 EL profile row, whose premise uses owl:bottomObjectProperty, now refuses extraction and honestly abstains)",
       "is_extension": true,
       "label": "OWL 2 DL profile identification (Direct arm)",
-      "note": "EXTENSION ratchet — the DIRECT-arm ProfileIdentificationTest cases whose POSITIVE test:profile tags the L2 syntactic checker reproduces through the REAL fail-closed L1 extraction + grammar walk; abstentions are never passes. The 27 singleton-intersection (M7) divergences are FIXED by sq-pbz04.4.16 (L1 normalizes a 1-ary owl:intersectionOf to its member) and now pass; the positive PROFILE_DIVERGENCES pin is empty. The EXPLICIT-NEGATIVE direction is a SEPARATE lane (sq-pbz04.4.16): the export's owl:NegativePropertyAssertion profile negations refuted where L2 can (138 after sq-zfwzq graduated three transitive-property inputs from extraction abstention: +1 refuted and +2 measured In-gap), with an honest measured In-gap (182 of 320 checkable) where axiom-grammar membership over the ALCH shadow cannot refute full-profile membership (deferred restrictions); species assertions remain unchecked (documented)",
-      "ratchet_floor": 94,
+      "note": "EXTENSION ratchet — the DIRECT-arm ProfileIdentificationTest cases whose POSITIVE test:profile tags the L2 syntactic checker reproduces through the REAL fail-closed L1 extraction + grammar walk; abstentions are never passes. The 27 singleton-intersection (M7) divergences are FIXED by sq-pbz04.4.16 (L1 normalizes a 1-ary owl:intersectionOf to its member) and now pass; the positive PROFILE_DIVERGENCES pin is empty. The EXPLICIT-NEGATIVE direction is a SEPARATE lane (sq-pbz04.4.16): the export's owl:NegativePropertyAssertion profile negations refuted where L2 can (134 after sq-pbz04.4.8 moved four built-in-property rows out of the checkable set into honest extraction abstention), with an honest measured In-gap (181 of 315 checkable) where axiom-grammar membership over the ALCH shadow cannot refute full-profile membership (deferred restrictions); species assertions remain unchecked (documented)",
+      "ratchet_floor": 93,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "dl-direct",
@@ -470,11 +470,11 @@
       "ci_job": "inference-conformance",
       "command": "cargo test -p sparq-conformance --features dl-direct --test dl_suite",
       "family": "sparq extension",
-      "floor_basis": "definitive expected verdicts through the L4 dispatch, EXACT-pinned (sparq EXTENSION over the scoped fragment — NOT full OWL 2 DL); re-pinned by sq-pbz04.4.11 (M1 named-composite fix, net +8); re-pinned by sq-pbz04.4.12 (M4 orphan/cyclic fix: -3, 192 -> 189); re-pinned by sq-pbz04.4.13 (M2 conclusion-bnode existential-reading fix: +1, 189 -> 190); re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization: -8, 190 -> 182 — 8 consistency cases re-route from the ALCH tableau to the RL branch and honestly abstain via the documented disjointWith divergence guard, never a wrong verdict; fail set unchanged); unchanged at 182 by sq-pbz04.4.9 (SubObjectPropertyOf conclusion encoding + L1 datatype-map-IRI refusal net to zero on the pass total, composition 97+69 -> 96+70; fail set still 5, M3/M5/M6); re-pinned by sq-zfwzq (ALCHS transitive roles: +2 consistency and +2 positive-entailment passes, 182 -> 186; composition 98+14+72+2, fail set unchanged)",
+      "floor_basis": "definitive expected verdicts through the L4 dispatch, EXACT-pinned (sparq EXTENSION over the scoped fragment — NOT full OWL 2 DL); re-pinned by sq-pbz04.4.11 (M1 named-composite fix, net +8); re-pinned by sq-pbz04.4.12 (M4 orphan/cyclic fix: -3, 192 -> 189); re-pinned by sq-pbz04.4.13 (M2 conclusion-bnode existential-reading fix: +1, 189 -> 190); re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization: -8, 190 -> 182 — 8 consistency cases re-route from the ALCH tableau to the RL branch and honestly abstain via the documented disjointWith divergence guard, never a wrong verdict; fail set unchanged); unchanged at 182 by sq-pbz04.4.9 (SubObjectPropertyOf conclusion encoding + L1 datatype-map-IRI refusal net to zero on the pass total, composition 97+69 -> 96+70; fail set still 5, M3/M5/M6); re-pinned by sq-zfwzq (ALCHS transitive roles: +2 consistency and +2 positive-entailment passes, 182 -> 186; composition 98+14+72+2, fail set unchanged); re-pinned by sq-pbz04.4.8 (guard-abstention tableau fall-through: +41, 186 -> 227; composition 136+17+72+2 — an abstaining RL/EL/QL branch now re-asks the ALCH tableau, which is complete for every L1-extracted ontology, so the 43 guard-abstained rows are decided instead of dropped; paired with an L1 refusal of owl:top/bottomObjectProperty, whose fixed extensions L1 had been reading away — without it the fall-through exposed 2 wrong verdicts; fail set unchanged at 5)",
       "is_extension": true,
       "label": "OWL 2 Direct-Semantics consistency + entailment (scoped fragment)",
       "note": "EXTENSION ratchet — the DIRECT-arm consistency / inconsistency / positive- / negative-entailment tests decided by the REAL sparq-reason-dl L4 dispatch (RL guarded / EL guarded / QL deferred / ALCH tableau) under a pinned deterministic count budget; fail-closed abstentions are reported, never passes, and all 5 remaining wrong-verdict divergences are pinned by name with audited mechanisms (M1 FIXED sq-pbz04.4.11; M4 FIXED sq-pbz04.4.12; M2 FIXED sq-pbz04.4.13; M7 FIXED sq-pbz04.4.16 — those rows now pass/abstain; remaining: M3/M5/M6). The default-off dl_transitive extension graduates transitive-role inputs only through the tableau whose termination and soundness argument is written in sparq-reason-dl::tableau §5a",
-      "ratchet_floor": 186,
+      "ratchet_floor": 227,
       "runner": {
         "crate": "sparq-conformance",
         "feature": "dl-direct",
@@ -560,9 +560,9 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 5315,
+    "conformance_floor_total": 5435,
     "conformance_suites": 25,
-    "extension_assertion_total": 19663,
+    "extension_assertion_total": 19706,
     "extension_suites": 11
   }
 }

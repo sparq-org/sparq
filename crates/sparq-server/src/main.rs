@@ -1233,9 +1233,13 @@ fn load_tcp_tls_config(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,
 ) -> Result<Arc<rustls::ServerConfig>, Box<dyn std::error::Error>> {
+    // [OPUS-5] sq-5ah3p: PEM decoding via `rustls-pki-types`' `PemObject`, reached through rustls'
+    // own re-export, retiring the archived `rustls-pemfile` shim (RUSTSEC-2025-0134).
+    use rustls::pki_types::pem::PemObject as _;
+
     let cert_file = std::fs::File::open(cert_path)
         .map_err(|e| format!("--tls-cert: cannot read {}: {e}", cert_path.display()))?;
-    let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(cert_file))
+    let certs = rustls::pki_types::CertificateDer::pem_reader_iter(cert_file)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("--tls-cert: malformed PEM in {}: {e}", cert_path.display()))?;
     if certs.is_empty() {
@@ -1248,9 +1252,18 @@ fn load_tcp_tls_config(
 
     let key_file = std::fs::File::open(key_path)
         .map_err(|e| format!("--tls-key: cannot read {}: {e}", key_path.display()))?;
-    let key = rustls_pemfile::private_key(&mut std::io::BufReader::new(key_file))
-        .map_err(|e| format!("--tls-key: malformed PEM in {}: {e}", key_path.display()))?
-        .ok_or_else(|| format!("--tls-key: {} contains no private key", key_path.display()))?;
+    // `from_pem_reader` folds "no key section here" into `NoItemsFound` where the retired
+    // `rustls_pemfile::private_key` returned `Ok(None)`; mapping that one variant back keeps both
+    // operator-facing diagnostics (empty vs corrupt) exactly as they were.
+    let key = rustls::pki_types::PrivateKeyDer::from_pem_reader(key_file).map_err(|e| match e {
+        rustls::pki_types::pem::Error::NoItemsFound => {
+            format!("--tls-key: {} contains no private key", key_path.display())
+        }
+        other => format!(
+            "--tls-key: malformed PEM in {}: {other}",
+            key_path.display()
+        ),
+    })?;
 
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut tls = rustls::ServerConfig::builder_with_provider(provider)
@@ -1270,9 +1283,11 @@ fn bind_http3_endpoint(
     cert_path: &std::path::Path,
     key_path: &std::path::Path,
 ) -> Result<quinn::Endpoint, Box<dyn std::error::Error>> {
+    use rustls::pki_types::pem::PemObject as _;
+
     let cert_file = std::fs::File::open(cert_path)
         .map_err(|e| format!("--tls-cert: cannot read {}: {e}", cert_path.display()))?;
-    let certs = rustls_pemfile::certs(&mut std::io::BufReader::new(cert_file))
+    let certs = rustls::pki_types::CertificateDer::pem_reader_iter(cert_file)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("--tls-cert: malformed PEM in {}: {e}", cert_path.display()))?;
     if certs.is_empty() {
@@ -1285,9 +1300,18 @@ fn bind_http3_endpoint(
 
     let key_file = std::fs::File::open(key_path)
         .map_err(|e| format!("--tls-key: cannot read {}: {e}", key_path.display()))?;
-    let key = rustls_pemfile::private_key(&mut std::io::BufReader::new(key_file))
-        .map_err(|e| format!("--tls-key: malformed PEM in {}: {e}", key_path.display()))?
-        .ok_or_else(|| format!("--tls-key: {} contains no private key", key_path.display()))?;
+    // `from_pem_reader` folds "no key section here" into `NoItemsFound` where the retired
+    // `rustls_pemfile::private_key` returned `Ok(None)`; mapping that one variant back keeps both
+    // operator-facing diagnostics (empty vs corrupt) exactly as they were.
+    let key = rustls::pki_types::PrivateKeyDer::from_pem_reader(key_file).map_err(|e| match e {
+        rustls::pki_types::pem::Error::NoItemsFound => {
+            format!("--tls-key: {} contains no private key", key_path.display())
+        }
+        other => format!(
+            "--tls-key: malformed PEM in {}: {other}",
+            key_path.display()
+        ),
+    })?;
 
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
     let mut tls = rustls::ServerConfig::builder_with_provider(provider)

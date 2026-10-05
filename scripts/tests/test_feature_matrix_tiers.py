@@ -13,6 +13,8 @@
 #   (g) mutation check: fail-open copy => non-sensitive on error
 #   (h) non-sensitive fixture (no cfg refs) => NOT sensitive
 #   (i) cfg(all(test, feature)) in src/ => SENSITIVE (b-direct pattern)
+#   (j) a test:true leg for the same feature NAME in a DIFFERENT crate does not
+#       satisfy the sq-vya1 guard (invariant (2) keys on (crate, feature))
 #
 # All tests are hermetic: they create temporary directories with synthetic
 # Rust files and call the detector functions directly. No subprocess, no
@@ -565,6 +567,102 @@ class TestEnforceMode(unittest.TestCase):
                 )
             finally:
                 det._crate_dir = original_crate_dir
+
+
+# ---------------------------------------------------------------------------
+# (j) [OPUS-5] cross-crate regression: cargo feature names are crate-LOCAL, so
+# invariant (2) must key on (crate, feature). A test:true leg for feature F in
+# crate A must NOT satisfy a sensitive F in crate B — keying on the bare name
+# silently masked exactly that gap (15 feature names are shared across crates
+# in the live fragments; sparq-arrow/arrow was standing in for sparq-py/arrow).
+# ---------------------------------------------------------------------------
+
+class TestCrossCrateFeatureNameCollision(unittest.TestCase):
+    """Two crates share a feature name; only the UNRELATED crate has test:true."""
+
+    def _run(self, extra_leg_fields: dict = None) -> int:
+        """Build the two-crate fixture and return cmd_enforce's exit code.
+
+        crate_a: NOT sensitive (no cfg refs at all), leg test:true.
+        crate_b: SENSITIVE (feature-gated #[test] in tests/), leg test:false.
+        Both legs declare the SAME feature name "shared-feat".
+        """
+        with tempfile.TemporaryDirectory() as tmp_a, \
+                tempfile.TemporaryDirectory() as tmp_b:
+            root_a = _make_crate(tmp_a)
+            root_b = _make_crate(
+                tmp_b,
+                test_files={
+                    "gated.rs": '#![cfg(feature = "shared-feat")]\n#[test]\nfn t() {}\n'
+                },
+            )
+
+            # Precondition: the detector must disagree about the two crates,
+            # or the test proves nothing.
+            self.assertFalse(
+                det.classify_leg(root_a, ["shared-feat"]).sensitive,
+                "crate_a fixture must be NON-sensitive for this test.",
+            )
+            self.assertTrue(
+                det.classify_leg(root_b, ["shared-feat"]).sensitive,
+                "crate_b fixture must be SENSITIVE for this test.",
+            )
+
+            original_crate_dir = det._crate_dir
+
+            def patched_crate_dir(name: str) -> Path:
+                if name == "crate_a":
+                    return root_a
+                if name == "crate_b":
+                    return root_b
+                return original_crate_dir(name)
+
+            det._crate_dir = patched_crate_dir
+            try:
+                leg_b = {
+                    "name": "crate_b (shared-feat)",
+                    "crate": "crate_b",
+                    "features": "shared-feat",
+                    "test": False,  # no cargo-test coverage for crate_b
+                }
+                leg_b.update(extra_leg_fields or {})
+                legs = [
+                    {
+                        "name": "crate_a (shared-feat)",
+                        "crate": "crate_a",
+                        "features": "shared-feat",
+                        "test": True,  # covers crate_a's feature, NOT crate_b's
+                    },
+                    leg_b,
+                ]
+                return det.cmd_enforce(legs)
+            finally:
+                det._crate_dir = original_crate_dir
+
+    def test_same_name_other_crate_test_leg_does_not_satisfy_guard(self):
+        """The unrelated crate's test:true leg must NOT cover crate_b's feature."""
+        self.assertNotEqual(
+            self._run(),
+            0,
+            "A test:true leg for the SAME feature name in a DIFFERENT crate must "
+            "not satisfy the sq-vya1 guard — feature names are crate-local.",
+        )
+
+    def test_written_test_reason_exempts_the_leg(self):
+        """A written test-reason: on the leg is the reviewed escape hatch."""
+        self.assertEqual(
+            self._run({"test-reason": "coverage lives in the python.yml pytest job"}),
+            0,
+            "A test:false leg carrying a written test-reason: must pass invariant (2).",
+        )
+
+    def test_blank_test_reason_does_not_exempt_the_leg(self):
+        """An empty/whitespace test-reason: is not a justification."""
+        self.assertNotEqual(
+            self._run({"test-reason": "   "}),
+            0,
+            "A blank test-reason: must not silence the sq-vya1 guard.",
+        )
 
 
 # ---------------------------------------------------------------------------

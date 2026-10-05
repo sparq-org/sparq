@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -25,3 +30,17 @@
   crate: "sparq-py"
   features: "arrow"
   test: false
+  # [OPUS-5] sq-vya1 invariant (2) override. The detector classifies sparq-py/arrow
+  # SENSITIVE (criterion (c): `cfg_attr(not(feature = "arrow"), ...)` in src/lib.rs), so a
+  # test:true leg would normally be required — hence the written reason below. Before the
+  # (crate, feature) keying fix this leg passed the guard silently: sparq-arrow's
+  # same-named `arrow` test:true leg was standing in for it, which is exactly the
+  # cross-crate collision the guard now rejects.
+  test-reason: >-
+    sparq-py has `[lib] test = false` (a pyo3 extension-module test harness does not link
+    on macOS), so the `arrow` surface — `Graph.query_arrow`, reachable only through the
+    pymodule — has no `cargo test` harness at all; the crate's tests/*.rs integration
+    tests deliberately `#[path]`-include pure src modules and never touch it. The
+    executor is the maturin-built `arrow` pytest job in python.yml
+    (crates/sparq-py/tests/test_arrow.py), which gates on PRs touching the Python
+    surfaces.

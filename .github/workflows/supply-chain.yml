@@ -173,8 +173,47 @@ jobs:
       - name: self-cert evidence check — GATING
         run: python3 scripts/check-bestpractices-evidence.py
 
+      # ---- Dependabot ecosystem coverage (sq-bqjv) — GATING ----
+      # [SONNET-4.6] A Dependabot entry aimed at a directory with no resolvable
+      # manifest/lock does NOT error — it just yields no PRs, which looks exactly like
+      # "no updates available". That silence hid a real hole: the npm entry pointed at
+      # the workspace MEMBER `/js` (whose lock is gitignored; only the repo-root lock is
+      # tracked), so `site` / `gui/*` / `packages/*` were uncovered, and the two
+      # digest-pinned Dockerfiles had no docker entry, so their base images were never
+      # refreshed for Debian/distroless security rebuilds. This asserts coverage
+      # structurally against the LIVE repo — every tracked npm lock root and Dockerfile
+      # directory is covered or carries a written, non-stale exclusion — so a newly
+      # added ecosystem cannot land uncovered. Pure-stdlib Python (re/subprocess/pathlib
+      # on the runner's 3.12), consistent with this job's other checks; runs
+      # unconditionally because its inputs are checked-in config, not the Rust
+      # dependency graph.
+      - name: Dependabot ecosystem-coverage check — GATING
+        run: python3 scripts/tests/test_dependabot_coverage.py
+
+      # ---- npm advisory-disposition record vs the live lock (#3767) — GATING ----
+      # [OPUS-5] Dependabot keeps concluding `security_update_not_possible` on the npm
+      # graph: a patched `brace-expansion` / `postcss` exists, but the reachable update
+      # path cannot land it, so no PR is opened and the alert stays open. The honest
+      # response is NOT a `dependabot.yml` ignore (that would suppress the future patch
+      # notification too) — it is the written disposition in
+      # supply-chain/npm-advisories.md plus this TRIPWIRE, which asserts that record
+      # against package-lock.json + the root `overrides`: instance-path set equality per
+      # package, the recorded version, and the thing that pins it. A RED here is normally
+      # the GOOD news (the graph moved, most likely because a patch became reachable);
+      # the response is to update/close the record, never to relax the check. It cannot
+      # detect advisories — it has no feed and no network — so Dependabot remains the npm
+      # surveillance surface; this only keeps the DISPOSITION from going quietly stale.
+      # Pure-stdlib Python (json/re/pathlib on the runner's 3.12), consistent with this
+      # job's other checks; unconditional because its inputs are checked-in files, not
+      # the Rust dependency graph. Self-test first, so a regression in the check itself
+      # is caught.
+      - name: npm advisory-record self-test
+        run: python3 scripts/tests/test_check_npm_advisory_record.py
+      - name: npm advisory-record drift check — GATING
+        run: python3 scripts/check-npm-advisory-record.py
+
       # ---- JS/npm CycloneDX SBOMs (published WASM + shared browser clients) ----
-      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@jeswr/sparq` and the
+      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@sparq-org/sparq` and the
       # `@sparq/client` code bundled into the site/GUI artifacts. Each gets a strict runtime
       # tree and a full build tree, schema-validated as CycloneDX 1.5 and uploaded together.
       # The generator derives transient member locks from the committed root lock without
@@ -230,7 +269,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-deny + cargo-vet + cargo-cyclonedx
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-deny,cargo-vet@0.10.2,cargo-cyclonedx
 
@@ -244,13 +283,16 @@ jobs:
       # parses CVSS v4.0 advisories, so the freshly-cloned RustSec DB loads and the
       # per-advisory `ignore` rules apply as intended. The deny.toml policy is fail-closed:
       # `yanked = "deny"` and (advisories v2) every unignored advisory FAILS the check;
-      # only the two justified `unmaintained` ignores (paste / rustls-pemfile, each with a
-      # documented reason + tracking bead) are tolerated. A REAL vulnerability or a yanked
-      # crate now blocks the PR. Verified: removing either justified ignore makes
-      # `cargo deny check advisories` exit non-zero ("advisories FAILED"); with the ignores
-      # in place it is "advisories ok". This is the PR-time gate; the daily watchdog
+      # only the justified ignores in `deny.toml [advisories].ignore` (each with a documented
+      # reason + tracking bead) are tolerated. A REAL vulnerability or a yanked crate now
+      # blocks the PR. Verified: removing a justified ignore makes `cargo deny check advisories`
+      # exit non-zero ("advisories FAILED"); with the ignores in place it is "advisories ok".
+      # This is the PR-time gate; the daily watchdog
       # (dependency-monitoring.yml) remains as defence-in-depth for advisories disclosed
       # between PRs.
+      # [OPUS-5] The preferred remediation is REMOVING the dependency, not adding an ignore —
+      # sq-5ah3p retired RUSTSEC-2025-0134 (`rustls-pemfile`) that way, migrating the mTLS PEM
+      # parse onto `rustls-pki-types`' `PemObject`.
       - name: cargo-deny check (advisories) — GATING
         if: steps.changes.outputs.rust_changed == 'true'
         run: cargo deny check advisories

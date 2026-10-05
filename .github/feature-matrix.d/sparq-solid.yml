@@ -3,8 +3,13 @@
 # One self-contained leg mapping per opt-in feature(group). Assembled into the
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
-# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
 # DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# leg-name set, and THAT is a TWO-FILE change — this fragment AND
+# scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
+# test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
+# change. See README.md in this directory.
 #
 # CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
 # discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
@@ -41,6 +46,10 @@
 # odrl-bridge/trust-graph, whose probes now assume the empty-default and use explicit
 # `GRAPH ?g`). No new dependency (a pure query-rewrite change). Without this leg the
 # union-always escape-hatch behaviour is never exercised.
+# [SONNET-4.6] sq-s5tkx: "needs its OWN ISOLATED leg" still holds — the legacy-gated tests
+# only compile here — but it does NOT mean this feature must appear in NO other leg. The
+# combined leg at the bottom of this file now ALSO enables it alongside the rest, which is
+# precisely the state that regressed unseen (see that leg's note).
 - name: "sparq-solid (legacy-union-default-graph)"
   crate: "sparq-solid"
   features: "legacy-union-default-graph"
@@ -54,4 +63,68 @@
 - name: "sparq-solid (pattern-scope)"
   crate: "sparq-solid"
   features: "pattern-scope"
+  test: true
+
+# [SONNET-4.6] sq-ysv3u (issue #2935): the opt-in `acp-vc` trust-the-issuer backend for the
+# ACP `acp:vc` matcher. The whole of tests/acp_vc_backend.rs is `#![cfg(feature = "acp-vc")]`
+# (sign a credential with `sparq-vc`, verify its `eddsa-rdfc-2022` Data Integrity proof,
+# admit the resulting holding, then satisfy an `acp:vc` matcher end-to-end), and
+# `VcRequirement` + `VerifiedCredentials::admit_data_integrity` only compile here — so
+# without this leg the backend NEVER runs in CI. The `acp:vc` MATCHER semantics themselves
+# are unconditional and are covered in BOTH feature states by tests/acp_vc.rs. Pulls only
+# the workspace-internal `sparq-vc` dependency — keeps the opt-in ON path from rotting.
+- name: "sparq-solid (acp-vc)"
+  crate: "sparq-solid"
+  features: "acp-vc"
+  test: true
+
+# [SONNET-4.6] sq-s5tkx (issue #2854): the COMBINED state — every opt-in feature at once,
+# i.e. what `cargo test -p sparq-solid --all-features` runs. This is the feature
+# INTERACTION none of the single-feature legs above can see. It was red on `main` and no
+# lane said so — it surfaced only from manual review, and the fix arrived incidentally in
+# an unrelated PR. (The red window itself was short, same-day; the point is not its length
+# but that its END did not depend on CI, so the next one need not be short.)
+#
+# WHAT REGRESSED, CONCRETELY (the reason this leg exists rather than a rule of thumb).
+# Before the sq-gq28y default-graph flip, the union-default-graph opt-in shipped as a
+# feature named `solid-sparql-query` that turned the standing default graph EMPTY, and
+# the ODRL bridge's end-to-end probes queried a BARE default-graph pattern:
+#     SELECT ?t WHERE { ?s <https://ex.dev/ns#title> ?t }   -> assert rows.len() == 1
+# Under feature unification those two features are ON TOGETHER, the bare pattern matches
+# nothing, and every probe asserting a NON-ZERO row count fails — 8 tests in
+# tests/odrl_bridge.rs (a 9th probe test survived because it only ever asserts 0 rows).
+# Each single-feature leg stayed green, so CI reported nothing. sq-gq28y then fixed the
+# tests by rewriting all 9 probes to an explicit `GRAPH ?g` form whose row count is
+# identical under both default-graph modes, and renamed the feature to
+# `legacy-union-default-graph` with the polarity inverted — but the LANE GAP it slipped
+# through was never closed, so the same class of break can return silently.
+#
+# WHY THE EXISTING LANES DO NOT COVER IT. ci.yml's `clippy (deny warnings, workspace —
+# all features)` compiles this exact unified state, so a LINT or a COMPILE break in it is
+# already gated; nothing anywhere runs `cargo test` in it. That is the hole, and it is
+# test-only — which matches the regression, since the 8 failures were runtime assertion
+# failures in code that compiled fine. No workflow in this repo runs `cargo test` with
+# `--all-features` for ANY crate, so this is not a sparq-solid oversight so much as the
+# first place the missing state was paid for.
+#
+# THIS LEG IS NOT VACUOUS — proof by executed mutation, reproducible in a checkout. In
+# tests/odrl_bridge.rs::round_trip_through_enforcement, replace the explicit `GRAPH ?g`
+# probe with the bare default-graph pattern and assert 0 rows for the AUTHORIZED agent
+# (the present-day mirror of the historical fault: a probe correct only under the
+# empty-default). Then:
+#     --features odrl-bridge                  -> 74 passed   (fault invisible)
+#     --features count-enforcement            -> 74 passed   (fault invisible)
+#     --features pattern-scope                -> suite not compiled
+#     --features <the combined list below>    -> 1 FAILED    (fault caught)
+# Only this leg goes red, because only here is the bridge's read path evaluated under
+# union-always semantics.
+#
+# MAINTENANCE: the feature list below is `--all-features` spelled out (the fragment schema
+# takes a literal comma list, and an explicit list is also what makes the leg reviewable).
+# A NEW sparq-solid feature must be appended here as well as getting its own leg, or this
+# leg quietly stops being the all-features state its name claims. Workspace crates only —
+# no new external dependency beyond what the single-feature legs already pull.
+- name: "sparq-solid (all opt-in features combined)"
+  crate: "sparq-solid"
+  features: "odrl-bridge,count-enforcement,trust-graph,trust-graph-did,pattern-scope,legacy-union-default-graph,acp-vc"
   test: true

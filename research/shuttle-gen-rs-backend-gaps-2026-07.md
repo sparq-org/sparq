@@ -7,6 +7,12 @@
 > [`shuttle-gen-rs-go-no-go-2026-07.md`](./shuttle-gen-rs-go-no-go-2026-07.md), which listed all
 > three gaps as open and attributed all three to the Rust backend. **Two are closed upstream;
 > the third is open in BOTH backends, not just gen-rs.**
+>
+> Sibling record (sq-e7hba, the other open upstream gap — generalizing the residual-consumption
+> printer past its shaclc skeleton):
+> [`shuttle-generic-print-mode-2026-07.md`](./shuttle-generic-print-mode-2026-07.md). The
+> `emit @graph` gap below is a hard **dependency** of it: until that lands, TriG/N-Quads cannot
+> serve as the non-shaclc grammar that bead's acceptance criterion requires.
 
 ## Why this record exists
 

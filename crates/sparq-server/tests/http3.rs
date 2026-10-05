@@ -16,6 +16,8 @@ use bytes::{Buf as _, Bytes};
 use futures_util::{SinkExt as _, StreamExt as _};
 use h3::quic::OpenStreams;
 use quinn::crypto::rustls::QuicClientConfig;
+use rustls::pki_types::pem::PemObject as _;
+use rustls::pki_types::CertificateDer;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -77,7 +79,7 @@ fn free_udp_addr() -> TestResult<SocketAddr> {
 fn h3_client(ca_path: &std::path::Path) -> TestResult<quinn::Endpoint> {
     let ca_file = std::fs::File::open(ca_path)?;
     let mut roots = rustls::RootCertStore::empty();
-    for cert in rustls_pemfile::certs(&mut std::io::BufReader::new(ca_file)) {
+    for cert in CertificateDer::pem_reader_iter(ca_file) {
         roots.add(cert?)?;
     }
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
@@ -401,7 +403,7 @@ async fn h3_response_matrix_matches_h1_and_websocket_falls_back() -> TestResult 
     let (mut websocket, upgrade) = {
         let ca_file = std::fs::File::open(fixture("http3-ca.pem"))?;
         let mut roots = rustls::RootCertStore::empty();
-        for cert in rustls_pemfile::certs(&mut std::io::BufReader::new(ca_file)) {
+        for cert in CertificateDer::pem_reader_iter(ca_file) {
             roots.add(cert?)?;
         }
         let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());

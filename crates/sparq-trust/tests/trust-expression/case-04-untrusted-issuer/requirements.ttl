@@ -1,0 +1,10 @@
+# Design §6 case 4 — mode 1 ONLY, and the holder's issuer is not in the enumerated
+# set. No `trustx:trustsFramework` is present, so there is no second mode that could
+# rescue the derivation.
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:tr:untrusted-issuer> a trustx:TrustRequirements ;
+    trustx:question              <urn:question:jesse-has-an-age> ;
+    trustx:trustsIssuer          <did:web:dvla.example> ;
+    trustx:requiresValidStatusAt "2026-07-05T00:00:00Z"^^xsd:dateTime .

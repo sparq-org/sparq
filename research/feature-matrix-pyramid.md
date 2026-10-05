@@ -1,7 +1,13 @@
 # Feature-matrix pyramid — collapse the per-feature build+test legs into a tiered set (sq-6vshe.2)
 
-**Status:** design record (provisional — the operative tier rules graduate into the
-`feature-matrix.yml` GUARD header + AGENTS.md gate docs as the child beads land).
+**Status:** GRADUATED (2026-07-29, `sq-p1ccp`) — child beads 1–3 of §8 shipped the
+detector, the tier-aware assembler + `check-tier` job, and the (empty) flip; bead 4 is
+this record's own graduation, which moves the operative tier rules into the
+`.github/workflows/feature-matrix.yml` GUARD header + the AGENTS.md gate-table row for
+sq-vya1. **Those two surfaces are authoritative; this record is retained as the design
+rationale + the dated evidence (§1, §9.1), not as the operative rule.** Sections written
+in the anticipatory "would" describe the design as proposed on 2026-07-04; where they
+differ from the living docs, the living docs win.
 Authored under the proceed-and-document rule.
 **Author:** Claude Fable 5 (SPARQ architect tier), 2026-07-04. [FABLE-5]
 **Parent:** `research/ci-structural-speedup.md` §4 (the class analysis A–D and the
@@ -407,3 +413,35 @@ As the beads land: fold the tier definitions + the detector ratchet rule into th
 record the measured before/after leg counts from the flip PR as a dated
 observation here; then rewrite this record's "would" into "does" or delete
 sections in favor of the living docs, per the research-record graduation rule.
+
+### 10.1 Graduation completed (2026-07-29, `sq-p1ccp`)
+
+Done, and deliberately WITHOUT restating the rules in two places:
+
+- **Tier definitions + the ratchet rule** now live in the `feature-matrix.yml` GUARD
+  header (the `[OPUS-5] sq-p1ccp` block, immediately after the original sq-vya1 guard)
+  and in the AGENTS.md gate-table row for "an opt-in cargo feature, or a test behind a
+  default-OFF feature". Both name `scripts/feature-matrix-tiers.py --enforce` as the
+  step in the gating `setup` job, spell out enforcement invariants (1) and (2), the
+  fail-closed detector, and the `tier: test` (default) vs `tier: check`
+  (PR clippy-only → full build+test on push-to-main) split.
+- **§4's invariants key on the `(crate, feature)` PAIR, not the bare feature name** —
+  a review finding on the graduation PR. Cargo feature names are crate-LOCAL, and 15 are
+  currently shared across crates (`arrow`, `service`, `templates`, …), so the first cut's
+  bare-name keying let a `test: true` leg for `F` in crate A silently satisfy a sensitive
+  `F` in crate B — the exact silent gap the guard exists to catch. Pair-keying exposed one
+  live instance (`sparq-py`/`arrow`, masked by `sparq-arrow`/`arrow`), so invariant (2)
+  gained a narrow escape: a written `test-reason:` on the leg, for coverage that genuinely
+  cannot be a `cargo test` leg. Regression cover:
+  `scripts/tests/test_feature_matrix_tiers.py::TestCrossCrateFeatureNameCollision` (two
+  crates, one shared feature name, only the unrelated crate `test: true`).
+- **Measured before/after counts:** already recorded above as the dated §9.1 observation
+  — **0 → 0 check-tier legs**. Bead 3's per-test audit cleared nothing, which §8
+  anticipated as a legitimate outcome, so the leg count is unchanged and the §9 "floor"
+  case is what shipped: the durable value delivered is the mechanized guard + ratchet,
+  not a leg-count reduction. The §9 ceiling (9 legs demoted) remains UNREALIZED; the
+  nine b-coloc candidates are still audit-pending.
+- **Not rewritten to "does":** §§1–7 are kept verbatim as the dated design rationale and
+  evidence. The Status header above now marks the record graduated and points at the
+  living docs as authoritative, which is the cheaper half of the "rewrite or delete"
+  choice and avoids a second copy of the operative rule drifting out of sync.

@@ -70,25 +70,67 @@ DOCS_ONLY = {"terra"}
 # over a site* label is the likely future mistake and is asserted against.
 GUI_CARVE_OUT_LABELS = frozenset({"area:gui"})
 GUI_CARVE_OUT_LEAD = "sol"
+# [OPUS-5] THE ROLES WHERE THE CARVE-OUT MAY *ADD* sol BACK, not merely re-order it (registry #738).
+#
+# WHY THIS BECAME NECESSARY. The carve-out above was a pure re-ordering, and that was sufficient only
+# while every affected route still HAD sol in its chain. On 2026-07-26 the maintainer, shown the
+# measurement in registry #738 (`role:impl` first-attempt yield: sol 18% vs opus5 86%, n=74, same
+# route and same brief; 4/4 same-issue crossovers), chose "remove sol from impl fallback" — so
+# `role:impl` became `["opus5"]`. A `["opus5"]` chain does not contain sol, so the both-implementors
+# condition DECLINES and the carve-out goes inert: all 33 open `area:gui` + `role:impl` issues would
+# have resolved opus5-only. That is the exact inversion of the maintainer's one stated exception that
+# PR #4211 was written to fix, re-created by an edit two directives later and with no symptom at all
+# (both resolvers agree on the wrong answer, so the PLAN/CLAIM agreement harness cannot see it).
+#
+# So for the roles named here — and ONLY these — the carve-out ADDS its lead to a chain that lacks
+# it. The narrowing is what preserves the original invariant's purpose:
+#   * `role:research` / `role:review` / `role:soundness` are single-provider for AUTHORSHIP reasons
+#     and escalate on exhaustion; a silent cross-provider rung would hide a stall that is meant to be
+#     visible. The registry mechanism REFUSES to parse a declaration naming them
+#     (chain_preference.INJECT_FORBIDDEN_ROLES), so this is structural, not merely undeclared.
+#   * A ROLELESS issue (the `[defaults]` branch) can never be injected into: no role, nothing to
+#     authorise it, fail-closed means decline. `[defaults]` still contains sol anyway.
+#   * `role:perf` / `role:site` / `role:ci` / `role:docs` all still contain sol, so they take the
+#     RE-ORDER path and are deliberately absent here — this set is the minimum that closes the gap.
+GUI_CARVE_OUT_INJECT_ROLES = frozenset({"impl"})
 
 
-def gui_carve_out(labels, chain):
-    """Return `chain` with sol moved to the front IFF this is GUI work and both models are already
-    possible implementors of it.
+def gui_carve_out(labels, chain, role=None):
+    """Return `chain` with sol leading IFF this is GUI work and sol is a permitted implementor of it.
 
-    "for which they are BOTH possible implementors" is the directive's own qualifier, and it is
-    encoded literally: a chain that does not already contain BOTH `sol` and `opus5` is returned
-    UNCHANGED. That is what stops the carve-out from injecting sol into `role:research`
-    (`["opus5"]`, deliberately anthropic-side + escalating) or from silently rewriting a
-    single-provider chain into a cross-provider one.
+    Two modes, mirroring the registry's shared `chain_preference.apply_preferences` exactly (the
+    registry reads the `[[chain_preference]]` declaration in orchestration/routing.toml; this
+    function is the PLAN-side half, and `--self-test` asserts the two agree row by row):
 
-    Idempotent: applying it to an already-sol-first chain is a no-op.
+    * sol ALREADY in the chain -> "for which they are BOTH possible implementors" is the directive's
+      own qualifier, encoded literally: the chain must contain BOTH sol and opus5, and the result is
+      a strict PERMUTATION (re-order only).
+    * sol ABSENT -> the result is the chain with sol PREPENDED, but only when `role` is in
+      GUI_CARVE_OUT_INJECT_ROLES. `role=None` never injects. That is what keeps the carve-out alive
+      now that `role:impl` is a single-rung `["opus5"]` chain, without making `role:research`
+      (anthropic-side + escalating) quietly cross-provider.
+
+    Idempotent in both modes: applying it to an already-sol-first chain is a no-op.
     """
     if not (set(labels) & GUI_CARVE_OUT_LABELS):
         return chain
-    if not {GUI_CARVE_OUT_LEAD, "opus5"} <= set(chain):
+    if GUI_CARVE_OUT_LEAD in chain:
+        if not {GUI_CARVE_OUT_LEAD, "opus5"} <= set(chain):
+            return chain
+        return [GUI_CARVE_OUT_LEAD] + [m for m in chain if m != GUI_CARVE_OUT_LEAD]
+    # HONESTY NOTE, found by mutating this very line: `role is None` is NOT the binding guard —
+    # `None not in GUI_CARVE_OUT_INJECT_ROLES` is already true for every well-formed allow-list, so
+    # deleting the `role is None` half leaves behaviour identical and no test can see it. It is kept
+    # because it states the intent at the point of decision, but the MEMBERSHIP test is what carries
+    # the property, and that is what the assertions pin. (Same shape as the note in the registry's
+    # no_change_routing.excluded_tiers.)
+    if role is None or role not in GUI_CARVE_OUT_INJECT_ROLES:
         return chain
-    return [GUI_CARVE_OUT_LEAD] + [m for m in chain if m != GUI_CARVE_OUT_LEAD]
+    if "opus5" not in chain:
+        # `requires` minus the lead: the route must still offer the other model the directive names,
+        # so an unrelated single-rung chain never acquires sol.
+        return chain
+    return [GUI_CARVE_OUT_LEAD] + list(chain)
 
 
 def _chains(doc):
@@ -178,10 +220,16 @@ def resolve(labels, doc):
                 # re-order a soundness chain. area:gui + area:sparq-zk is a ZK issue first.
                 return list(r["model_chain"]), r["agent"], bool(r.get("escalate"))
         elif "role" in r and role is not None and r["role"] == role:
-            return (gui_carve_out(labels, list(r["model_chain"])), r["agent"],
+            # `role` is passed so the injection allow-list can be evaluated: adding sol to a chain
+            # that lacks it is legal only for GUI_CARVE_OUT_INJECT_ROLES. The registry's CLAIM-side
+            # mechanism receives the same value at the same point.
+            return (gui_carve_out(labels, list(r["model_chain"]), role=role), r["agent"],
                     bool(r.get("escalate")))
     d = doc.get("defaults", {})
-    return gui_carve_out(labels, list(d.get("model_chain", []))), d.get("agent"), False
+    # role is None here BY CONSTRUCTION (a roleless issue), so the defaults branch can never be
+    # injected into — passed explicitly rather than left to the parameter default.
+    return (gui_carve_out(labels, list(d.get("model_chain", [])), role=None),
+            d.get("agent"), False)
 
 
 def _self_test():
@@ -213,9 +261,16 @@ def _self_test():
     # (the opus-4.8 tail fallback was deprecated 2026-07-26), escalate
     mc, ag, esc = resolve(["role:impl", "area:sparq-zk"], doc)
     chk("impl+zk -> opus5/escalate", (mc, ag, esc), (["opus5"], "sparq-reviewer", True))
-    # plain impl -> sol-led chain (maintainer directive 2026-07-18)
+    # [OPUS-5] plain impl -> OPUS5-ONLY + escalate (maintainer decision 2026-07-26 on the registry
+    # #738 measurement: "Remove sol from impl fallback"; sol 18% vs opus5 86% in-cell, n=74). The
+    # WHOLE tuple is asserted rather than the chain head, so a future demotion of sol back to a
+    # second rung reds this instead of passing on `mc[0] == "opus5"`.
     mc, ag, esc = resolve(["role:impl", "area:sparq-core"], doc)
-    chk("impl -> opus5-led", (mc, ag, esc), (["opus5", "sol"], "sparq-rust-impl", False))
+    chk("impl -> OPUS5-ONLY, escalating", (mc, ag, esc), (["opus5"], "sparq-rust-impl", True))
+    chk("role:impl names NO openai tier at all (exclusion, not a demotion)",
+        sorted({doc["models"][m]["provider"] for m in mc}), ["anthropic"])
+    chk("role:impl ESCALATES, so a single-rung chain has a machine exit instead of deferring "
+        "forever with nobody notified", esc, True)
     # [OPUS-5] docs -> SOL-led (maintainer 2026-07-26: docs writing off haiku/sonnet onto gpt-5.6
     # sol). terra is sol's same-provider fallback; opus5 the cross-provider tail.
     chk("docs -> sol-led", resolve(["role:docs", "area:x"], doc)[0], ["sol", "terra", "opus5"])
@@ -240,12 +295,21 @@ def _self_test():
     # [OPUS-5] OPUS-5-FIRST DEFAULT + THE `area:gui` CARVE-OUT (maintainer 2026-07-26).
     # ---------------------------------------------------------------------------------------------
     # Every route where opus5 AND sol are both viable implementors must lead with opus5...
-    for _role in ("impl", "site", "ci", "perf"):
+    # `role:impl` is deliberately EXCLUDED from this loop since 2026-07-26: it is the one
+    # implementor route where sol was REMOVED rather than demoted (asserted separately above).
+    for _role in ("site", "ci", "perf"):
         mc = resolve([f"role:{_role}"], doc)[0]
         chk(f"role:{_role} prefers opus5 over sol", mc[0], "opus5")
         chk(f"role:{_role} keeps sol reachable as a fallback (preference, not exclusion)",
             "sol" in mc, True)
     chk("defaults prefer opus5 over sol", resolve(["area:sparq-core"], doc)[0][0], "opus5")
+    # ...and the EXCLUSION is scoped to exactly one role. This is the guard that reds if a future
+    # edit copies the sol removal onto a route the maintainer did not scope it to.
+    chk("role:impl is the ONLY role route with no openai rung besides the escalating lanes",
+        sorted(r for r in ("impl", "site", "gui", "ci", "perf", "docs")
+               if not any(doc["models"][m]["provider"] == "openai"
+                          for m in resolve([f"role:{r}"], doc)[0])),
+        ["impl"])
     # ...EXCEPT role:gui, which keeps the sol lead (original-builder steer, task #331).
     gui = resolve(["role:gui", "area:gui"], doc)[0]
     chk("role:gui KEEPS sol first (the carve-out)", gui[0], "sol")
@@ -255,11 +319,18 @@ def _self_test():
     # The carve-out is EXACTLY role:gui. role:site must NOT be swept into it — "GUI" reads
     # informally as covering the site surfaces, which is the likely future widening mistake.
     chk("role:site is NOT in the sol carve-out", resolve(["role:site"], doc)[0][0], "opus5")
-    # Both directions terminate: neither class can become undispatchable.
-    for _role in ("impl", "site", "ci", "perf", "gui"):
+    # Both directions terminate: neither class can become undispatchable. `role:impl` is now
+    # deliberately single-provider, so its termination guarantee is `escalate = true` (a bounded
+    # starvation ladder ending in a self-clearing machine park) rather than a cross-provider rung —
+    # asserted above and, for the GUI carve-out, immediately below.
+    for _role in ("site", "ci", "perf", "gui"):
         mc = resolve([f"role:{_role}"], doc)[0]
         chk(f"role:{_role} chain is cross-provider (cannot be starved by one provider)",
             sorted({doc["models"][m]["provider"] for m in mc}), ["anthropic", "openai"])
+    chk("role:impl is single-provider, so it MUST escalate (otherwise an opus5 outage is a silent "
+        "permanent stall)",
+        (sorted({doc["models"][m]["provider"] for m in resolve(["role:impl"], doc)[0]}),
+         resolve(["role:impl"], doc)[2]), (["anthropic"], True))
     chk("research -> opus5 only", resolve(["role:research"], doc)[0], ["opus5"])
     # review role -> opus5 + escalate
     chk("review -> opus5/escalate", resolve(["role:review"], doc)[1:], ("sparq-reviewer", True))
@@ -279,22 +350,45 @@ def _self_test():
         resolve(["area:gui", "role:impl"], doc)[1], "sparq-rust-impl")
     chk("area:gui with NO role at all -> defaults, SOL-first",
         resolve(["area:gui", "priority:P2"], doc)[0], ["sol", "opus5"])
+    # [OPUS-5] THE COLLISION BETWEEN THE TWO DIRECTIVES, as a test rather than as prose
+    # (registry #738). `role:impl` is now a SINGLE-RUNG `["opus5"]` chain, and the carve-out was a
+    # pure re-ordering — so without the `inject_roles` opt-in these 33 issues resolve opus5-only,
+    # re-inverting the maintainer's one stated exception with no symptom whatsoever (both resolvers
+    # agree on the wrong answer, so the PLAN/CLAIM agreement harness reports nothing). These three
+    # rows are the ones that red if the injection branch, the declaration, or the allow-list is
+    # deleted.
+    chk("the live role:impl route really IS single-rung (so the row above is not passing because "
+        "sol happens to still be in the chain)",
+        [r["model_chain"] for r in doc["route"] if r.get("role") == "impl"], [["opus5"]])
+    chk("a re-order-ONLY carve-out would DISARM on that chain (this is the defect being fixed)",
+        gui_carve_out({"area:gui", "role:impl"}, ["opus5"], role=None), ["opus5"])
+    chk("...and the injection allow-list is what restores it",
+        gui_carve_out({"area:gui", "role:impl"}, ["opus5"], role="impl"), ["sol", "opus5"])
+    chk("area:gui + role:impl still ESCALATES (it inherits the impl route's exit; sol is a "
+        "preference on top, not a replacement for the exit)",
+        resolve(["area:gui", "role:impl"], doc)[2], True)
     for _role in ("impl", "site", "ci", "perf", "gui"):
         mc = resolve(["area:gui", f"role:{_role}"], doc)[0]
         chk(f"area:gui + role:{_role} -> sol-first", mc[0], "sol")
         chk(f"area:gui + role:{_role} keeps opus5 reachable (preference, not exclusion)",
             "opus5" in mc, True)
     # site* is NOT GUI — the exclusion the review confirmed already works; assert it end to end too.
+    # Since 2026-07-26 the correct answer for a NON-gui role:impl issue is the OPUS5-ONLY chain, so
+    # these rows are simultaneously the "site is outside the carve-out" guard and the "injection
+    # does not leak past the exact `area:gui` selector" guard.
     for _area in ("area:site", "area:site-specs", "area:site-papers", "area:sitemap"):
-        chk(f"{_area} + role:impl -> OPUS5-first (site is outside the carve-out)",
-            resolve([_area, "role:impl"], doc)[0], ["opus5", "sol"])
+        chk(f"{_area} + role:impl -> opus5-ONLY (site is outside the carve-out, and gets no sol)",
+            resolve([_area, "role:impl"], doc)[0], ["opus5"])
     chk("role:site + area:site -> opus5-first end to end",
         resolve(["role:site", "area:site"], doc)[0], ["opus5", "sol"])
     chk("surface:frontend is not in the carve-out",
         resolve(["surface:frontend", "role:site"], doc)[0][0], "opus5")
-    # EXACT label: a substring selector would sweep area:guide into the sol carve-out.
-    chk("area:guide does NOT false-match the carve-out",
-        resolve(["area:guide", "role:impl"], doc)[0], ["opus5", "sol"])
+    # EXACT label: a substring selector would sweep area:guide into the sol carve-out. Now that the
+    # carve-out can ADD sol, a false match is no longer merely a re-order — it would hand a
+    # deliberately excluded model back to a non-GUI issue, so these rows carry more weight.
+    for _near in ("area:guide", "area:guidance", "area:gui-toolkit", "xarea:gui", "gui"):
+        chk(f"{_near} does NOT false-match the carve-out (and is given NO sol rung)",
+            resolve([_near, "role:impl"], doc)[0], ["opus5"])
     # Security still wins, and its chain is returned UNTOUCHED by the preference rule.
     chk("area:gui + a security surface -> soundness lane, unmodified",
         resolve(["area:gui", "area:sparq-zk", "role:impl"], doc),
@@ -358,27 +452,63 @@ def _self_test():
         "INJECT a model into one that deliberately excludes it)",
         decl.get("lead") in decl.get("requires", []), True)
     chk("the declaration names no field the registry mechanism does not implement",
-        sorted(decl.keys()), ["labels", "lead", "requires"])
+        sorted(decl.keys()), ["inject_roles", "labels", "lead", "requires"])
     chk("every model the declaration names is in the live [models] catalog",
         sorted({decl.get("lead"), *decl.get("requires", [])} - set(doc.get("models", {}))), [])
+    # [OPUS-5] THE INJECTION ALLOW-LIST, pinned in BOTH directions (registry #738). Deleting
+    # `inject_roles` from the TOML reds the first row (CLAIM would stop applying the rule and GUI
+    # impl work would silently go opus5-only); widening the Python constant reds it too.
+    chk("the declared `inject_roles` equals GUI_CARVE_OUT_INJECT_ROLES",
+        sorted(decl.get("inject_roles", [])), sorted(GUI_CARVE_OUT_INJECT_ROLES))
+    chk("the declaration DOES name an inject role (a re-order-only declaration would disarm the "
+        "carve-out for every single-rung implementor chain)",
+        bool(decl.get("inject_roles")), True)
+    chk("every role in `inject_roles` is a role this table actually declares (a typo would make "
+        "the carve-out silently never fire)",
+        sorted(set(decl.get("inject_roles", []))
+               - {r["role"] for r in doc.get("route", []) if r.get("role")}), [])
+    chk("`inject_roles` names NO escalating single-provider authorship lane (the registry mechanism "
+        "refuses these at parse time; asserted here so the table cannot even propose one)",
+        sorted(set(decl.get("inject_roles", [])) & {"research", "review", "soundness"}), [])
     # BEHAVIOURAL EQUIVALENCE, not just field equality: run this module's rule and the declared
     # rule's semantics over the same rows and require identical chains. A declaration that agreed
     # field-by-field but was applied to a different set of routes would still split PLAN from CLAIM.
-    def _declared_rule(labels, chain):
+    # The `role` argument is threaded through BOTH sides — without it the comparison would only ever
+    # exercise the re-order path and the injection half would be untested on either side.
+    def _declared_rule(labels, chain, role):
         if not (set(labels) & set(decl.get("labels", []))):
             return list(chain)
-        if not set(decl.get("requires", [])) <= set(chain):
-            return list(chain)
         lead = decl.get("lead")
-        return [lead] + [m for m in chain if m != lead]
+        requires = set(decl.get("requires", []))
+        if lead in chain:
+            if not requires <= set(chain):
+                return list(chain)
+            return [lead] + [m for m in chain if m != lead]
+        if role is None or role not in set(decl.get("inject_roles", [])):
+            return list(chain)
+        if not (requires - {lead}) <= set(chain):
+            return list(chain)
+        return [lead] + list(chain)
 
     for _labels in (["area:gui", "role:impl"], ["area:gui", "role:perf"], ["area:gui"],
-                    ["area:gui", "role:research"], ["area:gui", "role:docs"],
+                    ["area:gui", "role:research"], ["area:gui", "role:review"],
+                    ["area:gui", "role:soundness"], ["area:gui", "role:gui"],
+                    ["area:gui", "role:site"], ["area:gui", "role:ci"],
+                    ["area:gui", "role:docs"],
                     ["area:site", "role:impl"], ["area:guide", "role:impl"],
                     ["area:sparq-core", "role:impl"], ["surface:frontend", "role:site"]):
-        for _chain in (["opus5", "sol"], ["opus5"], ["sol", "terra", "opus5"], ["sol", "opus5"]):
+        _role = next((lb[5:] for lb in _labels if lb.startswith("role:")), None)
+        for _chain in (["opus5", "sol"], ["opus5"], ["sol", "terra", "opus5"], ["sol", "opus5"],
+                       ["luna"], []):
             chk(f"declared rule == this module's rule for {_labels} over {_chain}",
-                _declared_rule(_labels, _chain), gui_carve_out(set(_labels), list(_chain)))
+                _declared_rule(_labels, _chain, _role),
+                gui_carve_out(set(_labels), list(_chain), role=_role))
+    # ...and the equivalence loop is NOT vacuous: at least one row must actually exercise the
+    # INJECTION branch, or the two implementations could agree by both never injecting.
+    chk("the equivalence loop exercises the injection branch",
+        (_declared_rule(["area:gui", "role:impl"], ["opus5"], "impl"),
+         gui_carve_out({"area:gui", "role:impl"}, ["opus5"], role="impl")),
+        (["sol", "opus5"], ["sol", "opus5"]))
 
     # ---------------------------------------------------------------------------------------------
     # [OPUS-5] THE DEPRECATION IS AN INVARIANT, NOT A ONE-TIME EDIT (maintainer 2026-07-26).

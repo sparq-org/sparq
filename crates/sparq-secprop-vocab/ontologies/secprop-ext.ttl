@@ -1,0 +1,361 @@
+# secprop-ext.ttl — the sparq EXTENSION of the vendored `sec-prop:` ontology.
+#
+# [OPUS-4.8] sq-5oru9 (epic sq-0dksu; design record
+# research/security-properties-ontology-design.md §4.2). 🤖 SPARQ agent —
+# security-properties ontology. Written while Fable unavailable; flag for re-review
+# when Fable returns.
+#
+# WHAT THIS IS. The vendored `sec-prop:` vocabulary (vocab/sec-prop.yaml.ld) carries
+# the eight security properties of paper §7.7 as boolean concepts. This file EXTENDS
+# that same namespace (https://w3id.org/zkp-sparql/sec-prop#) — it does NOT fork it
+# (design §4.1) — with the orthogonal proof-system dimensions it lacks (§3.3 delta)
+# and the assurance / audit-status axis (§4.2.2). Reused terms keep his IRIs; new
+# terms are minted under the `secx:` ("sec-prop extension") sub-prefix of the SAME
+# namespace so it is visible which are his vs new while both resolve under his
+# w3id.org base.
+#
+# IRREDUCIBILITY (design §4.4). Each dimension is non-derivable from the others
+# (Unlinkability ≠ Anonymity; ZeroKnowledgeType ≠ Soundness; Hiding ≠ Binding;
+# SingleUse ≠ Unlinkability; assurance ≠ any property). The assurance axis is ONE
+# axis orthogonal to every property — stated once, not multiplied across dimensions.
+#
+# HONESTY — assurance default + the sq-qhy4 audit gate. The default assurance for a
+# sparq-asserted ZK property is `secx:Claimed` (issue #1001 Option A) and the live
+# audit status is `secx:ExternalSignOffPending`: sparq's ZK estate is research-grade
+# and NOT externally audited (bead sq-qhy4). NO sparq ZK method may be labelled
+# `secx:Proven` while sq-qhy4 is open. This vocabulary RECORDS claims + their
+# epistemic basis; it is NOT itself a proof of any property.
+#
+# DPV ALIGNMENT — Light (issue #1002 Option 2). New property classes carry
+# `skos:closeMatch`/`rdfs:seeAlso` to W3C DPV CryptographicMethods IRIs where a
+# near-match exists; the full regulation→requirement chain is deliberately NOT built
+# here (that is the deeper, reversible-later option).
+#
+# SCOPE OF THIS FILE (bead sq-5oru9 — the VOCAB head of the chain). This file +
+# `crates/sparq-trust/src/secprop.rs` (the Rust constants, byte-pinned to this file
+# by the `secprop_ext_iris_match_rust_constants` test) are the vocabulary. The ODRL
+# leftOperand profile (Phase 4, sq-uor3g), the N3 admissibility ruleset (Phase 2,
+# sq-ufsi9), and the per-method annotation graph (Phase 3, sq-bevd3) are downstream
+# beads and are NOT in this file.
+
+@prefix sec-prop: <https://w3id.org/zkp-sparql/sec-prop#> .
+@prefix secx:    <https://w3id.org/zkp-sparql/sec-prop#> .   # SAME namespace; prose-only distinction
+@prefix sig-impl: <https://w3id.org/zkp-sparql/sig-impl#> .
+@prefix rdf:     <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:     <http://www.w3.org/2002/07/owl#> .
+@prefix skos:    <http://www.w3.org/2004/02/skos/core#> .
+@prefix dpv:     <https://w3id.org/dpv#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix xsd:     <http://www.w3.org/2001/XMLSchema#> .
+
+# --- ontology metadata -------------------------------------------------------
+
+<https://w3id.org/zkp-sparql/sec-prop-ext> a owl:Ontology ;
+  rdfs:label "sparq sec-prop: extension — orthogonal proof-system dimensions + assurance axis"@en-GB ;
+  dcterms:description """A sparq extension of the vendored ZKP-SPARQL `sec-prop:`
+ontology. It adds the orthogonal proof-system-theoretic dimensions (ZK-type,
+soundness, completeness, hiding/binding, anonymity, setup, interactivity, selective
+disclosure, single-use) and the machine-reasonable assurance / audit-status axis that
+`sec-prop:`'s boolean properties lack, under the SAME w3id.org/zkp-sparql/sec-prop#
+namespace (extend, not fork). It records claims and their epistemic basis; it is NOT
+a proof of any property. The default assurance for a sparq ZK property is `Claimed`
+and the audit status is `ExternalSignOffPending` (the ZK estate is unaudited,
+sq-qhy4); no sparq ZK method may be labelled `Proven` while that audit is open."""@en-GB ;
+  owl:imports <https://w3id.org/zkp-sparql/sec-prop> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/972> ;
+  rdfs:comment "sparq extension; reused terms keep the vendored IRIs (design §4.1)."@en-GB .
+
+# ─────────────────────── annotation shape (§4.2.2) ───────────────────────────
+# Generalises his sig-impl:Assertion reified pattern from "(sig-impl, property) →
+# verdict" to "(any method IRI, property) → (level, assurance, audit-status,
+# assumption, evidence)".
+
+secx:PropertyAssertion a owl:Class, rdfs:Class ;
+  rdfs:subClassOf sig-impl:Assertion ;
+  rdfs:label "Property assertion"@en-GB ;
+  rdfs:comment "A reified (method, property) → (level, assurance, audit-status, assumption, evidence) claim."@en-GB .
+
+secx:hasProperty a owl:ObjectProperty ;
+  rdfs:label "has property"@en-GB ;
+  rdfs:comment "Attaches a secx:PropertyAssertion to a method IRI (a zk:scheme, cryptosuite, circuit family, or mpc: protocol)."@en-GB ;
+  rdfs:range secx:PropertyAssertion .
+
+secx:property a owl:ObjectProperty ;
+  rdfs:label "property"@en-GB ;
+  rdfs:comment "The dimension the assertion is about (e.g. secx:UnlinkabilityScope)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion ;
+  rdfs:range sec-prop:SecurityProperty .
+
+secx:level a owl:ObjectProperty ;
+  rdfs:label "level"@en-GB ;
+  rdfs:comment "The level/class held within the asserted dimension (e.g. secx:CrossPresentation)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion .
+
+secx:parameter a owl:DatatypeProperty ;
+  rdfs:label "parameter"@en-GB ;
+  rdfs:comment "Optional numeric parameter for a parameterised dimension (secx:nistLevel, secx:anonymitySet)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion .
+
+secx:assurance a owl:ObjectProperty ;
+  rdfs:label "assurance"@en-GB ;
+  rdfs:comment "The epistemic basis of the claim: secx:Proven ⊐ secx:Claimed ⊐ secx:Conjectured. ONE axis, orthogonal to every property (§4.2.2). Default for a sparq ZK property is secx:Claimed (#1001 Option A)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion ;
+  rdfs:range secx:AssuranceLevel .
+
+secx:auditStatus a owl:ObjectProperty ;
+  rdfs:label "audit status"@en-GB ;
+  rdfs:comment "secx:ExternallyAudited ⊐ secx:InternallyReviewed ⊐ secx:Unreviewed; plus secx:ExternalSignOffPending for the live sq-qhy4 state."@en-GB ;
+  rdfs:domain secx:PropertyAssertion ;
+  rdfs:range secx:AuditStatus .
+
+secx:assumption a owl:ObjectProperty ;
+  rdfs:label "assumption"@en-GB ;
+  rdfs:comment "The assumption the claim rests on (secx:IssuerHonesty, secx:DiscreteLog, secx:RandomOracle, secx:HonestMajority, secx:SemiHonest). A precondition of a property's validity, not a property of the proof (§4.2.3)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion ;
+  rdfs:range secx:Assumption .
+
+secx:auditEvidence a owl:AnnotationProperty ;
+  rdfs:subPropertyOf rdfs:seeAlso ;
+  rdfs:label "audit evidence"@en-GB ;
+  rdfs:comment "Points at the audit doc / gap-register row backing the audit-status (e.g. the sq-qhy4 audit)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion .
+
+secx:scope a owl:ObjectProperty ;
+  rdfs:label "scope"@en-GB ;
+  rdfs:comment "The layer at which the asserted property is realised: secx:QueryProofLayer (re-verifiable in the sparq query proof — the default when omitted) or secx:SourceLayerOnly (a property of the SOURCE credential's cryptosuite that does NOT transfer to the query proof). A source-layer-only property MUST NOT satisfy a query-proof constraint (design §5a rule 2; the non-transfer guard)."@en-GB ;
+  rdfs:domain secx:PropertyAssertion ;
+  rdfs:range secx:PropertyScope .
+
+# ─── scope axis (§5a rule 2 — the source-layer non-transfer marker) ───────────
+# A property realised only at the SOURCE credential layer (e.g. BBS cross-show
+# unlinkability of an INPUT credential) does NOT carry to the sparq QUERY proof:
+# `zk:sourceCryptosuite` is PROVENANCE, not a re-verifiable in-proof property
+# (ZK config design §5.3). The admissibility ruleset (Phase 2/5) refuses to let a
+# secx:SourceLayerOnly assertion satisfy a query-proof constraint. Omitting
+# secx:scope means secx:QueryProofLayer (the conservative default: the property is
+# only claimed about the proof sparq actually emits).
+secx:PropertyScope a owl:Class, rdfs:Class ;
+  rdfs:label "Property scope"@en-GB ;
+  rdfs:comment "The layer a property assertion is scoped to (query-proof vs source-credential only)."@en-GB .
+
+secx:QueryProofLayer a secx:PropertyScope ;
+  rdfs:label "Query-proof layer"@en-GB ;
+  rdfs:comment "Re-verifiable in the sparq query proof. The DEFAULT scope when secx:scope is omitted."@en-GB .
+secx:SourceLayerOnly a secx:PropertyScope ;
+  rdfs:label "Source-layer only"@en-GB ;
+  rdfs:comment "A property of the SOURCE credential's cryptosuite that does NOT transfer to the query proof (zk:sourceCryptosuite is provenance, not an in-proof property; §5.3). Such an assertion must not satisfy a query-proof constraint."@en-GB .
+
+# ─────────────── the assurance axis individuals (§4.2.2) ─────────────────────
+# Proven ⊐ Claimed ⊐ Conjectured. The SAME discharge machinery as a property
+# dimension: `requiresAssurance gteq Proven` mechanically removes every unaudited
+# sparq method. NO sparq ZK method is Proven while sq-qhy4 is open.
+
+secx:AssuranceLevel a owl:Class, rdfs:Class ;
+  rdfs:label "Assurance level"@en-GB ;
+  rdfs:comment "The epistemic basis of a property assertion (orthogonal to every property)."@en-GB .
+
+secx:Proven a secx:AssuranceLevel ;
+  rdfs:label "Proven"@en-GB ;
+  rdfs:comment "Backed by a formal proof or an external audit (including a provable NEGATIVE result, e.g. 'not post-quantum secure'). NOT applicable to a sparq ZK property while sq-qhy4 is open (#1001)."@en-GB .
+secx:Claimed a secx:AssuranceLevel ;
+  rdfs:label "Claimed"@en-GB ;
+  rdfs:comment "Asserted by the implementer, NOT independently verified. The DEFAULT for a sparq ZK property (#1001 Option A)."@en-GB .
+secx:Conjectured a secx:AssuranceLevel ;
+  rdfs:label "Conjectured"@en-GB ;
+  rdfs:comment "Believed plausible but not yet established to the Claimed bar."@en-GB .
+
+secx:AuditStatus a owl:Class, rdfs:Class ;
+  rdfs:label "Audit status"@en-GB ;
+  rdfs:comment "Independent-review state of a property assertion."@en-GB .
+
+secx:ExternallyAudited a secx:AuditStatus ;
+  rdfs:label "Externally audited"@en-GB ;
+  rdfs:comment "Reviewed by an external accredited party."@en-GB .
+secx:InternallyReviewed a secx:AuditStatus ;
+  rdfs:label "Internally reviewed"@en-GB ;
+  rdfs:comment "Reviewed internally only (no external sign-off)."@en-GB .
+secx:Unreviewed a secx:AuditStatus ;
+  rdfs:label "Unreviewed"@en-GB ;
+  rdfs:comment "Not reviewed."@en-GB .
+secx:ExternalSignOffPending a secx:AuditStatus ;
+  rdfs:label "External sign-off pending"@en-GB ;
+  rdfs:comment "External audit is underway / pending. The live state of the sparq ZK estate (sq-qhy4)."@en-GB .
+
+# ─────────────────────── assumptions (§4.2.3) ────────────────────────────────
+
+secx:Assumption a owl:Class, rdfs:Class ;
+  rdfs:label "Assumption"@en-GB ;
+  rdfs:comment "A precondition under which an asserted property holds."@en-GB .
+
+secx:IssuerHonesty a secx:Assumption ; rdfs:label "Issuer honesty"@en-GB .
+secx:DiscreteLog a secx:Assumption ; rdfs:label "Discrete-log hardness"@en-GB .
+secx:RandomOracle a secx:Assumption ; rdfs:label "Random-oracle model"@en-GB .
+secx:HonestMajority a secx:Assumption ; rdfs:label "Honest majority (MPC)"@en-GB .
+secx:SemiHonest a secx:Assumption ; rdfs:label "Semi-honest adversary (MPC)"@en-GB .
+
+# ════════════════════ property dimensions + levels (§4.2.1) ══════════════════
+# [his] = reused from the vendored sec-prop: (the IRI is preserved; where his term
+# was boolean we ADD ordered levels). [new] = an orthogonal dimension this design
+# mints under the same namespace. `⊐` (in comments) = "stronger than".
+
+# ─── [his] Unlinkability: refined into two ordered sub-axes (strength × scope) ──
+# Both rdfs:subPropertyOf his sec-prop:Unlinkability so the original IRI is kept.
+# Honesty: the everlasting/computational and per/cross-presentation taxonomy is the
+# ACADEMIC one (Pfitzmann–Hansen), NOT lifted from the IRTF CFRG BBS draft.
+
+secx:UnlinkabilityStrength a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:subPropertyOf sec-prop:Unlinkability ;
+  rdfs:label "Unlinkability strength"@en-GB ;
+  skos:closeMatch dpv:Pseudonymisation ;
+  rdfs:comment "EverlastingUnlinkable ⊐ ComputationalUnlinkable (Pfitzmann–Hansen)."@en-GB .
+secx:EverlastingUnlinkable a skos:Concept ; rdfs:label "Everlasting unlinkable"@en-GB .
+secx:ComputationalUnlinkable a skos:Concept ; rdfs:label "Computational unlinkable"@en-GB .
+
+secx:UnlinkabilityScope a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:subPropertyOf sec-prop:Unlinkability ;
+  rdfs:label "Unlinkability scope"@en-GB ;
+  skos:closeMatch dpv:Pseudonymisation ;
+  rdfs:comment "CrossPresentation ⊐ PerPresentation ⊐ Linkable (multi-show scope)."@en-GB .
+secx:CrossPresentation a skos:Concept ; rdfs:label "Cross-presentation"@en-GB .
+secx:PerPresentation a skos:Concept ; rdfs:label "Per-presentation"@en-GB .
+secx:Linkable a skos:Concept ; rdfs:label "Linkable"@en-GB .
+
+# ─── [his] PostQuantumForgery: keep IRI, add the nistLevel parameter ──────────
+# The DIMENSION IRI is VENDORED (vocab/sec-prop.yaml.ld, paper §7.7 #3). The subject
+# below re-asserts the ORIGINAL IRI, label and `sec-prop:SecurityProperty` type
+# verbatim, adding only the provenance annotations (rdfs:isDefinedBy / rdfs:comment) —
+# it mints nothing and refines nothing (design §4.1, extend-do-not-fork). Note it is
+# deliberately NOT typed `owl:ObjectProperty` as the MINTED dimensions below are: the
+# vendored term is a `sec-prop:SecurityProperty` concept individual, and re-typing it
+# as a property would be a new ontology assertion this file has no mandate to make.
+# `secx:property`'s range is `sec-prop:SecurityProperty`, so the vendored typing alone
+# satisfies it. The subject is stated here so this file is self-contained for that
+# range, and so the cross-crate dimension-IRI drift guards (sq-mgxz8) CAN check subject
+# presence for these three directly; retiring their exemption entries in
+# `sparq-policy`'s guards is separate follow-up work in that crate.
+secx:PostQuantumForgery a sec-prop:SecurityProperty ;
+  rdfs:label "Post-quantum forgery resistance"@en-GB ;
+  rdfs:isDefinedBy <https://w3id.org/zkp-sparql/sec-prop> ;
+  rdfs:comment "Vendored dimension re-asserted from vocab/sec-prop.yaml.ld (§7.7 #3); levels PQForgeryResistant ⊐ PQForgeable, parameterised by secx:nistLevel."@en-GB .
+secx:PQForgeryResistant a skos:Concept ; rdfs:label "PQ forgery-resistant"@en-GB .
+secx:PQForgeable a skos:Concept ; rdfs:label "PQ forgeable"@en-GB .
+secx:nistLevel a owl:DatatypeProperty ;
+  rdfs:label "NIST security category"@en-GB ;
+  rdfs:comment "FIPS 203/204/205 security category 1–5 (a secx:parameter value)."@en-GB ;
+  rdfs:range xsd:integer .
+
+# ─── [his] PostQuantumSnooping ────────────────────────────────────────────────
+# Vendored dimension IRI — same re-assertion rationale as PostQuantumForgery above.
+secx:PostQuantumSnooping a sec-prop:SecurityProperty ;
+  rdfs:label "Post-quantum snooping resistance (harvest-now-decrypt-later)"@en-GB ;
+  rdfs:isDefinedBy <https://w3id.org/zkp-sparql/sec-prop> ;
+  rdfs:comment "Vendored dimension re-asserted from vocab/sec-prop.yaml.ld (§7.7 #4); levels PQHiding ⊐ PQRevealable. The PQ-time slice of the general secx:Hiding axis."@en-GB .
+secx:PQHiding a skos:Concept ; rdfs:label "PQ hiding"@en-GB .
+secx:PQRevealable a skos:Concept ; rdfs:label "PQ revealable"@en-GB .
+
+# ─── [his] SourceCredentialDisclosure: refined into ordered levels ────────────
+secx:NoIssuerDisclosure a skos:Concept ; rdfs:label "No issuer disclosure"@en-GB .
+secx:IssuerSetDisclosure a skos:Concept ; rdfs:label "Issuer-set disclosure"@en-GB .
+secx:FullSourceDisclosure a skos:Concept ; rdfs:label "Full source disclosure"@en-GB .
+
+# ─── [his] SignatureTypeLeakage ───────────────────────────────────────────────
+# Vendored dimension IRI — same re-assertion rationale as PostQuantumForgery above.
+secx:SignatureTypeLeakage a sec-prop:SecurityProperty ;
+  rdfs:label "Signature-type leakage (PoKoS reveals signature type)"@en-GB ;
+  rdfs:isDefinedBy <https://w3id.org/zkp-sparql/sec-prop> ;
+  rdfs:comment "Vendored dimension re-asserted from vocab/sec-prop.yaml.ld (§7.7 #5); levels SchemeHidden ⊐ SchemeRevealed."@en-GB .
+secx:SchemeHidden a skos:Concept ; rdfs:label "Scheme hidden"@en-GB .
+secx:SchemeRevealed a skos:Concept ; rdfs:label "Scheme revealed"@en-GB .
+
+# ─── [his] ProofSizeLeakage ───────────────────────────────────────────────────
+secx:FixedSize a skos:Concept ; rdfs:label "Fixed size"@en-GB .
+secx:StructureLeaking a skos:Concept ; rdfs:label "Structure leaking"@en-GB .
+
+# ─── [his] CircuitAudit: keep IRI; DISTINCT from the new Soundness dimension ───
+secx:MechanisedProof a skos:Concept ; rdfs:label "Mechanised proof"@en-GB .
+secx:ManualAudit a skos:Concept ; rdfs:label "Manual audit"@en-GB .
+secx:Unaudited a skos:Concept ; rdfs:label "Unaudited"@en-GB .
+
+# ─── [his] ValidityPeriodLeakage ──────────────────────────────────────────────
+secx:ValidityHidden a skos:Concept ; rdfs:label "Validity hidden"@en-GB .
+secx:ValidityRevealed a skos:Concept ; rdfs:label "Validity revealed"@en-GB .
+
+# ════════════════════ [new] orthogonal proof-system dimensions ═══════════════
+
+secx:ZeroKnowledgeType a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Zero-knowledge type"@en-GB ;
+  skos:closeMatch dpv:ZeroKnowledgeAuthentication ;
+  rdfs:comment "PerfectZK ⊐ StatisticalZK ⊐ ComputationalZK ⊐ NotZK. His set assumed ZK but did not type it."@en-GB .
+secx:PerfectZK a skos:Concept ; rdfs:label "Perfect ZK"@en-GB .
+secx:StatisticalZK a skos:Concept ; rdfs:label "Statistical ZK"@en-GB .
+secx:ComputationalZK a skos:Concept ; rdfs:label "Computational ZK"@en-GB .
+secx:NotZK a skos:Concept ; rdfs:label "Not ZK"@en-GB .
+
+secx:Soundness a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Soundness"@en-GB ;
+  rdfs:comment "KnowledgeSound ⊐ Sound ⊐ Unsound; orthogonally StatisticalSoundness ⊐ ComputationalSoundness. Distinct from his CircuitAudit (generator correctness)."@en-GB .
+secx:KnowledgeSound a skos:Concept ; rdfs:label "Knowledge-sound"@en-GB .
+secx:Sound a skos:Concept ; rdfs:label "Sound"@en-GB .
+secx:Unsound a skos:Concept ; rdfs:label "Unsound"@en-GB .
+secx:StatisticalSoundness a skos:Concept ; rdfs:label "Statistical soundness"@en-GB .
+secx:ComputationalSoundness a skos:Concept ; rdfs:label "Computational soundness"@en-GB .
+
+secx:Completeness a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Completeness"@en-GB ;
+  rdfs:comment "Complete / Incomplete (ZKProof reference)."@en-GB .
+secx:Complete a skos:Concept ; rdfs:label "Complete"@en-GB .
+secx:Incomplete a skos:Concept ; rdfs:label "Incomplete"@en-GB .
+
+secx:Hiding a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Hiding (commitments)"@en-GB ;
+  rdfs:comment "PerfectHiding ⊐ StatisticalHiding ⊐ ComputationalHiding ⊐ NotHiding. General-time hiding axis (his PostQuantumSnooping is its PQ-time slice)."@en-GB .
+secx:PerfectHiding a skos:Concept ; rdfs:label "Perfect hiding"@en-GB .
+secx:StatisticalHiding a skos:Concept ; rdfs:label "Statistical hiding"@en-GB .
+secx:ComputationalHiding a skos:Concept ; rdfs:label "Computational hiding"@en-GB .
+secx:NotHiding a skos:Concept ; rdfs:label "Not hiding"@en-GB .
+
+secx:Binding a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Binding (commitments)"@en-GB ;
+  rdfs:comment "PerfectBinding ⊐ StatisticalBinding ⊐ ComputationalBinding ⊐ NotBinding. Dual of Hiding; the perfectly-hiding-XOR-perfectly-binding impossibility is why both are needed."@en-GB .
+secx:PerfectBinding a skos:Concept ; rdfs:label "Perfect binding"@en-GB .
+secx:StatisticalBinding a skos:Concept ; rdfs:label "Statistical binding"@en-GB .
+secx:ComputationalBinding a skos:Concept ; rdfs:label "Computational binding"@en-GB .
+secx:NotBinding a skos:Concept ; rdfs:label "Not binding"@en-GB .
+
+secx:Anonymity a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Anonymity"@en-GB ;
+  skos:closeMatch dpv:Anonymisation ;
+  rdfs:comment "Anonymous ⊐ Pseudonymous ⊐ Identified, with an anonymitySet parameter. The trust-graph §3.4 clear-WebID path is Identified."@en-GB .
+secx:Anonymous a skos:Concept ; rdfs:label "Anonymous"@en-GB .
+secx:Pseudonymous a skos:Concept ; rdfs:label "Pseudonymous"@en-GB .
+secx:Identified a skos:Concept ; rdfs:label "Identified"@en-GB .
+secx:anonymitySet a owl:DatatypeProperty ;
+  rdfs:label "Anonymity set size"@en-GB ;
+  rdfs:comment "Size of the anonymity set (a secx:parameter value)."@en-GB ;
+  rdfs:range xsd:integer .
+
+secx:Setup a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Setup"@en-GB ;
+  rdfs:comment "Transparent ⊐ UniversalTrustedSetup ⊐ PerCircuitTrustedSetup (STARK/Bulletproofs vs PLONK/KZG vs Groth16)."@en-GB .
+secx:Transparent a skos:Concept ; rdfs:label "Transparent setup"@en-GB .
+secx:UniversalTrustedSetup a skos:Concept ; rdfs:label "Universal trusted setup"@en-GB .
+secx:PerCircuitTrustedSetup a skos:Concept ; rdfs:label "Per-circuit trusted setup"@en-GB .
+
+secx:Interactivity a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Interactivity"@en-GB ;
+  rdfs:comment "NonInteractive / Interactive (NI via Fiat–Shamir; load-bearing for credential-presentability)."@en-GB .
+secx:NonInteractive a skos:Concept ; rdfs:label "Non-interactive"@en-GB .
+secx:Interactive a skos:Concept ; rdfs:label "Interactive"@en-GB .
+
+secx:SelectiveDisclosure a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Selective disclosure"@en-GB ;
+  rdfs:comment "SelectivelyDisclosable / AllOrNothing (BBS / ecdsa-sd vs plain suites)."@en-GB .
+secx:SelectivelyDisclosable a skos:Concept ; rdfs:label "Selectively disclosable"@en-GB .
+secx:AllOrNothing a skos:Concept ; rdfs:label "All-or-nothing"@en-GB .
+
+secx:SingleUse a owl:ObjectProperty, sec-prop:SecurityProperty ;
+  rdfs:label "Single use"@en-GB ;
+  rdfs:comment "SingleUse (nullifier-enforced) / Replayable. The anti-replay primitive his work flagged but did not put in the vocabulary; every current sparq method is Replayable today (honest)."@en-GB .
+secx:SingleUseEnforced a skos:Concept ; rdfs:label "Single-use (nullifier-enforced)"@en-GB .
+secx:Replayable a skos:Concept ; rdfs:label "Replayable"@en-GB .

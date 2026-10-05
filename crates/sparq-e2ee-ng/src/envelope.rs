@@ -236,11 +236,20 @@ impl BlockEnvelope {
         })
     }
 
-    /// The `CommitId` of a root block = `SHA-256(canonical envelope)` (§8.3).
-    pub fn commit_id(&self) -> CommitId {
+    /// `SHA-256(canonical envelope)` — the digest of the **encrypted** block.
+    ///
+    /// This is the value a Merkle parent node authenticates for each of its
+    /// children (see [`crate::object`]), and it is exactly the byte string
+    /// [`Self::commit_id`] wraps for a root block.
+    pub fn digest(&self) -> [u8; 32] {
         let mut h = Sha256::new();
         h.update(self.encode());
-        CommitId::from_bytes(h.finalize().into())
+        h.finalize().into()
+    }
+
+    /// The `CommitId` of a root block = `SHA-256(canonical envelope)` (§8.3).
+    pub fn commit_id(&self) -> CommitId {
+        CommitId::from_bytes(self.digest())
     }
 }
 

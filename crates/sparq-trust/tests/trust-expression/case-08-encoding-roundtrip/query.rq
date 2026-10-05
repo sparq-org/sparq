@@ -1,0 +1,9 @@
+# A TWO-pattern SELECT so the response carries two distinct attestation bundles
+# from two distinct issuers: the (a)/(b) encoding correspondence and the independent
+# verifier re-check are then exercised over a response with real structure, not a
+# single-bundle degenerate case.
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+SELECT ?age ?name WHERE {
+    <urn:person:jesse> foaf:age ?age .
+    <urn:person:jesse> foaf:name ?name .
+}

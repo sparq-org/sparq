@@ -1,0 +1,40 @@
+# The RDFS entailment ruleset as Notation3 — the rule text under test by the
+# `sq-zgbso.6` SPIKE (`examples/rdfs_n3_spike.rs`, epic sq-zgbso / issue #1582).
+#
+# MEASUREMENT ARTEFACT, NOT A SHIPPING PATH. Nothing in the crate reads this file
+# except the spike example; `Profile::Rdfs` continues to run the hand-optimized
+# id-level materializer in `src/rdfs.rs`. Whether these rules ever replace that code
+# is exactly the question the spike's measured verdict answers.
+#
+# Scope: the SAME six rules `src/rdfs.rs` implements — rdfs2/3/5/7/9/11 of RDF 1.1
+# Semantics §9.2.1. Everything else that regime defines (rdfs1, rdfs4a/b, rdfs6, rdfs8,
+# rdfs10, rdfs12, rdfs13 and the axiomatic triples) is absent here because it is absent
+# there; of those, src/rdfs.rs's module docs call out rdfs4a/4b, rdfs6, rdfs8, rdfs10
+# and rdfs13 as deliberately omitted, "true but useless, and they blow up the store by
+# O(terms)". A spike that compared a DIFFERENT rule set against the materializer would
+# measure nothing, so the omissions are mirrored exactly.
+#
+# Every rule here is a plain Horn rule over triple patterns: no builtins, no negation,
+# no existentials — comfortably inside the compiled evaluator's documented subset
+# (`src/n3/compiled.rs` module docs), so the spike measures evaluation, not coverage.
+
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# rdfs2 — domain typing:      (p domain c), (s p o) ⊢ (s type c)
+{ ?p rdfs:domain ?c . ?s ?p ?o } => { ?s rdf:type ?c } .
+
+# rdfs3 — range typing:       (p range c), (s p o) ⊢ (o type c)
+{ ?p rdfs:range ?c . ?s ?p ?o } => { ?o rdf:type ?c } .
+
+# rdfs5 — subPropertyOf transitivity: (p sp q), (q sp r) ⊢ (p sp r)
+{ ?p rdfs:subPropertyOf ?q . ?q rdfs:subPropertyOf ?r } => { ?p rdfs:subPropertyOf ?r } .
+
+# rdfs7 — subPropertyOf rewrite:      (p sp q), (s p o) ⊢ (s q o)
+{ ?p rdfs:subPropertyOf ?q . ?s ?p ?o } => { ?s ?q ?o } .
+
+# rdfs9 — subClassOf typing:          (c sc d), (s type c) ⊢ (s type d)
+{ ?c rdfs:subClassOf ?d . ?s rdf:type ?c } => { ?s rdf:type ?d } .
+
+# rdfs11 — subClassOf transitivity:   (c sc d), (d sc e) ⊢ (c sc e)
+{ ?c rdfs:subClassOf ?d . ?d rdfs:subClassOf ?e } => { ?c rdfs:subClassOf ?e } .

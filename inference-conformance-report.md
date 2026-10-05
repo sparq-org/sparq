@@ -135,8 +135,8 @@ Source: w3c/rdf-tests `rdf/rdf11/rdf-turtle/manifest.ttl` (pinned clone). Runs T
 
 **Overall (W3C rdf-turtle through the sparq Turtle parser (parse_to_triples)): 313 pass / 0 fail / 0 documented divergence / 0 out-of-scope — pass+divergence 100.0% of run, 100.0% of all in-scope tests.**
 
-## Overall (all suites)
-
-Covers the four inference regime suites (rdf-mt, OWL 2 RL, N3, SPARQL 1.1 entailment) plus the W3C rdf-turtle Turtle parser suite (not an inference suite; shares the same `inference-conformance` CI ratchet job per the central scoreboard).
+## Overall (all inference suites)
 
 **1950 pass / 0 fail / 17 documented divergence / 185 out-of-scope — pass+divergence 100.0% of run, 91.4% of all in-scope tests.**
+
+Covers the four inference regime suites (rdf-mt, OWL 2 RL, N3, SPARQL 1.1 entailment) plus the W3C rdf-turtle Turtle parser suite (not an inference suite; shares the same `inference-conformance` CI ratchet job per the central scoreboard).

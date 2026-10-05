@@ -386,7 +386,11 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // Compaction Algorithm compared against the W3C EXPECTED document (see
     // src/floors/compact.rs for the side-by-side). Bumped in the SAME commit as the
     // lib const (rise-only).
-    ("W3C JSON-LD 1.1 compact", 228),
+    // [OPUS-5] sq-gzsky — raised 228 → 243: the lane now RUNS the 17
+    // NegativeEvaluationTests against the manifest's `expectErrorCode` instead of
+    // skipping them (a wrong code is a FAIL). Bumped in the SAME commit as the lib
+    // const src/floors/compact.rs::FLOOR (rise-only).
+    ("W3C JSON-LD 1.1 compact", 243),
     // [FABLE-5] sq-oy1f.29 — raised 61 → 92: the frame lane moved from the RDF-first
     // framer (`graph_to_jsonld_framed`) to the NATIVE Framing pipeline compared against
     // the W3C EXPECTED document under the stronger normative oracle (see
@@ -397,7 +401,14 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // wiring + @id-null retention + IRI-colon scheme check + @nest scoped ctx
     // propagation + @reverse @index + 1.0-mode round-trip guard). Bumped in the
     // SAME commit as src/floors/expand.rs::FLOOR (rise-only).
-    ("W3C JSON-LD 1.1 expand", 276),
+    // [OPUS-5] sq-gzsky — raised 276 → 381: the 109-case NegativeEvaluationTest SKIP
+    // bucket (the WHOLE expand gap) is closed — the lane RUNS them against the
+    // manifest's `expectErrorCode` — plus seven spec-faithful sparq-jsonld fixes
+    // (@included arrayification, @type+@direction, datatype-IRI + blank-node-datatype
+    // validation, the keyword round-trip check, and the two 1.0-mode restrictions on
+    // @container arrays and relative @vocab). Bumped in the SAME commit as
+    // src/floors/expand.rs::FLOOR (rise-only).
+    ("W3C JSON-LD 1.1 expand", 381),
     // [FABLE-5] sq-oy1f.26 — oracle-change re-pin (RDF-writer 50 → native flatten() 53).
     // The native lane composes over expand() and inherits the sq-oy1f.37 expand raises,
     // so merging main flips its 7 inherited fails to passes and it now MEASURES 53 pass /

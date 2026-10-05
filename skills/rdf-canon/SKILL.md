@@ -58,7 +58,7 @@ assert_eq!(map.get("x").map(String::as_str), Some("c14n0"));
 When you already hold serialized RDF — e.g. across a language boundary — skip the
 oxrdf term plumbing: `canonicalize_nquads(&str) -> Result<String, _>` parses an
 N-Quads document and returns its canonical N-Quads (`parse_nquads` exposes the parse
-alone). This is the seam the `@jeswr/sparq` RDF/JS `Dataset` uses for
+alone). This is the seam the `@sparq-org/sparq` RDF/JS `Dataset` uses for
 isomorphism-aware `toCanonical` / `equals` / `contains`, surfaced over wasm as the
 `canonicalizeNQuads(nquads)` binding behind `sparq-wasm`'s opt-in `canon` feature.
 
@@ -142,10 +142,10 @@ crate grew — keep a wildcard arm) and has five variants:
 ## ⚠️ Opt-in NON-STANDARD RDF 1.2 triple-term profile
 
 **OFF by default; NOT W3C RDFC-1.0.** RDFC-1.0 is an RDF-1.1-only spec with no
-notion of triple terms; their canonicalization is **unsettled upstream**
-([w3c/rdf-star-wg#114](https://github.com/w3c/rdf-star-wg/issues/114)). With the
-feature OFF, behaviour is byte-identical to the standard surface (triple terms
-still raise `CanonError::TripleTerm`; the W3C suite still passes).
+notion of triple terms. W3C has published no RDF-1.2 dataset canonicalization
+specification. With the feature OFF, behaviour is byte-identical to the standard
+surface (triple terms still raise `CanonError::TripleTerm`; the W3C suite still
+passes).
 
 Enable the cargo feature to opt in to a **separate, clearly non-standard** v2
 profile. It natively re-implements the RDFC-1.0 algorithm over oxrdf 0.3 and
@@ -219,6 +219,73 @@ an independent oracle before asserting the canon differs, so a future
 false-equal would be caught. The whether-the-marker-needs-a-sub-discriminator
 question is a spec-clarity / robustness matter, not a latent defect.
 
+## Opt-in `urn:concept:` record verification (`concept` feature) — [SONNET-4.6] issue #1746
+
+**OFF by default.** A federated concept record is named by a content address,
+`urn:concept:<multibase-multihash>`; before indexing a record you were handed,
+recompute that name from the bytes and refuse the record if it disagrees.
+
+```toml
+sparq-canon = { path = "crates/sparq-canon", features = ["concept"] }
+```
+
+```rust
+use sparq_canon::concept::{concept_urn, verify_concept_urn, ConceptHash, Multibase, ConceptUrn};
+
+// GUARD — run this BEFORE indexing. `Ok` means the quads you hold reproduce the
+// declared multihash byte-for-byte; every other outcome is a refusal.
+verify_concept_urn(urn, &record_quads)?;
+
+// Mint the name for a record you produce (same envelope, other direction).
+let urn = concept_urn(&record_quads, ConceptHash::Sha256, Multibase::Base58Btc)?;
+
+// Pin one algorithm rather than accepting any this build supports.
+let parsed = ConceptUrn::parse(urn_str)?;
+if parsed.hash_code() != ConceptHash::Sha256.code() { /* refuse */ }
+```
+
+Supported envelope: multibase `f`/`F` (base16), `b`/`B` (base32, unpadded), `z`
+(base58btc), `u` (base64url, unpadded); multihash codes `sha2-256` (`0x12`),
+`sha2-512` (`0x13`), `sha2-384` (`0x20`) at their full, untruncated lengths.
+
+**Fail-closed, exhaustively.** Not a `urn:concept:` URN; an unknown multibase
+prefix; a name-specific string longer than any well-formed multihash encodes to
+(refused on length *before* the body is decoded, so a hostile name cannot buy
+decoder work — base58btc decoding is quadratic in the body length);
+a character outside the declared alphabet or non-canonical padding bits;
+a truncated, non-minimal, or trailing-byte multihash; a declared length that
+disagrees with the digest present or with the code's natural size; a hash code
+this build cannot recompute; an empty record; an RDF 1.2 triple term; a digest
+mismatch — all `Err`, nothing indexed. Unknown never means accepted. The
+comparison is over the **full multihash** (prefix included) and is constant-time,
+so a record cannot pass by declaring a code other than the one that produced its
+digest.
+
+### The two things this deliberately does not do
+
+1. **It does not define which quads are "the record".** You pass them. The
+   scope-extraction rule (whole named graph? node neighbourhood? SCC?) belongs to
+   the concept-hash definition (GitHub #1683) and its profile freeze (#1746),
+   neither of which is vendored here. §3 of
+   `research/genai-urn-concept-verifier-design.md` shows, with counterexamples
+   from this crate's own `issue_quads`, that a node-level scope hash is **not** an
+   RDFC-1.0 property of the surrounding graph — so the choice is load-bearing and
+   is not sparq's to make. Two conventions this implementation *does* fix, so a
+   disagreement is visible rather than silent: the hashed pre-image is the exact
+   canonical N-Quads document including its trailing newline, and the multihash
+   code selects the **outer** digest only (canonicalization keeps RDFC-1.0's
+   spec-default SHA-256 profile).
+2. **It is not an independent implementation of RDFC-1.0.** Recomputing at the
+   ingestion boundary catches producer-side defects and tampering. It does not
+   catch a bug in RDFC-1.0 itself: `sparq-canon` delegates the algorithm to
+   `rdf-canon`, so a producer on the same lineage would reproduce such a bug
+   identically and it would cancel out. Do not describe this surface as
+   "double-implementation verified" or "independently proven".
+
+Suite: `crates/sparq-canon/tests/concept_urn.rs` — positive vectors are known
+answers derived **outside** this crate, plus a mutation check that flips every
+byte of a correct multihash in turn and requires each to be rejected.
+
 ## Conformance
 
 Validated against the official [W3C rdf-canon test
@@ -260,10 +327,14 @@ parity (sq-5i1d [OPUS-4.8]) and a constrained ground-triple-term
 (error-on-nested-bnode) `*_ground_terms` wrapper family for the common
 credential/VC case (sq-iaxd [FABLE-5]). The `canonicalize_nquads` / `parse_nquads` text seam
 and the `sparq-wasm` opt-in `canon` feature (`canonicalizeNQuads` binding for the
-`@jeswr/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
+`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
 `sparq-canon` with `default-features = false` (the crate now disables
 `sparq-core`'s default `parallel` and re-enables it via its own default `parallel`
 feature, so native builds are byte-identical and the wasm build drops rayon).
+The opt-in, off-by-default `concept` feature ([SONNET-4.6] issue #1746) adds the
+`urn:concept:` multibase/multihash envelope plus the recompute-and-byte-compare
+ingestion guard; it fixes no scope-extraction rule and makes no independence
+claim beyond producer-side re-derivation (see that section).
 `publish = false`, non-default workspace member — nothing in sparq's default graph
 depends on it, so the default build and lean wasm artifact are byte-identical with
 or without it.

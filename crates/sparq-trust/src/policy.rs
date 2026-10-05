@@ -90,9 +90,12 @@ pub struct TrustRule {
     /// `trust:scope` — the resource/container this rule applies to (containment check
     /// at admission). v1 is exact-or-ancestor IRI matching.
     pub scope: NamedNode,
-    /// `trust:freshWithin` — maximum admitted staleness, in seconds (parsed from the
-    /// `xsd:duration` literal). Consulted against `Session.now` as a per-request Rust
-    /// side-condition, NOT an in-reasoner predicate (§3.3 B′).
+    /// `trust:freshWithin` — maximum admitted staleness, in seconds. Parsed from the
+    /// `trust:freshWithin` literal, which must be an EXACT day/time duration
+    /// (`PnDTnHnMnS`); the nominal `P1Y`/`P6M` forms are rejected fail-closed rather
+    /// than approximated, so this second count is exactly what the author wrote.
+    /// Consulted against `Session.now` as a per-request Rust side-condition, NOT an
+    /// in-reasoner predicate (§3.3 B′).
     pub fresh_within_secs: i64,
 }
 
@@ -122,7 +125,9 @@ pub enum PolicyError {
     /// the DID and the resolver's reason. Fail-closed: a rule whose DID does not resolve
     /// admits nothing.
     BadIssuerDid { did: String, reason: String },
-    /// The `trust:freshWithin` literal was not a parseable `xsd:duration`.
+    /// The `trust:freshWithin` literal was not an exactly-representable day/time
+    /// `xsd:duration` (`PnDTnHnMnS`). This includes the lexically-valid-but-nominal
+    /// `P1Y`/`P6M`, which have no exact seconds value — see `parse_xsd_duration_secs`.
     BadDuration(String),
 }
 
@@ -140,9 +145,12 @@ impl std::fmt::Display for PolicyError {
             PolicyError::BadIssuerDid { did, reason } => {
                 write!(f, "trust:issuerDid <{}> did not resolve: {}", did, reason)
             }
-            PolicyError::BadDuration(d) => {
-                write!(f, "trust:freshWithin is not xsd:duration: {}", d)
-            }
+            PolicyError::BadDuration(d) => write!(
+                f,
+                "trust:freshWithin is not an exact day/time xsd:duration \
+                 (PnDTnHnMnS; the nominal Y/M designators have no exact seconds value): {}",
+                d
+            ),
         }
     }
 }
@@ -531,49 +539,109 @@ fn node_label(t: &Term) -> String {
     }
 }
 
-/// Parse the common `xsd:duration` shapes this PoC needs into whole seconds:
-/// `PnYnMnDTnHnMnS` (and the date-only `PnD` / `PnW` weeks). Years/months use the
-/// xsd-nominal 365-day year / 30-day month for the PoC's coarse freshness window —
-/// good enough for a "no staler than P30D" check, and documented as such. Returns
-/// `None` on any unparseable input (fail-closed: a bad duration rejects the policy).
+/// The ordered day/time designators, each with its EXACT length in seconds. A field's
+/// index in this table enforces both the XSD ordering (`nDTnHnMnS`) and at-most-once —
+/// the scan only ever looks at or after the last-matched index, so a repeated or
+/// out-of-order designator simply finds no entry and fails closed.
+///
+/// The nominal `Y`/`M` (year/month) designators are deliberately ABSENT: a year is 365
+/// or 366 days and a month is 28–31, so neither has an exact seconds value without an
+/// anchor instant to resolve the calendar against (the same partial-order hazard
+/// `sparq-reason`'s datatype notes call out for `P1M` vs `P30D`). The non-XSD ISO `W`
+/// (weeks) designator is absent too — it is not in the `xsd:duration` lexical space.
+const DAY_TIME_FIELDS: [(bool, char, i64); 4] = [
+    // (is-in-time-part, designator, seconds-per-unit)
+    (false, 'D', 86_400),
+    (true, 'H', 3_600),
+    (true, 'M', 60),
+    (true, 'S', 1),
+];
+
+/// Parse a `trust:freshWithin` literal into whole seconds, accepting the non-negative,
+/// whole-second part of the day/time subset of `xsd:duration` (a restriction of the
+/// `xsd:dayTimeDuration` lexical space): `PnDTnHnMnS`, with every component optional but
+/// at least one present.
+///
+/// Every accepted duration has an exact seconds value, so the freshness window a policy
+/// author writes is the window the admission gate enforces — no calendar approximation.
+/// Everything else is rejected fail-closed (`None` → [`PolicyError::BadDuration`], and a
+/// rejected policy admits nothing), specifically:
+///
+/// - **nominal `Y`/`M`** (`P1Y`, `P6M`) — no exact seconds value without an anchor
+///   instant; a policy meaning "a year" must say `P365D` and mean it;
+/// - **`W`** (`P1W`) — not in the `xsd:duration` lexical space at all;
+/// - **negative durations** (`-P1D`) — lexically valid `xsd:duration`, but a negative
+///   staleness ceiling is meaningless;
+/// - **fractional seconds** (`PT0.5S`) — not representable in whole seconds;
+/// - **malformed lexical forms** — out-of-order (`PT1M1H`) or repeated (`P1D1D`)
+///   designators, a dangling `T` (`P1DT`), digits with no designator (`P30`), an empty
+///   numeral (`PD`), and the empty duration `P`;
+/// - **out-of-range values** — every multiply and add is checked, so an absurd
+///   `P9223372036854775807D` is rejected rather than overflowing.
+///
+/// The literal's datatype IRI is not inspected — this validates the LEXICAL form, so a
+/// day/time value tagged `^^xsd:duration` (as the vocabulary's examples are) is accepted.
 fn parse_xsd_duration_secs(s: &str) -> Option<i64> {
-    let mut chars = s.chars().peekable();
-    if chars.next()? != 'P' {
+    // A leading `P` is mandatory; requiring it also rejects the negative `-P…` sign.
+    let rest = s.strip_prefix('P')?;
+    let (date_part, time_part) = match rest.split_once('T') {
+        Some((date, time)) => (date, Some(time)),
+        None => (rest, None),
+    };
+    // A `T` separator MUST introduce at least one time component: `P1DT` is malformed.
+    if time_part == Some("") {
         return None;
     }
-    let mut in_time = false;
+
     let mut total: i64 = 0;
+    // The lowest table index still available — monotonically advancing, which is what
+    // enforces designator ordering and uniqueness across BOTH parts.
+    let mut next_field = 0usize;
+    accumulate_duration_part(date_part, false, &mut total, &mut next_field)?;
+    if let Some(time) = time_part {
+        accumulate_duration_part(time, true, &mut total, &mut next_field)?;
+    }
+    // `next_field` is still 0 iff no component matched — the empty duration `P`.
+    if next_field == 0 {
+        return None;
+    }
+    Some(total)
+}
+
+/// Accumulate one side of the `T` separator into `total`, advancing `next_field` past
+/// each designator it consumes. Returns `None` on anything the restricted grammar does
+/// not accept, so the caller propagates the fail-closed rejection.
+fn accumulate_duration_part(
+    part: &str,
+    in_time: bool,
+    total: &mut i64,
+    next_field: &mut usize,
+) -> Option<()> {
     let mut num = String::new();
-    let mut saw_field = false;
-    for c in chars {
-        if c == 'T' {
-            in_time = true;
-            continue;
-        }
+    for c in part.chars() {
         if c.is_ascii_digit() {
             num.push(c);
             continue;
         }
+        // No entry at-or-after `next_field` ⇒ the designator is unsupported (`Y`/`M` in
+        // date position, `W`), already consumed, or out of order. All fail closed.
+        let (idx, field) = DAY_TIME_FIELDS
+            .iter()
+            .enumerate()
+            .skip(*next_field)
+            .find(|(_, (is_time, designator, _))| *is_time == in_time && *designator == c)?;
+        // An empty numeral (`PD`) or a value beyond `i64` fails here.
         let v: i64 = num.parse().ok()?;
         num.clear();
-        saw_field = true;
-        let secs = match (in_time, c) {
-            (false, 'Y') => v * 365 * 86_400,
-            (false, 'M') => v * 30 * 86_400,
-            (false, 'W') => v * 7 * 86_400,
-            (false, 'D') => v * 86_400,
-            (true, 'H') => v * 3_600,
-            (true, 'M') => v * 60,
-            (true, 'S') => v,
-            _ => return None,
-        };
-        total = total.checked_add(secs)?;
+        *total = total.checked_add(v.checked_mul(field.2)?)?;
+        *next_field = idx + 1;
     }
-    // Trailing digits with no unit, or `P` with no fields, is malformed.
-    if !num.is_empty() || !saw_field {
-        return None;
+    // Trailing digits with no designator (`P30`) are malformed.
+    if num.is_empty() {
+        Some(())
+    } else {
+        None
     }
-    Some(total)
 }
 
 #[cfg(test)]
@@ -588,18 +656,80 @@ mod tests {
         ));
     }
 
+    /// Every accepted duration is EXACT: the seconds value is the arithmetic sum of its
+    /// components, with no calendar approximation anywhere.
     #[test]
-    fn duration_parsing_covers_the_poc_shapes() {
+    fn exact_day_time_durations_parse_to_their_arithmetic_seconds() {
         assert_eq!(parse_xsd_duration_secs("P30D"), Some(30 * 86_400));
+        assert_eq!(parse_xsd_duration_secs("P7D"), Some(7 * 86_400));
         assert_eq!(parse_xsd_duration_secs("PT1H"), Some(3_600));
+        assert_eq!(parse_xsd_duration_secs("PT90M"), Some(5_400));
+        assert_eq!(parse_xsd_duration_secs("PT0S"), Some(0));
         assert_eq!(
             parse_xsd_duration_secs("P1DT2H3M4S"),
             Some(86_400 + 7_200 + 180 + 4)
         );
-        assert_eq!(parse_xsd_duration_secs("P1W"), Some(7 * 86_400));
+        // Interior components may be omitted, as long as the order is preserved.
+        assert_eq!(parse_xsd_duration_secs("P1DT4S"), Some(86_400 + 4));
+    }
+
+    /// The precision fix (sq-pfae.11 item 1): the nominal designators no longer parse.
+    /// A year is 365 OR 366 days and a month 28–31, so neither has an exact seconds
+    /// value without an anchor instant — approximating them silently widened or
+    /// narrowed the author's staleness ceiling. Rejecting is fail-closed: the policy
+    /// is refused outright, never admitted with a guessed window.
+    #[test]
+    fn nominal_year_and_month_durations_are_rejected_not_approximated() {
+        assert_eq!(parse_xsd_duration_secs("P1Y"), None);
+        assert_eq!(parse_xsd_duration_secs("P6M"), None);
+        assert_eq!(parse_xsd_duration_secs("P1Y6M"), None);
+        assert_eq!(parse_xsd_duration_secs("P1Y2M3DT4H"), None);
+        // `W` is ISO 8601 but is NOT in the xsd:duration lexical space.
+        assert_eq!(parse_xsd_duration_secs("P1W"), None);
+        // The time-position `M` is minutes and stays accepted — only the DATE-position
+        // `M` (months) is the nominal one.
+        assert_eq!(parse_xsd_duration_secs("PT6M"), Some(360));
+    }
+
+    /// A negative staleness ceiling is meaningless, so the lexically-valid `-P…` sign
+    /// is refused rather than silently admitting a rule nothing can satisfy.
+    #[test]
+    fn negative_durations_are_rejected() {
+        assert_eq!(parse_xsd_duration_secs("-P1D"), None);
+        assert_eq!(parse_xsd_duration_secs("-PT1H"), None);
+    }
+
+    /// Lexical strictness: the restricted grammar is `PnDTnHnMnS`, components ordered
+    /// and each at most once, with a `T` only where it introduces a time component.
+    #[test]
+    fn malformed_lexical_forms_are_rejected() {
         assert_eq!(parse_xsd_duration_secs("garbage"), None);
-        assert_eq!(parse_xsd_duration_secs("P"), None);
-        assert_eq!(parse_xsd_duration_secs("P30"), None);
+        assert_eq!(parse_xsd_duration_secs(""), None);
+        assert_eq!(parse_xsd_duration_secs("P"), None, "empty duration");
+        assert_eq!(parse_xsd_duration_secs("PT"), None, "dangling T, no time part");
+        assert_eq!(parse_xsd_duration_secs("P1DT"), None, "dangling T after a date");
+        assert_eq!(parse_xsd_duration_secs("P30"), None, "digits, no designator");
+        assert_eq!(parse_xsd_duration_secs("PD"), None, "designator, no numeral");
+        assert_eq!(parse_xsd_duration_secs("PT1M1H"), None, "out of order");
+        assert_eq!(parse_xsd_duration_secs("P1D1D"), None, "repeated designator");
+        assert_eq!(parse_xsd_duration_secs("PT1H1H"), None, "repeated designator");
+        assert_eq!(parse_xsd_duration_secs("P1H"), None, "time unit in date part");
+        assert_eq!(parse_xsd_duration_secs("PT1D"), None, "date unit in time part");
+        assert_eq!(parse_xsd_duration_secs("PT0.5S"), None, "fractional seconds");
+        assert_eq!(parse_xsd_duration_secs("1D"), None, "missing leading P");
+    }
+
+    /// Out-of-range components are rejected by checked arithmetic rather than
+    /// overflowing (which previously panicked in a debug build).
+    #[test]
+    fn out_of_range_durations_are_rejected_not_overflowed() {
+        assert_eq!(parse_xsd_duration_secs("P9223372036854775807D"), None);
+        assert_eq!(parse_xsd_duration_secs("P99999999999999999999D"), None);
+        assert_eq!(
+            parse_xsd_duration_secs("P106751991167300DT15H30M8S"),
+            None,
+            "the sum overflows even though each component fits"
+        );
     }
 
     // --- the claim-level `trust:trustsSourceFor` relational form (Form B, sq-pfae.4) ---

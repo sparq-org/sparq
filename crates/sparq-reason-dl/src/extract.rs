@@ -699,6 +699,12 @@ fn role_assertion(
             "RDF 1.2 triple term as a role-assertion individual".to_string(),
         ));
     }
+    // [SONNET-4.6] sq-pbz04.4.8: this path builds the property expression directly rather
+    // than through `decode_object_property`, so the built-in fixed-extension refusal is
+    // applied here too — the check is only sound if it is UNIFORM over property positions.
+    if let Some(err) = builtin_property_refusal(dict, p) {
+        return Err(err);
+    }
     onto.axioms.push(Axiom::ObjectPropertyAssertion {
         property: ObjectPropertyExpression::ObjectProperty(p),
         source: s,
@@ -1023,7 +1029,51 @@ fn decode_object_property(
             term_iri(dict, id)
         )));
     }
+    if let Some(err) = builtin_property_refusal(dict, id) {
+        return Err(err);
+    }
     Ok(ObjectPropertyExpression::ObjectProperty(id))
+}
+
+/// `Some(refusal)` when `id` is one of OWL 2's four BUILT-IN property IRIs, whose
+/// interpretation is FIXED by the Direct Semantics rather than constrained by axioms:
+/// `owl:topObjectProperty` (the universal relation ΔI × ΔI), `owl:bottomObjectProperty`
+/// (the empty relation), and their `*DataProperty` counterparts. L1 has no way to represent
+/// a role whose extension is fixed, so reading one as an ORDINARY named role silently drops
+/// that meaning — and the drop is not conservative, it manufactures models. Both W3C
+/// `New-Feature-{Top,Bottom}ObjectProperty-001` cases are inconsistent for exactly this
+/// reason and NOTHING else: `∃owl:bottomObjectProperty.⊤(i)` is unsatisfiable because the
+/// relation is empty, and `¬∃owl:topObjectProperty.⊤(i)` is unsatisfiable because it relates
+/// everything (domains are non-empty). Under the opaque-role reading both look satisfiable.
+/// Refuse fail-closed, uniformly at every property position — the same discipline as the
+/// datatype-map IRI refusal ([`datatype_iri_name`], sq-pbz04.4.9), which addressed the
+/// identical failure mode for built-in DATATYPE IRIs. [SONNET-4.6] sq-pbz04.4.8
+fn builtin_property_refusal(dict: &Dict, id: Id) -> Option<ExtractError> {
+    if is_inline(id) {
+        return None;
+    }
+    let TermParts::Iri { prefix, suffix } = dict.term_parts(id) else {
+        return None;
+    };
+    let iri = format!("{}{}", prefix, suffix);
+    match iri.as_str() {
+        "http://www.w3.org/2002/07/owl#topObjectProperty"
+        | "http://www.w3.org/2002/07/owl#bottomObjectProperty" => {
+            Some(ExtractError::OutOfFragment(format!(
+                "built-in object property {} (its extension is fixed by the Direct Semantics; \
+                 L1 can only represent axiom-constrained named roles)",
+                iri
+            )))
+        }
+        "http://www.w3.org/2002/07/owl#topDataProperty"
+        | "http://www.w3.org/2002/07/owl#bottomDataProperty" => {
+            Some(ExtractError::DataConstruct(format!(
+                "built-in data property {} in a property position (no concrete domain in L1)",
+                iri
+            )))
+        }
+        _ => None,
+    }
 }
 
 // -------------------------------------------------------------------------------------------

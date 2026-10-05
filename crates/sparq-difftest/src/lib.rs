@@ -47,9 +47,12 @@
 //! ([`numeric`]); `xsd:dateTime`/`date`/`duration` value comparison with timezone normalisation and
 //! the ±14h indeterminate window ([`temporal`]); a SPARQL-Results-JSON reader into the neutral
 //! `{var → term}` model ([`json`]); the multiset + `ORDER BY` sort-key-equivalence-class
-//! comparators ([`multiset`]); and the admission-decision (allow/deny set) equivalence +
+//! comparators ([`multiset`]); the admission-decision (allow/deny set) equivalence +
 //! fail-closed-asymmetry comparator ([`decision`]) shared by the trust/WAC/ODRL differential
-//! tests (a structural check, not a soundness proof).
+//! tests (a structural check, not a soundness proof); and cross-oracle **blank-node isomorphism**
+//! ([`iso`]) — RDFC-1.0 canonical labelling for `CONSTRUCT`/`DESCRIBE` graph results and for
+//! `SELECT` results projecting blank nodes, whose labels are engine-local and therefore comparable
+//! only up to a bijection.
 //!
 //! # Admission-decision overlap boundary
 //!
@@ -60,11 +63,23 @@
 //! Rejecting or normalising contradictory outcomes belongs to the producing policy harness and
 //! is a documented non-goal of this engine-independent comparator.
 //!
-//! Deliberately **not** here (separate DAG nodes / beads): blank-node isomorphism across oracles
-//! (`sq-qcnn.7`), wiring these comparators into the fuzz harness (`sq-qcnn.5`), the query/data
-//! generator extension (`sq-qcnn.6`), and the pluggable second-oracle adapter (`sq-qcnn.8`).
+//! # Who calls this (and who does not yet)
+//!
+//! `crates/sparq-bench`'s Oxigraph query fuzzer (`src/fuzz.rs`) is wired onto these comparators as
+//! of `sq-qcnn.5`: it bridges both engines' answers into this crate's neutral model (through
+//! `sparq-bench`'s own `neutral` module, a structural carrier→model conversion that decides no
+//! equality) and then compares by result form — [`multiset::multiset_equal`] for an un-ordered
+//! `SELECT`, [`multiset::order_by_equal`] under `ORDER BY`, [`iso::solutions_isomorphic`] for a
+//! blank-node-bearing solution table, and [`iso::graph_isomorphic`] for a `CONSTRUCT`/`DESCRIBE`
+//! graph. An [`IsoError`] is routed to a COUNTED triage bucket there, never read as agreement.
+//!
+//! Deliberately **not** here (separate DAG nodes / beads): the query/data generator extension
+//! (`sq-qcnn.6`) — so the fuzzer's `ASK` / `CONSTRUCT` comparators are wired and unit-tested but
+//! its generator does not emit those forms yet — and the pluggable second-oracle adapter
+//! (`sq-qcnn.8`).
 
 pub mod decision;
+pub mod iso;
 pub mod json;
 pub mod multiset;
 pub mod numeric;
@@ -73,6 +88,10 @@ pub mod term;
 
 pub use decision::{
     decision_diff, fail_closed_asymmetry, Baseline, Candidate, DecisionDiff, DecisionOutcome,
+};
+pub use iso::{
+    canonical_graph, canonical_solutions, graph_isomorphic, solutions_have_blank_nodes,
+    solutions_isomorphic, term_has_blank_node, IsoError,
 };
 pub use json::{parse_results_json, QueryResults, Solution};
 pub use multiset::{multiset_equal, order_by_equal};

@@ -33,7 +33,8 @@
 # HOW THE RECONCILE PERSISTS (issue #2475 — supersedes the sq-roe3 fail-soft push).
 # The original design committed a minimal .beads/issues.jsonl edit back to main. That
 # write NEVER landed: the default GITHUB_TOKEN cannot push to protected `main` (ruleset
-# GH013, empty bypass list — confirmed on the first real run, bead-autoclose.yml
+# GH013; only the repository-administrator role can bypass, not GITHUB_TOKEN — confirmed
+# on the first real run, bead-autoclose.yml
 # #27828093722 / PR #830), so every reconcile was silently lost and bead state drifted.
 # A PR-based write from this token is equally dead: GITHUB_TOKEN-created events trigger
 # NO workflows, so the required `ci-summary / gate` check would never report on such a PR

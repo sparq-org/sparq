@@ -4,7 +4,7 @@ description: "Derive a DASH-compatible, renderer-agnostic form description from 
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-forms — SHACL/DASH form derivation
@@ -51,7 +51,9 @@ What the description carries (all serde `Serialize + Deserialize`):
 - **`shapes`** — the applicable-shape switcher: `sh:targetNode`,
   `sh:targetClass`/implicit class targets (focus `rdf:type` with
   `rdfs:subClassOf` closure in the data graph), `dash:applicableToClass`,
-  ranked strongest-first; `FormOptions::shape` forces an explicit choice.
+  then the `sh:targetSubjectsOf`/`sh:targetObjectsOf` predicate targets,
+  ranked strongest-first (the first entry is the shape the form derives
+  against); `FormOptions::shape` forces an explicit choice.
 - **`groups[].fields[]`** — one field per property shape: SPARQL-path text
   (`^<p>` for `sh:inversePath` incoming references), label/description
   (`sh:name`/`sh:description`, `rdfs:label`/`rdfs:comment` fallbacks),
@@ -98,12 +100,13 @@ request, validate-before-commit guards, draft graphs, DASH suggestions,
 [`shacl-validation`](../shacl-validation/SKILL.md)) already validates the same
 graphs.
 
-_(status: Verified against sparq-forms 0.1.0 at authoring time [FABLE-5]
-(sq-lsp7k.1.1, 2026-07-11): 40 unit/integration tests incl. per-score widget
-tests + 3 golden-file fixtures (groups/order, enum + nested sh:node,
-inverse + multi-shape). Caveats: (1) widget scores follow datashapes.org/forms
+_(status: Verified against sparq-forms 0.1.0 [OPUS-4.8] (sq-vfcxv, 2026-07-27):
+56 unit/integration tests incl. per-score widget tests + 4 golden-file fixtures
+(groups/order, enum + nested sh:node, inverse + multi-shape, predicate
+targets). Caveats: (1) widget scores follow datashapes.org/forms
 with documented (sparq) auto-selection extensions where DASH is manual-only —
 InstancesSelect on sh:class, SubClass on dash:rootClass, Details on sh:node.
-(2) sh:targetSubjectsOf/ObjectsOf and SHACL 1.2 sh:targetWhere/SPARQL targets
-do not drive form applicability. (3) `values` for SPARQL-computed sh:values
+(2) SHACL 1.2 sh:targetWhere and SPARQL-valued targets do not drive form
+applicability (sh:targetSubjectsOf/ObjectsOf now do, ranked below
+dash:applicableToClass — sq-vfcxv). (3) `values` for SPARQL-computed sh:values
 shapes are not evaluated (F5). (4) rdf:langString base direction untouched.)_

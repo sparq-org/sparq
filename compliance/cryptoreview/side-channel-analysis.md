@@ -77,10 +77,14 @@ constant-time primitives. The risk register below records where that framing wou
 
 - **Secret on this path?** Yes — the issuer secret key `sk.0` (a Baby-JubJub scalar) and the derived
   nonce `k`. `s = k + e·sk.0`; `R = G·k`; `derive_nonce` maps `sk` through Poseidon2.
-- **Constant-time?** **Not asserted.** The scalar multiplication `G·k` and the scalar arithmetic
-  `e·sk.0` use `arkworks` (`ark-ed-on-bn254` / `ark-ff`), which makes **no default constant-time
-  guarantee** (§6). A co-located attacker observing signing could in principle obtain a timing/cache
-  signal correlated with `sk` or `k`.
+- **Constant-time?** **Not asserted** — this verdict is unchanged by the remediations recorded below,
+  which narrow the exposure without upgrading the claim. *As originally assessed:* the scalar
+  multiplication `G·k` and the scalar arithmetic `e·sk.0` use `arkworks` (`ark-ed-on-bn254` /
+  `ark-ff`), which makes **no default constant-time guarantee** (§6). A co-located attacker observing
+  signing could in principle obtain a timing/cache signal correlated with `sk` or `k`. *As of
+  `sq-j3b9`:* the scalar multiplications no longer use arkworks' bit-branching `mul_bigint` (see
+  below), so the square-and-multiply structure is gone; the underlying arkworks FIELD operations —
+  and `e·sk.0` — are unchanged and are still not asserted constant-time.
 - **Nonce derivation is otherwise sound for its purpose:** deterministic RFC6979-style `(sk, m)`
   derivation removes the seed-reuse key-recovery hazard (a *correctness/misuse* property, not a
   timing one) — see the module docstring's audit-#3/codex-#4 note.
@@ -99,6 +103,39 @@ constant-time primitives. The risk register below records where that framing wou
   it needs a constant-time scalar-mul (curve/dep swap), deferred. No protocol change — the guard is
   byte-identical to the old select for all reachable inputs (`k == 0` is ~2^-251), proven by test; all
   `sparq-zk` tests pass unchanged.
+- **`sq-j3b9` is now PARTIALLY ADDRESSED — the scalar-mul SHAPE, not the field ops ([OPUS-5], crypto
+  re-review pending).** The deferred follow-up above was scoped as "a curve/dep swap for a true
+  constant-time scalar-mul". sq-j3b9 takes the part of it that is achievable *without* a dependency
+  change and is explicit that this is a part, not the whole. What changed: the two SECRET-scalar
+  multiplications — `pk = sk·G` (`SecretKey::public_key`) and `R = G·k` (`sign_deterministic`) — no
+  longer call arkworks' generic `Group::mul_bigint`, whose textbook double-and-add
+  (`for b in BitIteratorBE::without_leading_zeros(k) { res.double_in_place(); if b { res += self } }`)
+  leaked the secret scalar *twice*: the `without_leading_zeros` short-circuit made the loop trip count
+  a function of the scalar's bit LENGTH, and `if b` made per-iteration work a function of each
+  individual scalar BIT. That is the textbook square-and-multiply side channel and it was the
+  strongest secret-dependent signal on the signing path. They now call a sparq-owned fixed-width
+  double-and-ALWAYS-add ladder (`sparq-zk/src/ct.rs::mul_ct`): a constant `MODULUS_BIT_SIZE` trip
+  count regardless of the scalar, and identical per-iteration work regardless of the bit — the addend
+  is selected between the base point and the twisted-Edwards affine identity `(0, 1)` by pure field
+  arithmetic (`(b·x, 1 + b·(y−1))`), not by a branch and not by a table index. Adding the identity is
+  *correct*, not merely harmless, because Baby-JubJub's addition law is complete and `ark-ec`
+  implements the unified `E^e` addition — the same property `mul_bigint` already relied on.
+  **What is explicitly NOT closed:** every operation still bottoms out in arkworks `ark-ff` field
+  arithmetic (Montgomery reduction ending in a conditional subtraction), which sparq still does **not
+  assert** is constant-time — that is the curve/dep swap, still open (§6.2). The scalar arithmetic
+  `s = k + e·sk` is likewise untouched; unlike a scalar multiplication it is a fixed two-operation
+  sequence with no loop and no branch, so it carries no square-and-multiply structure, but it inherits
+  the same field-op residual. **The LOW rating and the "NOT asserted constant-time" posture are
+  UNCHANGED** — hardening the ladder's shape does not upgrade the claim. The public-data `verify` path
+  deliberately KEEPS the faster variable-time arkworks multiplication (no secret on it, so a ladder
+  would buy nothing and would cost relying parties an extra group addition per scalar bit).
+  **No protocol/value change:** the ladder is
+  value-identical to the multiplication it replaces, so every derived key and signature is
+  byte-identical and already-issued credentials stay valid — pinned by a randomized differential
+  against the arkworks reference (`ct.rs`, including `k = 0`, `k = r−1`, and a non-generator base) plus
+  a call-site equivalence test in `sig.rs`. Still **source-level only**: no instrumented `dudect` /
+  `ctgrind` measurement (§6.1), and the crate remains research-grade and externally unaudited
+  (CR-G1, `sq-qhy4`).
 
 ### 2.3 Poseidon2 hash / permutation (`sparq-zk/src/poseidon2.rs`)
 
@@ -267,7 +304,7 @@ unchanged).
 | Component | Secret on path? | CT posture (source-level) | Residual risk | Bead |
 |---|---|---|---|---|
 | Schnorr **verify** (`sig.rs`) | No (public data) | No secret-dependent timing | None | — |
-| Schnorr **sign** (`sig.rs`) | Yes (issuer `sk`) | Our nonce-guard now branchless; arkworks scalar-mul residual not asserted CT (documented) | LOW (issuance-side) | `sq-8jv7` **ADDRESSED** |
+| Schnorr **sign** (`sig.rs`) | Yes (issuer `sk`) | Nonce-guard branchless; secret-scalar mul now a fixed-width always-add ladder (`ct.rs`); arkworks FIELD-op residual still not asserted CT (documented) | LOW (issuance-side) | `sq-8jv7` **ADDRESSED**; `sq-j3b9` **PARTIAL** (shape, not field ops) |
 | **Poseidon2** (`poseidon2.rs`) | Hashes secrets in MPC/sig | Fixed rounds, no secret branch/index | Inherits arkworks `Fr` | — |
 | MPC **secure compare** (`compare.rs`) | Operands secret-shared | Fixed loop; branches on PUBLIC bits only | Inherits `Fp` ops | — |
 | Shamir **share/reconstruct** (`shamir.rs`/`robust.rs`) | Reconstructs disclosed values | No secret-value control flow | `inv` over public points | — |
@@ -315,7 +352,13 @@ unchanged).
    `k == 0` guard) is now branchless (`subtle` select); the arkworks scalar-mul residual is documented
    (module CONSTANT-TIME POSTURE note in `sig.rs`), explicitly NOT claimed constant-time, with a
    curve/dep-swap follow-up beaded for true CT scalar-mul if signing ever moves to an exposed surface.
-   No protocol/value change; all `sparq-zk` tests pass unchanged.
+   No protocol/value change; all `sparq-zk` tests pass unchanged. **`sq-j3b9` PARTIALLY delivers that
+   follow-up ([OPUS-5], crypto re-review pending):** the two secret-scalar multiplications now use a
+   sparq-owned fixed-width double-and-always-add ladder (`sparq-zk/src/ct.rs`) instead of arkworks'
+   bit-branching, leading-zero-short-circuiting `mul_bigint`, removing the square-and-multiply
+   control-flow leak *without* a dependency change. The arkworks FIELD-op residual — the actual
+   curve/dep swap — remains OPEN, the "not asserted constant-time" posture and the LOW rating are
+   unchanged, and the change is value-identical (differential-tested). See §2.2.
 4. **(Folded into CR-G1, not a separate bead) — an instrumented `dudect`/`ctgrind` pass** on the sign
    path and the MPC mask/compare paths is the natural deliverable for the external cryptographer audit
    (`sq-qhy4`); this source-level review is the input pack for it, not a substitute.

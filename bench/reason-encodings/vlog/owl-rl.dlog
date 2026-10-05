@@ -25,10 +25,15 @@
 # this program adds none. VALIDATED set-identical to sparq (0 diff both directions,
 # 150589) — reconciliation cross-checked in scripts/bench/materialize-same-box.sh.
 #
-# NOTE: the intersectionOf list-membership rules (cls-int1) are written as an explicit
-# list-arity decode for lengths 1 and 2, the arities the LUBM TBox actually uses (all
-# owl:intersectionOf lists here are length 1 or 2). scm-int (C subClassOf each conjunct)
-# uses a recursive list walk so it generalises to any list length.
+# NOTE: cls-int1 (intersection membership) and scm-int (C subClassOf each conjunct) BOTH
+# use a recursive list walk, so both generalise to any owl:intersectionOf list length
+# (sq-3xsx0 — cls-int1 was previously an explicit decode for lengths 1 and 2, the only
+# arities the LUBM TBox uses). The LUBM closure is unchanged: on lists of length 1 and 2 the
+# walk derives exactly the facts the explicit decode did — pinned by the test
+# crates/sparq-reason/tests/datalog_intersection_arity.rs, which runs both rule shapes
+# through a semi-naive fixpoint. NOT re-measured against a live VLog in that change (VLog is
+# a gather-only dep); the harness re-asserts the pinned closure count before recording any
+# timing, so a divergence fails loudly rather than silently.
 
 # base graph flows into the closure predicate.
 T(S,P,O) :- TE(S,P,O)
@@ -57,12 +62,16 @@ IntTail(C,L) :- T(C,<http://www.w3.org/2002/07/owl#intersectionOf>,L)
 IntTail(C,R) :- IntTail(C,L), T(L,rdf:rest,R)
 T(C,rdfs:subClassOf,D) :- IntTail(C,L), T(L,rdf:first,D)
 
-# cls-int1 — intersection membership, explicit for list arities 1 and 2 (the arities
-# present in LUBM); conjunct classes are bound from the small list before the type join.
-Int1(C,A) :- T(C,<http://www.w3.org/2002/07/owl#intersectionOf>,L), T(L,rdf:first,A), T(L,rdf:rest,rdf:nil)
-Int2(C,A,B) :- T(C,<http://www.w3.org/2002/07/owl#intersectionOf>,L), T(L,rdf:first,A), T(L,rdf:rest,M), T(M,rdf:first,B), T(M,rdf:rest,rdf:nil)
-T(X,rdf:type,C) :- Int1(C,A), T(X,rdf:type,A)
-T(X,rdf:type,C) :- Int2(C,A,B), T(X,rdf:type,A), T(X,rdf:type,B)
+# cls-int1 — intersection membership, GENERIC in list arity (sq-3xsx0): IntAll(L,X) reads
+# "X is typed with EVERY conjunct from list cell L onward" — base case the last cell
+# (rdf:rest = rdf:nil), step case peels one conjunct off the front. Supersedes the previous
+# explicit arity-1/arity-2 decode, which derived nothing for a 3+-conjunct intersection;
+# sparq itself decodes the whole list (crates/sparq-reason/src/owl.rs). The walk is guarded
+# by IntTail so only cells reachable from an owl:intersectionOf are visited, and the cell L
+# — hence the conjunct A it holds — is bound from that small relation before T is probed.
+IntAll(L,X) :- IntTail(C,L), T(L,rdf:first,A), T(L,rdf:rest,rdf:nil), T(X,rdf:type,A)
+IntAll(L,X) :- IntTail(C,L), T(L,rdf:first,A), T(L,rdf:rest,R), IntAll(R,X), T(X,rdf:type,A)
+T(X,rdf:type,C) :- T(C,<http://www.w3.org/2002/07/owl#intersectionOf>,L), IntAll(L,X)
 
 # ===== OWL schema-propagation rules ===========================================
 # scm-dom1/scm-rng1 — domain/range climb the subClassOf hierarchy

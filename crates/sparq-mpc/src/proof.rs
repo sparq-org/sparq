@@ -55,6 +55,23 @@
 //!
 //! Accordingly every method here returns [`MpcError::NotYetImplemented`] naming
 //! the gate. No method fakes a signature, a commitment opening, or a proof.
+//!
+//! ## The buildable M4-v1 interim vs the Q1 spike [OPUS-5]
+//!
+//! `research/mpc-m4-distributed-sig-feasibility.md` §2 separates the *unsolved*
+//! Q1 join above from an honestly BUILDABLE interim — verifier-side attestation
+//! (Artemis commit-and-prove anchor + Dutta authenticated input), where the
+//! issuer signature is checked OUTSIDE the circuit over each already-public
+//! commitment. Its two non-research prerequisites (§4 item 4) live in
+//! [`crate::federated_binding`]: the explicit freshness/replay binding that
+//! out-of-circuit signature checking makes necessary (#4 stops being automatic),
+//! and the federated/multi-source public-input layout spanning all holders'
+//! commitments/rows/attribution.
+//!
+//! That module is **layout + out-of-circuit binding only**. It does not weaken
+//! the gate stated above, and nothing in this module changes: `prove`/`verify`
+//! remain [`MpcError::NotYetImplemented`] until the ZK foundation lands and a
+//! collaborative proof exists to emit those public inputs.
 
 use crate::backend::MpcBackend;
 use crate::join::JoinPlan;

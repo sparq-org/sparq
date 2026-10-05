@@ -236,6 +236,40 @@ test("TauriWorkspaceStore: save → list → load → remove over a fake fs", as
   assert.equal(await store.lastOpenedId(), null);
 });
 
+test("TauriWorkspaceStore: concurrent saves for DIFFERENT ids preserve both index entries", async () => {
+  const fs = fakeFs();
+  const rawWrite = fs.writeTextFile.bind(fs);
+  let indexWrites = 0;
+  let releaseFirstIndexWrite;
+  const firstIndexWriteGate = new Promise((resolve) => (releaseFirstIndexWrite = resolve));
+  let firstIndexWriteStarted;
+  const firstIndexWriteReady = new Promise((resolve) => (firstIndexWriteStarted = resolve));
+  fs.writeTextFile = async (path, contents) => {
+    if (path === "workspaces/__index__.json" && ++indexWrites === 1) {
+      firstIndexWriteStarted();
+      await firstIndexWriteGate;
+    }
+    await rawWrite(path, contents);
+  };
+
+  const store = new TauriWorkspaceStore(fs);
+  const saver = createSerializedWorkspaceSaver(store.save.bind(store));
+  const a = newWorkspace("Concurrent A", "SELECT 1");
+  const b = newWorkspace("Concurrent B", "SELECT 2");
+
+  const saveA = saver.save(a);
+  await firstIndexWriteReady;
+  const saveB = saver.save(b);
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseFirstIndexWrite();
+  await Promise.all([saveA, saveB]);
+
+  assert.deepEqual(
+    new Set(JSON.parse(fs._files.get("workspaces/__index__.json"))),
+    new Set([a.id, b.id]),
+  );
+});
+
 // --- runtime backend selection ---------------------------------------------
 
 test("isTauriRuntime is false in a headless Node (no window)", () => {

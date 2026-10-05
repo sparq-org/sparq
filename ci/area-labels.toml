@@ -7,10 +7,12 @@
 #
 # WHY THIS FILE EXISTS — the measured problem (reg#677, 2026-07-26 14:45Z).
 # The fleet scheduler (`dispatch-claim.py` / `scripts/ready-issues.py`) partitions work
-# by `area:<name>`: an in-flight PR RESERVES its areas, and a ready issue is deferred
-# while any of ITS areas is reserved. A PR with NO `area:` label maps to the
-# SERIALIZING `__global__` partition, so while it is in flight EVERY issue defers,
-# whatever crate it names. Measured: 84 of 87 open PRs carried no `area:` label,
+# by `area:<name>`, but PLAN and CLAIM treat an unattributable PR differently. PLAN's
+# occupancy rule reserves ONLY the PR's declared areas; a PR with NO `area:` label
+# reserves nothing there, by design, rather than seizing the whole fleet. CLAIM's
+# `busy_packages_of_pulls` instead maps that PR to the SERIALIZING `__global__`
+# partition because its blast radius is unknowable. Measured: 84 of 87 open PRs
+# carried no `area:` label,
 # because NOTHING in the pipeline ever applied one. Live layer chain that tick:
 # candidates 12 -> frontier 3 -> lease 3 -> max_concurrent 8 -> account pool 28,
 # i.e. min = 3 — 28 account slots idle while 3 workers ran. Raising max_concurrent or
@@ -49,6 +51,14 @@
 #                        purpose: one unattributable path means the PR's blast
 #                        radius is unknown, and unknown must serialize. The fix is
 #                        to ADD the missing row below, not to relax the rule.
+#                        ONE narrow exception (issue #4582): a crate whose root
+#                        `crates/<name>/Cargo.toml` THIS PR ADDS is attributable
+#                        even with no label yet, because the added manifest is a
+#                        structural WITNESS that the crate is new rather than a
+#                        guess at what an unmapped path might mean — and the
+#                        deriver then creates `area:<name>` explicitly. A crate
+#                        directory with no added root manifest is still
+#                        `unresolved`.
 #   3. `cross-cutting` — more than `[policy] max_areas` distinct areas. A PR that
 #                        genuinely spans the workspace IS repo-wide work.
 #
@@ -76,7 +86,9 @@
 #      a crate would otherwise be unresolvable forever — and those PRs collide with
 #      nothing, so they are the ones that most deserve a narrow partition. The guard
 #      against inventing an area is the live-`area:`-label check, which no non-crate
-#      name can pass. A file sitting DIRECTLY in `crates/` (two segments, e.g.
+#      name can pass — plus, for the new-crate case that check would otherwise strand
+#      forever (#4582), the ADDED-ROOT-MANIFEST witness described under `unresolved`
+#      above. A file sitting DIRECTLY in `crates/` (two segments, e.g.
 #      `crates/README.md`) is not a crate and is UNRESOLVED (fail closed).
 #   2. the first matching `[[map]]` row below, in file order.
 #   3. otherwise UNRESOLVED -> the whole PR falls back to `__global__`.
@@ -93,11 +105,18 @@
 # ===========================================================================
 # MAINTENANCE
 # ===========================================================================
-# * Adding a crate: nothing to do here (rule 1 is implicit) — but the repo MUST
-#   have an `area:<crate>` label, or the deriver drops it and the PR stays
-#   `__global__` with a `::warning`. It NEVER auto-creates a label: the workflow
-#   holds `pull-requests: write` only, and the "add labels" REST call silently
-#   CREATES an unknown label, which is how a typo becomes permanent repo state.
+# * Adding a crate: nothing to do here (rule 1 is implicit). The PR that adds
+#   `crates/<name>/Cargo.toml` gets `area:<name>` CREATED for it by the deriver, on
+#   that manifest as the witness — see `new_crate_area` in scripts/pr-area-labels.py.
+#   That is the ONLY case in which this pipeline creates a label; every other missing
+#   `area:*` still drops to `__global__` with a `::warning`, because the "add labels"
+#   REST call silently CREATES an unknown label and that is how a typo becomes
+#   permanent repo state. A `crates/<name>/` path with NO added root manifest — a
+#   typo'd directory, a stray file — gets no witness and stays fail-closed.
+#   KNOWN COST, accepted: if such a PR is CLOSED unmerged the label outlives it. A
+#   stale `area:*` label is inert — no `[[map]]` row names it, and the deriver only
+#   ever emits an area some changed path attributes to — so it costs a line in the
+#   label list, not a wrong partition.
 # * Adding a top-level directory: add a `[[map]]` row, or every PR touching it
 #   silently falls back to `__global__` and starves the frontier again.
 # * `scripts/tests/test_pr_area_labels.py` asserts every row's pattern root exists
@@ -221,6 +240,13 @@ area = "ci"
 
 [[map]]
 pattern = ".roborev.toml"
+area = "ci"
+
+# jscpd's copy/paste-detection config, read by the docs-quality `docs-duplication` step.
+# `ci` for the same reason as the other lint configs: it redefines what a CI leg checks,
+# so two concurrent editors of it collide on the pipeline lane, not on a doc surface.
+[[map]]
+pattern = ".jscpd.json"
 area = "ci"
 
 [[map]]

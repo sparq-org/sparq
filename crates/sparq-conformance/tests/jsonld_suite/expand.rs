@@ -35,13 +35,20 @@ use std::path::Path;
 ///    order significant only inside `@list`; integers compared exactly,
 ///    non-integral numbers compared as f64 so `1` ≡ `1.0`).
 ///
+/// ## NegativeEvaluationTests are RUN, not skipped ([OPUS-5] sq-gzsky)
+///
+/// The 109-case negative SKIP bucket this lane used to carry WAS the entire expand gap
+/// (`research/gap-jsonld-conformance-2026-07.md` §6). It is closed: a negative case passes
+/// iff `expand()` errors with EXACTLY the manifest's `expectErrorCode` — a WRONG code is a
+/// FAIL, never a pass — which is the oracle shape the `frame` lane has used since
+/// sq-oy1f.29 and what makes the closed `sparq_jsonld::JsonLdErrorCode` enum load-bearing.
+///
 /// ## Honest SKIP buckets (recorded, not passed, not failed)
 ///
 /// * `requires` optional-feature cases (same as all other lanes).
-/// * NegativeEvaluationTests — expander error-code completeness is unverified;
-///   deferred to a child bead of sq-oy1f.  SKIP (honest), never a counted pass.
 /// * Remote `input` URL — no network.
-/// * No `expect` file — nothing to compare.
+/// * A POSITIVE case with no `expect` file — nothing to compare. (A negative case needs no
+///   `expect` document: its expectation is the error code.)
 pub fn run_expand_native(root: &Path) -> Score {
     let mut s = Score::default();
     let entries = match read_manifest(root, "expand") {
@@ -61,16 +68,12 @@ pub fn run_expand_native(root: &Path) -> Score {
             s.skip();
             continue;
         }
-        // NegativeEvaluationTests: expander raises some errors but error-code
-        // completeness is unverified — SKIP honestly (deferred).
-        if e.is_negative {
+        let is_negative = e.is_negative || e.expect_error_code.is_some();
+        // A positive case with no `expect` document has nothing to compare.
+        if !is_negative && e.expect.is_none() {
             s.skip();
             continue;
         }
-        let Some(expect_rel) = &e.expect else {
-            s.skip();
-            continue;
-        };
         // Remote input (no network) — guard.
         if e.input.starts_with("http://") || e.input.starts_with("https://") {
             s.skip();
@@ -128,7 +131,27 @@ pub fn run_expand_native(root: &Path) -> Score {
 
         // 3. Call the native expand() algorithm. The FsLoader resolves any `@context` /
         // `@import` relative-URL references to local fixture files (sq-oy1f.45).
-        let expanded = match jsonld_expand(&input_json, &opts, &loader) {
+        let outcome = jsonld_expand(&input_json, &opts, &loader);
+
+        // 3b. NegativeEvaluationTest: pass iff expand() raises EXACTLY the
+        //     manifest's `expectErrorCode` (same shape as the frame lane).
+        if is_negative {
+            let want_code = e.expect_error_code.as_deref().unwrap_or("");
+            match &outcome {
+                Err(err) if err.code().as_str() == want_code => s.pass(),
+                Err(err) => s.fail(
+                    &e.id,
+                    format!("expected error {want_code:?}, got {:?}", err.code().as_str()),
+                ),
+                Ok(_) => s.fail(&e.id, format!("expected error {want_code:?}, got success")),
+            }
+            continue;
+        }
+
+        let Some(expect_rel) = &e.expect else {
+            unreachable!("positive cases without an `expect` document are skipped above")
+        };
+        let expanded = match outcome {
             Ok(j) => j,
             Err(why) => {
                 s.fail(&e.id, format!("expand() error: {}", why));
@@ -190,4 +213,44 @@ pub fn run_expand_native(root: &Path) -> Score {
         }
     }
     s
+}
+
+/// [OPUS-5] sq-gzsky — scope pin for the negative lane, the analogue of the compact lane's
+/// `t0038_skip_is_narrowly_scoped`. Asserts that every `NegativeEvaluationTest` in the
+/// pinned `expand` manifest (a) carries an `expectErrorCode` — without one the runner would
+/// compare against `""`, which no spec code equals, so the case could only ever FAIL — and
+/// (b) clears every skip gate `run_expand_native` applies, so it RUNS. A suite-pin bump that
+/// adds a negative behind `requires` or at a remote URL fails HERE and forces a deliberate
+/// decision instead of quietly shrinking the gated set.
+#[test]
+fn expand_negatives_all_run_with_an_expected_code() {
+    let root = suite_root();
+    if !root.exists() {
+        eprintln!(
+            "SKIP: W3C JSON-LD suite not present at {} — run scripts/fetch-jsonld-tests.sh",
+            root.display()
+        );
+        return;
+    }
+    let entries = read_manifest(&root, "expand").expect("read expand manifest");
+    let negatives: Vec<_> = entries.iter().filter(|e| e.is_negative).collect();
+    assert!(
+        !negatives.is_empty(),
+        "the pinned expand manifest must contain NegativeEvaluationTests — an empty set \
+         would make the negative lane vacuous"
+    );
+    for e in negatives {
+        assert!(
+            e.expect_error_code.is_some(),
+            "{} is a NegativeEvaluationTest with no expectErrorCode — it could never pass",
+            e.id
+        );
+        assert!(
+            e.requires.is_none()
+                && !e.input.starts_with("http://")
+                && !e.input.starts_with("https://"),
+            "{} would be SKIPPED rather than run — decide it explicitly",
+            e.id
+        );
+    }
 }

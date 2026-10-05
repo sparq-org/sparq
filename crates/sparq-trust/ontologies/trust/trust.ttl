@@ -36,7 +36,7 @@ statements that an N3 reasoner merges with the local .acl/.acr rules to derive a
 EVERY term here is NON-STANDARD and invented for this proposal; the namespace is a
 placeholder. Companion: SEMANTICS.md (two-stratum semantics, degenerate-.acl
 equivalence, strict additivity) and research/solid-trust-graph-authz-design.md."""@en ;
-  rdfs:seeAlso <https://github.com/jeswr/sparq/issues/940> ;
+  rdfs:seeAlso <https://github.com/sparq-org/sparq/issues/940> ;
   rdfs:comment "Placeholder namespace; a WG would rename/rehome every term."@en .
 
 # =============================================================================
@@ -114,7 +114,7 @@ trust:scope a rdf:Property, owl:ObjectProperty ;
 
 trust:freshWithin a rdf:Property, owl:DatatypeProperty ;
   rdfs:label "fresh within"@en ;
-  rdfs:comment "Maximum staleness admitted, as an xsd:duration consulted against Session.now. The temporal gate, orthogonal to source/type/scope (§2.3.2 item 9). It MUST be enforced as a per-request Rust side-condition, NOT an in-reasoner predicate (§3.3) — time is not a reasoner fact."@en ;
+  rdfs:comment "Maximum staleness admitted, as an xsd:duration consulted against Session.now. The temporal gate, orthogonal to source/type/scope (§2.3.2 item 9). It MUST be enforced as a per-request Rust side-condition, NOT an in-reasoner predicate (§3.3) — time is not a reasoner fact. The lexical value MUST lie in the exactly-representable day/time subset (PnDTnHnMnS — the non-negative, whole-second part of the xsd:dayTimeDuration lexical space): the nominal year/month designators (P1Y, P6M) have no exact seconds value without an anchor instant, so they are rejected fail-closed rather than approximated — a policy meaning 'a year' must write P365D."@en ;
   rdfs:domain trust:TrustRule ;
   rdfs:range xsd:duration ;
   rdfs:isDefinedBy trust: .

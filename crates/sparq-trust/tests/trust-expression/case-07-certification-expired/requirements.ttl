@@ -1,0 +1,9 @@
+# Design §6 case 7 — identical trust requirements to case 5 (mode 2, scope
+# conformance defaulting to true); only the CERTIFICATION's own validity differs.
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:tr:cert-invalid> a trustx:TrustRequirements ;
+    trustx:question              <urn:question:jesse-has-an-age> ;
+    trustx:trustsFramework       trustx:eIDAS2 ;
+    trustx:requiresValidStatusAt "2026-07-05T00:00:00Z"^^xsd:dateTime .

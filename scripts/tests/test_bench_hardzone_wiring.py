@@ -286,5 +286,97 @@ class TestOptimumIsNeverARegression(unittest.TestCase):
         self.assertEqual(len(rep["invalid"]), 1)
 
 
+class TestConfirmationPassIsWired(unittest.TestCase):
+    """The confirm-by-re-measurement pass must actually be REACHED from the gating YAML.
+
+    The gate-side logic is fully unit-tested by `--self-test`, but a confirmation pass with no
+    `--remeasure-cmd` at the call site is a no-op that still reports green: bench_hardzone.py is
+    deliberately fail-closed without one, so the omission is INVISIBLE — the gate simply keeps
+    reddening main on unreproduced breaches exactly as before. That is the YAML-seam vacuity this
+    class exists to prevent.
+    """
+
+    def setUp(self):
+        self.steps = _steps(_load(BENCH_YML), "bench")
+        self.gate = next(s for s in self.steps if "Hard zone" in (s.get("name") or ""))
+        self.run = self.gate.get("run", "")
+
+    def test_remeasure_cmd_is_passed_at_the_call_site(self):
+        """MUTANT: drop `--remeasure-cmd` from the step => RED.
+
+        Without it apply_remeasurement is handed remeasure_fn=None and relieves nothing, so
+        every unreproduced breach reds main again — silently, and with a green self-test.
+        """
+        self.assertIn(
+            "--remeasure-cmd", self.run,
+            "the bench lane must pass --remeasure-cmd to bench_hardzone.py; without it the "
+            "confirmation pass is a no-op and a runner slow-window reds main again "
+            "(measured: 29 of 153 live runs, 19%)",
+        )
+
+    def test_remeasure_actually_reruns_the_benchmark_suite(self):
+        """MUTANT: point --remeasure-cmd at `true` / `echo` / a stale file => RED.
+
+        A confirmation that does not re-execute the benchmark is not a second measurement; it
+        would either relieve nothing (best case) or, if it replayed the ORIGINAL results file,
+        confirm every breach forever.
+        """
+        m = re.search(r"--remeasure-cmd\s+'([^']*)'", self.run)
+        self.assertIsNotNone(m, "--remeasure-cmd must carry a single-quoted shell command")
+        cmd = m.group(1)
+        self.assertIn("scripts/ci-bench.sh", cmd,
+                      "the confirmation must re-run the real benchmark suite, not a stub")
+        self.assertNotIn("--deterministic-only", cmd,
+                         "the confirmation must re-measure TIMING metrics — the "
+                         "deterministic-only form emits none of the rows that trip this gate")
+
+    def test_remeasure_never_overwrites_the_published_results(self):
+        """MUTANT: write the re-measurement to bench-results.json => RED.
+
+        bench-results.json is what the Store step publishes. If a confirmation run overwrote
+        it, the trend would silently record the RE-MEASURED value instead of the value the
+        suite actually produced — laundering the reading the gate was asked to judge.
+        """
+        m = re.search(r"--remeasure-cmd\s+'([^']*)'", self.run)
+        cmd = m.group(1) if m else ""
+        self.assertNotRegex(
+            cmd, r"(?<![-\w])bench-results\.json",
+            "the re-measure command must write to its own path — never bench-results.json, "
+            "which the Store step publishes to the benchmark-data trend",
+        )
+        out = re.search(r"--remeasure-out\s+(\S+)", self.run)
+        self.assertIsNotNone(out, "--remeasure-out must be pinned at the call site")
+        self.assertNotEqual(out.group(1), "bench-results.json")
+        self.assertIn(out.group(1), cmd,
+                      "--remeasure-out must name the SAME path the command writes to, or the "
+                      "gate reads a file the command never produced and relieves nothing")
+
+    def test_the_confirmation_step_keeps_the_same_main_push_guard(self):
+        """MUTANT: widen/narrow the step `if:` => RED.
+
+        The confirmation rides the existing step, so it must inherit exactly its guard: a
+        widened guard would re-run the full suite on PRs (which are --deterministic-only and
+        already strictly gated by perf-gate.py), and a narrowed one would silently disable the
+        gate itself.
+        """
+        cond = str(self.gate.get("if", ""))
+        self.assertIn("github.ref == 'refs/heads/main'", cond)
+        self.assertIn("github.event_name != 'schedule'", cond)
+
+    def test_gate_module_defaults_are_fail_closed_without_a_command(self):
+        """MUTANT: make remeasure_fn default to something truthy => RED.
+
+        The behaviour every OTHER lane depends on: with no --remeasure-cmd the gate must be
+        byte-identical to its pre-confirmation behaviour.
+        """
+        hz = _load_gate_module()
+        code, rep = hz.evaluate([{"name": "q_us", "value": 2400.0, "unit": "us"}],
+                                {"q_us": [1000.0] * 5})
+        self.assertEqual(code, 1)
+        hz.apply_remeasurement(rep, None, 1)
+        self.assertEqual(len(rep["hard"]), 1, "no remeasure_fn must relieve nothing")
+        self.assertEqual(hz.gate_exit_code(rep), 1)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

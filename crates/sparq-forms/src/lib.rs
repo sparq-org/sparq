@@ -139,10 +139,17 @@ pub fn derive_form_validated(
     form
 }
 
-/// The node shapes applicable to `focus` — the renderer's shape switcher:
-/// `sh:targetNode`, `sh:targetClass` / implicit class targets (matched against
-/// the focus node's `rdf:type`s with `rdfs:subClassOf` closure in the data
-/// graph), and `dash:applicableToClass`.
+/// The node shapes applicable to `focus` — the renderer's shape switcher,
+/// strongest rationale first: `sh:targetNode`, `sh:targetClass` / implicit
+/// class targets (matched against the focus node's `rdf:type`s with
+/// `rdfs:subClassOf` closure in the data graph), `dash:applicableToClass`,
+/// then the predicate targets `sh:targetSubjectsOf` / `sh:targetObjectsOf`
+/// (the focus node is a subject, resp. object, of the named predicate).
+///
+/// SHACL 1.2 `sh:targetWhere` and SPARQL-valued targets still do NOT drive
+/// applicability: both need evaluation machinery (single-node conformance
+/// against an inline shape; running a node expression) that `sparq-shacl` keeps
+/// crate-private. [OPUS-4.8] sq-vfcxv
 pub fn applicable_shapes(
     data: &Graph,
     shapes: &Graph,

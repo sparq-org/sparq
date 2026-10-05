@@ -20,6 +20,10 @@
 #     marginal detection probability, so it was pole, not net; replay keeps every
 #     deterministic guarantee. The `fuzz-full` PR label restores randomized fuzzing on
 #     a specific PR (see the budget step) for a fuzz-sensitive change.
+#     [OPUS-5] #3508 DRAFT TIER: on a DRAFT pull_request head the `fuzz` job is skipped
+#     entirely (unless the PR carries `ci-full`/`fuzz-full`) — the replay re-runs at
+#     FULL tier on the same head SHA the moment the PR is un-drafted
+#     (`ready_for_review`), so no PR reaches the queue without it. See the job `if:`.
 #   - merge_group : this lane does NOT trigger on merge_group (removed by the
 #     2026-07-18 merge-queue-subset directive — see the `on:` block below). The
 #     deterministic replay already ran + gated on the PR head, so re-running it per
@@ -40,11 +44,12 @@
 # DEMOTION AUTO-BEAD PROTOCOL (design §7; mirrors the fmx4u §6.1 / differential.yml
 # nightly-failure protocol). Because the per-PR leg is now the DETERMINISTIC slice
 # only, the randomized-search net moves to the push-to-main + nightly full-form runs.
-# If either of those RANDOMIZED runs finds a crash, the failure path below auto-files a
-# standing P1 bead + GitHub issue (scripts/ci-file-demoted-lane-failure.py) naming the
-# lane + run, so a lane demoted off per-push cannot silently rot: a crash that the
-# per-PR replay could not have caught (a genuinely new randomized finding) is still
-# tracked to closure. The bead is the durable record that the full form ran + found it.
+# If either of those RANDOMIZED runs finds a crash, the separate least-privilege
+# `file-demoted-fuzz-finding` job below auto-files a standing P1 bead + GitHub issue
+# (scripts/ci-file-demoted-lane-failure.py) naming the lane + run, so a lane demoted off
+# per-push cannot silently rot: a crash that the per-PR replay could not have caught (a
+# genuinely new randomized finding) is still tracked to closure. The bead is the durable
+# record that the full form ran + found it.
 # The fuzz crate is OUTSIDE the cargo workspace (root `Cargo.toml` `exclude = [...,
 # "fuzz"]`) and needs NIGHTLY (libFuzzer codegen), so it never touches the stable
 # `cargo build`/`test`/`clippy --workspace` gate in ci.yml.
@@ -168,27 +173,47 @@ jobs:
     # the lane; a skipped job reports conclusion `skipped` (= satisfied) to the
     # ci-summary gate — no per-leg name is individually required (bead sq-fmx4u.4).
     needs: select
+    # [OPUS-5] #3508 DRAFT-TIER CI (docs/branch-protection.md §Draft-tier CI): this
+    # lane is SKIPPED ENTIRELY on draft PR heads — the second AND-term below. The
+    # review-fix loop re-pushes a draft head many times per PR and NOTHING in that
+    # loop reads a corpus-replay result: the deterministic replay is a pure function
+    # of the code, and the un-draft moment (`ready_for_review`, in the pull_request
+    # `types` above) re-runs this job at FULL tier on the SAME head SHA before the PR
+    # can be armed. Meanwhile the job pays a full nightly-toolchain install plus a
+    # `cargo fuzz build` of EVERY target in fuzz/fuzz_targets/ per draft push, which
+    # is exactly the runner occupancy the draft tier exists to reclaim. Same shape +
+    # same safety argument as bench.yml:bench and ci.yml's coverage jobs.
+    #   FAIL-OPEN off the PR path: push-to-main / schedule / workflow_dispatch all
+    #   satisfy `github.event_name != 'pull_request'`, so the randomized full-form
+    #   runs (and the demotion auto-bead protocol they feed) are byte-identical.
+    #   LABEL ESCAPE: `ci-full`/`fuzz-full` on the PR override the draft skip. Unlike
+    #   bench-full, `fuzz-full` selects this job's RANDOMIZED budget (the "Pick the
+    #   per-target budget + mode for this trigger" step reads it), so a bare draft
+    #   guard would silently neuter that label on the drafts where it is applied.
     # [FABLE-5] label-trigger guard: the first AND-term skips this job on any
     # labeled/unlabeled event whose label is not ci-full/fuzz-full (select, the only
-    # root here, must keep running — see the pull_request trigger note). The second
+    # root here, must keep running — see the pull_request trigger note). The last
     # AND-term is the unchanged fail-closed selection guard.
     if: >-
       (github.event_name != 'pull_request' ||
        !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
        contains(fromJSON('["ci-full","fuzz-full"]'), github.event.label.name)) &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft != true ||
+       contains(github.event.pull_request.labels.*.name, 'ci-full') ||
+       contains(github.event.pull_request.labels.*.name, 'fuzz-full')) &&
       (needs.select.outputs.mode != 'selected' ||
        contains(needs.select.outputs.affected, '"sparq-core"') ||
        contains(needs.select.outputs.affected, '"sparq-engine"') ||
        contains(needs.select.outputs.affected, '"sparq-shacl"'))
     runs-on: ubuntu-latest
-    # [FABLE-5] sq-6vshe.6: the demotion auto-bead step (randomized-run finding on
-    # push/nightly) files a GitHub issue + appends a P1 bead. Least-privilege, scoped
-    # to this job only (the top-level default stays contents:read):
-    #   contents: write — append the bead line to .beads/issues.jsonl + best-effort push
-    #   issues:   write — file/comment the standing GitHub issue (the reliable channel)
-    permissions:
-      contents: write
-      issues: write
+    # [OPUS-5] sq-c9q4r LEAST-PRIVILEGE: this job COMPILES AND EXECUTES the fuzz targets,
+    # i.e. PR-authored code, on every trigger including pull_request. It therefore holds
+    # NO elevated scope and inherits the top-level `contents: read`. The demotion
+    # auto-bead filer that needs contents:write + issues:write moved to the separate
+    # `file-demoted-fuzz-finding` job below, which builds and executes nothing and is
+    # reachable only from a randomized full-form failure (schedule / push-to-main).
+    # Previously the write scopes sat here, on every trigger including pull_request,
+    # alongside the compile-and-run of PR-authored fuzz targets.
     # Generous ceiling above the worst case (nightly: 4 targets × 600s + build) so a
     # hung target fails with a clear timeout rather than running away.
     timeout-minutes: 60
@@ -215,6 +240,13 @@ jobs:
       RUSTUP_TOOLCHAIN: nightly-2026-06-11
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # [OPUS-5] sq-c9q4r: do NOT leave a credentialed remote in .git/config while
+          # building + running PR-authored fuzz targets. Nothing in this job fetches over
+          # git — fuzz/ resolves against its own standalone fuzz/Cargo.lock, which carries
+          # no `git+` source — and the filer that pushes now lives in its own job, which
+          # supplies the token on the push URL explicitly.
+          persist-credentials: false
       # [OPUS-4.8] sq-czlh: reclaim ~20-30 GB of pre-installed SDKs/toolchains BEFORE the
       # cargo-fuzz build. Each libFuzzer/sancov-instrumented target links a sanitizer
       # runtime + its own `fuzz/target` tree, on a runner that starts with only ~14 GB free
@@ -249,7 +281,7 @@ jobs:
           # cache on its manifests so it is not shared with the workspace build.
           workspaces: "fuzz"
       - name: Install cargo-fuzz
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-fuzz
       # [FABLE-5] sq-0iqzw: persistent corpus. Without this, every run — including
@@ -324,8 +356,9 @@ jobs:
         env:
           SECS: ${{ steps.budget.outputs.secs }}
           MODE: ${{ steps.budget.outputs.mode }}
-          # Capture the combined per-target output so the failure step below can hand
-          # the log to the demoted-lane auto-bead filer on a randomized-run finding.
+          # Capture the combined per-target output so a randomized-run finding can hand
+          # the log to the demoted-lane auto-bead filer (uploaded as the `fuzz-run-log`
+          # artifact below and downloaded by the `file-demoted-fuzz-finding` job).
           RUN_LOG: ${{ runner.temp }}/fuzz-run-log.txt
         run: |
           set -euo pipefail
@@ -359,6 +392,21 @@ jobs:
             # committed seeds yet) from failing on a missing dir. In replay mode BOTH
             # dirs are executed input-by-input; nothing is written.
             mkdir -p "corpus/$t" "seeds/$t"
+            # [OPUS-5] sq-c9q4r: FAIL LOUD on a VACUOUS replay. The `mkdir -p` above is
+            # deliberately forgiving so a brand-new target does not error on a missing
+            # dir — but in replay mode that forgiveness is also how a target with NO
+            # committed seeds and NO cached corpus PASSES: `-runs=0` over zero inputs
+            # exits 0, and this BLOCKING per-PR gate reports green having executed
+            # nothing. Every target committed today carries seeds (fuzz/seeds/<t>), so
+            # this fires only for a FUTURE target added without them. The check lives in
+            # scripts/ci-fuzz-replay-guard.sh (hermetic `--self-test`, run on every PR
+            # from docs-quality.yml) rather than inline here, so the guard that keeps a
+            # gate honest is itself tested. Randomized mode is exempt — see that script.
+            if ! bash ../scripts/ci-fuzz-replay-guard.sh "$MODE" "$t" "corpus/$t" "seeds/$t"; then
+              status=1
+              echo "::endgroup::"
+              continue
+            fi
             # A nonzero exit (a crash/leak/timeout) is a genuine finding: RECORD it in
             # `status` and keep going so the remaining targets still run, then fail the
             # gate once at the end (`exit "$status"`). Tee to $RUN_LOG so the
@@ -384,19 +432,86 @@ jobs:
         with:
           path: fuzz/corpus
           key: fuzz-corpus-v1-${{ github.run_id }}
-      # [FABLE-5] sq-6vshe.6 DEMOTION AUTO-BEAD PROTOCOL (design §7). The per-PR fuzz
-      # leg is now deterministic corpus-replay only; the randomized-search net moved to
-      # this workflow's push-to-main + nightly runs (mode=fuzz). If a RANDOMIZED run
-      # crashes — a finding the per-PR replay could not have caught — auto-file a
-      # standing P1 bead + GitHub issue naming the lane + run so the demoted randomized
-      # form cannot silently rot. Guarded on failure() AND a randomized full-form run
-      # (push-to-main or schedule); a PR/merge_group replay failure is a NORMAL blocking
-      # gate finding, not a demotion-rot event, so it does NOT fire here. Deduped +
-      # append-only + fail-soft on the GH013 protected-main push, exactly like the
-      # differential.yml nightly filer this mirrors (the GitHub issue is the reliable
-      # channel; the orchestrator beads from it if the push is declined).
-      - name: Auto-file demoted randomized-fuzz finding (P1 bead + issue, deduped)
+      # [OPUS-5] sq-c9q4r: hand the captured run log to the separate, elevated-scope
+      # `file-demoted-fuzz-finding` job — it runs on its own runner and cannot read this
+      # one's $RUNNER_TEMP. Uploaded only on the randomized full-form failure path that
+      # actually files (same guard as that job's `if:`), so the normal red-PR case pays
+      # nothing. `if-no-files-found: ignore`: a failure BEFORE the run step (e.g. the
+      # build) leaves no log, and the filer treats a missing log as an empty tail.
+      - name: Upload the fuzz run log (input to the demoted-lane filer job)
         if: failure() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-run-log
+          path: ${{ runner.temp }}/fuzz-run-log.txt
+          if-no-files-found: ignore
+      # On a crash, libFuzzer writes the reproducing input to fuzz/artifacts/<target>/.
+      # Upload it so the failing case can be replayed locally with `cargo fuzz run
+      # <target> <artifact>`.
+      - name: Upload crash reproducers (on failure)
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
+  # [FABLE-5] sq-6vshe.6 DEMOTION AUTO-BEAD PROTOCOL (design §7). The per-PR fuzz leg is
+  # deterministic corpus-replay only; the randomized-search net lives in this workflow's
+  # push-to-main + nightly runs (mode=fuzz). If a RANDOMIZED run crashes — a finding the
+  # per-PR replay could not have caught — auto-file a standing P1 bead + GitHub issue
+  # naming the lane + run so the demoted randomized form cannot silently rot. Deduped +
+  # append-only + fail-soft on the GH013 protected-main push, exactly like the
+  # differential.yml nightly filer this mirrors (the GitHub issue is the reliable
+  # channel; the orchestrator beads from it if the push is declined).
+  #
+  # [OPUS-5] sq-c9q4r LEAST-PRIVILEGE JOB SPLIT. These two steps used to live INSIDE the
+  # `fuzz` job, which forced that job — the one that compiles and executes PR-authored
+  # fuzz targets, on every trigger including pull_request — to carry contents:write +
+  # issues:write. Splitting them out leaves the code-executing job at the top-level
+  # `contents: read` and confines the elevated scope to a job that checks out and runs
+  # only `scripts/ci-file-demoted-lane-failure.py` plus git, and is reachable ONLY from a
+  # randomized full-form failure (schedule / push-to-main) — never from a PR head.
+  #
+  # The `if:` is the exact conjunction the old step guards were (`failure()` AND a
+  # randomized full-form run): `always()` is required because a job-level `if:` defaults
+  # to success(), and `needs.fuzz.result == 'failure'` is the cross-job spelling of the
+  # step-level `failure()`. A PR replay failure is a NORMAL blocking gate finding, not a
+  # demotion-rot event, so it still does NOT file. The job name carries no
+  # advisory/informational token, so `ci-summary / gate` treats it as gating — on every
+  # PR it is `skipped`, which the gate counts as satisfied.
+  file-demoted-fuzz-finding:
+    name: file demoted randomized-fuzz finding (P1 bead + issue)
+    needs: fuzz
+    if: >-
+      always() && needs.fuzz.result == 'failure' &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The ONLY elevated scope in this workflow:
+    #   contents: write — append the bead line to .beads/issues.jsonl + best-effort push
+    #   issues:   write — file/comment the standing GitHub issue (the reliable channel)
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # The push below supplies the token on the remote URL explicitly, so no
+          # credential needs to be persisted into .git/config.
+          persist-credentials: false
+      # The log was captured on the `fuzz` job's runner; pull it across as an artifact.
+      # continue-on-error: a failure before the run step uploads nothing, and the filer
+      # renders a missing log as "(no log captured …)" rather than dying — the issue is
+      # still worth filing.
+      - name: Download the fuzz run log
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: fuzz-run-log
+          path: ${{ runner.temp }}/fuzz-log
+      - name: Auto-file demoted randomized-fuzz finding (P1 bead + issue, deduped)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -408,11 +523,10 @@ jobs:
             --full-form "randomized cargo-fuzz (${{ github.event_name }})" \
             --per-pr-form "deterministic corpus-replay (-runs=0)" \
             --bead-prefix fz \
-            --log "${{ runner.temp }}/fuzz-run-log.txt" \
+            --log "${{ runner.temp }}/fuzz-log/fuzz-run-log.txt" \
             --jsonl .beads/issues.jsonl \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - name: Commit the demoted-lane bead back to main (best-effort; fail-soft)
-        if: failure() && (github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -435,16 +549,6 @@ jobs:
             exit 0
           fi
           echo "pushed the demoted-lane bead to main."
-      # On a crash, libFuzzer writes the reproducing input to fuzz/artifacts/<target>/.
-      # Upload it so the failing case can be replayed locally with `cargo fuzz run
-      # <target> <artifact>`.
-      - name: Upload crash reproducers (on failure)
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: fuzz-artifacts
-          path: fuzz/artifacts/
-          if-no-files-found: ignore
 
   # [FABLE-5] PR-level differential smoke (bead sq-0iqzw) — the BLOCKING
   # wrong-answer gate. Runs the sparq-bench differential fuzzer (in-process
@@ -518,14 +622,20 @@ jobs:
           "$b" fuzz 4695 2200 filter
           # sq-j80vk: fixed per-category regression windows over the SPARQL 1.1
           # surfaces added to the generator (property paths, aggregates/GROUP BY/
-          # HAVING, sub-selects, EXISTS, VALUES, BIND, GRAPH). 'all' picks ONE
-          # category per seed, so the 2000-seed broad window above leaves each of the
-          # 16 categories only ~125 cases — too thin to be a per-PR net for a
-          # specific evaluation path. These are deterministic REGRESSION windows, not
+          # HAVING, sub-selects, EXISTS, VALUES, BIND, GRAPH) — plus sq-avd75's
+          # `antijoin` (the `OPTIONAL … FILTER(!bound)` idiom, i.e. rewrite (b) of the
+          # `algebra-rewrite` pass #1735, which the fuzzer builds ON) — and sq-qcnn.6's
+          # `typed` / `strfn` / `ask` / `construct` (the typed-literal columns, the
+          # string functions, and the two non-SELECT RESULT FORMS, which are compared
+          # by their boolean / canonical triple set rather than by a count). 'all'
+          # picks ONE category per seed, so the 2000-seed broad window above leaves
+          # each of the 21 categories only ~95 cases — too thin to be a per-PR net for
+          # a specific evaluation path. These are deterministic REGRESSION windows, not
           # known-catch ones: no historical bug is pinned to these seeds yet, and if
           # the nightly lane finds one its window gets pinned here the way sq-lr2ii's
           # was. ~2 s per category at release-fast throughput.
-          for c in path aggregate subquery exists values bind graph; do
+          for c in path aggregate subquery exists values bind graph antijoin \
+                   typed strfn ask construct; do
             "$b" fuzz 0 10000 "$c"
           done
           # Store-mode read paths over the fixed window: the same seeds re-run with

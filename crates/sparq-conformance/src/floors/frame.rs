@@ -30,4 +30,16 @@
 /// treated as `@once` (design record §11 — no output-tree object identity), and
 /// `@embed: @last` uses an embed-then-demote post-pass equivalent to the reference
 /// processors' remove-embed.
+///
+/// ## [OPUS-5] sq-gzsky — this floor does NOT rise, and that is the honest answer
+///
+/// Bead sq-gzsky asked to raise `floors::{expand,frame,compact}::FLOOR` off the
+/// sq-hmd7l.22 finding, which recorded frame at **66.3%**. That cell was already STALE
+/// when the bead was written: sq-oy1f.29 moved this lane to the native framer and
+/// `research/gap-jsonld-conformance-2026-07.md` §3 corrected it to 100.0% (the correction
+/// predates the bead). The lane is at the pinned suite's CEILING — 92 pass of 92 entries,
+/// 0 fail, 0 skip, negatives already RUN — so there is no headroom to ratchet into and
+/// raising the const to anything above 92 would be an ASPIRATIONAL floor, not a measured
+/// one. The expand and compact halves of sq-gzsky did rise (276 → 381, 228 → 243); this
+/// one stays put until the framing-suite pin bumps and adds entries.
 pub const FLOOR: usize = 92;

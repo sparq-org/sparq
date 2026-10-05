@@ -1,0 +1,6 @@
+# The POSITIVE twin of `query.rq`: the same holder graph and the same certification,
+# asked about the predicate the certification actually covers. Without this entry the
+# scope-violation case could pass for the wrong reason (a certification that admits
+# nothing at all).
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+ASK { <urn:person:jesse> foaf:age ?age }

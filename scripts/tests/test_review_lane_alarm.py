@@ -76,6 +76,18 @@ def comment(body, login="reviewer-bot", created="2026-07-02T00:00:00Z"):
     return {"body": body, "user": {"login": login}, "created_at": created}
 
 
+# The account that applied 41/41 of the live "human-owned" holds sparq#4911 measured.
+BOT = "sparq-orchestrator[bot]"
+
+
+def labeled(label="needs:user", login="jeswr", created="2026-07-20T00:00:00Z", kind=None):
+    """A `labeled` issue event, in the shape `GET /repos/{r}/issues/{n}/events` returns."""
+    actor = {"login": login}
+    if kind:
+        actor["type"] = kind
+    return {"event": "labeled", "label": {"name": label}, "actor": actor, "created_at": created}
+
+
 class TestNoVerdictIsNotArmable(unittest.TestCase):
     """OBLIGATION 1: a PR with no verdict must never read as reviewed."""
 
@@ -290,8 +302,111 @@ class TestNonAlarmingStates(unittest.TestCase):
             {}, REPO, now, 24)
         self.assertEqual(
             census,
-            {"blind-spot": 1, "draft": 1, "human-held": 1, "registry-lane": 1},
+            # `hold-owner-unknown` rides alongside the state exits: #3's hold is exempt,
+            # but with no event log supplied nothing PROVED a human applied it, and an
+            # unproved exemption has to be countable or it is invisible (sparq#4911).
+            {"blind-spot": 1, "draft": 1, "human-held": 1, "registry-lane": 1,
+             "hold-owner-unknown": 1},
         )
+
+
+class TestAMachineWrittenHoldBuysNoExemption(unittest.TestCase):
+    """sparq#4911 — the human-hold exit was keyed on the label's NAME, and the name does
+    not carry the fact. Census over the open sparq PRs: 41/41 live "human-owned" holds
+    were machine-applied (23/23 `needs:user` and 18/18 `review:needs-user` by
+    `sparq-orchestrator[bot]`), and a further population of machine PARKS was written
+    under the maintainer's own alias. So this alarm's QUIETEST exit — "a human is
+    deciding, stand down" — was being taken on machine writes: the loop escalates to a
+    human, signs the escalation as one, and the detector reads a decision that never
+    happened.
+
+    Ownership is now resolved from the `labeled` timeline event. Each test below goes red
+    on deletion OR inversion of one clause of `hold_ownership`."""
+
+    def setUp(self):
+        self.held = pr(number=4804, labels=("needs:user",), created="2026-07-01T00:00:00Z")
+        self.now = alarm._parse_iso("2026-07-26T00:00:00Z")
+
+    def test_a_bot_applied_hold_does_not_exempt_the_pr(self):
+        self.assertEqual(alarm.hold_ownership(self.held, [labeled(login=BOT)], []), "machine")
+        self.assertEqual(
+            alarm.classify_pr(self.held, [], REPO, [labeled(login=BOT)]), "blind-spot")
+
+    def test_a_real_human_hold_is_still_terminal(self):
+        self.assertEqual(alarm.hold_ownership(self.held, [labeled(login="jeswr")], []), "human")
+        self.assertEqual(
+            alarm.classify_pr(self.held, [], REPO, [labeled(login="jeswr")]), "human-held")
+
+    def test_a_type_bot_actor_without_the_suffix_is_machine(self):
+        self.assertEqual(
+            alarm.hold_ownership(self.held, [labeled(login="orchestrator", kind="Bot")], []),
+            "machine")
+
+    def test_an_alias_written_hold_with_a_bot_receipt_is_machine_owned(self):
+        """PR #3620's real shape: `jeswr` writes the label at 08:54:39 and the
+        orchestrator posts its `class=capacity cause=partition` receipt 86s later —
+        mixed credentials inside ONE logical operation. The actor test alone reads that
+        as a human decision; the receipt is what the loop cannot fake away."""
+        alias = [labeled(login="jeswr", created="2026-07-28T08:54:39Z")]
+        receipt = [comment("park: class=capacity cause=partition", login=BOT,
+                           created="2026-07-28T08:56:05Z")]
+        self.assertEqual(alarm.hold_ownership(self.held, alias, receipt), "machine")
+        self.assertEqual(alarm.classify_pr(self.held, receipt, REPO, alias), "blind-spot")
+
+    def test_the_receipt_window_is_a_window(self):
+        alias = [labeled(login="jeswr", created="2026-07-28T08:54:39Z")]
+        late = [comment("park: class=capacity", login=BOT, created="2026-07-29T08:56:05Z")]
+        self.assertEqual(alarm.hold_ownership(self.held, alias, late), "human")
+
+    def test_a_human_comment_quoting_a_class_marker_proves_nothing(self):
+        """The receipt clause trusts the loop's INTENT, and only the loop emits receipts.
+        A human pasting `class=capacity` into the thread must not machine-own their own
+        hold — that would invert the fix into a way to silence a real human decision."""
+        alias = [labeled(login="jeswr", created="2026-07-28T08:54:39Z")]
+        quoted = [comment("why is this class=capacity?", login="jeswr",
+                          created="2026-07-28T08:55:00Z")]
+        self.assertEqual(alarm.hold_ownership(self.held, alias, quoted), "human")
+
+    def test_the_latest_application_decides(self):
+        """Mirrors the park policy's own rule — the LATEST application decides — so a
+        machine re-park over an older human hold is machine-owned."""
+        self.assertEqual(
+            alarm.hold_ownership(
+                self.held,
+                [labeled(login="jeswr", created="2026-07-20T00:00:00Z"),
+                 labeled(login=BOT, created="2026-07-21T00:00:00Z")],
+                []),
+            "machine")
+
+    def test_an_event_for_a_label_the_pr_no_longer_carries_owns_nothing(self):
+        self.assertIsNone(
+            alarm.latest_hold_application(self.held, [labeled(label="review:parked", login=BOT)]))
+
+    def test_an_unresolvable_hold_stays_exempt_and_is_counted(self):
+        """The under-reporting direction, on purpose — this file never alarms on a guess.
+        But the exemption is counted, so a population of unproved holds is visible."""
+        self.assertEqual(alarm.hold_ownership(self.held, [], []), "unknown")
+        _, census = alarm.find_blind_spot([self.held], {}, REPO, self.now, 24, {})
+        self.assertEqual(census.get("human-held"), 1)
+        self.assertEqual(census.get("hold-owner-unknown"), 1)
+
+    def test_the_machine_held_pr_reaches_the_findings_with_its_reason(self):
+        findings, census = alarm.find_blind_spot(
+            [self.held], {}, REPO, self.now, 24, {4804: [labeled(login=BOT)]})
+        self.assertEqual([f["number"] for f in findings], [4804])
+        self.assertEqual(census.get("hold-owner-machine"), 1)
+        note = alarm.finding_note(findings[0])
+        self.assertIn("MACHINE write", note)
+        self.assertIn(BOT, note)
+        self.assertIn(note, alarm.render_issue_body(findings, census, REPO, 24))
+
+    def test_the_live_run_reads_the_event_log_for_held_prs(self):
+        """The predicate is only worth anything if `run()` actually FETCHES the events.
+        Without this, every live hold resolves to `unknown` and the fix is a no-op with a
+        fully green suite — the shape of the measured no-op sparq#4819 shipped."""
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("fetch_label_events(repo, number)", source)
+        self.assertIn("events_by_pr", source)
 
 
 class TestExitCodeCarriesTheVerdict(unittest.TestCase):

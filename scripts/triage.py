@@ -66,6 +66,35 @@ def _valid_priority(labels):
     return len(ps) == 1
 
 
+# [OPUS-5] `needs:area` is the ONE `needs:*` label this function owns: it is applied below when an
+# otherwise-complete issue has no crate, and cleared in the ready branch once one lands. Everything
+# else in the namespace is an external gate.
+SELF_CLEARING_GATE = "needs:area"
+
+
+def _blocking_gates(labels):
+    """The `needs:*` gates that must block `status:ready`, matching ready-issues.py `is_gated`.
+
+    [OPUS-5] This used to be the single literal `"needs:user" not in labels`, so triage attested
+    `status:ready` on `needs:ec2` / `needs:docker` / `needs:zk` / `needs:upstream` /
+    `needs:maintainer` issues. ready-issues.py treats EVERY `needs:*` as a hard dispatch gate, so
+    the two components disagreed about what "gated" means and the readiness engine was the only
+    thing keeping those issues off the frontier — a single-point defence for a class that is
+    gated for real external reasons (an EC2 spend authorisation, a missing upstream release).
+
+    Measured live on sparq-org/sparq 2026-07-26: 21 open issues carried BOTH `status:ready` and a
+    real `needs:*` gate (needs:ec2 12, needs:docker 4, needs:zk 3, needs:external-subject 2,
+    needs:upstream 1, needs:maintainer 1). It also bounded the retriage reach fix in this PR:
+    5 of the 79 newly-promotable issues carry `needs:ec2` and must NOT be attested ready.
+
+    Narrowing only — an issue that stops being `ready` here is fail-closed and cannot reach the
+    frontier, so this can never open a dispatch path. `SELF_CLEARING_GATE` is excluded because
+    treating it as blocking would deadlock it: `ready` would be False forever, and the `remove`
+    that lifts the park only runs in the ready branch.
+    """
+    return {lb for lb in labels if lb.startswith("needs:")} - {SELF_CLEARING_GATE}
+
+
 def _role(labels, issue_type):
     # a security-surface keyword forces the soundness lane regardless of kind/type/explicit role
     if any(k in lb for lb in labels for k in SEC_KEYWORDS):
@@ -120,7 +149,7 @@ def triage(labels, issue_type="task", trusted=True):
     # [OPUS-4.8] an epic is a tracking umbrella, never dispatchable — it must not gain status:ready
     # (the readiness engine also excludes kind:epic as the hard dispatch gate; this keeps the tracker
     # honest so an epic never *shows* as ready).
-    ready = (bool(role) and _valid_priority(labels) and has_area and "needs:user" not in labels
+    ready = (bool(role) and _valid_priority(labels) and has_area and not _blocking_gates(labels)
              and "kind:epic" not in labels)
     if ready:
         add.add("status:ready")
@@ -132,7 +161,7 @@ def triage(labels, issue_type="task", trusted=True):
         # a triage-complete-but-no-area issue: mark WHY it is parked so it is maintainer-actionable
         # and stays out of the frontier (needs:* is a hard gate) instead of silently reserving global.
         if (bool(role) and _valid_priority(labels) and not has_area
-                and "kind:epic" not in labels and "needs:user" not in labels):
+                and "kind:epic" not in labels and not _blocking_gates(labels)):
             add.add("needs:area")
     return {"add": add - labels, "remove": remove & labels, "ready": ready, "role": role}
 
@@ -215,6 +244,31 @@ def _self_test():
     # once an area lands, retriage clears the needs:area gate and promotes
     r = triage(["priority:P1", "role:impl", "area:sparq-core", "needs:area", "status:untriaged"], "feature")
     chk("area landed -> ready + clears needs:area", (r["ready"], "needs:area" in r["remove"]), (True, True))
+    # [OPUS-5] EVERY needs:* gate blocks readiness, not just needs:user — ready-issues.py has
+    # always treated the whole namespace as a hard dispatch gate and this function did not, so an
+    # externally-gated issue was attested `status:ready` with the readiness engine as the only
+    # thing keeping it off the frontier. Deleting a gate from `_blocking_gates` reds these.
+    for gate in ("needs:ec2", "needs:docker", "needs:zk", "needs:upstream", "needs:maintainer",
+                 "needs:external-subject", "needs:user"):
+        r = triage(["priority:P1", "role:impl", "area:sparq-core", gate], "feature")
+        chk(f"{gate} blocks status:ready",
+            (r["ready"], "status:ready" in r["add"], "status:untriaged" in r["add"]),
+            (False, False, True))
+        # ...and an externally-gated issue is not ALSO double-parked with needs:area
+        chk(f"{gate} no-area is not double-parked",
+            "needs:area" in triage(["priority:P1", "role:impl", gate], "task")["add"], False)
+    # the self-clearing gate must NOT be treated as blocking, or it can never be lifted: `ready`
+    # would be False forever and the `remove` that clears it only runs in the ready branch.
+    chk("needs:area is self-clearing, not a permanent block",
+        _blocking_gates({"needs:area"}), set())
+    # an unknown future needs:* label is gated by DEFAULT (namespace rule, not an allow-list)
+    chk("an unknown needs:* gate blocks by default",
+        triage(["priority:P1", "role:impl", "area:sparq-core", "needs:whatever-lands-next"],
+               "feature")["ready"], False)
+    # the gate set agrees with the readiness engine's, which is the whole point of the change
+    chk("gate namespace matches ready-issues.py is_gated",
+        _blocking_gates({"needs:ec2", "needs:area", "role:impl", "area:x", "trust:untrusted"}),
+        {"needs:ec2"})
     print("triage self-test", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 

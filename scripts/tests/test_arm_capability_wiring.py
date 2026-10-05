@@ -42,16 +42,21 @@
 from __future__ import annotations
 
 import ast
+import copy
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
+import socket
 import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from types import ModuleType
+from typing import NamedTuple
 
 import yaml
 
@@ -404,7 +409,7 @@ class TestScriptContract(unittest.TestCase):
 class TestSelfTestsRunInCi(unittest.TestCase):
     """The self-tests are only worth writing if something runs them on every PR."""
 
-    def test_docs_quality_runs_both_self_tests_and_this_wiring_suite(self) -> None:
+    def test_docs_quality_runs_the_arm_policy_self_tests_and_this_wiring_suite(self) -> None:
         document = load(WORKFLOWS / "docs-quality.yml")
         gating = [
             run_of(step)
@@ -412,16 +417,34 @@ class TestSelfTestsRunInCi(unittest.TestCase):
             for step in (job.get("steps") or [])
             if "advisory" not in str(job.get("name", job_id)).lower()
         ]
-        blob = "\n".join(gating)
-        for needle in (
-            "scripts/rearm-sweeper.py --self-test",
-            "scripts/auto-arm.py --self-test",
-            "scripts/tests/test_arm_capability_wiring.py",
+        # [OPUS-5] #4795: match a whole stripped LINE, not a substring of the blob. A
+        # containment check passes against `… --self-test-DISABLED` / `… --self-test || true`
+        # — the exact suffix-mutation shape that survived a containment pin elsewhere in
+        # this repo — so the command must appear as its own complete command line.
+        commands = {
+            line.strip()
+            for block in gating
+            for line in block.splitlines()
+            if line.strip()
+        }
+        for command in (
+            # [OPUS-5] #4795: gh_retry.py was the ONLY one of the three arm-policy scripts
+            # whose PR-time self-test was unpinned. docs-quality.yml did run it, so the
+            # coverage looked complete — but deleting that single line would have gone
+            # unnoticed, leaving every change to the transient classifier (the thing that
+            # decides whether a platform blip reds main) validated by nothing until the
+            # next cron. Pinning the file whose guard you are relying on is the point.
+            "python3 scripts/gh_retry.py --self-test",
+            "python3 scripts/rearm-sweeper.py --self-test",
+            "python3 scripts/auto-arm.py --self-test",
+            "python3 scripts/tests/test_arm_capability_wiring.py",
         ):
             self.assertIn(
-                needle,
-                blob,
-                f"docs-quality.yml must run `{needle}` in a GATING job",
+                command,
+                commands,
+                f"docs-quality.yml must run `{command}` as a complete command line in a "
+                "GATING job (found gating commands: "
+                f"{sorted(c for c in commands if 'self-test' in c or 'test_arm' in c)})",
             )
 
 
@@ -598,7 +621,7 @@ class TestMissingReleaseGuardArmsNothing(unittest.TestCase):
     A missing `gh_retry.py` costs RETRIES and must never cost the arm (#3776). A missing
     `release_pr_guard.py` costs the ARM ITSELF and must: without it the sweep cannot prove
     any candidate is not the release-plz Release PR, and arming that PR cuts a `v*` tag
-    and — once `publish = true` — publishes 17 crates to crates.io, irreversibly. A missed
+    and — once `publish = true` — publishes 37 crates to crates.io, irreversibly. A missed
     sweep is covered by the next cron; an unpublishable version is covered by nothing.
 
     These are the tests that go red if someone 'fixes' the fail-closed stub into a
@@ -1013,6 +1036,845 @@ class TestEventModeIsPerPr(unittest.TestCase):
             "policy decision about what may block a merge",
         ):
             self.assertIn(needle, source, f"auto-arm.py must keep {needle!r}")
+
+
+
+# --------------------------------------------------------------------------------------
+# [OPUS-5] #4548 — THE STUCK-ARM PHASE, pinned at the YAML SEAM.
+#
+# Measured here repeatedly: every uncaught mutant in this repo's recent rounds lived in the
+# workflow, not the Python. A wiring assertion once stayed green because the step's COMMENT
+# named the file it searched for; a `paths:`-filtered workflow never ran the suite guarding
+# its own headline mutant. So the pins below assert against the PARSED document (yaml drops
+# comments structurally — proved by `test_the_harness_is_comment_blind`) and against the
+# SCRIPT's real argparse surface, so deleting either half reds.
+STUCK_PHASE_FLAG = "--phase stuck-arm"
+STUCK_CAP_FLAG = "--max-stuck-actions"
+
+
+class TestStuckArmWiring(unittest.TestCase):
+    """The stuck-arm sweep must be REACHED, BOUNDED, and PERMITTED — or it is decoration."""
+
+    def setUp(self) -> None:
+        self.document = load(REARM_YML)
+        self.steps = steps_of(self.document)
+
+    def _stuck_indexes(self) -> list[int]:
+        return [
+            index
+            for index, step in enumerate(self.steps)
+            if STUCK_PHASE_FLAG in " ".join(run_of(step).split())
+        ]
+
+    def test_the_harness_is_comment_blind(self) -> None:
+        """The tripwire for the measured false-green: a COMMENT must not satisfy a pin."""
+        commented = yaml.safe_load(
+            "jobs:\n  j:\n    steps:\n"
+            f"      # runs rearm-sweeper.py {STUCK_PHASE_FLAG} {STUCK_CAP_FLAG} 5\n"
+            "      - name: decoy\n        run: echo nothing-here\n"
+        )
+        blob = "\n".join(run_of(step) for step in steps_of(commented))
+        self.assertNotIn(STUCK_PHASE_FLAG, blob)
+        self.assertNotIn(STUCK_CAP_FLAG, blob)
+        # ...and the same token in a real `run:` IS seen, so the check is not vacuous.
+        live = yaml.safe_load(
+            "jobs:\n  j:\n    steps:\n"
+            f"      - name: real\n        run: python3 x.py {STUCK_PHASE_FLAG}\n"
+        )
+        self.assertIn(
+            STUCK_PHASE_FLAG, "\n".join(run_of(step) for step in steps_of(live))
+        )
+
+    def test_the_stuck_arm_phase_is_actually_invoked_exactly_once(self) -> None:
+        indexes = self._stuck_indexes()
+        self.assertEqual(
+            len(indexes),
+            1,
+            f"rearm-sweeper.yml must run `{STUCK_PHASE_FLAG}` exactly once; a phase that "
+            "is never invoked classifies nothing, and two invocations double-act",
+        )
+        self.assertIn(
+            "scripts/rearm-sweeper.py",
+            run_of(self.steps[indexes[0]]),
+            "the stuck-arm flag must be passed to rearm-sweeper.py itself",
+        )
+
+    def test_it_runs_after_the_rearm_step(self) -> None:
+        """Order is policy: a PR re-armed seconds ago must be inside the grace window."""
+        stuck = self._stuck_indexes()[0]
+        rearm = [
+            index
+            for index, step in enumerate(self.steps)
+            if "scripts/rearm-sweeper.py" in run_of(step)
+            and PROBE_FLAG not in run_of(step)
+            and "--self-test" not in run_of(step)
+            and STUCK_PHASE_FLAG not in " ".join(run_of(step).split())
+        ]
+        self.assertTrue(rearm, "the re-arm step must still exist")
+        self.assertGreater(
+            stuck, max(rearm), "the stuck-arm phase must run AFTER the re-arm phase"
+        )
+
+    def test_the_per_tick_bound_is_actually_passed(self) -> None:
+        """A congestion bound that is never supplied is not a bound.
+
+        This repo has a measured congestion-collapse mode, so the cap has to be on the
+        command line, not merely available as a default.
+        """
+        run = " ".join(run_of(self.steps[self._stuck_indexes()[0]]).split())
+        self.assertIn(STUCK_CAP_FLAG, run)
+        value = run.split(STUCK_CAP_FLAG, 1)[1].split()[0]
+        self.assertTrue(value.isdigit(), f"{STUCK_CAP_FLAG} needs a numeric cap, got {value!r}")
+        self.assertGreaterEqual(int(value), 1)
+        self.assertLessEqual(
+            int(value), 10, "a per-tick cap above 10 re-opens the congestion-collapse mode"
+        )
+
+    def test_the_live_step_is_not_stuck_in_dry_run(self) -> None:
+        """A sweep permanently in --dry-run reports beautifully and repairs nothing.
+
+        The flag exists so the census can be taken against the live repository before
+        remediation is switched on; leaving it in the scheduled step would recreate exactly
+        the invisible-no-exit state this phase was built to remove.
+        """
+        run = " ".join(run_of(self.steps[self._stuck_indexes()[0]]).split())
+        self.assertNotIn("--dry-run", run)
+
+    def test_it_uses_the_same_token_expression_as_the_probe(self) -> None:
+        stuck = self.steps[self._stuck_indexes()[0]]
+        probe = next(
+            step for step in self.steps if PROBE_FLAG in run_of(step)
+        )
+        self.assertEqual(
+            (stuck.get("env") or {}).get("GH_TOKEN"),
+            (probe.get("env") or {}).get("GH_TOKEN"),
+            "a stuck-arm phase on a different token than the probe attests capability it "
+            "does not have",
+        )
+
+    def test_the_scopes_its_mutations_need_are_granted(self) -> None:
+        """Classify-then-403 is the failure mode this pin exists for.
+
+        [GPT-6 Astra] #6438 keeps existing workflow grants. The preferred App's
+        Actions grant governs reruns; the fallback has no Actions write and fails
+        closed. These declarations never elevate the minted installation token.
+        """
+        permissions = self.document.get("permissions") or {}
+        for scope in ("contents", "pull-requests", "checks", "issues"):
+            self.assertEqual(
+                permissions.get(scope),
+                "write",
+                f"the stuck-arm phase cannot remediate without `{scope}: write`",
+            )
+
+
+# --------------------------------------------------------------------------------------
+# [OPUS-5] #4642 — THE YAML SEAM ITSELF, lifted from #4400's docs-quality guard (which was
+# hardened into this exact shape after an earlier round found `|| true` on either leg
+# surviving every other pin in its class).
+#
+# Everything above this line tests the Python, or tests that the YAML NAMES the Python.
+# Neither can see the seam that decides whether the Python RUNS AT ALL. RE-DERIVED here by
+# applying each shape to the real rearm-sweeper.yml and running the suite as it stood
+# before this class existed — all four survived GREEN:
+#   1. `continue-on-error: true` on the JOB
+#   2. `continue-on-error: true` on the STEP
+#   3. `if: false` on the step
+#   4. `|| true` appended to the run line
+# A fifth, `if: false` on the JOB, falls out of the same read and is pinned with them.
+#
+# The reason is structural, and it is this estate's most-repeated defect class: a step
+# cannot red its own neutering (`continue-on-error` discards the exit status that would
+# report it) and a job cannot red its own skipping (`ci_summary_gate._PASSING` is
+# `("success", "skipped", "neutral")`). Something OUTSIDE the run has to witness that it
+# ran — so these checks read the PARSED document and never any result of executing it.
+# This workflow is not itself a gate (schedule / workflow_dispatch only), which makes the
+# seam MORE dangerous, not less: a neutered cron produces no red anywhere, it just
+# silently stops sweeping.
+#
+# `seam_findings` is a pure function of the document precisely so that
+# `test_the_guard_reds_on_each_swallow_shape` can feed it a MUTATED copy of the real
+# workflow and require the corresponding finding. A seam guard nobody has watched go red
+# is the thing a seam guard exists to prevent.
+REARM_SCRIPT = "scripts/rearm-sweeper.py"
+
+# Every `if:` permitted on a step that runs the sweep, keyed by step name. FAIL-CLOSED in
+# both directions: a step that runs the sweep must appear here, and its `if:` must match
+# EXACTLY. So `if: false`, a plausible-looking `github.event_name` guard, and a brand-new
+# unreviewed step all red, rather than inheriting silence from a permissive predicate.
+SEAM_STEP_IFS: dict[str, str | None] = {
+    "Self-test policy": None,
+    "Probe arm capability (one loud error, never per-PR)": None,
+    "Re-arm dropped reviewed PRs": None,
+    # #4642: the ONE vetted condition. Neither clause can be false while the sweep is
+    # needed — see the rationale block at the step itself. `always()` is deliberately NOT
+    # what is written there: this step mutates the repository.
+    "Sweep armed-but-unmergeable PRs to a counted terminal state": (
+        "${{ !cancelled() && steps.probe.outcome == 'success' }}"
+    ),
+}
+
+# A line invoking the sweep must BE the whole command. `||`, `;`, `|` and `&` each decide
+# the exit status the runner sees, so none may follow it — the anchored bare-call shape
+# test_banned_terminology.py uses, and the one a substring match cannot enforce
+# (`… --self-test || true` still "contains" `… --self-test`).
+BARE_SWEEP_LINE = re.compile(r"^[ \t]*python3 +" + re.escape(REARM_SCRIPT) + r"[^|;&]*$")
+
+
+class Finding(NamedTuple):
+    kind: str
+    message: str
+
+
+def _invokes_sweep(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("python3") and REARM_SCRIPT in stripped
+
+
+def sweep_steps(document: dict) -> list[tuple[str, dict, dict]]:
+    """(job_id, job, step) for every step whose `run` invokes the sweep script."""
+    return [
+        (job_id, job, step)
+        for job_id, job in (document.get("jobs") or {}).items()
+        for step in (job.get("steps") or [])
+        if any(_invokes_sweep(line) for line in run_of(step).splitlines())
+    ]
+
+
+def seam_findings(document: dict) -> list[Finding]:
+    """Every way this document could run the sweep and not report its failure."""
+    hosts = sweep_steps(document)
+    if not hosts:
+        return [Finding("absent", f"no step runs {REARM_SCRIPT} at all")]
+    findings: list[Finding] = []
+    for job_id, job, step in hosts:
+        name = str(step.get("name") or "<unnamed>")
+        if job.get("continue-on-error") not in (None, False):
+            findings.append(Finding(
+                "job-continue-on-error",
+                f"job {job_id!r} hosting {name!r} is continue-on-error, so a failed sweep "
+                "reports the job green",
+            ))
+        if step.get("continue-on-error") not in (None, False):
+            findings.append(Finding(
+                "step-continue-on-error",
+                f"step {name!r} is continue-on-error, so it cannot red its own failure",
+            ))
+        if job.get("if") is not None:
+            findings.append(Finding(
+                "if",
+                f"job {job_id!r} hosting {name!r} carries `if: {job.get('if')!r}`; a job "
+                "cannot red its own skipping",
+            ))
+        if name not in SEAM_STEP_IFS:
+            findings.append(Finding(
+                "undeclared",
+                f"step {name!r} runs the sweep but is not declared in SEAM_STEP_IFS — "
+                "decide and record whether it may carry an `if:`",
+            ))
+        elif step.get("if") != SEAM_STEP_IFS[name]:
+            findings.append(Finding(
+                "if",
+                f"step {name!r} carries `if: {step.get('if')!r}`, not the vetted "
+                f"{SEAM_STEP_IFS[name]!r}; an `if:` is the cheapest way to make a sweep "
+                "vacuous, and a skipped step is not a failed one",
+            ))
+        run = run_of(step)
+        for line in run.splitlines():
+            if _invokes_sweep(line) and not BARE_SWEEP_LINE.match(line):
+                findings.append(Finding(
+                    "discard",
+                    f"step {name!r} does not invoke the sweep as a bare command, so its "
+                    f"exit code can be discarded by what follows: {line.strip()!r}",
+                ))
+        if "set +e" in run:
+            findings.append(Finding(
+                "discard", f"step {name!r} disables errexit with `set +e`"
+            ))
+    return findings
+
+
+class TestTheYamlSeamIsGating(unittest.TestCase):
+    """The wiring above is only worth anything if a failure of it can be seen."""
+
+    def setUp(self) -> None:
+        self.document = load(REARM_YML)
+
+    def _kinds(self, *kinds: str) -> list[str]:
+        return [f.message for f in seam_findings(self.document) if f.kind in kinds]
+
+    def test_the_sweep_is_reached_by_at_least_one_step(self) -> None:
+        self.assertTrue(sweep_steps(self.document), f"nothing runs {REARM_SCRIPT}")
+
+    def test_no_sweep_step_can_swallow_its_own_failure(self) -> None:
+        self.assertEqual(self._kinds("job-continue-on-error", "step-continue-on-error"), [])
+
+    def test_no_sweep_step_is_conditionally_skipped_by_an_unvetted_if(self) -> None:
+        self.assertEqual(self._kinds("if", "undeclared"), [])
+
+    def test_no_sweep_step_discards_its_exit_code(self) -> None:
+        self.assertEqual(self._kinds("discard"), [])
+
+    def test_every_declared_step_still_exists(self) -> None:
+        """A rename must not leave a dead allowance behind, silently vetting nothing."""
+        live = {str(step.get("name")) for _job_id, _job, step in sweep_steps(self.document)}
+        self.assertEqual(
+            sorted(set(SEAM_STEP_IFS) - live),
+            [],
+            "SEAM_STEP_IFS names steps that rearm-sweeper.yml no longer has",
+        )
+
+    def test_the_stuck_arm_terminal_is_not_skipped_when_its_predecessor_fails(self) -> None:
+        """#4642's measured gap: 5 of the 200 most recent runs failed, and both retained
+        failures were the step directly in FRONT of this one. With no `if:`, GitHub skips
+        a step whenever an earlier one failed — so the terminal was unavailable exactly on
+        the ticks that needed it. `!cancelled()` is what makes a failed predecessor still
+        run it; the probe clause is what keeps the "fail loud once" contract."""
+        _job_id, _job, step = sweep_steps(self.document)[-1]
+        condition = str(step.get("if") or "")
+        self.assertIn("!cancelled()", condition)
+        self.assertNotIn("success()", condition)
+        self.assertIn(
+            "steps.probe.outcome",
+            condition,
+            "the probe clause must read `outcome` (the pre-continue-on-error result), so "
+            "it cannot be laundered green by marking the probe continue-on-error",
+        )
+        probe = next(
+            step for _j, _job, step in sweep_steps(self.document)
+            if PROBE_FLAG in run_of(step)
+        )
+        self.assertEqual(
+            probe.get("id"), "probe", "the `if:` above references a step id that must exist"
+        )
+
+    def test_the_guard_reds_on_each_swallow_shape(self) -> None:
+        """THE VACUITY GUARD. Each mutation is applied to a deep copy of the REAL workflow
+        and must produce a finding of its OWN kind — not merely some finding, which would
+        pass even if one check were doing all the work."""
+        def stuck(document: dict) -> tuple[dict, dict]:
+            _job_id, job, step = sweep_steps(document)[-1]
+            return job, step
+
+        mutants: tuple[tuple[str, str, object], ...] = (
+            ("job-continue-on-error", "continue-on-error on the JOB",
+             lambda job, step: job.__setitem__("continue-on-error", True)),
+            ("step-continue-on-error", "continue-on-error on the STEP",
+             lambda job, step: step.__setitem__("continue-on-error", True)),
+            ("if", "`if: false` on the step",
+             lambda job, step: step.__setitem__("if", False)),
+            ("if", "a plausible-looking event guard on the step",
+             lambda job, step: step.__setitem__("if", "github.event_name == 'schedule'")),
+            ("if", "`if: false` on the job",
+             lambda job, step: job.__setitem__("if", False)),
+            ("discard", "`|| true` appended to the run line",
+             lambda job, step: step.__setitem__("run", run_of(step) + " || true")),
+            ("discard", "`set +e` before the invocation",
+             lambda job, step: step.__setitem__("run", "set +e\n" + run_of(step))),
+            ("undeclared", "an undeclared new step running the sweep",
+             lambda job, step: job["steps"].append(
+                 {"name": "sneak", "run": f"python3 {REARM_SCRIPT} --phase stuck-arm"})),
+        )
+        for kind, label, mutate in mutants:
+            with self.subTest(shape=label):
+                document = copy.deepcopy(self.document)
+                mutate(*stuck(document))
+                self.assertIn(
+                    kind,
+                    [f.kind for f in seam_findings(document)],
+                    f"{label} survives the seam guard",
+                )
+        # That the guard is not simply always-red is what the three tests above assert,
+        # against the unmutated document — so it is deliberately not repeated here.
+
+
+class TestStuckArmScriptContract(unittest.TestCase):
+    """Cross-file pin: the YAML above is only meaningful if the SCRIPT still honours it."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.rearm = load_module(REARM_PY, "rearm_sweeper_stuck_under_test")
+
+    def test_the_script_accepts_the_flags_the_workflow_passes(self) -> None:
+        source = REARM_PY.read_text(encoding="utf-8")
+        for needle in ('"--phase"', '"stuck-arm"', '"--max-stuck-actions"'):
+            self.assertIn(needle, source, f"rearm-sweeper.py must define {needle}")
+        self.assertTrue(hasattr(self.rearm, "StuckArmSweeper"))
+        self.assertTrue(hasattr(self.rearm, "stuck_arm_exit"))
+
+    def test_the_stuck_self_test_is_reachable_from_dash_dash_self_test(self) -> None:
+        """THE VACUITY GUARD.
+
+        Everything else in this file assumes the stuck-arm suite runs. If `self_test()`
+        stops calling `stuck_self_test()`, that whole suite becomes dead code that still
+        reports PASS — the exact shape of a green-but-vacuous gate. Asserted on the AST so
+        a mention in a comment or a docstring cannot satisfy it.
+        """
+        tree = ast.parse(REARM_PY.read_text(encoding="utf-8"))
+        self_test = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.FunctionDef) and node.name == "self_test"
+        )
+        called = {
+            node.func.id
+            for node in ast.walk(self_test)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        }
+        self.assertIn(
+            "stuck_self_test",
+            called,
+            "self_test() must CALL stuck_self_test(); otherwise the stuck-arm suite never "
+            "runs and every pin in this file is vacuous",
+        )
+
+    def test_the_two_gate_names_are_distinct_and_matched_exactly(self) -> None:
+        """registry #761 in miniature: `gate` is a strict prefix of `gate, draft-tier`."""
+        self.assertNotEqual(self.rearm.GATE_CHECK_NAME, self.rearm.DRAFT_GATE_CHECK_NAME)
+        self.assertTrue(
+            self.rearm.DRAFT_GATE_CHECK_NAME.startswith(self.rearm.GATE_CHECK_NAME)
+        )
+        pages = [
+            {
+                "total_count": 1,
+                "check_runs": [
+                    {
+                        "name": self.rearm.DRAFT_GATE_CHECK_NAME,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "started_at": "2026-07-27T00:00:00Z",
+                        "id": 1,
+                    }
+                ],
+            }
+        ]
+        self.assertEqual(
+            self.rearm.resolve_gate(pages, is_draft=False), self.rearm.GATE_MISSING
+        )
+        self.assertEqual(
+            self.rearm.resolve_gate(pages, is_draft=True), self.rearm.GATE_SUCCESS
+        )
+
+    def test_every_class_is_routed(self) -> None:
+        """The enum is closed in BOTH directions — no class without an action."""
+        actions = self.rearm.CLASS_ACTIONS
+        self.assertTrue(actions)
+        self.assertEqual(
+            set(actions.values()) - {
+                self.rearm.ACTION_NONE, self.rearm.ACTION_PARK,
+                self.rearm.ACTION_ROUTE_FIX, self.rearm.ACTION_REBASE,
+                self.rearm.ACTION_RETRIGGER,
+            },
+            set(),
+        )
+
+
+
+# [GPT-6 Astra] #6438: exercise the production rerun path with distinct server IDs.
+# The existing workflow runs THIS suite; these are not an uncalled fixture appendix.
+class ActionsRerunFixture:
+    def __init__(self, module):
+        self.m = module
+        self.clock = module._iso_epoch("2026-09-06T12:00:00Z")
+        self.viewer = {"login": "sparq-orchestrator[bot]"}
+        # [GPT-6 Astra] Verified live: these APIs share a node id, not login spelling.
+        self.actor = dict(id="BOT_4300853", login="sparq-orchestrator", __typename="Bot")
+        self.rest_actor = dict(login=self.viewer["login"], node_id=self.actor["id"], type="Bot")
+        self.raw = module.live_pr(6360, labels=("review:pass",), head="a" * 40)
+        self.check = dict(module.check_run("gate", "cancelled", ident=101),
+            head_sha="a" * 40, app={"slug": "github-actions"},
+            details_url="https://github.com/sparq-org/sparq/actions/runs/303/job/202")
+        self.run = dict(id=303, workflow_id=404, run_attempt=1, event="pull_request",
+            path=".github/workflows/ci-summary.yml", status="completed", conclusion="cancelled",
+            head_sha="a" * 40, repository={"full_name": "sparq-org/sparq"},
+            pull_requests=[{"number": 6360, "head": {"sha": "a" * 40}}])
+        self.job = dict(id=202, run_id=303, head_sha="a" * 40, name="gate",
+            status="completed", conclusion="cancelled",
+            check_run_url="https://api.github.com/repos/sparq-org/sparq/check-runs/101")
+        self.comments = []
+        self.calls = []
+        self.after_claim = lambda: None
+        self.claim_reply = None
+        self.post_error = False
+        self.history_extra = 0
+        self.history_truncated = False
+        self.latest_extra = []
+        self.jobs_extra = 0
+        self.logs = []
+        self.sweeper = self.new_sweeper()
+        self.original = self.sweeper.live_pull(6360)
+        self.calls.clear()
+
+    def new_sweeper(self):
+        return self.m.StuckArmSweeper("sparq-org/sparq", "main", gh=self,
+            log=self.logs.append, now=lambda: self.clock)
+
+    def history_comments(self, query):
+        # [GPT-6 Astra] #6462: model the field-only Actor/Bot selection used here,
+        # not a general GraphQL parser. These fields were checked by live schema
+        # introspection; fixtures must not return an unrequested authenticated id.
+        actor_fields = {"avatarUrl", "login", "resourcePath", "url", "__typename"}
+        bot_fields = actor_fields | {"createdAt", "databaseId", "id", "updatedAt"}
+        start = query.index("{", query.index("author")) + 1
+        depth, end = 1, start
+        while depth:
+            char = query[end]
+            depth += (char == "{") - (char == "}")
+            end += 1
+        selection = query[start:end - 1]
+        fragment = r"\.\.\.\s+on\s+(\w+)\s*\{([^{}]*)\}"
+        fragments = re.findall(fragment, selection)
+        common = set(re.sub(fragment, "", selection).split())
+        if common - actor_fields:
+            raise self.m.GhError("Field does not exist on type Actor")
+        for kind, fields in fragments:
+            if kind != "Bot" or set(fields.split()) - bot_fields:
+                raise self.m.GhError("Unsupported concrete actor selection")
+        comments = copy.deepcopy(self.comments)
+        for comment in comments:
+            author = comment.get("author")
+            if isinstance(author, dict):
+                selected = common.copy()
+                for kind, fields in fragments:
+                    if author.get("__typename") == kind:
+                        selected.update(fields.split())
+                comment["author"] = {key: value for key, value in author.items() if key in selected}
+        return comments
+
+    def __call__(self, argv):
+        self.calls.append(list(argv))
+        if argv[:2] == ["pr", "list"]:
+            return json.dumps([self.raw])
+        if argv[:2] == ["api", "graphql"]:
+            query = next(x for x in argv if x.startswith("query="))
+            if "pullRequests(states:OPEN)" in query:
+                return json.dumps({"data": {"repository": {"pullRequests": {"totalCount": 1}}}})
+            if "viewer{" in query:
+                return json.dumps({"data": {"viewer": self.viewer, "repository": {"pullRequest": {
+                    "comments": {"totalCount": len(self.comments) + self.history_extra,
+                        "pageInfo": {"hasPreviousPage": self.history_truncated},
+                        "nodes": self.history_comments(query)}}}}})
+            return json.dumps({"data": {"repository": {"pullRequest": self.raw}}})
+        if argv[:3] == ["api", "-X", "POST"]:
+            if argv[3].endswith("/comments"):
+                body = next(x.removeprefix("body=") for x in argv if x.startswith("body="))
+                self.comments.append(dict(databaseId=505, body=body, author=copy.deepcopy(self.actor)))
+                self.raw["updatedAt"] = "2026-09-06T12:00:00Z"
+                self.after_claim()
+                return self.claim_reply if self.claim_reply is not None else json.dumps({"id": 505})
+            if argv[3] == "repos/sparq-org/sparq/actions/jobs/202/rerun":
+                if self.post_error:
+                    raise self.m.GhError("Resource not accessible by integration (HTTP 403)")
+                return "{}"
+            raise AssertionError(f"unexpected mutation: {argv}")
+        path = argv[-1]
+        if path == f"users/{self.viewer['login']}":
+            return json.dumps(self.rest_actor)
+        if "/commits/" in path:
+            return json.dumps(self.m.check_pages([self.check]))
+        if "/actions/workflows/ci-summary.yml/runs?" in path:
+            rows = [self.run] + self.latest_extra
+            return json.dumps([{"total_count": len(rows), "workflow_runs": rows}])
+        if "/attempts/1/jobs?" in path:
+            return json.dumps([{"total_count": 1 + self.jobs_extra, "jobs": [self.job]}])
+        if path == "repos/sparq-org/sparq/check-runs/101":
+            return json.dumps(self.check)
+        if path == "repos/sparq-org/sparq/actions/runs/303":
+            return json.dumps(self.run)
+        raise AssertionError(f"unexpected read: {argv}")
+
+    def posts(self):
+        return [c for c in self.calls if c[:3] == ["api", "-X", "POST"]]
+
+    def reruns(self):
+        return [c for c in self.posts() if c[3].endswith("/rerun")]
+
+    def drive(self):
+        self.sweeper.retrigger(self.original, 101, "fixture")
+
+
+class TestCancelledActionsRecovery(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load_module(REARM_PY, "rerun_rearm")
+
+    def setUp(self):
+        def poison(*args, **kwargs):
+            raise AssertionError("unexpected process/network access in rerun fixture")
+        for target, name in ((subprocess, "run"), (subprocess, "Popen"),
+                             (socket, "create_connection"), (socket.socket, "connect")):
+            patcher = patch.object(target, name, poison)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.f = ActionsRerunFixture(self.m)
+
+    def denied(self):
+        with self.assertRaises(self.m.GhError):
+            self.f.drive()
+        self.assertEqual(self.f.reruns(), [])
+
+    def test_distinct_check_job_and_run_ids_reach_actions_only(self):
+        self.assertEqual(self.f.sweeper.run(), 0)
+        self.assertEqual([c[3] for c in self.f.posts()], [
+            "repos/sparq-org/sparq/issues/6360/comments",
+            "repos/sparq-org/sparq/actions/jobs/202/rerun"])
+        claim = self.m.parse_rerun_claim(self.f.comments[0]["body"])
+        self.assertEqual((claim["check"], claim["job"], claim["run"], claim["attempt"]), (101, 202, 303, 1))
+        self.assertFalse(any("/rerequest" in arg for call in self.f.calls for arg in call))
+
+    def test_actor_id_selection_is_rejected_before_any_mutation(self):
+        # Keep an invalid direct selection realistic even when its field is last.
+        bad = self.m.RERUN_HISTORY_QUERY.replace("... on Bot{id}", "id")
+        self.assertNotEqual(bad, self.m.RERUN_HISTORY_QUERY)
+        with patch.object(self.m, "RERUN_HISTORY_QUERY", bad):
+            self.denied()
+        self.assertEqual(self.f.posts(), [])
+
+    def test_real_bot_login_forms_bind_to_the_same_authenticated_node(self):
+        self.assertEqual(self.f.viewer["login"], "sparq-orchestrator[bot]")
+        self.assertEqual(self.f.actor["login"], "sparq-orchestrator")
+        self.assertEqual(self.f.rest_actor["node_id"], self.f.actor["id"])
+        self.f.drive()
+        self.assertEqual(len(self.f.reruns()), 1)
+
+    def test_unverified_rest_identity_is_refused_before_claiming(self):
+        for field, value in (("login", "someone[bot]"), ("node_id", ""), ("type", "User")):
+            with self.subTest(field=field):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.rest_actor[field] = value
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_unrequested_bot_id_cannot_authenticate_posted_claim(self):
+        missing_id = self.m.RERUN_HISTORY_QUERY.replace("... on Bot{id}", "")
+        self.assertNotEqual(missing_id, self.m.RERUN_HISTORY_QUERY)
+        with patch.object(self.m, "RERUN_HISTORY_QUERY", missing_id):
+            self.denied()
+        self.assertEqual(len(self.f.posts()), 1)  # Claim only; no Actions rerun.
+
+    def test_fallback_identity_is_refused_before_any_claim_or_rerun(self):
+        # [GPT-6 Astra] Opus B1: valid bot metadata cannot grant the explicitly
+        # unprivileged fallback a claim. Keep the real App happy path above.
+        self.f.viewer = {"login": "github-actions[bot]"}
+        self.f.actor = dict(id="BOT_ACTIONS", login="github-actions[bot]", __typename="Bot")
+        self.f.post_error = True  # model the fallback's known Actions denial
+        self.assertEqual(self.f.sweeper.run(), 1)
+        self.assertEqual(self.f.posts(), [])
+        self.assertEqual(self.f.comments, [])
+        self.assertTrue(any("github-actions[bot]" in line and "no actions:write" in line
+                            for line in self.f.logs), self.f.logs)
+
+    def test_rerun_claim_cannot_shadow_or_satisfy_a_park_receipt(self):
+        # [GPT-6 Astra] Opus B2: exercise the actual park parser/evaluator, with
+        # a new claim appearing AFTER the park in a complete comment history.
+        park = self.m.stuck_comment(self.f.original, "gate-failed", self.m.GATE_FAILURE,
+                                   "fixture park", self.f.clock)
+        self.f.comments = [dict(databaseId=501, body=park, author=self.f.actor)]
+        self.f.drive()
+        claim_body = self.f.comments[-1]["body"]
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.assertNotIn(self.m.STUCK_MARKER, claim_body)
+        self.assertNotIn(self.m.RECEIPT_OPEN, claim_body)
+        self.assertIsNone(self.m.parse_stuck_receipt(claim_body))
+        self.assertIsNone(self.m.parse_rerun_claim(park))
+        expected_park = self.m.parse_stuck_receipt(park)
+        for history in (park + "\n\n" + claim_body, claim_body + "\n\n" + park):
+            selected = self.m.parse_stuck_receipt(history)
+            self.assertEqual(selected, expected_park)
+            self.assertTrue(self.m.unpark_satisfied(selected, self.f.original, self.m.GATE_SUCCESS))
+            self.assertFalse(self.m.unpark_satisfied(selected, self.f.original, self.m.GATE_FAILURE))
+        claim = self.m.parse_rerun_claim(claim_body)
+        self.assertFalse(self.m.unpark_satisfied(claim, self.f.original, self.m.GATE_SUCCESS))
+
+    def test_claim_history_cannot_change_the_existing_rearm_path(self):
+        self.f.drive()
+        claim_history = copy.deepcopy(self.f.comments)
+        for held in (False, True):
+            with self.subTest(held=held):
+                labels = ("review:pass", "needs:user") if held else ("review:pass",)
+                dropped = self.m.fixture(6360, labels=labels, armed=False)
+                dropped["comments"] = {"nodes": claim_history}
+                fake, _messages, outcome = self.m.exercise(dropped)
+                self.assertEqual(outcome.exit_code, 0)
+                self.assertEqual(len(self.m.arm_calls(fake)), 0 if held else 1)
+                # There is no production comment fetch/selector in re-arm; the
+                # separate unpark evaluator remains a human-only tool today.
+                queries = [arg for call in fake.calls for arg in call if arg.startswith("query=")]
+                self.assertFalse(any("comments(" in query for query in queries))
+
+    def test_crlf_claim_readback_preserves_integrity_and_attempt_dedupe(self):
+        def normalize_server_body():
+            self.f.comments[-1]["body"] = self.f.comments[-1]["body"].replace("\n", "\r\n")
+        self.f.after_claim = normalize_server_body
+        self.assertEqual(self.f.sweeper.run(), 0)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.f.clock += 1800
+        self.assertEqual(self.f.new_sweeper().run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.assertEqual(len(self.f.comments), 1)
+
+    def test_changed_head_draft_review_hold_queue_and_grace_never_claim(self):
+        changes = [dict(headRefOid="b" * 40), dict(isDraft=True), dict(state="CLOSED"),
+            dict(autoMergeRequest=None), dict(baseRefName="other"), dict(mergeable="UNKNOWN"),
+            dict(mergeQueueEntry={"id": "queued"}), dict(updatedAt="2026-09-06T12:00:00Z"),
+            dict(labels={"nodes": [], "pageInfo": {"hasNextPage": False}}),
+            dict(labels={"nodes": [{"name": "review:pass"}, {"name": "needs:user"}], "pageInfo": {"hasNextPage": False}}),
+            dict(reviewThreads={"totalCount": 1,"nodes": [{"isResolved": False}], "pageInfo": {"hasNextPage": False}}),
+            dict(labels={"nodes": [{"name":"review:pass"}], "pageInfo":{"hasNextPage":True}}),
+            dict(reviewThreads={"totalCount":0,"nodes":[],"pageInfo":{"hasNextPage":True}})]
+        for change in changes:
+            with self.subTest(change=change):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.raw.update(change)
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_explicit_6049_hold_survives_even_cancelled_metadata(self):
+        self.f.raw["number"] = 6049
+        self.f.original = self.m.replace(self.f.original, number=6049)
+        self.f.run["pull_requests"][0]["number"] = 6049
+        self.denied()
+        self.assertEqual(self.f.posts(), [])
+
+    def test_live_waiting_requested_and_action_required_are_not_cancelled(self):
+        for target in ("check", "job", "run"):
+            for status, conclusion in (("queued",None), ("in_progress",None), ("waiting",None),
+                    ("requested",None), ("completed","action_required"), ("completed","success"),
+                    ("completed","failure"), ("completed","stale")):
+                with self.subTest(target=target, status=status, conclusion=conclusion):
+                    self.f = ActionsRerunFixture(self.m)
+                    getattr(self.f,target).update(status=status,conclusion=conclusion)
+                    self.denied()
+                    self.assertEqual(self.f.posts(), [])
+
+    def test_wrong_app_url_job_run_head_workflow_event_or_attempt(self):
+        cases = [("check", "app", {"slug":"other"}),
+            ("check","details_url","https://github.com/other/repo/actions/runs/303/job/202"),
+            ("check","head_sha","b"*40), ("check","name","gate, draft-tier"),
+            ("job","check_run_url","https://api.github.com/repos/sparq-org/sparq/check-runs/999"),
+            ("job","id",999), ("job","run_id",999), ("job","head_sha","b"*40),
+            ("job","name","other"), ("run","head_sha","b"*40),
+            ("run","path",".github/workflows/other.yml"),
+            ("run","repository",{"full_name":"other/repo"}), ("run","pull_requests",[]),
+            ("run","event","merge_group"), ("run","event","schedule"), ("run","event","workflow_dispatch"),
+            ("run","run_attempt",2), ("run","run_attempt",True)]
+        for target,key,value in cases:
+            with self.subTest(target=target,key=key,value=value):
+                self.f = ActionsRerunFixture(self.m)
+                getattr(self.f,target)[key] = value
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_latest_workflow_supersedes_cancelled_check_and_short_attempt_denies(self):
+        for status,conclusion in (("waiting",None),("completed","cancelled")):
+            self.f = ActionsRerunFixture(self.m)
+            self.f.latest_extra = [dict(self.f.run,id=304,status=status,conclusion=conclusion)]
+            self.denied()
+            self.assertEqual(self.f.posts(), [])
+        self.f = ActionsRerunFixture(self.m)
+        self.f.jobs_extra = 1
+        self.denied()
+        self.assertEqual(self.f.posts(), [])
+
+    def test_stale_metadata_after_claim_prevents_rerun(self):
+        for target,key,value in (("raw","headRefOid","b"*40), ("raw","mergeQueueEntry",{"id":"q"}),
+                ("run","run_attempt",2), ("run","status","waiting"), ("job","status","in_progress"),
+                ("check","conclusion","success"),
+                ("raw","labels",{"nodes":[{"name":"review:needs"}],"pageInfo":{"hasNextPage":False}})):
+            with self.subTest(target=target,key=key):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.after_claim = lambda: getattr(self.f,target).__setitem__(key,value)
+                self.denied()
+                self.assertEqual(len(self.f.posts()), 1)
+
+    def test_claim_blocks_repeat_within_and_across_ticks_after_rejection(self):
+        self.f.post_error = True
+        self.assertEqual(self.f.sweeper.run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.f.clock += 1800  # beyond the comment's grace, same server attempt
+        self.assertEqual(self.f.sweeper.run(), 2)  # same instance retains sticky errors
+        self.assertEqual(self.f.new_sweeper().run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+        self.assertEqual(len(self.f.comments), 1)
+
+    def test_successful_but_not_yet_visible_attempt_stays_claimed(self):
+        self.f.drive()
+        self.f.clock += 1800
+        self.assertEqual(self.f.new_sweeper().run(), 1)
+        self.assertEqual(len(self.f.reruns()), 1)
+
+    def test_receipts_must_be_complete_unquoted_and_authenticated(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        valid_body = self.m.StuckArmSweeper.rerun_claim_body(claim)
+        old_body = self.m.StuckArmSweeper.rerun_claim_body(dict(claim,head="b"*40))
+        for body, author in ((valid_body,dict(self.f.actor,id="OTHER")),
+                (valid_body,dict(self.f.actor,login="someone")),
+                (old_body,dict(self.f.actor,id="OTHER")),
+                (old_body,dict(self.f.actor,login="someone")),
+                (old_body,dict(self.f.actor,__typename="User")),
+                ("> " + valid_body,self.f.actor), ("```\n"+valid_body+"\n```",self.f.actor),
+                (valid_body + "\n",self.f.actor), (valid_body.replace("\n", "\r"),self.f.actor),
+                (old_body.replace('"head":"'+'b'*40+'"','"head":"invalid"'),self.f.actor),
+                (valid_body.replace('"attempt":1','"attempt":"bad"'),self.f.actor),
+                (valid_body.replace('"repo":"sparq-org/sparq"','"repo":"other/repo"'),self.f.actor),
+                (valid_body.replace("-->",""),self.f.actor),
+                (valid_body,self.f.actor)):
+            with self.subTest(body=body,author=author):
+                self.f = ActionsRerunFixture(self.m)
+                self.f.comments=[dict(databaseId=501,body=body,author=author)]
+                self.denied()
+                self.assertEqual(self.f.posts(), [])
+
+    def test_authenticated_receipt_on_an_old_head_does_not_claim_new_head(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        self.f.comments = [dict(databaseId=501,author=self.f.actor,
+            body=self.m.StuckArmSweeper.rerun_claim_body(dict(claim,head="b"*40)))]
+        self.f.drive()
+        self.assertEqual(len(self.f.reruns()),1)
+
+    def test_same_attempt_is_claimed_even_if_job_or_check_id_changes(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        self.f.comments = [dict(databaseId=501,author=self.f.actor,
+            body=self.m.StuckArmSweeper.rerun_claim_body(dict(claim,job=999,check=998)))]
+        self.denied()
+        self.assertEqual(self.f.posts(),[])
+
+    def test_claim_is_not_review_evidence_or_a_verdict_bridge_trigger(self):
+        claim = self.f.sweeper.rerun_target(self.f.original,101)
+        body = self.m.StuckArmSweeper.rerun_claim_body(claim)
+        bridge_tests = load_module(REPO_ROOT / "scripts/tests/test_verdict_bridge.py", "claim_bridge_tests")
+        condition = load(WORKFLOWS / "verdict-bridge.yml")["jobs"]["bridge"]["if"]
+        event = bridge_tests.payload("issue_comment", issue={"number":6360,"pull_request":{}}, comment={"body":body})
+        self.assertFalse(bridge_tests.evaluate_if(condition,event))
+        self.assertIsNone(bridge_tests.vb.trailing_verdict(body))
+        # Positive control: the same production condition admits a real verdict.
+        event["github"]["event"]["comment"]["body"] = "VERDICT: pass"
+        self.assertTrue(bridge_tests.evaluate_if(condition,event))
+
+    def test_truncated_history_or_nonbot_authentication_never_claims(self):
+        for attr,value in (("history_truncated",True),("history_extra",1),
+                ("viewer",{"id":"HUMAN","login":"jeswr","__typename":"User"})):
+            self.f = ActionsRerunFixture(self.m)
+            setattr(self.f,attr,value)
+            self.denied()
+            self.assertEqual(self.f.posts(), [])
+
+    def test_claim_response_or_readback_uncertainty_never_posts_rerun(self):
+        for reply in ("bad-json", "{}", '{"id":"505"}', '{"id":999}'):
+            self.f = ActionsRerunFixture(self.m)
+            self.f.claim_reply=reply
+            self.denied()
+            self.assertEqual(len(self.f.posts()),1)
+
+    def test_per_tick_cap_and_dry_run_preserve_zero_posts(self):
+        self.f.sweeper.limits=self.m.StuckLimits(max_actions=0)
+        self.assertEqual(self.f.sweeper.run(),0)
+        self.assertEqual(self.f.sweeper.deferred,1)
+        self.assertEqual(self.f.posts(),[])
+        self.f.sweeper=self.f.new_sweeper()
+        self.f.sweeper.dry_run=True
+        self.assertEqual(self.f.sweeper.run(),0)
+        self.assertEqual(self.f.posts(),[])
 
 
 if __name__ == "__main__":

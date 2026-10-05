@@ -23,6 +23,17 @@
 #      root cause of the mislabels this tool exists to clean up. Asserted PER RULE
 #      (see TestScopeDiscipline), because the realistic edit changes one rule.
 #
+# and — since #5003 widened the queue from "the parked issues" to "every AREA-LESS
+# open issue" — the two properties that make that widening safe:
+#
+#   5. REACH — the fetch must SEE the never-parked area-less class, and must not
+#      silently truncate. Both defects are invisible from outside: a sweep that
+#      never fetched an issue looks exactly like a sweep with nothing to do
+#      (TestFetchReach).
+#   6. WIDER REACH, IDENTICAL WRITES — an issue that was never parked may only ever
+#      GAIN `area:` labels; the unpark is decided per issue from its own labels
+#      (TestUnparkDiscipline).
+#
 # Run:  python3 scripts/tests/test_triage_area.py
 # (stdlib only; no pytest required — also discoverable by `pytest`.)
 
@@ -31,10 +42,12 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import re
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:  # the parsed-regex API moved in 3.11
     from re import _parser as sre_parser
@@ -161,6 +174,138 @@ TEXT_SCOPED_RULES = frozenset({
 NEUTRAL_TITLE = "Recurring chore: worktree disk-hygiene sweep"
 
 
+class TestTriageAreaDiagnostics(unittest.TestCase):
+    """[GPT-6 Astra] #6468: real routing and the global prewrite failure boundary."""
+
+    DIAGNOSTIC = "triage-area aborts the classification pass on missing area:sparq-wrapper-gen label"
+    GENERATOR = "sparq-wrapper-gen: give the SHACL object-model generator an entry point (build script / CLI)"
+
+    @staticmethod
+    def issue(number, title, *labels, body=""):
+        return {"number": number, "title": title, "body": body,
+                "labels": [{"name": name} for name in labels]}
+
+    def run_main(self, issues, known, *args, apply=True):
+        """Drive the actual CLI, poisoning every unmocked GitHub call."""
+        calls, out, err = [], io.StringIO(), io.StringIO()
+
+        def gh(argv):
+            if argv[:2] != ["issue", "edit"]:
+                raise AssertionError(f"unexpected GitHub call: {argv}")
+            calls.append(list(argv))
+            return ""
+
+        with patch.object(TA, "candidate_issues", return_value=issues), \
+                patch.object(TA, "live_area_labels", return_value=set(known)), \
+                patch.object(TA, "_gh", side_effect=gh), \
+                patch.object(TA, "_sleep") as sleep, \
+                patch.object(sys, "argv", ["triage-area.py", *(["--apply"] if apply else []), *args]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = TA.main()
+        return code, calls, out.getvalue(), err.getvalue(), sleep.call_count
+
+    @staticmethod
+    def records(stderr):
+        return [json.loads(line.removeprefix("UNKNOWN_AREA "))
+                for line in stderr.splitlines() if line.startswith("UNKNOWN_AREA ")]
+
+    def test_captured_titles_and_existing_area(self):
+        self.assertEqual(areas(self.DIAGNOSTIC), ["ci"])
+        self.assertTrue(evidence(self.DIAGNOSTIC).startswith("T1 triage-area:"))
+        for title in ("triage-area.py: identify missing labels", "triage-area"):
+            self.assertEqual(areas(title), ["ci"])
+        self.assertEqual(areas(self.GENERATOR), ["sparq-wrapper-gen"])
+        self.assertEqual(areas("sparq-wrapper: improve generated bindings"), ["sparq-wrapper"])
+        row = TA.plan([self.issue(6468, self.DIAGNOSTIC, "area:ci")], CRATES)[0]
+        self.assertEqual(row[1:], ([], "SKIP already carries an area: label"))
+
+    def test_title_scope_and_t0_priority(self):
+        for title, body in ((NEUTRAL_TITLE, "triage-area: inspect routing"),
+                            ("Investigate triage-area diagnostics", ""),
+                            ("triage-area-other: inspect routing", "")):
+            self.assertEqual(TA.classify(title, body, CRATES), ([], ""))
+        self.assertEqual(TA.classify(self.DIAGNOSTIC, "crate_or_surface: sparq-core", CRATES),
+                         (["sparq-core"], "T0 author-declared crate_or_surface/crates field"))
+
+    def test_rule_precedes_benchmark_and_website_collisions(self):
+        for title in ("triage-area: benchmark the classification pass",
+                      "triage-area: website routing"):
+            got, why = TA.classify(title, "", CRATES)
+            self.assertEqual(got, ["ci"], title)
+            self.assertTrue(why.startswith("T1 triage-area:"), (title, why))
+
+    def test_unknown_later_row_blocks_all_writes_even_outside_budget(self):
+        issues = [self.issue(5016, self.GENERATOR, TA.PARK_LABEL),
+                  self.issue(1, self.DIAGNOSTIC, TA.PARK_LABEL)]
+        for apply, args in ((True, ()), (True, ("--max-writes", "1")),
+                            (True, ("--json",)), (False, ())):
+            code, calls, out, err, sleeps = self.run_main(issues, {"area:ci"}, *args, apply=apply)
+            self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+            self.assertEqual(self.records(err), [{
+                "number": 5016, "label": "area:sparq-wrapper-gen",
+                "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+            self.assertIn("absent from the fetched area-label set (1 area labels", err)
+            self.assertIn("the fetch may be incomplete", err)
+            self.assertIn("Do not create a label based on this failure.", err)
+            self.assertIn("GET /repos/{owner}/{repo}/labels/{url-encoded-name}", err)
+            self.assertIn("a separate reviewed maintenance action", err)
+            self.assertIn("This classifier never creates labels.", err)
+
+    def test_offenders_keep_row_label_tier_association_and_order(self):
+        issues = [self.issue(5016, self.GENERATOR),
+                  self.issue(19, NEUTRAL_TITLE, body="crates: sparq-core + sparq-engine"),
+                  self.issue(6468, self.DIAGNOSTIC)]
+        result = self.run_main(issues, {"area:ci"})
+        self.assertEqual((result[0], result[1], result[4]), (2, [], 0))
+        self.assertEqual(self.records(result[3]), [
+            {"number": 19, "label": "area:sparq-core",
+             "evidence": "T0 author-declared crate_or_surface/crates field"},
+            {"number": 19, "label": "area:sparq-engine",
+             "evidence": "T0 author-declared crate_or_surface/crates field"},
+            {"number": 5016, "label": "area:sparq-wrapper-gen",
+             "evidence": "T2 bd-to-issues.derive_areas (title scope/crate token)"}])
+        self.assertEqual(result, self.run_main(list(reversed(issues)), {"area:ci"}))
+
+    def test_diagnostic_escapes_records_without_dumping_issue_body(self):
+        # A synthetic plan probes serialization only; the preceding tests exercise
+        # real classification. Never execute these strings as workflow commands.
+        why = 'T2 evidence\n::error::forged\r\t"quoted"'
+        label = 'area:missing\nsecond-line'
+        row = self.issue(7, "unprinted title", body="private fixture body")
+        with patch.object(TA, "plan", return_value=[(row, [label], why)]):
+            code, calls, out, err, sleeps = self.run_main([], set())
+        self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+        # Assert line behavior BEFORE decoding: a newline can split a record and
+        # inject a workflow command without adding another UNKNOWN_AREA prefix.
+        self.assertFalse(any(line.startswith("::") for line in err.splitlines()))
+        self.assertEqual(sum(line.startswith("UNKNOWN_AREA ") for line in err.splitlines()), 1)
+        self.assertEqual(self.records(err), [{"number": 7, "label": label, "evidence": why}])
+        self.assertNotIn("private fixture body", err)
+        self.assertNotIn("unprinted title", err)
+
+    def test_supported_label_uses_normal_add_and_unpark_path(self):
+        issues = [self.issue(5016, self.GENERATOR, TA.PARK_LABEL),
+                  self.issue(1, self.DIAGNOSTIC),
+                  self.issue(6468, self.DIAGNOSTIC, "area:ci")]
+        code, calls, _out, err, sleeps = self.run_main(
+            issues, {"area:ci", "area:sparq-wrapper-gen"})
+        self.assertEqual((code, err, sleeps), (0, "", 1))
+        self.assertEqual([c[2] for c in calls], ["1", "5016"])
+        self.assertIn("area:ci", calls[0])
+        self.assertNotIn("--remove-label", calls[0])
+        self.assertEqual(calls[1][-4:], ["--remove-label", TA.PARK_LABEL,
+                                         "--add-label", "area:sparq-wrapper-gen"])
+
+    def test_unrelated_unknown_still_blocks_after_generator_provisioning(self):
+        issues = [self.issue(1, self.GENERATOR),
+                  self.issue(19, NEUTRAL_TITLE, body="crate: sparq-core")]
+        code, calls, out, err, sleeps = self.run_main(issues, {"area:sparq-wrapper-gen"})
+        self.assertEqual((code, calls, out, sleeps), (2, [], "", 0))
+        self.assertEqual(self.records(err), [{
+            "number": 19, "label": "area:sparq-core",
+            "evidence": "T0 author-declared crate_or_surface/crates field"}])
+
+
 class TestFailClosed(unittest.TestCase):
     """No evidence => no label. This is the property the whole design rests on."""
 
@@ -246,7 +391,7 @@ class TestNoDrift(unittest.TestCase):
             {"number": 13, "title": "make sure the pinned overview issue is kept",
              "body": "", "labels": [{"name": TA.PARK_LABEL}]},
         ]
-        for name, stub in (("parked_issues", lambda: issues),
+        for name, stub in (("candidate_issues", lambda: issues),
                            ("live_area_labels", lambda: {"area:sparq-reason-dl"})):
             real = getattr(TA, name)
             setattr(TA, name, stub)
@@ -278,6 +423,362 @@ class TestNoDrift(unittest.TestCase):
                                     {"name": TA.PARK_LABEL}]}], CRATES)
         self.assertEqual(rows[0][1], [])
         self.assertTrue(rows[0][2].startswith("SKIP"))
+
+
+class TestFetchReach(unittest.TestCase):
+    """[OPUS-5] (#5003) The candidate FETCH must SEE the whole area-less population.
+
+    Two independent reach defects, both invisible from the outside — a sweep that
+    never fetched an issue looks exactly like a sweep with nothing to do:
+
+      1. REACH. The fetch was `--label needs:area`, i.e. only the issues triage.py /
+         bd-to-issues.py PARKED. The class that actually blocks dispatch is "no
+         `area:` label", and an issue the event triager never ran on carries neither
+         a status nor a park. #3816 measured 832 open no-area issues against a park
+         an order of magnitude smaller. A label query cannot express the absence of
+         a label, so widening any downstream predicate could not have helped: an
+         issue that is never fetched is never classified.
+      2. TRUNCATION. `gh issue list --limit 1000` stops at the limit and reports
+         nothing. Latent while the queue is under the limit, and it re-arms silently
+         the moment it is not — on a half-hourly cron, where nobody is watching.
+
+    The stub below emulates BOTH `gh` shapes faithfully — `gh api --paginate`
+    exhausts the page chain, `gh api` without it returns one page, `gh issue list
+    --label L --limit N` returns only labelled rows truncated newest-first — so
+    every reverted implementation is EXECUTABLE here and fails on missing ROWS
+    rather than on an unrecognised command line. That is what makes these
+    behavioural guards and not spelling tests.
+    """
+
+    #: One page is 100, so a fetch that forgets `--paginate` returns 100 of these;
+    #: the old `--limit 1000` returns the newest 1000 and drops #1..#200.
+    PARKED = 1200
+    #: Area-less and NEVER PARKED: no `needs:area`, no `status:*`, nothing a label
+    #: query can select on. This is the population the widening exists to reach.
+    NEVER_PARKED = (90001, 90002, 90003)
+    #: Already attributed — a maintainer's decision the sweep must not re-open.
+    HAS_AREA = 90101
+    #: The issues endpoint returns PRs too.
+    PULL_REQUEST = 90201
+
+    def setUp(self):
+        self.corpus = [
+            {"number": n, "title": "DL L4: narrow the RL disjointWith guard",
+             "body": "", "labels": [{"name": TA.PARK_LABEL}]}
+            for n in range(1, self.PARKED + 1)
+        ]
+        self.corpus += [
+            {"number": n, "title": "DL L4: narrow the RL disjointWith guard",
+             "body": "", "labels": [{"name": "priority:P2"}]}
+            for n in self.NEVER_PARKED
+        ]
+        self.corpus.append({"number": self.HAS_AREA, "title": "DL L4: whatever",
+                            "body": "", "labels": [{"name": "area:sparq-core"}]})
+        self.corpus.append({"number": self.PULL_REQUEST, "title": "DL L4: a PR",
+                            "body": "", "labels": [{"name": TA.PARK_LABEL}],
+                            "pull_request": {"url": "x"}})
+        self.calls = []
+        real = TA._gh
+        TA._gh = self._stub_gh
+        self.addCleanup(lambda: setattr(TA, "_gh", real))
+
+    def _stub_gh(self, args):
+        """Faithful emulator of both CLI shapes — see the class docstring."""
+        self.calls.append(list(args))
+        if args[0] == "api":
+            rows = list(self.corpus)
+            pages = [rows[i:i + 100] for i in range(0, len(rows), 100)] or [[]]
+            return json.dumps(pages if "--paginate" in args else pages[:1])
+        if args[0:2] == ["issue", "list"]:
+            # `gh issue list` really does exclude PRs, unlike the REST issues
+            # endpoint — model that, so the PR assertion below is testing THIS
+            # implementation's filter and not an artifact of the stub.
+            label = args[args.index("--label") + 1]
+            rows = [r for r in self.corpus if "pull_request" not in r
+                    and label in {lb["name"] for lb in r["labels"]}]
+            limit = int(args[args.index("--limit") + 1]) if "--limit" in args else len(rows)
+            return json.dumps(sorted(rows, key=lambda r: -r["number"])[:limit])
+        raise AssertionError(f"unexpected gh invocation: {args}")
+
+    def test_a_never_parked_area_less_issue_reaches_the_queue(self):
+        """THE REACH GUARD. A `--label needs:area` fetch cannot return an issue that
+        carries no park, so reverting the fetch drops all of NEVER_PARKED here."""
+        nums = {it["number"] for it in TA.candidate_issues()}
+        self.assertEqual([n for n in self.NEVER_PARKED if n in nums],
+                         list(self.NEVER_PARKED),
+                         "issues that were never parked are unreachable — the sweep "
+                         "still only sees the park, not the area-less class")
+
+    def test_the_fetch_does_not_silently_truncate(self):
+        """THE TRUNCATION GUARD. `--limit 1000` keeps the newest 1000 and reports
+        nothing about the rest; a single page keeps 100. Both lose the OLDEST rows,
+        which on a work-queue sweep are the ones that have waited longest."""
+        nums = sorted(it["number"] for it in TA.candidate_issues())
+        self.assertEqual(len(nums), self.PARKED + len(self.NEVER_PARKED))
+        self.assertEqual(nums[:3], [1, 2, 3],
+                         "the oldest issues were dropped by a limited fetch")
+        self.assertEqual(len(set(nums)), len(nums), "an issue was fetched twice")
+
+    def test_the_fetch_uses_cursor_pagination(self):
+        TA.candidate_issues()
+        self.assertTrue(self.calls, "candidate_issues() made no gh call at all")
+        self.assertTrue(all(c[0] == "api" and "--paginate" in c for c in self.calls),
+                        f"the fetch used a fixed-limit call: {self.calls}")
+
+    def test_an_already_attributed_issue_is_not_re_fetched(self):
+        """Widening the reach must not re-open settled work: an issue that already
+        carries an `area:` is the maintainer's/author's decision, not ours."""
+        self.assertNotIn(self.HAS_AREA, {it["number"] for it in TA.candidate_issues()})
+
+    def test_pull_requests_are_not_candidates(self):
+        """The issues endpoint returns PRs; a PR has no dispatch partition, so
+        labelling one would be pure noise on the board."""
+        self.assertNotIn(self.PULL_REQUEST,
+                         {it["number"] for it in TA.candidate_issues()})
+
+    def test_a_runaway_snapshot_fails_closed(self):
+        """The ceiling is the other half of dropping the limit: pagination to
+        exhaustion must still refuse to half-report an implausible snapshot rather
+        than quietly editing thousands of live issues."""
+        with self.assertRaises(SystemExit):
+            TA.open_issues(ceiling=10)
+
+
+class TestUnparkDiscipline(unittest.TestCase):
+    """[OPUS-5] (#5003) Wider reach, IDENTICAL writes.
+
+    Most rows in the widened queue were never parked. Such an issue must only ever
+    GAIN `area:` labels: emitting `--remove-label needs:area` for it is a write the
+    sweep has no business making, and it reports a park-clearing that never
+    happened. The park half of the no-drift invariant (TestNoDrift) is unchanged for
+    the issues that ARE parked."""
+
+    def _capture_gh(self):
+        calls = []
+        real = TA._gh
+        TA._gh = lambda a: (calls.append(list(a)), "")[1]
+        self.addCleanup(lambda: setattr(TA, "_gh", real))
+        return calls
+
+    def test_a_never_parked_issue_is_not_unparked(self):
+        calls = self._capture_gh()
+        TA.apply_row(31, ["area:sparq-core"], unpark=False)
+        argv = calls[0]
+        self.assertNotIn("--remove-label", argv,
+                         f"the sweep removed a park the issue never had: {argv}")
+        self.assertEqual(argv.count("--add-label"), 1)
+
+    def test_a_parked_issue_still_travels_with_its_unpark(self):
+        calls = self._capture_gh()
+        TA.apply_row(32, ["area:sparq-core"], unpark=True)
+        argv = calls[0]
+        self.assertEqual(argv[argv.index("--remove-label") + 1], TA.PARK_LABEL)
+
+    def test_the_empty_add_guard_holds_in_both_modes(self):
+        """A bare unpark is refused with `unpark=True`; with `unpark=False` there is
+        nothing legitimate to write either, so the same guard must stop it reaching
+        `gh` as a contentless edit."""
+        calls = self._capture_gh()
+        for unpark in (True, False):
+            with self.assertRaises(ValueError):
+                TA.apply_row(4242, [], unpark=unpark)
+        self.assertEqual(calls, [], f"a contentless edit reached gh: {calls}")
+
+    def test_main_decides_the_unpark_per_issue(self):
+        """End-to-end through `main() --apply`: the decision is read from each
+        issue's OWN labels, not from a single flag for the whole sweep."""
+        calls = []
+        real = TA._gh
+        TA._gh = lambda a: (calls.append(list(a)), "")[1]
+        self.addCleanup(lambda: setattr(TA, "_gh", real))
+        issues = [
+            {"number": 41, "title": "DL L4: narrow the RL disjointWith guard",
+             "body": "", "labels": [{"name": TA.PARK_LABEL}]},
+            {"number": 42, "title": "DL L4: narrow the RL disjointWith guard",
+             "body": "", "labels": [{"name": "priority:P2"}]},
+        ]
+        for name, stub in (("candidate_issues", lambda: issues),
+                           ("live_area_labels", lambda: {"area:sparq-reason-dl"}),
+                           # #5448: main() paces its writes; keep this suite hermetic
+                           # (the pacing itself is asserted in TestWriteBudget).
+                           ("_sleep", lambda _s: None)):
+            prev = getattr(TA, name)
+            setattr(TA, name, stub)
+            self.addCleanup(lambda n=name, r=prev: setattr(TA, n, r))
+        real_argv = sys.argv
+        sys.argv = ["triage-area.py", "--apply"]
+        self.addCleanup(lambda: setattr(sys, "argv", real_argv))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(TA.main(), 0)
+
+        edits = {c[2]: c for c in calls if c[:2] == ["issue", "edit"]}
+        self.assertEqual(sorted(edits), ["41", "42"])
+        self.assertIn("--remove-label", edits["41"])
+        self.assertNotIn("--remove-label", edits["42"],
+                         f"main() unparked a never-parked issue: {edits['42']}")
+        for argv in edits.values():
+            self.assertIn("area:sparq-reason-dl", argv)
+
+
+class TestWriteBudget(unittest.TestCase):
+    """[OPUS-5] (#5448) The per-run write budget: bounded, paced, and NEVER SILENT.
+
+    #5003 widened the queue from the `needs:area` park to every area-less open issue.
+    That did not widen what is written per ISSUE, but it widened what is written per
+    RUN: one `gh issue edit` per classified issue, against a queue #3816 counted at 832.
+    GitHub's secondary limit on content-mutating requests (~80/min, ~500/hour) sits in
+    that range, so the first ticks would 403 — self-healing (the sweep is idempotent and
+    the next tick resumes) but red every half hour for hours, which is alert fatigue on
+    the one lane whose value is that a human reads its summary.
+
+    The three properties that make bounding it safe, each invisible from outside:
+
+      1. BOUNDED — at most `--max-writes` mutating calls leave a run.
+      2. NOT SILENT — the deferred tail is printed, counted in the tally line, and kept
+         SEPARATE from the `LEFT` residue. A budget that quietly dropped its tail would
+         look exactly like a tick with less work to do, and would break the one property
+         #3816 added this lane's report for.
+      3. CONVERGENT — the deferral is a deterministic prefix split of the
+         issue-number-ordered plan, and every write removes its issue from the queue, so
+         consecutive ticks drain the backlog monotonically instead of re-deciding it.
+
+    Plus the arithmetic behind the two defaults, which is only checkable if the limits it
+    is derived from are written down (they are, as named constants).
+    """
+
+    WORKFLOW = REPO_ROOT / ".github" / "workflows" / "triage-area.yml"
+
+    @staticmethod
+    def _classifiable(count, first=101):
+        """`count` issues that all classify to one known area, numbered consecutively
+        so the prefix split is assertable by number."""
+        return [{"number": first + i,
+                 "title": "DL L4: narrow the RL disjointWith guard",
+                 "body": "", "labels": [{"name": TA.PARK_LABEL}]}
+                for i in range(count)]
+
+    def _run_main(self, issues, argv):
+        """Drive `main()` over `issues` with gh, the fetch, the label list and the
+        CLOCK stubbed out. Returns (gh argvs, slept durations, stdout)."""
+        calls, sleeps = [], []
+        for name, stub in (("_gh", lambda a: (calls.append(list(a)), "")[1]),
+                           ("_sleep", sleeps.append),
+                           ("candidate_issues", lambda: issues),
+                           ("live_area_labels", lambda: {"area:sparq-reason-dl"})):
+            real = getattr(TA, name)
+            setattr(TA, name, stub)
+            self.addCleanup(lambda n=name, r=real: setattr(TA, n, r))
+        real_argv = sys.argv
+        sys.argv = ["triage-area.py", *argv]
+        self.addCleanup(lambda: setattr(sys, "argv", real_argv))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(TA.main(), 0)
+        return calls, sleeps, out.getvalue()
+
+    @staticmethod
+    def _edited(calls):
+        return [c[2] for c in calls if c[:2] == ["issue", "edit"]]
+
+    def test_the_budget_bounds_the_writes_a_single_run_can_spend(self):
+        calls, _, _ = self._run_main(
+            self._classifiable(5), ["--apply", "--max-writes", "2", "--write-pace", "0"])
+        self.assertEqual(self._edited(calls), ["101", "102"],
+                         "the per-run write budget did not bound the mutating calls — "
+                         "the first widened ticks will run into GitHub's secondary limit")
+
+    def test_the_deferred_tail_is_reported_not_silently_dropped(self):
+        """The headline property. A cap the report does not name is indistinguishable
+        from a tick that simply had less to do."""
+        _, _, out = self._run_main(
+            self._classifiable(5), ["--apply", "--max-writes", "2", "--write-pace", "0"])
+        self.assertEqual(re.findall(r"^   DEFERRED #(\d+)", out, re.M),
+                         ["103", "104", "105"],
+                         f"the budget dropped its tail without reporting it:\n{out}")
+        # The tally line is what .github/workflows/triage-area.yml lifts into the run
+        # summary (`sed -n 's/^-- //p'`), so the counts must be IN it, not merely printed.
+        self.assertRegex(out, r"(?m)^-- 5 classified \(2 writable this run, 3 deferred")
+        # ...and DEFERRED must never be folded into LEFT: LEFT means "no rule could
+        # attribute this, a human is needed", DEFERRED means "classified, next tick".
+        self.assertEqual(re.findall(r"^   LEFT #(\d+)", out, re.M), [],
+                         "a deferred issue was reported as unattributable residue")
+
+    def test_a_dry_run_shows_the_deferral_the_next_apply_tick_will_make(self):
+        # Otherwise the budget is invisible to a maintainer until the moment it bites.
+        calls, _, out = self._run_main(
+            self._classifiable(5), ["--max-writes", "2", "--write-pace", "0"])
+        self.assertEqual(self._edited(calls), [], "a dry run wrote labels")
+        self.assertEqual(re.findall(r"^   DEFERRED #(\d+)", out, re.M),
+                         ["103", "104", "105"])
+
+    def test_the_deferred_tail_is_written_by_the_next_tick(self):
+        """CONVERGENCE. The budget defers, it does not drop. Simulate the next tick:
+        the issues written above now carry an `area:` label, so `candidate_issues()`
+        no longer returns them, and the queue the budget sees is strictly smaller."""
+        issues = self._classifiable(5)
+        calls, _, _ = self._run_main(
+            issues, ["--apply", "--max-writes", "2", "--write-pace", "0"])
+        written = set(self._edited(calls))
+        remaining = [it for it in issues if str(it["number"]) not in written]
+        calls2, _, _ = self._run_main(
+            remaining, ["--apply", "--max-writes", "2", "--write-pace", "0"])
+        self.assertEqual(self._edited(calls2), ["103", "104"],
+                         "the next tick did not resume where the budget stopped")
+
+    def test_writes_are_paced_between_each_other_and_not_before_the_first(self):
+        calls, sleeps, _ = self._run_main(
+            self._classifiable(3), ["--apply", "--write-pace", "0.25"])
+        self.assertEqual(len(self._edited(calls)), 3)
+        self.assertEqual(sleeps, [0.25, 0.25],
+                         "the mutating calls are not paced — nothing keeps this lane "
+                         "under GitHub's per-minute secondary limit")
+        # A lane with a single write must not pay a pace interval for nothing.
+        _, single, _ = self._run_main(
+            self._classifiable(1), ["--apply", "--write-pace", "0.25"])
+        self.assertEqual(single, [])
+
+    def test_the_defaults_stay_under_the_documented_secondary_limits(self):
+        """The two constants are only defensible as arithmetic on the published limits,
+        so do the arithmetic here rather than trusting the comment next to them."""
+        self.assertLessEqual(
+            TA.MAX_WRITES_PER_RUN * TA.TICKS_PER_HOUR, TA.SECONDARY_WRITES_PER_HOUR,
+            "the per-run budget times the ticks in an hour exceeds GitHub's documented "
+            "hourly limit for content-mutating requests")
+        self.assertGreater(TA.WRITE_PACE_SECONDS, 0,
+                           "a zero default pace leaves the per-minute limit unguarded")
+        self.assertLessEqual(60 / TA.WRITE_PACE_SECONDS, TA.SECONDARY_WRITES_PER_MINUTE,
+                             "the default pace admits more writes per minute than "
+                             "GitHub's documented secondary limit allows")
+
+    def test_ticks_per_hour_matches_the_cron_that_actually_drives_the_lane(self):
+        """The budget is the hourly allowance divided across the ticks in an hour, so
+        widening the cron without re-deriving it silently doubles the hourly spend.
+        Read from the workflow, not asserted as a literal."""
+        source = self.WORKFLOW.read_text(encoding="utf-8")
+        crons = re.findall(r"-\s*cron:\s*'([^']+)'", source)
+        self.assertEqual(len(crons), 1, f"expected exactly one cron: {crons}")
+        minute, hour = crons[0].split()[0], crons[0].split()[1]
+        self.assertEqual(hour, "*", "the hour field moved; re-derive TICKS_PER_HOUR")
+        self.assertRegex(minute, r"^\d+(,\d+)*$",
+                         "the minute field is no longer a plain list, so the tick count "
+                         "below cannot be counted from it — re-derive TICKS_PER_HOUR")
+        self.assertEqual(TA.TICKS_PER_HOUR, len(minute.split(",")),
+                         f"cron {crons[0]!r} fires {len(minute.split(','))} times an "
+                         f"hour but TICKS_PER_HOUR says {TA.TICKS_PER_HOUR}")
+
+    def test_there_is_no_unlimited_write_mode(self):
+        # `--max-writes 0` reading as "no budget" is the footgun this flag exists to
+        # remove; argparse must refuse it rather than restore the unbounded tick.
+        for bad in ("0", "-1"):
+            real_argv = sys.argv
+            sys.argv = ["triage-area.py", "--apply", "--max-writes", bad]
+            try:
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit) as caught:
+                        TA.main()
+                self.assertEqual(caught.exception.code, 2, f"--max-writes {bad}")
+            finally:
+                sys.argv = real_argv
 
 
 class TestRuleTableHygiene(unittest.TestCase):
@@ -375,7 +876,7 @@ class TestScopeDiscipline(unittest.TestCase):
     #: dropping a `^` moves a rule OUT of this set, which reds this test and
     #: simultaneously brings the rule under the per-rule assertion below.
     ANCHORED_ONLY = {"difftest-normaliser", "difftest-harness", "kani-harness",
-                     "site-page", "deploy-demo"}
+                     "site-page", "deploy-demo", "triage-area"}
 
     def setUp(self):
         # Anti-tautology: the carrier title must itself classify to nothing, or

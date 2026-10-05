@@ -23,7 +23,7 @@ use crate::model::{
 };
 use oxrdf::{Literal, Term};
 use sparq_core::Graph;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -68,12 +68,54 @@ pub fn parse_policy(graph: &Graph) -> Result<Policy, String> {
     let permissions = rules(graph, "permission", true, &lists)?;
     let prohibitions = rules(graph, "prohibition", false, &lists)?;
     let conflict = policy_conflict(graph)?;
+    let party_collections = party_collections(graph)?;
     Ok(Policy {
         iri,
         permissions,
         prohibitions,
         conflict,
+        party_collections,
     })
+}
+
+/// The IRIs this graph identifies as an `odrl:PartyCollection` — retained on the
+/// [`Policy`] so a consumer that FREEZES a rule into an identity-matched head can route
+/// collection-valued heads to a membership-aware path. [SONNET-4.6] sq-rf9uv.
+///
+/// Two independent signals, unioned:
+///
+/// - `?c a odrl:PartyCollection` — the explicit ODRL 2.2 type declaration.
+/// - `?m odrl:partOf ?c` where `?c` is not explicitly `a odrl:AssetCollection` — the
+///   object of a membership edge stated *in the policy document*. A document that says
+///   `<alice> odrl:partOf <lab>` has identified `<lab>` as a collection just as surely as
+///   the type triple, and real ODRL policies routinely state one without the other.
+///   `odrl:partOf` is shared with asset-collection membership, so an object carrying no
+///   type at all is admitted here: over-inclusion only routes a head to the
+///   membership-aware path, which is the conservative direction, whereas missing a real
+///   party collection is the fail-OPEN one.
+///
+/// Blank nodes and literals are skipped: only an IRI can be an ACP head, so only an IRI
+/// can be a head the consumer needs to classify. Like [`policy_conflict`] this is
+/// deliberately NOT scoped to the policy node — an unrelated subject asserting the type
+/// still contributes, again the more fail-closed direction.
+fn party_collections(graph: &Graph) -> Result<BTreeSet<String>, String> {
+    let res = sparq_engine::query(
+        graph,
+        &format!(
+            "SELECT ?c WHERE {{ {{ ?c a <{ODRL_NS}PartyCollection> }} \
+             UNION {{ ?m <{ODRL_NS}partOf> ?c . \
+             FILTER NOT EXISTS {{ ?c a <{ODRL_NS}AssetCollection> }} }} }}"
+        ),
+    )?;
+    Ok(res
+        .rows
+        .into_iter()
+        .filter_map(|r| r.into_iter().next().flatten())
+        .filter_map(|t| match t {
+            Term::NamedNode(n) => Some(n.into_string()),
+            _ => None,
+        })
+        .collect())
 }
 
 /// Extract the policy's declared `odrl:conflict` conflict-resolution strategy, if any.

@@ -51,11 +51,12 @@
 //! [`DEFAULT_TLS_SESSION_CACHE_SIZE`] = 10 240; `0` disables resumption entirely). A larger cache lets
 //! more returning clients complete an ABBREVIATED (resumed) handshake — skipping the asymmetric key
 //! exchange — which is the connection-amortization half of the beyond-50k throughput plan
-//! (`docs/design/beyond-50k-throughput.md` §4 P1.3). This is a pure PERFORMANCE knob: it changes no
+//! (`research/lws-design-records.md` §7). This is a pure PERFORMANCE knob: it changes no
 //! LDP/auth/WAC semantics, and it does **NOT** enable TLS 0-RTT early data — `max_early_data_size`
 //! stays `0`. 0-RTT is replayable by design, which is incoherent under this server's anti-replay DPoP
-//! (`jti`) model, so it is never turned on here (§5 of the design doc). The tuning is installed
-//! uniformly on both build paths (default + mTLS) by `apply_transport_tuning`.
+//! (`jti`) model, so it is never turned on here (RSS `docs/design/beyond-50k-throughput.md` §5,
+//! not in this tree). The tuning is installed uniformly on both build paths (default + mTLS) by
+//! `apply_transport_tuning`.
 //!
 //! ## TLS session resumption — the stateless-`Ticketer` half (opt-in), 0-RTT STILL OFF
 //! By default rustls keeps its `NeverProducesTickets` ticketer, so TLS 1.3 resumption is STATEFUL
@@ -64,7 +65,7 @@
 //! — AES-256-CBC + HMAC-SHA256, RANDOM per-process keys rotated every ~6h (≈12h ticket life, forward-secret
 //! by key erasure) — so a returning client resumes STATELESSLY from an encrypted ticket, with NO server-side
 //! per-session memory. This is the second half of the beyond-50k P1.3 connection-amortization lever
-//! (`docs/design/beyond-50k-throughput.md` §4 P1.3). It stays OPT-IN and default OFF on purpose: a
+//! (`research/lws-design-records.md` §7). It stays OPT-IN and default OFF on purpose: a
 //! per-process ticket key is NOT shared across a horizontally-scaled fleet, so tickets issued by one node
 //! do not resume on another (a cross-node full-handshake fallback — a perf, never a correctness, effect;
 //! and the shared-key design belongs with the horizontal-scale / shared-replay work). Crucially, a
@@ -80,6 +81,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum_server::tls_rustls::RustlsConfig;
+// [OPUS-5] sq-5ah3p: PEM decoding comes from `rustls-pki-types`' `PemObject` trait, reached through
+// rustls' own `pki_types` re-export rather than a separate direct dependency — that spelling makes
+// version skew between the DER types rustls accepts and the ones we decode structurally impossible,
+// and it retires the archived `rustls-pemfile` shim (RUSTSEC-2025-0134), which since 2.x has been a
+// thin legacy wrapper over exactly these APIs.
+use rustls::pki_types::pem::{Error as PemError, PemObject};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 /// Env var naming the PEM **certificate chain** file (leaf first). Set together with [`ENV_TLS_KEY`].
@@ -92,7 +99,7 @@ pub const ENV_TLS_KEY: &str = "SOLID_SERVER_TLS_KEY";
 /// token can be matched against the presented cert's `cnf.x5t#S256` thumbprint. **Default OFF** — when
 /// unset/falsy the TLS + plain serve paths are byte-identical to the pre-Tier-1b behaviour (no client
 /// cert requested, no confirmation dispatch). See [`mtls_bound_tokens_from_env`] +
-/// [`build_rustls_config`]. Design: `docs/design/high-throughput-pop-auth.md` §7 (bead 2).
+/// [`build_rustls_config`]. Design: `research/lws-design-records.md` §7 (bead 2).
 pub const ENV_MTLS_BOUND_TOKENS: &str = "SOLID_SERVER_MTLS_BOUND_TOKENS";
 
 /// Env var tuning the size of the in-memory TLS **session-resumption cache** (rustls's
@@ -105,7 +112,7 @@ pub const ENV_MTLS_BOUND_TOKENS: &str = "SOLID_SERVER_MTLS_BOUND_TOKENS";
 /// - `N` ⇒ remember up to ≈`N` sessions, clamped to [`MAX_TLS_SESSION_CACHE_SIZE`].
 ///
 /// This is a pure THROUGHPUT knob — the connection-amortization half of the beyond-50k plan
-/// (`docs/design/beyond-50k-throughput.md` §4 P1.3): a larger cache lets more distinct concurrent
+/// (`research/lws-design-records.md` §7): a larger cache lets more distinct concurrent
 /// clients resume before eviction forces a full handshake, exactly as a connection-bound PoP check
 /// amortizes per-request asymmetric verifies. It changes NO LDP/auth/WAC semantics and, crucially,
 /// does NOT enable TLS 0-RTT early data — `max_early_data_size` stays `0`, because 0-RTT is replayable
@@ -518,8 +525,13 @@ fn build_mtls_server_config(
 
 /// Parse a PEM certificate chain (leaf first) into DER. A PEM with no CERTIFICATE block is a Malformed
 /// boot error (an empty chain would fail deep inside rustls with an opaque message).
+///
+/// `pem_slice_iter` yields ONLY `CERTIFICATE` sections, in file order, skipping any other section
+/// kind — notably a `PRIVATE KEY` bundled into the same file, which operators commonly do. That is
+/// the same filtering the retired `rustls_pemfile::certs` did, because that function was itself a
+/// wrapper over this parser.
 fn load_cert_chain(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, TlsConfigError> {
-    let certs = rustls_pemfile::certs(&mut &pem[..])
+    let certs = CertificateDer::pem_slice_iter(pem)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| TlsConfigError::Malformed {
             source: io::Error::other(e),
@@ -533,14 +545,19 @@ fn load_cert_chain(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>, TlsConfig
 }
 
 /// Parse the FIRST PEM private key (PKCS#8 / PKCS#1 / SEC1) into DER. Absent ⇒ a Malformed boot error.
+///
+/// `PrivateKeyDer::from_pem_slice` reports "no key here" as [`PemError::NoItemsFound`], where the
+/// retired `rustls_pemfile::private_key` reported it as `Ok(None)`; that one variant is mapped back
+/// to the same operator-facing message so the boot diagnostic is unchanged by the migration.
 fn load_private_key(pem: &[u8]) -> Result<PrivateKeyDer<'static>, TlsConfigError> {
-    rustls_pemfile::private_key(&mut &pem[..])
-        .map_err(|e| TlsConfigError::Malformed {
-            source: io::Error::other(e),
-        })?
-        .ok_or_else(|| TlsConfigError::Malformed {
-            source: io::Error::other("TLS private-key PEM contains no PRIVATE KEY block"),
-        })
+    PrivateKeyDer::from_pem_slice(pem).map_err(|e| TlsConfigError::Malformed {
+        source: match e {
+            PemError::NoItemsFound => {
+                io::Error::other("TLS private-key PEM contains no PRIVATE KEY block")
+            }
+            other => io::Error::other(other),
+        },
+    })
 }
 
 /// The RFC 8705 §2.2 **self-signed-flavour** optional client-certificate verifier.
@@ -661,7 +678,7 @@ impl rustls::server::danger::ClientCertVerifier for SelfSignedOptionalClientCert
 /// is FORCED to `0` here on every path, regardless of the ticketer. A ticketer makes 0-RTT *possible* only
 /// if `max_early_data_size > 0`; keeping it `0` means installing the ticketer never opens the 0-RTT
 /// replay window. 0-RTT early data is replayable by design, which is incoherent under this server's
-/// anti-replay DPoP `jti` model (`docs/design/beyond-50k-throughput.md` §5). The `debug_assert` pins that
+/// anti-replay DPoP `jti` model (`research/lws-design-records.md` §7). The `debug_assert` pins that
 /// the value was already `0` so a future rustls default change surfaces in tests.
 fn apply_transport_tuning(config: &RustlsConfig, tuning: TransportTuning) {
     let mut server_config = (*config.get_inner()).clone();
@@ -1064,6 +1081,73 @@ mod tests {
         assert!(
             !mtls_bound_tokens_from_env(),
             "absent ⇒ OFF (the default posture)"
+        );
+    }
+
+    /// [OPUS-5] sq-5ah3p: the behavioural contract of the two PEM loaders, pinned independently of
+    /// which crate implements the decode. These four properties are exactly what the retired
+    /// `rustls-pemfile` calls provided, so they are what the `PemObject` migration must preserve:
+    /// (1) EVERY `CERTIFICATE` section is returned, in file order, leaf first; (2) a non-certificate
+    /// section sharing the file (the common "cert and key concatenated" layout) is SKIPPED rather
+    /// than erroring or being mistaken for a cert; (3) a PEM carrying no certificate is a `Malformed`
+    /// boot error with the operator-facing message, not an empty chain handed to rustls; (4) a key
+    /// file with no key section is likewise `Malformed` with its own message — the one case where
+    /// `PemObject` reports `NoItemsFound` and the old API reported `Ok(None)`.
+    #[test]
+    fn pem_loaders_split_chain_from_key_and_reject_empty_input() {
+        let (cert_pem, key_pem) = self_signed_localhost_pem();
+
+        // (1) A two-element chain round-trips in order. The second element is the checked-in fixture
+        // CA — a certificate that is definitely NOT the minted leaf — so a reversed or deduplicated
+        // iterator cannot satisfy the index assertions below.
+        let ca_pem = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/test-ca.pem"
+        ))
+        .expect("read fixture CA");
+        let mut chain_pem = cert_pem.clone();
+        chain_pem.extend_from_slice(&ca_pem);
+        let chain = load_cert_chain(&chain_pem).expect("a two-certificate chain parses");
+        assert_eq!(chain.len(), 2, "both CERTIFICATE sections must be returned");
+        let leaf_only = load_cert_chain(&cert_pem).expect("single-cert PEM parses");
+        let ca_only = load_cert_chain(&ca_pem).expect("fixture CA parses");
+        assert_ne!(leaf_only[0], ca_only[0], "the two fixtures must differ");
+        assert_eq!(
+            chain[0], leaf_only[0],
+            "the FIRST section of the file must be the FIRST (leaf) entry of the chain"
+        );
+        assert_eq!(chain[1], ca_only[0], "the issuer must follow the leaf");
+
+        // (2) A cert file that also carries the key yields the certs only — and the key loader
+        // reads that same bundle happily, skipping the certificate section ahead of the key.
+        let mut bundle = cert_pem.clone();
+        bundle.extend_from_slice(&key_pem);
+        assert_eq!(
+            load_cert_chain(&bundle).expect("bundle parses").len(),
+            1,
+            "the PRIVATE KEY section must be skipped, not counted as a certificate"
+        );
+        load_private_key(&bundle).expect("the key is found past the leading certificate");
+
+        // (3) No CERTIFICATE section ⇒ Malformed, with the operator-facing message.
+        let err = load_cert_chain(&key_pem).expect_err("a key-only PEM has no certificate");
+        let TlsConfigError::Malformed { source } = err else {
+            panic!("a certificate-less PEM must be Malformed");
+        };
+        assert!(
+            source.to_string().contains("no CERTIFICATE block"),
+            "unexpected diagnostic: {source}"
+        );
+
+        // (4) No key section ⇒ Malformed. This is the `NoItemsFound` remap: without it the operator
+        // would see `PemObject`'s bare "no items found" instead of the actionable message.
+        let err = load_private_key(&cert_pem).expect_err("a cert-only PEM has no private key");
+        let TlsConfigError::Malformed { source } = err else {
+            panic!("a key-less PEM must be Malformed");
+        };
+        assert!(
+            source.to_string().contains("no PRIVATE KEY block"),
+            "unexpected diagnostic: {source}"
         );
     }
 

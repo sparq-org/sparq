@@ -1,0 +1,26 @@
+# [SONNET-4.6] sq-gg0qq.7 — Conformance Test Harness config for sparq-lws-core (the EXPERIMENTAL
+# Solid/LDP server core). Ported from jeswr/solid-server-rs@1e555b10.
+#
+# Run with `--target=sparq-lws-core` (selects the TestSubject in test-subjects.ttl). The harness reads
+# the test manifests + requirement comments + the published spec docs from solid-contrib/
+# specification-tests, which run.sh mounts at /data so the `path: /data` mapping resolves (mirrors the
+# spec-tests repo's own application.yaml). PORT DELTA: run.sh clones specification-tests into a
+# gitignored cache rather than reusing a sibling prod-solid-server clone.
+subjects: /app/config/test-subjects.ttl
+sources:
+  - https://solidproject.org/TR/protocol
+  - https://github.com/solid-contrib/specification-tests/blob/main/protocol/solid-protocol-test-manifest.ttl
+  - https://github.com/solid-contrib/specification-tests/blob/main/protocol/requirement-comments.ttl
+  - https://solidproject.org/TR/wac
+  - https://github.com/solid-contrib/specification-tests/blob/main/web-access-control/web-access-control-test-manifest.ttl
+  - https://github.com/solid-contrib/specification-tests/blob/main/web-access-control/requirement-comments.ttl
+  - https://github.com/solid-contrib/specification-tests/blob/main/web-access-control/wac-spec-additions.ttl
+mappings:
+  - prefix: https://github.com/solid-contrib/specification-tests/blob/main
+    path: /data
+# The origin the server's WAC must trust for the harness's session app (matches ORIGIN in the env).
+origin: https://tester
+# Karate runs the feature files in parallel up to maxThreads. The server terminates TLS natively and
+# uses in-memory backends (no external store contention), so concurrency is safe. Lower to 1 for
+# deterministic debugging of a flaky scenario.
+maxThreads: 4

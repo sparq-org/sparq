@@ -7,8 +7,8 @@
 // SPEC-REFERENCE, whose value comes from the generator's XPath F&O reference
 // because the oracle itself diverges there (see RECORDED ORACLE DIVERGENCES).
 // Doubles are additionally cross-checked BIT-for-BIT against native Rust f64, and
-// fn:substring against an explicit XPath F&O 5.4.3 window reference; an UNRECORDED
-// cross-check mismatch ABORTS generation.
+// fn:substring against an explicit XPath F&O 3.1 sec. 5.4.3 fn:substring window reference;
+// an UNRECORDED cross-check mismatch ABORTS generation.
 //
 // TCB, honestly: (1) the sparq Rust XSD evaluator is itself UNAUDITED -- it is the
 // repo's reference semantics, not a proven implementation; (2) coverage is a
@@ -28,16 +28,25 @@
 //   * SUBSTR(s, start, len) for start < 1
 //       sparq-engine: clamps start to 1 and then takes `len` characters
 //       XPath F&O:    the window [start, start+len) is NOT shifted, so a start below 1 consumes length
-//       sparq-engine exec.rs SubStr uses `start.max(1) - 1` then `.take(len)`; F&O sec. 5.4.3 keeps the window. e.g. SUBSTR("12345", 0, 3) is "12", not "123".
+//       sparq-engine exec.rs SubStr uses `start.max(1) - 1` then `.take(len)`; F&O 3.1 sec. 5.4.3 `fn:substring` keeps the window. e.g. SUBSTR("12345", 0, 3) is "12", not "123".
 //   * ROUND(xsd:double("-0.5"))
 //       sparq-engine: +0.0 (lexical "0")
 //       XPath F&O:    -0.0E0 -- a negative argument in [-0.5, 0) rounds to NEGATIVE zero
 //       sparq-engine's ROUND loses the sign of a zero result; the double serializer itself is fine (xsd:double("-0.0") does render as "-0E0").
 //
-// KNOWN SCOPE LIMIT: fn:substring cases are ASCII-only. noir_XPath's `substring`
-// indexes BYTE positions in the logical content (its own documented caveat; bead
-// sq-hjvte tracks codepoint-positional substring) while SPARQL SUBSTR is
-// codepoint-indexed. They agree exactly on single-byte content and only there.
+// KNOWN SCOPE LIMIT (sq-hjvte): noir_XPath's `substring` indexes BYTE positions in
+// the logical content (its own documented caveat), while SPARQL SUBSTR / fn:substring
+// index CODEPOINTS -- and `string_length` counts CODEPOINTS too (sq-3x7dl.6), so
+// `substring(s, i, string_length(s))` is WRONG for multibyte s. The two units agree
+// exactly on single-byte content and only there. Both regimes are covered here:
+//   * differential_oracle_substring -- ASCII, positions passed VERBATIM, so it holds
+//     noir_XPath to the F&O window arithmetic itself (the start < 1 budget rule).
+//   * differential_oracle_substring_multibyte -- multibyte, with each CODEPOINT window
+//     converted to the equivalent BYTE window by the generator before the call, so the
+//     byte-positional primitive is held to the CODEPOINT answer.
+// That conversion is HOST-side and needs the string's bytes. The in-circuit primitive
+// is still byte-positional; making it codepoint-positional for a PRIVATE string stays
+// open as sq-hjvte in the noir_XPath face repo.
 
 use xpath::{
     cast_double_to_integer, compare_double_int_eq, compare_double_int_ge,
@@ -297,9 +306,13 @@ fn differential_oracle_contains() {
 }
 
 /// fn:substring -- ASCII-only (see the byte-vs-codepoint scope limit above).
-/// Oracle: SPARQL `SUBSTR`, cross-checked against the F&O 5.4.3 window. The `start < 1`
-/// rows are SPEC-REFERENCE (see the header): sparq-engine shifts the window, so their
-/// expected value is F&O's, and they assert noir_XPath against the SPEC.
+/// Oracle: SPARQL `SUBSTR`, cross-checked against the F&O 3.1 sec. 5.4.3 fn:substring
+/// window. The `start < 1` rows are SPEC-REFERENCE (see the header): sparq-engine shifts
+/// the window, so their expected value is F&O's, and they assert noir_XPath against the SPEC.
+///
+/// Positions reach the circuit VERBATIM here, which is what holds noir_XPath to the F&O
+/// window arithmetic itself (sq-3x7dl.6). Multibyte content is covered separately, by
+/// differential_oracle_substring_multibyte.
 #[test]
 fn differential_oracle_substring() {
     // SUBSTR("hello", 2, 3) -> "ell"
@@ -347,9 +360,10 @@ fn differential_oracle_substring() {
     assert(out6[0] == 101);
     assert(out6[1] == 108);
     assert(out6[2] == 108);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "123", F&O 5.4.3 says
-    // "12". noir_XPath is correct here (sq-3x7dl.6) and the oracle is not, so
-    // the row asserts the SPEC value LIVE -- it holds noir_XPath to F&O, not to sparq.
+    // SPEC-REFERENCE (start < 1): sparq-engine says "123", F&O 3.1 sec. 5.4.3
+    // fn:substring says "12". noir_XPath is correct here (sq-3x7dl.6) and the
+    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
+    // F&O, not to sparq.
     // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("12345", 0, 3) -> "12"
     let ss7: str<5> = "12345";
@@ -357,27 +371,30 @@ fn differential_oracle_substring() {
     assert(len7 == 2);
     assert(out7[0] == 49);
     assert(out7[1] == 50);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "hell", F&O 5.4.3 says
-    // "h". noir_XPath is correct here (sq-3x7dl.6) and the oracle is not, so
-    // the row asserts the SPEC value LIVE -- it holds noir_XPath to F&O, not to sparq.
+    // SPEC-REFERENCE (start < 1): sparq-engine says "hell", F&O 3.1 sec. 5.4.3
+    // fn:substring says "h". noir_XPath is correct here (sq-3x7dl.6) and the
+    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
+    // F&O, not to sparq.
     // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("hello", -2, 4) -> "h"
     let ss8: str<5> = "hello";
     let (out8, len8) = substring::<5, 5>(ss8, -2, 4);
     assert(len8 == 1);
     assert(out8[0] == 104);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "12345", F&O 5.4.3 says
-    // "1". noir_XPath is correct here (sq-3x7dl.6) and the oracle is not, so
-    // the row asserts the SPEC value LIVE -- it holds noir_XPath to F&O, not to sparq.
+    // SPEC-REFERENCE (start < 1): sparq-engine says "12345", F&O 3.1 sec. 5.4.3
+    // fn:substring says "1". noir_XPath is correct here (sq-3x7dl.6) and the
+    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
+    // F&O, not to sparq.
     // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("12345", -3, 5) -> "1"
     let ss9: str<5> = "12345";
     let (out9, len9) = substring::<5, 5>(ss9, -3, 5);
     assert(len9 == 1);
     assert(out9[0] == 49);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "hel", F&O 5.4.3 says
-    // "". noir_XPath is correct here (sq-3x7dl.6) and the oracle is not, so
-    // the row asserts the SPEC value LIVE -- it holds noir_XPath to F&O, not to sparq.
+    // SPEC-REFERENCE (start < 1): sparq-engine says "hel", F&O 3.1 sec. 5.4.3
+    // fn:substring says "". noir_XPath is correct here (sq-3x7dl.6) and the
+    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
+    // F&O, not to sparq.
     // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("hello", -100, 3) -> ""
     let ss10: str<5> = "hello";
@@ -385,14 +402,161 @@ fn differential_oracle_substring() {
     assert(len10 == 0);
 }
 
-/// op:numeric-divide on two xs:integer operands -- the DECIMAL quotient (F&O 4.2.6),
-/// implemented as the documented double approximation, and DISTINCT from
-/// op:numeric-integer-divide (sq-3x7dl.4 de-aliasing). Oracle: SPARQL double
-/// division of the promoted operands, bit-cross-checked against native f64.
+/// fn:substring over MULTIBYTE content (sq-hjvte). Oracle: SPARQL `SUBSTR`, which is
+/// CODEPOINT-indexed, cross-checked against the F&O 3.1 sec. 5.4.3 window reference (and,
+/// in the generator's own unit tests, against CPython's codepoint slicing).
+///
+/// noir_XPath's `substring` windows BYTE positions, so each row's CODEPOINT window is
+/// converted to the equivalent BYTE window BY THE GENERATOR and the byte window is what
+/// the call below carries -- the row comment shows both. The expected value is still the
+/// CODEPOINT answer, so these rows hold the primitive to fn:substring on content where
+/// byte and codepoint positions DISAGREE.
+///
+/// HONEST SCOPE: that conversion happens on the HOST, which knows the string's bytes. It
+/// does NOT make the primitive codepoint-positional -- for a PRIVATE (witness) string the
+/// conversion has to happen in-circuit, which is still open as sq-hjvte in the noir_XPath
+/// face repo. Until then `substring(s, i, string_length(s))` remains WRONG for multibyte s.
+#[test]
+fn differential_oracle_substring_multibyte() {
+    // SUBSTR("na\u{ef}ve", 3, 1) -> "\u{ef}"
+    // codepoint window (3, 1) -> byte window (3, 2)
+    let mss0: str<6> = "naïve";
+    let (mout0, mlen0) = substring::<6, 6>(mss0, 3, 2);
+    assert(mlen0 == 2);
+    assert(mout0[0] == 195);
+    assert(mout0[1] == 175);
+    // SUBSTR("na\u{ef}ve", 1, 3) -> "na\u{ef}"
+    // codepoint window (1, 3) -> byte window (1, 4)
+    let mss1: str<6> = "naïve";
+    let (mout1, mlen1) = substring::<6, 6>(mss1, 1, 4);
+    assert(mlen1 == 4);
+    assert(mout1[0] == 110);
+    assert(mout1[1] == 97);
+    assert(mout1[2] == 195);
+    assert(mout1[3] == 175);
+    // SUBSTR("na\u{ef}ve", 3, 100) -> "\u{ef}ve"
+    // codepoint window (3, 100) -> byte window (3, 4)
+    let mss2: str<6> = "naïve";
+    let (mout2, mlen2) = substring::<6, 6>(mss2, 3, 4);
+    assert(mlen2 == 4);
+    assert(mout2[0] == 195);
+    assert(mout2[1] == 175);
+    assert(mout2[2] == 118);
+    assert(mout2[3] == 101);
+    // SUBSTR("na\u{ef}ve", 1, 5) -> "na\u{ef}ve"
+    // codepoint window (1, 5) -> byte window (1, 6)
+    let mss3: str<6> = "naïve";
+    let (mout3, mlen3) = substring::<6, 6>(mss3, 1, 6);
+    assert(mlen3 == 6);
+    assert(mout3[0] == 110);
+    assert(mout3[1] == 97);
+    assert(mout3[2] == 195);
+    assert(mout3[3] == 175);
+    assert(mout3[4] == 118);
+    assert(mout3[5] == 101);
+    // SUBSTR("na\u{ef}ve", 4, 2) -> "ve"
+    // codepoint window (4, 2) -> byte window (5, 2)
+    let mss4: str<6> = "naïve";
+    let (mout4, mlen4) = substring::<6, 6>(mss4, 5, 2);
+    assert(mlen4 == 2);
+    assert(mout4[0] == 118);
+    assert(mout4[1] == 101);
+    // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 2, 1) -> "\u{672c}"
+    // codepoint window (2, 1) -> byte window (4, 3)
+    let mss5: str<9> = "日本語";
+    let (mout5, mlen5) = substring::<9, 9>(mss5, 4, 3);
+    assert(mlen5 == 3);
+    assert(mout5[0] == 230);
+    assert(mout5[1] == 156);
+    assert(mout5[2] == 172);
+    // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 2, 2) -> "\u{672c}\u{8a9e}"
+    // codepoint window (2, 2) -> byte window (4, 6)
+    let mss6: str<9> = "日本語";
+    let (mout6, mlen6) = substring::<9, 9>(mss6, 4, 6);
+    assert(mlen6 == 6);
+    assert(mout6[0] == 230);
+    assert(mout6[1] == 156);
+    assert(mout6[2] == 172);
+    assert(mout6[3] == 232);
+    assert(mout6[4] == 170);
+    assert(mout6[5] == 158);
+    // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 2, 2) -> "\u{672c}\u{8a9e}"
+    // codepoint window (2, 2) -> byte window (4, 6)
+    let mss7: str<15> = "日本語\0\0\0\0\0\0";
+    let (mout7, mlen7) = substring::<15, 15>(mss7, 4, 6);
+    assert(mlen7 == 6);
+    assert(mout7[0] == 230);
+    assert(mout7[1] == 156);
+    assert(mout7[2] == 172);
+    assert(mout7[3] == 232);
+    assert(mout7[4] == 170);
+    assert(mout7[5] == 158);
+    // SUBSTR("\u{1d11e}", 1, 1) -> "\u{1d11e}"
+    // codepoint window (1, 1) -> byte window (1, 4)
+    let mss8: str<4> = "𝄞";
+    let (mout8, mlen8) = substring::<4, 4>(mss8, 1, 4);
+    assert(mlen8 == 4);
+    assert(mout8[0] == 240);
+    assert(mout8[1] == 157);
+    assert(mout8[2] == 132);
+    assert(mout8[3] == 158);
+    // SUBSTR("a\u{e9}", 2, 1) -> "\u{e9}"
+    // codepoint window (2, 1) -> byte window (2, 2)
+    let mss9: str<3> = "aé";
+    let (mout9, mlen9) = substring::<3, 3>(mss9, 2, 2);
+    assert(mlen9 == 2);
+    assert(mout9[0] == 195);
+    assert(mout9[1] == 169);
+    // SUBSTR("e\u{301}", 2, 1) -> "\u{301}"
+    // codepoint window (2, 1) -> byte window (2, 2)
+    let mss10: str<3> = "é";
+    let (mout10, mlen10) = substring::<3, 3>(mss10, 2, 2);
+    assert(mlen10 == 2);
+    assert(mout10[0] == 204);
+    assert(mout10[1] == 129);
+    // SUBSTR("\u{fb00}", 1, 1) -> "\u{fb00}"
+    // codepoint window (1, 1) -> byte window (1, 3)
+    let mss11: str<3> = "ﬀ";
+    let (mout11, mlen11) = substring::<3, 3>(mss11, 1, 3);
+    assert(mlen11 == 3);
+    assert(mout11[0] == 239);
+    assert(mout11[1] == 172);
+    assert(mout11[2] == 128);
+    // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 3, 0) -> ""
+    // codepoint window (3, 0) -> byte window (1, 0)
+    let mss12: str<9> = "日本語";
+    let (_mout12, mlen12) = substring::<9, 9>(mss12, 1, 0);
+    assert(mlen12 == 0);
+    // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 4, 2) -> ""
+    // codepoint window (4, 2) -> byte window (1, 0)
+    let mss13: str<9> = "日本語";
+    let (_mout13, mlen13) = substring::<9, 9>(mss13, 1, 0);
+    assert(mlen13 == 0);
+    // SPEC-REFERENCE (start < 1): sparq-engine says "\u{65e5}\u{672c}", F&O 3.1 sec. 5.4.3
+    // fn:substring says "\u{65e5}". noir_XPath is correct here (sq-3x7dl.6) and the
+    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
+    // F&O, not to sparq.
+    // Drop the special-casing (not the assertion) when the engine is fixed.
+    // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 0, 2) -> "\u{65e5}"
+    // codepoint window (0, 2) -> byte window (1, 3)
+    let mss14: str<9> = "日本語";
+    let (mout14, mlen14) = substring::<9, 9>(mss14, 1, 3);
+    assert(mlen14 == 3);
+    assert(mout14[0] == 230);
+    assert(mout14[1] == 151);
+    assert(mout14[2] == 165);
+}
+
+/// op:numeric-divide on two xs:integer operands -- the DECIMAL quotient
+/// (F&O 3.1 sec. 4.2.4 op:numeric-divide), implemented as the documented double
+/// approximation, and DISTINCT from op:numeric-integer-divide (sq-3x7dl.4
+/// de-aliasing). Oracle: SPARQL double division of the promoted operands,
+/// bit-cross-checked against native f64.
 ///
 /// The `numeric_divide_int` (idiv) rows are the DE-ALIASING control and are NOT
 /// oracle-derived -- SPARQL exposes no `idiv` builtin, so their reference is Rust's
-/// integer division, which truncates toward zero exactly as F&O 4.2.5 requires.
+/// integer division, which truncates toward zero exactly as F&O 3.1 sec. 4.2.5
+/// op:numeric-integer-divide requires.
 #[test]
 fn differential_oracle_numeric_divide() {
     // xsd:double("7") / xsd:double("2") -> bits 0x400c000000000000 as u64
@@ -427,10 +591,11 @@ fn differential_oracle_numeric_divide() {
     assert(numeric_divide_int(0, 5) == 0);
 }
 
-/// fn:round for xs:double -- ties toward +INFINITY (F&O 4.4.3), sign of zero
-/// preserved. Oracle: SPARQL `ROUND`, bit-cross-checked against the F&O reference. The
-/// -0.5 row is SPEC-REFERENCE (see the header): sparq-engine loses the sign of a zero
-/// result, so its expected value is F&O's and it asserts noir_XPath against the SPEC.
+/// fn:round for xs:double -- ties toward +INFINITY (F&O 3.1 sec. 4.4.4 fn:round), sign
+/// of zero preserved. Oracle: SPARQL `ROUND`, bit-cross-checked against the F&O
+/// reference. The -0.5 row is SPEC-REFERENCE (see the header): sparq-engine loses the
+/// sign of a zero result, so its expected value is F&O's and it asserts noir_XPath
+/// against the SPEC.
 #[test]
 fn differential_oracle_round_double() {
     // ROUND(xsd:double("2.5")) -> 3.0
@@ -445,10 +610,10 @@ fn differential_oracle_round_double() {
     assert(round_double(XsdDouble::from_bits(0xbff8000000000000 as u64)).to_bits() == 0xbff0000000000000 as u64);
     // ROUND(xsd:double("2.4999")) -> 2.0
     assert(round_double(XsdDouble::from_bits(0x4003ffcb923a29c7 as u64)).to_bits() == 0x4000000000000000 as u64);
-    // SPEC-REFERENCE: sparq-engine returns +0.0 (bits 0x0000000000000000); F&O 4.4.3
-    // requires NEGATIVE zero for an argument in [-0.5, 0). The row asserts the SPEC
-    // value LIVE -- it holds noir_XPath to F&O, not to sparq. Drop the special-casing
-    // (not the assertion) when the engine is fixed.
+    // SPEC-REFERENCE: sparq-engine returns +0.0 (bits 0x0000000000000000); F&O 3.1
+    // sec. 4.4.4 fn:round requires NEGATIVE zero for an argument in [-0.5, 0). The
+    // row asserts the SPEC value LIVE -- it holds noir_XPath to F&O, not to sparq.
+    // Drop the special-casing (not the assertion) when the engine is fixed.
     // ROUND(xsd:double("-0.5")) -> -0.0
     assert(round_double(XsdDouble::from_bits(0xbfe0000000000000 as u64)).to_bits() == 0x8000000000000000 as u64);
     // ROUND(xsd:double("0")) -> 0.0
@@ -633,7 +798,8 @@ fn differential_oracle_mixed_compare() {
     assert(compare_double_int_ge(d7, -1000000) == true);
 }
 
-/// xs:integer(xs:double) -- TRUNCATES toward zero (F&O 17.1.1); it does NOT round.
+/// xs:integer(xs:double) -- TRUNCATES toward zero (F&O 3.1 sec. 19.1.2.4 "Casting to
+/// xs:integer"); it does NOT round.
 /// Oracle: SPARQL `xsd:integer(xsd:double(...))`.
 #[test]
 fn differential_oracle_double_to_integer_cast() {
@@ -718,5 +884,5 @@ fn differential_oracle_datetime_pre_1970() {
     assert(datetime_less_than(dt0, dt3) == true);
 }
 
-// Coverage: 250 live assertions, 9 of them SPEC-REFERENCE rows whose expected value is
+// Coverage: 312 live assertions, 13 of them SPEC-REFERENCE rows whose expected value is
 // XPath F&O's rather than the oracle's (recorded oracle divergences; 0 commented out).

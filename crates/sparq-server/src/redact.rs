@@ -19,7 +19,7 @@
 //!
 //! ## What this does
 //!
-//! When redaction is on (the default — see [`ServerConfig::redact_logs`](crate::ServerConfig)),
+//! When redaction is on (the default — see `ServerConfig::redact_logs`),
 //! the request log's URI has its **query string replaced** by a placeholder that preserves the
 //! length and a stable non-reversible fingerprint of the original — `?<redacted len=N
 //! fp=xxxxxxxxxxxxxxxx>` — so logs stay useful for correlation (same query => same `fp`; a size

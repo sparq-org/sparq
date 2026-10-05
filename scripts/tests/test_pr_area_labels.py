@@ -20,7 +20,7 @@
 #      at any level (job or step), the labelling step must exist and pass exactly the
 #      four documented arguments, checkout must be pinned to the default branch (never the
 #      PR head — the job holds `pull-requests: write`), the permissions block must be
-#      exactly the least-privilege pair, `pull_request` must carry NO `paths:` filter, and
+#      exactly the least-privilege set, `pull_request` must carry NO `paths:` filter, and
 #      routing-self-tests.yml must actually INVOKE this file (a test nobody runs is a
 #      call-site mutant that survives everything else).
 #
@@ -107,8 +107,15 @@ class FakeGH:
         `gh` does, so dropping the flag really loses the tail;
       * on top of that it serves at most `cap` entries, which reproduces a ceiling the
         caller cannot page past — GraphQL `files(first: 100)`, or REST's 3000-file cap;
-      * an entry may be `"path"` or `("new_path", "previous_path")`, so a rename carries
-        `previous_filename` exactly as the REST payload does.
+      * an entry may be `"path"`, `("new_path", "previous_path")` or
+        `("new_path", "previous_path", "status")`, so a rename carries `previous_filename`
+        and a crate-creating PR carries `status: added`, exactly as the REST payload does.
+        The default status is `modified` — the value that witnesses NOTHING — so a fixture
+        must opt IN to being a new-crate PR.
+
+    Label CREATION is simulated too (`POST /repos/{repo}/labels` appends to the live set),
+    which is what makes the creation assertions discriminating: they check the resulting
+    label set and the recorded call, not the absence of a string in the source.
     """
 
     def __init__(self, prs, labels):
@@ -122,11 +129,23 @@ class FakeGH:
     def writes(self):
         return [c for c in self.calls if c[:2] == ["pr", "edit"]]
 
+    @property
+    def creates(self):
+        """The label names created via `POST .../labels`, in call order."""
+        out = []
+        for c in self.calls:
+            if c[0] == "api" and "--method" in c and "POST" in c:
+                out += [a.split("=", 1)[1] for a in c if a.startswith("name=")]
+        return out
+
     @staticmethod
     def _entries(pr):
         out = []
         for f in pr["files"]:
-            out.append((f, "") if isinstance(f, str) else (f[0], f[1] or ""))
+            if isinstance(f, str):
+                out.append((f, "", "modified"))
+            else:
+                out.append((f[0], f[1] or "", f[2] if len(f) > 2 else "modified"))
         return out
 
     def _files_payload(self, n, url, paginate):
@@ -142,7 +161,7 @@ class FakeGH:
         if not paginate:
             m = re.search(r"per_page=(\d+)", url)
             entries = entries[:int(m.group(1)) if m else 30]
-        return "".join(f"{new}\t{prev}\n" for new, prev in entries)
+        return "".join(f"{new}\t{prev}\t{status}\n" for new, prev, status in entries)
 
     def __call__(self, args):
         self.calls.append(list(args))
@@ -151,6 +170,12 @@ class FakeGH:
             m = re.search(r"/pulls/(\d+)/files", url)
             if m:
                 return self._files_payload(int(m.group(1)), url, "--paginate" in args)
+            if "--method" in args and "POST" in args and url.endswith("/labels"):
+                name = next(a.split("=", 1)[1] for a in args if a.startswith("name="))
+                if name in self.labels:            # GitHub answers 422 already_exists
+                    raise RuntimeError(f"gh api: label {name} already exists")
+                self.labels.append(name)
+                return "{}"
             return "".join(f"{name}\n" for name in self.labels)
         if args[:2] == ["pr", "view"]:
             n = int(args[2])
@@ -465,8 +490,10 @@ class TestDerivation(unittest.TestCase):
     def test_a_pr_that_ADDS_a_crate_resolves_once_its_label_exists(self):
         """The workflow reads the DEFAULT BRANCH's manifest, so a crate a PR is adding is
         not yet a workspace member. Such a PR collides with nothing and must still get a
-        narrow partition — gated only on a human having created the `area:` label. Two
-        live examples in the backfill were exactly this shape (#3464, #3581)."""
+        narrow partition. Two live examples in the backfill were exactly this shape
+        (#3464, #3581). This test pins the pure `derive_areas` contract — label present
+        resolves, label absent is fail-closed; the new-crate WITNESS that supplies the
+        missing label is the separate `creatable` path tested below."""
         new = "sparq-brand-new"
         self.assertNotIn(new, self.policy.members)
         self.assertEqual(
@@ -476,12 +503,102 @@ class TestDerivation(unittest.TestCase):
         self.assertEqual(M.derive_areas([f"crates/{new}/src/lib.rs"], self.policy, self.known),
                          (frozenset(), "unresolved"))
 
+    # --- the new-crate witness (#4582) ---------------------------------------------
+    def test_a_pr_that_adds_a_crate_manifest_is_attributable_without_a_prior_label(self):
+        """THE #4582 GUARD. Measured on #4578 (`crates/sparq-wrapper-shacl`): the deriver
+        reported `KEEP __global__ [unresolved]` because the crate is absent from the
+        DEFAULT BRANCH the job reads and no `area:` label had ever been made. The added
+        root manifest is the witness that turns that into a resolved, narrow partition
+        plus one label to create.
+
+        Delete the `creatable` widening in `derive_areas` — or the `new_crates` read in
+        `plan_for_pr` — and this reds with `reason == "unresolved"`."""
+        new = "sparq-not-yet-a-crate"
+        self.assertNotIn(new, self.policy.members)
+        self.assertNotIn(new, self.known)
+        pr = {"number": 4578, "labels": [], "complete": True,
+              "files": [f"crates/{new}/Cargo.toml", f"crates/{new}/src/lib.rs"],
+              "new_crates": [new]}
+        plan = M.plan_for_pr(pr, self.policy, self.known)
+        self.assertEqual(plan["reason"], "resolved")
+        self.assertEqual(plan["add"], [f"area:{new}"])
+        self.assertEqual(plan["create"], [f"area:{new}"])
+        self.assertEqual(plan["partition"], [new])
+        self.assertNotEqual(plan["partition"], [M.GLOBAL])
+
+    def test_the_same_paths_without_the_witness_stay_fail_closed(self):
+        """The DISCRIMINATING half: identical paths, no added root manifest (a typo'd
+        directory, a stray file under a name that is not a crate). Widening on the path
+        SHAPE instead of the witness would make this pass — which is the guessing the
+        fail-closed rule exists to forbid."""
+        pr = {"number": 4578, "labels": [], "complete": True,
+              "files": ["crates/sparq-not-yet-a-crate/Cargo.toml",
+                        "crates/sparq-not-yet-a-crate/src/lib.rs"],
+              "new_crates": []}
+        plan = M.plan_for_pr(pr, self.policy, self.known)
+        self.assertEqual(plan["reason"], "unresolved")
+        self.assertEqual(plan["create"], [])
+        self.assertEqual(plan["partition"], [M.GLOBAL])
+
+    def test_only_an_added_root_manifest_is_a_witness(self):
+        """`new_crate_area` is the whole authority for creating a label, so every way of
+        NOT being a new crate is pinned here: an edit to an existing manifest, a source
+        file, a manifest nested below the crate root, a file directly under `crates/`,
+        and a directory name that cannot be a label."""
+        self.assertEqual(M.new_crate_area("crates/sparq-new/Cargo.toml", "added"),
+                         "sparq-new")
+        self.assertEqual(M.new_crate_area("crates/sparq-new/Cargo.toml", "renamed"),
+                         "sparq-new")
+        for path, status in (("crates/sparq-new/Cargo.toml", "modified"),
+                             ("crates/sparq-new/Cargo.toml", "removed"),
+                             ("crates/sparq-new/src/lib.rs", "added"),
+                             ("crates/sparq-new/sub/Cargo.toml", "added"),
+                             ("crates/Cargo.toml", "added"),
+                             ("Cargo.toml", "added"),
+                             ("crates/has space/Cargo.toml", "added"),
+                             ("crates/../evil/Cargo.toml", "added"),
+                             ("crates/a,b/Cargo.toml", "added")):
+            self.assertIsNone(M.new_crate_area(path, status), f"{path} [{status}]")
+
+    def test_a_witness_never_rescues_an_otherwise_unattributable_pr(self):
+        """The widening is per-AREA, not per-PR: one unattributable path still poisons the
+        whole PR, and then nothing is created — `create` is a subset of `add`, so no label
+        is ever made for a PR that receives none."""
+        new = "sparq-brand-new"
+        plan = M.plan_for_pr({"number": 11, "labels": [], "complete": True,
+                              "files": [f"crates/{new}/Cargo.toml",
+                                        "no/such/top/level/x.txt"],
+                              "new_crates": [new]}, self.policy, self.known)
+        self.assertEqual(plan["reason"], "unresolved")
+        self.assertEqual(plan["add"], [])
+        self.assertEqual(plan["create"], [])
+
+    def test_a_truncated_file_list_creates_nothing_even_with_a_witness(self):
+        """`complete` is checked before anything else, so a partial enumeration cannot
+        make a label either — the witness never bypasses the truncation boundary."""
+        new = "sparq-brand-new"
+        plan = M.plan_for_pr({"number": 12, "labels": [],
+                              "files": [f"crates/{new}/Cargo.toml"],
+                              "new_crates": [new]}, self.policy, self.known)
+        self.assertEqual(plan["reason"], "incomplete-paths")
+        self.assertEqual(plan["create"], [])
+
+    def test_an_existing_crates_label_is_never_re_created(self):
+        """Adding a manifest for a crate that already HAS a label (a resurrected crate, a
+        rename back) resolves as usual and creates nothing."""
+        plan = M.plan_for_pr({"number": 13, "labels": [], "complete": True,
+                              "files": ["crates/sparq-core/Cargo.toml"],
+                              "new_crates": ["sparq-core"]}, self.policy, self.known)
+        self.assertEqual(plan["add"], ["area:sparq-core"])
+        self.assertEqual(plan["create"], [])
+
     def test_empty_change_set_stays_global(self):
         self.assertEqual(self.d([]), (frozenset(), "no-paths"))
 
     def test_area_with_no_live_label_is_never_invented(self):
-        """The `POST .../labels` call CREATES an unknown label, so an area outside the
-        live label set must be treated as unresolved."""
+        """`gh pr edit --add-label` CREATES an unknown label, so an area outside the live
+        label set — and outside the witnessed-new-crate set, empty here — must be treated
+        as unresolved."""
         self.assertEqual(
             M.derive_areas(["crates/sparq-reason/src/lib.rs"], self.policy,
                            self.known - {"sparq-reason"}),
@@ -541,6 +658,101 @@ class TestEffects(unittest.TestCase):
         self.assertEqual(f.prs[7]["labels"], [])
         self.assertIn("would label", out)
         self.assertIn("DRY RUN", out)
+
+    # --- the new-crate label creation (#4582) ---------------------------------------
+    NEW_CRATE_PR = (("crates/sparq-not-yet-a-crate/Cargo.toml", "", "added"),
+                    "crates/sparq-not-yet-a-crate/src/lib.rs")
+
+    def test_a_new_crate_pr_creates_its_label_and_then_applies_it(self):
+        """END TO END through the fake `gh`: the #4578 shape reaches `POST .../labels`
+        exactly once and the PR ends up narrowly partitioned instead of on `__global__`.
+
+        Asserted on the fake's SIMULATED label state, so deleting the creation call reds
+        here even if the plan still names the label."""
+        f = self.fake(files=self.NEW_CRATE_PR)
+        out = _run(f, ["--pr", "7", "--apply"])
+        self.assertEqual(f.creates, ["area:sparq-not-yet-a-crate"])
+        self.assertIn("area:sparq-not-yet-a-crate", f.labels)
+        self.assertEqual(f.prs[7]["labels"], ["area:sparq-not-yet-a-crate"])
+        self.assertNotIn("KEEP __global__", out)
+
+    def test_the_creation_call_sets_a_name_a_colour_and_a_description(self):
+        """The reason to use the explicit endpoint rather than the add-labels endpoint's
+        SILENT creation is that the created label is named and described. Pin that."""
+        f = self.fake(files=self.NEW_CRATE_PR)
+        _run(f, ["--pr", "7", "--apply"])
+        post = next(c for c in f.calls if "--method" in c and "POST" in c)
+        self.assertIn("repos/sparq-org/sparq/labels", post)
+        body = dict(a.split("=", 1) for a in post if "=" in a and not a.startswith("-"))
+        self.assertEqual(body["name"], "area:sparq-not-yet-a-crate")
+        self.assertTrue(body["color"])
+        self.assertTrue(body["description"])
+        self.assertLessEqual(len(body["description"]), 100)   # GitHub's cap
+
+    def test_a_dry_run_never_creates_a_label(self):
+        """`--dry-run` is the default and this is the one call that adds PERMANENT repo
+        state, so it must be gated on `--apply` like every write."""
+        f = self.fake(files=self.NEW_CRATE_PR)
+        out = _run(f, ["--pr", "7"])
+        self.assertEqual(f.creates, [])
+        self.assertNotIn("area:sparq-not-yet-a-crate", f.labels)
+        self.assertIn("would create", out)
+
+    def test_a_new_crate_dir_with_no_added_manifest_creates_nothing(self):
+        """The live discriminator: same directory, no witnessing manifest entry (here it
+        is `modified`, the default status). Must stay on `__global__` and write nothing."""
+        f = self.fake(files=("crates/sparq-not-yet-a-crate/src/lib.rs",))
+        out = _run(f, ["--pr", "7", "--apply"])
+        self.assertEqual(f.creates, [])
+        self.assertEqual(f.writes, [])
+        self.assertIn("KEEP __global__", out)
+
+    def test_a_pr_touching_only_existing_crates_creates_nothing(self):
+        """Non-regression: the ordinary case must not have grown a label write."""
+        f = self.fake()
+        _run(f, ["--pr", "7", "--apply"])
+        self.assertEqual(f.creates, [])
+
+    def test_a_second_pass_over_a_created_label_creates_it_again_never(self):
+        """IDEMPOTENCE across runs: once the label exists the next run sees it in the live
+        set, so it neither re-creates nor re-applies it."""
+        f = self.fake(files=self.NEW_CRATE_PR)
+        _run(f, ["--pr", "7", "--apply"])
+        f.calls.clear()
+        _run(f, ["--pr", "7", "--apply"])
+        self.assertEqual(f.creates, [])
+        self.assertEqual(f.writes, [])
+
+    def test_a_backfill_creates_one_label_for_two_prs_adding_the_same_crate(self):
+        """IDEMPOTENCE within a run. The live label set is read ONCE, so without keeping
+        it current the second PR would re-POST and hit a 422."""
+        policy = M.load_policy()
+        live = [f"area:{a}" for a in sorted(policy.members | policy.non_crate)]
+        f = FakeGH({7: {"labels": [], "files": list(self.NEW_CRATE_PR)},
+                    8: {"labels": [], "files": list(self.NEW_CRATE_PR)}}, live)
+        _run(f, ["--backfill", "--apply"])
+        self.assertEqual(f.creates, ["area:sparq-not-yet-a-crate"])
+        self.assertEqual(f.prs[7]["labels"], ["area:sparq-not-yet-a-crate"])
+        self.assertEqual(f.prs[8]["labels"], ["area:sparq-not-yet-a-crate"])
+
+    def test_a_concurrent_creation_race_is_tolerated_but_a_real_failure_reds(self):
+        """The one tolerated creation failure is another run having just made the same
+        label — re-READ from the live set, never inferred from the error text. Any other
+        failure propagates and REDS the run: falling back to `__global__` here is exactly
+        the warn-and-fall-back behaviour #4582 rejects."""
+        f = self.fake(files=self.NEW_CRATE_PR)
+        f.labels.append("area:sparq-not-yet-a-crate")        # created between the two reads
+        M.ensure_area_label(REPO, "area:sparq-not-yet-a-crate", runner=f,
+                            out=__import__("io").StringIO())
+
+        def refusing(args):
+            if "--method" in args and "POST" in args:
+                raise RuntimeError("gh api: 403 Resource not accessible by integration")
+            return f(args)
+
+        with self.assertRaises(RuntimeError):
+            M.ensure_area_label(REPO, "area:sparq-never-made", runner=refusing,
+                                out=__import__("io").StringIO())
 
     def test_human_applied_area_label_survives_an_apply(self):
         """Outcome assertion: the fake would DROP the label if a removal were ever
@@ -772,7 +984,7 @@ class TestChangedFileEnumeration(unittest.TestCase):
         """Cross-check arithmetic: a rename contributes TWO paths but ONE changed file.
         Counting paths instead of entries would make every rename look truncated and
         send correct PRs back to `__global__` (safe, but wrong and silent)."""
-        paths, entries = M.fetch_changed_files(
+        paths, entries, _ = M.fetch_changed_files(
             REPO, 7,
             runner=self.fake([("crates/sparq-zk/a.rs", "crates/sparq-core/a.rs"),
                               "crates/sparq-zk/b.rs"]))
@@ -917,9 +1129,15 @@ class TestWorkflowSeam(unittest.TestCase):
         self.assertEqual(with_.get("ref"), "${{ github.event.repository.default_branch }}")
         self.assertIs(with_.get("persist-credentials"), False)
 
-    def test_permissions_are_exactly_the_least_privilege_pair(self):
+    def test_permissions_are_exactly_the_least_privilege_set(self):
+        """`issues: write` is present ONLY because `POST /repos/{o}/{r}/labels` — the
+        explicit new-crate label creation (#4582) — offers no narrower scope; GitHub does
+        not accept `pull-requests: write` for the repository label collection. Anything
+        else appearing here (notably `contents: write` on a job that holds a write token
+        and reads a PR's paths) must red."""
         self.assertEqual(self.wf["permissions"],
-                         {"contents": "read", "pull-requests": "write"})
+                         {"contents": "read", "issues": "write",
+                          "pull-requests": "write"})
         for job in self.jobs.values():
             self.assertNotIn("permissions", job, "a job-level permissions block would "
                                                  "override the least-privilege default")

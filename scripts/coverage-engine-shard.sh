@@ -66,8 +66,17 @@
 # default-feature number, so this helper must not add/drop engine features. The instrumented
 # COMPILE inputs MUST be pinned identical across all runners (same toolchain, same features,
 # same RUSTFLAGS) so the binaries stay bit-reproducible and the cross-runner profraw merge is
-# valid — the CI jobs use one pinned dtolnay/rust-toolchain and pass no per-runner RUSTFLAGS.
+# valid — the CI jobs use one pinned dtolnay/rust-toolchain and one IDENTICAL job-level
+# RUSTFLAGS across every run partition and the merge job.
 # [FABLE-5]
+#
+# [SONNET-4.6] sq-6vshe.11: that RUSTFLAGS is no longer empty. The coverage-engine-{run,merge}
+# jobs set `RUSTFLAGS: -C link-arg=-fuse-ld=lld` at JOB level, because cargo-llvm-cov's own
+# RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS shadows ci.yml's workflow-level
+# CARGO_TARGET_<triple>_RUSTFLAGS (cargo picks ONE rustflags source, first match wins — it
+# never merges them), so the lld flag reached every other native job but not this lane. The
+# value is the SAME string in both jobs, so the compile inputs stay identical and the merge
+# stays valid; scripts/check-coverage-rustflags.py fails CI if they ever diverge.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

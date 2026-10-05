@@ -11,7 +11,8 @@ their CURRENT status against `hdt` master / 0.7.x.
 >   re-verified 2026-07-18 against the published `hdt` 0.7.3 source, the version
 >   sparq now pins): no release through 0.7.3 ships one. Upstream DRAFT PR
 >   [`KonradHoeffner/hdt#124`](https://github.com/KonradHoeffner/hdt/pull/124)
->   remains the tracked path.** See item 2.
+>   remains the tracked path, awaiting @jeswr's own review (`needs:user`).** See
+>   item 2.
 > - **`read_nt` stores literal lexical forms N-Triples-ESCAPED (spec says raw) —
 >   DOCUMENTED LIMITATION (sq-qalqs).** See item 3.
 
@@ -59,6 +60,31 @@ required for the write path; this item is closed (tracked under landed bead
 authored by `@jeswr`. It is **jeswr-review-gated** — not yet marked ready for
 maintainer review — so it is not merged. Tracking bead: `sq-fkj`.
 
+> **PR hygiene + review-gate mechanism ([OPUS-5] sq-uu7c, 2026-07-27).** #124 is
+> reconciled to the N3.js upstream-contribution practice in `AGENTS.md`
+> (*Upstream contributions — how to open the PR*): DRAFT, 🤖 agent self-id, a
+> "NOT yet ready for maintainer review" note, a "Why" section, and a single
+> self-contained change (one feature, 2 files) — so **no split is needed**.
+> Branch: `feat/decode-only-triples-streaming` on @jeswr's `hdt` fork.
+>
+> **Reviewer assignment is not available on this PR, by design of GitHub.** Both
+> `gh pr edit 124 --add-reviewer jeswr` and `--add-assignee jeswr` fail
+> (`RequestReviewsByLogin` / `ReplaceActorsForAssignable`): @jeswr is the PR
+> author, and an author cannot be their own requested reviewer; the agent account
+> also lacks triage on the external repo. Per `AGENTS.md` step 3, the **body
+> `@jeswr` review-mention is the working fallback** and is already in place —
+> that is the mechanism of record for this PR.
+>
+> **Open action — @jeswr only (`needs:user`).** Review #124 and, when satisfied,
+> mark it ready for maintainer review yourself. Agents must never flip a draft
+> upstream PR to ready.
+>
+> **Unrelated upstream build breakage (not ours to fix).** `hdt` master was
+> observed failing to build because `hdt` 0.7.1 resolves to `qwt` 0.3.5, which is
+> **yanked** on crates.io. This does not affect sparq: `Cargo.lock` pins `hdt`
+> 0.7.3 → `qwt` 0.4.0. It is the upstream maintainer's concern, and it is
+> orthogonal to this doc-only PR.
+>
 > **Re-verified against the released line ([FABLE-5] sq-fkj, 2026-07-18).** With
 > sparq now pinning `hdt` 0.7 (the sq-2l1 bump), the gap was re-checked against the
 > published **0.7.3** crate source: no decode-only entry point has shipped in any

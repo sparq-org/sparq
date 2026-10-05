@@ -13,7 +13,8 @@ use std::io::{BufRead, Write};
 use crate::server::McpServer;
 
 /// Serve the MCP protocol over an arbitrary reader/writer pair using the stdio
-/// framing (one JSON-RPC object per line). Reads requests from `reader` line by line,
+/// framing (one JSON-RPC value per line — an object, or a batch array).
+/// Reads requests from `reader` line by line,
 /// dispatches each through `server`, and writes each response as a single line to
 /// `writer` (flushing after every response so the client sees it promptly).
 ///

@@ -34,6 +34,16 @@
 # is_advisory() + render_verdict() so that deleting the declaration REDs a named test
 # rather than silently re-arming this detector as a merge blocker.
 #
+# WHO APPLIED THE HOLD (sparq#4911). The alarm exempts a PR carrying `needs:user` /
+# `review:needs-user` — but it now resolves that hold's OWNER from the `labeled` timeline
+# event rather than from the label's name, because 41/41 of the live "human-owned" holds
+# on open sparq PRs were applied by `sparq-orchestrator[bot]`, and a further population of
+# machine PARKS was written under the maintainer's own alias — so neither the label nor the
+# actor identity alone is a trustworthy answer to "did a human decide this?". The
+# live step therefore also reads `repos/{repo}/issues/{n}/events` for held blind-spot
+# candidates. That is a READ, already covered by the scopes below; no new permission is
+# requested and the alarm still cannot write a label on any PR.
+#
 # NO ARMING AUTHORITY, STRUCTURALLY. This workflow holds `issues: write` and NOTHING else:
 # no `pull-requests: write` (it cannot label, promote, or un-draft a PR) and no
 # `contents: write` (it cannot push). It is a detector. It is deliberately disjoint from

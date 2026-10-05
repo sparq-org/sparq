@@ -342,6 +342,61 @@ fn reject_out_of_fragment_property_characteristic() {
     ));
 }
 
+/// [SONNET-4.6] sq-pbz04.4.8 — OWL 2's built-in properties have a FIXED extension
+/// (`owl:topObjectProperty` = ΔI × ΔI, `owl:bottomObjectProperty` = ∅). L1 can only
+/// represent axiom-constrained named roles, so reading one as an ordinary role does not
+/// merely lose precision — it manufactures models. Refused fail-closed at EVERY property
+/// position (the uniformity is what makes the refusal sound).
+#[test]
+fn reject_builtin_object_properties_uniformly() {
+    // The two W3C cases that motivated the refusal, verbatim in shape. Both are
+    // INCONSISTENT in OWL 2 DL; under an opaque-role reading both look satisfiable.
+    for body in [
+        // New-Feature-BottomObjectProperty-001: ∃⊥ᵣ.⊤(i) — unsatisfiable, ⊥ᵣ is empty.
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:someValuesFrom owl:Thing ] .",
+        // New-Feature-TopObjectProperty-001: ¬∃⊤ᵣ.⊤(i) — unsatisfiable, ⊤ᵣ relates all.
+        ":i a [ owl:complementOf [ owl:onProperty owl:topObjectProperty ; \
+                                   owl:someValuesFrom owl:Thing ] ] .",
+        // The other property positions, so the refusal cannot be routed around.
+        ":r rdfs:subPropertyOf owl:topObjectProperty .",
+        "owl:topObjectProperty rdfs:subPropertyOf :r .",
+        "owl:bottomObjectProperty rdfs:domain :A .",
+        "owl:bottomObjectProperty rdfs:range :A .",
+        // The role-assertion path builds its property expression directly, NOT through
+        // decode_object_property — a refusal that missed this site would be non-uniform.
+        // DECLARED, so the triple gets past the undeclared-predicate refusal and actually
+        // reaches `role_assertion` (undeclared, it fails closed earlier as Unclassifiable —
+        // asserted separately below so this case cannot pass for the wrong reason).
+        "owl:topObjectProperty a owl:ObjectProperty . :x owl:topObjectProperty :y .",
+    ] {
+        let (d, t) = parse(body);
+        assert!(
+            matches!(extract(&d, &t), Err(ExtractError::OutOfFragment(_))),
+            "expected OutOfFragment for {:?}, got {:?}",
+            body,
+            extract(&d, &t)
+        );
+    }
+    // UNDECLARED, the built-in predicate is already refused a step earlier (a bare predicate
+    // is indistinguishable from an annotation) — pinned so the case above is known to be
+    // testing `role_assertion`'s refusal rather than inheriting this one.
+    let (d, t) = parse(":x owl:topObjectProperty :y .");
+    assert!(matches!(
+        extract(&d, &t),
+        Err(ExtractError::Unclassifiable(_))
+    ));
+    // The data-property counterparts refuse as DataConstruct (no concrete domain in L1).
+    let (d, t) = parse("owl:topDataProperty a owl:ObjectProperty . :x owl:topDataProperty :y .");
+    assert!(matches!(
+        extract(&d, &t),
+        Err(ExtractError::DataConstruct(_))
+    ));
+    // CONTROL: an ordinary role in the same shapes still extracts — the refusal is keyed on
+    // the built-in IRIs, not on the shapes carrying them.
+    let (d, t) = parse(":i a [ owl:onProperty :r ; owl:someValuesFrom owl:Thing ] . :x :r :y .");
+    assert!(extract(&d, &t).is_ok());
+}
+
 #[test]
 fn reject_data_construct_literal_in_class() {
     let (d, t) = parse(":A rdfs:subClassOf \"a literal\" .");

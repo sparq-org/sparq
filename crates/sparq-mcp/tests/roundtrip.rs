@@ -147,9 +147,13 @@ fn read_only_server_lists_read_tools_only() {
     #[cfg(not(feature = "shacl"))]
     assert!(!names.contains(&"describe_form"));
     assert!(!names.contains(&"update"), "update must NOT be advertised by default");
-    // The NL `ask` tool is feature-gated AND backend-gated: never advertised in the
+    // The NL tools are feature-gated AND backend-gated: never advertised in the
     // default build (the `nlq` feature is off here).
     assert!(!names.contains(&"ask"), "ask must NOT be advertised in the default build");
+    assert!(
+        !names.contains(&"nl_query"),
+        "nl_query must NOT be advertised in the default build"
+    );
     // Each tool ships a proper inputSchema object.
     for tool in resp["result"]["tools"].as_array().unwrap() {
         assert_eq!(tool["inputSchema"]["type"], "object");

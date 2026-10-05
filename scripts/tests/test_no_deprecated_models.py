@@ -157,9 +157,16 @@ class TestProviderPreference(unittest.TestCase):
     A preference expressed purely as chain ORDER decays exactly this way, so the order is pinned.
     """
 
-    # The routes where opus5 and sol are BOTH viable implementors. role:docs is excluded: the
-    # separate 2026-07-26 docs-writing directive puts sol first there deliberately.
-    OPUS5_FIRST_ROLES = ("impl", "site", "ci", "perf")
+    # The routes where opus5 and sol are BOTH viable implementors and the preference is expressed
+    # as ORDER. role:docs is excluded: the separate 2026-07-26 docs-writing directive puts sol first
+    # there deliberately. role:impl is excluded because it is no longer a preference at all — see
+    # OPUS5_ONLY_ROLES.
+    OPUS5_FIRST_ROLES = ("site", "ci", "perf")
+    # [OPUS-5] registry #738 (maintainer decision 2026-07-26: "Remove sol from impl fallback"). The
+    # routes where sol is EXCLUDED, not merely outranked. Measured in-cell `role:impl` first-attempt
+    # yield: sol 7/40 = 18% vs opus5 12/14 = 86%, n=74, same route and same brief; 4/4 same-issue
+    # crossovers; budget exhaustion refuted (longest no-diff model step 177s vs a 90-minute timeout).
+    OPUS5_ONLY_ROLES = ("impl",)
     GUI_ROLE = "gui"
 
     @classmethod
@@ -180,10 +187,48 @@ class TestProviderPreference(unittest.TestCase):
         self.assertEqual(self.doc["defaults"]["model_chain"][0], "opus5")
 
     def test_preference_is_not_exclusion(self):
-        """sol must stay REACHABLE on non-GUI work. MUTANT: drop sol from a chain => RED."""
+        """sol must stay REACHABLE on the ORDER-preference routes. MUTANT: drop sol from one of
+        these chains => RED. `role:impl` is deliberately NOT in this set since 2026-07-26."""
         for role in self.OPUS5_FIRST_ROLES:
             self.assertIn("sol", self.routes[role]["model_chain"],
                           f"role:{role}: sol must remain a fallback, not be excluded")
+
+    def test_impl_route_is_opus5_only(self):
+        """[OPUS-5] registry #738 — the EXCLUSION, asserted as a whole-chain equality rather than a
+        head check so demoting sol back to a second rung reds this too.
+
+        MUTANT: restore ["opus5", "sol"] on role:impl => RED."""
+        for role in self.OPUS5_ONLY_ROLES:
+            chain = self.routes[role]["model_chain"]
+            self.assertEqual(chain, ["opus5"],
+                             f"role:{role} must be opus5-ONLY (maintainer 2026-07-26: remove sol "
+                             f"from impl fallback)")
+            providers = {self.doc["models"][m]["provider"] for m in chain}
+            self.assertEqual(providers, {"anthropic"},
+                             f"role:{role} must name no openai tier at all")
+
+    def test_impl_exclusion_comes_with_an_exit(self):
+        """A single-rung chain with no `escalate` has NO exit: on an opus5 capacity outage the item
+        defers, and defers again, forever, with nobody notified. Deprecating a fallback has to come
+        with an exit — the same shape role:research uses.
+
+        MUTANT: delete `escalate = true` from the role:impl route => RED."""
+        for role in self.OPUS5_ONLY_ROLES:
+            self.assertTrue(self.routes[role].get("escalate"),
+                            f"role:{role} is single-provider and single-rung, so it MUST escalate")
+
+    def test_the_exclusion_is_scoped_to_the_roles_the_maintainer_named(self):
+        """The directive removed sol from `role:impl` and nothing else. This is the guard that reds
+        if a future edit copies the exclusion onto another implementor route (or onto docs/gui).
+
+        MUTANT: drop sol from role:site / role:perf / role:ci / role:gui / role:docs => RED."""
+        excluded = sorted(
+            role for role, r in self.routes.items()
+            if role in ("impl", "site", "ci", "perf", "gui", "docs")
+            and not any(self.doc["models"][m]["provider"] == "openai"
+                        for m in r["model_chain"]))
+        self.assertEqual(excluded, sorted(self.OPUS5_ONLY_ROLES),
+                         "exactly the roles in OPUS5_ONLY_ROLES may lack an openai rung")
 
     def test_gui_carve_out_keeps_sol_first(self):
         """MUTANT: delete the role:gui route, or flip it to opus5-first => RED."""
@@ -199,7 +244,9 @@ class TestProviderPreference(unittest.TestCase):
 
     def test_every_preference_chain_terminates_cross_provider(self):
         """Both directions must terminate: a chain naming only ONE provider can be starved by that
-        provider's outage with no other rung to fall to."""
+        provider's outage with no other rung to fall to. `role:impl` is excluded since 2026-07-26 —
+        it is deliberately single-provider and its termination guarantee is `escalate = true`
+        (test_impl_exclusion_comes_with_an_exit), not a cross-provider rung."""
         for role in self.OPUS5_FIRST_ROLES + (self.GUI_ROLE,):
             chain = self.routes[role]["model_chain"]
             providers = {self.doc["models"][m]["provider"] for m in chain}
@@ -333,14 +380,90 @@ class TestLabelsToModelChain(unittest.TestCase):
         self.assertEqual(self.rr.resolve(["area:gui", "area:sparq-zk", "role:impl"], self.doc),
                          (["opus5"], "sparq-reviewer", True))
 
-    def test_the_carve_out_never_injects_sol_into_a_chain_that_lacks_it(self):
+    def test_the_carve_out_never_injects_sol_into_an_authorship_pinned_chain(self):
         """The directive's own qualifier is "tasks for which they are BOTH possible implementors".
-        `role:research` is deliberately anthropic-side + escalating; the carve-out must leave it
-        alone rather than quietly making it cross-provider (which would hide the stall).
-        MUTANT: drop the both-in-chain condition => RED."""
-        chain, _agent, escalate = self.rr.resolve(["area:gui", "role:research"], self.doc)
-        self.assertEqual(chain, ["opus5"])
-        self.assertTrue(escalate)
+        `role:research` / `role:review` / `role:soundness` are deliberately anthropic-side +
+        escalating; the carve-out must leave them alone rather than quietly making one
+        cross-provider, which would hide a stall that is meant to be visible.
+
+        Since 2026-07-26 the carve-out CAN add sol back (see the tests below), so this is no longer
+        implied by a blanket both-in-chain condition — it is enforced by the `inject_roles`
+        allow-list, and the registry mechanism refuses to even parse these roles in that field.
+        MUTANT: add "research" to GUI_CARVE_OUT_INJECT_ROLES => RED."""
+        for role in ("research", "review", "soundness"):
+            chain, _agent, escalate = self.rr.resolve(["area:gui", f"role:{role}"], self.doc)
+            self.assertEqual(chain, ["opus5"],
+                             f"role:{role} must stay single-provider under area:gui")
+            self.assertTrue(escalate, f"role:{role} must still escalate")
+        self.assertEqual(
+            sorted(set(self.rr.GUI_CARVE_OUT_INJECT_ROLES)
+                   & {"research", "review", "soundness"}), [],
+            "no authorship-pinned escalating lane may be in the injection allow-list")
+
+    def test_gui_impl_work_survives_the_single_rung_impl_chain(self):
+        """[OPUS-5] THE HEADLINE GUARD OF registry #738's ROUTING CHANGE.
+
+        `role:impl` is now `["opus5"]`. The `area:gui` carve-out was a pure RE-ORDERING, so on a
+        chain that no longer contains sol its both-implementors condition declines and the carve-out
+        goes INERT — all 33 open `area:gui` + `role:impl` issues would resolve opus5-only, which is
+        the exact inversion of the maintainer's one stated exception that PR #4211 fixed. And it has
+        NO symptom: PLAN and CLAIM agree on the wrong answer, so the cross-resolver agreement
+        harness reports nothing.
+
+        MUTANT (any of these) => RED:
+          * delete `inject_roles` from the `[[chain_preference]]` block in routing.toml
+          * delete the injection branch from `route-resolve.gui_carve_out`
+          * remove "impl" from `GUI_CARVE_OUT_INJECT_ROLES`
+        """
+        impl_route = next(r for r in self.doc["route"] if r.get("role") == "impl")
+        self.assertEqual(impl_route["model_chain"], ["opus5"],
+                         "precondition: this guard is only meaningful on a single-rung impl chain")
+        for labels in (["area:gui", "role:impl"],
+                       ["area:gui", "role:impl", "priority:P2"],
+                       ["area:gui", "role:impl", "area:sparq-gui"]):
+            self.assertEqual(self.chain(labels), ["sol", "opus5"],
+                             f"{labels} must stay SOL-FIRST (maintainer: GUI keeps sol)")
+        self.assertEqual(self.rr.resolve(["area:gui", "role:impl"], self.doc)[1],
+                         "sparq-rust-impl",
+                         "the carve-out re-orders/leads the chain and never re-routes the agent")
+
+    def test_the_injection_allow_list_is_declared_in_the_table_not_only_in_python(self):
+        """CLAIM re-derives the route from the routing TOML with registry-owned code and
+        `_route_matches` demands EXACT chain equality. An allow-list that existed only in this
+        repo's Python would make every `area:gui` + `role:impl` issue defer `route-policy-failed`
+        on every tick, forever — the #4211 failure mode.
+
+        MUTANT: delete `inject_roles` from routing.toml, or widen the Python constant => RED."""
+        declared = self.doc.get("chain_preference", [])
+        self.assertEqual(len(declared), 1, "exactly one chain preference is declared")
+        self.assertEqual(sorted(declared[0].get("inject_roles", [])),
+                         sorted(self.rr.GUI_CARVE_OUT_INJECT_ROLES),
+                         "the TOML declaration and the resolver constant must not drift")
+        self.assertTrue(declared[0].get("inject_roles"),
+                        "a re-order-only declaration disarms the carve-out on a single-rung chain")
+        declared_roles = {r["role"] for r in self.doc.get("route", []) if r.get("role")}
+        self.assertLessEqual(set(declared[0]["inject_roles"]), declared_roles,
+                             "every inject_roles entry must name a role this table declares — a "
+                             "typo would make the carve-out silently never fire")
+
+    def test_injection_is_scoped_to_the_exact_gui_label(self):
+        """The carve-out can now hand back a model the impl route deliberately excludes, so a
+        false-matching selector is worse than a re-order: it would give sol to non-GUI work.
+
+        MUTANT: make the selector a substring test => RED (area:guide would gain a sol rung)."""
+        for near in ("area:guide", "area:guidance", "area:gui-toolkit", "kind:guidance",
+                     "area:site", "surface:frontend", "dashboard"):
+            self.assertEqual(self.chain([near, "role:impl"]), ["opus5"],
+                             f"{near} is not area:gui and must be given NO sol rung")
+
+    def test_a_roleless_gui_issue_is_never_injected_into(self):
+        """`role=None` (the `[defaults]` branch) has no role to check against the allow-list, so it
+        must decline. The live defaults chain still contains sol, so it is sol-first by re-order —
+        the assertion that carries the property is the direct one on `gui_carve_out`.
+
+        MUTANT: drop the `role is None` clause => RED."""
+        self.assertEqual(self.chain(["area:gui", "priority:P2"]), ["sol", "opus5"])
+        self.assertEqual(self.rr.gui_carve_out({"area:gui"}, ["opus5"], role=None), ["opus5"])
 
     def test_gui_docs_keep_the_docs_route(self):
         """Docs writing already leads with sol by the separate directive; the carve-out must not
@@ -355,6 +478,19 @@ class TestLabelsToModelChain(unittest.TestCase):
             self.assertEqual(self.chain([f"role:{role}", "area:sparq-core", "priority:P1"])[0],
                              "opus5")
         self.assertEqual(self.chain(["area:sparq-core", "priority:P1"])[0], "opus5")
+
+    def test_non_gui_impl_work_gets_no_sol_rung_end_to_end(self):
+        """[OPUS-5] registry #738, at the deciding layer: a plain `role:impl` issue resolves to the
+        WHOLE opus5-only chain. Asserted as an equality rather than a head check, because the defect
+        this replaces (sol serving the majority of impl work) came from the SECOND rung, not the
+        first — a head-only assertion cannot see it.
+
+        MUTANT: restore sol as a second rung on role:impl => RED."""
+        for area in ("area:sparq-core", "area:sparq-engine", "area:orchestration"):
+            self.assertEqual(self.chain(["role:impl", area, "priority:P1"]), ["opus5"],
+                             f"role:impl + {area} must resolve to the opus5-only chain")
+        self.assertTrue(self.rr.resolve(["role:impl", "area:sparq-core"], self.doc)[2],
+                        "and it must escalate, so a capacity outage is not a silent stall")
 
 
 class TestLabelWritesAreFailClosed(unittest.TestCase):
@@ -623,20 +759,48 @@ class TestWorkflowWiring(unittest.TestCase):
                       "this suite is never RUN — its assertions are dead in CI")
 
     def test_invocation_is_not_neutralised_by_a_trailing_true(self):
-        """MUTANT: append `|| true` to the invocation => RED. Exit-zero swallowing has bitten this
-        repo three times in one day; a guard whose failure is discarded is not a guard."""
-        runs = "\n".join(s["run"] for s in self._run_steps())
-        for line in runs.splitlines():
-            if "test_no_deprecated_models.py" in line:
+        """MUTANT: append `|| true` to ANY invocation in this workflow => RED.
+
+        [OPUS-5] WIDENED, found by mutation. This test previously matched only the line invoking
+        THIS suite, so `python3 scripts/route-resolve.py --self-test || true` — which silently
+        discards the entire routing-resolver contract, including the `area:gui` carve-out and the
+        role:impl chain — SURVIVED. Exit-zero swallowing has bitten this repo repeatedly; the
+        assertion has to cover every gating invocation in the job, not just this file's own."""
+        checked = 0
+        for step in self._run_steps():
+            for line in step["run"].splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("python3 "):
+                    continue
+                checked += 1
                 self.assertNotRegex(
-                    line.strip(), r"(\|\|\s*true|;\s*true|\|\|\s*:)\s*$",
-                    "the guard's exit status is discarded")
+                    stripped, r"(\|\|\s*true|;\s*true|\|\|\s*:)\s*$",
+                    f"the exit status of `{stripped}` is discarded")
+        self.assertGreater(checked, 5,
+                           "no invocations were inspected — the run blocks were not parsed")
+
+    def test_the_routing_contract_scripts_are_actually_invoked(self):
+        """[OPUS-5] A guard nobody runs cannot go red. The routing change of registry #738 lives in
+        `orchestration/routing.toml` + `scripts/route-resolve.py`, and its assertions live in those
+        scripts' own `--self-test`s — so this gate must invoke each of them.
+
+        MUTANT: delete any of these invocation lines (or the whole step) => RED."""
+        runs = "\n".join(s["run"] for s in self._run_steps())
+        for invocation in ("python3 scripts/routing-validate.py --self-test",
+                           "python3 scripts/route-resolve.py --self-test",
+                           "python3 scripts/dispatch-plan.py --self-test",
+                           "python3 scripts/tests/test_no_deprecated_models.py"):
+            self.assertIn(invocation, runs, f"`{invocation}` is never RUN in this gate")
+        self.assertRegex(runs, r"(?m)^\s*python3 scripts/routing-validate\.py\s*$",
+                         "the validator must also run against the LIVE routing.toml, not only "
+                         "against its own fixtures")
 
     def test_run_block_uses_pipefail(self):
-        """Without `set -euo pipefail` a failing early command does not fail the step."""
+        """Without `set -euo pipefail` a failing early command does not fail the step. Applied to
+        EVERY run step in the gating job, not only the one invoking this suite."""
         for step in self._run_steps():
-            if "test_no_deprecated_models.py" in step["run"]:
-                self.assertIn("set -euo pipefail", step["run"])
+            self.assertIn("set -euo pipefail", step["run"],
+                          f"run step {step.get('name', '<unnamed>')!r} lacks pipefail")
 
     def test_this_file_is_a_path_trigger_on_both_triggers(self):
         """MUTANT: drop the paths entry => this suite stops running on its own PRs => RED.

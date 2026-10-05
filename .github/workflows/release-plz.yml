@@ -6,15 +6,18 @@
 #       vX.Y.Z, which fires the EXISTING release.yml unchanged").
 #
 # WHAT THIS DOES — the two-step release-plz flow, anchored on release-plz.toml
-# (#789 / sq-v286.3: the version_group over the 17 publishable crates that keeps the
+# (#789 / sq-v286.3: the version_group over the 37 publishable crates that keeps the
 # locked single-version model):
 #
-#   1. release-pr  — on every push to main, release-plz reads the conventional-commit
+#   1. release-pr  — in normal post-bootstrap operation, on every push to main,
+#                    release-plz reads the conventional-commit
 #                    history (+ cargo-semver-checks API-break detection), computes the
 #                    next single workspace version, and opens/UPDATES one "Release-PR"
 #                    that bumps the version across the version_group + rewrites
 #                    CHANGELOG.md (git-cliff) + updates Cargo.lock. Nothing is released
-#                    yet — a human reviews + merges that PR.
+#                    yet — a human must also align the npm manifests/lock records, then
+#                    reviews + merges that PR. During the first registry bootstrap this
+#                    calculation is skipped entirely; use the manual recovery version PR.
 #
 #   2. release     — when the Release-PR MERGES, its version-bump commit lands on main;
 #                    this push re-runs the workflow and `release-plz release` detects the
@@ -142,7 +145,30 @@ jobs:
           # Do not leave the default GITHUB_TOKEN in the local git config; release-plz uses
           # its own `token:` input for forge operations (release-plz docs recommendation).
           persist-credentials: false
+      # [GPT-6] release-plz update packages a temporary graph even with git_only=true;
+      # before the first registry bootstrap that cannot resolve the unpublished engine.
+      # Keep manual cross-ecosystem version PRs + the independent tag job through the
+      # bootstrap. After the crates.io/OIDC flip, a generated Cargo Release-PR is still
+      # incomplete until its npm manifest + shared-lock records are aligned.
+      - name: Check first-bootstrap mode
+        id: bootstrap
+        run: |
+          python3 - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          workspace = tomllib.loads(Path("release-plz.toml").read_text())["workspace"]
+          git_only, publish = workspace["git_only"], workspace["publish"]
+          if type(git_only) is not bool or type(publish) is not bool:
+              raise SystemExit("release-plz bootstrap flags must be booleans")
+          bootstrap = git_only and not publish
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"ready={str(not bootstrap).lower()}\n")
+          if bootstrap:
+              print("First registry bootstrap is pending: use a manual version PR; automatic release-pr is skipped.")
+          PY
       - name: Rust (preinstalled stable)
+        if: steps.bootstrap.outputs.ready == 'true'
         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
@@ -161,11 +187,13 @@ jobs:
       # behavior is unchanged; only the invocation is now wrapped and captured. The unchanged
       # `release` job below still uses the pinned release-plz/action (no containment needed there).
       - name: Install release-plz + cargo-semver-checks (pinned)
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        if: steps.bootstrap.outputs.ready == 'true'
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: release-plz@0.3.160,cargo-semver-checks@0.48
       - name: Run release-plz release-pr (output captured for failure classification)
         id: releasepr
+        if: steps.bootstrap.outputs.ready == 'true'
         # continue-on-error so the containment step below can classify the failure from the
         # captured log: the KNOWN 403 (Actions PR-creation setting disabled) is tolerated with a
         # ::warning; anything else re-fails the job. See the job-level comment.
@@ -248,6 +276,49 @@ jobs:
           echo "::error::release-plz release-pr failed with the blocked-PR-creation signature in its output, but the live PR-creation probe returned HTTP ${code} (not 403) — the blocked-setting condition is not reproducible right now, so this is treated as a real failure. Probe response body follows."
           cat /tmp/rp-probe.json || true
           exit 1
+      # [OPUS-5] sq-lonae — PROMOTION SIGNAL. The promotion of this job back to gating is
+      # needs:user (provision ORCHESTRATOR_APP_ID/_PRIVATE_KEY or RELEASE_PLZ_TOKEN, or enable
+      # the Actions PR-creation setting — see the job comment and docs/release.md §8e), and
+      # until this step nothing in the repo OBSERVED the moment that prerequisite landed: the
+      # forge-token chain resolves silently, so a newly-provisioned token just makes this job go
+      # quietly green and the `(advisory)` declaration in .github/advisory-registry.json rots.
+      #
+      # The registered promotion criterion is "PR-creation works with this job's forge token",
+      # which is exactly what the containment step's side-effect-free probe answers — so re-use
+      # it on the SUCCESS path (the failure path already probed, and already reported). head==base
+      # is invalid, so a token PERMITTED to create PRs gets 422 Validation Failed and no PR is
+      # ever created, while a token blocked by the Actions setting gets 403. The probe is needed
+      # even on success because `release-plz release-pr` also exits 0 when there is simply
+      # nothing to release, which says nothing about whether PR-creation is allowed.
+      #
+      # FAIL-SOFT BY CONSTRUCTION — this step must never fail the release path (no `set -e`, the
+      # curl cannot propagate). Only the DEFINITIVE 422 (authorization passed, body rejected)
+      # claims readiness; 403 means still blocked; anything else — including a probe that never
+      # completed — is reported as inconclusive rather than misread as an unblock.
+      - name: Promotion signal — has PR-creation unblocked? (sq-lonae)
+        if: steps.releasepr.outcome == 'success'
+        env:
+          # Probe with the SAME token release-plz used, or the probe proves nothing about it.
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls" \
+            -d '{"title":"release-plz PR-creation probe (never created: head==base is invalid)","head":"main","base":"main"}') || true
+          echo "PR-creation probe HTTP status: ${code:-<probe did not complete>}"
+          case "${code}" in
+            422)
+              echo "::warning title=release-plz Release-PR promotion unblocked (sq-lonae)::This job's forge token CAN now create pull requests — the side-effect-free probe returned 422 (authorization passed, only the head==base body was rejected), so the known blocked-PR-creation condition no longer holds. The advisory declaration is now STALE. Promote: drop the ' (advisory)' token from this job's name, delete the 'Contain the known 403' step and this step, and delete the 'release-plz / Release-PR (advisory)' entry from .github/advisory-registry.json (docs/release.md §8e)."
+              ;;
+            403)
+              echo "PR-creation is still blocked for this forge token — the job stays advisory (sq-lonae)."
+              ;;
+            *)
+              echo "PR-creation probe inconclusive (HTTP '${code}') — not claiming promotion readiness."
+              ;;
+          esac
 
   # ---- 2. release: when the Release-PR's version commit is on main, create the v<version>
   #         git tag. That tag fires the EXISTING release.yml (push: tags: ["v*"]) which does

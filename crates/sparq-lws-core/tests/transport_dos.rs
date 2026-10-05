@@ -26,10 +26,10 @@ use std::time::Duration;
 
 use axum::routing::get;
 use axum::Router;
-use rustls_pemfile::certs;
 use sparq_lws_core::tls::{build_rustls_config, TlsMode};
 use sparq_lws_core::transport::{ConnectionLimiter, TransportConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
@@ -42,7 +42,7 @@ const CA_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test-
 fn client_config(alpn: &[&[u8]]) -> ClientConfig {
     let pem = std::fs::read(CA_PATH).expect("read fixture CA");
     let mut roots = RootCertStore::empty();
-    for cert in certs(&mut pem.as_slice()) {
+    for cert in CertificateDer::pem_slice_iter(&pem) {
         let cert: CertificateDer<'_> = cert.expect("parse fixture CA");
         roots.add(cert).expect("add fixture CA");
     }

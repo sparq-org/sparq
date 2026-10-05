@@ -16,13 +16,13 @@ import {
   termToNT,
   type SparqlJsonTerm,
 } from './sparql.js';
-import { SparqSource } from './source.js';
+import { SparqSource, type SparqSourceOptions } from './source.js';
 import { asResultStream, ResultStream, type SparqResultStream } from './result-stream.js';
 import { DataFactory, Quad, Variable } from './terms.js';
 import { init, WasmStore } from './wasm.js';
 
 // [OPUS-4.8] sq-dvyi: `'jsonld'` added — the engine parses JSON-LD (oxjsonld) when the
-// wasm bundle is built with the OPT-IN `jsonld` feature, which the published `@jeswr/sparq`
+// wasm bundle is built with the OPT-IN `jsonld` feature, which the published `@sparq-org/sparq`
 // bundle and the site REPL both enable (js `build:wasm`). The JS surface accepts it like
 // the other syntaxes; the default lean wasm bundle leaves oxjsonld out (perf-gate floor).
 export type RdfFormat = 'turtle' | 'ntriples' | 'nquads' | 'trig' | 'jsonld';
@@ -512,7 +512,7 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    * `[[prefix, iri], …]` map driving `@prefix`/`@context` compaction (omit for the engine
    * defaults). An unrecognised `format` (or a malformed `prefixes`) throws.
    *
-   * Requires a `serialize-rdf`-enabled wasm bundle (the published `@jeswr/sparq` ships one);
+   * Requires a `serialize-rdf`-enabled wasm bundle (the published `@sparq-org/sparq` ships one);
    * a `serialize-rdf`-less custom build throws a clear error here rather than a cryptic
    * "not a function". (The full W3C JSON-LD 1.1 Compaction against a caller `@context` is the
    * sibling raw-`Store` `serializeCompact` binding — see the javascript-wasm SKILL.)
@@ -560,7 +560,7 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    * documents (~10–100 triples); validate large graphs server-side via the
    * `sparq-server` HTTP `validate` path instead (the other half of #162).
    *
-   * Requires a `shacl`-enabled wasm bundle (the published `@jeswr/sparq` ships
+   * Requires a `shacl`-enabled wasm bundle (the published `@sparq-org/sparq` ships
    * one); a `shacl`-less custom build throws a clear error here rather than a
    * cryptic "not a function".
    */
@@ -704,9 +704,12 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    * `removeMatches` / `deleteGraph` consume/mutate via streams. The backing store stays the
    * source of truth; the adapter only re-views its primitives as the streaming interface, so a
    * sparq store drops into any RDF/JS Stream pipeline.
+   *
+   * @param options see `SparqSourceOptions` — `chunkSize` sets the quads-per-delta the adapter
+   *   applies while consuming an incoming stream (1024; `0` buffers the whole stream).
    */
-  asSource(): SparqSource {
-    return new SparqSource(this);
+  asSource(options: SparqSourceOptions = {}): SparqSource {
+    return new SparqSource(this, options);
   }
 
   /** Releases the wasm-side memory. The store must not be used afterwards. */

@@ -18,7 +18,7 @@ mod applier;
 /// policy]; the formal freeze is **pending maintainer ratification on #1248** (see the module
 /// docs), not unilaterally frozen here. Thin re-exports only; no new behaviour.
 ///
-/// [API stability policy]: https://github.com/jeswr/sparq/blob/main/docs/api-stability.md
+/// [API stability policy]: https://github.com/sparq-org/sparq/blob/main/docs/api-stability.md
 pub mod embed;
 /// [OPUS-4.8] (sq-o5bi) ONLINE consistent-snapshot backup + restore for the serving store
 /// — export an already-immutable pinned [`Generation`] to a single self-describing artifact
@@ -48,6 +48,18 @@ pub(crate) mod backup;
 /// the same-lineage / fail-closed boundaries.
 #[cfg(feature = "change-stream")]
 pub mod change_stream;
+/// [OPUS-5] (sq-l6zks, gh-3216) The EXTERNAL-BROKER seam over that durable log — a
+/// [`ChangeSink`](change_sink::ChangeSink) trait, a stable JSON broker-message encoding, a
+/// resumable [`BrokerRelay`](change_sink::BrokerRelay) pump with a durable delivered-through
+/// watermark, and one in-tree [`NatsSink`](change_sink::NatsSink) (core-NATS publish, std-only).
+/// Compiled only behind the opt-in `change-sink` feature (default OFF, implies `change-stream`)
+/// — the SEPARATE, HEAVIER opt-in: it is the only thing in this crate that opens a network
+/// socket, and relaying change records to a broker is a data-egress decision, so it never rides
+/// along with `change-stream`. Kafka (and TLS/SASL/retries) is reached by implementing the trait
+/// over the host's own client — no broker client, no async runtime enters this crate. See the
+/// module docs for the at-least-once contract and the off-the-writer-thread rationale.
+#[cfg(feature = "change-sink")]
+pub mod change_sink;
 /// [OPUS-4.8] (sq-bu1a) The INCREMENTAL DELTA-STREAM / point-in-time-recovery companion to the
 /// Option-A base backup ([`backup`]): export the change between two same-lineage generations as a
 /// self-describing delta artifact keyed off generation/writer-seq, and replay an ordered chain of
@@ -117,6 +129,19 @@ pub use change_stream::{
 };
 #[cfg(all(feature = "change-stream", not(feature = "backup")))]
 pub use backup::BackupError;
+// [OPUS-5] (sq-l6zks, gh-3216) The external-broker sink surface (feature `change-sink`):
+// `ChangeSink` is the pluggable seam a host implements over its OWN broker client (Kafka via
+// `rdkafka`, a webhook, …); `BrokerMessage`/`encode_message`/`SinkConfig` are the stable
+// broker-message encoding; `BrokerRelay` is the resumable pump from the durable change log to
+// a sink (`pump` → `PumpReport`, carrying a durable delivered-through watermark that feeds
+// `RetentionPolicy::acked_through_seq`); `RecordingSink` is the in-memory test/dry-run sink;
+// `NatsSink`/`NatsOptions` is the one in-tree broker client (core-NATS publish over plain TCP,
+// std-only — no TLS). `SinkError` is the surface's fail-closed error type.
+#[cfg(feature = "change-sink")]
+pub use change_sink::{
+    encode_message, BrokerMessage, BrokerRelay, ChangeSink, NatsOptions, NatsSink, PumpReport,
+    RecordingSink, SinkConfig, SinkError, DEFAULT_PUMP_MAX_BATCH, DEFAULT_SUBJECT,
+};
 pub use applier::{GraphApplier, DEFAULT_COMPACT_THRESHOLD};
 pub use epoch::{Epoch, PodEpochs, PodId};
 pub use footprint::{Footprint, TargetGraph};

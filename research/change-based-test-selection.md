@@ -184,7 +184,8 @@ input lives *inside* a crate dir (so crate-prefix ownership, steps 1–2, wins
 before the map is ever consulted for a `crates` attribution) **and** the reading
 crate is not in the owner's reverse-dependency closure. Relocation was rejected
 because it would move a *vendored crypto ontology*
-(`crates/sparq-trust/ontologies/zkp-sparql/secprop-ext.ttl`) and a *crate's core
+(`crates/sparq-secprop-vocab/ontologies/secprop-ext.ttl`; it lived under
+`crates/sparq-trust/ontologies/zkp-sparql/` until #3705 moved it to a leaf crate) and a *crate's core
 authorization rule corpus* (`crates/sparq-solid/rules/*.n3`) out of their owning
 crates and rewrite production `include_str!` / runtime include paths in
 `sparq-trust`, `sparq-solid`, `sparq-zk` and `sparq-reason`. The dep-edge

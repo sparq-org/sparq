@@ -1,0 +1,223 @@
+# vectors-aarch64 — EXECUTE the `sparq-vectors` distance-kernel guards on a REAL aarch64 host.
+# [SONNET-4.6] issue #5028.
+#
+# WHY THIS LANE EXISTS
+# --------------------
+# `crates/sparq-vectors/src/simd.rs` ships TWO runtime-dispatched intrinsic kernels behind
+# `#[cfg(target_arch = …)]`: `l2_sq_neon` (aarch64/NEON) and `l2_sq_avx2` (x86_64/AVX2+FMA).
+# Its unit tests (`simd::tests`) are arch-GENERIC — they call the dispatcher `l2_sq_dist` and
+# check it against an f64 reference — so WHICH kernel they verify is decided entirely by the
+# host they run on. Every pre-existing lane that runs `sparq-vectors` tests (ci.yml's sharded
+# nextest matrix, asan.yml, the coverage lanes) is `runs-on: ubuntu-latest`, i.e. x86_64.
+# The repo DOES have aarch64 rows, but none of them touches this crate's tests:
+# build-matrix.yml's `arm64-linux` tier only `cargo auditable build`s the release binaries, and
+# gui.yml's `arm64-linux` row does run `cargo test` — but under `defaults.run.working-directory:
+# gui/src-tauri`, so it is the GUI crate's own suite (and that row is `continue-on-error` with
+# an `.github/advisory-registry.json` declaration, i.e. non-gating). Neither compiles a
+# `sparq-vectors` test binary.
+#
+# So before this file: the NEON kernels were compile-checked and never once EXECUTED in CI.
+# `compliance/memsafety/unsafe-register.md` records the mirror-image hole from the other side —
+# its `l2_sq_avx2` row notes that kernel's numeric output was verified on the x86_64 CI runner
+# because the aarch64 work box sq-lfo84 was authored on cannot execute AVX2. Whichever arch the
+# authoring box happened to be, the OTHER arch's kernel shipped on an unexecuted correctness
+# argument. This lane closes the aarch64 half; ci.yml's x86_64 matrix is the other half.
+#
+# It matters more than a normal coverage gap because the kernels' entire licence to run is a
+# NUMERIC-AGREEMENT argument (`simd::tests` vs an f64 reference), and an argument asserted by
+# a test that never runs on the arch in question is not evidence.
+#
+# SCOPE — no new test is written here. The guards already exist and are arch-generic; they
+# only ever needed an aarch64 host. This lane supplies the host. It is scoped by ARCH, not by
+# kernel: it runs whatever `simd::tests` the crate carries, so kernels added to simd.rs later
+# (e.g. the deterministic exact/DiskANN/PQ kernels sq-9wrkc proposes, which are NOT in the tree
+# at the time of writing — simd.rs currently ships the two above) are covered on aarch64 the
+# moment they land, with no change here.
+#
+# TRIGGERS — gating on the PR head, with push-to-`main` as the post-merge net; deliberately
+# NO `merge_group` and NO nightly `schedule`:
+#   • `merge_group` is dropped for the reason docs/branch-protection.md §"Merge-queue subset —
+#     the maintainer-directed risk posture (2026-07-18)" records for `formal-verification.yml`
+#     / `fuzz.yml` / `bench.yml`: the lane already ran and GATED on the PR head, and GitHub does
+#     not support `paths` filters on `merge_group`, so a queue re-run would tax EVERY enqueue (including
+#     doc-only ones) with an arm build for no new signal. `ci-summary / gate` polls the
+#     check-runs that actually exist on the ref and requires only its own single context, so a
+#     lane absent from `merge_group` is never "expected but missing" and never hangs the gate.
+#     The residual risk is the accepted one: a break only a specific QUEUED COMBINATION could
+#     produce is caught by the `push`-to-`main` run below, then reverted / fixed forward.
+#   • no `schedule`: an unwatched nightly is a lane that can die quietly — `miri.yml`'s own
+#     DEAD-LANE POST-MORTEM is 22 consecutive verdict-less nights nobody alarmed on. A red
+#     here should be attributable to a specific diff, so the lane lives on the PR + push path.
+#     `workflow_dispatch` covers the on-demand case (e.g. after a toolchain bump).
+#
+# Third-party actions are pinned by full commit SHA (supply-chain hardening); the trailing
+# `# vX.Y.Z` comment is what Dependabot follows to bump the pin.
+name: vectors-aarch64
+
+on:
+  pull_request:
+    # `ready_for_review` per docs/branch-protection.md §Draft-tier CI rule 2: the default types
+    # are only opened/synchronize/reopened, so without it the un-draft moment would run nothing
+    # and the head would keep whatever this lane concluded while the PR was a draft.
+    types: [opened, synchronize, reopened, ready_for_review]
+    # NOTE: this list is duplicated verbatim under `push` below. GitHub Actions does NOT
+    # support YAML anchors/aliases in workflow files, so the two copies must be kept in sync
+    # by hand — keep them identical.
+    paths:
+      - "crates/sparq-vectors/**"
+      - ".github/workflows/vectors-aarch64.yml"
+      - ".config/nextest.toml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+  push:
+    branches: [main]
+    # Keep identical to the `pull_request` paths above (no YAML anchors in Actions).
+    paths:
+      - "crates/sparq-vectors/**"
+      - ".github/workflows/vectors-aarch64.yml"
+      - ".config/nextest.toml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+  workflow_dispatch:
+
+# Least-privilege: this lane only reads the repo and runs tests.
+permissions:
+  contents: read
+
+concurrency:
+  group: vectors-aarch64-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # `approx-ann` is LOAD-BEARING twice over, which is why it is asserted mechanically below:
+  #   (a) `mod simd` is `#[cfg(feature = "approx-ann")]` (crates/sparq-vectors/src/lib.rs), so
+  #       without it the kernels are not compiled at all; and
+  #   (b) it gates the kernel's ONLY call site — `l2_sq_dist` is called from exactly one place
+  #       in the crate, `impl Point for NPoint` in ann.rs (the HNSW distance function), itself
+  #       `#[cfg(feature = "approx-ann")]`. So `approx-ann` is precisely the feature under
+  #       which a NEON kernel is reachable at all, today.
+  # `filtered-ann` is added for breadth at ~zero cost: it is a dependency-free feature
+  # (`filtered-ann = []` in Cargo.toml), so it pulls no extra crate into the arm build while
+  # enabling tests/filtered.rs and the filtered half of tests/cost_model.rs.
+  #
+  # WHAT THIS DELIBERATELY OMITS, stated rather than left to inference: ci.yml's
+  # `cargo nextest archive` also enables `vec-predicate`, so the tests behind it
+  # (tests/vec_predicate.rs, tests/vec_hybrid.rs, the `vec-predicate` half of
+  # tests/cost_model.rs) do NOT run here. That feature pulls `sparq-engine` + `spargebra` into
+  # the build for SPARQL-rewrite coverage that reaches no distance kernel — a large arm build
+  # for no NEON signal. Those tests stay covered by ci.yml's x86_64 matrix, and they are
+  # arch-independent anyway.
+  VECTORS_FEATURES: approx-ann,filtered-ann
+
+jobs:
+  neon:
+    name: sparq-vectors tests (aarch64/NEON)
+    # GitHub-hosted aarch64 Linux runner — the EXACT label build-matrix.yml's `arm64-linux`
+    # release tier and gui.yml's `arm64-linux` row already use, so this lane cannot drift onto
+    # a runner class the repo does not otherwise prove available.
+    runs-on: ubuntu-24.04-arm
+    # Generous ceiling: a cold arm build of the sparq-vectors test binaries plus the crate's two
+    # heavy 50k recall tests. A hang fails with a clear timeout rather than running away.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # ---- NON-VACUITY GUARD 1: the host really is aarch64 with NEON ----
+      # The whole value of this lane is the HOST. If the runner label is ever changed, aliased,
+      # or silently remapped to x86_64, the arch-generic tests below would still pass — green,
+      # and testing the AVX2/scalar path instead, while the lane's name claims NEON coverage.
+      # That is the exact failure this file exists to end, so it fails CLOSED here.
+      - name: Assert the runner is aarch64 with NEON (fail-closed)
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          echo "runner arch: ${arch}"
+          if [ "${arch}" != "aarch64" ]; then
+            echo "::error::vectors-aarch64 ran on '${arch}', not aarch64 — the NEON kernels in crates/sparq-vectors/src/simd.rs are #[cfg(target_arch = \"aarch64\")] and were NOT compiled, so this lane would be vacuous. Fix the runs-on label."
+            exit 1
+          fi
+          # `asimd` is how the kernel spells Advanced SIMD (NEON) in /proc/cpuinfo's Features
+          # line on aarch64 Linux. It and `is_aarch64_feature_detected!("neon")` — the runtime
+          # check guarding the unsafe call in l2_sq_dist — both derive from the same kernel
+          # HWCAP_ASIMD bit, so its absence means the dispatcher takes the SCALAR fallback and
+          # the kernel is again unexecuted.
+          if ! grep -qw asimd /proc/cpuinfo; then
+            echo "::error::this aarch64 runner does not advertise 'asimd' (NEON) in /proc/cpuinfo — l2_sq_dist would take the scalar fallback and l2_sq_neon would stay unexecuted."
+            exit 1
+          fi
+          grep -m1 '^Features' /proc/cpuinfo
+
+      # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image ships a rustup
+      # stable toolchain; a SHA-pinned toolchain action re-downloads the whole toolchain
+      # whenever the image lags the newest release. `rustup default` never triggers a download.
+      - name: Rust (preinstalled stable)
+        run: |
+          rustup default stable
+          rustup show active-toolchain
+
+      - name: Cache cargo (aarch64)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: vectors-aarch64-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            vectors-aarch64-
+
+      # SHA-pinned install-action MUST carry an explicit `with: tool:` — the SHA pin drops the
+      # `@<tool>` ref selector and the action would install NOTHING (scripts/check-install-action-tool.py).
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
+
+      # ---- NON-VACUITY GUARD 2: the NEON-bearing module is actually in this build ----
+      # `mod simd` is `#[cfg(feature = "approx-ann")]`. Drop that feature from VECTORS_FEATURES
+      # and the kernels vanish from the binary while the rest of the crate's suite still runs
+      # GREEN — a lane that claims to cover NEON and covers nothing. Listing the tests proves
+      # they were compiled BEFORE the run step is allowed to report success.
+      - name: Assert the SIMD kernel tests are compiled into this run
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/simd-tests.txt"
+          listed=0
+          # `--color never` is LOAD-BEARING, not cosmetic: this listing is MACHINE-PARSED by the
+          # grep below. The workflow-level `CARGO_TERM_COLOR: always` is bound to nextest's
+          # `--color` flag, so nextest colourises even when stdout is a FILE — and its human list
+          # output styles the module path and the final name segment as SEPARATE spans, emitting
+          # `<esc>…m simd::tests <esc>[0m` + `::` + `<esc>…m <name>`. The literal `simd::tests::`
+          # is then never contiguous, the grep counts 0, and this guard fails CLOSED on a build
+          # that did compile the kernels. Force plain text for the parsed output; the run step
+          # below keeps colour for the human log.
+          cargo nextest list -p sparq-vectors --features "${VECTORS_FEATURES}" --color never \
+            -E 'package(sparq-vectors) & test(/^simd::tests::/)' > "${out}"
+          listed="$(grep -c 'simd::tests::' "${out}" || true)"
+          cat "${out}"
+          if [ "${listed}" -lt 1 ]; then
+            echo "::error::no simd::tests:: test was compiled into this run — 'mod simd' is #[cfg(feature = \"approx-ann\")], so the NEON kernels are absent and this lane covers nothing. Check VECTORS_FEATURES."
+            exit 1
+          fi
+          echo "${listed} simd::tests:: test(s) compiled for aarch64 — the NEON kernels are in this build."
+
+      # The crate's whole suite for these features, not just `simd::tests`. The DIRECT kernel
+      # guards are `simd::tests`; the INDIRECT ones are every test that constructs a
+      # `VectorIndex` (tests/recall.rs, ef_sweep, filtered, hybrid, hybrid_olympics, labels,
+      # olympics, ref_lib_verify, throughput), which reach `NPoint::distance` -> `l2_sq_dist`
+      # on real data — among them the recall@10 FLOOR that ann.rs names as what absorbs the
+      # kernel's <=1-ULP FMA difference vs the scalar reduction. Running them here is what puts
+      # that floor on an aarch64 host. The rest of the crate's tests come along because they
+      # share the one build; the crate's two heavy 50k recall tests are NOT excluded, which is
+      # the bulk of this lane's wall-clock (ci.yml isolates them onto dedicated shards; here
+      # they run inside nextest's own process-per-test parallelism).
+      # `--profile ci` is the repo's shared retry policy (.config/nextest.toml): retries=2 with
+      # `final-status-level = "flaky"`, so a retried-then-passed test is still reported FLAKY in
+      # the log and a test that fails every attempt reds the lane exactly as it would locally.
+      - name: cargo nextest run -p sparq-vectors (aarch64/NEON host)
+        run: |
+          cargo nextest run -p sparq-vectors --features "${VECTORS_FEATURES}" --profile ci

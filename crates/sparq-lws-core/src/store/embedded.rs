@@ -5,11 +5,12 @@
 //! query/update entry points DIRECTLY against an in-process [`Graph`] (`sparq-core`), rather than
 //! over SPARQ's HTTP service (the `HttpSparqClient` path — opt-in `http-sparq` feature; a code
 //! span, since that module is compiled out of the default build). It is the FIRST-CLASS
-//! `SparqClient` impl alongside the opt-in HTTP client and the [`InMemorySparqClient`](crate::store::InMemorySparqClient) test double,
-//! selected at boot by `PSS_SPARQ_BACKEND=embedded` (see `main.rs`). Behind the `embedded-sparq`
-//! build feature, ON BY DEFAULT since sq-gg0qq.3 (this crate lives in the sparq workspace, so the
-//! in-process engine binding is the default backend); `--no-default-features` builds the
-//! engine-free profile. See `decisions/0001-embed-sparq-in-process.md`.
+//! `SparqClient` impl alongside the opt-in HTTP client and the
+//! [`InMemorySparqClient`](crate::store::InMemorySparqClient) test double, selected at boot by
+//! `PSS_SPARQ_BACKEND=embedded` (see `main.rs`). Behind the `embedded-sparq` build feature, ON BY
+//! DEFAULT since sq-gg0qq.3 (this crate lives in the sparq workspace, so the in-process engine
+//! binding is the default backend); `--no-default-features` builds the engine-free profile. See
+//! `research/lws-design-records.md` §3 (RSS `decisions/0001-embed-sparq-in-process.md`).
 //!
 //! ## Why this is a net simplification over the HTTP path
 //! - **Same queries, different transport.** Every query/update is built by the SAME injection-safe

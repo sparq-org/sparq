@@ -10,7 +10,10 @@ have ZERO external test-framework dependency**: they default to Node's built-in
 > **Candidate contribution.** This package is a **proposal** intended to be
 > offered under <https://github.com/rdfjs/> after maintainer review. It is not
 > yet published to npm (`"private": true`). The name `@rdfjs-test/conformance`
-> is provisional and subject to the rdfjs maintainers' decision.
+> is provisional and subject to the rdfjs maintainers' decision. The drafted
+> proposal — venue, name and publish-to-npm options — lives in
+> [`research/rdfjs-conformance-upstream.md`](../../research/rdfjs-conformance-upstream.md);
+> it has **not** been filed upstream yet.
 
 Every assertion derives its expected value **from the RDF/JS spec**
 ([data-model](https://rdf.js.org/data-model-spec/),
@@ -42,17 +45,17 @@ await runDatasetTests({
 node --test "test/*.test.mjs"
 ```
 
-Run the same suites against the sparq WASM engine (`@jeswr/sparq`) — anything
+Run the same suites against the sparq WASM engine (`@sparq-org/sparq`) — anything
 that exposes an RDF/JS `DataFactory` / `DatasetCore` works the same way:
 
 ```js
-import { DataFactory, Store } from '@jeswr/sparq';
+import { DataFactory, Store } from '@sparq-org/sparq';
 import { runAll } from '@rdfjs-test/conformance';
 
 await runAll({
   factory: DataFactory,
   datasetFactory: (quads) => new Store(quads ? [...quads] : undefined),
-  label: '@jeswr/sparq',
+  label: '@sparq-org/sparq',
 });
 ```
 

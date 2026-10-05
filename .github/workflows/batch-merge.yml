@@ -129,8 +129,22 @@ jobs:
           python3 scripts/batch-merge.py "${args[@]}"
 
   # Merged-PR pickup ring: a merge into main frees merge-queue/worker capacity — poke the
-  # registry dispatcher immediately instead of waiting for its cron. Fail-soft: without
-  # the secret this skips with a notice (the registry cron is the backstop).
+  # registry dispatcher immediately instead of waiting for its cron.
+  #
+  # FAIL-LOUD on a missing credential (#4966), was `::notice::` + exit 0. This job has
+  # never once rung: REGISTRY_RING_TOKEN does not exist at repo or org level, so every
+  # push-triggered run took the fail-soft branch and reported SUCCESS. 12 of 12 sampled
+  # push runs, 0 rings. Reporting success while doing nothing is what kept it invisible.
+  #
+  # DECLARED ADVISORY (.github/advisory-registry.json, "ring registry dispatcher") in
+  # the same change, and that declaration is what makes this hard failure SAFE. This
+  # job runs on `push: branches: [main]`, so its check-run lands on the main head SHA —
+  # MEASURED present on main head 2cbf37359 — which is exactly the SHA the
+  # push-triggered `ci-summary / gate` polls (the sq-huwr8 refutation). Undeclared, a
+  # red here would have gated `ci-summary / gate` on EVERY push to main, and AGENTS.md
+  # treats a red main as a stop-the-line condition: that is a manufactured outage, not
+  # an alarm. Declared, the run itself reds (visible, countable, named) and the gate
+  # stays green. Pinned by scripts/tests/test_ring_credential_loud.py.
   ring:
     name: ring registry dispatcher
     if: github.event_name == 'push'
@@ -144,7 +158,13 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${REGISTRY_RING_TOKEN}" ]; then
-            echo "::notice::REGISTRY_RING_TOKEN not configured — skipping the registry ring (the registry's own cron is the backstop)."
-            exit 0
+            echo "::error title=registry ring suppressed::REGISTRY_RING_TOKEN is not configured, so the merged-PR pickup ring was NOT sent. Freed merge-queue/worker capacity will not be picked up until the registry's own ~10-min cron tick. Provision the secret — or delete this job if the ring is no longer wanted."
+            {
+              echo "### registry ring SUPPRESSED — REGISTRY_RING_TOKEN unset"
+              echo
+              echo "A merge landed on \`main\` but the pickup ring could not be sent."
+              echo "Effect: capacity pickup waits for the next ~10-min registry cron."
+            } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            exit 1
           fi
           GH_TOKEN="${REGISTRY_RING_TOKEN}" gh workflow run dispatch.yml -R jeswr/agent-account-registry

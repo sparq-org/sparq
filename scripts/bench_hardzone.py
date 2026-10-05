@@ -131,6 +131,7 @@ import math
 import os
 import re
 import statistics
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -146,6 +147,12 @@ DET_TOLERANCE = 0.01    # exemption (d): deterministic metrics must sit within 1
 HISTORY_WINDOW = 5      # median over the last up-to-5 published VALUES per metric
 MIN_HISTORY = 3         # a metric needs >= 3 history values to be gated at all
 DISAPPEAR_FAIL_FRACTION = 0.30  # > 30% of gateable metrics missing from results => suite breakage
+# How many INDEPENDENT re-measurements to attempt before letting a timing row red main
+# (see apply_remeasurement). 1 is the useful default because the re-measure command re-runs the
+# whole suite: one clean confirmation already separates a runner slow-window from a code
+# regression, and each extra attempt costs another full suite run for a strictly smaller marginal
+# gain. It is only ever paid on a run that is ALREADY about to fail.
+DEFAULT_REMEASURE_K = 1
 
 # NOISE FLOOR — UNIT-AWARE ALLOW-LIST of (unit, floor) pairs. A metric is floor-exempt
 # (watch-only, never a hard fail alone, excluded from the uniform-shift computations) ONLY if
@@ -391,6 +398,200 @@ def resolution_exempts(val: float, med: float, larger_better: bool, quantum: flo
             and ratio_lower_bound(val, med, larger_better, quantum) < HARD_RATIO)
 
 
+# ── CONFIRM-BY-RE-MEASUREMENT (sq-jxeqz) ────────────────────────────────────────────────────────
+def best_reading(values: list[float], larger_better: bool) -> float:
+    """The LEAST-REGRESSED reading in a set — min for smaller-is-better, max for `*_per_s`.
+
+    Direction-aware on purpose: taking `min` unconditionally would treat a throughput COLLAPSE as
+    the best reading and relieve exactly the regression the gate exists to catch.
+    """
+    return max(values) if larger_better else min(values)
+
+
+def _rows_by_name(rows: list[dict]) -> dict[str, float]:
+    """{name: value} for the finite, non-negative numeric rows of a bench-results.json payload."""
+    out: dict[str, float] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        name, val = row.get("name"), row.get("value")
+        if isinstance(name, str) and _is_num(val) and float(val) >= 0:
+            out[name] = float(val)
+    return out
+
+
+def apply_remeasurement(report: dict, remeasure_fn, k: int = 1) -> None:
+    """Re-measure the rows that are about to hard-fail and keep only the ones that REPRODUCE.
+
+    WHY THIS EXISTS — the measured defect (sq-jxeqz / #4559)
+    -------------------------------------------------------
+    The hard zone decides from a SINGLE sample per metric, taken inside ONE contiguous bench run.
+    Harvesting the live step output of 153 `Benchmarks` runs on main (the run logs are the only
+    UNCENSORED record — the gate runs before Store, so a failing run publishes nothing and its
+    reading never enters the very history the thresholds are derived from) gives 29 tripped runs
+    (19%) carrying 60 fatal rows over 19 distinct metrics, every one of them bracketed by GREEN
+    runs on the SAME metric with no intervening revert. The failures co-move within a run across
+    metrics that share a workload (`op_q04_triangle_{count,json,materialize}`,
+    `sp2b_q11_{count,json,materialize}`) — the signature of a runner slow WINDOW, which hits
+    whichever benchmarks execute inside it rather than the whole suite.
+    That event has no exemption today: the uniform-shift carve-out demands >= UNIFORM_FRACTION
+    (50%) of the suite move together, and a slow window was observed moving 1-8 of 438 metrics.
+
+    WHY NOT A WIDER BAND — measured, and rejected
+    ---------------------------------------------
+    Requiring an absolute delta above the metric's OWN historical dispersion (robust sigma from
+    the median absolute deviation of its published series) was measured against those same 60
+    fatal rows: at 5 sigma it relieves 11/60 rows (6/29 runs), and to relieve a majority it needs
+    10-12 sigma, which by the same replay stops catching a genuine sustained 2.0x regression on
+    6-7% of gated metrics. That is the false-positive-for-false-negative trade this gate must not
+    make, so the band is NOT what is implemented here. Neither is a recalibrated breadth
+    condition: green runs reach 15 watch-band metrics and tripped runs go as low as 1, so
+    run-level breadth does not separate the two populations.
+
+    WHAT IS IMPLEMENTED, AND WHAT IT STILL CATCHES
+    ----------------------------------------------
+    Confirmation. A row may only hard-fail if the breach REPRODUCES on an independent
+    re-measurement. This costs NO sensitivity to a real regression, which is the point: a genuine
+    regression is a property of the built artifact, so it re-measures at the same ratio and still
+    reds. Every other guard is untouched — HARD_RATIO, the unit floor, the resolution bound, the
+    four uniform-shift conditions, deterministic strictness, the disappeared-metric check and
+    every fail-closed numeric path all behave exactly as before. The ONLY breach this removes is
+    one that fails to reproduce, which by construction was not a property of the code.
+    It is NOT a best-of-N squeeze of the PUBLISHED number: `report["rows"]` and the results file
+    handed to the Store step are left untouched, so the trend keeps recording what was measured.
+
+    PRECEDENT: scripts/perf-gate.py has done exactly this for the PR-leg timing metric since
+    sq-dzfu (`--remeasure-cmd` / `--remeasure-k` / `gate_with_remeasure`), for the same reason
+    ("shared-runner wall-clock variance exceeds any band tight enough to be useful").
+
+    NOTE ON THE HARNESS'S OWN best-of-3: several suites already take a min over 3 iterations
+    (e.g. `bench_shacl` mins `validate_us` over `iters`). That is NOT a substitute — three
+    iterations of a ~140 us measurement span well under a millisecond, so all three samples sit
+    inside the same contention window. Only a re-measurement separated by the rest of the suite
+    is temporally independent.
+
+    FAIL-CLOSED IN EVERY DIRECTION:
+      * no `remeasure_fn`                       -> nothing is relieved (identical to today)
+      * `remeasure_fn` raises / returns nothing -> nothing is relieved
+      * a metric MISSING from a re-measurement  -> that row is NOT relieved
+      * a DETERMINISTIC row in the hard set     -> no re-measurement is attempted at all
+        (re-running cannot change an integer byte count, and its failure is already decisive)
+      * a ZERO-median (zero-boundary) row        -> declined; evaluate()'s own zero-boundary
+        decision stands, and no second semantics for it is invented here
+    The first three hold STRUCTURALLY rather than by a separate branch, and that is deliberate:
+    every metric's reading pool is SEEDED with the original measurement, which is by construction
+    already at or above HARD_RATIO (it is in `hard`). So a pool that gained nothing — no attempt
+    ran, the command emitted nothing, or it omitted this metric — still combines to the original
+    reading and re-derives the original ratio, and the row stays fatal. Explicit `if` branches for
+    those cases were written first and then REMOVED: mutation testing showed deleting them changed
+    no behaviour, i.e. they read as protection while protecting nothing. The property is pinned
+    instead by asserting the pool seeding directly (self-test 19g). The one remaining empty-pool
+    branch is an INVARIANT guard, not live protection, and is labelled as such at its site.
+    Mutates `report` in place: relieved rows leave `hard`, join `remeasure_relieved`, and ride the
+    existing durable `floor_exempt_hard` trail so nothing goes quiet.
+    """
+    report.setdefault("remeasure_relieved", [])
+    report.setdefault("remeasure_readings", {})
+    report.setdefault("remeasure_attempts", 0)
+    hard = report.get("hard") or []
+    if not hard or remeasure_fn is None or k < 1:
+        return
+    if report.get("uniform_shift"):
+        return                      # not failing on these rows anyway — do not spend the CI time
+    if any(r[5] for r in hard):
+        # A deterministic metric is in the hard set: it cannot be relieved and it fails the run on
+        # its own, so a re-measurement could not change the outcome. Mirrors perf-gate.py.
+        report["remeasure_skipped"] = ("a deterministic metric is in the hard set — its value "
+                                       "cannot change on a re-run and it fails the run alone")
+        return
+    wanted = {r[0]: r for r in hard}
+    readings: dict[str, list[float]] = {n: [r[1]] for n, r in wanted.items()}
+    attempts = 0
+    for _ in range(k):
+        try:
+            fresh = remeasure_fn()
+        except Exception as e:                                  # noqa: BLE001 — fail-closed
+            log(f"re-measurement attempt failed ({e!r}) — no row is relieved by it")
+            continue
+        attempts += 1
+        by_name = _rows_by_name(fresh)
+        for name in wanted:
+            if name in by_name:
+                readings[name].append(by_name[name])
+    report["remeasure_attempts"] = attempts
+    report["remeasure_readings"] = readings
+    still_hard, relieved = [], []
+    for name, r in wanted.items():
+        # SEEDED WITH THE ORIGINAL READING — this is what makes every "no usable re-measurement"
+        # path fail closed without a branch of its own. See the fail-closed note in the docstring.
+        vals = readings[name]
+        if not vals:
+            # INVARIANT GUARD, unreachable while the seeding above holds. It is here so that a
+            # future edit which breaks the seeding FAILS CLOSED (row stays fatal) instead of
+            # raising out of min()/max() — and so the mutant that breaks the seeding is killed by
+            # a NAMED assertion (self-test 19g) rather than by a traceback.
+            still_hard.append(r)
+            continue
+        med, larger_better = r[2], r[6]
+        best = best_reading(vals, larger_better)
+        # ZERO-BOUNDARY ROWS ARE NEVER RELIEVED HERE. A pessimal zero crossing DOES reach the
+        # hard set — `evaluate` admits one whose resolution-aware lower bound proves it passes
+        # HARD_RATIO, and such a row has median 0 (e.g. x_s: 0 -> 0.010 at 19.0x). Re-deriving a
+        # ratio from it would divide by zero, and inventing a second zero-boundary semantics here
+        # would be a place for the two to disagree. The zero boundary already has dedicated,
+        # tested handling in `evaluate` (improved_to_zero / zero_crossing / ratio_lower_bound), so
+        # this pass declines the row and leaves that decision standing: fail-closed, one owner.
+        if med <= 0 or best <= 0:
+            still_hard.append(r)
+            continue
+        new_ratio = (med / best) if larger_better else (best / med)
+        if new_ratio >= HARD_RATIO:
+            still_hard.append(r)
+        else:
+            relieved.append((r, best, new_ratio, len(vals) - 1))
+    report["hard"] = still_hard
+    report["remeasure_relieved"] = relieved
+    for r, best, new_ratio, n_re in relieved:
+        report["floor_exempt_hard"].append({
+            "name": r[0], "current": r[1], "previous": r[2],
+            "ratio_pct": round(r[4] * 100.0, 1), "unit": report.get("units", {}).get(r[0], ""),
+            "note": (f"NOT REPRODUCED — re-measured {n_re}x after the suite; best reading "
+                     f"{best:.6g} is {new_ratio:.2f}x median (< {HARD_RATIO:g}x). Watch-only for "
+                     f"the gate; the ORIGINAL {r[4]:.2f}x reading is what the trend publishes."),
+        })
+
+
+def remeasure_via_shell(cmd: str, out_path: str):
+    """Build a `remeasure_fn` that runs `cmd` and reads the bench-results JSON it writes.
+
+    Contract (identical to scripts/perf-gate.py's `--remeasure-cmd`): the command re-runs the
+    benchmark suite and writes a customSmallerIsBetter payload — a [{name,unit,value}] list — to
+    `out_path`. Anything else (non-zero exit, missing/corrupt file) yields NO rows, which relieves
+    NOTHING: the gate stays fail-closed on a broken re-measure command.
+    """
+    def _fn() -> list[dict]:
+        p = Path(out_path)
+        with contextlib.suppress(OSError):
+            p.unlink()
+        rc = subprocess.call(cmd, shell=True)
+        if rc != 0:
+            log(f"re-measure command exited {rc}; its readings are discarded (nothing relieved)")
+            return []
+        if not p.exists():
+            log(f"re-measure command wrote no {out_path}; nothing relieved")
+            return []
+        try:
+            payload = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, ValueError, OSError) as e:
+            log(f"re-measure output {out_path} is unreadable ({e}); nothing relieved")
+            return []
+        if isinstance(payload, dict):
+            payload = payload.get("benches", [])
+        return payload if isinstance(payload, list) else []
+
+    return _fn
+
+
 def evaluate(current: list[dict], hist: dict[str, list]) -> tuple[int, dict]:
     """Pure gate logic — unit-tested by --self-test. No I/O, no env access.
 
@@ -613,25 +814,34 @@ def evaluate(current: list[dict], hist: dict[str, list]) -> tuple[int, dict]:
                 f"wall-clock, never deterministic outputs")
         uniform = cond_a and cond_b and cond_c and cond_d
 
-    fail = False
-    if invalid:
-        fail = True
-    if disappeared_frac > DISAPPEAR_FAIL_FRACTION:
-        fail = True
-    if hard and not uniform:
-        fail = True
-
     report = {
         "compared": compared, "rows": rows, "watch": watch, "hard": hard,
         "floor_exempt": floor_exempt_rows, "floor_exempt_hard": floor_exempt_hard,
-        "resolution_exempt": resolution_exempt_rows,
+        "resolution_exempt": resolution_exempt_rows, "units": units,
         "gated_compared": len(gated_rows), "gated_watch": len(gated_watch),
         "invalid": invalid, "ungated": ungated, "new": new, "stable_zero": stable_zero,
         "improved_to_zero": improved_to_zero, "zero_crossing": zero_crossing,
         "disappeared": disappeared, "disappeared_frac": disappeared_frac,
         "uniform_shift": uniform, "exemption_reasons": exemption_reasons,
     }
-    return (1 if fail else 0), report
+    return gate_exit_code(report), report
+
+
+def gate_exit_code(report: dict) -> int:
+    """THE fail predicate — the single source of truth for the gate's exit code.
+
+    Deliberately a named function rather than an inline computation inside `evaluate`: the
+    confirm-by-re-measurement pass (apply_remeasurement) removes rows from `report["hard"]` and
+    the run's outcome must then be re-derived through the IDENTICAL predicate. Two independent
+    copies would be free to drift, and the copy that ran second would silently become the gate.
+    """
+    if report["invalid"]:
+        return 1
+    if report["disappeared_frac"] > DISAPPEAR_FAIL_FRACTION:
+        return 1
+    if report["hard"] and not report["uniform_shift"]:
+        return 1
+    return 0
 
 
 def _gating_label(floor: bool, res: bool) -> str:
@@ -671,8 +881,32 @@ def render_report(report: dict, markdown: bool) -> list[str]:
     """Human-readable report lines (plain for stdout, markdown for GITHUB_STEP_SUMMARY)."""
     h2 = "## " if markdown else ""
     lines: list[str] = [f"{h2}bench hard zone — median-of-history gate"]
+    relieved = report.get("remeasure_relieved") or []
+    # Report the hard band as MEASURED (confirmed + relieved), never only the confirmed count:
+    # after the confirmation pass `report["hard"]` holds the reproduced rows alone, so quoting it
+    # as "N gated >= HARD_RATIOx" would silently under-report what this run actually measured.
     lines.append(f"{report['compared']} metrics compared; {len(report['watch'])} >= "
-                 f"{WATCH_RATIO}x median; {len(report['hard'])} gated >= {HARD_RATIO}x median.")
+                 f"{WATCH_RATIO}x median; {len(report['hard']) + len(relieved)} gated >= "
+                 f"{HARD_RATIO}x median"
+                 + (f" ({len(relieved)} of them NOT REPRODUCED on re-measurement, "
+                    f"{len(report['hard'])} confirmed)." if relieved else "."))
+    if relieved:
+        lines.append("")
+        lines.append("**Re-measured — breach did NOT reproduce (watch-only):**" if markdown
+                     else "re-measured after the suite; the breach did NOT reproduce "
+                          "(watch-only, not failing the run):")
+        for r, best, new_ratio, n_re in sorted(relieved, key=lambda t: -t[0][4]):
+            if markdown:
+                lines.append(f"| `{r[0]}` | first read {r[1]:.6g} ({r[4]:.2f}x) | best of "
+                             f"{n_re} re-measurement(s) {best:.6g} ({new_ratio:.2f}x) | "
+                             f"median {r[2]:.6g} |")
+            else:
+                lines.append(f"  {r[0]:<60} first {r[1]:.4g} ({r[4]:.2f}x) -> best-of-{n_re} "
+                             f"{best:.4g} ({new_ratio:.2f}x) vs median {r[2]:.4g}")
+        lines.append(f"  (the ORIGINAL reading is what the trend publishes — this pass only "
+                     f"decides whether the row may RED the run; see apply_remeasurement)")
+    if report.get("remeasure_skipped"):
+        lines.append(f"  re-measurement skipped: {report['remeasure_skipped']}")
     if report["watch"]:
         lines.append("")
         lines.append(f"**Watch band (>= {WATCH_RATIO}x median):**" if markdown
@@ -763,7 +997,10 @@ def emit_report(report: dict) -> None:
                # [#4559] a zero-boundary move never fails the run any more, so the SUMMARY is
                # the only place it stays visible — it must make the run "notable".
                or report.get("improved_to_zero") or report.get("zero_crossing")
-               or report.get("resolution_exempt"))
+               or report.get("resolution_exempt")
+               # A row relieved by re-measurement stops failing the run, so — exactly like the
+               # zero-boundary case above — the step summary becomes the place it stays visible.
+               or report.get("remeasure_relieved"))
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if notable and summary_path:
         with open(summary_path, "a", encoding="utf-8") as f:
@@ -810,6 +1047,17 @@ def emit_report(report: dict) -> None:
               f"under {HARD_RATIO}x. It cannot fail the gate alone. It stays visible here, in "
               f"the watch table, AND it is routed via the --report-out JSON into the soft-triage "
               f"deduped bench-flake issue — the durable trail that survives the median rebasing.")
+    relieved = report.get("remeasure_relieved") or []
+    if relieved:
+        names = ", ".join(f"{r[0]} (first {r[4]:.2f}x, re-measured {nr:.2f}x)"
+                          for r, _b, nr, _n in relieved)
+        print(f"::warning title=bench hard zone — breach did NOT reproduce, watch only::{names} "
+              f"reached {HARD_RATIO}x median on the first reading but NOT on an independent "
+              f"re-measurement taken after the rest of the suite, so the breach is not a "
+              f"property of this build and cannot red the run alone (see apply_remeasurement). "
+              f"The ORIGINAL reading is still what the trend publishes, it stays in the watch "
+              f"table, and it is routed via the --report-out JSON into the soft-triage deduped "
+              f"bench-flake issue — the durable trail that survives the median rebasing.")
     if report["hard"] and not report["uniform_shift"]:
         for name, cur, med, n, ratio, _det, lb, _floor, _res in report["hard"]:
             direction = "median/current (larger-is-better)" if lb else "current/median"
@@ -831,11 +1079,24 @@ def build_parser() -> argparse.ArgumentParser:
                          "floor_exempt_hard rows bench-triage.py --hardzone-report merges "
                          "into the deduped bench-flake issue — the durable trail for "
                          "sub-floor watch-only regressions); optional")
+    ap.add_argument("--remeasure-cmd", default=None,
+                    help="shell command that RE-RUNS the benchmark suite and writes a "
+                         "customSmallerIsBetter [{name,unit,value}] JSON to --remeasure-out. A "
+                         "row that would hard-fail is only fatal if the breach REPRODUCES in "
+                         "that independent measurement (see apply_remeasurement). Omitted => "
+                         "no confirmation pass and behaviour identical to before.")
+    ap.add_argument("--remeasure-out", default="bench-results-remeasure.json",
+                    help="path the --remeasure-cmd writes its results JSON to")
+    ap.add_argument("--remeasure-k", type=int, default=DEFAULT_REMEASURE_K,
+                    help=f"how many independent re-measurements to attempt "
+                         f"(default {DEFAULT_REMEASURE_K}); readings are combined "
+                         f"least-regressed-wins, direction-aware")
     return ap
 
 
 def run_gate(results_path: str, prev_data_path: str, suite: str,
-             report_out: str | None = None) -> int:
+             report_out: str | None = None, remeasure_fn=None,
+             remeasure_k: int = DEFAULT_REMEASURE_K) -> int:
     rp = Path(results_path)
     if not rp.exists():
         print(f"::error title=bench hard zone::results file {results_path} is absent — the "
@@ -882,6 +1143,11 @@ def run_gate(results_path: str, prev_data_path: str, suite: str,
               f"'{suite}' in {prev_data_path}; nothing to compare; passing.")
         return 0
     code, report = evaluate(current, history_values(series))
+    # CONFIRM BEFORE FAILING. Runs BEFORE emit_report so the table, the annotations and the exit
+    # code all describe the SAME, final decision — a relieved row must never be ::error::'d.
+    if code != 0:
+        apply_remeasurement(report, remeasure_fn, remeasure_k)
+        code = gate_exit_code(report)
     emit_report(report)
     if report_out:
         # Written on pass AND fail (the step may fail on another metric while a floor-exempt
@@ -913,6 +1179,23 @@ def _series(points: list[list[tuple]]) -> list[dict]:
 
 def _cur(rows: list[tuple], unit: str = "us") -> list[dict]:
     return [{"name": n, "value": v, "unit": unit} for n, v in rows]
+
+
+def _quiet(fn, *a, **kw):
+    """Run `fn` with stdout captured; return (result, captured_text).
+
+    LOAD-BEARING, not tidiness. emit_report writes GitHub workflow commands (`::error::`,
+    `::warning::`) to stdout, and Actions turns any such line into a real annotation REGARDLESS of
+    which process wrote it. A self-test fixture that drives the real emitter therefore publishes
+    FAILURE-LEVEL annotations that are textually indistinguishable from a live finding: run
+    30426908184 emitted three, two of them fixtures, and the first human read of it counted three
+    regressions where there was one. Capturing keeps fixture output inside the test, and lets the
+    check PIN the emitted text rather than discard it.
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        res = fn(*a, **kw)
+    return res, buf.getvalue()
 
 
 def self_test() -> int:
@@ -1513,17 +1796,25 @@ def self_test() -> int:
             [[("a", 100.0), ("b", 100.0), ("c", 100.0), ("d", 100.0)]] * 5)}}
         prev.write_text("window.BENCHMARK_DATA = " + json.dumps(payload) + ";",
                         encoding="utf-8")
-        check(run_gate(str(results), str(prev), "some other suite") == 0,
+        # QUIET — see _quiet(): these fixtures drive the REAL emitter, so without a capture their
+        # `::error::` workflow commands become genuine GitHub annotations, indistinguishable from
+        # a live finding. Capturing also lets each check PIN what was emitted instead of
+        # discarding it.
+        rc, out = _quiet(run_gate, str(results), str(prev), "some other suite")
+        check(rc == 0 and "is not in" in out,
               "suite-name mismatch warns + exits 0 (no cross-suite fallback)")
-        check(run_gate(str(results), str(prev), "sparq engine") == 1,
+        rc, out = _quiet(run_gate, str(results), str(prev), "sparq engine")
+        check(rc == 1 and "::error title=bench hard zone::a is 2.10x" in out,
               "exact suite match gates for real (2.1x lone regression fails end-to-end)")
         empty = Path(td) / "empty-prev.js"
         empty.write_text("", encoding="utf-8")
-        check(run_gate(str(results), str(empty), "sparq engine") == 0,
+        rc, out = _quiet(run_gate, str(results), str(empty), "sparq engine")
+        check(rc == 0 and "::error" not in out,
               "empty prev-data.js (bootstrap fetch artifact) warns + exits 0")
         corrupt = Path(td) / "corrupt-prev.js"
         corrupt.write_text("window.BENCHMARK_DATA = {not json", encoding="utf-8")
-        check(run_gate(str(results), str(corrupt), "sparq engine") == 1,
+        rc, out = _quiet(run_gate, str(results), str(corrupt), "sparq engine")
+        check(rc == 1 and "could not parse non-empty" in out,
               "non-empty unparsable prev-data.js fails closed (corrupt published history)")
         # --report-out: the run writes the machine-readable report JSON carrying the
         # floor-exempt hard-band rows (the soft-triage durable-trail hand-off).
@@ -1534,12 +1825,215 @@ def self_test() -> int:
             {"entries": {"sparq engine": _series([[("tiny_us", 4.0)]] * 5)}}) + ";",
             encoding="utf-8")
         report_path = Path(td) / "hardzone-report.json"
-        rc = run_gate(str(sub_results), str(sub_prev), "sparq engine", str(report_path))
+        rc, _out = _quiet(run_gate, str(sub_results), str(sub_prev), "sparq engine",
+                          str(report_path))
         payload = json.loads(report_path.read_text(encoding="utf-8"))
         check(rc == 0 and [r["name"] for r in payload["floor_exempt_hard"]] == ["tiny_us"]
               and "floor-exempt hard-band" in payload["floor_exempt_hard"][0]["note"]
               and payload["floor_exempt_hard"][0]["previous"] == 4.0,
               "--report-out writes the floor-exempt hard-band rows for the soft-triage trail")
+
+    # 19. CONFIRM-BY-RE-MEASUREMENT (sq-jxeqz). The gate may only red main on a timing breach
+    #     that REPRODUCES. Every check below drives the real `evaluate` -> `apply_remeasurement`
+    #     -> `gate_exit_code` path, and the CONTROL pair (19a vs 19b) is what proves the
+    #     mechanism discriminates rather than relieving everything it is handed.
+    def _mk(cur_val, hist_val, name="q_us", unit="us", n=5):
+        cur = [{"name": name, "value": cur_val, "unit": unit}]
+        hist = {name: [hist_val] * n}
+        return cur, hist
+
+    # 19a. CONTROL — a breach that REPRODUCES is still fatal. Without this the whole mechanism
+    #      could be "relieve everything" and every other check here would still pass.
+    #      MUTATION: make apply_remeasurement relieve unconditionally => THIS goes red.
+    cur, hist = _mk(2400.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    check(code == 1 and len(rep["hard"]) == 1, "19a precondition: 2.40x lone breach hard-fails")
+    apply_remeasurement(rep, lambda: [{"name": "q_us", "value": 2300.0, "unit": "us"}], 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1 and not rep["remeasure_relieved"],
+          "a breach that REPRODUCES on re-measurement (2.30x) still HARD-FAILS")
+
+    # 19b. A breach that does NOT reproduce is relieved — exit 0, row leaves `hard`, and the
+    #      ORIGINAL reading is preserved for the trend.
+    #      MUTATION: delete the apply_remeasurement call in run_gate => the end-to-end check
+    #      (19j) goes red; delete the `report["hard"] = still_hard` assignment => THIS goes red.
+    cur, hist = _mk(2400.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    apply_remeasurement(rep, lambda: [{"name": "q_us", "value": 1010.0, "unit": "us"}], 1)
+    check(gate_exit_code(rep) == 0 and rep["hard"] == []
+          and len(rep["remeasure_relieved"]) == 1
+          and rep["remeasure_relieved"][0][1] == 1010.0
+          and abs(rep["remeasure_relieved"][0][2] - 1.01) < 1e-9
+          and rep["rows"][0][1] == 2400.0,
+          "a breach that does NOT reproduce (1.01x) is relieved, and the ORIGINAL 2400 reading "
+          "is left in `rows` for the trend")
+
+    # 19c. THRESHOLD — a re-measured best landing EXACTLY on HARD_RATIO is NOT relieved.
+    #      MUTATION: relax `new_ratio >= HARD_RATIO` to `>` => THIS goes red.
+    cur, hist = _mk(3000.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    apply_remeasurement(rep, lambda: [{"name": "q_us", "value": 2000.0, "unit": "us"}], 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1,
+          "a re-measurement landing EXACTLY on 2.0x is still a breach (the bound is inclusive)")
+    #      ...and one ULP under it IS relieved — the threshold is real, not a silenced metric.
+    cur, hist = _mk(3000.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    apply_remeasurement(rep, lambda: [{"name": "q_us", "value": 1999.0, "unit": "us"}], 1)
+    check(gate_exit_code(rep) == 0 and len(rep["remeasure_relieved"]) == 1,
+          "a re-measurement just UNDER 2.0x is relieved — the threshold discriminates")
+
+    # 19d. DIRECTION — the soundness check. `*_per_s` is larger-is-better, so the least-regressed
+    #      reading is the MAXIMUM. Taking `min` unconditionally would treat the WORST throughput
+    #      as the best reading and relieve a genuine collapse.
+    #      MUTATION: change best_reading to `min(values)` unconditionally => THIS goes red.
+    check(best_reading([100.0, 400.0], True) == 400.0
+          and best_reading([100.0, 400.0], False) == 100.0,
+          "best_reading is direction-aware: max for larger-is-better, min for smaller-is-better")
+    cur = [{"name": "t_per_s", "value": 400.0, "unit": "triples_per_s"}]
+    code, rep = evaluate(cur, {"t_per_s": [1000.0] * 5})
+    check(code == 1 and len(rep["hard"]) == 1,
+          "19d precondition: a throughput COLLAPSE (400 vs 1000 = 2.50x) hard-fails")
+    apply_remeasurement(rep, lambda: [{"name": "t_per_s", "value": 420.0,
+                                       "unit": "triples_per_s"}], 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1,
+          "a REPRODUCED throughput collapse stays fatal — the re-measure cannot invert direction")
+
+    # 19e. FAIL-CLOSED: a re-measurement that emits nothing relieves nothing.
+    #      MUTATION: treat an empty reading list as relief => THIS goes red.
+    cur, hist = _mk(2400.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    apply_remeasurement(rep, lambda: [], 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1,
+          "an EMPTY re-measurement relieves nothing (fail-closed)")
+
+    # 19f. FAIL-CLOSED: a re-measurement that RAISES relieves nothing, and does not crash the gate.
+    def _boom():
+        raise RuntimeError("bench runner died")
+    cur, hist = _mk(2400.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    _quiet(apply_remeasurement, rep, _boom, 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1 and rep["remeasure_attempts"] == 0,
+          "a re-measurement that RAISES relieves nothing and is not fatal to the gate")
+
+    # 19g. FAIL-CLOSED: a re-measurement that omits the tripping metric relieves nothing, even
+    #      though the attempt itself succeeded. Without this a runner that silently skipped the
+    #      suite (the `|| true` guards in ci-bench.sh) would turn every trip green.
+    #      The property holds because the reading pool is SEEDED with the original measurement,
+    #      so a pool that gained nothing re-derives the original ratio. Both the mechanism and
+    #      the behaviour are pinned, because the behaviour alone cannot distinguish a correct
+    #      implementation from one that never relieves anything.
+    #      MUTATION: seed the pool empty (`readings = {n: [] for n in wanted}`) => THIS goes red.
+    cur, hist = _mk(2400.0, 1000.0)
+    code, rep = evaluate(cur, hist)
+    apply_remeasurement(rep, lambda: [{"name": "other_us", "value": 1.0, "unit": "us"}], 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1 and rep["remeasure_attempts"] == 1
+          and rep["remeasure_readings"]["q_us"][:1] == [2400.0],
+          "a re-measurement that OMITS the tripping metric relieves nothing — the reading pool "
+          "is seeded with the ORIGINAL measurement (fail-closed without a branch of its own)")
+
+    # 19g2. ZERO-BOUNDARY rows reach the hard set (a pessimal zero crossing whose resolution-aware
+    #      lower bound proves it passes HARD_RATIO), and re-deriving a ratio from a ZERO median
+    #      would divide by zero. The pass must DECLINE them, leaving `evaluate`'s dedicated
+    #      zero-boundary decision standing — not crash, and not invent a second semantics.
+    #      MUTATION: drop the `med <= 0 or best <= 0` guard => THIS goes red (ZeroDivisionError).
+    code, rep = evaluate([{"name": "x_s", "value": 0.010, "unit": "s"}], {"x_s": [0.0] * 5})
+    check(code == 1 and len(rep["hard"]) == 1 and rep["hard"][0][2] == 0.0,
+          "19g2 precondition: a pessimal zero crossing above resolution IS in the hard set, "
+          "with a ZERO median")
+    apply_remeasurement(rep, lambda: [{"name": "x_s", "value": 0.010, "unit": "s"}], 1)
+    check(gate_exit_code(rep) == 1 and len(rep["hard"]) == 1 and not rep["remeasure_relieved"],
+          "a ZERO-median row is declined by the confirmation pass (fail-closed, no divide by "
+          "zero, and evaluate's zero-boundary decision stands)")
+
+    # 19h. A DETERMINISTIC row in the hard set is never re-measured — re-running cannot change a
+    #      byte count, and it fails the run alone.
+    #      MUTATION: delete the `any(r[5] for r in hard)` early return => THIS goes red.
+    cur = [{"name": "store_bytes", "value": 200.0, "unit": "bytes"}]
+    code, rep = evaluate(cur, {"store_bytes": [100.0] * 5})
+    check(code == 1 and rep["hard"][0][5] is True, "19h precondition: deterministic row is hard")
+    apply_remeasurement(rep, lambda: [{"name": "store_bytes", "value": 100.0,
+                                       "unit": "bytes"}], 1)
+    check(gate_exit_code(rep) == 1 and rep["remeasure_attempts"] == 0
+          and "deterministic" in rep.get("remeasure_skipped", ""),
+          "a DETERMINISTIC hard row is never re-measured and stays fatal")
+
+    # 19i. gate_exit_code is the SINGLE source of truth: relieving every hard row does NOT rescue
+    #      a run that is failing for another reason.
+    #      MUTATION: return 0 from run_gate whenever `hard` empties => THIS goes red.
+    cur = [{"name": "q_us", "value": 2400.0, "unit": "us"},
+           {"name": "bad_us", "value": float("nan"), "unit": "us"}]
+    code, rep = evaluate(cur, {"q_us": [1000.0] * 5, "bad_us": [1.0] * 5})
+    apply_remeasurement(rep, lambda: [{"name": "q_us", "value": 1010.0, "unit": "us"}], 1)
+    check(rep["hard"] == [] and gate_exit_code(rep) == 1,
+          "relieving every hard row does NOT rescue a run failing on an invalid measurement")
+
+    # 19j. END-TO-END through run_gate + the CLI seam, with a real --remeasure-cmd, and the
+    #      annotation contract: a relieved row must be a ::warning::, never a ::error::.
+    #      MUTATION: delete the `apply_remeasurement` call in run_gate => THIS goes red.
+    with tempfile.TemporaryDirectory(prefix="bench-hardzone-selftest-") as td19:
+        res19 = Path(td19) / "bench-results.json"
+        res19.write_text(json.dumps(_cur([("q_us", 2400.0)])), encoding="utf-8")
+        prev19 = Path(td19) / "prev-data.js"
+        prev19.write_text("window.BENCHMARK_DATA = " + json.dumps(
+            {"entries": {"sparq engine": _series([[("q_us", 1000.0)]] * 5)}}) + ";",
+            encoding="utf-8")
+        trail19 = Path(td19) / "report.json"
+        rc, out = _quiet(run_gate, str(res19), str(prev19), "sparq engine", str(trail19),
+                         lambda: [{"name": "q_us", "value": 1010.0, "unit": "us"}], 1)
+        payload19 = json.loads(trail19.read_text(encoding="utf-8"))
+        check(rc == 0 and "::error" not in out
+              and "did NOT reproduce" in out
+              and [r["name"] for r in payload19["floor_exempt_hard"]] == ["q_us"]
+              and "NOT REPRODUCED" in payload19["floor_exempt_hard"][0]["note"]
+              and payload19["floor_exempt_hard"][0]["current"] == 2400.0,
+              "end-to-end: an unreproduced breach exits 0, is ::warning'd not ::error'd, and "
+              "rides the durable trail carrying its ORIGINAL reading")
+        # ...and the same fixture with a REPRODUCING re-measure still exits 1 and ::error::s.
+        rc, out = _quiet(run_gate, str(res19), str(prev19), "sparq engine", None,
+                         lambda: [{"name": "q_us", "value": 2300.0, "unit": "us"}], 1)
+        check(rc == 1 and "::error title=bench hard zone::q_us is 2.40x" in out,
+              "end-to-end control: a REPRODUCED breach still exits 1 and is ::error'd")
+        # ...and with NO remeasure_fn the behaviour is byte-identical to before this change.
+        rc, out = _quiet(run_gate, str(res19), str(prev19), "sparq engine")
+        check(rc == 1 and "::error title=bench hard zone::q_us is 2.40x" in out
+              and "did NOT reproduce" not in out,
+              "no --remeasure-cmd => no confirmation pass and the pre-existing behaviour stands")
+        # remeasure_via_shell honours the documented contract, and a FAILING command relieves
+        # nothing. MUTATION: ignore the exit code in remeasure_via_shell => the second half reds.
+        out19 = Path(td19) / "remeasure.json"
+        payload_txt = "[{\"name\":\"q_us\",\"unit\":\"us\",\"value\":1010}]"
+        good = remeasure_via_shell(f"printf '%s' '{payload_txt}' > {out19}", str(out19))
+        # The FAILING command writes a payload that WOULD relieve the row — otherwise the exit
+        # code could be ignored with no observable difference and this check would be vacuous.
+        bad = remeasure_via_shell(f"printf '%s' '{payload_txt}' > {out19}; exit 3", str(out19))
+        got_good, (got_bad, _txt) = good(), _quiet(bad)
+        check(got_good == [{"name": "q_us", "unit": "us", "value": 1010}] and got_bad == [],
+              "remeasure_via_shell reads the command's JSON, and a NON-ZERO exit discards even a "
+              "well-formed relieving payload")
+
+    # 19k. The parser exposes the confirmation flags with the documented defaults.
+    ns19 = build_parser().parse_args(["--results", "r.json", "--prev-data", "p.js",
+                                      "--remeasure-cmd", "scripts/ci-bench.sh"])
+    check(ns19.remeasure_cmd == "scripts/ci-bench.sh"
+          and ns19.remeasure_k == DEFAULT_REMEASURE_K
+          and ns19.remeasure_out == "bench-results-remeasure.json",
+          "parser exposes --remeasure-cmd/--remeasure-k/--remeasure-out with documented defaults")
+
+    # 20. SELF-TEST ANNOTATION CONTAINMENT (class-level guard). Every fixture above drives the
+    #     real emitter, and Actions promotes ANY `::error::`/`::warning::` line to a real
+    #     annotation no matter who printed it — so a fixture leak is indistinguishable from a
+    #     live finding (run 30426908184 emitted three; two were fixtures). This asserts the
+    #     WHOLE self-test, run as a subprocess exactly as bench.yml runs it, emits none. It is a
+    #     class guard, not a spot fix: a future check that forgets _quiet() reds HERE.
+    #     MUTATION: drop the _quiet() wrapper from any run_gate call above => THIS goes red.
+    if os.environ.get("BENCH_HARDZONE_SELFTEST_INNER") != "1":
+        env = dict(os.environ, BENCH_HARDZONE_SELFTEST_INNER="1", PYTHONDONTWRITEBYTECODE="1")
+        proc = subprocess.run([sys.executable, "-B", os.path.abspath(__file__), "--self-test"],
+                              capture_output=True, text=True, env=env, check=False)
+        leaked = [ln for ln in (proc.stdout + proc.stderr).splitlines()
+                  if ln.lstrip().startswith(("::error", "::warning", "::notice"))]
+        check(proc.returncode == 0 and not leaked,
+              "the self-test emits ZERO GitHub annotations — fixture output can never be "
+              f"mistaken for a live finding (leaked: {leaked[:2]})")
 
     if failures:
         log(f"self-test FAILED ({len(failures)}/{checks} checks): " + "; ".join(failures))
@@ -1552,7 +2046,10 @@ def main(argv: list[str]) -> int:
     if "--self-test" in argv:
         return self_test()
     args = build_parser().parse_args(argv)
-    return run_gate(args.results, args.prev_data, args.suite, args.report_out)
+    fn = (remeasure_via_shell(args.remeasure_cmd, args.remeasure_out)
+          if args.remeasure_cmd else None)
+    return run_gate(args.results, args.prev_data, args.suite, args.report_out,
+                    remeasure_fn=fn, remeasure_k=args.remeasure_k)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+# Design §6 case 8 — the encoding case. Two enumerated issuers so both contributing
+# statements are admissible and the response carries two bundles.
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:tr:encoding> a trustx:TrustRequirements ;
+    trustx:question              <urn:question:jesse-age-and-name> ;
+    trustx:trustsIssuer          <did:web:dvla.example>, <did:web:registry.example> ;
+    trustx:requiresValidStatusAt "2026-07-05T00:00:00Z"^^xsd:dateTime .

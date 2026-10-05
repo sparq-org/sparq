@@ -191,8 +191,9 @@ class TestShadowMode(unittest.TestCase):
 
     def test_shadow_mode_default(self):
         doc = cc.compute_cone(["crates/lib/src/lib.rs"], self.meta)
-        # shadow key is always True from compute_cone() since this PR is shadow-only.
+        # compute_cone() defaults to enforce=False, i.e. shadow.
         self.assertTrue(doc["shadow"])
+        self.assertFalse(doc["enforce"])
 
     def test_shadow_mode_in_cli_output(self):
         # Invoke main() in compute-cone mode without --enforce; check shadow=True.
@@ -647,6 +648,324 @@ class TestGetChangedPathsStrip(unittest.TestCase):
             os.unlink(tmp_path)
 
         self.assertEqual(len(paths), 2, "whitespace-only lines must be excluded")
+
+
+class TestEnforceCratesOutput(unittest.TestCase):
+    """(m) [SONNET-4.6] sq-3dr4t — the ENFORCEMENT DECISION is the --crates-output file.
+
+    coverage.sh narrows its measurement iff COVERAGE_CONE is non-empty, and CI fills
+    COVERAGE_CONE from this file, so "who decides what gets skipped" reduces entirely to
+    "when is this file written non-empty". These tests pin that:
+        cone + --enforce  -> the cone crate list  (the ONLY narrowing case)
+        cone, no --enforce-> EMPTY  (shadow mode never narrows)
+        full-run trigger  -> EMPTY  (the §4.1 fail-safe never narrows)
+    """
+
+    def setUp(self):
+        # lib-b depends on lib-a; lib-c is unrelated (so it can fall OUTSIDE the cone).
+        self.meta = _synthetic_meta([
+            _pkg("lib-a", "crates/lib-a", []),
+            _pkg("lib-b", "crates/lib-b", [_dep("lib-a")]),
+            _pkg("lib-c", "crates/lib-c", []),
+        ])
+        self._tmp = tempfile.mkdtemp()
+        self.meta_path = os.path.join(self._tmp, "meta.json")
+        with open(self.meta_path, "w") as fh:
+            json.dump(self.meta, fh)
+
+    def _run(self, changed, *extra):
+        changed_path = os.path.join(self._tmp, "changed.txt")
+        with open(changed_path, "w") as fh:
+            fh.write("".join(p + "\n" for p in changed))
+        cone_path = os.path.join(self._tmp, "cone.json")
+        crates_path = os.path.join(self._tmp, "cone-crates.txt")
+        rc = cc.main([
+            "--mode", "compute-cone",
+            "--changed-file", changed_path,
+            "--metadata-file", self.meta_path,
+            "--output", cone_path,
+            "--crates-output", crates_path,
+            *extra,
+        ])
+        self.assertEqual(rc, 0)
+        with open(cone_path) as fh:
+            doc = json.load(fh)
+        with open(crates_path) as fh:
+            crates = fh.read().split()
+        return doc, crates
+
+    def test_enforce_cone_writes_the_cone_crate_list(self):
+        doc, crates = self._run(["crates/lib-a/src/lib.rs"], "--enforce")
+        self.assertEqual(doc["mode"], "cone")
+        # lib-a changed; lib-b depends on it => both in cone. lib-c is not.
+        self.assertEqual(sorted(crates), ["lib-a", "lib-b"])
+        self.assertNotIn("lib-c", crates, "an unrelated crate must be OUTSIDE the cone")
+
+    def test_shadow_mode_writes_an_empty_crate_list(self):
+        """Without --enforce the file must be empty — shadow mode must not narrow."""
+        doc, crates = self._run(["crates/lib-a/src/lib.rs"])
+        self.assertEqual(doc["mode"], "cone")
+        self.assertEqual(crates, [],
+                         "shadow mode must write an EMPTY list (no filter)")
+
+    def test_full_run_trigger_writes_an_empty_crate_list(self):
+        """A §4.1 full-run trigger under --enforce must still write EMPTY (fail-safe)."""
+        doc, crates = self._run(["Cargo.lock"], "--enforce")
+        self.assertEqual(doc["mode"], "full")
+        self.assertEqual(crates, [],
+                         "mode=full must write an EMPTY list so the whole shard is measured")
+
+    def test_metadata_error_writes_an_empty_crate_list(self):
+        """The metadata fail-safe path must leave the file empty, not unwritten/stale."""
+        crates_path = os.path.join(self._tmp, "cone-crates.txt")
+        # Seed it with a stale narrowing value to prove the fail-safe RESETS it.
+        with open(crates_path, "w") as fh:
+            fh.write("lib-a\n")
+        changed_path = os.path.join(self._tmp, "changed.txt")
+        with open(changed_path, "w") as fh:
+            fh.write("crates/lib-a/src/lib.rs\n")
+        rc = cc.main([
+            "--mode", "compute-cone", "--enforce",
+            "--changed-file", changed_path,
+            "--metadata-file", os.path.join(self._tmp, "does-not-exist.json"),
+            "--output", os.path.join(self._tmp, "cone.json"),
+            "--crates-output", crates_path,
+        ])
+        self.assertEqual(rc, 0)
+        with open(crates_path) as fh:
+            self.assertEqual(fh.read().split(), [],
+                             "a metadata load failure must reset the list to EMPTY")
+
+
+class TestConeFromSelection(unittest.TestCase):
+    """(m2) [SONNET-4.6] sq-3dr4t — the cone CI actually uses: the `select` job's outputs.
+
+    The coverage job's checkout is shallow, so an in-job `git diff base...head` cannot
+    resolve the base and always fail-safes to mode=full. CI therefore passes the select
+    job's `mode`/`affected` here. Narrowing must happen for EXACTLY ONE input —
+    mode == "selected" with a well-formed non-empty closure — and for nothing else.
+    """
+
+    def setUp(self):
+        self.meta = _synthetic_meta([
+            _pkg("lib-a", "crates/lib-a", []),
+            _pkg("lib-b", "crates/lib-b", [_dep("lib-a")]),
+            _pkg("lib-c", "crates/lib-c", []),
+        ])
+
+    def test_selected_mode_takes_the_affected_closure_as_the_cone(self):
+        doc = cc.cone_from_selection("selected", '["lib-a", "lib-b"]', self.meta, enforce=True)
+        self.assertEqual(doc["mode"], "cone")
+        self.assertEqual(doc["cone_crates"], ["lib-a", "lib-b"])
+        self.assertEqual(doc["all_members"], ["lib-a", "lib-b", "lib-c"])
+        self.assertTrue(doc["enforce"])
+
+    def test_a_list_is_accepted_as_well_as_json(self):
+        doc = cc.cone_from_selection("selected", ["lib-b", "lib-a"], self.meta)
+        self.assertEqual(doc["cone_crates"], ["lib-a", "lib-b"], "must be de-duped + sorted")
+
+    def test_non_selected_modes_fail_to_full(self):
+        """`full`, the CI_SELECT_MODE=shadow rollback, an empty value and a missing value
+        must ALL resolve to full — only an explicit 'selected' may narrow."""
+        for mode in ("full", "shadow", "", None, "SELECTED", "selected "):
+            doc = cc.cone_from_selection(mode, '["lib-a"]', self.meta, enforce=True)
+            self.assertEqual(doc["mode"], "full",
+                             f"select mode {mode!r} must NOT narrow measurement")
+            self.assertEqual(doc["cone_crates"], ["lib-a", "lib-b", "lib-c"])
+
+    def test_malformed_affected_fails_to_full(self):
+        for affected in ("not json", '{"a": 1}', '["lib-a", 7]', None, "[]", []):
+            doc = cc.cone_from_selection("selected", affected, self.meta, enforce=True)
+            self.assertEqual(doc["mode"], "full",
+                             f"affected={affected!r} must fail to a full run")
+
+    def test_absent_metadata_does_not_change_the_cone(self):
+        """metadata only fills the cosmetic all_members; it must never widen or narrow."""
+        with_meta = cc.cone_from_selection("selected", '["lib-a"]', self.meta, enforce=True)
+        without = cc.cone_from_selection("selected", '["lib-a"]', None, enforce=True)
+        self.assertEqual(without["mode"], "cone")
+        self.assertEqual(without["cone_crates"], with_meta["cone_crates"])
+        self.assertEqual(without["all_members"], [])
+
+    def test_cli_selection_path_writes_the_narrowing_crate_list(self):
+        tmp = tempfile.mkdtemp()
+        crates_path = os.path.join(tmp, "cone-crates.txt")
+        rc = cc.main([
+            "--mode", "compute-cone", "--enforce",
+            "--select-mode", "selected",
+            "--select-affected", '["lib-a", "lib-b"]',
+            "--metadata-file", self._meta_file(tmp),
+            "--output", os.path.join(tmp, "cone.json"),
+            "--crates-output", crates_path,
+        ])
+        self.assertEqual(rc, 0)
+        with open(crates_path) as fh:
+            self.assertEqual(sorted(fh.read().split()), ["lib-a", "lib-b"])
+
+    def test_cli_selection_path_full_mode_writes_empty(self):
+        tmp = tempfile.mkdtemp()
+        crates_path = os.path.join(tmp, "cone-crates.txt")
+        rc = cc.main([
+            "--mode", "compute-cone", "--enforce",
+            "--select-mode", "full",
+            "--select-affected", '["lib-a"]',
+            "--metadata-file", self._meta_file(tmp),
+            "--output", os.path.join(tmp, "cone.json"),
+            "--crates-output", crates_path,
+        ])
+        self.assertEqual(rc, 0)
+        with open(crates_path) as fh:
+            self.assertEqual(fh.read().split(), [],
+                             "select mode=full must leave the crate list EMPTY")
+
+    def _meta_file(self, tmp):
+        path = os.path.join(tmp, "meta.json")
+        with open(path, "w") as fh:
+            json.dump(self.meta, fh)
+        return path
+
+
+class TestEnforceReport(unittest.TestCase):
+    """(n) [SONNET-4.6] sq-3dr4t — the report under an ENFORCED cone.
+
+    The skipped crates are not in the summary's `crates` map at all (they were never
+    measured), so they must come from the `cone.inherited` block coverage.sh writes —
+    otherwise the table would just silently omit them.
+    """
+
+    def _docs(self):
+        cone_doc = {
+            "mode": "cone",
+            "enforce": True,
+            "shadow": False,
+            "base": "deadbeef",
+            "cone_crates": ["lib-a"],
+            "all_members": ["lib-a", "lib-b"],
+            "reason": "selected",
+        }
+        coverage_summary = {
+            "crates": {
+                "lib-a": {"measured": True, "lines_pct": 85.0,
+                          "lines_covered": 85, "lines_total": 100, "seconds": 1},
+            },
+            "cone": {"filter": ["lib-a"], "measured": ["lib-a"], "inherited": ["lib-b"]},
+        }
+        floor_doc = {"crates": {"lib-a": {"floor": 80}, "lib-b": {"floor": 80}}}
+        return cone_doc, coverage_summary, floor_doc
+
+    def test_skipped_crate_gets_an_inherited_row(self):
+        report = cc.shadow_report(*self._docs())
+        rows = {r["crate"]: r for r in report["rows"]}
+        self.assertIn("lib-b", rows, "an enforce-skipped crate must still get a row")
+        self.assertEqual(rows["lib-b"]["status"], "inherited")
+        self.assertNotIn("lines_pct", rows["lib-b"],
+                         "an inherited crate has no measurement this run")
+        self.assertEqual(rows["lib-a"]["status"], "measured")
+        self.assertEqual(report["inherited_declared"], ["lib-b"])
+        self.assertEqual(report["inherited_count"], 1)
+
+    def test_inherited_crate_not_double_counted_as_not_measured(self):
+        report = cc.shadow_report(*self._docs())
+        self.assertEqual(report["not_measured_in_shard"], 0,
+                         "an enforce-skipped crate has its own row, so it must not also "
+                         "be counted as not-measured-in-this-shard")
+
+    def test_enforce_report_declares_divergence_detection_unavailable(self):
+        """HONESTY: with no full run to compare against, an empty `divergences` list is
+        not evidence of soundness — the report must say detection is unavailable."""
+        report = cc.shadow_report(*self._docs())
+        self.assertFalse(report["shadow"])
+        self.assertTrue(report["enforce"])
+        self.assertIn("unavailable", report["divergence_detection"])
+        rendered = cc._render_report(report)
+        self.assertIn("Divergence detection unavailable", rendered)
+        self.assertNotIn("cone is sound for this PR", rendered)
+
+    def test_shadow_report_still_claims_detection(self):
+        """Same shape minus enforce: divergence detection IS available (regression guard
+        proving the enforce flag, not something else, drives the message)."""
+        cone_doc, coverage_summary, floor_doc = self._docs()
+        cone_doc["enforce"] = False
+        coverage_summary.pop("cone")
+        report = cc.shadow_report(cone_doc, coverage_summary, floor_doc)
+        self.assertTrue(report["shadow"])
+        self.assertIn("shadow", report["divergence_detection"])
+        self.assertIn("cone is sound for this PR", cc._render_report(report))
+
+
+class TestCoverageShCone(unittest.TestCase):
+    """(o) [SONNET-4.6] sq-3dr4t — coverage.sh's COVERAGE_CONE intersection.
+
+    Driven through `scripts/coverage.sh --print-crates`, which resolves the tier/shard
+    selection and the cone filter and exits BEFORE any cargo/fixture work — so this is
+    the hermetic guard on the code that decides what actually goes unmeasured.
+    """
+
+    COVERAGE_SH = REPO_ROOT / "scripts" / "coverage.sh"
+
+    def _crates(self, **env):
+        import subprocess
+        full_env = dict(os.environ)
+        full_env["COVERAGE_FETCH_FIXTURES"] = "0"
+        full_env.pop("COVERAGE_CRATES", None)
+        full_env.pop("COVERAGE_CONE", None)
+        full_env.pop("COVERAGE_SHARD", None)
+        full_env.update({k: v for k, v in env.items()})
+        out = subprocess.run(
+            ["bash", str(self.COVERAGE_SH), "--print-crates"],
+            capture_output=True, text=True, env=full_env, cwd=str(REPO_ROOT),
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        # `--print-crates` prints one crate per line; the shard/cone banners go to the
+        # same stream, so keep only lines that look like a bare crate name.
+        return [ln.strip() for ln in out.stdout.splitlines()
+                if ln.strip().startswith("sparq-") and " " not in ln.strip()]
+
+    def test_unset_cone_measures_the_whole_shard(self):
+        shard = self._crates(COVERAGE_SHARD="1")
+        self.assertGreater(len(shard), 1, "shard 1 must select several crates")
+        self.assertIn("sparq-core", shard)
+
+    def test_empty_cone_is_a_no_op(self):
+        """The fail-safe: an EMPTY COVERAGE_CONE must measure everything, unchanged."""
+        self.assertEqual(self._crates(COVERAGE_SHARD="1", COVERAGE_CONE=""),
+                         self._crates(COVERAGE_SHARD="1"))
+
+    def test_whitespace_only_cone_is_a_no_op(self):
+        """THE fail-safe that matters most. CI builds COVERAGE_CONE with
+        `tr '\\n' ' ' < cone-crates.txt`, so an EMPTY cone file becomes a string of
+        whitespace — non-empty as a STRING but ZERO crates once split. If the filter
+        gated on string-emptiness it would intersect to nothing and measure NOTHING,
+        turning the fail-safe into a total un-gating. It must be a plain no-op."""
+        baseline = self._crates(COVERAGE_SHARD="1")
+        for blank in (" ", "   ", "\n", " \n "):
+            self.assertEqual(self._crates(COVERAGE_SHARD="1", COVERAGE_CONE=blank),
+                             baseline,
+                             f"a whitespace-only cone ({blank!r}) must measure the whole "
+                             f"shard, not nothing")
+
+    def test_cone_intersects_the_shard(self):
+        cone = self._crates(COVERAGE_SHARD="1", COVERAGE_CONE="sparq-core sparq-geo")
+        self.assertEqual(sorted(cone), ["sparq-core", "sparq-geo"])
+
+    def test_cone_cannot_add_a_crate_outside_the_shard(self):
+        """Pure narrowing: a cone entry not in the shard's group is ignored."""
+        cone = self._crates(COVERAGE_SHARD="1",
+                            COVERAGE_CONE="sparq-core sparq-server sparq-wasm")
+        self.assertEqual(cone, ["sparq-core"],
+                         "sparq-server/-wasm live in another shard and must NOT be added")
+
+    def test_disjoint_cone_measures_nothing(self):
+        """A shard with nothing in the cone must resolve to an EMPTY crate list rather
+        than falling back to the full shard."""
+        self.assertEqual(self._crates(COVERAGE_SHARD="1", COVERAGE_CONE="sparq-server"), [])
+
+    def test_explicit_coverage_crates_bypasses_the_cone(self):
+        """coverage-gate.py --check-robust re-measures via COVERAGE_CRATES with the cone
+        still in the environment; the filter must NOT drop the crates it asked for."""
+        crates = self._crates(COVERAGE_CRATES="sparq-core sparq-server",
+                              COVERAGE_CONE="sparq-geo")
+        self.assertEqual(sorted(crates), ["sparq-core", "sparq-server"])
 
 
 if __name__ == "__main__":

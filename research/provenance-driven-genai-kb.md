@@ -6,9 +6,21 @@
 > investigation streams into one design + iteration roadmap.
 > **Author:** SPARQ agent 🤖 (Opus 4.8). **Bead:** sq-bxse0. **Epic:** sq-2489d.
 > **Direction:** part of the **[revisit-with-fable] neurosymbolic-KB** umbrella
-> ([issue #1111](https://github.com/jeswr/sparq/issues/1111)) — every adopt/abandon
+> ([issue #1111](https://github.com/sparq-org/sparq/issues/1111)) — every adopt/abandon
 > verdict below is **model-dependent** and should be re-iterated when a stronger model
 > (Fable) is available. Verdicts here are honest-best-effort on Opus 4.8, not final.
+>
+> **Update (2026-07-29 — issue #3246, bead sq-dbesf; see #1139):** §4.2's access table and
+> the two `[needs-access]` lists were written when **OpenAlex** served an anonymous
+> "polite pool" keyed only on a `mailto`. **OpenAlex retired the no-key polite pool in
+> February 2026 and now requires an API key**, so the "No key" cell and the
+> "OpenAlex/Crossref polite-pool `mailto`" phrasing were stale; both are corrected below.
+> This changes the *credential* line only — the connector design, DOI join key, bulk-vs-API
+> guidance and everything downstream are unaffected, because the `SourceStub` boundary is
+> source-agnostic. Per `research/research-kb-program.md` ("Access reality") an OpenAlex key
+> and a polite-pool `mailto` are now provisioned, so the OpenAlex half of the Phase-6
+> credential blocker is cleared; Semantic Scholar remains unavailable. The record's own
+> standing rule still applies: **re-verify every rate/auth cell at build time.**
 
 ---
 
@@ -296,7 +308,7 @@ per public API docs as of training cutoff; **re-verify at build time** (they cha
 
 | Source | Coverage | Auth | Rate-limit reality | Best for |
 |---|---|---|---|---|
-| **OpenAlex** | ~250M works, broadest open corpus | No key; polite-pool `mailto` | ~10/s polite pool; monthly S3 snapshot | Primary breadth + bulk snapshot |
+| **OpenAlex** | ~250M works, broadest open corpus | **API key required** (the no-key polite pool was retired Feb 2026; `mailto` alone no longer suffices) | per-key quota — re-verify; monthly S3 snapshot | Primary breadth + bulk snapshot |
 | **Crossref** | ~150M DOIs + reference lists | No key; polite-pool `mailto` | polite pool soft cap | DOI canonicalisation + citation edges |
 | **Semantic Scholar** | ~200M papers + TLDRs + SPECTER2 vectors + influential-citation flags | Free key on request (`x-api-key`) | dedicated ~1 req/s with key; bulk/datasets API | Abstracts/TLDRs + SPECTER2 (feeds `sparq-vectors`) |
 | **arXiv** | preprints, full PDF/LaTeX | No key | ~1 req/3s; Kaggle/S3 bulk | Full text for DB/ML/CL |
@@ -306,10 +318,12 @@ per public API docs as of training cutoff; **re-verify at build time** (they cha
 Cross-cutting: **the bulk/snapshot path beats the per-record API at scale** (sidesteps
 rate-limit fragility); **DOI is the join key** (make the DOI — or arXiv id where none — the
 content-addressed `pkg:Source` IRI so the same paper from two sources stitches to one node).
-**`[needs-access]` (maintainer-only):** an S2 API key; an OpenAlex/Crossref polite-pool
-`mailto`; outbound egress + S3/requester-pays creds for the bulk path; an Anthropic
-key/budget for the Haiku batches. An agent cannot mint these — the only valid blocker under
-the proceed-without-greenlight rule.
+**`[needs-access]` (maintainer-only):** an S2 API key; an **OpenAlex API key** (mandatory
+since the Feb-2026 polite-pool retirement — see the Update at the top) plus a Crossref
+polite-pool `mailto`; outbound egress + S3/requester-pays creds for the bulk path; an
+Anthropic key/budget for the Haiku batches. An agent cannot mint these — the only valid
+blocker under the proceed-without-greenlight rule. (Status: the OpenAlex key and the
+`mailto` are provisioned per `research/research-kb-program.md`; S2 is not.)
 
 ### 4.3 The extraction pipeline (Haiku turning papers into Findings)
 
@@ -506,10 +520,13 @@ is recorded in that PR's body (issue #1111 comment by @jeswr).
    subclass ({holds/refuted/uncertain/superseded}) is deferred until literature ingestion
    produces measured evidence of strain on the generic enum (sq-2489d.6 / Phase 5).
 
-3. **`[needs-access]` for the live pilot (Phase 6).** S2 API key; OpenAlex/Crossref
-   polite-pool `mailto`; egress + S3/requester-pays creds; Anthropic Haiku budget. An agent
-   cannot mint these — Phases 1–5 are fully buildable + testable on fixtures without them.
-   (No ruling needed; this is a credential block, not a design choice.)
+3. **`[needs-access]` for the live pilot (Phase 6).** S2 API key; an **OpenAlex API key**
+   (the no-key polite pool was retired Feb 2026) + a Crossref polite-pool `mailto`; egress +
+   S3/requester-pays creds; Anthropic Haiku budget. An agent cannot mint these — Phases 1–5
+   are fully buildable + testable on fixtures without them. (No ruling needed; this is a
+   credential block, not a design choice.) **Partially cleared (2026-07-29):** the OpenAlex
+   key and polite-pool `mailto` are provisioned per `research/research-kb-program.md`; S2
+   remains unavailable, so the SPECTER2 near-dup layer (§4.5 layer 2) stays designed-only.
 
 4. **Confidence calibration source — DECIDED: Ship hedging as "reflects asserted assurance"
    until rung C (sq-2489d.10).** **Ruling (sq-2489d / #1111 / sq-tzars.5 2026-07-05):**

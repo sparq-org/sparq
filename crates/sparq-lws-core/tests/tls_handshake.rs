@@ -17,12 +17,12 @@ use std::sync::Arc;
 
 use axum::routing::get;
 use axum::Router;
-use rustls_pemfile::certs;
 use sparq_lws_core::tls::{
     build_rustls_config, build_rustls_config_with_tuning, TlsMode, TransportTuning,
     DEFAULT_TLS_SESSION_CACHE_SIZE,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_rustls::rustls::pki_types::pem::PemObject;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::rustls::{ClientConfig, HandshakeKind, ProtocolVersion, RootCertStore};
 use tokio_rustls::TlsConnector;
@@ -45,7 +45,7 @@ fn client_config() -> ClientConfig {
 fn client_config_with_alpn(alpn: &[&[u8]]) -> ClientConfig {
     let pem = std::fs::read(CA_PATH).expect("read fixture CA");
     let mut roots = RootCertStore::empty();
-    for cert in certs(&mut pem.as_slice()) {
+    for cert in CertificateDer::pem_slice_iter(&pem) {
         let cert: CertificateDer<'_> = cert.expect("parse fixture CA");
         roots.add(cert).expect("add fixture CA to roots");
     }
@@ -491,18 +491,17 @@ async fn tls_mtls_connpop_reads_binds_and_rebinds_client_cert_across_resumption(
 
     // Client A: presents a client certificate ⇒ the server must read + hash it and report its x5t#S256.
     let (client_cert_pem, client_key_pem) = mint_client_cert();
-    let client_chain: Vec<CertificateDer<'static>> = certs(&mut client_cert_pem.as_slice())
-        .collect::<Result<_, _>>()
-        .expect("parse client cert");
+    let client_chain: Vec<CertificateDer<'static>> =
+        CertificateDer::pem_slice_iter(&client_cert_pem)
+            .collect::<Result<_, _>>()
+            .expect("parse client cert");
     let client_key: PrivateKeyDer<'static> =
-        rustls_pemfile::private_key(&mut client_key_pem.as_slice())
-            .expect("read client key")
-            .expect("a client private key");
+        PrivateKeyDer::from_pem_slice(&client_key_pem).expect("a client private key");
     let expected = CertThumbprint::from_cert_der(client_chain[0].as_ref()).to_base64url();
 
     let pem = std::fs::read(CA_PATH).expect("read fixture CA");
     let mut roots = RootCertStore::empty();
-    for cert in certs(&mut pem.as_slice()) {
+    for cert in CertificateDer::pem_slice_iter(&pem) {
         roots.add(cert.expect("parse fixture CA")).expect("add CA");
     }
     // A resumption-ENABLED client config (rustls `ClientConfig` enables an in-memory session store by

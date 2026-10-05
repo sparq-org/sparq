@@ -16,6 +16,9 @@ use std::time::{Duration, Instant};
 
 mod dataset;
 mod fuzz;
+// [OPUS-5] sq-qcnn.5: the oxrdf → sparq-difftest neutral-term bridge the query differential's
+// value-level comparators run on (see its module docs for the independence constraint).
+mod neutral;
 mod update_fuzz;
 
 /// The query workload. Each exercises a different plan shape.

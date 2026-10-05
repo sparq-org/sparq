@@ -56,7 +56,8 @@ pub async fn seed_conformance<S: Store>(
     seed_conformance_with_identity(store, base_url, issuer, None).await
 }
 
-/// [`seed_conformance`] with the OPTIONAL identity-host posture (`docs/design/webid-outside-pod.md`).
+/// [`seed_conformance`] with the OPTIONAL identity-host posture (`research/lws-design-records.md`
+/// §4).
 ///
 /// - `identity: None` — byte-identical to the pre-identity seed: the WebID is the in-pod
 ///   `/{u}/profile/card#me` carrying `pim:storage` + `solid:oidcIssuer`.
@@ -237,11 +238,11 @@ fn webid_profile_turtle(webid: &str, pod_root: &str, issuer: &str) -> ServerResu
 }
 
 /// Build the LOCKED identity document for `handle` — the provider-managed WebID doc served from the
-/// id host (identity mode; `docs/design/webid-outside-pod.md`). Subjects are on the IDENTITY origin
-/// (the served IRIs), never the reserved store key. Carries exactly the provider-locked statements:
-/// Person type, the locked `solid:oidcIssuer`, `pim:storage` → the pod root, the
-/// `<pod> solid:owner <webid>` back-link, and `rdfs:seeAlso` → the demoted in-pod card. Built via
-/// `oxrdf` triples (never hand-concatenated — the house rule).
+/// id host (identity mode; `research/lws-design-records.md` §4). Subjects are on the IDENTITY
+/// origin (the served IRIs), never the reserved store key. Carries exactly the provider-locked
+/// statements: Person type, the locked `solid:oidcIssuer`, `pim:storage` → the pod root, the `<pod>
+/// solid:owner <webid>` back-link, and `rdfs:seeAlso` → the demoted in-pod card. Built via `oxrdf`
+/// triples (never hand-concatenated — the house rule).
 fn identity_doc_turtle(
     config: &IdentityConfig,
     handle: &str,

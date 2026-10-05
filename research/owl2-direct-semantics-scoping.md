@@ -206,6 +206,103 @@ Given an ontology (structural model from L1), dispatch in order:
    yielding a definitive verdict (complete for the fragment).
 5. Otherwise: `Unknown(OutOfFragment(constructs…))`.
 
+**§4 amendment, sq-pbz04.4.8 (guard-abstention tableau fall-through) [SONNET-4.6].** The
+dispatch above is written branch-owned: the first branch whose profile test matches owns the
+verdict, and its abstention is the dispatch's answer. That rule is now RELAXED in exactly one
+direction. When the owning branch of steps 1–3 ABSTAINS, the dispatch re-asks the same
+ontology of the step-4 tableau and prefers its definitive verdict. **This needs no new
+soundness argument.** Step 4's own precondition — "the whole ontology is inside the §3
+fragment" — holds for *every* ontology the L1 mapping accepts, by construction of the L1
+model (that is precisely why step 4 can serve as the unconditional catch-all rather than
+another guarded branch). An ontology being additionally in RL, EL or QL does not take it out
+of ALCH; it only means a cheaper branch was tried first. So the tableau's existing
+completeness argument (§3) already covers every input that reaches the fall-through, and the
+change can only replace an `Unknown` with a verdict that argument licenses. It is the mirror
+image of the sq-pbz04.4.10 refutation fallback below, which re-asks the profile branches when
+the tableau abstains. Four rules, all of them the dispatch's own:
+
+1. **The profile branch keeps first refusal.** The fall-through never pre-empts a branch that
+   decided, so no existing verdict or branch attribution moves — the cheap branches stay the
+   fast path and the record's dispatch ORDER is untouched. What changes is only what an
+   abstention means: not "the dispatch abstains", but "ask the complete branch".
+2. **Strictly abstention-reducing.** If the tableau also abstains (its deterministic count
+   budget), the owner's outcome is returned UNCHANGED — same verdict, same `UnknownReason`,
+   same `Branch`. A guard's diagnosis is never overwritten by a `ResourceBudget` the tableau
+   earned second, and no abstention becomes less informative than it was.
+3. **`RlPr1Preconditions` (usage-level punning) does NOT fall through.** It is the one
+   abstention in steps 1–3 that is not an incompleteness guard. The other guards say "this
+   branch cannot decide this ontology"; the punning guard says the INPUT is ill-posed — an id
+   used as more than one of {class, property, individual} is not an OWL 2 DL ontology, so the
+   L1 shadow is one arbitrary reading of it rather than a faithful one, and a definitive
+   verdict on that shadow would be a verdict on a different ontology. Fail-closed, unchanged.
+   (Noted honestly: a punning input that is in NO profile already reaches step 4 today and
+   receives a verdict, so this boundary is not uniform. Making it uniform — either by lifting
+   the punning check out of the RL branch into the dispatch, or by dropping the
+   ill-posedness reading — is a real question this bead deliberately does not settle; it is
+   captured as follow-up work rather than answered by a fall-through rule.)
+4. **Transitivity is unaffected.** Under the opt-in `dl_transitive` extension a
+   transitivity-bearing ontology short-circuits to the ALCH+S tableau BEFORE the profile
+   dispatch, so it never reaches the fall-through.
+
+**The QL do-not-duplicate rule (step 3), re-examined explicitly** — the bead's acceptance
+condition. Step 3 says DL-Lite_R consistency is deferred to the QL workstream (sq-pbz04.3.4)
+and must not be duplicated here. The fall-through does not duplicate it, on three counts:
+no DL-Lite_R reasoning is written (it re-uses the ALCH tableau this crate already has and
+has already argued complete for the fragment); no QL-specific claim is made (the verdict is
+attributed to the tableau branch, and the QL branch's own soundness story is untouched); and
+QL ownership is PRESERVED, because with `dispatch_ql` the sparq-reason-ql checker is still
+asked first and every verdict it gives still wins — the fall-through fires only on
+`QlCaptureGap`, the case that crate itself declines. Without `dispatch_ql`, step 3's blanket
+`Unknown(QlConsistencyPending)` is a deferral of the QL PROCEDURE, never a claim that this
+crate cannot decide the ontology by other argued means; reading it as the latter is what kept
+these inputs abstaining. The rule stands as written and is honoured.
+
+**Measured on the pinned L5 corpus** (`tests/w3c/owl2/all.rdf`, the pinned Internet-Archive
+snapshot, pinned budget). Before: the DIRECT lane's abstention histogram carried 16
+RL-divergence, 26 EL-unapplied and 1 EL-⊤ guard rows — 43 candidates, no QL rows (reaching
+that branch needs in-QL ∧ ¬RL ∧ ¬EL, a shape the extractable corpus does not contain) and no
+PR1-punning rows. After: **all three guard buckets are gone from the histogram**, the DIRECT
+pass total rises **186 → 227 (+41)** and the abstained total falls **468 → 427 (−41)**, with
+the audited five-row divergence set unchanged. Composition 136 consistency + 17 inconsistency
++ 72 positive-entailment + 2 negative-entailment. Among the recovered rows — verified per row,
+not inferred from the totals — are the 8 `WebOnt-disjointWith-003`…`-009` / `WebOnt-I5.26-005`
+consistency cases that sq-pbz04.4.16 re-routed into `RlDivergenceGuard`, whose re-pin note
+explicitly anticipated this bead. The 43 guard-abstained rows account for exactly: 38
+consistency passes + 3 inconsistency passes (= the +41) + the 2 built-in-property rows that
+moved guard → out-of-fragment. Nothing is unaccounted for, and the budget bucket is unchanged
+at 16.
+
+**The measurement falsified the first version of the claim above, and that is worth
+recording.** "No soundness cost" is true of the fall-through *as a dispatch rule*, but the
+first measured run put TWO NEW ROWS IN THE FAIL BUCKET —
+`New-Feature-{Bottom,Top}ObjectProperty-001`, both `InconsistencyTest`s answered `Consistent`.
+The cause was not the fall-through. It was a **pre-existing L1 gap the profile guards had been
+accidentally masking**: L1 read `owl:bottomObjectProperty` and `owl:topObjectProperty` as
+ordinary named roles, discarding the fixed extensions (∅ and ΔI × ΔI) that are the *sole*
+reason those two ontologies are inconsistent. Under the opaque-role reading both are
+satisfiable, and the tableau — correctly, for the model it was given — said so. The guards had
+never let that reading reach a verdict, so the gap was invisible.
+
+Fixed here, at L1, by refusing all four built-in property IRIs fail-closed at every property
+position (`builtin_property_refusal` in `extract.rs`, applied in `decode_object_property` AND
+in `role_assertion`, which builds its property expression directly — a non-uniform refusal
+would be worthless). This is the **sq-pbz04.4.9 precedent applied to the same failure mode one
+vocabulary over**: there, built-in DATATYPE IRIs read as opaque object classes, and the
+escalated soundness verdict directed refusing at L1 rather than pinning a wrong definitive
+verdict. Same disease, same medicine. With the refusal in place the inconsistency lane's fail
+count returns to 0 and both rows abstain honestly as `OutOfFragment`. Its collateral re-pins:
+profile floor 94 → 93, profile abstained 118 → 119, explicit-negative refuted 138 → 134 /
+In-gap 182 → 181 / abstained 614 → 619 (checkable denominator 320 → 315), render round-trip
+296 → 294 with refusals 375 → 377 (`violations` still EMPTY — no renderer fidelity bug).
+
+The general lesson for this dispatch: **a guard that abstains is also a guard that hides.**
+Every abstention the fall-through removes exposes whatever L1 did with that input to a
+verdict for the first time, so widening the tableau's reach is a genuine test of L1
+faithfulness, not only a recall win. The two rows it caught here were real bugs of long
+standing. Future abstention-reducing work on this dispatch should expect the same and budget
+for it. Full re-pin evidence lives in the `DL_DIRECT_FLOOR` / `DL_DIRECT_ABSTAINED` notes in
+`crates/sparq-conformance/tests/dl_suite.rs`.
+
 **Entailment by refutation** (`PositiveEntailmentTest`): `O ⊨ α` is checked per
 conclusion-axiom, each with an explicit sound encoding into a consistency question —
 `SubClassOf(C,D)` → `O ∪ {(C ⊓ ¬D)(x_fresh)}` inconsistent; `ClassAssertion(C,a)` →
@@ -227,6 +324,29 @@ Conclusion-axiom kinds without an argued encoding (keys, …; none currently exp
 the L1 model) → `Unknown`. **Negative entailment** verdicts are
 emitted only when the refutation check lands in a branch that is *complete* (EL-guarded,
 ALCH, or RL-with-guard) — a definitive "consistent" is what certifies non-entailment.
+
+**§4 amendment, sq-pbz04.4.10 (refutation routing — budget robustness) [OPUS-5].** The
+"RL-with-guard" arm of the sentence above is now implemented, as a *fallback* rather than a
+first-choice route. The ALCH tableau keeps ownership of every refutation (it is the only branch
+complete for the whole §3 fragment, so routing there first cannot lose a verdict); the profile
+branches are re-asked the same question **only** when the tableau returns
+`Unknown(ResourceBudget)`. Rules, all of them the §4 dispatch's own: a transitivity-bearing
+augmented ontology is never re-asked (only the ALCH+S tableau is argued for it); `profiles()`
+routes RL → EL over the *augmented* ontology, never the premise alone, because a branch's
+argument only covers the graph it actually decides; the augmented model is serialised for the
+triple-consuming branches by the L1 forward renderer (sq-pbz04.4.7) with its round-trip
+invariant **re-verified per call** (re-extract, compare axiom multisets) rather than trusted;
+and every branch guard (PR1 punning, RL divergence, EL skipped/unapplied/⊤) applies unchanged.
+Any fallback abstention keeps the tableau's original `ResourceBudget` reason. The change is
+therefore strictly abstention-reducing — it can only replace an abstention with a verdict a
+branch's existing soundness argument already covers. QL is deliberately not routed: that
+branch's soundness rests on the sparq-reason-ql crate's capture accounting over the *original*
+input graph, and a refutation graph is a synthesised augmentation, so extending it needs its own
+argument. **Measured on the pinned L5 corpus: 7 entailment rows abstain on `ResourceBudget` (65
+refutation components), the fallback declines all 65 because the augmented ontology is in no
+profile, and the DIRECT floors are unchanged.** `(C ⊓ ¬D)(x)` is RL-legal only when `C` is also
+an RL superClassExpression, which the budget-exhausting corpus rows are not — so narrowing the
+RL divergence guard, not more routing, is the lever that would move those rows.
 
 **Double-counting discipline:** the dual-tagged (DIRECT + RDF-BASED) tests keep their
 RDF-Based run in the existing standards-conformance lane; the new DIRECT arm is a separate
@@ -253,6 +373,7 @@ wrong species check would poison the lane. Untagged species assertions are not c
 | Cardinalities / functionality (N/Q/F) | need the choose-rule + node merging; merging + blocking interaction is the classic unsoundness trap; with inverses added later this escalates to pairwise blocking | post-v1, only with a written argument |
 | Nominals in class expressions (`oneOf`, `hasValue`, O) | the O+I+Q interaction is where NEXPTIME bites and where naive blocking is unsound; a "fresh-concept" approximation is sound but **incomplete** and would blur the completeness ledger | revisit only after I and Q are argued |
 | Datatypes / data properties (D) | a datatype-aware tableau needs a concrete-domain satisfiability oracle; sparq already has the seam (`sparq-substrate` numeric tower; `dtype.rs`; EL `cdomain`) but wiring it into a tableau is its own design problem. **sq-pbz04.4.9 hardened the L1 boundary here:** a bare OWL 2 datatype-map IRI (`xsd:*`, `rdfs:Literal`, `rdf:PlainLiteral`/`XMLLiteral`, `owl:real`/`rational`) reaching ANY class-expression position — including an `rdfs:range`/`rdfs:domain` object — now refuses extraction as a `DataConstruct` rather than reading as an opaque object class (which silently dropped the value-space meaning; two disjoint datatype ranges were invisibly unrelated, e.g. WebOnt-I5.3-015). Uniform position check, same discipline as the literal / `owl:onDatatype` refusals. | future record; reuse the shared tower, never a private one |
+| Built-in fixed-extension properties (`owl:topObjectProperty`, `owl:bottomObjectProperty`, and the `*DataProperty` pair) | their interpretation is FIXED by the Direct Semantics (ΔI × ΔI and ∅) rather than constrained by axioms, and L1's role model can only represent an axiom-constrained named role. **sq-pbz04.4.8 hardened the L1 boundary here** (the datatype row's discipline, one vocabulary over): reading them as ordinary roles did not merely lose precision, it MANUFACTURED models — `New-Feature-{Bottom,Top}ObjectProperty-001` are inconsistent for no other reason, and the opaque reading called both consistent. Now refused fail-closed at EVERY property position (`decode_object_property` **and** `role_assertion`, which builds its property expression directly). Found only because the guard-abstention fall-through let the reading reach a verdict for the first time. | representable once the tableau gains a universal-role rule (⊤ᵣ) and an empty-role rule; neither is hard in isolation, but both want the inverse/cardinality rows settled first |
 | `sameAs` / `differentFrom` in the tableau path | equality reasoning = merging (see cardinalities); RL branch already covers them for RL ontologies | with N/Q |
 | Keys, property chains, `hasSelf`, property disjointness/(a)symmetry/(ir)reflexivity | outside ALCH; RL branch handles their assertional consequences for RL ontologies | per-construct evaluation later |
 | OWL 2 DL species validation (global restrictions) | needs regularity/simple-role machinery; wrong checks poison the profile lane | post-v1 bead if the lane's value warrants it |

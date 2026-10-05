@@ -38,7 +38,7 @@ pub enum Term {
 
 /// The effective datatype of a literal: `rdf:langString` if language-tagged, else `xsd:string` for an
 /// empty datatype (the simple-literal ≡ `xsd:string` fold), else the datatype as given.
-fn effective_datatype<'a>(datatype: &'a str, lang: &Option<String>) -> &'a str {
+pub(crate) fn effective_datatype<'a>(datatype: &'a str, lang: &Option<String>) -> &'a str {
     if lang.is_some() {
         RDF_LANGSTRING
     } else if datatype.is_empty() {
@@ -139,24 +139,37 @@ fn literal_key(lexical: &str, datatype: &str, lang: &Option<String>) -> String {
         return format!("L@\u{1f}{}\u{1f}{}", tag.to_ascii_lowercase(), lexical);
     }
     let dt = effective_datatype(datatype, lang);
+    format!("L\u{1f}{}\u{1f}{}", dt, canonical_lexical(lexical, dt))
+}
+
+/// The value-canonical **lexical form** of a non-language-tagged literal under its effective
+/// datatype: the exact numeric expansion for a numeric datatype, the UTC-normalised instant /
+/// canonical duration for a temporal one, `true`/`false` for `xsd:boolean`, and the lexical
+/// unchanged for strings and any datatype this crate does not model (no canonicalisation is
+/// invented for a datatype whose value space is unknown here).
+///
+/// Shared by [`canonical_key`] and by the blank-node isomorphism encoder
+/// ([`crate::iso`]), so a bnode-bearing result and a ground one collapse cross-engine
+/// canonical-lexical variance by exactly the same rule.
+pub(crate) fn canonical_lexical(lexical: &str, dt: &str) -> String {
     if let Some(n) = parse_numeric(lexical, dt) {
-        return format!("L\u{1f}{}\u{1f}{}", dt, canonical_numeric_string(&n));
+        return canonical_numeric_string(&n);
     }
     if let Some(v) = parse_datetime(lexical, dt) {
-        return format!("L\u{1f}{}\u{1f}{}", dt, v.canonical_key());
+        return v.canonical_key();
     }
     if let Some(d) = parse_duration(lexical, dt) {
-        return format!("L\u{1f}{}\u{1f}{}", dt, d.canonical_key());
+        return d.canonical_key();
     }
     if dt == XSD_BOOLEAN {
         match lexical.trim() {
-            "true" | "1" => return format!("L\u{1f}{}\u{1f}true", XSD_BOOLEAN),
-            "false" | "0" => return format!("L\u{1f}{}\u{1f}false", XSD_BOOLEAN),
+            "true" | "1" => return "true".to_string(),
+            "false" | "0" => return "false".to_string(),
             _ => {}
         }
     }
     // Strings, IRIs-as-literal, and any unknown datatype: exact lexical (no canonicalisation).
-    format!("L\u{1f}{}\u{1f}{}", dt, lexical)
+    lexical.to_string()
 }
 
 #[cfg(test)]
@@ -234,6 +247,25 @@ mod tests {
             canonical_key(&lit("01", "http://example.org/weird")),
             canonical_key(&lit("1", "http://example.org/weird"))
         );
+    }
+
+    #[test]
+    fn canonical_lexical_collapses_value_variants_only_where_the_value_space_is_known() {
+        // numeric / boolean / temporal: value-canonical.
+        assert_eq!(canonical_lexical("01", XSD_INT), canonical_lexical("1", XSD_INT));
+        assert_eq!(canonical_lexical("1", XSD_BOOLEAN), "true");
+        assert_eq!(canonical_lexical("0", XSD_BOOLEAN), "false");
+        assert_eq!(
+            canonical_lexical("2020-01-01T13:00:00Z", XSD_DT),
+            canonical_lexical("2020-01-01T14:00:00+01:00", XSD_DT)
+        );
+        // strings and any datatype this crate does not model: lexical UNCHANGED (no invented
+        // canonicalisation for an unknown value space).
+        assert_eq!(canonical_lexical("abc", XSD_STRING), "abc");
+        assert_eq!(canonical_lexical("01", "http://example.org/weird"), "01");
+        assert_eq!(canonical_lexical("maybe", XSD_BOOLEAN), "maybe");
+        // a genuinely different value still separates.
+        assert_ne!(canonical_lexical("1", XSD_INT), canonical_lexical("2", XSD_INT));
     }
 
     #[test]

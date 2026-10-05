@@ -1,0 +1,29 @@
+# Design §6 case 7 (b) — CERTIFICATION REVOKED. The other half of case 7:
+# certifications are status-checked exactly like credentials, through the SAME
+# positive-attestation machinery. Here the certification's window is wide open and
+# contains t, but no `trustx:StatusAttestation` covers the certification itself
+# (the framework operator revoked it, so none could be minted). The credential's own
+# status attestation is untouched, so the rejection is attributable to the
+# certification's status coverage alone.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:qtsp.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+<urn:cert:qtsp> a trustx:Certification ;
+    trustx:certifies      <did:web:qtsp.example> ;
+    trustx:underFramework trustx:eIDAS2 ;
+    trustx:certificationScope trustx:AnyServiceScope ;
+    trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}

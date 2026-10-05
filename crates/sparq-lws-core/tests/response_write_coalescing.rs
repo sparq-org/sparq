@@ -1,19 +1,19 @@
 // AUTHORED-BY Claude Fable 5
-//! P1.4 (`docs/design/beyond-50k-throughput.md` §4, item P1.4 — the vectored-write /
-//! response-coalescing audit): a DETERMINISTIC guard that pins the number of write-family
-//! syscalls the HTTP/1.1 response path emits per response, measured at the hyper→transport seam,
-//! **driving the REAL assembled router** (`build_router` — CORS → public-read skip → auth → WAC →
-//! LDP handler → `serve_read`/`negotiate_body`) over the SAME `axum::serve` path production uses.
-//! Both read paths are covered: the anonymous cases traverse CORS → public-read skip → `serve_read`
-//! (the skip short-circuits before the auth middleware), and the authenticated case
-//! (`real_authenticated_get_…`) carries a DPoP-bound token so it traverses the FULL auth middleware
-//! → WAC → LDP handler → `serve_read` (the P0.1 `authed-doc` class).
+//! P1.4 (`research/lws-design-records.md` §7; RSS `docs/design/beyond-50k-throughput.md` §4 item
+//! P1.4 — the vectored-write / response-coalescing audit): a DETERMINISTIC guard that pins the
+//! number of write-family syscalls the HTTP/1.1 response path emits per response, measured at the
+//! hyper→transport seam, **driving the REAL assembled router** (`build_router` — CORS → public-read
+//! skip → auth → WAC → LDP handler → `serve_read`/`negotiate_body`) over the SAME `axum::serve`
+//! path production uses. Both read paths are covered: the anonymous cases traverse CORS →
+//! public-read skip → `serve_read` (the skip short-circuits before the auth middleware), and the
+//! authenticated case (`real_authenticated_get_…`) carries a DPoP-bound token so it traverses the
+//! FULL auth middleware → WAC → LDP handler → `serve_read` (the P0.1 `authed-doc` class).
 //!
 //! ## Why this test exists — the P1.4 finding
 //!
 //! The P0.1 Linux syscall baseline (`bench/syscalls-results/2026-07-04-linux.md`) shows a
 //! **`writev` 1.04/req + `write` 1.04/req** pair on every read class (anon-doc, listing,
-//! authed-doc). The design doc's §2.1/§4 flagged, as UNVERIFIED, whether the response
+//! authed-doc). The RSS design doc's §2.1/§4 flagged, as UNVERIFIED, whether the response
 //! "header+body coalesce into one vectored write" — the P1.4 lever was to collapse a presumed
 //! two-writes-per-response into one.
 //!

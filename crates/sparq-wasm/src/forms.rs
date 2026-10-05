@@ -145,6 +145,11 @@ impl Store {
     /// (`JSON.parse` it on the JS side; the frontend must not reconstruct keys,
     /// groups, or widgets). Errors — an unparseable graph, focus, shape, or
     /// options document — throw a `JsError`; there is no demo-data fallback.
+    ///
+    /// Available only when the crate is built with the OPT-IN `forms` feature —
+    /// the hosted `/app` + site bundle (js `build:wasm`) enables it; the lean
+    /// default bundle does not, and there this method is simply absent (which is
+    /// exactly what `forms-bridge.ts` feature-detects).
     #[wasm_bindgen(js_name = deriveForm)]
     pub fn derive_form(
         &self,

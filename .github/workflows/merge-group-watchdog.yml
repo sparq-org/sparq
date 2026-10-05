@@ -1,0 +1,179 @@
+# [OPUS-5] sparq-org/sparq#4652 — recover a merge-group ref GitHub Actions never
+# dispatched, in minutes instead of the ruleset's 60-minute CI_TIMEOUT.
+#
+# WHY: measured 2026-07-27/28, PR #4534's merge-group ref was created at 23:04:37Z with
+# ZERO check-suites and deleted at 00:05:04Z when the queue timed it out. It held
+# position 1 in AWAITING_CHECKS the whole time — the queue merges strictly in order and
+# each entry needs its OWN group's required check, so three PRs with already-green
+# groups could not land. Total cost: 73 min 41 s of zero merges and ~66 min of group CI
+# thrown away on the rebuild. The full diagnosis is on #4652.
+#
+# NOT A GATE. Schedule / workflow_dispatch only — it never runs on a PR head, never
+# produces a check-run the `ci-summary` aggregator can see, and can therefore never
+# block a merge. Its only mutations are (a) a marker comment and (b) a dequeue +
+# re-enqueue of an entry it has POSITIVELY established has zero check-suites. Every
+# ambiguous reading is a refusal, not an action (see the script header).
+#
+# ── [OPUS-5] THE CRON IS NOW THE BACKSTOP, NOT THE PRIMARY PATH ──────────────────
+# `.github/workflows/merge-group-doorbell.yml` rings this workflow via
+# `workflow_dispatch` on every `pull_request_target` [enqueued, dequeued] — the two
+# events that between them cause every merge-group ref to be built. Read that file for
+# the measurement showing why `merge_group` itself CANNOT be the producer (it would put
+# a 9th check-suite on every group head and mask the `total_count == 0` predicate
+# outright, and it is dispatched by exactly the delivery that failed).
+#
+# The cron below is DELIBERATELY RETAINED as the independent second path. It is not
+# redundant and it is not the primary: MEASURED 2026-07-28 on this workflow, the
+# 5-minutely schedule produced 3 fires between 13:19:03Z and 17:07:52Z against ~45
+# expected (93% loss, largest gap 140 min). The dead ref `38a9d875` was built at
+# 15:58:00Z and the next scheduled fire was 17:07:52Z — 69.9 min later, past the
+# ruleset's own 60-minute CI_TIMEOUT. Two independent paths is the whole point: the
+# doorbell covers queue transitions, the cron covers everything else (notably a direct
+# push to `main` that rebases the queue without any PR-level queue event).
+#
+# Cadence is every 5 minutes — the GitHub scheduler minimum — against a 120 s grace, so
+# worst-case detection is ~10 min and typical is ~5, against the 60-minute ruleset
+# timeout it replaces. The grace is 30x the MEASURED maximum create->first-suite latency
+# on this repo (N=209, max 4 s; see the script's DEFAULT_GRACE_SECONDS note) and sits
+# below the tick interval so it never costs an extra tick. Minutes are offset from
+# auto-arm.yml's and rearm-sweeper.yml's crons so the three sweeps do not start together.
+#
+# BASE RATE, measured rather than assumed: THREE zero-dispatch refs on three
+# consecutive days — #4331 (07-26), #4534 (07-27), #4709 (07-28) — against 211 merge
+# groups sampled over the same period. Each held position 1 for ~60 min. #4709 was
+# caught live by this script's own `sweep --dry-run` while its four siblings in the
+# same chain all had 8 suites. This is a recurring platform event, not a one-off.
+name: merge-group watchdog
+
+on:
+  schedule:
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Emit decisions without dequeuing/re-enqueuing anything"
+        type: boolean
+        default: false
+
+# Least privilege, mirroring rearm-sweeper.yml (the sibling queue sweeper):
+#   contents: read       — the repository ACTIVITY api (branch_creation timestamps),
+#                          which is the only exact merge-group build-time anchor.
+#   checks: read         — the load-bearing predicate: check-SUITE count on the group head.
+#   pull-requests: write — the marker comment + the dequeue/enqueue mutations.
+permissions:
+  contents: read
+  checks: read
+  pull-requests: write
+
+concurrency:
+  group: merge-group-watchdog
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: recover zero-dispatch merge groups
+    runs-on: ubuntu-latest
+    # Raised from 10 for the resweep loop: 4 x 60 s of sleep plus five sweeps plus the
+    # checkout and self-test. Still a hard ceiling — the job cannot sit on the shared
+    # `merge-group-watchdog` concurrency slot indefinitely.
+    timeout-minutes: 15
+    env:
+      # Secrets are not readable from step `if:` expressions — mirror the id into env
+      # so the mint step can be skipped fail-soft when the App is not configured.
+      ORCHESTRATOR_APP_ID: ${{ secrets.ORCHESTRATOR_APP_ID }}
+    steps:
+      - name: Mint the sparq-orchestrator App token (re-enqueue must fire queue events)
+        id: app-token
+        if: env.ORCHESTRATOR_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ORCHESTRATOR_APP_ID }}
+          private-key: ${{ secrets.ORCHESTRATOR_APP_PRIVATE_KEY }}
+
+      # Always execute the trusted default-branch policy, including on manual dispatch.
+      - name: Checkout watchdog policy
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          # gh_retry.py is the watchdog's bounded transient-retry dependency — the
+          # self-test below imports it, so a missing path fails BEFORE the live sweep.
+          sparse-checkout: |
+            scripts/merge-group-watchdog.py
+            scripts/gh_retry.py
+          sparse-checkout-cone-mode: false
+
+      - name: Self-test policy
+        run: |
+          python3 scripts/gh_retry.py --self-test
+          python3 scripts/merge-group-watchdog.py --self-test
+
+      # ── WHY THIS IS A LOOP AND NOT A SINGLE SWEEP ────────────────────────────
+      # One fire must outlive the grace period, because the event that STARTS this run
+      # precedes the thing it has to observe. On the doorbell path the ordering is:
+      # queue transition at T -> group ref built at T+0..19 s (MEASURED over the three
+      # dead refs of 2026-07-28 and five live rebuilds) -> the group only becomes
+      # actionable at T+build+120 s of grace. A run that swept once at start would
+      # decide WAIT on the very group it was rung for and exit, and the next look would
+      # be whenever the unreliable cron next fires.
+      #
+      # The loop is UNCONDITIONAL — no `if:`, no per-trigger branching, no input that
+      # selects between "sweep once" and "sweep repeatedly". That is deliberate: a
+      # conditional here would be a YAML seam, and on this estate a seam is where an
+      # inert-but-innocent-looking mutation survives. The cron path simply gets the same
+      # coverage, which is strictly better than the single sweep it did before.
+      #
+      # STICKY EXIT CODE. A failed recovery in sweep 1 followed by clean sweeps 2-5 must
+      # still FAIL the run: `rc` is only ever raised, never reset, and the step exits on
+      # it after the loop. This repo has shipped the opposite defect three times in one
+      # day (a later transient discarding an earned hard failure), so the interleaved
+      # fail-then-succeed sequence is asserted by executing this very block in
+      # scripts/tests/test_merge_group_watchdog.py, not by reading it.
+      - name: Sweep the merge queue for zero-dispatch groups
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+          # 5 sweeps 60 s apart => ~4 min of cover per fire. Against a doorbell ring at
+          # T that puts the first sweep at ~T+30 s, a group built at T+19 s clears its
+          # 120 s grace at T+139 s and is recovered by the sweep at ~T+150 s.
+          RESWEEPS: "4"
+          RESWEEP_INTERVAL_SECONDS: "60"
+          # BLAST RADIUS, stated as it actually is. `--max-recoveries-per-run` is
+          # PROCESS-local, so looping five sweeps in one job silently multiplied the
+          # script's own "one tick may never churn the whole queue" bound by 5 (2 -> 10).
+          # Tightening the per-sweep budget to 1 puts the per-FIRE worst case at 5.
+          #
+          # That is still ABOVE the pre-loop 2, and it is a disclosed residual rather
+          # than a fix: restoring exactly 2 needs a budget shared ACROSS sweeps, which
+          # lives in the script's CAP path — decision logic this change deliberately does
+          # not touch. The residual is bounded and, on the measured base rate (3 dead
+          # refs in a DAY), reaching it needs 5 DISTINCT zero-suite entries inside 4
+          # minutes, which is a repo-wide dispatch outage in which recovering them is the
+          # correct action. Per-PR cap (2 per 6 h) and same-head idempotence are
+          # unaffected and still prevent the same entry being churned twice.
+          MAX_RECOVERIES_PER_SWEEP: "1"
+        run: |
+          set -euo pipefail
+          # Built as an array so the optional flag is passed as ONE argv element and
+          # never word-split (shellcheck SC2086 — the folded one-liner this replaced
+          # relied on unquoted splitting).
+          sweep_args=(sweep --repo "$REPO" --branch "$DEFAULT_BRANCH"
+                      --max-recoveries-per-run "$MAX_RECOVERIES_PER_SWEEP")
+          if [ -n "$DRY_RUN" ]; then
+            sweep_args+=("$DRY_RUN")
+          fi
+          rc=0
+          for i in $(seq 0 "$RESWEEPS"); do
+            if [ "$i" -gt 0 ]; then
+              sleep "$RESWEEP_INTERVAL_SECONDS"
+            fi
+            echo "::group::sweep $((i + 1))/$((RESWEEPS + 1))"
+            if ! python3 scripts/merge-group-watchdog.py "${sweep_args[@]}"; then
+              rc=1
+              echo "::warning title=merge-group-watchdog::sweep $((i + 1)) exited non-zero; the loop continues but this run will fail"
+            fi
+            echo "::endgroup::"
+          done
+          exit "$rc"

@@ -168,7 +168,7 @@ pub struct Certification {
     /// ATTESTS exactly which key it is vouching for (a substituted key breaks the
     /// signature — the delegation `sq-l5og` key-binding discipline applied to certs).
     pub certified_key: PublicKey,
-    /// `trustx:scope` — what the issuer is certified to issue (the statement-type / scope
+    /// `trustx:certificationScope` — what the issuer is certified to issue (the statement-type / scope
     /// narrowing). The derived rule's shape is `anchor.shape ∩ scope`.
     pub scope: CertScope,
     /// `trustx:validFrom` — inclusive start of the certification window (Unix seconds).

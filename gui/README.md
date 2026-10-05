@@ -138,10 +138,10 @@ The **file ingest library** is a shared zero-server multi-file upload harness fo
 
 **UI layer** — `<Dropzone>` (standalone dashed panel + keyboard-accessible button), `<DropTarget>` (wraps children as a drop surface with a hover overlay), and `useFileDrop` (raw drag/drop wiring for custom affordances). All three consume the same `IngestResult` contract, so callers surface accepted and rejected files identically.
 
-## Inference (per-workspace entailment) — `sq-tp1m`
+## Inference (per-workspace entailment) — `sq-tp1m`, `sq-glo5r`
 
 The **Inference tool** (and a compact selector in the Query action row) applies an **RDFS / OWL 2
-RL** entailment regime to queries over the live store, **per workspace**. It is real
+RL / N3** entailment regime to queries over the live store, **per workspace**. It is real
 forward-chaining, not a mock: a non-`off` mode lazily loads the tier-b **W-reason** wasm bundle
 (`crates/sparq-reason-wasm`, the same reasoner the site's `/surface/inference` page runs),
 materialises the deductive **closure** over the whole dataset (named graphs folded into the
@@ -156,9 +156,14 @@ hard-fails on it. The CI `gui-app` job builds it (`js`: `npm run build:reason-wa
 exported artifact ships live inference; a build without it degrades **honestly** — the tool shows
 a "reasoner unavailable" state, and a query issued while a non-`off` mode is active then fails with
 a clear message (turn inference **Off** to query the asserted data, or rebuild the bundle) rather
-than silently returning un-reasoned results. **N3** rule reasoning is
-deferred (it needs a rules-authoring surface + a store that can hold rule/formula terms, which the
-in-tab ground-triple store cannot represent) — tracked as a follow-up.
+than silently returning un-reasoned results.
+
+**N3 mode** carries a persisted rules document list on each workspace. The Inference tool can
+author rules inline or bulk-add `.n3` / `.ttl` files, and each document can be enabled, disabled,
+or removed independently. At query time the engine combines the enabled rules with an N-Triples
+snapshot of the asserted store and runs `reasonN3`; derived ground triples are loaded into the
+query-time closure. [SONNET-4.6] This is the honest live-wasm boundary: formula and quoted-graph
+conclusions are not inserted because the in-tab store represents ground triples only.
 
 ## Shared TS client
 

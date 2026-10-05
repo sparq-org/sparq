@@ -1,0 +1,11 @@
+@prefix ex: <http://example.org/> .
+
+# ex:alice is a SUBJECT of ex:knows and an OBJECT of ex:knows, and an
+# ex:Person — so all three of the applicable shapes match her, at three
+# different rationale ranks. She has no ex:worksFor (ex:EmployeeShape misses).
+ex:alice a ex:Person ;
+  ex:name "Alice" ;
+  ex:knows ex:bob .
+
+ex:carol a ex:Person ; ex:knows ex:alice .
+ex:bob a ex:Person ; ex:name "Bob" .

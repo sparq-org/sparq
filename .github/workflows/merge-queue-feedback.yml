@@ -31,14 +31,56 @@
 #   workflow is ever extended to build/test PR code, it MUST move that work to a
 #   separate `pull_request`-triggered job — do not add a checkout of the PR head here.
 #
+#   [OPUS-5] #4652 adds ONE checkout — pinned to `ref: <default_branch>` with
+#   `persist-credentials: false` — solely to obtain the trusted, default-branch copy of
+#   `scripts/merge-group-watchdog.py`. That is the base repo's own reviewed code, NOT
+#   the PR head, so the rule above is intact: this workflow still never checks out or
+#   executes anything a PR contributed. Do not change that `ref:`.
+#
 # GATE INTEGRATION: the job name carries the whole-word `advisory` token, so the
 # ci-summary gate's discovery excludes it from the gating set (a dequeue-feedback
 # hiccup on a PR head must never red a later gate evaluation on that same SHA). The
 # labels/comments it writes are exactly the fix lane's normal inputs.
 #
-# FLAKE-CLASSIFIED failures: an infra-flavoured dequeue reason (e.g. CI_TIMEOUT) is
-# noted in the comment but STILL routes to review:changes — the fix lane's ci-flavour
-# owns re-runs, so the routing is identical by design.
+# FLAKE-CLASSIFIED failures: an infra-flavoured dequeue reason (e.g. QUEUE_CLEARED,
+# ROLL_BACK) is noted in the comment but STILL routes to review:changes — the fix lane's
+# ci-flavour owns re-runs, so the routing is identical by design.
+#
+# ── [OPUS-5] #4652: the FIRST exception — a CI_TIMEOUT with ZERO check-suites ─────
+# (sq-fnr85 later added a second: a QUEUE_CLEARED / ROLL_BACK removal, which is the
+# queue acting on itself and carries no verdict about the diff even when the group had
+# already gone green. Same classifier, same `route=preserve` output, same fail-safe
+# default — see GREEN_DROP_REASONS in scripts/merge-group-watchdog.py.)
+# A `CI_TIMEOUT` has two utterly different causes and until now both got the same
+# treatment. (1) Checks genuinely ran long / hung — a legitimate signal, keep demoting.
+# (2) GitHub Actions NEVER DISPATCHED the `merge_group` event, so the group ref sat with
+# zero check-suites until the ruleset's 60-minute timeout fired. Measured on #4534
+# (2026-07-27): ref built 23:04:37Z, 0 check-suites / 0 check-runs / 0 workflow runs,
+# dequeued CI_TIMEOUT at 00:05:03Z. Demoting THAT strips `review:pass` and manufactures
+# a full re-review of code nobody found fault with — the same defect class as the
+# machine-manufactured `needs:user` escalations this repo has already fixed twice.
+#
+# The two are separated by the SUITE COUNT, never by the reason alone:
+# `scripts/merge-group-watchdog.py classify-dequeue` re-derives the live check-suite
+# count for the recorded group head and prints `route=preserve|demote`. FAIL-SAFE in
+# every direction — a missing marker, an unreadable count, a non-zero count, a stale
+# observation, or a crashed classifier all yield `demote`, i.e. today's behaviour. The
+# `if:` on the routing step below is written as `route != 'preserve'` so an EMPTY or
+# MISSING output (the classifier step failed, the output was lost) still demotes.
+#
+# The same classifier also recognises the watchdog's OWN recovery: the watchdog
+# re-enqueues via dequeue+enqueue, which itself fires `pull_request.dequeued`, and
+# without that arm the watchdog would demote every PR it just rescued. MEASURED on
+# #4709: `review:pass` was swapped for `review:changes` 17 SECONDS after a `MANUAL`
+# dequeue. `MANUAL` conflates "a reviewer withdrew this" (verdict SHOULD fall) with
+# "infrastructure moved it" (it should not), so the split is on EVIDENCE — a fresh
+# watchdog marker for that exact group head — never on the reason string.
+#
+# AND, on every preserve route: the verdict may only survive if the PR head has NOT
+# moved since `review:pass` was granted. A commit, a force-push, or a revoked label
+# after the grant forfeits it — never restore a verdict onto a tree it was not given
+# for. A genuine human dequeue has no fresh marker and still demotes; that control is
+# what stops this from becoming a verdict-preservation hole.
 #
 # No third-party actions (nothing to SHA-pin); every step is plain `gh` against the
 # workflow token, least-privilege scoped below.
@@ -48,11 +90,15 @@ on:
   pull_request_target:
     types: [dequeued]
 
-# Least-privilege for a WRITE-only, NO-checkout job: pull-requests: write covers the
-# disable-auto / relabel / comment writes; actions: read lists this repo's merge_group
-# runs to find the failed run. NO contents write is needed — nothing is pushed and no
-# repo code is checked out (see the pull_request_target safety note above).
+# Least-privilege: pull-requests: write covers the disable-auto / relabel / comment
+# writes; actions: read lists this repo's merge_group runs to find the failed run;
+# [OPUS-5] #4652 contents: read is the DEFAULT-BRANCH checkout of the classifier script
+# (read-only, never the PR head) and checks: read is the classifier's load-bearing
+# predicate — the check-SUITE count on the group head. NO contents WRITE is needed —
+# nothing is pushed (see the pull_request_target safety note above).
 permissions:
+  contents: read
+  checks: read
   pull-requests: write
   actions: read
 
@@ -83,8 +129,94 @@ jobs:
         run: |
           echo "PR ${PR_NUMBER} dequeued via successful merge - no action."
 
-      - name: Route genuine dequeue to the fix lane
+      # [OPUS-5] #4652. TRUSTED, DEFAULT-BRANCH checkout of the classifier only — never
+      # the PR head (see the pull_request_target safety note in the header). No PR code
+      # is fetched, and nothing from the PR is executed.
+      - name: Checkout the dequeue classifier (default branch, never the PR head)
         if: github.event.pull_request.merged != true
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/merge-group-watchdog.py
+            scripts/gh_retry.py
+          sparse-checkout-cone-mode: false
+
+      # [OPUS-5] #4652. Splits CI_TIMEOUT by the SUITE COUNT of the group head, not by
+      # the reason. Always exits 0 and always prints a row; every unprovable case
+      # yields route=demote (today's behaviour), so a failure here cannot preserve a
+      # verdict it did not establish.
+      - name: Classify the dequeue (zero-dispatch vs a real timeout)
+        id: classify
+        if: github.event.pull_request.merged != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: >-
+          python3 scripts/merge-group-watchdog.py classify-dequeue
+          --repo "$REPO"
+          --pr "$PR_NUMBER"
+          --reason "$DEQUEUE_REASON"
+
+      # The verdict-preserving route. It deliberately does NOT touch labels — preserving
+      # the review verdict IS leaving `review:pass` where it is — and does NOT disable
+      # the arm. `rearm-sweeper.yml` is the durable backstop if the direct re-arm below
+      # fails, because a PR carrying review:pass with no live arm is exactly what that
+      # sweep restores.
+      #
+      # The classifier has three preserve arms (zero-dispatch CI_TIMEOUT, the watchdog's
+      # own recovery, and the sq-fnr85 queue-level drop) and this step is deliberately
+      # agnostic about WHICH one fired: the arm-specific account lives in
+      # `steps.classify.outputs.detail`, which is quoted verbatim into the comment below.
+      # Do not re-introduce an arm-specific claim into this step's prose — it went stale
+      # the moment a second arm existed, and a wrong explanation posted on a PR is worse
+      # than none.
+      - name: Preserve the verdict and re-enqueue (the diff is not at fault)
+        # Deliberately NOT `!cancelled()`: preserving a verdict requires the classifier
+        # to have SUCCEEDED and positively returned `preserve`. The implicit `success()`
+        # is the correct default here — do not harmonise this with the step below.
+        if: github.event.pull_request.merged != true && steps.classify.outputs.route == 'preserve'
+        env:
+          CLASSIFY_DETAIL: ${{ steps.classify.outputs.detail }}
+          CLASSIFY_REENQUEUE: ${{ steps.classify.outputs.reenqueue }}
+        run: |
+          set -euo pipefail
+
+          STATE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json state -q .state)
+          if [ "$STATE" != "OPEN" ]; then
+            echo "PR #${PR_NUMBER} is ${STATE} — nothing to preserve; exiting 0."
+            exit 0
+          fi
+
+          if [ "$CLASSIFY_REENQUEUE" = "true" ]; then
+            gh pr merge "$PR_NUMBER" --repo "$REPO" --auto \
+              || echo "::warning::re-arm of PR #${PR_NUMBER} returned non-zero — rearm-sweeper.yml is the backstop."
+          else
+            echo "Re-enqueue owned by the watchdog itself — not re-arming here."
+          fi
+
+          body_file=$(mktemp)
+          {
+            printf '%s\n\n' "> 🤖 SPARQ agent — merge-queue feedback."
+            printf '%s\n\n' "This PR was dequeued (reason \`${DEQUEUE_REASON}\`), but the classifier established that the removal was a **queue-side or platform event, not a verdict about this diff** — either the merge-group ref never had the \`merge_group\` event dispatched to it (sparq-org/sparq#4652), or the queue removed a healthy entry for a queue-level reason (sq-fnr85). The exact arm is quoted below."
+            printf '%s\n\n' "**Nothing is wrong with this PR's diff, so its review verdict is preserved** and it is re-queued rather than demoted to \`review:changes\`."
+            printf '%s\n' "Classifier: \`${CLASSIFY_DETAIL}\`"
+          } > "$body_file"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$body_file" \
+            || echo "::warning::could not comment the zero-dispatch notification on PR #${PR_NUMBER} (routing is intact)."
+          echo "PR #${PR_NUMBER}: zero-dispatch ${DEQUEUE_REASON} — verdict preserved."
+
+      # FAIL-SAFE `if:` — written as `!= 'preserve'` so an EMPTY or MISSING classifier
+      # output (step failed, output lost) still routes to the fix lane exactly as it did
+      # before #4652. Never invert this to `== 'demote'`.
+      - name: Route genuine dequeue to the fix lane
+        # `!cancelled() &&` is LOAD-BEARING. A step `if:` with no status function
+        # defaults to `success()`, so a FAILED or TIMED-OUT classify step would SKIP
+        # this one — keeping `review:pass` and leaving the arm enabled, i.e. the exact
+        # opposite of fail-closed. The empty-output case was handled; the failed-step
+        # case was not, and a string-matching test could not see the difference.
+        if: "!cancelled() && github.event.pull_request.merged != true && steps.classify.outputs.route != 'preserve'"
         run: |
           set -euo pipefail
 
@@ -190,10 +322,13 @@ jobs:
 
           # Infra-flake note: a timeout/queue-side reason is flagged, but the routing
           # is deliberately IDENTICAL — the fix lane's ci-flavour handles re-runs.
+          # Reaching this step at all with one of these reasons means the classifier
+          # REFUSED to preserve (the verdict no longer describes this tree, or the
+          # re-queue budget is spent), so the note says only what is provable here.
           flake_note=""
           case "$DEQUEUE_REASON" in
             CI_TIMEOUT|QUEUE_CLEARED|ROLL_BACK)
-              flake_note=$'\n'"Reason \`${DEQUEUE_REASON}\` is queue/infra-flavoured (likely not a fault in this PR's diff); it is still routed to \`review:changes\` because the fix lane's ci-flavour owns re-runs."
+              flake_note=$'\n'"Reason \`${DEQUEUE_REASON}\` is queue/infra-flavoured (likely not a fault in this PR's diff), but the classifier could not establish that the review verdict still applies, so it is routed to \`review:changes\` and the fix lane's ci-flavour owns the re-run."
               ;;
           esac
 

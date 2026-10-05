@@ -1,0 +1,37 @@
+# Design §6 case 5 — MODE 2 PASS. The issuer appears in no enumerated set; it is
+# admissible only because a `trustx:Certification` under the eIDAS 2 framework
+# individual (a) certifies it, (b) is itself valid at t, (c) is itself covered by a
+# positive status attestation at t — certifications are status-checked exactly like
+# credentials — and (d) carries a scope the contributing statement falls inside.
+# `trustx:AnyServiceScope` is the honest DIATF/eIDAS service-level granularity:
+# "everything this certified service issues".
+#
+# Framework trust here is ANCHORED, not proven (design §7.2): it bottoms out in the
+# framework operator's signed certification artifacts, not in cryptography.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:qtsp.example> ;
+    trustx:coveredBy <urn:status:age> .
+
+<urn:status:age> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+<urn:cert:qtsp> a trustx:Certification ;
+    trustx:certifies      <did:web:qtsp.example> ;
+    trustx:underFramework trustx:eIDAS2 ;
+    trustx:certificationScope trustx:AnyServiceScope ;
+    trustx:validFrom      "2026-01-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil     "2027-01-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:coveredBy      <urn:status:cert> .
+
+<urn:status:cert> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}

@@ -45,6 +45,47 @@ fn serve_handles_a_line_delimited_session() {
     assert_eq!(payload["triples"], 1);
 }
 
+// [OPUS-5] gh #2497: a JSON-RPC batch survives the line-delimited transport intact — a
+// batch array arrives on ONE line and its array of responses goes back out on ONE line,
+// so nothing about batch receipt depends on re-framing the stream.
+#[test]
+fn serve_carries_a_batch_on_a_single_line_each_way() {
+    let graph = Graph::load_str("<http://ex/a> <http://ex/p> <http://ex/b> .", "ntriples").unwrap();
+    let mut server = McpServer::new(graph);
+
+    let input = concat!(
+        r#"[{"jsonrpc":"2.0","id":1,"method":"ping"},"#,
+        r#"{"jsonrpc":"2.0","method":"notifications/initialized"},"#,
+        r#"{"jsonrpc":"2.0","id":2,"method":"ping"}]"#,
+        "\n",
+        r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#,
+        "\n",
+    );
+
+    let reader = std::io::BufReader::new(input.as_bytes());
+    let mut out: Vec<u8> = Vec::new();
+    sparq_mcp::serve(&mut server, reader, &mut out).expect("serve loop");
+
+    let text = String::from_utf8(out).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "the whole batch is one output line, then the single request's line: {:?}",
+        lines
+    );
+
+    let batch: Value = serde_json::from_str(lines[0]).unwrap();
+    let batch = batch.as_array().expect("the batch line holds an array");
+    assert_eq!(batch.len(), 2, "the notification element contributes nothing");
+    assert_eq!(batch[0]["id"], 1);
+    assert_eq!(batch[1]["id"], 2);
+
+    let single: Value = serde_json::from_str(lines[1]).unwrap();
+    assert!(!single.is_array(), "a single request still gets a bare object");
+    assert_eq!(single["id"], 3);
+}
+
 // [GPT-5.6] sq-y1ljq: malformed tools/call names are protocol errors, not tool results.
 #[test]
 fn serve_rejects_missing_or_non_string_tool_names() {

@@ -32,5 +32,20 @@ bigdecimal = "0.4"
 # Parse the neutral wire form each oracle emits (SPARQL Results JSON).
 serde_json = "1"
 
+# [OPUS-5] sq-qcnn.7 — cross-oracle blank-node ISOMORPHISM (src/iso.rs).
+# Blank-node labels are engine-local, so a result carrying one is comparable only up to a
+# bijection; that needs canonical labelling (RDFC-1.0). The SAME independence constraint as
+# above applies: the labelling must NOT be either engine's own canonicaliser — in particular
+# NOT sparq's `sparq-canon` — or a bug there would cancel on both sides. `rdf-canon` is the
+# maintained third-party zkp-ld implementation. All three crates are ALREADY in this
+# workspace's lockfile (sparq-canon pulls the same versions), so this adds dependency EDGES
+# only — no new package and no new publisher to vet. `oxrdf 0.2` (the term model it speaks)
+# is used purely as a data carrier and decides no equality: which literals count as equal is
+# settled by this crate's own rules BEFORE the conversion. `sha2` names the RDFC-1.0 hash so
+# the HNDQ call limit can be set explicitly (a poison graph must return an error, not hang).
+rdf-canon = "0.15.3"
+oxrdf = "0.2.4"
+sha2 = "0.10"
+
 [dev-dependencies]
 # (none — the direct unit tests need only the crate's own deps.)

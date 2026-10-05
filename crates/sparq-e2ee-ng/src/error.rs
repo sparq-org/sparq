@@ -37,6 +37,11 @@ pub enum Error {
     Decrypt,
     /// A signature (author, publisher, or admin) did not verify.
     BadSignature,
+    /// An authenticated structural link did not check out: a Merkle child's
+    /// digest, level, or bound position disagreed with what its encrypted parent
+    /// recorded. Distinguished from [`Error::Malformed`] because the bytes
+    /// parsed fine — they simply are not the bytes that were linked.
+    Integrity(&'static str),
     /// A cryptographic key or point encoding was invalid.
     BadKey(&'static str),
 }
@@ -53,6 +58,7 @@ impl fmt::Display for Error {
             Error::Delegation(w) => write!(f, "invalid delegation: {w}"),
             Error::Decrypt => write!(f, "AEAD open failed (key / tag / associated-data mismatch)"),
             Error::BadSignature => write!(f, "signature did not verify"),
+            Error::Integrity(w) => write!(f, "authenticated link mismatch: {w}"),
             Error::BadKey(w) => write!(f, "invalid key material: {w}"),
         }
     }

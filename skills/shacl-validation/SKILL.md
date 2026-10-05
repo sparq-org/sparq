@@ -16,7 +16,9 @@ NOT a dependency of any other sparq crate by default, so the core engine and the
 default wasm bundle carry zero SHACL code/cost unless you pull it in. The browser/JS
 consumer opts in through `sparq-wasm`'s non-default `shacl` feature, which exposes
 `validate` as a stateless `Store.validate(data, shapes, format)` wasm binding
-returning a JSON report — a drop-in for `rdf-validate-shacl` (sq-yqi1, #162). On that
+returning a JSON report — a drop-in for `rdf-validate-shacl` (sq-yqi1, #162) — plus
+the store-backed `Store.validateStore(shapes, format)`, which validates the triples
+the store already holds (same report, only the shapes are re-parsed; gh-2520). On that
 wasm32 build the `sparq-engine` dep drops its defaults so rayon never enters the
 bundle; see the `javascript-wasm` skill for the JS API + report shape.
 

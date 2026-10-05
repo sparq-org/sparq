@@ -93,7 +93,9 @@ Compaction** (`compact::compact` / `compact::compact_expanded`): scoped
 `@nest`, `@reverse` redistribution, keyword aliasing, and the `compactArrays` /
 `compactToRelative` / `ordered` options. The `compact` conformance lane compares
 against the W3C **expected** documents (the normative oracle; see
-`sparq-conformance`'s `floors::compact` for the honest fail/skip buckets).
+`sparq-conformance`'s `floors::compact` for the honest fail/skip buckets). Bead `sq-gzsky`
+turned the `expand`/`compact` **negative lanes** ON — each `NegativeEvaluationTest` passes iff
+the exact `expectErrorCode` is raised, which is what makes the closed [`JsonLdErrorCode`](src/error.rs) enum load-bearing — and fixed seven spec divergences it surfaced.
 
 Beads `sq-oy1f.27` / `.29` add the document-level **Framing Algorithm**
 (`frame::frame` / `frame::frame_expanded`): frame matching and value patterns,

@@ -1,0 +1,30 @@
+# Design §6 case 2 — REVOKED. The status list's bit is set for this credential at
+# the authoritative snapshot, so `mint_status_attestation` refuses to mint (only a
+# `LiveStatus::Live` verdict admits) and NO `trustx:StatusAttestation` covers the
+# bundle. The rejection is therefore the ABSENCE of an admissible derivation, never
+# a derived "false because revoked" — there is no negation anywhere in the rewrite.
+#
+# The holder's status stratum is deliberately NON-empty: an unrelated, still-live
+# bundle carries a covering attestation, so this case cannot pass merely because the
+# fixture forgot to model status at all.
+@prefix foaf:   <http://xmlns.com/foaf/0.1/> .
+@prefix prov:   <http://www.w3.org/ns/prov#> .
+@prefix trustx: <https://sparq.dev/ns/trust#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+
+<urn:bundle:age> prov:wasAttributedTo <did:web:dvla.example> .
+
+<urn:bundle:address> prov:wasAttributedTo <did:web:dvla.example> ;
+    trustx:coveredBy <urn:status:address> .
+
+<urn:status:address> a trustx:StatusAttestation ;
+    trustx:validFrom  "2026-07-01T00:00:00Z"^^xsd:dateTime ;
+    trustx:validUntil "2026-07-10T00:00:00Z"^^xsd:dateTime .
+
+GRAPH <urn:bundle:age> {
+    <urn:person:jesse> foaf:age 25 .
+}
+
+GRAPH <urn:bundle:address> {
+    <urn:person:jesse> foaf:based_near <urn:place:swansea> .
+}

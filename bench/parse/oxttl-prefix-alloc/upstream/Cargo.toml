@@ -1,0 +1,41 @@
+# [OPUS-5] sq-98w7z.3 — UPSTREAM leg of the oxttl prefixed-name A/B.
+#
+# Compiles ../src/main.rs against oxigraph git, where the low-copy prefixed-name
+# expansion this bead was filed to upstream ALREADY LANDED (commit f5383d8,
+# 2026-05-17, "oxrdf: introduce our own OxString type" — unreleased as of oxttl
+# 0.2.3). See research/oxttl-prefixed-name-alloc-2026-07.md.
+#
+# `rev` is pinned, not `branch = "main"`: an unpinned git dep would make every
+# re-run measure a different tree and silently invalidate the recorded numbers.
+# Bump the rev deliberately, and re-record.
+[package]
+name = "oxttl-prefix-alloc-upstream"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "0.3.0-dev (oxigraph git 9af7d59)"
+
+[workspace]
+
+[dependencies]
+oxttl = { git = "https://github.com/oxigraph/oxigraph.git", rev = "9af7d59", package = "oxttl" }
+oxrdf = { git = "https://github.com/oxigraph/oxigraph.git", rev = "9af7d59", package = "oxrdf" }
+mimalloc = { version = "0.1", optional = true }
+
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+count-alloc = []
+# The feature set the sparq workspace actually enables on oxttl
+# (root Cargo.toml: `oxttl = { version = "0.2", features = ["rdf-12"] }`),
+# so the A/B can be run in the configuration production ships.
+rdf-12 = ["oxttl/rdf-12", "oxrdf/rdf-12"]
+
+[[bin]]
+name = "oxttl-prefix-alloc-upstream"
+path = "../src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

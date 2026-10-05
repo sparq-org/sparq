@@ -31,7 +31,7 @@ actually verifies.
 |---|---|---|
 | `sparq-zk`, `sparq-zk-compose` | The ZK estate has its **own** adversarial threat model. **Verdict: v1 verifier soundness is BROKEN** (a prover can forge arbitrary accepted results). | `research/zk-soundness-audit.md` (12 confirmed issues, 6 critical) |
 | `sparq-mpc` | `publish = false` research scaffold; crypto primitive not yet chosen — not ready for a production threat model. | Bead **sq-jskw** (DEFER until a primitive is chosen) |
-| `sparq-gpu` | `publish = false`; measure-first PCIe-break-even prototype. | Bead **sq-vrye** (DEFER until it exits the prototype stage) |
+| `sparq-gpu` | `publish = false`; measure-first PCIe-break-even prototype, depended on by nothing, so no adversary can reach a kernel. | [`research/gpu-threat-model-deferral.md`](gpu-threat-model-deferral.md) — bead **sq-vrye**: the deferral RECORD (justification, exit trigger, pre-scoped outline), not a model. The trigger is enforced by `crates/sparq-gpu/tests/deferral_premise.rs` <!-- [OPUS-5] sq-vrye --> |
 | `sparq-nlq` | LLM→SPARQL; hands untrusted text to a model and executes the result, so it has its **own** model (prompt/data injection, exfiltration, token budget). | [`research/nlq-threat-model.md`](nlq-threat-model.md) — bead **sq-j1wv**, deferral LIFTED by the GPT-5.6 strategy review |
 
 Capability crates not load-bearing for the core production path (`sparq-geo`,
@@ -479,7 +479,12 @@ Ordered by severity. Every gap maps to a bead (existing or new).
   verifier soundness is BROKEN**; do not present it as proving anything to a
   relying party.
 - **Research scaffolds** (`sparq-mpc` / `sparq-gpu`): deferred, beads **sq-jskw** /
-  **sq-vrye**.
+  **sq-vrye**. The `sparq-gpu` deferral is written down and mechanically enforced —
+  `research/gpu-threat-model-deferral.md` states why deferring is defensible today,
+  what ends the deferral, and what the model must cover when it does. Read its §3
+  before quoting the deferral: two exposures (an unaudited `wgpu`/`naga` build-graph
+  subtree, and kernel tests that skip-pass without a GPU) are **not** deferred by it.
+  <!-- [OPUS-5] sq-vrye -->
 - **`sparq-nlq`** (NL→SPARQL): no longer deferred — see
   `research/nlq-threat-model.md` (bead **sq-j1wv**), which models prompt/data
   injection, `SERVICE` exfiltration, and the token budget. Injection itself is

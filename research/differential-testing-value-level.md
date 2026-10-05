@@ -214,6 +214,16 @@ general, tractable in practice via canonical labelling — RDFC-1.0 / URDNA2015-
   the case to triage** (explicit, counted — never a silent skip) until the graph-canonicalisation
   phase lands. Honest: this is a real coverage gap in the first cut.
 
+**Status (bead D / `sq-qcnn.7`, landed):** both comparators now exist in
+`crates/sparq-difftest/src/iso.rs` — `canonical_graph`/`graph_isomorphic` for graph results, and
+`canonical_solutions`/`solutions_isomorphic` for a `SELECT` table (reified one-row-node-per-row, so
+duplicate rows and cross-row blank-node sharing are both preserved). The labelling is the
+third-party `rdf-canon` crate, **not** sparq's own `sparq-canon`, per the §2.3 independence trap.
+The gap is NOT yet closed end-to-end: `crates/sparq-bench`'s Oxigraph fuzzer predates the
+`sparq-difftest` wiring (bead B / `sq-qcnn.5`) and so still routes a blank-node answer to triage —
+now under its own counted `bindings_triage(bnode)` bucket rather than folded into the row-choice
+skip, so the remaining gap is a visible number.
+
 ## 4. Generator coverage extension
 
 Extend `gen_graph`/`gen_query` (the value comparator makes these *meaningful*; without it they would
@@ -363,8 +373,10 @@ DAG: `A → B → {C, F, G}`, `A → {D, E}`, `E → F`, `B,F → G`.
 - **The independent normaliser is new code and a bug surface of its own** (§2.3). It is only as good
   as its own tests; the second oracle is the structural mitigation. Do not present the harness as
   "proving" correctness — it raises the cost of a value bug surviving, it does not certify absence.
-- **Blank-node `SELECT`-result isomorphism is deferred** (§3.4); the first cut triages those cases.
-  That is a stated coverage gap, not a solved problem, until bead (D).
+- **Blank-node `SELECT`-result isomorphism**: the comparator landed with bead (D) in
+  `sparq-difftest::iso` (§3.4), but the `sparq-bench` fuzzer does not call it until bead (B) wires
+  `sparq-difftest` in; until then those cases are still triaged, under their own counted bucket.
+  A stated coverage gap that is now measured, not a solved problem.
 - **A second oracle is not an oracle of truth.** Jena and rdflib are *implementations*, not the spec.
   A divergence between oracles is triaged, never auto-read as "sparq is wrong". The allowlist must
   stay small and reasoned or it silently erodes the net — hence the visible per-bucket count.

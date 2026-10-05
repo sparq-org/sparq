@@ -231,7 +231,7 @@ canonical EC2 host; sq-me8x). The WASM story (§3.5) and the conformance breadth
 ### 3.5 Full-engine browser WASM — KILL standalone, FOLD into §3.4
 
 **In-repo evidence (verified).** `crates/sparq-wasm` (full SPARQL 1.1 engine incl.
-WCOJ Leapfrog Triejoin, single-threaded, npm `@jeswr/sparq`), plus
+WCOJ Leapfrog Triejoin, single-threaded, npm `@sparq-org/sparq`), plus
 `sparq-reason-wasm`, `-rsp-wasm`, `-shacl-wasm`, `-text-wasm`.
 
 **Closest work (search-verified).** Oxigraph's npm package already ships SPARQL 1.1

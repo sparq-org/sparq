@@ -1,33 +1,31 @@
-# [OPUS-4.8] sq-h0tr — mdBook docs-guide BUILD + VALIDATE lane (scaffold slice).
+# [OPUS-4.8] sq-h0tr — mdBook docs-guide BUILD + VALIDATE lane.
 #
-# SCOPE (deliberately limited to a non-publishing build gate):
-#   This workflow installs a PINNED mdbook, builds book/, runs the broken-include
-#   "[ERROR]" log grep + `mdbook test`, and uploads the rendered book as a CI
-#   artifact. It is the reproducible, SHA-pinned build wiring the docs-site design
-#   (sq-w9sr) calls for — MINUS the Pages publish step.
+# SCOPE (a non-publishing validate gate — deliberately, and PERMANENTLY):
+#   This workflow installs a PINNED mdbook, builds book/ through the shared
+#   scripts/build-guide.sh (which carries the broken-include "[ERROR]" log grep), runs
+#   `mdbook test`, and uploads the rendered book as a CI artifact. It runs on PRs that
+#   touch the guide or ANY source the guide embeds, so a broken include is caught before
+#   it can ship.
 #
-# WHY IT DOES NOT DEPLOY TO PAGES (the deferred half, reported as a blocker):
-#   GitHub Pages exposes exactly ONE deploy slot. The live site at
-#   https://sparq.jeswr.org/ is ALREADY published by pages.yml — the Next.js
-#   feature-showcase at the root, with the benchmark dashboard overlaid at
-#   /sparq/dev/. A SECOND `actions/deploy-pages` workflow here would race pages.yml
-#   on every main/benchmark-data push (last-writer-wins) AND replace the live
-#   showcase root with the mdBook guide. The sq-w9sr design (mdBook at "/") predates
-#   the showcase deploy and does not account for it; reconciling "mdBook-at-root vs
-#   showcase-at-root" + the dev/bench* fold + the one-time Pages-source flip (sq-vbq9)
-#   is a CUTOVER decision that belongs to sq-fymm / sq-w9sr, not this scaffold. Adding
-#   a publish step here unilaterally would break the existing site deploy, so it is
-#   intentionally omitted. See the PR description for the dependency note.
+# WHERE THE GUIDE IS ACTUALLY PUBLISHED ([OPUS-5] issue #5022 — decided, no longer a blocker):
+#   GitHub Pages exposes exactly ONE deploy slot, and pages.yml owns it (the Next.js
+#   showcase at /, the benchmark dashboards overlaid at /dev/bench*, the operational GUI at
+#   /app/). So this lane still ships NO deploy job: a SECOND `actions/deploy-pages` here
+#   would race pages.yml last-writer-wins. Instead, per
+#   research/docs-site-single-sourcing-anti-drift.md §7 option (a), pages.yml BUILDS AND
+#   OVERLAYS this same guide into its single artifact at **out/guide/**, published at
+#   https://sparq.jeswr.org/guide/ . One producer, one deploy slot, no race, no live URL
+#   moves. Options (b) guide-at-root and (c) two deploy workflows are rejected there.
 #
-# When the cutover bead lands, this lane gains the deploy job (configure-pages +
-# upload-pages-artifact + deploy-pages, all SHA-pinned).
+#   The two lanes must stay equivalent — this one is only a meaningful gate if it builds
+#   what pages.yml ships. Both therefore call the SAME scripts/build-guide.sh and pin the
+#   SAME mdbook version below, and scripts/check-guide-publish-wiring.py fails CI if either
+#   invariant drifts (it also binds the /guide/ mount to book.toml's `site-url`).
 #
-# [OPUS-4.8] sq-zngy — NOTE: the live Pages producer is pages.yml, not this scaffold.
-# The `dev/bench*` dashboard fold (bench.yml's dev/bench + bench-ec2.yml's dev/bench-ec2,
-# both on the benchmark-data branch) and the assembled-artifact smoke check live in
-# pages.yml's build job ("Overlay benchmark dashboard(s) (dev/bench*)" + "Smoke-check
-# assembled Pages artifact"). If this mdBook lane ever absorbs the Pages deploy, carry
-# that glob-fold + smoke check over rather than re-deriving them.
+# [OPUS-4.8] sq-zngy — NOTE: the live Pages producer is pages.yml, not this lane. The
+# `dev/bench*` dashboard fold (bench.yml's dev/bench + bench-ec2.yml's dev/bench-ec2, both
+# on the benchmark-data branch), the guide overlay, and the assembled-artifact smoke check
+# all live in pages.yml's build job. Do not re-derive them here.
 
 name: docs
 
@@ -52,6 +50,7 @@ on:
     paths:
       - "book/**"
       - "scripts/mdbook-rewrite-links.py"
+      - "scripts/build-guide.sh"
       - "crates/sparq-engine/examples/quickstart.rs"
       - "README.md"
       - "skills/zk-query-proofs/SKILL.md"
@@ -61,6 +60,7 @@ on:
     paths:
       - "book/**"
       - "scripts/mdbook-rewrite-links.py"
+      - "scripts/build-guide.sh"
       - "crates/sparq-engine/examples/quickstart.rs"
       - "README.md"
       - "skills/zk-query-proofs/SKILL.md"
@@ -86,21 +86,19 @@ jobs:
       # Pinned, prebuilt mdbook (GitHub Releases binary — reproducible + fast, no
       # cargo compile). Explicit `tool:` is required by the sq-ur7o install-action lint.
       - name: Install mdbook (pinned)
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: mdbook@0.4.40
 
+      # [OPUS-5] issue #5022 — the build itself moved into scripts/build-guide.sh so this
+      # VALIDATE lane and pages.yml's PUBLISH lane build the guide identically (see header).
+      # The script keeps the load-bearing detail this step used to carry inline: mdBook EXITS 0
+      # even on a broken {{#include}}/anchor (rust-lang/mdBook#1094), so it captures the log and
+      # FAILS on any "[ERROR]" line in addition to the process exit code.
       - name: Build guide
         run: |
           set -euo pipefail
-          # mdBook EXITS 0 even on a broken {{#include}}/anchor (rust-lang/mdBook#1094),
-          # so we capture the log and FAIL on any "[ERROR]" line in addition to the
-          # process exit code.
-          mdbook build book 2>&1 | tee /tmp/mdbook-build.log
-          if grep -q '\[ERROR\]' /tmp/mdbook-build.log; then
-            echo "::error::mdbook build emitted [ERROR] (broken include/anchor) — see log above"
-            exit 1
-          fi
+          bash scripts/build-guide.sh book
           echo "OK: mdbook build clean (no [ERROR] lines)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Test guide (compile-check rust fences)

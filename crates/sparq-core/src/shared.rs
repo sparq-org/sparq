@@ -11,7 +11,7 @@
 //! `Arc<RwLock<…>>` plumbing and the same lock-discipline decisions. [`SharedGraph`] packages
 //! the recommended pattern once, with the read-heavy default baked in.
 //!
-//! [gh #1121]: https://github.com/jeswr/sparq/issues/1121
+//! [gh #1121]: https://github.com/sparq-org/sparq/issues/1121
 //!
 //! # Which pattern to use
 //!

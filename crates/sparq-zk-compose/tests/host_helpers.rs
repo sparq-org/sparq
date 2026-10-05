@@ -560,6 +560,7 @@ fn proof_manifest_json_round_trips_and_defaults_type() {
         key_set: vec!["aa".to_string()],
         commitment_attestations: vec![],
         attributions: vec![vec![0]],
+        pattern_scans: vec![],
         join_obligations: vec![("v".to_string(), 0, 1)],
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],

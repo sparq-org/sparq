@@ -28,7 +28,7 @@
 
 | crate | floor | measured (ratchet note) | criticality | note |
 |---|---|---|---|---|
-| sparq-canon | 77 | 79.04 | **CORE** — RDFC-1.0 canonicalization; feeds diff-test bnode isomorphism (sq-qcnn.7), sparq-zk commitments, sparq-vc signing | mutation ceiling **STALE**: committed 9, real ≈ **98** survivors (sq-52su close-note) |
+| sparq-canon | 77 | 79.04 | **CORE** — RDFC-1.0 canonicalization; sparq-zk commitments, sparq-vc signing. (NOT the diff-test bnode isomorphism: sq-qcnn.7 landed in `sparq-difftest::iso` on third-party `rdf-canon` directly, because the independence constraint forbids the diff-test reusing sparq's own canonicaliser.) | mutation ceiling **STALE**: committed 9, real ≈ **98** survivors (sq-52su close-note) |
 | sparq-substrate | 80 | 82.49 (`numeric.rs` **71.36**) | **CORE** — shared eval substrate: XSD numeric tower, 4 join kernels, term total order | worst mutation score in the baseline: **128 survivors, 60.98% caught** |
 | sparq-engine | 83 (nightly 85) | ~85 test-only / 87.31 merged-nightly | **CORE** — the SPARQL engine itself | **absent from the mutation baseline entirely** (the historical gap the epic names) |
 | sparq-server | 86 | 88.14 | PROTOCOL | 2nd pass after sq-4vao |

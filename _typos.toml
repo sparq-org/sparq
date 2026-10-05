@@ -136,3 +136,4 @@ lov = "lov"              # lowercase var name in a SIMD code block
 LOD = "LOD"              # Linked Open Data
 WQS = "WQS"              # [OPUS-4.8] Wikidata Query Service — RDFox's own term, quoted in research/rdfox-claims-inventory.md (typos splits/flags WQS->WAS)
 Groth = "Groth"          # Groth16 zk-SNARK proving system
+intoto = "intoto"        # [OPUS-5] the in-toto attestation framework — `sparq-cli-<version>.intoto.jsonl` is the literal provenance filename the SLSA generic generator emits, quoted throughout compliance/slsa/ (typos flags the token as "into")

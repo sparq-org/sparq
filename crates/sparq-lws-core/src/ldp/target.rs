@@ -43,7 +43,7 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     }
 
     // The reserved provider-identity namespace (`/.identity/**` — see `crate::identity` and
-    // docs/design/webid-outside-pod.md) is refused OUTRIGHT on the LDP surface: 404 for every
+    // `research/lws-design-records.md` §4) is refused OUTRIGHT on the LDP surface: 404 for every
     // method, %-decoded too, REGARDLESS of the identity feature flag — so no `.acl` can ever exist
     // for it and no WAC grant can ever apply to an id-doc. The identity gate middleware refuses it
     // first (outermost); this check is the belt-and-braces chokepoint covering every handler and

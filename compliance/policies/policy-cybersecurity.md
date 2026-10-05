@@ -174,9 +174,9 @@ names the standing requirements:
 - Every release carries **`SHA256SUMS`** over each archive + SBOM + VEX, and a **SLSA build-
   provenance attestation** (`actions/attest-build-provenance`, Sigstore/OIDC) on the archives, SBOM,
   and the ghcr image (`provenance: mode=max`, `sbom: true`). The tiered `dist.yml` binaries are
-  provenance-attested too. Verify with `gh attestation verify <file> --repo jeswr/sparq`.
+  provenance-attested too. Verify with `gh attestation verify <file> --repo sparq-org/sparq`.
 - **CI actions are SHA-pinned**; `cargo-auditable` embeds the dependency manifest in the binary.
-- **Published-package provenance:** npm `@jeswr/sparq` publishes with native Sigstore provenance;
+- **Published-package provenance:** npm `@sparq-org/sparq` publishes with native Sigstore provenance;
   crates.io `.crate` bytes carry an out-of-band attestation (no native link upstream — external
   sub-gap); the PyPI `sparq-rdf` PEP-740 lane is CI-wired awaiting a one-time maintainer
   Trusted-Publisher registration (GX-10 partial — [`../cra/gap-register.md`](../cra/gap-register.md)).
@@ -213,7 +213,7 @@ The controls in §2–§6 are **automatically enforced** by the CI/branch-protec
 inline and indexed in [`../cra/evidence.md`](../cra/evidence.md) (by-artifact, with verification
 commands) and [`../cra/controls.md`](../cra/controls.md) (per-requirement status). A reviewer can
 spot-check any change against the `ci-summary / gate` result and verify a release with
-`gh attestation verify <file> --repo jeswr/sparq`. This policy does **not** restate that evidence —
+`gh attestation verify <file> --repo sparq-org/sparq`. This policy does **not** restate that evidence —
 it points to the single source so the two never drift.
 
 ## 10. Market-surveillance cooperation & authority reporting (Art. 24 / Art. 14)

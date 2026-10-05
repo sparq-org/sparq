@@ -40,7 +40,10 @@ EFF_FRESH, EFF_CACHE_READ, EFF_CACHE_WRITE = 1.0, 0.1, 1.25
 
 # Each fresh sub-agent's brief opens with this tag so we can attribute its transcript
 # to one (task, arm). The orchestrator that fans out the runs writes it verbatim.
-TAG = re.compile(r"\[ABM task=(\S+) arm=([ABC])\]")
+# Arms: A/B/C are the read-docs vs pkg-query 3-arm A/B (sq-ve5dy); P0..P3 are the
+# GenAI-KB Phase 7 provenance-capability arms (sq-2489d.6 — inert-PKG baseline P0 vs
+# one capability each, see PREREG-PROVENANCE.md). [OPUS-5]
+TAG = re.compile(r"\[ABM task=(\S+) arm=([ABC]|P[0-3])\]")
 
 
 def mine(transcript_dir: str) -> list[dict]:

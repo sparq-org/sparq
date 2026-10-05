@@ -11,6 +11,9 @@
 //!   * the iterator types (`TRIM_HORIZON`, `AT_SEQUENCE_NUMBER`, `AFTER_SEQUENCE_NUMBER`, `LATEST`);
 //!   * `limit` paging + resume via the returned continuation token;
 //!   * fail-closed `400` on a sequence-anchored iterator type with no anchor;
+//!   * [OPUS-5] (sq-iz7ag) retention-awareness — a log whose oldest segments retention already
+//!     dropped still replays under `TRIM_HORIZON` (from the horizon, never a `500`), and an
+//!     `at`/`after` offset below the horizon is a `410` naming where to resume;
 //!   * the read-auth gate (a poll is a READ);
 //!   * durability — the records survive a fresh `ChangeLog::open` on the same directory (a restart).
 #![cfg(feature = "change-stream")]
@@ -616,6 +619,104 @@ async fn concurrent_updates_record_a_gapless_monotonic_stream() {
         previous_generation = generation;
     }
     assert_eq!(body["nextSequenceNumber"], commit_count);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// [OPUS-5] (sq-iz7ag) Retention-aware TRIM_HORIZON — a log whose oldest segments retention
+// already dropped (sq-n9s4d) still replays, and a dropped offset is a caller-recoverable 410.
+// ---------------------------------------------------------------------------
+
+/// Builds a durable change log at `dir` holding three recorded commits ONE RECORD PER SEGMENT
+/// (so retention can drop whole segments), then trims every non-active segment away. Returns the
+/// resulting trim horizon — the oldest seq still retained — and asserts the trim really happened,
+/// so a test built on it cannot pass vacuously against an untrimmed log.
+fn seed_and_trim(dir: &std::path::Path) -> u64 {
+    use sparq_serve::{ChangeLog, ChangeLogConfig, GenerationRing, PodId, RetentionPolicy};
+
+    let load = |nq: &str| Graph::load_dataset(nq, "nquads").expect("seed parses");
+    let pod = PodId::new("http://ex/g");
+    let ring: GenerationRing<Graph> =
+        GenerationRing::new(load("<http://ex/s0> <http://ex/p> <http://ex/o0> .\n"));
+    let g0 = ring.current();
+    let g1 = ring.publish(load("<http://ex/s1> <http://ex/p> <http://ex/o1> .\n"), [pod.clone()]);
+    let g2 = ring.publish(load("<http://ex/s2> <http://ex/p> <http://ex/o2> .\n"), [pod.clone()]);
+    let g3 = ring.publish(load("<http://ex/s3> <http://ex/p> <http://ex/o3> .\n"), [pod]);
+    {
+        let mut log = ChangeLog::open_with_config(
+            dir,
+            ChangeLogConfig {
+                segment_target_bytes: 1,
+                fsync: false,
+            },
+        )
+        .expect("open log");
+        log.record_commit(&g0, &g1).expect("record 0->1");
+        log.record_commit(&g1, &g2).expect("record 1->2");
+        log.record_commit(&g2, &g3).expect("record 2->3");
+    }
+    let mut log = ChangeLog::open(dir).expect("reopen log");
+    let report = log
+        .apply_retention(&RetentionPolicy {
+            max_total_bytes: Some(0),
+            ..RetentionPolicy::default()
+        })
+        .expect("retention");
+    assert!(report.segments_dropped > 0, "the test needs a REAL trim");
+    assert!(report.first_retained_seq > 0, "seq 0 must be gone");
+    report.first_retained_seq
+}
+
+/// THE e2e invariant (sq-iz7ag): pointed at an ALREADY-trimmed log, `GET /streams` must serve
+/// `TRIM_HORIZON` from the horizon — the whole point of the iterator type is "replay everything
+/// RETAINED", and resolving it to seq 0 polls below the log's earliest surviving record, which
+/// the durable log rejects fail-closed, i.e. a `500` on every trimmed log. An `at`/`after` anchor
+/// below the horizon stays fail-closed but surfaces as a `410` naming the horizon (the consumer
+/// re-bootstraps) rather than as that opaque `500` — and never as a silent restart at the horizon.
+#[tokio::test]
+async fn trim_horizon_replays_a_trimmed_log_and_a_dropped_offset_is_410() {
+    let dir = scratch("trimmed");
+    let horizon = seed_and_trim(&dir);
+    // The server opens the already-trimmed directory (the restart-after-retention case).
+    let base = spawn(Some(dir.clone()), None).await;
+    let cl = client();
+
+    // TRIM_HORIZON: a 200 replaying from the horizon, not a 500 from polling below it.
+    let (status, body) = poll(&cl, &base, &[("iteratorType", "TRIM_HORIZON")]).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["totalRecords"], 3 - horizon, "{body}");
+    assert_eq!(body["records"][0]["eventId"]["commitNum"], horizon, "{body}");
+    assert_eq!(body["lastSequenceNumber"], 2, "{body}");
+    assert_eq!(body["nextSequenceNumber"], 3, "{body}");
+    assert_eq!(body["hasMoreRecords"], false, "{body}");
+
+    // No `iteratorType` at all defaults to TRIM_HORIZON — same answer, still not a 500.
+    let (status, body) = poll(&cl, &base, &[]).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["records"][0]["eventId"]["commitNum"], horizon, "{body}");
+
+    // An anchor BELOW the horizon: 410 Gone naming the horizon to resume from.
+    let (status, body) = poll(&cl, &base, &[("at", "0")]).await;
+    assert_eq!(status, 410, "{body}");
+    let message = body["error"].as_str().unwrap_or_default();
+    assert!(message.contains("trim horizon"), "{message}");
+    assert!(message.contains(&horizon.to_string()), "{message}");
+    // ...and it does NOT silently restart at the horizon: no records were served.
+    assert!(body.get("records").is_none(), "{body}");
+
+    // The boundary is the RESOLVED start: `after=horizon-1` starts exactly AT the horizon, so
+    // nothing was dropped from under that consumer and the poll succeeds.
+    let anchor = (horizon - 1).to_string();
+    let (status, body) = poll(&cl, &base, &[("after", anchor.as_str())]).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["records"][0]["eventId"]["commitNum"], horizon, "{body}");
+
+    // LATEST still tails the log rather than replaying the retained records.
+    let (status, body) = poll(&cl, &base, &[("iteratorType", "LATEST")]).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["totalRecords"], 0, "{body}");
+    assert_eq!(body["nextSequenceNumber"], 3, "{body}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

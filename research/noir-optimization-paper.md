@@ -110,18 +110,27 @@ upstream signal. "Un-examined" = the program has read the pass exists (survey §
 but has not derived a measured optimisation in it. Every candidate here is a
 *hypothesis to be measured*, not a claimed win.
 
+> **P3 OUTCOME (2026-07-29, `sq-mtolx`).** Every row of this table has since been
+> examined at code level against noir `8f33502e`; five are **refuted** and one is
+> factually **corrected**. Verdicts are carried inline below; the full record —
+> including the structural reason most of them are null, and the surviving
+> candidate register — is `research/noir-optimization-new-opportunities.md`.
+> Nothing was measured: the spawn gate ("reproduces a `bb`-gates win via the P1
+> harness") is unmet because P1 has not landed and `bb` is unavailable, so **zero
+> beads were spawned**.
+
 | Stage | Un-examined site (file · pass) | Pre-existing signal | Why plausible |
 |---|---|---|---|
-| Loops | `ssa/opt/loop_invariant.rs` (LICM, ~4.5k LOC), `mod.rs:284` | issues #10439 / #10438 (LICM `ArrayGet` hoisting too pessimistic) | Loop bodies dominate loop-heavy circuits; hoisting one bounds check out of an N-iteration loop scales |
-| Loops | `ssa/opt/unrolling.rs` (~5.2k LOC), `mod.rs:292,361` | #6631 (loop unswitching), #6629 (induction-var elimination / strength reduction, exact rewrite specified) | Unrolling already runs; unswitching + IV strength reduction are classic, upstream-requested |
-| Array/memory | `ssa/opt/flatten_cfg/value_merger.rs::try_merge_only_changed_indices`, `mod.rs:315` | #5501 (push `ArrayGet` through `IfElse`), precedent PR #11512 merged | ~2N constraints per merged N-array for one read today; the xpath corpus is array-heavy |
-| Array/memory | `ssa/opt/array_set_window_optimization.rs` (~951 LOC, `mod.rs:320`), `mutable_array_set.rs` (`mod.rs:417`) | none direct | Post-flatten array-write windows; unexplored |
-| Array/memory | `ssa/opt/mem2reg.rs` (~1.7k LOC, many invocations) | inline ordering comments (`mod.rs:212-214`) | Memory SSA promotion; cross-block promotion after flattening |
-| Conditionals | `ssa/opt/basic_conditional.rs` (~782 LOC, `flatten_basic_conditionals`, `mod.rs:352`) | none direct | Unconstrained-only conditional simplify; unexplored |
-| Signed lowering | `ssa/opt/expand_signed_math.rs` (`mod.rs:310`), `expand_signed_checks.rs` (`mod.rs:210`), `check_u128_mul_overflow.rs` (`mod.rs:374`) | none direct | Signed div/lt and u128 overflow lower to euclidean divisions — the expensive primitive |
-| ACIR-gen | comparison lowering `acir/acir_context/mod.rs:1163-1228` (sign-bit via euclidean division; quotient is 0/1) | **landmine** PR #10159 (witness-sharing regressed gates) | Every `<`/`>=` pays quotient+remainder range checks; measure-first, gates-not-opcodes |
-| ACIR-gen | quadratic ACIR expression growth in loops (#4629; `as_witness` is the manual workaround) | #4629 / #6539 (dup) | High value (quadratic → linear on loop-heavy circuits); design-first, high risk |
-| ACVM | `acvm-repo/.../optimizers/general.rs:16` (on-the-fly term merge TODO), `optimizers/common_subexpression/` (CSE) | issue #10109 | Backend-level term merging + CSE run after ACIR-gen; unexamined at code level |
+| Loops | `ssa/opt/loop_invariant.rs` (LICM, ~4.5k LOC), `mod.rs:284` | issues #10439 / #10438 (LICM `ArrayGet` hoisting too pessimistic) | Loop bodies dominate loop-heavy circuits; hoisting one bounds check out of an N-iteration loop scales — **REFUTED (P3): four genuine hoisting pessimisms found, all absorbed by post-unroll CSE, so the payoff is SSA size, not gates.** One candidate survives, in LICM's *constraint-strength-reduction* half |
+| Loops | `ssa/opt/unrolling.rs` (~5.2k LOC), `mod.rs:292,361` | #6631 (loop unswitching), #6629 (induction-var elimination / strength reduction, exact rewrite specified) | Unrolling already runs; unswitching + IV strength reduction are classic, upstream-requested — **REFUTED (P3): both moot under mandatory full unrolling; unswitching's risk direction is a gate *regression*** |
+| Array/memory | ~~`ssa/opt/flatten_cfg/value_merger.rs::try_merge_only_changed_indices`~~ → `ssa/ir/dfg/simplify/value_merger.rs`, `mod.rs:315` | ~~#5501~~ → **#8145** (push `ArrayGet` through `IfElse`), precedent PR #11512 merged | **CORRECTED (P3): the named function was removed upstream by PR #8142, the file moved to `ssa/ir/dfg/simplify/value_merger.rs`, the live tracker is #8145, and the #5501 ask is already implemented in `flatten_cfg::try_optimize_array_set_merge`.** The "~2N constraints for one read" figure holds only for dynamic-index or escaping merged arrays; a narrower residual candidate survives |
+| Array/memory | `ssa/opt/array_set_window_optimization.rs` (~951 LOC, `mod.rs:320`), `mutable_array_set.rs` (`mod.rs:417`) | none direct | Post-flatten array-write windows; unexplored — **EXAMINED (P3): no candidate; both conservatisms are a documented compile-time guard and a regression-tested liveness analysis** |
+| Array/memory | `ssa/opt/mem2reg.rs` (~1.7k LOC, many invocations) | inline ordering comments (`mod.rs:212-214`) | Memory SSA promotion; cross-block promotion after flattening — **REFUTED (P3): not proof-cost-relevant (reference memory ops never reach ACIR-gen), and the hypothesised post-flatten cross-block run already exists at `mod.rs:325`** |
+| Conditionals | `ssa/opt/basic_conditional.rs` (~782 LOC, `flatten_basic_conditionals`, `mod.rs:352`) | none direct | Unconstrained-only conditional simplify; unexplored — **CLOSED (P3): Brillig-only by an early return, so it emits no gates** |
+| Signed lowering | `ssa/opt/expand_signed_math.rs` (`mod.rs:310`), `expand_signed_checks.rs` (`mod.rs:210`), `check_u128_mul_overflow.rs` (`mod.rs:374`) | none direct | Signed div/lt and u128 overflow lower to euclidean divisions — the expensive primitive — **EXAMINED (P3): a per-operation euclidean-division cost table was produced; one candidate survives (signed `>>` is lowered through the generic signed-division expansion), and two apparently-wasteful constructs are load-bearing with in-code derivations** |
+| ACIR-gen | comparison lowering `acir/acir_context/mod.rs:1163-1228` (sign-bit via euclidean division; quotient is 0/1) | **landmine** PR #10159 (witness-sharing regressed gates) | Every `<`/`>=` pays quotient+remainder range checks; measure-first, gates-not-opcodes — **ALREADY NULL-RESULTED (`sq-jfkwk`, program §10.7) and RE-CONFIRMED at pin `8f33502e` by P3.** The adjacent 128-bit `bound_constraint_with_offset` asymmetry that record flagged **is** now a code-level candidate (P3-1) |
+| ACIR-gen | quadratic ACIR expression growth in loops (#4629; `as_witness` is the manual workaround) | #4629 / #6539 (dup) | High value (quadratic → linear on loop-heavy circuits); design-first, high risk — **DESIGN NOTE ALREADY DELIVERED (`sq-felqr`, program §10.6); not re-derived by P3** |
+| ACVM | `acvm-repo/.../optimizers/general.rs:16` (on-the-fly term merge TODO), `optimizers/common_subexpression/` (CSE) | issue #10109 | Backend-level term merging + CSE run after ACIR-gen; unexamined at code level — **REFUTED (P3): the #10109 on-the-fly merge is largely already done in `Expression::add_mul` and is a compile-time concern with no circuit-output change; the one genuinely open gap (#10192, cross-opcode subset sharing) is *gates-risk-inverted*.** This layer is also where P3 found the discount that voids a whole family of SSA-level candidates |
 
 The survey (`research/noir-optimization-program.md` §7) already **ranked** several
 of these as future opportunities (rows 5, 6, 9, 10) and beaded them under
@@ -245,6 +254,14 @@ maintainer's explicit "LOW PRIORITY, defer until little else to do" on the paren
    gates` win via the P1 harness, spawn a measured-PR child bead **under
    `sq-uuvac`** (not from a paper bead). Produces the paper's "new opportunities"
    section — the "surface further optimisations while writing" mandate.
+   **CODE-LEVEL HALF DELIVERED (2026-07-29):
+   `research/noir-optimization-new-opportunities.md` — all ten §2.2 rows examined
+   against pin `8f33502e`, five refuted, one corrected, five candidate specs
+   written, plus a draft of the paper's §5 prose. The MEASURED half is NOT done
+   and **zero beads were spawned**: the spawn gate requires a reproduced `bb`-gates
+   win, and P1 has not landed while `bb` is unavailable in the measurement
+   environment (as it was in program §10.8/§10.9). The bead stays **open**,
+   blocked on `sq-i50o4`.**
 4. **`sq-ome8p` — P4: survey-methodology + related-work sections.** The
    reproducible survey protocol + upstream etiquette as the methodological
    contribution; a lit survey of compiler optimisation for ZK/arithmetic circuits

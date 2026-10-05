@@ -22,6 +22,17 @@
 //   them through that same decompression path before RDF parsing. Format detection uses the
 //   served RDF Content-Type when available, otherwise the decompressed archive's inner name.
 //
+// (sq-ljc12) [OPUS-5] The web FILE tab now derives its RDF format from the archive's INNER name
+//   too, closing the gap the URL tab already handled. Previously it guessed from the OUTER
+//   upload name, which `rdf-format.ts#stripCompression` only unwraps for `.gz`/`.bz2`/`.zst[d]`
+//   — so a `bundle.zip` (member `data.nq`) or a `data.nt.gzip` fell back to Turtle and
+//   mis-parsed. Each accepted upload now carries the `effectiveName` that `maybeDecompressFile`
+//   already computed (the zip member name, or the suffix-stripped name).
+//   NOT fixed here: tar-gzip (`.tgz`/`.tbz`). `decompressDatasetBytes` inflates the gzip layer
+//   but there is no tar reader, so the result is tar bytes rather than the RDF member — and
+//   `innerNameForSource` deliberately returns `null` for those extensions. A name alone cannot
+//   fix that; `.tgz` still falls back to Turtle and fails to parse.
+//
 // Three tabs:
 //   * FILE  — web: browser File upload (incl. compressed .gz/.zip/.zst/.bz2); desktop: native
 //             loader (every format incl. HDT), off the main thread.
@@ -59,7 +70,7 @@ import {
 } from "@/lib/rdf-format";
 import { hasNativeLoader, pickRdfFile } from "@/lib/tauri-ipc";
 import { hasDraggedFiles } from "@/lib/file-ingest";
-import type { IngestedFile, RejectedFile, IngestResult } from "@/lib/file-ingest";
+import type { IngestedFile, RejectedFile } from "@/lib/file-ingest";
 // [SONNET-4.6] sq-1y04h — decompression shim; codec chunks loaded lazily on demand.
 import { fetchRdfDocument, maybeDecompressFile } from "@/lib/file-decompress";
 import type { WorkspaceSourceMeta } from "@sparq/client";
@@ -94,6 +105,22 @@ export function ImportDrawerProvider({ children }: { children: React.ReactNode }
 type FileItemStatus =
   | { kind: "ok"; added: number }
   | { kind: "error"; message: string };
+
+// ── Web-upload ingest contract (decompress-aware superset of `IngestResult`) ───────────────────
+// (sq-ljc12) The shared `file-ingest.ts` result is TEXT-only and has no notion of an archive, so
+// the web File tab carries its own shape: the same fields plus the `effectiveName` that
+// `maybeDecompressFile` derived (zip member name / suffix-stripped name / the original name when
+// the upload was not compressed). That name — NOT the outer upload name — drives `guessFormat`.
+
+interface WebUploadFile extends IngestedFile {
+  /** The inner document name to detect the RDF format from. */
+  effectiveName: string;
+}
+
+interface WebUploadResult {
+  accepted: WebUploadFile[];
+  rejected: RejectedFile[];
+}
 
 // ── RDF extensions the browser file picker + drop filter allow ─────────────────────────────────
 // [SONNET-4.6] sq-1y04h — compressed archives (.gz/.gzip/.zip/.zst/.zstd/.bz2/.bzip2) are now
@@ -175,8 +202,8 @@ function ImportDrawer({
   // ── File tab — per-persona state ─────────────────────────────────────────────────────────────
   // Desktop: list of paths from the multi-file native dialog.
   const [nativePaths, setNativePaths] = React.useState<string[]>([]);
-  // Browser: files already read from disk via the file-ingest library.
-  const [webFiles, setWebFiles] = React.useState<IngestedFile[]>([]);
+  // Browser: files already read from disk (and decompressed) by `readFilesWithDecompress`.
+  const [webFiles, setWebFiles] = React.useState<WebUploadFile[]>([]);
   const [webRejected, setWebRejected] = React.useState<RejectedFile[]>([]);
   // Per-file import status (populated while/after the batch runs).
   const [fileStatuses, setFileStatuses] = React.useState<Record<string, FileItemStatus>>({});
@@ -231,7 +258,7 @@ function ImportDrawer({
 
   // ── FILE (WEB) — multi-file browser upload: per-file in-tab WASM parse ─────────────────────
 
-  const onIngestWebFiles = React.useCallback((result: IngestResult) => {
+  const onIngestWebFiles = React.useCallback((result: WebUploadResult) => {
     setWebFiles((prev) => {
       // De-duplicate by name; later picks win.
       const byName = new Map(prev.map((f) => [f.name, f]));
@@ -267,7 +294,9 @@ function ImportDrawer({
             mode: fileMode,
             preserveGraphs,
             label: file.name,
-            format: guessFormat(file.name),
+            // (sq-ljc12) The INNER document name — `data.nq` for a `bundle.zip` carrying it —
+            // so a compressed upload is parsed as its real serialisation, not as the fallback.
+            format: guessFormat(file.effectiveName),
             text: file.text,
           }),
         (_key, _status, statuses) => setFileStatuses({ ...statuses }),
@@ -587,19 +616,27 @@ function DrawerTab({
 // ── Web file read helper (decompress-aware) ────────────────────────────────────────────────────
 
 /**
- * [SONNET-4.6] sq-1y04h — read a list of `File` objects into an `IngestResult`, routing each
- * through `maybeDecompressFile` so compressed archives (.gz / .zip / .zst / .bz2) are decoded
+ * [SONNET-4.6] sq-1y04h — read a list of `File` objects into a {@link WebUploadResult}, routing
+ * each through `maybeDecompressFile` so compressed archives (.gz / .zip / .zst / .bz2) are decoded
  * before the text is handed to the RDF parser. Replaces the `readDroppedFiles` / `File.text()`
  * call paths in the web-upload pane; the `file-ingest.ts` text-only paths are unchanged and
  * continue to serve SHACL shapes / N3 rules (no compression needed there).
+ *
+ * (sq-ljc12) Keeps `effectiveName` so the caller guesses the RDF format from the archive's INNER
+ * document (`bundle.zip` → member `data.nq` → nquads), not the container's extension.
  */
-async function readFilesWithDecompress(files: File[]): Promise<IngestResult> {
-  const accepted: IngestedFile[] = [];
+async function readFilesWithDecompress(files: File[]): Promise<WebUploadResult> {
+  const accepted: WebUploadFile[] = [];
   const rejected: RejectedFile[] = [];
   for (const file of files) {
     try {
       const decoded = await maybeDecompressFile(file);
-      accepted.push({ name: file.name, text: decoded.text, bytes: file.size });
+      accepted.push({
+        name: file.name,
+        text: decoded.text,
+        bytes: file.size,
+        effectiveName: decoded.effectiveName,
+      });
     } catch (err) {
       rejected.push({
         name: file.name,
@@ -620,9 +657,9 @@ function WebFilePane({
   fileStatuses,
   busy,
 }: {
-  files: IngestedFile[];
+  files: WebUploadFile[];
   rejected: RejectedFile[];
-  onIngest: (result: IngestResult) => void;
+  onIngest: (result: WebUploadResult) => void;
   onRemove: (name: string) => void;
   fileStatuses: Record<string, FileItemStatus>;
   busy: boolean;
@@ -782,6 +819,7 @@ function WebFilePane({
             <WebFileRow
               key={f.name}
               name={f.name}
+              format={guessFormat(f.effectiveName)}
               bytes={f.bytes}
               status={fileStatuses[f.name] ?? null}
               onRemove={busy ? undefined : () => onRemove(f.name)}
@@ -810,11 +848,14 @@ function WebFilePane({
 
 function WebFileRow({
   name,
+  format,
   bytes,
   status,
   onRemove,
 }: {
   name: string;
+  /** (sq-ljc12) Guessed from the archive's inner document name, so the preview matches the parse. */
+  format: string;
   bytes: number;
   status: FileItemStatus | null;
   onRemove?: () => void;
@@ -854,7 +895,7 @@ function WebFileRow({
         )}
         {!status && (
           <span className="block text-muted-foreground">
-            {fmt.format(bytes)}&nbsp;B · {guessFormat(name)}
+            {fmt.format(bytes)}&nbsp;B · {format}
           </span>
         )}
       </span>

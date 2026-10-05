@@ -452,12 +452,12 @@ edge sequences them (§10.4).
 
 | Bead | Tier | Target (noir repo) | One-line scope + risk note |
 |---|---|---|---|
-| `sq-jthy1` | opus | `ssa/opt/checked_to_unchecked.rs` | elide overflow checks dominated by a later range check (#7161); Brillig failure-point semantics in scope |
-| `sq-m3l62` | opus | `ssa/opt/flatten_cfg/value_merger.rs` | ArrayGet through IfElse (#5501); conservative use/alias analysis; precedent PR #11512 |
+| `sq-jthy1` | opus | `ssa/opt/checked_to_unchecked.rs` | elide overflow checks dominated by a later range check (#7161); Brillig failure-point semantics in scope — **DESIGN + FREQUENCY MEASURED, not implemented; a HEAD prerequisite fix must land first; see §10.9** |
+| `sq-m3l62` | opus | ~~`ssa/opt/flatten_cfg/value_merger.rs`~~ | ArrayGet through IfElse (#5501); conservative use/alias analysis; precedent PR #11512 — **RE-SPEC REQUIRED BEFORE PICKUP: the target file moved and the target function no longer exists; the #5501 ask is already implemented upstream. See §10.10** |
 | `sq-seust` | sonnet | `ssa/ir/dfg/simplify.rs` | NOT canonicalization for IfElse merging; PARK with a findings note if measured neutral (PR #11580 upkeep landmine) — **MEASURED NULL RESULT (0 firings / 556 packages); PARKED per that instruction, no PR; see §10.8** |
 | `sq-jfkwk` | sonnet | findings first; `acir/acir_context/mod.rs` only on a win | comparison-lowering experiment; fail-closed on the #10159 witness-sharing landmine; null result acceptable — **NULL RESULT returned, no PR proposed; bead still open, see §10.7** |
 | `sq-felqr` | opus | design note on noir#4629 only | quadratic ACIR growth; NO implementation before upstream buy-in — **design note DELIVERED, empirical half + live-thread check PENDING; bead still open, see §10.6** |
-| `sq-b0vpc` | sonnet | `noir_stdlib/src/collections/bounded_vec.nr` | only the TomAFrench capacity-assert slice of #5027 |
+| `sq-b0vpc` | sonnet | `noir_stdlib/src/collections/bounded_vec.nr` | only the TomAFrench capacity-assert slice of #5027 — **ALREADY IMPLEMENTED UPSTREAM as draft noir#13314 (@jeswr, 2026-07-10); do NOT re-implement. Two pre-flip review findings outstanding; see §10.11** |
 | `sq-eesz3` | sonnet | none (findings-only) | #6624 / #6313 / #4972 measurement comments upstream — **source analysis done, empirical half + live-thread checks PENDING; bead still open, see §10.5** |
 | `sq-jj3ne` | opus | new `ssa/ir/dfg/` range-analysis module + its two consumer passes | flagship v1; dep-gated on `sq-jthy1` + `sq-rxir8` (shared consumer files) and on the #12780/#12927 coordination pre-flight |
 | `sq-uuvac.2` | haiku | none (existing PR branches only) | shepherd the four open drafts: triage feedback (escalate substantive objections to an opus bead, never rebut directly), rebase on conflict, close sibling beads on merge, refresh the baseline on a new noir pin |
@@ -614,3 +614,162 @@ passed, no snapshot moved) with three added tests that **fail on HEAD and pass
 patched**, and the AST-fuzzer `arbtest` targets green — but none of that
 exercises the both-inner-conditions-false case, so it is not evidence for row 4. It is **not carried in this repo** — no
 upstream PR is proposed, and none should be until a program produces the shape.
+
+### 10.9 `sq-jthy1` (row 6, dominated overflow-check elision, noir#7161) — design + measured frequency, NOT implemented (2026-07-28)
+
+> 🤖 **SPARQ agent** [OPUS-5]. Full record:
+> `noir-dominated-overflow-elision-7161.md` (analysed *and measured* against noir
+> `a352e715`, workspace version `1.0.0-beta.25`).
+
+Using the §10.8 toolchain recipe, the compiler was built, the SSA interpreter was
+used as the executable spec, and an instrumented `nargo` counted candidates over
+509 `test_programs/execution_success` packages. `bb` is still absent, so **there
+are no gate numbers** and the optimization itself was **not written** — hence no
+ACIR-opcode delta and no upstream PR.
+
+| finding | consequence |
+|---|---|
+| the issue's claim holds in ACIR — measured: eliding the first check keeps the failure, moving it from the first `add` to the second — but the **same edit in a Brillig function turns the trap into `Ok(1)`** (wrapping) | the pass must be **ACIR-only**; the issue's "insert a brillig overflow check" is then unnecessary, at the cost of the two runtimes reporting different failure spans |
+| three masking shapes measured on the interpreter: a later `sub`, a `mul` by zero, an intervening `truncate` each let the chain re-enter range | the cover needs monotone, non-reducing steps — the elision is not a two-line pattern match |
+| separately, the *elided* op must be a checked unsigned **`add`**: ACIR does not wrap, so an underflowing `sub` escapes **downward** to `p - k`, and a later monotone `add` can carry it past the modulus back into range — **losing** the failure rather than moving it (an analytic argument from the ACIR semantics, not a measured row) | v1 excludes `sub` as the elided target on soundness grounds, and `mul` on magnitude grounds — the latter both as the elided target and as a chain step |
+| the right representation is **flip the checked op to `unchecked_*`**, never delete a `RangeCheck` — HEAD's `get_value_max_num_bits`/`operand_max_num_bits`/`can_simplify_arithmetic_identity` are already conservative about unchecked ACIR results | the transform inherits the existing invariant machinery instead of re-deriving it |
+| **prerequisite:** `checked_to_unchecked`'s private `required_bit_size` lacks the conservative unchecked-arithmetic arm its sibling `get_value_max_num_bits` has; measured at HEAD, it lets the pass flip a checked `u64` add that *can* overflow (execution changes from `Err(Overflow)` to an out-of-range `Ok`) | fix it first, as its own tiny PR — otherwise the elision can remove the very check it depends on. Noir-source reachability on HEAD is **not** demonstrated, so it is filed as a candidate latent bug, not a live one |
+| frequency: **501 structural chain candidates — an upper bound**, not elidable checks (≈20% of the 2516 checked unsigned `add`/`mul` ops surviving the pass today), concentrated in **9 of 509** packages, with **0** of the `RangeCheck`-covered variant. The counter tested the structural shape only: it did not evaluate C5, did not fully establish C3, did not apply the add-only C0 restriction, and did not establish that the covering op survives later passes | the pattern is real (unrolled accumulators, multi-term `+` expressions) yet the existing benchmark suite would show zero movement — a focused fixture is mandatory, and the "does it pay rent" question (PR #11580 landmine) is live |
+| the counter-risk is that a range check is one of the sites that cuts an accumulating ACIR expression into a witness (cf. §10.6 / noir#4629) | eliding every intermediate check on a long unrolled chain may **grow** the circuit; must be gate-measured before the design is trusted |
+
+The bead stays **open**: the recommendation is a four-step sequence (prerequisite
+helper fix → gate-measurement spike on focused fixtures → the ACIR-only v1 pass →
+optional extensions), with an explicit stop-and-park after step 2 if no gate win
+reproduces. Two questions are for the maintainer/upstream *before* code: whether
+the failure-attribution move is acceptable at all, and whether @jeswr's
+open #12780/#12927 range analysis subsumes this. Nothing was posted upstream.
+
+### 10.10 `sq-mtolx` (paper P3, gap analysis over the un-examined stages) — code-level half only (2026-07-29)
+
+> 🤖 **SPARQ agent** [OPUS-5]. Full record:
+> `noir-optimization-new-opportunities.md` (analysed against noir `8f33502e`).
+
+A child of the paper bead `sq-1j5ow`, not of this epic, but it lands here because
+it produces candidate specs for `sq-uuvac` and corrects two of this section's
+rows. Ten un-examined pipeline stages were read at code level; **nothing was
+measured** (no `nargo`, no `bb`, no build), so the bead's own spawn gate — *"for
+each candidate that reproduces a `bb`-gates win via the P1 harness"* — is unmet by
+construction and **zero beads were spawned**. Five candidate specs are written up
+ready for `bd create`, each blocked on `sq-i50o4`.
+
+| finding | consequence |
+|---|---|
+| three absorption layers — mandatory full unrolling, post-unroll dominance-aware CSE, and ACVM circuit-global CSE + two-use-intermediate refunding — each void a whole family of textbook optimisations | the classical catalogue is mostly null here *structurally*; surviving candidates concentrate in expensive **lowering formulations** and **N-distinct-constraints-to-one** rewrites that CSE cannot perform |
+| the loop family is refuted: LICM's four real hoisting pessimisms are absorbed by post-unroll CSE (the payoff is SSA size, not gates), and #6631/#6629 are moot under full unrolling — unswitching's risk direction is a gate *regression* | issues #10439/#10438 are probably describing IR size, not proving cost — a correction to take upstream once measured |
+| `mem2reg` is **not proof-cost-relevant**: reference memory ops are `unreachable!()`/`Err` in ACIR-gen, and the hypothesised post-flatten cross-block run already exists | the area closes; the gate-bearing memory surface is `ArrayGet`/`ArraySet` lowering, a different pass family |
+| **`try_merge_only_changed_indices` no longer exists** — removed upstream by PR #8142, file moved to `ssa/ir/dfg/simplify/value_merger.rs`, live tracker **#8145**, and the #5501 ask is implemented in `flatten_cfg::try_optimize_array_set_merge` | **`sq-m3l62` (§10.3) targets a deleted function in a moved file and must be re-spec'd before pickup.** The residual candidate is narrower: the merger emits two identical reads per *unchanged* index |
+| `sq-jfkwk`'s comparison-lowering null result (§10.7) **re-confirmed** at the new pin, all three findings; and its flagged adjacent lead is now a code-level candidate — `bound_constraint_with_offset`'s constant fast path is gated on a 128-bit conversion, so every `u128` comparison and every `Field as u128` pays a redundant full-width range check the 8/64-bit paths do not | the strongest genuinely-new candidate, confirmed by upstream's own committed fixtures; it is a *restructuring*, not a constraint removal — but it is a witness-topology change inside the exact function #10159 regressed, so opcode counts are not admissible evidence |
+| an independent re-derivation of PR #13263's rule arrived from the `check_u128_mul_overflow` expansion | evidence that #13263 fires on **compiler-generated** `Div`s, not only hand-written ones — relevant to the honest reading of its focused-fixture number. **No bead**; it is the program's own PR |
+
+The record's own headline recommendation is a program-level one: **`sq-i50o4`
+(P1) is not merely the paper's reproducibility prerequisite — it gates this entire
+candidate register plus four beads already open and blocked on the same missing
+capability** (`sq-eesz3`, `sq-felqr`, `sq-jfkwk`, and the gate half of
+`sq-jthy1`). Acquiring a `bb` binary in the measurement environment is the single
+highest-value next action in the program. Nothing was posted upstream, and no
+upstream issue thread was read from this bead — the issue numbers above are
+carried from these records unverified, and #5501 is demonstrably superseded.
+
+### 10.11 `sq-b0vpc` (row 11, `BoundedVec` capacity assert, noir#5027) — already shipped upstream as a draft (2026-07-29)
+
+> 🤖 **SPARQ agent** [OPUS-5]. Full record:
+> `noir-bounded-vec-capacity-assert-5027.md`.
+
+**Tracking correction.** The bead was picked up cold as an implementation task and
+is **already implemented**: draft PR **noir#13314** (*"feat(stdlib): move BoundedVec
+push capacity check to unconstrained hint"*, @jeswr, commit `efec45ef`, authored
+2026-07-10) touches exactly the §10.3 target file and nothing else. §10.1's status
+table predates it and lists only #13263–#13266; the PR is recorded elsewhere in this
+repo (`orchestration/start-here.toml`, as the ask behind sparq#1840) but was never
+reflected here, so §10.3 read as un-started. It is not. **Do not re-implement it.**
+
+Verified at `master` on 2026-07-29: the PR is still `DRAFT` and unmerged, and
+`bounded_vec.nr:182` still carries the constrained assert. The block is @jeswr's
+author review (§6), not fleet capacity. No acceptance criterion in §10.2 was run in
+that session — no noir checkout, no `nargo`, no `bb` — so nothing below is a
+measurement taken by this bead.
+
+Two findings the companion record raises as preconditions for flipping draft → ready:
+
+| finding | why it blocks the flip |
+|---|---|
+| **No red-on-wrong-answer test.** The existing `#[test(should_fail_with = "push out of bounds")] push_to_full_vector` (`bounded_vec.nr:1353`) still passes with the patch, because the assert still fires during *execution*. It cannot distinguish a constrained check from an unconstrained hint, and the PR adds no test that can | the elision removes the explicit constrained check and ships no regression guard for the property it relies on (whether the array write's own bound dominates is argued below, not established). §10.2's step-2 differential does **not** close the gap: both sides are execution paths, so the unconstrained assert keeps it green under an under-constrained circuit — it is an execution-equivalence check only. The needed test must bypass or mutate honest witness generation and show constraint-system/verifier rejection of an out-of-range index; no such test exists today. §5 of the companion record (2026-08-01, issue #5062) specifies command-by-command only a **prerequisite** of it — the ACIR memory-bound *mechanism* test on a plain-array fixture, with its witness forge, `bb prove`/`bb verify` oracle and the in-range positive control that stops it passing vacuously. The `BoundedVec::push` regression guard itself is **not** specified: §5.6 item 2 records that the `BoundedVec` form returns no verdict as shaped. Both are **unimplemented and unrun**, blocked on `sq-i50o4` |
+| **The measured table is unreproducible today.** Its corpus labels/counts are consistent with §5.2 (8 compose + 4 benchmark packages) — but that establishes nothing about whether the commands ran, whether the reported values came from those runs, or which toolchain produced them, so measurement execution and provenance remain **unverified**; and the UltraHonk gate row is the figure §10.8 and §10.10 report the fleet environment could not produce, with `sq-i50o4` not landed | §5.1 makes gates the arbiter and §4.2's #10159 lesson is that opcodes alone mislead. Unreproducible ≠ wrong, but confirmation or a reproducible rerun is a precondition for relying on the gate row, and it goes upstream under a named human author. §6 of the companion record (2026-08-01, issue #5063) works the axis as far as it goes without a toolchain and finds that **only one of the three blockers is actually `sq-i50o4`**: the commit message names no fixture, no `nargo` version and no `bb` version, so under §5.1's `bbup` coupling the row is not re-takeable by *anyone* on *any* box until @jeswr supplies them (unblocked); the fixture it names does exist (sirasistant's `BoundedVec` SIZE=500 comment program in the #5027 thread) but the PR ships it nowhere, contra §6 item 5; and the **"sparq compose corpus (8 packages): 0 delta" row is non-evidential** — all 55 `.nr` files under `zk/` plus the whole dependency closure (`compose_core` → `poseidon` v0.3.0, `sparq_ieee754` v0.11.0) contain zero `BoundedVec`/`.push(` occurrences, so a corpus that never calls the patched function reports 0 delta for a broken patch just as readily. Repairing or dropping that row is likewise unblocked. §5.2's baseline corpus has no `BoundedVec`-exercising package to put in its place |
+
+A third, softer item: the PR justifies the elision by the ACVM's execution-time
+`IndexOutOfBounds` error, which is an honest-prover property. The stronger in-tree
+argument — that upstream already relies on ACIR's built-in memory-op bound for every
+simple-element array index, via `array_index_needs_explicit_oob_check`
+(`ssa_gen/context.rs:131-136`) — is the one a maintainer will want. On that reading
+the elision is *plausibly* dominated by the array write's own bound; it is **not
+certified sound** by this bead, per `sq-qhy4`.
+
+### 10.12 `sq-fwcuo` (row 3, single-limb `to_bits`/`to_radix`) — already shipped upstream as a draft, verified (2026-07-31)
+
+> 🤖 **SPARQ agent** [OPUS-5]. Full record:
+> `noir-single-limb-decomposition-13265.md` (verified against noir `master`,
+> `d89d99a9`).
+
+**Tracking correction, same shape as §10.11.** The bead was re-dispatched as an
+implementation task; it is not one. Row 3 was written and shipped in steps 1–2 as
+draft **noir#13265**, which §10.1 already lists — the bead is open because the §6
+author-review gate has not been passed, not because code is missing. **Do not
+re-implement.** Verified this session: the two TODOs at
+`ssa/ir/dfg/simplify/call.rs:59,79` are still present at `master` (so the PR is
+unmerged), and all five of its `call.rs` hunks still apply there cleanly — only
+that file was checked, not the two snapshot files it also touches.
+
+Nothing was measured — no noir checkout, no `nargo`, no `bb` in this environment,
+so no ACIR-opcode delta and no gate count. The record is a source-level
+verification of the PR's diff against `master`:
+
+| finding | consequence |
+|---|---|
+| the rewrite's equivalence holds on every path read: `radix_le_decompose` at one limb is exactly `RANGE(w, log2 radix)` + `w == input`; `Instruction::Cast` is a constraint-free alias in ACIR-gen; and the reused failure string is character-identical to the one **both** runtimes emit (ACIR `generated_acir/mod.rs:422-424`, ACVM Brillig `black_box.rs:345-349`) | the PR is well-constructed; this bead's review is confirmatory, and per `sq-qhy4` still **not** a soundness certification |
+| predication is preserved: `flatten_cfg`'s `RangeCheck` arm rewrites the operand to `value * condition` **and** `map_value`s the original id (issue #8617), so the following `Cast` resolves to the predicated value — while the un-rewritten call was predicated by zeroing its argument | the predicated single-limb case, the one shape a reviewer will probe, is sound by the same mechanism on both sides |
+| the power-of-two guard costs nothing in ACIR — `radix_decompose` itself `assert!`s `is_power_of_two` — so the declined cases are Brillig-only, exactly as the PR's two decline tests are written | row 3's stated risk ("non-power-of-two radix cannot be a pure range check") is fully retired |
+| **the failure path has no live test**: the fixture's out-of-range input is only decomposed under a `false` predicate, so deleting the emitted `RangeCheck` leaves every shipped test green | the red-on-wrong-answer guard is missing — the one actionable precondition before the draft → ready flip, and cheap (an `execution_failure` fixture) |
+| the fixture lands in `execution_success`, not `test_programs/benchmarks/`, so no committed number moves if the rule regresses; and the removed recomposition `AssertZero` is the two-term shape the ACVM `MergeExpressionsOptimizer` refunds (§10.6) | any opcode delta counted from SSA/ACIR-gen is an **upper bound** on the post-ACVM one — measure after ACVM, with `bb` as arbiter (§5.1) |
+| frequency: `remove_bit_shifts` itself generates `to_le_bits(v) -> [u1; 1]` when the shift exponent's max bit width is 1 (`remove_bit_shifts.rs:347-363`, its committed snapshot at `:698`), and at that site the emitted range check is itself removed as already-implied (`simplify.rs:281-284`) — the decomposition goes away with nothing emitted in its place | the rule fires on **compiler-generated** IR, not only hand-written single-limb calls — the same evidence shape §10.10 found for #13263. Corpus frequency is still unmeasured |
+
+The bead stays **open**, blocked on the §6 author review and on `sq-i50o4` (a `bb`
+binary) like the rest of the program. Nothing was posted upstream, and the PR's
+body and review thread were not read — only its diff.
+
+### 10.13 `sq-9xhoa` (row 2, truncate after an `and` mask) — already shipped upstream as a draft, verified (2026-08-01)
+
+> 🤖 **SPARQ agent** [OPUS-5]. Full record:
+> `noir-truncate-after-and-mask-8628.md` (verified against noir `master`,
+> `d89d99a9`).
+
+**Tracking correction, same shape as §10.11 and §10.12.** The bead was
+re-dispatched as an implementation task; it is not one. Row 2 (#8628) was written
+and shipped in steps 1–2 as draft **noir#13264**, which §10.1 already lists — the
+bead is open because the §6 author-review gate has not been passed, not because
+code is missing. **Do not re-implement.** Verified this session: `master`'s
+`remove_truncate_after_range_check.rs` still has only its three original `match`
+arms (so the PR is unmerged), and the whole diff re-applies to `master` with no
+offset and no fuzz. Unlike #13265 it touches **no existing snapshot file**, so it
+carries no rebase hazard.
+
+Nothing was measured or executed — no `nargo`, no `bb`, no built compiler — so no
+ACIR-opcode delta and no gate count. The record is a source-level verification of
+the PR's diff against `master`:
+
+| finding | consequence |
+|---|---|
+| the bound is sound and the arm's dominance question is **vacuous**: `mask.num_bits()` is the value's bit length (`field_element.rs:414-423`, pinned by the upstream proptest `num_bits_agrees_with_ilog2`), and the bound is attached to the `and`'s *own result*, which by SSA dominance already dominates every use — so the pass's `previous_block` clearing heuristic can only cost a missed rewrite here, never an unsound one | stronger than the pre-existing `RangeCheck` arm, whose validity genuinely leans on that heuristic. Per `sq-qhy4` still **not** a soundness certification |
+| the tests are non-vacuous (source-derived, not executed): deleting the arm reddens both positive snapshots; computing the bound as popcount instead of bit length reddens the `mask = 0b101, truncate to 2 bits` test; flipping the `<=` reddens the `507` test; and the fixture's `kept` case bites at execution because its author picked an input where masked (`417`) and truncated (`161`) differ | the red-on-wrong-answer gap that blocks #13265 (§10.12) is **already closed** here |
+| **the one real gap — signed types.** The `2^n - 1` → `Truncate` canonicalization in `simplify/binary.rs:243` is guarded by `is_unsigned()`, so on a signed type an `and` by a `2^n - 1` mask survives to the pass and fires the new arm — a mask class unreachable on unsigned types. All seven unit tests and all four fixture cases are `u64`/`u32` | the single uniquely-reachable case has zero coverage. A few `i32`/`i64` SSA unit tests close it; cheap, and worth landing on the PR branch |
+| **placement question for the maintainer**: neither `get_value_max_num_bits` (`dfg.rs:574-634`, no `And` arm) nor the `Truncate` rule in `simplify.rs:210-262` covers this today, so the PR is not redundant — but that `Truncate` rule already reasons about `Div` **by a constant** in exactly this shape, and `get_value_max_num_bits` also backs the `RangeCheck` removal at `simplify.rs:281-284` | teaching the bound to `get_value_max_num_bits` instead would fire everywhere rather than at pipeline position `ssa/mod.rs:395`, and would drop redundant **range checks** on masked values for free. jfecher's in-issue direction was the pass, so this is a question to raise, not a defect — and it is row 7 (`sq-jj3ne`) territory |
+| the cost claim holds structurally: `convert_ssa_truncate` (`acir/mod.rs:856-892`) has **no early-out** on known bit width and always lowers to `truncate_var` → `euclidean_division_var` (`acir_context/mod.rs:1165-1179`) | each removal really does avoid a whole euclidean-division lowering; its *size* stays unquantified pending `bb` |
+| frequency is **weak-negative and unmeasured**: the diff updates no existing snapshot, and the idiomatic `& 0xFF`/`& 0xFFFF` masks are precisely the ones already canonicalized to truncations, so the arm's reachable population on unsigned types is the unusual non-`2^n - 1` masks | contrast §10.12, where the rule demonstrably fired on compiler-generated IR. The #11580 "does it pay rent" question is open, and the fixture sits in `execution_success`, not `test_programs/benchmarks/`, so no committed number moves if the rule regresses |
+
+The bead stays **open**, blocked on the §6 author review and on `sq-i50o4` like
+the rest of the program. Nothing was posted upstream, and the PR's body and review
+thread were not read — only its diff.

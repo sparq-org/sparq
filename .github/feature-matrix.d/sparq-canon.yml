@@ -1,0 +1,31 @@
+# Feature-matrix fragment for `sparq-canon`.
+#
+# One self-contained leg mapping per opt-in feature(group). Assembled into the
+# feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
+# (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
+# leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
+# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+#
+# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
+# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
+# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# A new leg also needs its `opt-in <name>` line added to
+# scripts/tests/feature-matrix-legnames.golden.txt (the assembler self-test).
+# Fields: name (required -> check-run name), crate (required), features (required,
+# non-empty comma list), test (bool — run `cargo test` for the leg).
+
+# [OPUS-5] Executor for the [SONNET-4.6] `concept` feature of issue #1746.
+# The default-OFF `concept` feature carries
+# tests/concept_urn.rs behind `#![cfg(feature = "concept")]`, so ci.yml's
+# default-feature lane compiles it to an EMPTY binary and runs ZERO of its tests —
+# the silent-skip class the C1 guard (scripts/check-feature-test-execution.py)
+# exists to catch. This leg is that test's CI executor: it runs the
+# `urn:concept:` envelope + recompute-and-byte-compare suite, including the
+# known-answer vectors derived outside this crate and the mutation check that
+# flips every byte of a correct multihash in turn. The feature pulls only `sha2`
+# (already a workspace dep, and already optional for `rdf12-triple-terms`), so
+# the leg is cheap and the default build stays byte-identical.
+- name: "sparq-canon (concept — content-addressed record envelope + recompute guard)"
+  crate: "sparq-canon"
+  features: "concept"
+  test: true

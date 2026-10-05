@@ -28,20 +28,62 @@ steady-state cost. The steady-state cost is **entry-wall × capacity-3 serializa
 
 ### 2.1 Per-workflow entry wall on `merge_group` (n≈17–20 successful runs each, last 250)
 
-| workflow (check family)  | median | p90    | max    | on the gate? |
-|--------------------------|--------|--------|--------|--------------|
-| ci-summary (gate waiter) | 15.1 m | 23.4 m | 28.9 m | IS the gate — duration ≈ entry critical path |
-| **CI** (ci.yml)          | **14.4 m** | **19.0 m** | 28.5 m | yes — **the pole** |
-| feature-matrix           | 5.8 m  | 10.4 m | 11.2 m | yes — #2 pole on engine-touching entries |
-| codeql                   | 3.8 m  | 4.0 m  | 4.2 m  | yes — **not a pole** (buildless; confirms sq-6vshe.6) |
-| Benchmarks               | 3.7 m  | 5.1 m  | 5.3 m  | yes — sibling lane moving it off (lever 5) |
-| container-scan           | 3.6 m  | 4.4 m  | 4.8 m  | yes |
-| fuzz (corpus-replay)     | 0.8 m  | 5.0 m  | 6.5 m  | yes |
-| supply-chain             | 0.7 m  | 1.0 m  | 1.4 m  | yes |
-| docs-quality             | 0.6 m  | 1.8 m  | 2.4 m  | yes |
-| flow-on-gates            | 0.3 m  | 0.6 m  | 0.8 m  | yes |
-| zk-toolchain             | 0.2 m  | 0.4 m  | 0.6 m  | yes |
-| formal-verification      | 0.2 m  | 0.5 m  | **22.7 m** | yes — rare pole when change-coupled Kani suites select |
+> **STALE AS A BASELINE — do not diff post-2026-07 numbers against these durations.** [OPUS-5]
+> The 2026-08-01 re-sample under §3.4a below measured the ci-summary entry wall at a
+> median well ABOVE the 15.1 m recorded here. That regression was already present on
+> 2026-07-26 — so it predates the sq-6vshe.17 demotion and is not caused by it; this
+> record does not establish which change between 07-10 and 07-26 caused it. The table
+> remains as the dated
+> 2026-07-10 snapshot that motivated the levers; the operative baseline is now the
+> pre-cutover window in the §3.4a measurement note.
+>
+> **LANE SET RE-VERIFIED 2026-08-01 (issue #5165) — it was stale in BOTH directions.**
+> [OPUS-5] Six of the original twelve lanes have LEFT the queue; three lanes that gate
+> there today were never in the table. The split below is verified STRUCTURALLY, from
+> the `on:` blocks of every `.github/workflows/*.yml` in this checkout — not from run
+> history. **No lane duration here has been re-sampled**: the medians are all still the
+> 2026-07-10 figures, retained only to say which lanes were poles *then*. Re-sampling
+> per-lane medians for the current set is the open residual in §5.
+
+**(a) Lanes that still trigger on `merge_group`.** Median column = the 2026-07-10
+snapshot, kept for the pole ranking it established, NOT as a current figure.
+
+| workflow (check family) | gating check-run(s) on the queue ref | 2026-07-10 median | status |
+|---|---|---|---|
+| ci-summary | `gate` | 15.1 m | IS the gate — duration ≈ entry critical path. **Superseded by §3.4a** (20.2 m median / 24.6 m p90, post-2026-07-30) |
+| **CI** (ci.yml) | ~30 jobs, event- and selection-gated | **14.4 m** | **the pole. Superseded by §3.4a** (19.6 m median / 24.0 m p90 on heavy entries) |
+| feature-matrix | `opt-in group (…)`, `feature-matrix check-tier (…)`, `pre-merge C1 (…)`, the three no-default-features legs, `fedclient dependency-boundary guard` | 5.8 m | #2 pole on engine-touching entries — not re-sampled |
+| vectorized-feature-off | `vectorized-feature-off quick-gates (…)`, `artifact-exact-equality (wasm bundle feature-OFF)` | — | **never sampled** (absent from the original table). `artifact-exact-equality` builds the feature-OFF wasm bundle TWICE in one run, so it is a plausible unmeasured pole on wasm-touching entries |
+| docs-quality | `docs-quality quick-gates` | 0.6 m | 13 jobs consolidated to 2 under sq-6vshe.20 — not re-sampled since |
+| flow-on-gates | `flow-on-gates quick-gates (G1 + G2 + G6)` | 0.3 m | 4 jobs consolidated to 2 under sq-6vshe.20 — not re-sampled since |
+| routing-self-tests | `Routing contract self-tests` | — | never sampled; hermetic, no build, no network |
+| pr-area-label | `derive area labels` | — | postdates the snapshot; on the queue ref there is no pull-request context, so the deriver exits 0 in Python |
+| codeql | **none** | 3.8 m | trigger set still lists `merge_group`, but the workflow is `disabled_manually` (2026-07-18), so it produces **no check-run on any event** and costs the queue nothing — see §3.3(c) and `docs/branch-protection.md` §*Merge-queue subset* |
+
+**(b) Lanes that have LEFT the queue since the snapshot.** Each still runs and gates on
+the PR head and re-runs on push-to-`main`; the accepted residual risk (a defect visible
+only in a queued *combination*, caught post-merge and recovered by revert / fix-forward)
+is recorded in `docs/branch-protection.md` §*Merge-queue subset*.
+
+| workflow | 2026-07-10 median | `merge_group` removed by |
+|---|---|---|
+| Benchmarks (bench.yml) | 3.7 m | sq-6vshe.6 — lever 5, §3.5 |
+| container-scan | 3.6 m | 2026-07-18 merge-queue-subset directive |
+| fuzz (corpus-replay) | 0.8 m | 2026-07-18 merge-queue-subset directive |
+| supply-chain | 0.7 m | 2026-07-18 merge-queue-subset directive |
+| zk-toolchain | 0.2 m | 2026-07-18 merge-queue-subset directive |
+| formal-verification | 0.2 m (max **22.7 m**) | 2026-07-18 merge-queue-subset directive |
+
+**What the shrink does and does not explain.** The entry wall is `max` over lanes, not
+`sum`: every departed lane was a measured NON-pole at the snapshot (largest median
+3.7 m, against ci.yml's 14.4 m), so the six removals predict ≈**0** change in the median
+wall. Their real value is runner-pool load and the TAIL — formal-verification's 22.7 m
+change-coupled-Kani max was the only departed lane that could ever have *been* the pole,
+and that tail is now off the queue. This is consistent with (and does not explain away)
+§3.4a's finding that the median wall got WORSE over the same period: **the regression
+cannot be attributed to the lane-set shrink**, and §3.4a independently locates the live
+pole inside ci.yml's own build→test serial chain. Any re-sample should therefore be
+scoped to ci.yml's job level, not spent re-timing the surviving sub-minute lanes.
 
 ### 2.2 Inside the CI workflow (job level; runs 29105265898 / 29105286547 / 29105790070)
 
@@ -119,10 +161,37 @@ KEEP-list (never skipped): release-plz, pages, scorecard, the bench canonical-se
 job (main-push writes the dashboard), randomized full-form fuzz (its placement IS
 push+nightly per sq-6vshe.6), **codeql on push** (main's default-branch alert state is
 fed by `refs/heads/main` analyses — the merge-group analysis lands on the queue ref;
-keep until the association is verified, it costs ~4 m on one runner), and ONE
+keep until the association is verified, it costs ~4 m on one runner — **moot while
+`codeql.yml` is `disabled_manually`; it produces no check-run on any event, so this
+KEEP-list entry only binds if PR #3427 re-enables the workflow**), and ONE
 **cache-primer** leg (build-archive or a deps-build) so the main-scope rust-cache stays
 warm — note today's cache freshness already depends on whichever push wave survives
 cancellation, so a small always-completing primer is a strict improvement.
+
+> **KEEP-list addition — the COVERAGE legs, and this one is load-bearing, not a
+> preference.** [OPUS-5] (issue #5149, added after §3.4a landed as sq-6vshe.17.)
+> The instrumented coverage legs — `coverage-measure`, `coverage-engine-run`,
+> `coverage-engine-merge` — must be **EXEMPT** from this skip. They are not re-validation
+> on main: the MEASUREMENT was demoted off `merge_group` by sq-6vshe.17, and the *only*
+> reason that demotion is sound is that push-to-main remains the enforcement point for the
+> batch-stacking case (two PRs each ≥ floor merging to a tree < floor). Skip them here and
+> the ratchet loses its last enforcement point silently — a strictly larger safety change
+> than this lever's fail-open design claims to make. They are also off the queue's critical
+> path by construction (that is what the demotion did), so exempting them costs this lever
+> none of its estimated saving. `coverage-floors` is the cheap no-compile companion: under
+> a minute, no instrumented build, and it is what keeps the `coverage` aggregate meaningful
+> on main — keep it too; there is nothing to win by skipping it.
+>
+> **How to implement the exemption:** whatever `queue-validated` guard the pure-validation
+> legs take, do NOT add it to those jobs — neither as an `if:` conjunct nor as a `needs:`
+> entry (a `push`-event pre-job is conditional, and a skip propagates through `needs:` to a
+> dependent that uses no status function, which these do not). Both shapes are pinned for
+> the three measure legs by
+> `scripts/tests/test_ci_select_wiring.py::TestCoverageMergeGroupDemotion` — its frozen
+> `ALLOWED_UPSTREAM` REDs on either, so landing this lever over them fails a test rather
+> than rotting silently; widen that set only with the exemption decided. Enforcement
+> topology of record: `docs/branch-protection.md` §*Coverage MEASUREMENT off the merge
+> queue*.
 
 **Safety: SAFE** (fail-open guard + explicit keep-list + the nightly full-matrix
 backstop and sq-va7at selection alarm are untouched).
@@ -150,6 +219,35 @@ rebuild. The honest remaining deltas, in measured order:
 **Safety: SAFE** (cache poisoning discipline per sq-6vshe.5 applies; measure-first).
 **Est. saved:** −0.5–2 m entry wall, mostly from (1).
 
+> **Status 2026-07-30 [SONNET-4.6] — sq-6vshe.15 landed items 1+2; item 3 is NOT done.**
+>
+> - **(1) partially done, and NOT the 90 s the profile attributed to compression.** The
+>   `nextest-archive` upload now sets `compression-level: 0`, so upload-artifact stops
+>   re-running its default DEFLATE-6 zip pass over an already-zstd-compressed
+>   `nextest.tar.zst`. That removes re-compression CPU only; the 90 s step is CPU **plus**
+>   transfer, and this change does not shrink the bytes, so the saving is un-quantified
+>   until the next re-profile — no number is claimed here. The other two options the lever
+>   listed (nextest `--zstd-level` retune, pruning non-test content from the archive) were
+>   **NOT** attempted: both change the archive's bytes/content, so both need the
+>   before/after test-count parity measurement this bead had no measured baseline for.
+> - **(2) done, over a lane set much smaller than §2.1 implies.** `save-if: ${{ github.ref
+>   == 'refs/heads/main' }}` is now on every `Swatinem/rust-cache` step in every workflow
+>   that still triggers on `merge_group`. **That is only `ci.yml` (20 steps),
+>   `feature-matrix.yml` (6, already compliant under sq-3sbrr) and
+>   `vectorized-feature-off.yml` (1)** — most §2.1 lanes no longer trigger on
+>   `merge_group` at all (`fuzz.yml`, `zk-toolchain.yml` and `formal-verification.yml`
+>   under the 2026-07-18 maintainer directive; `bench.yml` under sq-6vshe.6), and the
+>   nightly-only lanes asan/miri/kani never were queue-triggered. So this bead added the
+>   guard to **21 steps**, not to the whole tree.
+>   **Re-profile §2.1 before acting on any other lever here**: the record's own §6 caveat
+>   ("re-profile if the lane set has materially changed") has now fired.
+>   Pinned structurally by `scripts/tests/test_mergequeue_cache_posture.py`.
+>   NEW COUPLING for **sq-6vshe.14**: main-scope cache freshness now depends entirely on
+>   push-to-main runs, so .14 must keep its promised cache-primer leg.
+> - **(3) NOT done — no verdict either way.** No sccache A/B was run, so there is neither
+>   an adoption nor an honest negative result to record; the ≥60 s bar is untested. Nothing
+>   about sccache is wired. Tracked as a follow-up issue.
+
 ### 3.3 Lever 3 — prioritize/parallelize the thing about to merge → **bead sq-6vshe.16**
 
 - **CodeQL: KEEP on the blocking path.** Measured 3.8 m median (buildless). Moving a
@@ -173,6 +271,22 @@ rebuild. The honest remaining deltas, in measured order:
 the gain appears from position >6 and during bursts (drain rate ×1.67). Plus up to 5 m
 flat if the min-entries wait proves non-inert.
 
+> **RESOLVED (sq-6vshe.16, issue #2759) — see `docs/branch-protection.md` §*Merge-queue
+> throughput settings*, now the doc-of-record for all three items.** [OPUS-5]
+> **(a)** `max_entries_to_build` 3→5 approved in principle but **NOT requested**: lever 1
+> (`sq-6vshe.14`) has not landed — no `queue-validated` push-skip job exists in
+> `.github/workflows/` — so the pool-headroom precondition is unmet.
+> **(b)** the `min_entries_to_merge_wait_minutes: 5` audit **closes as INERT**: the field
+> is a ceiling on waiting while `min_entries_to_merge` is unmet, not a floor, so at
+> `min_entries_to_merge: 1` it never binds. The "up to 5 m flat" line above is therefore
+> **not** a real saving — no edit needed (re-audit if `min_entries_to_merge` ever rises
+> above 1).
+> **(c)** the CodeQL KEEP verdict stands on the measurement but has been **overtaken by
+> events**: `codeql.yml` was operationally disabled on 2026-07-18, so it produces no
+> check-run on any event and costs the queue nothing today. Its forward-looking meaning
+> is that queue latency is not a valid argument against re-enabling it on the blocking
+> path (PR #3427 owns the successor policy).
+
 ### 3.4 Lever 4 — skip tests for unaffected crates in the merge group
 
 Change-based selection ALREADY runs on `merge_group` with the sound fail-closed rule set
@@ -193,6 +307,80 @@ The residual risk is the batch-stacking case: two PRs individually ≥ floor mer
 This needs an explicit maintainer-visible design (proceed-and-document), not a quick flip.
 **Est. saved:** −2–6 m median entry wall (run 29105286547 would have been ~7 m, not 11.9 m).
 
+> **IMPLEMENTED 2026-07-29 (bead sq-6vshe.17), as proposed above.** The
+> maintainer-visible design is recorded in `docs/branch-protection.md` §*Coverage
+> MEASUREMENT off the merge queue* (the proceed-and-document requirement); the wiring is
+> in `ci.yml` and pinned behaviourally by
+> `scripts/tests/test_ci_select_wiring.py::TestCoverageMergeGroupDemotion`.
+> Deltas from the sketch above, all narrowing:
+> * the fast **no-compile** floor gates (`coverage-floors`: test-presence, floor
+>   MONOTONICITY, shard-partition) were **kept on `merge_group`** — they are well under a
+>   minute and they are what makes "no committed floor is silently lowered" true of a
+>   *batch*, not just of a PR. Only the instrumented MEASURE legs were demoted.
+> * the push-to-main run is left **unchanged** rather than narrowed to "only its coverage
+>   legs": lever 1 (sq-6vshe.14) is not implemented yet, so there is no push-run skip to
+>   be exempt from. The exemption is instead pinned as a **test** that REDs if a future
+>   push-run skip covers coverage — the coordination point, made mechanical.
+> * "blocks further ratchet advances until green" landed as
+>   `coverage-gate.py --check-advance-allowed`: it blocks only a **raise** of an existing
+>   floor while the `[demoted-lane] lane=coverage-ratchet-main` alarm is open, never the
+>   recovery path (a governed lowering under `--allow-lower`), never a new crate row, and
+>   it fails **open** if the alarm probe is unavailable.
+>
+> **MEASURED 2026-08-01 (issue #5147) — the −2–6 m projection lands at the BOTTOM of its
+> band; the saving is real but the absolute wall is WORSE than §2.1.** [OPUS-5]
+> Cutover = commit `3ab83df` (PR #5146, 2026-07-30T22:22:32Z), the commit that introduced
+> the `github.event_name != 'merge_group'` guard. Sample = successful `merge_group`
+> ci-summary runs split on `run_started_at`, duration = `updated_at − run_started_at`
+> (the §6 method): **n=94 post** (n=80 after excluding the sub-8-minute trivial-entry mode
+> — see below), against the n≥15 the issue asked for.
+>
+> | window (successful `merge_group` ci-summary) | n | median | p90 |
+> |---|---|---|---|
+> | PRE, matched 40.9 h immediately before cutover | 31 | 23.7 m | 27.6 m |
+> | PRE, broader 2026-07-26…07-28 baseline | 146 | 21.7 m | 27.4 m |
+> | **POST, cutover → 2026-08-01T15:15Z** | **80** | **20.2 m** | **24.6 m** |
+>
+> (Entries ≥8 m only. The raw distribution is bimodal — a ~2–4 m mode carrying 9–15 % of
+> every window, consistent with entries whose change-class skips the Rust matrix, though
+> the job level of that mode was not inspected — so an all-entries median tracks
+> window composition as much as it tracks CI. All-entries figures move the same way:
+> 23.2 → 19.4 m median, 27.6 → 24.6 m p90.)
+>
+> **Verdict: CONFIRMED, at the low end.** Median saving **−1.5 m** against the broader
+> pre baseline and **−3.5 m** against the matched-window one; p90 **−2.8 to −3.0 m**.
+> The honest range is **−1.5 to −3.5 m median**, i.e. the bottom of the projected −2–6 m,
+> and below it on the more conservative baseline. Corroborated independently on `ci.yml`'s
+> own wall (heavy entries: median 22.4 → 19.6 m, p90 27.5 → 24.0 m). Not a quiet-period
+> artifact: the post window carried ~2.8 times the pre window's entry rate (0.83 → 2.30
+> entries/h), so it measured *more* pool contention, not less.
+>
+> **Mechanism verified**, not just inferred — on post-cutover run `30652403619` every
+> instrumented coverage MEASURE leg reports `skipped` while `coverage floors` and
+> `coverage ratchet + test-presence gate` report `success`, exactly the topology the
+> guard above specifies.
+>
+> **Two corrections this sample forces:**
+> 1. **§2.1's 15.1 m median / 23.4 m p90 is no longer the baseline.** The wall had already
+>    regressed to ~21.7 m median by 2026-07-26, *before* this bead. So the post-change
+>    ~20 m median is BETTER than the run this demotion inherited and WORSE than the
+>    2026-07-10 snapshot; reading it against §2.1 would falsely score this bead as a
+>    regression. The §6 re-profile caveat has fired again.
+> 2. **The next pole is the build→test serial chain** — the branch issue #5147 named for a
+>    saving at the low end of the band. On run `30652403619` (26.5 m wall) the chain is
+>    build+archive 9.1 m → slowest shard `bulk 1/3` 16.6 m ≈ 25.7 m serial, essentially the
+>    entire wall, with the coverage legs no longer even candidates. Both hops are well past
+>    §2.2 (build+archive was 369–447 s; slowest shard was 655 s), and the imbalance §3.3
+>    flagged persists with the slow shard's identity moved (`bulk 1/3` 16.6 m vs `bulk 2/3`
+>    8.7 m). **→ lever sq-6vshe.7 (shard rebalance), not further demotion.**
+>    *Caveat: this hop decomposition is ONE post-cutover run, not a distribution — it is
+>    enough to locate the pole, NOT enough to attribute the (1) regression to these hops.
+>    A job-level pre/post sample is the follow-up.*
+>
+> Method: unauthenticated `GET /repos/sparq-org/sparq/actions/workflows/{ci-summary.yml,
+> ci.yml}/runs?event=merge_group&status=success` (300 + 200 runs) and
+> `GET /actions/runs/30652403619/jobs`.
+
 **(b) Selection-soundness memo + the fmx4u §7 P8 decision → bead sq-6vshe.18 — SAFE.**
 The union-diff-vs-target-tip argument that makes merge-group selection sound under
 ALLGREEN + a sole required `gate` is currently a bead note, and the maintainer's
@@ -202,46 +390,78 @@ research/change-based-test-selection.md, present the decision, recommend KEEP-se
 (nightly full backstop + sq-va7at alarm already fence it).
 
 Not worth extending selection to: conformance ratchets (44–76 s each, parallel,
-never the pole), container-scan (3.6 m, parallel), codeql language-scoping (security
-gate, 3.8 m, the code_scanning ruleset expects analyses — small win, real risk).
+never the pole). The other two candidates this paragraph once listed are **moot on the
+queue as of the §2.1 re-verification**: container-scan no longer triggers on
+`merge_group` (2026-07-18 directive) and codeql produces no check-run at all
+(`disabled_manually`). Both remain non-candidates on the PR head for the reasons given —
+container-scan is parallel and off the pole, codeql language-scoping is a small win
+against a security gate the `code_scanning` ruleset expects analyses from.
 
 ### 3.5 Lever 5 — benchmarks → nightly EC2 (sibling lane; cross-reference only)
 
-The `Benchmarks` merge-group leg ("run + track benchmarks", 233 s + select) gates today.
-The sibling lane moving benchmark timing off shared runners to the nightly EC2 lanes
-removes a 3.7 m median leg (rarely the pole) — but its REAL value is retiring the last
-flaky-timing surface from the gate: with ALLGREEN grouping, one flaky gating leg forces
-a whole-entry requeue (the worst churn multiplier), so the expected saving is in the
-tail, not the median. No bead here — owned by the sibling; do not double-implement.
+The `Benchmarks` merge-group leg ("run + track benchmarks", 233 s + select) gated when
+this was written. The sibling lane moving benchmark timing off shared runners to the
+nightly EC2 lanes removes a 3.7 m median leg (rarely the pole) — but its REAL value is
+retiring the last flaky-timing surface from the gate: with ALLGREEN grouping, one flaky
+gating leg forces a whole-entry requeue (the worst churn multiplier), so the expected
+saving is in the tail, not the median. No bead here — owned by the sibling; do not
+double-implement.
+
+> **The queue half of this is ALREADY DONE (§2.1 re-verification, 2026-08-01).** [OPUS-5]
+> `bench.yml` dropped its `merge_group` trigger under sq-6vshe.6, so the `Benchmarks`
+> leg no longer appears as a check-run on the queue ref and the flaky-timing requeue
+> multiplier is already off the gate. The 3.7 m median leg it removed was a non-pole
+> running in parallel, so the median-wall saving this lever implied is ≈0 — the tail
+> claim above is the part that held. What the sibling lane still owns is the *placement*
+> of the timing suites (nightly EC2 vs push-to-`main`); do not re-count the queue
+> removal as a pending saving in the §4 ranking.
 
 ## 4. Ranking — (queue-time saved × safety)
 
 | rank | lever | bead | verdict | est. saved | class |
 |------|-------|------|---------|-----------|-------|
 | 1 | push-to-main skip (validated SHAs) | sq-6vshe.14 | SAFE (fail-open) | 200–400 runner-min/merge; −0.5–2 m wall; collapse-tail removal; unlocks #3 | **SAFE-QUICK-WIN** |
-| 2 | bench → nightly EC2 | (sibling lane) | SAFE as designed there | −3.7 m leg + flake-requeue tail | in-flight |
-| 3 | queue settings (build 3→5; min-wait audit) | sq-6vshe.16 | SAFE after #1 | drain ×1.67 deep-queue; ≤5 m flat if wait non-inert | **SAFE-QUICK-WIN** (maintainer ruleset edit) |
-| 4 | coverage off merge_group | sq-6vshe.17 | recoverable-ratchet argument, needs protocol | −2–6 m median entry wall | **NEEDS-CAREFUL-DESIGN** |
-| 5 | test-shard rebalance | sq-6vshe.7 (existing, annotated) | SAFE | −3–5 m engine-entry p90 | existing bead |
+| 2 | bench → nightly EC2 | (sibling lane) | SAFE as designed there | flake-requeue tail removed; the "−3.7 m leg" was a parallel non-pole, so ≈0 median (§3.5) | **queue half DONE** (no `merge_group` trigger since sq-6vshe.6); placement owned by the sibling |
+| 3 | queue settings (build 3→5; min-wait audit) | sq-6vshe.16 | SAFE after #1 | drain ×1.67 deep-queue; the min-wait audit closed **inert** (§3.3 RESOLVED) so the "≤5 m flat" it once promised is **0** | **SAFE-QUICK-WIN** (maintainer ruleset edit, still blocked on #1) |
+| 4 | coverage off merge_group | sq-6vshe.17 | LANDED; **measured** (§3.4a, 2026-08-01) | **−1.5–3.5 m median / −2.8–3.0 m p90 measured**, vs −2–6 m projected | **DONE** |
+| 5 | test-shard rebalance | sq-6vshe.7 (existing, annotated) | SAFE | −3–5 m engine-entry p90 | existing bead — **now the top pole** (§3.4a) |
 | 6 | cache/artifact diet + sccache A/B | sq-6vshe.15 | SAFE, measure-first | −0.5–2 m | SAFE |
 | 7 | selection memo + P8 decision | sq-6vshe.18 | SAFE (docs/audit) | 0 direct; closes an open soundness decision | SAFE-QUICK-WIN |
 | 8 | gate waiter off the runner slot | sq-6vshe.19 | SAFE but fiddly | frees 3–6 runner slots during drains | discovered, P3 |
 | — | CodeQL off the blocking path | — | **REJECTED** — measured non-pole (3.8 m), security gate | ~0 | falsified premise |
 
-**End-state estimate** (levers 1+3+4a+5 + the existing .7): median entry wall
-15.1 m → ~9–12 m; engine-entry p90 23.4 m → ~17–19 m (then bounded by the
-build→test chain, whose next lever is the .7 rebalance and the closed-for-now .3/.4
-engine-split reopening conditions); a position-6 PR ≈ 40–60 m → ~15–25 m.
+**End-state estimate — 2026-07-10 projection, SUPERSEDED as an absolute target.** [OPUS-5]
+It reads: (levers 1+3+4a+5 + the existing .7) median entry wall 15.1 m → ~9–12 m;
+engine-entry p90 23.4 m → ~17–19 m (then bounded by the build→test chain, whose next
+lever is the .7 rebalance and the closed-for-now .3/.4 engine-split reopening
+conditions); a position-6 PR ≈ 40–60 m → ~15–25 m. The 2026-08-01 re-sample (§3.4a)
+measures the post-.17 median at ~20 m, so this arithmetic starts from a base ~6 m too
+low. Its *relative* deltas may still hold; its absolute targets do not. Re-derive after
+sq-6vshe.7 lands.
 
 ## 5. Discovered work (beaded unless noted)
 
 - sq-6vshe.19 — the ci-summary gate is a WAITER occupying a runner slot ~15–23 m per
   entry (×3–5 concurrent entries, + the push waiter). Its own doctrine (sq-90cv4) names
   moving it off the build-runner slot as the deferred deep fix.
-- sq-6vshe.7 (existing) — annotated with the measured bulk-shard imbalance (655 s vs
+- sq-6vshe.7 (existing) — **re-annotated 2026-08-01: now the top pole.** On post-.17 run
+  `30652403619` the imbalance persists and has grown in absolute terms (`bulk 1/3` 16.6 m
+  vs `bulk 2/3` 8.7 m), and build+archive → slowest shard is ~25.7 m of a 26.5 m wall.
+  Originally annotated with the 2026-07-10 bulk-shard imbalance (655 s vs
   340 s) and the formal-verification change-coupled-Kani 22.7 m outlier (a per-leg
   wall-time item squarely in that bead's inventory scope).
 - The `min_entries_to_merge_wait_minutes` semantics audit (folded into sq-6vshe.16).
+- **Per-lane re-sample for the current queue lane set — OPEN (issue #5165).** The
+  §2.1 lane SET is now verified against the checkout, but only two of its rows carry a
+  2026-08-01 duration (ci-summary and CI, both from §3.4a); `feature-matrix`,
+  `docs-quality` and `flow-on-gates` still carry 2026-07-10 medians taken before the
+  sq-6vshe.20 job consolidation, and `vectorized-feature-off`, `routing-self-tests` and
+  `pr-area-label` have **never** been sampled on the queue at all. Highest-value target
+  is `vectorized-feature-off`'s `artifact-exact-equality` (two release-wasm builds per
+  run — a candidate pole on wasm-touching entries that no measurement has ever covered);
+  the sub-minute survivors are not worth a run-history pass. Per §2.1's `max`-not-`sum`
+  argument, the *median-wall* re-profile that matters is the ci.yml JOB-LEVEL pre/post
+  sample §3.4a already names as its own follow-up — these two should be one pass.
 
 ## 6. Method / reproducibility
 
@@ -252,3 +472,20 @@ engine-split reopening conditions); a position-6 PR ≈ 40–60 m → ~15–25 m
 scripts/ci_select.py + .github/workflows/ci-summary.yml; conclusions histogram over the
 same 250-run window. Snapshot 2026-07-10 — re-profile before acting on a ranking if the
 lane set has materially changed.
+
+**Lane-set re-verification (2026-08-01, issue #5165) — a STRUCTURAL method, no run
+history.** [OPUS-5] The §2.1 lane split was derived by parsing the top-level `on:` block
+of every `.github/workflows/*.yml` and keeping the workflows that list `merge_group` as
+a trigger, then reading each workflow's `jobs.*.name` for the check-run names that land
+on the queue ref. Reproduce with `rg -l '^\s{2}merge_group:' .github/workflows/`, which
+returned exactly the nine table-(a) workflows on 2026-08-01. (A YAML-parse variant also
+works, but note that a YAML 1.1 loader such as PyYAML resolves the bare `on:` key to the
+boolean `True`, so it must be looked up as `doc[True]`.) The split is pinned against
+drift by `scripts/tests/test_mergequeue_lane_inventory.py`, which asserts
+`docs/branch-protection.md` §*Merge-queue subset* names exactly the triggering set
+(wired into the gating `docs-quality quick-gates` job). Two corrections this method contributes
+that a run-history pass alone would miss: `codeql.yml` still *lists* `merge_group` but is
+`disabled_manually`, so trigger presence ≠ a check-run; and `container-scan.yml` +
+`supply-chain.yml` had also dropped the trigger under the 2026-07-18 directive, which the
+`docs/branch-protection.md` §*Merge-queue subset* prose had not recorded (fixed in the
+same change). What this method does NOT give is durations — see the §5 residual.

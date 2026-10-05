@@ -40,7 +40,7 @@ pub struct ResourceMeta {
 }
 
 /// The result of ONE combined read-plan lookup ([`SparqClient::read_plan`]) — the whole per-read
-/// metadata round-trip of the read path (`docs/design/backend-read-path.md` §3.1): the target's
+/// metadata round-trip of the read path (`research/lws-design-records.md` §7): the target's
 /// authoritative metadata AND the presence/etag of every ACL candidate on its resolution chain,
 /// answered together.
 ///
@@ -182,8 +182,8 @@ pub trait SparqClient: Send + Sync {
     /// failed referenced-set query as "nothing is referenced" (which would delete the whole pod).
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError>;
 
-    /// ONE combined read-plan lookup (read-2 — `docs/design/backend-read-path.md` §3.1): the
-    /// target's metadata + the presence/etag of every ACL candidate, in one backend round-trip.
+    /// ONE combined read-plan lookup (read-2 — `research/lws-design-records.md` §7): the target's
+    /// metadata + the presence/etag of every ACL candidate, in one backend round-trip.
     ///
     /// The candidate set is computed up front by the caller (pure string work over the PROTECTED
     /// resource); probing every candidate is semantically identical to the sequential child→root

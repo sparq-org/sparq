@@ -1832,6 +1832,62 @@ pub struct ProofManifest {
     /// BGP pattern may draw from) — fed to `verify::recheck` for the Q6
     /// cross-graph bnode-join guard.
     pub attributions: Vec<Vec<usize>>,
+    /// [OPUS-5] sq-q9r5e follow-up: the EXPLICIT per-pattern answering-scan
+    /// declaration — `pattern_scans[pi]` is the set of `sub_proofs` indices of
+    /// the SCAN sub-proofs that answer query BGP pattern `pi`. Indexed per query
+    /// pattern in query order, exactly like [`Self::attributions`].
+    ///
+    /// # It carries NO verification weight — do not read it as one
+    /// The verifier resolves pattern→scan by constant MEMBERSHIP
+    /// (`crate::verifier`'s `scan_matches_pattern`) for EVERY obligation it
+    /// derives: the FILTER slot gate (`bind_query_correctness`), the cross-graph
+    /// attribution gate (`bind_attributions`), the Q6 namespace
+    /// (`global_attributions`) and `bind_joins` all ignore this field. A
+    /// declaration therefore CANNOT shrink what the verifier demands — a manifest
+    /// carrying one is never accepted where the same manifest without one is
+    /// rejected; it can only fail ADDITIONALLY, on the well-formedness checks
+    /// below.
+    ///
+    /// # Why it does not narrow (the residual this field is a placeholder for)
+    /// The reason to declare a mapping is the same-constant-layout over-demand:
+    /// two query patterns sharing a constant layout — `{ ?x <age> ?v . ?x <age>
+    /// ?c }`, both `(?, <age>, ?)` — are BOTH matched by BOTH scan sub-proofs, so
+    /// under `FILTER(?v >= 18)` the fail-closed sq-q9r5e / audit-L-1 rule demands
+    /// a true-verdict `?v >= 18` proof over the `5` of a genuine solution
+    /// `(?x = alice, ?v = 25, ?c = 5)`, which no honest prover can supply. Letting
+    /// the declaration narrow that obligation would fix the over-demand and open a
+    /// hole: SPARQL evaluates each pattern over EVERY compatible committed row and
+    /// the query text authorises no prover-chosen partition of the data, so the
+    /// prover could drop a constant-compatible scan's rows out of a pattern's
+    /// FILTER and attribution obligations by fiat while still disclosing them. The
+    /// well-formedness checks below pin only that the declaration is a TOTAL map
+    /// of scans to patterns; they establish nothing about whether an excluded scan
+    /// contributes to the claimed result. Narrowing needs what the flat manifest
+    /// cannot yet express — a claimed result row bound to the selected scan rows
+    /// with all shared-variable joins enforced — so it is NOT done, and the
+    /// over-demand stands (`crate::verifier`'s `check_pattern_scans` carries the
+    /// full argument).
+    ///
+    /// # It is DECLARED, not trusted — the verifier re-checks it
+    /// `crate::verifier`'s `check_pattern_scans` gate rejects a declaration
+    /// that is mis-sized (not one entry per query pattern), leaves a pattern
+    /// unanswered (empty entry), names a sub-proof that is out of range / not a
+    /// scan / whose bb-bound `pattern_is_const`/`pattern_const_enc` do NOT match
+    /// the pattern's constants, or leaves a scan sub-proof DANGLING (declared for
+    /// no pattern at all). Those are ADDITIONAL rejections, never a relaxation.
+    ///
+    /// # EMPTY = not declared
+    /// An empty vector means "no declaration" and skips the checks above; the
+    /// obligations are identical either way, so omitting the field neither weakens
+    /// nor strengthens any gate.
+    ///
+    /// Checked by the FLAT stage-1 gates only. The `extended-fragment` regime
+    /// defers all query-text term binding (see `verify_fragment_manifest`), so a
+    /// declaration is neither validated nor used there.
+    // [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping. Research-grade,
+    // NOT externally audited (sq-qhy4).
+    #[serde(default)]
+    pub pattern_scans: Vec<Vec<usize>>,
     /// Declared non-bnode join obligations (manifest side of the layer-3
     /// gate). `(variable, pattern_i, pattern_j)`.
     #[serde(default)]
@@ -2597,6 +2653,7 @@ mod holder_binding_tests {
             key_set: vec![public_key_to_hex(&issuer.public_key())],
             commitment_attestations: vec![att],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -2876,6 +2933,7 @@ mod canonical_edge_tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -3166,6 +3224,7 @@ mod path_schema_tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],

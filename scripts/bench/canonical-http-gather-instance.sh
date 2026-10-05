@@ -17,6 +17,9 @@
 #
 # Env knobs (all defaulted): SP2B_TRIPLES=250000 WATDIV_SF=1 ITERS=3 QTO=300 GATHERS=2
 #   OXI_VERSION/OXI_SHA256_X86_64 (prebuilt Oxigraph CLI pin, same as gather-ec2-sparql.sh)
+#   BENCH_RESULTS_S3_URI/BENCH_EGRESS_REGION (sq-ffaa9): when the launcher passes a
+#   run-scoped S3 prefix, each envelope is ALSO uploaded there as soon as it is written —
+#   the only channel that survives an AMI whose serial console returns nothing usable.
 set -uo pipefail   # NOT -e: one failed engine must never kill the gather (honest-n/a instead)
 
 SP2B_TRIPLES="${SP2B_TRIPLES:-250000}"
@@ -31,6 +34,10 @@ OXI_SHA256_X86_64="${OXI_SHA256_X86_64:-4be355715ba3945e8fb8c94a06662a29808683bf
 step() { echo "[STEP $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a /root/GATHER_STEP >&2; }
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."   # repo root
+# [OPUS-5] sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
+# unless the launcher passed BENCH_RESULTS_S3_URI in, so a run without the instance
+# profile attached behaves exactly as before (console + SSH pull only).
+. scripts/bench/bench-result-egress.sh
 SHA=$(git rev-parse --short HEAD)
 step "canonical-http gather @ $SHA (sp2b=$SP2B_TRIPLES watdiv_sf=$WATDIV_SF iters=$ITERS qto=$QTO gathers=$GATHERS suites='$SUITES')"
 want_suite() { case " $SUITES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
@@ -165,6 +172,9 @@ run_suite_http() {
   local OUT="bench/competitor-results/canonical-${suite}-http-$(date -u +%Y%m%dT%H%M%SZ).json"
   python3 scripts/bench/emit_envelope.py "$W" "$OUT" || step "[$suite-http g$gidx] WARN emit failed"
   jq . "$OUT" >/dev/null 2>&1 && step "[$suite-http g$gidx] envelope OK: $OUT" || step "[$suite-http g$gidx] WARN envelope invalid"
+  # Upload as soon as the envelope exists — a box that dies mid-panel then still leaves
+  # the completed suites in S3 (no-op unless BENCH_RESULTS_S3_URI was passed in).
+  bench_egress_push "$OUT"
 }
 
 g=1

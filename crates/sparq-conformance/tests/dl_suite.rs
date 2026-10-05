@@ -145,7 +145,14 @@ mod gated {
     /// abstained bucket (`DL_PROFILE_ABSTAINED` 117 → 118). Honest fail-closed shift — a
     /// pass under a wrong opaque-datatype reading becomes an honest abstention (the M4
     /// precedent). [FABLE-5]
-    pub const DL_PROFILE_FLOOR: usize = 94;
+    /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −1 (94 → 93).
+    /// `New-Feature-BottomObjectProperty-001` is tagged `test:profile EL` and previously
+    /// extracted with `owl:bottomObjectProperty` read as an ordinary named role; L1 now
+    /// refuses the built-in IRI, so its profile set is `Unknown` → the row moves to the
+    /// abstained bucket (`DL_PROFILE_ABSTAINED` 118 → 119). The same honest fail-closed shift
+    /// as the sq-pbz04.4.9 datatype-map precedent: a pass under a wrong opaque-role reading
+    /// becomes an honest abstention. [SONNET-4.6]
+    pub const DL_PROFILE_FLOOR: usize = 93;
 
     /// EXPLICIT-NEGATIVE profile lane REFUTED (pass) count — checkable
     /// `owl:NegativePropertyAssertion(case, test:profile, {EL|QL|RL})` rows the L2 checker
@@ -161,7 +168,14 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): +1 (137 → 138). Enabling fail-closed extraction
     /// of `owl:TransitiveProperty` makes one formerly-abstained negative-profile row
     /// definitively refutable; the two other newly checkable rows enter the measured In-gap.
-    pub const DL_PROFILE_NEGATIVE_REFUTED: usize = 138;
+        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −4
+    /// (138 → 134). Four explicit-negation rows whose input carries `owl:topObjectProperty` /
+    /// `owl:bottomObjectProperty` in a property position now REFUSE extraction, so L2 can no
+    /// longer answer `NotIn` on them — they move from refuted to abstained
+    /// (`DL_PROFILE_NEGATIVE_ABSTAINED` 614 → 619; checkable denominator 320 → 315). Not a
+    /// refutation regression: the rows became honestly out-of-fragment, exactly the
+    /// fail-closed L1 boundary (the sq-pbz04.4.9 datatype precedent). [SONNET-4.6]
+    pub const DL_PROFILE_NEGATIVE_REFUTED: usize = 134;
 
     /// EXPLICIT-NEGATIVE profile lane In-GAP — checkable explicit-negation rows where L2
     /// answered `In` (could not refute full-profile membership from axiom-grammar membership
@@ -177,7 +191,10 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): +2 (180 → 182) as two transitive-property inputs
     /// become structurally checkable but L2 axiom-grammar membership cannot refute their
     /// full-profile negations. This is the existing honest In-gap, never a fabricated pass.
-    pub const DL_PROFILE_NEGATIVE_IN_GAP: usize = 182;
+        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −1
+    /// (182 → 181), denominator 320 → 315. One In-gap row left the checkable set with the
+    /// four refuted ones; the gap is now 181 of 315. [SONNET-4.6]
+    pub const DL_PROFILE_NEGATIVE_IN_GAP: usize = 181;
 
     /// EXPLICIT-NEGATIVE profile lane ABSTAINED — explicit-negation rows where L1 extraction
     /// refused (out-of-fragment input), so L2 abstained (`Unknown`) rather than answering
@@ -187,7 +204,11 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): −3 (617 → 614); all three rows moved out only
     /// because `dl_transitive` now extracts their transitivity axiom, closing accounting
     /// with +1 refuted pass and +2 measured In-gap rows above.
-    pub const DL_PROFILE_NEGATIVE_ABSTAINED: usize = 614;
+        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +5
+    /// (614 → 619) — the four rows that left [`DL_PROFILE_NEGATIVE_REFUTED`] plus the one
+    /// that left [`DL_PROFILE_NEGATIVE_IN_GAP`] land here, closing the accounting.
+    /// [SONNET-4.6]
+    pub const DL_PROFILE_NEGATIVE_ABSTAINED: usize = 619;
 
     /// EXPLICIT-NEGATIVE profile lane OUT-OF-SCOPE — explicit-negation rows excluded at
     /// selection (owl:imports / functional-syntax-only input). [FABLE-5] sq-pbz04.4.16
@@ -257,7 +278,36 @@ mod gated {
     /// dispatch to the QL branch — reaching it needs in-QL ∧ not-RL ∧ not-EL, which forces
     /// a complement shape absent from the extractable corpus (the pre-change abstention
     /// histogram carried no "QL consistency pending" entry), so no row's verdict moves.
-    pub const DL_DIRECT_FLOOR: usize = 186;
+    /// Re-pinned by sq-pbz04.4.8 ([SONNET-4.6] — the guard-abstention tableau fall-through,
+    /// design record §4 as amended): **+41 (186 → 227)**, composition 136 consistency +
+    /// 17 inconsistency + 72 positive-entailment + 2 negative-entailment. This is the bead,
+    /// and it is the largest single move this floor has made. MECHANISM: when the owning
+    /// RL/EL/QL branch abstains, the dispatch now re-asks the ALCH tableau — complete for the
+    /// whole L1 fragment, hence for every in-profile ontology too — instead of returning
+    /// `Unknown`. The pre-change abstention histogram's three guard buckets (16 RL-divergence,
+    /// 26 EL-unapplied, 1 EL-⊤ = 43 rows) are GONE from the post-change histogram entirely;
+    /// 41 of those rows graduated to a definitive expected verdict (+38 consistency, +3
+    /// inconsistency) and the other 2 are accounted for by the L1 built-in-property refusal
+    /// below, NOT by a new budget abstention (`deterministic count budget exhausted` is
+    /// unchanged at 16). The 8 `WebOnt-disjointWith-003`…`-009` / `WebOnt-I5.26-005`
+    /// consistency rows that sq-pbz04.4.16 re-routed into `RlDivergenceGuard` are among those
+    /// recovered — verified per row, not inferred from the totals — exactly as that re-pin
+    /// note anticipated ("graduating them back is a deliberate future re-pin once … a tableau
+    /// fallback is added").
+    ///
+    /// The audited five-row divergence set is UNCHANGED — verified, and the verification
+    /// mattered: the FIRST measurement of the fall-through alone put two NEW rows in the fail
+    /// bucket (`New-Feature-BottomObjectProperty-001` / `New-Feature-TopObjectProperty-001`,
+    /// both `InconsistencyTest`s). Those were not fall-through bugs but a pre-existing L1 gap
+    /// the profile guards had been accidentally MASKING: L1 read `owl:bottomObjectProperty` /
+    /// `owl:topObjectProperty` as ordinary named roles, dropping the fixed extensions (∅ and
+    /// ΔI × ΔI) that are the sole reason those two ontologies are inconsistent. Fixed at L1 by
+    /// refusing the built-in property IRIs fail-closed at every property position — the
+    /// sq-pbz04.4.9 precedent, where the escalated soundness verdict likewise directed
+    /// refusing at L1 rather than pinning a wrong definitive verdict. With that refusal the
+    /// inconsistency lane's fail count returns to 0 and both rows abstain honestly.
+    /// [SONNET-4.6]
+    pub const DL_DIRECT_FLOOR: usize = 227;
 
     /// Abstained (fail-closed OutOfFragment / guard / deferred / budget) row totals,
     /// EXACT-pinned so the tri-state accounting is closed: profile lane, then the four
@@ -273,7 +323,10 @@ mod gated {
     /// `WebOnt-I5.3-015` positive profile row (EL-tagged; its premise carries `xsd:integer`/
     /// `xsd:string` ranges) now REFUSES extraction, moving from a pass to an abstention (see
     /// [`DL_PROFILE_FLOOR`]). [FABLE-5]
-    pub const DL_PROFILE_ABSTAINED: usize = 118;
+        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +1
+    /// (118 → 119). The `New-Feature-BottomObjectProperty-001` positive profile row (EL-tagged)
+    /// now REFUSES extraction — see [`DL_PROFILE_FLOOR`]. [SONNET-4.6]
+    pub const DL_PROFILE_ABSTAINED: usize = 119;
     /// See [`DL_PROFILE_ABSTAINED`].
     /// Re-pinned by sq-pbz04.4.11: +4 from the 4 consistency cases that shifted from
     /// Pass to OutOfFragment (budget exhaustion on the now-more-complete model).
@@ -303,7 +356,14 @@ mod gated {
     /// and two positive-entailment rows graduated into [`DL_DIRECT_FLOOR`].
     /// UNCHANGED at 468 by sq-fj8lj (the graduated QL dispatch branch): zero corpus rows
     /// reach the QL branch — see the [`DL_DIRECT_FLOOR`] note.
-    pub const DL_DIRECT_ABSTAINED: usize = 468;
+    /// Re-pinned by sq-pbz04.4.8 ([SONNET-4.6]): **−41 (468 → 427)**, composition 194
+    /// consistency + 96 inconsistency + 123 positive-entailment + 14 negative-entailment.
+    /// The mirror image of the [`DL_DIRECT_FLOOR`] +41: the guard-abstention tableau
+    /// fall-through is strictly abstention-REDUCING, so every row it graduated leaves this
+    /// bucket and nothing enters it from that change. The L1 built-in-property refusal moves
+    /// its 2 rows WITHIN the bucket (guard → out-of-fragment), not into or out of it, which
+    /// is why the two deltas are exactly equal and opposite. [SONNET-4.6]
+    pub const DL_DIRECT_ABSTAINED: usize = 427;
 
     /// Audited, PINNED divergence rows (module docs — mechanisms M3/M5/M6): every row
     /// where a checker verdict contradicts the export expectation, keyed by the
@@ -393,13 +453,21 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): +5 (291 → 296). Five corpus documents whose
     /// only formerly-unmodelled role characteristic was `owl:TransitiveProperty` now
     /// extract and round-trip through the feature-gated structural axiom; violations stay 0.
-    pub const DL_RENDER_ROUNDTRIP_FLOOR: usize = 296;
+        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −2
+    /// (296 → 294), with `DL_RENDER_ROUNDTRIP_REFUSED` +2 (375 → 377) — the accounting stays
+    /// closed at 672 documents. The two `New-Feature-{Top,Bottom}ObjectProperty-001` premise
+    /// documents no longer extract, so they leave the round-trip pass set for the
+    /// extraction-refused bucket. `violations` remains EMPTY, which is the load-bearing
+    /// assertion here: no renderer/extractor fidelity bug is involved. [SONNET-4.6]
+    pub const DL_RENDER_ROUNDTRIP_FLOOR: usize = 294;
     /// See [`DL_RENDER_ROUNDTRIP_FLOOR`] — documents the L1 extractor refused
     /// (out-of-ALCH-fragment; the renderer contract is scoped to successful extractions).
     /// Re-pinned by sq-pbz04.4.9: +2 (378 → 380) — see [`DL_RENDER_ROUNDTRIP_FLOOR`].
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): −5 (380 → 375), exactly the five documents
     /// graduated to [`DL_RENDER_ROUNDTRIP_FLOOR`].
-    pub const DL_RENDER_ROUNDTRIP_REFUSED: usize = 375;
+        /// Re-pinned by sq-pbz04.4.8: +2 (375 → 377). See [`DL_RENDER_ROUNDTRIP_FLOOR`].
+    /// [SONNET-4.6]
+    pub const DL_RENDER_ROUNDTRIP_REFUSED: usize = 377;
     /// See [`DL_RENDER_ROUNDTRIP_FLOOR`] — documents whose RDF/XML literal oxrdfxml
     /// rejects (the M6 mechanism, `FS2RDF-literals-ar`); they reach no lane's extraction.
     pub const DL_RENDER_ROUNDTRIP_PARSE_FAILED: usize = 1;

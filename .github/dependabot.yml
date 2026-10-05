@@ -70,10 +70,49 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-major"
+      # [OPUS-5] #4572: do NOT let Dependabot version-bump the SLSA trusted builder.
+      # Both of its reusable builders are referenced by TAG, on ONE shared tag, across the four
+      # isolated-provenance lanes: `generator_generic_slsa3.yml` in release.yml#provenance,
+      # release.yml#provenance-artifacts and dist.yml#provenance, and (#4635)
+      # `generator_container_slsa3.yml` in release.yml#provenance-container — the ONE documented
+      # exception to this repo's SHA-pin convention, because the generator derives the trusted-builder
+      # identity baked into the provenance (the identity `slsa-verifier` matches a consumer
+      # policy against) from its own `@ref`. Moving that tag changes the builder identity every
+      # downstream verification policy is written against, so it is a TRUST decision taken
+      # deliberately on a cadence — see compliance/slsa/trusted-builder-pin-policy.md and the
+      # quarterly tick in .github/workflows/slsa-builder-pin-review.yml — not a batched bump
+      # swept into the `actions-minor-patch` group.
+      #
+      # The trailing `*` matters: Dependabot may surface a reusable-workflow reference under
+      # either `owner/repo` or the full `owner/repo/.github/workflows/<file>.yml` name, and the
+      # glob has to cover both forms or the ignore silently does nothing.
+      #
+      # The `update-types` list is REQUIRED, not decoration: a bare `dependency-name` entry with
+      # no `update-types` ignores SECURITY updates too, which is the opposite of what we want
+      # here. Listing the three `version-update:*` types silences routine bumps while leaving
+      # advisory-driven security updates flowing.
+      - dependency-name: "slsa-framework/slsa-github-generator*"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
 
-  # ---- npm (the @jeswr/sparq wasm package) ----
+  # ---- npm (the whole workspace: js, site, gui/*, packages/*) ----
+  # [SONNET-4.6] sq-bqjv: this entry pointed at "/js" — a WORKSPACE MEMBER, not a
+  # resolvable npm tree. Per-member locks are deliberately gitignored as redundant
+  # (.gitignore "/js/package-lock.json" et al); the repo-root `package-lock.json` is
+  # the only tracked lock FOR THE WORKSPACE and it spans all nine members. (The two
+  # other tracked locks in the repo — bench/wasm-compare/browser and
+  # crates/sparq-shacl/tests/diff_fuzz — are standalone harnesses outside the
+  # workspace; see scripts/tests/test_dependabot_coverage.py for why they are
+  # deliberately excluded.) So the member-directory entry had no lock to resolve
+  # against, and `site` / `gui/app` / `gui/e2e*` / `packages/*` — the large majority of
+  # the JS dependency surface — had NO Dependabot coverage at all.
+  # Pointing at the workspaces root fixes both: npm-workspaces support walks every
+  # member manifest off the root lock, so one entry covers the tree that CI actually
+  # installs. Grouping/labels unchanged.
   - package-ecosystem: npm
-    directory: "/js"
+    directory: "/"
     schedule:
       interval: weekly
       day: monday
@@ -108,3 +147,60 @@ updates:
         update-types:
           - minor
           - patch
+
+  # ---- Docker base images ----
+  # [SONNET-4.6] sq-bqjv: the two Dockerfiles that build from THIRD-PARTY bases (this
+  # root one and crates/sparq-lws-core) pin them by DIGEST
+  # (`rust:1.88-slim-bookworm@sha256:…`, `gcr.io/distroless/cc-debian12:nonroot@sha256:…`).
+  # A digest pin is reproducible but FROZEN: a Debian/distroless security rebuild
+  # publishes a new digest under the same tag and the pin never moves, so base-image
+  # CVEs accumulate silently until someone bumps by hand. container-scan.yml only
+  # REPORTS that drift; nothing was opening the remediation PR. These entries close
+  # that loop — Dependabot refreshes the digest under the pinned tag.
+  #
+  # Two `directory` entries rather than one `directories` list: same-ecosystem
+  # repeated entries are long-established config, so the coverage cannot silently
+  # no-op on a key the config parser skips.
+  #
+  # The `rust` image `ignore` mirrors the dtolnay/rust-toolchain rationale above:
+  # `1.88` is the DECLARED workspace MSRV floor (root Cargo.toml
+  # `[workspace.package] rust-version`), not a "latest toolchain" pin. Letting
+  # Dependabot walk the tag to 1.9x would build the image on a toolchain above the
+  # declared floor and quietly stop exercising it. Only semver TAG walks are ignored;
+  # digest refreshes under the pinned tag — the security-relevant update — still flow,
+  # as do security updates. Move the tag by hand, in lockstep with `rust-version`.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    ignore:
+      - dependency-name: "rust"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
+
+  - package-ecosystem: docker
+    directory: "/crates/sparq-lws-core"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    ignore:
+      - dependency-name: "rust"
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"
+          - "version-update:semver-major"

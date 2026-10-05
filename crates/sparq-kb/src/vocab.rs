@@ -4,10 +4,10 @@
 //! §2.3) as constants, mirroring the pattern of `crates/sparq-trust/src/vocab.rs`.
 //!
 //! The canonical, machine-readable form of this vocabulary is
-//! [`ontology/pkg/pkg.ttl`](https://github.com/jeswr/sparq/blob/main/crates/sparq-kb/ontology/pkg/pkg.ttl)
+//! [`ontology/pkg/pkg.ttl`](https://github.com/sparq-org/sparq/blob/main/crates/sparq-kb/ontology/pkg/pkg.ttl)
 //! (Turtle, with `rdfs:label`/`rdfs:comment`/`rdfs:domain`/`rdfs:range`), the SHACL
 //! write-time guardrails are in
-//! [`shapes/pkg.shapes.ttl`](https://github.com/jeswr/sparq/blob/main/crates/sparq-kb/shapes/pkg.shapes.ttl),
+//! [`shapes/pkg.shapes.ttl`](https://github.com/sparq-org/sparq/blob/main/crates/sparq-kb/shapes/pkg.shapes.ttl),
 //! and the reuse + alignment-verification record is in `ontology/pkg/PROVENANCE.md`.
 //! The `ttl_pins_match_rust_constants` test below keeps the published Turtle and
 //! these Rust constants from drifting (exactly the `sparq-trust` discipline).

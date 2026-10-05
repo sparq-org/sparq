@@ -1328,6 +1328,53 @@ pub enum CheckError {
     /// A query FILTER constrains a variable that does not bind to any scanned
     /// column of a BGP pattern (cannot be mapped to a `filter_int` operand).
     UnmappableFilterVar { variable: String },
+    /// `manifest.pattern_scans` is DECLARED (non-empty) but does not carry
+    /// exactly one entry per query BGP pattern (sq-q9r5e follow-up): the
+    /// pattern→scan mapping is indexed in query order like `attributions`, so a
+    /// mis-sized declaration cannot be interpreted and is rejected fail-closed.
+    /// (The FILTER/attribution obligations themselves are unaffected by a
+    /// declaration — see `check_pattern_scans`.)
+    // [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping.
+    PatternScanArityMismatch { patterns: usize, declared: usize },
+    /// A DECLARED `manifest.pattern_scans[pattern]` is EMPTY: the prover declared
+    /// the mapping but left this query BGP pattern with no answering scan. Every
+    /// pattern must be answered (the declared analogue of `UnboundPattern`).
+    // [OPUS-5] sq-q9r5e follow-up.
+    PatternScanUnbound { pattern: usize },
+    /// A DECLARED `manifest.pattern_scans[pattern]` names sub-proof `proof`,
+    /// which is out of range, is not a SCAN, or whose bb-bound
+    /// `pattern_is_const`/`pattern_const_enc` do NOT match the query pattern's
+    /// constant slots (audit #10). A declaration must not claim a scan answers a
+    /// pattern it provably does not.
+    // [OPUS-5] sq-q9r5e follow-up.
+    PatternScanMismatch { pattern: usize, proof: usize },
+    /// `manifest.pattern_scans` is DECLARED but scan sub-proof `proof` is named
+    /// by NO pattern: the manifest discloses that scan's rows while its own
+    /// declared reading gives them no pattern, which is incoherent, so it is
+    /// rejected fail-closed rather than recorded.
+    // [OPUS-5] sq-q9r5e follow-up.
+    PatternScanUndeclared { proof: usize },
+    /// A query BGP pattern uses the SAME variable at two slots (`{ ?v <p> ?v }`)
+    /// but a disclosed row of a scan that answers that pattern binds those two
+    /// slots to DIFFERENT terms — so the row does not satisfy the pattern it is
+    /// disclosed under, and a relying party would read `?v` as two terms at once.
+    /// `slots` is the `(first, offending)` slot pair within the pattern.
+    ///
+    /// The cross-pattern analogues of this obligation are the disclosed-path
+    /// `recheck` / `join_obligations` gate and the hidden-path `bind_joins` slot
+    /// binding; both iterate pattern PAIRS over per-pattern variable SETS, so the
+    /// WITHIN-pattern repetition is invisible to them. `scan_matches_pattern` only
+    /// compares per-slot const-ness/encodings and the scan circuit binds only the
+    /// CONSTANT slots to `pattern_const_enc`, so nothing else constrains it.
+    // [OPUS-5] #5240 (raised while fixing audit L-1 / sq-q9r5e). Research-grade,
+    // NOT externally audited (sq-qhy4).
+    RepeatedSlotMismatch {
+        pattern: usize,
+        proof: usize,
+        row: usize,
+        variable: String,
+        slots: (usize, usize),
+    },
     /// A scan sub-proof's commitment has no issuer attestation in the manifest
     /// (audit #3): `commitments[g]` is unsigned / prover-invented, so the
     /// "credential issued by X" claim has no cryptographic backing. Closes the
@@ -1951,6 +1998,27 @@ impl std::fmt::Display for CheckError {
             CheckError::UnmappableFilterVar { variable } => write!(
                 f,
                 "query FILTER on ?{variable} does not bind to any scanned column"
+            ),
+            CheckError::PatternScanArityMismatch { patterns, declared } => write!(
+                f,
+                "manifest.pattern_scans declares {declared} entries for {patterns} query BGP patterns (the pattern→scan mapping is indexed per query pattern, like attributions)"
+            ),
+            CheckError::PatternScanUnbound { pattern } => write!(
+                f,
+                "manifest.pattern_scans[{pattern}] is empty: query BGP pattern {pattern} is declared to be answered by no scan sub-proof"
+            ),
+            CheckError::PatternScanMismatch { pattern, proof } => write!(
+                f,
+                "manifest.pattern_scans[{pattern}] names sub-proof {proof}, which is out of range, is not a scan, or whose bound pattern constants do not answer query BGP pattern {pattern} (audit #10: a declaration must not contradict the proof-bound constants)"
+            ),
+            CheckError::PatternScanUndeclared { proof } => write!(
+                f,
+                "scan sub-proof {proof} is named by no entry of the declared manifest.pattern_scans: the manifest discloses its rows but its own declared reading gives them no query BGP pattern (dangling scan)"
+            ),
+            CheckError::RepeatedSlotMismatch { pattern, proof, row, variable, slots } => write!(
+                f,
+                "query BGP pattern {pattern} binds ?{variable} at slots {} and {}, but disclosed row {row} of scan sub-proof {proof} (which answers that pattern) gives them different terms: the row does not satisfy the pattern it is disclosed under",
+                slots.0, slots.1
             ),
             CheckError::UnattestedCommitment { proof, commitment } => write!(
                 f,
@@ -2686,8 +2754,24 @@ fn prefilter_manifest_structure_impl(
     // so it is skipped here (documented unbound-terms limitation — the sub-proofs
     // still verify cryptographically, they are just not yet tied to the disclosed
     // solution terms).
+    //
+    // [OPUS-5] sq-q9r5e follow-up: stage 2a′ first — when the prover DECLARED a
+    // `manifest.pattern_scans` mapping, re-check it here. It is an ADDITIONAL
+    // fail-closed constraint only: the FILTER and attribution obligations below
+    // still run over the full constant-MEMBERSHIP relation, so a declaration can
+    // never shrink what the verifier demands (see `check_pattern_scans`).
+    //
+    // [OPUS-5] #5240: stage 2b′ last — a variable repeated WITHIN one BGP pattern
+    // (`{ ?v <p> ?v }`) constrains the two disclosed columns to be EQUAL, which no
+    // other gate enforced: `scan_matches_pattern` compares only const-ness and the
+    // constant encodings, and every shared-variable gate (`recheck` /
+    // `join_obligations` on the disclosed path, `bind_joins` on the hidden path)
+    // works across pattern PAIRS and so cannot see a within-pattern repeat. Placed
+    // AFTER the gates above so their (already-pinned) error precedence is unchanged.
     if !skip_query_binding {
+        check_pattern_scans(manifest)?;
         bind_query_correctness(manifest)?;
+        bind_repeated_pattern_slots(manifest)?;
     }
 
     // --- Stage 2e: cross-graph attribution binding (audit #8). ---
@@ -4591,6 +4675,99 @@ fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3])
     true
 }
 
+/// Stage 2a′: re-check a DECLARED [`ProofManifest::pattern_scans`] pattern→scan
+/// mapping. A no-op when the field is empty (the ordinary case).
+///
+/// # This gate only ADDS obligations — it never narrows one
+/// The declaration is a prover-authored reading of which scan answers which query
+/// BGP pattern. It is NOT consulted by [`bind_query_correctness`] or
+/// [`bind_attributions`]: both still resolve pattern→scan by constant MEMBERSHIP
+/// (`scan_matches_pattern`), so the sq-q9r5e / audit-L-1 rule stands unweakened —
+/// the FILTER must be discharged at EVERY slot the filtered variable occupies
+/// across EVERY pattern a scan matches by constants, whatever the prover declares.
+/// Declaring a mapping can therefore only ever cause an ADDITIONAL rejection
+/// here; it can never buy an acceptance the membership regime would refuse.
+///
+/// # Why it does not narrow (the round-2 review finding — READ THIS BEFORE WIRING IT IN)
+/// The obvious use of the declaration is to demand only the DECLARED answering
+/// scan's slots, removing the membership over-demand on same-constant-layout
+/// queries (`{ ?x <age> ?v . ?x <age> ?c }` — both patterns `(?, <age>, ?)`; see
+/// `research/zk-audit-gpt56-2026-07.md` L-1). That is UNSOUND as the manifest
+/// stands. SPARQL evaluates each pattern over EVERY compatible committed row, and
+/// the query text authorises no prover-chosen partition of the committed data, so
+/// a prover free to exclude a constant-compatible scan from a pattern can drop
+/// that scan's rows out of the pattern's FILTER and attribution obligations while
+/// still disclosing them. The checks below (total assignment: no empty entry, no
+/// dangling scan, no declared pair that contradicts the bb-bound constants) pin
+/// only that the declaration is a TOTAL map of scans to labels — they establish
+/// nothing about whether an excluded scan contributes to the claimed result.
+///
+/// Narrowing needs the missing piece: a claimed result row bound to the selected
+/// scan rows, with all shared-variable joins enforced, so that "this scan does not
+/// contribute" is a VERIFIED property rather than a prover assertion the consumer
+/// is asked to take on faith. The flat `ProofManifest` carries no such claimed
+/// result row, so that witness is NOT built here and
+/// the flat verifier keeps full constant-membership obligations, including the
+/// over-demand, and the honest same-layout manifest stays REJECTED
+/// (`pattern_scans_do_not_narrow_the_filter_obligation`).
+///
+/// # What IS checked when a declaration is present
+/// Exactly one entry per query pattern ([`CheckError::PatternScanArityMismatch`]);
+/// no empty entry ([`CheckError::PatternScanUnbound`]); every named sub-proof in
+/// range, a scan, and with bb-bound `pattern_is_const`/`pattern_const_enc` that
+/// MATCH the pattern's constants ([`CheckError::PatternScanMismatch`], audit #10);
+/// and no scan sub-proof left undeclared
+/// ([`CheckError::PatternScanUndeclared`]). A declaration that survives all four
+/// is recorded metadata, nothing more.
+// [OPUS-5] sq-q9r5e follow-up: explicit pattern→scan mapping, validated but
+// deliberately NOT load-bearing. Research-grade, NOT externally audited (sq-qhy4).
+fn check_pattern_scans(manifest: &ProofManifest) -> Result<(), CheckError> {
+    if manifest.pattern_scans.is_empty() {
+        return Ok(());
+    }
+
+    let patterns = fragment_patterns(&manifest.query)?;
+    let consts = fragment_pattern_consts(&patterns);
+
+    if manifest.pattern_scans.len() != consts.len() {
+        return Err(CheckError::PatternScanArityMismatch {
+            patterns: consts.len(),
+            declared: manifest.pattern_scans.len(),
+        });
+    }
+
+    let mut declared_scans: BTreeSet<usize> = BTreeSet::new();
+    for (pi, decl) in manifest.pattern_scans.iter().enumerate() {
+        if decl.is_empty() {
+            return Err(CheckError::PatternScanUnbound { pattern: pi });
+        }
+        for &spi in decl {
+            // Out of range / not a scan / constants disagree all collapse to the
+            // same rejection: the declaration must not contradict the bb-bound
+            // pattern constants (audit #10).
+            let answers = manifest
+                .sub_proofs
+                .get(spi)
+                .is_some_and(|sp| scan_matches_pattern(&sp.inputs, &consts[pi]));
+            if !answers {
+                return Err(CheckError::PatternScanMismatch { pattern: pi, proof: spi });
+            }
+            declared_scans.insert(spi);
+        }
+    }
+
+    // No DANGLING scan: a declaration that discloses a scan's rows while naming it
+    // for no pattern is an incoherent reading, so it is rejected rather than
+    // recorded.
+    for (spi, sp) in manifest.sub_proofs.iter().enumerate() {
+        if matches!(sp.inputs, ProofInputs::Scan { .. }) && !declared_scans.contains(&spi) {
+            return Err(CheckError::PatternScanUndeclared { proof: spi });
+        }
+    }
+
+    Ok(())
+}
+
 /// Stage 2b/2c: bind every query BGP pattern's constants to a scan sub-proof
 /// (audit #10) and every query FILTER to a slot-bound, true-verdict
 /// `filter_int` sub-proof reached via a binding edge (audit #5/#6/#7).
@@ -4605,6 +4782,24 @@ fn scan_matches_pattern(inputs: &ProofInputs, consts: &[Option<oxrdf::Term>; 3])
 /// comparison-substitution); and (4) the filter's `expected == true` (audit
 /// #5/#6 — the verdict gates row inclusion; an `expected==false` row may not be
 /// presented as passing).
+///
+/// # EVERY slot, not the first (sq-q9r5e / audit L-1)
+/// A scan is matched to a query pattern by constant MEMBERSHIP, so ONE scan can
+/// answer SEVERAL patterns — and those patterns may place the filtered variable
+/// at DIFFERENT slots. The obligation is therefore per `(scan, row, slot)` over
+/// the FULL set of slots `?v` occupies across the patterns that scan answers,
+/// not the first such slot. Gating only the first accepted a manifest whose
+/// other disclosed ?v column was never proven against the FILTER (confirmed
+/// reachable; witness `filter_reject_ungated_second_slot_within_scan`).
+///
+/// This is deliberately FAIL-CLOSED on the pattern→scan ambiguity: where two
+/// patterns share a constant layout the verifier cannot tell which one a given
+/// scan was meant to answer, so it demands the FILTER be discharged for every
+/// slot that scan could be read at. A manifest that cannot supply those proofs
+/// is REJECTED rather than accepted on the strength of one of them. A prover's
+/// `manifest.pattern_scans` declaration does NOT relax this — see
+/// [`check_pattern_scans`] for why narrowing needs a verified result witness the
+/// flat manifest cannot yet express.
 ///
 /// A FILTER with no such edge ⇒ REJECT (audit #10 FILTER-add / a `filter_int`
 /// over the wrong operand). Stage 2 already enforced the edge's scanned-slot
@@ -4655,27 +4850,58 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
                 ProofInputs::Scan { rows, row_count, .. } => (rows, *row_count as usize),
                 _ => continue,
             };
-            // Is this scan the one that answers a pattern ?v binds in, and at
-            // which slot does ?v sit there?
-            let slot = positions.iter().find_map(|(pi, si)| {
-                consts
-                    .get(*pi)
-                    .filter(|c| scan_matches_pattern(&sp.inputs, c))
-                    .map(|_| *si)
-            });
-            let Some(slot) = slot else { continue };
+            // EVERY slot ?v sits at across EVERY query pattern this scan
+            // answers — not just the first.
+            //
+            // [OPUS-5] sq-q9r5e (audit L-1, `research/zk-audit-gpt56-2026-07.md`):
+            // this was a `find_map`, which took only the FIRST matching
+            // (pattern, slot) pair. Pattern→scan is resolved by constant
+            // MEMBERSHIP (`scan_matches_pattern`), not an explicit mapping, so
+            // ONE scan can answer SEVERAL query patterns — and when those
+            // patterns place the filtered variable at DIFFERENT slots (e.g. a
+            // `(?, P, ?)` scan answering both `(?s P ?v)` and `(?v P ?o)`),
+            // every one of those slots is a column the relying party reads ?v
+            // off. Gating only the first left the others ungated, so a row whose
+            // second-slot binding of ?v was never proven against the FILTER was
+            // presented as satisfying it (CONFIRMED reachable: the structural
+            // gate accepted such a manifest — witness
+            // `filter_reject_ungated_second_slot_within_scan` in `tests/e2e.rs`).
+            //
+            // Collecting ALL matching slots is the FAIL-CLOSED direction and
+            // matches the discipline `bind_attributions` already applies (it
+            // checks EVERY scan matching a pattern, never a first match). A
+            // BTreeSet dedups the case where two patterns place ?v at the same
+            // slot, and gives a deterministic order for the error path.
+            //
+            // [OPUS-5] sq-q9r5e follow-up: a `manifest.pattern_scans` declaration
+            // is deliberately NOT read here. Narrowing this set to the declared
+            // answering scan would let the prover drop a constant-compatible
+            // scan's rows out of the FILTER obligation on its own say-so; see
+            // `check_pattern_scans`.
+            let slots: BTreeSet<usize> = positions
+                .iter()
+                .filter(|(pi, _)| {
+                    consts.get(*pi).is_some_and(|c| scan_matches_pattern(&sp.inputs, c))
+                })
+                .map(|(_, si)| *si)
+                .collect();
+            if slots.is_empty() {
+                continue;
+            }
             any_scan_answered = true;
             // Every ACTIVE disclosed row must have a true-verdict filter_int
-            // edge at this slot with matching (op, bound).
+            // edge at EACH such slot with matching (op, bound).
             for row in 0..row_count.min(rows.len()) {
-                let gated = manifest.binding_edges.iter().any(|edge| {
-                    edge.from_proof == spi
-                        && edge.from_row == row
-                        && edge.from_slot == slot
-                        && filter_edge_true(manifest, edge.to_proof, *op, *bound)
-                });
-                if !gated {
-                    return Err(CheckError::UnboundFilter { variable: variable.clone() });
+                for &slot in &slots {
+                    let gated = manifest.binding_edges.iter().any(|edge| {
+                        edge.from_proof == spi
+                            && edge.from_row == row
+                            && edge.from_slot == slot
+                            && filter_edge_true(manifest, edge.to_proof, *op, *bound)
+                    });
+                    if !gated {
+                        return Err(CheckError::UnboundFilter { variable: variable.clone() });
+                    }
                 }
             }
         }
@@ -4684,6 +4910,112 @@ fn bind_query_correctness(manifest: &ProofManifest) -> Result<(), CheckError> {
             // that pattern: the FILTER cannot be discharged (FILTER-add on a
             // manifest missing the filtered pattern's scan).
             return Err(CheckError::UnboundFilter { variable: variable.clone() });
+        }
+    }
+    Ok(())
+}
+
+/// Stage 2b′: a variable repeated WITHIN a single query BGP pattern
+/// (`{ ?v <p> ?v }`) must bind ONE term, so every disclosed row of every scan that
+/// answers that pattern must carry EQUAL values at the repeated slots.
+///
+/// # Why this is not already covered (#5240)
+/// SPARQL evaluates a BGP by matching each pattern against the data with a single
+/// substitution, so a variable at two slots of one pattern constrains those two
+/// columns to be equal. Nothing in the flat manifest regime enforced that:
+///
+/// - [`scan_matches_pattern`] compares only per-slot CONST-NESS and the constant
+///   ENCODINGS. Both slots of `{ ?v <p> ?v }` are variables, so it accepts any
+///   `(?, <p>, ?)` scan regardless of what the rows hold.
+/// - The scan circuit binds each disclosed row's CONSTANT slots to
+///   `pattern_const_enc`; a variable slot is unconstrained by construction (that
+///   is what makes it a variable), so the in-circuit statement says nothing here.
+/// - The shared-variable gates all work CROSS-pattern and are therefore blind to
+///   it: `sparq_zk::verify::cross_graph_join_obligations` (the disclosed path,
+///   via [`recheck`]) iterates pattern PAIRS `i < j` over per-pattern variable
+///   SETS — a repeated variable collapses in the set and `i == j` is never
+///   considered — and [`bind_joins`] (the hidden path) likewise requires the
+///   shared variable to sit in two DISTINCT patterns (`pj != pi`).
+///
+/// Confirmed empirically reachable against [`prefilter_manifest_structure`]
+/// (the method used for audit L-1): a manifest disclosing `(alice, knows, bob)`
+/// under `SELECT ?v WHERE { ?v <knows> ?v }` was ACCEPTED, so a relying party
+/// read a solution binding `?v` to two different terms at once. Witness:
+/// `repeated_pattern_var_rejects_a_row_whose_slots_disagree` in `tests/e2e.rs`.
+///
+/// # Per-row, over every constant-matching scan (the sq-q9r5e regime)
+/// This mirrors the FILTER gate exactly. The disclosed result IS the scans' rows,
+/// so EVERY active disclosed row of a matching scan is presented as answering the
+/// pattern and must satisfy it — one bad row makes the pattern unproven for the
+/// disclosed set. And pattern→scan is resolved by constant MEMBERSHIP, not by the
+/// prover's [`ProofManifest::pattern_scans`] declaration, so the obligation runs
+/// over EVERY scan whose bound constants match. Where a query places a
+/// repeated-variable pattern and a distinct-variable pattern at the SAME constant
+/// layout (`{ ?v <p> ?v . ?a <p> ?b }`) that is an OVER-demand — the verifier
+/// cannot tell which pattern a given scan answers, so it demands the equality for
+/// both readings and REJECTS rather than accept on the prover's say-so. That is
+/// the same deliberate fail-closed trade sq-q9r5e made for FILTERs; see
+/// [`check_pattern_scans`] for why narrowing it needs a verified result witness
+/// the flat manifest cannot yet express.
+///
+/// Comparison is on canonical big-endian field bytes ([`field_hex_eq`]), so hex
+/// spelling/padding differences do not spuriously diverge and a malformed row hex
+/// fails CLOSED (the reconstruction stage also rejects it as `MalformedField`).
+///
+/// The `extended-fragment` regime does not need this gate: `bind_fragment_scans`
+/// already binds each variable slot of a selected row to the disclosed solution
+/// (projected vars) or to a per-branch coherence map (existentials), both keyed by
+/// variable NAME across slots, so a repeated variable's two slots are compared
+/// there by construction.
+// [OPUS-5] #5240: within-pattern slot equality. Research-grade, NOT externally
+// audited (sq-qhy4).
+fn bind_repeated_pattern_slots(manifest: &ProofManifest) -> Result<(), CheckError> {
+    let patterns = fragment_patterns(&manifest.query)?;
+    let consts = fragment_pattern_consts(&patterns);
+    let var_slots = variable_slots(&patterns);
+
+    for (pi, c) in consts.iter().enumerate() {
+        // The repeated-slot obligations of THIS pattern: for a variable occupying
+        // slots [s0, s1, ..], every later slot must equal the first (which chains
+        // into full pairwise equality). A pattern with no repeat contributes none.
+        let mut by_var: std::collections::BTreeMap<&str, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        for (v, p, s) in &var_slots {
+            if *p == pi {
+                by_var.entry(v.as_str()).or_default().push(*s);
+            }
+        }
+        let obligations: Vec<(&str, usize, usize)> = by_var
+            .iter()
+            .filter(|(_, slots)| slots.len() > 1)
+            .flat_map(|(v, slots)| slots[1..].iter().map(move |s| (*v, slots[0], *s)))
+            .collect();
+        if obligations.is_empty() {
+            continue;
+        }
+
+        for (spi, sp) in manifest.sub_proofs.iter().enumerate() {
+            let (rows, row_count) = match &sp.inputs {
+                ProofInputs::Scan { rows, row_count, .. } => (rows, *row_count as usize),
+                _ => continue,
+            };
+            if !scan_matches_pattern(&sp.inputs, c) {
+                continue;
+            }
+            let active = row_count.min(rows.len());
+            for (row, values) in rows.iter().take(active).enumerate() {
+                for &(variable, first, other) in &obligations {
+                    if !field_hex_eq(&values[first], &values[other]) {
+                        return Err(CheckError::RepeatedSlotMismatch {
+                            pattern: pi,
+                            proof: spi,
+                            row,
+                            variable: variable.to_string(),
+                            slots: (first, other),
+                        });
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -5094,9 +5426,10 @@ fn global_attributions(manifest: &ProofManifest) -> Vec<BTreeSet<usize>> {
 /// per-graph attribution each scan sub-proof carries (audit #8).
 ///
 /// For each query BGP pattern `pi`, find the scan sub-proof that answers it
-/// (constants match, `scan_matches_pattern`) and require
-/// `manifest.attributions[pi]` to be a SUPERSET of that scan's proof-bound
-/// matched-graph set (`attribution[g] == true`). Soundness:
+/// (constants match, `scan_matches_pattern` — a prover's `manifest.pattern_scans`
+/// declaration deliberately does NOT narrow this, see [`check_pattern_scans`])
+/// and require `manifest.attributions[pi]` to be a SUPERSET of that scan's
+/// proof-bound matched-graph set (`attribution[g] == true`). Soundness:
 /// - **Under-declaring** (the `[[0],[0]]` forge): a graph the scan proved a
 ///   contribution from but `manifest.attributions[pi]` omits is rejected. This
 ///   is the load-bearing #8 fix — the prover can no longer shrink the
@@ -8609,6 +8942,7 @@ mod tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],
@@ -9105,6 +9439,7 @@ mod fragment_dispatch_tests {
             key_set: vec![],
             commitment_attestations: vec![],
             attributions: vec![],
+            pattern_scans: vec![],
             join_obligations: vec![],
             entailment_regime: EntailmentRegime::Simple,
             derivation_steps: vec![],

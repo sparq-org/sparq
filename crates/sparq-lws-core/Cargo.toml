@@ -42,15 +42,20 @@ tower = "0.5"
 # stack. PEM cert/key are loaded from file paths via `RustlsConfig::from_pem`. Config-gated: only
 # linked into the serve path when both TLS env vars are set (plain TCP otherwise).
 # Declared for native targets below.
-# PoP Tier-1b (mTLS-bound tokens, `SOLID_SERVER_MTLS_BOUND_TOKENS=1`). BOTH crates are ALREADY resolved
-# in the tree (transitively via axum-server's tls-rustls stack + the dev TLS tests), so promoting them
-# to non-dev [dependencies] adds NO new crate to the build — it only makes the existing types nameable
-# from this crate's mTLS serve path. `rustls-pemfile` parses the PEM cert-chain + key into the DER
-# types `ServerConfig::builder().with_client_cert_verifier(..).with_single_cert(..)` needs (the mTLS
-# path can't use axum-server's `RustlsConfig::from_pem`, which hard-codes `with_no_client_auth`).
-# `tokio-rustls` (matching the in-tree rustls 0.23 / aws-lc-rs) names `server::TlsStream` so the
-# per-connection acceptor can read `peer_certificates()` ONCE after the handshake. Both stay behind the
-# mTLS env flag: the default (flag-off) TLS + plain serve paths are byte-identical.
+# PoP Tier-1b (mTLS-bound tokens, `SOLID_SERVER_MTLS_BOUND_TOKENS=1`). `tokio-rustls` is ALREADY resolved
+# in the tree (transitively via axum-server's tls-rustls stack + the dev TLS tests), so promoting it
+# to a non-dev [dependencies] entry adds NO new crate to the build — it only makes the existing types
+# nameable from this crate's mTLS serve path. It matches the in-tree rustls 0.23 / aws-lc-rs and names
+# `server::TlsStream` so the per-connection acceptor can read `peer_certificates()` ONCE after the
+# handshake. It stays behind the mTLS env flag: the default (flag-off) TLS + plain serve paths are
+# byte-identical.
+# [OPUS-5] sq-5ah3p: the PEM cert-chain + key parse into the DER types
+# `ServerConfig::builder().with_client_cert_verifier(..).with_single_cert(..)` needs (the mTLS path
+# can't use axum-server's `RustlsConfig::from_pem`, which hard-codes `with_no_client_auth`) no longer
+# needs a `rustls-pemfile` entry here. That crate is archived (RUSTSEC-2025-0134) and since 2.x has
+# been a thin shim over `rustls-pki-types`' `PemObject`; `src/tls.rs` now calls `PemObject` directly
+# through rustls' own `rustls::pki_types` re-export, so the parse gains a dependency-free spelling
+# that cannot skew from the rustls version it feeds.
 # Declared for native targets below.
 # Auth: consume the standalone DPoP/Solid-OIDC verifier as a git dependency — do NOT reimplement.
 # The verifier's M2 landed the DNS-pinned SSRF-guarded network adapters (`NetworkJwksProvider` +
@@ -221,7 +226,6 @@ tokio = { version = "1", features = ["fs", "rt-multi-thread", "macros", "net", "
 tower-http = { version = "0.7", features = ["trace", "timeout"] }
 rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "std", "tls12"] }
 axum-server = { version = "0.8", default-features = false, features = ["tls-rustls-no-provider"] }
-rustls-pemfile = "2"
 tokio-rustls = { version = "0.26", default-features = false, features = ["aws-lc-rs"] }
 solid-oidc-verifier = { git = "https://github.com/jeswr/solid-oidc-verifier", rev = "89c896249a726398b78302fd2f65eef0a82af681", features = ["network"] }
 sparq-core = { path = "../sparq-core", features = ["mmap"], optional = true }
@@ -233,6 +237,19 @@ sparq-engine = { path = "../sparq-engine", optional = true }
 # native tree), so the feature adds NO new external crate. Native-only: the wasm request
 # core keeps the policy layer out of its dependency graph.
 sparq-policy = { path = "../sparq-policy", optional = true }
+# [OPUS-5] sq-hed3q: the trust-graph admission estate behind the OPT-IN, default-OFF
+# `trust-graph` feature — the LIBRARY seam `authz::trust_admit`, which adapts the `sparq-trust`
+# admission gate into this crate's own AccessMode/Decision vocabulary. `sparq-trust` runs the gate
+# (checked issuer signature over the RDFC-1.0 commitment, `trust:scope`, freshness, revocation,
+# holder binding) and derives the `auth:*` grants; `sparq-solid` supplies the `auth:` grant
+# vocabulary (`AUTH_NS` + `Mode`) that `PodStore::admit_trust_credential_static` installs into
+# `<urn:sparq:auth>`, so the two spellings of a grant cannot drift. Both are in-workspace path
+# deps, OPTIONAL, and OFF by default: with the feature off neither enters the dependency graph
+# and the server build is byte-identical to today. `sparq-trust` is `publish = false` (a research
+# prototype; the ZK estate it composes with is externally unaudited, sq-qhy4), hence path-only.
+# Native-only, like the ODRL gate: the wasm request core keeps them out of its graph.
+sparq-solid = { path = "../sparq-solid", optional = true }
+sparq-trust = { path = "../sparq-trust", optional = true }
 object_store = "0.14"
 pin-project-lite = "0.2"
 hyper = { version = "1", features = ["client", "http1"] }
@@ -273,7 +290,7 @@ p256 = { version = "0.13", features = ["ecdsa", "jwk", "pem", "std"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
 # (`serde_json` is a non-dev, non-optional [dependencies] entry above — the LDP/notifications/PoP
 # handlers name it unconditionally — so the test + example targets already resolve it; a duplicate
-# dev entry adds nothing to the graph. Same reasoning as `tokio-rustls`/`rustls-pemfile` below.)
+# dev entry adds nothing to the graph. Same reasoning as `tokio-rustls` below.)
 # The HttpSparqClient unit tests run against an in-process mock SPARQL endpoint (an axum server on a
 # tokio listener) — no live SPARQ. `net` for the listener, `rt-multi-thread` so the client + server
 # run on the same multi-threaded runtime, `time` for the timeout test.
@@ -283,8 +300,9 @@ http-body-util = "0.1"
 # HTTPS listener. tokio-rustls is the canonical rustls+tokio adapter and is ALREADY in the resolved
 # tree (pulled in transitively by axum-server's tls-rustls feature), so this adds NO new crate —
 # it only makes the existing dep nameable from the test. Matches the in-tree rustls 0.23 / aws-lc-rs.
-# (`tokio-rustls` + `rustls-pemfile` are now non-dev [dependencies] above — the mTLS serve path names
-# them — so the dev TLS tests reuse those; no separate dev entry needed.)
+# (`tokio-rustls` is now a non-dev [dependencies] entry above — the mTLS serve path names it — so the
+# dev TLS tests reuse it; no separate dev entry needed. The tests' PEM parsing likewise goes through
+# `rustls::pki_types::pem::PemObject`, so they need no PEM crate of their own either.)
 # The (default-`#[ignore]`d) live WebSocketChannel2023 handshake test drives a real WebSocket client
 # against the bound axum `…/receive` endpoint. tokio-tungstenite is ALREADY in the resolved tree
 # (pulled in by axum's `ws` feature), so naming it here adds NO new crate to the build. `futures-util`
@@ -315,6 +333,19 @@ h2 = "0.4"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 
+# [OPUS-5] sq-hed3q: `tests/lws_trust_admit.rs` MINTS the issuer-signed credential the trust-graph
+# seam admits — it signs a real RDFC-1.0 commitment rather than asserting against a hard-coded
+# golden hex, so the negative cases (forged signature, wrong holder, stale) are genuinely negative.
+# `sparq-trust` re-exports only the VERIFY side (`PublicKey`/`public_key_from_hex`), which is right
+# for runtime — the server never signs — so the test needs the signing primitives from `sparq-zk`
+# directly. DEV-ONLY: it does not enter the runtime or published graph, and the default
+# `cargo build` is unaffected. Both crates are already in the workspace test graph (`sparq-solid`
+# declares the same pair of dev-deps), so the workspace-wide `--all-targets` build compiles no new
+# crate. Scoped to non-wasm32 for the same reason `sparq-solid` scopes it: the ZK estate's arkworks
+# stack is native-only, and the wasm dev-graph must stay free of it.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+sparq-zk = { path = "../sparq-zk" }
+
 [features]
 # DEFAULT = the embedded in-process engine (sq-gg0qq.3): now that this crate lives IN the sparq
 # workspace, the in-process `sparq-core`/`sparq-engine` binding is the FIRST-CLASS data-path
@@ -333,7 +364,7 @@ redis-replay = ["dep:redis", "dep:r2d2"]
 # the first-class backend: `PSS_SPARQ_BACKEND=embedded` selects it at runtime (boot default stays
 # the in-memory double — explicit runtime selection, fail-safe). Disable with
 # `--no-default-features` to build the engine-free profile.
-# See `sparq_lws_core::store::embedded` and decisions/0001-embed-sparq-in-process.md.
+# See `sparq_lws_core::store::embedded` and `research/lws-design-records.md` §3.
 embedded-sparq = ["dep:sparq-core", "dep:sparq-engine"]
 # [GPT-5.6] sq-r1ei8: default-on full-tier query surface. The route, handler,
 # protocol parser, and engine dependencies are all compiled out together; this
@@ -352,6 +383,15 @@ sparql-endpoint = [
 # code and the handler hot path is byte-identical. Enable AND attach a gate at router assembly
 # (`LdpState::set_odrl_gate`) for it to fire; enabled-but-unattached is behaviour-identical.
 odrl-authz = ["dep:sparq-policy"]
+# [OPUS-5] sq-hed3q: OPT-IN trust-graph admission seam (`authz::trust_admit`) — the PURE LIBRARY
+# function that adapts the `sparq-trust` admission gate (an issuer-signed credential + the
+# Control-gated `.acr` rules) into an ADDITIVE, allow-only grant set in this crate's own
+# AccessMode/Decision vocabulary. OFF by default: the module is not compiled and neither
+# `sparq-solid` nor `sparq-trust` enters the dependency graph, so the server is byte-identical to
+# today. Enabling it is ALSO behaviour-identical — the seam is deliberately NOT called from
+# `ldp::handler`; hot-path wiring is a separate soundness-sensitive follow-up. RESEARCH prototype,
+# clear path: no privacy / unlinkability / anonymity / ZK-soundness claim (sq-qhy4).
+trust-graph = ["dep:sparq-solid", "dep:sparq-trust"]
 # Opt-in REMOTE backend (sq-gg0qq.3): the live `HttpSparqClient` (`src/store/http.rs`) — a SPARQL
 # 1.1 Protocol client over a remote SPARQ `/sparql` endpoint, selected at runtime by
 # `PSS_SPARQ_BACKEND=http`. OFF by default: in-workspace builds talk to the engine in-process

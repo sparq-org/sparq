@@ -2,17 +2,22 @@
 # [SONNET-4.6] run_differential_harness.sh — PROOF M1 (sq-3x7dl.14.2).
 #
 # Drives the XPath differential oracle harness:
-#   1. Run the Rust harness's own unit tests (the F&O references, the self-expiring
-#      oracle-divergence guards, the fault-injection non-vacuity check).
+#   1. Run the Rust harness's own unit tests (the F&O references, the CPython
+#      codepoint-slicing cross-check of the fn:substring window, the codepoint->byte
+#      boundary-conversion property test (sq-hjvte), the self-expiring oracle-divergence
+#      guards, the per-test-function fault-injection coverage checks).
 #   2. Build the harness (zk/xpath/differential/).
 #   3. Generate the oracle Noir test file — every expected value read back from sparq's
 #      own Rust SPARQL/XSD scalar evaluator, cross-checked bit-for-bit against native f64
-#      (doubles) and against an explicit XPath F&O 5.4.3 window (substring).
+#      (doubles) and against an explicit XPath F&O 3.1 sec. 5.4.3 fn:substring window.
 #   4. Create a temporary Nargo package depending on the RELEASED noir_XPath face repo.
 #   5. Run `nargo test` — every differential test function must pass.
-#   6. SELF-TEST: re-generate with --inject-fault and assert `nargo test` FAILS. A pass
-#      there means the harness is VACUOUS (not wired to the circuit) and this script
-#      exits non-zero.
+#   6. SELF-TEST: for EACH generated test function, re-generate the file with one
+#      corrupted expected value in that function alone (--inject-fault-in) and assert
+#      `nargo test` FAILS. A pass there means that test function is VACUOUS (not wired to
+#      the circuit) and this script exits non-zero. One variant per function, because a
+#      single run over an all-faults file yields ONE exit status: nonzero there says only
+#      that SOME test failed, so nine dead sections would hide behind one live one.
 #
 # Usage:
 #   ./scripts/run_differential_harness.sh                     # full run (normal CI)
@@ -25,7 +30,7 @@
 #
 # The noir_XPath source is NOT in this repo — it was externalized to the
 # sparq-org/noir_XPath face repo (sq-5reoy / #1599). Override the pinned dependency with:
-#   XPATH_GIT=https://github.com/sparq-org/noir_XPath  XPATH_TAG=v0.2.0
+#   XPATH_GIT=https://github.com/sparq-org/noir_XPath  XPATH_TAG=v0.3.0
 #   XPATH_DIRECTORY=xpath                       # the PACKAGE inside that repo's workspace
 #   XPATH_PATH=/local/checkout/xpath            # a local path dep instead of the git dep
 #
@@ -43,7 +48,7 @@ COMMITTED_ORACLE="${XPATH_DIR}/tests/differential_oracle/src/lib.nr"
 # Pinned released face repo. A floating default would silently change what is being
 # verified, so both the URL and the TAG are explicit and overridable.
 XPATH_GIT="${XPATH_GIT:-https://github.com/sparq-org/noir_XPath}"
-XPATH_TAG="${XPATH_TAG:-v0.2.0}"
+XPATH_TAG="${XPATH_TAG:-v0.3.0}"
 XPATH_PATH="${XPATH_PATH:-}"
 # The PACKAGE within the face repo's Nargo WORKSPACE — required for the git form, see
 # write_nargo_toml below.
@@ -172,22 +177,69 @@ if [ "${ORACLE_ONLY}" = "true" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: self-test (inject-fault) — prove the harness is non-vacuous.
+# Step 2: self-test (inject-fault) — prove EACH generated test function can fail.
 # A deliberately corrupted expected value MUST make nargo test fail. If it passes, the
 # generated file is not actually exercising the circuit and every green run is worthless.
+#
+# ONE VARIANT PER TEST FUNCTION, not one all-faults file. A `nargo test` run reports ONE
+# exit status for the whole file, so a single run over a file with ten faults proves only
+# that SOME test failed — nine sections that had quietly stopped being able to fail (a corpus
+# that emptied, an expected value derived from the very call it asserts) would hide behind
+# the one that still works. Each variant here is byte-identical to the oracle file that
+# just ran GREEN except for one corrupted value inside one test function, so its failure
+# is attributable to that function. That attribution assumes generation and `nargo test`
+# are deterministic — generation is pinned by a generator unit test, and the clean run
+# immediately above is the control.
 # ---------------------------------------------------------------------------
 FAULT_DIR="${TMPDIR_BASE}/fault"
 write_nargo_toml "${FAULT_DIR}" "sparq_xpath_differential_fault"
 
-echo "[xpath-differential] Generating the fault-injected Noir test file (self-test)..."
-"${HARNESS_BIN}" --inject-fault "${FAULT_DIR}/src/lib.nr"
+# The generator names the test functions it emits. Looping over ITS list, rather than one
+# hard-coded here, means a renamed or dropped section changes the loop instead of silently
+# shrinking the set of functions this self-test proves anything about.
+FAULT_TESTS=()
+while IFS= read -r fault_test; do
+    # `if`, not `[ … ] && …`: under `set -e` a failing AND-list as the last command of the
+    # loop body would abort the script on a blank line rather than skip it.
+    if [ -n "${fault_test}" ]; then
+        FAULT_TESTS+=("${fault_test}")
+    fi
+done < <("${HARNESS_BIN}" --list-fault-sites)
 
-echo "[xpath-differential] Running nargo test on the fault-injected file (MUST fail)..."
-if (cd "${FAULT_DIR}" && nargo test) 2>/dev/null; then
-    echo "ERROR: nargo test PASSED on a deliberately corrupted expected value." >&2
-    echo "ERROR: the differential harness is VACUOUS — it is not wired to the Noir circuit." >&2
+# Cross-check against the file that just ran green: every test function it contains must
+# get a variant, or that function's green run stands unproven.
+ORACLE_TESTS=()
+while IFS= read -r oracle_test; do
+    if [ -n "${oracle_test}" ]; then
+        ORACLE_TESTS+=("${oracle_test}")
+    fi
+done < <(sed -n 's/^fn \(differential_oracle_[A-Za-z0-9_]*\)() {$/\1/p' "${ORACLE_DIR}/src/lib.nr")
+
+if [ "${#FAULT_TESTS[@]}" -eq 0 ]; then
+    echo "ERROR: the generator reported no fault sites — the self-test would be a no-op." >&2
+    exit 1
+fi
+if [ "${FAULT_TESTS[*]:-}" != "${ORACLE_TESTS[*]:-}" ]; then
+    echo "ERROR: the fault-site list does not match the test functions in the oracle file:" >&2
+    echo "       sites:  ${FAULT_TESTS[*]:-}" >&2
+    echo "       oracle: ${ORACLE_TESTS[*]:-}" >&2
+    echo "       a test that just ran green would go unproven." >&2
     exit 1
 fi
 
-echo "[xpath-differential] Self-test PASSED: fault injection correctly detected."
+echo "[xpath-differential] Self-test: ${#FAULT_TESTS[@]} single-fault variants, each MUST fail..."
+for fault_test in "${FAULT_TESTS[@]}"; do
+    "${HARNESS_BIN}" --inject-fault-in "${fault_test}" "${FAULT_DIR}/src/lib.nr" \
+        2> "${TMPDIR_BASE}/inject.log" || { cat "${TMPDIR_BASE}/inject.log" >&2; exit 1; }
+    if (cd "${FAULT_DIR}" && nargo test) > "${TMPDIR_BASE}/nargo.log" 2>&1; then
+        cat "${TMPDIR_BASE}/nargo.log" >&2
+        echo "ERROR: nargo test PASSED with a deliberately corrupted expected value in" >&2
+        echo "       ${fault_test} — that test function is VACUOUS: it is not wired to the" >&2
+        echo "       Noir circuit, so its green run in oracle mode proves nothing." >&2
+        exit 1
+    fi
+    echo "[xpath-differential]   ${fault_test}: fault detected."
+done
+
+echo "[xpath-differential] Self-test PASSED: every generated test function failed on its own fault."
 echo "[xpath-differential] The differential harness is non-vacuous and wired to noir_XPath."
