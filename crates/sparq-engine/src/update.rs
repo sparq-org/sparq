@@ -410,7 +410,11 @@ fn load_document(source: &str) -> Result<TripleSet, String> {
         _ => "turtle",
     };
     let g = Graph::load_str(&text, format).map_err(|e| format!("LOAD {source}: {e}"))?;
-    Ok(decode_triples(&g))
+    // LOAD merges the document into the destination (SPARQL 1.1 Update §3.1.5), and an RDF
+    // merge standardises the incoming blank nodes apart from those already in the store: one
+    // fresh node per document label, never a store's (or an earlier LOAD's) `_:b` (#4160).
+    let mut fresh = FreshBnodes { map: FxHashMap::default() };
+    Ok(decode_triples(&g).iter().map(|t| t.each_ref().map(|x| freshen_term(x, &mut fresh))).collect())
 }
 
 // --- the rebuild path ----------------------------------------------------------------------------
@@ -1659,6 +1663,36 @@ mod tests {
         let g3 = update(&g3, "PREFIX : <http://ex/> INSERT DATA { _:s :a :o . _:s :b :o2 }").unwrap();
         let one_subj = crate::count(&g3, "SELECT DISTINCT ?s WHERE { ?s ?p ?o . FILTER(isBlank(?s)) }").unwrap();
         assert_eq!(one_subj, 1, "same label in one INSERT DATA op is one node");
+    }
+
+    /// #4160 — LOAD is an RDF merge: the document's blank nodes are standardised apart from
+    /// the store's and from every other LOAD's, on the rebuild and delta-overlay paths alike,
+    /// while one label within one document stays one node.
+    #[test]
+    fn load_blank_nodes_are_fresh() {
+        let dir = std::env::temp_dir().join(format!("sparq_load_4160_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.nt"), "_:b0 <http://ex/p> <http://ex/o1> .\n_:b0 <http://ex/q> <http://ex/o1> .\n").unwrap();
+        std::fs::write(dir.join("b.nt"), "_:b0 <http://ex/p> <http://ex/o2> .\n").unwrap();
+        let (a, b) = (dir.join("a.nt"), dir.join("b.nt"));
+        let req = format!("LOAD <file://{}> ; LOAD <file://{}> ; LOAD <file://{}>", a.display(), b.display(), a.display());
+        let blank_subjects = "SELECT DISTINCT ?s WHERE { ?s ?p ?o . FILTER(isBlank(?s)) }";
+        // The store already holds a `_:b0` of its own.
+        let src = "_:b0 <http://ex/p> <http://ex/existing> .";
+
+        let g = Graph::load_str(src, "ntriples").unwrap();
+        let g = with_load_base(dir.clone(), || update(&g, &req)).unwrap();
+        // existing + a.nt + b.nt + a.nt again: four distinct nodes, a.nt's two triples on one.
+        assert_eq!(count(&g), 6);
+        assert_eq!(crate::count(&g, blank_subjects).unwrap(), 4, "LOAD conflated blank nodes");
+
+        let mut g2 = Graph::load_str(src, "ntriples").unwrap();
+        with_load_base(dir.clone(), || update_in_place(&mut g2, &req)).unwrap();
+        assert_eq!(count(&g2), 6);
+        assert_eq!(crate::count(&g2, blank_subjects).unwrap(), 4, "in-place LOAD conflated blank nodes");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
