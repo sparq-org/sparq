@@ -11991,11 +11991,14 @@ fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell)
         (SortCell::Temp { id, .. }, SortCell::Num { f, .. }) => {
             compare_values(&sort_cell_term(graph, local, *id), &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Num { f, .. }, SortCell::Val { v, .. }) => {
-            compare_values(&Value::Num(Num::Double(*f)), v).unwrap_or(Ordering::Equal)
+        // A stored numeric against a computed value compares the stored term EXACTLY: its
+        // cached f64 would collapse a high-precision decimal or a big integer and misorder it
+        // against an exact computed key in the same column.
+        (SortCell::Num { id, .. }, SortCell::Val { v, .. }) => {
+            compare_values(&sort_cell_term(graph, local, *id), v).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Val { v, .. }, SortCell::Num { f, .. }) => {
-            compare_values(v, &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
+        (SortCell::Val { v, .. }, SortCell::Num { id, .. }) => {
+            compare_values(v, &sort_cell_term(graph, local, *id)).unwrap_or(Ordering::Equal)
         }
         // Two IRI sort cells: direct string comparison — no allocation, no term_class
         // dispatch. [SONNET-4.6] sq-7d3dj.30.2
@@ -12290,10 +12293,13 @@ fn order_bindings(
                 return Ok(sort_cell_val(Value::Term(term)));
             }
         }
-        Ok(match eval_compiled_numeric(graph, local, row, e) {
-            Some(n) => sort_cell_val(Value::Num(Num::Double(n))),
-            None => sort_cell_val(eval_compiled(graph, local, b, row, e)?),
-        })
+        // A computed key (arithmetic, a BIND-computed local value, any other expression)
+        // keeps its EXACT value: an `f64` fast path here collapsed integers beyond 2^53 and
+        // high-precision decimals into one tie, kept their input order, and turned an
+        // integer/decimal division by zero (a type error, so an unbound key) into infinity.
+        // The exact `Value` is ordered by `compare_values`, which already rechecks numeric
+        // ties exactly — the same order `cmp_expr` and MIN/MAX give (#3198).
+        Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?))
     };
     // The sort key (vector of (descending, SortCell)) for one row.
     let key_of = |row: &Row| -> Result<Vec<(bool, SortCell)>, String> {
