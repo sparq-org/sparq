@@ -3,16 +3,307 @@
 //! throughput investigation).
 //!
 //! `try_topk_orderby_indexed` is a pure SHORTCUT: it either returns exactly the
-//! same rows the pre-existing `eval_modified`-then-`order_bindings` path would,
-//! or declines (`Ok(None)`) and lets that path run. These tests never assume
-//! which branch fired — they only assert the OBSERVABLE result is correct,
-//! computed independently by fetching the full unordered relation (a query
-//! shape the new path never touches) and sorting it in the test itself.
+//! valid rows the pre-existing `eval_modified`-then-`order_bindings` path would,
+//! or declines (`Ok(None)`) and lets that path run. [GPT-6 Astra] Total-order
+//! tests use an independent Rust sort or full ORDER BY oracle; exact ties assert
+//! permitted membership and size. Execution traces pin admission/fallback guards.
 
 use sparq_core::Graph;
 use sparq_engine::query;
 
 const PFX: &str = "PREFIX ak: <http://example.org/ak#>\n";
+
+// [GPT-6 Astra] Delayed preparation must preserve modest/intermittent misses,
+// original pattern order, complete key groups, and OFFSET in either direction.
+#[test]
+fn lazy_probes_preserve_miss_patterns_and_overlay_windows() {
+    use std::fmt::Write;
+    for desc in [false, true] {
+        for prefix in [128, 800, 0] {
+            let mut ttl = String::new();
+            for i in 0..2048 {
+                let rank = if desc { 2047 - i } else { i };
+                let pending = if prefix == 0 { rank % 8 != 0 } else { rank >= prefix };
+                let status = if pending { "pending" } else { "done" };
+                writeln!(ttl, "<urn:s{i}> <urn:p> {} ; <urn:status> \"{status}\" ; <urn:seq> {i} .", i / 3).unwrap();
+            }
+            let base = Graph::load_str(&ttl, "turtle").unwrap();
+            let mut changed = base.fork();
+            sparq_engine::update_in_place(&mut changed, "DELETE DATA { <urn:s1024> <urn:p> 341 . <urn:s1025> <urn:p> 341 . }; INSERT DATA { <urn:extra> <urn:p> 400 ; <urn:status> \"pending\" ; <urn:seq> 9999 . }").unwrap();
+            for graph in [&base, &changed] {
+                for variable_first in [false, true] {
+                    let other = if variable_first { "?s <urn:seq> ?seq ; <urn:status> \"pending\"" } else { "?s <urn:status> \"pending\" ; <urn:seq> ?seq" };
+                    let direction = if desc { "DESC" } else { "ASC" };
+                    let text = format!("SELECT ?s WHERE {{ ?s <urn:p> ?p . {other} }} ORDER BY {direction}(?p) DESC(?seq)");
+                    let full = query(graph, &text).unwrap();
+                    let limited = format!("{text} OFFSET 2 LIMIT 4");
+                    assert_eq!(query(graph, &limited).unwrap().rows, full.rows[2..6], "prefix={prefix}, desc={desc}, variable_first={variable_first}");
+                }
+            }
+        }
+    }
+}
+
+// [GPT-6 Astra] An all-rejected walk cannot silently waive unvisited exclusions.
+#[test]
+fn unvisited_lazy_probe_keeps_empty_result_on_fallback() {
+    use std::fmt::Write;
+    let mut ttl = String::new();
+    for i in 0..32 {
+        writeln!(ttl, "<urn:s{i}> <urn:p> {i} ; <urn:later> 1, 2 . <urn:foreign{i}> <urn:status> \"pending\" .").unwrap();
+    }
+    let graph = Graph::load_str(&ttl, "turtle").unwrap();
+    let text = "SELECT ?s WHERE { ?s <urn:p> ?p ; <urn:status> \"pending\" ; <urn:later> ?v } ORDER BY DESC(?p) LIMIT 1";
+    assert!(query(&graph, text).unwrap().rows.is_empty());
+    let trace = sparq_engine::explain_analyze(&graph, text).unwrap();
+    assert!(trace.contains("BGP [binary GOO]"), "unvisited probe must not authorize indexed admission: {trace}");
+}
+
+// [GPT-6 Astra] A repeated variable must bind one term in both positions.
+// An IRI subject and an integer object can never satisfy this triple pattern.
+#[test]
+fn repeated_seed_variable_full_orderby_is_empty() {
+    let graph = Graph::load_str("<urn:s> <urn:p> 1 .", "turtle").unwrap();
+    let rows = query(&graph, "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x").unwrap();
+    assert!(rows.rows.is_empty(), "full ORDER BY must enforce subject/object equality: {rows:?}");
+}
+
+// [GPT-6 Astra] The LIMIT path must preserve the full evaluator's equality guard.
+#[test]
+fn repeated_seed_variable_limit_is_empty() {
+    let graph = Graph::load_str("<urn:s> <urn:p> 1 .", "turtle").unwrap();
+    let rows = query(&graph, "SELECT ?x WHERE { ?x <urn:p> ?x } ORDER BY ?x LIMIT 1").unwrap();
+    assert!(rows.rows.is_empty(), "LIMIT must enforce subject/object equality: {rows:?}");
+}
+
+// [GPT-6 Astra] LIMIT cannot hide an oversized intermediate working set.
+#[test]
+fn indexed_topk_preserves_intermediate_resource_limits() {
+    let graph = build_graph("X", &(0..40).map(|i| (i, i)).collect::<Vec<_>>(), "");
+    let query_text = format!("{PFX}{CLAIM_QUERY}1");
+    for (budget, expected) in [
+        (sparq_engine::QueryBudget { max_rows: Some(2), ..Default::default() }, "max-rows"),
+        (sparq_engine::QueryBudget { max_bytes: Some(16), ..Default::default() }, "max-bytes"),
+    ] {
+        let result = sparq_engine::query_with_budget(&graph, &query_text, &budget);
+        assert!(result.as_ref().is_err_and(|error| error.contains(expected)), "{expected}: {result:?}");
+    }
+    let generous = sparq_engine::QueryBudget { max_rows: Some(1000), ..Default::default() };
+    let result = sparq_engine::query_with_budget(&graph, &query_text, &generous).unwrap();
+    assert_eq!(task_seq(result.rows[0][0].as_ref().unwrap()), 39);
+}
+
+// [GPT-6 Astra] Keep the initial shortcut out of Cartesian fanout. Check both
+// the ordered answers and the actual fallback execution, not static plan text.
+#[test]
+fn multivalued_probe_uses_fallback_and_preserves_cartesian_rows() {
+    let graph = Graph::load_str(
+        "<urn:s> <urn:p> 2 ; <urn:b> 10, 11 ; <urn:c> 20, 21 .", "turtle",
+    ).unwrap();
+    let query_text = "SELECT ?s ?b ?c WHERE { ?s <urn:p> ?p ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p) ?b ?c";
+    let full = query(&graph, query_text).unwrap();
+    assert_eq!(full.rows.len(), 4);
+    let limited_query = format!("{query_text} LIMIT 3");
+    let limited = query(&graph, &limited_query).unwrap();
+    assert_eq!(limited.rows, full.rows[..3]);
+    let trace = sparq_engine::explain_analyze(&graph, &limited_query).unwrap();
+    assert!(trace.contains("BGP [binary GOO]"), "multivalued probe must execute the fallback: {trace}");
+}
+
+// [GPT-6 Astra] These two keys give a total order, so every OFFSET/LIMIT window
+// must equal the same full-order prefix/window, including complete tie boundaries.
+#[test]
+fn total_order_desc_offset_windows_match_full_sort() {
+    let graph = build_graph("X", &(0..96).map(|i| (i, i % 12)).collect::<Vec<_>>(), "");
+    let text = format!("{PFX}SELECT ?t WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s }} ORDER BY DESC(?p) DESC(?s)");
+    let full = query(&graph, &text).unwrap();
+    assert_eq!(full.rows.len(), 96);
+    for (offset, limit) in [(0, 0), (0, 1), (7, 2), (8, 9), (15, 3), (31, 17), (95, 4), (96, 1)] {
+        let got = query(&graph, &format!("{text} OFFSET {offset} LIMIT {limit}")).unwrap();
+        let expected: Vec<_> = full.rows.iter().skip(offset).take(limit).cloned().collect();
+        assert_eq!(got.rows, expected, "offset={offset}, limit={limit}");
+    }
+}
+
+// [GPT-6 Astra] With no secondary key, SPARQL does not specify which tied
+// subjects survive. Assert valid membership, multiplicity and size, not stability.
+#[test]
+fn exact_desc_ties_preserve_valid_membership_and_window_size() {
+    let graph = build_graph("X", &(0..32).map(|i| (i, 7)).collect::<Vec<_>>(), "");
+    let text = format!("{PFX}SELECT ?t ?p WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p }} ORDER BY DESC(?p)");
+    for (offset, limit) in [(0usize, 5usize), (3, 9), (28, 10), (40, 2), (0, 0)] {
+        let got = query(&graph, &format!("{text} OFFSET {offset} LIMIT {limit}")).unwrap();
+        assert_eq!(got.rows.len(), 32usize.saturating_sub(offset).min(limit));
+        let ids: std::collections::HashSet<_> = got.rows.iter()
+            .map(|row| task_seq(row[0].as_ref().unwrap())).collect();
+        assert_eq!(ids.len(), got.rows.len(), "no duplicate solution may be manufactured");
+        assert!(ids.iter().all(|id| (0..32).contains(id)));
+        assert!(got.rows.iter().all(|row| as_int(row[1].as_ref().unwrap()) == 7));
+    }
+}
+
+// [GPT-6 Astra] Exactly-at-cap groups remain eligible; one more must decline.
+// A distinguishing secondary key makes the OFFSET oracle deterministic.
+#[test]
+fn leading_tie_cap_boundaries_preserve_both_directions_and_offset() {
+    let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+    for (n, cap) in [(400, 256), (600, 300)] {
+        for desc in [false, true] {
+            for group in [cap, cap + 1] {
+                let tasks: Vec<_> = (0..n).map(|i| {
+                    let key = if i < group { if desc { 1000 } else { 0 } } else { i + 1 };
+                    (i, key)
+                }).collect();
+                let graph = build_graph("X", &tasks, "");
+                let direction = if desc { "DESC" } else { "ASC" };
+                let text = format!("{PFX}SELECT ?t WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s }} ORDER BY {direction}(?p) DESC(?s)");
+                let full = query(&graph, &text).unwrap();
+                let limited = format!("{text} OFFSET 1 LIMIT 1");
+                assert_eq!(query(&graph, &limited).unwrap().rows, full.rows[1..2]);
+                let trace = sparq_engine::explain_analyze(&graph, &limited).unwrap();
+                assert_eq!(trace.contains("BGP [binary GOO]"), group > cap || !supported,
+                           "n={n} group={group} direction={direction}: {trace}");
+            }
+        }
+    }
+}
+
+// [GPT-6 Astra] The cap still includes twice the requested row budget.
+#[test]
+fn leading_tie_cap_preserves_large_row_budget_admission() {
+    let tasks: Vec<_> = (0..600).map(|i| (i, if i < 400 { 1000 } else { i })).collect();
+    let graph = build_graph("X", &tasks, "");
+    assert_eq!(actual_top_k(&graph, 300), expected_top_k(&graph, 300));
+    let trace = sparq_engine::explain_analyze(&graph, &format!("{PFX}{CLAIM_QUERY}300")).unwrap();
+    let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+    assert_eq!(!trace.contains("BGP [binary GOO]"), supported, "{trace}");
+}
+
+// [GPT-6 Astra] Tombstones alter both the group extent and the existing n/2 cap.
+#[test]
+fn leading_tie_cap_observes_overlay_deletions() {
+    for desc in [false, true] {
+        let key = if desc { 1000 } else { 0 };
+        let tasks: Vec<_> = (0..600).map(|i| (i, if i < 301 { key } else { i + 1 })).collect();
+        let base = build_graph("X", &tasks, "");
+        let mut changed = base.fork();
+        sparq_engine::update_in_place(&mut changed, &format!("{PFX}DELETE DATA {{ <urn:task:X:0> ak:priority {key} . <urn:task:X:1> ak:priority {key} }}")).unwrap();
+        assert_eq!(changed.pending_delta_len(), 2);
+        let direction = if desc { "DESC" } else { "ASC" };
+        let text = format!("{PFX}SELECT ?t WHERE {{ ?t ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority ?p ; ak:seq ?s }} ORDER BY {direction}(?p) DESC(?s)");
+        let limited = format!("{text} OFFSET 1 LIMIT 1");
+        let full = query(&changed, &text).unwrap();
+        assert_eq!(query(&changed, &limited).unwrap().rows, full.rows[1..2]);
+        let before = sparq_engine::explain_analyze(&base, &limited).unwrap();
+        let after = sparq_engine::explain_analyze(&changed, &limited).unwrap();
+        assert!(before.contains("BGP [binary GOO]"), "original 301 > 300: {before}");
+        let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+        assert_eq!(!after.contains("BGP [binary GOO]"), supported, "remaining 299 == 598/2: {after}");
+    }
+}
+
+// [GPT-6 Astra] Each fixture has distinct numeric values, avoiding unspecified ties.
+#[test]
+fn negative_mixed_and_typed_lexical_values_use_the_fallback() {
+    for values in [
+        ["-5", "-1", "-3"],
+        ["\"02\"^^xsd:integer", "\"4\"^^xsd:int", "1.5"],
+        ["1", "-2", "3.5"],
+    ] {
+        let mut ttl = String::from("@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n");
+        for (i, value) in values.iter().enumerate() {
+            ttl.push_str(&format!("<urn:s{i}> <urn:p> {value} .\n"));
+        }
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        let text = "SELECT ?s ?p WHERE { ?s <urn:p> ?p } ORDER BY DESC(?p) ?s";
+        let full = query(&graph, text).unwrap();
+        let limited = format!("{text} LIMIT 2");
+        assert_eq!(query(&graph, &limited).unwrap().rows, full.rows[..2]);
+        let trace = sparq_engine::explain_analyze(&graph, &limited).unwrap();
+        assert!(trace.contains("BGP [binary GOO]"), "non-inline fixture must decline: {values:?}, {trace}");
+    }
+}
+
+// [GPT-6 Astra] Exercise an indexed subquery inside GRAPH, where the empty-default
+// view is suspended for a visible named graph. Hidden data must remain inaccessible.
+#[test]
+fn ordered_subqueries_preserve_default_and_named_view_boundaries() {
+    use sparq_engine::{DatasetView, DefaultGraphMode, query_view};
+    let graph = Graph::load_dataset(
+        "<urn:d> <urn:p> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n\
+         <urn:v> <urn:p> \"2\"^^<http://www.w3.org/2001/XMLSchema#integer> <urn:visible> .\n\
+         <urn:h> <urn:p> \"99\"^^<http://www.w3.org/2001/XMLSchema#integer> <urn:hidden> .\n",
+        "nquads",
+    ).unwrap();
+    let named = std::sync::Arc::new([oxrdf::Term::NamedNode(oxrdf::NamedNode::new("urn:visible").unwrap())].into_iter().collect());
+    let default_query = "SELECT ?s WHERE { ?s <urn:p> ?p } ORDER BY DESC(?p) LIMIT 1";
+    let named_query = |name: &str| format!("SELECT ?s WHERE {{ GRAPH <{name}> {{ SELECT ?s WHERE {{ ?s <urn:p> ?p }} ORDER BY DESC(?p) LIMIT 1 }} }}");
+    for default in [DefaultGraphMode::StoreDefault, DefaultGraphMode::Empty] {
+        let view = DatasetView { base: &graph, named: std::sync::Arc::clone(&named), default };
+        let rows = query_view(&view, default_query).unwrap().rows;
+        assert_eq!(rows.len(), usize::from(default == DefaultGraphMode::StoreDefault));
+        if let Some(row) = rows.first() { assert_eq!(row[0].as_ref().unwrap().to_string(), "<urn:d>"); }
+        let visible = query_view(&view, &named_query("urn:visible")).unwrap();
+        assert_eq!(visible.rows[0][0].as_ref().unwrap().to_string(), "<urn:v>");
+        assert_eq!(visible.rows.len(), 1);
+        for hidden in ["urn:hidden", "urn:absent"] {
+            assert!(query_view(&view, &named_query(hidden)).unwrap().rows.is_empty());
+            let from = format!("SELECT ?s FROM <{hidden}> WHERE {{ ?s <urn:p> ?p }} ORDER BY DESC(?p) LIMIT 1");
+            assert!(query_view(&view, &from).unwrap().rows.is_empty());
+        }
+    }
+    assert_eq!(query(&graph, &named_query("urn:hidden")).unwrap().rows[0][0].as_ref().unwrap().to_string(), "<urn:h>");
+}
+
+// [GPT-6 Astra] A scan must observe both overlay tombstones and newly inserted ids,
+// while a retained snapshot and the subsequently compacted result stay equivalent.
+#[test]
+fn forked_overlay_and_compaction_preserve_ordered_answers() {
+    let base = build_graph("X", &(0..40).map(|i| (i, i)).collect::<Vec<_>>(), "");
+    let mut changed = base.fork();
+    sparq_engine::update_in_place(&mut changed, &format!("{PFX}DELETE DATA {{ <urn:task:X:39> ak:priority 39 }}; INSERT DATA {{ <urn:task:X:90> ak:peer <urn:peer:X> ; ak:status \"pending\" ; ak:priority 90 ; ak:seq 90 }}")).unwrap();
+    assert!(changed.pending_delta_len() > 0);
+    for k in [1, 7, 40, 50] { assert_eq!(actual_top_k(&changed, k), expected_top_k(&changed, k)); }
+    assert_eq!(actual_top_k(&changed, 1), vec![90]);
+    assert_eq!(actual_top_k(&base, 1), vec![39]);
+    let before = actual_top_k(&changed, 50);
+    changed.compact().unwrap();
+    assert_eq!(changed.pending_delta_len(), 0);
+    assert_eq!(actual_top_k(&changed, 50), before);
+}
+
+// [GPT-6 Astra] A live cancellation flag arms the fallback even while false.
+// No sleeps or concurrent timing race is needed to prove cancellation and cleanup.
+#[test]
+fn armed_cancellation_uses_fallback_and_does_not_leak() {
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+    let graph = build_graph("X", &(0..40).map(|i| (i, i)).collect::<Vec<_>>(), "");
+    let text = format!("{PFX}{CLAIM_QUERY}1");
+    let flag = Arc::new(AtomicBool::new(false));
+    let budget = sparq_engine::QueryBudget::cancelled_by(Arc::clone(&flag));
+    let trace = sparq_engine::explain_analyze_with_budget(&graph, &text, &budget).unwrap();
+    assert!(trace.contains("BGP [binary GOO]"), "armed cancellation must decline: {trace}");
+    flag.store(true, Ordering::Relaxed);
+    let error = sparq_engine::query_with_budget(&graph, &text, &budget).unwrap_err();
+    assert!(error.contains("query budget exceeded (cancelled)"), "{error}");
+    assert_eq!(actual_top_k(&graph, 1), vec![39]);
+}
+
+// [GPT-6 Astra] Expiration is established before execution, never by a timed race.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn armed_deadline_uses_fallback_and_expired_deadline_errors() {
+    use std::time::{Duration, Instant};
+    let graph = build_graph("X", &(0..40).map(|i| (i, i)).collect::<Vec<_>>(), "");
+    let text = format!("{PFX}{CLAIM_QUERY}1");
+    let future = sparq_engine::QueryBudget { deadline: Some(Instant::now() + Duration::from_secs(3600)), ..Default::default() };
+    let trace = sparq_engine::explain_analyze_with_budget(&graph, &text, &future).unwrap();
+    assert!(trace.contains("BGP [binary GOO]"), "armed deadline must decline: {trace}");
+    let expired = sparq_engine::QueryBudget { deadline: Some(Instant::now()), ..Default::default() };
+    let error = sparq_engine::query_with_budget(&graph, &text, &expired).unwrap_err();
+    assert!(error.contains("query budget exceeded (timeout)"), "{error}");
+    assert_eq!(actual_top_k(&graph, 1), vec![39]);
+}
 
 /// One synthetic pending task: `(seq, priority)`. `seq` doubles as a stable,
 /// unique task identifier so results can be checked by task number.
@@ -326,8 +617,9 @@ fn fast_path_actually_engages_not_just_correct() {
         &format!("{PFX}{CLAIM_QUERY}1"),
     )
     .unwrap();
-    assert!(
-        !explained.contains("BGP [binary GOO]"),
-        "expected the indexed fast path to fire (no BGP execution-trace line), got:\n{explained}"
-    );
+    // [GPT-6 Astra] compact-index lacks the PSO scan needed by variable-object
+    // probes. Exercise its real decline instead of a zero-test feature pass.
+    let supported = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
+    assert_eq!(!explained.contains("BGP [binary GOO]"), supported,
+               "indexed engagement must match the built permutations:\n{explained}");
 }

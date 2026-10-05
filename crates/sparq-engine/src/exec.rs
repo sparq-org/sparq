@@ -3514,19 +3514,22 @@ fn try_topk_orderby(
 /// subject-sorted range resolved once, not re-resolved per candidate — see the
 /// `other_pats` construction below), and stopping once a COMPLETE sort-key group
 /// (never split mid-tie) has produced at least `row_budget` confirmed joins
-/// yields EXACTLY the rows `eval_modified` + `order_bindings` would: a candidate
-/// in an unvisited group is, by construction, sort-key-worse than every
-/// already-confirmed one (or sort-key-better but not yet visited, in the
-/// opposite direction — either way strictly ordered relative to what's been
-/// collected), so it can never enter the true top `row_budget`.
+/// yields valid top rows: an unvisited group is strictly worse in the requested
+/// primary-key direction, so it cannot displace the collected top `row_budget`.
+/// [GPT-6 Astra] If all ORDER BY keys tie, SPARQL permits different surviving
+/// subsets and tie order; equivalence does not require the fallback's input-index
+/// stability. Finishing a primary-key group preserves secondary-key selection.
 ///
 /// PERFORMANCE, not soundness: a single escalation block is also capped at a
 /// fraction of the candidate pool (see `max_group` below) — exceeding it
 /// declines (`Ok(None)`) even though continuing would still be CORRECT, because
 /// past that point this function's per-candidate cost stops being cheaper than
 /// the fallback's bulk join (measured; see `max_group`'s comment). This keeps
-/// the function's only failure mode "sometimes it doesn't help," never
-/// "sometimes it's slower than doing nothing."
+/// the walk bounded, but setup and failed probes still precede a decline.
+///
+/// [GPT-6 Astra] Recovery-stage restriction: budgeted queries, repeated variables
+/// and multi-valued probes use the existing evaluator. The historical timing notes
+/// below are unverified on current main; this candidate establishes no speedup.
 fn try_topk_orderby_indexed(
     graph: &Graph,
     local: &mut LocalVocab,
@@ -3536,6 +3539,11 @@ fn try_topk_orderby_indexed(
 ) -> Result<Option<Bindings>, String> {
     #[cfg(feature = "zk")]
     if crate::zk::enabled() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] Preserve the existing evaluator's intermediate row/byte
+    // accounting and cooperative cancellation schedule before doing any new work.
+    if budget::active() {
         return Ok(None);
     }
     if view::default_is_empty() {
@@ -3555,6 +3563,11 @@ fn try_topk_orderby_indexed(
     let mut filters = Vec::new();
     flatten_conjunction(ord_inner, &mut patterns, &mut filters);
     if !filters.is_empty() || patterns.is_empty() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] prepare_pattern records repeated slots but does not enforce
+    // their equality. Reuse the existing fast-path guard before bypassing build_row.
+    if patterns.iter().any(has_intra_triple_repeated_var) {
         return Ok(None);
     }
     // Out of scope for this first cut: blank nodes are treated as synthetic
@@ -3634,7 +3647,22 @@ fn try_topk_orderby_indexed(
         return Ok(None);
     }
 
-    // Prepare the other patterns ONCE, each as a SUBJECT-sorted scan over its
+    // [GPT-6 Astra] The first block must include its entire leading key group.
+    // Reject a group larger than the EXISTING block cap before retaining probe
+    // scans and subject vectors. Sorted object ids make equality at the cap's
+    // zero-based edge equivalent to group_len > max_group, in either direction.
+    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
+    let n = rows.len();
+    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
+    if n > max_group {
+        let first = if desc { n - 1 } else { 0 };
+        let edge = if desc { first - max_group } else { max_group };
+        if scan.to_spo(&rows[first])[2] == scan.to_spo(&rows[edge])[2] {
+            return Ok(None);
+        }
+    }
+
+    // Prepare the other patterns ONCE ON DEMAND, each as a SUBJECT-sorted scan over its
     // (fixed predicate [+ fixed object]) range — not re-resolved per candidate.
     // The first cut of this function called `graph.store.scan(&probe_pat)`
     // fresh for every (candidate, other-pattern) pair, which re-runs
@@ -3645,7 +3673,7 @@ fn try_topk_orderby_indexed(
     // fallback's bulk merge-join (which resolves the permutation ONCE per
     // pattern, not once per row). Resolving it once here and binary-searching
     // the resulting sorted slice per candidate removes that repeated cost.
-    struct OtherPat<'g> {
+    struct OtherScan<'g> {
         scan: sparq_core::store::Scan<'g>,
         // Precomputed ONCE (not per candidate, not per binary-search
         // comparison step): the subject id of every row in `scan`, in the
@@ -3658,7 +3686,34 @@ fn try_topk_orderby_indexed(
         // full [S,P,O] triple just to read column 0 is wasted work when the
         // search only ever needs that one column.
         subject_ids: Vec<Id>,
+    }
+    // [GPT-6 Astra] Resolve metadata eagerly, but retain a scan/vector only when
+    // a candidate reaches this pattern in the original order. A failed constant
+    // prefix therefore does not prepare later variable probes that it never uses.
+    struct OtherPat<'g> {
+        id_pat: IdPattern,
         obj_var: Option<Variable>,
+        prepared: Option<OtherScan<'g>>,
+    }
+    fn prepare_other<'g>(graph: &'g Graph, op: &mut OtherPat<'g>, seed_card: usize) -> bool {
+        if op.prepared.is_some() {
+            return true;
+        }
+        let sub_scan = graph.store.scan_sorted(&op.id_pat, 0);
+        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| op.id_pat[c].is_none());
+        if sub_actual_sort != Some(0) {
+            return false;
+        }
+        // The original exact-cardinality admission rule still applies to EVERY
+        // probe before it can contribute to a row, including a late selective one.
+        if sub_scan.rows.len().saturating_mul(2) < seed_card {
+            return false;
+        }
+        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
+        #[cfg(test)]
+        indexed_topk_preparation_tests::observe(subject_ids.len());
+        op.prepared = Some(OtherScan { scan: sub_scan, subject_ids });
+        true
     }
     let mut other_pats: Vec<OtherPat> = Vec::with_capacity(patterns.len().saturating_sub(1));
     for (i, tp) in patterns.iter().enumerate() {
@@ -3671,43 +3726,17 @@ fn try_topk_orderby_indexed(
             // WHOLE conjunction empty (a BGP join against an empty relation).
             return Ok(Some(Bindings::unsorted(out_vars, vec![])));
         }
-        let probe_id_pat: IdPattern = [None, id_pat[1], id_pat[2]];
-        let sub_scan = graph.store.scan_sorted(&probe_id_pat, 0);
-        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| probe_id_pat[c].is_none());
-        if sub_actual_sort != Some(0) {
-            // This store build can't give a subject-sorted scan for this
-            // pattern (e.g. no PSO permutation under `compact-index`/wasm) —
-            // decline rather than binary-search an unsorted range.
-            return Ok(None);
-        }
-        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
-        other_pats.push(OtherPat { scan: sub_scan, subject_ids, obj_var: pos_vars[2].clone() });
+        other_pats.push(OtherPat {
+            id_pat: [None, id_pat[1], id_pat[2]],
+            obj_var: pos_vars[2].clone(),
+            prepared: None,
+        });
     }
 
-    // UPFRONT cost check, before touching a single candidate: each `other_pats`
-    // scan's row count is the EXACT (not estimated) global cardinality of that
-    // pattern's own (predicate [+ object]) constraint. If any of them is
-    // already meaningfully smaller than the seed's own scan (`rows.len()`),
-    // the fallback's ordinary smallest-estimate seed selection will pick THAT
-    // pattern as ITS seed and materialize only that small set — beating this
-    // function's priority-ordered walk outright, with no reason to compete.
-    //
-    // This is exactly the realistic "claim strictly in priority order" shape:
-    // as such a queue drains, `ak:status="pending"` becomes highly selective
-    // while THIS function's seed (`ak:priority`, spanning the whole pool
-    // including now-claimed rows) does not shrink at all. Without this check,
-    // the only way to discover that is by actually walking past the
-    // ever-growing already-claimed prefix, probing (and rejecting) each one —
-    // real, wasted, unrecoverable cost. Measured directly: at n=1600 with
-    // 1000 of 1600 already claimed (600 truly pending), that reactive
-    // discovery cost ~237-272us total (wasted probes + the fallback anyway)
-    // vs. this upfront check's ~172-180us (matches a clean fallback-only
-    // cost, because it declines before doing ANY per-candidate work).
-    let seed_card = rows.len();
-    let min_other_card = other_pats.iter().map(|op| op.scan.rows.len()).min().unwrap_or(seed_card);
-    if min_other_card.saturating_mul(2) < seed_card {
-        return Ok(None);
-    }
+    // [GPT-6 Astra] The previous global min-cardinality check is now applied
+    // by prepare_other to each exact scan count before that probe is used. A
+    // successful row must visit every pattern, so it passes the same admission
+    // rule. Unvisited patterns stay unproved and cannot authorize an empty result.
 
     // The output column list is FIXED across every candidate (hub, order, then
     // each other pattern's object variable, in pattern order) — compute it and
@@ -3741,7 +3770,6 @@ fn try_topk_orderby_indexed(
     // position 0 is always the best candidate, via `logical`, and do all
     // block/boundary arithmetic in that space. `logical` and `obj_id_at` are the
     // only direction-aware code; everything below them is direction-agnostic.
-    let n = rows.len();
     let logical = |i: usize| -> usize { if desc { n - 1 - i } else { i } };
     let obj_id_at = |i: usize| -> Id { scan.to_spo(&rows[logical(i)])[2] };
     // A single escalation block is dominated by ONE large tie-group when the
@@ -3756,12 +3784,10 @@ fn try_topk_orderby_indexed(
     // (half of n) still beat the fallback (~228us vs. the fallback's ~269us),
     // but a tie-group of 1600 (all of n) lost (would be ~450-700us vs. the
     // fallback's own ~269us) — and the same ~0.5-0.75 fraction held at n=8000
-    // (4000 still competitive, 8000 clearly lost). `max_group` below is
+    // (4000 still competitive, 8000 clearly lost). `max_group` is
     // therefore `n / 2` (with a floor for small `n`, and never below
-    // `row_budget` itself) — declining past it defers to the fallback, whose
-    // cost at that point is exactly its normal (tie-structure-independent)
-    // cost, not a new regression.
-    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
+    // `row_budget` itself) — declining past it defers to the fallback, with
+    // any preparation and failed probes already performed adding to its cost.
     let mut collected: Vec<Row> = Vec::new();
     let mut visited_to: usize = 0;
     // Block sizes grow GEOMETRICALLY from a small multiple of `row_budget`, not
@@ -3774,7 +3800,6 @@ fn try_topk_orderby_indexed(
     // usually satisfies it — starting at 1024 would pay ~1024 point-probes even for
     // `LIMIT 1`, which is worse than the bulk path it's meant to beat (measured:
     // this was the actual cause of a regression at moderate `n`, not a win).
-    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
     // Cumulative count of candidates that failed an OTHER-pattern check, across
     // ALL blocks in this call — distinct from `max_group`'s per-block width
     // check. A workload that claims strictly in priority order (the realistic
@@ -3784,10 +3809,10 @@ fn try_topk_orderby_indexed(
     // being rejected. That prefix is made of individually DISTINCT priority
     // values, so it never forms one oversized tie-group `max_group` would
     // catch; it spreads across many small geometric-growth blocks instead. The
-    // UPFRONT cost check above (comparing `other_pats`' exact cardinalities to
+    // per-pattern cost check (comparing exact scan cardinalities to
     // the seed's) already declines the CLEAR case — an other-pattern that's
     // globally selective enough for the fallback's own planner to prefer as
-    // ITS seed — before any candidate is even touched. This counter is a
+    // ITS seed — before that probe is used. This counter is a
     // SAFETY NET for what that check can't see: the seed's global cardinality
     // vs. an other-pattern's global cardinality doesn't capture every
     // possible skip-prefix shape (e.g. a correlation between scan order and
@@ -3831,25 +3856,22 @@ fn try_topk_orderby_indexed(
             let spo = scan.to_spo(&rows[logical(i)]);
             let hub_id = spo[0];
             let order_id = spo[2];
-            // FAST PATH: assume single-valued (the realistic schema shape — a
-            // task has exactly one status/priority/seq), building ONE row with
-            // no heap allocation beyond the SmallVec's inline capacity. Only a
-            // genuinely multi-valued predicate (rare) allocates, and only then
-            // — this is what the earlier `Vec<SmallVec>`-per-candidate
-            // cartesian machinery paid unconditionally, which (combined with
-            // the per-candidate `cols` rebuild) was the dominant remaining
-            // cost for a large tie-group after the binary-search fix alone.
+            // [GPT-6 Astra] Only single-valued probes are admitted in this slice.
+            // General Cartesian expansion remains with the existing evaluator.
             let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
-            let mut fanout: Option<Vec<SmallVec<[Id; 8]>>> = None;
             let mut failed = false;
-            for op in &other_pats {
+            for op in &mut other_pats {
+                if !prepare_other(graph, op, rows.len()) {
+                    return Ok(None);
+                }
+                let prepared = op.prepared.as_ref().expect("successful preparation");
                 // Binary-search the PRECOMPUTED, plain-`Id` subject list for
                 // this pattern (built once, above) — a trivial integer
                 // compare per step, no `to_spo` reconstruction during the
                 // search itself (that only happens below, per ACTUAL match,
                 // not per comparison step — see `subject_ids`'s doc comment).
-                let start = op.subject_ids.partition_point(|&id| id < hub_id);
-                let stop = start + op.subject_ids[start..].partition_point(|&id| id == hub_id);
+                let start = prepared.subject_ids.partition_point(|&id| id < hub_id);
+                let stop = start + prepared.subject_ids[start..].partition_point(|&id| id == hub_id);
                 if start == stop {
                     failed = true;
                     break;
@@ -3857,29 +3879,12 @@ fn try_topk_orderby_indexed(
                 let Some(_) = &op.obj_var else {
                     continue; // `obj_const` — existence-only, no column added
                 };
-                let op_rows: &[[Id; 3]] = op.scan.rows.as_ref();
+                let op_rows: &[[Id; 3]] = prepared.scan.rows.as_ref();
                 let match_count = stop - start;
-                if let Some(rows_so_far) = fanout.as_mut() {
-                    let mut next = Vec::with_capacity(rows_so_far.len() * match_count);
-                    for r in rows_so_far.iter() {
-                        for row in &op_rows[start..stop] {
-                            let mut nr = r.clone();
-                            nr.push(op.scan.to_spo(row)[2]);
-                            next.push(nr);
-                        }
-                    }
-                    *rows_so_far = next;
-                } else if match_count == 1 {
-                    row_ids.push(op.scan.to_spo(&op_rows[start])[2]);
-                } else {
-                    let mut next = Vec::with_capacity(match_count);
-                    for row in &op_rows[start..stop] {
-                        let mut nr = row_ids.clone();
-                        nr.push(op.scan.to_spo(row)[2]);
-                        next.push(nr);
-                    }
-                    fanout = Some(next);
+                if match_count != 1 {
+                    return Ok(None);
                 }
+                row_ids.push(prepared.scan.to_spo(&op_rows[start])[2]);
             }
             if failed {
                 failed_count += 1;
@@ -3888,14 +3893,7 @@ fn try_topk_orderby_indexed(
                 }
                 continue;
             }
-            match &fanout {
-                None => emit(&row_ids, &mut collected),
-                Some(rows) => {
-                    for r in rows {
-                        emit(r, &mut collected);
-                    }
-                }
-            }
+            emit(&row_ids, &mut collected);
         }
         visited_to = end;
         if collected.len() >= row_budget {
@@ -3904,10 +3902,81 @@ fn try_topk_orderby_indexed(
         block_target = block_target.saturating_mul(4).max(visited_to + 1);
     }
 
+    // [GPT-6 Astra] An empty walk may never visit later patterns. Preserve their
+    // unproved static-sort/cardinality exclusions through the existing fallback.
+    if other_pats.iter().any(|op| op.prepared.is_none()) {
+        return Ok(None);
+    }
     let mut result = Bindings { vars: out_vars, rows: collected, sorted_by: None };
     let use_topk = result.rows.len() > row_budget;
     order_bindings(graph, local, &mut result, expression, if use_topk { Some(row_budget) } else { None })?;
     Ok(Some(result))
+}
+
+// [GPT-6 Astra] Test-only observations pin retained preparation work, not timing.
+#[cfg(test)]
+mod indexed_topk_preparation_tests {
+    use sparq_core::Graph;
+    use std::cell::Cell;
+    use std::fmt::Write;
+
+    thread_local! { static PREPARED: Cell<(usize, usize)> = const { Cell::new((0, 0)) }; }
+    pub(super) fn observe(rows: usize) {
+        PREPARED.with(|c| { let (scans, ids) = c.get(); c.set((scans + 1, ids + rows)); });
+    }
+    const TEXT: &str = "SELECT ?s WHERE { ?s <urn:peer> <urn:X> ; <urn:status> \"pending\" ; <urn:priority> ?p ; <urn:seq> ?seq ; <urn:a> ?a ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p)";
+
+    fn graph(prefix: usize, overlay: bool, selective_last: bool) -> Graph {
+        let mut ttl = String::new();
+        for i in 0..4096 {
+            let status = if i < 4096 - prefix { "pending" } else { "done" };
+            writeln!(ttl, "<urn:s{i}> <urn:peer> <urn:X> ; <urn:status> \"{status}\" ; <urn:priority> {i} ; <urn:seq> {i} ; <urn:a> {i} ; <urn:b> {i} .").unwrap();
+            if !selective_last || i == 4095 { writeln!(ttl, "<urn:s{i}> <urn:c> {i} .").unwrap(); }
+        }
+        let base = Graph::load_str(&ttl, "turtle").unwrap();
+        if !overlay { return base; }
+        let mut changed = base.fork();
+        let mut deletes = String::from("DELETE DATA {");
+        for i in (0..4096).step_by(5) { writeln!(deletes, "<urn:s{i}> <urn:priority> {i} .").unwrap(); }
+        deletes.push('}');
+        crate::update_in_place(&mut changed, &deletes).unwrap();
+        assert_eq!(changed.pending_delta_len(), 820);
+        changed
+    }
+
+    #[test]
+    fn later_variable_preparation_is_avoided_before_block_decline() {
+        for overlay in [false, true] {
+            let g = graph(2047, overlay, false);
+            let full = crate::query(&g, TEXT).unwrap();
+            PREPARED.with(|c| c.set((0, 0)));
+            let got = crate::query(&g, &format!("{TEXT} LIMIT 1")).unwrap();
+            assert_eq!(got.rows, full.rows[..1]);
+            assert_eq!(PREPARED.with(Cell::get), (2, 4096 + 2049), "later variable scans/vectors must remain unprepared");
+        }
+    }
+
+    #[test]
+    fn successful_rows_prepare_each_probe_once() {
+        let g = graph(0, false, false);
+        for k in [1, 32] {
+            PREPARED.with(|c| c.set((0, 0)));
+            assert_eq!(crate::query(&g, &format!("{TEXT} LIMIT {k}")).unwrap().rows.len(), k);
+            let expected = if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) { (6, 6 * 4096) } else { (2, 2 * 4096) };
+            assert_eq!(PREPARED.with(Cell::get), expected);
+        }
+    }
+
+    #[test]
+    fn late_selective_probe_still_declines_before_emitting() {
+        let g = graph(0, false, true);
+        let full = crate::query(&g, TEXT).unwrap();
+        assert_eq!(full.rows.len(), 1);
+        let limited = format!("{TEXT} LIMIT 1");
+        assert_eq!(crate::query(&g, &limited).unwrap().rows, full.rows);
+        let trace = crate::explain_analyze(&g, &limited).unwrap();
+        assert!(trace.contains("BGP [binary GOO]"), "late cardinality guard must decline: {trace}");
+    }
 }
 
 /// [OPUS-4.8] (sq-7d3dj.30.4) Attempts the DISTINCT-projection loose skip-scan for the
