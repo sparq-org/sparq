@@ -410,15 +410,36 @@ const MAX_XML_DEPTH: usize = 256;
 /// rebinds the RIF prefix (`<rif:Group xmlns:rif="urn:foreign">`) leaves RIF, and
 /// its local names must not be interpreted with RIF semantics. Resolution (scoping,
 /// inheritance, rebinding) is quick-xml's `NsReader`. #3360.
+///
+/// quick-xml returns the declared namespace value raw, without expanding character
+/// or predefined entity references, so `xmlns="http://www.w3.org/2007/rif&#35;"`
+/// arrives as the literal `rif&#35;`. The value is unescaped with quick-xml's own
+/// `unescape` before comparison (an attribute value's normalized form is what names
+/// the namespace); a value that is not UTF-8 or does not unescape is refused.
 fn check_rif_namespace(ns: &ResolveResult<'_>, local: &str) -> Result<(), ImportError> {
     match ns {
-        ResolveResult::Bound(n) if n.as_ref() == RIF_NS.as_bytes() => Ok(()),
-        ResolveResult::Bound(n) => Err(ImportError::MalformedXml(format!(
-            "element <{}> is in namespace <{}>, not the RIF namespace <{}>",
-            local,
-            String::from_utf8_lossy(n.as_ref()),
-            RIF_NS
-        ))),
+        ResolveResult::Bound(n) => {
+            let raw = std::str::from_utf8(n.as_ref()).map_err(|_| {
+                ImportError::MalformedXml(format!(
+                    "element <{}> has a namespace that is not valid UTF-8",
+                    local
+                ))
+            })?;
+            let resolved = quick_xml::escape::unescape(raw).map_err(|e| {
+                ImportError::MalformedXml(format!(
+                    "element <{}> has an undecodable namespace <{}>: {}",
+                    local, raw, e
+                ))
+            })?;
+            if resolved == RIF_NS {
+                Ok(())
+            } else {
+                Err(ImportError::MalformedXml(format!(
+                    "element <{}> is in namespace <{}>, not the RIF namespace <{}>",
+                    local, resolved, RIF_NS
+                )))
+            }
+        }
         ResolveResult::Unbound => Err(ImportError::MalformedXml(format!(
             "element <{}> is in no namespace; RIF/XML requires the RIF namespace <{}>",
             local, RIF_NS
@@ -2102,6 +2123,48 @@ mod tests {
         let xml = "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#\">\
                    <rif:payload><rif:Group></rif:Group></rif:payload></rif:Document>";
         import(xml.as_bytes()).expect("a prefixed RIF-namespace root must import");
+    }
+
+    /// quick-xml hands back namespace declaration values without expanding character
+    /// or predefined entity references, so an escaped spelling of the RIF namespace
+    /// must be unescaped before comparison (XML namespace normalization).
+    #[test]
+    fn escaped_rif_namespace_declarations_are_accepted() {
+        for xml in [
+            "<Document xmlns=\"http://www.w3.org/2007/rif&#35;\"><payload><Group/></payload></Document>",
+            "<Document xmlns=\"http://www.w3.org/2007/rif&#x23;\"><payload><Group/></payload></Document>",
+            "<rif:Document xmlns:rif=\"http&#58;//www.w3.org/2007/rif&#35;\">\
+             <rif:payload><rif:Group/></rif:payload></rif:Document>",
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\">\
+             <payload xmlns=\"http://www.w3.org/2007/rif&#35;\"><Group/></payload></Document>",
+        ] {
+            import(xml.as_bytes()).unwrap_or_else(|e| panic!("escaped RIF namespace must import: {xml}: {e:?}"));
+        }
+    }
+
+    /// An escape that decodes to a namespace other than RIF is still refused, as is
+    /// an escape that does not decode at all.
+    #[test]
+    fn escaped_foreign_namespace_declarations_are_refused() {
+        assert_namespace_refused(
+            "<Document xmlns=\"http://www.w3.org/2007/rif&#36;\"><payload><Group/></payload></Document>",
+            "an escape decoding to `rif$` is not the RIF namespace",
+        );
+        assert_namespace_refused(
+            "<rif:Document xmlns:rif=\"http://www.w3.org/2007/rif#&#35;\">\
+             <rif:payload><rif:Group/></rif:payload></rif:Document>",
+            "an escape decoding to `rif##` is not the RIF namespace",
+        );
+        assert_namespace_refused(
+            "<Document xmlns=\"http://www.w3.org/2007/rif#\">\
+             <payload xmlns=\"http://www.w3.org/2007/rif&amp;\"><Group/></payload></Document>",
+            "a predefined entity decoding to `rif&` is not the RIF namespace",
+        );
+        assert!(
+            import(b"<Document xmlns=\"http://www.w3.org/2007/rif&bogus;\"><payload><Group/></payload></Document>")
+                .is_err(),
+            "an undecodable escape in a namespace must be refused"
+        );
     }
 
     fn assert_namespace_refused(xml: &str, why: &str) {
