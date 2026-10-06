@@ -60,7 +60,7 @@
 //!   the published [vc-di-eddsa test vectors]; the published `proofValue` is
 //!   regression-tested. Proofs from earlier releases (`sec:created`, plain
 //!   `cryptosuite` literal) no longer verify — no legacy fallback; re-sign them.
-//! - **Proof options are validated first.** [OPUS-5.5] zkp-14.3: [`sign`],
+//! - **Proof options are validated first.** zkp-14.3: [`sign`],
 //!   [`verify`] and the graph wrappers run [`ProofConfig::validate`] before any
 //!   graph materialization, canonicalization, signing or DID resolution, failing
 //!   with [`VcError::InvalidProofOption`]: `verificationMethod` must be an

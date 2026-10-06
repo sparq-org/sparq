@@ -1,6 +1,6 @@
 //! Lexical validation of the typed Data Integrity proof options.
 //!
-//! [OPUS-5.5] zkp-14.3. [`check`] is the **single validation seam** every public
+//! zkp-14.3. [`check`] is the **single validation seam** every public
 //! entry point ([`crate::sign`], [`crate::sign_graph`], [`crate::verify`],
 //! [`crate::verify_graph`], [`crate::ProofConfig::validate`]) runs **before** any
 //! graph materialization, RDFC-1.0 canonicalization, signing, or
@@ -34,7 +34,7 @@
 //!   expanded IRI from the table instead (which hashes identically to its
 //!   compact term).
 //!
-//!   [OPUS-5.5] **Incompatibility:** the earlier implementation hashed every
+//!   **Incompatibility:** the earlier implementation hashed every
 //!   compact term as `sec:<term>`. That is correct only for
 //!   `assertionMethod`; proofs made with the other four compact terms signed the
 //!   wrong IRI, no longer verify, and must be re-signed. There is deliberately
@@ -177,7 +177,7 @@ pub(crate) fn check(config: &ProofConfig) -> Result<CheckedProofConfig<'_>, Proo
 
 /// The `@id` the VC v2 `@context` gives a compact `proofPurpose` term, if any.
 ///
-/// [OPUS-5.5] Transcribed from the `proofPurpose` scoped context of
+/// Transcribed from the `proofPurpose` scoped context of
 /// <https://www.w3.org/ns/credentials/v2>. Only `assertionMethod` is `sec:` plus
 /// the term; the other four end in `Method`. Changing any IRI changes the hashed
 /// proof configuration, so every proof signed with that purpose stops verifying.
@@ -483,7 +483,7 @@ mod tests {
         bad(&"\u{1f600}".repeat(250_000));
     }
 
-    /// [OPUS-5.5] The `proofPurpose` scoped-context `@id`s, written out by hand
+    /// The `proofPurpose` scoped-context `@id`s, written out by hand
     /// from <https://www.w3.org/ns/credentials/v2> (retrieved 2026-09-26, SHA-256
     /// `59955ced6697d61e03f2b2556febe5308ab16842846f5b586d7f1f7adec92734`). This is
     /// the primary-source oracle; it must not be derived from the production lookup.

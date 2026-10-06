@@ -2,7 +2,7 @@
 
 Experimental W3C [Data Integrity](https://www.w3.org/TR/vc-data-integrity/) `eddsa-rdfc-2022`
 sign/verify over RDF triples: Ed25519 over the [RDFC-1.0](https://www.w3.org/TR/rdf-canon/)
-canonical form, resolving `did:key` (`did:web` behind the `did-web` feature). Opt-in, `publish = false`. [OPUS-5.5]
+canonical form, resolving `did:key` (`did:web` behind the `did-web` feature). Opt-in, `publish = false`.
 
 ## 🚀 Quickstart
 

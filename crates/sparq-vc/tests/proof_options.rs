@@ -1,6 +1,6 @@
 //! Public-API tests for the typed proof-option validation seam (zkp-14.3).
 //!
-//! [OPUS-5.5] Every invalid option must be rejected identically by
+//! Every invalid option must be rejected identically by
 //! [`ProofConfig::validate`], [`sign`], [`sign_graph`], [`verify`] and
 //! [`verify_graph`], before canonicalization and before the `verificationMethod`
 //! resolver is consulted. Valid options must round-trip verbatim. The compact

@@ -142,7 +142,7 @@ config first, per the spec). Consequences you can rely on:
 
 ## Proof-option validation (runs first)
 
-[OPUS-5.5] `sign`, `sign_graph`, `verify` and `verify_graph` all run
+`sign`, `sign_graph`, `verify` and `verify_graph` all run
 `ProofConfig::validate` **before** graph materialization, RDFC-1.0 canonicalization,
 signing or DID resolution, and fail with `VcError::InvalidProofOption(ProofOptionError)`:
 

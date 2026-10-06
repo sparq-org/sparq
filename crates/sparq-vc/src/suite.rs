@@ -45,7 +45,7 @@
 //! any other proof option or `@context` a JSON-LD proof may carry is not
 //! preserved.
 //!
-//! [OPUS-5.5] zkp-14.3: every entry point lexically validates the `ProofConfig`
+//! zkp-14.3: every entry point lexically validates the `ProofConfig`
 //! (absolute-IRI `verificationMethod`, supported `proofPurpose`, XSD 1.1
 //! `created`) through one seam before any graph materialization,
 //! canonicalization, signing, or DID resolution, failing with
@@ -268,7 +268,7 @@ pub enum VcError {
     /// The proof's cryptosuite/type is not `eddsa-rdfc-2022` / `DataIntegrityProof`.
     UnsupportedProof(String),
     /// A [`ProofConfig`] option failed lexical validation. Raised before any
-    /// canonicalization, signing, or `verificationMethod` resolution. [OPUS-5.5]
+    /// canonicalization, signing, or `verificationMethod` resolution.
     InvalidProofOption(ProofOptionError),
 }
 
@@ -480,7 +480,7 @@ fn hash_data(triples: &[Triple], checked: &CheckedProofConfig<'_>) -> Result<Vec
 ///
 /// Takes only a [`CheckedProofConfig`]: the two option IRIs come pre-parsed from
 /// the validation seam, and `pred` is applied to fixed vocabulary terms only —
-/// never to caller input. [OPUS-5.5] zkp-14.3
+/// never to caller input. zkp-14.3
 fn proof_config_triples(checked: &CheckedProofConfig<'_>) -> Vec<Triple> {
     let config = checked.config;
     let subject = || NamedOrBlankNode::BlankNode(oxrdf::BlankNode::new_unchecked("proof"));
@@ -715,7 +715,7 @@ mod tests {
     #[test]
     fn proof_config_matches_w3c_eddsa_rdfc_2022_vector() {
         let cfg = ProofConfig::new(W3C_VM).with_created(W3C_CREATED);
-        // [OPUS-5.5] zkp-14.3: the published options pass validation, and the
+        // zkp-14.3: the published options pass validation, and the
         // expanded `sec:assertionMethod` IRI hashes to the same published digest,
         // so the published proofValue verifies under either spelling.
         let expanded = ProofConfig {
@@ -732,7 +732,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-5.5] Each compact purpose canonicalizes to the `@id` the VC v2
+    /// Each compact purpose canonicalizes to the `@id` the VC v2
     /// `@context` (<https://www.w3.org/ns/credentials/v2>, `proofPurpose` scoped
     /// context, retrieved 2026-09-26) gives it. The purpose lines are written out
     /// from that primary source, not from the production lookup. Only the
@@ -845,7 +845,7 @@ mod tests {
             .to_nquads()
     }
 
-    /// [OPUS-5.5] zkp-14.3: for valid `assertionMethod` configs — the only purpose
+    /// zkp-14.3: for valid `assertionMethod` configs — the only purpose
     /// the old blanket `sec:<term>` mapping got right — the validated builder
     /// hashes exactly what the unchecked one did, so deterministic Ed25519
     /// produces byte-identical signatures for those existing inputs.
@@ -872,7 +872,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-5.5] The other four compact purposes were hashed as `sec:<term>`,
+    /// The other four compact purposes were hashed as `sec:<term>`,
     /// which is not their VC v2 `@context` `@id`. The corrected mapping must
     /// differ from that legacy output, so proofs signed with it must be re-signed.
     #[test]
