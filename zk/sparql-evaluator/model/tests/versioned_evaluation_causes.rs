@@ -167,3 +167,20 @@ fn rec2013_language_tagged_strings_use_length_based_ebv() {
         assert_eq!(serde_json::to_value(v3::evaluate_detailed(&w3).unwrap().result).unwrap(), boolean, "{literal}");
     }
 }
+
+#[test]
+fn same_term_compares_computed_values_and_errors_on_unbound() {
+    // SPARQL 1.1 §17.4.1.8: sameTerm(1 + 0, 1) is true; an unbound argument is an error.
+    for (query, answer) in [
+        ("ASK { FILTER(!sameTerm(1 + 0, 1)) }", false),
+        ("ASK { FILTER(sameTerm(1 + 0, 1)) }", true),
+        ("ASK { FILTER(!sameTerm(?unbound, 1)) }", false),
+    ] {
+        for agreed in [false, true] {
+            let (w2, w3) = inputs(query, "", agreed);
+            let boolean = serde_json::json!({ "Ask": answer });
+            assert_eq!(serde_json::to_value(v2::evaluate_detailed(&w2).unwrap().result).unwrap(), boolean, "{query}");
+            assert_eq!(serde_json::to_value(v3::evaluate_detailed(&w3).unwrap().result).unwrap(), boolean, "{query}");
+        }
+    }
+}

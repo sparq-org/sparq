@@ -1,7 +1,7 @@
 {
   "base_commit": "d34b709ea9c8140c66fd67305c02d79b4cc283a5",
   "base_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
-  "candidate_lock_sha256": "1b44843b6be64fed663cc2db2a477da007875fab2a43fe5a85ef2bc88e8b9532",
+  "candidate_lock_sha256": "45c5f1a0cd02f585811861aae720b4f95e280200c9e94674e0b2772860967894",
   "removed_registry_packages": [
     {
       "name": "proc-macro-error-attr2",

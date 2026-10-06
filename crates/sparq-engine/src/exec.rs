@@ -14080,7 +14080,7 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
         Equal(a, c) => equal_expr(graph, local, b, row, a, c),
         SameTerm(a, c) => {
             let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-            Ok(Value::Bool(matches!((&x, &y), (Value::Term(p), Value::Term(q)) if p == q)))
+            Ok(same_term_value(&x, &y))
         }
         Greater(a, c) => cmp_expr(graph, local, b, row, a, c, |o| o == Ordering::Greater),
         GreaterOrEqual(a, c) => cmp_expr(graph, local, b, row, a, c, |o| o != Ordering::Less),
@@ -15898,7 +15898,7 @@ fn eval_compiled(
         IdEqNonLit(a, c) => Ok(equal_idfast(graph, row, a, c)),
         SameTerm(a, c) => {
             let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-            Ok(Value::Bool(matches!((&x, &y), (Value::Term(p), Value::Term(q)) if p == q)))
+            Ok(same_term_value(&x, &y))
         }
         Greater(a, c) => cmp_compiled(graph, local, b, row, a, c, |o| o == Ordering::Greater),
         GreaterOrEqual(a, c) => cmp_compiled(graph, local, b, row, a, c, |o| o != Ordering::Less),
@@ -16667,6 +16667,19 @@ fn value_to_id(graph: &Graph, local: &mut LocalVocab, v: &Value) -> Id {
         }
     };
     local.intern(term)
+}
+
+/// `sameTerm` over evaluated operands. Computed numerics and booleans compare as the
+/// literal a BIND of them would produce, so `sameTerm(1 + 0, 1)` is true; an unbound
+/// or error operand is a type error rather than `false`.
+fn same_term_value(x: &Value, y: &Value) -> Value {
+    if let (Value::Term(p), Value::Term(q)) = (x, y) {
+        return Value::Bool(p == q);
+    }
+    match (value_as_term(x), value_as_term(y)) {
+        (Some(p), Some(q)) => Value::Bool(p == q),
+        _ => Value::Error,
+    }
 }
 
 /// A computed value as a concrete RDF term (`None` for unbound / type error).
