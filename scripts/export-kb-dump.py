@@ -84,9 +84,11 @@ LEAK_PATTERNS_GLOBAL: list[tuple[re.Pattern | None, str | None, str]] = [
 #   1. Prefixed-name string  (e.g. "sigimpl:justification") — catches common serialisations.
 #   2. IRI-substring string  (e.g. "sig-impl#justification") — catches full-IRI and any
 #      non-standard prefix serialisations that evade the prefixed form.
-# Additionally, _rdflib_check_restricted_projection() parses the Turtle graph with rdflib
-# (when available) and asserts zero matching triples by full IRI — catching rdflib's
-# auto-prefixed forms (e.g. "ns1:justification") that evade BOTH string patterns above.
+# Additionally, _prefix_expanded_check_restricted_projection() (stdlib, always run)
+# expands every declared prefix, and _rdflib_check_restricted_projection() parses the
+# Turtle graph with rdflib (when available) and asserts zero matching triples by full
+# IRI — both catch auto-prefixed forms (e.g. "ns1:justification") that evade BOTH
+# string patterns above.
 LEAK_PATTERNS_RESTRICTED_PROJECTION: list[tuple[re.Pattern | None, str | None, str]] = [
     # ── sigimpl:justification ─────────────────────────────────────────────────
     (
@@ -268,6 +270,72 @@ def leak_check_file(
     return violations
 
 
+# Restricted-tier IRIs whose ANY use in the public projection is a leak. The
+# stdlib prefix-expansion check below resolves every declared prefix, so an
+# auto-generated binding (rdflib's "ns1:", "ns2:", ...) or any other non-standard
+# prefix collapses to the same full IRI the IRI-substring patterns already guard.
+RESTRICTED_PROJECTION_IRIS: tuple[str, ...] = (
+    "https://w3id.org/zkp-sparql/sig-impl#justification",
+    "http://purl.org/dc/terms/abstract",
+    "https://sparq.dev/ns/pkg#Finding",
+)
+
+# Turtle `@prefix p: <iri> .` and SPARQL-style `PREFIX p: <iri>` (case-insensitive).
+_PREFIX_DECL_RE = re.compile(
+    r"(?:@prefix|(?i:\bprefix))\s+([A-Za-z][\w.-]*)?:\s*<([^>]*)>"
+)
+
+
+def _prefix_expanded_check_restricted_projection(
+    filename: str, content: str
+) -> list[LeakViolation]:
+    """
+    Stdlib-only, serialisation-independent companion to the rdflib check: expand
+    every declared prefix and flag any prefixed name that resolves to a
+    RESTRICTED_PROJECTION_IRIS term (e.g. "ns1:justification" bound to the
+    sig-impl namespace). Unlike the rdflib check this needs no optional
+    dependency, so the auto-prefix form is caught on every runner (#6037/#6383).
+    """
+    prefixes: dict[str, str] = {}
+    for m in _PREFIX_DECL_RE.finditer(content):
+        prefixes[m.group(1) or ""] = m.group(2)
+
+    # (compiled prefixed-name regex, restricted IRI) for every prefix whose
+    # namespace is a proper prefix of a restricted IRI.
+    targets: list[tuple[re.Pattern, str, str]] = []
+    for pfx, ns in prefixes.items():
+        if not ns:
+            continue
+        for iri in RESTRICTED_PROJECTION_IRIS:
+            if iri.startswith(ns) and len(iri) > len(ns):
+                local = iri[len(ns):]
+                name = f"{pfx}:{local}"
+                pat = re.compile(
+                    r"(?<![\w.:-])" + re.escape(name) + r"(?![\w-]|\.[\w-])"
+                )
+                targets.append((pat, name, iri))
+
+    violations: list[LeakViolation] = []
+    if not targets:
+        return violations
+    for lineno, line in enumerate(content.splitlines(), start=1):
+        for pat, name, iri in targets:
+            if pat.search(line):
+                violations.append(
+                    LeakViolation(
+                        filename=filename,
+                        marker=name,
+                        reason=(
+                            f"prefix-expanded IRI-match: {name!r} resolves to restricted "
+                            f"<{iri}> — serialisation-independent check (stdlib)"
+                        ),
+                        line_no=lineno,
+                        snippet=line.strip()[:120],
+                    )
+                )
+    return violations
+
+
 def _rdflib_check_restricted_projection(
     filename: str, content: str
 ) -> list[LeakViolation]:
@@ -356,8 +424,13 @@ def run_leak_check(
         violations = leak_check_file(filename, content, extra_patterns=extra)
         all_violations.extend(violations)
 
-        # Additional rdflib-based IRI check for the restricted projection
+        # Additional serialisation-independent IRI checks for the restricted
+        # projection: the stdlib prefix expansion always runs (so the auto-prefix
+        # form is caught without rdflib), the rdflib graph check when available.
         if filename == restricted_projection_key:
+            all_violations.extend(
+                _prefix_expanded_check_restricted_projection(filename, content)
+            )
             all_violations.extend(
                 _rdflib_check_restricted_projection(filename, content)
             )
