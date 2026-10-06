@@ -101,6 +101,13 @@ class WithRdflib(unittest.TestCase):
         self.assertFalse(passed)
         self.assertNotIn(kb.RDFLIB_REQUIRED_MARKER, [v.marker for v in viols])
 
+    def test_malformed_projection_is_refused(self):
+        bad = "@prefix ns1: <https://w3id.org/zkp-sparql/sig-impl#> .\n<https://x> ns1:justification [[[ .\n"
+        passed, viols, err = _check(bad)
+        self.assertFalse(passed)
+        self.assertIn(kb.PROJECTION_UNPARSEABLE_MARKER, [v.marker for v in viols])
+        self.assertIn("::error::restricted projection is not parseable Turtle", err)
+
     def test_dry_run_catches_probe_b(self):
         r = subprocess.run([sys.executable, str(SCRIPT), "--dry-run"], cwd=ROOT,
                            capture_output=True, text=True)

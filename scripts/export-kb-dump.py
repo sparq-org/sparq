@@ -272,6 +272,8 @@ def leak_check_file(
 # Marker of the fail-closed refusal emitted when rdflib is missing (#6037/#6230/#6383).
 RDFLIB_REQUIRED_MARKER = "rdflib-required"
 RDFLIB_INSTALL_HINT = "python3 -m pip install rdflib"
+# Marker of the fail-closed refusal when rdflib cannot parse the projection.
+PROJECTION_UNPARSEABLE_MARKER = "projection-unparseable"
 
 
 def _rdflib_available() -> bool:
@@ -295,7 +297,8 @@ def _rdflib_check_restricted_projection(
     string patterns.
 
     Returns an empty list if rdflib is unavailable (run_leak_check refuses the export
-    in that case) or the Turtle is unparseable (let the string patterns handle it).
+    in that case). Unparseable Turtle yields a PROJECTION_UNPARSEABLE_MARKER violation
+    (fail closed).
     """
     try:
         import rdflib  # noqa: PLC0415
@@ -312,10 +315,24 @@ def _rdflib_check_restricted_projection(
     try:
         g = rdflib.Graph()
         g.parse(data=content, format="turtle")
-    except Exception:
-        # Unparseable Turtle — the string patterns will still flag obvious markers;
-        # also the prov round-trip test will catch invalid Turtle in provenance.
-        return []
+    except Exception as exc:
+        # FAIL CLOSED: a projection rdflib cannot parse cannot be verified free of
+        # restricted-tier triples, and the string patterns miss prefixed forms.
+        msg = (
+            f"restricted projection is not parseable Turtle ({type(exc).__name__}: "
+            f"{str(exc)[:200]}) — it cannot be verified free of restricted-tier terms; "
+            f"refusing the export"
+        )
+        print(f"::error::{msg}", file=sys.stderr)
+        return [
+            LeakViolation(
+                filename=filename,
+                marker=PROJECTION_UNPARSEABLE_MARKER,
+                reason=msg,
+                line_no=0,
+                snippet="",
+            )
+        ]
 
     for pred in RESTRICTED_PREDICATES:
         for subj, _, obj in g.triples((None, pred, None)):
