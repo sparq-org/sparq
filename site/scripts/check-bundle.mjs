@@ -56,7 +56,7 @@ export const HEAVY_MODULE_SUFFIXES = [
   // The in-tab ZK prover (~MB each), dynamic-imported inside lib/zk-prover.ts.
   "-> @aztec/bb.js",
   "-> @noir-lang/noir_js",
-  // [GPT-5.6] #1046 — the zstd decoder, dynamic-imported inside js/src/decompress.ts and
+  // [GPT-5.6] #1046 — the zstd decoder, dynamic-imported inside @sparq/client's decompress.ts and
   // reached through the site's bytesToRdf pipeline. The maintainer's standing rule is that
   // rarely-used codecs are fetched ONLY when a user actually decodes a file of that
   // type, so it must STAY a lazy split point (never fold into a route-entry bundle).

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for the proactive merge-gate G3 — new-bench->registry+
-# dashboard (bead sq-ncvq.6, epic sq-ncvq). Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# Hermetic tests for the proactive merge-gate G3 — new-bench->registry+
+# dashboard (bead sq-ncvq.6, epic sq-ncvq).
 #
 # Hermetic w.r.t. git/network: imports scripts/check-new-bench-registered.py and
 # drives its pure evaluate() entry point against FIXTURE diff/registry/dashboard

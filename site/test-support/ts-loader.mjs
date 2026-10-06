@@ -16,6 +16,10 @@ import ts from 'typescript';
 // files still resolve normally) lets the unit tests import that package's source unchanged.
 // Pure test-support; it changes nothing the bundler / `tsc` see.
 export async function resolve(specifier, context, next) {
+  // #5114 — the tsconfig `paths` / webpack alias for the shared client, mirrored for node --test.
+  if (specifier === '@sparq/client') {
+    return next(new URL('../../packages/sparq-client/src/index.ts', import.meta.url).href, context);
+  }
   if (specifier.endsWith('.js') && (specifier.startsWith('./') || specifier.startsWith('../'))) {
     try {
       const tsUrl = new URL(specifier.slice(0, -'.js'.length) + '.ts', context.parentURL);

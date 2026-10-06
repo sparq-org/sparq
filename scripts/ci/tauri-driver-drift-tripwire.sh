@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-t6492 — tauri-driver ↔ WebKitGTK capability DRIFT TRIPWIRE + regression guard
+# sq-t6492 — tauri-driver ↔ WebKitGTK capability DRIFT TRIPWIRE + regression guard
 #
 # The native GUI smoke (nightly-full-sweep.yml `tauri-smoke`, gui.yml `tauri-e2e`) launches the
 # Tauri shell through `tauri-driver`, which proxies to the runner's WebKitWebDriver (from the

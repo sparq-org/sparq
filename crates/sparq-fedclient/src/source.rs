@@ -1131,22 +1131,18 @@ impl HttpFragmentTransport {
 }
 
 /// Percent-encode a query-parameter VALUE (RFC 3986 unreserved set passes through; everything
-/// else is `%XX`-escaped), so an N-Triples term (`<`, `>`, `"`, spaces, newlines in a brTPF
-/// block) round-trips through the URL back to the same term. Mirrors the sparq server's
-/// `pct_encode` so the link the transport builds is read identically server-side. Hand-rolled
-/// to avoid a `url`-crate dependency (the crate pulls `oxrdf`/`oxttl`, not `url`). [OPUS-4.8].
-#[cfg(not(target_arch = "wasm32"))]
-fn pct_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
+/// else is `%XX`-escaped, uppercase hex per UTF-8 byte), so an N-Triples term (`<`, `>`, `"`,
+/// spaces, newlines in a brTPF block) round-trips through the URL back to the same term. The
+/// server's TPF `hydra:next` builder uses the SAME `percent-encoding` set, so the link the
+/// transport builds is read identically server-side; the discovery ASK probe shares this one
+/// definition too (#3712).
+pub(crate) fn pct_encode(value: &str) -> String {
+    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(value, UNRESERVED).to_string()
 }
 
 /// Render a [`FragTerm`] in N-Triples lexical form (the TPF query-parameter grammar the server
@@ -1645,6 +1641,20 @@ mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
     use std::sync::Mutex;
+
+    /// #3712 tripwire: every printable ASCII byte + a control + 2-/4-byte UTF-8 — exactly the
+    /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
+    #[test]
+    fn pct_encode_pins_the_unreserved_set() {
+        let all: String = (0x20u8..0x7f)
+            .map(char::from)
+            .chain("\t\né😀".chars())
+            .collect();
+        assert_eq!(
+            pct_encode(&all),
+            "%20%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%09%0A%C3%A9%F0%9F%98%80"
+        );
+    }
 
     /// A canned-response transport double: records the (endpoint, query) it was asked for
     /// and returns a fixed body. Lets us assert the adapter reached the transport (i.e.

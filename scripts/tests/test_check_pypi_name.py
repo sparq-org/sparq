@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for scripts/check-pypi-name.py (bead sq-ed5).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Hermetic tests for scripts/check-pypi-name.py (bead sq-ed5).
 #
 # Hermetic w.r.t. git/network: imports scripts/check-pypi-name.py and drives its pure
 # classify_status() decision table + read_dist_name() reader against the committed

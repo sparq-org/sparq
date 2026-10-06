@@ -1,18 +1,18 @@
 # Feature-matrix fragment for `sparq-lws-core` (imported from jeswr/solid-server-rs,
-# bead sq-gg0qq.2). [FABLE-5]
+# bead sq-gg0qq.2).
 #
 # One self-contained leg mapping per opt-in feature. Assembled into the feature-matrix
 # `opt-in-features` strategy by scripts/assemble-feature-matrix.py; adding a leg for
 # THIS crate edits no OTHER crate's fragment (bead sq-ibrze).
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 
 # The IN-PROCESS embedded SPARQ backend (src/store/embedded.rs) — in-workspace path
 # deps on sparq-core/sparq-engine. DEFAULT-ON since sq-gg0qq.3 (the first-class
@@ -25,7 +25,7 @@
   features: "embedded-sparq"
   test: true
 
-# [GPT-5.6] sq-r1ei8: explicit compile/test coverage for the default-on full
+# sq-r1ei8: explicit compile/test coverage for the default-on full
 # tier. The complementary core tier cannot be expressed by this additive matrix;
 # `feature-matrix.yml` gates it in a dedicated `--no-default-features` job.
 - name: "sparq-lws-core (sparql-endpoint)"
@@ -42,7 +42,7 @@
   features: "http-sparq"
   test: true
 
-# [GPT-5.6] sq-oprna.2: the encrypted HTTP/3 listener over the same hardened
+# sq-oprna.2: the encrypted HTTP/3 listener over the same hardened
 # LDP router. The feature-gated integration test drives real TLS TCP + QUIC
 # sockets, response parity, and peer ConnectInfo-backed rate limiting.
 - name: "sparq-lws-core (http3)"
@@ -68,7 +68,7 @@
   features: "wasm"
   test: true
 
-# [OPUS-5] sq-hed3q: the opt-in trust-graph admission seam (src/authz/trust_admit.rs) — the
+# sq-hed3q: the opt-in trust-graph admission seam (src/authz/trust_admit.rs) — the
 # library adapter from the sparq-trust admission gate onto this crate's AccessMode/Decision
 # vocabulary. tests/lws_trust_admit.rs is entirely `#![cfg(feature = "trust-graph")]`, so without
 # this leg the seam's signed-credential positive path, its fail-closed cases, and its adversarial
@@ -78,7 +78,7 @@
   features: "trust-graph"
   test: true
 
-# [OPUS-5] sq-gg0qq.11: the opt-in ODRL policy gate on the LDP read / SPARQL query path
+# sq-gg0qq.11: the opt-in ODRL policy gate on the LDP read / SPARQL query path
 # (`src/authz/odrl.rs`, sq-elg47). THIS LEG WAS MISSING: `tests/odrl_gate.rs` is entirely
 # `#![cfg(all(feature = "odrl-authz", not(target_arch = "wasm32")))]`, and `odrl-authz` is
 # default-OFF, so ci.yml's `cargo nextest archive --workspace --all-targets` (whose only

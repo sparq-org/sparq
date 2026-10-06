@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] Feature-matrix tier detector + sq-vya1 guard (bead sq-6g9kr).
+# Feature-matrix tier detector + sq-vya1 guard (bead sq-6g9kr).
 # Design: research/feature-matrix-pyramid.md §4.
 #
 # Classifies each opt-in feature-matrix leg as sensitive (tier: test) or

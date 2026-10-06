@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-toze.35 (gate) + sq-qhy4 (the ZK-soundness external-audit gate).
+# sq-toze.35 (gate) + sq-qhy4 (the ZK-soundness external-audit gate).
 #
 # PRIVACY-CLAIM HONESTY GATE — the empirical-honesty mandate (MEMORY: feedback-
 # empirical-honesty) in CI form.
@@ -39,13 +39,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# [OPUS-4.8] sq-mraf (Option C) — the FORBIDDEN-PHRASE patterns are loaded from the SINGLE
+# sq-mraf (Option C) — the FORBIDDEN-PHRASE patterns are loaded from the SINGLE
 # shared source of truth `scripts/honesty-phrases.json` so this gate and the build-boundary
 # assertion in site/scripts/build-papers.mjs cannot drift. The JSON is the canonical list;
 # the per-line classification logic (which tier exempts how) stays HERE, unchanged.
 #
 # Inline allow-list marker: a scanned line containing this token is exempt. The text
-# AFTER the marker is the required human justification (audit trail). [OPUS-4.8]
+# AFTER the marker is the required human justification (audit trail).
 PHRASES_JSON="${ROOT}/scripts/honesty-phrases.json"
 [ -f "$PHRASES_JSON" ] || { echo "::error::shared honesty-phrase list not found at ${PHRASES_JSON} (sq-mraf)"; exit 2; }
 
@@ -75,7 +75,7 @@ ALLOW_MARKER="$(_phrases_field allowMarker)"
 #   SOUNDNESS_CLAIMS — PREDICATE-FORM positive soundness overclaims about a ZK/MPC
 #                      *artifact* (the verifier / proof / protocol / scheme / circuit /
 #                      prover / SNARK / system / estate / construction is/are SOUND, or
-#                      "provably/fully/… sound"). [OPUS-4.8] sq-qhy4: the prior
+#                      "provably/fully/… sound"). sq-qhy4: the prior
 #                      `sound(ness)?-(verifier|proof)` adjacency pattern missed
 #                      predicate-form overclaims ("the verifier is SOUND",
 #                      "…are COMPLETE and SOUND") — one sat in zk/compose/STATUS.md
@@ -91,7 +91,7 @@ ALLOW_MARKER="$(_phrases_field allowMarker)"
 # Loaded from the shared list (`absoluteForbiddenPatterns`) — see sq-mraf note above.
 mapfile -d '' -t PATTERNS < <(_phrases_array absoluteForbiddenPatterns)
 
-# [OPUS-4.8] Predicate-form soundness overclaim, subject-anchored on a ZK/MPC artifact
+# Predicate-form soundness overclaim, subject-anchored on a ZK/MPC artifact
 # noun + copula + "sound" (e.g. "the verifier is sound", "the proofs are sound", "the
 # protocol is sound"). The anchoring keeps it OFF honest non-crypto "is sound" lines.
 # Both parts come from the shared list so build-papers.mjs reuses the identical regex.
@@ -127,7 +127,7 @@ NEGATOR_HEDGE_RE="$(_phrases_field negatorHedge)"
 #     are line-marked where they legitimately name a phrase.
 #   - .git/target/node_modules/vendor : not authored claim surface.
 #
-# [OPUS-4.8] bead sq-mkza: the paper-factory `.typ` sources (`site/papers/*.typ` +
+# bead sq-mkza: the paper-factory `.typ` sources (`site/papers/*.typ` +
 # `site/papers/**/*.typ`, i.e. the pilot papers AND `_lib/*.typ`) are added — a `.typ`
 # paper IS a published outward claim, so an unqualified ZK/MPC soundness/privacy claim
 # typed into paper prose must trip the SAME absolute patterns as any README/site copy.
@@ -138,7 +138,7 @@ NEGATOR_HEDGE_RE="$(_phrases_field negatorHedge)"
 # This catches the COARSE unqualified-claim class; a subtle semantic overclaim phrased
 # around the patterns remains Stage-5 human review.
 #
-# [OPUS-4.8] bead sq-rvgr2.5: the spec-factory `.typ` sources (`site/specs/*.typ` +
+# bead sq-rvgr2.5: the spec-factory `.typ` sources (`site/specs/*.typ` +
 # `site/specs/**/*.typ`, i.e. every Proposed-Specification draft AND `_lib/*.typ`) are added
 # for the SAME reason — a published /specs draft is an outward claim surface, and the ZK/MPC
 # spec CONTENT (zkSPARQL / MPC-SPARQL, beads sq-rvgr2.2/.3) will author real cryptographic
@@ -147,7 +147,7 @@ NEGATOR_HEDGE_RE="$(_phrases_field negatorHedge)"
 # hedge exemption apply UNCHANGED; the per-line classification below is reused verbatim, so a
 # spec draft may hedge, negate, or `privacy-claims-allow:`-mark a line exactly like a paper.
 #
-# [OPUS-4.8] bead sq-4hga: the paper-factory EVIDENCE file
+# bead sq-4hga: the paper-factory EVIDENCE file
 # `site/src/data/paper-evidence.json` is also added — its human `note` / free-text fields
 # are published-paper provenance prose (they surface inline via the `provenance()` helper),
 # so an unqualified ZK/MPC claim hidden in a record `note` must trip the SAME patterns. The

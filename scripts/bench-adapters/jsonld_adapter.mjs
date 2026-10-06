@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// [FABLE-5] sq-hmd7l.15 — jsonld.js adapter for the bench/jsonld suite
+// sq-hmd7l.15 — jsonld.js adapter for the bench/jsonld suite
 // (registered in bench/competitors.json, id: jsonld-js). GATHER-ONLY: jsonld.js
 // is NOT a committed dependency — `npm install jsonld` into a scratch dir at
 // gather time and point NODE_PATH at it (bench/jsonld/gather.py does this).

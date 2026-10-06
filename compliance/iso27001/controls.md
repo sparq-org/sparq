@@ -33,7 +33,7 @@ evidence) · `AUDIT-READY` = doc/substrate in repo, certificate needs an org act
 | A.5.5 | Contact with authorities | N/A(op) | No org/authority relationship to maintain for an OSS project; operator owns this for their deployment. | Operator |
 | A.5.6 | Contact with special interest groups | IMPL | OpenSSF Scorecard published to the public OpenSSF dashboard (`.github/workflows/scorecard.yml`, `publish_results: true`); RustSec advisory-DB consumed daily (`dependency-monitoring.yml`); CodeQL/GHSA ecosystem participation. | sparq |
 | A.5.7 | Threat intelligence | IMPL | Daily advisory watchdog `.github/workflows/dependency-monitoring.yml` (RustSec); Dependabot 4 ecosystems (`.github/dependabot.yml`); CodeQL `security-and-quality` (`codeql.yml`). | sparq |
-| A.5.8 | Information security in project management | IMPL | Security gates are part of the dev process: `ci.yml` (clippy `-D warnings`, tests), `codeql.yml`, `supply-chain.yml`, `miri.yml`, `fuzz.yml`, `scorecard.yml`, aggregated by `ci-summary.yml` as a branch-protection gate. Threat model authored per surface (`research/threat-model.md`). | sparq |
+| A.5.8 | Information security in project management | IMPL | Security gates are part of the dev process: `ci.yml` (clippy `-D warnings`, tests), `codeql.yml`, `supply-chain.yml`, `miri.yml`, `fuzz.yml`, `scorecard.yml`, with `ci-fast.yml` (core-crate clippy/tests + SPARQL conformance) as the one required branch-protection check; the others run post-merge/nightly. Threat model authored per surface (`research/threat-model.md`). | sparq |
 | A.5.9 | Inventory of information & associated assets | AUDIT-READY | Asset inventory of the *software* exists: CycloneDX SBOM per build (`supply-chain.yml`), crate list, `research/threat-model.md` §Assets. Inventory of *operator data assets* is the operator's. | sparq / Operator |
 | A.5.10 | Acceptable use of information & assets | N/A(op) | Acceptable-use of a deployed instance + loaded data is the operator's policy. | Operator |
 | A.5.11 | Return of assets | N/A(op) | People/asset-return control; no employees. | Operator |
@@ -61,7 +61,7 @@ evidence) · `AUDIT-READY` = doc/substrate in repo, certificate needs an org act
 | A.5.33 | Protection of records | N/A(op) | Operator's records retention. | Operator |
 | A.5.34 | Privacy & protection of PII | AUDIT-READY | sparq processes no PII of its own; loaded-RDF PII is operator-controller. Scoped in `compliance/data-flow.md` + `compliance/dpia.md` (privacy worktree). | Operator |
 | A.5.35 | Independent review of information security | AUDIT-READY | Independent reviews exist in substance: OpenSSF Scorecard (external automated), CodeQL, the adversarial threat model + ZK soundness audit; this very engineer↔auditor loop. A *formal accredited internal-audit programme* is an org act — GAP-ISO-1. | sparq / Adopting org |
-| A.5.36 | Compliance with policies, rules & standards | IMPL | The `ci-summary.yml` aggregator is a required branch-protection gate that fails the merge if any policy lane (clippy, tests, conformance ratchets, supply-chain, CodeQL) is red. `docs/branch-protection.md`. | sparq |
+| A.5.36 | Compliance with policies, rules & standards | PARTIAL | The required `ci-fast` check fails the merge on core-crate clippy/tests or the SPARQL conformance ratchet; CodeQL alerts block via the `code_scanning` rule. Partial because supply-chain, full-workspace clippy/tests and the other ratchets now run post-merge/nightly (the `ci-summary` aggregator was deleted). `docs/branch-protection.md`. | sparq |
 | A.5.37 | Documented operating procedures | IMPL | `AGENTS.md` (the operating procedure for working on the repo), `CONTRIBUTING.md`, `docs/branch-protection.md`, the workflows themselves are executable procedure. | sparq |
 
 ## A.6 — People controls (8)
@@ -90,7 +90,7 @@ evidence) · `AUDIT-READY` = doc/substrate in repo, certificate needs an org act
 | A.8.1 | User endpoint devices | N/A(op) | Operator/org workstation control. | Operator |
 | A.8.2 | Privileged access rights | N/A(op) → AUDIT-READY | Branch-protection ruleset disallows direct push *including admins* (`docs/branch-protection.md`); privileged access to a deployed instance is operator-owned. | sparq / Operator |
 | A.8.3 | Information access restriction | N/A(op) | Restriction within a deployed instance is operator-owned (B3 no-auth design). | Operator |
-| A.8.4 | Access to source code | IMPL | Branch protection on `main` (no direct push, PR + review + required `ci-summary` gate; `docs/branch-protection.md`); `CODEOWNERS`; SHA-pinned actions; release artifacts SLSA-attested + SHA256SUMS (`release.yml`). | sparq |
+| A.8.4 | Access to source code | IMPL | Branch protection on `main` (no direct push, PR + review + required `ci-fast` check; `docs/branch-protection.md`); `CODEOWNERS`; SHA-pinned actions; release artifacts SLSA-attested + SHA256SUMS (`release.yml`). | sparq |
 | A.8.5 | Secure authentication | N/A(op) → AUDIT-READY | Optional server bearer token (`SPARQ_AUTH_TOKEN`); full secure-auth (MFA, session) is the operator's gateway (boundary B3). Repo-side: GitHub auth + signed commits/attestations. | Operator |
 | A.8.6 | Capacity management | N/A(op) → IMPL(partial) | Engine has a `QueryBudget` DoS-limit primitive (`sparq-engine`, threat-model T-DoS); capacity of a *running deployment* is operator-owned. | sparq / Operator |
 | A.8.7 | Protection against malware | IMPL | CodeQL SAST (`codeql.yml`), supply-chain advisory gating (`supply-chain.yml` + daily watchdog), SHA-pinned actions, distroless non-root image (no shell/package-manager to subvert; `Dockerfile`). | sparq |
@@ -102,7 +102,7 @@ evidence) · `AUDIT-READY` = doc/substrate in repo, certificate needs an org act
 | A.8.13 | Information backup | N/A(op) | Backup of operator data is operator-owned. | Operator |
 | A.8.14 | Redundancy of information processing facilities | N/A(op) | Availability/redundancy of a running deployment is operator-owned. | Operator |
 | A.8.15 | Logging | AUDIT-READY | Logging is present and the *hygiene standard* is documented (`CONTRIBUTING.md`: no sensitive content in logs); structured-log/retention policy of a deployment is operator-owned. | sparq / Operator |
-| A.8.16 | Monitoring activities | IMPL(repo) / N/A(op) | Repo-side: CI monitors every push (`ci.yml`, `ci-summary.yml`), Scorecard, daily advisory watchdog. Runtime monitoring of a deployment is operator-owned. | sparq / Operator |
+| A.8.16 | Monitoring activities | IMPL(repo) / N/A(op) | Repo-side: CI monitors every push (`ci-fast.yml` per PR/push, `ci.yml` nightly), Scorecard, daily advisory watchdog. Runtime monitoring of a deployment is operator-owned. | sparq / Operator |
 | A.8.17 | Clock synchronization | N/A(op) | Operator infrastructure control. | Operator |
 | A.8.18 | Use of privileged utility programs | IMPL | Distroless `nonroot` image has **no shell / no package manager / no privileged utilities** to abuse (`Dockerfile` `gcr.io/distroless/cc-debian12:nonroot`). | sparq |
 | A.8.19 | Installation of software on operational systems | IMPL | Reproducible, pinned build: pinned base digest, `Cargo.lock`, SHA-pinned actions, SLSA-attested artifacts; CIS-Docker hardening in `compliance/cis/` (cross-ref). | sparq |
@@ -118,7 +118,7 @@ evidence) · `AUDIT-READY` = doc/substrate in repo, certificate needs an org act
 | A.8.29 | Security testing in development & acceptance | IMPL | `cargo test --workspace` (`ci.yml`), W3C SPARQL/SHACL/inference conformance ratchets (never-lowered), `cargo-fuzz` (`fuzz.yml` PR smoke + nightly), Miri UB lane (`miri.yml`), the mmap corruption oracle (`crates/sparq-core/tests/mmap_corruption_oracle.rs`). | sparq |
 | A.8.30 | Outsourced development | N/A(op) | No outsourced development. | sparq |
 | A.8.31 | Separation of dev/test/production environments | AUDIT-READY | Branch model (`main` protected; feature branches) separates in-progress from released; release artifacts are built only on tags via `release.yml`. Operator owns their prod env separation. | sparq / Operator |
-| A.8.32 | Change management | IMPL | All changes via PR + review + required `ci-summary` gate + conformance "never-lower" ratchets (`CONTRIBUTING.md`, `docs/branch-protection.md`); `CHANGELOG.md`; beads track work. | sparq |
+| A.8.32 | Change management | IMPL | All changes via PR + review + required `ci-fast` check (core crates + SPARQL ratchet) + conformance "never-lower" ratchets (others nightly) (`CONTRIBUTING.md`, `docs/branch-protection.md`); `CHANGELOG.md`; beads track work. | sparq |
 | A.8.33 | Test information | N/A(op) | Use of (operator) production data in test is operator-owned; sparq's tests use W3C/synthetic fixtures. | sparq / Operator |
 | A.8.34 | Protection of information systems during audit testing | N/A(op) | Operator-owned (auditing a running system). | Operator |
 

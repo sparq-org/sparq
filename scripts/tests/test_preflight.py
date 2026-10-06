@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] Hermetic tests for scripts/preflight.py — the diff-scoped pre-submit
+# Hermetic tests for scripts/preflight.py — the diff-scoped pre-submit
 # gate runner.
 #
 # EVERY test here is NAMED for the guard it pins and is written to go RED when
@@ -923,7 +923,6 @@ class NonMechanicalObligationsAreStated(unittest.TestCase):
 
 
 WORKER_BRIEFS = (
-    "sparq-rust-impl.md",
     "sparq-rust-feature.md",
     "sparq-ci-infra.md",
     "sparq-docs.md",
@@ -1010,9 +1009,9 @@ class TheYamlSeamIsGating(unittest.TestCase):
             self.assertIsNotNone(jid, f"no step in {self.WORKFLOW} runs: {cmd}")
 
     def test_the_hosting_job_name_carries_no_advisory_token(self) -> None:
-        # ci-summary EXCLUDES any check-run whose name matches
-        # \b(advisory|informational|non-blocking)\b. Renaming the job to include one
-        # of those tokens silently un-gates every leg in it.
+        # A job name matching \b(advisory|informational|non-blocking)\b reads as
+        # non-blocking (and check-advisory-registry.py treats it so). Renaming the job
+        # to include one of those tokens silently un-gates every leg in it.
         import re as _re
 
         for cmd in self.STEP_RUNS:
@@ -1021,7 +1020,7 @@ class TheYamlSeamIsGating(unittest.TestCase):
             name = str(job.get("name") or jid)
             self.assertIsNone(
                 _re.search(r"\b(advisory|informational|non-blocking)\b", name, _re.I),
-                f"{cmd} is hosted by job {name!r}, which ci-summary would EXCLUDE",
+                f"{cmd} is hosted by job {name!r}, which reads as non-blocking",
             )
 
     def test_neither_leg_can_swallow_its_own_failure(self) -> None:

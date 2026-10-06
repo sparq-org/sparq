@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-qcnn.32 — advisory-job registry + gate-intent placement check.
-# [OPUS-5] #3773 — extended: language-agnostic gate detection (C3) + stable-identity
+# sq-qcnn.32 — advisory-job registry + gate-intent placement check.
+# #3773 — extended: language-agnostic gate detection (C3) + stable-identity
 # binding of every declaration (C4). 🤖 SPARQ agent.
 #
-# THE REGISTRY IS NOW LOAD-BEARING. Since #3773, `.github/advisory-registry.json` is
-# the ONLY thing that can make a check-run non-gating: scripts/ci_summary_gate.py
-# excludes a check iff its name is DECLARED here, and everything else GATES. Before
-# #3773 the gate inferred advisory status from the display NAME
-# (`\b(advisory|informational)\b`), which silently neutralised four real gates. This
-# checker is therefore the registry's integrity gate.
+# THE REGISTRY is the record of which jobs are ADVISORY (findings reported, check-run
+# kept green) and why; every undeclared job is HARD. (The one required merge check is
+# `ci-fast`; the registry decides hard-vs-advisory, not requiredness.) An earlier
+# aggregator inferred advisory status from the display NAME
+# (`\b(advisory|informational)\b`), which silently neutralised four real gates (#3773).
+# This checker is the registry's integrity gate.
 #
 # Checks FOUR directions across .github/workflows/*.yml:
 #
@@ -38,7 +38,7 @@
 #      identity pair at all, and a key with no literal anchor outside its
 #      `${{ … }}` expressions.
 #
-# [OPUS-5] #3774 review (gpt-5.6-sol) — the two C4 holes that reached this file:
+# #3774 review (gpt-5.6-sol) — the two C4 holes that reached this file:
 #   (a) C4 used to `continue` past an identity-less entry "already reported by C2".
 #       C2 only iterates jobs whose NAME carries the advisory/informational token, so
 #       an identity-less entry keyed on a NON-token name (`clippy (gate) + fmt
@@ -106,7 +106,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # its name rule in #3773 and now excludes only DECLARED names.
 ADVISORY_RE = re.compile(r"\b(advisory|informational)\b", re.IGNORECASE)
 
-# [OPUS-5] #3773 — the repo's own vocabulary for "this step fails the build on a
+# #3773 — the repo's own vocabulary for "this step fails the build on a
 # violation". Kept deliberately small and whole-word-ish so the classifier stays
 # precise: a false positive costs a waiver, a false NEGATIVE costs a silent gate.
 GATE_TOKEN_RE = re.compile(r"(?i)(?:^|[^a-z0-9])(gate|ratchet|tripwire|guard)(?:[^a-z0-9]|$)")
@@ -115,13 +115,13 @@ SCRIPT_PATH_RE = re.compile(r"[\w./-]+\.(?:py|sh|bash|mjs|cjs|js|ts)\b")
 # `npm run <script>` (also `npm run -w pkg <script>`, `npm --prefix x run <script>`).
 NPM_RUN_RE = re.compile(r"\bnpm\s+(?:[^\s]+\s+)*?run\s+(?:-[^\s]+\s+(?:[^\s-][^\s]*\s+)?)*([\w:.@/-]+)")
 
-# Required fields in every registry entry. [OPUS-5] #3773 adds the C4 identity pair.
+# Required fields in every registry entry. #3773 adds the C4 identity pair.
 # This set is MIRRORED by ci_summary_gate.py's REGISTRY_REQUIRED_FIELDS — the gate must
 # refuse exactly what this checker refuses, or an entry the checker rejects can still
 # buy a runtime exclusion (#3774 review, gpt-5.6-sol finding 2(a)).
 REQUIRED_FIELDS = ("owner_bead", "promotion_criteria", "registered", "workflow", "job_id")
 
-# [OPUS-5] #3774 review (finding 2(b)) — a `${{ … }}` in a registry key compiles to an
+# #3774 review (finding 2(b)) — a `${{ … }}` in a registry key compiles to an
 # unbounded `.+` in ci_summary_gate.py, so a key with no LITERAL, non-whitespace
 # character outside its expressions matches every check-run name (`gate` included).
 # Mirrors ci_summary_gate.py's `_YAML_EXPR_RE` / `registry_key_has_literal_anchor`.
@@ -210,7 +210,7 @@ def _strip_shell_comments(line: str) -> str:
 def extract_run_commands(block_text: str) -> list[str]:
     """Return the shell text of every `run:` step in a job block.
 
-    [OPUS-5] #3773 — classification must read what the job RUNS, not its prose. The
+    #3773 — classification must read what the job RUNS, not its prose. The
     previous whole-block scan also matched script paths mentioned in YAML comments
     (gui.yml's tauri-e2e header comment names `support/no-sleep-gate.sh`, which
     attributed the gate to the WRONG job), and shell comments inside a run block are
@@ -245,7 +245,7 @@ def extract_run_commands(block_text: str) -> list[str]:
 def load_npm_scripts(root: Path) -> dict[str, list[str]]:
     """Map every npm script NAME in the repo to the command(s) it runs.
 
-    [OPUS-5] #3773 — this is the "derive the gate set from what the workflows actually
+    #3773 — this is the "derive the gate set from what the workflows actually
     run" half: a workflow's `npm run X` is classified by the command X expands to, not
     by how X is spelled. Every package.json outside node_modules contributes (the repo
     is an npm workspace: root + site/ + js/ + gui/**/ + packages/**), so a script name
@@ -365,7 +365,7 @@ def check_workflows(root: Path) -> list[str]:
                 offences.append(
                     f"C2: {path.name}: job {job_name!r} is advisory/informational "
                     f"but has no entry in .github/advisory-registry.json "
-                    f"(so ci_summary_gate.py GATES it — declare it or drop the token)"
+                    f"(declare it or drop the token)"
                 )
             else:
                 missing = [f for f in REQUIRED_FIELDS if not entry.get(f)]
@@ -398,12 +398,12 @@ def check_registry_bindings(registry: dict,
                             live_jobs: dict[tuple[str, str], str]) -> list[str]:
     """C4: bind each registry key to (workflow, job_id) and pin the job's name.
 
-    [OPUS-5] #3773. The gate can only recognise a declared-advisory check by its
+    #3773. The gate can only recognise a declared-advisory check by its
     DISPLAY NAME, so a declaration that drifts from the job it describes silently
     stops applying. Fail-closed is the gate's job (a renamed job GATES); making the
     drift LOUD is this check's job.
 
-    [OPUS-5] #3774 review (gpt-5.6-sol, finding 2(a)). This used to `continue` past an
+    #3774 review (gpt-5.6-sol, finding 2(a)). This used to `continue` past an
     entry with no `workflow`/`job_id` "already reported by C2" — FALSE. C2 only
     iterates jobs whose NAME carries an advisory/informational token, so an
     identity-less entry whose key is not token-named (`clippy (gate) + fmt
@@ -423,9 +423,8 @@ def check_registry_bindings(registry: dict,
         if not _has_literal_anchor(key):
             offences.append(
                 f"C4: registry key {key!r} has no literal (non-expression) anchor. It "
-                f"compiles to an unbounded `.+` in ci_summary_gate.py, so it would "
-                f"whole-name-match EVERY check-run — `gate` included — from one "
-                f"registry line. Frame the expression with literal text (e.g. "
+                f"would whole-name-match EVERY check-run when matched as a pattern, "
+                f"from one registry line. Frame the expression with literal text (e.g. "
                 f"`GUI build ({key}, advisory)`)."
             )
         workflow = entry.get("workflow") or ""
@@ -436,9 +435,7 @@ def check_registry_bindings(registry: dict,
                 f"C4: registry entry {key!r} is missing {missing} — it has NO job "
                 f"identity to bind to, so no check can police it (C2 only sees "
                 f"advisory/informational-NAMED jobs, so it does not report this key). "
-                f"ci_summary_gate.py refuses such an entry outright (it declares "
-                f"nothing and the check keeps GATING): add the workflow file name and "
-                f"the job's YAML key, or delete the entry."
+                f"Add the workflow file name and the job's YAML key, or delete the entry."
             )
             continue
         actual = live_jobs.get((workflow, job_id))
@@ -573,7 +570,7 @@ _FIXTURE_C2_MISSING_FIELD_REGISTRY = {
 }
 
 
-# [OPUS-5] #3773 — C3 SHELL/NPM fixtures: the coverage hole that let the site
+# #3773 — C3 SHELL/NPM fixtures: the coverage hole that let the site
 # determinism grep-gate and the gui no-sleep-gate sit inside advisory jobs unnoticed.
 _FIXTURE_C3_SHELL_WORKFLOW = """\
 name: test-workflow
@@ -664,7 +661,7 @@ def _run_check(workflow_text: str, registry: dict,
 
 
 def _c4_cases() -> int:
-    """[OPUS-5] #3773 — C4: a declaration must bind to a live job whose CURRENT name
+    """#3773 — C4: a declaration must bind to a live job whose CURRENT name
     is exactly the key. Renaming the job therefore cannot silently flip its gating
     status: the gate stops matching it (it GATES, fail-closed) and this REDs."""
     entry = {
@@ -700,7 +697,7 @@ def _c4_cases() -> int:
             {},
             1,
         ),
-        # [OPUS-5] #3774 review, finding 2(a). These four used to be a single
+        # #3774 review, finding 2(a). These four used to be a single
         # "C4-skip: identity incomplete (C2 already reports it)" case asserting ZERO
         # offences. C2 does NOT report an identity-less entry whose key carries no
         # advisory/informational token — that is the hole the reviewer walked through
@@ -758,7 +755,7 @@ def _c4_cases() -> int:
 
 
 def _run_command_extraction_cases() -> int:
-    """[OPUS-5] #3773 — the run:-block extractor underpinning C3 precision."""
+    """#3773 — the run:-block extractor underpinning C3 precision."""
     cases = [
         ("inline run", "    steps:\n      - run: bash a-gate.sh\n", ["bash a-gate.sh"]),
         ("block scalar", "      - run: |\n          bash a-gate.sh\n          echo hi\n",
@@ -852,7 +849,7 @@ def self_test() -> int:
             0,
             "an advisory job running a non-gate script must not trigger C3",
         ),
-        # --- [OPUS-5] #3773: the shell/npm coverage hole -----------------------
+        # --- #3773: the shell/npm coverage hole -----------------------
         (
             "C3-negative(#3773): SHELL gate in an advisory job, no waiver",
             _FIXTURE_C3_SHELL_WORKFLOW,

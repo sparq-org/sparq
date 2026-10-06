@@ -358,19 +358,19 @@ impl OwlExplain {
                 self.dom_raw.entry(s).or_default().push(o);
             } else if p == v.range {
                 self.rng_raw.entry(s).or_default().push(o);
-            } else if p == ow.equiv_class {
+            } else if p == ow.o.equiv_class {
                 self.sc_raw.entry(s).or_default().push((o, EdgeOrigin::Equiv(t)));
                 self.sc_raw.entry(o).or_default().push((s, EdgeOrigin::Equiv(t)));
-            } else if p == ow.equiv_prop {
+            } else if p == ow.o.equiv_prop {
                 self.sp_raw.entry(s).or_default().push((o, EdgeOrigin::Equiv(t)));
                 self.sp_raw.entry(o).or_default().push((s, EdgeOrigin::Equiv(t)));
-            } else if p == ow.inverse_of {
+            } else if p == ow.o.inverse_of {
                 for (a, b) in [(s, o), (o, s)] {
                     self.inv_adj.entry(a).or_default().push(b);
                     let e = self.inv_prem.entry((a, b)).or_insert(t);
                     *e = (*e).min(t); // deterministic premise pick
                 }
-            } else if p == v.ty && o == ow.symmetric {
+            } else if p == v.ty && o == ow.o.symmetric {
                 self.symmetric.insert(s);
             }
             for id in t {
@@ -549,8 +549,8 @@ impl OwlProver<'_> {
             return self.prove_dr(t[0], true, t[2], depth);
         }
         // Post-equivalences: mutual subsumption ⊢ equivalence (scm-eqc2 / scm-eqp2).
-        if t[1] == ow.equiv_class || t[1] == ow.equiv_prop {
-            let (rel, rule) = if t[1] == ow.equiv_class {
+        if t[1] == ow.o.equiv_class || t[1] == ow.o.equiv_prop {
+            let (rel, rule) = if t[1] == ow.o.equiv_class {
                 (v.sub_class, "scm-eqc2")
             } else {
                 (v.sub_prop, "scm-eqp2")
@@ -560,7 +560,7 @@ impl OwlProver<'_> {
             return self.push(t, rule, vec![fwd, bwd]);
         }
         // pre_monotone owl:Thing / owl:Nothing typing (+ its cax-sco emissions).
-        if t[1] == v.ty && (t[0] == ow.thing || t[0] == ow.nothing) {
+        if t[1] == v.ty && (t[0] == ow.o.thing || t[0] == ow.nothing) {
             if t[2] == ow.owl_class {
                 return self.push(t, "axiom-owl", vec![]);
             }
@@ -948,7 +948,7 @@ impl OwlProver<'_> {
             } else if let Some(&prem) = self.g.explain.inv_prem.get(&(qa, qb)) {
                 (if prem[0] == qa && prem[2] == qb { "prp-inv1" } else { "prp-inv2" }, prem)
             } else if qa == qb && self.g.explain.symmetric.contains(&qa) {
-                ("prp-symp", [qa, self.g.v.ty, self.g.ow.symmetric])
+                ("prp-symp", [qa, self.g.v.ty, self.g.ow.o.symmetric])
             } else {
                 return None;
             };
@@ -969,7 +969,7 @@ impl OwlProver<'_> {
         match step {
             TraceStep::Chain(mid) => {
                 let r = t[1];
-                let typing = self.prove([r, self.g.v.ty, self.g.ow.transitive], depth + 1)?;
+                let typing = self.prove([r, self.g.v.ty, self.g.ow.o.transitive], depth + 1)?;
                 let left = self.prove([t[0], r, mid], depth + 1)?;
                 let right = self.prove([mid, r, t[2]], depth + 1)?;
                 self.push(t, "prp-trp", vec![typing, left, right])

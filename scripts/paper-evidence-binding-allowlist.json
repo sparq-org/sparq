@@ -1,5 +1,5 @@
 {
-  "_comment": "[OPUS-4.8] sq-gum8.13 (paper factory F1) — SHRINK-ONLY allowlist of canonical paper-evidence records not yet migrated to a machine-verified binding. scripts/verify-paper-evidence.py FAILS if this list GROWS beyond seed_count, if a key here names a non-canonical / non-existent record, or if a key here now has a passing binding (a stale entry). F3 (sq-gum8.15) drives this list to EMPTY by migrating every record; F2 (sq-gum8.14) exports the scoreboard consts so the conformance floors become json-pointer bindings. Do NOT add records to buy time — bind them.",
+  "_comment": "sq-gum8.13 (paper factory F1) — SHRINK-ONLY allowlist of canonical paper-evidence records not yet migrated to a machine-verified binding. scripts/verify-paper-evidence.py FAILS if this list GROWS beyond seed_count, if a key here names a non-canonical / non-existent record, or if a key here now has a passing binding (a stale entry). F3 (sq-gum8.15) drives this list to EMPTY by migrating every record; F2 (sq-gum8.14) exports the scoreboard consts so the conformance floors become json-pointer bindings. Do NOT add records to buy time — bind them.",
   "seed_count": 45,
   "keys": [
     "filtered_ann.recall_at_10_floor",

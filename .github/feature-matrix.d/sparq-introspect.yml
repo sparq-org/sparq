@@ -5,17 +5,17 @@
 # The default build is covered by the workspace lane; this fragment covers code
 # and tests that exist only when an opt-in feature is enabled.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required), crate (required), features (non-empty), test (boolean).
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 
-# [GPT-5.6] sq-lsp7k.29: numeric range and histogram facets are default-OFF, and
+# sq-lsp7k.29: numeric range and histogram facets are default-OFF, and
 # tests/numeric_facets.rs is feature-gated. This leg compiles, lints, and runs that
 # suite with the implementation enabled; the workspace lane retains feature-OFF
 # coverage.
@@ -24,7 +24,7 @@
   features: "numeric-facets"
   test: true
 
-# [GPT-5.6] sq-yjemp: schema-diff and its exact drift oracle are default-OFF.
+# sq-yjemp: schema-diff and its exact drift oracle are default-OFF.
 - name: "sparq-introspect (schema-diff — structured schema drift)"
   crate: "sparq-introspect"
   features: "schema-diff"

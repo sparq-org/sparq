@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// [FABLE-5] sq-hmd7l.16 — rdf-canonize (digitalbazaar, JavaScript) adapter for
+// sq-hmd7l.16 — rdf-canonize (digitalbazaar, JavaScript) adapter for
 // the bench/canon RDFC-1.0 comparison panel. rdf-canonize is the reference
 // INDEPENDENT implementation (sparq-canon delegates its algorithm to the Rust
 // rdf-canon crate, so the JS column is the real cross-implementation check).

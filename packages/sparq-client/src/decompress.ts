@@ -1,6 +1,7 @@
 /// <reference path="./seek-bzip.d.ts" />
 
-// [GPT-5.6] sq-epbw4 — shared browser decompression for the site and GUI.
+// [GPT-5.6] sq-epbw4 — THE browser decompressor for the site and GUI (#5114 folded the
+// site's former dataset-archive.ts copy into this module).
 //
 // gzip and ZIP use browser-native DecompressionStream support. zstd and bzip2 have no
 // native browser codec, so their dependencies are imported only when that codec is selected.
@@ -33,7 +34,8 @@ const CODEC_EXTENSIONS: Readonly<
   bzip2: ["bz2", "bzip2", "tbz", "tbz2"],
 };
 
-function codecFromMagic(
+/** The codec a payload's magic number announces, or `undefined`. */
+export function sniffDatasetCodec(
   bytes: Uint8Array,
 ): DatasetCompressionCodec | undefined {
   if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)
@@ -70,7 +72,10 @@ function codecFromMagic(
   return undefined;
 }
 
-function codecFromName(name: string): DatasetCompressionCodec | undefined {
+/** The codec a filename/URL extension names (query and fragment ignored), or `undefined`. */
+export function datasetCodecFromName(
+  name: string,
+): DatasetCompressionCodec | undefined {
   const extension = name.split(/[?#]/)[0].split(".").pop()?.toLowerCase() ?? "";
   for (const [codec, extensions] of Object.entries(CODEC_EXTENSIONS)) {
     if (extensions.includes(extension)) return codec as DatasetCompressionCodec;
@@ -78,19 +83,36 @@ function codecFromName(name: string): DatasetCompressionCodec | undefined {
   return undefined;
 }
 
-function innerNameForSource(
-  name: string,
-  codec: DatasetCompressionCodec,
-): string | null {
+const CODEC_CONTENT_TYPES: Readonly<Record<string, DatasetCompressionCodec>> = {
+  "application/gzip": "gzip",
+  "application/x-gzip": "gzip",
+  "application/zip": "zip",
+  "application/x-zip-compressed": "zip",
+  "application/zstd": "zstd",
+  "application/x-zstd": "zstd",
+  "application/bzip2": "bzip2",
+  "application/x-bzip2": "bzip2",
+};
+
+/** The codec a response `Content-Type` names (parameters ignored), or `undefined`. */
+export function datasetCodecFromContentType(
+  contentType: string | null | undefined,
+): DatasetCompressionCodec | undefined {
+  if (!contentType) return undefined;
+  return CODEC_CONTENT_TYPES[contentType.split(";")[0].trim().toLowerCase()];
+}
+
+// Tar wrappers have no single inner RDF document name, so they force a caller fallback.
+const TAR_EXTENSIONS = new Set(["tgz", "tbz", "tbz2"]);
+
+/** Strips a trailing compression suffix (`data.nt.gz` -> `data.nt`) for RDF format guessing. */
+function innerNameForSource(name: string): string | null {
   const base = name.split(/[?#]/)[0];
   if (base.length === 0) return null;
   const extension = base.split(".").pop()?.toLowerCase() ?? "";
-  if (codec === "gzip" && extension === "tgz") return null;
-  if (codec === "bzip2" && (extension === "tbz" || extension === "tbz2"))
-    return null;
-  if (!CODEC_EXTENSIONS[codec].includes(extension)) return base;
-  const suffixLength = extension.length + 1;
-  const inner = base.slice(0, -suffixLength);
+  if (TAR_EXTENSIONS.has(extension)) return null;
+  if (datasetCodecFromName(base) === undefined) return base;
+  const inner = base.slice(0, -(extension.length + 1));
   return inner.length > 0 ? inner : null;
 }
 
@@ -306,13 +328,14 @@ export async function decompressDatasetBytes(
   sourceName = "",
   codec?: DatasetCompressionCodec,
 ): Promise<DecompressedDatasetBytes> {
-  const resolved = codec ?? codecFromMagic(bytes) ?? codecFromName(sourceName);
+  const resolved =
+    codec ?? sniffDatasetCodec(bytes) ?? datasetCodecFromName(sourceName);
   switch (resolved) {
     case "gzip":
       return {
         bytes: await inflate(bytes, "gzip"),
         codec: resolved,
-        innerName: innerNameForSource(sourceName, resolved),
+        innerName: innerNameForSource(sourceName),
       };
     case "zip": {
       const decoded = await unzipFirstRdfMember(bytes);
@@ -322,13 +345,13 @@ export async function decompressDatasetBytes(
       return {
         bytes: await decodeZstd(bytes),
         codec: resolved,
-        innerName: innerNameForSource(sourceName, resolved),
+        innerName: innerNameForSource(sourceName),
       };
     case "bzip2":
       return {
         bytes: await decodeBzip2(bytes),
         codec: resolved,
-        innerName: innerNameForSource(sourceName, resolved),
+        innerName: innerNameForSource(sourceName),
       };
     default:
       throw new Error(

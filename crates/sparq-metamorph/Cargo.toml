@@ -28,7 +28,7 @@ publish = false
 # touch the network (the drivers' pure request-building layer is unit-tested
 # without sockets). ureq 3 with rustls+platform-verifier mirrors sparq-engine's
 # `service` transport pin, so enabling this grows no new dependency tree.
-protocol-drivers = ["dep:ureq"]
+protocol-drivers = ["dep:ureq", "dep:percent-encoding"]
 
 [dependencies]
 # Engine-independent result comparators (multiset equality, SPARQL-Results-JSON
@@ -44,6 +44,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # See the `protocol-drivers` feature note above.
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
+# #3712: `driver::form_urlencode`'s encoder (protocol-drivers only; already in the tree via ureq).
+percent-encoding = { workspace = true, optional = true }
 
 # [GPT-5.6] sq-hgqza: self-relative generation + oracle-check throughput only;
 # Criterion is dev-only and never enters the crate's lean dependency graph.

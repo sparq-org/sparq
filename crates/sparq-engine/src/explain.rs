@@ -50,7 +50,7 @@ pub fn explain(graph: &Graph, sparql: &str) -> Result<String, String> {
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+    let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     let (form, pattern) = query_form_pattern(&q);
     let mut out = String::new();
     let _ = writeln!(out, "EXPLAIN ({form}) — planning-only dry run; nothing is executed.");
@@ -78,7 +78,7 @@ pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBu
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+    let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     let (form, pattern) = query_form_pattern(&q);
     if !matches!(q, Query::Select { .. } | Query::Ask { .. }) {
         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use EXPLAIN for CONSTRUCT/DESCRIBE)".into());

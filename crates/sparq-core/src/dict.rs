@@ -1986,7 +1986,7 @@ impl Dict {
     /// Serialises the dictionary (prefixes, datatypes, compact terms) to `path` in a
     /// compact binary format. The hash table is NOT written — it is rebuilt on `open`.
     /// Arena-mode only (it serialises `terms`); the compacted/mmap'd modes persist via
-    /// [`save_mmap`](Self::save_mmap), which handles appended terms too.
+    /// `save_mmap`, which handles appended terms too.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         assert_eq!(self.base, 0, "Dict::save is arena-mode only; use save_mmap for blob/mmap'd (or grown) dicts");

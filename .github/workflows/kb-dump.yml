@@ -23,7 +23,7 @@ name: kb-dump
 #   sparq-org/research-kb. Not required to exist as a persistent repo secret —
 #   the job skips gracefully when absent (see "Check KB_DUMP_TOKEN" step).
 #
-# (sq-tzars.8 / sq-yfh5d) [SONNET-4.6] 🤖 SPARQ agent — sparq-org/research-kb dump workflow.
+# (sq-tzars.8 / sq-yfh5d) 🤖 SPARQ agent — sparq-org/research-kb dump workflow.
 
 on:
   # workflow_dispatch-only: automation aborted per #1552.  Run manually when a

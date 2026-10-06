@@ -5,7 +5,7 @@ description: How to make text-format parsing (N-Triples / Turtle / line-delimite
 
 # Rust parallel parsing for RDF ingest
 
-[OPUS-4.8] Authored from this project's measured research. Verify any claim
+Authored from this project's measured research. Verify any claim
 against `research/custom-parsers-baseline.md` and `research/fast-ingestion.md`
 before quoting it — those are the source of truth and were measured on an M1 Air.
 

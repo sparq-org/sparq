@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for the read-payload measurer (bead sq-lhwo.4, epic
-# sq-lhwo). Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable
-# returns). 🤖 SPARQ agent.
+# Hermetic tests for the read-payload measurer (bead sq-lhwo.4, epic
+# sq-lhwo). 🤖 SPARQ agent.
 #
 # Hermetic where it matters: the byte->token proxy, the cache-discount formula, the
 # hit-digest reducer, and the corpus drift-check are tested against a SYNTHETIC

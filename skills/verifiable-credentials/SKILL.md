@@ -129,6 +129,16 @@ config first, per the spec). Consequences you can rely on:
   credential + its proof config (exactly what RDFC-1.0 canonicalizes). Transforming a
   JSON-LD credential to RDF (context expansion) is the caller's job — e.g. via the
   engine's JSON-LD parser — to keep the lean build free of a JSON-LD context processor.
+- **W3C proof-config mapping (breaking).** [OPUS-5.5] `created` is hashed as
+  `dcterms:created` and `cryptosuite` as a `sec:cryptosuiteString`-typed literal, per
+  the published [vc-di-eddsa test vectors](https://www.w3.org/TR/vc-di-eddsa/#test-vectors)
+  (the published `proofValue` verifies in `crates/sparq-vc/tests/w3c_eddsa_rdfc.rs`).
+  Proofs signed by earlier releases (`sec:created`, plain `cryptosuite` literal) **no
+  longer verify** — there is no legacy fallback; re-sign them.
+- **Typed subset only.** `ProofConfig` carries type, cryptosuite, verificationMethod,
+  proofPurpose, created, domain and challenge; other proof options/`@context` are not
+  preserved, and field values (`created`, IRIs, purpose) are not fully validated.
+  Issuer/controller authorization and credential status are not checked.
 
 ## See also
 

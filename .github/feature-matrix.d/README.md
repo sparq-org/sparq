@@ -1,4 +1,4 @@
-<!-- [SONNET-4.6] sq-19f1i follow-up (issue #2384): the TWO-FILE scope contract for
+<!-- sq-19f1i follow-up (issue #2384): the TWO-FILE scope contract for
      feature-matrix leg work. Written here, in the fragment directory itself, because
      this is the directory a bead spec names when it scopes a leg change. -->
 
@@ -7,8 +7,8 @@
 One YAML fragment per crate. `scripts/assemble-feature-matrix.py` reads them all (in
 sorted-filename order) and emits the `opt-in-features` strategy matrix consumed by
 `.github/workflows/feature-matrix.yml`. Each leg's CI check-run name is
-`opt-in <name>`, and the `ci-summary / gate` aggregator discovers those names as
-REQUIRED checks — so the emitted name set is gate-critical.
+`opt-in <name>`. The matrix runs nightly and on dispatch (it does not block PRs; the
+one required check is `ci-fast`), and the emitted name set is pinned by a golden file.
 
 ## THE TWO-FILE SCOPE RULE
 
@@ -53,8 +53,8 @@ line and adds another.
 
 ## Other rules for a leg
 
-- Keep `name` free of the whole words "advisory" and "informational" — `ci-summary`
-  excludes matching check-runs, so such a leg would silently stop gating.
+- Keep `name` free of the whole words "advisory" and "informational" — those mark a
+  check-run as non-blocking, so such a leg would read as advisory.
 - `name` must be unique across all fragments (duplicates collapse two gating checks
   into one); `features` must be a non-empty comma list.
 - A crate's leg lives in that crate's fragment only, so concurrent PRs for DIFFERENT

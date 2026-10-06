@@ -46,11 +46,11 @@ test("the slim top bar shows the destinations (no Try item) and no full sidebar 
   ]) {
     await expect(primary.getByRole("link", { name: label, exact: true })).toBeVisible();
   }
-  // [GPT-5.6] sq-f8ufg — mutation witness: removing Docs or pointing it at the nonexistent
-  // /docs route makes this assertion fail. The Skills router is the canonical live docs index.
+  // #2549 — mutation witness: Docs must point at the mdBook guide overlaid at /guide/ by
+  // pages.yml (basePath-prefixed, trailing slash), not at the agent-skills router.
   await expect(primary.getByRole("link", { name: "Docs", exact: true })).toHaveAttribute(
     "href",
-    "https://github.com/sparq-org/sparq/blob/main/skills/SKILL.md",
+    /\/guide\/$/,
   );
   // [OPUS-4.8] sq-4hiqe — the "Try" nav item is REMOVED (the /try playground is gone). The bar
   // must expose NO "Try" destination now.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] sq-t099c + sq-1d528 (issue #3171) — anti-drift guard binding the COMMITTED
+# sq-t099c + sq-1d528 (issue #3171) — anti-drift guard binding the COMMITTED
 # inference conformance report to the ci.yml extractor that gates it, to the ratchet
 # ci.yml ADVERTISES in its job name, and to the central scoreboard floor.
 #

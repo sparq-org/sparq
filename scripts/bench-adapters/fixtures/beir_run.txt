@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-1fz0 BEIR fixture: a TREC run `<qid> Q0 <docid> <rank> <score> <tag>`.
+# sq-1fz0 BEIR fixture: a TREC run `<qid> Q0 <docid> <rank> <score> <tag>`.
 # q1 rows are INTENTIONALLY out of score order to prove parse_run sorts by score
 # (dA 9 > dX 8 > dB 7), not by file row order. Pairs with beir_qrels.txt:
 #   q1 top-3 = dA,dX,dB  -> recall@3 = |{dA,dB}|/2 = 1.0 ; ndcg gains [1,0,1]
