@@ -181,8 +181,12 @@ fn result(entry: &TestEntry, outcome: Outcome) -> TestResult {
 /// True iff the entry's query file parses and carries its own `FROM`/`FROM NAMED`
 /// clause. An unreadable or unparsable query is left to the evaluation path to report.
 fn query_file_carries_dataset(entry: &TestEntry) -> bool {
-    let Some(path) = &entry.action.query else { return false };
-    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    let Some(path) = &entry.action.query else {
+        return false;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
     SparqlParser::new()
         .with_base_iri(crate::rdf::file_iri(path))
         .ok()
@@ -2254,7 +2258,11 @@ mod query_dataset_guard_tests {
             suite: "sparql11/entailment".into(),
             kind: EntryKind::QueryEval,
             withdrawn: false,
-            action: QueryAction { query: Some(q), data: vec![data], ..QueryAction::default() },
+            action: QueryAction {
+                query: Some(q),
+                data: vec![data],
+                ..QueryAction::default()
+            },
             result_file: None,
             update_request: None,
             update_pre: UpdateState::default(),
@@ -2268,7 +2276,10 @@ mod query_dataset_guard_tests {
         std::fs::create_dir_all(&dir).unwrap();
         for (name, q) in [
             ("from.rq", "SELECT * FROM <data.ttl> WHERE { ?s ?p ?o }"),
-            ("from_named.rq", "SELECT * FROM NAMED <data.ttl> WHERE { GRAPH ?g { ?s ?p ?o } }"),
+            (
+                "from_named.rq",
+                "SELECT * FROM NAMED <data.ttl> WHERE { GRAPH ?g { ?s ?p ?o } }",
+            ),
         ] {
             let e = entry_with_query(&dir, name, q);
             assert!(query_file_carries_dataset(&e), "{name}");

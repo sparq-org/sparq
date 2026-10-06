@@ -312,13 +312,25 @@ fn suite_fixture_path(iri: &str) -> Option<PathBuf> {
 /// Resolve a `log:content` / `log:semantics` IRI to a file inside `root`: a
 /// `file://` IRI by its path, a canonical suite fixture URL by its path in the
 /// checkout. Either way the canonical result must stay inside `root`.
-fn resolve_in_suite(iri: &str, root: &Path) -> Option<PathBuf> {
+/// `Ok(None)`: no such document (a case may probe for one on purpose).
+/// `Err(())`: the document exists but lies outside `root`, so the runner
+/// refused it.
+fn resolve_in_suite(iri: &str, root: &Path) -> Result<Option<PathBuf>, ()> {
     let p = match suite_fixture_path(iri) {
         Some(rel) => root.join(rel),
-        None => file_iri_path(iri)?,
+        None => match file_iri_path(iri) {
+            Some(p) => p,
+            None => return Ok(None),
+        },
     };
-    let p = std::fs::canonicalize(p).ok()?;
-    p.starts_with(root).then_some(p)
+    let Ok(p) = std::fs::canonicalize(p) else {
+        return Ok(None);
+    };
+    if p.starts_with(root) {
+        Ok(Some(p))
+    } else {
+        Err(())
+    }
 }
 
 /// Run sparq's N3 reasoner over one test document. `log:semantics` /
@@ -355,16 +367,23 @@ pub fn run_one(path: &Path, suite_root: &Path) -> Verdict {
 /// error is the PASS outcome; otherwise it is CRASHED.
 pub fn run_source(src: &str, base: &str, suite_root: &Path, expect_rejection: bool) -> Verdict {
     let root = std::fs::canonicalize(suite_root).unwrap_or_else(|_| suite_root.to_path_buf());
-    // The first external (non-file, non-suite) IRI the document asked for.
+    // The first IRI the runner refused: external (non-file, non-suite), or an
+    // existing file outside the checkout.
     // (`Resolver` is `'static`, so the slot is shared rather than borrowed.)
     let unavailable = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
     let seen = std::rc::Rc::clone(&unavailable);
     let resolver = move |iri: &str| -> Option<String> {
-        if !iri.starts_with("file://") && suite_fixture_path(iri).is_none() {
+        let refuse = || {
             seen.borrow_mut().get_or_insert_with(|| iri.to_string());
-            return None;
+            None
+        };
+        if !iri.starts_with("file://") && suite_fixture_path(iri).is_none() {
+            return refuse();
         }
-        std::fs::read_to_string(resolve_in_suite(iri, &root)?).ok()
+        match resolve_in_suite(iri, &root) {
+            Ok(p) => std::fs::read_to_string(p?).ok(),
+            Err(()) => refuse(),
+        }
     };
     let (verdict, positive_pass) =
         match sparq_reason::n3::reason_n3_terms_with_resolver(src, Some(base), Some(&resolver)) {
@@ -790,7 +809,27 @@ mod tests {
         );
         assert_eq!(
             run_source(&doc(&dir.join("outside.n3")), &base, &suite, false),
-            Verdict::Incomplete
+            Verdict::Unavailable(file_iri(&dir.join("outside.n3")))
+        );
+        // Refused, so a negative case cannot pass on it either; a missing file
+        // is an ordinary (measurable) miss.
+        let neg = |target: &Path| {
+            format!(
+                "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+                case(
+                    "fail-semantics-1",
+                    &format!("<{}> log:semantics ?f", file_iri(target)),
+                    "false"
+                )
+            )
+        };
+        assert_eq!(
+            run_source(&neg(&dir.join("outside.n3")), &base, &suite, false),
+            Verdict::Unavailable(file_iri(&dir.join("outside.n3")))
+        );
+        assert_eq!(
+            run_source(&neg(&suite.join("missing.n3")), &base, &suite, false),
+            Verdict::Pass
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -832,19 +871,23 @@ mod tests {
                 "{iri}"
             );
         }
-        // `..` (literal or encoded) cannot climb out of the checkout, and a
-        // missing fixture is an engine-visible miss, not an unavailable resource.
+        // `..` (encoded) cannot climb out of the checkout: the escape is refused
+        // (unavailable). A missing fixture is an ordinary, engine-visible miss.
         for iri in [
             format!("{raw}/branch/main/%2E%2E/outside.n3"),
             format!("{raw}/branch/main/sub/%2E%2E/%2E%2E/outside.n3"),
-            format!("{raw}/branch/main/NoSuchFile.n3"),
         ] {
             assert_eq!(
                 run_source(&doc(&iri), &base, &suite, false),
-                Verdict::Incomplete,
+                Verdict::Unavailable(iri.clone()),
                 "{iri}"
             );
         }
+        let missing = format!("{raw}/branch/main/NoSuchFile.n3");
+        assert_eq!(
+            run_source(&doc(&missing), &base, &suite, false),
+            Verdict::Incomplete
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
