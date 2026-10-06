@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validating the file and byte-swapping its dense f32 region into aligned owned storage; `.spqv`
   writers and the `.spqg` reader/writer remain little-endian-host only.
 
+### Changed
+
+- **Breaking (sparq-vc):** `sign`, `sign_graph`, `verify` and `verify_graph` validate
+  proof options before any signing or verification work: `verificationMethod` must be
+  an absolute IRI, `proofPurpose` a supported VC v2 term or an absolute IRI, and
+  `created` an XSD 1.1 `dateTime`. The `authentication`, `capabilityDelegation`,
+  `capabilityInvocation` and `keyAgreement` purposes now hash as their VC v2 context
+  IRIs (`sec:…Method`), and absolute-IRI purposes hash verbatim. Proofs signed with
+  those purposes by earlier releases **no longer verify** and must be re-signed; there
+  is no fallback. `assertionMethod` proofs are unaffected.
+
 ## [0.1.4] - 2026-09-26
 
 [GPT-5] Recovery candidate after the immutable v0.1.3 release workflow failed before
