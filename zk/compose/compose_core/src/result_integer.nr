@@ -1,4 +1,4 @@
-// Canonical full-u64 private literal binding; research-stage, not externally audited.
+// [GPT-6] Canonical full-u64 private literal binding; research-stage, not externally audited.
 //! Retains the existing string commitment and hides the exact decimal length.
 //! Each fixed-length BLAKE3 candidate is constrained. The public circuit capacity
 //! does not select or reveal the witness's actual digit count.

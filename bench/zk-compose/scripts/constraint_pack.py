@@ -103,7 +103,7 @@ TOOL = "bb gates -s ultra_honk"
 #   result     — integrated support for released mappings, without result completeness
 # ---------------------------------------------------------------------------------------
 FAMILIES: list[dict] = [
-    # zkp-15.1: the regex pins the exact measured profile (K1/K2, N16, P3, R4,
+    # [OPUS-5.5] zkp-15.1: the regex pins the exact measured profile (K1/K2, N16, P3, R4,
     # F0, D10) rather than a parameter shape, so an unmeasured version-4 bucket fails
     # classify() instead of joining this family unreviewed.
     {
@@ -120,7 +120,7 @@ FAMILIES: list[dict] = [
         "f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, "
         "d=10. Does not establish result completeness or holder identity.",
     },
-    # Keep the selected-result contract separate from complete-scan members.
+    # [GPT-6] Keep the selected-result contract separate from complete-scan members.
     {
         "key": "result_v3",
         "pattern": r"result_v3_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)_s(?P<s>\d+)_d(?P<d>\d+)",

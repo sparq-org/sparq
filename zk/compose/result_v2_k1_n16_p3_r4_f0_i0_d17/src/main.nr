@@ -1,10 +1,10 @@
-// Versioned successful-result relation. Research-stage, not externally audited.
+// [GPT-6] Versioned successful-result relation. Research-stage, not externally audited.
 // PUBLIC: challenge, query/result layout, issuer slots, accepted status-policy root.
 // PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.
 // Declaration order is the Rust public-input reconstruction contract.
 use sparq_zk_compose_core::result::{result_check, N, P, R, V, POLICY_DEPTH};
 global K: u32 = 1;
-// Explicit public capacity; actual integer length remains private.
+// [GPT-6] Explicit public capacity; actual integer length remains private.
 global STATUS_DEPTH: u32 = 17;
 global F: u32 = 0;
 

@@ -1,6 +1,6 @@
 # Bounded workload campaigns
 
-The standard-library Python runner materializes synthetic inputs, then
+[GPT-6] The standard-library Python runner materializes synthetic inputs, then
 runs the selected-support and exact-evaluator adapters in separate subprocesses.
 It retains each scheduled outcome and raw sample. The profile is an executable
 experiment definition, not evidence of performance or external security assurance.

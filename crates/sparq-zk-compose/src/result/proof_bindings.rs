@@ -1,4 +1,4 @@
-// Real corpus adapter deliberately reaches private witnesses after honest preparation.
+// [GPT-6] Real corpus adapter deliberately reaches private witnesses after honest preparation.
 use super::*;
 use crate::verifier::InMemorySeenNonces;
 use sha2::{Digest, Sha256};
@@ -169,7 +169,7 @@ fn attack_witness(toml: &str, kind: &str) -> Fallible<String> {
     replace(toml, name, &value)
 }
 
-// beadzkp-15.1.1: the only members the explicit version-four
+// [OPUS-5.5] beadzkp-15.1.1: the only members the explicit version-four
 // backend may count. A legacy or signed preparation is an error, never a pass.
 const PUBLIC_PATTERN_PACKAGES: [&str; 2] = [
     "result_v4_k1_n16_p3_r4_f0_d10",
@@ -300,7 +300,7 @@ fn run(job: &Value, output: &Path) -> Fallible<Value> {
     {
         return Err("Noir corpus schema/operation rejected".into());
     }
-    // beadzkp-15.1.1: version four is an explicit backend only.
+    // [OPUS-5.5] beadzkp-15.1.1: version four is an explicit backend only.
     let (profile, public_pattern) = match job["backend"].as_str() {
         Some("noir_unsigned") => (NumericProfile::Unsigned, false),
         Some("noir_signed") => (NumericProfile::Signed, false),
@@ -636,7 +636,7 @@ fn run_job() -> Fallible<()> {
     Ok(())
 }
 
-// beadzkp-15.1.1: native adapter tests. They execute no Noir and
+// [OPUS-5.5] beadzkp-15.1.1: native adapter tests. They execute no Noir and
 // establish no proof; constraint and real cells run only in the CI campaign.
 const SCAN: &str = "SELECT DISTINCT ?s ?o WHERE { ?s <urn:p> ?o }";
 const JOIN: &str = "SELECT DISTINCT ?s ?m ?o WHERE { ?s <urn:p> ?m . ?m <urn:p> ?o }";

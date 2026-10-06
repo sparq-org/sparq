@@ -1,4 +1,4 @@
-// Bounded materialized wallet inputs for the common campaign runner.
+// [GPT-6] Bounded materialized wallet inputs for the common campaign runner.
 use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

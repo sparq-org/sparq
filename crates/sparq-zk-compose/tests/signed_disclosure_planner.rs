@@ -1,4 +1,4 @@
-//! Signed host semantics and unsigned isolation; no guest or proof evidence.
+//! [GPT-6] Signed host semantics and unsigned isolation; no guest or proof evidence.
 
 use oxrdf::{Literal, NamedNode, Term, Triple};
 use sparq_zk::commit::commit_triples;

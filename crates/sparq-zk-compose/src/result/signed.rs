@@ -1,4 +1,4 @@
-//! Separately versioned successful-result proofs over canonical signed integers.
+//! [GPT-6] Separately versioned successful-result proofs over canonical signed integers.
 //!
 //! Version three uses one fixed signed-i64 capacity. It preserves exact RDF
 //! lexical identity and keeps private sign and lexical length out of the public

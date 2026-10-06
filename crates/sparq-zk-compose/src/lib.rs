@@ -39,7 +39,7 @@ pub mod driver;
 pub mod holder;
 pub mod issuer;
 pub mod manifest;
-// Research-grade disclosure obligations and PRIVATE successful-row witnesses.
+// [GPT-6] Research-grade disclosure obligations and PRIVATE successful-row witnesses.
 pub mod planner;
 // [OPUS-5] sq-rsd3v.3: witnessed-rule-shape N3 derivation — the host mirror of
 // the in-circuit relation, the fail-closed PROVABLE-SUBSET admission gate, and
@@ -136,9 +136,9 @@ pub use verifier::RevocationPolicy;
 // [OPUS-4.8] sq-cwq: external holder trust anchor for the HolderPop binding's PoP.
 pub use verifier::HolderRegistry;
 
-// Versioned authenticated-result experiment, off by default.
+// [GPT-6] Versioned authenticated-result experiment, off by default.
 #[cfg(feature = "successful-results")]
 pub mod result;
-// beadzkp-13.5: private exact pinned-toolchain version matcher.
+// [OPUS-5.5] beadzkp-13.5: private exact pinned-toolchain version matcher.
 #[cfg(feature = "successful-results")]
 mod toolchain;

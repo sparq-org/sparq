@@ -1,4 +1,4 @@
-// beadzkp-15.1: version-four public-pattern successful-result member.
+// [OPUS-5.5] beadzkp-15.1: version-four public-pattern successful-result member.
 // Research-grade, NOT externally audited; gate count pending EC2 measurement.
 // PUBLIC: challenge, query/result layout, issuer slots, policy root, public triple table.
 // PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.

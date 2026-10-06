@@ -18,7 +18,7 @@ publish = false
 
 [features]
 default = []
-# Additive private-witness result contract; legacy verifier unchanged.
+# [GPT-6] Additive private-witness result contract; legacy verifier unchanged.
 successful-results = []
 # [OPUS-4.8] sq-xojl + sq-cfmv: the DUAL-LEAF value lane — the
 # `CircuitId::FilterValueDl` member id + `ProofInputs::FilterValueDl` public
@@ -49,12 +49,12 @@ commitment-value-only = ["dual-leaf", "sparq-zk/commitment-value-only"]
 extended-fragment = []
 
 [dependencies]
-# Immutable ACIR cache names and private result term-type openings.
+# [GPT-6] Immutable ACIR cache names and private result term-type openings.
 # Already present through sparq-zk; this capability crate has no core consumers.
 blake3 = "1"
 sparq-zk = { path = "../sparq-zk" }
 oxrdf = { workspace = true }
-# The disclosure planner admits the query through the shared SPARQL AST.
+# [GPT-6] The disclosure planner admits the query through the shared SPARQL AST.
 spargebra = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -66,10 +66,10 @@ libc = { workspace = true }
 
 [dev-dependencies]
 # Deterministic temp dirs for prove/verify e2e.
-# Test-only corpus artifact identities; already resolved in the workspace.
+# [GPT-6] Test-only corpus artifact identities; already resolved in the workspace.
 sha2 = "0.10"
 
-# Reuses this opt-in crate and its existing lock; no detached benchmark graph.
+# [GPT-6] Reuses this opt-in crate and its existing lock; no detached benchmark graph.
 [[example]]
 name = "result_experiment"
 required-features = ["successful-results"]

@@ -1,6 +1,6 @@
 # Synthetic result experiment
 
-This first adapter uses the existing `successful-results` capability and
+[GPT-6] This first adapter uses the existing `successful-results` capability and
 its pinned Noir/Barretenberg driver. It measures selected successful support,
 without asserting complete answers, absence, holder identity, or external security
 assurance. The fixture deliberately releases Alice while withholding another
@@ -100,7 +100,7 @@ measurements establish working instrumentation, not a performance advantage.
 
 ## Public-pattern ablation (schema version 3)
 
-Schema-version-3 manifests select a separate paired ablation of the
+[OPUS-5.5] Schema-version-3 manifests select a separate paired ablation of the
 default version-one relation (`baseline_v1`) against the opt-in version-four
 public-pattern relation (`public_pattern_v4`). The selected-support query above
 hides `?s` and filters a hidden `?age`, so it is not version-four eligible; it

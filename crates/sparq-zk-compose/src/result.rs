@@ -1,4 +1,4 @@
-// Research-stage selected-result contract; not externally audited (sq-qhy4).
+// [GPT-6] Research-stage selected-result contract; not externally audited (sq-qhy4).
 //! Builds and verifies bounded authenticated result witnesses with private intermediate data.
 //!
 //! Enable `successful-results` explicitly. This additive contract does not change
@@ -54,17 +54,17 @@ const POLICY_DEPTH: u32 = 4;
 /// Separately versioned signed-integer successful-result preparation and verification.
 pub mod signed;
 
-// Adversarial corpus access stays test-only; private witnesses are not a public API.
+// [GPT-6] Adversarial corpus access stays test-only; private witnesses are not a public API.
 #[cfg(test)]
 mod proof_bindings;
 
-// Only the typed entry point selects the numeric contract. A signed
+// [GPT-6] Only the typed entry point selects the numeric contract. A signed
 // capacity is never added to the legacy presentation's deserialization enum.
 #[derive(Clone, Copy)]
 enum NumericContract {
     Unsigned(PrivateIntegerCapacity),
     Signed,
-    // beadzkp-15.1: opt-in version four; unsigned public filters only.
+    // [OPUS-5.5] beadzkp-15.1: opt-in version four; unsigned public filters only.
     PublicPattern,
 }
 
@@ -106,7 +106,7 @@ impl NumericContract {
     }
 }
 
-// beadzkp-15.1: version-four public-pattern contract. Research-grade,
+// [OPUS-5.5] beadzkp-15.1: version-four public-pattern contract. Research-grade,
 // not externally audited; no gate or runtime saving is claimed before measurement.
 /// Contract version of the opt-in public-pattern successful-result members.
 ///
@@ -243,7 +243,7 @@ pub struct ResultPolicy {
     pub max_version: u64,
 }
 
-// Capacity is public; the exact decimal length remains a private witness.
+// [GPT-6] Capacity is public; the exact decimal length remains a private witness.
 /// Public private-integer capacity selected by the successful-result proof.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -546,7 +546,7 @@ fn public_statement(
     policy: &ResultPolicy,
     nonce: &VerifierNonce,
 ) -> Result<PublicStatement, ResultError> {
-    // beadzkp-15.1: dispatch uses only the public version; the
+    // [OPUS-5.5] beadzkp-15.1: dispatch uses only the public version; the
     // specialized pattern is then re-derived from the query, never the witness.
     let contract = if p.version == PUBLIC_PATTERN_VERSION {
         if p.integer_capacity != PrivateIntegerCapacity::TwoDigits {
@@ -876,7 +876,7 @@ pub fn prepare_result_with_options(
     )
 }
 
-// beadzkp-15.1: explicit opt-in; ResultOptions is unchanged so
+// [OPUS-5.5] beadzkp-15.1: explicit opt-in; ResultOptions is unchanged so
 // existing struct literals and default dispatch keep their behavior.
 /// Prepares a version-four result whose first public pattern skips typed openings.
 ///
@@ -945,7 +945,7 @@ fn prepare_result_contract(
     profile: NumericProfile,
     public_pattern: bool,
 ) -> Result<PreparedResult, ResultError> {
-    // Reject the wallet shape before authentication or graph cloning;
+    // [GPT-6] Reject the wallet shape before authentication or graph cloning;
     // empty and ineligible credentials still count toward resource admission.
     if credentials.len() > crate::planner::MAX_DISCLOSURE_CREDENTIALS {
         return Err(reject("input credentials exceed disclosure planning limit"));
@@ -953,7 +953,7 @@ fn prepare_result_contract(
     let mut parsed = parse_numeric_query(query, profile)?;
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
-    // beadzkp-15.1: unsupported opt-in shapes reject before search.
+    // [OPUS-5.5] beadzkp-15.1: unsupported opt-in shapes reject before search.
     if public_pattern {
         parsed = public_prefix(parsed)?;
         if parsed
@@ -1348,7 +1348,7 @@ fn prepare_result_contract(
     })
 }
 
-// TOML integer literals are signed i64; Noir also accepts decimal
+// [GPT-6] TOML integer literals are signed i64; Noir also accepts decimal
 // strings for integer inputs. This witness-only conversion preserves the public
 // field encoding and admits the full u64 FILTER-bound range without truncation.
 fn toml_witness_value(value: &Value) -> Value {
@@ -1361,7 +1361,7 @@ fn toml_witness_value(value: &Value) -> Value {
     }
 }
 
-// beadzkp-13.5: exact version field, not a substring of lossy stdout.
+// [OPUS-5.5] beadzkp-13.5: exact version field, not a substring of lossy stdout.
 fn pinned_toolchain() -> Result<(), ResultError> {
     for (tool, version) in crate::toolchain::PINNED_TOOLS {
         let out = Command::new(tool)
@@ -1607,7 +1607,7 @@ mod tests {
         (credentials, policy, nonce, rows)
     }
 
-    // beadzkp-15.1: native version-four statement tests. These do not
+    // [OPUS-5.5] beadzkp-15.1: native version-four statement tests. These do not
     // prove; real-proof and Noir execution remain pending pinned-toolchain runs.
     const PUBLIC_NAME_QUERY: &str =
         "SELECT DISTINCT ?person ?name WHERE { ?person <urn:name> ?name . }";
@@ -1871,7 +1871,7 @@ mod tests {
                 .expect("SPARQ_PUBLIC_PATTERN_EVIDENCE must name a new absolute directory"),
         );
         assert!(dir.is_absolute(), "evidence directory must be absolute");
-        // zkp-15.1.2: location-only containment check. The manifest
+        // [OPUS-5.5] zkp-15.1.2: location-only containment check. The manifest
         // directory is canonicalized FIRST and the checkout root is then taken
         // as two parents of that resolved path, matching the former
         // `join("../..").canonicalize()`: a symlinked `crates/<crate>` resolves
@@ -1910,7 +1910,7 @@ mod tests {
         options.open(path).unwrap().write_all(bytes).unwrap();
     }
 
-    /// beadzkp-15.1: genuine version-four K1 and K2 proofs with verifier controls.
+    /// [OPUS-5.5] beadzkp-15.1: genuine version-four K1 and K2 proofs with verifier controls.
     ///
     /// Synthetic fixture only; this is not production-store certification. Public
     /// evidence is retained only after every assertion passes.
@@ -2053,7 +2053,7 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
-    /// beadzkp-15.1: version-four witness mutations reach their intended constraints.
+    /// [OPUS-5.5] beadzkp-15.1: version-four witness mutations reach their intended constraints.
     #[test]
     #[ignore = "requires pinned nargo; version-four constraint execution"]
     fn result_relation_public_pattern_rejects_tampered_retained_witnesses() {
@@ -2508,7 +2508,7 @@ mod tests {
 
     #[test]
     fn canonical_large_sibling_remains_eligible_or_fails_its_actual_predicate() {
-        // Keep the valid large-sibling case distinct from lexical rejection.
+        // [GPT-6] Keep the valid large-sibling case distinct from lexical rejection.
         let (_, mut policy, nonce, _) = fixture();
         let c = credential(
             vec![
@@ -2524,7 +2524,7 @@ mod tests {
             "person".into(),
             Term::NamedNode(iri("urn:alice")),
         )])];
-        // The first case characterizes today's equal-cost tie break:
+        // [GPT-6] The first case characterizes today's equal-cost tie break:
         // canonical leaf order visits 100 first. A measured tiny-first optimizer
         // may legitimately change that expectation; it is not a wire-contract rule.
         for (predicate, value, capacity) in [
@@ -2545,7 +2545,7 @@ mod tests {
         }
     }
 
-    // Goldens cover value, lexical, type and capacity boundaries independently.
+    // [GPT-6] Goldens cover value, lexical, type and capacity boundaries independently.
     pub(super) fn numeric_fixture(
         term: Term,
         index: u64,
@@ -3123,7 +3123,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; preserves actual baseline v1 verification keys"]
     fn result_legacy_v1_keys_match_pinned_foundation_keys() {
-        // Expected bytes were built from the independent foundation713 archive.
+        // [GPT-6] Expected bytes were built from the independent foundation713 archive.
         pinned_toolchain().unwrap();
         let expected: Value = serde_json::from_str(include_str!(
             "../../../bench/zk-compose/result_v1_compatibility.json"
@@ -3146,7 +3146,7 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; genuine expanded tiny and predicate-free proofs"]
     fn result_real_proofs_cover_expanded_tiny_and_predicate_free_public_abis() {
-        // These are genuine proofs, separately counted from wrapper executions.
+        // [GPT-6] These are genuine proofs, separately counted from wrapper executions.
         pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         let dir =

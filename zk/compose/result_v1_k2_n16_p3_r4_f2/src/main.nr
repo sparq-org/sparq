@@ -1,4 +1,4 @@
-// Versioned successful-result relation. Research-stage, not externally audited.
+// [GPT-6] Versioned successful-result relation. Research-stage, not externally audited.
 // PUBLIC: challenge, query/result layout, issuer slots, accepted status-policy root.
 // PRIVATE: graph roots/contents/sizes/salts, selected rows, signatures and status references.
 // Declaration order is the Rust public-input reconstruction contract.

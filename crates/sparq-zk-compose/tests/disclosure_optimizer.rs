@@ -1,4 +1,4 @@
-//! Structural objective tests; no prover latency or security claim.
+//! [GPT-6] Structural objective tests; no prover latency or security claim.
 
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Triple};
 use sparq_zk::commit::{commit_triples, GraphCommitment};
