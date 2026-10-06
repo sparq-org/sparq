@@ -17,6 +17,7 @@ const KIND_FILL: Record<SelectGraphNodeKind, string> = {
   uri: "var(--primary)",
   literal: "var(--accent-foreground)",
   bnode: "var(--muted-foreground)",
+  triple: "var(--warning)",
 };
 
 function clip(value: string, max = 22): string {
