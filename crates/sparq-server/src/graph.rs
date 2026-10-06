@@ -66,13 +66,25 @@ pub const COMMON_PREFIXES: &[(&str, &str)] = &[
 /// `s p o .` line per triple in `oxrdf` Display term syntax, written straight to the sink
 /// with no whole-document `String`. [`triples_to_ntriples`] is this function over a `Vec<u8>`.
 ///
+/// The lines are formatted into a reusable `String` (cheap `fmt::Write` pushes) and handed to
+/// `w` in ~64 KiB batches, so `w` sees a few large writes rather than one `io::Write` call per
+/// formatted piece; the bytes are identical either way.
+///
 /// The only error a caller can observe is `w`'s: over an in-memory buffer that is impossible,
 /// over the HTTP chunk sink it means the client went away (and serialisation should stop).
 pub fn write_ntriples_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std::io::Result<()> {
+    use std::fmt::Write as _;
+    const BATCH: usize = 64 * 1024;
+    let mut buf = String::with_capacity(BATCH + 1024);
     for t in triples {
-        writeln!(w, "{} {} {} .", t.subject, t.predicate, t.object)?;
+        // Writing into a `String` cannot fail.
+        let _ = writeln!(buf, "{} {} {} .", t.subject, t.predicate, t.object);
+        if buf.len() >= BATCH {
+            w.write_all(buf.as_bytes())?;
+            buf.clear();
+        }
     }
-    Ok(())
+    w.write_all(buf.as_bytes())
 }
 
 /// Serialises an RDF graph as canonical **N-Triples**. Identical contract to the engine's
