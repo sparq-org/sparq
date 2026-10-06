@@ -1,4 +1,4 @@
-# [FABLE-5] sq-hmd7l.2 — build artifacts of the standalone (non-workspace) generator;
+# sq-hmd7l.2 — build artifacts of the standalone (non-workspace) generator;
 # the root /target ignore does not cover nested cargo projects. Cargo.lock is not
 # committed: the load-bearing pin is the exact `rand = "=0.10.1"` in Cargo.toml.
 target/

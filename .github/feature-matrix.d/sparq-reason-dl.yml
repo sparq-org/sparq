@@ -1,12 +1,12 @@
 # Feature-matrix fragment for `sparq-reason-dl`.
 #
-# [GPT-5.6] sq-zfwzq: `dl_transitive` is default-OFF and gates the structural
+# sq-zfwzq: `dl_transitive` is default-OFF and gates the structural
 # `owl:TransitiveProperty` axiom, the ALCHS ∀₊ rule, and its oracle/blocking tests.
 # Compose it with `dispatch` so this leg also executes the feature-gated
 # DirectChecker consistency/entailment path rather than compiling those tests empty.
 # This leg (dispatch WITHOUT dispatch_ql) also keeps the deferred QL arm
-# (`QlConsistencyPending` + its test) executing in CI. [FABLE-5] sq-fj8lj
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# (`QlConsistencyPending` + its test) executing in CI. sq-fj8lj
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
@@ -16,7 +16,7 @@
   features: "dispatch,dl_transitive"
   test: true
 
-# [FABLE-5] sq-fj8lj: `dispatch_ql` graduates the QL dispatch branch — it delegates to
+# sq-fj8lj: `dispatch_ql` graduates the QL dispatch branch — it delegates to
 # sparq-reason-ql's `ql-consistency` DL-Lite_R checker (sq-p6yb7) instead of abstaining
 # `QlConsistencyPending`. Composed with `dl_transitive` (matching the leg above, and so
 # clippy's `-D warnings` sees no dl_transitive-only dead code) — this leg is the ONLY

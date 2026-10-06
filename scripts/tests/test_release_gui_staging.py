@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Execute the real GUI staging step against hermetic installer fixtures.
+"""Execute the real GUI staging step against hermetic installer fixtures.
 
 Uses /bin/bash (3.2 on macOS), overridable with RELEASE_TEST_BASH. No builds,
 network, GitHub credentials, or publication calls are needed.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] issue #5022 — hermetic both-direction self-test for scripts/build-guide.sh.
+# issue #5022 — hermetic both-direction self-test for scripts/build-guide.sh.
 #
 # WHY: build-guide.sh exists for ONE non-obvious reason — mdBook EXITS 0 on a broken
 # {{#include}} / missing anchor (rust-lang/mdBook#1094) and only says so on stderr as an

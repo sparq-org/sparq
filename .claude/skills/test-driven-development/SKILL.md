@@ -7,7 +7,7 @@ description: Use when implementing any feature or bugfix, before writing impleme
 (SKILL.md + testing-anti-patterns.md), unmodified. The upstream repository carries
 no LICENSE file at vendor time; vendored by arrangement with the owner (@jeswr).
 Mirrored here for sparq's certification framework (epic sq-toze, bead sq-toze.1) so
-gap-fixes across the memsafety/sbom/cis/asvs worktrees land test-first. [OPUS-4.8] -->
+gap-fixes across the memsafety/sbom/cis/asvs worktrees land test-first. -->
 
 # Test-Driven Development (TDD)
 

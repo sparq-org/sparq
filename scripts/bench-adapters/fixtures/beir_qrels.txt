@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-1fz0 BEIR fixture: TREC qrels `<qid> <iter> <docid> <rel>`.
+# sq-1fz0 BEIR fixture: TREC qrels `<qid> <iter> <docid> <rel>`.
 # Three queries with GRADED judgements (q2 has a grade-2 doc so nDCG exercises the
 # graded path; SciFact is binary but TREC-COVID grades 0/1/2). Pairs with beir_run.txt
 # to give a KNOWN Recall@3 = 0.5 and nDCG@3 = 0.4332715... (see test_adapters.py).

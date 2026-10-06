@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-[OPUS-4.8] sq-pntvh.8 / [OPUS-4.8] sq-v3nel: feature-OFF CI proof for M4 vectorization.
+sq-pntvh.8 / sq-v3nel: feature-OFF CI proof for M4 vectorization.
 
 Proves compile-time absence (leg1, leg3) and artifact byte-DETERMINISM (leg2) of
 the vectorized-OFF build. Does NOT prove runtime performance neutrality — that is
@@ -27,7 +27,7 @@ Three legs:
   --leg3                   cfg-audit: every vectorized call site in lib.rs/exec.rs is gated
   --self-test              run built-in tripwires that MUST fail (guard the guards)
 
-[OPUS-4.8] sq-v3nel (2026-07-07): leg 2 was RE-DESIGNED from a static exact-equality
+sq-v3nel (2026-07-07): leg 2 was RE-DESIGNED from a static exact-equality
 pin (bench/perf-baseline.json metrics.wasm_bundle_bytes.feature_off_exact) to this
 DYNAMIC same-run base-vs-head byte comparison. The static pin was ORDER-DEPENDENT: any
 PR touching always-compiled engine/core code changed the merged-tree bundle bytes, the
@@ -538,7 +538,7 @@ def run_self_test() -> int:
         all_passed = False
 
     # ----- Tripwire 2: Leg 2 (dynamic) must reject an UNDECLARED byte change -----
-    # [OPUS-4.8] sq-v3nel: the dynamic check compares base-tree vs head-tree feature-OFF
+    # sq-v3nel: the dynamic check compares base-tree vs head-tree feature-OFF
     # wasm bytes in the SAME run. Differing bytes with an un-bumped change_token MUST fail.
     rc = _leg2_dynamic_on_bytes(b"\x00wasm-base", b"\x00wasm-headX", base_tok=0, head_tok=0)
     if rc != 0:
@@ -559,7 +559,7 @@ def run_self_test() -> int:
         all_passed = False
 
     # ----- Tripwire 4: Leg 2 V2 must ACCEPT a per-PR declaration FILE added by head -----
-    # [OPUS-4.8] sq-v3nel-v2: scalar token unchanged, but head added 1720.json not in base.
+    # sq-v3nel-v2: scalar token unchanged, but head added 1720.json not in base.
     rc = _leg2_dynamic_on_bytes(b"\x00wasm-base", b"\x00wasm-headX", base_tok=0, head_tok=0,
                                 base_decl_names=["README.md"],
                                 head_decl_names=["README.md", "1720.json"])

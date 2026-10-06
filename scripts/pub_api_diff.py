@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Shared `pub `-item diff helper (bead sq-l0a0, branch
-# feat-flow-on-refine). Authored by Opus 4.8 (Fable unavailable; flag for
-# re-review when Fable returns).
+# Shared `pub `-item diff helper (bead sq-l0a0, branch
+# feat-flow-on-refine).
 #
 # WHY THIS MODULE EXISTS
 # ----------------------
@@ -29,7 +28,7 @@ from __future__ import annotations
 
 import re
 
-# [OPUS-4.8] A line is a PUBLIC-ITEM signature iff, after the leading diff marker
+# A line is a PUBLIC-ITEM signature iff, after the leading diff marker
 # (+/-) and any indentation, it begins with `pub ` (whitespace-separated) followed
 # by one of the exported item keywords. Requiring whitespace after `pub` excludes
 # restricted visibilities (`pub(crate)`/`pub(super)`/`pub(in …)`, all written
@@ -39,7 +38,7 @@ import re
 # only the eight item forms below count.
 PUB_ITEM_RE = re.compile(r"^[+-]\s*pub\s+(?:fn|struct|enum|trait|const|type|mod|use)\b")
 
-# [OPUS-4.8] The item KIND drives where its signature ends. The brace-bodied kinds
+# The item KIND drives where its signature ends. The brace-bodied kinds
 # (fn/struct/enum/trait) end at the body's opening `{`; the statement kinds
 # (use/mod-decl/const/type and unit/tuple struct) end at `;`. We read the kind
 # off the first line so a group-import brace in `pub use a::{B, C};` is NOT
@@ -47,7 +46,7 @@ PUB_ITEM_RE = re.compile(r"^[+-]\s*pub\s+(?:fn|struct|enum|trait|const|type|mod|
 _KIND_RE = re.compile(r"\bpub\s+(fn|struct|enum|trait|const|type|mod|use)\b")
 _BRACE_BODIED = frozenset({"fn", "struct", "enum", "trait"})
 
-# [OPUS-4.8] Trailing comma rustfmt INSERTS when it wraps a comma-delimited list
+# Trailing comma rustfmt INSERTS when it wraps a comma-delimited list
 # (params, generics, tuple-struct fields, where-clause bounds). The single-line
 # form has no trailing comma before its closing delimiter; the wrapped form does.
 # Dropping a comma that immediately precedes a closing delimiter — `)`/`]`/`>`,
@@ -105,7 +104,7 @@ def _signature_complete(acc: str, kind: str) -> bool:
 def scan_pub_diff(diff_lines: list[str]) -> tuple[list[str], list[str]]:
     """Split unified-diff lines into (added, removed) public-item signatures.
 
-    [OPUS-4.8] A `pub `-item signature that rustfmt LINE-WRAPS spans several diff
+    A `pub `-item signature that rustfmt LINE-WRAPS spans several diff
     lines on one side: the first matches PUB_ITEM_RE, the continuations
     (`    chunks: &[S],`, `) -> R {`) do not. We REASSEMBLE the wrapped signature
     by appending same-sign (`+`/`-`) continuation lines until this item KIND's

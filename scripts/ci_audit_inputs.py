@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Out-of-crate-input audit for change-based CI test-selection.
+# Out-of-crate-input audit for change-based CI test-selection.
 # Bead sq-fmx4u.2 (epic sq-fmx4u). Design: research/change-based-test-selection.md
-# §4.2 (the ownership map + its audit). Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# §4.2 (the ownership map + its audit).
 #
 # WHY THIS EXISTS (the soundness hole it closes):
 #   The selector (scripts/ci_select.py) may SKIP a crate C's tests when no path
@@ -115,12 +114,12 @@ class Residual:
 # matching no discovered read is reported STALE, so a fixed one cannot linger.
 #
 # History (both closed by input-relocation-shaped fixes, not by weakening a gate):
-# * [FABLE-5] sq-m4bxc closed the two sibling-crate include residuals (sparq-zk ->
+# * sq-m4bxc closed the two sibling-crate include residuals (sparq-zk ->
 #   secprop-ext.ttl, sparq-reason -> sparq-solid/rules) with the ci_select
 #   additional-readers mechanism (a `readers` entry in ci/path-ownership.toml
 #   unions the extra reader into the affected set — monotone, fail-safe). They are
 #   now COVERED "additional-readers map".
-# * [SONNET-4.6] sq-z1xv8 closed residual 3: sparq-conformance's
+# * sq-z1xv8 closed residual 3: sparq-conformance's
 #   tests/scoreboard_floors.rs read SIBLING-CRATE TEST SOURCES at a
 #   runtime-computed workspace path (statically unresolvable, so it collapsed to
 #   '.' and no `readers` entry could attribute it). The eleven affected floors moved

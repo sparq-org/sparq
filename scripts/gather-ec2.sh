@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-8dp3 — orphan-proof EC2 orchestrator for the competitor gather, with
+# sq-8dp3 — orphan-proof EC2 orchestrator for the competitor gather, with
 # the RESULTS-LOSS FIX. The prior gather (sq-gbq0) lost the jena-shacl +
 # rdf-validate-shacl envelopes because the box self-terminated on a post-gather
 # `shutdown +1min` BEFORE the orchestrator could SSH-pull files off a
@@ -73,7 +73,7 @@ AMI=$(aws ec2 describe-images --region "$REGION" --owners 099720109477 \
   --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text)
 VPC=$(aws ec2 describe-vpcs --region "$REGION" --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
 SUBNET=$(aws ec2 describe-subnets --region "$REGION" --filters Name=vpc-id,Values="$VPC" "Name=default-for-az,Values=true" --query 'Subnets[0].SubnetId' --output text)
-# [OPUS-4.8] sq-8dp3: checkip.amazonaws.com returns a trailing newline, and curl -s
+# sq-8dp3: checkip.amazonaws.com returns a trailing newline, and curl -s
 # can yield an empty string on failure without a non-zero exit. Strip ALL whitespace so
 # "${MYIP}/32" is a valid CIDR, then fail fast if empty (a bad/empty CIDR would make
 # authorize-security-group-ingress fail or misconfigure the SG).
@@ -93,7 +93,7 @@ USERDATA=$(cat <<UD
 #!/bin/bash
 set -x
 exec > >(tee /var/log/gather.log) 2>&1
-# [OPUS-4.8] sq-8dp3: orphan-proof self-terminate — TWO independent 3h hard caps,
+# sq-8dp3: orphan-proof self-terminate — TWO independent 3h hard caps,
 # each from a DIFFERENT subsystem so a single failure can't leave the box running:
 #   (1) detached "sleep" subshell — works immediately, no package deps, but dies if
 #       the user-data shell's process group is reaped.
@@ -182,7 +182,7 @@ INSTANCE_ID=$(aws ec2 run-instances --region "$REGION" --image-id "$AMI" --insta
   --tag-specifications "$TAGSPEC" \
   --user-data "$USERDATA" \
   --query 'Instances[0].InstanceId' --output text)
-# [OPUS-4.8] run-instances can return ""/"None" on a failed launch (e.g. VcpuLimitExceeded,
+# run-instances can return ""/"None" on a failed launch (e.g. VcpuLimitExceeded,
 # no capacity). Without this guard the script would `wait`/poll/terminate against a bogus
 # id for ~50 min and try to clean up nothing. Validate it is a real i-... id and ABORT.
 case "$INSTANCE_ID" in
@@ -193,7 +193,7 @@ log "launched INSTANCE_ID=$INSTANCE_ID"
 aws ec2 wait instance-running --region "$REGION" --instance-ids "$INSTANCE_ID"
 IP=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
 log "public IP=$IP; waiting for sshd"
-# [OPUS-4.8] sq-8dp3: if sshd NEVER comes up (wrong SG/VPC, transient EC2 fault) the
+# sq-8dp3: if sshd NEVER comes up (wrong SG/VPC, transient EC2 fault) the
 # poll/pull phase below would just spin ~45 min hammering an unreachable host. Track
 # reachability and ABORT on failure — exit 1 fires the EXIT trap, which terminates the
 # instance (orphan-proof) instead of proceeding against a box we can't reach.

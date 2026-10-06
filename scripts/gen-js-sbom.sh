@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: CycloneDX SBOMs for shipped JS code.
+# sq-toze.27 / sq-epbw4: CycloneDX SBOMs for shipped JS code.
 #
 # The published `@sparq-org/sparq` package and the shared `@sparq/client` source are both in scope.
 # The latter is private as a standalone package, but its runtime code and lazy codec dependencies

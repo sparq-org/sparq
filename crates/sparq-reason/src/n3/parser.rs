@@ -1212,89 +1212,29 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Pragmatic RFC 3986 reference resolution: enough for the forms test suites
-/// and real documents use (`#frag`, `name.n3#frag`, `../x`, absolute IRIs,
-/// scheme-relative and root-relative paths). With no base, or an absolute
-/// reference, the reference is returned as written.
+/// RFC 3986 §5.2 reference resolution through `oxiri` — the SAME automaton oxttl and
+/// sparq-core's native Turtle path resolve with (#3707). The contract stays infallible and
+/// lenient, as the N3 parser must never fail (or panic) on hostile bytes:
+///
+/// - no base, or a reference that already carries a scheme (RFC 3986 §4.3): returned AS
+///   WRITTEN (no dot-segment normalisation of an absolute IRI);
+/// - a base or reference `oxiri` rejects (e.g. a malformed `%`-escape): the reference is
+///   returned as written rather than guessed at.
+///
+/// `resolve_iri(base, "#")` is the cwm empty-prefix convention (`<base>#`).
 pub(super) fn resolve_iri(base: &str, iri: &str) -> String {
-    let is_absolute = |s: &str| -> bool {
-        match s.find(':') {
-            Some(i) if i > 0 => {
-                let scheme = &s[..i];
-                scheme.starts_with(|c: char| c.is_ascii_alphabetic())
-                    && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-                    // a pname-like "a:b" inside <> is still an IRI; treat any
-                    // syntactically valid scheme as absolute (RFC 3986 §4.3)
-            }
-            _ => false,
-        }
-    };
-    if base.is_empty() || is_absolute(iri) {
+    let has_scheme = iri.split_once(':').is_some_and(|(scheme, _)| {
+        scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    });
+    if base.is_empty() || has_scheme {
         return iri.to_string();
     }
-    // Strip any fragment from the base.
-    let base = base.split('#').next().unwrap_or(base);
-    if iri.is_empty() {
-        return base.to_string();
-    }
-    if let Some(frag) = iri.strip_prefix('#') {
-        return format!("{base}#{frag}");
-    }
-    if iri.starts_with('?') {
-        // query-only reference: replace the base's query, keep its path
-        return format!("{}{iri}", base.split('?').next().unwrap_or(base));
-    }
-    // scheme = up to ':'; authority = '//…' if present.
-    let scheme_end = base.find(':').map(|i| i + 1).unwrap_or(0);
-    let (authority_end, has_authority) = if base[scheme_end..].starts_with("//") {
-        let rest = &base[scheme_end + 2..];
-        (scheme_end + 2 + rest.find('/').unwrap_or(rest.len()), true)
-    } else {
-        (scheme_end, false)
-    };
-    if iri.starts_with("//") && has_authority {
-        return format!("{}{}", &base[..scheme_end], iri);
-    }
-    let merged = if iri.starts_with('/') {
-        format!("{}{}", &base[..authority_end], iri)
-    } else {
-        // Merge with the base path minus its last segment.
-        let path_end = base.rfind('/').map(|i| i + 1).unwrap_or(base.len());
-        let dir = if path_end > authority_end { &base[..path_end] } else { base };
-        if dir.ends_with('/') {
-            format!("{dir}{iri}")
-        } else {
-            format!("{dir}/{iri}")
-        }
-    };
-    // Remove dot segments in the path part (after the authority); the
-    // query/fragment must not take part (RFC 3986 §5.2.4).
-    let (prefix, rest) = merged.split_at(authority_end.min(merged.len()));
-    let qpos = rest.find(['?', '#']).unwrap_or(rest.len());
-    let (path, tail) = rest.split_at(qpos);
-    let mut out: Vec<&str> = Vec::new();
-    let mut trailing_slash = path.ends_with('/');
-    for seg in path.split('/') {
-        match seg {
-            "." => trailing_slash = true,
-            ".." => {
-                // never pop the leading empty segment (the path root)
-                if out.len() > 1 || (out.len() == 1 && !out[0].is_empty()) {
-                    out.pop();
-                }
-                trailing_slash = true;
-            }
-            s => {
-                trailing_slash = s.is_empty();
-                out.push(s);
-            }
-        }
-    }
-    let mut joined = out.join("/");
-    if trailing_slash && !joined.ends_with('/') {
-        joined.push('/');
-    }
-    format!("{prefix}{joined}{tail}")
+    oxiri::IriRef::parse(base)
+        .and_then(|base| base.resolve(iri))
+        .map_or_else(|_| iri.to_string(), oxiri::IriRef::into_inner)
 }
 
 /// Byte-level whitespace test for the byte-wise lexer — ONLY ASCII bytes count.
@@ -1377,6 +1317,82 @@ mod resolve_iri_tests {
             ("./", "http://a/b/c/"),
         ] {
             assert_eq!(resolve_iri(base, rel), want, "rel={rel}");
+        }
+    }
+
+    // #3707: the rest of the RFC 3986 §5.4 table (normal + abnormal), now that resolution goes
+    // through oxiri — query/fragment/params/same-document forms the old helpers special-cased.
+    #[test]
+    fn rfc3986_full_examples() {
+        let base = "http://a/b/c/d;p?q";
+        for (rel, want) in [
+            ("g:h", "g:h"),
+            ("//g", "http://g"),
+            ("?y", "http://a/b/c/d;p?y"),
+            ("g?y", "http://a/b/c/g?y"),
+            ("#s", "http://a/b/c/d;p?q#s"),
+            ("g#s", "http://a/b/c/g#s"),
+            ("g?y#s", "http://a/b/c/g?y#s"),
+            (";x", "http://a/b/c/;x"),
+            ("g;x?y#s", "http://a/b/c/g;x?y#s"),
+            ("", "http://a/b/c/d;p?q"),
+            ("g.", "http://a/b/c/g."),
+            (".g", "http://a/b/c/.g"),
+            ("g..", "http://a/b/c/g.."),
+            ("..g", "http://a/b/c/..g"),
+            ("./../g", "http://a/b/g"),
+            ("./g/.", "http://a/b/c/g/"),
+            ("g/./h", "http://a/b/c/g/h"),
+            ("g/../h", "http://a/b/c/h"),
+            ("g;x=1/./y", "http://a/b/c/g;x=1/y"),
+            ("g;x=1/../y", "http://a/b/c/y"),
+            // dot segments inside the query / fragment are NOT removed
+            ("g?y/./x", "http://a/b/c/g?y/./x"),
+            ("g#s/../x", "http://a/b/c/g#s/../x"),
+        ] {
+            assert_eq!(resolve_iri(base, rel), want, "rel={rel}");
+        }
+    }
+
+    // #3707: the lenient, infallible contract the N3 parser relies on.
+    #[test]
+    fn lenient_contract() {
+        // No base, or a reference with a scheme: returned AS WRITTEN (an absolute IRI's dot
+        // segments are not normalised — oxiri's resolve would, so this guard is load-bearing).
+        assert_eq!(resolve_iri("", "../x"), "../x");
+        assert_eq!(
+            resolve_iri("http://ex/a", "http://h/a/../b"),
+            "http://h/a/../b"
+        );
+        // cwm empty-prefix convention + fragment replacement on the base.
+        assert_eq!(resolve_iri("http://ex/doc.n3", "#"), "http://ex/doc.n3#");
+        assert_eq!(
+            resolve_iri("http://ex/doc.n3#old", "#new"),
+            "http://ex/doc.n3#new"
+        );
+        assert_eq!(resolve_iri("http://ex/doc.n3#old", ""), "http://ex/doc.n3");
+        // Authority-only base: the merged path gains its root '/' (RFC 3986 §5.2.3).
+        assert_eq!(resolve_iri("http://ex", "x"), "http://ex/x");
+        // A relative base still resolves.
+        assert_eq!(resolve_iri("//host/p", "q"), "//host/q");
+    }
+
+    // #3707 intentional differences from the retired hand-rolled resolver, pinned:
+    // (1) a base with NO authority merges per RFC 3986 §5.2.3 (the old code appended `/ref`
+    //     to the whole base: `urn:x:y` + `z` gave `urn:x:y/z`);
+    // (2) a reference or base oxiri rejects is returned as written instead of being glued
+    //     onto the base — never an error, never a panic.
+    // A 100k-pair differential over every `<…>` in the pinned w3c/N3 suite showed these are
+    // the ONLY divergences.
+    #[test]
+    fn intentional_differences_from_the_old_resolver() {
+        assert_eq!(resolve_iri("urn:x:y", "z"), "urn:z");
+        assert_eq!(resolve_iri("urn:x:y", "#f"), "urn:x:y#f");
+        assert_eq!(resolve_iri("http://ex/a", "%zz"), "%zz");
+        assert_eq!(resolve_iri("not a base", "x"), "x");
+        for hostile in ["%", "%G0", "[", "a#b#c", "\u{fffe}", "//[::1", "//h:x/"] {
+            let _ = resolve_iri("http://ex/a/b", hostile);
+            let _ = resolve_iri(hostile, "x");
         }
     }
 }

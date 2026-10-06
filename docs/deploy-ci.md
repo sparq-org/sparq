@@ -7,8 +7,8 @@ standing cloud credentials. It is the control plane for `deploy/**`; provider te
 owned by their provider directories.
 
 Deployment validation is deliberately separate from the native Rust workspace gate. Dedicated
-deploy workflows use path filters plus `workflow_dispatch`, and their advisory jobs are not part
-of `ci-summary`. A cloud CLI outage or unavailable provider account therefore cannot turn the
+deploy workflows use path filters plus `workflow_dispatch`, and their advisory jobs are not required
+checks (the only required check is `ci-fast`). A cloud CLI outage or unavailable provider account therefore cannot turn the
 engine workspace red.
 
 ## Common smoke contract
@@ -50,7 +50,7 @@ template-layer authentication contract.
 A provider-specific deploy job is complete only when all applicable items below are explicit:
 
 - It is in a dedicated deploy workflow, with `workflow_dispatch` and a narrow `deploy/**` path
-  filter, and is not aggregated into `ci-summary`.
+  filter, and is not a required check.
 - Tool versions are pinned; downloaded tools are checksum-verified where the repository installs
   binaries directly.
 - Both `sparq-server` and Solid/LWS variants are parsed, rendered, or synthesized.

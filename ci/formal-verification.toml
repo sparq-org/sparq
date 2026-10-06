@@ -3,9 +3,8 @@
 #
 # WHO CONSUMES THIS (three scripts, one contract):
 #   * scripts/fv_select.py        — the change-coupled proof selector (formal-verification.yml
-#     `fv-select` job): a PR whose diff touches a suite's `proves` paths RUNS that suite's
-#     Kani harnesses ON THE PR as a GATING check (name carries no advisory/informational
-#     token, so the ci-summary aggregator waits on it). Unrelated PRs skip it entirely.
+#     `fv-select` job): picks the suites to run. formal-verification.yml now runs nightly and
+#     on dispatch only, where the selector fails closed to every pr_gate suite.
 #   * scripts/check-fv-manifest.py — the completeness + drift gate (formal-verification.yml
 #     `fv-manifest` job): fails when a `#[cfg(kani)]` module exists in the workspace that no
 #     suite's `proves` covers, when a `#[kani::proof]` harness in source is missing from (or

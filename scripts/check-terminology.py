@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Terminology HARD gate.
-#   [OPUS-4.8] original RDF-star/SPARQL-star wording gate (bead sq-2p8z / issue #812).
-#   [OPUS-5]   made DATA-DRIVEN + given per-term file surfaces (issue #3811).
+#   original RDF-star/SPARQL-star wording gate (bead sq-2p8z / issue #812).
+#     made DATA-DRIVEN + given per-term file surfaces (issue #3811).
 #
 # WHAT: scans the repo for banned terminology and FAILS the build on a hit. The banned
 # list is DATA, not code — `scripts/banned-terminology.json`. Adding a future banned
@@ -178,7 +178,7 @@ MUST_FAIL = [
     "Hartig co-originated RDF*/SPARQL* (statement-level metadata).",
     "We store embedded triples in a side table.",
     "The RDF star feature is first-class.",
-    # [OPUS-5] issue #3811 — the trust-container term, in every spelling that reached
+    # issue #3811 — the trust-container term, in every spelling that reached
     # PR #3451. The Rust and Turtle shapes are the ones the md-only gate could not see.
     "pub struct TrustEnvelope {",
     "pub fn parse_envelope(query: &str) -> Result<TrustEnvelope, ExpressionError> {",
@@ -200,7 +200,7 @@ MUST_PASS = [
     "GeoSPARQL spatial filters and Text-to-SPARQL are unrelated.",
     "The *engine runs real SPARQL* against a graph.",
     "It loads the operator's own RDF**, then indexes it.",
-    # [OPUS-5] #3811 — the APPROVED replacement wording must pass.
+    # #3811 — the APPROVED replacement wording must pass.
     "pub struct ContractRequest {",
     "pub fn parse_request(query: &str) -> Result<ContractRequest, ExpressionError> {",
     "The verifier sends a trust-requirements document (TR) plus a nonce.",

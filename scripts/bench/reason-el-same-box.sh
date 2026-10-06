@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.8 (epic sq-hmd7l) — same-box OWL 2 EL CLASSIFICATION comparison:
+# sq-hmd7l.8 (epic sq-hmd7l) — same-box OWL 2 EL CLASSIFICATION comparison:
 # sparq-reason-el vs ELK (the canonical consequence-based EL classifier, Apache-2.0) on
 # real ontologies (Gene Ontology + OpenGALEN), emitting one competitor-results ENVELOPE
 # per ontology. Mirrors scripts/bench/shacl-same-box.sh (the SHACL gather recipe) and the

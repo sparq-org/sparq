@@ -140,3 +140,66 @@ test("[GPT-5.6] sq-n18o5: compressed URL is fetched as binary and decompressed b
     "the decompressed inner .nt name must select N-Triples before RDF parse",
   );
 });
+
+// ── #4920: the non-gzip codecs through the File-reading shim ─────────────────────────────────
+//
+// Reference fixtures generated once with the `zstd` / `bzip2` CLIs from CLI_SOURCE (Node has
+// no zstd or bzip2 encoder). The codecs themselves are covered in
+// packages/sparq-client/test/decompress.test.mjs; these prove a .zst / .bz2 / .zip File
+// actually reaches them and that the inner name used for format detection is derived right.
+
+const CLI_SOURCE =
+  '<http://example.org/s> <http://example.org/p> "object value" .\n' +
+  "<http://example.org/s> <http://example.org/q> <http://example.org/o2> .\n";
+const fromBase64 = (value: string) => new Uint8Array(Buffer.from(value, "base64"));
+const ZSTD_FIXTURE = fromBase64(
+  "KLUv/SSHDQIAJAM8aHR0cDovL2V4YW1wbGUub3JnL3M+IHA+ICJvYmplY3QgdmFsdWUiIC4KcW8yPiAuCgQAOooIuAaWolmlZxOc62uy",
+);
+const BZIP2_FIXTURE = fromBase64(
+  "QlpoOTFBWSZTWY3OZasAABVZgAAQUAGQFTrW/0AgAEhJSNNPU0xAGTQSUjQND1ANqPUxGHuVZwTkaIZFEddogtTCXlT66GleyLURCPEOyHFdV0VRbCJMiR9NEIZ+Efi7kinChIRucy1Y",
+);
+
+/** A single STORED-member ZIP — enough to exercise the File → zip routing. */
+function storedZip(name: string, text: string): Uint8Array {
+  const nameBytes = new TextEncoder().encode(name);
+  const raw = new TextEncoder().encode(text);
+  const local = new DataView(new ArrayBuffer(30));
+  local.setUint32(0, 0x04034b50, true);
+  local.setUint32(18, raw.length, true);
+  local.setUint32(22, raw.length, true);
+  local.setUint16(26, nameBytes.length, true);
+  const central = new DataView(new ArrayBuffer(46));
+  central.setUint32(0, 0x02014b50, true);
+  central.setUint32(20, raw.length, true);
+  central.setUint32(24, raw.length, true);
+  central.setUint16(28, nameBytes.length, true);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(8, 1, true);
+  eocd.setUint16(10, 1, true);
+  eocd.setUint32(12, 46 + nameBytes.length, true);
+  eocd.setUint32(16, 30 + nameBytes.length + raw.length, true);
+  return new Uint8Array(
+    Buffer.concat([
+      new Uint8Array(local.buffer), nameBytes, raw,
+      new Uint8Array(central.buffer), nameBytes, new Uint8Array(eocd.buffer),
+    ]),
+  );
+}
+
+const NON_GZIP_CASES = [
+  { file: new FakeFile("dataset.nt.zst", ZSTD_FIXTURE), codec: "zstd", inner: "dataset.nt", format: "ntriples", text: CLI_SOURCE },
+  { file: new FakeFile("dataset.nt.bz2", BZIP2_FIXTURE), codec: "bzip2", inner: "dataset.nt", format: "ntriples", text: CLI_SOURCE },
+  { file: new FakeFile("bundle.zip", storedZip("graph.ttl", SAMPLE_NT)), codec: "zip", inner: "graph.ttl", format: "turtle", text: SAMPLE_NT },
+] as const;
+
+for (const { file, codec, inner, format, text } of NON_GZIP_CASES) {
+  test(`#4920: a ${codec} File (${file.name}) is decompressed with the right inner name`, async () => {
+    const result = await maybeDecompressFile(file as unknown as File);
+    assert.strictEqual(result.wasDecompressed, true);
+    assert.strictEqual(result.codec, codec);
+    assert.strictEqual(result.text, text);
+    assert.strictEqual(result.effectiveName, inner);
+    assert.strictEqual(guessFormat(result.effectiveName), format);
+  });
+}

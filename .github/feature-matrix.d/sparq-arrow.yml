@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-v78l4 (gh-910): the sparq-arrow opt-in Apache Arrow columnar export.
+# sq-v78l4 (gh-910): the sparq-arrow opt-in Apache Arrow columnar export.
 # Only the `arrow` leg lives here: it pulls arrow-array/arrow-schema/arrow-buffer and
 # runs the RecordBatch export integration suite (tests/record_batch.rs is
 # `#![cfg(feature = "arrow")]`, so it ONLY runs with the feature ON): the QueryResult ->
@@ -37,7 +37,7 @@
   features: "arrow"
   test: true
 
-# [GPT-5.6] sq-lsp7k.21: the Parquet byte round-trip is a separate default-OFF
+# sq-lsp7k.21: the Parquet byte round-trip is a separate default-OFF
 # feature. Its two integration suites are cfg-gated on `parquet`, so this leg is
 # their required CI executor and also clippies the complete optional closure.
 - name: "sparq-arrow (parquet — in-memory byte round-trip)"
@@ -45,7 +45,7 @@
   features: "parquet"
   test: true
 
-# [GPT-5.6] sq-r3cab: Arrow IPC stream bytes are a separate default-OFF feature.
+# sq-r3cab: Arrow IPC stream bytes are a separate default-OFF feature.
 # The cfg-gated IPC integration suite can execute only in this required leg.
 - name: "sparq-arrow (ipc — Arrow stream byte round-trip)"
   crate: "sparq-arrow"

@@ -1,7 +1,7 @@
 //! W3C vc-di-eddsa `eddsa-rdfc-2022` published test vector, verified through the
 //! public API. [OPUS-5.5] zkp-14.2.
 //!
-//! Testdata origin: W3C Recommendation "Data Integrity EdDSA Cryptosuites v1.0"
+//! Test data origin: W3C Recommendation "Data Integrity EdDSA Cryptosuites v1.0"
 //! (15 May 2025), Appendix B.1 (`eddsa-rdfc-2022` representation) —
 //! <https://www.w3.org/TR/vc-di-eddsa/#test-vectors>. The canonical document is
 //! Example 9, its SHA-256 Example 10, and the `proofValue` Example 16. The vectors
@@ -45,7 +45,7 @@ const EXPECTED_DOC_SHA256: &str =
     "517744132ae165a5349155bef0bb0cf2258fff99dfe1dbd914b938d775a36017";
 
 fn iri(s: &str) -> NamedNode {
-    NamedNode::new_unchecked(s)
+    NamedNode::new(s).unwrap_or_else(|e| panic!("invalid W3C fixture IRI {s:?}: {e}"))
 }
 
 fn triple(s: &str, p: &str, o: Term) -> Triple {
@@ -118,6 +118,24 @@ fn published_proof() -> DataIntegrityProof {
     }
 }
 
+/// Index of the one triple with this subject and predicate. Panics unless exactly
+/// one matches, so a tamper step cannot silently miss (or over-hit) its target.
+fn unique_index(triples: &[Triple], subject: &str, predicate: &str) -> usize {
+    let s = NamedOrBlankNode::NamedNode(iri(subject));
+    let hits: Vec<usize> = triples
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.subject == s && t.predicate.as_str() == predicate)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected exactly one <{subject}> <{predicate}> triple, found at {hits:?}"
+    );
+    hits[0]
+}
+
 fn assert_signature_invalid(triples: &[Triple], proof: &DataIntegrityProof, what: &str) {
     match verify(triples, proof, &DidKeyResolver) {
         Err(VcError::SignatureInvalid) => {}
@@ -143,23 +161,39 @@ fn published_proof_value_verifies() {
     let verified = verify(&document(), &proof, &DidKeyResolver)
         .expect("W3C published eddsa-rdfc-2022 proofValue verifies");
     assert_eq!(verified.verification_method, VM);
-    assert_eq!(proof.config.proof_purpose, "assertionMethod");
-    assert_eq!(proof.config.domain, None);
-    assert_eq!(proof.config.challenge, None);
+    assert_eq!(verified.config.verification_method, VM);
+    assert_eq!(verified.config.proof_purpose, "assertionMethod");
+    assert_eq!(verified.config.created.as_deref(), Some(CREATED));
+    assert_eq!(verified.config.domain, None);
+    assert_eq!(verified.config.challenge, None);
+
+    // RDFC-1.0 canonicalization makes the supplied triple order irrelevant.
+    let mut reversed = document();
+    reversed.reverse();
+    let reordered = verify(&reversed, &proof, &DidKeyResolver)
+        .expect("published proofValue verifies over reversed triple order");
+    assert_eq!(reordered, verified);
 }
 
 #[test]
 fn tampered_content_is_rejected() {
     let mut tampered = document();
-    tampered[4] = triple(
-        VC,
-        "https://schema.org/name",
-        Term::Literal(Literal::new_simple_literal("Alumni Credential (edited)")),
+    let name = unique_index(&tampered, VC, "https://schema.org/name");
+    assert_eq!(
+        tampered[name].object,
+        Term::Literal(Literal::new_simple_literal("Alumni Credential"))
     );
+    tampered[name].object =
+        Term::Literal(Literal::new_simple_literal("Alumni Credential (edited)"));
     assert_signature_invalid(&tampered, &published_proof(), "edited name");
 
     let mut dropped = document();
-    dropped.pop();
+    let valid_from = unique_index(
+        &dropped,
+        VC,
+        "https://www.w3.org/2018/credentials#validFrom",
+    );
+    dropped.remove(valid_from);
     assert_signature_invalid(&dropped, &published_proof(), "dropped validFrom");
 }
 

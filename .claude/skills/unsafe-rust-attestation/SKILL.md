@@ -77,7 +77,7 @@ the attestation doesn't overstate the threat there.
 still catches real UB in sparq-core), `-Zmiri-ignore-leaks` (rayon daemon threads
 outlive `main`), `-Zmiri-disable-isolation` (incidental clock/temp access). It's
 **nightly-only** (Miri ships only on nightly; pinned by date) with **no PR
-trigger**, so it creates no check-run and the ci-summary gate never waits on it —
+trigger**, so it creates no PR check-run —
 the same "nightly safety net, not a per-PR tax" posture as fuzz/zk-toolchain.
 
 The intended future addition is an **ASan lane** (`-Zsanitizer=address`, non-musl
@@ -126,6 +126,6 @@ cargo test -p sparq-core --features mmap,dict-spill mmap_corruption_oracle
 cargo geiger --manifest-path crates/sparq-core/Cargo.toml   # unsafe report
 ```
 
-<!-- [OPUS-4.8] Authored for bead sq-toze.1 (epic sq-toze, cert framework). Grounded in
+<!-- Authored for bead sq-toze.1 (epic sq-toze, cert framework). Grounded in
 research/threat-model.md §B5, crates/sparq-core/src, .github/workflows/miri.yml + ci.yml geiger.
-Re-review when Fable returns. -->
+ -->

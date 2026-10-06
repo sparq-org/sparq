@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic both-direction self-tests for the _typos.toml allow-list
+# Hermetic both-direction self-tests for the _typos.toml allow-list
 # (bead sq-hyzq, tightened in sq-uiie — CI hygiene: stop recurring SPARQL-keyword false-
-# positives blocking the docs-quality `typos` gate). Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# positives blocking the docs-quality `typos` gate).
 #
 # WHY: typos (crate-ci/typos) splits an ALL-CAPS SPARQL keyword written with a lowercase
 # English suffix at the case boundary and flags the keyword-minus-tail or the dangling
@@ -101,7 +100,7 @@ check FAIL "Each value was MULTIPLYed by two."            # MULTIPLY+ed, not a S
 check FAIL "The fault OCURRed under load."                # OCURR(ed) is not a keyword
 
 # --------------------------------------------------------------------------- #
-# [OPUS-4.8] Pin (bead sq-k041): the glued mixed-case forms RECIEVEd/ADRESs were cited by the sq-uiie
+# Pin (bead sq-k041): the glued mixed-case forms RECIEVEd/ADRESs were cited by the sq-uiie
 # comment as misspellings the new anchor "recovers" — but typos NEVER flags those glued forms
 # (case-boundary split leaves a mixed-case token it won't correct), regex or no. They are NOT
 # the recovered class. These MUST PASS unconditionally — independent of the keyword anchor —

@@ -1039,7 +1039,7 @@ pub fn query_prepared_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
             // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
@@ -1077,7 +1077,7 @@ pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget:
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
             _ => Err("ask() requires an ASK query".into()),
@@ -1114,7 +1114,7 @@ pub fn query_json_prepared_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
             // The SPARQL 1.1 JSON results boolean form.
@@ -1140,7 +1140,7 @@ pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &Query
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
             Query::Ask { pattern, .. } => {
@@ -1196,7 +1196,7 @@ pub fn query_json_stream_prepared_with_budget(
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => {
                 exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
@@ -1235,7 +1235,7 @@ pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budge
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
     exec::budget::with_budget(budget, || {
-        exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
         match q {
             Query::Select { pattern, .. } => exec::count_select(graph, pattern),
             // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.
@@ -2579,6 +2579,56 @@ mod tests {
         let b = QueryBudget { max_rows: Some(3), ..QueryBudget::unlimited() };
         let e = query_json_chunks_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &b).unwrap_err();
         assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
+    }
+
+    /// #4239 — a row cap that trips on the streaming scan fast path must not close the
+    /// JSON document: the sink never receives the `]}}` terminator of a truncated result.
+    #[test]
+    fn budget_tripped_select_json_stream_leaves_the_document_unclosed() {
+        use std::ops::ControlFlow;
+        let b = QueryBudget { max_rows: Some(1), ..QueryBudget::unlimited() };
+        let mut body = String::new();
+        let e = query_json_stream_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &b, |c| {
+            body.push_str(&c);
+            ControlFlow::Continue(())
+        })
+        .unwrap_err();
+        assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
+        assert!(!body.ends_with("]}}"), "truncated stream was closed: {body}");
+        // Under the cap, the same query streams a complete document.
+        let mut whole = String::new();
+        query_json_stream_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &QueryBudget::unlimited(), |c| {
+            whole.push_str(&c);
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+        assert!(whole.ends_with("]}}"));
+    }
+
+    /// A cancellation raised by the sink after its first chunk stops a large parallel
+    /// stream: no later chunk and no `]}}`, so the aborted body never looks complete.
+    #[test]
+    fn cancel_from_the_first_chunk_stops_a_parallel_select_json_stream() {
+        use std::fmt::Write as _;
+        use std::ops::ControlFlow;
+        use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+        let mut nt = String::new();
+        for i in 0..60_000 {
+            writeln!(nt, "<http://ex/s{i}> <http://ex/p> \"v{i}\" .").unwrap();
+        }
+        let graph = Graph::load_str(&nt, "ntriples").unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        let budget = QueryBudget::cancelled_by(flag.clone());
+        let (mut body, mut chunks) = (String::new(), 0);
+        let result = query_json_stream_with_budget(&graph, "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o }", &budget, |c| {
+            chunks += 1;
+            body.push_str(&c);
+            flag.store(true, Ordering::Relaxed);
+            ControlFlow::Continue(())
+        });
+        assert_eq!(result.unwrap_err(), "query budget exceeded (cancelled)");
+        assert_eq!(chunks, 1, "chunks kept flowing after cancellation");
+        assert!(!body.ends_with("]}}"), "a cancelled stream was closed");
     }
 
     // [GPT-6] Refusal precedes any output, including empty-result headers, on both

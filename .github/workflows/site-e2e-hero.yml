@@ -1,11 +1,11 @@
-# [SONNET-4.6] sq-ymr2e.3 — ADVISORY CI lane for the home hero-runner E2E journeys.
+# sq-ymr2e.3 — ADVISORY CI lane for the home hero-runner E2E journeys.
 #
 # Runs the five P1 journeys in site/e2e/home-runner.spec.ts against a real headless Chromium
 # with the lean wasm bundle built from source — so the "engine-computed rows" and "zero-network
 # invariant" are verified against the actual Rust engine on every site/ change.
 #
 # ADVISORY (continue-on-error: true on both Playwright steps; the whole word `advisory` in the job
-# NAME also excludes it from the `ci-summary` aggregator). The heroic run of all five journeys +
+# NAME is declared in .github/advisory-registry.json). The heroic run of all five journeys +
 # the stress (--repeat-each=5) needs a full wasm build with a warm cache. Making it advisory keeps
 # PR CI snappy on Rust-only changes while surfacing failures as a visible check the maintainer can
 # inspect. Promotion to a required check is governed by `.github/E2E-GATING-POLICY.md` (probation
@@ -19,8 +19,7 @@ name: site-e2e-hero
 
 on:
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "site/**"
@@ -72,7 +71,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # [FABLE-5] CI-economy (2026-07-18 directive 2b): this wasm lane compiles
+          # CI-economy (2026-07-18 directive 2b): this wasm lane compiles
           # the same sparq-wasm dependency stack as the other js/pages/gui/site wasm
           # lanes — ONE shared dependency cache across them keeps demand inside the
           # 10 GB Actions-cache budget (sq-3sbrr doctrine: save on push-to-main
@@ -80,10 +79,14 @@ jobs:
           shared-key: site-wasm
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776): a
+      # `cargo install` recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
 
-      # [FABLE-5] PR #3511 review finding 5: redundant second cargo cache REMOVED —
+      # PR #3511 review finding 5: redundant second cargo cache REMOVED —
       # the Swatinem/rust-cache above (shared-key: site-wasm) already caches
       # ~/.cargo/registry + ~/.cargo/git + the workspace target/ across the js/pages/
       # gui/site wasm lanes, restore-only off main. The former PR-scoped
@@ -113,7 +116,7 @@ jobs:
       - name: Install Playwright Chromium (+ OS deps)
         run: npx playwright install --with-deps chromium
 
-      # [OPUS-5] #3773 — the determinism grep gate is HARD-gated in site-e2e-foundation.yml's
+      # #3773 — the determinism grep gate is HARD-gated in site-e2e-foundation.yml's
       # `determinism-gate` job (same `site/**` path filter). It used to run HERE too, inside
       # this advisory job, where the "HARD — must pass" comment it carried was simply false;
       # re-running it in a non-gating job gates nothing, so it is not duplicated.

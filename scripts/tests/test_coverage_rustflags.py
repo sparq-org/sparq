@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] Hermetic tests for scripts/check-coverage-rustflags.py (bead sq-6vshe.11).
+# Hermetic tests for scripts/check-coverage-rustflags.py (bead sq-6vshe.11).
 #
 # Three layers:
 #   1. The gate's PURE logic (the same fixtures as its built-in --self-test, asserted here

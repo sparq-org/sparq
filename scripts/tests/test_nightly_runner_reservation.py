@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] 🤖 SPARQ agent — hosted-runner reservation for the scheduled safety lanes
+# 🤖 SPARQ agent — hosted-runner reservation for the scheduled safety lanes
 # (sparq-org/sparq#6349).
 #
 # THE DEFECT THIS PINS. `miri.yml` and `kani.yml` are informational NIGHTLY lanes, but each

@@ -1929,18 +1929,19 @@ pub(crate) mod functions {
         static ACTIVE: RefCell<Option<Arc<FunctionRegistry>>> = const { RefCell::new(None) };
     }
 
-    /// Uninstalls the registry when the installing entry point returns (also on
-    /// error/unwind, so a poisoned thread never leaks a stale registry).
-    pub(crate) struct Guard;
+    /// Restores the PREVIOUS registry when the installing entry point returns (also
+    /// on error/unwind). Restoring rather than clearing keeps a nested install from
+    /// unregistering the outer scope's functions for the rest of that scope (#4467).
+    pub(crate) struct Guard(Option<Arc<FunctionRegistry>>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.borrow_mut().take());
+            let prev = self.0.take();
+            ACTIVE.with(|a| *a.borrow_mut() = prev);
         }
     }
 
     pub(crate) fn install(fns: &FunctionRegistry) -> Guard {
-        ACTIVE.with(|a| *a.borrow_mut() = Some(Arc::new(fns.clone())));
-        Guard
+        Guard(ACTIVE.with(|a| a.borrow_mut().replace(Arc::new(fns.clone()))))
     }
 
     /// Snapshot of the installed registry for the rayon-parallel branches
@@ -2072,16 +2073,16 @@ pub(crate) mod aggregates {
         static ACTIVE: RefCell<Option<Arc<CustomAggregateRegistry>>> = const { RefCell::new(None) };
     }
 
-    pub(crate) struct Guard;
+    pub(crate) struct Guard(Option<Arc<CustomAggregateRegistry>>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.borrow_mut().take());
+            let prev = self.0.take();
+            ACTIVE.with(|a| *a.borrow_mut() = prev);
         }
     }
 
     pub(crate) fn install(reg: &CustomAggregateRegistry) -> Guard {
-        ACTIVE.with(|a| *a.borrow_mut() = Some(Arc::new(reg.clone())));
-        Guard
+        Guard(ACTIVE.with(|a| a.borrow_mut().replace(Arc::new(reg.clone()))))
     }
 
     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
@@ -2276,16 +2277,16 @@ pub(crate) mod spatial {
         static ACTIVE: RefCell<Option<Arc<dyn SpatialProvider>>> = const { RefCell::new(None) };
     }
 
-    pub(crate) struct Guard;
+    pub(crate) struct Guard(Option<Arc<dyn SpatialProvider>>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.borrow_mut().take());
+            let prev = self.0.take();
+            ACTIVE.with(|a| *a.borrow_mut() = prev);
         }
     }
 
     pub(crate) fn install(idx: Arc<dyn SpatialProvider>) -> Guard {
-        ACTIVE.with(|a| *a.borrow_mut() = Some(idx));
-        Guard
+        Guard(ACTIVE.with(|a| a.borrow_mut().replace(idx)))
     }
 
     /// The installed spatial index, if any.
@@ -2899,7 +2900,8 @@ fn single_pattern_scan_json_emit(
             // deadline-only budget, the now-past wall clock: sets the sticky flag the
             // caller's `budget::check(0)` converts into the budget error (a chunk skipped
             // above means the deadline is globally past, so this fires deterministically).
-            let _ = budget::exhausted(frags.iter().map(|(n, _)| n).sum());
+            let total: usize = frags.iter().map(|(n, _)| n).sum();
+            budget::exhausted(total);
             // Accumulate into `pending` and hand a chunk to `emit` at each flush boundary
             // (byte-identical concatenation to the old `emit_chunk` Vec layout — only the
             // chunk *boundaries* differ, and the concat is what the byte-identity contract
@@ -2915,14 +2917,26 @@ fn single_pattern_scan_json_emit(
                 }
                 wrote = true;
                 pending.push_str(&f);
-                if flush.is_some_and(|n| pending.len() >= n)
-                    && emit(std::mem::take(&mut pending)).is_break()
-                {
-                    return Some(());
+                if flush.is_some_and(|n| pending.len() >= n) {
+                    if emit(std::mem::take(&mut pending)).is_break() {
+                        return Some(());
+                    }
+                    // A cancellation (possibly set by the sink itself) or a deadline that
+                    // passed while emitting stops the stream here, rechecked per chunk.
+                    if budget::exhausted(total) {
+                        return Some(());
+                    }
                 }
             }
-            pending.push_str("]}}");
-            let _ = emit(pending);
+            // Never close the document over a result the budget cut short (#4239): the
+            // caller reports the abort, and a sink that saw `]}}` would hold a complete-
+            // looking but truncated body. Rechecked here, not cached from before emission.
+            if !budget::exhausted(total) {
+                pending.push_str("]}}");
+            }
+            if !pending.is_empty() {
+                let _ = emit(pending);
+            }
             return Some(());
         }
     }
@@ -2941,13 +2955,20 @@ fn single_pattern_scan_json_emit(
         }
         written += 1;
         write_row(row, &mut s);
-        if flush.is_some_and(|n| s.len() >= n) && emit(std::mem::take(&mut s)).is_break() {
+        if flush.is_some_and(|n| s.len() >= n)
+            && (emit(std::mem::take(&mut s)).is_break() || budget::exhausted(written))
+        {
             return Some(());
         }
     }
-    let _ = budget::exhausted(written); // final row-count gate (sticky)
-    s.push_str("]}}");
-    let _ = emit(s);
+    // Final row-count gate (sticky). An exhausted budget leaves the document unclosed
+    // (#4239), as above.
+    if !budget::exhausted(written) {
+        s.push_str("]}}");
+    }
+    if !s.is_empty() {
+        let _ = emit(s);
+    }
     Some(())
 }
 
@@ -3445,6 +3466,17 @@ fn try_topk_orderby(
             try_topk_orderby(graph, local, red_inner, row_budget)
         }
         GraphPattern::OrderBy { inner: ord_inner, expression } => {
+            // [SONNET-5] (sq-artifact-keeper-topk) Try the index-ordered seed path
+            // first: for the narrow "star BGP, ORDER BY a variable bound by exactly
+            // one pattern's object" shape, it walks a value-sorted permutation scan
+            // directly instead of materialising every matching row — see
+            // `try_topk_orderby_indexed`'s doc comment for the soundness argument.
+            // Declines (`Ok(None)`) for any shape/datatype it can't prove safe, in
+            // which case the existing materialize-then-select path below runs
+            // unchanged.
+            if let Some(b) = try_topk_orderby_indexed(graph, local, ord_inner, expression, row_budget)? {
+                return Ok(Some(b));
+            }
             let mut b = eval_modified(graph, local, ord_inner)?;
             // Use the top-k path only when the budget is strictly less than n;
             // otherwise the heap adds overhead with no benefit.
@@ -3455,6 +3487,521 @@ fn try_topk_orderby(
         // Not an OrderBy under transparent wrappers: decline so the caller
         // falls through to the regular eval_modified path.
         _ => Ok(None),
+    }
+}
+
+/// [SONNET-5] (sq-artifact-keeper-topk) Attempts INDEX-ORDERED top-k evaluation for a
+/// `Slice{OrderBy{BGP}}` shape whose primary sort key is bound by exactly one triple
+/// pattern's OBJECT. `try_topk_orderby`'s existing bounded-heap path still calls
+/// `eval_modified` to fully evaluate (and materialise) the WHOLE matching candidate
+/// set before selecting the top `row_budget` rows — `O(n)` in the number of rows
+/// CURRENTLY matching the BGP's equality filters, not in `row_budget`. That is fine
+/// when some pattern is selective, but when every pattern matches nearly the same
+/// rows (e.g. a job-queue "claim the next pending task for peer X, ordered by
+/// priority" query, where `peer` + `status` don't shrink the candidate set at all),
+/// there is no cheaper seed for the cardinality-based planner to pick, and the cost
+/// scales with the size of the whole pending queue on every single claim — profiled
+/// and confirmed via `EXPLAIN ANALYZE` (the BGP operator reports touching every
+/// matching row) in the sparq/artifact-keeper migration's claim-queue throughput
+/// investigation.
+///
+/// SOUNDNESS. Only activates for a narrow, syntactically-verified "star" shape, and
+/// declines (`Ok(None)`) at the first sign of anything it cannot prove safe — the
+/// caller's `eval_modified`-then-select path is always correct, just `O(n)`; this
+/// function's only job is to be a provably-equivalent shortcut, never a new source
+/// of results:
+/// - `ord_inner` is a plain triple-pattern conjunction with NO residual FILTER and
+///   no blank nodes (kept out of scope for this first cut).
+/// - The FIRST order key is a bare `Variable` (secondary tie-break keys, if any,
+///   are resolved by re-using `order_bindings` over the small collected set below —
+///   not reimplemented here).
+/// - Exactly one pattern (the "seed") binds that variable as its OBJECT, with a
+///   CONSTANT predicate and a VARIABLE subject (the join "hub").
+/// - Every OTHER pattern has that same hub variable as its SUBJECT and a CONSTANT
+///   predicate (a star join around the hub); any object variable it introduces must
+///   not appear anywhere else in the BGP. Any other shape (the hub appearing
+///   elsewhere, a variable predicate, a reused object variable) declines.
+/// - Every object id on the seed's sorted scan is an INLINE small integer
+///   (`dict::is_inline`) — the only case where ascending dictionary-id order is
+///   proven to equal ascending SPARQL `value()` order (the same guard
+///   `scan_to_bindings`'s range-pruning already relies on for the same reason).
+///   Checked for the WHOLE scan up front, before any result is built, so a
+///   non-inline id never leaks a partially-computed (and potentially
+///   wrongly-ordered) answer.
+///
+/// Under those conditions, walking the seed's sorted scan in the required
+/// direction, testing each candidate hub value against the OTHER patterns via a
+/// direct bound lookup (index-nested-loop / bind join over a per-pattern
+/// subject-sorted range resolved once, not re-resolved per candidate — see the
+/// `other_pats` construction below), and stopping once a COMPLETE sort-key group
+/// (never split mid-tie) has produced at least `row_budget` confirmed joins
+/// yields valid top rows: an unvisited group is strictly worse in the requested
+/// primary-key direction, so it cannot displace the collected top `row_budget`.
+/// [GPT-6 Astra] If all ORDER BY keys tie, SPARQL permits different surviving
+/// subsets and tie order; equivalence does not require the fallback's input-index
+/// stability. Finishing a primary-key group preserves secondary-key selection.
+///
+/// PERFORMANCE, not soundness: a single escalation block is also capped at a
+/// fraction of the candidate pool (see `max_group` below) — exceeding it
+/// declines (`Ok(None)`) even though continuing would still be CORRECT, because
+/// past that point this function's per-candidate cost stops being cheaper than
+/// the fallback's bulk join (measured; see `max_group`'s comment). This keeps
+/// the walk bounded, but setup and failed probes still precede a decline.
+///
+/// [GPT-6 Astra] Recovery-stage restriction: budgeted queries, repeated variables
+/// and multi-valued probes use the existing evaluator. The historical timing notes
+/// below are unverified on current main; this candidate establishes no speedup.
+fn try_topk_orderby_indexed(
+    graph: &Graph,
+    local: &mut LocalVocab,
+    ord_inner: &GraphPattern,
+    expression: &[OrderExpression],
+    row_budget: usize,
+) -> Result<Option<Bindings>, String> {
+    #[cfg(feature = "zk")]
+    if crate::zk::enabled() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] Preserve the existing evaluator's intermediate row/byte
+    // accounting and cooperative cancellation schedule before doing any new work.
+    if budget::active() {
+        return Ok(None);
+    }
+    if view::default_is_empty() {
+        return Ok(None);
+    }
+    let Some((desc, order_var)) = expression.first().and_then(|oe| match oe {
+        OrderExpression::Asc(Expression::Variable(v)) => Some((false, v.clone())),
+        OrderExpression::Desc(Expression::Variable(v)) => Some((true, v.clone())),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    if !is_conjunctive(ord_inner) {
+        return Ok(None);
+    }
+    let mut patterns = Vec::new();
+    let mut filters = Vec::new();
+    flatten_conjunction(ord_inner, &mut patterns, &mut filters);
+    if !filters.is_empty() || patterns.is_empty() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] prepare_pattern records repeated slots but does not enforce
+    // their equality. Reuse the existing fast-path guard before bypassing build_row.
+    if patterns.iter().any(has_intra_triple_repeated_var) {
+        return Ok(None);
+    }
+    // `prepare_pattern` resolves a triple term as a ground term, so a variable nested
+    // inside one would error instead of matching; decline and let the evaluator run it.
+    if patterns.iter().any(has_quoted_triple_term) {
+        return Ok(None);
+    }
+    // Out of scope for this first cut: blank nodes are treated as synthetic
+    // variables by `prepare_pattern` (`bnode_var`) but not necessarily by
+    // `collect_vars`'s header-construction — decline rather than risk a header
+    // mismatch.
+    let has_blank_node = patterns.iter().any(|tp| {
+        matches!(tp.subject, TermPattern::BlankNode(_)) || matches!(tp.object, TermPattern::BlankNode(_))
+    });
+    if has_blank_node {
+        return Ok(None);
+    }
+
+    // Locate the ONE seed pattern binding `order_var` as its object with a
+    // constant predicate and a variable subject.
+    let mut seed_idx = None;
+    for (i, tp) in patterns.iter().enumerate() {
+        if !matches!(&tp.object, TermPattern::Variable(v) if *v == order_var) {
+            continue;
+        }
+        if !matches!(&tp.predicate, NamedNodePattern::NamedNode(_)) {
+            return Ok(None);
+        }
+        if !matches!(&tp.subject, TermPattern::Variable(_)) {
+            return Ok(None);
+        }
+        if seed_idx.is_some() {
+            return Ok(None); // order_var bound by more than one pattern: not this shape
+        }
+        seed_idx = Some(i);
+    }
+    let Some(seed_idx) = seed_idx else { return Ok(None) };
+    let hub_var = match &patterns[seed_idx].subject {
+        TermPattern::Variable(v) => v.clone(),
+        _ => unreachable!("checked above"),
+    };
+
+    // Every OTHER pattern must be `hub_var <constant predicate> (var|const)` — a
+    // star around the hub — and any variable it introduces must be fresh.
+    let mut other_vars: FxHashSet<Variable> = FxHashSet::default();
+    for (i, tp) in patterns.iter().enumerate() {
+        if i == seed_idx {
+            continue;
+        }
+        if !matches!(&tp.subject, TermPattern::Variable(v) if *v == hub_var) {
+            return Ok(None);
+        }
+        if !matches!(&tp.predicate, NamedNodePattern::NamedNode(_)) {
+            return Ok(None);
+        }
+        if let TermPattern::Variable(v) = &tp.object {
+            if *v == hub_var || *v == order_var || !other_vars.insert(v.clone()) {
+                return Ok(None);
+            }
+        }
+    }
+
+    let out_vars = collect_vars(&patterns);
+    if row_budget == 0 {
+        return Ok(Some(Bindings::unsorted(out_vars, vec![])));
+    }
+
+    // Resolve + scan the seed pattern sorted by its OBJECT (canonical column 2).
+    let (seed_id_pat, _seed_pos_vars, seed_unsat) = prepare_pattern(graph, &patterns[seed_idx])?;
+    if seed_unsat {
+        return Ok(Some(Bindings::unsorted(out_vars, vec![])));
+    }
+    let scan = graph.store.scan_sorted(&seed_id_pat, 2);
+    let actual_sort = scan.perm.order().into_iter().find(|&c| seed_id_pat[c].is_none());
+    if actual_sort != Some(2) {
+        return Ok(None); // this store build can't give us an object-sorted scan
+    }
+    let rows: &[[Id; 3]] = scan.rows.as_ref();
+    // Guard: EVERY object id on this scan must be an inline integer, or ascending
+    // id order is not proven to be ascending value order.
+    if !rows.iter().all(|r| dict::is_inline(scan.to_spo(r)[2])) {
+        return Ok(None);
+    }
+
+    // [GPT-6 Astra] The first block must include its entire leading key group.
+    // Reject a group larger than the EXISTING block cap before retaining probe
+    // scans and subject vectors. Sorted object ids make equality at the cap's
+    // zero-based edge equivalent to group_len > max_group, in either direction.
+    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
+    let n = rows.len();
+    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
+    if n > max_group {
+        let first = if desc { n - 1 } else { 0 };
+        let edge = if desc { first - max_group } else { max_group };
+        if scan.to_spo(&rows[first])[2] == scan.to_spo(&rows[edge])[2] {
+            return Ok(None);
+        }
+    }
+
+    // Prepare the other patterns ONCE ON DEMAND, each as a SUBJECT-sorted scan over its
+    // (fixed predicate [+ fixed object]) range — not re-resolved per candidate.
+    // The first cut of this function called `graph.store.scan(&probe_pat)`
+    // fresh for every (candidate, other-pattern) pair, which re-runs
+    // `Store::choose`'s permutation selection + bound computation every single
+    // time even though the choice is IDENTICAL across all candidates for a
+    // given pattern (only the subject varies). That repeated per-call setup —
+    // not the underlying lookup — is what made a large tie-group lose to the
+    // fallback's bulk merge-join (which resolves the permutation ONCE per
+    // pattern, not once per row). Resolving it once here and binary-searching
+    // the resulting sorted slice per candidate removes that repeated cost.
+    struct OtherScan<'g> {
+        scan: sparq_core::store::Scan<'g>,
+        // Precomputed ONCE (not per candidate, not per binary-search
+        // comparison step): the subject id of every row in `scan`, in the
+        // SAME (subject-sorted) order. `partition_point` over this plain
+        // `&[Id]` does a trivial integer compare per step; searching `scan`
+        // directly would call `to_spo` (a permutation-order reconstruction)
+        // on EVERY comparison, i.e. ~log(m) reconstructions per candidate per
+        // pattern — measured as a real remaining cost for a long skip-prefix
+        // (many candidates probed and rejected in a row): reconstructing the
+        // full [S,P,O] triple just to read column 0 is wasted work when the
+        // search only ever needs that one column.
+        subject_ids: Vec<Id>,
+    }
+    // [GPT-6 Astra] Resolve metadata eagerly, but retain a scan/vector only when
+    // a candidate reaches this pattern in the original order. A failed constant
+    // prefix therefore does not prepare later variable probes that it never uses.
+    struct OtherPat<'g> {
+        id_pat: IdPattern,
+        obj_var: Option<Variable>,
+        prepared: Option<OtherScan<'g>>,
+    }
+    fn prepare_other<'g>(graph: &'g Graph, op: &mut OtherPat<'g>, seed_card: usize) -> bool {
+        if op.prepared.is_some() {
+            return true;
+        }
+        let sub_scan = graph.store.scan_sorted(&op.id_pat, 0);
+        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| op.id_pat[c].is_none());
+        if sub_actual_sort != Some(0) {
+            return false;
+        }
+        // The original exact-cardinality admission rule still applies to EVERY
+        // probe before it can contribute to a row, including a late selective one.
+        if sub_scan.rows.len().saturating_mul(2) < seed_card {
+            return false;
+        }
+        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
+        #[cfg(test)]
+        indexed_topk_preparation_tests::observe(subject_ids.len());
+        op.prepared = Some(OtherScan { scan: sub_scan, subject_ids });
+        true
+    }
+    let mut other_pats: Vec<OtherPat> = Vec::with_capacity(patterns.len().saturating_sub(1));
+    for (i, tp) in patterns.iter().enumerate() {
+        if i == seed_idx {
+            continue;
+        }
+        let (id_pat, pos_vars, unsat) = prepare_pattern(graph, tp)?;
+        if unsat {
+            // A constant elsewhere in the BGP absent from the dictionary makes the
+            // WHOLE conjunction empty (a BGP join against an empty relation).
+            return Ok(Some(Bindings::unsorted(out_vars, vec![])));
+        }
+        other_pats.push(OtherPat {
+            id_pat: [None, id_pat[1], id_pat[2]],
+            obj_var: pos_vars[2].clone(),
+            prepared: None,
+        });
+    }
+
+    // [GPT-6 Astra] The previous global min-cardinality check is now applied
+    // by prepare_other to each exact scan count before that probe is used. A
+    // successful row must visit every pattern, so it passes the same admission
+    // rule. Unvisited patterns stay unproved and cannot authorize an empty result.
+
+    // The output column list is FIXED across every candidate (hub, order, then
+    // each other pattern's object variable, in pattern order) — compute it and
+    // the out_vars -> column-position mapping ONCE, not per candidate.
+    let mut cols: Vec<Variable> = Vec::with_capacity(2 + other_pats.len());
+    cols.push(hub_var.clone());
+    cols.push(order_var.clone());
+    for op in &other_pats {
+        if let Some(ov) = &op.obj_var {
+            cols.push(ov.clone());
+        }
+    }
+    let out_to_cols: Vec<Option<usize>> = out_vars.iter().map(|v| cols.iter().position(|c| c == v)).collect();
+    let emit = |ids: &[Id], collected: &mut Vec<Row>| {
+        let mut row = Row::with_capacity(out_to_cols.len());
+        for pos in &out_to_cols {
+            row.push(pos.map(|i| ids[i]).unwrap_or(NO_ID));
+        }
+        collected.push(row);
+    };
+
+    // Walk the sorted scan in the required direction, in escalating blocks aligned
+    // to complete sort-key (object-id) groups, joining each candidate against the
+    // other patterns via a direct bound lookup (index-nested-loop / bind join).
+    //
+    // `rows` is always ASCENDING by object id (the scan's actual sort order). For
+    // DESC, "best first" means walking it back-to-front. Rather than slicing from
+    // the front and reversing per block (which — subtly, and wrongly — visits the
+    // SMALLEST values first regardless of direction, since the slice bounds
+    // themselves were never flipped), define a single LOGICAL index `0..n` where
+    // position 0 is always the best candidate, via `logical`, and do all
+    // block/boundary arithmetic in that space. `logical` and `obj_id_at` are the
+    // only direction-aware code; everything below them is direction-agnostic.
+    let logical = |i: usize| -> usize { if desc { n - 1 - i } else { i } };
+    let obj_id_at = |i: usize| -> Id { scan.to_spo(&rows[logical(i)])[2] };
+    // A single escalation block is dominated by ONE large tie-group when the
+    // sort key has low cardinality (e.g. a handful of discrete priority tiers:
+    // "urgent/high/normal/low", not a near-unique value per row). This
+    // function's per-candidate cost is roughly CONSTANT per candidate (a
+    // binary search per other pattern, resolved against a scan fetched once —
+    // see `other_pats` below), while the fallback's bulk merge-join cost is
+    // roughly constant PER `n` regardless of tie structure (it materialises the
+    // whole matching set before it can sort). So the crossover is a FRACTION of
+    // `n`, not an absolute row count: measured at n=1600, a tie-group of 800
+    // (half of n) still beat the fallback (~228us vs. the fallback's ~269us),
+    // but a tie-group of 1600 (all of n) lost (would be ~450-700us vs. the
+    // fallback's own ~269us) — and the same ~0.5-0.75 fraction held at n=8000
+    // (4000 still competitive, 8000 clearly lost). `max_group` is
+    // therefore `n / 2` (with a floor for small `n`, and never below
+    // `row_budget` itself) — declining past it defers to the fallback, with
+    // any preparation and failed probes already performed adding to its cost.
+    let mut collected: Vec<Row> = Vec::new();
+    let mut visited_to: usize = 0;
+    // Block sizes grow GEOMETRICALLY from a small multiple of `row_budget`, not
+    // from `CAPPED_SEED_BLOCK` (1024): each candidate here costs a real
+    // per-pattern binary search (against the scan `other_pats` already resolved
+    // once, above), unlike the bulk merge-join the fallback path uses, which
+    // amortises its own permutation selection over the WHOLE scan in one pass.
+    // For the common case (small `row_budget`, most candidates
+    // join successfully), starting near `row_budget` means the first block alone
+    // usually satisfies it — starting at 1024 would pay ~1024 point-probes even for
+    // `LIMIT 1`, which is worse than the bulk path it's meant to beat (measured:
+    // this was the actual cause of a regression at moderate `n`, not a win).
+    // Cumulative count of candidates that failed an OTHER-pattern check, across
+    // ALL blocks in this call — distinct from `max_group`'s per-block width
+    // check. A workload that claims strictly in priority order (the realistic
+    // shape: highest priority first) leaves an ever-growing prefix of
+    // ALREADY-CLAIMED, high-priority-but-no-longer-`pending` rows at the head
+    // of the seed scan — each one still costs a real per-pattern probe before
+    // being rejected. That prefix is made of individually DISTINCT priority
+    // values, so it never forms one oversized tie-group `max_group` would
+    // catch; it spreads across many small geometric-growth blocks instead. The
+    // per-pattern cost check (comparing exact scan cardinalities to
+    // the seed's) already declines the CLEAR case — an other-pattern that's
+    // globally selective enough for the fallback's own planner to prefer as
+    // ITS seed — before that probe is used. This counter is a
+    // SAFETY NET for what that check can't see: the seed's global cardinality
+    // vs. an other-pattern's global cardinality doesn't capture every
+    // possible skip-prefix shape (e.g. a correlation between scan order and
+    // an other-pattern's matches that isn't visible from cardinality alone).
+    //
+    // The budget here must stay LARGE (matching `max_group`, not a small
+    // constant): every failed probe before declining is pure waste stacked ON
+    // TOP OF the fallback's full cost, but a SMALL budget bails on the far
+    // more common "moderate skip-prefix" case too — one that would have
+    // SUCCEEDED cheaply if allowed to keep going (a candidate ~100-800
+    // positions in costs only tens of us to walk to, vastly cheaper than a
+    // ~100-350us fallback). Measured directly: tightening this to a small
+    // constant (64) made the COMMON moderate case (already-claimed ~100-400)
+    // cost ~225-275us (forced into a fallback the upfront check didn't catch
+    // and completion would have avoided entirely) instead of the ~15-70us it
+    // gets by simply being allowed to finish. A large budget's own worst case
+    // (a skip-prefix near `n/2`, right at the edge) is bounded and modest by
+    // comparison (~30-50% over a clean fallback, not multiples of it) — an
+    // acceptable price for a case the upfront check should catch almost
+    // always in practice anyway.
+    let failure_budget = max_group;
+    let mut failed_count: usize = 0;
+    let mut block_target = row_budget.saturating_mul(4).max(16);
+    loop {
+        if visited_to >= n {
+            break;
+        }
+        let mut end = block_target.clamp(visited_to, n);
+        // Extend to the next object-id group boundary so a tie is never split
+        // across blocks (the early-stop check below requires a COMPLETE group).
+        if end < n && end > 0 {
+            let boundary_obj = obj_id_at(end - 1);
+            while end < n && obj_id_at(end) == boundary_obj {
+                end += 1;
+            }
+        }
+        if end - visited_to > max_group {
+            return Ok(None);
+        }
+        for i in visited_to..end {
+            let spo = scan.to_spo(&rows[logical(i)]);
+            let hub_id = spo[0];
+            let order_id = spo[2];
+            // [GPT-6 Astra] Only single-valued probes are admitted in this slice.
+            // General Cartesian expansion remains with the existing evaluator.
+            let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
+            let mut failed = false;
+            for op in &mut other_pats {
+                if !prepare_other(graph, op, rows.len()) {
+                    return Ok(None);
+                }
+                let prepared = op.prepared.as_ref().expect("successful preparation");
+                // Binary-search the PRECOMPUTED, plain-`Id` subject list for
+                // this pattern (built once, above) — a trivial integer
+                // compare per step, no `to_spo` reconstruction during the
+                // search itself (that only happens below, per ACTUAL match,
+                // not per comparison step — see `subject_ids`'s doc comment).
+                let start = prepared.subject_ids.partition_point(|&id| id < hub_id);
+                let stop = start + prepared.subject_ids[start..].partition_point(|&id| id == hub_id);
+                if start == stop {
+                    failed = true;
+                    break;
+                }
+                let Some(_) = &op.obj_var else {
+                    continue; // `obj_const` — existence-only, no column added
+                };
+                let op_rows: &[[Id; 3]] = prepared.scan.rows.as_ref();
+                let match_count = stop - start;
+                if match_count != 1 {
+                    return Ok(None);
+                }
+                row_ids.push(prepared.scan.to_spo(&op_rows[start])[2]);
+            }
+            if failed {
+                failed_count += 1;
+                if failed_count > failure_budget {
+                    return Ok(None);
+                }
+                continue;
+            }
+            emit(&row_ids, &mut collected);
+        }
+        visited_to = end;
+        if collected.len() >= row_budget {
+            break; // a COMPLETE group boundary was just finished — safe to stop
+        }
+        block_target = block_target.saturating_mul(4).max(visited_to + 1);
+    }
+
+    // [GPT-6 Astra] An empty walk may never visit later patterns. Preserve their
+    // unproved static-sort/cardinality exclusions through the existing fallback.
+    if other_pats.iter().any(|op| op.prepared.is_none()) {
+        return Ok(None);
+    }
+    let mut result = Bindings { vars: out_vars, rows: collected, sorted_by: None };
+    let use_topk = result.rows.len() > row_budget;
+    order_bindings(graph, local, &mut result, expression, if use_topk { Some(row_budget) } else { None })?;
+    Ok(Some(result))
+}
+
+// [GPT-6 Astra] Test-only observations pin retained preparation work, not timing.
+#[cfg(test)]
+mod indexed_topk_preparation_tests {
+    use sparq_core::Graph;
+    use std::cell::Cell;
+    use std::fmt::Write;
+
+    thread_local! { static PREPARED: Cell<(usize, usize)> = const { Cell::new((0, 0)) }; }
+    pub(super) fn observe(rows: usize) {
+        PREPARED.with(|c| { let (scans, ids) = c.get(); c.set((scans + 1, ids + rows)); });
+    }
+    const TEXT: &str = "SELECT ?s WHERE { ?s <urn:peer> <urn:X> ; <urn:status> \"pending\" ; <urn:priority> ?p ; <urn:seq> ?seq ; <urn:a> ?a ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p)";
+
+    fn graph(prefix: usize, overlay: bool, selective_last: bool) -> Graph {
+        let mut ttl = String::new();
+        for i in 0..4096 {
+            let status = if i < 4096 - prefix { "pending" } else { "done" };
+            writeln!(ttl, "<urn:s{i}> <urn:peer> <urn:X> ; <urn:status> \"{status}\" ; <urn:priority> {i} ; <urn:seq> {i} ; <urn:a> {i} ; <urn:b> {i} .").unwrap();
+            if !selective_last || i == 4095 { writeln!(ttl, "<urn:s{i}> <urn:c> {i} .").unwrap(); }
+        }
+        let base = Graph::load_str(&ttl, "turtle").unwrap();
+        if !overlay { return base; }
+        let mut changed = base.fork();
+        let mut deletes = String::from("DELETE DATA {");
+        for i in (0..4096).step_by(5) { writeln!(deletes, "<urn:s{i}> <urn:priority> {i} .").unwrap(); }
+        deletes.push('}');
+        crate::update_in_place(&mut changed, &deletes).unwrap();
+        assert_eq!(changed.pending_delta_len(), 820);
+        changed
+    }
+
+    #[test]
+    fn later_variable_preparation_is_avoided_before_block_decline() {
+        for overlay in [false, true] {
+            let g = graph(2047, overlay, false);
+            let full = crate::query(&g, TEXT).unwrap();
+            PREPARED.with(|c| c.set((0, 0)));
+            let got = crate::query(&g, &format!("{TEXT} LIMIT 1")).unwrap();
+            assert_eq!(got.rows, full.rows[..1]);
+            assert_eq!(PREPARED.with(Cell::get), (2, 4096 + 2049), "later variable scans/vectors must remain unprepared");
+        }
+    }
+
+    #[test]
+    fn successful_rows_prepare_each_probe_once() {
+        let g = graph(0, false, false);
+        for k in [1, 32] {
+            PREPARED.with(|c| c.set((0, 0)));
+            assert_eq!(crate::query(&g, &format!("{TEXT} LIMIT {k}")).unwrap().rows.len(), k);
+            let expected = if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) { (6, 6 * 4096) } else { (2, 2 * 4096) };
+            assert_eq!(PREPARED.with(Cell::get), expected);
+        }
+    }
+
+    #[test]
+    fn late_selective_probe_still_declines_before_emitting() {
+        let g = graph(0, false, true);
+        let full = crate::query(&g, TEXT).unwrap();
+        assert_eq!(full.rows.len(), 1);
+        let limited = format!("{TEXT} LIMIT 1");
+        assert_eq!(crate::query(&g, &limited).unwrap().rows, full.rows);
+        let trace = crate::explain_analyze(&g, &limited).unwrap();
+        assert!(trace.contains("BGP [binary GOO]"), "late cardinality guard must decline: {trace}");
     }
 }
 
@@ -5393,26 +5940,29 @@ fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPatt
             Ok(b)
         }
         GraphPattern::Join { left, right } => {
-            let l = eval_graph_pattern(graph, local, left)?;
-            // Bind-join pushdown: if the RIGHT side is a SERVICE and the left has
-            // already bound its join variables, push those bindings to the remote as a
-            // VALUES block instead of materialising the whole remote relation. Join is
+            // Bind-join pushdown: if one side is a SERVICE and the other has already
+            // bound its join variables, push those bindings to the remote as a VALUES
+            // block instead of materialising the whole remote relation. Join is
             // symmetric, so try either side as the SERVICE. [OPUS-4.8] (sq-sjkj)
+            //
+            // SERVICE on the left (and not on the right): evaluate the right FIRST and
+            // the SERVICE at most once — evaluating it eagerly and again on a declined
+            // pushdown fetched the endpoint (or ran a local handler) twice (#4438).
             #[cfg(feature = "service")]
+            if matches!(left.as_ref(), GraphPattern::Service { .. })
+                && !matches!(right.as_ref(), GraphPattern::Service { .. })
             {
-                if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
-                    return Ok(join_bindings(l, r));
+                let r = eval_graph_pattern(graph, local, right)?;
+                if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
+                    return Ok(join_bindings(r, sl));
                 }
-                // Symmetric: SERVICE on the left, bindings produced by the right.
-                if matches!(left.as_ref(), GraphPattern::Service { .. }) {
-                    let r = eval_graph_pattern(graph, local, right)?;
-                    if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
-                        return Ok(join_bindings(r, sl));
-                    }
-                    // Fall through with the already-evaluated right; recompute left verbatim.
-                    let l2 = eval_graph_pattern(graph, local, left)?;
-                    return Ok(join_bindings(l2, r));
-                }
+                let l = eval_graph_pattern(graph, local, left)?;
+                return Ok(join_bindings(l, r));
+            }
+            let l = eval_graph_pattern(graph, local, left)?;
+            #[cfg(feature = "service")]
+            if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
+                return Ok(join_bindings(l, r));
             }
             // Sideways information passing (SIP): when the already-evaluated `l` is
             // SMALL, evaluate the big `right` child CORRELATED on it — seeding scans
@@ -9176,15 +9726,17 @@ fn bind_join(
 
     // [GPT-6-ASTRA] Verify metadata candidates without allocating: stale sortedness
     // must not split a key across runs and repeat scans (or accumulate duplicate zk
-    // matches). Unsorted bags keep the existing hash grouping. The identity index
-    // vector keeps the shared, monomorphic slice-based combine API simple while
-    // avoiding a separate Vec allocation for every already-sorted distinct key.
+    // matches). Unsorted bags keep the existing hash grouping. Verified runs carry
+    // contiguous row ranges, avoiding an allocated identity-index vector.
     let nrows = result.rows.len();
     let presorted = result.sorted_by.as_ref().is_some_and(|sv| result.vars.get(rk) == Some(sv))
         && result.rows.windows(2).all(|pair| pair[0][rk] <= pair[1][rk]);
     #[cfg(test)]
     bind_join_run_grouping::observe_strategy(presorted);
-    let order: Vec<usize> = if presorted { (0..nrows).collect() } else { Vec::new() };
+    enum GroupRows {
+        Contiguous(std::ops::Range<usize>),
+        Indexed(Vec<usize>),
+    }
     let mut groups: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
     if !presorted {
         for (ri, row) in result.rows.iter().enumerate() {
@@ -9192,24 +9744,24 @@ fn bind_join(
         }
     }
 
-    debug_assert!(order.is_empty() || groups.is_empty());
-    // Cow lets both strategies share the same scan/filter/budget body without copying
-    // run slices or retaining owned hash-group vectors after their iteration.
+    debug_assert!(!presorted || groups.is_empty());
+    // Both strategies share the scan/filter/budget body. Owned hash-group vectors
+    // still drop after their iteration; contiguous ranges contain only two indices.
     let mut start = 0usize;
     let runs = std::iter::from_fn(|| {
-        if start == order.len() {
+        if !presorted || start == nrows {
             return None;
         }
-        let val = result.rows[order[start]][rk];
+        let val = result.rows[start][rk];
         let mut end = start + 1;
-        while end < order.len() && result.rows[order[end]][rk] == val {
+        while end < nrows && result.rows[end][rk] == val {
             end += 1;
         }
-        let ris = &order[start..end];
+        let range = start..end;
         start = end;
-        Some((val, std::borrow::Cow::Borrowed(ris)))
+        Some((val, GroupRows::Contiguous(range)))
     });
-    let hashed = groups.into_iter().map(|(val, ris)| (val, std::borrow::Cow::Owned(ris)));
+    let hashed = groups.into_iter().map(|(val, ris)| (val, GroupRows::Indexed(ris)));
 
     let mut out_rows: Vec<Row> = Vec::new();
     // zk-trace hook: accumulate the matched triples across all bound rescans
@@ -9242,7 +9794,14 @@ fn bind_join(
             // The per-(result-row, match) combine is the shared substrate's `bind_combine`
             // (sq-hknqs): the scan + filter pushdown above stay engine-private (they own the
             // store + `ScanCmp`); only the id-tuple combine is shared.
-            sjoin::bind_combine(&result.rows, &ris, &new_vals, &mut out_rows);
+            match &ris {
+                GroupRows::Contiguous(range) => {
+                    sjoin::bind_combine_rows(&result.rows[range.clone()], &new_vals, &mut out_rows);
+                }
+                GroupRows::Indexed(indices) => {
+                    sjoin::bind_combine(&result.rows, indices, &new_vals, &mut out_rows);
+                }
+            }
         }
     }
     #[cfg(feature = "zk")]
@@ -10163,7 +10722,7 @@ fn try_theta_antijoin(
 
     // ---- SIP-seed anti-join (small correlation cardinality / literal keys) ----
     let mut fired = false;
-    for key in &order {
+    'groups: for key in &order {
         let members = &groups[key];
         let ri0 = members[0];
 
@@ -10231,8 +10790,11 @@ fn try_theta_antijoin(
         let all_cands: Vec<usize> = (0..b_prime.rows.len()).collect();
         for &ri in members {
             let lrow = &left_b.rows[ri];
+            // Stop the whole SIP strategy, not just this correlation group, so it ends
+            // exactly like the hash strategy: no further seeded `B'` is evaluated and the
+            // caller's operator-exit check raises the budget error (#4158).
             if budget::exhausted(result_rows.len()) {
-                break;
+                break 'groups;
             }
             let matched = antijoin_row_matches(
                 graph, local, lrow, &b_prime, &all_cands, &shared, &out_src, &tmp_vars, &checks,
@@ -11456,11 +12018,14 @@ fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell)
         (SortCell::Temp { id, .. }, SortCell::Num { f, .. }) => {
             compare_values(&sort_cell_term(graph, local, *id), &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Num { f, .. }, SortCell::Val { v, .. }) => {
-            compare_values(&Value::Num(Num::Double(*f)), v).unwrap_or(Ordering::Equal)
+        // A stored numeric against a computed value compares the stored term EXACTLY: its
+        // cached f64 would collapse a high-precision decimal or a big integer and misorder it
+        // against an exact computed key in the same column.
+        (SortCell::Num { id, .. }, SortCell::Val { v, .. }) => {
+            compare_values(&sort_cell_term(graph, local, *id), v).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Val { v, .. }, SortCell::Num { f, .. }) => {
-            compare_values(v, &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
+        (SortCell::Val { v, .. }, SortCell::Num { id, .. }) => {
+            compare_values(v, &sort_cell_term(graph, local, *id)).unwrap_or(Ordering::Equal)
         }
         // Two IRI sort cells: direct string comparison — no allocation, no term_class
         // dispatch. [SONNET-4.6] sq-7d3dj.30.2
@@ -11755,10 +12320,13 @@ fn order_bindings(
                 return Ok(sort_cell_val(Value::Term(term)));
             }
         }
-        Ok(match eval_compiled_numeric(graph, local, row, e) {
-            Some(n) => sort_cell_val(Value::Num(Num::Double(n))),
-            None => sort_cell_val(eval_compiled(graph, local, b, row, e)?),
-        })
+        // A computed key (arithmetic, a BIND-computed local value, any other expression)
+        // keeps its EXACT value: an `f64` fast path here collapsed integers beyond 2^53 and
+        // high-precision decimals into one tie, kept their input order, and turned an
+        // integer/decimal division by zero (a type error, so an unbound key) into infinity.
+        // The exact `Value` is ordered by `compare_values`, which already rechecks numeric
+        // ties exactly — the same order `cmp_expr` and MIN/MAX give (#3198).
+        Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?))
     };
     // The sort key (vector of (descending, SortCell)) for one row.
     let key_of = |row: &Row| -> Result<Vec<(bool, SortCell)>, String> {
@@ -15031,8 +15599,28 @@ thread_local! {
 
 /// Installs the active query's base IRI for expression evaluation (IRI()/URI()
 /// relative-reference resolution). Called by the query entry points; `None` clears it.
-pub(crate) fn set_query_base(base: Option<&str>) {
-    QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+///
+/// The returned guard restores the previous base when dropped (including on unwind), so
+/// a query run re-entrantly on the same thread — e.g. from an extension function — cannot
+/// leak its BASE (or its lack of one) into the enclosing query (#6479). Bind it to a named
+/// variable for the duration of evaluation.
+pub(crate) fn set_query_base(base: Option<&str>) -> QueryBaseGuard {
+    let new = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok());
+    QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(new))) }
+}
+
+/// Restores the enclosing query's base IRI on drop; see [`set_query_base`].
+#[must_use = "the query base is restored when the guard drops; bind it to a named variable"]
+pub(crate) struct QueryBaseGuard {
+    previous: Option<Option<oxiri::Iri<String>>>,
+}
+
+impl Drop for QueryBaseGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            QUERY_BASE.with(|b| *b.borrow_mut() = previous);
+        }
+    }
 }
 
 /// `IRI(str)`: absolute IRIs pass through; relative references resolve against the
@@ -22239,5 +22827,95 @@ mod capped_rhs_tests {
             1,
             "off-diagonal repeated-variable rows must not survive"
         );
+    }
+}
+
+/// #4467 — the scoped registry guards restore the registry the install replaced
+/// (rather than clearing it), so a nested install hands the outer scope its own
+/// registry back, on normal return and on unwind alike.
+#[cfg(test)]
+mod scoped_registry_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    const F: &str = "http://ex/f";
+
+    fn registry(tag: &'static str) -> crate::FunctionRegistry {
+        let mut reg = crate::FunctionRegistry::new();
+        reg.register(F, move |_: &[Term]| Ok(Term::Literal(oxrdf::Literal::new_simple_literal(tag))));
+        reg
+    }
+
+    fn call() -> Option<Term> {
+        functions::lookup(F).map(|f| f(&[]).unwrap())
+    }
+
+    fn lit(tag: &str) -> Option<Term> {
+        Some(Term::Literal(oxrdf::Literal::new_simple_literal(tag)))
+    }
+
+    #[test]
+    fn nested_function_registry_restores_the_outer_one() {
+        crate::with_functions(&registry("outer"), || {
+            assert_eq!(call(), lit("outer"));
+            crate::with_functions(&registry("inner"), || assert_eq!(call(), lit("inner")));
+            assert_eq!(call(), lit("outer"), "outer registry lost after the inner scope");
+            let g = sparq_core::Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
+            let r = crate::query(&g, "SELECT ?v WHERE { BIND(<http://ex/f>() AS ?v) }").unwrap();
+            assert_eq!(r.rows[0][0], lit("outer"));
+        });
+        assert_eq!(call(), None, "registry leaked past the outermost scope");
+    }
+
+    #[test]
+    fn nested_function_registry_restores_the_outer_one_on_unwind() {
+        crate::with_functions(&registry("outer"), || {
+            let unwound = std::panic::catch_unwind(|| {
+                crate::with_functions(&registry("inner"), || panic!("inner scope panics"))
+            });
+            assert!(unwound.is_err());
+            assert_eq!(call(), lit("outer"));
+        });
+        assert_eq!(call(), None);
+    }
+
+    #[cfg(feature = "window-functions")]
+    #[test]
+    fn nested_aggregate_registry_restores_the_outer_one() {
+        let reg = |tag: &'static str| {
+            let mut reg = crate::CustomAggregateRegistry::new();
+            reg.register(F, move |_: &[Option<Term>]| Ok(lit(tag)));
+            reg
+        };
+        let call = || aggregates::lookup(F).map(|f| f(&[]).unwrap());
+        crate::aggregate::with_aggregates(&reg("outer"), || {
+            crate::aggregate::with_aggregates(&reg("inner"), || assert_eq!(call(), Some(lit("inner"))));
+            assert_eq!(call(), Some(lit("outer")));
+        });
+        assert_eq!(call(), None);
+    }
+
+    struct NoIndex;
+    impl crate::SpatialProvider for NoIndex {
+        fn candidates(&self, _: &crate::SpatialQuery) -> Option<Vec<Term>> {
+            None
+        }
+        fn is_indexed(&self, _: &Term) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn nested_spatial_index_restores_the_outer_one() {
+        let outer: Arc<dyn crate::SpatialProvider> = Arc::new(NoIndex);
+        let inner: Arc<dyn crate::SpatialProvider> = Arc::new(NoIndex);
+        let is = |want: &Arc<dyn crate::SpatialProvider>| {
+            spatial::active().is_some_and(|a| std::ptr::addr_eq(Arc::as_ptr(&a), Arc::as_ptr(want)))
+        };
+        crate::with_spatial_index(outer.clone(), || {
+            crate::with_spatial_index(inner.clone(), || assert!(is(&inner)));
+            assert!(is(&outer), "outer spatial index lost after the inner scope");
+        });
+        assert!(spatial::active().is_none());
     }
 }

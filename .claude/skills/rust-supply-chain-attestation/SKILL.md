@@ -58,7 +58,7 @@ can't parse the vendored `spargebra`, which needs `edition2024` / cargo >= 1.85)
   RUSTSEC-2024-0436) left when the GPU stack dropped it (it later returned via parquet);
   `rustls-pemfile` via ureq (sq-g2xs, RUSTSEC-2025-0134) left when the federation HTTP
   client moved ureq 2 → ureq 3; and when the solid-server-rs import brought
-  `rustls-pemfile` back for its mTLS PEM parse, sq-5ah3p ([OPUS-5]) removed it again by
+  `rustls-pemfile` back for its mTLS PEM parse, sq-5ah3p removed it again by
   migrating that parse to `rustls-pki-types`' `PemObject` — dropping the ignore, the VEX
   statement and the cargo-vet exemption in ONE change, which is what the `vex-deny-sync`
   gate requires. The gate re-flags any regression that reintroduces the crate.
@@ -131,6 +131,6 @@ cargo cyclonedx --all --format json      # CycloneDX SBOMs
 gh attestation verify <archive> --owner jeswr   # SLSA provenance check
 ```
 
-<!-- [OPUS-4.8] Authored for bead sq-toze.1 (epic sq-toze, cert framework). Grounded in
+<!-- Authored for bead sq-toze.1 (epic sq-toze, cert framework). Grounded in
 deny.toml + .github/workflows/{supply-chain,scorecard,dependency-monitoring,release}.yml.
-Re-review when Fable returns. -->
+ -->
