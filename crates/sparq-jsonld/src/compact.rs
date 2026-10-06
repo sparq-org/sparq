@@ -951,8 +951,20 @@ fn add_to_container_map(
     } else if kind == "@index" {
         // 12.8.9.6: property-valued index maps — the key is the first value of the
         // (compacted) index property; remaining values stay on the property.
+        // The item was compacted under its own (property- and type-scoped) context, which
+        // may give the index name another meaning; the entry is only taken when it agrees.
+        let node = node_ctx(cur, Some(iap), item, env)?;
+        let node: &Ctx = node.as_deref().unwrap_or(cur);
+        let typed = type_ctx(cur, node, item, env)?;
+        // When that context reads the term's index name as another property, a reader
+        // could resolve the map key either way, so the value stays put under @none.
+        let item_ctx = typed.as_deref().unwrap_or(node);
+        let index_iri = cur.active.expand_iri(&index_key, false, true).unwrap_or_default();
+        let agrees = item_ctx.active.expand_iri(&index_key, false, true).as_deref()
+            == Some(index_iri.as_str());
         let container_key = cur.ciri(&index_key, None, true, false);
-        if let Some(taken) = take_entry(&mut compacted_item, &container_key) {
+        let taken = if agrees { take_entry(&mut compacted_item, &container_key) } else { None };
+        if let Some(taken) = taken {
             let mut vals = match taken {
                 Json::Arr(a) => a,
                 other => vec![other],

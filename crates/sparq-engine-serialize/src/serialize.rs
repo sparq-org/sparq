@@ -4156,6 +4156,30 @@ ex:bob
         }
     }
 
+    // A property-valued index under a scoped context that renames the index property keys
+    // on the right value and keeps the data property.
+    #[test]
+    fn frame_index_map_under_scoped_names_keeps_predicates() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> <http://ex/label> "K" ; <http://ex/data> "D" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"label":"http://ex/label","p":{"@id":"http://ex/p","@container":"@index",
+                "@index":"label","@context":{"label":"http://ex/data","key":"http://ex/label"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+        // Readers differ on which context resolves the index name here, so the value is
+        // not used as a key at all.
+        assert!(framed.contains(r#""p":{"@none":"#), "{framed}");
+    }
+
     // A property-valued index whose value reads as an `@none` alias stays on the node.
     #[test]
     fn frame_index_map_keeps_values_spelled_like_none() {
