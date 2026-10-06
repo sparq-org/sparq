@@ -84,11 +84,10 @@ LEAK_PATTERNS_GLOBAL: list[tuple[re.Pattern | None, str | None, str]] = [
 #   1. Prefixed-name string  (e.g. "sigimpl:justification") — catches common serialisations.
 #   2. IRI-substring string  (e.g. "sig-impl#justification") — catches full-IRI and any
 #      non-standard prefix serialisations that evade the prefixed form.
-# Additionally, _prefix_expanded_check_restricted_projection() (stdlib, always run)
-# expands prefixed names with the binding in force (source order), and _rdflib_check_restricted_projection() parses the
-# Turtle graph with rdflib (when available) and asserts zero matching triples by full
-# IRI — both catch auto-prefixed forms (e.g. "ns1:justification") that evade BOTH
-# string patterns above.
+# Additionally, _rdflib_check_restricted_projection() parses the Turtle graph with rdflib
+# and asserts zero matching triples by full IRI — catching rdflib's auto-prefixed forms
+# (e.g. "ns1:justification") that evade BOTH string patterns above. rdflib is REQUIRED:
+# without it run_leak_check refuses the export (fail closed).
 LEAK_PATTERNS_RESTRICTED_PROJECTION: list[tuple[re.Pattern | None, str | None, str]] = [
     # ── sigimpl:justification ─────────────────────────────────────────────────
     (
@@ -270,102 +269,20 @@ def leak_check_file(
     return violations
 
 
-# Restricted-tier IRIs whose ANY use in the public projection is a leak. The
-# stdlib prefix-expansion check below resolves every declared prefix, so an
-# auto-generated binding (rdflib's "ns1:", "ns2:", ...) or any other non-standard
-# prefix collapses to the same full IRI the IRI-substring patterns already guard.
-RESTRICTED_PROJECTION_IRIS: tuple[str, ...] = (
-    "https://w3id.org/zkp-sparql/sig-impl#justification",
-    "http://purl.org/dc/terms/abstract",
-    "https://sparq.dev/ns/pkg#Finding",
-)
-
-# Turtle lexer pieces for the stdlib scan. PN_PREFIX / PN_LOCAL follow the Turtle
-# grammar closely enough for leak detection: a local name may contain `:` and `.`
-# (but not end in `.`), plus `%xx` and `\`-escapes.
-_PNAME_RE = re.compile(
-    r"([A-Za-z][\w.-]*)?:((?:[\w:%-]|\\.)(?:(?:[\w.:%-]|\\.)*(?:[\w:%-]|\\.))?)?"
-)
-_DIRECTIVE_RE = re.compile(
-    r"(?:@prefix|(?i:prefix))\s+([A-Za-z][\w.-]*)?:\s*<([^>]*)>"
-)
-_NAME_CHAR_RE = re.compile(r"[\w.:%-]")
+# Marker of the fail-closed refusal emitted when rdflib is missing (#6037/#6230/#6383).
+RDFLIB_REQUIRED_MARKER = "rdflib-required"
+RDFLIB_INSTALL_HINT = "python3 -m pip install rdflib"
 
 
-def _prefix_expanded_check_restricted_projection(
-    filename: str, content: str
-) -> list[LeakViolation]:
-    """
-    Stdlib-only, serialisation-independent companion to the rdflib check: lex the
-    Turtle in source order (skipping comments, string literals including the long
-    triple-quoted forms, and <...> IRIs), apply each `@prefix` / SPARQL-style
-    `PREFIX` directive as it is reached, and expand every prefixed name with the
-    binding in force at that point. A name whose expansion EXACTLY equals a
-    RESTRICTED_PROJECTION_IRIS term (e.g. "ns1:justification" bound to the sig-impl
-    namespace) is a violation. Needs no optional dependency, so the auto-prefix
-    form is caught on every runner (#6037/#6383).
-    """
-    restricted = set(RESTRICTED_PROJECTION_IRIS)
-    prefixes: dict[str, str] = {}
-    violations: list[LeakViolation] = []
-    lines = content.splitlines()
-    n = len(content)
-    i = 0
-    while i < n:
-        c = content[i]
-        if c == "#":
-            nl = content.find("\n", i)
-            i = n if nl < 0 else nl + 1
-            continue
-        if c in "\"'":
-            if content.startswith(c * 3, i):
-                j = i + 3
-                while j < n and not content.startswith(c * 3, j):
-                    j += 2 if content[j] == "\\" else 1
-                i = j + 3
-            else:
-                j = i + 1
-                while j < n and content[j] != c and content[j] != "\n":
-                    j += 2 if content[j] == "\\" else 1
-                i = j + 1
-            continue
-        if c == "<":
-            gt = content.find(">", i)
-            i = n if gt < 0 else gt + 1
-            continue
-        boundary = i == 0 or not _NAME_CHAR_RE.match(content[i - 1])
-        if boundary and c in "@pP":
-            m = _DIRECTIVE_RE.match(content, i)
-            if m:
-                prefixes[m.group(1) or ""] = m.group(2)
-                i = m.end()
-                continue
-        if boundary:
-            m = _PNAME_RE.match(content, i)
-            if m:
-                pfx = m.group(1) or ""
-                local = re.sub(r"\\(.)", r"\1", m.group(2) or "")
-                ns = prefixes.get(pfx)
-                if ns is not None and ns + local in restricted:
-                    lineno = content.count("\n", 0, i) + 1
-                    iri = ns + local
-                    violations.append(
-                        LeakViolation(
-                            filename=filename,
-                            marker=m.group(0),
-                            reason=(
-                                f"prefix-expanded IRI-match: {m.group(0)!r} resolves to "
-                                f"restricted <{iri}> — serialisation-independent check "
-                                f"(stdlib)"
-                            ),
-                            line_no=lineno,
-                            snippet=lines[lineno - 1].strip()[:120],
-                        )
-                    )
-                i = max(m.end(), i + 1)
-                continue
-        i += 1
-    return violations
+def _rdflib_available() -> bool:
+    """True iff rdflib can be imported. The serialisation-independent restricted-term
+    check needs it: without a real Turtle parser, prefixed forms such as
+    "ns1:justification" cannot be expanded, so the export must be refused."""
+    try:
+        import rdflib  # noqa: F401, PLC0415
+    except ImportError:
+        return False
+    return True
 
 
 def _rdflib_check_restricted_projection(
@@ -377,8 +294,8 @@ def _rdflib_check_restricted_projection(
     (e.g. "ns1:justification") which evade both the prefixed-name and IRI-substring
     string patterns.
 
-    Returns an empty list if rdflib is unavailable or the Turtle is unparseable
-    (let the string patterns handle those cases).
+    Returns an empty list if rdflib is unavailable (run_leak_check refuses the export
+    in that case) or the Turtle is unparseable (let the string patterns handle it).
     """
     try:
         import rdflib  # noqa: PLC0415
@@ -456,16 +373,31 @@ def run_leak_check(
         violations = leak_check_file(filename, content, extra_patterns=extra)
         all_violations.extend(violations)
 
-        # Additional serialisation-independent IRI checks for the restricted
-        # projection: the stdlib prefix expansion always runs (so the auto-prefix
-        # form is caught without rdflib), the rdflib graph check when available.
+        # Additional rdflib-based IRI check for the restricted projection.
+        # FAIL CLOSED without rdflib: the string patterns cannot see prefixed forms
+        # such as "ns1:justification", so a clean string scan proves nothing there.
         if filename == restricted_projection_key:
-            all_violations.extend(
-                _prefix_expanded_check_restricted_projection(filename, content)
-            )
-            all_violations.extend(
-                _rdflib_check_restricted_projection(filename, content)
-            )
+            if not _rdflib_available():
+                msg = (
+                    "rdflib is required to verify the restricted projection is free of "
+                    "restricted-tier terms (prefixed forms such as 'ns1:justification' "
+                    f"evade the string patterns) — refusing the export. Install it: "
+                    f"{RDFLIB_INSTALL_HINT}"
+                )
+                print(f"::error::{msg}", file=sys.stderr)
+                all_violations.append(
+                    LeakViolation(
+                        filename=filename,
+                        marker=RDFLIB_REQUIRED_MARKER,
+                        reason=msg,
+                        line_no=0,
+                        snippet="",
+                    )
+                )
+            else:
+                all_violations.extend(
+                    _rdflib_check_restricted_projection(filename, content)
+                )
 
     return (len(all_violations) == 0), all_violations
 
@@ -806,51 +738,96 @@ kb:finding-machine-1 a pkg:Finding ;
     with tempfile.TemporaryDirectory(prefix="sparq-kb-dump-selftest-") as tmpdir:
         out_path = Path(tmpdir) / "dump"
 
-        # ── Step 1: clean assembly — expect PASS ──────────────────────────────
-        print("\n[self-test] Step 1: assemble clean dump — leak check must PASS")
-        try:
-            assemble_dump(
-                out_dir=out_path,
-                ontology_content=SYNTHETIC_ONTOLOGY,
-                hand_authored_content=SYNTHETIC_HAND_AUTHORED,
-                machine_content=SYNTHETIC_MACHINE,
-                restricted_projection_content=SYNTHETIC_RESTRICTED_PROJECTION,
-                source_commit="selftest-0000000",
-                dump_date="1970-01-01",
-                generated_at="1970-01-01T00:00:00Z",
-            )
-        except SystemExit:
+        have_rdflib = _rdflib_available()
+        if not have_rdflib:
+            # ── Step 0: without rdflib a real export must be REFUSED ─────────
             print(
-                "[FAIL] self-test step 1: clean dump UNEXPECTEDLY failed the leak check.",
-                file=sys.stderr,
+                "\n[self-test] Step 0: rdflib NOT available — a real leak check must "
+                "REFUSE the export (fail closed)"
             )
-            return False
+            import contextlib as _ctx  # noqa: PLC0415
+            import io as _io  # noqa: PLC0415
 
-        print("[self-test] Step 1 PASSED — clean dump clears the leak check.")
+            _err = _io.StringIO()
+            refused = False
+            with _ctx.redirect_stderr(_err):
+                try:
+                    assemble_dump(
+                        out_dir=Path(tmpdir) / "dump-no-rdflib",
+                        ontology_content=SYNTHETIC_ONTOLOGY,
+                        hand_authored_content=SYNTHETIC_HAND_AUTHORED,
+                        machine_content=SYNTHETIC_MACHINE,
+                        restricted_projection_content=SYNTHETIC_RESTRICTED_PROJECTION,
+                        source_commit="selftest-no-rdflib",
+                        dump_date="1970-01-01",
+                        generated_at="1970-01-01T00:00:00Z",
+                    )
+                except SystemExit as e:
+                    refused = e.code == 1
+            if not refused or RDFLIB_REQUIRED_MARKER not in _err.getvalue():
+                print(
+                    "[FAIL] self-test step 0: without rdflib the export was NOT refused.",
+                    file=sys.stderr,
+                )
+                return False
+            if (Path(tmpdir) / "dump-no-rdflib").exists():
+                print(
+                    "[FAIL] self-test step 0: the refused export still wrote files.",
+                    file=sys.stderr,
+                )
+                return False
+            print("[self-test] Step 0 PASSED — export refused without rdflib.")
+            print(
+                f"[self-test] Steps 1 and 1b SKIPPED — rdflib not available "
+                f"(a clean export requires it; install: {RDFLIB_INSTALL_HINT})."
+            )
 
-        # ── Step 1b: prov round-trip — parse the generated dump-provenance.ttl ─
-        print("\n[self-test] Step 1b: parse dump-provenance.ttl with rdflib")
-        prov_file = out_path / "dump-provenance.ttl"
-        try:
-            import rdflib as _rdflib  # noqa: PLC0415
+        if have_rdflib:
+            # ── Step 1: clean assembly — expect PASS ──────────────────────────────
+            print("\n[self-test] Step 1: assemble clean dump — leak check must PASS")
+            try:
+                assemble_dump(
+                    out_dir=out_path,
+                    ontology_content=SYNTHETIC_ONTOLOGY,
+                    hand_authored_content=SYNTHETIC_HAND_AUTHORED,
+                    machine_content=SYNTHETIC_MACHINE,
+                    restricted_projection_content=SYNTHETIC_RESTRICTED_PROJECTION,
+                    source_commit="selftest-0000000",
+                    dump_date="1970-01-01",
+                    generated_at="1970-01-01T00:00:00Z",
+                )
+            except SystemExit:
+                print(
+                    "[FAIL] self-test step 1: clean dump UNEXPECTEDLY failed the leak check.",
+                    file=sys.stderr,
+                )
+                return False
 
-            _g = _rdflib.Graph()
-            _g.parse(str(prov_file), format="turtle")
-            print(
-                f"[self-test] Step 1b PASSED — dump-provenance.ttl is valid Turtle "
-                f"({len(_g)} triples)."
-            )
-        except ImportError:
-            print(
-                "[self-test] Step 1b SKIPPED — rdflib not available; "
-                "string-scan only for provenance validation."
-            )
-        except Exception as exc:
-            print(
-                f"[FAIL] self-test step 1b: dump-provenance.ttl is not valid Turtle: {exc}",
-                file=sys.stderr,
-            )
-            return False
+            print("[self-test] Step 1 PASSED — clean dump clears the leak check.")
+
+            # ── Step 1b: prov round-trip — parse the generated dump-provenance.ttl ─
+            print("\n[self-test] Step 1b: parse dump-provenance.ttl with rdflib")
+            prov_file = out_path / "dump-provenance.ttl"
+            try:
+                import rdflib as _rdflib  # noqa: PLC0415
+
+                _g = _rdflib.Graph()
+                _g.parse(str(prov_file), format="turtle")
+                print(
+                    f"[self-test] Step 1b PASSED — dump-provenance.ttl is valid Turtle "
+                    f"({len(_g)} triples)."
+                )
+            except ImportError:
+                print(
+                    "[self-test] Step 1b SKIPPED — rdflib not available; "
+                    "string-scan only for provenance validation."
+                )
+            except Exception as exc:
+                print(
+                    f"[FAIL] self-test step 1b: dump-provenance.ttl is not valid Turtle: {exc}",
+                    file=sys.stderr,
+                )
+                return False
 
         # ── Step 2: injected-leak negative — expect FAIL ──────────────────────
         print(
@@ -935,13 +912,30 @@ kb:finding-machine-1 a pkg:Finding ;
 
         PROJ_KEY = "pkg-restricted-projection.ttl.gz"
 
-        def _probe(label: str, content: str) -> bool:
-            """Run run_leak_check on *content* as the restricted projection; return True if caught."""
-            passed_probe, viols = run_leak_check(
-                {PROJ_KEY: content},
-                restricted_projection_key=PROJ_KEY,
-            )
-            if passed_probe:
+        def _probe(label: str, content: str, rdflib_only: bool = False) -> bool:
+            """Run run_leak_check on *content* as the restricted projection; return True if caught.
+
+            The fail-closed rdflib refusal is NOT counted as catching a probe: only a
+            violation naming the restricted content does. A probe that only the rdflib
+            check can catch is SKIPPED (not EVADED) when rdflib is absent, because the
+            exporter then refuses every export anyway (Step 0)."""
+            if rdflib_only and not have_rdflib:
+                print(
+                    f"  [PROBE {label}] SKIPPED — only the rdflib check can catch this "
+                    f"form and rdflib is not available (exports are refused without it; "
+                    f"install: {RDFLIB_INSTALL_HINT})."
+                )
+                return True
+            import contextlib as _ctx  # noqa: PLC0415
+            import io as _io  # noqa: PLC0415
+
+            with _ctx.redirect_stderr(_io.StringIO()):
+                _, all_viols = run_leak_check(
+                    {PROJ_KEY: content},
+                    restricted_projection_key=PROJ_KEY,
+                )
+            viols = [v for v in all_viols if v.marker != RDFLIB_REQUIRED_MARKER]
+            if not viols:
                 print(
                     f"  [PROBE {label}] EVADED — scanner did NOT catch this form.",
                     file=sys.stderr,
@@ -963,6 +957,7 @@ kb:finding-machine-1 a pkg:Finding ;
             "B (ns1: auto-prefix)",
             "@prefix ns1: <https://w3id.org/zkp-sparql/sig-impl#> .\n"
             '<https://doi.org/10.5555/probe.b> ns1:justification "auto-prefix text" .\n',
+            rdflib_only=True,
         )
 
         # Probe C: bare full-IRI triple (no comment; the previous self-test blind-spot)
@@ -989,7 +984,13 @@ kb:finding-machine-1 a pkg:Finding ;
             )
             return False
 
-        print("[self-test] Step 3 PASSED — all four evasion probes caught.")
+        if have_rdflib:
+            print("[self-test] Step 3 PASSED — all four evasion probes caught.")
+        else:
+            print(
+                "[self-test] Step 3 PASSED — probes A/C/D caught; PROBE B SKIPPED "
+                "(rdflib not available, so the exporter refuses every export)."
+            )
 
     print("\n── Self-test result: ALL PASSED ────────────────────────────────────────")
     return True
