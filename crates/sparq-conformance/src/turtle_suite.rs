@@ -77,19 +77,27 @@ pub fn run_suite(turtle_root: &Path, out: &mut Vec<TestResult>) -> Result<(), St
             .into_iter()
             .find_map(|ty| ty.strip_prefix(RDFT).map(str::to_string));
         let Some(kind) = kind else { continue };
-        let name = g.str_object(&node, &format!("{MF}name")).unwrap_or_else(|| match &node {
-            NamedOrBlankNode::NamedNode(n) => {
-                n.as_str().rsplit(['#', '/']).next().unwrap_or(n.as_str()).to_string()
-            }
-            NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
-        });
+        let name = g
+            .str_object(&node, &format!("{MF}name"))
+            .unwrap_or_else(|| match &node {
+                NamedOrBlankNode::NamedNode(n) => n
+                    .as_str()
+                    .rsplit(['#', '/'])
+                    .next()
+                    .unwrap_or(n.as_str())
+                    .to_string(),
+                NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
+            });
         let file = |pred: &str| {
-            g.object(&node, &format!("{MF}{pred}")).and_then(|t| match t {
-                Term::NamedNode(n) => iri_to_path(n.as_str()),
-                _ => None,
-            })
+            g.object(&node, &format!("{MF}{pred}"))
+                .and_then(|t| match t {
+                    Term::NamedNode(n) => iri_to_path(n.as_str()),
+                    _ => None,
+                })
         };
-        let Some(action) = file("action") else { continue };
+        let Some(action) = file("action") else {
+            continue;
+        };
         let result = file("result");
         let outcome = match kind.as_str() {
             "TestTurtlePositiveSyntax" => syntax_test(&action, turtle_root, true),
@@ -98,7 +106,11 @@ pub fn run_suite(turtle_root: &Path, out: &mut Vec<TestResult>) -> Result<(), St
             "TestTurtleNegativeEval" => eval_test(&action, result.as_deref(), turtle_root, false),
             other => Outcome::OutOfScope(format!("unhandled rdft type {other}")),
         };
-        out.push(TestResult { suite: "rdf-turtle".to_string(), name, outcome });
+        out.push(TestResult {
+            suite: "rdf-turtle".to_string(),
+            name,
+            outcome,
+        });
     }
     Ok(())
 }
@@ -113,7 +125,11 @@ fn parse_sparq(action: &Path, turtle_root: &Path) -> Result<Vec<[String; 3]>, Ou
         Ok((dict, ids)) => Ok(ids
             .iter()
             .map(|&[s, p, o]| {
-                [dict.term(s).to_string(), dict.term(p).to_string(), dict.term(o).to_string()]
+                [
+                    dict.term(s).to_string(),
+                    dict.term(p).to_string(),
+                    dict.term(o).to_string(),
+                ]
             })
             .collect()),
         Err(e) => Err(Outcome::Fail(e)),
@@ -131,12 +147,7 @@ fn syntax_test(action: &Path, turtle_root: &Path, positive: bool) -> Outcome {
     }
 }
 
-fn eval_test(
-    action: &Path,
-    result: Option<&Path>,
-    turtle_root: &Path,
-    positive: bool,
-) -> Outcome {
+fn eval_test(action: &Path, result: Option<&Path>, turtle_root: &Path, positive: bool) -> Outcome {
     let parsed = match parse_sparq(action, turtle_root) {
         Ok(t) => t,
         Err(Outcome::Fail(e)) => {

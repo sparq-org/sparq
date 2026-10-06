@@ -32,7 +32,13 @@ import sys
 import unittest
 from pathlib import Path
 
-import yaml
+
+# #5820: local runs without PyYAML skip this module instead of erroring; CI still
+# hard-fails on a missing PyYAML (see scripts/tests/_yaml_seam.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _yaml_seam import yaml_or_local_skip  # noqa: E402
+
+yaml = yaml_or_local_skip()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 GATE_PY = REPO_ROOT / "scripts" / "check-terminology.py"

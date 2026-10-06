@@ -444,7 +444,10 @@ fn render_report(
                     let _ = writeln!(md, "## Documented divergences\n");
                     any_div = true;
                 }
-                let _ = writeln!(md, "- `{suite}` — **{name}**: {rationale}.\n  *observed*: {observed}");
+                let _ = writeln!(
+                    md,
+                    "- `{suite}` — **{name}**: {rationale}.\n  *observed*: {observed}"
+                );
             }
         }
     }

@@ -8,8 +8,8 @@
 //! so the pass rate can be ratcheted in CI once it stabilizes.
 #![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
 
-use sparq_conformance::inference::{n3_suite, owl_suite, rdfmt, report, sparql_entail};
 use sparq_conformance::inference::report::{Outcome, Section, TestResult};
+use sparq_conformance::inference::{n3_suite, owl_suite, rdfmt, report, sparql_entail};
 use sparq_conformance::turtle_suite;
 use std::path::PathBuf;
 
@@ -54,34 +54,35 @@ fn main() {
     }
 
     let mut sections: Vec<Section> = Vec::new();
-    let mut run_section = |label: &str,
-                           notes: Vec<String>,
-                           f: &dyn Fn(&mut Vec<TestResult>) -> Result<(), String>| {
-        let mut results = Vec::new();
-        match f(&mut results) {
-            Ok(()) => {}
-            Err(e) => eprintln!("[{label}] suite error: {e}"),
-        }
-        if let Some(flt) = &filter {
-            results.retain(|r| r.name.contains(flt.as_str()) || r.suite.contains(flt.as_str()));
-        }
-        if verbose {
-            for r in &results {
-                let tag = match &r.outcome {
-                    Outcome::Pass => "PASS".to_string(),
-                    Outcome::Fail(e) => format!("FAIL ({e})"),
-                    Outcome::Divergence(why, obs) => format!("DIVERGENCE ({why}; {obs})"),
-                    Outcome::OutOfScope(why) => format!("OUT-OF-SCOPE ({why})"),
-                };
-                println!("[{}] {} — {}", r.suite, r.name, tag);
+    let mut run_section =
+        |label: &str,
+         notes: Vec<String>,
+         f: &dyn Fn(&mut Vec<TestResult>) -> Result<(), String>| {
+            let mut results = Vec::new();
+            match f(&mut results) {
+                Ok(()) => {}
+                Err(e) => eprintln!("[{label}] suite error: {e}"),
             }
-        }
-        sections.push(Section {
-            label: label.to_string(),
-            notes,
-            results,
-        });
-    };
+            if let Some(flt) = &filter {
+                results.retain(|r| r.name.contains(flt.as_str()) || r.suite.contains(flt.as_str()));
+            }
+            if verbose {
+                for r in &results {
+                    let tag = match &r.outcome {
+                        Outcome::Pass => "PASS".to_string(),
+                        Outcome::Fail(e) => format!("FAIL ({e})"),
+                        Outcome::Divergence(why, obs) => format!("DIVERGENCE ({why}; {obs})"),
+                        Outcome::OutOfScope(why) => format!("OUT-OF-SCOPE ({why})"),
+                    };
+                    println!("[{}] {} — {}", r.suite, r.name, tag);
+                }
+            }
+            sections.push(Section {
+                label: label.to_string(),
+                notes,
+                results,
+            });
+        };
 
     run_section(
         "RDF Semantics entailment (rdf-tests rdf/rdf11/rdf-mt)",
@@ -139,7 +140,10 @@ fn main() {
 
     let md = report::render(
         &sections,
-        &[("rdf-tests commit", rdf_tests.as_path()), ("w3c/N3 commit", n3_root.as_path())],
+        &[
+            ("rdf-tests commit", rdf_tests.as_path()),
+            ("w3c/N3 commit", n3_root.as_path()),
+        ],
     );
     print!("{md}");
     if let Err(e) = std::fs::write(&report_path, &md) {

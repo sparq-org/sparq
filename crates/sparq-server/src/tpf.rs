@@ -974,7 +974,7 @@ mod tests {
             Some("http://host/tpf?page=0"),
             Some(&format!("http://host/tpf?page={}", f.last_page())),
         );
-        let doc = crate::graph::triples_to_ntriples(&triples);
+        let doc = crate::graph::triples_to_ntriples(&triples).unwrap();
         // totalItems + itemsPerPage estimate.
         assert!(doc.contains("hydra/core#totalItems"), "{doc}");
         assert!(doc.contains("hydra/core#itemsPerPage"), "{doc}");
@@ -1007,7 +1007,7 @@ mod tests {
             Some("http://host/tpf?page=0"),
             Some(&format!("http://host/tpf?page={}", f.last_page())),
         );
-        let doc = crate::graph::triples_to_ntriples(&triples);
+        let doc = crate::graph::triples_to_ntriples(&triples).unwrap();
         assert!(doc.contains("hydra/core#previous"), "{doc}");
         assert!(doc.contains("hydra/core#next"), "{doc}");
     }
@@ -1028,11 +1028,11 @@ mod tests {
             Some("http://host/tpf?subject=%3Chttp%3A%2F%2Fex%2Fnobody%3E&page=0"),
             Some("http://host/tpf?subject=%3Chttp%3A%2F%2Fex%2Fnobody%3E&page=0"),
         );
-        let ttl = crate::graph::triples_to_turtle(&triples);
+        let ttl = crate::graph::triples_to_turtle(&triples).unwrap();
         // Re-parses as valid Turtle.
         let g = sparq_core::Graph::load_str(&ttl, "turtle").unwrap();
         assert!(g.len() >= 3, "metadata + search control present: {ttl}");
-        let nt = crate::graph::triples_to_ntriples(&triples);
+        let nt = crate::graph::triples_to_ntriples(&triples).unwrap();
         // The count is a typed integer literal: `…#totalItems> "0"^^<xsd:integer>`.
         assert!(nt.contains("totalItems> \"0\""), "{nt}");
     }
@@ -1072,7 +1072,7 @@ mod tests {
             Some("http://host/tpf?page=0"),
             Some(&format!("http://host/tpf?page={}", f.last_page())),
         );
-        let doc = crate::graph::triples_to_ntriples(&triples);
+        let doc = crate::graph::triples_to_ntriples(&triples).unwrap();
         assert!(doc.contains("hydra/core#first"), "{doc}");
         assert!(doc.contains("hydra/core#last"), "{doc}");
         // first → page 0, last → page 2 (7 triples / size 3).

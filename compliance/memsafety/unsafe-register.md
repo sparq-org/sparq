@@ -131,18 +131,18 @@ Recurring invariant shorthands used below:
 The extra row was a stale duplicate: `VectorStore::open` and `DiskAnnIndex::open` used to each
 carry their own `Mmap::map`, and sq-98c unified both behind the single `store::open_backing`
 helper + the `Bytes` backing enum, so the `.spqv` and `.spqg` loaders now share **one** map site
-(`store.rs:195`). On `wasm32` (memmap2 target-gated out) `open_backing` takes the owned
+(`store.rs:285`). On `wasm32` (memmap2 target-gated out) `open_backing` takes the owned
 `AlignedBytes` branch instead, which contains no `unsafe` of its own. Every file:line below was
 re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/store.rs:146` | mut slice reinterpret | `words` is u32-aligned, holds ≥ `len` bytes; region exclusively owned | `AlignedBytes::from_vec` over-allocates to a word boundary (`len.div_ceil(4)` u32s); `copy_from_slice` fills exactly `len` bytes of the freshly-allocated, unaliased buffer. |
-| `src/store.rs:154` | slice reinterpret (read) | u32-aligned, ≥ `len` initialised bytes | `AlignedBytes::as_bytes` reads the bytes copied in above; base ≥ 4-byte aligned by construction (review 1874). |
-| `src/store.rs:195` | `Mmap::map` (`open_backing`) | own-for-lifetime | the SINGLE read-backing map site, shared by `VectorStore::open` (`.spqv`) and `DiskAnnIndex::open` (`.spqg`); `open_validated` bounds every offset afterwards. Native-only — wasm32 takes the owned-bytes branch. **B5**. |
-| `src/store.rs:653` | slice reinterpret (write) | f32 has no invalid bit patterns; `align(f32) ≥ align(u8)` | `finalize`: the f32 data section → LE bytes for `write_all`; big-endian targets rejected at create/open. |
-| `src/store.rs:939` | slice reinterpret (read) | `start` is a multiple of 4 ⇒ f32-aligned; range validated in `open` | `slot_vector`: the backing is u32-aligned for BOTH branches — page-aligned map, or `AlignedBytes` (review 1874 fixed a UB align bug here); `debug_assert_eq!` checks it; f32 accepts any bit pattern. **B5**. |
-| `src/store.rs:1459` | slice reinterpret (write) | f32 no invalid patterns; align ok | the streaming builder's `put`: f32→LE bytes for `write_all` after `validate_vector`. |
+| `src/store.rs:213` | mut slice reinterpret | `words` is u32-aligned, holds ≥ `len` bytes; region exclusively owned | `AlignedBytes::from_vec` over-allocates to a word boundary (`len.div_ceil(4)` u32s); `copy_from_slice` fills exactly `len` bytes of the freshly-allocated, unaliased buffer. |
+| `src/store.rs:221` | slice reinterpret (read) | u32-aligned, ≥ `len` initialised bytes | `AlignedBytes::as_bytes` reads the bytes copied in above; base ≥ 4-byte aligned by construction (review 1874). |
+| `src/store.rs:285` | `Mmap::map` (`open_backing`) | own-for-lifetime | the SINGLE read-backing map site, shared by `VectorStore::open` (`.spqv`) and `DiskAnnIndex::open` (`.spqg`); `open_validated` bounds every offset afterwards. Native-only — wasm32 takes the owned-bytes branch. **B5**. |
+| `src/store.rs:773` | slice reinterpret (write) | f32 has no invalid bit patterns; `align(f32) ≥ align(u8)` | `finalize`: the f32 data section → LE bytes for `write_all`; big-endian hosts are rejected by the WRITER (`create`/`create_inner`). The READER accepts them: `open_validated` validates the complete little-endian structure first and only then byte-swaps the dense f32 words into owned aligned storage (sq-i7w), so no `unsafe` site gains a new precondition. |
+| `src/store.rs:1059` | slice reinterpret (read) | `start` is a multiple of 4 ⇒ f32-aligned; range validated in `open` | `slot_vector`: the backing is u32-aligned for BOTH branches — page-aligned map, or `AlignedBytes` (review 1874 fixed a UB align bug here); `debug_assert_eq!` checks it; f32 accepts any bit pattern. **B5**. |
+| `src/store.rs:1579` | slice reinterpret (write) | f32 no invalid patterns; align ok | the streaming builder's `put`: f32→LE bytes for `write_all` after `validate_vector`. |
 | `src/diskann.rs:461` | slice reinterpret (read) | f32 no invalid patterns; align ok | build path: f32→LE bytes copied into the fixed-width record; LE target asserted; borrows `b.vectors`. |
 | `src/diskann.rs:808` | slice reinterpret (read) | `start` a multiple of 4 ⇒ f32-aligned; range validated in `open_validated` | `node_vector`: `debug_assert_eq!` checks alignment; both backings are ≥ 4-byte aligned; f32 accepts any bit pattern; borrows the backing. **B5**. |
 | `src/simd.rs:96` (`approx-ann`) | `#[target_feature(enable="neon")]` call | the `neon` ISA extension is present at runtime | entered ONLY when `active_kernel()` answers `Neon`, which it does ONLY inside `if is_aarch64_feature_detected!("neon")`; `l2_sq_neon` reads exactly `a.len()==b.len()` lanes. [OPUS-4.8] sq-lfo84 |

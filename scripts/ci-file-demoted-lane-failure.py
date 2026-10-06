@@ -220,25 +220,46 @@ def gh(*argv: str) -> str:
     return subprocess.run(["gh", *argv], check=True, capture_output=True, text=True).stdout.strip()
 
 
+# #6173: the dedupe lookup must FAIL CLOSED. An unreadable response, or a result page
+# filled to the cap without the marker, cannot certify "no open issue" — treating either
+# as "none" filed a fresh duplicate on every red run.
+DEDUPE_LIMIT = 100
+
+
+class DedupeUnavailable(Exception):
+    """The open-issue lookup could not establish whether an issue already exists."""
+
+
 def find_open_issue(lane: str) -> str | None:
     try:
         out = gh(
             "issue", "list", "--state", "open",
             "--search", f'in:title "{MARKER} lane={lane}"',
-            "--json", "number,title", "--limit", "10",
+            "--json", "number,title", "--limit", str(DEDUPE_LIMIT),
         )
-        for item in json.loads(out or "[]"):
-            if MARKER in item.get("title", "") and f"lane={lane}" in item.get("title", ""):
-                return str(item["number"])
+        items = json.loads(out or "[]")
     except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        log(f"warning: issue dedupe search failed ({e}) — will attempt creation")
+        raise DedupeUnavailable(f"issue dedupe search failed ({e})") from e
+    for item in items:
+        if MARKER in item.get("title", "") and f"lane={lane}" in item.get("title", ""):
+            return str(item["number"])
+    if len(items) >= DEDUPE_LIMIT:
+        raise DedupeUnavailable(
+            f"issue dedupe search hit its {DEDUPE_LIMIT}-result cap without the marker "
+            f"— an existing issue may sit past the cut"
+        )
     return None
 
 
 def file_github_issue(bead_id: str, lane: str, args, log_tail: str) -> None:
     body = build_issue_body(bead_id, lane, args, log_tail)
     title = f"{MARKER} lane={lane}: full-form CI run failed"
-    existing = find_open_issue(lane)
+    try:
+        existing = find_open_issue(lane)
+    except DedupeUnavailable as e:
+        log(f"::error::{e} — NOT filing, to avoid a duplicate issue; the lane is already "
+            f"red and its log/artifact carries the failure.")
+        return
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
         tf.write(body)
         body_file = tf.name
@@ -254,6 +275,56 @@ def file_github_issue(bead_id: str, lane: str, args, log_tail: str) -> None:
         log("the lane is already red — not fatal.")
     finally:
         os.unlink(body_file)
+
+
+def _dedupe_fails_closed_self_test() -> None:
+    """#6173: the dedupe lookup never reports "none open" when it cannot tell."""
+    global gh, log
+    real_gh = gh
+    want = "lane=fuzz-randomized"
+
+    def fake(out=None, exc=None):
+        def _gh(*_argv: str) -> str:
+            if exc is not None:
+                raise exc
+            return out
+        return _gh
+
+    def unavailable(stub) -> bool:
+        global gh
+        gh = stub
+        try:
+            find_open_issue("fuzz-randomized")
+        except DedupeUnavailable:
+            return True
+        return False
+
+    try:
+        hit = [{"number": 7, "title": f"{MARKER} {want}: x"}]
+        gh = fake(json.dumps(hit))
+        assert find_open_issue("fuzz-randomized") == "7"
+        gh = fake("[]")
+        assert find_open_issue("fuzz-randomized") is None
+        assert unavailable(fake(exc=subprocess.CalledProcessError(1, "gh")))
+        assert unavailable(fake("not json"))
+        full = [{"number": i, "title": "unrelated"} for i in range(DEDUPE_LIMIT)]
+        assert unavailable(fake(json.dumps(full)))
+        # file_github_issue must NOT reach `gh issue create` when dedupe is unavailable.
+        calls: list[tuple[str, ...]] = []
+
+        def _rec(*argv: str) -> str:
+            calls.append(argv)
+            raise subprocess.CalledProcessError(1, "gh")
+        gh = _rec
+        real_log = log
+        log = lambda *_a, **_k: None  # noqa: E731 — keep the expected ::error:: out of CI logs
+        try:
+            file_github_issue("sq-aaaaa", "fuzz-randomized", argparse.Namespace(full_form="f", per_pr_form="p", run_url="https://example.invalid/run/1"), "tail")
+        finally:
+            log = real_log
+        assert not any(a[:2] == ("issue", "create") for a in calls), calls
+    finally:
+        gh = real_gh
 
 
 # ── self-test (hermetic: no gh, no repo writes) ──────────────────────────────────
@@ -330,6 +401,7 @@ def self_test() -> int:
         # A single/double backtick is NOT a fence and must be left alone (no over-strip).
         assert defuse_code_fences("a `b` c ``d``") == "a `b` c ``d``"
         assert defuse_code_fences(defuse_code_fences(hostile)) == defuse_code_fences(hostile)
+    _dedupe_fails_closed_self_test()
     log("self-test OK")
     return 0
 

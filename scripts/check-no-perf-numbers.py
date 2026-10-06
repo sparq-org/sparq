@@ -362,6 +362,14 @@ def main() -> int:
         help="print the resolved default scan list (one path per line) and exit 0",
     )
     ap.add_argument(
+        # #5396: an explicit path list normally bypasses ALLOW_PATH_PREFIXES (so a
+        # caller can deliberately scan e.g. a research/ record). A diff-scoped caller
+        # such as preflight.py passes this to get the SAME exemptions as the default
+        # whole-tree CI mode, instead of a false FAIL on a sanctioned numbers home.
+        "--honour-allowlist", action="store_true",
+        help="apply the ALLOW_PATH_PREFIXES exemptions to explicit paths too",
+    )
+    ap.add_argument(
         "paths", nargs="*",
         help="optional explicit paths to scan (default: all git-tracked markdown + the "
              "paper-factory .typ sources, minus the bench/research/changelog "
@@ -369,7 +377,11 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    files = args.paths or [p for p in tracked_sources() if not is_exempt_path(p)]
+    skip_exempt = not args.paths or args.honour_allowlist
+    if args.paths:
+        files = [p for p in args.paths if not (skip_exempt and is_exempt_path(p))]
+    else:
+        files = [p for p in tracked_sources() if not is_exempt_path(p)]
     # bead sq-4hga: in default (whole-tree) mode, also scan the paper-evidence
     # prose fields. Added explicitly because the file is *.json (not in SCAN_GLOBS) and its
     # scan is field-aware, not line-shaped. An explicit-paths invocation that names the file
@@ -383,7 +395,7 @@ def main() -> int:
 
     if args.list_scanned:
         for path in sorted(files):
-            if not args.paths and is_exempt_path(path):
+            if skip_exempt and is_exempt_path(path):
                 continue
             print(path)
         return 0
@@ -392,7 +404,7 @@ def main() -> int:
     read_errors = 0  # unreadable files — never silently skipped
     summary_lines: list[str] = []
     for path in sorted(files):
-        if not args.paths and is_exempt_path(path):
+        if skip_exempt and is_exempt_path(path):
             continue
         try:
             # sq-mkza: `.typ` paper sources use the accessor-aware,

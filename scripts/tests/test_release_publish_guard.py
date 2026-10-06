@@ -41,9 +41,15 @@ import tomllib
 import unittest
 from pathlib import Path
 
-# PyYAML is REQUIRED, never optional: skipping on ImportError would make this whole
-# suite silently vacuous, which is the exact failure mode it exists to prevent.
-import yaml
+# PyYAML is REQUIRED in CI, never optional there: skipping on ImportError in CI would
+# make this whole suite silently vacuous, the exact failure mode it exists to prevent.
+# The helper below skips ONLY on a local run and re-raises under CI.
+# #5820: local runs without PyYAML skip this module instead of erroring; CI still
+# hard-fails on a missing PyYAML (see scripts/tests/_yaml_seam.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _yaml_seam import yaml_or_local_skip  # noqa: E402
+
+yaml = yaml_or_local_skip()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO_ROOT / "scripts"

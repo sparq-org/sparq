@@ -227,7 +227,10 @@ pub fn run_suite(export: &Path, out: &mut Vec<TestResult>) -> Result<(), String>
             not_rl += 1;
             continue;
         }
-        if !iri_objs("semantics").iter().any(|s| s == &format!("{T}RDF-BASED")) {
+        if !iri_objs("semantics")
+            .iter()
+            .any(|s| s == &format!("{T}RDF-BASED"))
+        {
             not_rdf_based += 1;
             continue;
         }
@@ -235,21 +238,29 @@ pub fn run_suite(export: &Path, out: &mut Vec<TestResult>) -> Result<(), String>
         let lit = |p: &str| -> Option<String> { g.str_object(&case_node, &format!("{T}{p}")) };
         let case = Case {
             ident: lit("identifier").unwrap_or_else(|| match &case_node {
-                NamedOrBlankNode::NamedNode(n) => {
-                    n.as_str().rsplit('/').next().unwrap_or(n.as_str()).to_string()
-                }
+                NamedOrBlankNode::NamedNode(n) => n
+                    .as_str()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(n.as_str())
+                    .to_string(),
                 NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
             }),
-            status: g.object(&case_node, &format!("{T}status")).and_then(|t| match t {
-                Term::NamedNode(n) => n.as_str().strip_prefix(T).map(|s| s.to_string()),
-                _ => None,
-            }),
+            status: g
+                .object(&case_node, &format!("{T}status"))
+                .and_then(|t| match t {
+                    Term::NamedNode(n) => n.as_str().strip_prefix(T).map(|s| s.to_string()),
+                    _ => None,
+                }),
             checks,
             premise: lit("rdfXmlPremiseOntology").or_else(|| lit("rdfXmlInputOntology")),
             conclusion: lit("rdfXmlConclusionOntology"),
             nonconclusion: lit("rdfXmlNonConclusionOntology"),
-            imports: g.object(&case_node, &format!("{T}importedOntology")).is_some()
-                || g.object(&case_node, &format!("{T}importedOntologyIRI")).is_some(),
+            imports: g
+                .object(&case_node, &format!("{T}importedOntology"))
+                .is_some()
+                || g.object(&case_node, &format!("{T}importedOntologyIRI"))
+                    .is_some(),
         };
         run_case(case, out);
     }
@@ -308,7 +319,10 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
     }
     let Some(premise_xml) = case.premise.clone() else {
         for kind in &case.checks {
-            push(kind, Outcome::OutOfScope("premise only available in functional syntax".into()));
+            push(
+                kind,
+                Outcome::OutOfScope("premise only available in functional syntax".into()),
+            );
         }
         return;
     };
@@ -317,7 +331,10 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
         Ok(rows) => rows,
         Err(e) => {
             for kind in &case.checks {
-                push(kind, Outcome::Fail(format!("premise RDF/XML parse error: {e}")));
+                push(
+                    kind,
+                    Outcome::Fail(format!("premise RDF/XML parse error: {e}")),
+                );
             }
             return;
         }
@@ -354,7 +371,10 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             for kind in &case.checks {
-                push(kind, Outcome::Fail("timeout (20s) in materialization".into()));
+                push(
+                    kind,
+                    Outcome::Fail("timeout (20s) in materialization".into()),
+                );
             }
             return;
         }
@@ -373,7 +393,10 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
                 if clashes.is_empty() {
                     Outcome::Pass
                 } else {
-                    Outcome::Fail(format!("wrongly judged inconsistent: {}", clashes.join("; ")))
+                    Outcome::Fail(format!(
+                        "wrongly judged inconsistent: {}",
+                        clashes.join("; ")
+                    ))
                 }
             }
             "inconsistency" => {
@@ -384,7 +407,9 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
                 }
             }
             "positive-entailment" => match &case.conclusion {
-                None => Outcome::OutOfScope("conclusion only available in functional syntax".into()),
+                None => {
+                    Outcome::OutOfScope("conclusion only available in functional syntax".into())
+                }
                 Some(xml) => match parse_ontology(xml, &base) {
                     Err(e) => Outcome::Fail(format!("conclusion RDF/XML parse error: {e}")),
                     Ok(conclusion) => {
@@ -400,7 +425,9 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
                                     if d.contains(n.as_str()) {
                                         closure.push([
                                             t.clone(),
-                                            Term::NamedNode(oxrdf::NamedNode::new_unchecked(RDF_TYPE)),
+                                            Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                                                RDF_TYPE,
+                                            )),
                                             Term::NamedNode(oxrdf::NamedNode::new_unchecked(
                                                 oxrdf::vocab::rdfs::DATATYPE.as_str(),
                                             )),
@@ -412,18 +439,24 @@ fn run_case(case: Case, out: &mut Vec<TestResult>) {
                         if !clashes.is_empty() || entail::entails(&closure, &conclusion, &d) {
                             Outcome::Pass
                         } else {
-                            Outcome::Fail("conclusion not entailed by the RL/RDF-rules closure".into())
+                            Outcome::Fail(
+                                "conclusion not entailed by the RL/RDF-rules closure".into(),
+                            )
                         }
                     }
                 },
             },
             "negative-entailment" => match &case.nonconclusion {
-                None => Outcome::OutOfScope("non-conclusion only available in functional syntax".into()),
+                None => {
+                    Outcome::OutOfScope("non-conclusion only available in functional syntax".into())
+                }
                 Some(xml) => match parse_ontology(xml, &base) {
                     Err(e) => Outcome::Fail(format!("non-conclusion RDF/XML parse error: {e}")),
                     Ok(nonconclusion) => {
                         if !clashes.is_empty() {
-                            Outcome::Fail("premise wrongly judged inconsistent (entails everything)".into())
+                            Outcome::Fail(
+                                "premise wrongly judged inconsistent (entails everything)".into(),
+                            )
                         } else if entail::entails(&closure, &nonconclusion, &d) {
                             Outcome::Fail("non-conclusion wrongly entailed".into())
                         } else {
@@ -504,7 +537,9 @@ mod tests {
             );
             // A checkable spec anchor: a rule-table rule name, the RL-grammar
             // section, or the PR1 completeness theorem.
-            let anchors = ["prp-", "cls-", "cax-", "scm-", "eq-diff", "dt-", "§4.2", "PR1"];
+            let anchors = [
+                "prp-", "cls-", "cax-", "scm-", "eq-diff", "dt-", "§4.2", "PR1",
+            ];
             assert!(
                 anchors.iter().any(|tok| rationale.contains(tok)),
                 "{}: rationale must cite a rule-table / grammar / PR1 grounding",

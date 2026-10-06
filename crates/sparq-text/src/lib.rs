@@ -24,7 +24,7 @@ pub use rewrite::{prepare_text, query_text, query_text_with_budget, rewrite_quer
 pub use snippet::{snippet, Snippet};
 pub use tokenize::Analyzer;
 
-/// The `text:` vocabulary — magic predicates recognised by [`rewrite`]
+/// The `text:` vocabulary — magic predicates recognised by `rewrite`
 /// (`http://sparq.dev/text#`, the sparq extension namespace).
 pub mod vocab {
     /// `text:` — the sparq full-text-search namespace.
@@ -54,7 +54,7 @@ pub mod vocab {
     /// `?lit text:near "foo bar"` — the proximity/slop generalisation of
     /// `text:phrase`: literals where the tokens occur IN ORDER within a bounded
     /// total gap, RELEVANCE-RANKED (tighter clustering scores higher). The gap
-    /// budget defaults to [`DEFAULT_SLOP`](crate::rewrite::DEFAULT_SLOP); set it
+    /// budget defaults to `rewrite::DEFAULT_SLOP`; set it
     /// with a `?lit text:slop N` companion (a non-negative integer literal) on
     /// the same subject variable in the same basic graph pattern. Unlike
     /// `text:phrase` (boolean adjacency) it IS scored, so it also takes an

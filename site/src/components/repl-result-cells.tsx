@@ -15,7 +15,7 @@
 
 import * as React from "react";
 
-import type { SparqlResults, SparqlTerm } from "@/lib/sparq-wasm";
+import { formatTerm, termValue, type SparqlResults, type SparqlTerm } from "@/lib/sparq-wasm";
 // [OPUS-4.8] sq-vw3ax.10 — CURIE abbreviation is now shared with the node-link Graph view
 // (repl-graph-view.tsx) via @/lib/curie so both renderers use exactly one prefix set.
 import { XSD, curie } from "@/lib/curie";
@@ -44,6 +44,9 @@ export function ResultCell({ term }: { term: SparqlTerm | undefined }) {
   }
   if (term.type === "bnode") {
     return <span className="text-muted-foreground">_:{term.value}</span>;
+  }
+  if (term.type === "triple") {
+    return <span className="font-mono">{formatTerm(term)}</span>;
   }
   // Literal.
   if (isNumericLiteral(term)) {
@@ -109,10 +112,10 @@ export function deriveViz(results: SparqlResults, max = 12): VizBar[] | null {
   for (const row of rows) {
     const valTerm = row[valueVar];
     if (!valTerm) continue;
-    const value = Number(valTerm.value);
+    const value = Number(termValue(valTerm));
     if (!Number.isFinite(value)) continue;
     const labelTerm = row[labelVar];
-    const label = labelTerm ? labelTerm.value : "—";
+    const label = termValue(labelTerm) ?? "—";
     bars.push({ label: curie(label), value });
     if (bars.length >= max) break;
   }
