@@ -4081,6 +4081,23 @@ ex:bob
         assert_eq!(firsts(&g1), firsts(&g0), "{doc}");
     }
 
+    // A further list on a `@list` term with a scoped context keeps its values' meaning.
+    #[test]
+    fn compact_keeps_further_lists_outside_the_terms_scope() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/s> <http://ex/p> ("a"@en), ("b"@en) ."#,
+            "turtle",
+        )
+        .unwrap();
+        let (doc, g1) = compact_then_reload(
+            &g0,
+            r#"{"l":{"@id":"http://ex/p","@container":"@list","@context":{"@language":"en"}}}"#,
+        );
+        let tagged = |g: &Graph| nt_sorted(g).iter().filter(|t| t.contains("\"@en")).count();
+        assert_eq!(nt_sorted(&g1).len(), 6, "{doc}");
+        assert_eq!(tagged(&g1), 2, "{doc}");
+    }
+
     // A property-valued index whose value reads as an `@none` alias stays on the node.
     #[test]
     fn frame_index_map_keeps_values_spelled_like_none() {

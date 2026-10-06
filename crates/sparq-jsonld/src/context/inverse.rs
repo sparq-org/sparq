@@ -715,6 +715,11 @@ pub fn compact_iri(
                     .get(relative.as_str())
                     .is_some_and(|d| d.iri.as_deref().is_some_and(|i| i.starts_with('@')));
                 if alias || first_segment.contains(':') {
+                    // "./" before a same-document "#…" / "?…" reference would drop the
+                    // base's last segment, so those keep the absolute IRI.
+                    if relative.starts_with(['#', '?']) {
+                        return iri.to_string();
+                    }
                     return format!("./{}", relative);
                 }
                 return relative;
@@ -1025,6 +1030,11 @@ mod tests {
         let inv = ac.inverse_context();
         assert_eq!(compact_iri(&ac, &inv, "http://ex/doc#part:one", None, false, false), "#part:one");
         assert_eq!(compact_iri(&ac, &inv, "http://ex/doc?q=a:b", None, false, false), "?q=a:b");
+        let ac = ctx_of(r##"{"@base": "http://ex/doc", "#part": "@id", "?q": "@id"}"##);
+        let inv = ac.inverse_context();
+        for iri in ["http://ex/doc#part", "http://ex/doc?q"] {
+            assert_eq!(compact_iri(&ac, &inv, iri, None, false, false), iri);
+        }
     }
 
     /// A vocab-relative suffix containing a colon or starting with `@` would not

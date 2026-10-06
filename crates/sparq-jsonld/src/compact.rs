@@ -693,7 +693,14 @@ fn compact_element(
                             format!("several lists for the @list term {iap}"),
                         ));
                     }
-                    add_value(&mut result, key, wrap(compacted_item), false);
+                    // Compacted again under the absolute IRI, which carries no scoped
+                    // context (the term's could change how its values read back).
+                    let plain = compact_element(cur, Some(key), inner, env)?;
+                    let plain = match plain {
+                        Json::Arr(_) => plain,
+                        other => Json::Arr(vec![other]),
+                    };
+                    add_value(&mut result, key, wrap(plain), false);
                     continue;
                 }
                 let nest = nest_target(&mut result, cur, &iap)?;
