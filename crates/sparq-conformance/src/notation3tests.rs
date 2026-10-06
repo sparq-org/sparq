@@ -366,7 +366,9 @@ pub fn run_one(path: &Path, suite_root: &Path) -> Verdict {
 /// expectation. With `expect_rejection` (a `crash-*` case) a parse or reasoning
 /// error is the PASS outcome; otherwise it is CRASHED.
 pub fn run_source(src: &str, base: &str, suite_root: &Path, expect_rejection: bool) -> Verdict {
-    let root = std::fs::canonicalize(suite_root).unwrap_or_else(|_| suite_root.to_path_buf());
+    // Fail closed: with no canonical root (missing, or an empty path) every
+    // local lookup is refused, never confined to a prefix that matches all.
+    let root = std::fs::canonicalize(suite_root).ok();
     // The first IRI the runner refused: external (non-file, non-suite), or an
     // existing file outside the checkout.
     // (`Resolver` is `'static`, so the slot is shared rather than borrowed.)
@@ -380,7 +382,10 @@ pub fn run_source(src: &str, base: &str, suite_root: &Path, expect_rejection: bo
         if !iri.starts_with("file://") && suite_fixture_path(iri).is_none() {
             return refuse();
         }
-        match resolve_in_suite(iri, &root) {
+        let Some(root) = root.as_deref() else {
+            return refuse();
+        };
+        match resolve_in_suite(iri, root) {
             Ok(p) => std::fs::read_to_string(p?).ok(),
             Err(()) => refuse(),
         }
@@ -930,6 +935,36 @@ mod tests {
         let js: serde_json::Value = serde_json::from_str(&report_json(&rows, "r")).unwrap();
         assert_eq!(js["buckets"]["unavailable"], 1);
         assert!(report_markdown(&rows, "r").contains("| unavailable | 1 |"));
+    }
+
+    /// An unresolvable root (here the empty path, whose `starts_with` would
+    /// match everything) refuses every local lookup instead of allowing it.
+    #[test]
+    fn unresolvable_root_fails_closed() {
+        let dir = tmp("noroot");
+        std::fs::write(
+            dir.join("data.n3"),
+            "@prefix : <urn:example:>.\n:a :b :c.\n",
+        )
+        .unwrap();
+        let target = file_iri(&dir.join("data.n3"));
+        let src = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{}",
+            case(
+                "success-semantics-1",
+                &format!("<{target}> log:semantics ?f. ?f log:includes {{ <urn:example:a> <urn:example:b> <urn:example:c> }}"),
+                "true"
+            )
+        );
+        for root in [Path::new(""), Path::new("/nonexistent-n3t-root")] {
+            assert_eq!(
+                run_source(&src, &target, root, false),
+                Verdict::Unavailable(target.clone()),
+                "{}",
+                root.display()
+            );
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
