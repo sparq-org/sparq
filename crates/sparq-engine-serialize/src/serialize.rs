@@ -4057,6 +4057,48 @@ ex:bob
         );
     }
 
+    // Two lists on one `@list`-container property both survive.
+    #[test]
+    fn compact_keeps_several_lists_on_a_list_term() {
+        let g0 = Graph::load_str(
+            r#"@prefix ex: <http://ex/> . ex:s ex:p ("A"), ("B"), ("C") ."#,
+            "turtle",
+        )
+        .unwrap();
+        let (doc, g1) =
+            compact_then_reload(&g0, r#"{"items":{"@id":"http://ex/p","@container":"@list"}}"#);
+        // Blank-node labels differ, so compare the list members per head.
+        let firsts = |g: &Graph| {
+            let mut v: Vec<String> = nt_sorted(g)
+                .into_iter()
+                .filter(|t| t.contains("#first>"))
+                .map(|t| t.split("#first> ").nth(1).unwrap().to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(nt_sorted(&g1).len(), 9, "{doc}");
+        assert_eq!(firsts(&g1), firsts(&g0), "{doc}");
+    }
+
+    // A property-valued index whose value reads as an `@none` alias stays on the node.
+    #[test]
+    fn frame_index_map_keeps_values_spelled_like_none() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> . <http://ex/b> <http://ex/label> "none" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"none":"@none","label":"http://ex/label",
+                "p":{"@id":"http://ex/p","@container":"@index","@index":"label"}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+    }
+
     // An `@id` map key that would read back as an `@none` alias keeps the full IRI.
     #[test]
     fn compact_id_map_key_never_reads_as_none() {

@@ -666,20 +666,38 @@ fn compact_element(
                 if !matches!(compacted_item, Json::Arr(_)) {
                     compacted_item = Json::Arr(vec![compacted_item]);
                 }
+                // Re-wrap as a list object under the @list alias (+ verbatim @index).
+                let wrap = |items: Json| {
+                    let mut wrapper = Json::obj();
+                    wrapper.set(&cur.ciri("@list", None, true, false), items);
+                    if let Some(idx) = item.get("@index") {
+                        wrapper.set(&cur.ciri("@index", None, true, false), idx.clone());
+                    }
+                    wrapper
+                };
                 if container.iter().any(|c| c == "@list") {
                     // A @list-container term holds exactly one list — set directly.
                     let nest = nest_target(&mut result, cur, &iap)?;
-                    nest.set(&iap, compacted_item);
+                    if nest.get(&iap).is_none() {
+                        nest.set(&iap, compacted_item);
+                        continue;
+                    }
+                    // The spec overwrites an earlier list here; to keep it, a further
+                    // list on the same property goes under the absolute IRI as a list
+                    // object (an error when that spelling does not expand back to it).
+                    if cur.active.term_definition(key).is_some()
+                        || cur.active.expand_iri(key, false, true).as_deref() != Some(key)
+                    {
+                        return Err(JsonLdError::with_detail(
+                            E::InvalidSetOrListObject,
+                            format!("several lists for the @list term {iap}"),
+                        ));
+                    }
+                    add_value(&mut result, key, wrap(compacted_item), false);
                     continue;
                 }
-                // Re-wrap as a list object under the @list alias (+ verbatim @index).
-                let mut wrapper = Json::obj();
-                wrapper.set(&cur.ciri("@list", None, true, false), compacted_item);
-                if let Some(idx) = item.get("@index") {
-                    wrapper.set(&cur.ciri("@index", None, true, false), idx.clone());
-                }
                 let nest = nest_target(&mut result, cur, &iap)?;
-                add_value(nest, &iap, wrapper, as_array);
+                add_value(nest, &iap, wrap(compacted_item), as_array);
                 continue;
             }
 
@@ -934,7 +952,11 @@ fn add_to_container_map(
             };
             if !vals.is_empty() {
                 let first = vals.remove(0);
-                map_key = first.as_str().map(str::to_string);
+                // A key that reads back as an @none alias would drop the value on
+                // expansion, so such a value stays on the property too.
+                map_key = first.as_str().map(str::to_string).filter(|k| {
+                    cur.active.expand_iri(k, false, true).as_deref() != Some("@none")
+                });
                 for v in vals {
                     add_value(&mut compacted_item, &container_key, v, false);
                 }
