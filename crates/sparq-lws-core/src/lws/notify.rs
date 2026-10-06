@@ -216,6 +216,21 @@ fn new_etag() -> String {
 }
 
 impl Notifier {
+    /// Put a subscription of `inbox` to the storage root in force, in memory only.
+    #[cfg(test)]
+    pub fn subscribe_root_for_test(&self, storage: &str, inbox: &str) {
+        let sub = Subscription {
+            id: "test".into(),
+            subscriber: None,
+            client: None,
+            topics: vec![storage.to_string()],
+            inbox: inbox.to_string(),
+            expires: None,
+            expires_at: None,
+        };
+        self.subs.write().expect("lock").insert("test".into(), sub);
+    }
+
     /// Ensure the service container exists and load the subscriptions it holds.
     pub async fn load<S: Store>(store: &S, cfg: &LwsConfig) -> Result<Self, String> {
         let mut builder = reqwest::Client::builder()

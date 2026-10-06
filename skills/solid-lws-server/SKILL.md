@@ -246,7 +246,10 @@ What the server exposes, all discoverable from the storage description
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
   patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
-  full serialized size (keys and separators as well as values). `livez` and `readyz` are never
+  full serialized size (keys and separators as well as values). A JSON Patch may hold at most
+  1,000 operations, and the bytes its operations copy, move, add, replace or test are charged
+  against a work budget of four times the body limit; past either it gets `413`. A `POST`
+  whose request is cancelled after the member is written is still announced. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
   `PATCH` whose result nests too deeply to store gets `422`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.

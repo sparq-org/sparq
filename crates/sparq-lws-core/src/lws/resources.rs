@@ -1137,19 +1137,32 @@ async fn create<S: Store + 'static>(
             meta.clone(),
         );
         tokio::spawn(async move {
-            let _locks = (child_guards, parent_guard);
+            let locks = (child_guards, parent_guard);
             state.put_resource_meta(&child, &meta).await?;
-            match state
+            let created = match state
                 .store
                 .create_in_container(&parent, &child, body, &content_type)
                 .await
             {
-                Ok(m) => Ok(m),
+                Ok(m) => m,
                 Err(e) => {
                     let _ = state.store.delete(&meta_key(&child), None).await;
-                    Err(e)
+                    return Err(e);
                 }
-            }
+            };
+            // What follows a commit follows it whether or not the client is still there: the
+            // container's bookkeeping and the Create notification. The locks go first (the touch
+            // takes the container's lock again).
+            drop(locks);
+            touch_container(&state, &parent).await;
+            let event = Event {
+                kind: "Create",
+                uri: child.clone(),
+                is_container,
+                relation: Some(("target", parent.clone())),
+            };
+            state.notify.announce(&state, event).await;
+            Ok(created)
         })
         .await
     };
@@ -1158,19 +1171,6 @@ async fn create<S: Store + 'static>(
         Ok(Err(e)) => return store_error(e),
         Err(e) => return store_error(ServerError::Storage(format!("the create failed: {e}"))),
     };
-    touch_container(state, parent).await;
-    state
-        .notify
-        .announce(
-            state,
-            Event {
-                kind: "Create",
-                uri: child.clone(),
-                is_container,
-                relation: Some(("target", parent.to_string())),
-            },
-        )
-        .await;
     let mut resp = problem(StatusCode::CREATED, None);
     let h = resp.headers_mut();
     set(h, header::LOCATION, &child);
@@ -1576,6 +1576,16 @@ fn merge_patch_bounded(target: &Value, patch: &Value, budget: usize) -> Result<V
 /// `copy` doubles what it copies, so without a bound a few dozen operations exhaust memory.
 pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
 
+/// How many operations a JSON Patch may have.
+pub const MAX_PATCH_OPS: usize = 1000;
+
+/// The work a JSON Patch may do, in bytes measured, cloned or compared, as a multiple of
+/// [`PATCH_BUDGET`].
+pub const PATCH_WORK_FACTOR: usize = 4;
+
+/// The least work any JSON Patch may do, however small its size budget.
+pub const MIN_PATCH_WORK: usize = 1 << 20;
+
 /// How deeply a patched document may nest, in arrays and objects: the deepest document
 /// `serde_json` parses back (its recursion limit). The parser bounds every document a request
 /// carries, but JSON Patch builds new ones: each `move` or `copy` may nest an existing value under
@@ -1690,10 +1700,25 @@ fn json_size(v: &Value) -> usize {
 pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
     use PatchError::Failed;
     let ops = validate_json_patch(ops)?;
+    if ops.len() > MAX_PATCH_OPS {
+        return Err(PatchError::TooLarge);
+    }
     let mut doc = target.clone();
     // The document's size, kept as an upper bound: every operation that adds checks the budget
     // before it clones or inserts anything.
     let mut size = json_size(&doc);
+    // The work done, in bytes measured, cloned or compared: a patch within the size budget can
+    // still repeat costly operations (a copy of a large value over itself, again and again), so
+    // the total is held to a budget of its own.
+    let work_budget = budget.saturating_mul(PATCH_WORK_FACTOR).max(MIN_PATCH_WORK);
+    let mut work = size;
+    let charge = |work: &mut usize, bytes: usize| {
+        *work = work.saturating_add(bytes);
+        if *work > work_budget {
+            return Err(PatchError::TooLarge);
+        }
+        Ok(())
+    };
     let str_of = |op: &Value, k: &str| op[k].as_str().unwrap_or_default().to_string();
     for op in ops {
         let path = str_of(op, "path");
@@ -1730,21 +1755,27 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 let v = &op["value"];
                 fits(v)?;
                 let minus = replaced(&doc);
-                let by = json_size(v) + member_overhead(&doc, &path, true);
+                let value = json_size(v);
+                charge(&mut work, 2 * value + minus)?;
+                let by = value + member_overhead(&doc, &path, true);
                 grow(&mut size, by, minus)?;
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
             }
             "remove" => {
                 let overhead = member_overhead(&doc, &path, false);
                 let old = pointer_remove(&mut doc, &path).ok_or(Failed)?;
-                size = size.saturating_sub(json_size(&old) + overhead);
+                let gone = json_size(&old);
+                charge(&mut work, gone)?;
+                size = size.saturating_sub(gone + overhead);
             }
             "replace" => {
                 let v = &op["value"];
                 fits(v)?;
                 let old = doc.pointer(&path).ok_or(Failed)?;
                 let minus = json_size(old);
-                grow(&mut size, json_size(v), minus)?;
+                let value = json_size(v);
+                charge(&mut work, 2 * value + minus)?;
+                grow(&mut size, value, minus)?;
                 pointer_remove(&mut doc, &path).ok_or(Failed)?;
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
             }
@@ -1761,6 +1792,7 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 let moved = json_size(&v);
                 size = size.saturating_sub(moved + overhead);
                 let minus = replaced(&doc);
+                charge(&mut work, 2 * moved + minus)?;
                 let by = moved + member_overhead(&doc, &path, true);
                 grow(&mut size, by, minus)?;
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
@@ -1769,13 +1801,17 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 let from = str_of(op, "from");
                 let source = doc.pointer(&from).ok_or(Failed)?;
                 fits(source)?;
-                let added = json_size(source) + member_overhead(&doc, &path, true);
+                let copied = json_size(source);
+                let added = copied + member_overhead(&doc, &path, true);
                 let minus = replaced(&doc);
+                charge(&mut work, 2 * copied + minus)?;
                 grow(&mut size, added, minus)?;
                 let v = doc.pointer(&from).ok_or(Failed)?.clone();
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "test" => {
+                // A comparison walks no more of the document than the value it is given.
+                charge(&mut work, json_size(&op["value"]))?;
                 if !json_equal(doc.pointer(&path).ok_or(Failed)?, &op["value"]) {
                     return Err(Failed);
                 }
@@ -3449,6 +3485,36 @@ mod tests {
         assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
     }
 
+    /// Review finding: a JSON Patch could repeat a costly operation without end within the size
+    /// budget (a copy of a large value over itself replaces it, so the document never grows). The
+    /// operations are counted, and the work they do is held to a budget of its own.
+    #[test]
+    fn json_patch_work_is_bounded() {
+        let big = json!({ "a": "x".repeat(1 << 20) });
+        let over_itself = json!({"op": "copy", "from": "/a", "path": "/a"});
+        // A few are fine; enough to do many times the budget's work are refused.
+        let few = Value::Array(vec![over_itself.clone(); 3]);
+        assert_eq!(json_patch(&big, &few, 8 << 20), Ok(big.clone()));
+        let many = Value::Array(vec![over_itself; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // Tests count too.
+        let probe = json!({"op": "test", "path": "/a", "value": "x".repeat(1 << 20)});
+        let many = Value::Array(vec![probe; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // And so do operations, however cheap.
+        let cheap = json!({"op": "test", "path": "/b", "value": 1});
+        let ops = Value::Array(vec![cheap.clone(); MAX_PATCH_OPS]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Ok(json!({"b": 1}))
+        );
+        let ops = Value::Array(vec![cheap; MAX_PATCH_OPS + 1]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+    }
+
     #[test]
     fn json_patch_copy_is_held_to_a_budget() {
         let mut ops = Vec::new();
@@ -3936,9 +4002,14 @@ mod tests {
             json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH), PATCH_BUDGET),
             Err(PatchError::TooDeep)
         );
-        // Far past the bound: refused, not a stack overflow.
+        // Far past the bound: refused, not a stack overflow (by the operation count first, and by
+        // the depth bound for as many as are allowed).
         assert_eq!(
             json_patch(&doc, &nesting_ops(100_000), PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_PATCH_OPS / 3), PATCH_BUDGET),
             Err(PatchError::TooDeep)
         );
         // A copy into itself doubles the depth; add places a deep value under a deep path.
@@ -4691,6 +4762,51 @@ mod tests {
             .expect("the container stayed locked");
         assert_eq!(r.status(), StatusCode::CREATED);
         assert_eq!(hdr(&r, "location"), format!("{x}-2"));
+    }
+
+    /// Review finding: a create's writes ran in a task of their own, but the container's touch and
+    /// the Create notification ran after it in the request, so a client that went away left a
+    /// committed member that nobody heard of and a container whose listing validators stood still.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancelled_create_is_still_announced() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::time::Duration;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        // No room in the delivery queue: every notification made is counted as dropped.
+        cfg.delivery = super::super::notify::DeliveryLimits {
+            queue: 0,
+            workers: 1,
+            per_inbox: 1,
+        };
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let root = st.cfg.storage();
+        st.notify
+            .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
+        let version = st.resource_meta(&root).await.unwrap().version;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let h = [("slug", "x"), ("content-type", "text/plain")];
+        let request = req(Method::POST, "/", &h, "x");
+        let agent = Agent::anonymous();
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            create(&st, &request, &agent, &root),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.notify.dropped() > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(st.store.exists(&format!("{root}x")).await.unwrap());
+        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
     }
 
     /// Review finding: with the create's writes inline, a client that went away released the
