@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic regression tests for the metrics-collection harness
-# (bead sq-lhwo.1, epic sq-lhwo). Authored by Opus 4.8 (Fable unavailable; flag for
-# re-review when Fable returns).
+# Hermetic regression tests for the metrics-collection harness
+# (bead sq-lhwo.1, epic sq-lhwo).
 #
 # FULLY HERMETIC: imports metrics_row.py and drives it through the --from-json bundle
 # path + pure helpers -- NO gh / roborev / bd / network calls. Exercises:

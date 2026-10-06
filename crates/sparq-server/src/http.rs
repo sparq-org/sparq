@@ -3938,21 +3938,37 @@ fn tpf_base(headers: &HeaderMap) -> String {
 }
 
 /// [OPUS-4.8] sq-bzh1: percent-encodes a query-parameter VALUE for building the `hydra:next` /
-/// `hydra:previous` page URLs. Encodes everything outside the RFC 3986 unreserved set plus the
-/// few sub-delims safe in a query value, so an N-Triples term value (`<`, `>`, `"`, spaces, …)
-/// round-trips through the URL back to the same term. Hand-rolled to avoid a new dependency.
+/// `hydra:previous` page URLs: the RFC 3986 unreserved set passes through, everything else is
+/// uppercase `%XX` per UTF-8 byte, so an N-Triples term value (`<`, `>`, `"`, spaces, …)
+/// round-trips through the URL back to the same term. The SAME `percent-encoding` set as
+/// sparq-fedclient's `pct_encode` (the client that reads these links) — #3712.
 #[cfg(feature = "tpf")]
 fn pct_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
+    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(value, UNRESERVED).to_string()
+}
+
+#[cfg(all(test, feature = "tpf"))]
+mod pct_encode_tests {
+    use super::pct_encode;
+
+    /// #3712 tripwire: every printable ASCII byte + a control + 2-/4-byte UTF-8 — exactly the
+    /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
+    #[test]
+    fn pct_encode_pins_the_unreserved_set() {
+        let all: String = (0x20u8..0x7f)
+            .map(char::from)
+            .chain("\t\né😀".chars())
+            .collect();
+        assert_eq!(
+            pct_encode(&all),
+            "%20%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%09%0A%C3%A9%F0%9F%98%80"
+        );
     }
-    out
 }
 
 /// [OPUS-4.8] sq-bzh1: builds a `/tpf` page URL for the given pattern parameters and page,

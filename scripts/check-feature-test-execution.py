@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-qcnn.31: Structural guard C1 — every feature-gated test module/
+# sq-qcnn.31: Structural guard C1 — every feature-gated test module/
 # target must have a CI executor. Design: research/test-quality-program-plan.md Wave 2
 # (W2-G1). Authored by the SPARQ Sonnet agent (sq-qcnn.31).
 #

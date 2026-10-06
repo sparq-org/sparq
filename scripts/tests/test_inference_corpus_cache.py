@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] #4935 — the inference-conformance corpus AVAILABILITY decoupling.
+# #4935 — the inference-conformance corpus AVAILABILITY decoupling.
 #
 # WHY a test at all. `Inference conformance (ratchet >= 1967 pass+divergence)` is a
 # GATING check, and it used to re-download the OWL 2 test-case export from
@@ -30,7 +30,7 @@
 #      still hard-fail. A cached corpus and a downloaded corpus are indistinguishable
 #      to the runner, so a genuine regression still reds.
 #
-#   4. [GPT-6] ARCHIVE TRANSPORT — cache misses use HTTPS to fetch the same
+#   4. ARCHIVE TRANSPORT — cache misses use HTTPS to fetch the same
 #      timestamped HTTP-origin snapshot, with the original SHA-256 pin intact.
 #
 # Hermetic: stdlib only (no PyYAML, no network, no gh, no cargo).
@@ -62,7 +62,7 @@ _JOB_KEY = re.compile(r"^ {2}[A-Za-z0-9_-]+:\s*$")
 
 
 class TestOwlArchivePin(unittest.TestCase):
-    # [GPT-6] Only the archive transport changes; the captured resource stays HTTP.
+    # Only the archive transport changes; the captured resource stays HTTP.
     def test_https_preserves_the_snapshot_and_digest(self) -> None:
         script = FETCH_SCRIPT.read_text()
         expected = {

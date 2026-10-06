@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-ymr2e.12 — SPARQ agent. Operational gating/probation policy for the
+<!-- sq-ymr2e.12 — SPARQ agent. Operational gating/probation policy for the
      deterministic site + GUI Playwright lanes. Design of record:
      research/web-gui-test-program.md §6.3 (advisory-first, promotion earned). -->
 
@@ -12,25 +12,21 @@
 
 ## 1. The one rule everything follows
 
-`ci-summary / gate` (`.github/workflows/ci-summary.yml`) is the **single** required
-branch-protection context. It aggregates every other check-run on the head commit and
-**excludes only the check names DECLARED in
-[`.github/advisory-registry.json`](advisory-registry.json)**. A lane's gating status is
-therefore decided by whether it is **declared**, not by what it is called:
+`ci-fast` is the **only** required branch-protection context
+([`docs/branch-protection.md`](../docs/branch-protection.md)); no E2E lane blocks a merge.
+What this policy governs is whether a lane is **hard** (its check-run goes red on a failure
+and must be read and fixed before merging) or **advisory** (findings reported, check-run
+stays green). That status is decided by whether the job is **declared** in
+[`.github/advisory-registry.json`](advisory-registry.json), not by what it is called:
 
-- an entry in the registry → the aggregator ignores it → **non-gating** (in probation).
-- no entry → the aggregator waits on it → **gating** (promoted, or never demoted).
+- an entry in the registry → **advisory** (in probation);
+- no entry → **hard** (promoted, or never demoted).
 
-> **Corrected 2026-07-25 (#3773).** Until then the aggregator inferred advisory status from
-> the job **NAME** matching `\b(advisory|informational)\b`. That silently neutralised **four
-> real gates** — including the determinism grep-gates that §1.1 of the design and §4 below
-> both called "hard", and which in fact gated nothing — because any job whose name happened
-> to contain those words was dropped from the gating set wholesale, with no waiver and no
-> record. The name token is now **diagnostic only**: a check carrying it with no registry
-> entry GATES, and the gate summary prints a loud note naming it. A **rename can no longer
-> flip gating status** either: each declaration binds to the job's stable identity (workflow
-> file + job id), and `scripts/check-advisory-registry.py` C4 REDs when a job's current name
-> stops matching its declaration — while the renamed job GATES, fail-closed.
+> **History (#3773).** An earlier aggregator inferred advisory status from the job **NAME**
+> matching `\b(advisory|informational)\b`, which silently neutralised four real gates. The
+> name token is now diagnostic only, each declaration binds to the job's stable identity
+> (workflow file + job id), and `scripts/check-advisory-registry.py` C4 REDs when a job's
+> current name stops matching its declaration.
 
 Branch protection is therefore **never edited directly** to promote a lane. Promotion is a
 registry edit (§4). Adding a raw required context is forbidden.
@@ -60,7 +56,7 @@ ratcheted, and none of them is declared in the registry):
   (design §5.3). Its stabilisation/flake-probe is tracked by `sq-ymr2e.6`, not here.
 - `gui.yml` · `tauri-e2e-probe` — a `workflow_dispatch` flake probe; never a PR check.
 - The nightly full-sweep lane (`sq-ymr2e.11`: cross-browser, full-surface axe/visual,
-  the per-platform tauri matrix) — **nightlies never gate** `ci-summary`.
+  the per-platform tauri matrix) — **nightlies stay advisory**.
 
 > The per-platform Tauri **build + clippy** matrix (`gui.yml` · `tauri-build`) is a separate
 > question governed by its own bead (`sq-var9`): it is a compile lane, not an e2e lane, and
@@ -97,8 +93,7 @@ per lane:
 > claims anything about them.
 
 Nothing else changes — no branch-protection edit, no new required context. Deleting the
-declaration alone moves the lane from "reported but ignored" to "waited on by
-`ci-summary / gate`". To **demote** (if a promoted lane starts flaking), do the reverse: add
+declaration alone moves the lane from "reported" to "hard". To **demote** (if a promoted lane starts flaking), do the reverse: add
 an entry back with an `owner_bead` + `promotion_criteria`, so an unstable gate is never left
 blocking the train while it is fixed — and, unlike the old name flip, the demotion is a
 reviewable diff in one file that carries its own justification.
@@ -116,7 +111,7 @@ reviewable diff in one file that carries its own justification.
 ## 6. `gui-mock-ipc` early promotion — RATIFIED 2026-07-06 (#1656)
 
 The `gui-mock-ipc` job carries **no registry declaration and no `continue-on-error`**, so it
-**gates** `ci-summary`. It was promoted at creation (`sq-ymr2e.5`, PR #1431) on the rationale
+is **hard**. It was promoted at creation (`sq-ymr2e.5`, PR #1431) on the rationale
 that it is a fully deterministic headless-Chromium lane (`retries=0`, mocked IPC). That
 promotion **pre-dated this governance** and did not sit on recorded §3 probation evidence,
 which the architect's plan of record (design §6.3 "everything lands advisory"; the
@@ -177,8 +172,7 @@ lane is promotable only when its row clears **both** §3 floors with zero §7 qu
 - Design of record: [`research/web-gui-test-program.md`](../research/web-gui-test-program.md) §6.3.
 - Determinism doctrine + the shared harness: [`site/e2e/support/README.md`](../site/e2e/support/README.md).
 - The GUI mocked-IPC suite: [`gui/e2e-playwright/README.md`](../gui/e2e-playwright/README.md).
-- The aggregator semantics: [`.github/workflows/ci-summary.yml`](workflows/ci-summary.yml)
-  (header) + `scripts/ci_summary_gate.py`.
+- The required-check posture: [`docs/branch-protection.md`](../docs/branch-protection.md).
 - The declared-advisory registry + its integrity checks (C2/C3/C4):
   [`.github/advisory-registry.json`](advisory-registry.json) +
   `scripts/check-advisory-registry.py`.

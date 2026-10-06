@@ -1,4 +1,4 @@
-# [OPUS-4.8] Governance: issue-template chooser config (bead sq-rau7).
+# Governance: issue-template chooser config (bead sq-rau7).
 # Disable blank issues so reporters pick a template (and so security reports are
 # routed to private disclosure rather than an unstructured public issue).
 blank_issues_enabled: false

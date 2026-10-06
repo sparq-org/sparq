@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [HAIKU-4.5] sq-hmd7l.4 — same-box HDT LOAD-AND-DECODE comparison harness:
+# sq-hmd7l.4 — same-box HDT LOAD-AND-DECODE comparison harness:
 # sparq-hdt vs hdt-cpp on the SAME .hdt archive (the snikmeta fixture by default),
 # decode-to-native ONLY (load+decode wall-clock), emitting one canonical-competitor-results
 # ENVELOPE per gather (the exact JSON shape of bench/canonical-competitor-results/2026-07-07/
@@ -22,7 +22,7 @@
 # METHODOLOGY:
 #   * sparq-hdt: examples/bench_oracle decodes the archive IN-PROCESS min-of-N and emits
 #     `snikmeta_decode_s` (plus the deterministic count metrics the crosscheck consumes).
-#   * hdt-cpp: [FABLE-5 sq-hmd7l.33] hdt2rdf decode timed IN-CONTAINER best-of-N — one
+#   * hdt-cpp: hdt2rdf decode timed IN-CONTAINER best-of-N — one
 #     `docker run` executes a small /bin/sh loop that nanosecond-times each
 #     `hdt2rdf <in.hdt> <out.nt>` invocation, so the recorded `decode_us` EXCLUDES the
 #     docker container spawn (which dominated the old whole-`docker run` wall figure) but
@@ -125,7 +125,7 @@ fi
 # wave-1 canonical box when stdout-piping was attempted, sq-hmd7l.26); decode into
 # a rw-mounted scratch file instead.
 #
-# [FABLE-5] sq-hmd7l.33 — NUMERIC decode_us: ONE container runs a /bin/sh loop that
+# sq-hmd7l.33 — NUMERIC decode_us: ONE container runs a /bin/sh loop that
 # nanosecond-times each of $HDT_ITERS `hdt2rdf` invocations (GNU date +%s%N — present
 # in the debian-based rdfhdt/hdt-cpp image), emitting `HDT_CPP_ITER_NS <n>` lines.
 # best-of-N of those is the envelope's decode_us: container spawn EXCLUDED, hdt2rdf
@@ -266,7 +266,7 @@ if sparq_triples not in ("n/a", "ERROR"):
 if hdt_cpp_count not in ("n/a", "ERROR"):
     count_check["hdt_cpp_triples"] = hdt_cpp_count
 
-# [SONNET-4.6] sq-45zbg — derive the oracle from sparq's decoded store rather
+# sq-45zbg — derive the oracle from sparq's decoded store rather
 # than pinning the tiny fixture's count. hdt2rdf must agree before its timing is
 # considered comparable.
 agreement = {}
@@ -316,7 +316,7 @@ envelope = {
 if sparq_data:
     envelope["sparq_metrics"] = sparq_data
 
-# [FABLE-5] sq-hmd7l.33 — hdt-cpp NUMERIC decode timing: best-of-N in-container
+# sq-hmd7l.33 — hdt-cpp NUMERIC decode timing: best-of-N in-container
 # hdt2rdf wall-clock (container spawn excluded). This is the field the ingest's
 # normalizeHdt renders as the hdt-cpp column cell.
 if all_agree and os.environ.get("HDT_CPP_DECODE_US", "n/a") != "n/a":

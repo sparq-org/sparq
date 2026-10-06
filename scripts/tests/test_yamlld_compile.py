@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for the PKG write-path YAML-LD compiler
+# Hermetic tests for the PKG write-path YAML-LD compiler
 # (crates/sparq-kb/ingest/yamlld_compile.py; FO-bridge Phase 4, bead sq-mztg8.2, epic
-# sq-mztg8). 🤖 SPARQ agent. Authored by Opus 4.8 (Fable unavailable; flag for
-# re-review when Fable returns).
+# sq-mztg8). 🤖 SPARQ agent.
 #
 # Hermetic w.r.t. git/network/filesystem-state: imports the compiler module's pure
 # entry points (parse_yaml_ld / ConceptResolver / compile_yaml_ld) and drives them over

@@ -1,11 +1,11 @@
-# [GPT-5.6] sq-lmz40 — release the native Solid/LWS image independently of sparq-server.
+# sq-lmz40 — release the native Solid/LWS image independently of sparq-server.
 name: LWS container release
 
 on:
   push:
     tags:
       - "v*"
-  # [OPUS-4.8] Publish the LWS image on demand WITHOUT cutting a full `v*` release
+  # Publish the LWS image on demand WITHOUT cutting a full `v*` release
   # (that tag also fires release.yml). A manual run tags only `:latest` (the semver
   # tags below require a git tag) — exactly what the deploy templates + demo reference.
   workflow_dispatch:

@@ -4,17 +4,17 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits only THIS file, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # A new leg also needs its `opt-in <name>` line added to
 # scripts/tests/feature-matrix-legnames.golden.txt (the assembler self-test).
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-5] Executor for the [SONNET-4.6] `concept` feature of issue #1746.
+# Executor for the `concept` feature of issue #1746.
 # The default-OFF `concept` feature carries
 # tests/concept_urn.rs behind `#![cfg(feature = "concept")]`, so ci.yml's
 # default-feature lane compiles it to an EMPTY binary and runs ZERO of its tests —

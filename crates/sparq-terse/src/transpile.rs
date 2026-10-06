@@ -305,7 +305,7 @@ fn k_spans(src: &str) -> Vec<KSpan> {
             b'K' => {
                 // Standalone sigil: the preceding char (if any) must not be an identifier
                 // char (so `?xK:type` or `fooK:type` are NOT the keyword token).
-                let prev_ok = i == 0 || !is_ident_char(bytes[i - 1]);
+                let prev_ok = !preceded_by_name(bytes, i);
                 if prev_ok && i + 1 < n && bytes[i + 1] == b':' {
                     if let Some((name, end)) = parse_k_name(bytes, i + 2) {
                         out.push(KSpan { name, start: i, end });
@@ -371,7 +371,7 @@ fn declares_prefix_k(src: &str) -> bool {
             }
             _ => {
                 // At a token boundary, try to match `PREFIX`/`@prefix` then `K` `:`.
-                let boundary = i == 0 || !is_ident_char(bytes[i - 1]);
+                let boundary = !preceded_by_name(bytes, i);
                 if boundary {
                     if let Some(after) = match_prefix_kw(bytes, i) {
                         let k = skip_ws(bytes, after);
@@ -417,7 +417,7 @@ fn match_word_ci(bytes: &[u8], start: usize, word: &[u8]) -> Option<usize> {
         }
     }
     // Must be followed by a non-identifier byte (or end of input).
-    if end < bytes.len() && is_ident_char(bytes[end]) {
+    if end < bytes.len() && is_name_byte(bytes[end]) {
         return None;
     }
     Some(end)
@@ -498,7 +498,7 @@ fn scan_v_constructs<T>(
             b'V' => {
                 // Must be a standalone `V` token: the preceding char (if any) must not be
                 // part of an identifier (so `?fooV(` or `abcV(` are NOT the construct).
-                let prev_ok = i == 0 || !is_ident_char(bytes[i - 1]);
+                let prev_ok = !preceded_by_name(bytes, i);
                 if prev_ok {
                     if let Some((phrase, end)) = parse_v_call(bytes, i) {
                         if let Some(t) = f(&phrase, i, end) {
@@ -520,6 +520,30 @@ fn scan_v_constructs<T>(
 /// glued to one is not a standalone token).
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b':' || b == b'?' || b == b'$'
+}
+
+/// `true` if `b` can be part of a SPARQL name: an ASCII identifier byte, or any
+/// non-ASCII byte. Outside strings, IRIs and comments (which the scanners skip),
+/// a non-ASCII character can only be a `PN_CHARS` name character — SPARQL
+/// whitespace and punctuation are all ASCII — so every UTF-8 lead/continuation
+/// byte counts as a name byte. GitHub #4662.
+fn is_name_byte(b: u8) -> bool {
+    is_ident_char(b) || !b.is_ascii()
+}
+
+/// `true` if the token starting at `bytes[i]` is glued to a preceding name, so
+/// it is NOT a standalone `K` / `V` / `PREFIX` token: the previous byte is a
+/// name byte ([`is_name_byte`]), or the previous two bytes are a `PN_LOCAL_ESC`
+/// (`\` + one of `_~.-!$&'()*+,;=/?#@%`), which continues a local name.
+/// GitHub #4662.
+fn preceded_by_name(bytes: &[u8], i: usize) -> bool {
+    if i == 0 {
+        return false;
+    }
+    if is_name_byte(bytes[i - 1]) {
+        return true;
+    }
+    i >= 2 && bytes[i - 2] == b'\\' && b"_~.-!$&'()*+,;=/?#@%".contains(&bytes[i - 1])
 }
 
 /// At `bytes[start] == b'V'`, tries to parse `V("phrase")` / `V('phrase')` allowing
@@ -651,6 +675,36 @@ mod tests {
         assert_eq!(e.canonical_sparql, q, "pass-through must be byte-identical");
         assert!(e.resolutions.is_empty());
         assert!(e.warnings.is_empty());
+    }
+
+    /// GitHub #4662: a `K` that ends a Unicode variable name (`?aéK`) is not the
+    /// keyword sigil — the byte before it is a UTF-8 continuation byte, which is
+    /// part of the name, not a delimiter. Valid SPARQL must pass through unchanged.
+    #[test]
+    fn k_after_unicode_name_char_is_not_a_sigil() {
+        let q = "PREFIX : <http://ex/> SELECT ?s WHERE { ?aéK:x ?s }";
+        let e = terse_to_sparql(q).expect("valid SPARQL passes through");
+        assert_eq!(e.canonical_sparql, q);
+        assert!(e.keywords.is_empty());
+    }
+
+    /// GitHub #4662: a `K` after a `PN_LOCAL_ESC` (`\-`) continues the local
+    /// name (`ex:a\-K:x` is the local name `a-K:x`), so it is not the sigil.
+    #[test]
+    fn k_after_pn_local_esc_is_not_a_sigil() {
+        let q = "PREFIX ex: <http://ex/> SELECT ?s WHERE { ?s ex:p ex:a\\-K:x }";
+        let e = terse_to_sparql(q).expect("valid SPARQL passes through");
+        assert_eq!(e.canonical_sparql, q);
+        assert!(e.keywords.is_empty());
+    }
+
+    /// GitHub #4662: the `V(` scanner shares the boundary predicate, so a `V`
+    /// glued to a Unicode name is not the construct either.
+    #[test]
+    fn v_after_unicode_name_char_is_not_a_construct() {
+        let q = "SELECT ?s WHERE { ?s <http://ex/p> ?aéV(\"x\") }";
+        let err = terse_to_sparql(q).expect_err("not valid SPARQL");
+        assert!(matches!(err, TerseError::CanaryFailed { .. }), "{err:?}");
     }
 
     #[test]

@@ -1,5 +1,5 @@
 # feature-matrix-report — the TRUSTED, DEFAULT-BRANCH-OWNED reporter for the grouped
-# opt-in feature-matrix legs (PR #3511 review, CRITICAL finding 1). [FABLE-5] 🤖 SPARQ agent.
+# opt-in feature-matrix legs (PR #3511 review, CRITICAL finding 1).
 #
 # WHY THIS IS ITS OWN `workflow_run` WORKFLOW (the security fix):
 # feature-matrix.yml's group jobs execute PR-controlled code (cargo build scripts,
@@ -21,8 +21,7 @@
 # WHAT IT DOES: downloads the triggering feature-matrix run's artifacts (by run-id),
 # treats every artifact STRICTLY AS DATA (parse + hostile-input validate, never
 # execute), and posts the per-leg `opt-in <name>` check-runs plus one head-SHA
-# `feature-matrix report` summary check-run onto the PR/merge_group head commit that
-# ci-summary polls. scripts/run-feature-matrix-group.py --report is the engine; it
+# `feature-matrix report` summary check-run onto the run's head commit. scripts/run-feature-matrix-group.py --report is the engine; it
 # constructs every check-run NAME reporter-side (`opt-in <name>`), resolves leg
 # names/metadata against the run's SELECTED-matrix artifact (finding 2), and FAILS
 # CLOSED unless the observed legs match the selected set EXACTLY.
@@ -42,16 +41,9 @@
 #    string, so a permission failure on a push / merge_group / same-repo PR is a hard
 #    failure (a real auth regression), never a benign fork denial.
 #
-# GATING: the reporter's `feature-matrix report` summary check-run NAME is free of the
-# words advisory/informational, so once discovered on the head SHA it GATES via
-# `ci-summary / gate` — a reporter failure (completeness violation / unexpected POST
-# error) blocks the merge (fail-closed). Because the reporter runs on a workflow_run
-# event it lands its check-runs a little AFTER the group jobs finish; ci-summary is
-# still polling on the slower siblings (CodeQL/coverage) in the common case and
-# discovers them. The ALWAYS-gating coarse signal (independent of reporter timing) is
-# the group jobs' own conclusions, which run on the PR/merge_group event and are
-# discovered directly by ci-summary (requiredness flows through `ci-summary / gate`,
-# never a per-leg name — sq-fmx4u.4).
+# A reporter failure (completeness violation / unexpected POST error) fails this run
+# (fail-closed). The coarse signal independent of reporter timing is the group jobs' own
+# conclusions in the feature-matrix run itself.
 #
 # §ADVERSARIAL (self-check, PR #3511 review finding 1):
 #  (1) Can PR-head content influence the privileged job? NO. workflow_run always loads
@@ -159,10 +151,9 @@ jobs:
           DETAILS_URL: ${{ github.event.workflow_run.html_url }}
           # CORRELATION (PR #3511 review finding 2 — same-SHA stale-report race):
           # the TRIGGERING feature-matrix run id. Server-supplied + unforgeable; the
-          # reporter embeds it as the `feature-matrix report` check's external_id so
-          # ci_summary_gate.py binds the verdict to THIS group run and ignores a stale
-          # same-SHA report from an earlier feature-matrix run (feature-matrix reruns
-          # on ready_for_review / label events against the same head SHA).
+          # reporter embeds it as the `feature-matrix report` check's external_id so a
+          # consumer can bind the verdict to THIS group run and ignore a stale same-SHA
+          # report from an earlier feature-matrix run against the same head SHA.
           TRIGGER_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail

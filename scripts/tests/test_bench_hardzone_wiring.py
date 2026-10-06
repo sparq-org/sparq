@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] issue #4559 (bead sq-jxeqz) — the NAMED wiring + invariant test for the bench
+# issue #4559 (bead sq-jxeqz) — the NAMED wiring + invariant test for the bench
 # HARD-ZONE gate (scripts/bench_hardzone.py).
 #
 # WHY THIS EXISTS. Two independent failures met in #4559:

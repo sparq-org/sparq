@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-7d3dj.33 — same-box SHACL VALIDATION comparison harness:
+# sq-7d3dj.33 — same-box SHACL VALIDATION comparison harness:
 # sparq-shacl vs pySHACL vs Apache Jena SHACL on the SAME (data x shapes)
 # workloads, emitting one canonical-competitor-results ENVELOPE per scale
 # (the exact JSON shape of bench/canonical-competitor-results/2026-07-07/

@@ -588,6 +588,22 @@ fn reason_rdfs_reports_triple_count() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #6466: with an output path, stdout may BE the closure (`/dev/stdout`), so the summary goes
+/// to stderr and stdout carries only N-Triples.
+#[cfg(unix)]
+#[test]
+fn reason_to_dev_stdout_writes_only_the_closure_to_stdout() {
+    let dir = scratch("reason-stdout");
+    let data = write(&dir, "data.nt", NT);
+    let (code, stdout, stderr) = run3(&["reason", s(&data), "ntriples", "rdfs", "/dev/stdout"]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stderr.contains("triples after rdfs reasoning"), "stderr: {stderr}");
+    let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert!(!lines.is_empty(), "closure missing from stdout");
+    assert!(lines.iter().all(|l| l.ends_with(" .")), "non-N-Triples line on stdout: {stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn bench_emits_one_tsv_line_per_query_including_construct() {
     let dir = scratch("bench");

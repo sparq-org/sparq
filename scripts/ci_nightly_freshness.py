@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6 Astra] Prove heavy nightly completion before skipping an unchanged head.
+"""Prove heavy nightly completion before skipping an unchanged head.
 
 Only scheduled ci.yml runs on main are evidence. A successful workflow with skipped
 heavy jobs is NOT evidence; follow it back to real work within the fixed read budget.
@@ -27,7 +27,7 @@ COVERAGE = "coverage (nightly, full incl. heavy vectors)"
 COVERAGE_STEP = "Measure + enforce per-crate coverage (FULL tier, max-remeasure gate)"
 MUTATION = "mutation ratchet (cargo-mutants, advisory)"
 MUTATION_STEP = "Nightly mutation work completed"
-# [GPT-6 Astra] All non-completed statuses supported by the workflow-runs API.
+# All non-completed statuses supported by the workflow-runs API.
 ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "requested", "pending")
 COMPLETED_CONCLUSIONS = ("success", "failure", "cancelled", "timed_out", "startup_failure",
                          "stale", "neutral", "action_required", "skipped")
@@ -138,7 +138,7 @@ def read_jobs(get, repo, run):
     for job in jobs:
         if (not isinstance(job, dict) or not positive_int(job.get("id"))
                 or job["id"] in ids or job.get("run_id") != run["id"]
-                # [GPT-6 Astra] The attempt-scoped endpoint supplies the binding
+                # The attempt-scoped endpoint supplies the binding
                 # when this optional field is absent. A contradictory value does not.
                 or ("run_attempt" in job and (not positive_int(job["run_attempt"])
                                               or job["run_attempt"] != run["run_attempt"]))
@@ -149,7 +149,7 @@ def read_jobs(get, repo, run):
 
 
 def successful_step(job, name):
-    # [GPT-6 Astra] The API may omit optional steps: readable absence is no proof.
+    # The API may omit optional steps: readable absence is no proof.
     # Null/non-array/malformed values are still unreadable evidence, not admission.
     if "steps" not in job:
         return False
@@ -168,7 +168,7 @@ def heavy_state(jobs):
     if len(coverage) != 1 or not mutations:
         return "incomplete"
     heavy = coverage + mutations
-    # [GPT-6 Astra] GitHub represents a job skipped before matrix expansion with
+    # GitHub represents a job skipped before matrix expansion with
     # one base-name placeholder. Never accept a partial/mixed matrix as a skip.
     if (len(mutations) == 1 and mutations[0]["name"] == MUTATION
             and all(j.get("status") == "completed" and j.get("conclusion") == "skipped"
@@ -207,7 +207,7 @@ def decide(event, repo, head, current_id, get=gh_json):
         if not nightly_identity(run, repo, head) or run["id"] in seen:
             raise EvidenceError("scheduled history identity mismatch")
         seen.add(run["id"])
-    # [GPT-6 Astra] Run IDs order creation, not the update time of an old rerun.
+    # Run IDs order creation, not the update time of an old rerun.
     # A newer same-head schedule means this tick is stale; do not start more work.
     if any(run["id"] > current_id for run in runs):
         raise EvidenceError("newer same-head schedule exists")

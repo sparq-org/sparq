@@ -67,8 +67,8 @@ Wired as the `tauri-e2e` job in [`.github/workflows/gui.yml`](../../.github/work
 - `xvfb-run --auto-servernum` provides the headless display.
 - Single process (workers=1 by construction).
 - Shell-level retry 1 for xvfb startup races; failure artifacts uploaded either way.
-- Job name carries `(Linux, advisory)` so the `ci-summary / gate` aggregator excludes it.
-- `continue-on-error: true` ensures a driver/webview flake never turns `ci-summary` red.
+- Job name carries `(Linux, advisory)` and is declared in `.github/advisory-registry.json`.
+- `continue-on-error: true` ensures a driver/webview flake never turns the run red.
 
 ## Flake probe
 

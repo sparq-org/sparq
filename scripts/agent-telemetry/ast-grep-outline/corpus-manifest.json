@@ -1,5 +1,5 @@
 {
-  "_README": "[OPUS-4.8] Frozen-corpus sha256 manifest for the ast-grep+outline A/B (sq-lhwo.4). Files are pinned by sha256; directory entries are glob targets scanned live (not content-hashed). measure_ab.py drift-checks this BEFORE measuring so a run over a changed corpus is FLAGGED, not silently trusted. Regenerable data (a .json, not markdown) -> not a perf claim; check-no-perf-numbers.py never touches it.",
+  "_README": "Frozen-corpus sha256 manifest for the ast-grep+outline A/B (sq-lhwo.4). Files are pinned by sha256; directory entries are glob targets scanned live (not content-hashed). measure_ab.py drift-checks this BEFORE measuring so a run over a changed corpus is FLAGGED, not silently trusted. Regenerable data (a .json, not markdown) -> not a perf claim; check-no-perf-numbers.py never touches it.",
   "crates/": {
     "dir": true,
     "note": "directory glob target \u2014 drift not hashed (grep/ast-grep scan the live tree)"

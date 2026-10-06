@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// [OPUS-5] sq-tonhr.12 — INTERIM Shuttle "generate mode" + differential harvest.
+// sq-tonhr.12 — INTERIM Shuttle "generate mode" + differential harvest.
 //
 // WHAT THIS IS. rdf-shuttle's spec (spec/SHUTTLE.md §9) derives a third artifact
 // from a grammar — a conformance-pair generator (`--emit tests`) producing

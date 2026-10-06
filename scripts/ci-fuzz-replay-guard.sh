@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] Fail loud on a VACUOUS libFuzzer corpus-replay (bead sq-c9q4r).
+# Fail loud on a VACUOUS libFuzzer corpus-replay (bead sq-c9q4r).
 #
 # WHY: .github/workflows/fuzz.yml runs the per-PR fuzz leg in REPLAY mode — libFuzzer
 # `-runs=0` executes every input in `fuzz/corpus/<target>` (the restored cache) and

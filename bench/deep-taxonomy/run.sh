@@ -66,10 +66,10 @@ for DEPTH in $DEPTHS; do
 
   # ---- 2. materialize the N3 forward closure; capture engine time + triple-count --------
   # `reason <f> n3 n3 <out.nt>`: stderr carries `reasoned [N3]: <N> ground triples in closure in
-  # <X>s` (engine-internal timer, robust to machine load); stdout carries `<N> triples after n3
-  # reasoning`. We read the triple-count from stdout and the closure seconds from the stderr timer.
+  # <X>s` (engine-internal timer, robust to machine load) and, because an output file is given,
+  # `<N> triples after n3 reasoning` (#6466). We read both from stderr.
   "$CLI" reason "$CORPUS" n3 n3 "$CLOSURE" >"$TMP/r.out" 2>"$TMP/r.err"
-  triples="$(grep -oE '[0-9]+ triples after n3 reasoning' "$TMP/r.out" | grep -oE '^[0-9]+' | head -1)"
+  triples="$(grep -oE '[0-9]+ triples after n3 reasoning' "$TMP/r.err" | grep -oE '^[0-9]+' | head -1)"
   closure_s="$(grep -oE 'in [0-9.]+s' "$TMP/r.err" | head -1 | grep -oE '[0-9.]+' | head -1)"
 
   # ---- 3. run query.rq over the closure (count mode, min-of-ITERS) ----------------------

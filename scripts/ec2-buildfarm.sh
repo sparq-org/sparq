@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sparq EC2 BUILD FARM launcher. Authored by Opus 4.8 (1M context); Fable
-# unavailable — flag for re-review when Fable returns.
+# sparq EC2 BUILD FARM launcher.
 #
 #   scripts/ec2-buildfarm.sh <branch|#PR> [region]      # launch + gate + self-terminate
 #   scripts/ec2-buildfarm.sh --dry-run <branch|#PR>      # print plan, launch NOTHING
@@ -147,7 +146,7 @@ render_userdata() { # <ref> -> the cloud-init script on stdout
 #!/bin/bash
 set -x
 exec > >(tee /var/log/buildfarm.log) 2>&1
-# [OPUS-4.8] ORPHAN-PROOF: TWO independent hard caps, each from a DIFFERENT subsystem, BOTH
+# ORPHAN-PROOF: TWO independent hard caps, each from a DIFFERENT subsystem, BOTH
 # armed before any apt-get so a single failure cannot leave the box running past ${MAX_LIFETIME_SEC}s:
 #   (1) detached sleep subshell — works immediately, no package deps.
 #   (2) systemd-run transient timer — survives the user-data shell exiting; pre-installed on the AMI.

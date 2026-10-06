@@ -7,10 +7,12 @@
 //! index FIRST then (best-effort) the bytes — so the invariant "if it is indexed, its bytes exist"
 //! always holds and a crash can only ever leave the *benign* opposite: **bytes with no index row**.
 //! Those are ORPHANS — they cost disk but are never observable through the LDP surface (a read goes
-//! index-first, so it never sees them). Several documented paths produce them on purpose to avoid a
-//! worse race: [`super::Store::delete_container_if_empty`] leaves a deleted container's bytes for the
-//! sweep rather than racing a same-IRI recreate; a `create_in_container` whose index commit fails
-//! (missing parent) orphans the bytes it already PUT. This reconciler is the GC that reclaims them.
+//! index-first, so it never sees them). The composite store reclaims superseded and deleted bytes
+//! INLINE right after the index commit that drops their reference, so in steady state orphans come
+//! only from: a crash (or a failed best-effort blob delete) between that commit and the reclaim; a
+//! write or create whose index commit fails (e.g. a missing parent), orphaning the bytes it already
+//! PUT; and a concurrent same-IRI writer whose superseded key the winning commit never observed. This
+//! reconciler is the GC that reclaims them.
 //!
 //! ## What it does — and the grace period (LOAD-BEARING)
 //! [`reconcile_orphans`]:

@@ -52,6 +52,7 @@ import {
   storeToNQuads,
   datasetSize,
   extractTable,
+  termValue,
   type SparqlResults,
   type WasmStore,
 } from "@/lib/sparq-wasm";
@@ -114,7 +115,7 @@ function firstValue(store: WasmStore, query: string): string | null {
     const row = parsed.results?.bindings?.[0];
     if (!row) return null;
     const term = Object.values(row)[0];
-    return term?.value ?? null;
+    return termValue(term) ?? null;
   } catch {
     return null;
   }

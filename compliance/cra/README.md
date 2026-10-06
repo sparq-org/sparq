@@ -90,7 +90,7 @@ on crates.io / npm / PyPI / ghcr.io. That shape drives four scoping decisions:
 | The vulnerability-handling **process** (advisory gate, coordinated disclosure, SBOM, security updates via releases) | Authentication of *end users* and per-user authorization (boundary B3 → gateway / sparq-solid) |
 | Supply-chain integrity of what sparq ships (cargo-deny, cargo-vet, SLSA provenance, signed releases) | The **conformity assessment**, **EU declaration of conformity**, and **CE marking** (a manufacturer organizational act) |
 | Information & instructions to the user (Annex II): SECURITY.md, READMEs, the support/EOL statement | Article 14 **reporting to ENISA/CSIRTs** of actively-exploited vulns (an organizational/legal duty of whoever is the manufacturer/steward of record) |
-| The honest "no known exploitable vulnerability at ship" claim, resting on the real PR-time advisory gate | The risk acceptance for *whatever RDF data the operator loads* (sparq is a data engine; the operator is the data controller) |
+| The honest "no known exploitable vulnerability at ship" claim, resting on the real (post-merge/nightly) advisory check | The risk acceptance for *whatever RDF data the operator loads* (sparq is a data engine; the operator is the data controller) |
 
 ## Deliverables in this folder
 
@@ -123,8 +123,8 @@ on crates.io / npm / PyPI / ghcr.io. That shape drives four scoping decisions:
 
 sparq **already satisfies the substance of the CRA Annex I vulnerability-handling process and
 most of the secure-by-default essential requirements** — coordinated disclosure
-(`SECURITY.md` + RFC 9116 `security.txt`), an SBOM (per-release CycloneDX + VEX), a **gating**
-PR-time advisory check (cargo-deny advisories un-degraded, `supply-chain.yml`), signed
+(`SECURITY.md` + RFC 9116 `security.txt`), an SBOM (per-release CycloneDX + VEX), a fail-closed
+post-merge/nightly advisory check (cargo-deny advisories un-degraded, `supply-chain.yml`; not a PR gate), signed
 provenance on releases, and documented secure-by-default server limits. The remaining work is
 **(a)** a small set of release-completeness gaps (SLSA provenance on the `dist.yml` lane and
 published-package provenance for crates.io/npm/PyPI; a container-image vuln scan), and

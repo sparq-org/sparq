@@ -801,7 +801,33 @@ pub async fn head_handler<S: Store>(
 /// serve a PUBLIC read AS anonymous (token = [`VerifiedToken::public`]) over the SAME code path the
 /// handler uses — guaranteeing a skipped public read is byte-identical to a genuinely anonymous one
 /// (INV-1). The middleware never passes a non-public token here.
+///
+/// A read that loses the reclaim race ([`ServerError::ResourceChanged`] — the authorized version was
+/// rewritten and its bytes reclaimed before the fetch) restarts from the top, read plan AND
+/// authorization included, at most [`READ_RACE_RETRIES`](crate::store::READ_RACE_RETRIES) times; it
+/// never serves the newer version under the old version's authorization. Still losing after that
+/// surfaces as 503 + `Retry-After`. The common (no-race) path runs the body exactly once.
 pub(crate) async fn serve_read<S: Store>(
+    state: &Arc<LdpState<S>>,
+    token: &VerifiedToken,
+    uri: &axum::http::Uri,
+    req_headers: &HeaderMap,
+    with_body: bool,
+) -> Result<Response, ServerError> {
+    let mut restarts = 0;
+    loop {
+        match serve_read_once(state, token, uri, req_headers, with_body).await {
+            Err(ServerError::ResourceChanged) if restarts < crate::store::READ_RACE_RETRIES => {
+                restarts += 1;
+            }
+            other => return other,
+        }
+    }
+}
+
+/// One attempt of [`serve_read`]: authorize via the read plan, then serve exactly the authorized
+/// version's bytes.
+async fn serve_read_once<S: Store>(
     state: &Arc<LdpState<S>>,
     token: &VerifiedToken,
     uri: &axum::http::Uri,
@@ -838,6 +864,8 @@ pub(crate) async fn serve_read<S: Store>(
     // The BYTES are fetched only now — after the Allow (no speculative byte fetch, design
     // invariant 5) — through the plan's held metadata (`read_at`, §3.3): the unique-per-write blob
     // key names an immutable object, so these are exactly the bytes that metadata committed with.
+    // If a concurrent rewrite reclaimed that blob, `read_at` fails with `ResourceChanged` rather than
+    // hand back a version this request never authorized; `serve_read` then restarts the attempt.
     let body = state.store.read_at(&target.iri, &meta).await?;
     let resource = Resource { body, meta };
 
@@ -5372,8 +5400,7 @@ mod tests {
         // sq-10ty4: the serialiser's default output IS the expanded document form, so the expanded
         // profile is honoured with byte-identical output — same variant ETag, but the Content-Type
         // echoes the honoured profile.
-        const EXPANDED: &str =
-            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
+        const EXPANDED: &str = "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
         let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
 
         let mut accept_plain = HeaderMap::new();

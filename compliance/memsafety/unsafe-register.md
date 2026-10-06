@@ -339,10 +339,9 @@ scripts/unsafe-gate.py --list         # file:line:text of every counted site
 ```
 
 The **`unsafe-register (count ratchet)`** CI lane (`.github/workflows/ci.yml`) runs
-`--check` on every PR and merge-queue ref. Because it does **not** contain the word
-"advisory"/"informational", the `ci-summary / gate` aggregator treats it as a
-**required** (gating) check — distinct from the pre-existing non-gating
+`--check` nightly (and on `workflow_dispatch`); it is a failing (not informational) job but,
+since the `ci-summary` aggregator was deleted, **not** a required merge check — distinct from the pre-existing non-gating
 `unsafe report (cargo-geiger, informational)` lane, which stays as a visibility-only
-report. A PR that adds an `unsafe` site therefore fails CI until the author adds a
+report. A change that adds an `unsafe` site therefore reds the nightly run until the author adds a
 register row here, a `// SAFETY:` comment in source, and re-seeds the snapshot — all
 three changes land in the same reviewable diff.

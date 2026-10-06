@@ -46,6 +46,14 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.put_meta(iri, meta).await
     }
 
+    async fn replace_meta(
+        &self,
+        iri: &str,
+        meta: ResourceMeta,
+    ) -> Result<Option<ResourceMeta>, SparqError> {
+        self.0.replace_meta(iri, meta).await
+    }
+
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         self.0.exists(iri).await
     }

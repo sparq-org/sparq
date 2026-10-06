@@ -1159,20 +1159,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf",
- "peg 0.8.6",
- "rand 0.9.4",
- "thiserror",
-]
-
-[[package]]
 name = "sparq-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "memchr",
@@ -1184,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1195,15 +1183,15 @@ dependencies = [
  "sha1",
  "sha2",
  "smallvec",
- "spargebra",
  "sparq-core",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bzip2 0.6.1",
  "crc",
@@ -1216,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-parse"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "flate2",
  "rayon",
@@ -1224,8 +1212,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf",
+ "peg 0.8.6",
+ "rand 0.9.4",
+ "thiserror",
+]
+
+[[package]]
 name = "sparq-substrate"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf",
@@ -1588,3 +1588,7 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "spargebra"
+version = "0.4.6"

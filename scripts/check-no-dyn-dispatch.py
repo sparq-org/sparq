@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Perf-neutrality structural gate: NO dynamic dispatch in the
+# Perf-neutrality structural gate: NO dynamic dispatch in the
 # sparq-substrate hot loops (bead sq-0ja86, epic sq-6tykl / sq-qonbz — the shared
 # zero-overhead eval substrate).
 #
@@ -50,7 +50,7 @@ import sys
 #     zero-overhead doc-contract but is included so a future hot helper added there is
 #     also covered. Adding a new hot-path module to the substrate? Add it here.
 #
-#     [HAIKU-4.5] sq-qonbz.7: EXPLICIT enumeration of the FOUR substrate hot-loop modules
+#     sq-qonbz.7: EXPLICIT enumeration of the FOUR substrate hot-loop modules
 #     (join::delta is a SUBMODULE of join, not a fifth top-level module — the count and the
 #     list agree at four):
 #     - rows (shared Row/Key/Posting id-tuple vocabulary)
@@ -70,21 +70,21 @@ SUBSTRATE_HOT_PATHS = [
     # INCLUDES join::delta submodule (persistent extendable hash table for semi-naive
     # Δ⋈full join — no Box<dyn> on the delta probe path either).
     "crates/sparq-substrate/src/join.rs",
-    # [OPUS-4.8] sq-vezew (epic sq-qonbz, Phase 4): SPARQL term total order
+    # sq-vezew (epic sq-qonbz, Phase 4): SPARQL term total order
     # (compare::compare_terms, generic over the CompareTerm trait) — an ORDER BY / sort /
     # range-filter hot path, so it joins the guarded set: the algorithm must stay monomorphic
     # (a `dyn CompareTerm` on the per-comparison loop would defeat the zero-overhead seam).
     "crates/sparq-substrate/src/compare.rs",
     # Library wiring and zero-overhead doc-contract.
     "crates/sparq-substrate/src/lib.rs",
-    # [FABLE-5] sq-2n1q3.4: the first guarded CONSUMER probe path — sparq-rsp's windowed
+    # sq-2n1q3.4: the first guarded CONSUMER probe path — sparq-rsp's windowed
     # materialisation drives join::delta::DeltaTable for the EvalMode::Delta/Snapshot
     # consecutive-window (ISTREAM/DSTREAM-shaped) diff (WindowDiff::contains /
     # apply_window_delta). The invariant applies on the consumer side of the seam too: the
     # probe's emit hook is a monomorphised closure and its budget the NoBudget ZST — never
     # a trait object between the probe loop and its comparison.
     "crates/sparq-rsp/src/eval.rs",
-    # [FABLE-5] sq-pbz04.1.2: the reasoner-side CompareTerm adoption (substrate seam 3) —
+    # sq-pbz04.1.2: the reasoner-side CompareTerm adoption (substrate seam 3) —
     # sparq-reason's `compare` module orders entailed solutions through the shared
     # compare_terms total order. The consumer-side invariant applies here too: IdTerm is a
     # generic CompareTerm impl monomorphised into the sort loop — never a trait object

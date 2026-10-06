@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] gather-competitors.sh (sq-t0c3) — authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# gather-competitors.sh (sq-t0c3) —
 #
 # Orchestrates gathering competitor-engine numbers for the perf dashboard's
 # side-by-side comparison, recording each competitor's VERSION + ENVIRONMENT
@@ -72,7 +71,7 @@ cd "$REPO_ROOT"
 
 REGISTRY="bench/competitors.json"
 RESULTS_DIR="bench/competitor-results"
-# [OPUS-4.8] sq-eifd: shared external-engine adapter KINDS live here. Each kind is
+# sq-eifd: shared external-engine adapter KINDS live here. Each kind is
 # a small parser/harness reused across engines; dispatch is off competitors.json's
 # `kind` field (see the "adapter-kind dispatch" section below).
 ADAPTERS_DIR="scripts/bench-adapters"
@@ -396,7 +395,7 @@ adapter_recipe_of() { # the engine's `.adapter` recipe object as compact JSON
   jq -c --arg id "$1" 'first(.competitors[]|select(.id==$id)).adapter // {}' "$REGISTRY"
 }
 
-# [OPUS-4.8] sq-8dp3: SHACL_SHAPES is a DIRECTORY in the committed suite
+# sq-8dp3: SHACL_SHAPES is a DIRECTORY in the committed suite
 # (bench/shacl/shapes/ — five hand-authored shape graphs, one workload each).
 # sparq-shacl validates the data against EACH shape file separately and
 # expected.tsv records a per-workload (conforms,violations,focus_nodes). An
@@ -409,7 +408,7 @@ adapter_recipe_of() { # the engine's `.adapter` recipe object as compact JSON
 shacl_shape_files() { # <shapes-path> -> one path per line (the file itself, or dir/*.ttl)
   local p="$1"
   if [ -d "$p" ]; then
-    # [OPUS-4.8] sq-8dp3: fail CLOSED if a shapes dir expands to zero *.ttl files.
+    # sq-8dp3: fail CLOSED if a shapes dir expands to zero *.ttl files.
     # A silently-empty expansion makes the per-shape loop a no-op and produces ZERO
     # result envelopes — exactly the "0 violations / missing-shapes" apples-to-oranges
     # class of bug this expansion exists to prevent. Better to die loudly than to
@@ -422,7 +421,7 @@ shacl_shape_files() { # <shapes-path> -> one path per line (the file itself, or 
   fi
 }
 shacl_workload_of() { # <shape-path> -> workload stem (basename minus .ttl), or "" for a non-dir single file
-  # [OPUS-4.8] sq-8dp3: use a literal string comparison, NOT `case` — `case` performs
+  # sq-8dp3: use a literal string comparison, NOT `case` — `case` performs
   # glob matching, so a single-file shapes path containing glob metacharacters
   # (e.g. '[', '*', '?') could mis-match the pattern. `[ x = y ]` is an exact match.
   if [ "${SHACL_SHAPES:-}" = "$1" ]; then
@@ -439,7 +438,7 @@ run_report_cli_engine() { # <id>
   log "  recipe: $recipe"
   if [ "$DO_RUN" -eq 1 ]; then
     have python3 || die "python3 needed for the report-cli adapter"
-    have jq || die "jq needed for the report-cli adapter (to parse the --json sidecar)"  # [OPUS-4.8] match js-lib's jq guard
+    have jq || die "jq needed for the report-cli adapter (to parse the --json sidecar)"  # match js-lib's jq guard
     python3 -c 'import rdflib' 2>/dev/null || die "report-cli adapter needs rdflib (pip install rdflib)"
     { [ -n "${SHACL_DATA:-}" ] && [ -n "${SHACL_SHAPES:-}" ]; } || die "report-cli --run needs SHACL_DATA + SHACL_SHAPES"
     [ -d "$SHACL_SHAPES" ] && log "  SHACL_SHAPES is a directory — expanding per shape file (one workload each, matching sparq-shacl)"
@@ -449,7 +448,7 @@ run_report_cli_engine() { # <id>
       [ -n "$shape" ] || continue
       workload="$(shacl_workload_of "$shape")"
       log "  shape: $shape  (workload=${workload:-<single>})"
-      # [OPUS-4.8] The adapter's --json sidecar (stderr) carries the RESOLVED engine
+      # The adapter's --json sidecar (stderr) carries the RESOLVED engine
       # version + the conforms bit; capture it (not /dev/null) so the results
       # envelope records what the engine actually reported, per the script header
       # and the adapter design — rather than the pinned_version placeholder.
@@ -459,7 +458,7 @@ run_report_cli_engine() { # <id>
         || { rm -f "$errf"; die "report-cli adapter failed for $id (shape $shape)"; }
       PAYLOAD="$(tail -n1 "$errf" | jq -c --arg w "$workload" '{engine,version,conforms,violations,validate_us,workload:$w}' 2>/dev/null)"
       rm -f "$errf"
-      # [OPUS-4.8] sq-8dp3: the fallback (when the --json sidecar can't be parsed) must
+      # sq-8dp3: the fallback (when the --json sidecar can't be parsed) must
       # ALSO carry the workload field, so a parse-failure result is still attributed to
       # its shape/workload — matching the primary path above. Pass $workload as argv[1].
       [ -n "$PAYLOAD" ] || PAYLOAD="$(printf '%s' "$OUT" | python3 -c 'import json,sys; e,v,u=sys.stdin.read().split(); print(json.dumps({"engine":e,"violations":int(v),"validate_us":int(u),"workload":sys.argv[1]}))' "$workload")"
@@ -487,7 +486,7 @@ run_js_lib_engine() { # <id>
       [ -n "$shape" ] || continue
       workload="$(shacl_workload_of "$shape")"
       log "  shape: $shape  (workload=${workload:-<single>})"
-      # [OPUS-4.8] Build the payload from the adapter's --json sidecar (stderr,
+      # Build the payload from the adapter's --json sidecar (stderr,
       # well-formed JSON) via jq — not a python3 TSV reparse (python3 was never
       # required for js-lib) and not a printf %s of raw $OUT (whose unescaped
       # trailing newline/tab would emit invalid JSON and fail write_result's
@@ -510,7 +509,7 @@ run_http_sparql_engine() { # <id>
   hdr "$id (http-sparql)"
   log "  adapter: $ADAPTERS_DIR/http_sparql_adapter.py (POST query -> parse SPARQL-JSON -> count)"
   log "  PREP (gather box): start the engine's HTTP endpoint, then set SPARQL_ENDPOINT + SPARQL_QUERY_FILE"
-  # [OPUS-4.8] sq-gbq0: a Docker-backed http-sparql engine (Fuseki, Virtuoso, the
+  # sq-gbq0: a Docker-backed http-sparql engine (Fuseki, Virtuoso, the
   # jena-* SAILs) records its IMAGE DIGEST as the version identifier (the endpoint
   # reports no build string), and tags the result per SUITE so the file lands as
   # <engine>-<suite>-<UTC>.json per bench/CATALOG.md (e.g. fuseki-sp2b-<UTC>.json).
@@ -540,7 +539,7 @@ run_vector_lib_engine() { # <id>
   local id="$1"
   hdr "$id (vector-lib)"
   log "  adapter: $ADAPTERS_DIR/vector_lib_adapter.py (build index -> query -> recall@k vs exact-kNN oracle)"
-  # [OPUS-4.8] sq-aiup: TWO gather modes.
+  # sq-aiup: TWO gather modes.
   #   * SINGLE-POINT (default): VECTOR_NPZ (npz with {data,queries}) -> one recall@k point.
   #   * PARETO (gather-tier, the published-dataset recall-QPS curve): set VECTOR_DATASET +
   #     VECTOR_ROOT to sweep `ef` over SIFT1M (sift-128-euclidean) or glove-100-angular and
@@ -553,7 +552,7 @@ run_vector_lib_engine() { # <id>
   if [ "$DO_RUN" -eq 1 ]; then
     have python3 || die "python3 needed for the vector-lib adapter"
     python3 -c 'import numpy, hnswlib' 2>/dev/null || die "vector-lib adapter needs numpy + hnswlib (pip install numpy hnswlib)"
-    # [FABLE-5] sq-5o5.4: record the resolved gather-box distribution, not the
+    # sq-5o5.4: record the resolved gather-box distribution, not the
     # registry's intentionally version-agnostic placeholder.
     local vector_version
     vector_version="$(python3 -c 'import importlib.metadata; print(importlib.metadata.version("hnswlib"))')" \
@@ -596,7 +595,7 @@ for ln in sys.stdin.read().splitlines():
 print(json.dumps({"engine":e,"deficits_milli":m}))'
 }
 
-# [OPUS-4.8] sq-1fz0: PYTHON-LIB kind — the BEIR IR-quality axis of the FTS suite
+# sq-1fz0: PYTHON-LIB kind — the BEIR IR-quality axis of the FTS suite
 # (design §3.4). The ONLY python-lib engine is lucene-anserini, the kernel BM25
 # ORACLE: it downloads a small BEIR cut (SciFact / TREC-COVID + qrels), BM25-retrieves
 # with Anserini/pyserini (k1=1.2/b=0.75, matching sparq-text), and scores Recall@100 /

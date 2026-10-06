@@ -14,7 +14,7 @@
 // unit-test directly under `node --test`; the engine-level named-graph behaviour is
 // covered by the Rust tests + js/test/store.test.mjs.
 
-import type { SparqlTerm } from "./sparq-wasm";
+import { termToNTriples, type SparqlTerm } from "@sparq/client";
 
 // [OPUS-4.8] sq-dvyi: JSON-LD can carry named graphs (`@graph` with an outer `@id`),
 // so it joins nquads/trig as a dataset format routed through `loadDataset`.
@@ -82,37 +82,6 @@ export const ALL_QUADS_BODY = "{ ?s ?p ?o } UNION { GRAPH ?g { ?s ?p ?o } }";
 
 /** A SELECT that enumerates the whole dataset (see {@link ALL_QUADS_BODY}). */
 export const ALL_QUADS_QUERY = `SELECT ?s ?p ?o ?g WHERE { ${ALL_QUADS_BODY} }`;
-
-/** Escapes a literal's lexical form for an N-Quads quoted string (matches the
- * engine's own serialiser: backslash, double-quote, LF, CR — a raw tab is legal). */
-function escapeLiteral(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r");
-}
-
-const XSD_STRING = "http://www.w3.org/2001/XMLSchema#string";
-
-/** Serialises one SPARQL-JSON term to its N-Triples / N-Quads token. */
-function termToNT(term: SparqlTerm): string {
-  switch (term.type) {
-    case "uri":
-      return `<${term.value}>`;
-    case "bnode":
-      return `_:${term.value}`;
-    case "literal": {
-      const quoted = `"${escapeLiteral(term.value)}"`;
-      const lang = term["xml:lang"];
-      if (lang) return `${quoted}@${lang}`;
-      if (term.datatype && term.datatype !== XSD_STRING) {
-        return `${quoted}^^<${term.datatype}>`;
-      }
-      return quoted;
-    }
-  }
-}
 
 /** One solution row from {@link ALL_QUADS_QUERY}: bound `s`/`p`/`o`, optional `g`. */
 type QuadRow = {
@@ -322,8 +291,8 @@ export function rowsToNQuads(rows: QuadRow[]): string {
   const lines: string[] = [];
   for (const row of rows) {
     if (!row.s || !row.p || !row.o) continue;
-    const spo = `${termToNT(row.s)} ${termToNT(row.p)} ${termToNT(row.o)}`;
-    lines.push(row.g ? `${spo} ${termToNT(row.g)} .` : `${spo} .`);
+    const spo = `${termToNTriples(row.s)} ${termToNTriples(row.p)} ${termToNTriples(row.o)}`;
+    lines.push(row.g ? `${spo} ${termToNTriples(row.g)} .` : `${spo} .`);
   }
   return lines.join("\n");
 }

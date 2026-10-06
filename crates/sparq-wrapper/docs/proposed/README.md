@@ -1,7 +1,6 @@
 # Proposed feature status
 
-These pages record whether each default-off proposal feature is implemented or
-reserved, including where its API lives:
+These pages record where each default-off proposal feature's API lives:
 
 - [Async events](async_events.md)
 - [Async node](async_node.md)

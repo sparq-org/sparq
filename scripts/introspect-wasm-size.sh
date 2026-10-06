@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-aq5 — sparq-introspect wasm bundle-size measurement (INFORMATIONAL).
+# sq-aq5 — sparq-introspect wasm bundle-size measurement (INFORMATIONAL).
 #
 # sparq-introspect is a pure library (rlib-only): every statistic it mines is a sorted
 # scan over sparq-core's already-built permutation indexes — no threads, no syscalls, no

@@ -460,10 +460,15 @@ fn is_set_operator(op: Option<&Term>) -> bool {
 ///   fail-OPEN hazard) — both degrade to `None` → the unsatisfiable guard
 ///   (fail-closed, consistent with every other malformed-constraint path).
 ///
-/// Members are deduplicated by node key; a nested-list member is NOT recursively
-/// flattened (it stays a blank-node string — an unmatchable member, fail-closed),
-/// and an empty list (`rdf:nil` directly as the object) has no cons cell, so it
-/// falls through as the plain nil IRI — unmatchable by ordinary values, as before.
+/// Members are deduplicated by node key. An empty list (`rdf:nil` directly as the
+/// object) has no cons cell, so it falls through as the plain nil IRI — unmatchable
+/// by ordinary values, as before.
+///
+/// **A NESTED-list member REFUSES the whole parse (`Err`)** — mirroring the sibling
+/// refusal in [`fold_list_operands`]. Kept as an opaque blank-node string it would be
+/// an unmatchable member, which is fail-closed only for the POSITIVE set operators:
+/// under `isNoneOf` it excludes nothing, silently dropping the authored exclusion on a
+/// permission (and narrowing a set-op prohibition's carve-out). #3982.
 ///
 /// **A MALFORMED collection REFUSES the whole parse (`Err`)** — the
 /// [`fold_list_operands`] / [`policy_conflict`] precedent. A collection-SHAPED
@@ -509,6 +514,21 @@ fn fold_rights(
         } else {
             vec![r.clone()]
         };
+        if lists.is_collection_shaped(&key) {
+            let nil = format!("<{RDF_NS}nil>");
+            if let Some(m) = expanded.iter().find(|m| {
+                let mkey = node_key(m);
+                mkey == nil || lists.is_collection_shaped(&mkey)
+            }) {
+                return Err(format!(
+                    "a constraint's collection rightOperand ({key}) has a NESTED-list \
+                     member ({}); nested collections are not a supported operand shape \
+                     (an unmatchable member would silently drop an `isNoneOf` exclusion), \
+                     so the policy is refused (fail-closed)",
+                    node_key(m)
+                ));
+            }
+        }
         for m in expanded {
             if seen.insert(node_key(&m), ()).is_none() {
                 members.push(m);
@@ -544,12 +564,33 @@ struct RawConstraint {
     rights: Vec<Term>,
     rights_seen: BTreeMap<String, ()>,
     is_logical: bool,
+    /// Set when the node carries several DISTINCT `leftOperand` objects. #3832.
+    left_conflict: bool,
+    /// Set when the node carries several DISTINCT `operator` objects. #3832.
+    op_conflict: bool,
+}
+
+/// Bind a single-valued field from one result row, flagging `conflict` when a
+/// DIFFERENT value (by node key) has already been bound. #3832.
+fn absorb_single(slot: &mut Option<Term>, conflict: &mut bool, v: Option<Term>) {
+    let Some(v) = v else { return };
+    match slot {
+        None => *slot = Some(v),
+        Some(cur) => {
+            if node_key(cur) != node_key(&v) {
+                *conflict = true;
+            }
+        }
+    }
 }
 
 impl RawConstraint {
-    /// Merge one result row into the accumulator: first-bound `left`/`op` win
-    /// (single-valued per the ODRL model), `right` objects accumulate
-    /// (deduplicated by node key, in row order), `is_logical` is sticky.
+    /// Merge one result row into the accumulator: `left`/`op` are single-valued
+    /// per the ODRL model — a second DISTINCT value is recorded as a conflict
+    /// (refused at [`RawConstraint::build`], never first-binding-wins: which
+    /// binding comes first is not stable under result ordering, #3832); `right`
+    /// objects accumulate (deduplicated by node key, in row order); `is_logical`
+    /// is sticky.
     fn absorb(
         &mut self,
         left: Option<Term>,
@@ -557,12 +598,8 @@ impl RawConstraint {
         right: Option<Term>,
         is_logical: bool,
     ) {
-        if self.left.is_none() {
-            self.left = left;
-        }
-        if self.op.is_none() {
-            self.op = op;
-        }
+        absorb_single(&mut self.left, &mut self.left_conflict, left);
+        absorb_single(&mut self.op, &mut self.op_conflict, op);
         if let Some(r) = right {
             if self.rights_seen.insert(node_key(&r), ()).is_none() {
                 self.rights.push(r);
@@ -575,7 +612,25 @@ impl RawConstraint {
     /// [`Constraint`] — anything malformed degrades to the unsatisfiable guard,
     /// except a malformed COLLECTION right operand, which refuses the whole parse
     /// (`Err`; see [`fold_rights`]). [FABLE-5] sq-srjuc.
+    ///
+    /// A node with several distinct `leftOperand`/`operator` objects also refuses
+    /// the parse (`Err`): degrading it to the unsatisfiable guard would DISABLE a
+    /// prohibition (the widening direction), so — as for a malformed collection —
+    /// the ambiguous shape is refused on both rule kinds. #3832.
     fn build(self, lists: &ListTable) -> Result<Constraint, String> {
+        for (conflict, field) in [
+            (self.left_conflict, "odrl:leftOperand"),
+            (self.op_conflict, "odrl:operator"),
+        ] {
+            if conflict {
+                return Err(format!(
+                    "a constraint carries several distinct {field} objects; a constraint \
+                     is single-valued in that position and evaluating an arbitrarily \
+                     chosen one is not stable under result ordering, so the policy is \
+                     refused (fail-closed)"
+                ));
+            }
+        }
         let right = fold_rights(self.op.as_ref(), &self.rights, lists)?;
         Ok(build_constraint(self.left, self.op, right))
     }

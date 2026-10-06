@@ -1,17 +1,17 @@
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# [GPT-5.6] Bounded typo-tolerant lookup is default-OFF; exercise the feature-gated
+# Bounded typo-tolerant lookup is default-OFF; exercise the feature-gated
 # implementation and its differential/property tests in CI.
 - name: "sparq-text (fuzzy)"
   crate: "sparq-text"
   features: "fuzzy"
   test: true
 
-# [GPT-5.6] Literal highlighting is default-OFF; exercise the direct snippet
+# Literal highlighting is default-OFF; exercise the direct snippet
 # tests so the feature's implementation cannot compile silently empty in CI.
 - name: "sparq-text (highlight)"
   crate: "sparq-text"
