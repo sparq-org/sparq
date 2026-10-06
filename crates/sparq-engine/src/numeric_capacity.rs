@@ -1,4 +1,4 @@
-//! [GPT-6] Checked numeric consumers for an explicitly bounded evaluation.
+//! Checked numeric consumers for an explicitly bounded evaluation.
 
 use super::{budget, xsd, ArithOp, Dec, Literal, Num};
 

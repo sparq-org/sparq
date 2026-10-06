@@ -258,7 +258,7 @@ fn corruption_sweep(mode: SaveMode) {
     }
 }
 
-// [GPT-6] Keep the corruption inventory on the current semantic cache version.
+// Keep the corruption inventory on the current semantic cache version.
 #[test]
 fn current_numeric_sidecar_is_in_corruption_inventory() {
     for mode in [SaveMode::Raw, SaveMode::CompressedV1,

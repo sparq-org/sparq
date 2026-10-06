@@ -1,4 +1,4 @@
-// [GPT-6] Materialized named-organization data with independently derived count goldens.
+// Materialized named-organization data with independently derived count goldens.
 use serde::{Deserialize, Serialize};
 use sparq_proved_evaluator_model::{CanonicalResult, RowOrder};
 

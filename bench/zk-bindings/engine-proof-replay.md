@@ -1,6 +1,6 @@
 # Engine replay to exact V3 proof bridge
 
-[OPUS-5.5] This experimental adapter takes one cell retained by the
+This experimental adapter takes one cell retained by the
 [native engine/storage replay](engine-replay.md) and prepares its unchanged
 `query.rq` and `data.ttl` for the exact V3 relation of the
 [proved evaluator](../../zk/sparql-evaluator/README.md). In real mode it creates
@@ -143,7 +143,7 @@ infrastructure failure; partial outputs are retained without a status record.
 
 ## Synthetic experiment setup
 
-[OPUS-5.5] The `engine_replay_setup` host example writes the holder and both
+The `engine_replay_setup` host example writes the holder and both
 verifier manifests for one explicitly synthetic cell, so an experiment need not
 hand-author them. It has no production mode; the `synthetic` mode word is
 mandatory.
@@ -263,7 +263,7 @@ cargo test --locked --manifest-path zk/sparql-evaluator/Cargo.toml \
 SPARQ_ENGINE_REPLAY_PROOF_JOB=/abs/job.json RISC0_SERVER_PATH=/installed/r0vm \
   cargo test --locked --release --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator --test actual_engine_replay -- --ignored --nocapture
-# [OPUS-5.5] omission negative only; creates no proof
+# omission negative only; creates no proof
 SPARQ_ENGINE_REPLAY_OMISSION_JOB=/abs/omission-job.json RISC0_SERVER_PATH=/installed/r0vm \
   cargo test --locked --release --manifest-path zk/sparql-evaluator/Cargo.toml \
   -p sparq-proved-evaluator --test actual_engine_replay -- --ignored --nocapture \
@@ -307,7 +307,7 @@ must name the same originals with distinct nonces. It is not part of the
 default run, and heavy lanes are not wired into CI until source and native
 review.
 
-[OPUS-5.5] `new_output_directory` must be absolute and must not exist. Its
+`new_output_directory` must be absolute and must not exist. Its
 parent is canonicalized, and the directory must be outside both the source
 checkout and the canonical replay directory. It is checked and created before
 any proof. The test never removes it, so a failure keeps whatever was written.
@@ -340,7 +340,7 @@ log can confirm that the guest aborted. Persisted receipts are evidence for this
 one run and cell only. They are not reusable for other cells, storage modes or
 profiles.
 
-[OPUS-5.5] The ignored `real_engine_replay_omission_is_an_observed_guest_abort`
+The ignored `real_engine_replay_omission_is_an_observed_guest_abort`
 reads a separate job with the same schema and a fresh `new_output_directory`,
 named by `SPARQ_ENGINE_REPLAY_OMISSION_JOB`. It uses the same pinned guest and
 r0vm, and it creates no receipt. It prepares the same cell under the
@@ -366,7 +366,7 @@ is an observed guest execution rejection, not a negative cryptographic proof.
 
 ## Evidence interpretation
 
-[OPUS-5.5] This page, the examples and the tests only configure experiments.
+This page, the examples and the tests only configure experiments.
 They are not evidence that any experiment ran, and this page records no run
 results. Current review and evaluation context lives in
 [PR #6579](https://github.com/sparq-org/sparq/pull/6579), not here.

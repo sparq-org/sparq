@@ -1,4 +1,4 @@
-// [GPT-6] Native evaluation adapter; never generates or counts cryptographic proofs.
+// Native evaluation adapter; never generates or counts cryptographic proofs.
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sparq_engine::{BudgetExceeded, EvaluationCapacity};
@@ -20,7 +20,7 @@ fn authority(job: &Value, commitment: [u8; 32]) -> Result<DatasetAuthority, Box<
     }
 }
 
-// [GPT-6] The model exposes static diagnostics, including one deliberately
+// The model exposes static diagnostics, including one deliberately
 // ambiguous evaluation/budget error. Classify only exact reviewed producers;
 // never let expected job data or a substring decide what actually failed.
 fn rejection(error: &model::Rejected, phase: &str) -> Option<Value> {
@@ -36,7 +36,7 @@ fn rejection(error: &model::Rejected, phase: &str) -> Option<Value> {
     Some(classified)
 }
 
-// [GPT-6] Only actual enum values emitted by the owning query frame certify
+// Only actual enum values emitted by the owning query frame certify
 // execution capacity. Neither a legacy string nor the job's expectation does.
 fn detailed_rejection(error: &model::EvaluationError, phase: &str) -> Option<Value> {
     use model::EvaluationError;

@@ -9,7 +9,7 @@ publish.workspace = true
 default = []
 evaluate = ["dep:sparq-engine", "dep:sparq-core", "dep:spargebra", "dep:oxrdf", "dep:oxttl"]
 graph-results = ["evaluate", "dep:sparq-canon", "sparq-engine/deterministic-blank-nodes"]
-# [OPUS-5.5] V5 issuer-authenticated RDF model; also compiled by the separate V5
+# V5 issuer-authenticated RDF model; also compiled by the separate V5
 # guest (`methods/guest-authrdf`), never by the exact guest. No receipt is recorded.
 authenticated-rdf = ["graph-results", "dep:ed25519-dalek"]
 
@@ -25,7 +25,7 @@ oxrdf = { version = "0.3", features = ["rdf-12"], optional = true }
 oxttl = { version = "0.2", features = ["rdf-12"], optional = true }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["alloc"], optional = true }
 
-# [GPT-6] Explicit native corpus adapter; no proof or default-feature claim.
+# Explicit native corpus adapter; no proof or default-feature claim.
 [[example]]
 name = "proof_bindings"
 required-features = ["evaluate"]

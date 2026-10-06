@@ -1,4 +1,4 @@
-// [OPUS-5.5] Native vcq adapter gates. Unit doubles only: no proof is created,
+// Native vcq adapter gates. Unit doubles only: no proof is created,
 // and the only receipt used is a FAKE one that must be rejected.
 #![cfg(feature = "vcq")]
 
@@ -299,7 +299,7 @@ fn nonce_and_statement_follow_the_documented_composition() {
 
 #[test]
 fn representative_stored_request_fields_change_the_nonce() {
-    // [OPUS-5.5] A subset; full field coverage lives in the shared encoding tests.
+    // A subset; full field coverage lives in the shared encoding tests.
     let base = Spec::bag();
     let other_pin = ArtifactPin {
         sha256: [1; 32],

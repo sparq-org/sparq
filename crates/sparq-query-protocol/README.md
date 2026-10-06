@@ -1,4 +1,4 @@
-<!-- [OPUS-5.5] zkp-16.1: first executable contract layer for vcq draft 0; zkp-16.2 request binding. -->
+<!-- zkp-16.1: first executable contract layer for vcq draft 0; zkp-16.2 request binding. -->
 # sparq-query-protocol
 
 > **Experimental, unpublished (`publish = false`), zero dependencies, not externally audited
@@ -21,7 +21,7 @@
 > The durable challenge store is
 > supplied by the APPLICATION: neither crate ships a production store; the host tests use
 > in-memory test doubles only. `sparq-core`, `sparq-engine` and the default wasm build are
-> unchanged. <!-- [OPUS-5.5] -->
+> unchanged. <!-- -->
 
 ## 🚀 Quickstart
 

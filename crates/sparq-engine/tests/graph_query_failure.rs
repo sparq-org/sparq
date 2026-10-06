@@ -1,4 +1,4 @@
-// [GPT-6] Graph-form causes are captured before their own budget frame exits.
+// Graph-form causes are captured before their own budget frame exits.
 use oxrdf::Triple;
 use sparq_core::Graph;
 use sparq_engine::{

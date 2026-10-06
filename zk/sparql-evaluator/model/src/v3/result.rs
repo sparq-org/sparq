@@ -1,4 +1,4 @@
-// [GPT-6] Whole-result RDFC encoding preserves cross-row blank-node identity.
+// Whole-result RDFC encoding preserves cross-row blank-node identity.
 use super::{CanonicalResult, CanonicalizationPolicy};
 use crate::{Rejected, RowOrder};
 use oxrdf::{BlankNode, GraphName, Literal, NamedNode, Quad, Term, Triple};
@@ -110,7 +110,7 @@ pub(super) fn select(
             }
         }
     }
-    // [GPT-6] Blank-free results require no isomorphism work. Artificial row nodes
+    // Blank-free results require no isomorphism work. Artificial row nodes
     // are introduced only when their incidence is needed to preserve value identity.
     let labels = if values.is_empty() {
         BTreeMap::new()

@@ -1,4 +1,4 @@
-// [GPT-6] Opt-in export of synthetic, already verified integration-test receipts.
+// Opt-in export of synthetic, already verified integration-test receipts.
 use risc0_zkvm::{InnerReceipt, Receipt, VerifierContext};
 use serde::Serialize;
 use sparq_proved_evaluator::{ArtifactPin, embedded_pin};

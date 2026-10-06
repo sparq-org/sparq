@@ -1,6 +1,6 @@
 # Blank nodes and graph results: V3 implementation design
 
-[GPT-6] This is work in progress after the separate V2 named-dataset relation.
+This is work in progress after the separate V2 named-dataset relation.
 Execution status is recorded in the linked structured checks; full SPARQL coverage is not claimed.
 
 The V3 model schema preserves V1/V2 request and commitment meanings.
@@ -48,7 +48,7 @@ Source namespaces are checked across the active dataset. Independent result grap
 still require standardization apart before combination. V3 guest validation and receipts have separate test entry points; their source
 presence does not establish successful execution.
 
-[GPT-6] Native `dataset_blank_nodes` now exercises read-query RDF merge separation,
+Native `dataset_blank_nodes` now exercises read-query RDF merge separation,
 preserved named-graph identity, collision avoidance, repeated-IRI acquisition,
 dataset views, graph production and recursive triple-term handling. Each distinct
 FROM IRI supplies one snapshot; default-copy nodes are disjoint from preserved

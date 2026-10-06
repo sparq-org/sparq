@@ -405,7 +405,7 @@ impl Graph {
     /// ASK runs on the engine's native entry point (evaluation early-exits at the
     /// first solution); a SELECT is answered by the engine's lazy solution count.
     fn ask(&self, py: Python<'_>, sparql: &str) -> PyResult<bool> {
-        // [GPT-6] Keep VERSION metadata on both ASK and SELECT/count paths.
+        // Keep VERSION metadata on both ASK and SELECT/count paths.
         let (query, versions) = sparq_engine::parse_versioned_query(spargebra::SparqlParser::new(), sparql)
             .map_err(|error| engine_err(error.to_string()))?;
         let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Required original-fixture replay with actual typed model causes."""
+"""Required original-fixture replay with actual typed model causes."""
 import argparse
 import json
 import os
@@ -28,7 +28,7 @@ def original_plan(root=ROOT):
         cases.extend(imported)
     if len(cases) != inventory["cases"]:
         raise ValueError("missing original cases")
-    # [OPUS-5.5] Every applied override must come from the pinned registry bytes.
+    # Every applied override must come from the pinned registry bytes.
     applied = [c["oracle"]["projection"] for c in cases
                if c["oracle"].get("projection", {}).get("kind") == "reviewed_projection_override"]
     if (len(applied) != pin["overrides"]

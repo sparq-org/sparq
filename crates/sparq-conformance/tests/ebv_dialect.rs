@@ -1,4 +1,4 @@
-// [GPT-6] Manual dialect-discriminating results through the actual suite runner.
+// Manual dialect-discriminating results through the actual suite runner.
 use sparq_conformance::manifest::{EntryKind, QueryAction, TestEntry, UpdateState};
 use sparq_conformance::run::{run_query_test, Status};
 

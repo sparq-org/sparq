@@ -1,4 +1,4 @@
-// [GPT-6] Synthetic V3 fixtures shared by actual guest and genuine receipt tests.
+// Synthetic V3 fixtures shared by actual guest and genuine receipt tests.
 use sparq_proved_evaluator_model::{DatasetAuthority, ProofContract, v3};
 
 pub fn witness(query: &str, source: &str, named: &[&str]) -> v3::Witness {

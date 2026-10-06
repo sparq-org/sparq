@@ -1,4 +1,4 @@
-// [GPT-6] Typed lexical, explicit datatype-extension and constructor-capacity controls.
+// Typed lexical, explicit datatype-extension and constructor-capacity controls.
 use sparq_core::Graph;
 
 #[test]

@@ -1,6 +1,6 @@
 # EXISTS with MINUS solution domains
 
-<!-- [GPT-6] Scoped shared engine correction; broader correlation is unfinished. -->
+<!-- Scoped shared engine correction; broader correlation is unfinished. -->
 
 For EXISTS/NOT EXISTS bodies composed of BGP, Join, UNION, FILTER and MINUS,
 the engine applies captured IRI/literal bindings before MINUS observes the child

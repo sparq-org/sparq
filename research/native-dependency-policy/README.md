@@ -1,6 +1,6 @@
 # Native dependency policy reconciliation
 
-[GPT-6] This record applies the reviewed policy inheritance to the detached
+This record applies the reviewed policy inheritance to the detached
 native workspace. It is a dependency-policy change, not a source audit of the
 remaining packages, an external cryptographic review, or permission to merge.
 The native implementation, its lockfile and its proof evidence are unchanged.
@@ -86,7 +86,7 @@ dependency-gate claim.
 
 ## Two independently reviewed source units
 
-[GPT-6] The [2026-09-25 source review](reviewed-units/2026-09-25/review-final.md)
+The [2026-09-25 source review](reviewed-units/2026-09-25/review-final.md)
 adds an explicitly attributed automated GPT-6 audit for the exact
 `num-iter 0.1.45 -> 0.1.46` delta and a full exact-package audit for
 `cranelift-codegen-shared 0.110.3`. The

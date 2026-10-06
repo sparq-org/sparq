@@ -41,7 +41,7 @@ def canon_ref:
     | (sub("^[^#]*#"; "")) as $rest                      # everything after the first '#'
     | ($rest | sub("^(?<v>[^ ]*)"; "")) as $suffix       # trailing suffix after the version token
     | ($rest | sub("^(?<v>[^ ]*).*$"; "\(.v)")) as $version
-    # [GPT-6] Cargo includes name@version when the package name differs from
+    # Cargo includes name@version when the package name differs from
     # its directory (e.g. evaluator/host). Preserve that explicit identity.
     | if ($version | test("^[A-Za-z0-9_-]+@[^@]+$")) then
         "pkg:cargo/\($version)\($suffix)"
@@ -147,10 +147,10 @@ def derive_supplier($author):
   | if ($ref | startswith("registry+https://github.com/rust-lang/crates.io-index")) then
       {name: "crates.io", url: [cratesio_url]}
     elif ($ref | test("^path\\+file://.*/vendor/zk-sdk/")) then
-      # [GPT-6] This repository supplies the patched bytes; upstream registry
+      # This repository supplies the patched bytes; upstream registry
       # provenance is recorded separately in the accompanying UPSTREAM.json.
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
-    # [OPUS-5.5] zkp-14.5: plus the separately pinned V5 guest workspace, by exact name.
+    # zkp-14.5: plus the separately pinned V5 guest workspace, by exact name.
     elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest|methods/guest-authrdf)#"))
           and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest|authrdf[-_]guest)$"))) then
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}

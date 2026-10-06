@@ -19,7 +19,7 @@ Support for [SPARQL 1.2](https://www.w3.org/TR/sparql12-query/) is also availabl
 
 This crate is intended to be a building piece for SPARQL implementations in Rust like [Oxigraph](https://oxigraph.org).
 
-<!-- [GPT-6] zkp-10.1, target-scoped support for the detached experimental guest. -->
+<!-- zkp-10.1, target-scoped support for the detached experimental guest. -->
 On `target_os = "zkvm"`, parser-generated internal variables use a checked
 monotonic counter in a namespace outside SPARQL user-variable syntax. This avoids
 ambient entropy for aggregate/projection lowering. Other targets retain the

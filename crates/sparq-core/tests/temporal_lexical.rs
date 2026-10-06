@@ -1,4 +1,4 @@
-// [GPT-6] Raw RDF temporal lexicals are validated without construction normalization.
+// Raw RDF temporal lexicals are validated without construction normalization.
 use sparq_core::temporal::{
     ExactTemporal, ExactTimeline, Temporal, Timeline, year_within_capacity,
 };

@@ -3,7 +3,7 @@
 //! Classes are chosen by the code path that detects the failure, never by
 //! parsing message text. Backend failures use [`ProtocolError::backend`], whose
 //! class type has no capacity variant: only [`ProtocolError::capacity`], which
-//! must name the exhausted bound, can report `capacity`. [OPUS-5.5]
+//! must name the exhausted bound, can report `capacity`.
 
 use core::fmt;
 
@@ -132,7 +132,7 @@ pub enum ErrorCode {
     CapacityExceeded(CapacityBound),
     /// A backend-defined stable code.
     Backend(&'static str),
-    /// [OPUS-5.5] A request challenge is all zero bytes.
+    /// A request challenge is all zero bytes.
     ZeroChallenge,
     /// A query is empty or longer than [`MAX_QUERY_LEN`](crate::MAX_QUERY_LEN).
     MalformedQuery,

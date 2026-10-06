@@ -55,7 +55,7 @@ assert_eq!(map.get("x").map(String::as_str), Some("c14n0"));
 
 ### Explicit work limits
 
-[GPT-6] `canonicalize_quads_bounded_with::<sha2::Sha256>(&quads, &limits)` and
+`canonicalize_quads_bounded_with::<sha2::Sha256>(&quads, &limits)` and
 `issue_quads_bounded_with::<sha2::Sha256>(&quads, &limits)` retain standard RDFC-1.0
 output while adding `CanonicalizationLimits`. Set every field explicitly:
 `max_quads`, `max_input_bytes`, `max_output_bytes`, `max_hndq_calls` and

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Complete native seed/storage matrices; no builds, installs or proofs."""
+"""Complete native seed/storage matrices; no builds, installs or proofs."""
 import argparse
 import hashlib
 import itertools

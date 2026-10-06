@@ -1,6 +1,6 @@
 //! Stable-parser recovery of SPARQL `VERSION` announcements.
 //!
-//! [OPUS-5.5] The published `spargebra` 0.4.6 parser accepts `VERSION`
+//! The published `spargebra` 0.4.6 parser accepts `VERSION`
 //! declarations (with its `sparql-12` feature) but discards their labels, while
 //! the engine needs every label, in source order, to select EBV rules. The
 //! helpers here use only that stable upstream API, so the published crate and

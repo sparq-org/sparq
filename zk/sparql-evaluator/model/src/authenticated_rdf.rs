@@ -1,4 +1,4 @@
-// [OPUS-5.5] Issuer-authenticated RDF relation V5; zkp-14.5 runs it in a separate guest.
+// Issuer-authenticated RDF relation V5; zkp-14.5 runs it in a separate guest.
 //! Issuer-authenticated bounded RDF queries over W3C `eddsa-rdfc-2022` credentials.
 //!
 //! This is relation version 5. Source for a separately pinned optional guest
@@ -485,7 +485,7 @@ struct Verified {
 }
 
 fn authenticate(dataset: &PrivateCredentials, policy: &Policy) -> Result<Authenticated, Rejected> {
-    // [OPUS-5.5] Same V3 program ceilings as `validate_request`, before any source work.
+    // Same V3 program ceilings as `validate_request`, before any source work.
     v3::validate_policy(&policy.evaluation)?;
     let table = checked_table(&policy.authorization)?;
     let policy_digest = policy_digest(policy, &table)?;

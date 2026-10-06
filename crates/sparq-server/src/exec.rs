@@ -432,7 +432,7 @@ mod tests {
         );
     }
 
-    // [GPT-6] Protocol dataset rewriting must retain query VERSION metadata.
+    // Protocol dataset rewriting must retain query VERSION metadata.
     #[test]
     fn version_survives_protocol_dataset_rewrite_and_conflicts_reject() {
         let over = DatasetOverride { default: vec!["http://ex/absent".into()], named: vec![] };
@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn using_override_cannot_erase_unsupported_update_version() {
-        // [GPT-6] Protocol dataset rewriting must reject before serialization
+        // Protocol dataset rewriting must reject before serialization
         // could discard a VERSION announcement. Empty overrides retain text
         // for the engine's same REC-only validation.
         let over = UsingOverride { default: vec!["urn:g".into()], named: vec![] };

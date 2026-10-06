@@ -1,6 +1,6 @@
 # Exact-evaluator experiments
 
-[GPT-6] `exact_experiment` runs fixed synthetic V2 SELECT, false-ASK and complete
+`exact_experiment` runs fixed synthetic V2 SELECT, false-ASK and complete
 named-graph catalog contracts with the existing local RISC Zero host API. It is an
 experimental measurement adapter, not an external cryptographic audit or a claim
 of full SPARQL support. The [evaluator's assurance limits](../README.md) apply.

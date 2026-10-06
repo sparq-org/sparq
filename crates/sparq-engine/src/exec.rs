@@ -203,7 +203,7 @@ pub(crate) mod budget {
     thread_local! {
         static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
         static EXCEEDED: Cell<Option<BudgetExceeded>> = const { Cell::new(None) };
-        // [GPT-6] Semantic capacity cannot be refunded by a SERVICE byte rollback.
+        // Semantic capacity cannot be refunded by a SERVICE byte rollback.
         static CAPACITY_EXCEEDED: Cell<Option<EvaluationCapacity>> = const { Cell::new(None) };
     }
 
@@ -263,7 +263,7 @@ pub(crate) mod budget {
         }
     }
 
-    // [GPT-6] Query entry only. The resolved rule is copied into LocalVocab;
+    // Query entry only. The resolved rule is copied into LocalVocab;
     // per-row evaluation and Rayon workers never consult this TLS selector.
     pub(crate) fn with_query_budget<T>(b: &QueryBudget, semantics: crate::EbvSemantics, f: impl FnOnce() -> T) -> T {
         let _scope = install(b);
@@ -512,7 +512,7 @@ pub(crate) mod budget {
         Ok(())
     }
 
-    // [GPT-6] Read before Guard restores the parent frame. Only actual emitters
+    // Read before Guard restores the parent frame. Only actual emitters
     // set these enums; arbitrary callback/evaluation error strings cannot do so.
     pub(crate) fn failure() -> Option<QueryFailure> {
         CAPACITY_EXCEEDED.with(Cell::get).map(QueryFailure::Capacity)
@@ -1804,7 +1804,7 @@ fn nnp_var_ref(p: &NamedNodePattern) -> Option<&Variable> {
     }
 }
 
-/// [GPT-6] Restricts positive patterns by IRI bindings without crossing scopes.
+/// Restricts positive patterns by IRI bindings without crossing scopes.
 /// Both ordinary SIP and the theta anti-join seed path use this admission rule.
 /// Other algebra uses ordinary evaluation: constant replacement is not selection
 /// through binding, negative, nullable-domain, or solution-modifier boundaries.
@@ -1815,7 +1815,7 @@ fn subst_pattern(p: &GraphPattern, sub: &FxHashMap<Variable, oxrdf::NamedNode>) 
             patterns: patterns.iter().map(|tp| subst_triple(tp, sub)).collect::<Option<Vec<_>>>()?,
         },
         G::Path { subject, path, object } => {
-            // [GPT-6] Variable-bearing triple terms are decomposed only in
+            // Variable-bearing triple terms are decomposed only in
             // BGPs. Grounding one here would erase the ordinary path error.
             if matches!(subject, TermPattern::Triple(_)) || matches!(object, TermPattern::Triple(_)) {
                 return None;
@@ -2671,15 +2671,15 @@ pub struct LocalVocab<'dataset> {
     /// FILTER/comparison over a BIND-computed numeric does not clone + re-parse
     /// the term per row.
     nums: Vec<f64>,
-    /// [GPT-6] Bound outer terms for EXISTS expression substitution. Kept with
+    /// Bound outer terms for EXISTS expression substitution. Kept with
     /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
     /// inherit another evaluation's bindings through thread-local state.
     correlation: FxHashMap<Variable, Term>,
-    /// [GPT-6] The active dataset catalog is independent of the active graph.
+    /// The active dataset catalog is independent of the active graph.
     /// Nested GRAPH switches graph dictionaries without losing this borrowed
     /// catalog; it is scoped to this evaluation, with no cloning or global state.
     dataset: Option<&'dataset Graph>,
-    /// [GPT-6] Remove substituted variables before domain-sensitive operators.
+    /// Remove substituted variables before domain-sensitive operators.
     substitute_exists_domains: bool,
 }
 
@@ -2706,7 +2706,7 @@ impl<'dataset> LocalVocab<'dataset> {
             // [FABLE-5] sq-74oy4 / sq-6b1lj: cache the DATATYPE-AWARE f64 (`numeric_cache_f64`)
             // — the SAME acceptance the graph `numeric_value` cache and the lenient `as_num`
             // seam use — so a computed (BIND/aggregate) numeric term joins/compares identically
-            // to a graph term. [GPT-6] It validates raw RDF lexical bytes verbatim and rejects a per-datatype-
+            // to a graph term. It validates raw RDF lexical bytes verbatim and rejects a per-datatype-
             // ill-formed lexical (`"1.5"^^xsd:integer`); either folds to the NaN cache-miss
             // sentinel, deferring `=`/`<`/`>` to the exact evaluator (which type-errors it).
             Term::Literal(l) => numeric_cache_f64(l).unwrap_or(f64::NAN),
@@ -3499,7 +3499,7 @@ fn eval_modified(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Res
     // Pin NOW() for this execution (SPARQL 1.1 §17.4.5.1). Outermost call samples
     // the clock once; the recursive / EXISTS re-entries see it active and keep the
     // outer instant (a Cell read). [FABLE-5] sq-98w7z.1
-    // [GPT-6] A proof guest has no wall clock; its wrapper rejects NOW().
+    // A proof guest has no wall clock; its wrapper rejects NOW().
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
     let _query_now = query_now::scope();
     match p {
@@ -6033,7 +6033,7 @@ fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPatt
     if !local.substitute_exists_domains {
         return Ok(bindings);
     }
-    // [GPT-6] Charge the materialized intermediate before capture filtering and
+    // Charge the materialized intermediate before capture filtering and
     // projection reduce it. Tracing then sees the actual substituted output.
     let previous = budget::set_width(bindings.vars.len());
     let result = budget::check(bindings.rows.len());
@@ -7233,7 +7233,7 @@ fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, S
     fn lit_num(e: &Expression) -> Option<f64> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
-                // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant (`numeric_cache_f64`).
+                // sq-6b1lj: datatype-aware, verbatim-validated constant (`numeric_cache_f64`).
                 // A datatype-ill-formed threshold (`"1.5"^^xsd:integer`) yields `None`, so
                 // `extract_sargable` DECLINES the numeric fast path and the FILTER takes the
                 // exact general comparison — which type-errors the ill-formed constant,
@@ -7711,7 +7711,7 @@ fn eval_path(
             TermPattern::BlankNode(b) => End::Var(bnode_var(b)),
             other => {
                 let term = term_pattern_to_term(other)?;
-                // [GPT-6] Keep absent constants as ordinary local IDs throughout
+                // Keep absent constants as ordinary local IDs throughout
                 // the recursive relation, so alternatives retain each identity.
                 End::Bound(graph.id_of(&term).unwrap_or_else(|| local.intern(term)))
             }
@@ -7793,7 +7793,7 @@ fn eval_path(
     Ok(Bindings::unsorted(vars, rows))
 }
 
-/// [GPT-6] Endpoint roles and optional scan hints. A concrete RDF term can
+/// Endpoint roles and optional scan hints. A concrete RDF term can
 /// seed a nullable path even outside nodes(G); a variable merely constrained
 /// by an optimization cannot. In particular, sequence midpoints remain
 /// variables. Hints may return supersets, but must never invent relation pairs.
@@ -7871,7 +7871,7 @@ impl PathEnds {
 /// the hash join instead.
 const SEQ_MIDPOINT_FANOUT_LIMIT: usize = 1024;
 
-// [GPT-6] SPARQL 1.1 §18.4 defines alternatives as multiset union and
+// SPARQL 1.1 §18.4 defines alternatives as multiset union and
 // sequences as join followed by projection. Reachability operators deliberately
 // retain the set evaluator below, so duplicate routes do not multiply p*/p+.
 fn path_bag_pairs(
@@ -8344,7 +8344,7 @@ fn negated_property_pairs(graph: &Graph, props: &[oxrdf::NamedNode], ends: PathE
     out
 }
 
-// [GPT-6] Structural nullability is a conservative substitution guard; the
+// Structural nullability is a conservative substitution guard; the
 // actual relation still follows endpoint roles and sequence's fresh midpoint.
 fn path_nullable(path: &PropertyPathExpression) -> bool {
     use PropertyPathExpression as P;
@@ -8357,7 +8357,7 @@ fn path_nullable(path: &PropertyPathExpression) -> bool {
     }
 }
 
-// [GPT-6] Dictionary membership also includes predicate-only terms.
+// Dictionary membership also includes predicate-only terms.
 fn is_graph_node(graph: &Graph, id: Id) -> bool {
     !graph.store.scan(&[Some(id), None, None]).rows.is_empty()
         || !graph.store.scan(&[None, None, Some(id)]).rows.is_empty()
@@ -12004,7 +12004,7 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
                         .map(Value::Num)
                         .unwrap_or(Value::Error))
                 }
-                // [GPT-6] MIN/MAX select an input RDF term. Numeric comparisons
+                // MIN/MAX select an input RDF term. Numeric comparisons
                 // must not replace its lexical form or datatype with a new term.
                 AggregateFunction::Min => Ok(minmax_values(vals, Ordering::Less)),
                 AggregateFunction::Max => Ok(minmax_values(vals, Ordering::Greater)),
@@ -12336,7 +12336,7 @@ fn sort_cell_val(v: Value) -> SortCell<'static> {
 fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell<'_>, c: &SortCell<'_>) -> Ordering {
     match (a, c) {
         (SortCell::Temp { key: a, .. }, SortCell::Temp { key: b, .. }) => {
-            // [GPT-6] Keys already borrow validated lexicals; no dictionary lookup,
+            // Keys already borrow validated lexicals; no dictionary lookup,
             // calendar parsing, allocation, or validity assertion occurs here.
             ExactTemporal::compare_total(*a, *b)
         }
@@ -13814,7 +13814,7 @@ enum Value {
 enum CompiledExpr {
     /// Pre-resolved column: `Some(c)` → `row[c]`; `None` → variable not in scope (always unbound).
     Var(Option<usize>),
-    /// [GPT-6] An outer EXISTS term, including blank nodes and computed literals.
+    /// An outer EXISTS term, including blank nodes and computed literals.
     Captured(Term),
     CapturedBound,
     /// `BOUND(?v)`: `Some(c)` → `row[c] != NO_ID`; `None` → always `false`.
@@ -14036,11 +14036,11 @@ fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
-                // [GPT-6] Raw RDF booleans have exactly four lexical forms.
+                // Raw RDF booleans have exactly four lexical forms.
                 // Constructor whitespace normalization applies only to string inputs.
                 as_bool_val(v).or_else(|| (semantics == crate::EbvSemantics::Rec2013).then_some(false))
             } else if is_numeric_dt(l) {
-                // [GPT-6] EBV needs zero/NaN classification, not finite arithmetic.
+                // EBV needs zero/NaN classification, not finite arithmetic.
                 // Validate datatype facets before inspecting exact decimal digits;
                 // converting them to f64 could underflow a nonzero value to false.
                 if !sparq_core::numeric_literal_valid(l.value(), dt) {
@@ -14061,7 +14061,7 @@ fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
     }
 }
 
-/// [GPT-6] General expression operands share the constructor capacity boundary.
+/// General expression operands share the constructor capacity boundary.
 fn checked_term_value(term: Term) -> Result<Value, String> {
     if let Term::Literal(literal) = &term {
         budget::check_temporal(literal.value(), literal.datatype().as_str())?;
@@ -14225,7 +14225,7 @@ fn eval_exists_inner(
     #[cfg(feature = "zk")]
     let _zk = crate::zk::exists_scope();
 
-    // [GPT-6] SPARQL 1.1 §18.6 substitutes every bound outer variable,
+    // SPARQL 1.1 §18.6 substitutes every bound outer variable,
     // including variables used only in FILTER expressions. A separate local
     // vocabulary preserves actual term identity across graph/local ID spaces.
     let mut inner_local = LocalVocab {
@@ -14243,7 +14243,7 @@ fn eval_exists_inner(
         }
     }
 
-    // [GPT-6] MINUS observes solution domains before final compatibility. For
+    // MINUS observes solution domains before final compatibility. For
     // the admitted BGP/Join/UNION/FILTER/MINUS shape, restrict and remove each
     // bound IRI/literal column before its parent operator can inspect domains.
     if exists_domain::required(inner, &inner_local.correlation) {
@@ -14276,7 +14276,7 @@ fn eval_exists_inner(
 
     let inner_b = eval_graph_pattern(graph, &mut inner_local, inner)?;
     budget::check(inner_b.rows.len())?;
-    // [GPT-6] Include inherited captures: a nested EXISTS can refer to a
+    // Include inherited captures: a nested EXISTS can refer to a
     // grandparent variable absent from its immediate parent's solution columns.
     let shared: Vec<(usize, &Term, Option<Id>)> = inner_b
         .vars
@@ -14324,7 +14324,7 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
                 graph.numeric_value(id)
             }
         }
-        // [FABLE-5] sq-6b1lj: the CONSTANT operand is datatype-aware and validated verbatim too
+        // sq-6b1lj: the CONSTANT operand is datatype-aware and validated verbatim too
         // (`numeric_cache_f64`), so a datatype-ill-formed literal constant (`"1.5"^^xsd:integer`)
         // is a type error on this fast comparison path exactly as the graph-term side is.
         Literal(l) => numeric_cache_f64(l),
@@ -14382,7 +14382,7 @@ fn temporal_of_lit(l: &Literal) -> Option<ExactTemporal<'_>> {
     ExactTemporal::of_lit(l.value(), l.datatype().as_str())
 }
 
-/// [GPT-6] Stored temporal values obey the same evaluation domain as constructors.
+/// Stored temporal values obey the same evaluation domain as constructors.
 fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>> {
     if dict::is_inline(id) { return None; }
     // Capacity checks remain input-based even for malformed/out-of-cache values.
@@ -14492,7 +14492,7 @@ fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id
     }
 }
 
-// [GPT-6] Every exact lexical shortcut validates the original RDF datatype first.
+// Every exact lexical shortcut validates the original RDF datatype first.
 fn exact_lexical_of_literal(l: &Literal) -> Option<&str> {
     (l.language().is_none() && sparq_core::exact_numeric_literal_valid(l.value(), l.datatype().as_str()))
         .then_some(l.value())
@@ -14519,7 +14519,7 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
             let id = row[c];
             if id == NO_ID { None } else if is_local(id) { local.numeric(id) } else { graph.numeric_value(id) }
         }
-        // [FABLE-5] sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
+        // sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
         Literal(l, _) => numeric_cache_f64(l),
         Add(a, d) => Some(eval_compiled_numeric(graph, local, row, a)? + eval_compiled_numeric(graph, local, row, d)?),
         Subtract(a, d) => {
@@ -15036,7 +15036,7 @@ fn as_numeric(v: &Value) -> Option<Num> {
     }
 }
 
-// [GPT-6] XPath numeric-unary-plus returns its numeric operand unchanged.
+// XPath numeric-unary-plus returns its numeric operand unchanged.
 // Validate the value space without imposing the arithmetic representation bound.
 fn unary_plus(value: Value) -> Value {
     match &value {
@@ -15047,7 +15047,7 @@ fn unary_plus(value: Value) -> Value {
     }
 }
 
-// [GPT-6] SUBSTR's SPARQL signature requires integer operands, not numeric coercion.
+// SUBSTR's SPARQL signature requires integer operands, not numeric coercion.
 fn integer_argument(v: &Value) -> Option<i128> {
     match v {
         Value::Num(Num::Int(n)) => Some(i128::from(*n)),
@@ -15070,7 +15070,7 @@ fn as_num(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        // [GPT-6] Keep scalar comparisons and caches on the same raw
+        // Keep scalar comparisons and caches on the same raw
         // lexical/facet acceptance path; string constructors preprocess separately.
         Value::Term(Term::Literal(l)) => numeric_cache_f64(l),
         _ => None,
@@ -15085,7 +15085,7 @@ fn is_numeric_dt(l: &Literal) -> bool {
         || dt == xsd::FLOAT.as_str()
 }
 
-/// [GPT-6] Returns the raw literal's numeric image within the shared cache lane.
+/// Returns the raw literal's numeric image within the shared cache lane.
 /// Invalid lexical forms, subtype facets and unsupported representations return None.
 #[inline]
 fn numeric_cache_f64(l: &Literal) -> Option<f64> {
@@ -15328,7 +15328,7 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(n) => n,
                 None => return Ok(Value::Error),
             };
-            // [GPT-6] XPath positions satisfy start <= position < start+length.
+            // XPath positions satisfy start <= position < start+length.
             // Clipping the start before adding length incorrectly extends slices
             // that start before position one. Widen before addition to avoid overflow.
             let end = if nargs >= 3 {
@@ -15631,7 +15631,7 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
             }
             if vals.len() == 1 {
                 if let Value::Term(Term::Literal(literal)) = &vals[0] {
-                    // [GPT-6] Capacity applies to the constructed lexical after the
+                    // Capacity applies to the constructed lexical after the
                     // string-cast preprocessing, while raw typed terms stay strict.
                     let lexical = if literal.datatype() == xsd::STRING && nn.as_str() == xsd::DATE_TIME.as_str() {
                         literal.value().trim_matches([' ', '\t', '\r', '\n'])
@@ -16026,7 +16026,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     // (language-tagged literals and non-string types are NOT castable as strings).
     let src_str = || match v {
         Value::Term(Term::Literal(l)) if l.language().is_none() && l.datatype() == xsd::STRING => {
-            // [GPT-6] XSD whitespace collapse excludes Unicode spaces such as NBSP.
+            // XSD whitespace collapse excludes Unicode spaces such as NBSP.
             Some(l.value().trim_matches([' ', '\t', '\r', '\n']).to_string())
         }
         _ => None,
@@ -16101,7 +16101,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
             return Some(match n {
                 Num::Int(i) => Value::Num(Num::Int(i)),
                 Num::Dec(d) => {
-                    // [GPT-6] An unrepresentable power means |value| < 1, so
+                    // An unrepresentable power means |value| < 1, so
                     // truncation is zero. Reject an out-of-range integer instead
                     // of wrapping its i128 mantissa through an `as i64` cast.
                     let integer = 10i128.checked_pow(d.scale).map_or(0, |p| d.mant / p);
@@ -16551,7 +16551,7 @@ fn encode_for_uri(s: &str) -> String {
 /// form. YEAR…MINUTES return xsd:integer; SECONDS returns xsd:decimal (per SPARQL),
 /// parsed from the lexical so fractional seconds stay exact.
 fn datetime_field(v: &Value, idx: usize) -> Value {
-    // [GPT-6] Date accessors accept typed dateTime values, not strings or IRIs
+    // Date accessors accept typed dateTime values, not strings or IRIs
     // whose text happens to look like a timestamp.
     let s = match v {
         Value::Term(Term::Literal(l))
@@ -16582,7 +16582,7 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
             Some(lex) => match Dec::parse_lexical(lex) {
                 Some(d) => Value::Num(Num::Dec(d)),
                 None => {
-                    // [GPT-6] Accessor output is lexical, not bounded-decimal arithmetic.
+                    // Accessor output is lexical, not bounded-decimal arithmetic.
                     // Preserve every validated fractional digit without f64/i128 rounding.
                     let (whole, fraction) = lex.split_once('.').unwrap_or((lex, ""));
                     let whole = whole.trim_start_matches('0');
@@ -20256,7 +20256,7 @@ mod f64_collapse_order_agreement {
             );
         }
 
-        // [GPT-6] Both numeric seams validate raw RDF lexicals verbatim.
+        // Both numeric seams validate raw RDF lexicals verbatim.
         // Padding and per-datatype malformed forms are ordinary type errors.
         let ints = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::INTEGER)));
         let decs = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::DECIMAL)));
@@ -20813,7 +20813,7 @@ mod effective_boolean_unit {
     #[test]
     fn ebv_ill_formed_boolean_is_false_per_sparql_11() {
         let ill = Value::Term(Term::Literal(Literal::new_typed_literal("yes", xsd::BOOLEAN)));
-        // [GPT-6] REC §17.2.2 first bullet explicitly specifies false here.
+        // REC §17.2.2 first bullet explicitly specifies false here.
         assert_eq!(ebv(&ill, crate::EbvSemantics::Rec2013), Some(false));
     }
 
@@ -21768,7 +21768,7 @@ mod compiled_expr_tests {
         for e in &exprs {
             assert_compiled_matches_original(&g, &local, &b, e);
         }
-        // [GPT-6] Compare all expression lanes with captured outer terms too.
+        // Compare all expression lanes with captured outer terms too.
         // Inner columns deliberately contain different values (and UNBOUND).
         let mut captured = LocalVocab::default();
         captured.correlation.insert(va, Term::BlankNode(BlankNode::new_unchecked("outer")));
@@ -23510,14 +23510,14 @@ mod capped_rhs_tests {
     }
 }
 
-// [GPT-6] Nullable path semantics have an independent bottom-up test oracle.
+// Nullable path semantics have an independent bottom-up test oracle.
 #[cfg(test)]
 #[path = "nullable_path_tests.rs"]
 mod nullable_path_tests;
 
 #[cfg(test)]
 mod exact_temporal_sort_cache_tests {
-    // [GPT-6] The comparator consumes prevalidated keys, not dictionary IDs.
+    // The comparator consumes prevalidated keys, not dictionary IDs.
     use super::*;
 
     #[test]

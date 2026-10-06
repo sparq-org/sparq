@@ -1,4 +1,4 @@
-// [GPT-6] Execute admitted aggregates and exact profile rejections in the real guest.
+// Execute admitted aggregates and exact profile rejections in the real guest.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator_methods::SPARQ_EXACT_GUEST_ELF;
 use sparq_proved_evaluator_model::{

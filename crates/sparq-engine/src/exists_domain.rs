@@ -1,4 +1,4 @@
-// [GPT-6] Bounded published-SPARQL-1.1 substitution for MINUS inside EXISTS.
+// Bounded published-SPARQL-1.1 substitution for MINUS inside EXISTS.
 use super::{Bindings, Expression, Graph, GraphPattern, LocalVocab, Term, TermPattern};
 use rustc_hash::FxHashMap;
 use spargebra::term::Variable;

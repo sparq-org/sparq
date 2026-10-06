@@ -1,4 +1,4 @@
-//! [GPT-6] Retain existing fuzz seeds and native storage observations, never proofs.
+//! Retain existing fuzz seeds and native storage observations, never proofs.
 
 use std::collections::BTreeMap;
 use std::path::Path;

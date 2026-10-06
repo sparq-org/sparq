@@ -175,7 +175,7 @@ def test_ask():
 
 
 def test_ask_and_select_count_retain_version_ebv():
-    # [GPT-6] Exercise the real Python entry points, including SELECT-as-bool.
+    # Exercise the real Python entry points, including SELECT-as-bool.
     graph = g()
     body = 'FILTER(!"z"^^<http://www.w3.org/2001/XMLSchema#boolean>)'
     for form in ("ASK", "SELECT * WHERE"):

@@ -201,7 +201,7 @@ pub fn run_syntax_test(entry: &TestEntry, positive: bool, update: bool) -> Statu
     }
 }
 
-// [GPT-6] The downloaded suite determines EBV expectations. This does not
+// The downloaded suite determines EBV expectations. This does not
 // claim complete 1.2 support and never changes expected RDF terms or ratchets.
 fn suite_budget(suite: &str) -> sparq_engine::QueryBudget {
     sparq_engine::QueryBudget {
@@ -216,7 +216,7 @@ fn suite_budget(suite: &str) -> sparq_engine::QueryBudget {
 
 #[test]
 fn root_and_nested_suite_labels_select_only_the_pinned_ebv_dialect() {
-    // [GPT-6] Root manifests and their descendants share the suite dialect;
+    // Root manifests and their descendants share the suite dialect;
     // similarly named directories must not acquire it accidentally.
     for suite in ["sparql12", "sparql12/ebv", "sparql12/syntax"] {
         assert_eq!(suite_budget(suite).ebv_semantics, Some(sparq_engine::EbvSemantics::Draft20260912));

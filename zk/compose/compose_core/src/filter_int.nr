@@ -51,7 +51,7 @@ pub fn filter_int_check<let D: u32>(
     digits: [u8; D],
 ) {
     std::static_assert(D >= 1, "at least one digit");
-    // [GPT-6] Twenty digits cover u64::MAX; checked accumulation rejects overflow.
+    // Twenty digits cover u64::MAX; checked accumulation rejects overflow.
     std::static_assert(D <= 20, "at most twenty decimal digits");
     assert(op <= OP_NE, "unknown comparison operator");
 

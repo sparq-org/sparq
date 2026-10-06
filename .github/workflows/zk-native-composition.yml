@@ -1,4 +1,4 @@
-# [GPT-6] The native research prototype is a detached Cargo workspace. Root
+# The native research prototype is a detached Cargo workspace. Root
 # workspace tests do not run its real BBS+/LegoGroth16 composition checks.
 name: zk-native-composition
 

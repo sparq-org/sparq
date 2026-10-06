@@ -1,6 +1,6 @@
 # Exact dataset evaluation
 
-<!-- [GPT-6] zkp-10.1, experimental and not externally audited. -->
+<!-- zkp-10.1, experimental and not externally audited. -->
 
 Use the detached [`zk/sparql-evaluator`](../../../zk/sparql-evaluator/README.md)
 workspace when experimenting with exact evaluation of a bounded default graph.

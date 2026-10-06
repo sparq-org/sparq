@@ -1,6 +1,6 @@
 # Proof binding corpus and replay
 
-[GPT-6] This experimental test harness preserves the distinction between selected
+This experimental test harness preserves the distinction between selected
 support and a complete result over a fixed committed scope. Tests do not establish
 a cryptographic security or privacy guarantee. The [inventory](inventory.json)
 lists backend contracts, original suites, host variants and configured coverage.
@@ -39,7 +39,7 @@ private witness attacks alter padding, graph lengths, active result lengths,
 indices and reused support slots after solving a positive witness. They bypass
 the honest planner and require an actual constraint failure, not a generic error.
 
-[OPUS-5.5] The explicit `noir_public_pattern` backend replays the same exhaustive
+The explicit `noir_public_pattern` backend replays the same exhaustive
 native cells and finite cycle profile through opt-in version 4
 (`prepare_result_public_pattern`). It never falls back: every accepted or
 constraint cell must report a `result_v4_k{1,2}_n16_p3_r4_f0_d10` contract.
@@ -52,7 +52,7 @@ unread. Real cells also check that relabeled versions are rejected. It is
 research-grade and not externally audited, and it is not a benchmark or gate
 measurement.
 
-[OPUS-5.5] One independent non-canonical EC2 run at corpus source
+One independent non-canonical EC2 run at corpus source
 `2e0f4a9dba47d537835b4745c66147f097c68e43` executed this backend: all 576 native cells (72 accepted, 468 `native_support`
 and 36 `empty_graph` refusals) and all 46 real cells (4 genuine K1 proofs, 32
 absent-binding and 10 private-witness-attack constraint failures, i.e. 42 actual
@@ -84,7 +84,7 @@ python3 bench/zk-bindings/run.py plan --regressions /path/to/conformance.json \
 
 `--regressions` retains each original JSON fixture and its golden. Row-only
 fixtures require `--variables` from the original runner; no projection is guessed.
-[OPUS-5.5] The reviewed [projection expectations](projection-expectations.json)
+The reviewed [projection expectations](projection-expectations.json)
 override that default only for an exact repository source path, source SHA-256
 and retained fixture object (it currently covers three `builtin_edges` date cases
 aliased `y m day h`). Stale, unknown, duplicate or malformed override records
@@ -170,7 +170,7 @@ remain separately tracked work.
 
 ## Native finite CI replay
 
-[GPT-6] The separate native workflow runs `native_ci.py` after the existing
+The separate native workflow runs `native_ci.py` after the existing
 tuple, RDF malicious-proof and adapter suites. It builds the release adapter
 and replays the unchanged exhaustive native domain: 576 jobs, comprising
 72 required proofs accepted, 468 genuine weaker proofs independently verified

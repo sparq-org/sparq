@@ -1,4 +1,4 @@
-// [GPT-6] Actual V3 execution of unchanged shared goldens; these are not receipts.
+// Actual V3 execution of unchanged shared goldens; these are not receipts.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use serde_json::Value;
 use sha2::{Digest, Sha256};

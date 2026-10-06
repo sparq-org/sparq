@@ -50,7 +50,7 @@
 
 use std::collections::BTreeSet;
 
-// [GPT-6] Structured replay reuses this generator and these independent comparators.
+// Structured replay reuses this generator and these independent comparators.
 pub(crate) mod replay;
 
 use oxigraph::store::Store;

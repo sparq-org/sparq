@@ -1,4 +1,4 @@
-// [GPT-6] Native relation checks; actual guest evidence is a separate runner.
+// Native relation checks; actual guest evidence is a separate runner.
 #![cfg(feature = "evaluate")]
 use sparq_proved_evaluator_model::{
     CanonicalResult, DatasetAuthority, Dialect, Policy, PrivateDataset, ProofContract, Request,

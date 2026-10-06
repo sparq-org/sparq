@@ -1,6 +1,6 @@
 # Native RDF binding test adapter
 
-[GPT-6] The detached `native-bindings` executable implements
+The detached `native-bindings` executable implements
 `sparq.proof-binding-job.v1` for the experimental native RDF relation. Build it
 with the existing pinned Circom compiler and repository Rust toolchain:
 

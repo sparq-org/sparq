@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: genuine V5 receipts over the published W3C vector.
+// zkp-14.5: genuine V5 receipts over the published W3C vector.
 // Rust guideline compliant 2026-02-21
 //! Compiled only with `--features authenticated-rdf`.
 //!

@@ -1,4 +1,4 @@
-// [GPT-6] Versioned complete default/named dataset relation; not externally audited.
+// Versioned complete default/named dataset relation; not externally audited.
 //! Complete N-Quads source and an explicit catalog of IRI-named graphs.
 //!
 //! Empty named graphs must appear in the catalog even though N-Quads cannot

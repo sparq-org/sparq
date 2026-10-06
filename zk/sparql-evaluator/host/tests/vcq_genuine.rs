@@ -1,4 +1,4 @@
-// [OPUS-5.5] Ignored genuine vcq receipts: six accepted tuples plus one row-bound rejection.
+// Ignored genuine vcq receipts: six accepted tuples plus one row-bound rejection.
 // Rust guideline compliant 2026-02-21
 //! Driver only: set `SPARQ_VCQ_PROOF_JOB` to an explicit job file and run one
 //! ignored test by name; see `skills/zk-query-proofs/references/vcq-exact-adapter.md`.
@@ -36,7 +36,7 @@ const JOB_SCHEMA: &str = "sparq.vcq-genuine-proof.test-job.v1";
 const METADATA_SCHEMA: &str = "sparq.vcq-genuine-proof.test-metadata.v1";
 /// Summary schema id.
 ///
-/// [OPUS-5.5] Version 2 replaces v1's fixed `registry_adapter_available: false`
+/// Version 2 replaces v1's fixed `registry_adapter_available: false`
 /// with `registry_adapter_availability`, since this test never reads the
 /// registry. Summaries already written under v1 stay as they are.
 const SUMMARY_SCHEMA: &str = "sparq.vcq-genuine-proof.test-summary.v2";

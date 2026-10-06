@@ -1,4 +1,4 @@
-// [GPT-6] Manual SPARQL 1.1 oracles for optimizer scope boundaries.
+// Manual SPARQL 1.1 oracles for optimizer scope boundaries.
 use sparq_core::Graph;
 use sparq_engine::{query, sip_testing};
 
@@ -117,7 +117,7 @@ fn positive_bgp_and_nonnullable_path_substitution_still_fires() {
     }
 }
 
-// [GPT-6] Triple-term variable decomposition is a BGP facility. SIP cannot
+// Triple-term variable decomposition is a BGP facility. SIP cannot
 // turn an unsupported variable-carrying path endpoint into a supported constant.
 #[test]
 fn triple_term_path_endpoints_keep_the_cold_evaluator_error() {

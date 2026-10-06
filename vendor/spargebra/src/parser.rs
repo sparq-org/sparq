@@ -119,7 +119,7 @@ impl SparqlParser {
         self.parse_query_with_versions(query).map(|(query, _)| query)
     }
 
-    /// [GPT-6] Parses query algebra and retains all VERSION announcements.
+    /// Parses query algebra and retains all VERSION announcements.
     /// The legacy AST and `parse_query` API remain unchanged. Execution engines
     /// must validate supported labels and resolve their own semantic options.
     #[cfg_attr(not(feature = "standard-unicode-escaping"), expect(clippy::needless_borrow))]
@@ -156,7 +156,7 @@ impl SparqlParser {
         self.parse_update_with_versions(update).map(|(update, _)| update)
     }
 
-    /// [GPT-6] Parses update algebra and retains every VERSION announcement.
+    /// Parses update algebra and retains every VERSION announcement.
     /// Execution support is checked by the caller; the legacy AST is unchanged.
     #[cfg_attr(not(feature = "standard-unicode-escaping"), expect(clippy::needless_borrow))]
     pub fn parse_update_with_versions(self, update: &str) -> Result<(Update, Vec<String>), SparqlSyntaxError> {
@@ -1216,7 +1216,7 @@ fn property_path_middle() -> BlankNode {
     BlankNode::default()
 }
 
-// [GPT-6] Keep path intermediates existential (and out of SELECT *) while
+// Keep path intermediates existential (and out of SELECT *) while
 // distinguishing them from source blank nodes. The leading # cannot occur in
 // BLANK_NODE_LABEL, so query text cannot forge this reserved internal namespace.
 // This opt-in namespace is also recognized by the exact-evaluator admission rule.
@@ -1229,7 +1229,7 @@ fn property_path_middle() -> BlankNode {
     BlankNode::new_unchecked(format!("#sparq-path#{id}"))
 }
 
-// [GPT-6] Anonymous query/list/template nodes have no externally meaningful
+// Anonymous query/list/template nodes have no externally meaningful
 // label. The opt-in deterministic labels cannot collide with a source blank label.
 #[cfg(not(feature = "sparq-deterministic-blank-nodes"))]
 fn anonymous_blank_node() -> BlankNode {
@@ -1284,7 +1284,7 @@ fn variable() -> Variable {
     Variable::new_unchecked(format!("{:x}", random::<u128>()))
 }
 
-// [GPT-6] zkvm guests have no ambient entropy. Internal aggregate/projection
+// zkvm guests have no ambient entropy. Internal aggregate/projection
 // variables use a monotonic namespace forbidden by SPARQL VARNAME syntax, so
 // neither user variables nor different synthetic variables can collide. This
 // function does not generate RDF blank nodes or query-visible random values.
@@ -1330,7 +1330,7 @@ parser! {
 
         rule VersionDecl() = i("VERSION") _ version:VersionSpecifier() {?
             if cfg!(feature = "sparql-12") {
-                // [GPT-6] Retain every label; semantic compatibility belongs
+                // Retain every label; semantic compatibility belongs
                 // to the consumer, not the syntax grammar. UPDATE discards these.
                 state.versions.push(version);
                 Ok(())

@@ -75,12 +75,12 @@ const SD_SPARQL_UPDATE: &str = "http://www.w3.org/ns/sparql-service-description#
 const SPARQL_VERSION_1_0: &str = "http://www.w3.org/ns/sparql#version-1.0";
 /// [OPUS-4.8] sq-2msb: `sparql:version-1.1`.
 const SPARQL_VERSION_1_1: &str = "http://www.w3.org/ns/sparql#version-1.1";
-/// [GPT-6] Existing `sparql:version-1.2` service label; see the scoped contract below.
+/// Existing `sparql:version-1.2` service label; see the scoped contract below.
 const SPARQL_VERSION_1_2: &str = "http://www.w3.org/ns/sparql#version-1.2";
 
 /// Existing service-description version labels, in ascending order.
 ///
-/// [GPT-6] The legacy public constant name and emitted IRIs are retained for
+/// The legacy public constant name and emitted IRIs are retained for
 /// compatibility, not a claim of complete SPARQL 1.2 conformance. Unannounced
 /// queries retain REC 2013 expression semantics; `VERSION "1.2"` selects only
 /// the implemented, pinned 2026-09-12 WD EBV behavior. UPDATE remains REC 2013
@@ -916,7 +916,7 @@ mod tests {
                 "must advertise sd:supportedVersion <{ver}>: {b}"
             );
         }
-        // [GPT-6] Preserve the existing label serialization, independently of
+        // Preserve the existing label serialization, independently of
         // the explicitly scoped execution contract above.
         assert!(
             b.contains("<http://www.w3.org/ns/sparql#version-1.2>"),

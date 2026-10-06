@@ -1,4 +1,4 @@
-// [GPT-6] Differential relation tests; these are not cryptographic proof tests.
+// Differential relation tests; these are not cryptographic proof tests.
 #![cfg(feature = "evaluate")]
 
 use sparq_proved_evaluator_model::*;

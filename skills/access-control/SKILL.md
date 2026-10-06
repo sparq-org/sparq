@@ -9,7 +9,7 @@ metadata:
 
 # sparq-solid — graph-level WAC/ACP access control
 
-[GPT-6] Authorized query rewrites retain all validated `VERSION` announcements;
+Authorized query rewrites retain all validated `VERSION` announcements;
 unsupported or incompatible labels fail before evaluation. UPDATE remains REC
 2013 only. See the [EBV dialect contract](../sparql-query/ebv-dialects.md).
 

@@ -1,4 +1,4 @@
-"""[GPT-6] Mandatory evaluator selection must never hide an uncertain diff."""
+"""Mandatory evaluator selection must never hide an uncertain diff."""
 
 import importlib.util
 from pathlib import Path

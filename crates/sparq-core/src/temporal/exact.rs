@@ -1,4 +1,4 @@
-//! [GPT-6] Borrowed temporal keys that preserve every fractional digit.
+//! Borrowed temporal keys that preserve every fractional digit.
 
 use super::{TemporalKind, Timeline, XSD_DATE, XSD_DATE_TIME, XSD_DATE_TIME_STAMP};
 use std::cmp::Ordering;
@@ -16,7 +16,7 @@ pub fn year_within_capacity(value: &str, datatype: &str, min: i64, max: i64) -> 
     if min > max {
         return false;
     }
-    // [GPT-6] Raw padded RDF lexicals are ill-typed, not oversized temporal values.
+    // Raw padded RDF lexicals are ill-typed, not oversized temporal values.
     // String constructors apply their own preprocessing before producing a term.
     if value.trim_matches([' ', '\t', '\r', '\n']) != value {
         return true;
@@ -165,7 +165,7 @@ impl<'a> ExactTemporal<'a> {
     }
 }
 
-// [GPT-6] Cache only owned scalar fields and offsets, never self-references.
+// Cache only owned scalar fields and offsets, never self-references.
 // Dictionary re-encoding preserves lexical bytes; appends extend an initialized memo.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CacheCell {

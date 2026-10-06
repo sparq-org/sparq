@@ -187,7 +187,7 @@ mod tests {
     #[cfg(feature = "server")]
     async fn read_mock_request(conn: &mut tokio::net::TcpStream) {
         use tokio::io::AsyncReadExt;
-        // [GPT-6] Closing with unread request bytes can reset TCP on macOS. Read
+        // Closing with unread request bytes can reset TCP on macOS. Read
         // only the bounded GET headers, not EOF: the probe waits for our reply.
         tokio::time::timeout(PROBE_TIMEOUT, async {
             let mut request = [0u8; 1024];

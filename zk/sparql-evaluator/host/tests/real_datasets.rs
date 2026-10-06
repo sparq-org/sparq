@@ -1,4 +1,4 @@
-// [GPT-6] Real V2 dataset receipts and guest rejection tests; no mock/ignored path.
+// Real V2 dataset receipts and guest rejection tests; no mock/ignored path.
 #[path = "support/evidence.rs"]
 mod evidence;
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};

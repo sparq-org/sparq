@@ -1,6 +1,6 @@
 //! Typed negotiation and method contract for Sparq credential query proofs.
 //!
-//! [OPUS-5.5] Experimental, unpublished, dependency-free contract layer for
+//! Experimental, unpublished, dependency-free contract layer for
 //! vcq draft 0 (`research/vc-query-protocol.md`, registry
 //! `research/vc-query-methods.json`). It contains shared types, the
 //! [`QueryMethod`] trait, deterministic, fail-closed capability negotiation,

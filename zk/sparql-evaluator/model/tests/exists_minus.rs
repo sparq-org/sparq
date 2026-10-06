@@ -1,4 +1,4 @@
-// [GPT-6] Published-2013 domain substitution and its exact proof-profile boundary.
+// Published-2013 domain substitution and its exact proof-profile boundary.
 #![cfg(feature = "evaluate")]
 use sparq_proved_evaluator_model::{
     CanonicalResult, DatasetAuthority, Dialect, Policy, PrivateDataset, ProofContract, Request,

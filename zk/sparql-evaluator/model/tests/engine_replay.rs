@@ -1,4 +1,4 @@
-// [OPUS-5.5] Native engine-replay bridge contracts; no guest execution or receipts.
+// Native engine-replay bridge contracts; no guest execution or receipts.
 #![cfg(feature = "graph-results")]
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};

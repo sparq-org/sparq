@@ -1,4 +1,4 @@
-<!-- [OPUS-5.5] zkp-14.5: usage reference for the separate V5 guest and low-level host API. -->
+<!-- zkp-14.5: usage reference for the separate V5 guest and low-level host API. -->
 # Issuer-authenticated RDF: separate V5 guest and host API
 
 **Built and directly executed; one genuine receipt, through the adapter.** At

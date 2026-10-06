@@ -1,4 +1,4 @@
-// [GPT-6] REC 2013 §17.2.2 versus pinned 2026-09-12 WD §17.2.3.
+// REC 2013 §17.2.2 versus pinned 2026-09-12 WD §17.2.3.
 use oxrdf::{Literal, Term};
 use sparq_core::Graph;
 use sparq_engine::{EbvSemantics, FunctionRegistry, PreparedQuery, QueryBudget};

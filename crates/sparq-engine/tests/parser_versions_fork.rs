@@ -1,4 +1,4 @@
-//! [OPUS-5.5] Differential: the stable-parser adapter versus the vendored fork.
+//! Differential: the stable-parser adapter versus the vendored fork.
 //!
 //! The vendored `spargebra` fork retains VERSION labels itself. This target is
 //! the only caller of those fork-only methods; production code uses

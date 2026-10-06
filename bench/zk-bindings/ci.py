@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Mandatory bounded CI invocation; missing cells/tools fail closed."""
+"""Mandatory bounded CI invocation; missing cells/tools fail closed."""
 import argparse
 import json
 import os
@@ -69,7 +69,7 @@ def check_inventory(report, expected):
             raise ValueError("honest API refusal cannot replace a direct malicious witness")
 
 
-# [OPUS-5.5] beadzkp-15.1.1: independently derived V4 native denominators over
+# beadzkp-15.1.1: independently derived V4 native denominators over
 # the 16 graphs of four possible edges (each edge present in 8 graphs).
 # Scan positives: 4 edges x 8 graphs = 32. Join positives: the 8 two-step walks;
 # the 2 self-loop walks need one edge (8 graphs), the other 6 need two (4 graphs):

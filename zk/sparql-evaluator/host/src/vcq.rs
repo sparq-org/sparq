@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-16.2 first executable vcq adapter; experimental, not externally audited.
+// zkp-16.2 first executable vcq adapter; experimental, not externally audited.
 //! `sparq-query-protocol` adapter over the exact RISC Zero V3 relation.
 //!
 //! [`Risc0ExactV3`] implements [`QueryMethod`] for one exact descriptor,
@@ -119,7 +119,7 @@ pub const NONCE_DOMAIN: &[u8] = b"sparq:vcq:risc0-exact:v3-nonce:local-struct-v1
 /// Domain separator of [`statement_digest`].
 pub const STATEMENT_DOMAIN: &[u8] = b"sparq:vcq:risc0-exact:statement:v3\0";
 
-// [OPUS-5.5] zkp-14.6: the helpers below are `pub(crate)` only so that the V5
+// zkp-14.6: the helpers below are `pub(crate)` only so that the V5
 // adapter (`crate::vcq_authenticated`) reuses them; V3 behavior is unchanged.
 pub(crate) fn fail(class: BackendFailure, phase: Phase, code: &'static str) -> ProtocolError {
     ProtocolError::backend(class, phase, code)
@@ -364,7 +364,7 @@ pub fn system_unix_seconds() -> u64 {
     unix_seconds(SystemTime::now())
 }
 
-// [OPUS-5.5] Failed epoch conversion must not read as a valid instant.
+// Failed epoch conversion must not read as a valid instant.
 fn unix_seconds(now: SystemTime) -> u64 {
     now.duration_since(UNIX_EPOCH)
         .map_or(u64::MAX, |elapsed| elapsed.as_secs())

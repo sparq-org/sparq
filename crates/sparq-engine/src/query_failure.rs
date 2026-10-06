@@ -1,4 +1,4 @@
-//! [GPT-6] Typed execution causes, emitted independently of diagnostic text.
+//! Typed execution causes, emitted independently of diagnostic text.
 
 use std::fmt;
 

@@ -231,7 +231,7 @@ pub fn merkle_root(snapshot: &StatusListSnapshot, depth: u32) -> Option<Fr> {
     Some(sparse_subtree_root(snapshot, &defaults, set_after, 0, depth))
 }
 
-// [GPT-6] Both roots and paths must cover the whole byte-sized snapshot. Checking
+// Both roots and paths must cover the whole byte-sized snapshot. Checking
 // before any hashing also protects accepted-policy and hidden-reference callers.
 fn covered_bits(snapshot: &StatusListSnapshot, depth: u32) -> Option<u64> {
     if depth > 31 {
@@ -623,7 +623,7 @@ mod tests {
         );
     }
 
-    // [GPT-6] A depth-3 tree covers the entire byte. Its first four leaves
+    // A depth-3 tree covers the entire byte. Its first four leaves
     // [0,1,0,0] retain the hand-built subtree used by the Noir accept tests.
     #[test]
     fn merkle_root_depth3_matches_hand_built() {
@@ -785,7 +785,7 @@ mod tests {
         assert_eq!(merkle_witness(&s, 3, 8), None); // full snapshot, index beyond tree
     }
 
-    // [GPT-6] The final representable bit binds the root; any appended byte is
+    // The final representable bit binds the root; any appended byte is
     // rejected, even if the requested witness still lies in the old prefix.
     #[test]
     fn status_snapshot_capacity_binds_roots_witnesses_and_legacy_policy() {

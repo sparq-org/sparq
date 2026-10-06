@@ -40,7 +40,7 @@ use spargebra::{Query, SparqlParser};
 use sparq_engine::PreparedQuery;
 use std::cell::Cell;
 
-// [GPT-6] Preserve announcements without enabling an extra optimizer pass.
+// Preserve announcements without enabling an extra optimizer pass.
 fn parse_prepared(text: &str) -> Option<PreparedQuery> {
     let (query, versions) = sparq_engine::parse_versioned_query(SparqlParser::new(), text).ok()?;
     PreparedQuery::from_query_with_versions(query, versions).ok()
@@ -2718,7 +2718,7 @@ mod tests {
     }
 }
 
-// [GPT-6] Every pre-binding executor keeps the author's validated metadata.
+// Every pre-binding executor keeps the author's validated metadata.
 #[cfg(test)]
 mod version_tests {
     use super::*;

@@ -738,7 +738,7 @@ full output-mode + builtins-coverage tables.
 - `research/reasoner-suite-on-substrate.md` §2.5 — the QL track design: the PerfectRef applicability trap, the strict CQ-shape gate, and why the production path (tree-witness + UCQ-containment minimisation) is sequenced late by soundness risk (the phased plan `sparq-reason-ql` implements through phases Q1–Q3, and the sparq-extension conformance floors — the DL-Lite_R certain-answer floor `QL_DLLITE_FLOOR` and the sound-subset entailment-arm floor `QL_ENTAILMENT_FLOOR` — have both graduated, sq-qo1a9 / sq-pbz04.3.4).
 - `crates/sparq-conformance/tests/ufo_sn3/` — **UFO-SN3**: a finite-world, function-free, range-restricted N3 projection of representative UFO (Unified Foundational Ontology) concepts — rigidity, identity criteria, relators, events/participation, dispositions, commitments/norms, situations/worlds/accessibility — run as committed vocab + rules + fixture cases through plain `reason_n3` (`tests/ufo_sn3_suite.rs`, `UFO_SN3_FLOOR`, an UNGATED sparq-EXTENSION row in the central scoreboard). Demonstrates the reification-node projection for statement-level (triple-term-shaped) claims, since the N3 `Term` model has no triple-term variant (a tracked gap). [FABLE-5]
 
-[GPT-6] The opt-in `substrate-compare` temporal ordering borrows exact integer-second
+The opt-in `substrate-compare` temporal ordering borrows exact integer-second
 and fractional-digit keys from core. It preserves nanosecond and large-year ordering
 without changing approximate epoch/vector caches; no additional materialization
 rules are introduced. See [temporal scope](../zk-query-proofs/references/exact-temporals.md).

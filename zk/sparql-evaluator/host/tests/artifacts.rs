@@ -1,4 +1,4 @@
-// [GPT-6] Reject unapproved bytes before the SDK reads ELF memory declarations.
+// Reject unapproved bytes before the SDK reads ELF memory declarations.
 use sparq_proved_evaluator::{AcceptedGuest, embedded_artifact, embedded_pin, method_id};
 
 #[test]

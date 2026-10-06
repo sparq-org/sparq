@@ -46,7 +46,7 @@ const QUERIES: &[(&str, &str)] = &[
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    // [GPT-6] Explicit retained native observations; this command produces no proofs.
+    // Explicit retained native observations; this command produces no proofs.
     if args.get(1).map(String::as_str) == Some("fuzz-replay") {
         if let Err(error) = fuzz::replay::run(&args[2..]) {
             eprintln!("fuzz-replay: {error}");

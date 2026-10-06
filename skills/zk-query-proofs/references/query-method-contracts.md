@@ -1,4 +1,4 @@
-<!-- [OPUS-5.5] zkp-16.1: usage reference for the experimental sparq-query-protocol crate. -->
+<!-- zkp-16.1: usage reference for the experimental sparq-query-protocol crate. -->
 # Query-method contracts (`sparq-query-protocol`)
 
 `crates/sparq-query-protocol` is an experimental, unpublished, dependency-free leaf crate. It
@@ -7,12 +7,12 @@ holds the typed negotiation and method contract of the
 request subset, a named LOCAL structural encoding and a shared challenge-store contract. It has
 **no proof backend, interoperable wire encoding, transport, parser, hash or other cryptography,
 proves no cryptographic claim**, and is not externally audited (sq-qhy4). The crate registers
-no method. <!-- [OPUS-5.5] --> In the [method registry](../../../research/vc-query-methods.json),
+no method. <!-- --> In the [method registry](../../../research/vc-query-methods.json),
 `adapter_available` is true only for `method:risc0-exact` version 3, and only for the six tuples
 of its experimental adapter: SELECT bag, ASK and CONSTRUCT, each under holder-declared or
 verifier-agreed authority, with source evidence `None`, status `NotRequested` and holder
 `BearerAccepted`. It is false for every other entry and version. See the [crate README](../../../crates/sparq-query-protocol/README.md)
-for the full rule list. [OPUS-5.5] Its consumers are the optional, off-by-default `vcq`
+for the full rule list. Its consumers are the optional, off-by-default `vcq`
 feature of the detached exact-evaluator host crate (see [vcq exact adapter](vcq-exact-adapter.md))
 and, since zkp-14.6, its `vcq-authenticated` feature: a V5 issuer-authenticated RDF adapter
 whose registry entry keeps `adapter_available` false, because an independently audited genuine
@@ -98,7 +98,7 @@ sparq-query-protocol = { path = "crates/sparq-query-protocol" }
 
 ## Local encoding schema (`local-struct-v1`)
 
-<!-- [OPUS-5.5] zkp-16.2: mirrors the `encoding` module rustdoc; change both together. -->
+<!-- zkp-16.2: mirrors the `encoding` module rustdoc; change both together. -->
 A structural, byte-exact encoding of this crate's typed values. It is **not** RDF or SPARQL
 canonicalization, not the draft §7.2 wire profile, not a transport and has no decoder, and it
 computes no digest. Each object starts with its domain separator

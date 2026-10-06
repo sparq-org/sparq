@@ -1,6 +1,6 @@
 # Version-pinned EBV rules
 
-[GPT-6] `QueryBudget.ebv_semantics` selects effective boolean value rules only.
+`QueryBudget.ebv_semantics` selects effective boolean value rules only.
 `None` uses a recognized query `VERSION` announcement, otherwise
 `EbvSemantics::Rec2013`. `Some(Rec2013)` explicitly pins the published
 [21 March 2013 Recommendation §17.2.2](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#ebv).
@@ -27,7 +27,7 @@ when an integration first wraps parsed algebra. `PreparedQuery::with_query`
 retains that metadata across a structural rewrite. Bare `From<Query>`/`into_query` carry
 algebra alone; callers must retain announcement metadata separately.
 
-[OPUS-5.5] Integrations that configure their own parser call
+Integrations that configure their own parser call
 `sparq_engine::parse_versioned_query(parser, text)` (or
 `parse_versioned_update`) and pass the labels to `from_query_with_versions`.
 These use only the stable upstream `spargebra` 0.4.6 API, so they compile

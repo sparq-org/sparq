@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Detached graph coverage and failure propagation, without Cargo/network."""
+"""Detached graph coverage and failure propagation, without Cargo/network."""
 import importlib.util
 import json
 from pathlib import Path
@@ -25,7 +25,7 @@ class GraphCoverage(unittest.TestCase):
             (self.root / manifest.with_name("Cargo.lock")).write_text("version = 4\n")
 
     def test_each_independent_lock_is_required(self):
-        # [OPUS-5.5] zkp-14.5: the separately pinned V5 guest is a fourth graph.
+        # zkp-14.5: the separately pinned V5 guest is a fourth graph.
         self.assertEqual(tuple(map(str, gate.MANIFESTS)), (
             "Cargo.toml", "zk/sparql-evaluator/Cargo.toml",
             "zk/sparql-evaluator/methods/guest/Cargo.toml",

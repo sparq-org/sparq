@@ -347,7 +347,7 @@ means the release is missing a fix — keep the tree and report it upstream.
 
 ## 11. Deterministic internal variables for the bounded zkvm evaluator
 
-<!-- [GPT-6] zkp-10.1; sparq-local portability patch. -->
+<!-- zkp-10.1; sparq-local portability patch. -->
 
 On `target_os = "zkvm"` only, generated aggregate/projection variables use a
 checked monotonic counter in the `#sparq-zkvm-var#` namespace. The `#` character
@@ -379,7 +379,7 @@ stay valid `BLANK_NODE_LABEL`s, so algebra serialized back to SPARQL reparses.
 
 ## 12. Preserve query VERSION metadata without changing the algebra enum
 
-[GPT-6] `SparqlParser::parse_query_with_versions` returns the existing query
+`SparqlParser::parse_query_with_versions` returns the existing query
 algebra together with every version label in source order. The legacy `parse_query`
 method keeps its return type and discards this metadata explicitly. Repeated
 announcements remain valid syntax (including the pinned W3C `version-06` case);

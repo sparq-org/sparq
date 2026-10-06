@@ -1105,7 +1105,7 @@ mod dp_planner_result_equivalence {
     }
 }
 
-/// [GPT-6] Raw typed lexicals are not string constructors. The cache and exact
+/// Raw typed lexicals are not string constructors. The cache and exact
 /// arithmetic reject padding consistently; RDF term identity is still preserved.
 /// Historical collapse expectations are superseded by RDF lexical membership.
 mod numeric_raw_whitespace_consistency {
@@ -1156,7 +1156,7 @@ mod numeric_raw_whitespace_consistency {
 /// general evaluator SLOW path (`values_equal`/`value_compare_strict` → `Num::of_literal`)
 /// must return the SAME answer for `=`, `<`, `>` over padded / per-datatype-ill-formed /
 /// well-formed lexicals across `xsd:integer`/`double`/`decimal`/`float`. The two beads pin:
-///   * [GPT-6] Raw whitespace-PADDED numeric lexicals are invalid on every value
+///   * Raw whitespace-PADDED numeric lexicals are invalid on every value
 ///     operator. Explicit string constructors normalize XML boundary whitespace.
 ///   * sq-6b1lj — a lexical ill-formed FOR its datatype (`"1.5"^^xsd:integer`, `"1E2"^^
 ///     xsd:decimal`) is a type error on ALL of `=`/`<`/`>` (the
@@ -1217,7 +1217,7 @@ mod numeric_fast_slow_path_agreement {
         }
     }
 
-    // [GPT-6] XSD 1.0 §3.3.13 requires signed digits even when a decimal
+    // XSD 1.0 §3.3.13 requires signed digits even when a decimal
     // spelling denotes an integral mathematical value.
     #[test]
     fn integer_decimal_spellings_fail_on_both_paths() {
@@ -1230,7 +1230,7 @@ mod numeric_fast_slow_path_agreement {
 
     #[test]
     fn padded_raw_lexicals_bind_but_value_filters_exclude_them() {
-        // [GPT-6] No raw RDF pre-lexical processing on `<`/`>`/`=`.
+        // No raw RDF pre-lexical processing on `<`/`>`/`=`.
         for obj in [
             "\" 1 \"^^xsd:integer",
             "\" 1.0 \"^^xsd:decimal",
@@ -1245,7 +1245,7 @@ mod numeric_fast_slow_path_agreement {
 
     #[test]
     fn invalid_or_out_of_capacity_numerics_are_excluded_by_value_filters() {
-        // [GPT-6] Datatype-invalid lexicals and valid out-of-capacity values both
+        // Datatype-invalid lexicals and valid out-of-capacity values both
         // produce native expression errors in this lane. These FILTER results
         // do not identify representation overflow with normative lexical invalidity.
         for (obj, why) in [

@@ -1,4 +1,4 @@
-// [GPT-6] Experimental versioned blank-node and graph-result relation.
+// Experimental versioned blank-node and graph-result relation.
 //! A separate request and result schema for bounded RDF graph production.
 //!
 //! V1/V2 remain distinct relations. Source labels are not copied as identifiers;
@@ -14,7 +14,7 @@ mod evaluate;
 mod result;
 #[cfg(feature = "graph-results")]
 pub use evaluate::{admit, evaluate, evaluate_detailed};
-// [OPUS-5.5] Host-only actual-form classification for protocol adapters.
+// Host-only actual-form classification for protocol adapters.
 #[cfg(all(feature = "graph-results", not(target_os = "zkvm")))]
 mod request_shape;
 #[cfg(all(feature = "graph-results", not(target_os = "zkvm")))]
@@ -44,7 +44,7 @@ pub struct CanonicalizationPolicy {
 
 impl Default for CanonicalizationPolicy {
     fn default() -> Self {
-        // [GPT-6] Static profile ceilings bound table encoding as well as RDFC.
+        // Static profile ceilings bound table encoding as well as RDFC.
         Self {
             max_quads: 32_768,
             max_input_bytes: 1_048_576,

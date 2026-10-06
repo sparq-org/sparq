@@ -1,4 +1,4 @@
-// [GPT-6] Standards-derived host semantic cases, not guest proof evidence.
+// Standards-derived host semantic cases, not guest proof evidence.
 #![cfg(feature = "evaluate")]
 
 use serde::Deserialize;
@@ -244,7 +244,7 @@ fn corpus_metadata_and_oracles_are_well_formed() {
     }
 }
 
-// [GPT-6] Every coverage claim points to an executed case of the correct kind.
+// Every coverage claim points to an executed case of the correct kind.
 #[test]
 fn coverage_manifest_cannot_count_rejections_as_support() {
     let manifest: serde_json::Value = serde_json::from_str(include_str!("../../coverage.json"))

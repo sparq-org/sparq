@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [GPT-6] Opt-in observations over original synthetic REC-derived fixtures.
+# Opt-in observations over original synthetic REC-derived fixtures.
 """Reproduce the bounded NPS disagreement; never install dependencies or edit goldens."""
 
 from __future__ import annotations

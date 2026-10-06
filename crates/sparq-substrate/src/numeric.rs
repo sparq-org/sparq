@@ -172,7 +172,7 @@ impl Dec {
                 match mode {
                     RoundMode::Floor => q,
                     RoundMode::Ceil => q + i128::from(r > 0),
-                    // [GPT-6] Compare against the half threshold without doubling
+                    // Compare against the half threshold without doubling
                     // a remainder near 10^38, which can overflow signed i128.
                     RoundMode::HalfUp => q + i128::from(r >= p / 2 + p % 2),
                 }
@@ -796,7 +796,7 @@ impl Num {
 
     /// Parses borrowed numeric literal parts using the shared datatype and capacity rules.
     ///
-    /// [GPT-6] Equivalent to [`Self::of_literal`] for a literal without a language tag.
+    /// Equivalent to [`Self::of_literal`] for a literal without a language tag.
     /// Returns `None` for invalid lexicals, subtype facet violations, nonnumeric
     /// datatypes, or values beyond this arithmetic tower's finite representation.
     #[inline]
@@ -2078,7 +2078,7 @@ mod tests {
         );
     }
 
-    // [GPT-6] Independent expectations prevent shared trimming from passing parity.
+    // Independent expectations prevent shared trimming from passing parity.
     #[test]
     fn raw_numeric_whitespace_is_invalid_in_both_layers() {
         for dt in [xsd::INTEGER, xsd::BYTE, xsd::UNSIGNED_LONG, xsd::DECIMAL, xsd::FLOAT, xsd::DOUBLE] {
@@ -2111,14 +2111,14 @@ mod tests {
         let cases: &[(&str, oxrdf::NamedNodeRef<'_>)] = &[
             // ---- both accept (well-formed for datatype), same f64 image ----
             ("42", xsd::INTEGER),
-            (" 7 ", xsd::DECIMAL),      // [GPT-6] invalid raw lexical: both reject
+            (" 7 ", xsd::DECIMAL),      // invalid raw lexical: both reject
             ("+3", xsd::INTEGER),
             (" 1 ", xsd::INTEGER),      // invalid raw lexical: both reject
             ("1.5", xsd::DECIMAL),
             ("1.5E2", xsd::DOUBLE),
             ("INF", xsd::DOUBLE),
             ("3.0", xsd::FLOAT),
-            // [GPT-6] Both reject decimal notation for an integer datatype.
+            // Both reject decimal notation for an integer datatype.
             ("5.", xsd::INTEGER),
             ("5.0", xsd::INTEGER),
             ("5.00", xsd::INTEGER),

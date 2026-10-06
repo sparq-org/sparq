@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.6 optional vcq adapter over the V5 authenticated-RDF relation.
+// zkp-14.6 optional vcq adapter over the V5 authenticated-RDF relation.
 // Experimental source, not externally audited. At frozen source 7fe88955 one
 // audited genuine receipt covers only the select-bag-verifier-agreed case.
 // Rust guideline compliant 2026-02-21

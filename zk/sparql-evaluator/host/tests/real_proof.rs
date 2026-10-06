@@ -1,4 +1,4 @@
-// [GPT-6] No ignored tests, mock mode, network prover, or tool-presence skip.
+// No ignored tests, mock mode, network prover, or tool-presence skip.
 #[path = "support/evidence.rs"]
 mod evidence;
 

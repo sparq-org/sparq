@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: V5 credential authentication and evaluation are proved here.
+// zkp-14.5: V5 credential authentication and evaluation are proved here.
 // Rust guideline compliant 2026-02-21
 #![no_main]
 

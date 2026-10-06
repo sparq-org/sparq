@@ -1,11 +1,11 @@
-//! [GPT-6] Deterministic blank-node separation for read-query RDF merges.
+//! Deterministic blank-node separation for read-query RDF merges.
 
 use oxrdf::{BlankNode, NamedOrBlankNode, Term};
 use rustc_hash::FxHashSet;
 
 use crate::dataset::TripleSet;
 
-// [GPT-6] Each preserved node can occupy at most one numbered namespace, so a
+// Each preserved node can occupy at most one numbered namespace, so a
 // free namespace exists among 0..=occupied.len(). No entropy or guessed seed is used.
 pub(crate) fn namespace<'a>(preserved: impl Iterator<Item = &'a TripleSet>) -> usize {
     let mut occupied = FxHashSet::default();
@@ -44,7 +44,7 @@ fn collect_namespaces(term: &Term, occupied: &mut FxHashSet<usize>) {
     }
 }
 
-// [GPT-6] A graph-index prefix and the original valid label form an injective
+// A graph-index prefix and the original valid label form an injective
 // mapping. Repeated occurrences, including in triple terms, retain their identity.
 pub(crate) fn rename(mut term: Term, namespace: usize, graph: usize) -> Term {
     fn node(node: &BlankNode, namespace: usize, graph: usize) -> BlankNode {

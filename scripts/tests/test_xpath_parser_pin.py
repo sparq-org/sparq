@@ -1,4 +1,4 @@
-"""[GPT-6] Static cold-resolution contract; does not invoke Cargo or a network."""
+"""Static cold-resolution contract; does not invoke Cargo or a network."""
 from pathlib import Path
 import tomllib
 import unittest

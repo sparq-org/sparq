@@ -203,7 +203,7 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
 
 
 class TestDetachedSuppliers(unittest.TestCase):
-    """[GPT-6] Explicit first-party members and patched-byte distributor identity."""
+    """Explicit first-party members and patched-byte distributor identity."""
 
     def test_detached_and_patched_sources_keep_honest_supplier_identity(self):
         if not shutil.which("jq"):
@@ -213,7 +213,7 @@ class TestDetachedSuppliers(unittest.TestCase):
             ("sparq-proved-evaluator-model", "zk/sparql-evaluator/model", "Jesse Wright"),
             ("sparq-proved-evaluator-methods", "zk/sparql-evaluator/methods", "Jesse Wright"),
             ("sparq-exact-guest", "zk/sparql-evaluator/methods/guest", "Jesse Wright"),
-            # [OPUS-5.5] zkp-14.5: the separately pinned V5 guest, by exact path and name.
+            # zkp-14.5: the separately pinned V5 guest, by exact path and name.
             ("sparq-authrdf-guest", "zk/sparql-evaluator/methods/guest-authrdf", "Jesse Wright"),
             ("sparq-authrdf-guest", "zk/sparql-evaluator/methods/guest-other", None),
             ("sparq-authrdf-guest-extra", "zk/sparql-evaluator/methods/guest-authrdf", None),

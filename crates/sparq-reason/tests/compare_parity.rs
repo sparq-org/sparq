@@ -86,7 +86,7 @@ ex:bob ex:d "2024-03-14"^^xsd:date .
 ex:bob ex:y "2020"^^xsd:gYear .
 ex:bob ex:y2 "2021"^^xsd:gYear .
 ex:bob ex:odd "weird"^^ex:custom .
-# [GPT-6] Invalid numeric value spaces retain RDF identity and comparator parity.
+# Invalid numeric value spaces retain RDF identity and comparator parity.
 ex:bob ex:invalidByte "1200"^^xsd:byte .
 ex:bob ex:invalidInteger "5.0"^^xsd:integer .
 ex:bob ex:invalidUnsigned "-1"^^xsd:unsignedLong .

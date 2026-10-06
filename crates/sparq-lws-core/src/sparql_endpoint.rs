@@ -123,7 +123,7 @@ async fn execute<S: Store>(
     let _snapshot = state.sparql_snapshot_read().await;
     let authorized = assemble_authorized_dataset(state.as_ref(), &token, origin).await?;
     expand_union_default(&mut query, &authorized.graph_names)?;
-    // [GPT-6] Protocol and authorized-dataset rewrites retain the query contract.
+    // Protocol and authorized-dataset rewrites retain the query contract.
     let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)
         .map_err(ServerError::BadRequest)?;
 

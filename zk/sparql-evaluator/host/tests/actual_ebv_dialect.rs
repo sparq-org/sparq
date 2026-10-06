@@ -1,4 +1,4 @@
-// [GPT-6] Real execution confirms the serialized proof dialect cannot be overridden by VERSION.
+// Real execution confirms the serialized proof dialect cannot be overridden by VERSION.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator_methods::SPARQ_EXACT_GUEST_ELF;
 use sparq_proved_evaluator_model::*;

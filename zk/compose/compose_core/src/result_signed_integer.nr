@@ -1,4 +1,4 @@
-//! [GPT-6] Canonical signed-i64 literal binding for the separate signed result profile.
+//! Canonical signed-i64 literal binding for the separate signed result profile.
 //! Research-stage, not externally audited. Sign and actual lexical length are
 //! private within one fixed capacity. This module alone is not a result-proof API.
 

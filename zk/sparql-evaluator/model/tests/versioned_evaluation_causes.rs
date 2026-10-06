@@ -1,4 +1,4 @@
-// [GPT-6] Original queries and goldens remain immutable; these are native definitions.
+// Original queries and goldens remain immutable; these are native definitions.
 #![cfg(feature = "graph-results")]
 
 use sparq_engine::{BudgetExceeded, EvaluationCapacity};
@@ -132,7 +132,7 @@ fn original_dialect_controls_apply_to_both_versioned_admission_and_execution() {
                 let (rejection, execution) = if let Some(expected) = preparation_error {
                     assert_eq!(sparq_engine::PreparedQuery::parse(&w2.request.query).unwrap_err(), expected);
                     let rejection = Rejected("SPARQL parse rejected");
-                    // [OPUS-5.5] Rejected is Clone, not Copy: admission and execution each own one.
+                    // Rejected is Clone, not Copy: admission and execution each own one.
                     (rejection.clone(), EvaluationError::Rejected(rejection))
                 } else {
                     sparq_engine::PreparedQuery::parse(&w2.request.query).unwrap();

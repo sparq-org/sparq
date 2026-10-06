@@ -1,4 +1,4 @@
-// [GPT-6] Export an artifact for independent release review and common deployment.
+// Export an artifact for independent release review and common deployment.
 use sparq_proved_evaluator::{embedded_artifact, embedded_pin};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

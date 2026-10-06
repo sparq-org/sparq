@@ -1,4 +1,4 @@
-// [GPT-6] Native profile admission/evaluation, separate from guest proof evidence.
+// Native profile admission/evaluation, separate from guest proof evidence.
 #![cfg(feature = "evaluate")]
 
 use sparq_proved_evaluator_model::v2::{

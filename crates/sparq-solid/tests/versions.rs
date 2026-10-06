@@ -1,4 +1,4 @@
-// [GPT-6] String-producing authorization rewrites preserve the query dialect.
+// String-producing authorization rewrites preserve the query dialect.
 use sparq_core::Graph;
 use sparq_engine::{EbvSemantics, PreparedQuery, QueryBudget};
 

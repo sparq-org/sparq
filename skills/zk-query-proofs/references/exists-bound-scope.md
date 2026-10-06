@@ -1,6 +1,6 @@
 # EXISTS and captured BOUND
 
-<!-- [GPT-6] Experimental proof-profile boundary; not an engine conformance claim. -->
+<!-- Experimental proof-profile boundary; not an engine conformance claim. -->
 
 The published [SPARQL 1.1 substitution rule](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_substitute)
 replaces a bound variable occurrence with its RDF term. However,

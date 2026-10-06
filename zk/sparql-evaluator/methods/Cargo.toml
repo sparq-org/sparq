@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
-# [OPUS-5.5] zkp-14.5: also build the separately pinned V5 guest and generate
+# zkp-14.5: also build the separately pinned V5 guest and generate
 # SPARQ_AUTHRDF_GUEST_{ELF,ID} in their own file. Off by default; the exact
 # guest's flags, target subdirectory, manifest, lock and constants never depend on it.
 [features]

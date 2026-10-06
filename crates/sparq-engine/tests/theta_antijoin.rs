@@ -984,7 +984,7 @@ fn the_parallel_verdict_fan_out_abandons_probing_when_the_budget_trips() {
     //     raise the canonical error and stop probing well short of all `N` left rows.
     armed.store(true, Ordering::SeqCst);
     let budget = sparq_engine::QueryBudget::cancelled_by(Arc::clone(&cancel));
-    // [GPT-6] The worker's typed reason must survive the synchronous handback;
+    // The worker's typed reason must survive the synchronous handback;
     // a matching diagnostic alone must not be reclassified as cancellation.
     let prepared = sparq_engine::PreparedQuery::parse(&q).unwrap();
     let error = sparq_engine::with_functions(&fns, || {

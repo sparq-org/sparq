@@ -1,6 +1,6 @@
 #![cfg(feature = "geosparql_rewrite")]
 
-// [GPT-6] Structural integration rewrites preserve the announced EBV rule.
+// Structural integration rewrites preserve the announced EBV rule.
 #[test]
 fn rewrite_preserves_version_ebv_and_conflicts() {
     let graph = sparq_core::Graph::load_str("", "ntriples").unwrap();
@@ -20,7 +20,7 @@ fn rewrite_preserves_version_ebv_and_conflicts() {
     }
 }
 
-// [GPT-6] Preserve the pre-existing opt-in engine algebra pass before Geo rewriting.
+// Preserve the pre-existing opt-in engine algebra pass before Geo rewriting.
 #[test]
 fn rewrite_preserves_engine_preparation() {
     let query = "VERSION '1.2' SELECT ?s WHERE { ?s <urn:p> ?o . FILTER(?s = <urn:s>) }";

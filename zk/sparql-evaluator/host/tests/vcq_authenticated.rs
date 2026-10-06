@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.6: native gates of the optional V5 vcq adapter.
+// zkp-14.6: native gates of the optional V5 vcq adapter.
 // Rust guideline compliant 2026-02-21
 //! Compiled only with `--features vcq-authenticated`.
 //!
@@ -606,7 +606,7 @@ fn nonce_statement_and_expected_request_follow_the_documented_composition() {
 
 #[test]
 fn representative_stored_request_fields_change_the_nonce() {
-    // [OPUS-5.5] A subset; full field coverage lives in the shared encoding tests.
+    // A subset; full field coverage lives in the shared encoding tests.
     let base = Spec::bag();
     let other = vcq5::descriptor(&embedded_authrdf_pin(), &two_entry_policy()).unwrap();
     let mut cases: Vec<(&'static str, Spec)> = vec![("base", base.clone())];

@@ -1,4 +1,4 @@
-// [GPT-6] REC-derived literal, computed and stored temporal comparison matrix.
+// REC-derived literal, computed and stored temporal comparison matrix.
 use sparq_core::Graph;
 
 #[test]

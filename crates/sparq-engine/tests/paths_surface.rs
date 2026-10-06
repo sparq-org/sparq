@@ -6,7 +6,7 @@ use sparq_engine::{explain_paths, query, query_paths};
 
 const PATHS: &str = "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = ex:a END ?e = ex:d VIA ex:p";
 
-// [GPT-6] Inner PATHS patterns use the REC-only extension contract.
+// Inner PATHS patterns use the REC-only extension contract.
 #[test]
 fn paths_refuses_unimplemented_version_announcements() {
     let graph = diamond();

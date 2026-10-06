@@ -1,6 +1,6 @@
 # Successful-result contract (opt-in)
 
-[GPT-6] Enable `successful-results` for `result::{prepare_result, verify_result}`.
+Enable `successful-results` for `result::{prepare_result, verify_result}`.
 This research-stage addition is **not externally audited** and leaves the legacy
 complete-scan verifier intact. It accepts nonempty `SELECT DISTINCT` answers for
 positive BGPs with canonical nonnegative integer FILTERs. The verifier takes its
@@ -50,12 +50,12 @@ This choice depends on all accepted lists, including lists unused by the witness
 Missing trailing bits remain revoked padding. The policy retains its existing
 fixed accepted-list capacity.
 
-[GPT-6] Backend builders can use `planner::plan_disclosure_admitted` to restrict
+Backend builders can use `planner::plan_disclosure_admitted` to restrict
 candidate eligibility without changing committed graphs or query semantics. The
 callback receives the pattern index, original wallet/leaf reference and triple;
 a rejection only removes that candidate, and all ordinary planner checks remain.
 
-[GPT-6] `prepare_result` excludes untrusted, unauthenticated, revoked, stale or
+`prepare_result` excludes untrusted, unauthenticated, revoked, stale or
 over-capacity credentials before witness selection. Backend-ineligible selected
 terms are skipped through candidate admission, so an early unsupported candidate
 does not hide a later usable witness. Public query checks remain independent.
@@ -74,13 +74,13 @@ not admitted. Names have fixed prefixes before caller labels. Input
 writes reject final-component symlinks on Unix. The caller controls the workspace
 and its parent directories.
 
-[GPT-6] Optional `planner::optimize_disclosure[_admitted]` jointly chooses witnesses
+Optional `planner::optimize_disclosure[_admitted]` jointly chooses witnesses
 across fixed released rows, minimizing authentication count and then shared
 membership count within explicit resource and credential-capacity bounds. Its
 report separates established structural optimality from budget exhaustion. This
 does not change the baseline selection policy or assert a measured runtime gain.
 
-[GPT-6] `prepare_result` now uses bounded joint optimization by default, enforcing
+`prepare_result` now uses bounded joint optimization by default, enforcing
 credential capacity during selection. `ResultOptions::witness_selection` can
 select `FirstSuccess` for ablations; `max_search_steps` controls either search.
 An exhausted search uses a complete feasible incumbent if available, records
@@ -90,7 +90,7 @@ truncated. Capacity selection applies to the chosen plan, so fewer selected
 credentials can choose the smaller signature circuit. Structural search metrics
 are local diagnostics; measured circuit costs are in the generated gate snapshot.
 
-[GPT-6] The native subprocess driver serializes nargo compile and execute through
+The native subprocess driver serializes nargo compile and execute through
 an OS advisory lock on the local workspace's target cache, including execute's
 implicit compilation. Canonical-key generation and proving copy ACIR into their
 own job directories while holding the lock. The public `compile` method returns
@@ -100,20 +100,20 @@ Rust 1.88 minimum; lock and I/O errors fail closed. This coordinates cooperating
 driver processes on a local filesystem. External nargo writes, network filesystem
 locking semantics, and deleting the cache during a job are outside that contract.
 
-[GPT-6] Both planner paths reject oversized credential slices before traversal,
+Both planner paths reject oversized credential slices before traversal,
 including empty or ineligible graphs, via `MAX_DISCLOSURE_CREDENTIALS`.
 
-[GPT-6] Successful-result preparation applies the same credential-slice cap before
+Successful-result preparation applies the same credential-slice cap before
 signature authentication or graph cloning. The generated commitment-method gate
 matrix lists every result capacity member as string-canonical only; it does not
 inherit dual-leaf compatibility from the legacy lexical-handle dispatch rule.
 
-[GPT-6] The successful-result public ABI sorts variable names lexicographically;
+The successful-result public ABI sorts variable names lexicographically;
 this is separate from the planner’s first-occurrence variable ordering. FILTER
 bounds retain their complete `u64` public field encoding. Witness TOML represents
 values above `i64::MAX` as decimal strings accepted by Noir.
 
-[GPT-6] `ResultOptions::integer_capacity` defaults to
+`ResultOptions::integer_capacity` defaults to
 `IntegerCapacityPolicy::Smallest`: selected private values through 99 use
 `PrivateIntegerCapacity::TwoDigits`, and larger canonical values select
 `FullU64`. `HideInU64` uses the full-width member for any private predicate,

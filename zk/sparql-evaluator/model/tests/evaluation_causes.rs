@@ -1,4 +1,4 @@
-// [GPT-6] Typed causes are native evidence, not guest receipt execution.
+// Typed causes are native evidence, not guest receipt execution.
 #![cfg(feature = "evaluate")]
 
 use sparq_engine::{BudgetExceeded, EvaluationCapacity, QueryFailure};

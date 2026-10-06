@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: retained V5 receipt evidence, bound to the approved V5 pin.
+// zkp-14.5: retained V5 receipt evidence, bound to the approved V5 pin.
 //! Evidence for genuine V5 receipts, kept separate from `support/evidence.rs`.
 //!
 //! Every record names the exact typed request, the independently approved V5

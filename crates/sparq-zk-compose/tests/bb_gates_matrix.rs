@@ -135,7 +135,7 @@ fn is_value_lane(member: &str) -> bool {
 
 /// Kept in lockstep with `RESULT_PREFIXES` in `bb_gates_matrix.py`.
 ///
-/// [OPUS-5.5] zkp-15.1 adds the version-4 public-pattern members.
+/// zkp-15.1 adds the version-4 public-pattern members.
 fn is_successful_result(member: &str) -> bool {
     ["result_v1_", "result_v2_", "result_v3_", "result_v4_"]
         .iter()
@@ -147,7 +147,7 @@ fn is_successful_result(member: &str) -> bool {
 /// illegal for `value-only`.
 fn expect_legal(method_key: &str, member: &str) -> bool {
     if is_successful_result(member) {
-        // [GPT-6] The additive result relation authenticates whole string-canonical
+        // The additive result relation authenticates whole string-canonical
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
     } else if is_value_lane(member) {
@@ -511,7 +511,7 @@ fn committed_legality_matches_resolve_circuit() {
     );
 }
 
-// [GPT-6] Keep all measured result buckets in the comparison without inventing
+// Keep all measured result buckets in the comparison without inventing
 // compatibility with the legacy dual-leaf dispatch surface.
 #[test]
 fn successful_result_members_only_admit_string_canonical_commitments() {
@@ -521,7 +521,7 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
         .iter()
         .filter(|(member, _)| is_successful_result(member))
         .collect();
-    // [OPUS-5.5] zkp-15.1: 30 v1-v3 buckets plus exactly the two measured v4 buckets.
+    // zkp-15.1: 30 v1-v3 buckets plus exactly the two measured v4 buckets.
     assert_eq!(members.len(), 32);
     let v4: Vec<&str> = members
         .iter()

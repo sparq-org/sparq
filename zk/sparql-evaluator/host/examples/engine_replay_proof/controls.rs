@@ -1,4 +1,4 @@
-// [OPUS-5.5] Verifier-side substitution and tamper controls; not malicious-witness checks.
+// Verifier-side substitution and tamper controls; not malicious-witness checks.
 //! Verification-only rejection controls shared by the example and its ignored test.
 //!
 //! The prover never receives a result: V3 evaluates inside the guest. Editing the

@@ -1,4 +1,4 @@
-// [GPT-6] Every step here executes INSIDE the proved guest, including parsing.
+// Every step here executes INSIDE the proved guest, including parsing.
 use crate::*;
 use oxrdf::{Literal, NamedOrBlankNode, Term};
 use spargebra::algebra::{
@@ -203,7 +203,7 @@ pub(crate) fn admit_query(
                 Expression::Literal(l) => literal(l)?,
                 Expression::NamedNode(_) | Expression::Variable(_) => {}
                 Expression::Bound(variable) => {
-                    // [GPT-6] Literal 2013 substitution has no BOUND(term) rule.
+                    // Literal 2013 substitution has no BOUND(term) rule.
                     // Reject possible captures, while preserving body-local BOUND.
                     if exists_captures
                         .as_ref()
@@ -303,7 +303,7 @@ pub(crate) fn admit_query(
             Visit::Path(p) => match p {
                 PropertyPathExpression::NamedNode(_)
                 | PropertyPathExpression::NegatedPropertySet(_) => {}
-                // [GPT-6] Inverse swaps endpoint roles; alternative is bag union. Neither
+                // Inverse swaps endpoint roles; alternative is bag union. Neither
                 // introduces the variable midpoint of a path sequence.
                 PropertyPathExpression::Reverse(p) => pending.push(Visit::Path(p)),
                 PropertyPathExpression::Alternative(a, b) => {
@@ -411,7 +411,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     evaluate_detailed(witness).map_err(Rejected::from)
 }
 
-/// [GPT-6] Evaluates the same relation while retaining typed execution causes.
+/// Evaluates the same relation while retaining typed execution causes.
 ///
 /// Request, dataset and journal encodings are identical to [`evaluate`].
 /// Private execution diagnostics are discarded; a cause comes from the actual

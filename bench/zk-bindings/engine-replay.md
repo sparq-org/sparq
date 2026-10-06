@@ -1,6 +1,6 @@
 # Existing engine and storage replay
 
-[GPT-6] `engine_replay.py` retains the original `sparq-bench` seed generator,
+`engine_replay.py` retains the original `sparq-bench` seed generator,
 Oxigraph oracle and engine-independent `sparq-difftest` comparisons. The
 [matrix](engine-matrix.json) maps existing optimizer, join, storage and worker
 tests. Its small configured matrix does not replace the original fixed or nightly
@@ -57,7 +57,7 @@ using its original seed/category and exact accepted binary before minimizing it.
 This first slice preserves the original minimizers and fuzz targets; it does not
 claim a minimized counterexample or per-backend admission/proof execution.
 
-[OPUS-5.5] The separate [engine proof replay bridge](engine-proof-replay.md)
+The separate [engine proof replay bridge](engine-proof-replay.md)
 prepares one retained cell's unchanged originals for the exact V3 relation and,
 in real mode, proves and independently verifies them. It writes its own status
 record; this controller, its null record bridge fields, its denominators and its

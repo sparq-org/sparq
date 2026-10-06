@@ -1,4 +1,4 @@
-// [GPT-6] Appended exact keys must reach ordinary FILTER, COUNT, ORDER and aggregates.
+// Appended exact keys must reach ordinary FILTER, COUNT, ORDER and aggregates.
 use oxrdf::{Literal, NamedNode, Term};
 use sparq_core::Graph;
 use sparq_engine::query;

@@ -1,4 +1,4 @@
-// [GPT-6] Executes V3 in the actual guest; these executions are not receipts.
+// Executes V3 in the actual guest; these executions are not receipts.
 #[path = "support/graph_results.rs"]
 mod fixtures;
 use fixtures::*;

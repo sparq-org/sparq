@@ -1,4 +1,4 @@
-// [GPT-6] Manual value/error goldens, independent of engine output generation.
+// Manual value/error goldens, independent of engine output generation.
 use sparq_core::Graph;
 
 #[test]
@@ -88,7 +88,7 @@ fn stored_invalid_literals_fail_soft_in_dense_and_compressed_caches() {
     }
 }
 
-// [GPT-6] Arithmetic comparisons must validate operands before exact-decimal shortcuts.
+// Arithmetic comparisons must validate operands before exact-decimal shortcuts.
 #[test]
 fn stored_arithmetic_validity_agrees_in_dense_and_compressed_graphs() {
     for (literal, valid) in [
@@ -155,7 +155,7 @@ fn stored_arithmetic_validity_agrees_in_dense_and_compressed_graphs() {
     }
 }
 
-// [GPT-6] Identity comparison exposes a unary-plus bypass that arithmetic tests miss.
+// Identity comparison exposes a unary-plus bypass that arithmetic tests miss.
 #[test]
 fn stored_unary_plus_and_cast_errors_agree_across_execution_paths() {
     for (literal, expression, valid) in [

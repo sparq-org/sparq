@@ -1,4 +1,4 @@
-// [GPT-6] Export existing W3C manifests and goldens without evaluating queries.
+// Export existing W3C manifests and goldens without evaluating queries.
 //! Run `proof_corpus MANIFEST SUITE_ROOT OUTPUT_JSON` against an existing suite checkout.
 use serde_json::{Value, json};
 use spargebra::{Query, SparqlParser, algebra::GraphPattern};

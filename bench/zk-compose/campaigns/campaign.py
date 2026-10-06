@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Generate and execute bounded synthetic campaigns without pooling contracts."""
+"""Generate and execute bounded synthetic campaigns without pooling contracts."""
 import argparse
 import hashlib
 import json

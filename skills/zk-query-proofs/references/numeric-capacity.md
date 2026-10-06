@@ -1,6 +1,6 @@
 # Numeric evaluation capacity
 
-[GPT-6] `QueryBudget.strict_numeric_capacity` is false by default and explicitly
+`QueryBudget.strict_numeric_capacity` is false by default and explicitly
 enabled by the exact-dataset evaluator. It separates a valid RDF numeric lexical
 from a computation the current engine can represent. This is a bounded numeric
 profile, not arbitrary-precision SPARQL arithmetic.

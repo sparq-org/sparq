@@ -1,4 +1,4 @@
-"""[GPT-6] Pure-Python inventory checks; no compiler or evaluator invocation."""
+"""Pure-Python inventory checks; no compiler or evaluator invocation."""
 import copy
 from pathlib import Path
 import unittest
@@ -24,7 +24,7 @@ class OriginalReplayTests(unittest.TestCase):
             self.assertEqual(case["query"], case["original_fixture"]["query"])
 
     def test_projection_registry_is_hash_pinned_and_applied_exactly(self):
-        # [OPUS-5.5] Inventory pins the reviewed projection registry bytes.
+        # Inventory pins the reviewed projection registry bytes.
         root = Path(__file__).resolve().parents[2]
         pin = load(root / "bench/zk-bindings/exact-originals.json")["projection_expectations"]
         self.assertEqual(pin["path"], "bench/zk-bindings/projection-expectations.json")

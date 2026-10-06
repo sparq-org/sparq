@@ -1,4 +1,4 @@
-// [GPT-6] Actual guest execution over shared REC-derived and capacity goldens.
+// Actual guest execution over shared REC-derived and capacity goldens.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator_methods::SPARQ_EXACT_GUEST_ELF;
 use sparq_proved_evaluator_model::{
@@ -56,7 +56,7 @@ fn actual_guest_executes_shared_builtin_edges_and_labeled_capacity_controls() {
             .build()
             .unwrap();
         let execution = executor.execute(env, SPARQ_EXACT_GUEST_ELF);
-        // [GPT-6] Capacity is a whole-relation rejection, not an unbound result.
+        // Capacity is a whole-relation rejection, not an unbound result.
         if case["expectation_kind"] == "implementation_capacity" {
             let error = execution.expect_err("capacity violation must not reach Halted(0)");
             let rejection = format!("{error:#}");
@@ -140,7 +140,7 @@ fn actual_v2_guest_executes_the_same_literal_values_and_stored_builtin_matrix() 
             .build()
             .unwrap();
         let execution = executor.execute(env, SPARQ_EXACT_GUEST_ELF);
-        // [GPT-6] Capacity is a whole-relation rejection, not an unbound result.
+        // Capacity is a whole-relation rejection, not an unbound result.
         if case["expectation_kind"] == "implementation_capacity" {
             let error = execution.expect_err("capacity violation must not reach Halted(0)");
             let rejection = format!("{error:#}");

@@ -23,7 +23,7 @@ curl --compressed -G http://127.0.0.1:3030/sparql \
   --data-urlencode 'query=SELECT * WHERE { ?s ?p ?o }'
 ```
 
-[GPT-6] Query VERSION metadata survives protocol dataset overrides and prepared
+Query VERSION metadata survives protocol dataset overrides and prepared
 execution. The query engine resolves its [scoped EBV rules](../sparql-query/ebv-dialects.md);
 this is not a full SPARQL 1.2 protocol or language conformance claim.
 
@@ -1037,7 +1037,7 @@ advertise itself as a discoverable federation node by serving two read-only RDF 
       conformance-verifies, as `sparql:version-*` IRIs (`http://www.w3.org/ns/sparql#`). SPARQL
       1.2 SD moves version negotiation off `sd:Language` onto `sd:supportedVersion`, so a
       1.2-aware federation client can discover triple-term / `dir`-lang support without probing.
-      [GPT-6] sparq advertises query syntax labels `version-1.0`, `version-1.1` and
+      sparq advertises query syntax labels `version-1.0`, `version-1.1` and
       `version-1.2`; these do not certify complete draft semantics. Clients must announce
       `VERSION "1.2"` (or `1.2-basic`) for the pinned draft EBV rule; unannounced queries
       use REC 2013. UPDATE supports REC 2013 only and rejects non-`1.1` announcements,

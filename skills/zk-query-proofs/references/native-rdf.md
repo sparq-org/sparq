@@ -1,6 +1,6 @@
 # Native RDF public support
 
-[GPT-6] The detached `zk/native-composition` workspace has an optional
+The detached `zk/native-composition` workspace has an optional
 `native-rdf` research API. It authenticates **successful support** for a bounded
 SELECT DISTINCT basic graph pattern using native Dock BBS+ signatures. It is
 experimental and has not received external cryptographic review. It does not

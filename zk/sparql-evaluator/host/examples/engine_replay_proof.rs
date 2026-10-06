@@ -1,4 +1,4 @@
-// [OPUS-5.5] Retained engine-replay cell to genuine exact V3 proof bridge.
+// Retained engine-replay cell to genuine exact V3 proof bridge.
 //! Prepare, or prove and independently verify, one retained engine-replay cell.
 //!
 //! See `bench/zk-bindings/engine-proof-replay.md` for inputs, outputs and scope.

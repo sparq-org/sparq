@@ -1,4 +1,4 @@
-<!-- [OPUS-5.5] Experimental Sparq protocol design for review, authored by Claude Opus 5.5. No implementation lands with this record. -->
+<!-- Experimental Sparq protocol design for review, authored by Claude Opus 5.5. No implementation lands with this record. -->
 # Verifiable-credential query proofs with pluggable proof methods (vcq draft 0)
 
 > **Status: experimental Sparq protocol research, for review.** A proposed protocol shape, not
@@ -10,7 +10,7 @@
 The companion [`vc-query-methods.json`](vc-query-methods.json) is a bounded proposed registry
 of suites, mapping profiles, methods, linking profiles, allowed combinations and conformance
 vectors. A registry label is a name, never evidence that anything it names is supported.
-[OPUS-5.5] Only `method:risc0-exact` version 3 has a vcq adapter (`adapter_available: true` for
+Only `method:risc0-exact` version 3 has a vcq adapter (`adapter_available: true` for
 exactly six tuples, §6.1, §9); every other entry and version keeps `adapter_available: false`.
 Adapter source for `method:risc0-authenticated-rdf` version 5 now exists (§9.2), but its entry
 stays `false`: an independently audited genuine adapter receipt covers only one of its six
@@ -244,7 +244,7 @@ rule 9 and linked to the evaluated values, §8); or `re-attested` (a trusted imp
 source issuer). Either authority may carry any source evidence. A holder-chosen subset of
 issuer-authenticated credentials remains `holder-declared`: authentication never upgrades
 authority. An anchor over authenticated credentials is expressible, but the authentication
-must be linked to the anchored bytes, not checked beside them. [OPUS-5.5] The V5 relation
+must be linked to the anchored bytes, not checked beside them. The V5 relation
 and its vcq adapter source (§9.2) declare that link, with the anchor defined over the signed
 canonical hashes. One independently audited genuine adapter receipt covers only its
 verifier-agreed bag SELECT tuple, on one public synthetic fixture; the verifier-agreed ASK and
@@ -272,7 +272,7 @@ Capabilities include an `enforces` map from each obligation the method can disch
 enforcer (§7.3), the challenge owner and policy (§6.4), and `adapter_available`. A registry
 `status` such as `implemented-experimental` says only that component source exists; a
 consumer MUST NOT register a method as executable through vcq unless `adapter_available` is
-true. [OPUS-5.5] In the registry it is true only for `method:risc0-exact` version 3, and only
+true. In the registry it is true only for `method:risc0-exact` version 3, and only
 for the six tuples its `vcq_adapter` lists (§9); it is false for every other entry and version.
 An adapter's local `Capabilities` must declare itself available so that `admit` can select it.
 That local declaration records an implementation. It is not the registry's validated
@@ -293,7 +293,7 @@ registry (§9.2), even after one genuine receipt for one of its six tuples.
 `admit` is deterministic over public data and sees no result. The verifier recomputes it
 and never uses a holder's copy. `admit` returns `unsupported` when a required obligation has
 no enforcer and `capacity` when a public request bound (such as `resources` released rows)
-exceeds a method ceiling. [OPUS-5.5] `verify` MUST check two distinct bounds. The encoded
+exceeds a method ceiling. `verify` MUST check two distinct bounds. The encoded
 presentation byte size is checked before anything is decoded. The released-row capacity is
 a semantic bound on the result. When rows are read only from the proof's result (§9.1), it is
 checked after the result is decoded and the proof is verified, and BEFORE the challenge is
@@ -479,7 +479,7 @@ narrowed for exact V3 by the adapter described after this list):
 
 ### 9.1 Exact V3 vcq adapter (later source, independently certified run)
 
-[OPUS-5.5] `sparq_proved_evaluator::vcq::Risc0ExactV3` (detached `zk/sparql-evaluator/host`,
+`sparq_proved_evaluator::vcq::Risc0ExactV3` (detached `zk/sparql-evaluator/host`,
 feature `vcq`, off by default) implements *QueryMethod* over the V3 relation for descriptor
 `urn:sparq:vcq:method:risc0-exact` version 3 only. It declares exactly six capability tuples:
 `SelectBag`, `AskBoolean` and `GraphRdfc10` (CONSTRUCT only), each under
@@ -514,7 +514,7 @@ with the same name from the separate post-restore run.
 The run used a public synthetic fixture. It shows no issuer authentication of any
 credential, no status, no holder identity, and no completeness beyond the exact agreed
 bytes (no federation or nondeterministic dataset). The adapter is experimental and not
-externally audited (sq-qhy4). [OPUS-5.5] The adapter applies the two §6.2 bounds
+externally audited (sq-qhy4). The adapter applies the two §6.2 bounds
 separately. It checks the encoded presentation bytes before decoding the receipt
 (`vcq-presentation-bytes`). It checks the released rows, which it reads from the verified
 journal, after the proof checks and before challenge consumption (`vcq-released-rows`).
@@ -524,7 +524,7 @@ has not been executed.
 
 ### 9.2 Authenticated-RDF V5 vcq adapter (native gate and one genuine case)
 
-[OPUS-5.5] `sparq_proved_evaluator::vcq_authenticated::Risc0AuthenticatedRdfV5` (detached
+`sparq_proved_evaluator::vcq_authenticated::Risc0AuthenticatedRdfV5` (detached
 host crate, feature `vcq-authenticated`, off by default) implements *QueryMethod* over the V5
 issuer-authenticated RDF relation. Its descriptor is `urn:sparq:vcq:method:risc0-authenticated-rdf`
 version 5, and it is built from three verifier-owned inputs: an approved V5 `ArtifactPin`, its
@@ -625,7 +625,7 @@ method under a holder-declared request uses the same linking profile without gai
 Expected outcomes name a class and phase (§6.4); vectors that do not apply to a method are
 `unsupported` at negotiation. Machine-readable copies are in the registry, where `applies`
 names registry method, suite, mapping or linking entries. Every vector is an illustrative
-proposal and none has been executed as a vector. [OPUS-5.5] The §9.1 run executed the exact V3
+proposal and none has been executed as a vector. The §9.1 run executed the exact V3
 adapter's own test controls, which are not a vector run. The `neg-excess-rows` expectation
 was aligned with that adapter's source and its seventh receipt, not executed as a vector.
 

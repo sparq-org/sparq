@@ -132,7 +132,7 @@ exceptions = [
   #     import pre-flight, sq-gg0qq.1) behind the opt-in `redis-replay` feature of the
   #     incoming crates. Scoped per-crate so the broad allowlist stays as-is. [FABLE-5]
   { crate = "xxhash-rust@0.8.16", allow = ["BSL-1.0"] },
-  # [GPT-6] Exact native dependency license proposals; individual archive/VCS evidence retained.
+  # Exact native dependency license proposals; individual archive/VCS evidence retained.
   { crate = "cranelift-bforest@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },
   { crate = "cranelift-bitset@0.110.3", allow = ["Apache-2.0 WITH LLVM-exception"] },
   { crate = "cranelift-codegen@0.110.2", allow = ["Apache-2.0 WITH LLVM-exception"] },

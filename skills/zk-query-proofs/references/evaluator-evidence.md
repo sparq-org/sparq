@@ -1,6 +1,6 @@
 # Exact-evaluator campaign evidence
 
-[GPT-6] The mandatory `real exact-dataset guest and proof` job executes
+The mandatory `real exact-dataset guest and proof` job executes
 `scripts/ci_exact_evaluator_evidence.py --output NEW_DIRECTORY`. This GitHub
 Actions helper requires the actual event context and installed pinned toolchain;
 it has no mock or missing-tool success path. It runs native semantic tests,
@@ -69,7 +69,7 @@ riscv32im-risc0-zkvm-elf`; Cargo's default host/debug clean scope does not clear
 those artifacts. A real read-only dry run checked this distinction before the
 first exported campaign. The host package rebuild uses its actual default scope.
 
-[OPUS-5.5] zkp-14.5: the campaign also covers the separately pinned V5 guest
+zkp-14.5: the campaign also covers the separately pinned V5 guest
 (`methods/guest-authrdf`), which has its own Cargo metadata, locked fetch and
 guest/release rebuild scope in the `sparq-authrdf-guest` target subdirectory.
 It exports `authrdf-artifact/guest.bin` and `authrdf-artifact/pin.json`
@@ -86,7 +86,7 @@ direct V5 guest execution and a feature Clippy pass outside this campaign; it is
 not a campaign record. See the
 [V5 guest reference](authenticated-rdf-guest.md#recorded-evidence).
 
-[OPUS-5.5] zkp-14.6: after `lint-authrdf`, the campaign runs the commands named in
+zkp-14.6: after `lint-authrdf`, the campaign runs the commands named in
 `VCQ_COMMANDS`, each through the same fail-closed `run_logged` path, before both
 guests are re-exported. These commands were authored at `e4fb7dff`. No completed
 run of the full named campaign, with these commands or the zkp-14.5 V5 steps, is

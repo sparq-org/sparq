@@ -6,7 +6,6 @@
 //! never combines axes from different tuples. Each tuple names an [`Enforcer`]
 //! per [`Obligation`]; binding a field into a challenge
 //! ([`Enforcer::BoundOnly`]) is recorded but never discharges an obligation.
-//! [OPUS-5.5]
 
 use crate::error::{ErrorCode, FailureClass, Phase, ProtocolError};
 use crate::ids::{Digest32, Identifier, QueryProfile};
@@ -208,7 +207,7 @@ pub enum DatasetAssembly {
     CredentialNamedGraphs,
     /// Exact source N-Quads bytes with an exact graph-name catalog.
     ///
-    /// [OPUS-5.5] Not a credential assembly: the dataset is the source bytes as
+    /// Not a credential assembly: the dataset is the source bytes as
     /// given, not graphs built from imported credentials. The choice says
     /// nothing about authenticity, which [`SourceEvidence`] states separately.
     ExactSourceCatalog,

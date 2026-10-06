@@ -110,7 +110,7 @@ pub use sparq_engine_service::service::{with_service_remote_request_cap, SERVICE
 #[cfg(feature = "serialize-rdf")]
 pub use sparq_engine_serialize::serialize;
 mod update;
-// [OPUS-5.5] Stable-parser VERSION metadata: the published crate resolves upstream
+// Stable-parser VERSION metadata: the published crate resolves upstream
 // spargebra 0.4.6, which has no label-retaining parse methods.
 mod versioned_parse;
 pub use versioned_parse::{parse_versioned_query, parse_versioned_update, VersionedParseError};
@@ -268,7 +268,7 @@ use oxrdf::{Term, Variable};
 use sparq_core::Graph;
 use spargebra::{Query, SparqlParser};
 
-/// [GPT-6] Version-pinned effective boolean value rules, not a full dialect claim.
+/// Version-pinned effective boolean value rules, not a full dialect claim.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum EbvSemantics {
     /// Published SPARQL 1.1 Recommendation, 21 March 2013, section 17.2.2.
@@ -293,7 +293,7 @@ pub enum EbvSemantics {
 /// not interrupt arbitrary callback work or combine budgets across queries.
 #[derive(Debug, Clone, Default)]
 pub struct QueryBudget {
-    /// [GPT-6] EBV semantics override. `None` uses a query VERSION announcement,
+    /// EBV semantics override. `None` uses a query VERSION announcement,
     /// or REC 2013 when absent. A conflicting announcement is rejected.
     /// This selects EBV behavior only, not full SPARQL version conformance.
     pub ebv_semantics: Option<EbvSemantics>,
@@ -321,7 +321,7 @@ pub struct QueryBudget {
     /// anti-OOM ceiling, not an exact RSS quota. `None` (the default) disables it; it
     /// composes with `max_rows` (whichever trips first aborts).
     pub max_bytes: Option<usize>,
-    /// [GPT-6] Inclusive year range for temporal evaluation and construction.
+    /// Inclusive year range for temporal evaluation and construction.
     /// `None` retains the native parser's checked range. An exceeded range is a
     /// sticky query-capacity error, even if FILTER/BIND/COALESCE could absorb an
     /// ordinary expression error. Capacity-constrained expression work stays
@@ -894,7 +894,7 @@ impl PreparedQuery {
         Self::from_query_with_versions(query, version)
     }
 
-    /// [GPT-6] Retains parser metadata when callers rewrite an algebra's dataset.
+    /// Retains parser metadata when callers rewrite an algebra's dataset.
     /// This validates labels and EBV compatibility, not full version conformance.
     ///
     /// # Errors
@@ -942,7 +942,7 @@ impl PreparedQuery {
 
     /// Replaces algebra while retaining all validated VERSION announcements.
     ///
-    /// [GPT-6] Use after structural rewrites of this query. Unlike `From<Query>`,
+    /// Use after structural rewrites of this query. Unlike `From<Query>`,
     /// this preserves the source query's EBV contract without re-parsing text.
     pub fn with_query(&self, query: Query) -> Self {
         Self { query, versions: self.versions.clone() }
@@ -959,7 +959,7 @@ impl PreparedQuery {
 
     /// Unwraps into the `spargebra` algebra.
     ///
-    /// [GPT-6] This discards the VERSION announcement. Retain [`Self::versions`]
+    /// This discards the VERSION announcement. Retain [`Self::versions`]
     /// separately and use [`Self::from_query_with_versions`] when rewriting algebra
     /// that must preserve the declared EBV rules.
     pub fn into_query(self) -> Query {
@@ -1117,7 +1117,7 @@ pub fn query_prepared_with_budget(
     query_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
 }
 
-/// [GPT-6] Executes a prepared SELECT/ASK query with typed whole-query causes.
+/// Executes a prepared SELECT/ASK query with typed whole-query causes.
 ///
 /// Budget/domain causes are captured from actual emitters before query-local
 /// state is restored. Diagnostic text is never used to classify a failure.

@@ -1,4 +1,4 @@
-// [GPT-6] Exact comparison expectations independent of the approximate cache.
+// Exact comparison expectations independent of the approximate cache.
 use sparq_core::temporal::{ExactTemporal, ExactTimeline};
 use std::cmp::Ordering::{Equal, Greater, Less};
 

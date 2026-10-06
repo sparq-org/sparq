@@ -60,7 +60,7 @@ in the generated file's header. Read such a row as `noir_XPath == XPath F&O`, no
 `noir_XPath == sparq`. Keeping it live is the point: these are edges `noir_XPath` has already
 *fixed*, so a regression on one must fail the run — a commented-out assertion cannot fail
 and would verify nothing. One divergence remains: `ROUND` loses the sign of negative
-zero. [GPT-6] The former `SUBSTR` window divergence is fixed; every substring row now
+zero. The former `SUBSTR` window divergence is fixed; every substring row now
 requires oracle/reference equality, including starts below one.
 
 Three unit tests hold that arrangement in place: one asserts no assertion is ever emitted
@@ -166,7 +166,7 @@ repo root: the face repo's root `Nargo.toml` is a `[workspace]`, so the git dep 
 
 **License:** MIT
 
-[GPT-6] The Rust oracle requires the vendored spargebra 0.4.6 fork. Its exact
+The Rust oracle requires the vendored spargebra 0.4.6 fork. Its exact
 workspace requirement and this detached workspace's local patch must both remain;
 a compatible registry release lacks the VERSION metadata APIs. Other detached
 resolution remains intentionally unlocked, as documented in Cargo.toml.

@@ -54,7 +54,7 @@ pub fn construct_prepared_with_budget(
     construct_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
 }
 
-/// [GPT-6] Constructs a graph while preserving typed whole-query failures.
+/// Constructs a graph while preserving typed whole-query failures.
 ///
 /// # Errors
 /// Returns actual budget/capacity causes or a whole-query evaluation diagnostic.
@@ -110,7 +110,7 @@ pub fn describe_prepared_with_budget(
     describe_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
 }
 
-/// [GPT-6] Describes resources while preserving typed whole-query failures.
+/// Describes resources while preserving typed whole-query failures.
 ///
 /// # Errors
 /// Returns actual budget/capacity causes or a whole-query evaluation diagnostic.
@@ -225,7 +225,7 @@ fn instantiate(template: &[TriplePattern], solutions: &QueryResult, graph: &Grap
         let get = |v: &Variable| -> Option<Term> { cols.get(v).and_then(|&i| row[i].clone()) };
         // Blank nodes in the template are scoped to one solution: the same label
         // maps to one fresh node within a row, different nodes across rows.
-        // [GPT-6] The optional deterministic namespace is chosen against all
+        // The optional deterministic namespace is chosen against all
         // blank nodes in the active dataset and in the solution terms (an
         // extension function can compute a blank node the dataset never held).
         #[cfg(not(feature = "deterministic-blank-nodes"))]

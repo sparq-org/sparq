@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Mandatory finite native RDF replay; no build or simulated proofs."""
+"""Mandatory finite native RDF replay; no build or simulated proofs."""
 import argparse
 from collections import Counter
 import hashlib

@@ -1,4 +1,4 @@
-# [OPUS-5.5] zkp-14.6: genuine V5 adapter receipts, one declared case per job.
+# zkp-14.6: genuine V5 adapter receipts, one declared case per job.
 # Runs the existing ignored driver `vcq_authenticated_genuine` with an explicit
 # single-case job. Each job exports both guests from this commit, proves one
 # case, and uploads the driver's evidence directory (summary.json last).

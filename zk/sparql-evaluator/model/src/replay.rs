@@ -1,4 +1,4 @@
-// [OPUS-5.5] Host-only engine-replay bridge; experimental and not externally audited.
+// Host-only engine-replay bridge; experimental and not externally audited.
 //! Prepares retained engine-replay originals as exact V3 witnesses.
 //!
 //! `sparq-bench fuzz-replay` retains each native matrix cell as unchanged

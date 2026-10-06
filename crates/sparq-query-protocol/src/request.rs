@@ -1,6 +1,6 @@
 //! Verifier-stored request: requirements plus query, challenge, audience and window (draft §5.1).
 //!
-//! [OPUS-5.5] [`StoredRequest`] joins the negotiation [`QueryRequirements`]
+//! [`StoredRequest`] joins the negotiation [`QueryRequirements`]
 //! with the request fields a verifier checks against its own stored copy: the
 //! exact query text, the original single-use [`Challenge32`], the audience,
 //! the validity window, the declared [`QueryForm`], an optional base IRI and

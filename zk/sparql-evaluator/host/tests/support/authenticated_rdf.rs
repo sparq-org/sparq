@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: public W3C fixture shared by the V5 host and guest tests.
+// zkp-14.5: public W3C fixture shared by the V5 host and guest tests.
 //! Published W3C vector: vc-di-eddsa Recommendation 2025-05-15, the
 //! `eddsa-rdfc-2022` representation, examples 7, 9, 10, 12, 13 and 15
 //! (<https://www.w3.org/TR/vc-di-eddsa/>). The bytes, public key and signature
@@ -255,7 +255,7 @@ impl Nonces for CountingNonces {
     }
 }
 
-// [OPUS-5.5] zkp-14.6: synthetic payment-history credential for the false-ASK example.
+// zkp-14.6: synthetic payment-history credential for the false-ASK example.
 // Signed with the RFC 8032 section 7.1 TEST 1 key, whose secret key is public;
 // the fixture is public test data, never a deployment credential.
 

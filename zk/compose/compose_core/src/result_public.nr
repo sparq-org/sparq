@@ -1,4 +1,4 @@
-// [OPUS-5.5] beadzkp-15.1: version-four public-pattern result relation.
+// beadzkp-15.1: version-four public-pattern result relation.
 // Research-grade, NOT externally audited; no gate or runtime saving is claimed
 // before the pending EC2 measurement.
 //! Successful-result support where pattern zero is fully determined by public data.

@@ -34,7 +34,7 @@ let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
 
 ## Numeric validity and capacity
 
-[GPT-6] `numeric::Num::of_literal` and `as_numeric` use the shared
+`numeric::Num::of_literal` and `as_numeric` use the shared
 `sparq_core::numeric_literal_valid` grammar/facets: `"5.0"^^xsd:integer` and
 `"1200"^^xsd:byte` are invalid; raw boundary whitespace is invalid too.
 

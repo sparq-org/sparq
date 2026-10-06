@@ -1,10 +1,10 @@
-<!-- [OPUS-5.5] zkp-16.2: usage reference for the optional vcq adapter over the exact V3 relation. -->
+<!-- zkp-16.2: usage reference for the optional vcq adapter over the exact V3 relation. -->
 # vcq adapter for the exact RISC Zero V3 evaluator
 
 `sparq_proved_evaluator::vcq` (detached crate `zk/sparql-evaluator/host`, cargo feature `vcq`,
 **off by default**) implements the `sparq-query-protocol` `QueryMethod` trait over the existing
 V3 relation. It is experimental and not externally audited (sq-qhy4). It authenticates no
-source credential, checks no credential status and no holder key. <!-- [OPUS-5.5] --> The research
+source credential, checks no credential status and no holder key. <!-- --> The research
 [method registry](../../../research/vc-query-methods.json) lists `method:risc0-exact` with
 `adapter_available` true for version 3 only, and only for the six tuples below (its
 `vcq_adapter` entry); versions 1 and 2 stay `false`. The registry mirrors the adapter's local
@@ -24,7 +24,7 @@ cargo test --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evalua
 | `Risc0ExactV3::new(&ArtifactPin, AcceptedGuest)` | Method from an independently approved pin and guest; rejects a guest that does not match the pin |
 | `.with_r0vm(PathBuf)` | Local `r0vm` used by `prove` |
 | `.with_verifier(Identifier, fn() -> u64)` | Verifier audience and clock used by the trait `verify` |
-| `system_unix_seconds()` | Default clock; a pre-epoch system time reads as `u64::MAX`, so every window rejects it as expired <!-- [OPUS-5.5] --> |
+| `system_unix_seconds()` | Default clock; a pre-epoch system time reads as `u64::MAX`, so every window rejects it as expired <!-- --> |
 | `verify_at(request, audience, now_unix, admission, presentation, store)` | Verification with explicitly supplied audience and Unix time |
 | `descriptor(&ArtifactPin)` | The exact `MethodDescriptor` a verifier lists in its request |
 | `derive_nonce`, `stored_request_digest`, `descriptor_digest`, `statement_digest`, `parameter_digest` | Documented digests below |
@@ -94,7 +94,7 @@ Native tests (`host/tests/vcq_adapter.rs`, unit tests in `host/src/vcq.rs`,
 `model/tests/vcq_request_shape.rs`) create no proof. The only receipt they use is a fake one,
 which must be rejected without touching the store.
 
-<!-- [OPUS-5.5] Records an independently certified run; this page re-executed nothing. -->
+<!-- Records an independently certified run; this page re-executed nothing. -->
 The genuine-receipt tests below were run once and independently certified at source
 `872c219ca18c6cc978d2f5c705f020e8c69748a6`. The record:
 
@@ -124,7 +124,7 @@ no benchmark. Any new claim needs its own run with the evidence listed below.
 
 ## Genuine receipt tests (`host/tests/vcq_genuine.rs`)
 
-<!-- [OPUS-5.5] Test definitions; the one certified run is recorded under Evidence status. -->
+<!-- Test definitions; the one certified run is recorded under Evidence status. -->
 Two ignored tests, compiled only with `--features vcq`, driven by one explicit job file named by
 `SPARQ_VCQ_PROOF_JOB`. The tests read environment variables but never set them.
 `RISC0_DEV_MODE` must be unset. A missing job, tool or input fails the test; nothing is skipped
@@ -228,7 +228,7 @@ verification and `record.json` after controls. The row-bound directory keeps its
 `record.json` marked `protocol_accepted: false`. `summary.json` is written only after every
 assertion. It counts 6 protocol-accepted genuine receipts plus 1 genuine receipt rejected by the
 row bound, and it counts controls separately. Limits: public synthetic data only; no source
-credential, status or holder key is authenticated; not externally audited. <!-- [OPUS-5.5] -->
+credential, status or holder key is authenticated; not externally audited. <!-- -->
 The certified run at `872c219ca` wrote a v1 summary, and that summary is frozen as written. Its
 `registry_adapter_available` field is a `false` hardcoded in that test source. It predates the
 registry's version 3 entry and says nothing about it. Newer source writes schema

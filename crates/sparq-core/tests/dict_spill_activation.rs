@@ -145,7 +145,7 @@ fn tiny_budget_eviction_matches_comfortable_budget_byte_for_byte() {
     Graph::build_external_spill(nt.as_bytes(), "ntriples", &tiny_dir, 256, &tiny).unwrap();
     Graph::build_external_spill(nt.as_bytes(), "ntriples", &comfy_dir, 256, &comfy).unwrap();
 
-    // [GPT-6] An obsolete inventory must not silently skip both current files.
+    // An obsolete inventory must not silently skip both current files.
     assert!(tiny_dir.join("numerics-v3.bin").is_file());
     assert!(comfy_dir.join("numerics-v3.bin").is_file());
     for &f in DICT_FILES {

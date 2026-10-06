@@ -1,6 +1,6 @@
 # Exact temporal memo: append work and remaining measurements
 
-[GPT-6] The graph memo stores exact seconds and checked fraction spans. Dictionary
+The graph memo stores exact seconds and checked fraction spans. Dictionary
 IDs and their lexical contents remain stable during supported delta updates.
 An initialized memo therefore extends under the existing exclusive graph borrow;
 it does not discard old entries or add a lock to each temporal lookup. An unused

@@ -1,4 +1,4 @@
-// [GPT-6] Genuine V3 graph-result receipts with independent request verification.
+// Genuine V3 graph-result receipts with independent request verification.
 #[path = "support/evidence.rs"]
 mod evidence;
 #[path = "support/graph_results.rs"]

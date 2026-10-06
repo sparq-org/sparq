@@ -53,7 +53,7 @@
 //! `D_ENTAIL_FLOOR` ratchet are byte-identical before/after. Two pieces stay local
 //! by DESIGN, not omission (design record §4 keeps facet validation dtype-resident):
 //!
-//! - **`integer_subtype_ok` (bounded-range facets) stays local.** [GPT-6] Both this
+//! - **`integer_subtype_ok` (bounded-range facets) stays local.** Both this
 //!   D-value parser and substrate `Num::of_literal` now reject out-of-range subtypes.
 //!   The local check remains necessary before the unbounded canonical-key path;
 //!   that path must preserve the distinct D-entailment value-space semantics.
@@ -1628,7 +1628,7 @@ mod tests {
         );
 
         // (3) RANGE FACETS. rdfD1 must not type a literal outside its datatype's value
-        // space, so "200"^^xsd:byte has NO D-value. [GPT-6] The shared numeric
+        // space, so "200"^^xsd:byte has NO D-value. The shared numeric
         // parser must reject the same invalid operand before comparison.
         assert!(
             d_value_key("200", &byte).is_none(),

@@ -1,4 +1,4 @@
-// [GPT-6] Private source commitments, parsing and SPARQL evaluation are proved.
+// Private source commitments, parsing and SPARQL evaluation are proved.
 #![no_main]
 
 risc0_zkvm::guest::entry!(main);

@@ -1,4 +1,4 @@
-"""[GPT-6] Discriminating oracle, coverage and evidence-boundary controls."""
+"""Discriminating oracle, coverage and evidence-boundary controls."""
 import itertools
 import json
 from pathlib import Path
@@ -94,7 +94,7 @@ class CorpusTests(unittest.TestCase):
         self.assertEqual(full["classifications"], [])
 
     def test_public_pattern_backend_reuses_unchanged_finite_domain(self):
-        # [OPUS-5.5] beadzkp-15.1.1: V4 cells mirror, never replace, legacy cells.
+        # beadzkp-15.1.1: V4 cells mirror, never replace, legacy cells.
         legacy = plan(finite_proof_universe(), ["noir_unsigned", "noir_signed"], "real")
         both = plan(finite_proof_universe(), ["noir_unsigned", "noir_signed", "noir_public_pattern"], "real")
         for backend in ("noir_unsigned", "noir_signed"):
@@ -241,7 +241,7 @@ class CorpusTests(unittest.TestCase):
             import_regressions(source)
 
     def test_reviewed_projection_overrides_keep_originals_and_denominator(self):
-        # [OPUS-5.5] Aliases come from the reviewed registry, not evaluator output.
+        # Aliases come from the reviewed registry, not evaluator output.
         source = Path(__file__).resolve().parents[2] / "crates/sparq-engine/tests/fixtures/builtin_edges.json"
         original = json.loads(source.read_text())["cases"]
         imported = import_regressions(source, ["v"])

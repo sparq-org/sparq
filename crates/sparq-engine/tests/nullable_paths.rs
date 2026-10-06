@@ -1,4 +1,4 @@
-// [GPT-6] Published SPARQL 1.1 property-path endpoint and multiplicity rules.
+// Published SPARQL 1.1 property-path endpoint and multiplicity rules.
 use sparq_core::Graph;
 use sparq_engine::{QueryBudget, query, query_with_budget};
 

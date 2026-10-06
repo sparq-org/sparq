@@ -1,4 +1,4 @@
-// [GPT-6] Raw RDF lexical validity is separate from XPath string construction.
+// Raw RDF lexical validity is separate from XPath string construction.
 use oxrdf::{Literal, NamedNode};
 use sparq_core::Graph;
 use sparq_engine::{QueryBudget, ask_with_budget, query_with_budget};
@@ -252,7 +252,7 @@ fn original_terms_are_preserved_and_valid_boolean_forms_still_work() {
     }
 }
 
-// [GPT-6] The same complete result goldens feed the versioned guest runners.
+// The same complete result goldens feed the versioned guest runners.
 #[test]
 fn shared_raw_literal_result_goldens() {
     let corpus: serde_json::Value = serde_json::from_str(include_str!(

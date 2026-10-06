@@ -29,7 +29,7 @@ assert_eq!(count, 1);
 
 ## Literal validation and evaluation caches
 
-[GPT-6] `numeric_literal_valid(value, datatype)` checks lexical forms and integer
+`numeric_literal_valid(value, datatype)` checks lexical forms and integer
 subtype facets on the raw RDF lexical form, independently of finite arithmetic
 capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
 representation and the existing NaN sentinel; larger literals can remain valid.

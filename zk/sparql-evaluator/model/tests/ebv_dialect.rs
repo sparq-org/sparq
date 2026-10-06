@@ -1,4 +1,4 @@
-// [GPT-6] Native relation controls; actual guest execution is a separate gate.
+// Native relation controls; actual guest execution is a separate gate.
 #![cfg(feature = "evaluate")]
 use sparq_proved_evaluator_model::*;
 

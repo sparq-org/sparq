@@ -198,7 +198,7 @@ fn parse_bool(v: &str) -> Option<bool> {
     }
 }
 
-/// [GPT-6] Borrowed literal parsing shares the substrate implementation and validity rules.
+/// Borrowed literal parsing shares the substrate implementation and validity rules.
 #[inline]
 fn num_of_parts(value: &str, datatype: &str) -> Option<Num> {
     Num::of_parts(value, datatype)
@@ -256,7 +256,7 @@ impl CompareTerm for IdTerm<'_> {
             return None;
         }
         match self.dict.term_parts(self.id) {
-            // [GPT-6] Use the same raw lexical/facet gate as engine comparisons.
+            // Use the same raw lexical/facet gate as engine comparisons.
             TermParts::Lit { value, datatype, lang: None }
                 if is_numeric_dt(datatype) && num_of_parts(value, datatype).is_some() =>
             {
@@ -634,7 +634,7 @@ mod tests {
             ("2.5", XSD_FLOAT),
             ("hello", XSD_STRING), // non-numeric datatype
             ("7", "http://www.w3.org/2001/XMLSchema#byte"), // derived integer type
-            // [GPT-6] Facets and raw lexical rejection must match the shared parser.
+            // Facets and raw lexical rejection must match the shared parser.
             ("1200", "http://www.w3.org/2001/XMLSchema#byte"),
             ("5.0", "http://www.w3.org/2001/XMLSchema#integer"),
             ("-1", "http://www.w3.org/2001/XMLSchema#unsignedLong"),
@@ -655,7 +655,7 @@ mod tests {
         }
     }
 
-    // [GPT-6] Pin rejection independently of the cross-layer parity oracle.
+    // Pin rejection independently of the cross-layer parity oracle.
     #[test]
     fn raw_numeric_whitespace_is_not_a_reasoner_number() {
         for dt in ["http://www.w3.org/2001/XMLSchema#integer", XSD_DECIMAL, XSD_FLOAT, XSD_DOUBLE] {

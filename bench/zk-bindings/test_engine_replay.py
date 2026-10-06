@@ -1,4 +1,4 @@
-"""[GPT-6] Pure controller/source controls; no engine, Cargo or prover processes."""
+"""Pure controller/source controls; no engine, Cargo or prover processes."""
 import copy
 import hashlib
 import json
@@ -30,7 +30,7 @@ class EngineReplayTests(unittest.TestCase):
     def test_exact_denominator_and_unchanged_original_generator(self):
         self.assertEqual(len(self.plan), self.matrix["configured_native_cells"])
         source = (replay.ROOT / "crates/sparq-bench/src/fuzz.rs").read_text()
-        addition = "\n// [GPT-6] Structured replay reuses this generator and these independent comparators.\npub(crate) mod replay;\n"
+        addition = "\n// Structured replay reuses this generator and these independent comparators.\npub(crate) mod replay;\n"
         self.assertEqual(source.count(addition), 1)
         self.assertEqual(hashlib.sha256(source.replace(addition, "").encode()).hexdigest(), self.matrix["original_generator_sha256"])
         self.assertEqual(replay.digest(self.registry), self.matrix["original_registry_sha256"])

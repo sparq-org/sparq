@@ -4,7 +4,7 @@
 //! the trait proves nothing about their correctness: this crate cannot check
 //! that `verify` runs a real proof check, and a [`VerifiedClaim`] is exactly
 //! as trustworthy as the backend that built it. This crate itself never builds a
-//! claim, computes a digest or verifies a proof. [OPUS-5.5]
+//! claim, computes a digest or verifies a proof.
 
 use core::fmt;
 
@@ -239,7 +239,7 @@ impl<R> VerifiedClaim<R> {
 
 /// A pluggable query proof method (draft §6.2 *QueryMethod*).
 ///
-/// `Request` is the verifier-stored request. [OPUS-5.5] Adapters should use
+/// `Request` is the verifier-stored request. Adapters should use
 /// [`StoredRequest`](crate::StoredRequest), or a type wrapping it, so the
 /// query text, original challenge, audience and validity window come from one
 /// validated value. `ChallengeStore` should be `dyn`

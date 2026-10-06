@@ -1,4 +1,4 @@
-// [GPT-6] Execute the complete EBV goldens before accepting typed capacity rejections.
+// Execute the complete EBV goldens before accepting typed capacity rejections.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator_methods::SPARQ_EXACT_GUEST_ELF;
 use sparq_proved_evaluator_model::{

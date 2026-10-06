@@ -1,4 +1,4 @@
-// [GPT-6] Genuine local exact-result measurements with independently accepted artifacts.
+// Genuine local exact-result measurements with independently accepted artifacts.
 //! Run fixed synthetic V2 contracts; see `experiments/README.md` for measurement scope.
 #[path = "exact_experiment/fixtures.rs"]
 mod fixtures;

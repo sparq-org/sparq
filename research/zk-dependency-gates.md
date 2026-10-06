@@ -1,6 +1,6 @@
 # Dependency gates for the detached evaluator
 
-[GPT-6] The evaluator and its nested guest have independent lockfiles. The root
+The evaluator and its nested guest have independent lockfiles. The root
 workspace's cargo-deny, cargo-vet and SBOM run cannot cover them implicitly.
 `scripts/rust-dependency-graphs.py` enumerates all three manifests for the existing
 supply-chain gate and daily advisory watchdog. Changes to nested lockfiles or SDK
@@ -48,7 +48,7 @@ audited because it builds.
 
 ## Existing bincode maintenance exception
 
-[GPT-6] The existing `RUSTSEC-2025-0141` ignore remains a maintenance-only
+The existing `RUSTSEC-2025-0141` ignore remains a maintenance-only
 exception. The [primary RustSec advisory](https://rustsec.org/advisories/RUSTSEC-2025-0141.html)
 reports that bincode is unmaintained and has no patched version; it does not
 report a vulnerability. This does not establish that every use is safe.

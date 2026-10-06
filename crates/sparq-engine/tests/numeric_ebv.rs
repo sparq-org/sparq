@@ -1,4 +1,4 @@
-// [GPT-6] SPARQL 1.1 §17.2.2 distinguishes numeric EBV from arithmetic capacity.
+// SPARQL 1.1 §17.2.2 distinguishes numeric EBV from arithmetic capacity.
 use sparq_core::Graph;
 use sparq_engine::{QueryBudget, ask_with_budget, query_with_budget};
 

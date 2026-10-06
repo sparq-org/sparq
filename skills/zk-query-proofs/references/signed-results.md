@@ -1,6 +1,6 @@
 # Canonical signed-integer result contract
 
-[GPT-6] With `sparq-zk-compose/successful-results`, the separate
+With `sparq-zk-compose/successful-results`, the separate
 `result::signed` API prepares and verifies released distinct answers using the
 canonical signed `i64` profile. It inherits the
 [successful-result contract](successful-results.md): positive BGPs, joins,

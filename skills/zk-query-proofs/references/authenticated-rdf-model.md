@@ -1,6 +1,6 @@
 # Issuer-authenticated RDF: native V5 model
 
-[OPUS-5.5] **Native model.** A separately pinned optional guest and a low-level
+**Native model.** A separately pinned optional guest and a low-level
 host API run it unchanged; at source `42d13fed` that guest was built and
 executed directly, without proving (see the
 [V5 guest reference](authenticated-rdf-guest.md)). A separate

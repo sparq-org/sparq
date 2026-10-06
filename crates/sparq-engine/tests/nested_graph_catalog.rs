@@ -1,4 +1,4 @@
-// [GPT-6] Nested GRAPH keeps the active dataset catalog across public query surfaces.
+// Nested GRAPH keeps the active dataset catalog across public query surfaces.
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
 use sparq_engine::{QueryBudget, ask, count, query, query_json, query_with_budget};

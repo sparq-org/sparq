@@ -1,4 +1,4 @@
-// [GPT-6] Recompute stale temporal values without rewriting the RDF archive.
+// Recompute stale temporal values without rewriting the RDF archive.
 #![cfg(feature = "mmap")]
 
 use oxrdf::{Literal, Term, vocab::xsd};

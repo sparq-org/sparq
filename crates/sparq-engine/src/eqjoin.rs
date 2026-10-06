@@ -451,7 +451,7 @@ fn key_of(graph: &Graph, id: Id) -> JKey {
                     _ => JKey::Term(id),
                 };
             }
-            // [GPT-6] Numeric cache misses include raw invalid lexicals, NaN,
+            // Numeric cache misses include raw invalid lexicals, NaN,
             // and representation limits. Padding is not normalized for typed RDF.
             // Defer these values to the exact evaluator: it can retain identical
             // terms without incorrectly pairing padded and valid numeric lexicals.
@@ -707,7 +707,7 @@ mod tests {
         assert!(on[0].iter().any(|c| c.contains("1.000000000000000010")), "bag: {:?}", on);
     }
 
-    // [GPT-6] Raw padded typed lexicals miss both the cache and numeric parser.
+    // Raw padded typed lexicals miss both the cache and numeric parser.
     // The Hard fallback must not invent equality to a distinct plain literal.
     #[test]
     fn whitespace_padded_numeric_does_not_pair_with_plain_value() {
@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(key_of(&g, id_of("\"1\"^^<http://www.w3.org/2001/XMLSchema#boolean>")), JKey::Bool(true));
         // Value-comparable temporals are the Hard class.
         assert_eq!(key_of(&g, id_of("2020-01-01T00:00:00Z")), JKey::Hard);
-        // [GPT-6] Raw padding is invalid. The exact fallback differs from the
+        // Raw padding is invalid. The exact fallback differs from the
         // ordinary numeric key; term identity remains available through Hard.
         assert_eq!(key_of(&g, id_of("\" 7\"")), JKey::Hard);
         assert_eq!(key_of(&g, dict::INLINE_BASE + 7), JKey::Num(7.0f64.to_bits()));

@@ -223,7 +223,7 @@ fn validate_prologue(prologue: &str) -> Result<(), String> {
     if prologue.is_empty() {
         return Ok(());
     }
-    // [GPT-6] This extension serializes inner patterns without a prologue.
+    // This extension serializes inner patterns without a prologue.
     // Reject unsupported semantics before that intentional metadata boundary.
     crate::PreparedQuery::parse(&format!("{prologue} ASK {{ }}"))?
         .resolve_ebv_semantics(Some(crate::EbvSemantics::Rec2013))

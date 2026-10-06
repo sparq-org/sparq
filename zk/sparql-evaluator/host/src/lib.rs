@@ -1,4 +1,4 @@
-// [GPT-6] Genuine local RISC Zero receipts only; experimental, not externally audited.
+// Genuine local RISC Zero receipts only; experimental, not externally audited.
 //! Proves exact bounded Sparq evaluation and verifies independent request binding.
 //!
 //! This opt-in detached crate is not part of the lean engine or WASM dependency
@@ -22,15 +22,15 @@ pub mod v2;
 /// Versioned blank-node identity and canonical graph-result proving and verification.
 pub mod v3;
 
-/// [OPUS-5.5] Optional `sparq-query-protocol` adapter over the V3 relation.
+/// Optional `sparq-query-protocol` adapter over the V3 relation.
 #[cfg(feature = "vcq")]
 pub mod vcq;
 
-/// [OPUS-5.5] Issuer-authenticated RDF (V5) proving and verification over a separate guest.
+/// Issuer-authenticated RDF (V5) proving and verification over a separate guest.
 #[cfg(feature = "authenticated-rdf")]
 pub mod authenticated_rdf;
 
-/// [OPUS-5.5] Optional `sparq-query-protocol` adapter over the V5 authenticated-RDF relation.
+/// Optional `sparq-query-protocol` adapter over the V5 authenticated-RDF relation.
 #[cfg(feature = "vcq-authenticated")]
 pub mod vcq_authenticated;
 
@@ -88,7 +88,7 @@ pub fn embedded_pin() -> ArtifactPin {
     }
 }
 
-/// [OPUS-5.5] The separately built V5 authenticated-RDF guest artifact, for export.
+/// The separately built V5 authenticated-RDF guest artifact, for export.
 ///
 /// This image is distinct from [`embedded_artifact`] and rejects V1–V3 input.
 /// Release operators must approve [`embedded_authrdf_pin`] before deployment.
@@ -97,7 +97,7 @@ pub fn embedded_authrdf_artifact() -> &'static [u8] {
     sparq_proved_evaluator_methods::SPARQ_AUTHRDF_GUEST_ELF
 }
 
-/// [OPUS-5.5] Exports a pin for the locally compiled V5 guest; operators must approve it.
+/// Exports a pin for the locally compiled V5 guest; operators must approve it.
 #[cfg(feature = "authenticated-rdf")]
 pub fn embedded_authrdf_pin() -> ArtifactPin {
     ArtifactPin {

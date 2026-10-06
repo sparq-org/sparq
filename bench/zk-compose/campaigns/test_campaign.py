@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Hermetic campaign protocol checks; stub outputs are never proof evidence."""
+"""Hermetic campaign protocol checks; stub outputs are never proof evidence."""
 import copy
 import json
 from pathlib import Path

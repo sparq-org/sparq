@@ -1,4 +1,4 @@
-// [OPUS-5.5] Native actual-form classification used by the vcq adapter; no proofs.
+// Native actual-form classification used by the vcq adapter; no proofs.
 #![cfg(feature = "graph-results")]
 
 use sparq_proved_evaluator_model::v3::{QueryShape, ShapeError, query_shape};

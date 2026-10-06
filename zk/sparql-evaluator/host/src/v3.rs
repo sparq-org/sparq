@@ -1,4 +1,4 @@
-// [GPT-6] Explicit V3 APIs preserve earlier versioned wire and commitment semantics.
+// Explicit V3 APIs preserve earlier versioned wire and commitment semantics.
 //! Blank-node and graph-result receipts bound to independently supplied V3 requests.
 
 use crate::{AcceptedGuest, Error, Nonces, Presentation, prove_serialized, verify_receipt};
@@ -97,7 +97,7 @@ fn verify_program(
     nonces: &mut impl Nonces,
     image_id: [u32; 8],
 ) -> Result<Journal, Error> {
-    // [OPUS-5.5] The public APIs run no extra check; behavior is unchanged.
+    // The public APIs run no extra check; behavior is unchanged.
     let no_check = |_: &Journal| Ok::<(), Infallible>(());
     match verify_checked_program(presentation, expected, nonces, image_id, no_check) {
         Ok((journal, ())) => Ok(journal),
@@ -106,7 +106,7 @@ fn verify_program(
     }
 }
 
-/// [OPUS-5.5] Failure of a checked V3 verification.
+/// Failure of a checked V3 verification.
 pub(crate) enum CheckedFailure<E> {
     /// Receipt, request binding or nonce consumption failed.
     Verification(Error),
@@ -114,7 +114,7 @@ pub(crate) enum CheckedFailure<E> {
     Check(E),
 }
 
-/// [OPUS-5.5] Verifies like [`verify_with_artifact`], plus a caller check.
+/// Verifies like [`verify_with_artifact`], plus a caller check.
 ///
 /// `check` sees the journal only after Succinct receipt verification, journal
 /// decoding and independent request binding, and runs BEFORE `nonces` is

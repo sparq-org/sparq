@@ -233,7 +233,7 @@ async fn direct_no_leak_matches_ldp_get_authorization() {
     );
 }
 
-// [GPT-6] Dataset assembly must not erase the request's VERSION contract.
+// Dataset assembly must not erase the request's VERSION contract.
 #[tokio::test]
 async fn endpoint_preserves_version_ebv_and_rejects_unknown_labels() {
     let harness = Harness::new(false, false).await;

@@ -1,4 +1,4 @@
-// [GPT-6] These are native model checks, not guest execution or proof evidence.
+// These are native model checks, not guest execution or proof evidence.
 #![cfg(feature = "evaluate")]
 
 use sparq_proved_evaluator_model::{
@@ -84,7 +84,7 @@ fn strict_profile_retains_normative_builtin_goldens_and_rejects_capacity_control
     assert_eq!((normative, capacity), (167, 2));
 }
 
-// [GPT-6] The V2 wire/profile is checked independently.
+// The V2 wire/profile is checked independently.
 mod v2_checks {
     use super::*;
     use sparq_proved_evaluator_model::v2::{

@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: direct V5 guest execution; these are not receipts or proofs.
+// zkp-14.5: direct V5 guest execution; these are not receipts or proofs.
 // Rust guideline compliant 2026-02-21
 //! Every test is ignored and needs `RISC0_SERVER_PATH` naming the real local
 //! `r0vm`. Inputs go straight to the executor, bypassing every host precheck, so

@@ -1,4 +1,4 @@
-# [OPUS-5.5] zkp-16.1 — typed negotiation and method contract for the vcq draft 0
+# zkp-16.1 — typed negotiation and method contract for the vcq draft 0
 # (`research/vc-query-protocol.md`). A dependency-free LEAF: no proof backend,
 # wire encoding or cryptography lives here. Its only consumer is the detached
 # zk/sparql-evaluator/host crate's OFF-by-default `vcq` feature, so

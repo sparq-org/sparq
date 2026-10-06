@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Fail-closed proof corpus planning, execution, retention and replay."""
+"""Fail-closed proof corpus planning, execution, retention and replay."""
 import argparse
 from collections import Counter
 import hashlib
@@ -133,7 +133,7 @@ PUBLIC_PATTERN_PACKAGES = ("result_v4_k1_n16_p3_r4_f0_d10", "result_v4_k2_n16_p3
 
 
 def check_public_pattern(job, outcome, stage):
-    """[OPUS-5.5] V4 cells never fall back or count an API refusal as an attack."""
+    """V4 cells never fall back or count an API refusal as an attack."""
     executed = [c.get("kind") for c in outcome["controls"]
                 if isinstance(c, dict) and c.get("executed") is True]
     if len(set(executed)) != len(executed):

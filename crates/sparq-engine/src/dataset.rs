@@ -75,7 +75,7 @@ fn find_named<'a>(graph: &'a Graph, name: &NamedNode) -> Option<&'a Graph> {
 /// never pays for this.
 pub(crate) fn build_active(graph: &Graph, ds: &QueryDataset) -> Graph {
     let visible = |n: &NamedNode| crate::exec::view::allows(&Term::NamedNode(n.clone()));
-    // [GPT-6] Named graph identity is preserved; only FROM's RDF merge renames
+    // Named graph identity is preserved; only FROM's RDF merge renames
     // source nodes. Inspect selected named graphs before choosing a disjoint prefix.
     let mut named = Vec::new();
     for n in ds.named.as_deref().unwrap_or_default() {
@@ -93,7 +93,7 @@ pub(crate) fn build_active(graph: &Graph, ds: &QueryDataset) -> Graph {
             continue; // view: non-visible ≡ absent
         }
         if let Some(g) = find_named(graph, n) {
-            // [GPT-6] One snapshot per distinct IRI; SPARQL 1.1 §13.2.3 does not
+            // One snapshot per distinct IRI; SPARQL 1.1 §13.2.3 does not
             // prescribe acquisition identity for repeated dataset-clause IRIs.
             let index = seen.len() - 1;
             default.extend(decode_triples(g).into_iter().map(|triple| {

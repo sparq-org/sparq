@@ -1,6 +1,6 @@
 # Exact temporal values and evaluation capacity
 
-[GPT-6] `sparq-core::temporal::ExactTimeline` / `ExactTemporal` borrow validated
+`sparq-core::temporal::ExactTimeline` / `ExactTemporal` borrow validated
 lexical fractions and compare checked integer whole seconds followed by decimal
 digits. They preserve nanoseconds, fractions near a minute boundary and separate
 seconds at large years. Parsing/comparison allocate no memory and take linear

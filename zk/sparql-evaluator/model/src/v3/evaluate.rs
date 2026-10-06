@@ -1,4 +1,4 @@
-// [GPT-6] Native/guest-shared V3 evaluation; execution evidence is separate.
+// Native/guest-shared V3 evaluation; execution evidence is separate.
 use super::*;
 use crate::evaluate::{DatasetProfile, admit_query, ordered, query_budget};
 use crate::EvaluationError;
@@ -30,7 +30,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     evaluate_inner(witness, |_, legacy_message| Rejected(legacy_message))
 }
 
-/// [GPT-6] Evaluates V3 graph/table results with actual typed engine causes.
+/// Evaluates V3 graph/table results with actual typed engine causes.
 ///
 /// Journal framing, blank-node canonicalization and DESCRIBE policy are unchanged.
 /// Ordinary relation/canonicalization rejections retain their existing category;
@@ -66,7 +66,7 @@ fn evaluate_inner<E: From<Rejected>>(
         PreparedQuery::parse(&request.query).map_err(|_| Rejected("SPARQL parse rejected"))?;
     admit_query(prepared.query(), DatasetProfile::GraphResultsBlankFree)?;
     let graph = v2::evaluate::build_dataset(&witness.dataset, &request.policy.dataset, true)?;
-    // [GPT-6] No admitted expression creates a blank term before WHERE finishes:
+    // No admitted expression creates a blank term before WHERE finishes:
     // BNODE/custom calls and triple terms are excluded, query blank nodes are
     // existential variables, and template nodes are allocated only afterward.
     // Inspect all source graphs, including unselected named graphs, so captured
@@ -113,7 +113,7 @@ fn evaluate_inner<E: From<Rejected>>(
             result::graph(triples, canonical)?
         }
         spargebra::Query::Describe { .. } => {
-            // [GPT-6] The enum has one explicitly bound closure policy; the engine
+            // The enum has one explicitly bound closure policy; the engine
             // traverses outgoing blank objects in the selected active default graph.
             let triples = match &request.policy.describe {
                 DescribePolicy::OutgoingBlankNodeClosure => {

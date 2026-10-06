@@ -1,4 +1,4 @@
-// [GPT-6] Optional local diagnostics, never part of a proof presentation.
+// Optional local diagnostics, never part of a proof presentation.
 use serde::Serialize;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Instant;

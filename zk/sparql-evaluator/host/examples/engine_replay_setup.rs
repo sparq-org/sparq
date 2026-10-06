@@ -1,4 +1,4 @@
-// [OPUS-5.5] Synthetic experiment setup for the engine replay proof bridge.
+// Synthetic experiment setup for the engine replay proof bridge.
 //! Derive holder and verifier manifests for one explicitly synthetic replay cell.
 //!
 //! See `bench/zk-bindings/engine-proof-replay.md` for usage and trust boundary.

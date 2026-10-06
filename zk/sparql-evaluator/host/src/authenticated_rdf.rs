@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: low-level V5 host API over the separately pinned guest.
+// zkp-14.5: low-level V5 host API over the separately pinned guest.
 // Rust guideline compliant 2026-02-21
 //! Issuer-authenticated RDF (V5) receipts bound to independent verifier requests.
 //!
@@ -109,7 +109,7 @@ pub fn verify_with_artifact(
     }
 }
 
-// [OPUS-5.5] zkp-14.6: crate-private hook used by `crate::vcq_authenticated`.
+// zkp-14.6: crate-private hook used by `crate::vcq_authenticated`.
 // `check` sees only a verified, request-bound journal and runs before the nonce
 // is consumed; a rejected check never reaches `nonces`. Behavior is unchanged.
 pub(crate) fn verify_checked<T, E>(

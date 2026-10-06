@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.6: ignored genuine-receipt driver for the V5 vcq adapter.
+// zkp-14.6: ignored genuine-receipt driver for the V5 vcq adapter.
 // Rust guideline compliant 2026-02-21
 //! Compiled only with `--features vcq-authenticated`.
 //!

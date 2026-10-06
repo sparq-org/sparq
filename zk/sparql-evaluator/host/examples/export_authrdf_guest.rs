@@ -1,4 +1,4 @@
-// [OPUS-5.5] zkp-14.5: export the separate V5 guest for independent release review.
+// zkp-14.5: export the separate V5 guest for independent release review.
 use sparq_proved_evaluator::{embedded_authrdf_artifact, embedded_authrdf_pin, embedded_pin};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

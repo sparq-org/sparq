@@ -1,6 +1,6 @@
 # Raw literal validity and string construction
 
-[GPT-6] RDF literal lexicals are preserved, including ill-typed terms. Numeric and
+RDF literal lexicals are preserved, including ill-typed terms. Numeric and
 boolean interpretation checks the raw lexical against its datatype. XML boundary
 whitespace is not removed from an already typed literal. By contrast, a constructor
 such as `xsd:integer(" 1 ")` first normalizes its string input as specified by XPath.

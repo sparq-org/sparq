@@ -1,4 +1,4 @@
-// [GPT-6] The named-dataset relation retains shared correlation boundaries.
+// The named-dataset relation retains shared correlation boundaries.
 #![cfg(feature = "evaluate")]
 use sparq_proved_evaluator_model::{CanonicalResult, DatasetAuthority, ProofContract, v2};
 

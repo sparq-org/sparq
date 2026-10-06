@@ -1,4 +1,4 @@
-//! [OPUS-5.5] Stored-request, local-encoding and shared challenge-store tests.
+//! Stored-request, local-encoding and shared challenge-store tests.
 //!
 //! These are contract and mock tests. Every store and simulated method here
 //! is a test double, and these tests generate and verify ZERO proofs.

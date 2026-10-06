@@ -330,7 +330,7 @@ literals. The decoder accepts only that exact datatype and returns
 `CodecError::InvalidInteger` for malformed or out-of-range lexical forms.
 The proposed wrapper codec currently normalizes boundary XML whitespace:
 `" 7"^^xsd:integer` decodes as `7`, while interior whitespace such as `"+ 1"`
-is rejected. [GPT-6] This is the codec's existing behavior, distinct from the
+is rejected. This is the codec's existing behavior, distinct from the
 query engine's strict raw RDF lexical validation. The engine normalizes only
 string-sourced constructors; this change does not alter the proposed codec.
 `encode_lang_string` validates a BCP47 language tag and produces an

@@ -381,7 +381,7 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1
 
-      # [GPT-6] Rebuild the immutable foundation separately from the PR candidate.
+      # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
       - name: Rebuild fixed foundation result keys independently
         if: steps.changes.outputs.zk == 'true'
@@ -393,9 +393,9 @@ jobs:
           git archive 713025dc0fcdcbdcd070ba4dcbde524be50ba055 zk/compose | tar -x -C "$baseline_dir"
           python3 bench/zk-compose/scripts/verify_result_evidence.py --baseline-root "$baseline_dir"
 
-      # [GPT-6] The additive result contract is default-off, so it needs explicit
+      # The additive result contract is default-off, so it needs explicit
       # feature coverage: real private-witness rejection, ZK proofs and ABI anchors.
-      # [OPUS-5.5] beadzkp-15.1: the ignored public-pattern proof test fails closed
+      # beadzkp-15.1: the ignored public-pattern proof test fails closed
       # without a NEW absolute evidence directory outside the checkout. runner.temp
       # is the existing per-job parent; the test itself creates the unique leaf.
       - name: Run selected-result private-witness and verifier tests (real bb)
@@ -414,7 +414,7 @@ jobs:
           nargo test --package sparq_zk_compose_core result_signed_integer::
           nargo test --package sparq_zk_compose_core result_public::
 
-      # [OPUS-5.5] beadzkp-15.1: evidence files are written only after every assertion
+      # beadzkp-15.1: evidence files are written only after every assertion
       # passes, so a failed step may leave the directory empty or absent; missing
       # files are an error whenever the step succeeded.
       - name: Retain public-pattern proof evidence including failed runs

@@ -1,4 +1,4 @@
-// [GPT-6] Actual guest execution over shared REC-derived and capacity goldens.
+// Actual guest execution over shared REC-derived and capacity goldens.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator_methods::SPARQ_EXACT_GUEST_ELF;
 use sparq_proved_evaluator_model::{

@@ -1,4 +1,4 @@
-// [GPT-6] Captured BOUND is an ambiguous 2013 shape, not a normative false Boolean.
+// Captured BOUND is an ambiguous 2013 shape, not a normative false Boolean.
 #![cfg(feature = "evaluate")]
 use sparq_proved_evaluator_model::{
     CanonicalResult, DatasetAuthority, Dialect, Policy, PrivateDataset, ProofContract, Request,

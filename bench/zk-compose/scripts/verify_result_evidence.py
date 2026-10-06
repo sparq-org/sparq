@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Check result compatibility evidence; optionally rebuild the fixed foundation."""
+"""Check result compatibility evidence; optionally rebuild the fixed foundation."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def is_hex(value: object, length: int = 64) -> bool:
 
 
 def check_measured_source(source: object) -> None:
-    """[OPUS-5.5] Require exact, explicitly non-canonical candidate provenance."""
+    """Require exact, explicitly non-canonical candidate provenance."""
     if not isinstance(source, dict):
         raise ValueError("measured source provenance is missing")
     if not all(is_hex(source.get(field), 40) for field in ("source_commit", "source_tree")):
@@ -105,7 +105,7 @@ def check_capacity(capacity: dict, data: dict, snapshot: dict) -> None:
 
 
 def check_signed(signed: dict, data: dict, snapshot: dict) -> None:
-    """[GPT-6] Bind the fixed signed-capacity measurement inventory to its source."""
+    """Bind the fixed signed-capacity measurement inventory to its source."""
     if (signed["source_files"] != data["source_files"] or signed["tool_versions"] != data["tool_versions"]
             or signed.get("measured_source") != data["measured_source"]):
         raise ValueError("signed evidence source or toolchain differs from compatibility evidence")
@@ -131,7 +131,7 @@ def legacy_acir(capacity: dict, signed: dict) -> set[str]:
 
 
 def check_public(public: dict, data: dict, snapshot: dict, regression: dict, legacy: set[str]) -> None:
-    """[OPUS-5.5] Bind the version-4 static measurements to the same source and tools."""
+    """Bind the version-4 static measurements to the same source and tools."""
     if (public["source_files"] != data["source_files"] or public["tool_versions"] != data["tool_versions"]
             or public.get("measured_source") != data["measured_source"]):
         raise ValueError("public-pattern evidence source, toolchain or provenance differs")
@@ -183,7 +183,7 @@ def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict,
     changed = copy.deepcopy(data)
     changed["comparison_base"] = "0" * 40
     variants.append(changed)
-    # [OPUS-5.5] Candidate provenance: relabelled canonical, truncated commit, bad tool hash.
+    # Candidate provenance: relabelled canonical, truncated commit, bad tool hash.
     for path, value in ((("canonical",), True), (("source_commit",), "14d426bd"),
                         (("tool_executable_sha256", "bb"), "invalid")):
         changed = copy.deepcopy(data)
@@ -241,7 +241,7 @@ def self_test(data: dict, capacity: dict, signed: dict, snapshot: dict,
         except ValueError:
             continue
         raise AssertionError(f"corrupted signed evidence variant {index} was accepted")
-    # [OPUS-5.5] Version-4 record corruptions; each tuple is (public, gate JSON, regression snapshot).
+    # Version-4 record corruptions; each tuple is (public, gate JSON, regression snapshot).
     legacy = legacy_acir(capacity, signed)
     member = sorted(PUBLIC_MEMBERS)[0]
     public_variants = []

@@ -1,4 +1,4 @@
-// [GPT-6] SPARQL 1.1 substitution and property-path multiset regressions.
+// SPARQL 1.1 substitution and property-path multiset regressions.
 use sparq_core::Graph;
 use sparq_engine::{query, query_with_budget, QueryBudget};
 

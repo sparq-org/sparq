@@ -1,4 +1,4 @@
-"""[GPT-6] Hermetic provenance rejection tests; no simulated proof is evidence."""
+"""Hermetic provenance rejection tests; no simulated proof is evidence."""
 
 import importlib.util
 import json
@@ -153,7 +153,7 @@ class EvidenceGuards(unittest.TestCase):
         self.assertNotIn("--release", host)
         with self.assertRaisesRegex(ValueError, "unknown package"):
             evidence.clean_command("ambiguous", "Cargo.toml", self.root, [])
-        # [OPUS-5.5] zkp-14.5: the V5 guest invalidates its own guest/release artifacts.
+        # zkp-14.5: the V5 guest invalidates its own guest/release artifacts.
         authrdf = evidence.clean_command("authrdf-guest", evidence.AUTHRDF_GUEST_MANIFEST,
                                          self.root, ["sparq-canon"])
         self.assertEqual(authrdf[authrdf.index("--target") + 1], "riscv32im-risc0-zkvm-elf")
@@ -193,7 +193,7 @@ class EvidenceGuards(unittest.TestCase):
         self.assertIn('"--example", "export_authrdf_guest"', runner)
         self.assertIn("creates no V5 receipt", evidence.AUTHRDF_SCOPE)
 
-    # [OPUS-5.5] zkp-14.6: feature and target selection of the added commands.
+    # zkp-14.6: feature and target selection of the added commands.
     @staticmethod
     def targets(argv):
         return [argv[index + 1] for index, arg in enumerate(argv) if arg == "--test"]
@@ -299,7 +299,7 @@ class EvidenceGuards(unittest.TestCase):
         self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", workflow)
         runner = (root / "scripts/ci_exact_evaluator_evidence.py").read_text()
         self.assertIn('"--nocapture", "--test-threads=1"', runner)
-        # [OPUS-5.5] zkp-14.6: once, for the direct V5 executor target only (see above).
+        # zkp-14.6: once, for the direct V5 executor target only (see above).
         self.assertEqual(runner.count('"--ignored"'), 1)
 
 

@@ -1,4 +1,4 @@
-// [GPT-6] Native V2 semantics and commitment tests; not receipt evidence.
+// Native V2 semantics and commitment tests; not receipt evidence.
 #![cfg(feature = "evaluate")]
 
 use sparq_proved_evaluator_model::v2::*;

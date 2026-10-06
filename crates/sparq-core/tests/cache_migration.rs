@@ -1,4 +1,4 @@
-// [GPT-6] Legacy derived caches must not override current literal semantics.
+// Legacy derived caches must not override current literal semantics.
 #![cfg(feature = "mmap")]
 
 use oxrdf::{Literal, Term, vocab::xsd};

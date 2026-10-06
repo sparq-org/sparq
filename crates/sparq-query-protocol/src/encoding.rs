@@ -1,6 +1,6 @@
 //! Versioned, deterministic LOCAL byte encoding of stored requests and descriptors.
 //!
-//! [OPUS-5.5] Profile [`LOCAL_ENCODING_PROFILE`] (`local-struct-v1`) maps a
+//! Profile [`LOCAL_ENCODING_PROFILE`] (`local-struct-v1`) maps a
 //! [`StoredRequest`] or a [`MethodDescriptor`] to exact bytes. It is a
 //! STRUCTURAL encoding of this crate's typed values: it is not RDF or SPARQL
 //! canonicalization, not the draft §7.2 wire profile, not an interoperable

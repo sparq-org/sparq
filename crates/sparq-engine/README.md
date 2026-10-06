@@ -10,10 +10,10 @@ The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.o
 
 Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN ANALYZE`, and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
 
-<!-- [GPT-6] The detached proof guest does not add an engine dependency. -->
+<!-- The detached proof guest does not add an engine dependency. -->
 The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`, rejecting ambient NOW/RAND/UUID in that target only. The experiment is not externally audited.
 
-[GPT-6] Prepared query, construct and describe APIs have `_with_budget_detailed` variants preserving typed budget/domain causes; existing String APIs remain compatible. `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
+Prepared query, construct and describe APIs have `_with_budget_detailed` variants preserving typed budget/domain causes; existing String APIs remain compatible. `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
 
 ## 🚀 Quickstart
 
@@ -45,7 +45,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
   Read-query `FROM` standardizes source blank nodes apart; `GRAPH` preserves identity.
-  [GPT-6] Nested `GRAPH` preserves the catalog, empty graphs, bindings and `FROM NAMED` restrictions.
+  Nested `GRAPH` preserves the catalog, empty graphs, bindings and `FROM NAMED` restrictions.
 - **Deterministic blank nodes** *(opt-in `deterministic-blank-nodes`)* — entropy-free
   parser/template labels, fresh per solution and disjoint from active input; see the SKILL.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
@@ -106,11 +106,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Lazy top-k string sort key** *(opt-in `topk-lazy-strkey` feature, OFF by default)* — an `ORDER BY` on a plain `xsd:string` column with a `LIMIT` builds a zero-allocation id-carrying sort key (compared via the literal's zero-copy value bytes) instead of reconstructing + re-allocating the literal value per input row, so a top-k over a large scan pays no key allocation for the rows it discards. Byte-identical output (a full-output differential + W3C ORDER BY conformance); off, zero code compiles, no new deps.
 - **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; [GPT-6 Astra] a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.
 - **SELECT-JSON entry cancellation** — [GPT-6] a budget already expired or cancelled at evaluator entry refuses before scanning, queuing Rayon work, or emitting a header. Budgets that trip during evaluation retain the cooperative checks and error behavior.
-- **VERSION-aware parsing with your own parser** — [OPUS-5.5] `parse_versioned_query(parser, text)` / `parse_versioned_update(parser, text)` parse the unchanged text with the caller's configured `spargebra::SparqlParser` (base IRI, prefixes, custom aggregates; it stays the syntax authority) and return the algebra plus the leading prologue's `VERSION` labels in source order. Pass query labels to `PreparedQuery::from_query_with_versions`; `parse_update_rec2013` applies UPDATE's REC 2013 restriction. Labels are not validated at parse time. `VersionedParseError::is_syntax` keeps the parser's diagnostic text unchanged; `is_prologue` marks a declaration that could not be accounted for, which is refused rather than guessed. Only the stable crates.io `spargebra` 0.4.6 API is used, including under its `standard-unicode-escaping` feature. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
+- **VERSION-aware parsing with your own parser** — `parse_versioned_query(parser, text)` / `parse_versioned_update(parser, text)` parse the unchanged text with the caller's configured `spargebra::SparqlParser` (base IRI, prefixes, custom aggregates; it stays the syntax authority) and return the algebra plus the leading prologue's `VERSION` labels in source order. Pass query labels to `PreparedQuery::from_query_with_versions`; `parse_update_rec2013` applies UPDATE's REC 2013 restriction. Labels are not validated at parse time. `VersionedParseError::is_syntax` keeps the parser's diagnostic text unchanged; `is_prologue` marks a declaration that could not be accounted for, which is refused rather than guessed. Only the stable crates.io `spargebra` 0.4.6 API is used, including under its `standard-unicode-escaping` feature. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 
 ## 📚 Learn more
 
-- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine). [GPT-6] Prepared-query rewrites use `with_query` to retain VERSION metadata. UPDATE and the PATHS extension are REC 2013 only and reject unsupported announcements; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
+- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine). Prepared-query rewrites use `with_query` to retain VERSION metadata. UPDATE and the PATHS extension are REC 2013 only and reject unsupported announcements; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md) and the planning / parallelism verdicts in [`research/`](../../research).
 - **Performance** — numbers live on the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench), not in docs.
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

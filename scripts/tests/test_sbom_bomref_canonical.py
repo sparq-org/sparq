@@ -220,7 +220,7 @@ class TestBomRefNormalization(unittest.TestCase):
         self.assertEqual(root, "pkg:cargo/sparq-cli@0.1.0")
 
     def test_explicit_package_identity_differs_from_directory(self):
-        # [GPT-6] Real detached member refs use #name@version, including targets.
+        # Real detached member refs use #name@version, including targets.
         raw = "path+file:///build/zk/sparql-evaluator/host#sparq-proved-evaluator@0.1.0"
         canonical = "pkg:cargo/sparq-proved-evaluator@0.1.0"
         doc = {"components": [{"name": "sparq-proved-evaluator", "bom-ref": raw,

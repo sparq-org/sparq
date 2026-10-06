@@ -1,4 +1,4 @@
-//! [GPT-6] Bounded joint selection over successful private row witnesses.
+//! Bounded joint selection over successful private row witnesses.
 
 use super::{
     assemble_plan, extend_bindings, released_bindings, validate_released, DisclosurePlan,

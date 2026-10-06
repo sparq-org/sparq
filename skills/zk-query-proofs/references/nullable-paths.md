@@ -1,6 +1,6 @@
 # Nullable alternatives and inverses in the exact evaluator
 
-[GPT-6] This bounded admission slice uses the published
+This bounded admission slice uses the published
 [SPARQL 1.1 path evaluation rules](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalPP).
 Inverse swaps the endpoints. Alternative is bag union, so `(p*|p*)` retains two
 zero-length solutions for a concrete endpoint, including a term absent from the

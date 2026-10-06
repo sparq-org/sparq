@@ -1,4 +1,4 @@
-// [GPT-6] Independent, deliberately unoptimized SPARQL 1.1 §18.4 oracle.
+// Independent, deliberately unoptimized SPARQL 1.1 §18.4 oracle.
 // It evaluates the published operators bottom-up without scan hints or SCCs.
 use super::*;
 use PropertyPathExpression as P;

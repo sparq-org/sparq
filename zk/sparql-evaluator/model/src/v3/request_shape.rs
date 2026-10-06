@@ -1,4 +1,4 @@
-// [OPUS-5.5] Host-only query-shape classification for protocol adapters; not in the guest.
+// Host-only query-shape classification for protocol adapters; not in the guest.
 //! Classifies the actual form of a V3-admitted query from its parse.
 //!
 //! A protocol adapter must not trust a stored form label. [`query_shape`] runs

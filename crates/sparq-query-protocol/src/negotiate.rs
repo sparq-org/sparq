@@ -14,7 +14,7 @@
 //! private fields and is built only by [`admit`], which guarantees only that
 //! the value passed this structural admission. It is not an unforgeable
 //! security token: anyone can declare local capabilities and admit against
-//! them. [OPUS-5.5]
+//! them.
 
 use crate::descriptor::{
     Capabilities, CapabilityTuple, ChallengePolicy, Completeness, DatasetAssembly, Enforcer,

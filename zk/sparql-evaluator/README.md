@@ -1,6 +1,6 @@
 # Proved Sparq evaluator
 
-<!-- [GPT-6] zkp-10.1; this is a bounded research implementation, not an audit. -->
+<!-- zkp-10.1; this is a bounded research implementation, not an audit. -->
 
 This detached Cargo workspace proves execution of the actual Sparq evaluator on
 one complete, bounded RDF dataset. V1 retains the default-graph relation; the
@@ -146,7 +146,7 @@ Pins: RISC Zero SDK/build/server 3.0.6, guest Rust 1.97.0, host repository Rust
 selected by `RISC0_HOME` and requires an explicitly supplied local `r0vm` path.
 It never delegates private inputs to a hosted prover.
 
-[GPT-6] Narrow [SDK dependency patches](../../vendor/zk-sdk/README.md) remove unused
+Narrow [SDK dependency patches](../../vendor/zk-sdk/README.md) remove unused
 discovery dependencies, select derive macros only for the features that use them,
 and update a tracing API without changing constraint arithmetic.
 Both detached locks retain the SDK pin. The patch record preserves
@@ -230,7 +230,7 @@ detached evaluator and supplies its existential path intermediates.
 The mandatory CI lane exports the accepted executable, actual synthetic receipts
 and source/toolchain/HAL evidence using the [campaign evidence contract](../../skills/zk-query-proofs/references/evaluator-evidence.md). Partial uploads are not success records.
 
-[GPT-6] The shared raw-literal boundary checks numeric/boolean typed lexicals
+The shared raw-literal boundary checks numeric/boolean typed lexicals
 verbatim and retains XML whitespace normalization for string constructors. The
 separate `raw-literal-whitespace.json` matrix contains 32 complete result controls;
 its native and actual-guest runners authenticate each case's source dataset.
@@ -247,25 +247,25 @@ remain distinguishable. Private engine diagnostic text is discarded. The legacy
 distinct query and graph messages. Canonicalizer library failures are not inferred
 to be capacity failures from their text. Native definitions in
 `model/tests/versioned_evaluation_causes.rs` cover both authorities and graph forms;
-actual execution at the integrated source remains separately required. [GPT-6]
+actual execution at the integrated source remains separately required.
 
 The V3 shared guest regression runner retains the original builtin, temporal,
 lexical, aggregate, EXISTS, nullable-path and dialect fixtures under agreed scope.
 Its exact success/profile/capacity denominators are asserted in
 `host/tests/actual_v3_regressions.rs`; these are actual-execution definitions, not
 receipt evidence. Both-authority native replay and the genuine authority receipt
-families remain distinct. V2 also executes the original VERSION controls. [GPT-6]
+families remain distinct. V2 also executes the original VERSION controls.
 
 ## Exact experiment adapter
 
-[GPT-6] The opt-in [experiment adapter](experiments/README.md) uses fixed synthetic
+The opt-in [experiment adapter](experiments/README.md) uses fixed synthetic
 V2 contracts, independently accepted artifact/pin inputs, genuine local succinct
 receipts and separate verifier controls. Its measurements explicitly distinguish
 inclusive API costs, unavailable internal stages and noncanonical provenance.
 
 ## Engine replay proof bridge
 
-[OPUS-5.5] The experimental [engine replay proof bridge](../../bench/zk-bindings/engine-proof-replay.md)
+The experimental [engine replay proof bridge](../../bench/zk-bindings/engine-proof-replay.md)
 prepares one retained native engine replay cell's unchanged `query.rq` and
 `data.ttl` for the exact V3 relation. Native preparation tests
 (`model/tests/engine_replay.rs`) check conversion, identity, request and anchor
@@ -293,7 +293,7 @@ this bridge has been recorded yet.
 
 ## vcq query-method adapter
 
-[OPUS-5.5] The optional `vcq` feature (off by default; `cargo test -p
+The optional `vcq` feature (off by default; `cargo test -p
 sparq-proved-evaluator --features vcq`) adds `vcq::Risc0ExactV3`, a
 `sparq-query-protocol` `QueryMethod` over the V3 relation. It uses
 `v3::prove_with_artifact` and the existing checked V3 verification with an
@@ -307,7 +307,7 @@ selected descriptor. The actual query form is checked by the host-only
 original challenge is consumed once through the shared store. The existing
 public verify APIs keep their behavior. The registry sets `adapter_available: true`
 for `method:risc0-exact` version 3 and these six tuples only; V1 and V2 stay `false`.
-[OPUS-5.5] The ignored `host/tests/vcq_genuine.rs` defines the genuine-receipt run.
+The ignored `host/tests/vcq_genuine.rs` defines the genuine-receipt run.
 It uses an explicit `SPARQ_VCQ_PROOF_JOB`, an approved guest and pin, and a public
 synthetic fixture. It proves six accepted tuples plus one receipt that the protocol
 row bound rejects after the proof checks and before challenge consumption. Controls
@@ -321,7 +321,7 @@ for the record and its caveats.
 
 ## Issuer-authenticated RDF model
 
-[OPUS-5.5] The model crate's `authenticated-rdf` feature (off by default) adds the
+The model crate's `authenticated-rdf` feature (off by default) adds the
 native relation version 5 in `authenticated_rdf`; V1–V3 are unchanged. The
 verifier-owned policy table authorizes each issuer, verification method and public
 key. Each credential needs strict Ed25519 over the hashes of its RDFC-1.0 canonical
@@ -332,7 +332,7 @@ authenticated provenance values. It makes no credential status, holder binding o
 wallet-completeness claim. See the
 [native model reference](../../skills/zk-query-proofs/references/authenticated-rdf-model.md).
 
-[OPUS-5.5] zkp-14.5 adds source for a separately pinned V5 guest
+zkp-14.5 adds source for a separately pinned V5 guest
 (`methods/guest-authrdf`, methods feature `authenticated-rdf`, off by default).
 The host feature `authenticated-rdf` (off by default) adds a low-level API:
 `authenticated_rdf::{prove_with_artifact, verify_with_artifact}` against an
@@ -364,7 +364,7 @@ for digests, identities and audit records.
 
 ## vcq adapter for authenticated RDF (V5)
 
-[OPUS-5.5] zkp-14.6 adds the optional `vcq-authenticated` host feature (off by
+zkp-14.6 adds the optional `vcq-authenticated` host feature (off by
 default; it only combines `vcq` and `authenticated-rdf`). It adds source for
 `vcq_authenticated::Risc0AuthenticatedRdfV5`, a `sparq-query-protocol`
 `QueryMethod` over the V5 relation. The method is

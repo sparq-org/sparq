@@ -1,4 +1,4 @@
-// [GPT-6] Explicit V2 APIs preserve V1 wire and commitment semantics.
+// Explicit V2 APIs preserve V1 wire and commitment semantics.
 //! Complete named-dataset receipts bound to independently supplied V2 requests.
 
 use crate::{AcceptedGuest, Error, Nonces, Presentation, prove_serialized, verify_receipt};

@@ -328,7 +328,7 @@ fn pair_corpus() -> Vec<(S, S)> {
 /// an un-normalized window.
 ///
 /// `start < 1` cases carry the F&O window semantics that `sq-3x7dl.6` fixed in the
-/// circuit. [GPT-6] sparq-engine now agrees, so every row must pass the ordinary
+/// circuit. sparq-engine now agrees, so every row must pass the ordinary
 /// oracle/reference equality check and remain a live circuit assertion.
 fn substring_corpus() -> Vec<(&'static str, usize, i64, i64)> {
     vec![
@@ -850,7 +850,7 @@ fn substring_section(
         let expr = format!("SUBSTR({}, {start}, {length})", sparql_str(value));
         let sparq_answer = oracle_plain_string(g, &expr);
         let spec_answer = fo_substring(value, start, length);
-        // [GPT-6] The historical shifted-window exception is fixed. Any renewed
+        // The historical shifted-window exception is fixed. Any renewed
         // mismatch must now abort generation, including starts below one.
         assert_eq!(
             sparq_answer, spec_answer,
@@ -1440,7 +1440,7 @@ mod tests {
 
     /// The two circuit edges `noir_XPath` FIXED — the F&O window for `start < 1`
     /// (`sq-3x7dl.6`) and negative zero out of `fn:round` — must reach the circuit as LIVE
-    /// assertions. [GPT-6] Substring now agrees with the oracle; ROUND still uses
+    /// assertions. Substring now agrees with the oracle; ROUND still uses
     /// the F&O reference. If either were emitted commented out, a `noir_XPath`
     /// regression on an edge it advertises as fixed would go completely undetected while
     /// every other check stayed green. This test is that guard.
@@ -1484,7 +1484,7 @@ mod tests {
         ));
     }
 
-    /// [GPT-6] Keep the former divergence cases as affirmative agreement controls.
+    /// Keep the former divergence cases as affirmative agreement controls.
     #[test]
     fn substring_start_below_one_agrees_with_the_reference() {
         let g = oracle_graph();

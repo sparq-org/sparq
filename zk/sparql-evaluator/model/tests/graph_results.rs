@@ -1,4 +1,4 @@
-// [GPT-6] Native V3 relation tests; actual guest/receipt coverage is separate.
+// Native V3 relation tests; actual guest/receipt coverage is separate.
 #![cfg(feature = "graph-results")]
 use sparq_proved_evaluator_model::{DatasetAuthority, ProofContract, Provenance, RowOrder, v2, v3};
 

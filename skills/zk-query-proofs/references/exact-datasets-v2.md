@@ -1,6 +1,6 @@
 # Complete named-dataset evaluation
 
-<!-- [GPT-6] zkp-10.4; experimental relation, not externally audited. -->
+<!-- zkp-10.4; experimental relation, not externally audited. -->
 
 The detached evaluator's `model::v2` and `host::v2` APIs evaluate a complete bounded
 RDF dataset with a default graph and an explicit catalog of IRI-named graphs.
@@ -109,7 +109,7 @@ restriction branch and adds an invalid numeric-facet arithmetic discriminator.
 The [evaluator README](../../../zk/sparql-evaluator/README.md) describes pinned
 toolchain execution, receipt evidence and deployment limitations.
 
-[GPT-6] The generated [V2 local campaign record](../../../zk/sparql-evaluator/proof-evidence-v2.json)
+The generated [V2 local campaign record](../../../zk/sparql-evaluator/proof-evidence-v2.json)
 binds completed guest execution and all five real V1/V2 receipt fixtures to one
 exact source and artifact. It records observed CPU targets without attributing
 unlogged stages. This local evidence does not attest to the separately published

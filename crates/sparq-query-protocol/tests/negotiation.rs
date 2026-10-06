@@ -1,4 +1,4 @@
-//! [OPUS-5.5] Negotiation and method-contract tests for vcq draft 0.
+//! Negotiation and method-contract tests for vcq draft 0.
 //!
 //! Every method and capability declaration here is a unit-test fixture. None
 //! is a registered backend, and these tests generate and verify ZERO proofs.

@@ -294,7 +294,7 @@ apply to upstream `lib/spargebra/src/parser.rs` with only path changes.
 
 ### Issue 5 — `sparql11/aggregates` agg-min-02: expected MIN changes the selected term
 
-[GPT-6] **Title:** `agg-min-02.srx changes the selected double from 2E-1 to 2.0E-1`
+**Title:** `agg-min-02.srx changes the selected double from 2E-1 to 2.0E-1`
 
 **Body:**
 

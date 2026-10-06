@@ -1,4 +1,4 @@
-// [GPT-6] XSD 1.0 lexical/value boundaries shared by cached and scalar evaluation.
+// XSD 1.0 lexical/value boundaries shared by cached and scalar evaluation.
 use sparq_core::temporal::{Temporal, Timeline, parse_civil_date, parse_tz};
 
 #[test]
@@ -54,7 +54,7 @@ fn valid_boundaries_keep_their_timeline_values() {
     let midnight = Timeline::parse_datetime("2024-02-29T24:00:00.000Z").unwrap();
     let next_day = Timeline::parse_datetime("2024-03-01T00:00:00Z").unwrap();
     assert_eq!(midnight.instant(), next_day.instant());
-    // [OPUS-5.5] Raw lexicals are not XML-preprocessed: boundary padding is rejected
+    // Raw lexicals are not XML-preprocessed: boundary padding is rejected
     // (single-char `Temporal::of_lit` pads are covered in `temporal_lexical.rs`).
     let unpadded = "2024-03-01T00:00:00Z";
     assert!(Temporal::of_lit(unpadded, "http://www.w3.org/2001/XMLSchema#dateTime").is_some());
@@ -66,7 +66,7 @@ fn valid_boundaries_keep_their_timeline_values() {
     let padded = format!(" \t{unpadded}\r\n");
     assert!(Timeline::parse_datetime(&padded).is_none());
     assert!(Temporal::of_lit(&padded, "http://www.w3.org/2001/XMLSchema#dateTime").is_none());
-    // [GPT-6] Capacity control only: the f64 cache collapses these distinct XSD
+    // Capacity control only: the f64 cache collapses these distinct XSD
     // instants. This is not normative value equality or exact fractional support.
     assert_eq!(
         Timeline::parse_datetime("2024-03-01T00:00:59.999999999999999999Z")

@@ -1,4 +1,4 @@
-// [GPT-6] Actual named-dataset guest execution; native corpus success is separate.
+// Actual named-dataset guest execution; native corpus success is separate.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator::embedded_artifact;
 use sparq_proved_evaluator_model::{CanonicalResult, DatasetAuthority, ProofContract, v2};

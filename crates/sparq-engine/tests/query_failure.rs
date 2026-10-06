@@ -1,4 +1,4 @@
-// [GPT-6] Typed causes come from emitters, not messages or prior query state.
+// Typed causes come from emitters, not messages or prior query state.
 use sparq_core::Graph;
 use sparq_engine::{
     BudgetExceeded, EvaluationCapacity, PreparedQuery, QueryBudget, QueryFailure,

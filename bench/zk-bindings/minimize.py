@@ -1,4 +1,4 @@
-"""[GPT-6] Bounded data delta reduction with a fixed semantic failure predicate."""
+"""Bounded data delta reduction with a fixed semantic failure predicate."""
 from copy import deepcopy
 from corpus import oracle
 

@@ -1,5 +1,5 @@
-// [GPT-6] SDK guest compilation with explicit source-path remapping.
-// [OPUS-5.5] zkp-14.5: the optional V5 guest reuses this child build. The exact
+// SDK guest compilation with explicit source-path remapping.
+// zkp-14.5: the optional V5 guest reuses this child build. The exact
 // guest keeps its flags, target subdirectory, manifest, lock and constants in
 // `methods.rs`, so the feature is intended not to change its bytes or image ID
 // (pending a byte comparison against the previous build; not yet measured).

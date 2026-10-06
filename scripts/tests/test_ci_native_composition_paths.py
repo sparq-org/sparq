@@ -1,4 +1,4 @@
-"""[GPT-6] Native proof work is required unless a complete diff proves irrelevance."""
+"""Native proof work is required unless a complete diff proves irrelevance."""
 import importlib.util
 from pathlib import Path
 import subprocess

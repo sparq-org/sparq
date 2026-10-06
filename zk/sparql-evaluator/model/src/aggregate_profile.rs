@@ -1,4 +1,4 @@
-// [GPT-6] Conservative admission while aggregate error semantics remain unresolved.
+// Conservative admission while aggregate error semantics remain unresolved.
 use crate::Rejected;
 use oxrdf::Variable;
 use spargebra::algebra::{AggregateExpression, AggregateFunction, Expression, GraphPattern};

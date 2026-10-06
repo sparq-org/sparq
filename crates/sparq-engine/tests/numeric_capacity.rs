@@ -1,4 +1,4 @@
-// [GPT-6] Capacity exhaustion must not masquerade as a completed SPARQL answer.
+// Capacity exhaustion must not masquerade as a completed SPARQL answer.
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
 

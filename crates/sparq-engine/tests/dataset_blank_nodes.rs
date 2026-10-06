@@ -1,4 +1,4 @@
-// [GPT-6] REC-derived RDF merge identity tests; native execution, not proof evidence.
+// REC-derived RDF merge identity tests; native execution, not proof evidence.
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
 use sparq_engine::{
@@ -64,7 +64,7 @@ fn merged_nodes_cannot_collide_with_preserved_named_graph_nodes() {
     let text = "PREFIX ex:<http://ex/> ASK FROM ex:g1 FROM NAMED ex:reserved { ?s ex:p ex:a . GRAPH ex:reserved { ?s ?p ?o } }";
     assert!(!ask(&graph, text).unwrap());
     assert!(!ask_prepared(&graph, &PreparedQuery::parse(text).unwrap()).unwrap());
-    // [GPT-6] This implementation acquires each IRI once, but separates its FROM
+    // This implementation acquires each IRI once, but separates its FROM
     // copy from its preserved FROM NAMED copy; §13.2.3 leaves that identity open.
     assert!(!ask(&graph, "PREFIX ex:<http://ex/> ASK FROM ex:g1 FROM NAMED ex:g1 { ?s ex:p ex:a . GRAPH ex:g1 { ?s ex:p ex:a } }").unwrap());
 }

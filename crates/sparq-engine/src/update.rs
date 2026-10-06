@@ -511,7 +511,7 @@ pub fn update(graph: &Graph, sparql: &str) -> Result<Graph, String> {
 
 /// Parses an update, rejecting VERSION labels outside the supported REC 2013 contract.
 ///
-/// [GPT-6] Protocol rewrites must use this before discarding parser metadata.
+/// Protocol rewrites must use this before discarding parser metadata.
 /// SPARQL 1.2 draft EBV selection is currently supported for queries only.
 ///
 /// # Errors

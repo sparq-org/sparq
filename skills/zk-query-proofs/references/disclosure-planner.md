@@ -1,6 +1,6 @@
 # Disclosure planning and selected result witnesses
 
-<!-- [GPT-6] zkp-3: host planning surface, with no cryptographic acceptance claim. -->
+<!-- zkp-3: host planning surface, with no cryptographic acceptance claim. -->
 
 `sparq_zk_compose::planner` derives a strict positive query fragment from the
 existing SPARQL parser and selects a successful witness for each released result.
@@ -94,7 +94,7 @@ variable occurrence to its first occurrence, including repetitions within one
 triple. Backends must enforce RDF term identity, including blank-node scope, on
 these links.
 
-[GPT-6] `DisclosureQuery::variables()` gives deterministic first-occurrence
+`DisclosureQuery::variables()` gives deterministic first-occurrence
 ordering for the planner’s variable IDs. The [successful-result public ABI](successful-results.md)
 instead sorts variable names lexicographically. `canonical_integer` and
 `integer_comparison` provide
@@ -111,7 +111,7 @@ and provide no cryptographic assurance.
 
 ## Optional joint witness optimization
 
-<!-- [GPT-6] zkp-8: bounded structural selection, no calibrated latency claim. -->
+<!-- zkp-8: bounded structural selection, no calibrated latency claim. -->
 
 `optimize_disclosure` and `optimize_disclosure_admitted` are explicit alternatives
 to the unchanged first-success selection policy. They keep the exact query and
@@ -166,7 +166,7 @@ cryptographic correctness.
 
 ## Canonical signed-integer admission
 
-[GPT-6] `planner::signed::SignedDisclosureQuery::parse` separately admits the same
+`planner::signed::SignedDisclosureQuery::parse` separately admits the same
 positive query shape with canonical signed `i64` comparison bounds. Use
 `plan_signed_disclosure[_admitted]` or `optimize_signed_disclosure[_admitted]` with
 that type. The unsigned `DisclosureQuery::parse`, planning functions and proof
@@ -188,7 +188,7 @@ same RDF identity, backend admission, resource limits and proof-obligation rules
 original committed graphs, literal spellings and membership references are never
 rewritten. Host selection is not signed-predicate proof verification.
 
-[GPT-6] The separate Noir `result_signed_integer` core gadget now reconstructs
+The separate Noir `result_signed_integer` core gadget now reconstructs
 the exact canonical signed token from a private order-preserving unsigned value.
 It reuses the existing literal hash and comparison functions, handles the signed
 minimum without signed negation, and uses one fixed capacity for both signs and

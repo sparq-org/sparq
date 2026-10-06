@@ -1,6 +1,6 @@
 # Exact-evaluator query coverage
 
-[GPT-6] The [coverage manifest](../../../zk/sparql-evaluator/coverage.json) maps the
+The [coverage manifest](../../../zk/sparql-evaluator/coverage.json) maps the
 bounded evaluator profile to executable semantic fixtures and explicit gaps.
 It is a coverage inventory, not a claim of complete SPARQL conformance. Its
 `partial_fixture_coverage` entries mean only that the linked examples are tested;

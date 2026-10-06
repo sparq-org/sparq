@@ -1,6 +1,6 @@
 # Exact dependency review backlog
 
-[GPT-6] The [accepted package dispositions](accepted-6f7/per-entry-dispositions.json)
+The [accepted package dispositions](accepted-6f7/per-entry-dispositions.json)
 record 143 individually screened, exact-version exceptions under the repository's
 existing cargo-vet review-backlog policy. They are **not completed source audits**.
 The independent reviewer was GPT-6 in a separate task from the proposal author.

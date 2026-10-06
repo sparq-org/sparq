@@ -1,4 +1,4 @@
-"""[GPT-6] Hermetic protocol mutations only; these tests generate no proofs."""
+"""Hermetic protocol mutations only; these tests generate no proofs."""
 import copy
 import hashlib
 from pathlib import Path

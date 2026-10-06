@@ -1,4 +1,4 @@
-// [GPT-6] Published SPARQL 1.1 MINUS domains and existential NPS matching.
+// Published SPARQL 1.1 MINUS domains and existential NPS matching.
 use sparq_core::Graph;
 use sparq_engine::query;
 

@@ -1,4 +1,4 @@
-<!-- [OPUS-5.5] zkp-14.6: usage reference for the optional vcq adapter over the V5 authenticated-RDF relation. -->
+<!-- zkp-14.6: usage reference for the optional vcq adapter over the V5 authenticated-RDF relation. -->
 # vcq adapter for issuer-authenticated RDF (V5)
 
 **One genuine case; five tuples and the row-bound case not run.** At frozen adapter source

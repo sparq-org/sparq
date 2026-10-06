@@ -1,4 +1,4 @@
-// [GPT-6] Bound the library's uncounted permutation loops before invoking RDFC.
+// Bound the library's uncounted permutation loops before invoking RDFC.
 use crate::{CanonError, Digest};
 use oxrdf::{GraphName, NamedOrBlankNode, Quad, Term};
 use std::{collections::HashMap, fmt::Write};

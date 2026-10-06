@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Export source-bound artifacts from the mandatory real evaluator gate."""
+"""Export source-bound artifacts from the mandatory real evaluator gate."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import time
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = "zk/sparql-evaluator/Cargo.toml"
 GUEST_MANIFEST = "zk/sparql-evaluator/methods/guest/Cargo.toml"
-# [OPUS-5.5] zkp-14.5: the separately pinned V5 guest; its own manifest and lock.
+# zkp-14.5: the separately pinned V5 guest; its own manifest and lock.
 AUTHRDF_GUEST_MANIFEST = "zk/sparql-evaluator/methods/guest-authrdf/Cargo.toml"
 EXACT_GUEST, AUTHRDF_GUEST = "sparq-exact-guest", "sparq-authrdf-guest"
 # Rebuild scopes: label, manifest and the child target subdirectory that
@@ -24,7 +24,7 @@ EXACT_GUEST, AUTHRDF_GUEST = "sparq-exact-guest", "sparq-authrdf-guest"
 REBUILD_SCOPES = (("host", MANIFEST, None), ("guest", GUEST_MANIFEST, EXACT_GUEST),
                   ("authrdf-guest", AUTHRDF_GUEST_MANIFEST, AUTHRDF_GUEST))
 GUEST_LABELS = frozenset({"guest", "authrdf-guest"})
-# [OPUS-5.5] zkp-14.6: the default-off vcq features and the direct V5 executor
+# zkp-14.6: the default-off vcq features and the direct V5 executor
 # target, run after the zkp-14.5 V5 gates. Native commands select every target
 # explicitly and pass no test filter. Only the direct-execution target runs
 # `--ignored`: its tests execute the V5 guest with the SDK executor and prove
@@ -279,7 +279,7 @@ def main() -> int:
                  "-p", "sparq-proved-evaluator", "--example", "export_guest", "--"]
         run_logged(cargo + [str(output / "artifact")], "export-guest", output, env, commands)
         pin = artifact_pin(output / "artifact")
-        # [OPUS-5.5] zkp-14.5: the V5 guest is exported separately under its own name.
+        # zkp-14.5: the V5 guest is exported separately under its own name.
         authrdf = ["cargo", "run", "--locked", "--manifest-path", MANIFEST, "-p", "sparq-proved-evaluator",
                    "--features", "authenticated-rdf", "--example", "export_authrdf_guest", "--"]
         run_logged(authrdf + [str(output / "authrdf-artifact")], "export-authrdf-guest", output, env, commands)
@@ -297,7 +297,7 @@ def main() -> int:
         run_logged(["cargo", "clippy", "--locked", "--manifest-path", MANIFEST, "--workspace",
                     "--all-targets", "--features", f"sparq-proved-evaluator-model/{model_feature}", "--",
                     "-D", "warnings"], "lint", output, env, commands)
-        # [OPUS-5.5] zkp-14.5: V5 native gates and lint; the V5 guest is not executed.
+        # zkp-14.5: V5 native gates and lint; the V5 guest is not executed.
         run_logged(test + ["-p", "sparq-proved-evaluator-model", "--features", "authenticated-rdf",
                            "--lib", "--test", "authenticated_rdf"], "native-authrdf", output, env, commands)
         run_logged(test + ["-p", "sparq-proved-evaluator", "--features", "authenticated-rdf",

@@ -1,6 +1,6 @@
 #![cfg(feature = "engine")]
 
-// [GPT-6] Structural integration rewrites preserve the announced EBV rule.
+// Structural integration rewrites preserve the announced EBV rule.
 #[test]
 fn rewrite_preserves_version_ebv_and_conflicts() {
     let graph = sparq_core::Graph::load_str("", "ntriples").unwrap();

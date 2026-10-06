@@ -1,4 +1,4 @@
-"""[GPT-6] Each unchanged capacity fixture must fail for its intended reason."""
+"""Each unchanged capacity fixture must fail for its intended reason."""
 import hashlib
 import json
 from pathlib import Path

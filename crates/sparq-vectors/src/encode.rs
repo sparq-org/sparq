@@ -194,7 +194,7 @@ pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
             // it shares the temporal lane's order with date/dateTime.
             let year = parse_gyear(lexical)?;
             // days_from_civil(year-01-01) * seconds-per-day. Reuse the core civil-date parser.
-            // [GPT-6] Preserve XSD's four-digit minimum after parsing the signed year.
+            // Preserve XSD's four-digit minimum after parsing the signed year.
             let sign = if year < 0 { "-" } else { "" };
             let days = sparq_core::temporal::parse_civil_date(&format!("{sign}{:04}-01-01", year.unsigned_abs()))?;
             Some(days.checked_mul(86_400)? as f64)
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(parse_gyear("abcd"), None);
     }
 
-    // [GPT-6] Signed short years must survive the shared parser's lexical validation.
+    // Signed short years must survive the shared parser's lexical validation.
     #[test]
     fn gyear_epoch_preserves_padding_and_fails_soft_on_capacity() {
         for year in ["0001", "0009", "0500", "-0001", "-0009", "-0500", "12000"] {

@@ -218,7 +218,7 @@ pub fn wrap_for_view_opt_in(sparql: &str) -> Result<String, String> {
     serialize_with_versions(q, versions)
 }
 
-// [GPT-6] Query Display omits VERSION metadata. Validate labels before emitting
+// Query Display omits VERSION metadata. Validate labels before emitting
 // the retained announcements, so unknown text cannot enter the serialized prologue.
 fn serialize_with_versions(query: Query, versions: Vec<String>) -> Result<String, String> {
     let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)?;

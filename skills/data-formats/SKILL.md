@@ -19,7 +19,7 @@ loaders live in `sparq-core`; the binary HDT archive format (including content-s
 
 ## Literal validity and cache eligibility
 
-[GPT-6] RDF ingestion preserves ill-typed literals. To check numeric datatype
+RDF ingestion preserves ill-typed literals. To check numeric datatype
 membership, call `sparq_core::numeric_literal_valid(value, datatype_iri)`: this
 checks raw lexical grammar and integer subtype facets, rejecting all boundary
 whitespace. This includes the
@@ -38,7 +38,7 @@ retain them, but query equality/order must use the exact keys. `year_within_capa
 checks an explicit year range separately from ordinary datatype validity.
 Malformed Unicode returns `None` without slicing panics. `dateTimeStamp` requires a timezone.
 Raw RDF temporal literals undergo no XML preprocessing; string casts are separate constructors.
-[GPT-6] `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` and both v2 caches,
+`Graph::open` ignores legacy `numerics.bin`/`temporals.bin` and both v2 caches,
 which could contain padded raw literals, and recomputes values from the dictionary.
 It does not rewrite old caches or drop ill-typed RDF terms. Current writers use
 `numerics-v3.bin` and `temporals-v3.bin` across ordinary, compressed and external

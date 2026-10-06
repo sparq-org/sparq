@@ -1,4 +1,4 @@
-//! [OPUS-5.5] Stable-parser contract for `parse_versioned_query`/`_update`.
+//! Stable-parser contract for `parse_versioned_query`/`_update`.
 //!
 //! Only APIs present in the published `spargebra` 0.4.6 appear here, so the
 //! same file also compiles against upstream. Set

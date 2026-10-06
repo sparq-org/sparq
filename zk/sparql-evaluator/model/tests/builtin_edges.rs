@@ -1,4 +1,4 @@
-// [GPT-6] Native profile admission/evaluation, separate from guest proof evidence.
+// Native profile admission/evaluation, separate from guest proof evidence.
 #![cfg(feature = "evaluate")]
 
 use sparq_proved_evaluator_model::{
@@ -36,7 +36,7 @@ fn shared_builtin_goldens_are_admitted_and_evaluated_by_the_native_model() {
         };
         admit(&request).unwrap_or_else(|e| panic!("{}: admission {e:?}", case["id"]));
         let evaluation = evaluate(&Witness { request, dataset });
-        // [GPT-6] Preserve the native corpus golden, but reject its two labeled
+        // Preserve the native corpus golden, but reject its two labeled
         // capacity controls at the stricter proof relation boundary.
         if case["expectation_kind"] == "implementation_capacity" {
             assert_eq!(

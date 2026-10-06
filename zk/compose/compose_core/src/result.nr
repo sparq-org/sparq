@@ -1,4 +1,4 @@
-// [GPT-6] Additive successful-result relation; research-stage, not externally audited.
+// Additive successful-result relation; research-stage, not externally audited.
 //! Authenticated support for released positive BGP solutions, with private witnesses.
 //!
 //! This relation asserts existence of successful witnesses, never completeness.
@@ -39,7 +39,7 @@ pub fn small_integer_check(operand: Field, op: u32, bound: u64, value: u8) {
     }
 }
 
-// [GPT-6] Static numeric dispatch keeps v1 values u8 throughout the shared
+// Static numeric dispatch keeps v1 values u8 throughout the shared
 // relation; expanded members retain their u64 witness ABI and pre-cast guard.
 pub trait ResultInteger {
     fn check(self, operand: Field, op: u32, bound: u64, bits: u32);
@@ -97,7 +97,7 @@ pub fn result_check<T, let K: u32, let F: u32, let SD: u32, let INTEGER_BITS: u3
     selected_hashes: [[[Field; 3]; P]; R],
     filter_values: [[T; F]; R],
 ) where T: ResultInteger {
-    // [GPT-6] Every published member fixes these capacities at compile time.
+    // Every published member fixes these capacities at compile time.
     std::static_assert((SD == 10) | (SD == 17) | (SD == 20), "unsupported status depth");
     std::static_assert((INTEGER_BITS == 0) | (INTEGER_BITS == 8) | (INTEGER_BITS == 64), "unsupported integer capacity");
     std::static_assert((F == 0) == (INTEGER_BITS == 0), "numeric capacity must match filter member");

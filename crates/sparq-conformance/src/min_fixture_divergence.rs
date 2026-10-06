@@ -1,4 +1,4 @@
-//! [GPT-6] Exact exception for the pinned grouped-MIN fixture transcription.
+//! Exact exception for the pinned grouped-MIN fixture transcription.
 //!
 //! The upstream fixture stays unchanged. Its query, input and expected bytes,
 //! manifest identity, and complete single-cell mismatch must all match. The

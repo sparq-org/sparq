@@ -1,4 +1,4 @@
-"""[GPT-6] Independent finite relational oracle and retained source-case import."""
+"""Independent finite relational oracle and retained source-case import."""
 import hashlib
 import itertools
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 
 BACKENDS = ("noir_unsigned", "noir_signed", "native_rdf", "exact_v1", "exact_v2", "exact_v3",
             "noir_public_pattern")
-# [OPUS-5.5] beadzkp-15.1.1: explicit V4 cells reuse the same Noir job shapes.
+# beadzkp-15.1.1: explicit V4 cells reuse the same Noir job shapes.
 NOIR_BACKENDS = ("noir_unsigned", "noir_signed", "noir_public_pattern")
 NODES = ("<urn:a>", "<urn:b>")
 CANDIDATES = (*NODES, "<urn:missing>")
@@ -145,7 +145,7 @@ def valid_variables(variables):
 
 
 def check_select(result, case_id):
-    """[OPUS-5.5] Structural SELECT golden: unique names, list rows of projection width."""
+    """Structural SELECT golden: unique names, list rows of projection width."""
     if type(result) is not dict or "Select" not in result:
         return
     body = result["Select"]
@@ -159,7 +159,7 @@ def check_select(result, case_id):
 
 
 def projection_overrides(path, document):
-    """[OPUS-5.5] Reviewed per-fixture projections; exact source path, hash and object."""
+    """Reviewed per-fixture projections; exact source path, hash and object."""
     registry = load(PROJECTIONS)
     if (set(registry) != {"schema", "authored_by", "scope", "overrides"}
             or registry["schema"] != "sparq.projection-expectations.v1"
@@ -216,7 +216,7 @@ def import_regressions(path, variables=None):
         rejection = expected.get("kind") == "rejection" or original.get("admitted") is False or original.get("expected_admission_error", False) or capacity
         projection = None
         if result is None and "expected_rows" in original:
-            # [OPUS-5.5] Reviewed exact-fixture override first, else the caller's default.
+            # Reviewed exact-fixture override first, else the caller's default.
             projection = overrides.get(original["id"]) or (
                 {"kind":"caller_variables", "variables":list(variables)} if variables else None)
             if projection is None:
@@ -269,7 +269,7 @@ def jobs_for(case, backend, tier):
     if case.get("classification"):
         return [], {"case_id":case["id"], "backend":backend, **case["classification"]}
     case_hash = digest(case)
-    # [GPT-6] Profile promotion changes only the version's expected outcome.
+    # Profile promotion changes only the version's expected outcome.
     # Original query, dataset, fixture and V1 rejection stay bound in case_hash.
     versioned = case.get("backend_expectations", {}).get(backend)
     rejected = case.get("rejection", False) if versioned is None else False

@@ -1,4 +1,4 @@
-// [GPT-6] Published SPARQL 1.1 §18.6 substitution and §18.5 MINUS domains.
+// Published SPARQL 1.1 §18.6 substitution and §18.5 MINUS domains.
 use sparq_core::Graph;
 use sparq_engine::{QueryBudget, query, query_with_budget};
 

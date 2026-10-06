@@ -1,4 +1,4 @@
-// [GPT-6] Executable profile restrictions; not a claim of complete aggregate semantics.
+// Executable profile restrictions; not a claim of complete aggregate semantics.
 #![cfg(feature = "evaluate")]
 use sparq_proved_evaluator_model::{
     CanonicalResult, DatasetAuthority, Dialect, Policy, PrivateDataset, ProofContract, Request,

@@ -2,7 +2,7 @@
 //!
 //! These are exact names loaded from verifier configuration. Comparison is
 //! byte-exact; there is no case folding, prefix matching or wildcard. This
-//! module validates shape only and computes no digest. [OPUS-5.5]
+//! module validates shape only and computes no digest.
 
 use core::fmt;
 

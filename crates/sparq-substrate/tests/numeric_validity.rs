@@ -1,4 +1,4 @@
-// [GPT-6] Datatype validity and bounded arithmetic capacity are separate contracts.
+// Datatype validity and bounded arithmetic capacity are separate contracts.
 #![cfg(feature = "numeric")]
 
 use oxrdf::{Literal, NamedNode};

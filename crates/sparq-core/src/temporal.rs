@@ -1,6 +1,6 @@
 //! Checked temporal parsing, exact borrowed keys and approximate epoch caches.
 //!
-//! [GPT-6] [`ExactTimeline`] and [`ExactTemporal`] preserve integer whole seconds
+//! [`ExactTimeline`] and [`ExactTemporal`] preserve integer whole seconds
 //! and every lexical fractional digit. Query/reasoner comparison uses these keys,
 //! including the partial mixed-timezone order and its deterministic total extension.
 //! Direct keys parse without allocation; graph keys memoize validation and borrow
@@ -31,7 +31,7 @@ pub struct Timeline {
     pub tz: Option<i64>,
 }
 
-// [GPT-6] Validate once without using floating point in the exact-key path.
+// Validate once without using floating point in the exact-key path.
 struct ParsedDateTime<'a> {
     secs: i64,
     whole_second: i64,
@@ -192,7 +192,7 @@ pub fn parse_tz(tz: &str) -> Option<i64> {
     if tz == "Z" {
         return Some(0);
     }
-    // [GPT-6] Check bytes before slicing: malformed or non-ASCII API input
+    // Check bytes before slicing: malformed or non-ASCII API input
     // must not panic, and XSD offsets are bounded by fourteen hours.
     if !tz.is_ascii() || tz.len() != 6 || !matches!(tz.as_bytes()[0], b'+' | b'-') || tz.as_bytes()[3] != b':' {
         return None;
@@ -290,7 +290,7 @@ impl Temporal {
         let (kind, tl) = match datatype {
             XSD_DATE_TIME | XSD_DATE_TIME_STAMP => {
                 let timeline = Timeline::parse_datetime(value)?;
-                // [GPT-6] Keep the approximate cache aligned with exact typed validity.
+                // Keep the approximate cache aligned with exact typed validity.
                 if datatype == XSD_DATE_TIME_STAMP && timeline.tz.is_none() { return None; }
                 (TemporalKind::DateTime, timeline)
             },

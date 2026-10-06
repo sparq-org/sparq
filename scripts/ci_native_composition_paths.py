@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Fail-closed selection for the mandatory native-composition check."""
+"""Fail-closed selection for the mandatory native-composition check."""
 
 import os
 import re

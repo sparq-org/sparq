@@ -1,4 +1,4 @@
-// [OPUS-5.5] Native V5 authenticated-RDF model tests; no guest, receipt or proof coverage.
+// Native V5 authenticated-RDF model tests; no guest, receipt or proof coverage.
 #![cfg(feature = "authenticated-rdf")]
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
@@ -609,7 +609,7 @@ fn authorization_table_is_validated_and_bound_into_request_and_commitment() {
     );
 }
 
-// [OPUS-5.5] The commitment API enforces the same V3 policy ceilings as the request.
+// The commitment API enforces the same V3 policy ceilings as the request.
 #[test]
 fn dataset_commitment_rejects_evaluation_policies_outside_v3_program_ceilings() {
     fn with_evaluation(edit: impl FnOnce(&mut v3::Policy)) -> Policy {

@@ -1,6 +1,6 @@
 //! Shared single-use challenge-store contract (draft §6.4).
 //!
-//! [OPUS-5.5] One verifier shares ONE [`ChallengeStore`] namespace across all
+//! One verifier shares ONE [`ChallengeStore`] namespace across all
 //! of its query methods. Each verification has exactly one owner (the method
 //! or the adapter, per [`ChallengePolicy`](crate::ChallengePolicy)) that calls
 //! [`ChallengeStore::consume`] at most once, with the ORIGINAL

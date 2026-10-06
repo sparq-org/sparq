@@ -1,4 +1,4 @@
-// [GPT-6] Native resource/identity regressions; these are not guest proof evidence.
+// Native resource/identity regressions; these are not guest proof evidence.
 use oxrdf::{BlankNode, GraphName, NamedNode, Quad, Term};
 use sha2::Sha256;
 use sparq_canon::{

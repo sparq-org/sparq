@@ -1,4 +1,4 @@
-//! [GPT-6] Typed execution causes without private diagnostic text.
+//! Typed execution causes without private diagnostic text.
 
 use crate::Rejected;
 use sparq_engine::{BudgetExceeded, EvaluationCapacity, QueryFailure};

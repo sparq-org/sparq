@@ -1,4 +1,4 @@
-// [GPT-6] The shared captured-BOUND profile executes through each later wire version.
+// The shared captured-BOUND profile executes through each later wire version.
 use risc0_zkvm::{Executor, ExecutorEnv, ExternalProver};
 use sparq_proved_evaluator::embedded_artifact;
 use sparq_proved_evaluator_model::{DatasetAuthority, ProofContract, v2, v3};

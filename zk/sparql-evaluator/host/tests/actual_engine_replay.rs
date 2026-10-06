@@ -1,4 +1,4 @@
-// [OPUS-5.5] Ignored genuine V3 receipts for one explicitly supplied retained replay cell.
+// Ignored genuine V3 receipts for one explicitly supplied retained replay cell.
 //! Driver only: set `SPARQ_ENGINE_REPLAY_PROOF_JOB` and `RISC0_SERVER_PATH`, then
 //! run this ignored test by name. See `bench/zk-bindings/engine-proof-replay.md`.
 //! A missing job, tool or input fails; it never counts as a proof run. Public
@@ -148,7 +148,7 @@ fn pretty(value: &impl serde::Serialize) -> Vec<u8> {
     serde_json::to_vec_pretty(value).expect("typed public JSON")
 }
 
-// [OPUS-5.5] Omission-only SDK observation; test-only classification, never production.
+// Omission-only SDK observation; test-only classification, never production.
 const OMISSION_SUMMARY_SCHEMA: &str = "sparq.engine-replay-omission.real-test-summary.v1";
 /// The guest's `reject()` text as the pinned SDK renders it.
 ///
@@ -421,7 +421,7 @@ fn real_engine_replay_cell_proves_both_authorities_and_rejects_substitutions() {
     write_new(&output.join("summary.json"), &pretty(&summary)).expect("final summary");
 }
 
-/// [OPUS-5.5] Observes why the omitted-statement witness fails, without new proofs.
+/// Observes why the omitted-statement witness fails, without new proofs.
 ///
 /// The valid baseline is executed once (no proof). The omission then goes
 /// straight to the SDK's `ExternalProver::prove_with_ctx`, bypassing the

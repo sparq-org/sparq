@@ -33,7 +33,7 @@
 //!    Determinism is conservative — anything the walker is unsure about is treated as
 //!    non-cacheable.
 //!
-//! 3. **The EBV rules differ.** [GPT-6] The resolved query-local EBV semantics
+//! 3. **The EBV rules differ.** The resolved query-local EBV semantics
 //!    are part of the key. Use [`ResultCache::get_or_eval_prepared`] to preserve
 //!    VERSION announcements and reject explicit option conflicts before lookup.
 //!
@@ -342,7 +342,7 @@ impl ResultCache {
         Ok(result)
     }
 
-    /// [GPT-6] Caches a prepared query while retaining its VERSION announcement.
+    /// Caches a prepared query while retaining its VERSION announcement.
     ///
     /// # Errors
     /// Rejects declaration/option conflicts before looking up any cached result,

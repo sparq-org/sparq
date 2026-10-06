@@ -1,4 +1,4 @@
-// [GPT-6] Complete source/catalog authentication and evaluation run in the guest.
+// Complete source/catalog authentication and evaluation run in the guest.
 use super::*;
 use crate::EvaluationError;
 use crate::evaluate::{DatasetProfile, admit_query, execute_detailed, term_string};
@@ -33,7 +33,7 @@ pub fn evaluate(witness: &Witness) -> Result<Journal, Rejected> {
     evaluate_detailed(witness).map_err(Rejected::from)
 }
 
-/// [GPT-6] Evaluates V2 while retaining actual typed execution causes.
+/// Evaluates V2 while retaining actual typed execution causes.
 ///
 /// Request, catalog, commitment and journal bytes are unchanged. The existing
 /// entry point retains its original rejection strings through a wrapper.

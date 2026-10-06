@@ -5,7 +5,7 @@ description: Run SPARQL 1.1/1.2 queries (SELECT/ASK/CONSTRUCT/DESCRIBE) and UPDA
 
 # sparq SPARQL query surface
 
-<!-- [GPT-6] zkp-10.1: the separate proof guest is not the ordinary query API. -->
+<!-- zkp-10.1: the separate proof guest is not the ordinary query API. -->
 For experimental exact-dataset proofs, use the detached
 [proved evaluator](../../zk/sparql-evaluator/README.md). Its `zkvm` target disables
 ambient clock/entropy functions and its wrapper applies a narrower admission
@@ -20,10 +20,10 @@ typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-
 [Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
 solution-domain correction and the remaining native practical fallbacks.
 
-[GPT-6] Query options can pin [EBV rules](ebv-dialects.md) to REC 2013 or the
+Query options can pin [EBV rules](ebv-dialects.md) to REC 2013 or the
 12 September 2026 SPARQL 1.2 draft. VERSION announcements are retained and
 explicit contradictions reject evaluation; this is not full 1.2 conformance.
-[OPUS-5.5] With your own `SparqlParser`, keep them via
+With your own `SparqlParser`, keep them via
 `parse_versioned_query`/`parse_versioned_update` (stable upstream parser API).
 
 ## Quickstart
@@ -97,7 +97,7 @@ The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_
   cancellation handle; a `Relaxed` store of `true` aborts cooperatively at the next coarse poll with
   `query budget exceeded (cancelled)`. `cancelled_by(flag)` creates an otherwise-unlimited budget.
 
-[GPT-6] `temporal_year_range: Some((minimum, maximum))` imposes an explicit
+`temporal_year_range: Some((minimum, maximum))` imposes an explicit
 inclusive year capacity when date/dateTime values are evaluated or constructed.
 Out-of-range values trigger sticky `query evaluation capacity exceeded (temporal-year)`;
 FILTER/BIND/COALESCE and SERVICE byte rollback cannot absorb this query failure.
@@ -117,7 +117,7 @@ SECONDS preserves all validated
 fractional digits as an xsd:decimal result; this does not expand finite decimal
 arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
 
-[GPT-6] `strict_numeric_capacity: true` rejects unsupported numeric consumers as
+`strict_numeric_capacity: true` rejects unsupported numeric consumers as
 a sticky whole-query capacity failure; it is `false` by default. It retains the
 `i64` integer and `i128` decimal lanes, including the existing bounded decimal
 division precision, while refusing overflow fallback to floating point.
@@ -128,7 +128,7 @@ Invalid numeric/boolean lexical EBV is false under SPARQL 1.1 §17.2.2;
 arithmetic on invalid numeric terms still errors. Constrained expression work
 stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
 
-[GPT-6] `query_prepared_with_budget_detailed`, `construct_prepared_with_budget_detailed`
+`query_prepared_with_budget_detailed`, `construct_prepared_with_budget_detailed`
 and `describe_prepared_with_budget_detailed` return `QueryFailure` with typed
 `Budget(BudgetExceeded::{Rows, Bytes, Deadline, Cancelled})`,
 `Capacity(EvaluationCapacity::{NumericRepresentation, TemporalYear})`, or
@@ -239,7 +239,7 @@ input dataset, including unselected named graphs, and creates distinct template
 nodes per solution occurrence. Repeated template labels within one occurrence
 still share a node; duplicate solutions keep their own fresh nodes. The option
 also applies the query row budget to constructed output triples, rejecting an
-excessive result without returning a partial graph. [GPT-6]
+excessive result without returning a partial graph.
 
 The output labels are deterministic and local to a result. Independently created
 results must be standardized apart before combining their blank-node namespaces;
@@ -269,7 +269,7 @@ sparq_engine::query(&g,
 - **With `GROUP BY`** ⇒ an empty input has **zero groups**, so you get **zero** rows (the
   single-implicit-group rule applies only when no `GROUP BY` is written).
 
-[GPT-6] `MIN` and `MAX` return a selected input term: they preserve lexical forms
+`MIN` and `MAX` return a selected input term: they preserve lexical forms
 such as `"01"^^xsd:integer` and the selected datatype. Arithmetic aggregates retain
 their existing promotion behavior.
 
@@ -294,7 +294,7 @@ Numeric integer facets retain XSD 1.1 sign handling (including `+1` and `-0` for
 unsigned types), consistent with RDF 1.1's datatype reference. Temporal parsing
 still uses its documented XSD 1.0 year-zero rule; this is not a uniform XSD version claim.
 
-[GPT-6] Unary plus validates numeric lexical forms and facets before returning its
+Unary plus validates numeric lexical forms and facets before returning its
 operand unchanged, preserving valid derived datatypes and large numeric lexical
 forms. This follows the mapped [XPath unary-plus definition](https://www.w3.org/TR/2007/REC-xpath-functions-20070123/#func-numeric-unary-plus).
 Identity-comparison regressions distinguish this guard from tests that already
@@ -302,7 +302,7 @@ validated operands in later arithmetic. PyOxigraph 0.5.11 also accepts the
 invalid-byte identity example; that interoperability difference does not change
 the numeric-operand golden. String casts collapse only XML whitespace, so NBSP
 does not disappear before integer, decimal, float, double or boolean validation.
-[GPT-6] Raw typed literals are checked verbatim: `" true "^^xsd:boolean` and
+Raw typed literals are checked verbatim: `" true "^^xsd:boolean` and
 `" 1 "^^xsd:integer` are ill-typed. They retain their RDF identity, but have false
 EBV under the published 2013 Recommendation; numeric interpretation and typed
 casts reject them. String constructors still normalize XML boundary whitespace.
@@ -318,7 +318,7 @@ sparq_engine::query(&g,
     "PREFIX ex: <http://ex/> SELECT ?x WHERE { ex:alice ex:knows+ ?x }").unwrap();   // transitive
 ```
 
-<!-- [GPT-6] Shared expression correlation and path bag semantics. -->
+<!-- Shared expression correlation and path bag semantics. -->
 Alternatives preserve duplicate solutions: `ex:p|ex:p` contributes each matching
 edge twice. Sequences multiply compatible occurrences; `DISTINCT` removes duplicates
 when requested. Reachability operators (`*`, `+`, `?`) retain endpoint set semantics.
@@ -670,14 +670,14 @@ let v = DatasetView { base: &store, named: visible, default: DefaultGraphMode::S
 let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); // only g1 visible
 ```
 
-[GPT-6] Nested `GRAPH` patterns preserve the query's active dataset catalog while
+Nested `GRAPH` patterns preserve the query's active dataset catalog while
 switching the active graph. Constant and variable graph names can select another
 named graph from that catalog, including an empty graph. `FROM NAMED` restrictions
 continue to apply at every nesting level; graph-name bindings retain normal join
 compatibility and result multiplicity. The evaluator borrows this catalog in its
 per-query context rather than cloning graphs or using global dataset state.
 
-[GPT-6] Read-query `FROM` builds an RDF merge: blank nodes are renamed consistently
+Read-query `FROM` builds an RDF merge: blank nodes are renamed consistently
 within each source graph and kept distinct between source graphs and preserved
 `FROM NAMED` graphs. `GRAPH` alone preserves source dataset identity. Repeated
 `FROM` IRIs use one stored snapshot per distinct IRI; this acquisition policy is

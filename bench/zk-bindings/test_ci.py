@@ -1,4 +1,4 @@
-"""[GPT-6] CI coverage denominators cannot silently shrink or count API refusals."""
+"""CI coverage denominators cannot silently shrink or count API refusals."""
 import copy
 from pathlib import Path
 import unittest
@@ -27,7 +27,7 @@ class CiTests(unittest.TestCase):
             check_inventory(self.report, self.expected)
 
     def test_public_pattern_native_scopes_are_exact(self):
-        # [OPUS-5.5] beadzkp-15.1.1: counts are re-derived, not copied from a report.
+        # beadzkp-15.1.1: counts are re-derived, not copied from a report.
         from itertools import product
         from corpus import exhaustive
         edges = [(s, o) for s in ("a", "b") for o in ("a", "b")]
@@ -67,7 +67,7 @@ class CiTests(unittest.TestCase):
         self.assertIn('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a', workflow)
 
     def test_generic_sweep_supplies_and_retains_public_pattern_evidence(self):
-        # [OPUS-5.5] beadzkp-15.1: the step running the generic sweep must supply the
+        # beadzkp-15.1: the step running the generic sweep must supply the
         # fail-closed evidence directory, and a pinned upload must retain that path.
         workflow = (Path(__file__).resolve().parents[2] / '.github/workflows/zk-toolchain.yml').read_text()
         steps = workflow.split('\n      - name: ')[1:]

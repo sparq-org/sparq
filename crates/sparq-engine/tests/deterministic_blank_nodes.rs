@@ -1,4 +1,4 @@
-// [GPT-6] Native deterministic identity tests; no guest/proof claim.
+// Native deterministic identity tests; no guest/proof claim.
 #![cfg(feature = "deterministic-blank-nodes")]
 
 use oxrdf::{NamedOrBlankNode, Term};

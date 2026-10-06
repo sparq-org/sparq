@@ -1,4 +1,4 @@
-// [GPT-6] Fixed synthetic contracts; host oracles are tests, never proof substitutes.
+// Fixed synthetic contracts; host oracles are tests, never proof substitutes.
 #[path = "workloads.rs"]
 mod workloads;
 

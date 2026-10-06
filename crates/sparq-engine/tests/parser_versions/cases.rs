@@ -1,4 +1,4 @@
-//! [OPUS-5.5] Shared VERSION-prologue corpus for the parser contract tests.
+//! Shared VERSION-prologue corpus for the parser contract tests.
 //!
 //! Included by `parser_versions.rs` (stable upstream parser API) and by
 //! `parser_versions_fork.rs` (the vendored-fork differential). Both targets use every item here.
