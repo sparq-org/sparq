@@ -89,10 +89,22 @@ pub fn explain_paths(_graph: &Graph, src: &str) -> Result<String, String> {
         .max_length
         .map_or_else(|| "none".to_owned(), |n| n.to_string());
     Ok(format!(
-        "Paths mode={mode} cyclic={} via={} maxLength={maximum}",
+        "Paths mode={mode} cyclic={} start={} end={} via={} maxLength={maximum}",
         parsed.cyclic,
+        display_endpoint(parsed.start.as_ref()),
+        display_endpoint(parsed.end.as_ref()),
         display_via(&parsed.via)
     ))
+}
+
+/// `none` for an unrestricted endpoint, the fixed node, or the endpoint graph pattern —
+/// so plans that differ only in their START/END restriction explain differently (#3994).
+fn display_endpoint(endpoint: Option<&Endpoint>) -> String {
+    match endpoint {
+        None => "none".to_owned(),
+        Some(Endpoint::Node(term)) => term.to_string(),
+        Some(Endpoint::Pattern { source, variable }) => format!("{variable} {{ {source} }}"),
+    }
 }
 
 fn integer(value: usize) -> Term {

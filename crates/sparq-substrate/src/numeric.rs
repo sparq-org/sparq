@@ -193,7 +193,22 @@ impl Dec {
     /// exact value lives in `mant`/`scale`). Used by the LENIENT order / arithmetic fallback.
     #[inline]
     pub fn f64(self) -> f64 {
-        self.mant as f64 / 10f64.powi(self.scale as i32)
+        // One rounding (#3800). When the mantissa and `10^scale` are both exact `f64`s
+        // (|mant| <= 2^53, scale <= 22), the IEEE division is the single correctly-rounded
+        // step. Otherwise `mant as f64` would round first and the division round again, so
+        // re-parse the exact lexical instead (Rust's decimal parser is correctly rounded).
+        const POW10: [f64; 23] = [
+            1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+            1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+        ];
+        if self.mant.unsigned_abs() <= 1 << 53 && (self.scale as usize) < POW10.len() {
+            return self.mant as f64 / POW10[self.scale as usize];
+        }
+        match self.lexical().parse::<f64>() {
+            Ok(f) => f,
+            // Unreachable (`Dec::lexical` writes `[-]digits[.digits]`); stay total.
+            Err(_) => self.mant as f64 / 10f64.powi(self.scale as i32),
+        }
     }
 
     /// The value as an `f32`, rounded to single precision **exactly once** — the
@@ -2158,5 +2173,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// #3800 — `Dec::f64` rounds once. Each witness's two-rounding image
+    /// (`mant as f64 / 10^scale`) differs from the correctly-rounded `f64`, which is
+    /// what parsing its exact decimal lexical gives.
+    #[test]
+    fn dec_f64_is_correctly_rounded_where_two_roundings_differ() {
+        for (mant, scale, lex) in [
+            (1_657_193_426_554_050_932_993i128, 15u32, "1657193.426554050932993"),
+            (8_178_004_666_638_016_248_042, 22, "0.8178004666638016248042"),
+            (1_964_143_770_713_488_765_677, 17, "19641.43770713488765677"),
+            (-471_625_210_719_485_281_189, 18, "-471.625210719485281189"),
+        ] {
+            let d = Dec { mant, scale };
+            let want: f64 = lex.parse().unwrap();
+            assert_ne!((mant as f64 / 10f64.powi(scale as i32)).to_bits(), want.to_bits(), "not a witness: {lex}");
+            assert_eq!(d.f64().to_bits(), want.to_bits(), "{lex}");
+        }
+        // The exact fast path: small mantissa and scale.
+        assert_eq!(Dec { mant: 15, scale: 1 }.f64(), 1.5);
+        assert_eq!(Dec { mant: -1, scale: 22 }.f64(), -1e-22);
     }
 }

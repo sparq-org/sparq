@@ -388,7 +388,8 @@ pattern has no single predicate term, each returned `?edge` is the canonicalized
 an `xsd:string` literal (and therefore contains no blank nodes).
 
 The same feature exposes a dedicated non-standard query form through `query_paths` and
-`explain_paths`. It is intentionally rejected by the ordinary `query` entry point:
+`explain_paths` (which renders the mode, cyclicity, START/END restriction, VIA and MAX LENGTH).
+It is intentionally rejected by the ordinary `query` entry point:
 
 ```rust
 let result = sparq_engine::query_paths(&g,
