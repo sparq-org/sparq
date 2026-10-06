@@ -60,6 +60,56 @@ class PrefixExpandedScan(unittest.TestCase):
         )
         self.assertEqual(_stdlib_hits(ttl), [])
 
+    def test_commented_rebinding_does_not_mask_the_real_binding(self):
+        # Codex review: a commented-out directive must not overwrite the real one.
+        ttl = (
+            "@prefix ns1: <http://purl.org/dc/terms/> .\n"
+            "# @prefix ns1: <https://example.org/> .\n"
+            '<https://doi.org/10.5555/g> ns1:abstract "leak" .\n'
+        )
+        self.assertEqual([h.marker for h in _stdlib_hits(ttl)], ["ns1:abstract"])
+
+    def test_directives_inside_literals_and_iris_are_ignored(self):
+        ttl = (
+            "@prefix ns1: <http://purl.org/dc/terms/> .\n"
+            '<https://doi.org/10.5555/h> <https://ex.org/note> """multi\n'
+            '@prefix ns1: <https://example.org/> .\n""" ;\n'
+            "  <https://ex.org/n2> '@prefix ns1: <https://example.org/> .' ;\n"
+            '  ns1:abstract "leak" .\n'
+        )
+        hits = _stdlib_hits(ttl)
+        self.assertEqual([h.marker for h in hits], ["ns1:abstract"])
+        self.assertEqual(hits[0].line_no, 6)
+
+    def test_names_inside_literals_are_not_flagged(self):
+        ttl = (
+            "@prefix ns1: <http://purl.org/dc/terms/> .\n"
+            '<https://doi.org/10.5555/i> <https://ex.org/note> "see ns1:abstract" .\n'
+        )
+        self.assertEqual(_stdlib_hits(ttl), [])
+
+    def test_rebinding_uses_the_binding_in_force(self):
+        ttl = (
+            "@prefix ns1: <https://example.org/> .\n"
+            '<https://doi.org/10.5555/j> ns1:abstract "harmless" .\n'
+            "@prefix ns1: <http://purl.org/dc/terms/> .\n"
+            '<https://doi.org/10.5555/j> ns1:abstract "leak" .\n'
+            "PREFIX ns1: <https://example.org/>\n"
+            '<https://doi.org/10.5555/j> ns1:abstract "harmless again" .\n'
+        )
+        self.assertEqual([h.line_no for h in _stdlib_hits(ttl)], [4])
+
+    def test_longer_local_names_are_not_flagged(self):
+        # `ns1:abstract:count` is a complete PN_LOCAL distinct from `ns1:abstract`;
+        # a trailing `.` is the statement terminator, not part of the name.
+        ttl = (
+            "@prefix ns1: <http://purl.org/dc/terms/> .\n"
+            '<https://doi.org/10.5555/k> ns1:abstract:count 3 ; ns1:abstract.v 1 .\n'
+            "<https://doi.org/10.5555/k> <https://ex.org/p> ns1:abstract.\n"
+        )
+        hits = _stdlib_hits(ttl)
+        self.assertEqual([(h.marker, h.line_no) for h in hits], [("ns1:abstract", 3)])
+
     def test_run_leak_check_catches_auto_prefix(self):
         ttl = (
             "@prefix ns1: <https://w3id.org/zkp-sparql/sig-impl#> .\n"

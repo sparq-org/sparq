@@ -85,7 +85,7 @@ LEAK_PATTERNS_GLOBAL: list[tuple[re.Pattern | None, str | None, str]] = [
 #   2. IRI-substring string  (e.g. "sig-impl#justification") — catches full-IRI and any
 #      non-standard prefix serialisations that evade the prefixed form.
 # Additionally, _prefix_expanded_check_restricted_projection() (stdlib, always run)
-# expands every declared prefix, and _rdflib_check_restricted_projection() parses the
+# expands prefixed names with the binding in force (source order), and _rdflib_check_restricted_projection() parses the
 # Turtle graph with rdflib (when available) and asserts zero matching triples by full
 # IRI — both catch auto-prefixed forms (e.g. "ns1:justification") that evade BOTH
 # string patterns above.
@@ -280,59 +280,91 @@ RESTRICTED_PROJECTION_IRIS: tuple[str, ...] = (
     "https://sparq.dev/ns/pkg#Finding",
 )
 
-# Turtle `@prefix p: <iri> .` and SPARQL-style `PREFIX p: <iri>` (case-insensitive).
-_PREFIX_DECL_RE = re.compile(
-    r"(?:@prefix|(?i:\bprefix))\s+([A-Za-z][\w.-]*)?:\s*<([^>]*)>"
+# Turtle lexer pieces for the stdlib scan. PN_PREFIX / PN_LOCAL follow the Turtle
+# grammar closely enough for leak detection: a local name may contain `:` and `.`
+# (but not end in `.`), plus `%xx` and `\`-escapes.
+_PNAME_RE = re.compile(
+    r"([A-Za-z][\w.-]*)?:((?:[\w:%-]|\\.)(?:(?:[\w.:%-]|\\.)*(?:[\w:%-]|\\.))?)?"
 )
+_DIRECTIVE_RE = re.compile(
+    r"(?:@prefix|(?i:prefix))\s+([A-Za-z][\w.-]*)?:\s*<([^>]*)>"
+)
+_NAME_CHAR_RE = re.compile(r"[\w.:%-]")
 
 
 def _prefix_expanded_check_restricted_projection(
     filename: str, content: str
 ) -> list[LeakViolation]:
     """
-    Stdlib-only, serialisation-independent companion to the rdflib check: expand
-    every declared prefix and flag any prefixed name that resolves to a
-    RESTRICTED_PROJECTION_IRIS term (e.g. "ns1:justification" bound to the
-    sig-impl namespace). Unlike the rdflib check this needs no optional
-    dependency, so the auto-prefix form is caught on every runner (#6037/#6383).
+    Stdlib-only, serialisation-independent companion to the rdflib check: lex the
+    Turtle in source order (skipping comments, string literals including the long
+    triple-quoted forms, and <...> IRIs), apply each `@prefix` / SPARQL-style
+    `PREFIX` directive as it is reached, and expand every prefixed name with the
+    binding in force at that point. A name whose expansion EXACTLY equals a
+    RESTRICTED_PROJECTION_IRIS term (e.g. "ns1:justification" bound to the sig-impl
+    namespace) is a violation. Needs no optional dependency, so the auto-prefix
+    form is caught on every runner (#6037/#6383).
     """
+    restricted = set(RESTRICTED_PROJECTION_IRIS)
     prefixes: dict[str, str] = {}
-    for m in _PREFIX_DECL_RE.finditer(content):
-        prefixes[m.group(1) or ""] = m.group(2)
-
-    # (compiled prefixed-name regex, restricted IRI) for every prefix whose
-    # namespace is a proper prefix of a restricted IRI.
-    targets: list[tuple[re.Pattern, str, str]] = []
-    for pfx, ns in prefixes.items():
-        if not ns:
-            continue
-        for iri in RESTRICTED_PROJECTION_IRIS:
-            if iri.startswith(ns) and len(iri) > len(ns):
-                local = iri[len(ns):]
-                name = f"{pfx}:{local}"
-                pat = re.compile(
-                    r"(?<![\w.:-])" + re.escape(name) + r"(?![\w-]|\.[\w-])"
-                )
-                targets.append((pat, name, iri))
-
     violations: list[LeakViolation] = []
-    if not targets:
-        return violations
-    for lineno, line in enumerate(content.splitlines(), start=1):
-        for pat, name, iri in targets:
-            if pat.search(line):
-                violations.append(
-                    LeakViolation(
-                        filename=filename,
-                        marker=name,
-                        reason=(
-                            f"prefix-expanded IRI-match: {name!r} resolves to restricted "
-                            f"<{iri}> — serialisation-independent check (stdlib)"
-                        ),
-                        line_no=lineno,
-                        snippet=line.strip()[:120],
+    lines = content.splitlines()
+    n = len(content)
+    i = 0
+    while i < n:
+        c = content[i]
+        if c == "#":
+            nl = content.find("\n", i)
+            i = n if nl < 0 else nl + 1
+            continue
+        if c in "\"'":
+            if content.startswith(c * 3, i):
+                j = i + 3
+                while j < n and not content.startswith(c * 3, j):
+                    j += 2 if content[j] == "\\" else 1
+                i = j + 3
+            else:
+                j = i + 1
+                while j < n and content[j] != c and content[j] != "\n":
+                    j += 2 if content[j] == "\\" else 1
+                i = j + 1
+            continue
+        if c == "<":
+            gt = content.find(">", i)
+            i = n if gt < 0 else gt + 1
+            continue
+        boundary = i == 0 or not _NAME_CHAR_RE.match(content[i - 1])
+        if boundary and c in "@pP":
+            m = _DIRECTIVE_RE.match(content, i)
+            if m:
+                prefixes[m.group(1) or ""] = m.group(2)
+                i = m.end()
+                continue
+        if boundary:
+            m = _PNAME_RE.match(content, i)
+            if m:
+                pfx = m.group(1) or ""
+                local = re.sub(r"\\(.)", r"\1", m.group(2) or "")
+                ns = prefixes.get(pfx)
+                if ns is not None and ns + local in restricted:
+                    lineno = content.count("\n", 0, i) + 1
+                    iri = ns + local
+                    violations.append(
+                        LeakViolation(
+                            filename=filename,
+                            marker=m.group(0),
+                            reason=(
+                                f"prefix-expanded IRI-match: {m.group(0)!r} resolves to "
+                                f"restricted <{iri}> — serialisation-independent check "
+                                f"(stdlib)"
+                            ),
+                            line_no=lineno,
+                            snippet=lines[lineno - 1].strip()[:120],
+                        )
                     )
-                )
+                i = max(m.end(), i + 1)
+                continue
+        i += 1
     return violations
 
 
