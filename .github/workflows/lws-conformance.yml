@@ -55,6 +55,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: lws-conformance
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: build touchstone
         working-directory: touchstone
         run: ./mvnw -q -B -ntp -pl harness-cli -am -Dmaven.test.skip=true package
@@ -99,6 +100,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: lws-conformance
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: build sparq-lws-core
         run: cargo build -p sparq-lws-core
       - name: run lws-net
