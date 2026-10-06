@@ -103,6 +103,7 @@ _MOD_DECL = re.compile(
 _MOD_KEYWORD = re.compile(r'(?<![A-Za-z0-9_#])mod\b')
 _MOD_INLINE = re.compile(
     r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*\s*\{')
+_CHAR_LIT = re.compile(r"'(?:\\.|[^\\'])'")
 _STRING_LIT = re.compile(r'"(?:[^"\\]|\\.)*"')
 # Fail-closed `path` handling. The ONLY supported spelling is the simple form
 # `#[path = "<plain chars>"]`: a normal string with no backslash or quote, optional
@@ -539,10 +540,21 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
     d = os.path.dirname(rel)
     stem = os.path.splitext(os.path.basename(rel))[0]
     base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
+    depth = 0  # `{` nesting at the start of the current line (strings/chars removed)
     for lineno, line in enumerate(lines, start=1):
         code = _strip_line_comment(line)
-        n_mod = len(_MOD_KEYWORD.findall(_STRING_LIT.sub('""', code)))
+        bare = _CHAR_LIT.sub("' '", _STRING_LIT.sub('""', code))
+        depth_here = depth
+        depth += bare.count("{") - bare.count("}")
+        n_mod = len(_MOD_KEYWORD.findall(bare))
         if not n_mod:
+            continue
+        if depth_here > 0 and not _MOD_INLINE.match(_split_leading_attrs(code)[1].strip()):
+            # Inside an inline module (whose own `#[path]` would change where its
+            # children live) or any other block: not resolved line by line.
+            yield lineno, "?", None, False, (
+                "out-of-line `mod` declaration nested inside a block is unsupported: "
+                + line.strip())
             continue
         same_line_attrs, rest = _split_leading_attrs(code)
         rest = rest.strip()
@@ -958,6 +970,10 @@ _LEG3_TREES_ODD_MOD_SYNTAX = [
     _leg3_tree_cfg_attr('#[path = "elsewhere.rs"]\n/* note */\nmod child;\n'),
     _leg3_tree_cfg_attr('#[path = "elsewhere.rs"] /* note */\nmod child;\n'),
     _leg3_tree_outside('#[path = "x//../../elsewhere.rs"] mod hidden;\n'),
+    {_EXEC_RS: '#[path = "outside"]\nmod inner {\nmod child;\n}\n',
+     f"{_EXEC_DIR}/inner/child.rs": "fn ok() {}\n",
+     "crates/sparq-engine/src/outside/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: 'fn f() {\nmod child;\n}\n', f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
 ]
 # Inline modules and `mod` inside strings or identifiers are not declarations.
 _LEG3_TREES_INLINE_MOD_OK = [
