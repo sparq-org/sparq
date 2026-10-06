@@ -1177,7 +1177,7 @@ jobs:
           version: 3.9.1
           files: '["README.md","AGENTS.md","CONTRIBUTING.md","SECURITY.md","skills","docs","crates"]'
           fail_on_error: false
-          # [GPT-5] The v3 default (`github-pr-annotations`) reports through the runner log, so
+          # The v3 default (`github-pr-annotations`) reports through the runner log, so
           # this advisory lane keeps the workflow's read-only permissions and needs no PR writes.
           token: ${{ github.token }}
 
