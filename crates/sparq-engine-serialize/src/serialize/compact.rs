@@ -26,7 +26,7 @@ use oxrdf::{NamedOrBlankNode, Term, Triple};
 use sparq_jsonld::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
 use sparq_jsonld::frame::{frame, FrameOptions};
 use sparq_jsonld::compact::compact_expanded;
-use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
+use sparq_jsonld::{expand, JsonLdOptions, NoopLoader, ProcessingMode};
 
 pub use sparq_jsonld::{ActiveContext, Json};
 
@@ -150,7 +150,7 @@ pub fn write_jsonld_compact(graphs: &[NamedGraph<'_>], context: &Json) -> String
     match compact(context) {
         Ok(compacted) => match readable_type_maps(&compacted, context) {
             None => render(&compacted),
-            Some(stripped) => render(&compact(&stripped).unwrap_or(doc)),
+            Some(stripped) => render(&compact(&stripped).unwrap_or(compacted)),
         },
         Err(_) => render(&doc),
     }
@@ -178,23 +178,24 @@ fn strip_type_containers(ctx: &mut Json, terms: &mut Vec<String>) {
                     continue;
                 }
                 let Json::Obj(fields) = def else { continue };
+                let mut stripped = false;
                 for (key, val) in fields.iter_mut() {
                     match (key.as_str(), val) {
                         ("@context", scoped) => strip_type_containers(scoped, terms),
                         ("@container", Json::Arr(cs)) => {
                             let n = cs.len();
                             cs.retain(|c| c.as_str() != Some("@type"));
-                            if cs.len() != n {
-                                terms.push(name.clone());
-                            }
+                            stripped |= cs.len() != n;
                         }
+                        ("@container", c) => stripped |= c.as_str() == Some("@type"),
                         _ => {}
                     }
                 }
-                if def.get("@container").and_then(Json::as_str) == Some("@type") {
-                    if let Json::Obj(fields) = def {
-                        fields.retain(|(k, _)| k != "@container");
-                    }
+                if stripped {
+                    // A container left empty (or that was just "@type") is dropped.
+                    fields.retain(|(k, v)| {
+                        k != "@container" || matches!(v, Json::Arr(cs) if !cs.is_empty())
+                    });
                     terms.push(name.clone());
                 }
             }
@@ -241,10 +242,12 @@ pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> Strin
                 .and_then(|ctx| readable_type_maps(&framed, ctx));
             match stripped {
                 None => render(&framed),
+                // The match stands; only the framed result is compacted again (re-framing
+                // under the new context would change what the frame selects).
                 Some(ctx) => {
-                    let mut f = frame_doc.clone();
-                    f.set("@context", ctx);
-                    render(&run(&f).unwrap_or(doc))
+                    let again = expand(&framed, &opts, &NoopLoader)
+                        .and_then(|exp| compact_expanded(&exp, &ctx, &opts, &NoopLoader));
+                    render(&again.unwrap_or(framed))
                 }
             }
         }

@@ -4037,8 +4037,9 @@ ex:bob
         let framed = graph_to_jsonld_framed(&g0, &frame);
         // `p` becomes a plain property (sparq's reader can't read node objects in a type
         // map); under `T`'s type-scoped context `t` is ex:data and `type` the type. The
-        // shape is pinned: oxjsonld doesn't apply a type-scoped context after `@id`.
-        assert!(framed.contains(r#""p":{"@id":"http://ex/b","type":"T","t":"kept"}"#), "{framed}");
+        // output is checked by expansion: oxjsonld doesn't apply a type-scoped context
+        // after `@id`.
+        assert!(framed.contains(r#""p":{"@id":"http://ex/b","#), "{framed}");
         let doc = sparq_jsonld::Json::parse(&framed).unwrap();
         let opts = sparq_jsonld::JsonLdOptions::default();
         let mut exp = String::new();
@@ -4127,6 +4128,32 @@ ex:bob
         );
         assert!(doc.contains(r#""@container":"@type""#), "{doc}");
         assert_eq!(nt_sorted(&g1), nt_sorted(&refs), "{doc}");
+    }
+
+    // The readable re-rendering keeps what the frame matched: a type-map frame still
+    // selects by type, and a `["@type"]` container is dropped whole.
+    #[test]
+    fn readable_type_maps_keep_the_frame_match() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" .
+               <http://ex/z> <http://ex/data> "other" ."#,
+            "turtle",
+        )
+        .unwrap();
+        for container in [r#""@type""#, r#"["@type"]"#] {
+            let frame = parse_context_json(&format!(
+                r#"{{"@context":{{"@vocab":"http://ex/","p":{{"@id":"http://ex/p","@container":{container}}}}},
+                    "@id":"http://ex/a","p":{{"T":{{}}}}}}"#
+            ))
+            .unwrap();
+            let framed = graph_to_jsonld_framed(&g0, &frame);
+            assert!(!framed.contains("other"), "{framed}");
+            let back = Graph::load_str(&framed, "jsonld").unwrap();
+            let mut want = nt_sorted(&g0);
+            want.retain(|t| !t.contains("other"));
+            assert_eq!(nt_sorted(&back), want, "{framed}");
+        }
     }
 
     // A property-valued index whose value reads as an `@none` alias stays on the node.
