@@ -966,9 +966,9 @@ checksum = "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d"
 
 [[package]]
 name = "rustls"
-version = "0.23.41"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b92b125634d9b795e7beca796cc790df15a7fb38323bf3196fda83292d06b1f"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "log",
  "once_cell",
@@ -1029,9 +1029,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -1262,22 +1262,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46715eb957d1fe960cbbc0b713da8f78e2cb19df315b48fb09c9467a1c84f656"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf",
- "peg",
- "rand",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "sparq-conformance"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "oxrdfxml",
@@ -1285,17 +1271,22 @@ dependencies = [
  "quick-xml 0.41.0",
  "rustc-hash",
  "serde_json",
- "spargebra",
+ "sparq-conformance-floors",
  "sparq-core",
  "sparq-engine",
  "sparq-reason",
  "sparq-server",
+ "sparq-spargebra",
  "tokio",
 ]
 
 [[package]]
+name = "sparq-conformance-floors"
+version = "0.1.4"
+
+[[package]]
 name = "sparq-core"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "hashbrown",
  "memchr",
@@ -1309,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1320,17 +1311,17 @@ dependencies = [
  "sha1 0.11.0",
  "sha2",
  "smallvec",
- "spargebra",
  "sparq-core",
  "sparq-engine-serialize",
  "sparq-engine-service",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -1339,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "quick-xml 0.41.0",
@@ -1352,11 +1343,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.0"
+version = "0.1.4"
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "rayon",
@@ -1368,23 +1359,24 @@ dependencies = [
 
 [[package]]
 name = "sparq-serve"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "arc-swap",
  "oxrdf",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-spargebra",
 ]
 
 [[package]]
 name = "sparq-server"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "axum",
  "flate2",
  "futures-util",
+ "http-body",
  "hyper",
  "hyper-util",
  "mimalloc",
@@ -1392,10 +1384,10 @@ dependencies = [
  "oxrdfxml",
  "oxttl",
  "serde_json",
- "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-serve",
+ "sparq-spargebra",
  "tokio",
  "tower",
  "tower-http",
@@ -1404,8 +1396,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf",
+ "peg",
+ "rand",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "sparq-substrate"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "hashbrown",
  "oxrdf",

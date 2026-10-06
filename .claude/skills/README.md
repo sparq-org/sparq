@@ -28,16 +28,6 @@ USE sparq") — do not confuse the two.
   whenever a question is about code *shape* rather than an exact string, or before
   reading a file > ~200 lines.
 
-- **`proceed-and-document/`** — the reusable form of the standing *"proceed
-  without the maintainer's greenlight"* rule: on a design/judgment-decision bead,
-  make the best-judgment choice, document it (PR body + one-line bead note), open a
-  SPARQ-self-id issue to steer post-hoc, and proceed — with the two hard exceptions
-  (external credential/access; honesty/soundness labels). Carries the rule that the
-  scheduler's `implPrompt()` + Frontier brief and hand-dispatched briefs reference
-  **by name** so it is inherited identically. Authority is
-  [`AGENTS.md`](../../AGENTS.md) *"STANDING RULE …"*; design basis
-  [`research/agent-effectiveness-program.md`](../../research/agent-effectiveness-program.md)
-  §2.3. Use it whenever you'd otherwise stall a bead on a maintainer decision.
 
 ## Vendored third-party skills
 

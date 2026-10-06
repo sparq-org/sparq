@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Paired A/B statistics + §5.6 verdict-object emitter (bead sq-lhwo.4,
-# epic sq-lhwo). Authored by Opus 4.8 (Fable unavailable; flag for re-review when
-# Fable returns). 🤖 SPARQ agent.
+# Paired A/B statistics + §5.6 verdict-object emitter (bead sq-lhwo.4,
+# epic sq-lhwo). 🤖 SPARQ agent.
 #
 # WHY THIS EXISTS
 # --------------------------------------------------------------------------------

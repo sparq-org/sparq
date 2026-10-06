@@ -143,6 +143,8 @@ pub use change_sink::{
     RecordingSink, SinkConfig, SinkError, DEFAULT_PUMP_MAX_BATCH, DEFAULT_SUBJECT,
 };
 pub use applier::{GraphApplier, DEFAULT_COMPACT_THRESHOLD};
+#[cfg(feature = "params")]
+pub use applier::PreparedGraphApplier;
 pub use epoch::{Epoch, PodEpochs, PodId};
 pub use footprint::{Footprint, TargetGraph};
 pub use ring::{Generation, GenerationRing, RingConfig, TimeTravelConfig, DEFAULT_RETAIN};

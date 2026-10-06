@@ -24,12 +24,13 @@ all-features = true
 # unblocks the substrate move-chain (research/shared-eval-substrate.md, Option C). It
 # depends ONLY on sparq-core (NOT sparq-engine) so BOTH the engine AND the reasoners
 # (sparq-reason / sparq-reason-el, which depend only on sparq-core) can later consume it
-# with NO dependency cycle. This crate is a SCAFFOLD: it defines / re-exports the shared
-# id-tuple vocabulary and the numeric value tower, behind DEFAULT-OFF features, with NO
-# evaluation logic moved yet (the join kernels + the engine `compare_values`/`Num`
-# arithmetic land in later beads of the epic). Nothing in the workspace depends on it, so
-# the lean default / wasm build does not compile any of it and the wasm_bundle_bytes floor
-# stays byte-identical (Phase-1 acceptance, research record §7.1).
+# with NO dependency cycle. It holds the shared id-tuple vocabulary, the numeric value
+# tower, the comparison helpers and the hash-join kernels, each behind a DEFAULT-OFF
+# feature. It is NO LONGER unconsumed: `sparq-engine` depends on it unconditionally
+# (features numeric + join + compare) and `sparq-reason` depends on it (numeric, plus
+# rows/join behind its own features), so it IS compiled into the lean default / feature-OFF
+# wasm bundle. A change to code behind those features moves `wasm_bundle_bytes` and may need
+# a feature-off declaration (bench/feature-off-declarations/) like any engine change (#3806).
 
 [features]
 # DEFAULT-OFF by construction: the lean core/engine/wasm build must compile NONE of this
@@ -82,7 +83,7 @@ overhead = ["join", "numeric", "compare"]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`). sparq-core is the ONLY dependency: this
 # crate sits at the leaf, below the engine, so the reasoners can reach it without a cycle.
-sparq-core = { path = "../sparq-core", version = "0.1.1", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.4", default-features = false }
 # Inline small rows (avoid a heap allocation per solution row / join key). Same crate the
 # engine already uses for its `Row`/`Key` aliases, so the representation is byte-identical.
 smallvec.workspace = true

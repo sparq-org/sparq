@@ -472,3 +472,149 @@ _:l2 rdf:first <urn:purpose/b> ; rdf:rest rdf:nil .
     assert!(evaluate(&p, &purpose("urn:purpose/b")).allow);
     assert!(!evaluate(&p, &purpose("urn:purpose/c")).allow);
 }
+
+// ===========================================================================
+// #3982 — a NESTED-list member of a rightOperand collection REFUSES the parse.
+//
+// A nested list used to stay an opaque blank-node string inside the set
+// encoding: unmatchable, which is fail-closed only for the POSITIVE set
+// operators. Under `isNoneOf` an unmatchable member excludes nothing, so the
+// authored exclusion was silently dropped (widening on a permission; a
+// narrowed carve-out on a prohibition). Mirrors `fold_list_operands`.
+// ===========================================================================
+
+/// The issue's witness: `isNoneOf ( ( <a> ) <b> )` on a permission used to
+/// GRANT purpose `a`, which the author listed in the exclusion set.
+#[test]
+fn nested_list_member_right_operand_refuses_the_parse_on_permission() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:leftOperand odrl:purpose ; odrl:operator odrl:isNoneOf ;
+                      odrl:rightOperand ( ( <urn:purpose/a> ) <urn:purpose/b> ) ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(
+        err.contains("NESTED-list member"),
+        "a nested-list rightOperand member must refuse the parse, got: {err}"
+    );
+}
+
+/// The same shape gating a PROHIBITION (where an unmatchable member would
+/// narrow the carve-out) is refused too.
+#[test]
+fn nested_list_member_right_operand_refuses_the_parse_on_prohibition() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ;
+  odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ;
+  odrl:prohibition [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:leftOperand odrl:purpose ; odrl:operator odrl:isAnyOf ;
+                      odrl:rightOperand ( <urn:purpose/b> ( <urn:purpose/a> ) ) ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(
+        err.contains("NESTED-list member"),
+        "a nested-list rightOperand member must refuse the parse, got: {err}"
+    );
+}
+
+/// An EMPTY nested list (`( )` as a member, i.e. `rdf:nil`) is a degenerate
+/// nested collection and is refused the same way.
+#[test]
+fn empty_nested_list_member_right_operand_refuses_the_parse() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:leftOperand odrl:purpose ; odrl:operator odrl:isNoneOf ;
+                      odrl:rightOperand ( ( ) <urn:purpose/b> ) ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(err.contains("NESTED-list member"), "got: {err}");
+}
+
+/// Nested lists inside a LogicalConstraint's atomic operand are refused too
+/// (the atom table shares the same fold).
+#[test]
+fn nested_list_member_in_logical_operand_refuses_the_parse() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:and
+        [ odrl:leftOperand odrl:purpose ; odrl:operator odrl:isNoneOf ;
+          odrl:rightOperand ( ( <urn:purpose/a> ) <urn:purpose/b> ) ] ,
+        [ odrl:leftOperand odrl:purpose ; odrl:operator odrl:neq ;
+          odrl:rightOperand <urn:purpose/c> ] ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(err.contains("NESTED-list member"), "got: {err}");
+}
+
+// ===========================================================================
+// #3832 — a constraint node with SEVERAL distinct `odrl:leftOperand` or
+// `odrl:operator` objects REFUSES the parse instead of evaluating one
+// arbitrarily chosen binding (unstable under result ordering).
+// ===========================================================================
+
+#[test]
+fn multiple_left_operands_refuse_the_parse() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:leftOperand odrl:recipient , odrl:purpose ;
+                      odrl:operator odrl:eq ; odrl:rightOperand <urn:alice> ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(
+        err.contains("several distinct odrl:leftOperand"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn multiple_operators_refuse_the_parse() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ; odrl:prohibition [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:leftOperand odrl:purpose ;
+                      odrl:operator odrl:eq , odrl:neq ; odrl:rightOperand <urn:purpose/a> ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(err.contains("several distinct odrl:operator"), "got: {err}");
+}
+
+/// The same refusal applies to an atomic operand of a LogicalConstraint.
+#[test]
+fn multiple_left_operands_in_logical_operand_refuse_the_parse() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/p> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:or
+        [ odrl:leftOperand odrl:recipient , odrl:purpose ;
+          odrl:operator odrl:eq ; odrl:rightOperand <urn:alice> ] ,
+        [ odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ;
+          odrl:rightOperand <urn:purpose/c> ] ] ] .
+"#;
+    let err = parse_policy_str(ttl, "turtle").unwrap_err();
+    assert!(
+        err.contains("several distinct odrl:leftOperand"),
+        "got: {err}"
+    );
+}
+
+/// A single leftOperand repeated across several rows (one per rightOperand
+/// object) is NOT a conflict — the multi-object fold still works.
+#[test]
+fn repeated_identical_left_operand_rows_still_fold() {
+    let p = purpose_policy("isNoneOf", "<urn:purpose/a>, <urn:purpose/b>");
+    assert!(!evaluate(&p, &purpose("urn:purpose/a")).allow);
+    assert!(!evaluate(&p, &purpose("urn:purpose/b")).allow);
+    assert!(evaluate(&p, &purpose("urn:purpose/c")).allow);
+}

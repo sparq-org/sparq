@@ -35,7 +35,10 @@ use solid_oidc_verifier::verifier::Verifier;
 use sparq_lws_core::app::{build_router, AppState};
 use sparq_lws_core::auth::AuthContext;
 use sparq_lws_core::ldp::handler::LdpState;
-use sparq_lws_core::store::{CompositeStore, InMemoryBlobStore, InMemorySparqClient, Store};
+use sparq_lws_core::store::{
+    BlobEntry, BlobError, BlobStore, BodyCache, CompositeStore, InMemoryBlobStore,
+    InMemorySparqClient, Store,
+};
 use tower::ServiceExt;
 
 const TURTLE: &str =
@@ -636,5 +639,167 @@ async fn dpop_header_without_authorization_falls_through() {
         resp.status(),
         StatusCode::OK,
         "a no-Authorization GET with a valid-UTF8 DPoP header falls through; the public resource is 200"
+    );
+}
+
+// --------------------------------------------------------------------------------------------------
+// Reclaim race: an anonymous read authorized for a PUBLIC version must never serve the private
+// version that replaced it (and had its bytes reclaimed) between authorization and the byte fetch.
+// --------------------------------------------------------------------------------------------------
+
+/// A blob store that PAUSES the first `get` of one armed key: it signals `reached`, then waits for
+/// `proceed` before reading. That pins the reader between its read-plan/authorization round and its
+/// byte fetch, so the test can commit the owner's revoke + rewrite exactly in that window.
+struct PausingBlob {
+    inner: InMemoryBlobStore,
+    armed: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    reached: std::sync::Arc<tokio::sync::Notify>,
+    proceed: std::sync::Arc<tokio::sync::Notify>,
+}
+
+#[async_trait::async_trait]
+impl BlobStore for PausingBlob {
+    async fn get(&self, key: &str) -> Result<axum::body::Bytes, BlobError> {
+        let pause = {
+            let mut armed = self.armed.lock().unwrap();
+            if armed.as_deref() == Some(key) {
+                armed.take();
+                true
+            } else {
+                false
+            }
+        };
+        if pause {
+            self.reached.notify_one();
+            self.proceed.notified().await;
+        }
+        self.inner.get(key).await
+    }
+    async fn put(&self, key: &str, body: axum::body::Bytes) -> Result<(), BlobError> {
+        self.inner.put(key, body).await
+    }
+    async fn exists(&self, key: &str) -> Result<bool, BlobError> {
+        self.inner.exists(key).await
+    }
+    async fn delete(&self, key: &str) -> Result<(), BlobError> {
+        self.inner.delete(key).await
+    }
+    async fn list(&self) -> Result<Vec<BlobEntry>, BlobError> {
+        self.inner.list().await
+    }
+    async fn delete_if_unchanged(
+        &self,
+        key: &str,
+        expected_generation: u64,
+    ) -> Result<bool, BlobError> {
+        self.inner
+            .delete_if_unchanged(key, expected_generation)
+            .await
+    }
+}
+
+#[tokio::test]
+async fn reclaim_race_never_serves_a_rewritten_private_version_to_an_anonymous_reader() {
+    use std::sync::Arc;
+    const DOC: &str = "https://pod.example/flip";
+    const ACL: &str = "https://pod.example/flip.acl";
+    const PUBLIC_BODY: &str =
+        "<https://pod.example/flip#it> <http://xmlns.com/foaf/0.1/name> \"public\" .";
+    const PRIVATE_BODY: &str =
+        "<https://pod.example/flip#it> <http://xmlns.com/foaf/0.1/name> \"PRIVATE-SECRET\" .";
+
+    let issuer_key = KeyKit::generate();
+    let config = VerifierConfig::new(vec![ISSUER.to_string()], BASE_URL);
+    let replay = InMemoryReplayStore::with_window(config.replay_ttl());
+    let verifier = Verifier::new(config, jwks_provider(&issuer_key), replay).unwrap();
+    let ctx = AuthContext::new(verifier, BASE_URL);
+
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let proceed = Arc::new(tokio::sync::Notify::new());
+    let armed = Arc::new(std::sync::Mutex::new(None));
+    // Cold/disabled body cache: every read reaches the blob store (the reviewed scenario).
+    let store = CompositeStore::with_body_cache(
+        InMemorySparqClient::new(),
+        PausingBlob {
+            inner: InMemoryBlobStore::new(),
+            armed: Arc::clone(&armed),
+            reached: Arc::clone(&reached),
+            proceed: Arc::clone(&proceed),
+        },
+        BodyCache::disabled(),
+    );
+    let owner_only = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>; acl:accessTo <https://pod.example/>; acl:default <https://pod.example/>; acl:mode acl:Read, acl:Write, acl:Control."#
+    );
+    store
+        .write(
+            "https://pod.example/.acl",
+            axum::body::Bytes::from(owner_only),
+            "text/turtle",
+        )
+        .await
+        .unwrap();
+    let public_acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+@prefix foaf: <http://xmlns.com/foaf/0.1/>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>; acl:accessTo <{DOC}>; acl:mode acl:Read, acl:Write, acl:Control.
+<#pub> a acl:Authorization; acl:agentClass foaf:Agent; acl:accessTo <{DOC}>; acl:mode acl:Read."#
+    );
+    store
+        .write(ACL, axum::body::Bytes::from(public_acl), "text/turtle")
+        .await
+        .unwrap();
+    let v1 = store
+        .write(DOC, axum::body::Bytes::from(PUBLIC_BODY), "text/turtle")
+        .await
+        .unwrap();
+
+    let state = AppState::new(ctx, LdpState::new(store, BASE_URL));
+    let ldp = Arc::clone(&state.ldp);
+    let app = build_router(state);
+
+    // Sanity: the public version is anonymously readable before the race.
+    let before = snapshot(app.clone().oneshot(get("/flip")).await.unwrap()).await;
+    assert_eq!(before.0, StatusCode::OK);
+    assert_eq!(before.2, PUBLIC_BODY.as_bytes());
+
+    // Arm the pause on v1's blob, start the anonymous GET, and wait until it has authorized against
+    // the PUBLIC ACL and is about to fetch v1's bytes.
+    *armed.lock().unwrap() = Some(v1.blob_key.clone());
+    let reader = tokio::spawn({
+        let app = app.clone();
+        async move { app.oneshot(get("/flip")).await.unwrap() }
+    });
+    reached.notified().await;
+
+    // The owner revokes public access, then rewrites the document with private content. The rewrite
+    // reclaims v1's blob right after its index commit.
+    let owner_acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization; acl:agent <{WEBID}>; acl:accessTo <{DOC}>; acl:mode acl:Read, acl:Write, acl:Control."#
+    );
+    ldp.store
+        .write(ACL, axum::body::Bytes::from(owner_acl), "text/turtle")
+        .await
+        .unwrap();
+    ldp.store
+        .write(DOC, axum::body::Bytes::from(PRIVATE_BODY), "text/turtle")
+        .await
+        .unwrap();
+    proceed.notify_one();
+
+    let (status, _headers, body) = snapshot(reader.await.unwrap()).await;
+    assert!(
+        !String::from_utf8_lossy(&body).contains("PRIVATE-SECRET"),
+        "the private rewrite must never be served under the public version's authorization \
+         (status {status}, body {:?})",
+        String::from_utf8_lossy(&body)
+    );
+    // The read restarts with re-authorization against the CURRENT (owner-only) ACL: anonymous ⇒ 401.
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "the restarted read must re-authorize against the revoked ACL"
     );
 }

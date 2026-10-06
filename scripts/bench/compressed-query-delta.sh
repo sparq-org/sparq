@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [SONNET-4.6] sq-7d3dj.32.2.2 — compressed-query-delta harness:
+# sq-7d3dj.32.2.2 — compressed-query-delta harness:
 # per-query latency comparison raw vs SPARQ_STORE_PROFILE=compressed on the
 # WatDiv suite (bench/watdiv/queries, gen.sh corpus), emitting the house JSON
 # envelope with per-query best-of-N rows.

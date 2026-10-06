@@ -175,6 +175,18 @@ fn result(entry: &TestEntry, outcome: Outcome) -> TestResult {
     }
 }
 
+/// True iff the entry's query file parses and carries its own `FROM`/`FROM NAMED`
+/// clause. An unreadable or unparsable query is left to the evaluation path to report.
+fn query_file_carries_dataset(entry: &TestEntry) -> bool {
+    let Some(path) = &entry.action.query else { return false };
+    let Ok(text) = std::fs::read_to_string(path) else { return false };
+    SparqlParser::new()
+        .with_base_iri(crate::rdf::file_iri(path))
+        .ok()
+        .and_then(|p| p.parse_query(&text).ok())
+        .is_some_and(|q| query_carries_dataset(&q))
+}
+
 fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outcome {
     // [OPUS-4.8] sq-oy1f — the `sparql11/entailment` manifest at the pinned
     // rdf-tests revision contains NO `qt:graphData` entries (every entailment test
@@ -188,6 +200,13 @@ fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outc
     // properly is tracked as a deferred bead; do NOT drop the guard to "make it run"
     // until the reasoner models named-graph materialization.
     if !entry.action.graph_data.is_empty() {
+        return Outcome::OutOfScope("named-graph entailment dataset not wired".into());
+    }
+    // The same hold for a dataset the QUERY declares (#6403): the runner appends a
+    // `FROM`/`FROM NAMED` document to the graph names but, with the closure passed as the
+    // data override, never loads it, so the query would run over declared-but-empty
+    // graphs. No entailment query at the pinned rdf-tests revision carries one.
+    if query_file_carries_dataset(entry) {
         return Outcome::OutOfScope("named-graph entailment dataset not wired".into());
     }
     // Load and materialize the default-graph data. The blank-node labels of
@@ -1243,7 +1262,6 @@ fn classify_rewrite_abstain(reason: &str) -> QlHoldReason {
 /// (condition (4): the CQ-shape gate drops `dataset` rather than honouring it,
 /// so a dataset-carrying query must be HELD, never rewritten over the wrong
 /// graph). [FABLE-5] sq-pbz04.3.4
-#[cfg(feature = "ql-experimental")]
 fn query_carries_dataset(query: &Query) -> bool {
     match query {
         Query::Select { dataset, .. }
@@ -2150,5 +2168,52 @@ mod ql_tests {
             panic!("select");
         };
         assert_eq!(projected_vars(pattern), vec!["x".to_string()]);
+    }
+}
+
+/// #6403 — a query-declared `FROM`/`FROM NAMED` dataset is held like a manifest
+/// `qt:graphData` one, instead of evaluating over declared-but-empty named graphs.
+#[cfg(test)]
+mod query_dataset_guard_tests {
+    use super::*;
+    use crate::manifest::{EntryKind, QueryAction, TestEntry, UpdateState};
+
+    fn entry_with_query(dir: &Path, name: &str, query: &str) -> TestEntry {
+        let data = dir.join("data.ttl");
+        std::fs::write(&data, "<http://ex/s> <http://ex/p> <http://ex/o> .").unwrap();
+        let q = dir.join(name);
+        std::fs::write(&q, query).unwrap();
+        TestEntry {
+            id: format!("urn:test:{name}"),
+            name: name.into(),
+            suite: "sparql11/entailment".into(),
+            kind: EntryKind::QueryEval,
+            withdrawn: false,
+            action: QueryAction { query: Some(q), data: vec![data], ..QueryAction::default() },
+            result_file: None,
+            update_request: None,
+            update_pre: UpdateState::default(),
+            update_post: UpdateState::default(),
+        }
+    }
+
+    #[test]
+    fn query_declared_dataset_is_held() {
+        let dir = std::env::temp_dir().join(format!("sparq_6403_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, q) in [
+            ("from.rq", "SELECT * FROM <data.ttl> WHERE { ?s ?p ?o }"),
+            ("from_named.rq", "SELECT * FROM NAMED <data.ttl> WHERE { GRAPH ?g { ?s ?p ?o } }"),
+        ] {
+            let e = entry_with_query(&dir, name, q);
+            assert!(query_file_carries_dataset(&e), "{name}");
+            match run_one(&e, Profile::Rdfs, false) {
+                Outcome::OutOfScope(r) => assert_eq!(r, "named-graph entailment dataset not wired"),
+                other => panic!("{name}: expected a hold, got {other:?}"),
+            }
+        }
+        let plain = entry_with_query(&dir, "plain.rq", "SELECT * WHERE { ?s ?p ?o }");
+        assert!(!query_file_carries_dataset(&plain));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

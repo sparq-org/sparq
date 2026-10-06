@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-[OPUS-5] sq-v3nel-v3: test suite for scripts/feature_off_autodeclare.py.
+sq-v3nel-v3: test suite for scripts/feature_off_autodeclare.py.
 
 The tool decides whether a feature-OFF wasm-bundle difference is line-position churn
 (comments moved, an off-by-default `#[cfg]` item inserted) or a real change to the code the
@@ -1007,12 +1007,12 @@ def test_builder_ignores_an_inherited_shared_target_dir() -> None:
 
 
 def test_paths_filter_includes_the_new_scripts() -> None:
-    """Editing the derivation must re-run the leg, in BOTH of the workflow's filter blocks."""
+    """Editing the derivation must re-run the leg: the push `paths:` filter lists both."""
     text = workflow_text()
     check("test_paths_filter_includes_the_new_scripts",
-          text.count("- 'scripts/feature_off_autodeclare.py'") == 2
-          and text.count("- 'scripts/tests/test_feature_off_autodeclare.py'") == 2,
-          "both paths-filter blocks must list the derivation script and its suite")
+          text.count('- "scripts/feature_off_autodeclare.py"') == 1
+          and text.count('- "scripts/tests/test_feature_off_autodeclare.py"') == 1,
+          "the push paths filter must list the derivation script and its suite")
 
 
 TESTS = [
@@ -1178,8 +1178,7 @@ MUTANTS = [
 
 # YAML mutants. "Ask the deletion question of the YAML": delete the `if:`, delete the STEP,
 # and delete the CALL SITE the guard reads — each must red its own named check.
-_DERIV_IF = ("        if: always() && steps.changes.outputs.rust_changed == 'true'\n"
-             "          && steps.leg2.outcome == 'failure' && github.event_name == 'pull_request'\n")
+_DERIV_IF = "        if: always() && steps.leg2.outcome == 'failure'\n"
 
 YAML_MUTANTS = [
     ("Y1-drop-leg2-id",
@@ -1201,20 +1200,18 @@ YAML_MUTANTS = [
      "test_derivation_suite_is_run_in_ci"),
     ("Y7-reintroduce-shared-target-dir",
      "hand the derivation a shared CARGO_TARGET_DIR again",
-     "          PR_NUMBER: ${{ github.event.pull_request.number }}",
-     "          PR_NUMBER: ${{ github.event.pull_request.number }}\n"
+     "          INPUT_PR: ${{ inputs.pr_number }}",
+     "          INPUT_PR: ${{ inputs.pr_number }}\n"
      "          CARGO_TARGET_DIR: ${{ runner.temp }}/shared",
      "test_workflow_sets_no_shared_target_dir"),
     ("Y8-drop-always-from-derivation-if",
      "drop always() so the derivation is skipped exactly when leg 2 fails",
-     "        if: always() && steps.changes.outputs.rust_changed == 'true'\n"
-     "          && steps.leg2.outcome == 'failure' && github.event_name == 'pull_request'",
-     "        if: steps.changes.outputs.rust_changed == 'true'\n"
-     "          && steps.leg2.outcome == 'failure' && github.event_name == 'pull_request'",
+     "        if: always() && steps.leg2.outcome == 'failure'",
+     "        if: steps.leg2.outcome == 'failure'",
      "test_derivation_if_carries_always"),
     ("Y9-disable-the-mutation-tripwire",
      "switch the --mutate tripwire off with if: false",
-     "        if: always() && steps.changes.outputs.rust_changed == 'true'\n"
+     "        if: always()\n"
      "        # Runs the derivation's own suite INCLUDING the mutation matrix",
      "        if: false\n"
      "        # Runs the derivation's own suite INCLUDING the mutation matrix",
@@ -1231,7 +1228,7 @@ YAML_MUTANTS = [
      "test_ci_passes_the_bundles_in_the_right_order"),
     ("Y5-drop-paths-filter-entry",
      "stop re-running the leg when the derivation script itself changes",
-     "              - 'scripts/feature_off_autodeclare.py'\n", "",
+     '      - "scripts/feature_off_autodeclare.py"\n', "",
      "test_paths_filter_includes_the_new_scripts"),
     ("Y6-make-leg2-tolerant",
      "let leg 2 itself continue-on-error, which would silently un-gate the whole leg",

@@ -1,6 +1,6 @@
 # GitHub Release pipeline (T20): tag `vX.Y.Z` -> build, package, checksum, release, docker.
 #
-# [OPUS-4.8] sq-v286.2: the per-hardware-tier build matrix is no longer inlined here. It is
+# sq-v286.2: the per-hardware-tier build matrix is no longer inlined here. It is
 # defined ONCE in the reusable workflow `build-matrix.yml` and invoked below with
 # `mode: archive` (the `package` job is a `workflow_call`). release.yml remains THE entry point
 # for cutting a release (it fires on a `v*` tag and is the path the release-plz tag flow will
@@ -14,34 +14,26 @@
 # manifest — produced by the reusable workflow's `archive` mode + the `release` job below.
 #
 # Triggers: version tags AND manual workflow_dispatch — both are deliberate releasing acts. NO
-# schedule, NO pull_request, so this workflow NEVER runs as a PR check and never gates a PR (the
-# required branch-protection check is `ci-summary / gate`, which only ever evaluates PR/main
-# events — release.yml has no `pull_request` trigger, so it is invisible to that aggregator).
+# schedule, NO pull_request, so this workflow NEVER runs as a PR check and never gates a PR.
 #
-# [OPUS-4.8] sq-gl3cf: a `v*` tag push is the canonical release; `workflow_dispatch` is the
-# developer/test path that builds + attaches the SAME assets (GUI bundles, archives, SBOM/VEX,
-# docker image) WITHOUT pushing a real `v*` tag. On dispatch, `github.ref_name` is the BRANCH the
-# dispatch ran on (NOT a version), so every place asset identity / the release tag was derived
-# from `github.ref_name` is now threaded from the `setup` job's single `version` output
-# (`inputs.tag` on dispatch, `github.ref_name` on tag push). Dispatch builds are pre-release by
-# default. There is NO double-build on tag: a single event fires exactly one trigger, and `setup`
-# resolves the version for whichever fired.
+# sq-gl3cf: a `v*` tag push is the canonical release; `workflow_dispatch` is the
+# recovery path, run at the SAME immutable tag as its `tag` input. setup refuses
+# branch dispatches, source/tag mismatches, and inconsistent manifest versions before any
+# artifact is built or published. Dispatch builds remain pre-release by default.
 name: release
 
 on:
   push:
     tags: ["v*"]
-  # [OPUS-4.8] sq-gl3cf: manual path to build + attach the release assets (incl. the UNSIGNED
-  # Tauri desktop GUI bundles) without cutting a real `v*` tag — for developer/test releases.
+  # Manual recovery retries the workflow AT the tag; it cannot pick up workflow fixes
+  # merged later. See docs/release.md §3b before retrying a deterministic failure.
   workflow_dispatch:
     inputs:
       tag:
         description: >-
-          Release tag the built assets attach to (e.g. v0.1.0-dev). MUST be a vX.Y.Z release tag —
-          the publish-cadence guard (#2552) refuses anything else, because it cannot tell which tag
-          to exclude from the interval sources. A developer/test dispatch SHOULD use a -dev /
-          pre-release suffix so it is never mistaken for a canonical release.
-          This is the single source of asset naming + the GitHub Release tag on the dispatch path.
+          Existing vX.Y.Z tag to build and attach assets to. Dispatch the workflow at this exact
+          tag (not main); its commit and manifest versions must match. A prerelease tag must
+          also match the prerelease version in the manifests. Never move a public tag to retry.
         required: true
         type: string
       prerelease:
@@ -56,11 +48,10 @@ permissions:
 
 jobs:
   # ---- 0. resolve the single version string used for asset identity + the release tag ----
-  # [OPUS-4.8] sq-gl3cf: ONE source of truth for the version, consumed by EVERY job that names an
+  # sq-gl3cf: ONE source of truth for the version, consumed by EVERY job that names an
   # asset or attaches to a tag. On a `v*` tag push, `inputs.tag` is empty and `github.ref_name` is
-  # the tag (e.g. `v0.1.0`). On `workflow_dispatch`, `inputs.tag` is the developer-supplied release
-  # tag and `github.ref_name` is the BRANCH (wrong for asset identity) — so `${{ inputs.tag ||
-  # github.ref_name }}` picks the dispatch input when present and the tag otherwise. This output is
+  # the tag (e.g. `v0.1.0`). On `workflow_dispatch`, `inputs.tag` must name the same existing
+  # tag as the dispatch ref; setup verifies this before building. This output is
   # threaded into `gui-bundle`, `sbom`, `package` (via build-matrix.yml's `version` input), and
   # `release` (tag_name + body links) so BOTH triggers name assets + tag the Release identically.
   setup:
@@ -73,8 +64,10 @@ jobs:
     steps:
       - name: Resolve version
         id: v
-        run: echo "version=${{ inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
-      # [OPUS-5] issue #2552 — THE CADENCE GUARD ON THE TAG-PUSH PATH. LOAD-BEARING.
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: printf 'version=%s\n' "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+      # issue #2552 — THE CADENCE GUARD ON THE TAG-PUSH PATH. LOAD-BEARING.
       #
       # Maintainer, verbatim: "We need to make sure that we do not create many many
       # releases so please put a policy in place to ensure we do not do more than 1
@@ -98,15 +91,10 @@ jobs:
       # PRECONDITION — on a shallow checkout the tag list is not authoritative and the
       # guard refuses rather than guessing.
       #
-      # WHY UNCONDITIONAL — including `workflow_dispatch`. A dispatch build looks like a
-      # developer/test path (pre-release, `dev-`-prefixed image tags), but the Release it
-      # creates fires `release: published`, and publish.yml's `npm` job runs on ANY
-      # `release` event. So a dispatch reaches a registry too: exempting it would leave the
-      # loophole this guard exists to close. The escape hatch the guard's no-override
-      # design reserves is a maintainer publishing BY HAND, outside CI — not dispatching a
-      # workflow that publishes for them. Consequence, by design: `inputs.tag` must be a
-      # `vX.Y.Z` release tag (a `-dev` suffix is fine); anything else refuses, because the
-      # guard cannot tell which tag to exclude from the cadence sources.
+      # WHY UNCONDITIONAL — including `workflow_dispatch`: dispatch publishes Release
+      # assets and container images too. GITHUB_TOKEN-created Releases do not trigger
+      # publish.yml; registry uploads use a separate explicit dispatch. Both workflows
+      # now require an existing tag whose version and commit match the checkout.
       #
       # DO NOT add an `if:`, do not add `continue-on-error`, do not swap `--enforce` for
       # `--dry-run`, and do not append `|| true`.
@@ -115,8 +103,13 @@ jobs:
       - name: Checkout (full history — the `v*` tag list must be authoritative)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify immutable release source
+        env:
+          RELEASE_TAG: ${{ steps.v.outputs.version }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG"
       - name: Publish-cadence guard (fail-closed minimum release interval, #2552)
         env:
           # Via env, never string-interpolated into the shell: a tag name is attacker-
@@ -125,14 +118,14 @@ jobs:
         run: python3 scripts/release-interval-guard.py --enforce --repo-root . --released-tag "${RELEASED_TAG}"
 
   # ---- 1. build + package per hardware tier ----
-  # [OPUS-4.8] sq-v286.2: invoke the shared reusable matrix in `archive` mode. The 10-tier
+  # sq-v286.2: invoke the shared reusable matrix in `archive` mode. The 10-tier
   # runner-label matrix + build steps + the sq-zqq6 SLSA archive attestation all live in
   # build-matrix.yml now (single source of truth); this caller only selects the artifact shape.
   # The reusable workflow's matrix job attests + uploads `pkg-<tier>`; the `release` job below
   # consumes those artifacts. `permissions:` here is the ceiling passed down to the called
   # workflow — it must grant the OIDC + attestation writes the attestation step needs.
   package:
-    # [OPUS-4.8] sq-gl3cf: thread the resolved version into the reusable matrix so the per-tier
+    # sq-gl3cf: thread the resolved version into the reusable matrix so the per-tier
     # archives are named `sparq-cli-<version>-<tier>` on BOTH triggers (on dispatch, the matrix's
     # own `github.ref_name` is the branch and would mis-name every archive).
     needs: setup
@@ -146,7 +139,7 @@ jobs:
       version: ${{ needs.setup.outputs.version }}
 
   # ---- 1a. ISOLATED trusted-builder SLSA provenance over the release archives ----
-  # [OPUS-5] sq-toze.25 (GX-11 / SL-B3-b) — the SLSA **Build L3** lane for the release archives.
+  # sq-toze.25 (GX-11 / SL-B3-b) — the SLSA **Build L3** lane for the release archives.
   #
   # THE GAP THIS CLOSES. `package` (above) already emits provenance with
   # `actions/attest-build-provenance`, but that step runs in the SAME job as
@@ -164,7 +157,7 @@ jobs:
   # WHAT THIS DOES *NOT* CLAIM. The subjects are the digests the build matrix reported. A build
   # step that produced a malicious archive still gets provenance over THAT archive — L3 makes the
   # provenance non-falsifiable, it does not make the build trustworthy. And the scope of THIS job
-  # is the ARCHIVES ONLY — [OPUS-5] #4570 added the sibling `provenance-artifacts` job for the GUI
+  # is the ARCHIVES ONLY — #4570 added the sibling `provenance-artifacts` job for the GUI
   # bundles / SBOM/VEX / conformance report and `dist.yml#provenance` for the tiered binaries, but
   # the ghcr image still attests in-band (L2). GX-11 therefore NARROWS; it does not close.
   #
@@ -194,23 +187,22 @@ jobs:
       # bytes it uploaded. Deliberately threaded — this job must never recompute them from
       # artifacts, which would drag the build's outputs back inside the trusted builder.
       base64-subjects: ${{ needs.package.outputs.hashes }}
-      # `upload-assets: false`: the generator's own uploader attaches to `github.ref`'s release,
-      # which on a workflow_dispatch is a BRANCH (the same trap sq-gl3cf fixed everywhere else),
-      # and the `release` job below is the single place this pipeline creates the Release. We
+      # `upload-assets: false`: the `release` job below is the single place this pipeline
+      # creates the Release and attaches its complete asset set. We
       # download the provenance artifact there instead, so it lands in SHA256SUMS for free.
       upload-assets: false
       provenance-name: sparq-cli-${{ needs.setup.outputs.version }}.intoto.jsonl
 
   # ---- 1b. per-release CycloneDX SBOM + VEX ----
-  # [OPUS-4.8] sq-toze.3 (GX-2): emit a CycloneDX SBOM for each released binary plus a VEX
+  # sq-toze.3 (GX-2): emit a CycloneDX SBOM for each released binary plus a VEX
   # (the checked-in supply-chain/vex.cdx.json, version-stamped) justifying the advisories
   # cargo-deny is configured to ignore. Both are uploaded as an artifact for the `release`
   # job to attach to the GitHub Release, and SLSA-attested here (binding their digests to
   # this workflow run; verifiable with `gh attestation verify`).
   sbom:
     name: CycloneDX SBOM + VEX
-    # [OPUS-4.8] sq-gl3cf: needs the resolved version so the per-release SBOM/VEX filenames carry
-    # the dispatch tag (on dispatch the scripts' GITHUB_REF_NAME fallback is the branch).
+    # sq-gl3cf: needs the resolved version so the per-release SBOM/VEX filenames carry
+    # the verified release tag on either trigger.
     needs: setup
     runs-on: ubuntu-latest
     permissions:
@@ -219,8 +211,10 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -232,21 +226,20 @@ jobs:
         uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: cargo-cyclonedx
-      # [OPUS-4.8] sq-toze.27 (GS-3): Node for the JS/npm SBOM of the published WASM client.
+      # sq-toze.27 (GS-3): Node for the JS/npm SBOM of the published WASM client.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      # [OPUS-4.8] sq-gl3cf: pass VERSION explicitly. gen-sbom-vex.sh honors $VERSION (falling
-      # back to GITHUB_REF_NAME), but on a workflow_dispatch GITHUB_REF_NAME is the BRANCH, so the
-      # SBOM/VEX filenames would be mis-stamped — thread the resolved version instead.
+      # sq-gl3cf: pass VERSION explicitly. gen-sbom-vex.sh honors $VERSION (falling
+      # back to GITHUB_REF_NAME); thread the verified version explicitly for both triggers.
       - name: Generate per-release SBOM + VEX
         env:
           VERSION: ${{ needs.setup.outputs.version }}
         run: scripts/gen-sbom-vex.sh
-      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: per-release CycloneDX SBOMs for
+      # sq-toze.27 / sq-epbw4: per-release CycloneDX SBOMs for
       # `@sparq-org/sparq` and the shared `@sparq/client` code bundled into browser artifacts.
       # Runtime + full build trees land in sbom/, so the attestation glob below covers all four.
-      # [OPUS-4.8] sq-gl3cf: gen-js-sbom.sh ALSO reads GITHUB_REF_NAME for the version-stamped
+      # sq-gl3cf: gen-js-sbom.sh ALSO reads GITHUB_REF_NAME for the version-stamped
       # filenames, so it needs the same VERSION thread for the dispatch path to name JS SBOMs right.
       - name: Generate per-release JS/npm SBOMs (WASM + shared browser clients)
         env:
@@ -258,7 +251,7 @@ jobs:
           subject-path: |
             sbom/*.sbom.cdx.json
             sbom/*.vex.cdx.json
-      # [OPUS-5] #4570 (GX-11 residual): publish the SBOM/VEX digests as data for the ISOLATED
+      # #4570 (GX-11 residual): publish the SBOM/VEX digests as data for the ISOLATED
       # trusted builder (`provenance-artifacts` below). The in-band attestation above stays — it
       # is what `gh attestation verify` reads — but it shares this job's execution context with
       # the generator scripts, which is the L2 ceiling. Digests are taken over the SAME set the
@@ -293,7 +286,7 @@ jobs:
           if-no-files-found: error
 
   # ---- 1c. per-release served-surface SPARQL 1.1 Protocol conformance report ----
-  # [OPUS-4.8] sq-ro6if (PSS #1415/#1478): publish the MACHINE-READABLE served-surface conformance
+  # sq-ro6if (PSS #1415/#1478): publish the MACHINE-READABLE served-surface conformance
   # report for THIS release commit and attach it to the GitHub Release, so an HTTP consumer (e.g.
   # prod-solid-server, which consumes only the served /sparql surface) can trust the served WIRE
   # contract per released tag without re-verifying it against every SHA. Built by re-running the
@@ -305,8 +298,8 @@ jobs:
   # SBOM/VEX above, so the `release` job folds it into SHA256SUMS + the GitHub Release for free.
   served-conformance:
     name: served-surface conformance report
-    # [OPUS-4.8] sq-ro6if: needs the resolved version so the per-release report filename carries the
-    # release tag (mirrors the SBOM job's VERSION thread; on dispatch GITHUB_REF_NAME is the branch).
+    # sq-ro6if: needs the resolved version so the per-release report filename carries the
+    # release tag (mirrors the SBOM job's VERSION thread).
     needs: setup
     runs-on: ubuntu-latest
     permissions:
@@ -315,8 +308,10 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -344,7 +339,7 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: conformance/served-conformance-*.json
-      # [OPUS-5] #4570 (GX-11 residual): same digest hand-off as the SBOM lane — the conformance
+      # #4570 (GX-11 residual): same digest hand-off as the SBOM lane — the conformance
       # report is a consumer-facing assurance artifact, so provenance a compromised build step
       # could restate is exactly the wrong property for it.
       - name: Record conformance-report digests (subjects for the isolated provenance builder)
@@ -372,7 +367,7 @@ jobs:
           if-no-files-found: error
 
   # ---- 1d. Tauri desktop GUI bundles (UNSIGNED) ----
-  # [OPUS-4.8] sq-8n1c: build the cross-platform Tauri 2 desktop INSTALLERS — .dmg (+ .app)
+  # sq-8n1c: build the cross-platform Tauri 2 desktop INSTALLERS — .dmg (+ .app)
   # on macOS, .msi + NSIS .exe on Windows, .deb + .AppImage on Linux — as ADDITIONAL release
   # artifacts on the same desktop platforms the `package` matrix already covers, per the GUI
   # design record (research/gui-design.md §3 "Releases"). They are SLSA build-provenance
@@ -404,7 +399,7 @@ jobs:
   # bead sq-v286.9 — no rows here.
   #
   # ====================================================================================
-  # [OPUS-4.8] sq-gl3cf: STABLE, PREDICTABLE per-OS asset names — the /download page can
+  # sq-gl3cf: STABLE, PREDICTABLE per-OS asset names — the /download page can
   # hardcode these. The `Stage GUI bundles` step below maps each matrix `label` to ONE canonical
   # `{arch}` token and emits `sparq-gui_<version>_<arch>.<ext>` per produced bundle EXT (NOT the
   # old nested `sparq-gui-<ver>-<label>-<tauri's own sparq_<ver>_<arch>.<ext>>` double-version).
@@ -428,10 +423,10 @@ jobs:
   # ====================================================================================
   gui-bundle:
     name: "GUI desktop bundle ${{ matrix.label }} (unsigned)"
-    # [OPUS-4.8] sq-gl3cf: the resolved version is the asset-name token for every bundle.
+    # sq-gl3cf: the resolved version is the asset-name token for every bundle.
     needs: setup
     runs-on: ${{ matrix.os }}
-    # [OPUS-4.8] sq-gl3cf — a documented-untested platform's bundler MUST NOT fail the whole
+    # sq-gl3cf — a documented-untested platform's bundler MUST NOT fail the whole
     # release. `continue-on-error` is per-row (matrix.soft): Linux rows are BLOCKING (the full
     # frontend chain is reproduced locally + the GUI crate is proven green in gui.yml), while
     # macOS/Windows rows are SOFT this pass (their native .dmg/.msi/NSIS bundler steps are
@@ -457,15 +452,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux: fully reproduced locally + proven green in gui.yml -> BLOCKING (soft:false).
-          - { os: ubuntu-latest, label: x64-linux, soft: false }
-          - { os: ubuntu-24.04-arm, label: arm64-linux, soft: false }
+          # v0.1.4 release path: GUI installers are OPTIONAL release artefacts, so
+          # every row is soft — a GUI bundler failure can no longer block the CLI/server
+          # Release. Linux stays proven green in gui.yml; its absence is reported, not fatal.
+          - { os: ubuntu-latest, label: x64-linux, soft: true }
+          - { os: ubuntu-24.04-arm, label: arm64-linux, soft: true }
           # macOS/Windows: native bundlers documented-untested this pass -> SOFT (non-fatal).
           - { os: macos-14, label: arm64-darwin, soft: true }
           - { os: macos-15-intel, label: x64-darwin, soft: true }
           - { os: windows-latest, label: win-x64, soft: true }
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
 
       # The Tauri webview + bundler system libraries are LINUX-ONLY (macOS ships WKWebView,
       # Windows ships WebView2). This is the SAME apt set gui.yml installs to build the GUI
@@ -492,10 +491,14 @@ jobs:
         with:
           node-version: 22
 
-      # [OPUS-4.8] sq-gl3cf — the GUI frontend (gui/app) is a DISTINCT operational Next.js app
+      # sq-gl3cf — the GUI frontend (gui/app) is a DISTINCT operational Next.js app
       # (repointed off the marketing site by PR #1003 / sq-ixc3.8). Its `prebuild` hook
       # (gui/app/scripts/sync-wasm.mjs) needs the lean shacl,jsonld wasm bundle present in js/wasm/.
       # Mirror gui.yml's proven-green `gui-app`/`tauri-e2e` jobs: build the wasm bundle FIRST.
+      # The one lane deliberately left on the source compile (#5776): this matrix spans
+      # arm64/macOS/Windows runners where jetli/wasm-pack-action is unverified, and a
+      # wrong-arch download would break a release bundle. Allowlisted by exactly this
+      # (workflow, job) in scripts/tests/test_js_wasm_pack_install.py.
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
@@ -503,7 +506,7 @@ jobs:
         working-directory: js
         run: npm run build:wasm
 
-      # [OPUS-4.8] sq-gl3cf — the GUI frontend (gui/app) is a repo-ROOT npm-workspace member
+      # sq-gl3cf — the GUI frontend (gui/app) is a repo-ROOT npm-workspace member
       # (root package.json `workspaces` lists `gui/app`, alongside `packages/*`, `site`, `js`).
       # A workspace-aware repo-root `npm install` installs gui/app's deps (next, cross-env, …)
       # into the hoisted root node_modules — so the explicit `Build GUI frontend` step below
@@ -518,7 +521,7 @@ jobs:
       - name: Install workspace dependencies (incl. gui/app)
         run: npm install
 
-      # [OPUS-4.8] sq-gl3cf — BUILD THE FRONTEND EXPLICITLY here, instead of relying on Tauri's
+      # sq-gl3cf — BUILD THE FRONTEND EXPLICITLY here, instead of relying on Tauri's
       # `beforeBuildCommand` (`cd ../app && npm run build:tauri` in gui/src-tauri/tauri.conf.json).
       # Run 27890097353 failed EVERY Linux + macOS row at `sh: cd: can't cd to ../app`: Tauri runs
       # `beforeBuildCommand` from its inferred FRONTEND dir, NOT from gui/src-tauri (tauri-cli
@@ -540,7 +543,7 @@ jobs:
       - name: Install tauri-cli (v2)
         run: cargo install tauri-cli --version "^2.0.0" --locked
 
-      # [OPUS-4.8] sq-gl3cf — write a CI-ONLY config overlay that EMPTIES `beforeBuildCommand`.
+      # sq-gl3cf — write a CI-ONLY config overlay that EMPTIES `beforeBuildCommand`.
       # tauri-cli's run_hook treats an empty `beforeBuildCommand` as "skip" (HookCommand::Script(s)
       # if s.is_empty() => no-op; the official config docs list `"beforeBuildCommand": ""` as a
       # valid value). The frontend is already built by the explicit step above, so `cargo tauri
@@ -561,14 +564,14 @@ jobs:
       # already exported to gui/app/out above), and enables the native capabilities promised by
       # the desktop release: HDT import, SERVICE federation, ODRL policy previews, and
       # SHACL-derived forms.
-      # [SONNET-4.6] sq-b1hdb — keep these explicit because the crate defaults intentionally remain
+      # sq-b1hdb — keep these explicit because the crate defaults intentionally remain
       # lean; omitting them silently compiles the rebuild-hint stubs into shipped installers.
       # Keep this feature list in sync with gui.yml's "release feature union" clippy lane.
       # The command compiles the native Rust shell embedding gui/app/out (`frontendDist`) and
       # bundles installers for the host platform into
       # gui/src-tauri/target/release/bundle/<format>/. `--ci` disables interactive prompts;
       # no signing env vars are set, so the bundles are produced UNSIGNED (see the job header
-      # — signing is needs:user sq-v286.8). [SONNET-4.6] sq-3w29b: release bundles explicitly
+      # — signing is needs:user sq-v286.8). sq-3w29b: release bundles explicitly
       # enable the native HDT importer, federated SERVICE client, and ODRL policy tool. These
       # native capabilities stay off for lean development builds; Forms remains opt-in until a
       # release explicitly selects its larger SHACL model stack. `--verbose` aids diagnosis.
@@ -637,7 +640,7 @@ jobs:
       # files (different ext) per label, both with the same arch token (NSIS gets `-setup.exe`).
       # `if-no-files-found: error` on the upload + this `set -e` glob guard mean a bundler that
       # silently produced nothing FAILS the job rather than shipping an empty release row.
-      # [OPUS-4.8] sq-gl3cf: VERSION is the resolved release tag (threaded via env so the SAME
+      # sq-gl3cf: VERSION is the resolved release tag (threaded via env so the SAME
       # bash works on both the tag-push and workflow_dispatch paths).
       - name: Stage GUI bundles
         shell: bash
@@ -648,7 +651,8 @@ jobs:
           BUNDLE_DIR="gui/src-tauri/target/release/bundle"
           OUT="gui-bundles"
           mkdir -p "$OUT"
-          shopt -s nullglob globstar
+          # macOS ships Bash 3.2. These one-directory globs need only nullglob.
+          shopt -s nullglob
 
           # matrix label -> ONE canonical arch token for the emitted asset name.
           case "${{ matrix.label }}" in
@@ -713,7 +717,7 @@ jobs:
         with:
           subject-path: gui-bundles/*
 
-      # [OPUS-5] #4570 (GX-11 residual): this row's bundle digests, published as data for the
+      # #4570 (GX-11 residual): this row's bundle digests, published as data for the
       # ISOLATED trusted builder (`provenance-artifacts` below). Two things this step must get
       # right, both of which fail only at release time:
       #   * WRITE OUTSIDE gui-bundles/ — that directory is uploaded WHOLESALE as `pkg-gui-*`,
@@ -754,7 +758,7 @@ jobs:
           if-no-files-found: error
 
   # ---- 1e. collect the NON-ARCHIVE release-artifact digests into ONE `base64-subjects` blob ----
-  # [OPUS-5] #4570 (GX-11 residual). sq-toze.25 routed only the release ARCHIVES through the
+  # #4570 (GX-11 residual). sq-toze.25 routed only the release ARCHIVES through the
   # isolated trusted builder; the GUI bundles, the SBOM/VEX and the served-surface conformance
   # report were left on in-band `actions/attest-build-provenance`, which signs inside the same job
   # that produced the bytes — the L2 ceiling. This job is the digest hand-off that lets them cross
@@ -803,8 +807,9 @@ jobs:
           done
           gui=( subject-hashes-gui-*.txt )
           if [ "${#gui[@]}" -eq 0 ]; then
-            echo "ERROR: no subject-hashes-gui-* list — every GUI bundle row failed to publish digests" >&2
-            exit 1
+            # every GUI row is soft: no GUI digests means no GUI assets are
+            # published either (digests are uploaded before bundles), so coverage still holds.
+            echo "::warning::no subject-hashes-gui-* list — this release ships no GUI installers"
           fi
           cat -- subject-hashes-sbom.txt subject-hashes-conformance.txt "${gui[@]}" > all.sha256
           while read -r digest name; do
@@ -818,7 +823,7 @@ jobs:
           echo "hashes=$(base64 -w0 all.sha256)" >> "$GITHUB_OUTPUT"
 
   # ---- 1f. ISOLATED trusted-builder SLSA provenance over the non-archive release artifacts ----
-  # [OPUS-5] #4570 (GX-11 residual / SL-B3-b). Structurally identical to `provenance` above — a
+  # #4570 (GX-11 residual / SL-B3-b). Structurally identical to `provenance` above — a
   # BARE `uses:` of the trusted reusable builder, its own OIDC identity, no step of ours inside,
   # and exactly one input across the boundary (`base64-subjects`, threaded from the collector).
   # See `provenance`'s header for the full rationale, including WHY A TAG REF, NOT A SHA (the
@@ -833,7 +838,7 @@ jobs:
   # THE ONE THING TO WATCH ON THE FIRST TAG: this is the first time the generator is invoked
   # TWICE in one workflow run. The two jobs are only safe to coexist because the generator names
   # its uploaded artifact from `provenance-name`, and the two names differ — the `release` job
-  # never hard-codes either, it reads each job's own `provenance-download-name` output. If a
+  # reads each job's `provenance-name` output and checks the expected distinct names. If a
   # future generator version ever used a FIXED artifact name instead, the second upload would
   # collide and this job would red (fail-closed, which is the right direction) — that is the
   # residual to check on the first `v*` tag, not something verifiable from a PR.
@@ -862,59 +867,76 @@ jobs:
   # ---- 2. checksums + GitHub Release ----
   release:
     name: create GitHub Release
-    # [OPUS-4.8] sq-gl3cf: `setup` added so the Release attaches to the resolved tag (tag_name
-    # below) on BOTH triggers — on dispatch, action-gh-release's default tag_name is `github.ref`,
-    # which is the BRANCH, so we must override it explicitly.
-    # [OPUS-5] sq-toze.25: `provenance` is a HARD dependency, not an optional extra. If the
+    # sq-gl3cf: `setup` added so the Release attaches to the resolved tag (tag_name
+    # below) on BOTH triggers; setup verifies that this is also the workflow's tag ref.
+    # sq-toze.25: `provenance` is a HARD dependency, not an optional extra. If the
     # isolated trusted builder fails, no Release is cut — a release that shipped without the
     # L3 provenance while the docs claim L3 is precisely the silent overclaim the compliance
     # register exists to prevent.
-    # [OPUS-5] #4570: `provenance-artifacts` is a hard dependency on exactly the same grounds —
+    # #4570: `provenance-artifacts` is a hard dependency on exactly the same grounds —
     # it covers the GUI bundles, SBOM/VEX and conformance report.
     needs: [setup, package, provenance, provenance-artifacts, sbom, gui-bundle, served-conformance]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release + upload assets — the only write this pipeline needs
     steps:
-      # [FABLE-5] sq-vw3ax.11.3: checkout FIRST (its default `clean` would wipe a pre-existing
+      # sq-vw3ax.11.3: checkout FIRST (its default `clean` would wipe a pre-existing
       # assets/ dir) — the alias contract check below needs scripts/check-release-aliases.sh and
       # the /download page source it extracts the site-referenced alias set from.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+      # v0.1.3's empty `provenance-download-name` input caused download-artifact to
+      # download EVERY run artifact into assets/, then SHA256SUMS failed on their directories.
+      # The pinned generic generator exports `provenance-name`; require its expected outputs
+      # before either download so a future output-contract mismatch fails closed here.
+      - name: Validate signed provenance artifact names
+        env:
+          VERSION: ${{ needs.setup.outputs.version }}
+          ARCHIVE_PROVENANCE: ${{ needs.provenance.outputs.provenance-name }}
+          ARTIFACT_PROVENANCE: ${{ needs.provenance-artifacts.outputs.provenance-name }}
+        run: |
+          set -euo pipefail
+          if [ "$ARCHIVE_PROVENANCE" != "sparq-cli-${VERSION}.intoto.jsonl" ] ||
+             [ "$ARTIFACT_PROVENANCE" != "sparq-artifacts-${VERSION}.intoto.jsonl" ]; then
+            echo "ERROR: signed provenance artifact names are missing or unexpected" >&2
+            exit 1
+          fi
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: pkg-*
           path: assets
           merge-multiple: true
-      # [OPUS-4.8] sq-toze.3 (GX-2): pull the SBOM + VEX in alongside the archives so they
+      # sq-toze.3 (GX-2): pull the SBOM + VEX in alongside the archives so they
       # are covered by SHA256SUMS and attached to the release.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: sbom-vex
           path: assets
-      # [OPUS-4.8] sq-ro6if (PSS #1415/#1478): pull the served-surface conformance report in
+      # sq-ro6if (PSS #1415/#1478): pull the served-surface conformance report in
       # alongside the archives + SBOM so it is covered by SHA256SUMS and attached to the release.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: served-conformance
           path: assets
-      # [OPUS-5] sq-toze.25 (GX-11): pull in the in-toto bundle the ISOLATED trusted builder
+      # sq-toze.25 (GX-11): pull in the in-toto bundle the ISOLATED trusted builder
       # signed (release.yml#provenance) so it is covered by SHA256SUMS and attached to the
       # Release. Consumers verify it with `slsa-verifier verify-artifact <archive>
       # --provenance-path <this file> --source-uri github.com/<owner>/<repo>`. The artifact name
-      # comes from the generator's own output — hard-coding it would silently 404 the day the
-      # generator changes its naming, and this download is fail-closed by default.
+      # comes from the generator's own output; the guard above fails before download if a
+      # future generator changes or omits that output.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.provenance.outputs.provenance-download-name }}
+          name: ${{ needs.provenance.outputs.provenance-name }}
           path: assets
-      # [OPUS-5] #4570 (GX-11 residual): the SECOND isolated-builder bundle — the one covering the
+      # #4570 (GX-11 residual): the SECOND isolated-builder bundle — the one covering the
       # GUI bundles, SBOM/VEX and served-surface conformance report. Same fail-closed download by
       # the generator's own output name, so it lands in SHA256SUMS and on the Release too.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: ${{ needs.provenance-artifacts.outputs.provenance-download-name }}
+          name: ${{ needs.provenance-artifacts.outputs.provenance-name }}
           path: assets
-      # [FABLE-5] sq-vw3ax.11.3: stage version-STABLE alias assets. The /download page's direct
+      # sq-vw3ax.11.3: stage version-STABLE alias assets. The /download page's direct
       # buttons target `releases/latest/download/<alias>` (static hrefs, no API dependency), but
       # every canonical asset name is versioned — so each release uploads alias COPIES of the
       # canonical bytes (GitHub release assets cannot be symlinked) per the NORMATIVE table in
@@ -955,7 +977,7 @@ jobs:
           stage "sparq-cli-${VERSION}-x64-baseline.tar.gz"  sparq-cli-x64-linux.tar.gz
           stage "sparq-cli-${VERSION}-arm64-linux.tar.gz"   sparq-cli-arm64-linux.tar.gz
           stage "sparq-cli-${VERSION}-win-x64-baseline.zip" sparq-cli-win-x64.zip
-      # [FABLE-5] sq-vw3ax.11.3: FAIL-CLOSED alias contract — the site's usage is the source of
+      # sq-vw3ax.11.3: FAIL-CLOSED alias contract — the site's usage is the source of
       # truth. The script extracts every alias download-client.tsx references (its `file:`
       # literals + the sparq-cli-<token>.<ext> names cliTarget composes) and fails the release
       # if any is absent from the staged asset list, so a published release can never serve a
@@ -964,27 +986,31 @@ jobs:
         run: |
           set -euo pipefail
           ls -1 assets > "$RUNNER_TEMP/release-asset-list.txt"
-          bash scripts/check-release-aliases.sh "$RUNNER_TEMP/release-asset-list.txt"
-      # [FABLE-5] sq-vw3ax.11.3: runs AFTER alias staging, so SHA256SUMS carries the versioned
+          # GUI installers are optional (all gui-bundle rows are soft): a missing GUI
+          # alias is a warning; every CLI archive alias stays fail-closed.
+          RELEASE_OPTIONAL_ALIAS_PREFIXES="sparq-gui-" \
+            bash scripts/check-release-aliases.sh "$RUNNER_TEMP/release-asset-list.txt"
+      # sq-vw3ax.11.3: runs AFTER alias staging, so SHA256SUMS carries the versioned
       # entries (unchanged) PLUS one appended entry per alias (same digest, alias name).
       - name: Generate SHA256SUMS
         run: cd assets && sha256sum -- * > SHA256SUMS
+      - name: Reverify remote release tag immediately before creating the release
+        env:
+          RELEASE_TAG: ${{ needs.setup.outputs.version }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          # [OPUS-4.8] sq-gl3cf: attach to the RESOLVED tag. The action defaults tag_name to
-          # `github.ref`, which on a workflow_dispatch is the branch (wrong) — pin it to the
-          # version the rest of the pipeline named assets with so dispatch + tag agree.
+          # Attach to the verified tag used to name every artifact.
           tag_name: ${{ needs.setup.outputs.version }}
-          # [OPUS-4.8] sq-gl3cf: dispatch builds are developer/test releases — mark them
+          # sq-gl3cf: dispatch builds are marked
           # pre-release by default (the dispatch `prerelease` input; true unless overridden). A
           # tag push has no such input, so `inputs.prerelease` is empty -> not a pre-release.
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease }}
           files: assets/*
           generate_release_notes: true
           # CHANGELOG.md is the curated source of truth; point readers at it. Body links use the
-          # resolved version (needs.setup.outputs.version), not github.ref_name, so dispatch
-          # builds (where github.ref_name is the branch) link to the right tag.
+          # resolved version (needs.setup.outputs.version) on both triggers.
           body: |
             See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ needs.setup.outputs.version }}/CHANGELOG.md) for the curated changelog.
 
@@ -1004,7 +1030,7 @@ jobs:
           fail_on_unmatched_files: true
 
   # ---- 2b. post-publication provenance verification (the SL-B3-b evidence step) ----
-  # [OPUS-5] issue #4571 / PR #4644 review: this MUST be driven from HERE, not from
+  # issue #4571 / PR #4644 review: this MUST be driven from HERE, not from
   # release-verify.yml's `release: published` trigger. GitHub does not start a workflow run from
   # an event generated by the workflow's own GITHUB_TOKEN, and the `release` job above creates the
   # Release with exactly that token (action-gh-release defaults `token: ${{ github.token }}`), so
@@ -1039,7 +1065,7 @@ jobs:
   # publishing can delete this job (or add `if: false`) without affecting the binaries/release
   # jobs above.
   #
-  # [OPUS-5] sq-w1dxx: the image tags are version-THREADED from `setup`, not derived from the git
+  # sq-w1dxx: the image tags are version-THREADED from `setup`, not derived from the git
   # ref. `docker/metadata-action`'s `type=semver` reads `github.ref` by default, which on a
   # `workflow_dispatch` is the BRANCH — so a dispatch used to produce NO semver tag and push only
   # the moving `:latest`, silently overwriting the canonical released image that `deploy/paas` and
@@ -1050,7 +1076,7 @@ jobs:
   #     No `latest`, no moving `{{major}}.{{minor}}` — a dev build can never claim a tag a
   #     deployment follows, and is still pullable by its exact namespaced dispatch tag.
   #
-  # [OPUS-5] the `dev-` prefix is what makes that disjointness hold for ANY input, not just a
+  # the `dev-` prefix is what makes that disjointness hold for ANY input, not just a
   # well-behaved one. `inputs.tag` is a `required: true` free-form string: gating on the trigger
   # alone still let a dispatch with `tag: latest` (or `v1.2.3`, or a moving `1.2`) resolve
   # `type=raw,value=${{ needs.setup.outputs.version }}` straight onto the canonical tag it names
@@ -1065,20 +1091,20 @@ jobs:
   docker:
     name: build + push container (ghcr.io)
     runs-on: ubuntu-latest
-    # [OPUS-5] sq-w1dxx: the resolved version is the single source of the image tags on both paths.
+    # sq-w1dxx: the resolved version is the single source of the image tags on both paths.
     needs: setup
     permissions:
       contents: read
       packages: write # push to ghcr.io with GITHUB_TOKEN
-      # [OPUS-4.8] sq-zqq6: buildkit attaches SLSA provenance + an SBOM to the
+      # sq-zqq6: buildkit attaches SLSA provenance + an SBOM to the
       # pushed image; the OIDC token is what signs the provenance attestation.
       id-token: write
       attestations: write
-      # [OPUS-4.8] sq-p9xq: upload the released image's Trivy SARIF to the
+      # sq-p9xq: upload the released image's Trivy SARIF to the
       # code-scanning dashboard (Security tab) so a vuln in the published artifact
       # is visible there, not just in the run log.
       security-events: write
-    # [OPUS-5] #4635 (GX-11 residual): the two values — and the ONLY two — that cross into the
+    # #4635 (GX-11 residual): the two values — and the ONLY two — that cross into the
     # isolated container generator (`provenance-container` below). `digest` is the OCI index
     # digest buildx REPORTED for the push, never a tag: a tag is mutable, so provenance keyed on
     # one would describe "whatever :latest happens to be", which is not provenance about anything.
@@ -1087,7 +1113,9 @@ jobs:
       digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      # [GPT-5.6] sq-fvzi6: register the arm64 binfmt emulator before Buildx so the final
+        with:
+          ref: ${{ github.sha }}
+      # sq-fvzi6: register the arm64 binfmt emulator before Buildx so the final
       # release push can build both target platforms on this native amd64 runner.
       - name: Set up QEMU for arm64
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -1105,7 +1133,7 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/${{ github.repository_owner }}/sparq-server
-          # [OPUS-5] sq-w1dxx: `value=` overrides metadata-action's default git-ref parsing with the
+          # sq-w1dxx: `value=` overrides metadata-action's default git-ref parsing with the
           # `setup` job's resolved version; the `enable=` guards keep the canonical (tag push) and
           # developer (dispatch) tag sets mutually exclusive — see the job header.
           tags: |
@@ -1113,7 +1141,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ needs.setup.outputs.version }},enable=${{ github.event_name != 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ github.event_name != 'workflow_dispatch' }}
             type=raw,value=dev-${{ needs.setup.outputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
-      # [OPUS-4.8] sq-n6rv: SMOKE BEFORE PUSH. Build the image locally first, `docker run`
+      # sq-n6rv: SMOKE BEFORE PUSH. Build the image locally first, `docker run`
       # it, and prove it serves /health + a query — so a container that exits immediately on
       # boot (the sq-n6rv regression) can never reach ghcr.io. The build is cached to GHA, so
       # the subsequent push step is a cache hit (it does not rebuild from scratch).
@@ -1123,7 +1151,7 @@ jobs:
           context: .
           load: true
           push: false
-          # [GPT-5.6] sq-fvzi6: keep the pre-push runtime and Trivy gate native/loadable;
+          # sq-fvzi6: keep the pre-push runtime and Trivy gate native/loadable;
           # the final step reuses this amd64 cache and adds the arm64 descriptor.
           platforms: linux/amd64
           tags: sparq-server:smoke
@@ -1131,7 +1159,7 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Smoke test the image (docker run + /health + ASK query)
         run: scripts/docker-smoke.sh sparq-server:smoke 3030
-      # [OPUS-4.8] sq-p9xq: SCAN BEFORE PUSH. cargo-deny gates the Rust dependency tree, but
+      # sq-p9xq: SCAN BEFORE PUSH. cargo-deny gates the Rust dependency tree, but
       # the distroless base layer (glibc / libgcc / CA certs) is outside that scope — a CVE
       # disclosed there would ship in the released image unscanned. Trivy scans the exact
       # `sparq-server:smoke` artifact built above (same bytes that get pushed) for OS-package
@@ -1174,7 +1202,7 @@ jobs:
         with:
           sarif_file: trivy-results.sarif
           category: trivy-release-image
-      # [OPUS-5] #4635: the image NAME the container generator attests, computed here rather than
+      # #4635: the image NAME the container generator attests, computed here rather than
       # inlined into the `provenance-container` call for two reasons. (1) The generator's `image`
       # input must carry NO tag and NO digest — it is the repository name alone — so it cannot
       # reuse `steps.meta.outputs.tags`. (2) ghcr rejects an uppercase path component, and
@@ -1188,26 +1216,30 @@ jobs:
         run: |
           set -euo pipefail
           echo "image=ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')/sparq-server" >> "$GITHUB_OUTPUT"
+      - name: Reverify remote release tag immediately before pushing the image
+        env:
+          RELEASE_TAG: ${{ needs.setup.outputs.version }}
+        run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       - name: Build and push
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
-          # [GPT-5.6] sq-fvzi6: one OCI image index per metadata tag, with both supported
+          # sq-fvzi6: one OCI image index per metadata tag, with both supported
           # runtime descriptors. Buildx pushes the index only after both builds succeed.
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # [OPUS-4.8] sq-zqq6: max-mode SLSA provenance + an embedded SBOM,
+          # sq-zqq6: max-mode SLSA provenance + an embedded SBOM,
           # attached to the image in ghcr.io (verifiable via cosign / gh).
           provenance: mode=max
           sbom: true
 
   # ---- 3a. ISOLATED trusted-builder SLSA provenance over the pushed container image ----
-  # [OPUS-5] #4635 (GX-11 residual / SL-B3-b) — the fourth and last isolated-provenance lane.
+  # #4635 (GX-11 residual / SL-B3-b) — the fourth and last isolated-provenance lane.
   #
   # WHY IT IS ITS OWN MIGRATION. The other three lanes (`release.yml#provenance`,
   # `release.yml#provenance-artifacts`, `dist.yml#provenance`) all call the GENERIC generator,

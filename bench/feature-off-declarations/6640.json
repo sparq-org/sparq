@@ -1,0 +1,5 @@
+{
+  "pr": 6640,
+  "date": "2026-10-05",
+  "reason": "Issue #6479: `set_query_base` in the always-compiled crates/sparq-engine/src/exec.rs now returns a `QueryBaseGuard` that restores the enclosing query's thread-local BASE IRI on drop, and the query entry points in lib.rs, cache.rs, explain.rs and explain_json.rs bind it. These sites are outside every `#[cfg(feature = ...)]` block and compile into the feature-OFF sparq-wasm bundle, so its bytes move by design. This is a deliberate correctness fix for nested queries, not leakage from a default-OFF feature: no feature gate is added or widened, no dependency is added, and there is no `unsafe`. Bundle SIZE remains governed separately by the metrics.wasm_bundle_bytes floor ratchet in bench.yml."
+}

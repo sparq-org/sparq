@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-eifd: cross-engine SHACL COUNT-AGREEMENT check. Authored by Opus
-# 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-eifd: cross-engine SHACL COUNT-AGREEMENT check.
 #
 # The headline verification for the report-cli + js-lib adapters: validate the SAME
 # (data.ttl, shapes.ttl) fixture with sparq-shacl, pySHACL (report-cli) and

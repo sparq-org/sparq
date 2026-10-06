@@ -77,26 +77,27 @@ organization sets the **review cadence** for this register in §6.
 ## 3. Security checks per SDLC stage (SSDF PO.2.1)
 
 The check criteria for each stage. The authoritative gate definition is `AGENTS.md` "The gate" /
-`CONTRIBUTING.md`; CI enforces it (`docs/branch-protection.md`, the `ci-summary / gate`
-aggregator). **A change lands only when all applicable checks below are green.**
+`CONTRIBUTING.md`; CI enforces it (`docs/branch-protection.md`): the required `ci-fast` check blocks merge;
+lanes marked post-merge/nightly below detect after merge rather than block it.
 
 | SDLC stage | Mandated security checks (criteria) | Enforced by | SSDF |
 |---|---|---|---|
 | **Design / change-intent** | Threat-model re-evaluation against B1–B5; the PR-template re-evaluation checklist tied to `AGENTS.md`. | `research/threat-model.md`; `.github/PULL_REQUEST_TEMPLATE.md` | PO.2.1, PW.1.1 |
 | **Code authoring** | The secure-coding standard (R-1…R-6); `// SAFETY:` + register on any new `unsafe`. | `CONTRIBUTING.md` "Secure coding"; `compliance/memsafety/unsafe-register.md` | PO.2.1, PW.5.1 |
-| **Static analysis (SAST)** | clippy `--all-targets -- -D warnings` (hard gate); CodeQL `security-and-quality`; code-scanning alerts kept at zero. | `.github/workflows/ci.yml#clippy`; `.github/workflows/codeql.yml` | PO.2.1, PW.7 |
+| **Static analysis (SAST)** | clippy `--all-targets -- -D warnings` (hard pre-merge gate on the core crates via `ci-fast`; workspace-wide nightly); CodeQL `security-and-quality`; code-scanning alerts kept at zero. | `.github/workflows/ci-fast.yml`; `.github/workflows/ci.yml#lint`; `.github/workflows/codeql.yml` | PO.2.1, PW.7 |
 | **Build** | `--locked` release build; `cargo auditable build` embeds the dependency manifest; distroless non-root container. | `.github/workflows/release.yml`; `Dockerfile` | PO.2.1, PW.6.1 |
-| **Test (functional + conformance)** | `cargo test --workspace`; the W3C SPARQL/SHACL/inference conformance ratchets (never lowered); the coverage/perf ratchets. | `.github/workflows/ci.yml`; the conformance/perf floors | PO.2.1, PW.8.1 |
+| **Test (functional + conformance)** | Core-crate tests + W3C SPARQL conformance ratchet pre-merge (`ci-fast`); `cargo test --workspace`, the SHACL/inference ratchets and coverage/perf ratchets nightly (never lowered). | `.github/workflows/ci-fast.yml`; `.github/workflows/ci.yml`; the conformance/perf floors | PO.2.1, PW.8.1 |
 | **Dynamic analysis** | Miri UB lane over the `sparq-core` `unsafe` surface; coverage-guided fuzzing over parsers + mmap loader; the mmap-corruption oracle for B5 sites Miri cannot reach. | `.github/workflows/miri.yml`; `.github/workflows/fuzz.yml` | PO.2.1, PW.8.2 |
-| **Supply chain** | cargo-deny advisories (**gating** at PR time) + bans/sources/licenses; cargo-vet gating; daily advisory watchdog; per-build SBOM. | `.github/workflows/supply-chain.yml`; `.github/workflows/dependency-monitoring.yml`; `deny.toml` | PO.2.1, PW.4 |
+| **Supply chain** | cargo-deny advisories + bans/sources/licenses and cargo-vet (fail-closed, but **post-merge/nightly** — not a PR gate); daily advisory watchdog; per-build SBOM. | `.github/workflows/supply-chain.yml`; `.github/workflows/dependency-monitoring.yml`; `deny.toml` | PO.2.1, PW.4 |
 | **Review** | PR-only flow (no direct pushes, incl. admins); required `@jeswr` review on CODEOWNERS security-sensitive paths; all review comments resolved before merge. | `docs/branch-protection.md`; `CODEOWNERS` | PO.2.1, PW.7.1 |
 | **Public-API change** | Any changed public API (a `pub` item, CLI flag, HTTP route, or binding) updates the matching `skills/<surface>/SKILL.md` **in the same change** (enforced convention). | `AGENTS.md` MAINTENANCE RULE; `CONTRIBUTING.md` | PO.2.1 |
 | **Release** | SLSA build-provenance attestation (Sigstore) over each archive + SBOM/VEX; `SHA256SUMS`; per-release SBOM + VEX. | `.github/workflows/release.yml` | PO.2.1, PS.2.1, PS.3.2 |
 | **Vulnerability response** | Private intake (GitHub Security Advisories / email); acknowledge within 5 business days, initial assessment within 10; coordinated disclosure; `.well-known/security.txt`. | `SECURITY.md`; `.well-known/security.txt` | RV.1–RV.3 |
 | `<FILL-IN>` | `<FILL-IN: org-stage-specific checks — e.g. the org's pre-deployment security review, environment-promotion gates, runtime monitoring sign-off>` | `<FILL-IN>` | `<FILL-IN>` |
 
-The single required merge check is `ci-summary / gate`, which polls every sibling check-run and
-fails if any concluded failure (`docs/branch-protection.md`).
+The single required merge check is `ci-fast` (core-crate clippy/tests + SPARQL conformance;
+`docs/branch-protection.md`). The former `ci-summary / gate` aggregator is deleted; other lanes
+are non-blocking.
 
 ## 4. Roles & responsibilities
 
@@ -113,7 +114,7 @@ fails if any concluded failure (`docs/branch-protection.md`).
 The checks in §3 are **automatically enforced** by the CI/branch-protection wiring cited inline and
 indexed in [`../ssdf/evidence.md`](../ssdf/evidence.md) (by-artifact, with local-reproduction
 commands) and [`../ssdf/controls.md`](../ssdf/controls.md) (per-task status). A reviewer can
-spot-check any change against the `ci-summary / gate` result and verify a release with
+spot-check any change against the `ci-fast` result (plus the next nightly runs) and verify a release with
 `gh attestation verify <file> --repo sparq-org/sparq`. This policy does **not** restate that evidence —
 it points to the single source so the two never drift.
 

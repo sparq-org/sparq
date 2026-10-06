@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the crates.io publishing protections (issues #1135, #2552).
 
-[OPUS-5] 🤖 SPARQ agent.
+🤖 SPARQ agent.
 
 WHY THIS FILE EXISTS AS A SEPARATE SUITE
 ========================================
@@ -104,7 +104,7 @@ class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
 
     def test_only_the_dependency_final_anchor_enables_git_tags(self) -> None:
         # release-plz processes every package independently. If the workspace default is
-        # enabled, all 37 packages try to create the same `v{{ version }}` tag. [GPT-5.6]
+        # enabled, all 37 packages try to create the same `v{{ version }}` tag.
         config = tomllib.loads(
             (REPO_ROOT / "release-plz.toml").read_text(encoding="utf-8")
         )
@@ -127,7 +127,7 @@ class TestWorkspaceTagIsCreatedOnce(unittest.TestCase):
 class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
     """A missing `.crate` must stop provenance generation, not merely warn."""
 
-    def test_packaging_collects_failures_and_refuses_incomplete_output(self) -> None:
+    def test_packaging_strips_then_refuses_incomplete_output(self) -> None:
         workflow = yaml.safe_load(PUBLISH_WORKFLOW.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["crates"]["steps"]
         matches = [step for step in steps if step.get("name") == "Package publishable crates"]
@@ -138,9 +138,14 @@ class TestCrateAttestationPackagingFailsClosed(unittest.TestCase):
         run = step["run"]
         self.assertIn("cargo metadata --no-deps --format-version 1", run)
         self.assertIn("select(.publish != [])", run)
-        self.assertIn("failures=()", run)
-        self.assertIn('failures+=("$pkg")', run)
-        self.assertIn('if [ "${#failures[@]}" -ne 0 ]; then', run)
+        # One `cargo package --workspace` under `set -e`: any crate failing to package
+        # stops the step before attestation.
+        self.assertIn("set -euo pipefail", run)
+        self.assertIn("python3 scripts/publish-strip.py --with-vendored", run)
+        self.assertIn("cargo package --workspace --no-verify --allow-dirty", run)
+        self.assertLess(
+            run.index("scripts/publish-strip.py"), run.index("cargo package --workspace")
+        )
         self.assertIn('if [ "$packaged" -ne "$expected" ]; then', run)
         self.assertGreaterEqual(run.count("exit 1"), 2)
 
@@ -493,36 +498,12 @@ class TestReleaseCarriesTheExperimentalZkCaveat(unittest.TestCase):
             )
 
 
-class TestArmWorkflowsSelfTestTheGuard(unittest.TestCase):
-    """Both arm sweeps must run the guard's self-test before arming anything.
-
-    Their scripts come from the DEFAULT branch at cron time, so a regression in the
-    shared predicate would otherwise first be observed by arming the Release PR.
-    """
-
-    def _run_block(self, workflow_name: str, job_id: str) -> str:
-        data = yaml.safe_load(
-            (REPO_ROOT / ".github" / "workflows" / workflow_name).read_text("utf-8")
-        )
-        steps = data["jobs"][job_id]["steps"]
-        return "\n".join(str(step.get("run") or "") for step in steps)
-
-    def test_auto_arm_self_tests_the_release_guard(self) -> None:
-        self.assertIn(
-            "scripts/release_pr_guard.py --self-test",
-            self._run_block("auto-arm.yml", "arm"),
-        )
-
-    def test_rearm_sweeper_self_tests_the_release_guard(self) -> None:
-        self.assertIn(
-            "scripts/release_pr_guard.py --self-test",
-            self._run_block("rearm-sweeper.yml", "sweep"),
-        )
+class TestDocsQualityRunsTheGuardSuite(unittest.TestCase):
+    """This suite must itself be invoked by a hard job, or every assertion is dead code."""
 
     def test_docs_quality_gates_the_publishing_protections(self) -> None:
-        # This suite must itself be invoked by a GATING job, or every assertion above is
-        # dead code. docs-quality's job name contains neither "advisory" nor
-        # "informational", so ci-summary discovers it as gating.
+        # docs-quality's job name contains neither "advisory" nor "informational", so it
+        # is a hard (non-advisory) job.
         data = yaml.safe_load(
             (REPO_ROOT / ".github" / "workflows" / "docs-quality.yml").read_text("utf-8")
         )
@@ -539,24 +520,19 @@ class TestArmWorkflowsSelfTestTheGuard(unittest.TestCase):
 class TestEveryArmingPathConsultsTheGuard(unittest.TestCase):
     """The enumerated arming paths each call release_pr_guard.
 
-    Deleting the call from any one of them reds the named test here. The scripts' OWN
-    self-tests also go red (proved by mutation in the PR body) — this is the second,
-    cross-file net, so a path added later without the guard is visible.
+    Deleting the call from any one of them reds the named test here, so a path added
+    later without the guard is visible. (The automated arm sweeps were removed; the
+    `gh pr merge` PreToolUse hook is the one remaining arming path in the repo.)
     """
 
     PATHS = {
-        "auto-arm.py": "arm_block_reason",
-        "rearm-sweeper.py": "arm_block_reason",
         "check-pr-arm-base.py": "arm_block_reason",
-        "batch-merge.py": "arm_block_reason",
-        "pr-backlog.py": "arm_block_reason",
     }
 
     def test_each_arming_path_imports_and_calls_the_guard(self) -> None:
         # AST, not substring. MEASURED: the first draft of this test asserted
         # `"release_pr_guard.arm_block_reason" in text` and a mutant that reverted
-        # scripts/batch-merge.py's predicate to the old author-AND-title conjunction
-        # SURVIVED — the phrase still appeared, in the function's DOCSTRING. A prose
+        # one script's predicate to the old author-AND-title conjunction SURVIVED — the phrase still appeared, in the function's DOCSTRING. A prose
         # mention is not a call site.
         import ast
 
@@ -579,35 +555,19 @@ class TestEveryArmingPathConsultsTheGuard(unittest.TestCase):
                     "#1135 Release-PR exclusion. (A comment, docstring or import "
                     "mentioning the guard does not exclude anything.)",
                 )
-    def test_batch_merge_and_pr_backlog_catch_a_branch_only_release_pr(self) -> None:
-        """BEHAVIOURAL, not structural: the case the OLD conjunction missed.
+    def test_a_branch_only_release_pr_is_caught(self) -> None:
+        """BEHAVIOURAL: the case an author-AND-title conjunction misses.
 
-        `author == github-actions AND title startswith "chore: release"` returns False for
-        a Release PR whose title was edited or whose author identity changed, even though
-        its head branch is unmistakable. Both scripts must now catch it on the branch
-        alone. This is the assertion that killed the surviving mutant.
+        A Release PR whose title was edited or whose author identity changed is still
+        unmistakable by its head branch; the guard must catch it on the branch alone.
         """
-        batch = _load("batch_merge_under_test", "batch-merge.py")
-        backlog = _load("pr_backlog_under_test", "pr-backlog.py")
-        branch_only = {
-            "head_ref": "release-plz-main",
-            "author_login": "app/some-other-bot",
-            "title": "Bump workspace version to 0.2.0",
-        }
-        ordinary = {
-            "head_ref": "sparq-agent/issue-3801-x",
-            "author_login": "app/sparq-orchestrator",
-            "title": "fix(engine): a change",
-        }
-        for name, module in (("batch-merge", batch), ("pr-backlog", backlog)):
-            with self.subTest(script=name):
-                self.assertTrue(
-                    module.is_release_plz(branch_only),
-                    f"{name}.is_release_plz missed a Release PR identifiable by its head "
-                    "branch alone — the old author-AND-title conjunction is back.",
-                )
-                # The discriminating half: it must not swallow ordinary worker PRs.
-                self.assertFalse(module.is_release_plz(ordinary), name)
+        self.assertIsNotNone(
+            release_pr_guard.arm_block_reason(
+                head_ref="release-plz-main",
+                author_login="app/some-other-bot",
+                title="Bump workspace version to 0.2.0",
+            )
+        )
 
     def test_the_predicate_cannot_be_influenced_by_labels(self) -> None:
         # The whole point of #1135's keying decision: a label can be added by anything
@@ -822,6 +782,196 @@ class TestSettingsJsonWrapperDoesNotInvertTheGuard(unittest.TestCase):
 
 
 # ================================================================ THE CADENCE GUARD
+class TestV013RecoveryException(unittest.TestCase):
+    """Exercise both real run() paths; every external runner is poisoned."""
+
+    def setUp(self):
+        from unittest.mock import patch
+        self.tmp = tempfile.TemporaryDirectory(prefix="sparq-v013-recovery-")
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        (self.root / "crates/a").mkdir(parents=True)
+        (self.root / "crates/b").mkdir(parents=True)
+        for name in ("a", "b"):
+            (self.root / f"crates/{name}/Cargo.toml").write_text(
+                f'[package]\nname = "{name}"\nversion.workspace = true\n')
+        (self.root / "release-plz.toml").write_text(
+            '[workspace]\npublish = false\n'
+            '[[package]]\nname = "a"\nversion_group = "sparq"\n'
+            '[[package]]\nname = "b"\nversion_group = "sparq"\n')
+        self.set_version("0.1.3")
+        self.at = dt.datetime(2026, 9, 20, 22, 3, 11, tzinfo=dt.timezone.utc)
+        self.now = self.at + dt.timedelta(hours=1)
+        self.tags = [("v0.1.2", self.at), ("v0.1.1", self.at - dt.timedelta(days=20)),
+                     ("v0.1.0", self.at - dt.timedelta(days=90)),
+                     ("v0.1.0-dev.3", self.at - dt.timedelta(days=91))]
+        self.remote = dict(interval_guard.V013_PREDECESSOR_REFS)
+        self.local = {"refs/tags/v0.1.2": "05efded769a745d5b0e8d6d076425c171732ab1d",
+                      "refs/tags/v0.1.2^{commit}": "4b37254efe502f8a0aeba36076130ed9b44853ef"}
+        self.fetch_calls = []
+        self.git_calls = []
+        self.logs = []
+        for target in ("urllib.request.urlopen", "subprocess.run"):
+            poison = patch(target, side_effect=AssertionError("real external runner reached"))
+            poison.start()
+            self.addCleanup(poison.stop)
+
+    def set_version(self, version):
+        (self.root / "Cargo.toml").write_text(
+            '[workspace]\nmembers = ["crates/a", "crates/b"]\n'
+            f'[workspace.package]\nversion = "{version}"\n')
+
+    def add_target(self):
+        self.tags.insert(0, ("v0.1.3", self.now))
+        self.local.update({"refs/tags/v0.1.3": "a" * 40,
+                           "refs/tags/v0.1.3^{commit}": "b" * 40})
+        self.remote.update({"refs/tags/v0.1.3": "a" * 40,
+                            "refs/tags/v0.1.3^{}": "b" * 40})
+
+    def git(self, root, args):
+        self.assertEqual(root, self.root)
+        self.git_calls.append(args)
+        if args == ["rev-parse", "--is-shallow-repository"]:
+            return "false\n"
+        if args[0] == "for-each-ref":
+            return "".join(f"{name}\t{stamp.isoformat()}\n" for name, stamp in self.tags)
+        if args[:2] == ["rev-parse", "--verify"]:
+            return self.local[args[2]] + "\n"
+        self.assertEqual(args, ["ls-remote", "--tags",
+                               "https://github.com/sparq-org/sparq.git", "refs/tags/v*"])
+        return "".join(f"{oid}\t{ref}\n" for ref, oid in self.remote.items())
+
+    def absent(self, url):
+        self.fetch_calls.append(url)
+        return None, None
+
+    def run_guard(self, *, released_tag=None, fetch=None, git_runner=None):
+        self.logs.clear()
+        return interval_guard.run(
+            self.root, dry_run=False, now=self.now, released_tag=released_tag,
+            git_runner=git_runner or self.git, fetch=fetch or self.absent, log=self.logs.append)
+
+    def test_exact_pre_tag_and_tag_push_admit_after_authoritative_reads(self):
+        for tag in (None, "v0.1.3"):
+            with self.subTest(tag=tag):
+                if tag:
+                    self.add_target()
+                self.fetch_calls.clear()
+                self.assertEqual(self.run_guard(released_tag=tag), 0, self.logs)
+                self.assertEqual(len(self.fetch_calls), 2)
+                self.assertTrue(any(args[0] == "ls-remote" for args in self.git_calls))
+                self.assertIn("maintainer-authorized v0.1.3 recovery", "\n".join(self.logs))
+
+    def test_all_other_versions_keep_the_full_interval(self):
+        for version in ("0.1.4", "0.1.3-dev.1", "0.2.0"):
+            self.set_version(version)
+            with self.subTest(version=version):
+                self.now = self.at + dt.timedelta(hours=23, minutes=59)
+                self.assertEqual(self.run_guard(), 1)
+                self.assertEqual(self.run_guard(released_tag=f"v{version}"), 1)
+                self.now = self.at + dt.timedelta(hours=24)
+                self.assertEqual(self.run_guard(), 0)
+                self.assertEqual(self.run_guard(released_tag=f"v{version}"), 0)
+
+    def test_altered_released_tag_refuses(self):
+        for tag in ("v0.1.2", "v0.1.4", "v0.1.3-dev.1", "latest"):
+            with self.subTest(tag=tag):
+                self.assertEqual(self.run_guard(released_tag=tag), 1)
+
+    def test_predecessor_name_or_timestamp_change_refuses(self):
+        original = list(self.tags)
+        for predecessor in (("v0.1.1", self.at),
+                            ("v0.1.2", self.at - dt.timedelta(seconds=1)),
+                            ("v0.1.2", self.at + dt.timedelta(seconds=1))):
+            with self.subTest(predecessor=predecessor):
+                self.tags = [predecessor, *original[1:]]
+                self.assertEqual(self.run_guard(), 1)
+        self.tags = original[1:]
+        self.assertEqual(self.run_guard(), 1)
+
+    def test_changed_local_and_remote_objects_or_commits_refuse(self):
+        for inventory in (self.local, self.remote):
+            for ref in list(inventory):
+                with self.subTest(ref=ref, remote=inventory is self.remote):
+                    original = inventory[ref]
+                    inventory[ref] = "c" * 40
+                    self.assertEqual(self.run_guard(), 1)
+                    inventory[ref] = original
+
+    def test_extra_tag_refuses_even_when_backdated_or_only_remote(self):
+        original = list(self.tags)
+        for stamp in (self.at - dt.timedelta(days=60), self.at + dt.timedelta(minutes=1)):
+            for local in (False, True):
+                with self.subTest(stamp=stamp, local=local):
+                    self.remote["refs/tags/v0.1.4"] = "c" * 40
+                    self.tags = original + ([("v0.1.4", stamp)] if local else [])
+                    self.assertEqual(self.run_guard(), 1)
+
+    def test_missing_or_mismatched_target_tag_refuses(self):
+        self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+        self.add_target()
+        self.remote["refs/tags/v0.1.3^{}"] = "c" * 40
+        self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+
+    def test_clock_before_predecessor_refuses(self):
+        self.now = self.at - dt.timedelta(seconds=1)
+        self.assertEqual(self.run_guard(), 1)
+
+    def test_target_future_or_backdated_timestamp_refuses(self):
+        self.add_target()
+        for stamp in (self.now + dt.timedelta(seconds=1), self.at - dt.timedelta(seconds=1)):
+            with self.subTest(stamp=stamp):
+                self.tags[0] = ("v0.1.3", stamp)
+                self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+
+    def test_tag_push_still_checks_registry_and_predecessor(self):
+        self.add_target()
+        self.assertEqual(self.run_guard(released_tag="v0.1.3",
+                                        fetch=lambda _url: ({"versions": []}, None)), 1)
+        self.local["refs/tags/v0.1.2"] = "c" * 40
+        self.assertEqual(self.run_guard(released_tag="v0.1.3"), 1)
+
+    def test_pre_tag_refuses_target_present_only_on_remote(self):
+        self.remote["refs/tags/v0.1.3"] = "a" * 40
+        self.assertEqual(self.run_guard(), 1)
+
+    def test_empty_or_malformed_remote_inventory_refuses(self):
+        for output in ("", "garbage\n", "a" * 40 + "\trefs/tags/v0.1.2\n"):
+            def malformed(root, args):
+                return output if args[0] == "ls-remote" else self.git(root, args)
+            with self.subTest(output=output):
+                self.assertEqual(self.run_guard(git_runner=malformed), 1)
+
+    def test_any_registry_response_other_than_definitive_absence_refuses(self):
+        for response in (({}, None), ({"versions": []}, None),
+                         ({"versions": [{"created_at": "2020-01-01T00:00:00Z"}]}, None),
+                         ({"versions": [{"num": "0.1.3", "created_at": self.now.isoformat()}]}, None),
+                         (None, "unparseable JSON body"), (None, "HTTP 403")):
+            with self.subTest(response=response):
+                self.assertEqual(self.run_guard(fetch=lambda _url: response), 1)
+        # The second crate must also be read; a partial bootstrap invalidates recovery.
+        self.assertEqual(self.run_guard(fetch=lambda url: (None, None) if url.endswith("/a")
+                                        else ({"versions": []}, None)), 1)
+
+    def test_indeterminate_git_reads_and_shallow_checkout_refuse(self):
+        def shallow(root, args):
+            return "true\n" if args == ["rev-parse", "--is-shallow-repository"] else self.git(root, args)
+        self.assertEqual(self.run_guard(git_runner=shallow), 1)
+        for operation in ("for-each-ref", "rev-parse", "ls-remote"):
+            def broken(root, args):
+                if args[0] == operation:
+                    raise interval_guard.GuardRefusal("indeterminate git fixture")
+                return self.git(root, args)
+            with self.subTest(operation=operation):
+                self.assertEqual(self.run_guard(git_runner=broken), 1)
+
+    def test_real_runners_are_poisoned(self):
+        with self.assertRaisesRegex(AssertionError, "real external runner"):
+            interval_guard._http_get_json("https://invalid.example")
+        with self.assertRaisesRegex(AssertionError, "real external runner"):
+            interval_guard._run_git(self.root, ["status"])
+
+
 class TestMinimumIntervalIsEnforced(unittest.TestCase):
     NOW = dt.datetime(2026, 7, 26, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -928,6 +1078,27 @@ class TestUnknownsRefuseRatherThanPublish(unittest.TestCase):
         self.assertEqual(calls, 3)
         self.assertIn("after 3 attempt(s)", str(ctx.exception))
 
+    def test_tag_path_ignores_the_release_being_cut_on_crates_io(self) -> None:
+        # publish -> tag -> release.yml: the crates of the release being cut were published
+        # minutes before the tag. They must not count as "the last release", or the
+        # downstream release refuses itself; older versions must still count.
+        now = dt.datetime(2026, 10, 20, tzinfo=dt.timezone.utc)
+        payload = {"versions": [
+            {"num": "0.1.5", "created_at": (now - dt.timedelta(minutes=5)).isoformat()},
+            {"num": "0.1.4", "created_at": (now - dt.timedelta(days=3)).isoformat()},
+        ]}
+        fetch = lambda _u: (payload, None)
+        self.assertEqual(
+            interval_guard.crates_io_last_publish(["sparq-core"], fetch=fetch),
+            now - dt.timedelta(minutes=5),
+        )
+        self.assertEqual(
+            interval_guard.crates_io_last_publish(
+                ["sparq-core"], fetch=fetch, exclude_version="0.1.5"
+            ),
+            now - dt.timedelta(days=3),
+        )
+
     def test_a_definitive_404_is_NOT_an_unknown(self) -> None:
         # The discriminating counterpart: a successful "this crate does not exist" must
         # NOT be conflated with "I could not ask", or the first release could never ship.
@@ -1004,7 +1175,7 @@ def _make_test_repo(
         "GIT_COMMITTER_NAME": "t",
         "GIT_COMMITTER_EMAIL": "t@e",
     }
-    # [GPT-5.6] Keep the fixture hermetic when a maintainer signs commits/tags globally.
+    # Keep the fixture hermetic when a maintainer signs commits/tags globally.
     git = lambda *a: subprocess.run(  # noqa: E731
         [
             "git",
@@ -1356,11 +1527,14 @@ class TestPublishableDependencyClosure(unittest.TestCase):
         crates = interval_guard.publishable_crates(REPO_ROOT)
         expected = [crate.name for crate in interval_guard.publish_order(crates)]
         documented = re.findall(
-            r"^cargo publish -p ([A-Za-z0-9_-]+)$",
+            r"^cargo publish --allow-dirty -p ([A-Za-z0-9_-]+)$",
             (REPO_ROOT / "docs" / "release.md").read_text(encoding="utf-8"),
             flags=re.MULTILINE,
         )
-        self.assertEqual(documented, expected)
+        # The vendored parser fork is published first and outside the version group, so
+        # the guard (workspace members only) does not derive it.
+        self.assertEqual(documented[:1], ["sparq-spargebra"])
+        self.assertEqual(documented[1:], expected)
 
     @staticmethod
     def _fixture(

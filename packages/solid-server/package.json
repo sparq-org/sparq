@@ -1,6 +1,6 @@
 {
   "name": "@sparq-org/solid-server",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "description": "Local-development Solid/LDP server backed by sparq WebAssembly.",
   "license": "MIT",
   "type": "module",
@@ -45,7 +45,7 @@
     }
   },
   "devDependencies": {
-    "fastify": "^5.0.0",
+    "fastify": "^5.12.1",
     "fastify-v4": "npm:fastify@^4.28.0",
     "jose": "^6.2.4"
   },

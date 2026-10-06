@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] README length-cap + required-sections check (bead sq-5fd1).
+# README length-cap + required-sections check (bead sq-5fd1).
 #
 # Pairs with the crate-README template from the doc-overhaul design (bead sq-9jw5):
 # a concise (<=120-line) per-crate README with three emoji section markers —
@@ -34,7 +34,7 @@ REQUIRED_SECTIONS = [
     ("✨", re.compile(r"^##\s*✨", re.M)),    # Features
     ("📚", re.compile(r"^##\s*📚", re.M)),    # Learn more
 ]
-# [OPUS-4.8] Require a real License *section*, not any inline mention of the word
+# Require a real License *section*, not any inline mention of the word
 # "License" (e.g. "licensed under", a "license" badge). The template's License is a
 # heading or a one-line section label at line-start: a markdown heading (`## License`),
 # a bold label (`**License**`), or a leading `License` followed by `:`/`—`/`-`. Each
@@ -45,10 +45,10 @@ LICENSE_RE = re.compile(
     r"|License\s*(?:[:—-]|$))",                # one-line section: "License:" / "License —"
     re.M | re.I,
 )
-# [OPUS-4.8] sq-ixsf: A README is exempt from the section requirement ONLY when it carries
+# sq-ixsf: A README is exempt from the section requirement ONLY when it carries
 # an EXPLICIT internal-stub directive — the HTML comment the README-overhaul (sq-9jw5/sq-inzv)
 # stamps on every publish=false stub, e.g.
-#   <!-- [OPUS-4.8] sq-4kr5: internal-stub README for a publish=false crate. -->
+#   <!-- sq-4kr5: internal-stub README for a publish=false crate. -->
 # The previous heuristic substring-matched body PROSE ("not published", "internal crate", …),
 # so a FULL-TEMPLATE README that merely *mentioned* those words anywhere was mis-classified as
 # a <=30-line stub and silently exempted from the cap + the 🚀/✨/📚 + License requirements —
@@ -92,7 +92,7 @@ def check_readme(path: str) -> list[str]:
     return check_readme_text(text)
 
 
-# [OPUS-4.8] sq-ixsf: hermetic self-test of the stub-classification + section/cap logic.
+# sq-ixsf: hermetic self-test of the stub-classification + section/cap logic.
 # No filesystem, no network — pins the gate's OWN behaviour so a future regression in the
 # stub narrowing (or a re-broadening back to a prose substring match) fails CI here. Mirrors
 # the perf-gate.py --self-test / coverage-gate.py --self-test pattern.
@@ -121,7 +121,7 @@ def _self_test() -> int:
     # An EXPLICIT internal-stub directive (HTML comment) IS a stub → exempt from sections,
     # passing while <=30 lines.
     stub_ok = (
-        "<!-- [OPUS-4.8] sq-4kr5: internal-stub README for a publish=false crate. -->\n"
+        "<!-- sq-4kr5: internal-stub README for a publish=false crate. -->\n"
         "# sparq-bar\n\nInternal crate; see the design record.\n\n## License\n\nMIT.\n"
     )
     expect("explicit directive IS a stub", is_stub_readme(stub_ok))

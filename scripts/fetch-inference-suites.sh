@@ -23,7 +23,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# [OPUS-4.8] sq-nj0pd: `retry` + the pinned-clone idiom now live in the shared
+# sq-nj0pd: `retry` + the pinned-clone idiom now live in the shared
 # lib so every conformance suite-fetch retries identically (sq-y5dz seeded this
 # resilience here; centralising it also covers the delegated fetch-conformance.sh
 # in step 1 below — the w3c/rdf-tests clone that was the remaining un-retried
@@ -47,12 +47,14 @@ echo "w3c/N3 pinned at $N3_PIN."
 # Pin = the Internet Archive snapshot timestamp (an immutable capture of
 # http://owl.semanticweb.org/exports/all.rdf, the full test-case export of the
 # OWL WG wiki referenced by the OWL 2 Conformance REC) + sha256 of the payload.
+# Use HTTPS for the archive transport; the captured origin remains HTTP.
+# Plain HTTP can fail from CI runners even when this same snapshot serves over HTTPS.
 OWL_SNAPSHOT="20160703034201"
-OWL_URL="http://web.archive.org/web/${OWL_SNAPSHOT}if_/http://owl.semanticweb.org/exports/all.rdf"
+OWL_URL="https://web.archive.org/web/${OWL_SNAPSHOT}if_/http://owl.semanticweb.org/exports/all.rdf"
 OWL_SHA256="446e9eae0488e7eb58a8bd7db92b5fb358316c63e3cad1749103cd912664bee4"
 OWL_DEST="$ROOT/tests/w3c/owl2/all.rdf"
 
-# [OPUS-5] #4935 — the sha256-gated fetch now lives in the shared lib as
+# #4935 — the sha256-gated fetch now lives in the shared lib as
 # `fetch_pinned_file` (with the `--retry-all-errors` rationale sq-y5dz added
 # here). Extracting it made the OFFLINE-ON-HIT property — a payload already at
 # the pinned digest costs ZERO network calls — directly testable, which is what
@@ -68,7 +70,7 @@ if ! fetch_pinned_file "$OWL_URL" "$OWL_DEST" "$OWL_SHA256" \
 fi
 
 # --- 4. W3C RIF Working Group test cases (Core subset) ------------------------
-# [FABLE-5] sq-pbz04.5.5 (epic sq-pbz04.5) — the W3C RIF WG test cases, Core dialect,
+# sq-pbz04.5.5 (epic sq-pbz04.5) — the W3C RIF WG test cases, Core dialect,
 # for the `rif-wg-core` conformance arm (crates/sparq-conformance/tests/rif_wg_core_suite.rs).
 #
 # FIXTURES ARE FETCHED, NOT VENDORED (license gate — verified 2026-07). The RIF test

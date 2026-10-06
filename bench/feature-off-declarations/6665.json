@@ -1,0 +1,5 @@
+{
+  "pr": 6665,
+  "date": "2026-10-05",
+  "reason": "Issue #3198: the always-compiled ORDER BY key builder in crates/sparq-engine/src/exec.rs (`order_bindings`) now builds a computed sort key from the exact evaluated Value instead of an f64 fast path, so high-precision computed keys order exactly. This site is outside every `#[cfg(feature = ...)]` block and compiles into the feature-OFF sparq-wasm bundle, so its bytes move by design. The PATHS explain change is behind the default-OFF `paths` feature and the conformance change is outside the wasm closure. No feature gate is added or widened, no dependency is added, and there is no `unsafe`. Bundle SIZE remains governed separately by the metrics.wasm_bundle_bytes floor ratchet in bench.yml."
+}

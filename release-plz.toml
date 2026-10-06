@@ -21,7 +21,7 @@
 # all packages that share a version_group the SAME (highest computed) next
 # version, so they keep bumping together — e.g. 0.1.0 -> 0.2.0 in lockstep —
 # instead of drifting to per-crate versions. Without this, adoption would
-# silently start versioning the 37 publishable crates independently.
+# silently start versioning the publishable crates independently.
 
 [workspace]
 # Automate the version + changelog that docs/release.md §1–§2 do by hand today
@@ -37,7 +37,7 @@ semver_check = true
 # `{{ package }}-v{{ version }}`). A single `vX.Y.Z` tag is what the existing
 # release.yml / dist.yml fire on (their `tags: ['v*']` trigger) and matches the
 # locked single-version model. Disable tags by default because release-plz processes
-# each crate separately; otherwise all 37 crates try to create the same tag. The
+# each crate separately; otherwise every crate tries to create the same tag. The
 # dependency-final sparq-cli entry below is the sole tag anchor. [GPT-5.6]
 git_tag_name = "v{{ version }}"
 git_tag_enable = false
@@ -104,37 +104,28 @@ git_release_enable = false
 #   `crates` job reverts to attest-only over the .crate bytes — "the point of adoption".
 publish = false
 
-# [GPT-5.6] #3399 / first-release bootstrap: crates.io is still empty, but an abandoned
-# `v0.1.0` tag already exists. Use git tags as the version baseline until the first complete
-# registry publish, so release-plz proposes v0.1.1 without moving/reusing that public tag.
-# The post-bootstrap flip is atomic: `git_only = false` together with `publish = true` and
-# the pre-wired crates.io OIDC step in release-plz.yml.
+# [GPT-6] #3399 / recovery bootstrap: crates.io is still empty, and the existing `v0.1.0`,
+# `v0.1.1`, and `v0.1.2` tags are incomplete immutable history. Use git tags as the version baseline
+# until the first complete registry publish; the manual cross-ecosystem version PR targets
+# v0.1.3. The post-bootstrap flip is atomic: `git_only = false` together with `publish = true`
+# and the pre-wired crates.io OIDC step in release-plz.yml. Generated Cargo Release-PRs must
+# still be augmented with matching npm manifest + shared-lock versions before merge.
 git_only = true
 
-# --- The locked version_group: the complete crates.io dependency closure -----
-# Every crates/* package without `publish = false` belongs here. The set includes the
-# implementation/capability crates reached by normal or optional dependencies of the public
-# front doors; Cargo cannot publish a crate whose registry manifest points at a workspace-only
-# dependency. `scripts/release-interval-guard.py` derives and verifies the exact set and order.
+# --- The locked version_group: the crates.io publish set ---------------------------
+# Every crates/* package without `publish = false` belongs here, and that is deliberately
+# the focused core (12 crates): the engine stack, reasoner, SHACL, HDT, the server and the
+# CLI. Every other workspace crate is `publish = false`. Optional features of these crates
+# that reach an unpublished crate (ZK, trust, policy, Solid authz, terse, ...) are removed
+# from the packaged manifests by `scripts/publish-strip.py`, so they are available from a
+# git build only. `scripts/release-interval-guard.py` derives and verifies the set and
+# order. The vendored SPARQL parser fork `sparq-spargebra` (vendor/spargebra) is published
+# too, but outside this group: it is versioned independently and published by hand when
+# its version changes (docs/release.md "crates.io publish set").
 #
 # Each entry pins `changelog_path = "CHANGELOG.md"` so all crates write to
 # the SINGLE root Keep-a-Changelog file (the locked model has one changelog,
-# not 37 per-crate ones); changelog_path is a per-package-only key.
-
-[[package]]
-name = "sparq-algos"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-arrow"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-canon"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
+# not one per crate); changelog_path is a per-package-only key.
 
 [[package]]
 name = "sparq-cli"
@@ -165,32 +156,7 @@ version_group = "sparq"
 changelog_path = "CHANGELOG.md"
 
 [[package]]
-name = "sparq-fedplan"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-forms"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-geo"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
 name = "sparq-hdt"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-http3"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-introspect"
 version_group = "sparq"
 changelog_path = "CHANGELOG.md"
 
@@ -200,42 +166,7 @@ version_group = "sparq"
 changelog_path = "CHANGELOG.md"
 
 [[package]]
-name = "sparq-mcp"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-nlq"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-policy"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
 name = "sparq-reason"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-reason-el"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-reason-ql"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-rsp"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-secprop-vocab"
 version_group = "sparq"
 changelog_path = "CHANGELOG.md"
 
@@ -255,56 +186,6 @@ version_group = "sparq"
 changelog_path = "CHANGELOG.md"
 
 [[package]]
-name = "sparq-shaclc"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-sim"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-solid"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
 name = "sparq-substrate"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-terse"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-text"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-trust"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-vc"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-vectors"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-wrapper"
-version_group = "sparq"
-changelog_path = "CHANGELOG.md"
-
-[[package]]
-name = "sparq-zk"
 version_group = "sparq"
 changelog_path = "CHANGELOG.md"

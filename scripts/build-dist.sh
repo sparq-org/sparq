@@ -35,7 +35,7 @@ cd "$(dirname "$0")/.."
 OUT=dist
 mkdir -p "$OUT"
 
-# [OPUS-4.8] sq-ytnq (area:release): embed the resolved dependency manifest INTO the
+# sq-ytnq (area:release): embed the resolved dependency manifest INTO the
 # shipped dist binary via cargo-auditable, so a `dist/sparq-cli-<tier>` built with this
 # script is self-describing for post-incident audit (`cargo audit bin dist/sparq-cli-<tier>`)
 # — exactly as the CI dist/release matrices already do (dist.yml + release.yml#package,

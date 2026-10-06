@@ -1,29 +1,29 @@
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# [GPT-5.6] sq-lsp7k.26: exercise deterministic multi-hop signature expansion and its
+# sq-lsp7k.26: exercise deterministic multi-hop signature expansion and its
 # weighted-Jaccard property witnesses; the feature is default-OFF.
 - name: "sparq-sim (multi-hop)"
   crate: "sparq-sim"
   features: "multi-hop"
   test: true
-# [FABLE-5] sq-lsp7k: exercise the explain_similarity explanation surface — the
+# sq-lsp7k: exercise the explain_similarity explanation surface — the
 # score-reconstruction differential + set-membership witnesses; default-OFF.
 - name: "sparq-sim (explain)"
   crate: "sparq-sim"
   features: "explain"
   test: true
-# [FABLE-5] sq-lsp7k: the combined leg is load-bearing — only multi-hop attenuation
+# sq-lsp7k: the combined leg is load-bearing — only multi-hop attenuation
 # makes the two sides weight one shared element differently, so the min-weight
 # differential (a `min → max` mutation goes red) runs ONLY with both features on.
 - name: "sparq-sim (explain+multi-hop)"
   crate: "sparq-sim"
   features: "explain,multi-hop"
   test: true
-# [FABLE-5] sq-lgw: exercise the MinHash/LSH sketch index — the exact-rescore
+# sq-lgw: exercise the MinHash/LSH sketch index — the exact-rescore
 # differential, guaranteed twin recall, and the decline witnesses; default-OFF.
 - name: "sparq-sim (sketch)"
   crate: "sparq-sim"

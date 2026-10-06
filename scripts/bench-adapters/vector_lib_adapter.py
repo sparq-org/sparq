@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-eifd: PYTHON-LIB (vector-lib) adapter KIND. Authored by Opus 4.8
-# (Fable unavailable; flag for re-review when Fable returns).
+# sq-eifd: PYTHON-LIB (vector-lib) adapter KIND.
 #
 # In-process, cross-language ANN harness — the vector analogue of the embedded-Rust
 # Oxigraph model, but Python. Covers FAISS / hnswlib / Lucene-via-Anserini
@@ -28,7 +27,7 @@
 # recall_at_k consumes two such maps (approx + exact) and scores them.
 #
 # --- GATHER-TIER: SIFT1M / GloVe-100-angular recall-QPS Pareto (sq-aiup) ------
-# [OPUS-4.8] sq-aiup. The per-commit suite (bench/vector/) gates the SYNTHETIC 50k
+# sq-aiup. The per-commit suite (bench/vector/) gates the SYNTHETIC 50k
 # corpus recall deficits. The big PUBLISHED-dataset recall-QPS Pareto is gather-tier:
 # the corpora (SIFT1M = ann-benchmarks `sift-128-euclidean`; `glove-100-angular`) are
 # NOT redistributable in-repo, so this is a download/gather step (nightly/EC2), never a
@@ -98,7 +97,7 @@ def recall_deficit_milli(recall):
 
 
 # --- published-dataset parse + curve maths (pure, fixture-tested) ------------
-# [OPUS-4.8] sq-aiup. These are stdlib-only so they are unit-tested WITHOUT numpy.
+# sq-aiup. These are stdlib-only so they are unit-tested WITHOUT numpy.
 # `.fvecs`/`.ivecs` is the TEXMEX/SIFT1M on-disk format (http://corpus-texmex.irisa.fr):
 # each record is a little-endian int32 dimension `d`, then `d` little-endian values
 # (float32 for .fvecs, int32 for .ivecs). GloVe-100-angular ships as ann-benchmarks
@@ -356,7 +355,7 @@ def main(argv):
 
     try:
         if mode == "smoke":
-            # [SONNET-4.6] sq-hmd7l.19: lightweight self-test for the pure (no-numpy/hnswlib)
+            # sq-hmd7l.19: lightweight self-test for the pure (no-numpy/hnswlib)
             # functions — recall_at_k, pareto_frontier, matched_recall_qps, read_vecs.
             # Exits 0 on pass, 1 on failure.
             import struct as _struct

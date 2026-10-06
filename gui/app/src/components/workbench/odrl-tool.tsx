@@ -40,7 +40,7 @@ import {
   type OdrlPreviewResult,
   type OdrlPane,
 } from "@/lib/odrl";
-import { isAskResult, type SparqlResults } from "@sparq/client";
+import { isAskResult, termValue, type SparqlResults } from "@sparq/client";
 
 // [FABLE-5] sq-qgkwy.2 — the override lives in the sibling `.meta.ts` (eagerly bundled for the
 // rail/tab honesty read path) so THIS panel module can stay behind a lazy dynamic import().
@@ -125,7 +125,7 @@ function PaneTable({ results }: { results: SparqlResults }) {
           <tr key={ri} className="border-b">
             {vars.map((v) => (
               <td key={v} className="px-2 py-1 font-mono">
-                {row[v]?.value ?? ""}
+                {termValue(row[v]) ?? ""}
               </td>
             ))}
           </tr>

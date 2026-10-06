@@ -1,6 +1,6 @@
 {
   "name": "sparq-gui-app",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "private": true,
   "description": "The sparq operational GUI frontend — a DISTINCT Next.js workbench app (NOT the marketing site) consumed by both the Tauri 2 desktop shell and a static-exported hosted 'Try the GUI live' web target. Reuses the @sparq/client wasm engine client + shared logic; renders its own operational shell (left rail · top bar · IDE tab strip · status bar), never the site's hero/Showcase/Benchmarks/About chrome.",
   "type": "module",
@@ -16,7 +16,7 @@
     "start": "npx --yes serve out",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --import ./test-support/register-ts.mjs --test src/lib/editor-keys.test.ts src/lib/federation.test.ts src/lib/odrl.test.ts src/lib/tauri-fs.test.ts src/lib/import-batch.test.ts src/lib/workspace-actions-visibility.test.ts src/lib/rsp-feed.test.ts src/lib/plan-view.test.ts src/lib/query-monitor.test.ts src/lib/proof-view.test.ts src/lib/inferred-facts.test.ts src/lib/form-render-model.test.ts src/lib/forms-bridge.test.ts src/lib/file-decompress.test.ts src/lib/select-result-graph.test.ts scripts/strip-legacy-polyfills.test.mjs"
+    "test:unit": "node --import ./test-support/register-ts.mjs --test src/lib/editor-keys.test.ts src/lib/federation.test.ts src/lib/odrl.test.ts src/lib/tauri-fs.test.ts src/lib/import-batch.test.ts src/lib/import-url.test.ts src/lib/workspace-sources.test.ts src/lib/workspace-actions-visibility.test.ts src/lib/rsp-feed.test.ts src/lib/plan-view.test.ts src/lib/query-monitor.test.ts src/lib/proof-view.test.ts src/lib/inferred-facts.test.ts src/lib/form-render-model.test.ts src/lib/forms-bridge.test.ts src/lib/file-decompress.test.ts src/lib/select-result-graph.test.ts src/lib/wasm-preload.test.ts scripts/strip-legacy-polyfills.test.mjs"
   },
   "dependencies": {
     "buffer": "^6.0.3",

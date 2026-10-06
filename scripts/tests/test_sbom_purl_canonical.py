@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-tmyw: hermetic tests for scripts/check-sbom-purl-canonical.py.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-tmyw: hermetic tests for scripts/check-sbom-purl-canonical.py.
 #
 # Hermetic w.r.t. git/network: imports the check module and drives its pure evaluate()
 # + the file parser against in-tmpdir fixtures. NO subprocess, NO live git. A final test
@@ -27,7 +26,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# [OPUS-4.8] sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
+# sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
 # fetch is TRANSIENTLY flaky on hosted runners (observed `curl ... [16] Error in the HTTP2
 # framing layer` -> non-zero exit at ~9-12s). PR #750 wrapped the cyclonedx invocation in the
 # WORKFLOW STEPS, but this live-SBOM self-test runs its OWN `cargo cyclonedx` (it executes
@@ -111,7 +110,7 @@ class TestEvaluate(unittest.TestCase):
         self.assertTrue(any("NON-CANONICAL" in l for l in lines))
 
     def test_vcs_url_qualifier_fails(self):
-        # [FABLE-5] sq-gg0qq.2 (GS-7): the raw purl cargo-cyclonedx 0.5.9 emits for a GIT
+        # sq-gg0qq.2 (GS-7): the raw purl cargo-cyclonedx 0.5.9 emits for a GIT
         # dependency (sparq-lws-core's pinned solid-oidc-verifier). The normalizer must
         # strip the vcs_url qualifier; the backstop must flag it if that ever regresses.
         ok, lines = chk.evaluate(
@@ -174,7 +173,7 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             # Generate into the repo (cargo-cyclonedx writes next to each Cargo.toml),
             # normalize, copy out, then clean the generated crate SBOMs.
-            # [OPUS-4.8] sq-90ew: GENERATION only, with the transient-flake retry. The
+            # sq-90ew: GENERATION only, with the transient-flake retry. The
             # GS-6/GS-7 purl assertion below runs ONCE on the produced files (NOT retried).
             _generate_workspace_sbom()
             try:

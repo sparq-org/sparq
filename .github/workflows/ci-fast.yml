@@ -1,0 +1,175 @@
+name: ci-fast
+
+# ci-fast — the ONE required check (docs/branch-protection.md). Fast and self-contained.
+#
+# WHAT: one workflow whose jobs are ordinary `needs:` edges — no cross-workflow polling.
+# Three parallel work jobs cover the core crates, and one aggregating job named `ci-fast`
+# is the check the ruleset requires:
+#   * lint        — clippy -D warnings on the core crates (fmt is informational: see below)
+#   * test        — nextest + doctests on the core crates, default features
+#   * conformance — the W3C SPARQL conformance ratchet, the same command + floor as ci.yml
+#   * ci-fast     — `if: always()`; green iff every job above concluded `success`
+#
+# SCOPE: the heavy suites (full-workspace matrix, coverage, wasm, MSRV, SHACL/inference
+# conformance, fuzz, …) run nightly and on dispatch in their own workflows (ci.yml,
+# feature-matrix.yml, fuzz.yml, …); they do not block merges.
+#
+# CORE CRATES: kept in ONE env var below so the three jobs cannot drift apart.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per PR (a new push cancels the stale run); push-to-main / merge_group /
+# dispatch runs are never cancelled (each has its own ref or run id in the group).
+concurrency:
+  group: ci-fast-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Same build env as ci.yml (copied verbatim, see the sq-6vshe.1 note there): no
+# incremental, thin debuginfo, lld. Keeping it IDENTICAL also keeps Swatinem/rust-cache's
+# env hash identical, so the `lint` / `conformance` jobs here can restore the caches that
+# ci.yml's same-named jobs save from main.
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  CARGO_NET_RETRY: "10"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
+  CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+  CORE_CRATES: >-
+    -p sparq-core -p sparq-substrate -p sparq-engine -p sparq-cli
+    -p sparq-server -p sparq-lws-core -p sparq-solid
+
+jobs:
+  lint:
+    name: lint (clippy core crates; fmt non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # rust-toolchain.toml pins the compiler (+ clippy/rustfmt); the first cargo call
+      # materialises it. Print it so a lint disagreement names its own compiler.
+      - name: Rust (pinned by rust-toolchain.toml)
+        run: |
+          cargo --version
+          cargo clippy --version
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: clippy (deny warnings, core crates)
+        run: cargo clippy $CORE_CRATES --all-targets -- -D warnings
+      # Informational: `cargo fmt --all -- --check` FAILS on main today (the deferred
+      # one-time workspace reformat has not landed — see rustfmt.toml and ci.yml's lint
+      # job). Flip to gating (drop continue-on-error) once that reformat merges.
+      - name: rustfmt (non-blocking until the workspace reformat lands)
+        continue-on-error: true
+        run: |
+          cargo fmt --version
+          cargo fmt --all -- --check
+
+  test:
+    name: test (core crates, default features)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # The core crates' test binaries are large; a stock runner has ~14 GB free.
+      - name: Free runner disk
+        run: ./scripts/ci-free-disk.sh
+      - name: Rust (pinned by rust-toolchain.toml)
+        run: cargo --version
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: nextest
+      # `--profile ci` = the retry policy in .config/nextest.toml (a retried-then-passed
+      # test is reported FLAKY in the summary, a test failing every attempt reds the job).
+      - name: Tests (nextest)
+        run: cargo nextest run $CORE_CRATES --profile ci --no-fail-fast
+      - name: Doctests (nextest does not run these)
+        run: cargo test $CORE_CRATES --doc
+
+  conformance:
+    name: W3C SPARQL conformance (ratchet >= 1229 pass+divergence)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Rust (pinned by rust-toolchain.toml)
+        run: cargo --version
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch W3C test suites (pinned)
+        run: ./scripts/fetch-conformance.sh
+      # Same command as ci.yml's `conformance` job, including its one-retry transient
+      # self-heal (a crates.io hiccup before the report is written is not a regression).
+      - name: Run conformance suite
+        run: |
+          set -uo pipefail
+          MAX_ATTEMPTS=2
+          attempt=1
+          while true; do
+            echo "::group::W3C SPARQL conformance — attempt $attempt/$MAX_ATTEMPTS"
+            rc=0
+            cargo run --profile release-fast -p sparq-conformance --bin sparq-conformance || rc=$?
+            echo "::endgroup::"
+            if [ "$rc" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+              echo "::error::W3C SPARQL conformance run failed after $attempt attempt(s) (exit $rc)."
+              exit "$rc"
+            fi
+            echo "::warning::W3C SPARQL conformance attempt $attempt failed (exit $rc) — retrying once."
+            attempt=$((attempt + 1))
+          done
+      - name: Summarize
+        run: cat conformance-report.md >> "$GITHUB_STEP_SUMMARY"
+      # The floor is the SAME number as ci.yml's `conformance` job. Raise both together;
+      # never lower it.
+      - name: Enforce ratchet (pass+divergence count must not regress)
+        run: |
+          RATCHET=1229
+          if [ ! -s conformance-report.md ] || ! grep -qE '^## Overall' conformance-report.md; then
+            echo "::error::SPARQL conformance report is missing/empty (no '## Overall' section) — an infra/build failure, NOT a conformance regression. Re-run the job."
+            exit 1
+          fi
+          OVERALL=$(grep -A2 '^## Overall' conformance-report.md | grep -E '\*\*[0-9]+ pass /')
+          PASS=$(echo "$OVERALL" | grep -oE '[0-9]+ pass' | grep -oE '[0-9]+' | head -1)
+          DIV=$(echo "$OVERALL" | grep -oE '[0-9]+ documented divergence' | grep -oE '[0-9]+' | head -1)
+          TOTAL=$(( ${PASS:-0} + ${DIV:-0} ))
+          echo "pass: ${PASS:-unknown} + documented divergences: ${DIV:-0} = $TOTAL (ratchet: $RATCHET)"
+          [ -n "$PASS" ] && [ "$TOTAL" -ge "$RATCHET" ] || { echo "::error::conformance regressed below the ratchet ($TOTAL < $RATCHET)"; exit 1; }
+
+  ci-fast:
+    # THE check a ruleset would require. `always()` so it reports a verdict even when a
+    # need failed or was cancelled (a skipped required check would otherwise read as
+    # "pending" forever, or worse, as satisfied).
+    name: ci-fast
+    needs: [lint, test, conformance]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All jobs succeeded
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success") | .key] | join(", ")')
+          if [ -n "$bad" ]; then
+            echo "::error::ci-fast: not successful: $bad"
+            exit 1
+          fi
+          echo "ci-fast: all jobs succeeded"

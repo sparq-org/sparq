@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-eifd cross-engine SHACL fixture — DATA graph.
+# sq-eifd cross-engine SHACL fixture — DATA graph.
 # Four ex:Person focus nodes, hand-authored so the violation set is unambiguous:
 #   ex:alice   — VALID    (name string, age integer, knows an IRI)            0 viol
 #   ex:bob     — missing ex:name                                  -> minCount  1 viol

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [GPT-5.6] Fail closed when a deferred normative core has no tracking bead
+# Fail closed when a deferred normative core has no tracking bead
 # (bead sq-nj0ts).
 
 """Require tracking beads for deferred normative-core sections in Typst specs."""

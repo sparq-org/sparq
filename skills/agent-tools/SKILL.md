@@ -251,7 +251,10 @@ same `nlq` feature:
   the query may still fail at runtime or match nothing. Note that sparq-nlq's
   dictionary-grounding constraint (`NlqConfig::check_dictionary`) is opt-in and **off** in
   the default config, for `ask` as well as `nl_query` — so an ungrounded predicate/class
-  IRI is accepted by **both** (`ask` just executes it to zero rows). Same backend, same
+  IRI is accepted by **both** (`ask` just executes it to zero rows). Both tools start
+  from one shared config, and the library entry point `run_nl_query_with(graph, question,
+  config, llm)` takes an explicit `NlqConfig`: with `check_dictionary` on it applies the
+  same dictionary repair `ask` does, so the two cannot drift. Same backend, same
   fail-closed "not configured" error.
 
 These are **ergonomics / grounding aids pending measurement** — *not* a token-saving

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Auto-file a nightly differential-fuzz finding (bead sq-0iqzw).
+# Auto-file a nightly differential-fuzz finding (bead sq-0iqzw).
 #
 # WHAT: the deterministic filing core of .github/workflows/differential.yml's
 # failure path. When a nightly shard of the sparq-bench differential fuzzer (the
@@ -149,7 +149,7 @@ def build_bead_record(bead_id: str, shard: str, parsed: dict, args, now: str) ->
         f"Repro (seed + query + graph) is inline in the linked GitHub issue and in the "
         f"differential-repro artifact of the run. Adjudicated divergence classes "
         f"(bench/differential-divergences.json) are already excluded — this is a "
-        f"NON-adjudicated wrong-answer candidate. 🤖 SPARQ agent [FABLE-5]"
+        f"NON-adjudicated wrong-answer candidate. 🤖 SPARQ agent"
     )
     return {
         "_type": "issue",
@@ -183,7 +183,7 @@ def build_issue_body(bead_id: str, shard: str, parsed: dict, args) -> str:
         replay = f"{args.mode}=1 {replay}"
     seeds_line = ", ".join(str(s) for s in parsed["seeds"][:50]) + (" …" if n > 50 else "")
     case = parsed["first_case"] or "(no FIRST FAILING CASE block captured — see the artifact log)"
-    return f"""> 🤖 **SPARQ agent** — auto-filed by the nightly differential-fuzz lane (bead sq-0iqzw). [FABLE-5]
+    return f"""> 🤖 **SPARQ agent** — auto-filed by the nightly differential-fuzz lane (bead sq-0iqzw).
 
 The nightly sparq-vs-Oxigraph differential fuzzer found **{n} non-adjudicated mismatch(es)** in shard `{shard}` (category `{args.category}`, mode `{args.mode}`, seed window {args.seed_start}+{args.count}).
 
