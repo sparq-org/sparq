@@ -31,20 +31,30 @@ pub fn run_suite(rdf_tests_root: &Path, out: &mut Vec<TestResult>) -> Result<(),
                 .str_object(&node, &format!("{MF}name"))
                 .unwrap_or_else(|| format!("{node}"));
             let types = g.types_of(&node);
-            let positive = types.iter().any(|t| t == &format!("{MF}PositiveEntailmentTest"));
-            let negative = types.iter().any(|t| t == &format!("{MF}NegativeEntailmentTest"));
+            let positive = types
+                .iter()
+                .any(|t| t == &format!("{MF}PositiveEntailmentTest"));
+            let negative = types
+                .iter()
+                .any(|t| t == &format!("{MF}NegativeEntailmentTest"));
             if !positive && !negative {
-                out.push(result(&name, Outcome::OutOfScope(format!(
-                    "not an entailment test (type {})",
-                    types.first().cloned().unwrap_or_default()
-                ))));
+                out.push(result(
+                    &name,
+                    Outcome::OutOfScope(format!(
+                        "not an entailment test (type {})",
+                        types.first().cloned().unwrap_or_default()
+                    )),
+                ));
                 continue;
             }
             if matches!(
                 g.object(&node, &format!("{RDFT}approval")),
                 Some(Term::NamedNode(n)) if n.as_str().ends_with("Rejected") || n.as_str().ends_with("Withdrawn")
             ) {
-                out.push(result(&name, Outcome::OutOfScope("test rejected/withdrawn upstream".into())));
+                out.push(result(
+                    &name,
+                    Outcome::OutOfScope("test rejected/withdrawn upstream".into()),
+                ));
                 continue;
             }
             let outcome = run_one(&g, &node, positive);
@@ -86,11 +96,13 @@ fn run_one(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode, positive: bool) -> Out
 
     // Premise.
     let premise_rows: Vec<Row> = match g.object(node, &format!("{MF}action")) {
-        Some(Term::NamedNode(n)) => match iri_to_path(n.as_str()).map(|p| crate::rdf::parse_file(&p)) {
-            Some(Ok(triples)) => triples.iter().map(entail::triple_row).collect(),
-            Some(Err(e)) => return Outcome::Fail(format!("premise parse error: {e}")),
-            None => return Outcome::Fail("non-file premise IRI".into()),
-        },
+        Some(Term::NamedNode(n)) => {
+            match iri_to_path(n.as_str()).map(|p| crate::rdf::parse_file(&p)) {
+                Some(Ok(triples)) => triples.iter().map(entail::triple_row).collect(),
+                Some(Err(e)) => return Outcome::Fail(format!("premise parse error: {e}")),
+                None => return Outcome::Fail("non-file premise IRI".into()),
+            }
+        }
         _ => return Outcome::Fail("manifest entry has no mf:action document".into()),
     };
 
@@ -100,7 +112,9 @@ fn run_one(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode, positive: bool) -> Out
         Inconsistency,
     }
     let goal = match g.object(node, &format!("{MF}result")) {
-        Some(Term::NamedNode(n)) => match iri_to_path(n.as_str()).map(|p| crate::rdf::parse_file(&p)) {
+        Some(Term::NamedNode(n)) => match iri_to_path(n.as_str())
+            .map(|p| crate::rdf::parse_file(&p))
+        {
             Some(Ok(triples)) => Goal::Conclusion(triples.iter().map(entail::triple_row).collect()),
             Some(Err(e)) => return Outcome::Fail(format!("conclusion parse error: {e}")),
             None => return Outcome::Fail("non-file conclusion IRI".into()),
@@ -121,14 +135,18 @@ fn run_one(g: &MiniGraph, node: &oxrdf::NamedOrBlankNode, positive: bool) -> Out
             (true, Some(_)) => Outcome::Pass,
             (true, None) => Outcome::Fail("premise not detected as inconsistent".into()),
             (false, None) => Outcome::Pass,
-            (false, Some(why)) => Outcome::Fail(format!("premise wrongly judged inconsistent ({why})")),
+            (false, Some(why)) => {
+                Outcome::Fail(format!("premise wrongly judged inconsistent ({why})"))
+            }
         },
         Goal::Conclusion(rows) => {
             // An inconsistent premise entails everything.
             let holds = inconsistent.is_some() || entail::entails(&closure, &rows, &d);
             match (positive, holds) {
                 (true, true) => Outcome::Pass,
-                (true, false) => Outcome::Fail("conclusion not entailed by the materialized closure".into()),
+                (true, false) => {
+                    Outcome::Fail("conclusion not entailed by the materialized closure".into())
+                }
                 (false, false) => Outcome::Pass,
                 (false, true) => Outcome::Fail("conclusion wrongly entailed".into()),
             }

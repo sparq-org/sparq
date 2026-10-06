@@ -135,8 +135,13 @@ mod gated {
         let frame_root = frame_suite_root();
         let frame = frame_root.exists().then(|| frame::run_frame(&frame_root));
 
-        println!("\nW3C JSON-LD 1.1 conformance scoreboard (pinned w3c/json-ld-api + json-ld-framing)");
-        println!("{:<10} {:>5} {:>5} {:>5}", "category", "pass", "fail", "skip");
+        println!(
+            "\nW3C JSON-LD 1.1 conformance scoreboard (pinned w3c/json-ld-api + json-ld-framing)"
+        );
+        println!(
+            "{:<10} {:>5} {:>5} {:>5}",
+            "category", "pass", "fail", "skip"
+        );
         // [OPUS-4.8] The CI ratchet greps these `TOTAL <cat>` lines.
         println!(
             "TOTAL toRdf {} {} {} (floor {})",
@@ -186,7 +191,12 @@ mod gated {
         }
         println!("\nknown-gap (NOT-IMPLEMENTED — not gated, grows the ratchet as they land):");
         for (cat, why) in NOT_IMPLEMENTED_CATS {
-            println!("  {:<10} {:>4} tests — {}", cat, not_impl.get(cat).copied().unwrap_or(0), why);
+            println!(
+                "  {:<10} {:>4} tests — {}",
+                cat,
+                not_impl.get(cat).copied().unwrap_or(0),
+                why
+            );
         }
 
         if !tordf.failures.is_empty() {

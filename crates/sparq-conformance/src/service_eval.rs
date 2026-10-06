@@ -114,12 +114,8 @@ fn parse_manifest(manifest: &Path) -> Result<Vec<ServiceTest>, String> {
                 // The manifest base is the manifest file, so relative names are
                 // already absolute file:// IRIs after parse; fall back to joining
                 // the bare last path segment onto the manifest directory.
-                iri_to_path(n.as_str()).or_else(|| {
-                    n.as_str()
-                        .rsplit('/')
-                        .next()
-                        .map(|seg| dir.join(seg))
-                })
+                iri_to_path(n.as_str())
+                    .or_else(|| n.as_str().rsplit('/').next().map(|seg| dir.join(seg)))
             }
             _ => None,
         }
@@ -152,10 +148,7 @@ fn parse_manifest(manifest: &Path) -> Result<Vec<ServiceTest>, String> {
             let Some(action) = as_node(action_t) else {
                 continue;
             };
-            let Some(query) = g
-                .object(&action, &format!("{QT}query"))
-                .and_then(resolve)
-            else {
+            let Some(query) = g.object(&action, &format!("{QT}query")).and_then(resolve) else {
                 continue;
             };
             let data: Vec<PathBuf> = g
@@ -170,16 +163,15 @@ fn parse_manifest(manifest: &Path) -> Result<Vec<ServiceTest>, String> {
                     Some(Term::NamedNode(n)) => n.as_str().to_string(),
                     _ => continue,
                 };
-                let Some(ddoc) = g
-                    .object(&sd, &format!("{QT}data"))
-                    .and_then(resolve)
-                else {
+                let Some(ddoc) = g.object(&sd, &format!("{QT}data")).and_then(resolve) else {
                     continue;
                 };
-                service_data.push(ServiceData { endpoint, data: ddoc });
+                service_data.push(ServiceData {
+                    endpoint,
+                    data: ddoc,
+                });
             }
-            let Some(result) = g.object(&node, &format!("{MF}result")).and_then(resolve)
-            else {
+            let Some(result) = g.object(&node, &format!("{MF}result")).and_then(resolve) else {
                 continue;
             };
             tests.push(ServiceTest {
@@ -217,7 +209,10 @@ fn stand_up(doc: &Path) -> Result<LoopbackEndpoint, String> {
 /// [`sparq_server::ServiceAllowlist::add`]. The server's per-request egress mode is
 /// `AllowlistOnly` — the same strict mode the stock server installs — so only the
 /// explicitly listed inner endpoints are reachable; all other destinations stay refused.
-fn stand_up_with_egress(doc: &Path, allowed_entries: &[String]) -> Result<LoopbackEndpoint, String> {
+fn stand_up_with_egress(
+    doc: &Path,
+    allowed_entries: &[String],
+) -> Result<LoopbackEndpoint, String> {
     let triples = parse_file(doc)?;
     let mut nt = String::new();
     for t in &triples {
@@ -232,7 +227,9 @@ fn stand_up_with_egress(doc: &Path, allowed_entries: &[String]) -> Result<Loopba
             .add(entry)
             .map_err(|e| format!("allowlist entry \"{}\": {}", entry, e))?;
     }
-    Ok(LoopbackEndpoint::serve_with(move || AppState::with_config(graph, config)))
+    Ok(LoopbackEndpoint::serve_with(move || {
+        AppState::with_config(graph, config)
+    }))
 }
 
 /// Rewrites every well-known endpoint IRI to its loopback `sparql_url()` in `text`.
@@ -265,7 +262,12 @@ fn build_local_nt(data: &[PathBuf], map: &BTreeMap<String, String>) -> Result<St
 fn align(binding: &Binding, order: &[String]) -> Row {
     order
         .iter()
-        .map(|v| binding.iter().find(|(bv, _)| bv == v).map(|(_, t)| t.clone()))
+        .map(|v| {
+            binding
+                .iter()
+                .find(|(bv, _)| bv == v)
+                .map(|(_, t)| t.clone())
+        })
         .collect()
 }
 
@@ -312,7 +314,12 @@ fn find_service_nesting(pattern: &GraphPattern) -> BTreeMap<String, Vec<String>>
     let mut result: BTreeMap<String, Vec<String>> = BTreeMap::new();
     walk(pattern, &mut |p| {
         // Only consider non-SILENT SERVICE nodes with a named (IRI) endpoint.
-        if let GraphPattern::Service { name: NamedNodePattern::NamedNode(outer_name), inner, .. } = p {
+        if let GraphPattern::Service {
+            name: NamedNodePattern::NamedNode(outer_name),
+            inner,
+            ..
+        } = p
+        {
             if !matches!(p, GraphPattern::Service { silent: true, .. }) {
                 let outer_iri = outer_name.as_str().to_string();
                 let mut nested = Vec::new();

@@ -77,7 +77,11 @@ impl LineSuite {
 
 /// Parse `text` through the suite's REAL sparq entry point, returning the resulting
 /// quad set (rendered) or the parse error.
-pub fn parse_sparq_quads(suite: LineSuite, text: &str, base: &str) -> Result<Vec<[String; 4]>, String> {
+pub fn parse_sparq_quads(
+    suite: LineSuite,
+    text: &str,
+    base: &str,
+) -> Result<Vec<[String; 4]>, String> {
     match suite {
         LineSuite::NTriples => {
             let (dict, ids) = sparq_core::Graph::parse_to_triples(text, "ntriples")?;
@@ -111,10 +115,17 @@ fn canonical_iri(suite: LineSuite, suite_root: &Path, file: &Path) -> String {
 
 /// Walk the suite's `manifest.ttl` and run every entry through the sparq parse path.
 /// `suite_root` is `<rdf-tests>/rdf/rdf11/rdf-{n-triples,n-quads,trig}`.
-pub fn run_suite(suite: LineSuite, suite_root: &Path, out: &mut Vec<TestResult>) -> Result<(), String> {
+pub fn run_suite(
+    suite: LineSuite,
+    suite_root: &Path,
+    out: &mut Vec<TestResult>,
+) -> Result<(), String> {
     let manifest = suite_root.join("manifest.ttl");
     if !manifest.is_file() {
-        return Err(format!("{} not found — run scripts/fetch-conformance.sh", manifest.display()));
+        return Err(format!(
+            "{} not found — run scripts/fetch-conformance.sh",
+            manifest.display()
+        ));
     }
     let g = MiniGraph::load(&manifest)?;
     let mut seen = std::collections::HashSet::new();
@@ -128,19 +139,27 @@ pub fn run_suite(suite: LineSuite, suite_root: &Path, out: &mut Vec<TestResult>)
             .into_iter()
             .find_map(|ty| ty.strip_prefix(RDFT).map(str::to_string));
         let Some(kind) = kind else { continue };
-        let name = g.str_object(&node, &format!("{MF}name")).unwrap_or_else(|| match &node {
-            NamedOrBlankNode::NamedNode(n) => {
-                n.as_str().rsplit(['#', '/']).next().unwrap_or(n.as_str()).to_string()
-            }
-            NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
-        });
+        let name = g
+            .str_object(&node, &format!("{MF}name"))
+            .unwrap_or_else(|| match &node {
+                NamedOrBlankNode::NamedNode(n) => n
+                    .as_str()
+                    .rsplit(['#', '/'])
+                    .next()
+                    .unwrap_or(n.as_str())
+                    .to_string(),
+                NamedOrBlankNode::BlankNode(b) => format!("_:{}", b.as_str()),
+            });
         let file = |pred: &str| {
-            g.object(&node, &format!("{MF}{pred}")).and_then(|t| match t {
-                Term::NamedNode(n) => iri_to_path(n.as_str()),
-                _ => None,
-            })
+            g.object(&node, &format!("{MF}{pred}"))
+                .and_then(|t| match t {
+                    Term::NamedNode(n) => iri_to_path(n.as_str()),
+                    _ => None,
+                })
         };
-        let Some(action) = file("action") else { continue };
+        let Some(action) = file("action") else {
+            continue;
+        };
         let result = file("result");
         let stem = suite.kind_stem();
         let outcome = match kind.strip_prefix(stem) {
@@ -150,12 +169,20 @@ pub fn run_suite(suite: LineSuite, suite_root: &Path, out: &mut Vec<TestResult>)
             Some("NegativeEval") => eval_test(suite, &action, result.as_deref(), suite_root, false),
             _ => Outcome::OutOfScope(format!("unhandled rdft type {kind}")),
         };
-        out.push(TestResult { suite: suite.label().to_string(), name, outcome });
+        out.push(TestResult {
+            suite: suite.label().to_string(),
+            name,
+            outcome,
+        });
     }
     Ok(())
 }
 
-fn parse_action(suite: LineSuite, action: &Path, suite_root: &Path) -> Result<Vec<[String; 4]>, Outcome> {
+fn parse_action(
+    suite: LineSuite,
+    action: &Path,
+    suite_root: &Path,
+) -> Result<Vec<[String; 4]>, Outcome> {
     let bytes = std::fs::read(action)
         .map_err(|e| Outcome::Fail(format!("read {}: {e}", action.display())))?;
     let text = String::from_utf8_lossy(&bytes).into_owned();

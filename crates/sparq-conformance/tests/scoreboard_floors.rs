@@ -50,8 +50,8 @@ use std::path::PathBuf;
 /// [`textual_guard_reads_only_crate_local_sources`].
 fn const_floor_in(rel_from_crate: &str, const_name: &str) -> usize {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel_from_crate);
-    let src = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let src =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     for line in src.lines() {
         let line = line.trim();
         // [OPUS-4.8] sq-t58w.6 — tolerate an optional `pub ` visibility prefix: some
@@ -67,8 +67,11 @@ fn const_floor_in(rel_from_crate: &str, const_name: &str) -> usize {
                     continue;
                 }
                 if let Some(eq) = after_name.split('=').nth(1) {
-                    let digits: String =
-                        eq.trim_start().chars().take_while(|c| c.is_ascii_digit()).collect();
+                    let digits: String = eq
+                        .trim_start()
+                        .chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect();
                     if !digits.is_empty() {
                         return digits.parse().expect("floor parses");
                     }
@@ -76,7 +79,10 @@ fn const_floor_in(rel_from_crate: &str, const_name: &str) -> usize {
             }
         }
     }
-    panic!("did not find `const {const_name}: usize = N;` in {}", path.display());
+    panic!(
+        "did not find `const {const_name}: usize = N;` in {}",
+        path.display()
+    );
 }
 
 /// (suite label, source file, const name) for each ratchet whose runner lives in
@@ -449,15 +455,39 @@ fn shared_crate_floors_are_pinned() {
     let shared: &[(&str, usize)] = &[
         ("W3C SHACL core", floors::shacl::CORE_FLOOR),
         ("W3C SHACL-SPARQL", floors::shacl::SPARQL_FLOOR),
-        ("OGC GeoSPARQL topology compliance", floors::geo::OGC_TOPOLOGY_FLOOR),
-        ("OGC GeoSPARQL query-rewrite extension", floors::geo::OGC_QUERY_REWRITE_FLOOR),
-        ("Solid WAC decision parity", floors::solid::WAC_SCENARIO_FLOOR),
-        ("Solid ACP decision parity", floors::solid::ACP_SCENARIO_FLOOR),
-        ("Solid WAC differential oracle", floors::solid::DIVERGENCE_FLOOR),
-        ("Solid ACP differential oracle", floors::solid::DIVERGENCE_FLOOR),
+        (
+            "OGC GeoSPARQL topology compliance",
+            floors::geo::OGC_TOPOLOGY_FLOOR,
+        ),
+        (
+            "OGC GeoSPARQL query-rewrite extension",
+            floors::geo::OGC_QUERY_REWRITE_FLOOR,
+        ),
+        (
+            "Solid WAC decision parity",
+            floors::solid::WAC_SCENARIO_FLOOR,
+        ),
+        (
+            "Solid ACP decision parity",
+            floors::solid::ACP_SCENARIO_FLOOR,
+        ),
+        (
+            "Solid WAC differential oracle",
+            floors::solid::DIVERGENCE_FLOOR,
+        ),
+        (
+            "Solid ACP differential oracle",
+            floors::solid::DIVERGENCE_FLOOR,
+        ),
         ("SolidLab ODRL Test Suite", floors::policy::ODRL_SUITE_FLOOR),
-        ("text-search differential oracle", floors::text::BM25_ORACLE_FLOOR),
-        ("RSP expressivity / SRBench correctness", floors::rsp::EXPRESSIVITY_FLOOR),
+        (
+            "text-search differential oracle",
+            floors::text::BM25_ORACLE_FLOOR,
+        ),
+        (
+            "RSP expressivity / SRBench correctness",
+            floors::rsp::EXPRESSIVITY_FLOOR,
+        ),
     ];
     // All three lists must cover the same suites, or a newly shared floor could be
     // listed as exempt from the textual guard while nothing actually pins its value.
@@ -513,12 +543,16 @@ fn textual_guard_reads_only_crate_local_sources() {
             "floor-sync row {:?} names {:?}, which escapes crates/sparq-conformance — put \
              the floor in the shared sparq-conformance-floors crate and add the suite to \
              SHARED_CRATE_FLOORS instead of reading another crate's source",
-            label, src
+            label,
+            src
         );
         assert!(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(src).is_file(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join(src)
+                .is_file(),
             "floor-sync row {:?} names missing source {:?}",
-            label, src
+            label,
+            src
         );
     }
 }
@@ -581,8 +615,9 @@ fn all_crate_test_suites_are_guarded() {
             suite.runner,
             Runner::CrateTest { .. } | Runner::FeatureGatedCrateTest { .. }
         ) {
-            let textually_guarded =
-                CRATE_LOCAL_FLOORS.iter().any(|(label, _, _)| *label == suite.label);
+            let textually_guarded = CRATE_LOCAL_FLOORS
+                .iter()
+                .any(|(label, _, _)| *label == suite.label);
             let shared_crate = SHARED_CRATE_FLOORS.contains(&suite.label);
             let lib_sourced = LIB_SOURCED_FLOORS.contains(&suite.label);
             let buckets = usize::from(textually_guarded)
@@ -602,7 +637,8 @@ fn all_crate_test_suites_are_guarded() {
                 "registry CrateTest suite {:?} is in {} floor-guard buckets — keep exactly \
                  one (the imported const is the single source; drop the CRATE_LOCAL_FLOORS \
                  row)",
-                suite.label, buckets
+                suite.label,
+                buckets
             );
         }
     }

@@ -399,9 +399,8 @@ mod gated {
                 continue;
             }
 
-            let lit = |p: &str| -> Option<String> {
-                g.str_object(&case_node, &format!("{}{}", T, p))
-            };
+            let lit =
+                |p: &str| -> Option<String> { g.str_object(&case_node, &format!("{}{}", T, p)) };
             let case = Case {
                 ident: lit("identifier").unwrap_or_else(|| match &case_node {
                     NamedOrBlankNode::NamedNode(n) => n
@@ -587,7 +586,12 @@ mod gated {
                 return case
                     .checks
                     .iter()
-                    .map(|k| finish(k, Outcome::Fail(format!("premise RDF/XML parse error: {}", e))))
+                    .map(|k| {
+                        finish(
+                            k,
+                            Outcome::Fail(format!("premise RDF/XML parse error: {}", e)),
+                        )
+                    })
                     .collect();
             }
         };
@@ -641,9 +645,9 @@ mod gated {
                     }
                 }
                 "positive-entailment" => match &case.conclusion {
-                    None => Outcome::Deferred(
-                        "conclusion only available in functional syntax".into(),
-                    ),
+                    None => {
+                        Outcome::Deferred("conclusion only available in functional syntax".into())
+                    }
                     Some(xml) => match parse_ontology(xml, &base) {
                         Err(e) => Outcome::Fail(format!("conclusion RDF/XML parse error: {}", e)),
                         Ok(conclusion) => {
@@ -770,8 +774,7 @@ mod gated {
                              from the sequential engine on this EL case"
                         );
                         assert_eq!(
-                            par_report.unsatisfiable_classes,
-                            tbox_report.unsatisfiable_classes,
+                            par_report.unsatisfiable_classes, tbox_report.unsatisfiable_classes,
                             "classify_graph_par(threads={threads}) unsatisfiable-class \
                              count diverged on this EL case"
                         );
@@ -793,9 +796,7 @@ mod gated {
         let out = match rx.recv_timeout(TEST_TIMEOUT) {
             Ok(Ok(c)) => Ok(c),
             Ok(Err(_)) => Err("EL realiser panicked".into()),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                Err("timeout (20s) in EL realisation".into())
-            }
+            Err(mpsc::RecvTimeoutError::Timeout) => Err("timeout (20s) in EL realisation".into()),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err("EL realiser panicked".into()),
         };
         // Intentional detach: see the function-level comment above.
@@ -897,8 +898,7 @@ mod gated {
     /// [SONNET-4.6] sq-pbz04.2.10
     fn augment_equivalent_properties(closure: &[Row]) -> Vec<Row> {
         const RDFS_SUB_PROPERTY_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
-        const OWL_EQUIVALENT_PROPERTY: &str =
-            "http://www.w3.org/2002/07/owl#equivalentProperty";
+        const OWL_EQUIVALENT_PROPERTY: &str = "http://www.w3.org/2002/07/owl#equivalentProperty";
 
         use std::collections::HashSet;
         let mut sub_of: HashSet<(String, String)> = HashSet::new();
@@ -911,8 +911,7 @@ mod gated {
         }
 
         let mut extra: Vec<Row> = Vec::new();
-        let eq_prop =
-            Term::NamedNode(oxrdf::NamedNode::new_unchecked(OWL_EQUIVALENT_PROPERTY));
+        let eq_prop = Term::NamedNode(oxrdf::NamedNode::new_unchecked(OWL_EQUIVALENT_PROPERTY));
         for (a, b) in &sub_of {
             if sub_of.contains(&(b.clone(), a.clone())) {
                 let an = Term::NamedNode(oxrdf::NamedNode::new_unchecked(a.clone()));
@@ -1001,15 +1000,11 @@ mod gated {
             classify_under_watchdog(premise).expect("canary: EL realiser must not panic/timeout");
         // A ⊑ D must appear in the derived closure as a plain rdfs:subClassOf triple.
         // [SONNET-4.6] CodeQL positional format! args used throughout (rust/unused-variable guard).
-        let a = Term::NamedNode(oxrdf::NamedNode::new_unchecked(
-            "http://ex/A".to_string(),
-        ));
+        let a = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/A".to_string()));
         let sub_class_of = Term::NamedNode(oxrdf::NamedNode::new_unchecked(
             "http://www.w3.org/2000/01/rdf-schema#subClassOf".to_string(),
         ));
-        let d = Term::NamedNode(oxrdf::NamedNode::new_unchecked(
-            "http://ex/D".to_string(),
-        ));
+        let d = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/D".to_string()));
         let expected: Row = [a, sub_class_of, d];
         assert!(
             classified.closure.contains(&expected),
