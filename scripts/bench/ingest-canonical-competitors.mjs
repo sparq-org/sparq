@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-1sa9r — the MINIMAL canonical-competitor ingestion path.
+// sq-1sa9r — the MINIMAL canonical-competitor ingestion path.
 //
 // PURPOSE. Turn the raw canonical "sparql-same-box-comparison" gather envelopes
 // (bench/canonical-competitor-results/<date>/canonical-<suite>-<ts>.json — the exact
@@ -27,14 +27,14 @@
 //
 // USAGE:  node scripts/bench/ingest-canonical-competitors.mjs [<results-dir>...]
 //   default results-dirs = EVERY dated directory under bench/canonical-competitor-results/
-//   ([FABLE-5] sq-7d3dj.34: the HTTP/TTFB panel lands in a sibling dated dir, e.g.
+//   (sq-7d3dj.34: the HTTP/TTFB panel lands in a sibling dated dir, e.g.
 //   2026-07-07-http/, whose envelopes carry DISTINCT suite ids like "sp2b-http" — so
 //   multiple dirs combine into one same_box_comparisons array without collisions).
 // It rewrites ONLY the `same_box_comparisons` key of bench/dashboard/competitors.json;
 // every other key (schema_version, engines, values, references, …) is preserved verbatim.
 // Re-run site/scripts/sync-benchmarks.mjs afterwards to refresh the site JSON.
 //
-// [FABLE-5] sq-7d3dj.34 — 6-col HTTP-profile envelopes: when an envelope's TSVs carry the
+// sq-7d3dj.34 — 6-col HTTP-profile envelopes: when an envelope's TSVs carry the
 // extended columns (`<query>\t<rows>\t<ka_best_us>\t<ka_ttfb_us>\t<fresh_us>\t<fresh_ttfb_us>`)
 // the row keeps `values` = keep-alive full-request best (col 3, backward-compatible) and
 // ADDITIONALLY carries values_ttfb / values_fresh / values_fresh_ttfb; the envelope's
@@ -78,7 +78,7 @@ const ENGINE_META = {
     label: "QLever",
     mode: "HTTP SPARQL adapter (qlever-index → qlever-server)",
   },
-  // [FABLE-5] sq-hmd7l.28 — the new comparative axes' competitor engines. Each axis'
+  // sq-hmd7l.28 — the new comparative axes' competitor engines. Each axis'
   // same-box harness (scripts/bench/{fts,geo,hdt,update,materialize}-same-box.sh) records
   // these ids in its envelope `engines` map; adding them here gives the site a stable human
   // label + measurement-MODE string per column. A brand-new competitor a harness adds later
@@ -113,7 +113,7 @@ const ENGINE_META = {
 // engineIdsOf, so a new competitor never gets silently dropped).
 const ENGINE_ORDER = ["sparq", "oxigraph", "fuseki", "virtuoso", "qlever"];
 
-// [FABLE-5] sq-hmd7l.28 — the engine ids to render for ONE envelope, sparq first, then the
+// sq-hmd7l.28 — the engine ids to render for ONE envelope, sparq first, then the
 // fixed SPARQL-matrix order for any of those present, then any REMAINING engine the envelope
 // declares (a new-axis competitor like jena-text / hdt-cpp / vlog) in its own key order. This
 // is what makes a new competitor column flow through WITHOUT editing this script per gather.
@@ -157,7 +157,7 @@ function parseTsv(tsv) {
   return out;
 }
 
-// [FABLE-5] sq-hmd7l.28 — an envelope's per-engine TSV key is `<id>_tsv`, but some harnesses
+// sq-hmd7l.28 — an envelope's per-engine TSV key is `<id>_tsv`, but some harnesses
 // (fts, geo) sanitise hyphenated ids to underscores (`jena-text` → `jena_text_tsv`). Resolve
 // whichever form the envelope actually carries so a hyphenated competitor id is not read as an
 // all-null column.
@@ -252,7 +252,7 @@ function buildEntry(gathers) {
     return row;
   });
 
-  // [FABLE-5] sq-7d3dj.34: an HTTP-profile envelope (6-col ttfb TSVs) records the true
+  // sq-7d3dj.34: an HTTP-profile envelope (6-col ttfb TSVs) records the true
   // per-engine HTTP mode itself — prefer it. CLI-matrix envelopes keep the curated
   // ENGINE_META display labels (stable output for the committed 2026-07-07 matrix).
   const isHttpProfile = !!(primary.tsv_format && /ttfb/.test(primary.tsv_format));
@@ -297,7 +297,7 @@ function buildEntry(gathers) {
     git_commit: primary.git_commit,
     gathered_at_utc: (primary.env && primary.env.gathered_at_utc) || primary.gathered_at_utc,
     canonical: primary.canonical === true,
-    // [FABLE-5] sq-hmd7l.28 — the sp2b/watdiv matrix keeps its exact reviewed prose (incl. the
+    // sq-hmd7l.28 — the sp2b/watdiv matrix keeps its exact reviewed prose (incl. the
     // real virtuoso-q09 example) for a byte-stable committed snapshot; other axes get a generic,
     // accurate combine string (no fabricated engine/query name) + the gather's OWN dated dir.
     combine: /^(sp2b|watdiv)(-http)?$/i.test(suite)
@@ -320,7 +320,7 @@ function buildEntry(gathers) {
   };
 }
 
-// ---- [FABLE-5] sq-hmd7l.28 — bespoke-shape axis adapters ----------------------------
+// ---- sq-hmd7l.28 — bespoke-shape axis adapters ----------------------------
 // A few axes do NOT emit the query-row `<engine>_tsv` + `count_crosscheck` layout the
 // generic buildEntry consumes. Rather than hand-transcribe them, we normalise each into the
 // SAME same_box_comparison shape (engines + rows) here, keyed off the envelope `suite`, so a
@@ -377,7 +377,7 @@ function normalizeHdt(primary, gathers) {
   const sparqDecodeS = decodeCell && typeof decodeCell.value !== "undefined" ? Number(decodeCell.value) : null;
   const cc = primary.count_agreement || {};
   const ids = engineIdsOf(primary).length ? engineIdsOf(primary) : ["sparq", "hdt-cpp"];
-  // decode seconds → µs for a uniform unit with the other axes. hdt-cpp: [FABLE-5]
+  // decode seconds → µs for a uniform unit with the other axes. hdt-cpp:
   // sq-hmd7l.33 — the harness now records a NUMERIC best-of-N in-container decode_us
   // (container spawn excluded) under hdt_cpp_metrics; absent (an older envelope, or the
   // in-container timing fell back) → null (renders n/a, never a fabricated number).
@@ -469,7 +469,7 @@ for (const [suite, gathers] of bySuite) {
       const a = parseTsv(tsvFor(ref, id));
       const b = parseTsv(tsvFor(g, id));
       for (const q of Object.keys(a)) {
-        // [FABLE-5] sq-7d3dj.34: an ERROR row (rows=null, e.g. a per-query timeout that
+        // sq-7d3dj.34: an ERROR row (rows=null, e.g. a per-query timeout that
         // fired in only one of the gathers) is a MISSING count, not a DISAGREEING count —
         // only two conflicting numeric counts refuse the ingest.
         if (b[q] && a[q].rows != null && b[q].rows != null && a[q].rows !== b[q].rows) {
@@ -488,7 +488,7 @@ const suiteOrder = [...bySuite.keys()].sort((a, b) => {
   const rank = (s) => (/sp2b/i.test(s) ? 0 : /watdiv/i.test(s) ? 1 : 2);
   return rank(a) - rank(b) || (a < b ? -1 : 1);
 });
-// [FABLE-5] sq-hmd7l.28 — dispatch each suite to its bespoke adapter or the generic query-row
+// sq-hmd7l.28 — dispatch each suite to its bespoke adapter or the generic query-row
 // buildEntry. A defensive adapter that returns null (an unfinalised gather shape) is skipped
 // with a warning so the ingest never crashes and never fabricates a row.
 const sameBox = [];

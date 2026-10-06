@@ -204,8 +204,8 @@ python3 scripts/tests/test_vex_deny_drift.py   # hermetic self-test (11 cases in
 ```
 
 Wired as `.github/workflows/supply-chain.yml#vex-deny-sync` (job name
-`VEX ↔ deny.toml sync (GS-5) — GATING`; no `advisory`/`informational` whole word, so ci-summary gates
-it). Recorded this branch: both = `{RUSTSEC-2024-0436, RUSTSEC-2025-0141, RUSTSEC-2026-0194,
+`VEX ↔ deny.toml sync (GS-5) — GATING`; no `advisory`/`informational` whole word; now a step of the
+`supply-chain-gates` job, run on push to `main` + nightly — post-merge detection, not a PR gate). Recorded this branch: both = `{RUSTSEC-2024-0436, RUSTSEC-2025-0141, RUSTSEC-2026-0194,
 RUSTSEC-2026-0195}` — **in sync** (no drift to resolve). ([OPUS-5] sq-5ah3p removed
 `RUSTSEC-2025-0134` from both sides in one change, which is exactly the edit shape this gate exists to
 police.) Negative test: temporarily dropping any one of the four deny.toml ignores makes the check exit 1 and name
@@ -215,10 +215,10 @@ the offending id. A genuinely-intended one-sided entry is recorded with a reason
 ## 5. Provenance verification (for a consumer)
 
 ```sh
-gh attestation verify sparq-cli-<ver>.sbom.cdx.json --repo jeswr/sparq   # SLSA provenance on the SBOM
+gh attestation verify sparq-cli-<ver>.sbom.cdx.json --repo sparq-org/sparq   # SLSA provenance on the SBOM
 shasum -a 256 -c SHA256SUMS                                              # release-asset integrity
 cargo audit bin sparq-server                                            # read the embedded manifest (cargo-auditable)
-cosign verify-attestation ghcr.io/jeswr/sparq@<digest> ...              # image SBOM + provenance
+cosign verify-attestation ghcr.io/sparq-org/sparq@<digest> ...              # image SBOM + provenance
 ```
 
 These are the consumer-facing verification steps a downstream high-security integrator runs; they
@@ -227,7 +227,7 @@ correspond to SIG-1/SIG-2, DEP-5, and SIG-3 respectively.
 > **Operating-effectiveness status (release-gated controls):** all four commands above are
 > **unrunnable today** — `release.yml` triggers only on `push: tags: v*`, and the repo has **no
 > `v*` tags, no GitHub Releases, and no Sigstore attestations yet** (verified `git tag -l 'v*'` → 0,
-> `gh release list` → empty, `gh api repos/jeswr/sparq/attestations/...` → 404, 2026-06-15). The
+> `gh release list` → empty, `gh api repos/sparq-org/sparq/attestations/...` → 404, 2026-06-15). The
 > SIG-*/PUB-*/VEX-4/DEP-5 controls are therefore **verified at the configuration level (workflow
 > wiring reviewed and correct), not at the operating level** — no attested SBOM/VEX artifact has ever
 > been produced. An external auditor must re-verify these by cutting (or observing) the first `v*`
@@ -258,19 +258,19 @@ Recorded this branch (2026-06-16): **PASS** — all purls canonical (`sparq-serv
 `?download_url=file://…` qualifier, a `#src/main.rs` subpath, a *hypothetical future*
 `?repository_url=…` qualifier, a non-cargo purl, and an empty purl-set each FAIL the check. Wired as
 the GATING job `.github/workflows/supply-chain.yml#sbom-purl-canonical` (job name
-`SBOM purl-canonicality assertion (GS-6/GS-7) — GATING`; no `advisory`/`informational` whole word, so
-ci-summary gates it), which runs the self-test then the live regenerate→normalize→assert.
+`SBOM purl-canonicality assertion (GS-6/GS-7) — GATING`; no `advisory`/`informational` whole word; now a step of the
+`supply-chain-gates` job, push to `main` + nightly — not a PR gate), which runs the self-test then the live regenerate→normalize→assert.
 
 ## 7. JS / npm SBOM — shipped clients (GS-3 — [OPUS-4.8], sq-toze.27; [GPT-5.6], sq-epbw4)
 
-The published npm package `@jeswr/sparq` and the shared `@sparq/client` code bundled into the
+The published npm package `@sparq-org/sparq` and the shared `@sparq/client` code bundled into the
 site/GUI artifacts have dedicated CycloneDX 1.5 SBOMs, closing their JS supply-chain surfaces.
 
 **Scope decision (honest):**
 
 | Workspace | npm name | Shipped? | SBOM'd? | Why |
 |---|---|---|---|---|
-| `js/` | `@jeswr/sparq` | **published to npm** | **YES** | the consumable WASM client; its lockfile tree is a real supply-chain surface |
+| `js/` | `@sparq-org/sparq` | **published to npm** | **YES** | the consumable WASM client; its lockfile tree is a real supply-chain surface |
 | `packages/sparq-client/` | `@sparq/client` (`"private": true`) | **bundled into site/GUI artifacts** | **YES** | its runtime tree includes the lazy zstd and bzip2 codecs shipped to browser consumers |
 | `site/` | `sparq-site` (`"private": true`) | never (GitHub-Pages demo) | **NO** (intentional) | not a shipped artifact; dev/showcase tree (Next.js/React/bb.js) covered by npm Dependabot |
 
@@ -284,17 +284,17 @@ root workspace lock and no dependency resolution):
 
 | Artifact | Tree | Components (this branch) | Audience |
 |---|---|---|---|
-| `sparq-js-<ver>.sbom.cdx.json` | runtime (`--omit dev`) | **1** — `pkg:npm/fzstd@0.1.1` | what a CONSUMER of `@jeswr/sparq` installs (matches the published-tarball dep surface) |
-| `sparq-js-dev-<ver>.sbom.cdx.json` | full build tree | `@jeswr/sparq` runtime plus build dependencies | BUILD-time surface (SSDF parity with the Rust full-tree SBOM) |
+| `sparq-js-<ver>.sbom.cdx.json` | runtime (`--omit dev`) | **1** — `pkg:npm/fzstd@0.1.1` | what a CONSUMER of `@sparq-org/sparq` installs (matches the published-tarball dep surface) |
+| `sparq-js-dev-<ver>.sbom.cdx.json` | full build tree | `@sparq-org/sparq` runtime plus build dependencies | BUILD-time surface (SSDF parity with the Rust full-tree SBOM) |
 | `sparq-js-client-<ver>.sbom.cdx.json` | runtime (`--omit dev`) | `fzstd`, `seek-bzip`, browser `buffer`, and their closure | codec dependencies bundled on demand into browser artifacts |
 | `sparq-js-client-dev-<ver>.sbom.cdx.json` | full build tree | `@sparq/client` runtime plus build dependencies | full shared-client build surface |
 
 **Validity:** all are VALIDATED against the official CycloneDX 1.5 JSON schema — cyclonedx-npm's built-in
 `--validate` (default on) plus an independent `jsonschema` check against
 `CycloneDX/specification` `bom-1.5.schema.json` (+ referenced `spdx`/`jsf` schemas): **VALID**, root
-root components `pkg:npm/%40jeswr/sparq@0.1.0` and `pkg:npm/%40sparq/client@0.1.0`, all component
+root components `pkg:npm/%40sparq-org/sparq@0.1.0` and `pkg:npm/%40sparq/client@0.1.0`, all component
 purls `pkg:npm/…`. The generator also fails unless the shared-client runtime SBOM contains both
-lazy codecs. Wired as the per-PR GATING
+lazy codecs. Wired as the GATING (push to `main` + nightly, not per-PR)
 job `.github/workflows/supply-chain.yml#js-sbom` (uploads `sbom-js-cyclonedx`) + the per-release step
 `.github/workflows/release.yml#sbom` "Generate per-release JS/npm SBOM" (the `sbom/*.sbom.cdx.json`
 attest + attach + checksum globs already cover the JS SBOMs, so they are SLSA-attested and on the
@@ -314,7 +314,7 @@ one where the class is undeterminable.
 | Component class | Raw `bom-ref` signal | `supplier.name` | `supplier.url` | `publisher` | Rationale |
 |---|---|---|---|---|---|
 | crates.io-published dependency | `registry+https://github.com/rust-lang/crates.io-index#…` | `crates.io` | `https://crates.io/crates/<name>` | the crate's `author` where present (144/166); else absent | crates.io is the distributor / supplier-of-record |
-| first-party workspace crate | `path+file…/crates/sparq-*#…` (+ the root component & its build-target sub-components) | `Jesse Wright` | `https://github.com/jeswr/sparq` | — (these crates carry no `author` in raw output) | the project authors + ships these; matches the VEX top-level `metadata.supplier` |
+| first-party workspace crate | `path+file…/crates/sparq-*#…` (+ the root component & its build-target sub-components) | `Jesse Wright` | `https://github.com/sparq-org/sparq` | — (these crates carry no `author` in raw output) | the project authors + ships these; matches the VEX top-level `metadata.supplier` |
 | vendored `[patch.crates-io]` crate (today only `spargebra`) | `path+file…/vendor/<name>#…` | `crates.io` | `https://crates.io/crates/<name>` | its `author` (`Tpt <…>`) | a crates.io-published crate vendored as a patch replacement → crates.io is its supplier-of-record, **NOT** the sparq project (attributing it to sparq would be fabrication) |
 | anything else | — | **omitted** | — | — | not determinable → omitted honestly per NTIA's omit/mark-unknown guidance. **None occurs today**, so coverage is **100%** |
 
@@ -335,7 +335,7 @@ one where the class is undeterminable.
   "purl": "pkg:cargo/aho-corasick@1.1.4" }
 ```
 
-The first-party `sparq-core` gets `supplier {name:"Jesse Wright", url:["https://github.com/jeswr/sparq"]}`;
+The first-party `sparq-core` gets `supplier {name:"Jesse Wright", url:["https://github.com/sparq-org/sparq"]}`;
 the vendored `spargebra` gets `supplier {name:"crates.io", url:["https://crates.io/crates/spargebra"]}` +
 `publisher "Tpt <thomas@pellissier-tanon.fr>"` (NOT attributed to sparq).
 
@@ -361,8 +361,8 @@ python3 scripts/tests/test_sbom_supplier.py          # hermetic self-test + live
 ```
 
 Wired as the GATING job `.github/workflows/supply-chain.yml#sbom-supplier` (job name
-`SBOM per-component supplier-name assertion (GS-1) — GATING`; no `advisory`/`informational` whole word,
-so ci-summary gates it), which regenerates+normalizes the SBOM and asserts every cargo component carries
+`SBOM per-component supplier-name assertion (GS-1) — GATING`; no `advisory`/`informational` whole word;
+now a step of `supply-chain-gates`, push to `main` + nightly — not a PR gate), which regenerates+normalizes the SBOM and asserts every cargo component carries
 a `supplier.name` — so a future cargo-cyclonedx bump that changes the component shape and silently stops
 the derivation FAILS the PR rather than shipping an SBOM regressed to the empty-supplier state. Negative
 coverage (self-test): a component missing its supplier, a blank/`name`-less supplier object, and a

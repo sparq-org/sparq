@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// [OPUS-4.8] Node smoke-test for the benchmark dashboard's PURE functions (bead sq-ocuf).
+// Node smoke-test for the benchmark dashboard's PURE functions (bead sq-ocuf).
 // dashboard.js exports its pure helpers under module.exports when require()d from node, so this
 // runs them WITHOUT a browser/DOM. It also loads the committed bench/dashboard/metric-labels.json
 // and asserts the readable-label plumbing (labelFor / suiteFor / titleFor / buildSummary).
@@ -51,7 +51,7 @@ for (const k of Object.keys(labels)) {
 
 // ---- labelFor / suiteFor: the cryptic stems from the bead brief must become readable ----------
 // These assert the label map is wired through (not the fallback) for the exact examples cited.
-// [OPUS-4.8] (sq-1wrw) WatDiv metrics now carry the scale-factor token `_sf<SF>` (per-commit SF=1)
+// (sq-1wrw) WatDiv metrics now carry the scale-factor token `_sf<SF>` (per-commit SF=1)
 // so the per-commit + nightly SF tiers form distinct series for the scaling chart. The label map +
 // emitter both use the SF-suffixed stem (watdiv_sf1_S1_count_us), so assert against that name.
 eq(D.labelFor('watdiv_sf1_S1_count_us'), 'WatDiv S1 (SF=1) — star query, count', 'watdiv_sf1_S1_count_us label');
@@ -107,7 +107,7 @@ summary.groups.forEach(function (g) {
 ok(sawWatdivRow, 'watdiv row present in summary');
 
 // ============================================================================================
-// [OPUS-4.8] sq-19z8 — per-metric SEMANTIC badges (LUBM regime + result mode).
+// sq-19z8 — per-metric SEMANTIC badges (LUBM regime + result mode).
 // semanticBadges() surfaces the label record's `regime` (extensional vs entailed OWL-RL closure)
 // and `mode` (count/materialize/json/…) fields — which previously lived ONLY in the title tooltip —
 // as small badge descriptors the DOM renders as muted .pill spans next to the metric label.
@@ -140,7 +140,7 @@ eq(D.semanticBadges('load_s').length, 0, 'load_s has no semantic badges');
 eq(D.semanticBadges('totally_new_metric_count_us').length, 0, 'unlabelled metric has no semantic badges');
 
 // ============================================================================================
-// [OPUS-4.8] sq-xvow — featured well-known suites at the TOP (+ competitor seam for sq-t0c3).
+// sq-xvow — featured well-known suites at the TOP (+ competitor seam for sq-t0c3).
 // ============================================================================================
 ok(typeof D.featuredSuiteOf === 'function', 'dashboard.js exports featuredSuiteOf');
 ok(typeof D.buildFeatured === 'function', 'dashboard.js exports buildFeatured');
@@ -158,13 +158,13 @@ ok(D.featuredSuiteOf('load_s') === null, 'pipeline metric is NOT featured');
 // Deep Taxonomy isn't in the label map yet (sq-1hgz) — name-token fallback must still recognise it.
 eq(D.featuredSuiteOf('deeptax_d5_count_us') && D.featuredSuiteOf('deeptax_d5_count_us').key, 'Deep Taxonomy',
    'unlabelled deep-taxonomy metric is featured via name fallback');
-// [OPUS-4.8] sq-v02y: the 4th capability-surface suite — Vector / ANN recall-deficit metrics are
+// sq-v02y: the 4th capability-surface suite — Vector / ANN recall-deficit metrics are
 // featured (via the label-map suite "Vector / ANN" AND the `vectors`/`vector` name-token alias).
 eq(D.featuredSuiteOf('vectors_hnsw_recall_at10') && D.featuredSuiteOf('vectors_hnsw_recall_at10').key, 'Vector / ANN',
    'vector ANN recall metric is featured under Vector / ANN');
 eq(D.featuredSuiteOf('vectors_diskann_query_us') && D.featuredSuiteOf('vectors_diskann_query_us').key, 'Vector / ANN',
    'vector ANN advisory-latency metric is featured under Vector / ANN');
-// [GPT-5.6] sq-g3n7h: every newly implemented comparative suite must resolve from both its
+// sq-g3n7h: every newly implemented comparative suite must resolve from both its
 // registry spelling and the underscore-prefixed metric spelling emitted into benchmark feeds.
 [
   ['wasm-compare/bundle', 'Browser / WASM'],
@@ -242,7 +242,7 @@ eq(lubmComp && lubmComp.oxigraph, 200, 'competitor matched by canonical stem (na
 ok(watdivComp && watdivComp.oxigraph === undefined, 'unmatched competitor cell stays absent (renders —)');
 
 // ============================================================================================
-// [OPUS-4.8] sq-aas7 — nightly-priority featured tier: pickFeaturedSeries / tierDescriptor and the
+// sq-aas7 — nightly-priority featured tier: pickFeaturedSeries / tierDescriptor and the
 // buildFeatured `tier` carry. The featured block PREFERS the EC2/nightly series when present, falls
 // back to the per-commit gh-runner series otherwise (graceful when EC2 absent).
 // ============================================================================================
@@ -282,7 +282,7 @@ const tdN = D.tierDescriptor('nightly'); const tdC = D.tierDescriptor('per-commi
 eq(tdN.kind, 'tier-nightly', 'tierDescriptor(nightly) kind');
 eq(tdC.kind, 'tier-per-commit', 'tierDescriptor(per-commit) kind');
 ok(tdN.text && tdN.title && tdC.text && tdC.title, 'tier descriptors carry text + title');
-// [OPUS-4.8] sq-c0kd: the nightly tier must NOT claim "same box" vs the competitor gathers (nightly
+// sq-c0kd: the nightly tier must NOT claim "same box" vs the competitor gathers (nightly
 // runs c7g.4xlarge, the gathers ran c7g.xlarge — same c7g family, different size). The title must
 // say "instance family" and flag the gap so EC2-nightly-vs-competitor is never read as a direct,
 // same-box comparison once the tier goes live.
@@ -299,7 +299,7 @@ const featDefault = D.buildFeatured(commitEntry, null);
 eq(featDefault.tier, 'per-commit', 'buildFeatured defaults to per-commit when no opts (legacy callers)');
 
 // ============================================================================================
-// [OPUS-4.8] sq-viby — scaling comparison: size/depth axis derived from the metric NAME.
+// sq-viby — scaling comparison: size/depth axis derived from the metric NAME.
 // ============================================================================================
 ok(typeof D.sizeAxisOf === 'function', 'dashboard.js exports sizeAxisOf');
 ok(typeof D.buildScalingFamilies === 'function', 'dashboard.js exports buildScalingFamilies');
@@ -340,7 +340,7 @@ const sfFam = fams.filter(function (f) { return f.axisLabel === 'scale factor'; 
 ok(sfFam && sfFam.points.length === 1, 'single-size family is kept (renders a single marker + note)');
 ok(fams.every(function (f) { return !/lubm_q06/.test(f.base); }), 'non-size-parametrised metric excluded');
 
-// [OPUS-4.8] (sq-1wrw) The exact names the ci-bench emitter now produces: the per-commit SF=1 tier
+// (sq-1wrw) The exact names the ci-bench emitter now produces: the per-commit SF=1 tier
 // (watdiv_sf1_C1_count_us) and the EC2/nightly SF=1000 tier (watdiv_sf1000_C1_count_us) must
 // collapse to ONE scaling family (same base) with two ascending scale-factor points — this is the
 // engine-vs-scale-factor axis the bead unblocks. Before this bead both tiers emitted the SF-less
@@ -361,7 +361,7 @@ eq(D.sizeAxisOf('watdiv_sf1_C1_count_us').base, D.sizeAxisOf('watdiv_sf1000_C1_c
    'watdiv per-commit + nightly share one family base (sf-token stripped)');
 
 // ============================================================================================
-// [OPUS-4.8] Copilot review fixes on PR #59 — unit-less labels (#2/#4), clean scaling base (#3),
+// Copilot review fixes on PR #59 — unit-less labels (#2/#4), clean scaling base (#3),
 // and the featured "Metric" column header (#1).
 // ============================================================================================
 ok(typeof D.labelForBare === 'function', 'dashboard.js exports labelForBare');
@@ -413,7 +413,7 @@ eq(D.sizeAxisOf('deeptax_d1_count_us').base, D.sizeAxisOf('deeptax_d10_count_us'
    'normalized base is still shared across sizes (family grouping intact)');
 
 // ============================================================================================
-// [OPUS-4.8] sq-rltn — capability FAMILIES: the summary-first taxonomy that makes the dashboard
+// sq-rltn — capability FAMILIES: the summary-first taxonomy that makes the dashboard
 // visibly cover ALL query types (not SPARQL-only). familyOf() routes a metric to a top-level
 // family; buildFamilies() builds the per-family view (latest value per metric) for first paint.
 // ============================================================================================
@@ -426,7 +426,7 @@ ok(typeof D.buildFamilies === 'function', 'dashboard.js exports buildFamilies');
   ok(D.FAMILIES.some(function (f) { return f.key === k; }), 'FAMILIES includes the ' + k + ' family');
 });
 
-// [OPUS-4.8] sq-ncvq.15 / drift-scan §5.D: the newly-promoted families that close the dashboard
+// sq-ncvq.15 / drift-scan §5.D: the newly-promoted families that close the dashboard
 // coverage gap — the ZK estate (headline) plus Solid/HDT/RSP/GenAI/GPU. They have NO flowing data
 // yet (stdout/criterion benches), so they render as "not yet reported"; assert they EXIST in the
 // taxonomy AND that a representative (still unlabelled) metric routes to each via the prefix
@@ -443,7 +443,7 @@ eq(D.familyOf('rsp_throughput').key, 'rsp', 'unlabelled RSP-throughput metric ->
 eq(D.familyOf('sim_most_similar_us').key, 'genai', 'unlabelled similarity metric -> GenAI family');
 eq(D.familyOf('introspect_build_s').key, 'genai', 'unlabelled introspection metric -> GenAI family');
 eq(D.familyOf('gpu_filter_us').key, 'gpu', 'unlabelled GPU-kernel metric -> GPU family');
-// [OPUS-4.8] sq-5o5.5-.9: the featured=false trend-only dispositions. NL→SPARQL (nlq) is part of the
+// sq-5o5.5-.9: the featured=false trend-only dispositions. NL→SPARQL (nlq) is part of the
 // GenAI estate; MPC gets its OWN caveated trend family (modelled counting tier, semi-honest). The
 // sim/introspect/nlq/mpc benches are flagged `featured = false` in bench/benchmarks.toml (trend-only,
 // NO competitor card), and route to a real dashboard family so coverage is HONEST, not silent.
@@ -517,7 +517,7 @@ famByKey.sparql.rows.forEach(function (r) {
 });
 ok(sawFamWatdiv, 'watdiv row present in the SPARQL family view');
 
-// [OPUS-4.8] Copilot #200: buildFamilies must NOT throw on an empty/absent entries list — it does
+// Copilot #200: buildFamilies must NOT throw on an empty/absent entries list — it does
 // entries[entries.length - 1], which would blow up on []. The docstring promises empty families
 // are kept, so an empty input returns one zero-count entry per family (the same shape).
 let emptyFamView = null;
@@ -534,14 +534,14 @@ try { D.buildFamilies(undefined); } catch (e) { undefThrew = true; }
 ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
 
 // ============================================================================================
-// [OPUS-4.8] BROWSER-DOM SIMULATION — confirm the featured section + scaling charts actually
+// BROWSER-DOM SIMULATION — confirm the featured section + scaling charts actually
 // build DOM (sq-xvow #featured / sq-viby #scaling), like sq-ocuf's renderSummary smoke would. A
 // tiny stub document/window/Chart lets the (browser-only) render fns run under node: we import
 // dashboard.js a SECOND time with its module.exports branch suppressed so its DOM half executes.
 // ============================================================================================
 (function domSimulation() {
   // --- minimal DOM shim: just enough for el()/renderFeatured()/renderSummary()/render(). -------
-  // [OPUS-4.8] Copilot #200: the shim now models enough of the DOM that the state-preservation
+  // Copilot #200: the shim now models enough of the DOM that the state-preservation
   // logic (querySelector/querySelectorAll over .family-section / details.family-trends[open],
   // parentNode, id, and a real toggle event on `open`) actually exercises in node — so the
   // relabel-preserves-open-state assertion below is a true behavioural check, not a no-op skip.
@@ -615,7 +615,7 @@ ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
     createElement: makeNode,
     getElementById: function (id) {
       if (hosts[id]) return hosts[id];
-      // [OPUS-4.8] also resolve dynamically-created ids (e.g. the fam-<key> sections appended into
+      // also resolve dynamically-created ids (e.g. the fam-<key> sections appended into
       // #families) so the relabel state-preservation path can re-find a section by id.
       for (var k in hosts) {
         var found = hosts[k].querySelectorAll('*').filter(function (n) { return n.attributes.id === id; })[0];
@@ -627,9 +627,9 @@ ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
   };
   global.window = {
     matchMedia: function () { return { matches: false }; },
-    __SPARQ_DASHBOARD_TEST__: true,   // [OPUS-4.8] expose paintSummary so we can drive a real relabel
+    __SPARQ_DASHBOARD_TEST__: true,   // expose paintSummary so we can drive a real relabel
     BENCHMARK_DATA: {
-      lastUpdate: Date.now(), repoUrl: 'https://github.com/jeswr/sparq',
+      lastUpdate: Date.now(), repoUrl: 'https://github.com/sparq-org/sparq',
       entries: { 'sparq engine': [{
         commit: { id: 'deadbeefcafe', message: 'dom sim', url: '#' }, date: Date.now(),
         benches: [
@@ -664,7 +664,7 @@ ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
 
   ok(hosts.featured.children.length > 0, 'DOM: #featured populated (sq-xvow rendered)');
   ok(hosts.scaling.children.length > 0, 'DOM: #scaling populated (sq-viby rendered)');
-  // [OPUS-4.8] sq-ays7: the same-box SPARQL comparison card renders from the embedded
+  // sq-ays7: the same-box SPARQL comparison card renders from the embedded
   // COMPETITORS_DATA.same_box_comparisons (the shim has no fetch, so boot() uses the mirror).
   // It renders a section when the mirror carries a comparison, else a graceful hint.
   ok(hosts['same-box'].children.length > 0, 'DOM: #same-box populated (sq-ays7 rendered)');
@@ -689,7 +689,7 @@ ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
   const sparqlSec = famSections.filter(function (s) { return s.attributes.id === 'fam-sparql'; })[0];
   const sparqlTable = sparqlSec && sparqlSec.children.filter(function (c) { return c.tagName === 'table'; })[0];
   ok(sparqlTable, 'DOM: SPARQL family renders a summary table synchronously (first paint)');
-  // [OPUS-4.8] sq-19z8: the LUBM row (lubm_q06_count_us — entailed OWL-RL closure, mode=count)
+  // sq-19z8: the LUBM row (lubm_q06_count_us — entailed OWL-RL closure, mode=count)
   // carries its semantic badges as .metric-badge pills next to the label, not just in the tooltip.
   const sparqlBadges = sparqlSec ? sparqlSec.querySelectorAll('span.metric-badge') : [];
   ok(sparqlBadges.length > 0, 'DOM: SPARQL family rows render .metric-badge pills (sq-19z8)');
@@ -714,7 +714,7 @@ ok(!undefThrew, 'buildFamilies(undefined) does not throw either');
   ok(vecSec && vecSec.children.some(function (c) {
     return (c.attributes['class'] || '').indexOf('family-empty') !== -1;
   }), 'DOM: an empty family (Vector/ANN) renders a "not yet reported" placeholder (honest coverage)');
-  // [OPUS-4.8] sq-aas7: the featured host opens with a TIER badge row (the shim has no fetch, so the
+  // sq-aas7: the featured host opens with a TIER badge row (the shim has no fetch, so the
   // EC2 series is absent -> the per-commit tier badge), then the suite sections.
   const tierRow = hosts.featured.children.filter(function (c) {
     return (c.attributes['class'] || '').indexOf('featured-tier') === 0;

@@ -54,7 +54,10 @@
 //!
 //! Triple terms (`Term::Triple`, the RDF-1.2 `<<( s p o )>>` object) are
 //! **outside** the W3C RDFC-1.0 data model, so the standard paths above fail
-//! closed with [`CanonError::TripleTerm`]. Enabling the **opt-in, off-by-default**
+//! closed with [`CanonError::TripleTerm`]. RDF-1.2 directional-language
+//! literals (`"…"@en--ltr`) are likewise outside that RDF-1.1 data model and
+//! fail closed with [`CanonError::DirectionalLiteral`] on the standard paths.
+//! Enabling the **opt-in, off-by-default**
 //! `rdf12-triple-terms` cargo feature adds a *separate, clearly non-standard* v2
 //! profile (`canonicalize_rdf12`, `canonicalize_triples_rdf12`, …) that
 //! natively re-implements the RDFC-1.0 algorithm over oxrdf-0.3 and **descends
@@ -85,7 +88,7 @@ use std::collections::HashMap;
 // Text-in / text-out API ([OPUS-4.8] sq-1dd5t). A self-contained N-Quads
 // document is the interchange form RDFC-1.0 is defined over, so a `&str` ->
 // `String` entry point is the natural seam for callers that already hold
-// serialized RDF (the @jeswr/sparq RDF/JS `Dataset` wasm binding) and do not
+// serialized RDF (the @sparq-org/sparq RDF/JS `Dataset` wasm binding) and do not
 // want to reconstruct oxrdf term graphs across a language boundary.
 // ---------------------------------------------------------------------------
 
@@ -209,6 +212,14 @@ pub enum CanonError {
     /// present (not feature-gated), per the `NestedBlankNode` precedent.
     /// [FABLE-5] sq-x3oj2.
     TripleTermDepthExceeded,
+    /// An RDF 1.2 directional-language literal (`"…"@lang--ltr` / `--rtl`,
+    /// [`oxrdf::BaseDirection`]) reached a **standard** (`rdf-canon`-backed)
+    /// entry point. RDFC-1.0 is defined over RDF 1.1, and the standard path's
+    /// oxrdf-0.2 bridge cannot represent a base direction, so these paths fail
+    /// closed with this typed error instead of a generic [`CanonError::Bridge`].
+    /// The opt-in, non-standard `rdf12-triple-terms` profile (`canonicalize_rdf12`
+    /// and siblings) canonicalizes directional literals natively. GitHub #5359.
+    DirectionalLiteral,
     /// Bridge serialization/parse failure (should not happen for RDFC-1.0-model
     /// content; surfaced rather than swallowed).
     Bridge(String),
@@ -240,6 +251,13 @@ impl std::fmt::Display for CanonError {
                     "RDF 1.2 triple term nests deeper than the crate-wide bound of \
                      {MAX_TRIPLE_TERM_DEPTH} levels; failing closed (deeply-nested \
                      triple terms are a stack-overflow vector for recursive descent)"
+                )
+            }
+            CanonError::DirectionalLiteral => {
+                write!(
+                    f,
+                    "RDF 1.2 directional-language literals are outside the W3C RDFC-1.0 \
+                     data model; enable the `rdf12-triple-terms` profile to canonicalize them"
                 )
             }
             CanonError::Bridge(e) => write!(f, "oxrdf bridge error: {e}"),
@@ -422,6 +440,7 @@ pub fn graph_triples(g: &Graph) -> Result<Vec<Triple>, CanonError> {
 /// literal word `DEFAULT`, so the default graph is emitted explicitly as a
 /// 3-term line.
 fn bridge_to_02(dataset: &[Quad]) -> Result<Vec<oxrdf02::Quad>, CanonError> {
+    reject_unbridgeable(dataset.iter().map(|q| &q.object))?;
     let doc = serialize_quads(dataset)?;
     parse_02(&doc)
 }
@@ -479,6 +498,7 @@ fn serialize_quads(dataset: &[Quad]) -> Result<String, CanonError> {
 }
 
 fn bridge_triples_to_02(triples: &[Triple]) -> Result<Vec<oxrdf02::Quad>, CanonError> {
+    reject_unbridgeable(triples.iter().map(|t| &t.object))?;
     let mut doc = String::new();
     #[cfg(feature = "bridge-lowcopy")]
     use std::fmt::Write as _;
@@ -536,6 +556,29 @@ fn parse_canonical(canonical: &str) -> Result<CanonicalGraph, CanonError> {
         })?);
     }
     Ok(CanonicalGraph { lines, triples })
+}
+
+/// Fails closed on object terms the RDF-1.1 oxrdf-0.2 bridge cannot carry,
+/// before serialization: triple terms ([`CanonError::TripleTerm`], which takes
+/// precedence) and directional-language literals
+/// ([`CanonError::DirectionalLiteral`]). Literals only occur in object
+/// position, and triple terms are rejected outright, so the top-level objects
+/// are the only places a base direction can appear. GitHub #5359.
+fn reject_unbridgeable<'a>(
+    objects: impl Iterator<Item = &'a oxrdf::Term>,
+) -> Result<(), CanonError> {
+    let mut directional = false;
+    for o in objects {
+        match o {
+            oxrdf::Term::Triple(_) => return Err(CanonError::TripleTerm),
+            oxrdf::Term::Literal(l) if l.direction().is_some() => directional = true,
+            _ => {}
+        }
+    }
+    if directional {
+        return Err(CanonError::DirectionalLiteral);
+    }
+    Ok(())
 }
 
 fn contains_triple_term(t: &Triple) -> bool {
@@ -890,7 +933,7 @@ mod tests {
     }
 
     /// [OPUS-4.8] sq-1dd5t: the text-in/text-out `canonicalize_nquads` entry point
-    /// (what the @jeswr/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
+    /// (what the @sparq-org/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
     /// documents that are RDF-isomorphic but differ in blank-node labels AND quad
     /// order canonicalize to byte-identical output; a label-only diff that is NOT
     /// isomorphic (an extra edge) does not.

@@ -241,7 +241,8 @@ pattern has no single predicate term, each returned `?edge` is the canonicalized
 an `xsd:string` literal (and therefore contains no blank nodes).
 
 The same feature exposes a dedicated non-standard query form through `query_paths` and
-`explain_paths`. It is intentionally rejected by the ordinary `query` entry point:
+`explain_paths` (which renders the mode, cyclicity, START/END restriction, VIA and MAX LENGTH).
+It is intentionally rejected by the ordinary `query` entry point:
 
 ```rust
 let result = sparq_engine::query_paths(&g,
@@ -480,7 +481,8 @@ sites; tripping it fails with `"query budget exceeded (timeout)"` / `"... (max-r
 evaluation (`sq-yfcu2`): a SELECT-JSON body whose deadline falls due while the (already
 materialised) result is being written out is reported as the budget error, not returned as a
 complete-but-late result — on the streamed entry points some chunks may already have reached the
-sink when the trip is detected:
+sink when the trip is detected. [GPT-6] A SELECT-JSON budget already expired or cancelled
+at evaluator entry refuses before scanning, queuing Rayon work, or emitting any chunks:
 
 ```rust
 use sparq_engine::QueryBudget;
@@ -497,6 +499,14 @@ let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budg
 // Another thread may call cancel.store(true, std::sync::atomic::Ordering::Relaxed).
 // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
 ```
+
+[GPT-6 Astra] A nested public query from an extension callback uses an independent child
+budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
+budget rather than combining limits. After the child returns, returns an error, or unwinds,
+the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
+and any previously recorded budget error restored. Its deadline and cancellation are checked
+at the next outer poll. This does not interrupt arbitrary callback work or pool resource limits
+across nested queries; an aborting panic has no continuation.
 
 **Named-graph dataset view** (zero-copy restriction; a non-visible graph is indistinguishable from
 an absent one):
@@ -1049,6 +1059,24 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
+- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
+  direct core dependency:
+
+  ```toml
+  sparq-core = { version = "0.1", features = ["overlay-deleted-projections"] }
+  ```
+
+  Cargo unifies this feature for engine queries using that same core package.
+  No engine, CLI or runtime flag is required or added. It is off in default builds,
+  which keep linear deletion counting and no deletion-cache state. The experiment
+  sorts all tombstones on first use of each permutation; actual tombstone changes
+  invalidate projections, and concurrent first readers share a blocking initializer.
+  Each requested vector retains twelve bytes per tombstone plus capacity slack,
+  in addition to the hash set. Every live fork/snapshot copies initialized vectors;
+  retained generations multiply this cost. No cap or eviction is provided. Cold
+  reads and update/read cycles can regress; measure the intended workload using
+  `bench/overlay-count` before choosing this opt-in. No universal crossover or
+  canonical speedup is claimed.
 - **Sharing one `Graph` across server threads** — a `sparq_core::Graph` (and its read-only
   `GraphSnapshot`) is **`Send + Sync`** (guaranteed by a compile-time assertion in `sparq-core`), so
   it can be shared across the async handlers of an axum/actix/tower server directly with
@@ -1096,6 +1124,37 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
       Ok(version) => println!("committed as v{version}"),
       Err(CommitError::Conflict { .. }) => { /* retry against the new state */ }
   }
+  # Ok::<(), String>(())
+  ```
+
+  `execute_txn_with_retry` (bead `sq-it1x` follow-up) wraps the begin/update/commit loop
+  above with automatic retry on `CommitError::Conflict`: it owns the transaction lifecycle
+  (the closure must not call `commit`/`rollback` itself), retries up to `max_attempts`
+  total tries with a caller-supplied delay between attempts, and returns `RetryError::Update`
+  immediately (no retry) if the closure's own update fails, or `RetryError::Exhausted` if
+  every attempt conflicted. `decorrelated_jitter_backoff` is a dependency-free jitter
+  generator (AWS's "Exponential Backoff and Jitter") for the delay argument — it keeps the
+  `txn` feature's zero-new-dependency contract (no `rand` crate). Recommended for
+  claim-style job-queue updates against a single-sequenced-writer store: claim **one row
+  per transaction** (conflict detection is per-triple, so disjoint single-row claims never
+  conflict with each other) and let each caller's jittered backoff decorrelate retries on a
+  hot row.
+
+  ```rust
+  // Cargo.toml: sparq-engine = { version = "0.1", features = ["txn"] }
+  use sparq_engine::txn::{decorrelated_jitter_backoff, execute_txn_with_retry, TransactionManager};
+  use std::time::Duration;
+
+  let m = TransactionManager::new(graph);
+  let backoff = decorrelated_jitter_backoff(Duration::from_millis(5), Duration::from_millis(200));
+  let version = execute_txn_with_retry(&m, 5, backoff, |txn| {
+      txn.update(
+          "PREFIX ak: <http://example.org/ak#> \
+           DELETE { ?t ak:status \"pending\" } \
+           INSERT { ?t ak:status \"claimed\" } \
+           WHERE  { SELECT ?t WHERE { ?t ak:status \"pending\" } LIMIT 1 }",
+      )
+  });
   # Ok::<(), String>(())
   ```
 - **Default cargo features** (`parallel`, `regex`, `digest`): `regex` powers REGEX/REPLACE; `digest`

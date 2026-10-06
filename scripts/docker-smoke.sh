@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-n6rv — sparq-server container smoke test.
+# sq-n6rv — sparq-server container smoke test.
 #
 # WHY: the released ghcr.io image is the only surface where a `docker run` that exits
 # immediately ships silently. sq-n6rv was exactly that: after the fail-closed bind posture
 # (sq-o4qf) landed, the ENTRYPOINT's non-loopback `--addr 0.0.0.0:3030` was REFUSED at
-# startup, so every `docker run ghcr.io/jeswr/sparq-server` from a release tag died on
+# startup, so every `docker run ghcr.io/sparq-org/sparq-server` from a release tag died on
 # boot — and nothing caught it because no test ever actually RAN the built image. This
 # script does: it runs an already-built image, then proves over the network that it serves.
 #

@@ -13,18 +13,18 @@ and [`CONTRIBUTING.md`](CONTRIBUTING.md) (the contributor-facing gate).
 
 ## The 5-minute version
 
-**One check summarizes tree health: `ci-summary / gate`.** It is the single required
-branch-protection status on `main` ([`docs/branch-protection.md`](docs/branch-protection.md)):
-it polls **every other check-run on the same commit** — build + tests, `clippy -D warnings`,
-the conformance / coverage / unsafe-count ratchets, the opt-in feature matrix, supply-chain,
-and the docs-honesty gates — and passes only when none failed. (**CodeQL is NOT among them** —
-it has been disabled since 2026-07-18; see §11.) So:
+**One check blocks a merge: `ci-fast`.** It is the single required branch-protection status
+on `main` ([`docs/branch-protection.md`](docs/branch-protection.md)): `clippy -D warnings`,
+nextest + doctests on the core crates, and the W3C SPARQL conformance ratchet. The heavy
+suites — the full workspace build + tests, every conformance / coverage / unsafe-count
+ratchet, the opt-in feature matrix, fuzzing and formal verification — run **nightly and on
+demand** against `main`; supply-chain also runs on every push to `main`. (**CodeQL is
+disabled** since 2026-07-18; see §11.) So:
 
-1. Open any merged PR (or the latest commit on `main`) and look at its **checks list** —
-   green `ci-summary / gate` ≈ everything below in this document that gates was green.
-   Definition: [`.github/workflows/ci-summary.yml`](.github/workflows/ci-summary.yml), logic in
-   [`scripts/ci_summary_gate.py`](scripts/ci_summary_gate.py) (itself unit-tested in CI by
-   [`scripts/tests/test_ci_summary_gate.py`](scripts/tests/test_ci_summary_gate.py)).
+1. Open any merged PR and look at its **checks list** — green `ci-fast` means the fast core
+   gate passed. For everything else, look at the latest **nightly runs on `main`** in the
+   Actions tab (`ci.yml`, `feature-matrix.yml`, `fuzz.yml`, `formal-verification.yml`,
+   `supply-chain.yml`). Definition: [`.github/workflows/ci-fast.yml`](.github/workflows/ci-fast.yml).
 2. For the *"does it implement the specs?"* question, open the **conformance scoreboard**: the
    job summary of the conformance job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
    renders every suite with its ratchet floor. Locally:
@@ -284,9 +284,9 @@ measured figures live only in the [benchmarks dashboard](https://sparq.jeswr.org
 never in markdown), terminology, internal-links (lychee), typos, markdownlint, README-template,
 and "a new public API/config key must be documented in the same diff" gates.
 
-- **See it run:** [`docs-quality.yml`](.github/workflows/docs-quality.yml) and
-  [`flow-on-gates.yml`](.github/workflows/flow-on-gates.yml), on every PR. Locally:
-  `bash scripts/check-privacy-claims.sh`.
+- **See it run:** [`docs-quality.yml`](.github/workflows/docs-quality.yml), on every PR.
+  Locally: `bash scripts/check-privacy-claims.sh`, or `python3 scripts/preflight.py` for the
+  diff-scoped new-crate / public-API → skill / config-documented gates.
 - **Green means:** no unqualified crypto claim, no baked-in perf number, no dead internal
   link on the gated surface.
 - **Limits:** it is a phrase/pattern gate, not semantic review — it raises the floor on

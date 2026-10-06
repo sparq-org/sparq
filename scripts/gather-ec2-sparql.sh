@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-ays7 / sq-t0c3 — orphan-proof EC2 orchestrator for the same-box SPARQL
+# sq-ays7 / sq-t0c3 — orphan-proof EC2 orchestrator for the same-box SPARQL
 # competitor gather (PHASE 2). Sibling of scripts/gather-ec2.sh (the SHACL gather): it
 # reuses the SAME orphan-proofing + SSH-pull-while-alive + explicit-terminate design, but
 # runs a SPARQL same-box comparison on a featured corpus instead of the SHACL suite.
@@ -25,7 +25,7 @@
 #                 can never hang the gather (the prior ~53min stall). If Docker/index/server
 #                 is too heavy/flaky in the bounded window it is SKIPPED and stays honest-n/a.
 #
-# [OPUS-4.8] sq-sxso — DIAGNOSE-AND-AVOID-THE-STALL HARDENING. The same-box Oxigraph half
+# sq-sxso — DIAGNOSE-AND-AVOID-THE-STALL HARDENING. The same-box Oxigraph half
 # previously had NO per-step timeout and NO timestamped sentinel, so a hung step (a heavy
 # from-source `cargo build`, or a pathological SP2Bench query in Oxigraph) burned the whole
 # window with NO sentinel — the observed "73 min, no GATHER_DONE" failure, the same class of
@@ -85,7 +85,7 @@ set -euo pipefail
 BRANCH="${1:?usage: gather-ec2-sparql.sh <branch> [region]}"
 REGION="${2:-${AWS_REGION:-eu-west-2}}"
 ITYPE="${GATHER_ITYPE:-c7g.2xlarge}"     # 8 vCPU arm64 (more RAM for the QLever index; falls back below)
-# [FABLE-5] sq-7d3dj.30.6 — arch-parametric AMI + fallback so the CANONICAL c6i.4xlarge (x86_64)
+# sq-7d3dj.30.6 — arch-parametric AMI + fallback so the CANONICAL c6i.4xlarge (x86_64)
 # re-measure can pin the SAME architecture as the 2026-07-07 §0 baseline (mixing arm64 vs x86_64
 # would make the per-query rows non-comparable). Defaults are the historical arm64 values, so an
 # unset environment reproduces the prior behaviour byte-for-byte. For the canonical x86_64 run:
@@ -93,13 +93,13 @@ ITYPE="${GATHER_ITYPE:-c7g.2xlarge}"     # 8 vCPU arm64 (more RAM for the QLever
 #   GATHER_AMI_NAME='ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*'
 ITYPE_FB="${GATHER_ITYPE_FB:-c7g.xlarge}"
 AMI_NAME="${GATHER_AMI_NAME:-ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*}"
-REPO="https://github.com/jeswr/sparq.git"
-SP2B_TRIPLES="${SP2B_TRIPLES:-100000}"   # [OPUS-4.8] sq-sxso: smaller smoke default (was 250000)
+REPO="https://github.com/sparq-org/sparq.git"
+SP2B_TRIPLES="${SP2B_TRIPLES:-100000}"   # sq-sxso: smaller smoke default (was 250000)
 ITERS="${GATHER_ITERS:-5}"
 GATHER_QLEVER="${GATHER_QLEVER:-0}"
-OXI_EMBEDDED="${OXI_EMBEDDED:-0}"        # [OPUS-4.8] sq-sxso: 0 = prebuilt CLI (default); 1 = embedded sparq-bench
+OXI_EMBEDDED="${OXI_EMBEDDED:-0}"        # sq-sxso: 0 = prebuilt CLI (default); 1 = embedded sparq-bench
 
-# [OPUS-4.8] sq-sxso — PREBUILT, SHA-PINNED Oxigraph CLI (avoids the from-source compile).
+# sq-sxso — PREBUILT, SHA-PINNED Oxigraph CLI (avoids the from-source compile).
 # Pin: oxigraph CLI v0.5.9 standalone release binaries (github.com/oxigraph/oxigraph/releases).
 # The gather box is arm64 (Graviton / ubuntu-noble-24.04-arm64); the x86_64 sha is pinned too
 # so the lane is portable + locally reproducible. Re-pin only deliberately: bump OXI_VERSION
@@ -108,7 +108,7 @@ OXI_VERSION="${OXI_VERSION:-v0.5.9}"
 OXI_SHA256_AARCH64="${OXI_SHA256_AARCH64:-dc17e58cf65d74f89853bb8b49180099399a53b9df7f1671a4a9ca188208d794}"
 OXI_SHA256_X86_64="${OXI_SHA256_X86_64:-4be355715ba3945e8fb8c94a06662a29808683bf2ec355894dba9e82762e7cc7}"
 
-# [OPUS-4.8] sq-sxso — per-phase hard-timeout caps (seconds). A hung step now fails FAST with
+# sq-sxso — per-phase hard-timeout caps (seconds). A hung step now fails FAST with
 # the step logged, instead of burning the whole window with no sentinel (the 73-min stall).
 STEP_APT_TIMEOUT="${STEP_APT_TIMEOUT:-900}"        # apt-get update+install
 STEP_RUSTUP_TIMEOUT="${STEP_RUSTUP_TIMEOUT:-600}"  # rustup install
@@ -173,7 +173,7 @@ exec > >(tee /var/log/gather.log) 2>&1
 ( sleep 10800; shutdown -h now ) &
 systemd-run --on-active=10800 /sbin/shutdown -h now || true
 
-# [OPUS-4.8] sq-sxso — PER-STEP TIMESTAMPED SENTINEL. Every phase calls step() FIRST, which
+# sq-sxso — PER-STEP TIMESTAMPED SENTINEL. Every phase calls step() FIRST, which
 # UTC-stamps a line into the tee'd /var/log/gather.log AND appends it to /root/GATHER_STEP. A
 # stalled run no longer hangs invisibly — the orchestrator pulls /root/GATHER_STEP and the
 # LAST line is EXACTLY the step that hung (the "73 min, no sentinel" failure was just an
@@ -202,12 +202,12 @@ run_step apt $STEP_APT_TIMEOUT -- bash -c 'apt-get update -qq && apt-get install
 if [ "$GATHER_QLEVER" = "1" ]; then
   step "apt docker.io (qlever opt-in)"
   apt-get install -y -qq docker.io || true
-  # [OPUS-4.8] sq-vw3ax.12.1 — WAIT for the daemon (fixes the Wave-0 qlever fast-fail). Wave 0
+  # sq-vw3ax.12.1 — WAIT for the daemon (fixes the Wave-0 qlever fast-fail). Wave 0
   # did 'systemctl start docker || true' and moved on, so when the socket was not yet ready the
   # qlever recipe hit an instant "Cannot connect to the Docker daemon" cascade (~9s, recorded
   # only as qlever_status:"failed"). enable --now + a bounded 'docker info' poll makes the daemon
   # actually be up before scripts/qlever-same-box.sh runs (which itself now preflights the daemon).
-  # [FABLE-5] sq-7d3dj.30.6 — the backticks in these two comment lines were UNESCAPED inside the
+  # sq-7d3dj.30.6 — the backticks in these two comment lines were UNESCAPED inside the
   # UNQUOTED '<<UD' heredoc, so on any launch host that has a 'docker' binary they were command-
   # substituted AT RENDER TIME: the local 'docker info' printed docker's help text with an
   # unbalanced paren straight into the user-data, syntax-erroring the instance-side script at boot
@@ -233,7 +233,7 @@ git checkout -q "$BRANCH"
 SHA=\$(git rev-parse --short HEAD)
 step "checked out \$SHA"
 
-# [OPUS-4.8] sq-sxso: ALWAYS build sparq-cli (the sparq engine under test). Only build the
+# sq-sxso: ALWAYS build sparq-cli (the sparq engine under test). Only build the
 # embedded sparq-bench (the heavy from-source Oxigraph compile) when OXI_EMBEDDED=1 — the
 # default prebuilt-CLI path does NOT need it, which removes the most likely build-time hang
 # from the critical path.
@@ -268,7 +268,7 @@ run_step sparq-run $STEP_SPARQ_RUN_TIMEOUT -- bash -c "./target/release/sparq-cl
 echo "=== sparq.tsv ==="; cat /tmp/sparq.tsv 2>/dev/null || true
 
 # ---- oxigraph (same corpus, same queries, same count semantics) --------------------------
-# [OPUS-4.8] sq-sxso: DEFAULT = prebuilt SHA-pinned Oxigraph CLI (on-disk store); no compile.
+# sq-sxso: DEFAULT = prebuilt SHA-pinned Oxigraph CLI (on-disk store); no compile.
 # OXI_EMBEDDED=1 = the in-process embedded path (in-RAM store). Either way the per-query loop
 # is timeout-bounded so a pathological SP2Bench query (q07/q08 are minutes-long in Oxigraph at
 # scale — measured) records ERROR and the gather moves on, instead of hanging the whole run.
@@ -369,7 +369,7 @@ NPROC=\$(nproc)
 KERNEL=\$(uname -r)
 NOW=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# qlever best-effort  [OPUS-4.8] sq-52fo
+# qlever best-effort  sq-52fo
 # Delegates the heavy index->server->query->teardown dance to the dedicated, BOUNDED,
 # orphan-safe recipe scripts/qlever-same-box.sh (every step timeout-capped, an EXIT trap
 # always tears down the server container + temp index — fixes the prior ~53min hang / leaked
@@ -394,7 +394,7 @@ if [ "$GATHER_QLEVER" = "1" ] && command -v docker >/dev/null 2>&1; then
   fi
 fi
 
-# [OPUS-4.8] sq-sxso: read the TSVs DEFENSIVELY — a timed-out step leaves an empty/missing
+# sq-sxso: read the TSVs DEFENSIVELY — a timed-out step leaves an empty/missing
 # file, and the envelope must still be written (so /root/GATHER_DONE is reached and the
 # orchestrator does not itself hang waiting for a sentinel that never comes). A missing file
 # becomes "" rather than aborting the heredoc under set -euo pipefail.
@@ -468,7 +468,7 @@ for i in $(seq 1 40); do ssh $SSHO "ubuntu@$IP" true 2>/dev/null && { log "ssh u
 [ "$SSH_UP" = 1 ] || die "sshd never became reachable on $IP after 40 attempts — aborting (cleanup trap terminates $INSTANCE_ID)"
 
 mkdir -p "$RESULTS_DIR"
-# [OPUS-4.8] sq-ays7 — SENTINEL-GATED teardown (poll-bound bug fix).
+# sq-ays7 — SENTINEL-GATED teardown (poll-bound bug fix).
 # PREVIOUS BUG: the poll loop was a FIXED `for i in $(seq 1 120)` @ sleep 30 = 60 min hard
 # bound. On the c7g.xlarge fallback, apt + docker + rustup + `cargo build --release` (two
 # crates) + sp2b corpus-gen + the sparq run consumed almost the whole 60 min, so the bound
@@ -501,7 +501,7 @@ while :; do
     DONE=1; break
   fi
   STATE=$(aws ec2 describe-instances --region "$REGION" --instance-ids "$INSTANCE_ID" --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null || echo unknown)
-  # [OPUS-4.8] sq-sxso: surface the CURRENT step LIVE while polling — the last /root/GATHER_STEP
+  # sq-sxso: surface the CURRENT step LIVE while polling — the last /root/GATHER_STEP
   # line tells us which phase the box is on, so a stall is visible AS IT HAPPENS (not only after
   # the deadline). This is the diagnostic the prior "73 min, no sentinel" run lacked entirely.
   CUR_STEP=$(ssh $SSHO "ubuntu@$IP" "sudo tail -n1 /root/GATHER_STEP 2>/dev/null" 2>/dev/null || true)
@@ -514,7 +514,7 @@ if [ "$DONE" = 1 ]; then
     && log "pulled result envelopes:" || log "tar pull failed"
   for f in "$RESULTS_DIR"/sparql-same-box-*.json; do [ -f "$f" ] || continue; cat "$f"; echo; done
 else
-  # [OPUS-4.8] sq-sxso: on NO sentinel, pull the per-step log FIRST and call out the LAST step
+  # sq-sxso: on NO sentinel, pull the per-step log FIRST and call out the LAST step
   # (the one that hung) explicitly, THEN the gather.log tail. This is the core diagnosability
   # fix: a future stalled run names the hung phase instead of being invisible.
   log "NO sentinel — pulling /root/GATHER_STEP (the hung step) + /var/log/gather.log for diagnosis"

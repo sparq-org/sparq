@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-iwhl8 (#1116) — the RDF/JS Stream-spec surface for `@jeswr/sparq`:
+// [OPUS-4.8] sq-iwhl8 (#1116) — the RDF/JS Stream-spec surface for `@sparq-org/sparq`:
 // a browser-safe quad `Stream`, and a `Source` / `Sink` / `Store` adapter over a
 // {@link SparqStore} so the engine is usable wherever an RDF/JS Stream interface is expected
 // (https://rdf.js.org/stream-spec/). This completes the term/factory/dataset surface with the

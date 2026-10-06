@@ -250,6 +250,13 @@ sparq-policy = { path = "../sparq-policy", optional = true }
 # Native-only, like the ODRL gate: the wasm request core keeps them out of its graph.
 sparq-solid = { path = "../sparq-solid", optional = true }
 sparq-trust = { path = "../sparq-trust", optional = true }
+# Behind `trust-graph` only: `tests/lws_trust_admit.rs` MINTS the issuer-signed credential the
+# seam admits (a real RDFC-1.0 commitment, so the negative cases are genuinely negative), which
+# needs sparq-zk's SIGNING primitives (sparq-trust re-exports only the verify side). It is
+# already a transitive dep of sparq-trust, so the feature adds no crate; making it an optional
+# normal dep rather than an unconditional dev-dep keeps the research ZK estate out of the
+# default `cargo test` of this core crate. Run with `--features trust-graph`.
+sparq-zk = { path = "../sparq-zk", version = "0.1.4", optional = true }
 object_store = "0.14"
 pin-project-lite = "0.2"
 hyper = { version = "1", features = ["client", "http1"] }
@@ -333,18 +340,6 @@ h2 = "0.4"
 h3 = "0.0.8"
 h3-quinn = "0.0.10"
 
-# [OPUS-5] sq-hed3q: `tests/lws_trust_admit.rs` MINTS the issuer-signed credential the trust-graph
-# seam admits — it signs a real RDFC-1.0 commitment rather than asserting against a hard-coded
-# golden hex, so the negative cases (forged signature, wrong holder, stale) are genuinely negative.
-# `sparq-trust` re-exports only the VERIFY side (`PublicKey`/`public_key_from_hex`), which is right
-# for runtime — the server never signs — so the test needs the signing primitives from `sparq-zk`
-# directly. DEV-ONLY: it does not enter the runtime or published graph, and the default
-# `cargo build` is unaffected. Both crates are already in the workspace test graph (`sparq-solid`
-# declares the same pair of dev-deps), so the workspace-wide `--all-targets` build compiles no new
-# crate. Scoped to non-wasm32 for the same reason `sparq-solid` scopes it: the ZK estate's arkworks
-# stack is native-only, and the wasm dev-graph must stay free of it.
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-sparq-zk = { path = "../sparq-zk" }
 
 [features]
 # DEFAULT = the embedded in-process engine (sq-gg0qq.3): now that this crate lives IN the sparq
@@ -391,7 +386,7 @@ odrl-authz = ["dep:sparq-policy"]
 # today. Enabling it is ALSO behaviour-identical — the seam is deliberately NOT called from
 # `ldp::handler`; hot-path wiring is a separate soundness-sensitive follow-up. RESEARCH prototype,
 # clear path: no privacy / unlinkability / anonymity / ZK-soundness claim (sq-qhy4).
-trust-graph = ["dep:sparq-solid", "dep:sparq-trust"]
+trust-graph = ["dep:sparq-solid", "dep:sparq-trust", "dep:sparq-zk"]
 # Opt-in REMOTE backend (sq-gg0qq.3): the live `HttpSparqClient` (`src/store/http.rs`) — a SPARQL
 # 1.1 Protocol client over a remote SPARQ `/sparql` endpoint, selected at runtime by
 # `PSS_SPARQ_BACKEND=http`. OFF by default: in-workspace builds talk to the engine in-process

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-hmd7l.7 / sq-hmd7l.31 — Nemo materialization adapter for the same-box
+# sq-hmd7l.7 / sq-hmd7l.31 — Nemo materialization adapter for the same-box
 # reasoning comparison harness (scripts/bench/materialize-same-box.sh).
 #
 # 🤖 SPARQ agent. Nemo (github.com/knowsys/nemo, Apache-2.0) is a Rust-native Datalog

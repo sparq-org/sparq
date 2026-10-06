@@ -4,7 +4,7 @@ description: "Experimental GPU (wgpu / WGSL) compute kernels for sparq's hot-pat
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-gpu — experimental GPU compute kernels (T24d, parked)
@@ -55,17 +55,20 @@ let Some(gpu) = Gpu::new() else { return; };       // no adapter → skip
 
 // FILTER + count: how many elements fall in [lo, hi]?
 let col = gpu.upload_u32(&[1u32, 5, 9, 3, 7]);
-let n = gpu.filter_count_u32(&col, 4, 8);          // -> 2  (5 and 7)
+let n = gpu.filter_count_u32(&col, 4, 8)?;         // -> 2  (5 and 7)
 
 // Hash-join probe against a resident open-addressing table.
-let table = gpu.upload_table(&[[42, 100], [7, 200]]);   // [key, payload]
+// Build it on the host with `cpu::build_hash_table` (load factor <= 0.5): `upload_table`
+// panics on a table that is not a power of two or has no EMPTY_KEY slot.
+let slots = sparq_gpu::cpu::build_hash_table(&[42, 7], &[100, 200]); // keys, payloads
+let table = gpu.upload_table(&slots);
 let probe = gpu.upload_u32(&[42u32, 7, 7, 1]);
-let (matches, payload_sum) = gpu.hash_probe(&table, &probe);
+let (matches, payload_sum) = gpu.hash_probe(&table, &probe)?;
 
 // GROUP BY COUNT+SUM (keys pre-densified to 0..groups, groups ≤ MAX_GROUPS = 512).
 let keys = gpu.upload_u32(&[0u32, 1, 0, 1, 1]);
 let vals = gpu.upload_u32(&[10u32, 20, 30, 40, 50]);
-let per_group = gpu.group_aggregate(&keys, &vals, 2);   // Vec<(count, sum)>
+let per_group = gpu.group_aggregate(&keys, &vals, 2)?;  // Vec<(count, sum)>
 let _ = (n, matches, payload_sum, per_group);
 ```
 
@@ -76,15 +79,24 @@ let _ = (n, matches, payload_sum, per_group);
   `upload_table` (build), and `write_u32` / `write_f64` / `write_table` (re-fill an
   existing buffer in place). Resident types: `ColU32`, `ColF64`, `HashTable`.
 - Kernels (all reduce **on-device** and read back O(1)/O(groups) bytes):
-  - `filter_count_u32(&col, lo, hi) -> u64` — count elements in `[lo, hi]`.
-  - `filter_count_f64_gt(&col, t) -> u64` — count `> t`. WGSL has **no f64**, so the
+  - `filter_count_u32(&col, lo, hi) -> Result<u64, GpuError>` — count elements in `[lo, hi]`.
+  - `filter_count_f64_gt(&col, t) -> Result<u64, GpuError>` — count `> t`. WGSL has **no f64**, so the
     f64 kernel compares IEEE-754 bit patterns mapped to a monotonic u64 key (sign-flip
     trick): **exact, NaN-correct, no float math on the device** for comparisons.
-  - `hash_probe(&table, &probe) -> (u64, u64)` — `(matches, payload_sum)` against a
+  - `hash_probe(&table, &probe) -> Result<(u64, u64), GpuError>` — `(matches, payload_sum)` against a
     resident linear-probing table (load ≤ 0.5; u64 sum via 32-bit atomic carry).
-  - `group_aggregate(&keys, &vals, groups) -> Vec<(u64, u64)>` — `(count, sum)` per
-    group with two-level (workgroup-shared → global) atomics.
-- Constants / introspection: `EMPTY_KEY` (`u32::MAX`), `MAX_GROUPS` (`512`),
+  - `group_aggregate(&keys, &vals, groups) -> Result<Vec<(u64, u64)>, GpuError>`
+    — `(count, sum)` per group with two-level (workgroup-shared → global) atomics. A key
+    `>= groups` is flagged on the device and returned as `GpuError::GroupKeyOutOfRange`;
+    the CPU oracle `cpu::group_aggregate` returns `GroupKeyOutOfRange` (it no longer
+    panics; `GpuError: From<GroupKeyOutOfRange>`).
+- The probe walk is bounded at one pass over the table, and each submission is waited on
+  for at most `POLL_TIMEOUT` (60 s) rather than indefinitely. A timeout returns
+  `GpuError::Stalled` (not a panic) and marks the `Gpu` stalled: later kernel calls fail
+  fast with the same error, and dropping it **leaks** its wgpu device + queue on purpose,
+  because wgpu's queue destructor waits for idle with no timeout and would hang on the
+  stalled submission (including during a panic unwind). Recreate a `Gpu` to retry.
+- Constants / introspection: `EMPTY_KEY` (`u32::MAX`), `MAX_GROUPS` (`512`), `POLL_TIMEOUT`,
   `Gpu::max_storage_bytes` (the `max_storage_buffer_binding_size` cap on resident column
   size).
 

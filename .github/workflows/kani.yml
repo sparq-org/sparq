@@ -1,6 +1,5 @@
 # kani — Kani bounded model-checking proof of the `.spqv` + mmap-dict on-disk-format VALIDATORS
-# (beads sq-hkud / sq-ueuk, epic sq-toze; addresses memsafety gap MS-G4). [OPUS-4.8] authored
-# while Fable unavailable — re-review when Fable returns. Per-crate/per-harness split + timeouts
+# (beads sq-hkud / sq-ueuk, epic sq-toze; addresses memsafety gap MS-G4). Per-crate/per-harness split + timeouts
 # + step summary added under sq-otpxg (see RUNNER / STRUCTURE below).
 #
 # WHY (the MS-G4 gap, from compliance/memsafety/gap-register.md): the unsafe mmap on-disk
@@ -74,15 +73,15 @@
 # reds the job too, EXCEPT for a suite marked `debt: true` (the two mmap-validator totality suites
 # whose bounding is tracked by sq-j3u6o): those exceed the 20m per-harness CBMC budget EVERY night,
 # so a pure timeout there is recorded LOUDLY (step summary + `::warning::`) but is NON-FATAL —
-# otherwise the whole `kani` workflow can never conclude `success` and the nightly formal-lane
-# alarm (formal-alarm.yml) fires forever on pre-existing, already-tracked solver-budget debt while
+# otherwise the whole `kani` workflow can never conclude `success` and stays red forever on
+# pre-existing, already-tracked solver-budget debt while
 # the 3 HEALTHY suites (25 substrate order-law proofs + 5 dict id-partition proofs + 6 engine
 # reducer proofs) DO verify green. Flip `debt` off the instant sq-j3u6o bounds those harnesses so
 # they gate normally again. No larger GitHub-hosted runner class or self-hosted runner is available
 # to this repo (`gh api /repos/sparq-org/sparq/actions/runners` == 0; every other workflow uses
 # `ubuntu-latest`), so option "beefier runner" is not currently reachable — recorded in the PR.
 #
-# ADDING A SUITE ([FABLE-5] sq-63ups — the Phase-1 suites are wired in): append ONE entry to
+# ADDING A SUITE (sq-63ups — the Phase-1 suites are wired in): append ONE entry to
 # the `matrix.suite` list below — `{ name, crate, features, harnesses }`. `harnesses` is the
 # space-separated list of `#[kani::proof]` fn names in that crate. Nothing else changes: the
 # per-harness timeout loop + summary apply uniformly to every suite. This matrix is
@@ -117,9 +116,7 @@
 #   • schedule (nightly) — the standing bounded-proof safety net over the validators.
 #   • workflow_dispatch  — on demand (used to smoke-test this lane on a branch).
 # There is intentionally NO pull_request / merge_group / push trigger, so this workflow creates
-# NO check-run on a PR head or merge-queue ref — the required `ci-summary / gate` aggregator
-# (which POLLS sibling check-runs on the head commit) therefore never discovers it and never
-# waits on it. This lane is INFORMATIONAL / NON-BLOCKING, exactly the nightly-safety-net posture
+# NO check-run on a PR head. This lane is INFORMATIONAL / NON-BLOCKING, exactly the nightly-safety-net posture
 # of miri.yml + asan.yml + the nightly fuzz tier. (Each matrix job is ALSO belt-and-braces named
 # "…, informational" so that even if the lane were ever wired onto a PR ref it would be excluded
 # from the gate by its .github/advisory-registry.json declaration — #3773.)
@@ -151,7 +148,7 @@ env:
   # TIMEOUT record (and its solver reaped) instead of being allowed to exhaust the ~7 GB runner
   # and kill it silently. Tunable in one place; `timeout(1)` duration syntax (e.g. 20m, 1200s).
   KANI_HARNESS_TIMEOUT: "20m"
-  # [OPUS-5] sq-ko0jt — SUITE-LEVEL budget, and why a PER-HARNESS ceiling alone is not enough.
+  # sq-ko0jt — SUITE-LEVEL budget, and why a PER-HARNESS ceiling alone is not enough.
   # The per-harness ceiling bounds ONE proof; it does NOT bound a SUITE. The compare ORDER-law
   # suite carries 26 harnesses, so its worst case is 26 × 20m = 520m against a `timeout-minutes:
   # 90` job backstop — and a backstop hit is a job CANCELLATION: the loop below never reaches its
@@ -180,6 +177,18 @@ jobs:
     strategy:
       # One crate's OOM/timeout must NOT cancel the other crate's proofs.
       fail-fast: false
+      # issue #6349 — HOSTED-RUNNER RESERVATION. Every suite in the matrix still
+      # runs (the suite list is unchanged, and D3 in scripts/check-fv-manifest.py still pins
+      # it against ci/formal-verification.toml); at most 2 suites are ADMITTED to a hosted
+      # runner at a time. This lane's proofs are long-lived and it overlaps the miri window
+      # whenever either run is delayed, so in the PR-throughput incident that filed #6349 the
+      # two scheduled safety lanes together held most of the account's standard-runner
+      # admissions while PR-head checks queued. Each suite keeps its own 90-minute backstop,
+      # its per-harness KANI_HARNESS_TIMEOUT and its KANI_STEP_BUDGET, so verdict semantics
+      # are untouched; only the ADMISSION rate changes (worst case 3 waves x 90 min = 4.5 h,
+      # well inside the nightly cycle). The per-workflow and combined miri+kani ceilings are
+      # machine-checked by scripts/tests/test_nightly_runner_reservation.py.
+      max-parallel: 2
       matrix:
         # ADD A SUITE = ONE ENTRY (see header). harnesses = space-separated `#[kani::proof]`
         # fn names in that crate; features = extra cargo features the harnesses need.
@@ -187,7 +196,7 @@ jobs:
           - name: "sparq-vectors (.spqv validator)"
             crate: sparq-vectors
             features: ""
-            # [FABLE-5] KNOWN-TIMEOUT DEBT (bounding tracked by sq-j3u6o): both totality
+            # KNOWN-TIMEOUT DEBT (bounding tracked by sq-j3u6o): both totality
             # harnesses exceed the 20m per-harness CBMC budget on this ~7 GB runner and TIMEOUT
             # every night. `debt: true` makes a pure TIMEOUT NON-FATAL for this suite (recorded
             # LOUDLY in the step summary + a ::warning:: annotation, so the debt stays visible
@@ -199,7 +208,7 @@ jobs:
             harnesses: >-
               open_from_bytes_never_panics
               open_validated_v2_tail_never_panics
-          # [FABLE-5] sq-63ups: the former single sparq-core entry is SPLIT so the five
+          # sq-63ups: the former single sparq-core entry is SPLIT so the five
           # fast id-partition/domain harnesses (all pass in seconds) report an honest
           # GREEN job instead of being dragged red every night by the two mmap-validator
           # totality harnesses, which exceed the per-harness CBMC budget on this runner
@@ -219,7 +228,7 @@ jobs:
           - name: "sparq-core (dict mmap validator totality)"
             crate: sparq-core
             features: "--features mmap"
-            # [FABLE-5] KNOWN-TIMEOUT DEBT (bounding tracked by sq-j3u6o) — same class as the
+            # KNOWN-TIMEOUT DEBT (bounding tracked by sq-j3u6o) — same class as the
             # .spqv validator suite above: both harnesses exceed the 20m per-harness CBMC budget
             # and TIMEOUT every night. `debt: true` => a pure TIMEOUT is non-fatal (loud warning
             # only); a real Kani FAIL still reds the job so a genuine proof regression is caught.
@@ -227,7 +236,7 @@ jobs:
             harnesses: >-
               validate_dict_bytes_never_panics
               validate_dict_bytes_sized_tail_never_panics
-          # [FABLE-5] sq-63ups: the two Phase-1 suites (sq-sqtk2.3 / sq-sqtk2.4) that ran
+          # sq-63ups: the two Phase-1 suites (sq-sqtk2.3 / sq-sqtk2.4) that ran
           # in no CI lane since merge. Local evidence (61 GB aarch64 work box, Kani 0.67,
           # suites run concurrently so wall times are upper bounds): every reducer harness
           # PASSes (slowest ~10 min), every compare harness PASSes (most in seconds).
@@ -271,7 +280,7 @@ jobs:
               witness_mixed_tier_collapse_now_exact
               witness_numeric_vs_string_now_ranked_by_kind
               witness_nan_now_totalised_first
-          # [FABLE-5] sq-39kps: domain-coverage self-check for the wac-oracle POST-Slug
+          # sq-39kps: domain-coverage self-check for the wac-oracle POST-Slug
           # `.acl` escalation corpus — pins that the static CORPUS genuinely contains a
           # surviving escalation (exact-image asserts + a kani::cover! witness), so a
           # future re-scope cannot empty the interesting inputs vacuously. Proof cone is
@@ -281,7 +290,7 @@ jobs:
             features: ""
             harnesses: >-
               domain_corpus_exhibits_a_surviving_escalation
-    # [OPUS-5] PINNED-TOOLCHAIN ESCAPE — REQUIRED here, not belt-and-braces. The repo root
+    # PINNED-TOOLCHAIN ESCAPE — REQUIRED here, not belt-and-braces. The repo root
     # carries a `rust-toolchain.toml` pinning STABLE, and rustup resolves that file
     # (precedence 4) ABOVE the `rustup default <toolchain>` that `dtolnay/rust-toolchain`
     # performs (precedence 5). Unlike the miri/asan/fuzz lanes, NOTHING in this job uses

@@ -5,8 +5,7 @@ description: Understand code STRUCTURE without reading whole files — outline a
 
 # ast-grep + outline: read STRUCTURE, not whole files
 
-[OPUS-4.8] Internal agent skill. Authored by Opus 4.8 (Fable unavailable — flag
-for re-review when Fable returns). Design basis:
+Internal agent skill. Design basis:
 `research/agent-effectiveness-program.md` §2.2 (the query-type → tool map) and
 the shared A/B protocol in `research/dogfooding-sparq-knowledge-graph.md` §5.
 

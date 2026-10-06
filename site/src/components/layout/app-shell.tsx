@@ -55,10 +55,10 @@ import {
 import { PaletteCommandsProvider } from "@/components/palette-commands";
 
 const REPO_URL = "https://github.com/sparq-org/sparq";
-// [GPT-5.6] sq-f8ufg — the published documentation surface currently lives in the repository's
-// Agent Skills router. The mdBook build is validation-only (not deployed at /docs or /guide), so
-// link to this canonical, live index rather than presenting a dead route on the marketing site.
-const DOCS_URL = "https://github.com/sparq-org/sparq/blob/main/skills/SKILL.md";
+// #2549 — Docs points at the human-facing mdBook guide, which pages.yml builds and overlays at
+// /guide/ on the same origin (issue #5022; gated by scripts/check-guide-publish-wiring.py). It is
+// a separate static build, so it is an `external` (hard-navigation) slot like /app.
+const DOCS_URL = "/guide";
 
 // The slim top bar's content destinations. Capabilities is the single gallery that replaces
 // the collapsed /surface/* tree; App is the live operational GUI destination (the single

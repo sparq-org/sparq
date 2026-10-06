@@ -6,7 +6,7 @@
 //! exact by construction (bit-pattern total-order comparison, not float math on
 //! the device), so it is asserted exactly too — including NaN/±inf/-0.0 edges.
 
-use sparq_gpu::{cpu, Gpu, EMPTY_KEY, MAX_GROUPS};
+use sparq_gpu::{cpu, Gpu, GpuError, GroupKeyOutOfRange, EMPTY_KEY, MAX_GROUPS};
 
 /// Deterministic xorshift64* stream (same generator the wgpu spike used).
 struct Rng(u64);
@@ -63,7 +63,7 @@ fn filter_u32_matches_cpu() {
     ] {
         let expect = cpu::filter_count_u32(&col, lo, hi);
         assert_eq!(
-            gpu.filter_count_u32(&resident, lo, hi),
+            gpu.filter_count_u32(&resident, lo, hi).unwrap(),
             expect,
             "lo={lo} hi={hi}"
         );
@@ -111,7 +111,11 @@ fn filter_f64_matches_cpu_including_ieee_edges() {
         5e-324,
     ] {
         let expect = cpu::filter_count_f64_gt(&col, t);
-        assert_eq!(gpu.filter_count_f64_gt(&resident, t), expect, "t={t}");
+        assert_eq!(
+            gpu.filter_count_f64_gt(&resident, t).unwrap(),
+            expect,
+            "t={t}"
+        );
     }
 }
 
@@ -144,7 +148,7 @@ fn hash_probe_matches_cpu() {
     let probe_col = gpu.upload_u32(&probe);
 
     let expect = cpu::hash_probe(&slots, &probe);
-    assert_eq!(gpu.hash_probe(&table, &probe_col), expect);
+    assert_eq!(gpu.hash_probe(&table, &probe_col).unwrap(), expect);
 }
 
 #[test]
@@ -161,12 +165,55 @@ fn group_aggregate_matches_cpu() {
         let keys_col = gpu.upload_u32(&keys);
         let vals_col = gpu.upload_u32(&vals);
 
-        let expect = cpu::group_aggregate(&keys, &vals, groups);
-        let got = gpu.group_aggregate(&keys_col, &vals_col, groups);
+        let expect = cpu::group_aggregate(&keys, &vals, groups).unwrap();
+        let got = gpu.group_aggregate(&keys_col, &vals_col, groups).unwrap();
         assert_eq!(got, expect, "groups={groups}");
         let total: u64 = got.iter().map(|(c, _)| c).sum();
         assert_eq!(total, N as u64, "every row lands in exactly one group");
     }
+}
+
+/// GitHub #4603: an out-of-range GROUP BY key must be rejected identically by
+/// the GPU and the CPU oracle — never silently dropped on the GPU. Covers a key
+/// in `groups..MAX_GROUPS` (lands in a workgroup slot that is never flushed) and
+/// one `>= MAX_GROUPS` (past the shared-memory array), at a row deep inside a
+/// multi-workgroup dispatch.
+#[test]
+fn group_aggregate_rejects_out_of_range_keys_like_cpu() {
+    let Some(gpu) = gpu_or_skip("group_aggregate_out_of_range") else {
+        return;
+    };
+    let groups = 7u32;
+    for bad in [groups, MAX_GROUPS - 1, MAX_GROUPS, u32::MAX] {
+        let mut keys: Vec<u32> = (0..10_000u32).map(|i| i % groups).collect();
+        keys[5_000] = bad;
+        let vals = vec![1u32; keys.len()];
+        let keys_col = gpu.upload_u32(&keys);
+        let vals_col = gpu.upload_u32(&vals);
+        assert_eq!(
+            gpu.group_aggregate(&keys_col, &vals_col, groups),
+            Err(GpuError::GroupKeyOutOfRange),
+            "gpu, bad key {bad}"
+        );
+        assert_eq!(
+            cpu::group_aggregate(&keys, &vals, groups),
+            Err(GroupKeyOutOfRange),
+            "cpu, bad key {bad}"
+        );
+    }
+}
+
+/// GitHub #4603: `upload_table` rejects a table with no EMPTY_KEY slot (in
+/// release builds too) instead of handing the probe walk a table it could
+/// never leave.
+#[test]
+fn upload_table_rejects_a_full_table() {
+    let Some(gpu) = gpu_or_skip("upload_table_full") else {
+        return;
+    };
+    let full = [[1u32, 0], [2, 0], [3, 0], [4, 0]];
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gpu.upload_table(&full)));
+    assert!(r.is_err(), "a full table must be rejected");
 }
 
 /// [OPUS-4.8] sq-goay: randomized differential oracle.
@@ -206,7 +253,7 @@ fn differential_sweep_all_kernels() {
                 let b = rng.u32();
                 let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
                 assert_eq!(
-                    gpu.filter_count_u32(&resident, lo, hi),
+                    gpu.filter_count_u32(&resident, lo, hi).unwrap(),
                     cpu::filter_count_u32(&col, lo, hi),
                     "filter_u32 n={n} lo={lo} hi={hi}"
                 );
@@ -222,7 +269,7 @@ fn differential_sweep_all_kernels() {
             for _ in 0..4 {
                 let t = (rng.u32() as f64 - (u32::MAX / 2) as f64) / 1e3;
                 assert_eq!(
-                    gpu.filter_count_f64_gt(&resident, t),
+                    gpu.filter_count_f64_gt(&resident, t).unwrap(),
                     cpu::filter_count_f64_gt(&col, t),
                     "filter_f64 n={n} t={t}"
                 );
@@ -250,7 +297,7 @@ fn differential_sweep_all_kernels() {
             let table = gpu.upload_table(&slots);
             let probe_col = gpu.upload_u32(&probe);
             assert_eq!(
-                gpu.hash_probe(&table, &probe_col),
+                gpu.hash_probe(&table, &probe_col).unwrap(),
                 cpu::hash_probe(&slots, &probe),
                 "hash_probe n={n}"
             );
@@ -265,7 +312,7 @@ fn differential_sweep_all_kernels() {
             let vals_col = gpu.upload_u32(&vals);
             assert_eq!(
                 gpu.group_aggregate(&keys_col, &vals_col, groups),
-                cpu::group_aggregate(&keys, &vals, groups),
+                cpu::group_aggregate(&keys, &vals, groups).map_err(GpuError::from),
                 "group_aggregate n={n} groups={groups}"
             );
         }

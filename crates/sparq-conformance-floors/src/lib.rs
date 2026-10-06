@@ -47,7 +47,7 @@
 //! (`SHARED_CRATE_EXPECTED`), which pins each value the same way
 //! `LIB_SOURCED_EXPECTED` pins the JSON-LD lanes.
 //!
-//! [`scoreboard::SUITES`]: https://github.com/jeswr/sparq/blob/main/crates/sparq-conformance/src/scoreboard.rs
+//! [`scoreboard::SUITES`]: https://github.com/sparq-org/sparq/blob/main/crates/sparq-conformance/src/scoreboard.rs
 
 /// W3C SHACL ratchets — enforced by `sparq-shacl`'s `tests/w3c_core.rs` and
 /// `tests/w3c_sparql.rs` (CI job `shacl-conformance`).

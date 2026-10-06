@@ -2,7 +2,7 @@
 //!
 //! This crate implements the low-level, opt-in cryptographic primitives for the
 //! **NextGraph-style E2EE-queryable profile** designed in
-//! [`research/e2ee-nextgraph-variant-gpt56-2026-07.md`](https://github.com/jeswr/sparq)
+//! [`research/e2ee-nextgraph-variant-gpt56-2026-07.md`](https://github.com/sparq-org/sparq)
 //! (program `sq-tag1q`, bead `sq-tag1q.9`):
 //!
 //! * [`cbor`] — a minimal **deterministic** CBOR codec (RFC 8949 core

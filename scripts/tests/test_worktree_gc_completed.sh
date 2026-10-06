@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic end-to-end self-test for scripts/worktree-gc.sh's COMPLETED-but-unmerged
-# workflow-worktree reclaim (--reclaim-completed — bead sq-h34dc). Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# Hermetic end-to-end self-test for scripts/worktree-gc.sh's COMPLETED-but-unmerged
+# workflow-worktree reclaim (--reclaim-completed — bead sq-h34dc).
 #
 # WHY: the completed-reclaim path removes a worktree whose PR branch is PUSHED but NOT yet merged
 # — strictly more aggressive than the default MERGED-or-GONE broom. Its safety rests on three

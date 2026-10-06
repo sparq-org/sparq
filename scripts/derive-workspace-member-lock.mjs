@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// [OPUS-4.8] sq-jpki.1 — derive a SELF-CONTAINED, standalone npm lockfile for ONE
+// sq-jpki.1 — derive a SELF-CONTAINED, standalone npm lockfile for ONE
 // workspace member out of the repo-root `package-lock.json`, WITHOUT a network install.
 //
 // WHY: after the repo-root npm-workspaces migration there is a SINGLE root
@@ -8,7 +8,7 @@
 // requires a lockfile co-located with `js/package.json` AND must NOT hit the network (the
 // supply-chain `js-sbom` lane is deliberately install-free + deterministic). This script
 // projects the member's dependency CLOSURE out of the committed root lock into a temporary
-// standalone lockfile whose root component is the member itself (e.g. `@jeswr/sparq`), so
+// standalone lockfile whose root component is the member itself (e.g. `@sparq-org/sparq`), so
 // the SBOM stays anchored at the published client — exactly as it did pre-migration with a
 // committed per-package lock — while preserving the EXACT versions the root lock pins (no
 // `^`-range re-resolution, no registry call). The emitted lock is TRANSIENT scratch (the
@@ -24,7 +24,7 @@
 // hard error (so a future hoisting change fails LOUDLY rather than silently dropping a
 // component from the SBOM).
 //
-// [OPUS-4.8] sq-f04e: a workspace-to-workspace dep edge (a `link: true` node, e.g. a member
+// sq-f04e: a workspace-to-workspace dep edge (a `link: true` node, e.g. a member
 // depending on a sibling `@sparq/client` in `packages/*`) is handled by MATERIALIZING the link
 // target's real package node AND its own nested closure into the standalone lock (see
 // `materializeLinkTarget`). Previously such a dep was re-homed VERBATIM as a dangling link stub,
@@ -76,7 +76,7 @@ const resolveKey = (name) => {
   return null;
 };
 
-// [OPUS-4.8] sq-f04e: resolve <name> as REQUIRED BY the package living at lock-key `fromKey`,
+// sq-f04e: resolve <name> as REQUIRED BY the package living at lock-key `fromKey`,
 // mirroring npm's nearest-ancestor `node_modules` walk: try `<fromKey>/node_modules/<name>`,
 // then peel one trailing `node_modules/<seg>` segment and retry, down to top-level. Used to
 // reconstruct a LINK TARGET's own (possibly version-conflicting, hence NESTED) closure at the
@@ -110,7 +110,7 @@ out.packages[""] = { ...memberPkg };
 
 let unresolved = 0;
 
-// [OPUS-4.8] sq-f04e: materialize the FULL subtree of a workspace-link TARGET into the standalone
+// sq-f04e: materialize the FULL subtree of a workspace-link TARGET into the standalone
 // lock at the keys the root lock uses (link node at `node_modules/<name>` PLUS the real package
 // node at its `resolved` path PLUS the target's own nested closure). WHY: the derive script used
 // to re-home a `link: true` dep VERBATIM (just the link stub) and drop its target, leaving an
@@ -187,7 +187,7 @@ while (queue.length) {
   out.packages[outKey] = r.node;
   seenKeys.add(outKey);
   if (r.node.link === true && r.node.resolved) {
-    // [OPUS-4.8] sq-f04e: a workspace-link dep — emit its real target node + closure so npm ls
+    // sq-f04e: a workspace-link dep — emit its real target node + closure so npm ls
     // resolves it instead of crashing on a dangling link (sq-f04e). Do NOT recurse into the link
     // node's (empty) own deps; the target carries the real dependency edges.
     materializeLinkTarget(r.node, seenKeys);

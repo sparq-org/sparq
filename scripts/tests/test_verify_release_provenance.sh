@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] issue #4571 — hermetic self-test for scripts/verify-release-provenance.sh.
+# issue #4571 — hermetic self-test for scripts/verify-release-provenance.sh.
 #
 # WHY IT EXISTS. The script under test is the EVIDENCE ENGINE for SL-B3-b: its verdict is what
 # flips the control from AR to IV. It runs for the first time when a release is being cut, and
@@ -90,7 +90,7 @@ make_release() {
 }
 
 run_script() { # run_script <dir> -> stdout+stderr in $OUT, status in $STATUS
-  OUT="$(bash "$SCRIPT" --tag "$TAG" --repo jeswr/sparq --dir "$1" 2>&1)"
+  OUT="$(bash "$SCRIPT" --tag "$TAG" --repo sparq-org/sparq --dir "$1" 2>&1)"
   STATUS=$?
 }
 
@@ -193,7 +193,7 @@ failed_with() { # failed_with <substring> — the last run must have red WITH th
   [ "$STATUS" -ne 0 ] && printf '%s' "$OUT" | grep -qF -- "$1"
 }
 
-OUT="$(bash "$SCRIPT" --repo jeswr/sparq --dir "$WORK/happy" 2>&1)"
+OUT="$(bash "$SCRIPT" --repo sparq-org/sparq --dir "$WORK/happy" 2>&1)"
 STATUS=$?
 check "a missing --tag reds" "a missing --tag did not red with a usable message" \
   failed_with "--tag is required"

@@ -172,9 +172,9 @@ fn reason_subcommand_accepts_el() {
     let ttl = write(&dir, "ex.ttl", EXISTENTIAL);
     let out = dir.join("closure.nt");
 
-    let (code, stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "el", s(&out)]);
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "el", s(&out)]);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert!(stdout.contains("triples after el reasoning"), "stdout: {stdout}");
+    assert!(stderr.contains("triples after el reasoning"), "stderr: {stderr}");
     assert!(stderr.contains("classified [OWL 2 EL]"), "stderr: {stderr}");
 
     let closure = std::fs::read_to_string(&out).expect("read closure");

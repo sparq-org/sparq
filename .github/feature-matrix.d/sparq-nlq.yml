@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-2489d.1 (GenAI-KB Phase 1): the opt-in citation renderer +
+# sq-2489d.1 (GenAI-KB Phase 1): the opt-in citation renderer +
 # cross-cutting provenance-join primitive. The feature is pure offline read-only
 # logic (no network, unlike `live`), so it belongs in this lane — the leg runs
 # the provenance/cite unit suites PLUS the end-to-end tests/citations.rs
@@ -25,7 +25,7 @@
 # the feature ON: the citation-resolution-rate-1.0 + zero-fabrication +
 # no-source-recorded acceptance bar) and `clippy --all-targets -D warnings` in
 # that state. The DEFAULT (feature-OFF) build is covered by the workspace lane.
-# [OPUS-4.8] sq-2489d.2 (GenAI-KB Phase 2): the SAME leg now ALSO covers
+# sq-2489d.2 (GenAI-KB Phase 2): the SAME leg now ALSO covers
 # answer-qualification (hedge + abstention) — the new `qualify` module's in-src
 # unit tests AND the `tests/qualification.rs` integration suite (also
 # `#![cfg(feature = "citations")]`: the abstention precision/recall=1.0 + monotone
@@ -40,7 +40,7 @@
   features: "citations"
   test: true
 
-# [OPUS-4.8] sq-2m6zm.6 (PKG NL-tool PRODUCT flavor): the configurable,
+# sq-2m6zm.6 (PKG NL-tool PRODUCT flavor): the configurable,
 # provider-agnostic OpenAI-compatible endpoint client (`EndpointLlm`). Unlike `live`
 # (a real Anthropic network call, never tested in CI), the `nlq-endpoint` tests drive
 # the REAL request/response/parse path against a loopback `TcpListener` stub
@@ -54,7 +54,7 @@
   features: "nlq-endpoint"
   test: true
 
-# [GPT-5.6] sq-kufo1: policy accessors are compiled and tested only under the
+# sq-kufo1: policy accessors are compiled and tested only under the
 # existing default-off `query-policy` feature. This leg executes the exhaustive
 # SELECT/ASK/CONSTRUCT/DESCRIBE result-form checks and the update-policy checks.
 - name: "sparq-nlq (query-policy — parsed algebra policy + result-form classification)"

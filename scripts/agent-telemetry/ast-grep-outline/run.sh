@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] One-shot driver for the ast-grep+outline read-payload A/B (bead
-# sq-lhwo.4, epic sq-lhwo). 🤖 SPARQ agent. Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# One-shot driver for the ast-grep+outline read-payload A/B (bead
+# sq-lhwo.4, epic sq-lhwo). 🤖 SPARQ agent.
 #
 # RUNS the firm A/B per research/dogfooding-sparq-knowledge-graph.md §5.1-§5.6 over
 # the FROZEN stratified task set, emitting the §5.6 verdict object. Every number it

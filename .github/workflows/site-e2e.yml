@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-5q63 — site CI lane: lint + unit + the headless Playwright smoke test.
+# sq-5q63 — site CI lane: lint + unit + the headless Playwright smoke test.
 #
 # WHY: the ZK car-hire prover pre-warms on route mount so the FIRST "Generate ZK proof"
 # pays no cold start (prewarmProver() in site/src/lib/zk-prover.ts). That was previously
@@ -8,7 +8,7 @@
 # prover's `window.__zkProverColdStarts` counter stays at 1).
 #
 # SCOPE: PRs that touch site/** (or this workflow) — a Rust-/docs-only PR skips this lane
-# (no run, so the required `ci-summary / gate` simply never waits on it). It is path-
+# It is path-
 # scoped, not run on `merge_group`, so the heavy browser-download + real-proving cost is
 # paid only on the PRs that actually change the site (matching js.yml / pages.yml, which
 # are likewise not merge-queue lanes). It re-runs on push to main for post-merge cover.
@@ -25,7 +25,7 @@
 name: site-e2e
 
 on:
-  # [OPUS-4.8] sq-5f1s4 — self-guarding path filter: this lane's `npm ci` resolves the
+  # sq-5f1s4 — self-guarding path filter: this lane's `npm ci` resolves the
   # `site` workspace member from the REPO-ROOT lockfile + manifest (site/ is an npm
   # workspace member; the per-member lock was dropped — see the install step). A change to
   # the root `package-lock.json`/`package.json` (e.g. a sibling member bumping a hoisted
@@ -34,8 +34,7 @@ on:
   # is no unfiltered main-push catch-all either (unlike js.yml). That is the exact
   # gui.yml/#1081 blind-spot class, so the root workspace inputs are listed too.
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "site/**"
@@ -70,7 +69,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # [OPUS-4.8] sq-jpki.1 — repo-root npm workspaces: `site/` is now a workspace member
+      # sq-jpki.1 — repo-root npm workspaces: `site/` is now a workspace member
       # and the per-member `site/package-lock.json` was dropped as redundant. The single
       # lockfile is the repo-root `package-lock.json`, so the setup-node npm cache keys off
       # THAT (the old `site/package-lock.json` path no longer exists). The `npm ci` below runs
@@ -84,7 +83,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
 
-      # [SONNET-4.6] The unit suite runs the native sparq-policy parity fixture.
+      # The unit suite runs the native sparq-policy parity fixture.
       # Provision Rust explicitly instead of relying on the runner image, and cache its detached
       # fixture workspace.
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -119,7 +118,7 @@ jobs:
       - name: Install Playwright Chromium (+ OS deps)
         run: npx playwright install --with-deps chromium
 
-      # [OPUS-4.8] sq-rvgr2.1 — install the SAME pinned, SHA-256-verified Typst the paper
+      # sq-rvgr2.1 — install the SAME pinned, SHA-256-verified Typst the paper
       # factory uses (mirrors pages.yml's "Install Typst CLI" step) so `npm run build-specs`
       # below renders the REAL ReSpec spec fragments (src/generated/specs/<slug>.html, git-
       # ignored). Without this, e2e/specs-smoke.spec.ts sees only the "not built yet"
@@ -139,14 +138,14 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           "$HOME/.local/bin/typst" --version
 
-      # [OPUS-4.8] sq-rvgr2.1 — pre-bake the spec fragments (+ the honesty scan over the spec
+      # sq-rvgr2.1 — pre-bake the spec fragments (+ the honesty scan over the spec
       # sources) BEFORE Playwright boots `next dev`, so the per-spec route's build-time
       # readFileSync of src/generated/specs/<slug>.html reads the REAL ReSpec HTML (not the
       # placeholder) and the specs-smoke ReSpec-render assertions exercise the true output.
       - name: Build spec fragments (Typst → src/generated/specs)
         run: npm run build-specs
 
-      # [SONNET-4.6] sq-ymr2e.8 — pre-bake paper HTML fragments so e2e/surface-sweep.spec.ts
+      # sq-ymr2e.8 — pre-bake paper HTML fragments so e2e/surface-sweep.spec.ts
       # sees the REAL in-site paper render (src/generated/papers/<slug>.html) rather than the
       # "not built yet" placeholder. Mirrors the build-specs step above. The paper HTML uses
       # the same paper-evidence.json evidence injection as the PDF build.

@@ -1,6 +1,6 @@
-# docs-quality — documentation-quality CI (bead sq-5fd1). [OPUS-4.8]
+# docs-quality — documentation-quality CI (bead sq-5fd1).
 #
-# [FABLE-5] sq-6vshe.20 (design: research/ci-runner-consolidation-2026-07.md §4.1):
+# sq-6vshe.20 (design: research/ci-runner-consolidation-2026-07.md §4.1):
 # CONSOLIDATED from 13 sub-minute jobs to 2 bucket jobs. Every job was a separate
 # runner claim (queue wait + claim + checkout + action setup) for seconds of real
 # linting, and this is the repo's highest-frequency workflow (pull_request +
@@ -8,15 +8,14 @@
 # The former jobs survive VERBATIM as named sequential step-groups inside:
 #
 #   * `quick-gates`   ("docs-quality quick-gates") — every HARD gate. NO
-#     continue-on-error anywhere: any failing step fails the job, the single
-#     gating check-run reds, and the required ci-summary `gate` reds. Former job
+#     continue-on-error anywhere: any failing step fails the job and its
+#     check-run reds. Former job
 #     names survive as step names for log greppability + blame attribution.
 #   * `quick-advisory` ("docs-quality quick-advisory (advisory)") — the three
-#     advisory checks. The job NAME carries the advisory token (ci-summary
-#     exclusion) and findings stay swallowed AT THE STEP exactly as before.
+#     advisory checks. The job NAME carries the advisory token (declared in
+#     .github/advisory-registry.json) and findings stay swallowed AT THE STEP.
 #
-# Gate-contract safety: ci-summary's aggregator polls check-runs (created PER JOB)
-# by name — jobs merge freely as long as (a) every formerly-GATING check still runs
+# Check-runs are created PER JOB, so jobs merge freely as long as (a) every formerly-GATING check still runs
 # inside an advisory-token-free job and (b) every ADVISORY check stays under an
 # advisory-token name concluding SUCCESS. Registry: the three former advisory job
 # entries in .github/advisory-registry.json are replaced by one entry for the
@@ -25,7 +24,7 @@
 # WHAT: lints the repo's markdown for spelling, link integrity, style, and the
 # house rules (no baked-in perf numbers; concise crate-README template). Two tiers:
 #
-#   HARD gates (FAIL the build; picked up by the ci-summary aggregator):
+#   HARD gates (FAIL the build):
 #     • markdownlint  — structural markdown defects over the user-facing + governance
 #                       doc surface (root docs, skills/, docs/, crates/, metrics/, the
 #                       book/ mdBook sources — added by issue #5020 — and, as of
@@ -127,15 +126,13 @@
 # carries a per-class precision problem, so they advise until their scope is clean, then
 # flip to HARD.
 #
-# ci-summary aggregation: it polls every check-run on the head commit and fails iff one
-# concluded failure. So every ADVISORY job must CONCLUDE SUCCESS or it would block the
-# gate. JOB-level `continue-on-error: true` is NOT sufficient — it stops the run from
+# Every ADVISORY job must CONCLUDE SUCCESS so its check-run never shows red. JOB-level `continue-on-error: true` is NOT sufficient — it stops the run from
 # failing but the job's check-run still concludes `failure` (verified: vale showed as a
 # failing check on PR #42). Therefore advisory jobs make their findings non-fatal AT THE
 # STEP: script steps end with `|| true` (markdownlint-advisory, custom-checks); action
 # steps that exit non-zero on findings (vale/reviewdog) carry step-level
 # `continue-on-error: true`. (lychee uses `fail: false`.) Job-level continue-on-error is
-# kept as defence-in-depth. [OPUS-4.8]
+# kept as defence-in-depth.
 #
 # Third-party actions are pinned by full commit SHA with a trailing `# vX.Y.Z`
 # (repo hard rule, #34) so the supply chain + Scorecard/CodeQL stay green.
@@ -143,13 +140,9 @@ name: docs-quality
 
 on:
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
-  # [OPUS-4.8] Merge queue: docs-quality surfaces checks on PRs (some gating, some
-  # advisory/informational which ci-summary excludes), so it must also run on the
-  # queue's merge_group ref or the required ci-summary would wait for siblings that
-  # never appear there. The concurrency group below uses
+  # Merge queue (if enabled): docs-quality also runs on the queue's merge_group ref. The concurrency group below uses
   # `github.event.pull_request.number || github.ref`, which falls back to the unique
   # merge_group ref — no cross-event collision.
   merge_group:
@@ -166,10 +159,9 @@ concurrency:
 
 jobs:
   # ----------------------------- HARD GATES -----------------------------
-  # [FABLE-5] sq-6vshe.20: the ten former gating jobs as sequential step-groups on
+  # sq-6vshe.20: the ten former gating jobs as sequential step-groups on
   # ONE runner. Fail-fast: NO continue-on-error — any red step reds this job's
-  # check-run, which reds the required ci-summary `gate`. The job name carries no
-  # advisory/informational whole word, so the aggregator gates on it. Fastest greps
+  # check-run. The job name carries no advisory/informational whole word. Fastest greps
   # first, the big ci-scripts bucket last. Shared setup (one checkout + node +
   # python/PyYAML + typos/lychee binaries) replaces ~10 duplicated setups.
   quick-gates:
@@ -187,7 +179,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install PyYAML
-        # [OPUS-4.8] HASH-pinned (Scorecard PinnedDependenciesID): a `==` version pin
+        # HASH-pinned (Scorecard PinnedDependenciesID): a `==` version pin
         # still trusts whatever PyPI serves, so --require-hashes verifies every artifact's
         # sha256 against .github/requirements/docs-quality.txt before use. PyYAML has no
         # runtime deps, so that file is the full closure. See its header to bump/regenerate.
@@ -220,19 +212,19 @@ jobs:
           # `git ls-files '*.md'` matches at any depth, so EXCLUDE the out-of-scope
           # dirs to land exactly on the same set markdownlint's config globs. (A file
           # COUNT was pinned here and rotted — it read 49 while the real scope had grown
-          # to 280; the step prints the live count below, so do not re-pin one. [OPUS-5])
+          # to 280; the step prints the live count below, so do not re-pin one.)
           git ls-files '*.md' \
             ':!:research/**' ':!:zk/**' ':!:bench/**' ':!:js/**' \
             ':!:.beads/**' ':!:.claude/**' ':!:.github/**' \
             ':!:vendor/**' ':!:**/vendor/**' | sort -u > /tmp/doc-md.txt
           echo "Scanning $(wc -l < /tmp/doc-md.txt) markdown file(s) for typos:"
           typos --file-list /tmp/doc-md.txt
-      # [OPUS-4.8] sq-hyzq: both-direction self-test for the _typos.toml allow-list — the
+      # sq-hyzq: both-direction self-test for the _typos.toml allow-list — the
       # recurring "ALL-CAPS SPARQL keyword + lowercase suffix" false-positives (DELETEd,
       # INSERTed, "3 OPTIONALs", invokable, …) must stay SUPPRESSED, AND a genuine ALL-CAPS
       # misspelling + ordinary lowercase typos must STILL fire (so the regex keeps its
       # teeth). Hermetic (temp fixtures, no repo scan, no network); runs in this same HARD
-      # job so an allow-list over- or under-reach also fails the ci-summary gate.
+      # job so an allow-list over- or under-reach also fails it.
       - name: Self-test the typos allow-list (both directions)
         run: bash scripts/tests/test_typos_allowlist.sh
 
@@ -242,7 +234,7 @@ jobs:
         with:
           # --offline → no network (deterministic); --include-fragments validates
           # #heading anchors. fail=true makes broken internal links a HARD failure.
-          # [OPUS-5] issue #5020: './book/**/*.md' added — the mdBook sources were in
+          # issue #5020: './book/**/*.md' added — the mdBook sources were in
           # NEITHER this list nor the markdownlint HARD globs, so a broken intra-book
           # ./*.md link shipped unchecked. No exclusion is needed for the pages'
           # `{{#include ../../README.md:anchor}}` / `{{#rustdoc_include}}` directives:
@@ -261,24 +253,24 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       # ---- former job: skill-frontmatter (Agent-Skills YAML) ----
-      # [OPUS-4.8] HARD gate (beads sq-56im + sq-tstv): every skills/**/SKILL.md AND
+      # HARD gate (beads sq-56im + sq-tstv): every skills/**/SKILL.md AND
       # every .claude/agents/*.md must have YAML frontmatter that actually parses
       # (yaml.safe_load) and carries non-empty string `name` + `description`. Catches the
       # GitHub "mapping values are not allowed in this context" render error caused by an
       # UNQUOTED colon in a description value (reported on full-text-search/SKILL.md, and
       # later on the sparq-site.md agent's "GitHub Pages app: …" — hence the agent-file
-      # coverage). The validation itself is deterministic (no network). [OPUS-4.8]
+      # coverage). The validation itself is deterministic (no network).
       - name: skill-frontmatter (Agent-Skills YAML) — validate SKILL.md + .claude/agents
         run: python3 scripts/check-skill-frontmatter.py
-      # [OPUS-4.8] sq-tstv: hermetic self-test of the gate's classification — an
+      # sq-tstv: hermetic self-test of the gate's classification — an
       # unquoted-colon agent description must FAIL, a quoted one must PASS, and the
       # default glob must cover both the skills/ and .claude/agents/ families. Runs in
-      # this same HARD job so a coverage regression also fails the ci-summary gate.
+      # this same HARD job so a coverage regression also fails it.
       - name: Self-test the skill-frontmatter gate
         run: python3 scripts/tests/test_skill_frontmatter.py
 
       # ---- former job: privacy-claims (ZK/MPC honesty gate) ----
-      # [OPUS-4.8] HARD gate (bead sq-toze.35 + sq-qhy4): the empirical-honesty mandate
+      # HARD gate (bead sq-toze.35 + sq-qhy4): the empirical-honesty mandate
       # in CI form. The v1 ZK verifier is pending external cryptographer sign-off and
       # `sparq-mpc` is honest-majority semi-honest only (SECURITY.md; research/zk-*-audit.md),
       # so NO outward doc / README / SKILL / site-copy / compliance-index string may assert a
@@ -286,20 +278,20 @@ jobs:
       # not-yet-sound caveat. The script greps the outward claim surface for forbidden
       # unqualified-claim phrases; a hit fails the build unless the line carries an inline
       # `privacy-claims-allow: <why>` justification marker (the allow-list). Deterministic,
-      # no network, grep-only. [OPUS-4.8]
+      # no network, grep-only.
       - name: privacy-claims (ZK/MPC honesty gate) — no unqualified claims
         run: bash scripts/check-privacy-claims.sh
-      # [OPUS-4.8] sq-qhy4: both-direction self-tests for the predicate-form soundness
+      # sq-qhy4: both-direction self-tests for the predicate-form soundness
       # coverage — should-FAIL overclaims ("the verifier is sound", "…are COMPLETE and
       # SOUND", "provably sound") must be caught; should-PASS negated/hedged/non-crypto
       # lines (incl. the canonical "SOUND as landed for the … threat model" verdict) must
       # not regress. Hermetic (no git/network) — pins the gate classification. Runs in
-      # this same HARD job so a coverage regression also fails the ci-summary gate.
+      # this same HARD job so a coverage regression also fails it.
       - name: Self-test the privacy-claims gate (both directions)
         run: bash scripts/tests/test_privacy_claims.sh
 
       # ---- former job: terminology (RDF 1.2 / SPARQL 1.2 wording) ----
-      # [OPUS-4.8] sq-2p8z (issue #812): the terminology HARD gate. The feature historically
+      # sq-2p8z (issue #812): the terminology HARD gate. The feature historically
       # nicknamed "RDF-star"/"RDF*" is STANDARDISED in RDF 1.2 (the construct is a "triple
       # term", with "reifiers"/"reified triples" + rdf:reifies); "SPARQL-star" → "SPARQL 1.2".
       # The community spellings are imprecise (a non-spec version name AND the wrong, old
@@ -316,18 +308,17 @@ jobs:
       # third-party-doc / URL / allow-marker lines (+ the GeoSPARQL / italic-closer / bold
       # false-positive families) must not regress. Hermetic (no git/network).
       #
-      # [OPUS-5] issue #3811 — the gate is now DATA-DRIVEN (scripts/banned-terminology.json)
+      # issue #3811 — the gate is now DATA-DRIVEN (scripts/banned-terminology.json)
       # and each banned term declares its OWN file surface. The trigger: ~98 occurrences of a
       # maintainer-banned trust term reached PR #3451 as a `pub` Rust type AND a PUBLISHED
-      # .ttl rdfs:comment with a green `ci-summary / gate`, because this gate hard-coded its
+      # .ttl rdfs:comment with green CI, because this gate hard-coded its
       # list and scanned only *.md — neither extension was reachable. Adding a future banned
       # term is now one object in the JSON, not a code change.
       #
       # These three steps are the whole enforcement path; deleting any one of them silently
       # disarms the gate, so scripts/tests/test_banned_terminology.py asserts all three call
       # sites exist, that neither the steps nor the job carry a skip `if:`, that the job name
-      # does not read as advisory (ci_summary_gate.py would stop gating on it), and that the
-      # workflow still triggers on merge_group (the queue must evaluate it).
+      # does not read as advisory, and that the workflow still triggers on merge_group.
       - name: Self-test the terminology gate (both directions)
         run: python3 scripts/check-terminology.py --self-test
       - name: Self-test the banned-terminology gate (fixtures + workflow wiring)
@@ -336,17 +327,17 @@ jobs:
         run: python3 scripts/check-terminology.py
 
       # ---- former job: no-perf-numbers (docs) ----
-      # [OPUS-4.8] sq-8ic6: PROMOTED to a HARD gate. The no-perf-numbers backlog cleared —
+      # sq-8ic6: PROMOTED to a HARD gate. The no-perf-numbers backlog cleared —
       # `scripts/check-no-perf-numbers.py --enforce` is GREEN on main (the last residual stray,
       # `skills/cli/SKILL.md:111`'s inline ratio, was reworded to point at the canonical
       # measured source instead of baking the figure inline; same pattern as
       # skills/data-formats/SKILL.md). So the no-perf-numbers house rule (AGENTS.md) now FAILS
-      # the build instead of advising. The check is deterministic (grep-only, no network). [OPUS-4.8]
+      # the build instead of advising. The check is deterministic (grep-only, no network).
       - name: no-perf-numbers (docs) — GATING
         run: python3 scripts/check-no-perf-numbers.py --enforce
 
       # ---- former job: no-dyn-dispatch (substrate) ----
-      # [OPUS-4.8] sq-0ja86 (epic sq-6tykl / sq-qonbz — the shared zero-overhead eval substrate):
+      # sq-0ja86 (epic sq-6tykl / sq-qonbz — the shared zero-overhead eval substrate):
       # a perf-NEUTRALITY structural gate. crates/sparq-substrate is a leaf crate (depends only on
       # sparq-core) holding the shared evaluation substrate consumed by BOTH sparq-engine AND the
       # reasoners; the maintainer invariant (research/shared-eval-substrate.md §2.3/§4) is that its
@@ -363,7 +354,7 @@ jobs:
         run: python3 scripts/check-no-dyn-dispatch.py
 
       # ---- former job: readme-template (template) ----
-      # [OPUS-4.8] sq-8ic6 (deferred half): PROMOTED to a HARD gate. The README-overhaul epic
+      # sq-8ic6 (deferred half): PROMOTED to a HARD gate. The README-overhaul epic
       # (sq-9jw5) cleared the backlog — sq-inzv (#751) brought 20 publish=true crate READMEs to
       # the template and sq-4lvq finished the 3 deferred crates (sparq-hdt/introspect/sim), so
       # `scripts/check-readme-template.py --enforce` is now GREEN across ALL 35 READMEs (0
@@ -372,21 +363,21 @@ jobs:
       # could silently exempt a real deviation). So the crate-README template (length cap +
       # 🚀/✨/📚 + License) now FAILS the build instead of advising. Deterministic (grep/
       # line-count only, no network). The exact string `readme-template (template)` is
-      # deliberately preserved as a step name (de-facto REQUIRED gate — sq-6vshe.20). [OPUS-4.8]
+      # deliberately preserved as a step name (de-facto REQUIRED gate — sq-6vshe.20).
       #
-      # [OPUS-4.8] sq-ixsf: hermetic self-test of the stub-classification + section/cap
+      # sq-ixsf: hermetic self-test of the stub-classification + section/cap
       # logic — a re-broadening back to a prose substring match (which would let real
       # deviations through) fails the gate HERE. Mirrors the coverage-gate.py / perf-gate.py
-      # --self-test pattern; runs in this same HARD job so a regression also reds ci-summary.
+      # --self-test pattern; runs in this same HARD job.
       - name: Self-test the readme-template stub classifier (pure logic)
         run: python3 scripts/check-readme-template.py --self-test
       - name: readme-template (template) — crate-README cap + sections (sq-9jw5) — GATING
         run: python3 scripts/check-readme-template.py --enforce
 
-      # [OPUS-5] Pre-submit runner (scripts/preflight.py) — the checker that shifts
+      # Pre-submit runner (scripts/preflight.py) — the checker that shifts
       # G1/G2/G6 + no-perf-numbers + readme-template + privacy-claims LEFT into the
       # worker's worktree, plus the `guard-untested` check. Two HARD legs, both in
-      # this already-GATING job so a regression reds ci-summary:
+      # this HARD job:
       #   * --self-test pins the checker's own logic (mirrors readme-template /
       #     coverage-gate / perf-gate above);
       #   * the unittest suite additionally pins that EVERY worker brief still
@@ -407,7 +398,7 @@ jobs:
         run: python3 scripts/tests/test_preflight.py
 
       # ---- inference-conformance report drift (sq-t099c + sq-1d528 / issue #3171) ----
-      # [OPUS-5] Two beads landed this gate independently; the script unifies them and
+      # Two beads landed this gate independently; the script unifies them and
       # is wired in ONCE here. The inference ratchet number lives in four places and
       # only one is machine-regenerated: the scoreboard export's `ratchet_floor`
       # (source of truth), ci.yml's `RATCHET=` + the job `name:` that advertises it,
@@ -444,7 +435,7 @@ jobs:
       - name: "Enforce inference report ↔ ci.yml ratchet/job-name ↔ central scoreboard floor agree — GATING"
         run: python3 scripts/check-inference-report-drift.py
 
-      # [OPUS-5] #5021: hermetic self-test of the mdBook link-fixup preprocessor
+      # #5021: hermetic self-test of the mdBook link-fixup preprocessor
       # (scripts/mdbook-rewrite-links.py) — which repo-relative link targets get rewritten
       # to the mount-portable blob URL and which are left alone. It runs HERE, on every PR,
       # rather than only in docs.yml, because docs.yml fires on a hand-maintained path
@@ -461,7 +452,7 @@ jobs:
           bash deploy/demo/check-self-test.sh
 
       # ---- former job: ci-scripts (CI-helper self-tests + workflow lints) ----
-      # [OPUS-4.8] sq-6uc7: HARD self-tests for the shared CI disk-reclaim script
+      # sq-6uc7: HARD self-tests for the shared CI disk-reclaim script
       # (scripts/ci-free-disk.sh). #462 folded `/usr/local/share/boost` + the env-named
       # `$AGENT_TOOLSDIRECTORY` toolcache into that one script (instead of a 2nd inline
       # step). The toolcache is UNSET on a non-GitHub host and the script runs `set -u`,
@@ -475,7 +466,7 @@ jobs:
         run: shellcheck scripts/ci-free-disk.sh scripts/tests/test_ci_free_disk.sh
       - name: Self-test ci-free-disk.sh (set -u safety + existence guards + #462 fold)
         run: bash scripts/tests/test_ci_free_disk.sh
-      # [OPUS-5] sq-c9q4r: the vacuous-replay guard for fuzz.yml's per-PR corpus-replay
+      # sq-c9q4r: the vacuous-replay guard for fuzz.yml's per-PR corpus-replay
       # leg. That leg is BLOCKING, and `-runs=0` over an empty corpus exits 0 — so a
       # future fuzz target added without committed seeds would report green having
       # executed nothing. This guard is what makes that RED, so its own hermetic
@@ -485,7 +476,7 @@ jobs:
         run: shellcheck scripts/ci-fuzz-replay-guard.sh
       - name: Self-test ci-fuzz-replay-guard.sh (empty corpus is fatal in replay mode)
         run: bash scripts/ci-fuzz-replay-guard.sh --self-test
-      # [OPUS-4.8] sq-4vo9m: the per-tick disk guard (df-check + merged-worktree prune +
+      # sq-4vo9m: the per-tick disk guard (df-check + merged-worktree prune +
       # gated main-target reclaim) that stops the autonomous loop from filling the work box
       # to ENOSPC. Validated HERE (hermetic: the harness PATH-shadows df/pgrep and sandboxes
       # the main checkout / worktree-gc, so it touches no real disk/worktree) — it has no
@@ -499,7 +490,7 @@ jobs:
         run: bash scripts/disk-guard.sh --dry-run-self-test
       - name: Self-test disk-guard.sh (gated escalation + busy-build guard, end-to-end)
         run: bash scripts/tests/test_disk_guard.sh
-      # [OPUS-4.8] sq-h34dc: worktree-gc.sh's COMPLETED-but-unmerged reclaim (--reclaim-completed)
+      # sq-h34dc: worktree-gc.sh's COMPLETED-but-unmerged reclaim (--reclaim-completed)
       # removes clean+pushed wf_/agent- worktrees with no live owning task — strictly more
       # aggressive than the default MERGED-or-GONE broom, so its safety (opt-in, workflow-named
       # only, KEEP-if-dirty/unpushed/in-use) is pinned by a hermetic harness that builds real git
@@ -512,7 +503,7 @@ jobs:
         run: bash scripts/worktree-gc.sh --dry-run-self-test
       - name: Self-test worktree-gc.sh (completed-reclaim opt-in + workflow-only + in-use guard, end-to-end)
         run: bash scripts/tests/test_worktree_gc_completed.sh
-      # [OPUS-4.8] sq-13uyp: the per-tick merged-bead reconcile sweep — closes bd-OPEN beads
+      # sq-13uyp: the per-tick merged-bead reconcile sweep — closes bd-OPEN beads
       # whose fix already MERGED so they stop wasting frontier dispatches (it COMPLEMENTS
       # push-frontier's open-PR exclusion, sq-7mwun). Its correctness rests on a conservative
       # EXACT-token match (the `sq-ixc3.1` must-NOT-match-`sq-ixc3.11` guard) and a
@@ -525,7 +516,7 @@ jobs:
         run: bash scripts/reconcile-merged-beads.sh --dry-run-self-test
       - name: Self-test reconcile-merged-beads.sh (exact-match + gating + apply/idempotency, end-to-end)
         run: bash scripts/tests/test_reconcile_merged_beads.sh
-      # [FABLE-5] PR #3488 review: the canonical BEIR gather's honesty must be
+      # PR #3488 review: the canonical BEIR gather's honesty must be
       # MACHINE-enforced, not narrative — a failed/partial/invalid gather must never
       # emit the GATHER_DONE success sentinel or canonical=true, and the serial-console
       # envelope extractor must recover exact *.json basenames (the `name=$2` awk kept
@@ -536,7 +527,7 @@ jobs:
         run: bash scripts/tests/test_beir_gather_sentinel.sh
       - name: Self-test console envelope extractor (exact names + CRLF + allowlist)
         run: bash scripts/tests/test_extract_console_envelopes.sh
-      # [OPUS-5] sq-ffaa9: the serial console is AMI-dependent — on the AL2023/Nitro x86_64
+      # sq-ffaa9: the serial console is AMI-dependent — on the AL2023/Nitro x86_64
       # image `get-console-output` returned nothing usable, so a whole canonical gather was
       # unrecoverable. scripts/bench/bench-result-egress.sh adds the durable S3 channel; this
       # hermetic harness (PATH-shadowed `aws`, no account, no network) pins the two properties
@@ -546,7 +537,7 @@ jobs:
       # write-only + prefix-scoped, and that the launchers stay wired to the library.
       - name: Self-test durable S3 result egress (inert by default, half-config fails fast)
         run: bash scripts/tests/test_bench_result_egress.sh
-      # [SONNET-4.6] PR #3990 review: bench/geo/gsb.sh advertises a HARD sha256 pin on the
+      # PR #3990 review: bench/geo/gsb.sh advertises a HARD sha256 pin on the
       # GeoSPARQL Compliance Benchmark, but a CACHED extraction was accepted on file COUNTS
       # alone — a stale or locally edited corpus would have been scored silently, making the
       # recorded compliance number irreproducible. The cache is now gated on a recorded proof
@@ -556,13 +547,13 @@ jobs:
       # correctly-shaped tree in a scratch dir and drives the real script with GSB_FETCH=0.
       - name: Self-test gsb.sh cache pin (count-preserving edit never scored)
         run: bash bench/geo/gsb.sh --self-test
-      # [OPUS-4.8] sq-neq8: hermetic self-test of the coverage-ratchet gate's PURE logic
+      # sq-neq8: hermetic self-test of the coverage-ratchet gate's PURE logic
       # (max-remeasure aggregation sq-x4jy + floor-monotonicity sq-neq8) so a regression in
       # the gate ITSELF is caught here, before the gate is trusted to guard real coverage.
       # No compile / no files / no subprocess (mirrors perf-gate.py --self-test in bench.yml).
       - name: Self-test coverage-gate.py (ratchet + monotonicity aggregation logic)
         run: python3 scripts/coverage-gate.py --self-test
-      # [FABLE-5] sq-6vshe.6: the demotion auto-bead filer's PURE logic (id derivation +
+      # sq-6vshe.6: the demotion auto-bead filer's PURE logic (id derivation +
       # per-lane dedupe + append-only JSONL + log-tail truncation + issue-body assembly).
       # It fires from fuzz.yml's randomized-run failure path (and any future demoted lane),
       # so a regression in the filer must be caught HERE — on every PR — not only when a
@@ -571,7 +562,7 @@ jobs:
       # self-test in differential.yml).
       - name: Self-test demoted-lane failure filer (id/dedupe/append/log-tail logic)
         run: python3 scripts/ci-file-demoted-lane-failure.py --self-test
-      # [OPUS-5] sq-jxeqz / #4559: the bench HARD-ZONE gate's pure logic
+      # sq-jxeqz / #4559: the bench HARD-ZONE gate's pure logic
       # (scripts/bench_hardzone.py). Its --self-test previously ran ONLY inside bench.yml's
       # "Hard zone" step, which is guarded `github.event_name != 'schedule' && github.ref ==
       # 'refs/heads/main'` — so the gate's own logic was NEVER exercised on a PR, and a change
@@ -590,7 +581,7 @@ jobs:
       # OWN step is present, so the seam cannot be un-wired one level up.
       - name: Self-test bench hard-zone WIRING (PR coverage + publish order + no swallow)
         run: python3 scripts/tests/test_bench_hardzone_wiring.py
-      # [FABLE-5] formal-lanes fix: the nightly miri.yml UB lane's verdict CLASSIFIER
+      # formal-lanes fix: the nightly miri.yml UB lane's verdict CLASSIFIER
       # (scripts/miri_classify_verdict.py) decides whether a shard's non-passes are known
       # per-test-cap TIMEOUTS (cost debt, sq-0s15k — non-fatal) or a GENUINE Miri UB/assertion
       # failure (always fatal — the finding the lane exists for). A regression here could turn
@@ -598,59 +589,18 @@ jobs:
       # exit codes) runs on every PR — same stdlib-only, no-deps pattern as the lints above.
       - name: Self-test Miri verdict classifier (timeout-vs-UB split + exit codes)
         run: python3 scripts/miri_classify_verdict.py --self-test
-      # [FABLE-5] #3419: the issue-triage pair (scripts/triage.py + scripts/retriage.py) was
-      # self-tested ONLY inside the retriage cron (retriage.yml), so a PR that changed
-      # triage.py's promotion behavior (#2898: park no-area issues) broke retriage's fixture
-      # expectations on main SILENTLY — the KeyError surfaced a day later, out-of-band.
-      # Running both hermetic self-tests HERE (stdlib-only, no gh/network: pure label-delta
-      # fixtures) reds the offending PR instead of the next cron run.
-      - name: Self-test triage.py + retriage.py (static-triage + retriage-plan fixtures)
-        run: |
-          python3 scripts/triage.py --self-test
-          python3 scripts/retriage.py --self-test
-      # [OPUS-5] #1135: scripts/triage-area.py is the third member of that triage
-      # family — it CLEARS the `needs:area` park triage.py sets. As of #3816 it also
-      # runs unattended every half hour (.github/workflows/triage-area.yml), which
-      # makes this PR-time gate load-bearing rather than merely prudent: without it a
-      # rule-table edit would first be observed by mislabeling LIVE issues on the next
-      # cron fire, and a wrong `area:` routes a worker at the wrong crate. The cron
-      # re-runs both suites itself before it writes, so this gate and that one fail on
-      # the same regression — here on the PR, there before any label is touched.
-      # Both suites are hermetic (stdlib only, no gh/network):
-      # the script's own rule self-test, plus the independent safety tests
-      # (fail-closed / no unpark-without-an-area / no invented label / the three
-      # rule orderings that were measured wrong on the live backlog / — since
-      # #5003 — the candidate fetch's REACH and its no-silent-truncation guards,
-      # which are fail-QUIET defects a live cron cannot surface on its own).
-      - name: Self-test triage-area.py (needs:area classifier — fail-closed + no-drift)
-        run: |
-          python3 scripts/triage-area.py --self-test
-          python3 scripts/tests/test_triage_area.py
-      # [FABLE-5] #3759 / registry#563 item 4: the transient-tolerant gh READ retry
-      # helper (scripts/gh_retry.py — bounded, transient-5xx-only, fail-closed
-      # read-allow-list so mutations/arm calls can never be wrapped) and the two arm
-      # sweeps that consume it. Their own workflows (auto-arm.yml / rearm-sweeper.yml)
-      # self-test only the DEFAULT-BRANCH copy at cron time, so a PR changing any of
-      # the three files would otherwise merge unvalidated — these hermetic self-tests
-      # (injected runners, no gh/network) red the offending PR instead.
-      - name: Self-test gh-retry helper + arm sweeps (#3759 transient tolerance)
-        run: |
-          python3 scripts/gh_retry.py --self-test
-          python3 scripts/auto-arm.py --self-test
-          python3 scripts/rearm-sweeper.py --self-test
-      # [OPUS-5] issue #1135 — the crates.io PUBLISHING protections, gated here because
+      # issue #1135 — the crates.io PUBLISHING protections, gated here because
       # the release path itself (release-plz.yml) runs ONLY on push:main and therefore
       # never registers on this PR's `gate`: a defect in it would otherwise surface for
       # the first time at release time, when the mistake is irreversible.
       #   * release_pr_guard.py    — the branch/author/title Release-PR exclusion that
-      #                              auto-arm.py, rearm-sweeper.py, check-pr-arm-base.py,
-      #                              batch-merge.py and pr-backlog.py all consult.
+      #                              check-pr-arm-base.py consults.
       #   * release-interval-guard — the fail-closed minimum-release-interval belt.
       #   * test_release_publish_guard.py — parses .github/workflows/release-plz.yml
       #     STRUCTURALLY (not by substring) so `if: false`, a deleted step, a reordered
       #     step or a re-pointed `--dry-run` input each red this gate. Measured in this
       #     repo: every uncaught mutant has lived at the YAML seam, not in the Python.
-      #     [OPUS-5] PR #4192 review: it now pins the guard step's `run:` by EQUALITY and
+      #     PR #4192 review: it now pins the guard step's `run:` by EQUALITY and
       #     asserts `continue-on-error` is ABSENT — a `|| true` suffix, an `exit 0;`
       #     prefix, `continue-on-error: 'true'` and `continue-on-error: ${{ true }}` all
       #     survived the looser containment/identity readings. It also drives `run()`'s
@@ -661,7 +611,9 @@ jobs:
           python3 scripts/release_pr_guard.py --self-test
           python3 scripts/release-interval-guard.py --self-test
           python3 scripts/tests/test_release_publish_guard.py
-      # [OPUS-4.8] sq-ur7o: every SHA-pinned `taiki-e/install-action` step MUST carry an
+          python3 scripts/tests/test_release_source.py
+          python3 scripts/tests/test_release_gui_staging.py
+      # sq-ur7o: every SHA-pinned `taiki-e/install-action` step MUST carry an
       # explicit `with: tool:`. install-action picks the tool from its @<tool> git ref; the
       # code-scanning=0 SHA-pin policy DROPS that selector, so without `with: tool:` the
       # action installs NOTHING and the downstream `cargo <tool>` ENOENTs — silently making
@@ -672,7 +624,7 @@ jobs:
         run: python3 scripts/check-install-action-tool.py --self-test
       - name: "Enforce explicit `with: tool:` on every SHA-pinned install-action — GATING"
         run: python3 scripts/check-install-action-tool.py
-      # [SONNET-4.6] sq-6vshe.11: every cargo-llvm-cov job MUST set a job-level RUSTFLAGS,
+      # sq-6vshe.11: every cargo-llvm-cov job MUST set a job-level RUSTFLAGS,
       # and they must all set the SAME value. cargo picks ONE rustflags source (first match
       # wins, never merged) and cargo-llvm-cov sets RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS to
       # inject `-C instrument-coverage` — which silently DROPS ci.yml's workflow-level
@@ -685,7 +637,7 @@ jobs:
         run: python3 scripts/check-coverage-rustflags.py --self-test
       - name: "Enforce job-level RUSTFLAGS on every cargo-llvm-cov job — GATING"
         run: python3 scripts/check-coverage-rustflags.py
-      # [OPUS-4.8] sq-u59rq: the stacked-PR arm guard. A deterministic PreToolUse command-hook
+      # sq-u59rq: the stacked-PR arm guard. A deterministic PreToolUse command-hook
       # (.claude/settings.json, sibling to the perf-reviewer) that DENIES `gh pr merge … --auto`
       # when the PR's baseRefName ≠ main — so we never squash-merge a stacked PR into its base
       # branch (content misses main, head branch auto-deletes; observed #1023 → re-landed as
@@ -693,17 +645,17 @@ jobs:
       # is validated HERE by its hermetic self-test — command-parsing + base-comparison +
       # fail-OPEN-on-error — with NO network/gh dependency (the base lookup is injected). Mirrors
       # coverage-gate.py / check-install-action-tool.py --self-test (stdlib-only, no deps).
-      # [GPT-5.6] #3605: it also runs the real settings command from an unrelated cwd and
+      # #3605: it also runs the real settings command from an unrelated cwd and
       # proves an unrunnable guard script returns an explicit decision with exit 0 instead
       # of bricking every Bash.
-      # [OPUS-5] PR #4192 review, finding 3: that explicit decision used to be `allow` for
+      # PR #4192 review, finding 3: that explicit decision used to be `allow` for
       # EVERY command, which inverted the script's deliberately fail-CLOSED release axis
       # exactly when there is no guard. The wrapper now DENIES `gh pr merge` and allows
       # everything else; both halves are pinned in the self-test (an all-deny would
       # re-create the #3605 all-Bash deadlock, so the allow row is load-bearing too).
       - name: Self-test stacked-PR arm guard (cwd-independent; fail-closed on arms)
         run: python3 scripts/check-pr-arm-base.py --self-test
-      # [OPUS-4.8] sq-53cq: anti-drift guard for the two-hop dashboard publish. The in-repo
+      # sq-53cq: anti-drift guard for the two-hop dashboard publish. The in-repo
       # source-of-truth bench/dashboard/* reaches the live site via bench.yml's "Seed Pages
       # dashboard" step (a HAND-CODED `for f in …` copy list onto benchmark-data) then
       # pages.yml's dev/ fold. The footgun: add a NEW asset to bench/dashboard/ (as happened
@@ -721,7 +673,10 @@ jobs:
         run: python3 scripts/check-dashboard-publish-wiring.py --self-test
       - name: "Enforce every served bench/dashboard asset is wired into the Pages publisher — GATING"
         run: python3 scripts/check-dashboard-publish-wiring.py
-      # [OPUS-5] issue #5022: the SAME silent-drop class for the mdBook guide. GitHub Pages has
+      # Exercise the actual publisher shell with file-only Git races.
+      - name: Test bounded dashboard publication recovery (local Git)
+        run: python3 scripts/tests/test_bench_dashboard_publish.py
+      # issue #5022: the SAME silent-drop class for the mdBook guide. GitHub Pages has
       # one deploy slot, so the guide has no workflow of its own — docs.yml VALIDATES it on PRs
       # and pages.yml BUILDS + OVERLAYS it into the single Pages artifact at out/guide/. Three
       # things must hold for that to work and each fails silently: both lanes must build through
@@ -737,7 +692,7 @@ jobs:
         run: python3 scripts/check-guide-publish-wiring.py --self-test
       - name: "Enforce the mdBook guide is wired to publish at /guide/ — GATING"
         run: python3 scripts/check-guide-publish-wiring.py
-      # [OPUS-5] issue #5022: scripts/build-guide.sh is the shared mdBook builder for BOTH the
+      # issue #5022: scripts/build-guide.sh is the shared mdBook builder for BOTH the
       # validate lane (docs.yml) and the publish lane (pages.yml). Its only non-obvious job is
       # the teeth — mdBook exits 0 on a broken {{#include}}/anchor (rust-lang/mdBook#1094) and
       # only says so as an "[ERROR]" log line — and the guide is entirely {{#include}} wrappers
@@ -748,11 +703,11 @@ jobs:
         run: shellcheck scripts/build-guide.sh scripts/tests/test_build_guide.sh
       - name: Self-test build-guide.sh (broken-include teeth; stub mdbook)
         run: bash scripts/tests/test_build_guide.sh
-      # [OPUS-5] sq-t099c's inference report/scoreboard drift gate was wired in here and
+      # sq-t099c's inference report/scoreboard drift gate was wired in here and
       # sq-1d528's (#3171) a few steps above; the two scripts are now ONE gate, invoked
       # once at the earlier site (search "inference-conformance report drift"). Running
       # the same script twice in this job bought nothing but runner seconds.
-      # [OPUS-4.8] sq-d8or: the built-docs-site link gate (scripts/check-site-links.sh) is
+      # sq-d8or: the built-docs-site link gate (scripts/check-site-links.sh) is
       # invoked on the publish path in pages.yml (after `next build`), where the static export
       # exists. Its remap of the /sparq GitHub-Pages base path + its TEETH (a broken internal
       # link / dangling #anchor must fail) are easy to break silently when the export's link
@@ -764,7 +719,7 @@ jobs:
         run: shellcheck scripts/check-site-links.sh scripts/tests/test_check_site_links.sh
       - name: Self-test check-site-links.sh (basePath remap + broken-link teeth)
         run: bash scripts/tests/test_check_site_links.sh
-      # [SONNET-4.6] sq-vw3ax.11.3: the fail-closed release alias contract check
+      # sq-vw3ax.11.3: the fail-closed release alias contract check
       # (scripts/check-release-aliases.sh) runs on the RELEASE path (release.yml), where a
       # silently shrunken extraction would only surface after a bad release shipped. Its
       # hermetic self-test therefore runs HERE on every PR: it pins the golden alias contract
@@ -776,7 +731,7 @@ jobs:
         run: shellcheck scripts/check-release-aliases.sh scripts/tests/test_check_release_aliases.sh
       - name: Self-test check-release-aliases.sh (golden contract + partial-extraction teeth)
         run: bash scripts/tests/test_check_release_aliases.sh
-      # [OPUS-5] issue #4571 (GX-11 residual / SL-B3-b): verify-release-provenance.sh is the
+      # issue #4571 (GX-11 residual / SL-B3-b): verify-release-provenance.sh is the
       # EVIDENCE ENGINE for the AR->IV flip — release.yml's `verify-provenance` job runs it right
       # after cutting the Release, so like every other release-time script its first real execution
       # is the worst moment to discover a bug in it. Worse, its dangerous failure is the VACUOUS
@@ -789,7 +744,7 @@ jobs:
         run: shellcheck scripts/verify-release-provenance.sh scripts/tests/test_verify_release_provenance.sh
       - name: Self-test verify-release-provenance.sh (fail-closed branches + vacuity guard)
         run: bash scripts/tests/test_verify_release_provenance.sh
-      # [OPUS-4.8] sq-mkza: end-to-end proof that BOTH honesty gates now cover the
+      # sq-mkza: end-to-end proof that BOTH honesty gates now cover the
       # paper-factory `.typ` sources (site/papers/**/*.typ) — the highest-stakes
       # OUTWARD surface. Before sq-mkza a hard-coded perf ratio or an unqualified
       # "maliciously secure" typed straight into a paper tripped NEITHER gate. The
@@ -801,7 +756,7 @@ jobs:
         run: shellcheck scripts/tests/test_typ_honesty_gates.sh
       - name: Self-test the .typ honesty-gate coverage (perf + privacy, both directions)
         run: bash scripts/tests/test_typ_honesty_gates.sh
-      # [OPUS-4.8] sq-ed5: the pre-publish PyPI distribution-name availability check
+      # sq-ed5: the pre-publish PyPI distribution-name availability check
       # (scripts/check-pypi-name.py) is the runnable half of docs/release.md §0a — its
       # LIVE `--check` mode hits the PyPI JSON API (network) and is maintainer-run at
       # release time, but its PURE decision table (200/404/other -> verdict) + the
@@ -810,7 +765,7 @@ jobs:
       # so a silent rename back to the taken name fails CI here. Stdlib-only, no network.
       - name: Self-test check-pypi-name.py (decision table + dist-name reader)
         run: python3 scripts/check-pypi-name.py --self-test
-      # [OPUS-5] sq-98w7z.8: the upstream-release watch for the vendored spargebra
+      # sq-98w7z.8: the upstream-release watch for the vendored spargebra
       # (scripts/check-spargebra-release.py) answers the one question gating retirement of
       # vendor/spargebra + the root [patch.crates-io] entry — "has oxigraph released a
       # spargebra above 0.4.6 yet?". Its LIVE mode queries the crates.io sparse index
@@ -823,7 +778,7 @@ jobs:
       # network — mirrors the other scripts/check-*.py --self-test lints here.
       - name: Self-test check-spargebra-release.py (yanked + prerelease version ranking)
         run: python3 scripts/check-spargebra-release.py --self-test
-      # [OPUS-4.8] sq-mraf: the build-BOUNDARY honesty assertion in
+      # sq-mraf: the build-BOUNDARY honesty assertion in
       # site/scripts/build-papers.mjs re-runs BOTH shared gates over the exact paper
       # sources + paper-evidence.json before any artifact is written, so the factory can
       # never serve an un-scanned / violating paper. This self-test drives the REAL
@@ -834,7 +789,7 @@ jobs:
         run: shellcheck scripts/tests/test_build_papers_honesty_boundary.sh
       - name: Self-test the build-papers.mjs build-boundary honesty assertion (sq-mraf)
         run: bash scripts/tests/test_build_papers_honesty_boundary.sh
-      # [OPUS-4.8] sq-gum8.13 (epic sq-gum8, paper factory F1): the fail-closed EVIDENCE-BINDING
+      # sq-gum8.13 (epic sq-gum8, paper factory F1): the fail-closed EVIDENCE-BINDING
       # verifier (scripts/verify-paper-evidence.py) upgrades every paper-evidence number's
       # source-trace from ASSERTED to MACHINE-VERIFIED — a canonical record's value must still
       # MATCH its committed source (json-pointer / rust-anchor / doc-anchor) or sit on the
@@ -847,7 +802,7 @@ jobs:
       # scripts/check-*.py --self-test lints above.
       - name: Self-test the paper-evidence binding verifier (drift + missing-anchor FAIL; real evidence PASS — sq-gum8.13)
         run: python3 scripts/verify-paper-evidence.py --self-test
-      # [SONNET-4.6] sq-gum8.5 (epic sq-gum8): the constraint-count evaluation pack
+      # sq-gum8.5 (epic sq-gum8): the constraint-count evaluation pack
       # (bench/zk-compose/constraint_counts.json + CONSTRAINT_COUNTS.md) is GENERATED — every
       # integer is joined from the regression-gated snapshot
       # crates/sparq-zk-compose/tests/gate_count_snapshot.json, nothing is hand-typed. Without a
@@ -863,7 +818,7 @@ jobs:
       # generator, or either artefact changes.
       - name: "constraint-pack reproducibility (bench/zk-compose, sq-gum8.5) — GATING"
         run: python3 bench/zk-compose/scripts/constraint_pack.py --check
-      # [OPUS-4.8] sq-dhss (epic sq-lhwo): the agent-efficiency Phase-1 telemetry
+      # sq-dhss (epic sq-lhwo): the agent-efficiency Phase-1 telemetry
       # harness (scripts/agent-telemetry/) is the BLOCKING measurement baseline —
       # it parses Claude Code transcript JSONL and aggregates token/cache/$ usage
       # per agent + per wave so every later efficiency %-claim is measured on OUR
@@ -873,7 +828,7 @@ jobs:
       # trusted. (Measured numbers are runtime-only / NON-CANONICAL by design.)
       - name: Self-test agent-telemetry harness (parser + cache-ratio + cost math)
         run: python3 scripts/agent-telemetry/tests/test_agent_telemetry.py
-      # [OPUS-4.8] sq-mztg8.2 (epic sq-mztg8, FO-bridge Phase 4): the PKG write-path
+      # sq-mztg8.2 (epic sq-mztg8, FO-bridge Phase 4): the PKG write-path
       # YAML-LD authoring compiler (crates/sparq-kb/ingest/yamlld_compile.py) lets the
       # AGENTS.md Findings tier be authored in a compact, IRI-free *.yaml.ld and
       # deterministically compiled to schema.org-typed PKG Turtle. Its stdlib-only
@@ -885,7 +840,7 @@ jobs:
       # `sparq-kb --features validate --test yamlld_write_path`.)
       - name: Self-test PKG write-path YAML-LD compiler (sq-mztg8.2)
         run: python3 scripts/tests/test_yamlld_compile.py
-      # [OPUS-4.8] sq-lhwo.4 (epic sq-lhwo): the firm ast-grep+outline token A/B harness
+      # sq-lhwo.4 (epic sq-lhwo): the firm ast-grep+outline token A/B harness
       # (scripts/agent-telemetry/ast-grep-outline/) under the shared §5 protocol. Its
       # statistics + §5.6 verdict-object emitter (Wilcoxon signed-rank + bootstrap CI +
       # break-even N* + the kill criteria) and the read-payload measurer are
@@ -898,7 +853,7 @@ jobs:
         run: python3 scripts/agent-telemetry/ast-grep-outline/tests/test_ab_stats.py
       - name: Self-test ast-grep+outline A/B read-payload measurer (sq-lhwo.4)
         run: python3 scripts/agent-telemetry/ast-grep-outline/tests/test_measure_ab.py
-      # [OPUS-4.8] sq-f04e: gen-js-sbom.sh DERIVES a standalone per-member lock via
+      # sq-f04e: gen-js-sbom.sh DERIVES a standalone per-member lock via
       # scripts/derive-workspace-member-lock.mjs, then cyclonedx-npm shells out to `npm ls
       # --omit=dev`. A workspace-to-workspace dep edge (a `link: true` node — a published member
       # depending on a sibling @sparq/* in packages/*) USED TO derive a dangling link stub that
@@ -913,7 +868,7 @@ jobs:
         run: shellcheck scripts/gen-js-sbom.sh scripts/tests/test_derive_workspace_member_lock.sh scripts/tests/test_js_sbom_external_devdep.sh
       - name: "Self-test derive-workspace-member-lock.mjs (workspace-link materialization — sq-f04e)"
         run: bash scripts/tests/test_derive_workspace_member_lock.sh
-      # [OPUS-4.8] sq-pl1p (sq-f04e/#887 + #922 class): sq-f04e hardened only the workspace-LINK
+      # sq-pl1p (sq-f04e/#887 + #922 class): sq-f04e hardened only the workspace-LINK
       # dep case. An EXTERNAL (registry) devDependency added to a PUBLISHED member (js/) projects its
       # full transitive closure into the derived lock; a real dev-dep tree's unsatisfied peerDeps make
       # cyclonedx-npm's FULL `npm ls` exit 254 (the #922 break). The fix keeps the runtime SBOM strict
@@ -923,57 +878,26 @@ jobs:
       # runtime-honesty teeth.
       - name: "Self-test js-sbom lane vs external dev-deps on a published member (sq-pl1p)"
         run: bash scripts/tests/test_js_sbom_external_devdep.sh
-      # [FABLE-5] sq-90cv4: the ci-summary gate poll loop — the brain of the SINGLE
-      # required branch-protection check — lives in scripts/ci_summary_gate.py
-      # (extracted from ci-summary.yml's inline bash). Its verdict semantics
-      # (all-green=>PASS, real-failure=>FAIL, advisory word-boundary exclusion,
-      # sq-ipkku settle guard + #997 graceful timeout, anchored self-exclusion) AND
-      # the sq-90cv4 adaptive saturation budget (queued-siblings-under-saturation =>
-      # still-settling, idle-queue hang => RED, absolute cap bounded) are pinned by a
-      # hermetic stdlib-unittest suite (NO gh, NO network — injected fetchers). A
-      # regression in the gate's own logic must red CI before every merge depends on it.
-      # [GPT-5.6] #3505 adds a script-native mutation tripwire: superseded cancellation
-      # must pass, newest failure must fail, and cancelled-run redispatch must stop at one.
-      - name: "Self-test ci-summary #3505 mutations (supersession + failure + bounded redispatch)"
-        run: python3 scripts/ci_summary_gate.py --self-test
-      - name: Self-test ci-summary gate loop (verdict semantics + adaptive saturation budget — sq-90cv4)
-        run: python3 scripts/tests/test_ci_summary_gate.py
-      # [FABLE-5] sq-fmx4u.3: the change-based test-selection stack is now
-      # LOAD-BEARING (the select pre-job feeds every wide lane's skip guard and
-      # the ci-summary gate's skipped-only-under-successful-selection rule), so
-      # its whole test surface gates HERE on every PR:
+      # The change-based test-selection stack (scripts/ci_select.py, still used by
+      # codeql.yml's change detection and fv_select.py) and its ownership map:
       #   * test_ci_select.py       — the affected-set selector (sq-fmx4u.1):
       #     closure math, §4.1 full-run triggers, fail-closed error paths, the
       #     shadow/filterset wiring hooks. Hermetic (synthetic metadata; the one
       #     real-metadata case self-skips without cargo).
       #   * test_path_ownership.py  — the ownership map + out-of-crate-input
       #     audit (sq-fmx4u.2): map validity, trigger-mirror drift guard.
-      #   * test_ci_select_wiring.py — cross-file INSPECTION of the wiring
-      #     itself: every selection-consuming `if:` carries the fail-closed
-      #     `mode != 'selected'` disjunct (empty outputs => run), every literal
-      #     '"<crate>"' guard needle is a REAL workspace member (a typo would
-      #     skip a lane exactly when it should run), the ci-select.yml job name
-      #     matches the gate's SELECT_RE, select callers are unconditional,
-      #     ENFORCE is the default with a ci-full label override + shadow rollback
-      #     escape hatch, and the nightly full-matrix backstop is wired (sq-fmx4u.5).
-      # The wiring test needs PyYAML — installed once in the shared setup above.
       - name: Self-test ci_select.py (affected-set selector — sq-fmx4u.1/.3)
         run: python3 scripts/tests/test_ci_select.py
       - name: Self-test path-ownership map + out-of-crate-input audit (sq-fmx4u.2)
         run: python3 scripts/tests/test_path_ownership.py
-      - name: Selection wiring inspection (fail-closed guards + real crate needles — sq-fmx4u.3)
-        run: python3 scripts/tests/test_ci_select_wiring.py
-      # [SONNET-4.6] sq-6vshe.15: the merge-queue cache/artifact posture is two
-      # single-line YAML properties that are INVISIBLE when absent — a dropped
-      # `save-if` just makes the queue slower and churns the shared 10 GB cache
-      # budget again, and a dropped `compression-level: 0` just re-compresses the
-      # already-zstd nextest archive on the critical path. Neither reds anything on
-      # its own, so both are pinned structurally over every workflow that still
-      # triggers on `merge_group`, together with the archive's producer/consumer
-      # content-parity contract. Hermetic + stdlib-only (no PyYAML needed).
-      - name: Merge-queue cache/artifact posture (save-if + archive diet — sq-6vshe.15)
+      # sq-6vshe.15 / #5213 / #5214: cache + artifact posture — single-line YAML
+      # properties that are INVISIBLE when absent: `save-if` (main only) on every
+      # rust-cache step in a workflow that runs on branch refs, explicit `shared-key`s
+      # in ci.yml, and `compression-level: 0` on the already-zstd nextest archive.
+      # Hermetic + stdlib-only (no PyYAML needed).
+      - name: Cache/artifact posture (save-if + shared-key + archive diet — sq-6vshe.15)
         run: python3 scripts/tests/test_mergequeue_cache_posture.py
-      # [OPUS-5] #4935: the gating inference-conformance lane used to re-download the
+      # #4935: the gating inference-conformance lane used to re-download the
       # OWL 2 corpus from web.archive.org over http:// on EVERY run, so a transient
       # outage there concluded `failure` with nothing measured and ejected an unrelated
       # PR from the merge queue. It is now restored from an Actions cache. Same
@@ -983,102 +907,34 @@ jobs:
       # property, pins the ci.yml wiring, and pins that the ratchet was NOT weakened.
       - name: Inference corpus cache posture (offline-on-hit + ratchet intact — #4935)
         run: python3 scripts/tests/test_inference_corpus_cache.py
-      # [OPUS-5] sq-khm3f: same invisible-regression shape as the posture test above.
-      # The gating `js` lane installs wasm-pack as a PREBUILT, SHA-pinned, exactly-
-      # versioned binary; reverting to `cargo install wasm-pack` would keep the lane
-      # green on a good day while re-exposing it to a transient crates.io blip
-      # (which red-gated PR #1131). Hermetic + stdlib-only (no PyYAML needed).
-      - name: js lane wasm-pack install posture (prebuilt + pinned — sq-khm3f)
+      # sq-khm3f: lanes install wasm-pack as a PREBUILT, SHA-pinned, exactly-versioned
+      # binary; reverting to `cargo install wasm-pack` re-exposes them to a transient
+      # crates.io blip. Hermetic + stdlib-only. Also pins: every lane asks for the SAME
+      # version (#5771), no lane except the allowlisted release `gui-bundle` source-
+      # compiles it (#5776), and the contributor-facing install hints in js/README.md +
+      # the two guardrails/prepare-build.mjs name that same pin (#5777).
+      # (The name is quoted: unquoted, YAML would truncate it at the first ` #`.)
+      - name: "wasm-pack install posture (prebuilt + pinned + one version + hints — sq-khm3f, #5771, #5776, #5777)"
         run: python3 scripts/tests/test_js_wasm_pack_install.py
-      # [OPUS-4.8] sq-va7at: the nightly selection-bug ALARM
-      # (scripts/ci_selection_alarm.py, .github/workflows/selection-alarm.yml,
-      # design §6.1). Hermetic unittest suite (NO gh, NO git, NO cargo, NO network;
-      # stdlib + PyYAML, installed once in the shared setup above): the pure
-      # correlation core (precise per-crate hit, fail-safe triage for narrowed
-      # shards, the non-spam empty-skip-set property), the TRIAGE_LANE_RE pin
-      # against the real ci.yml shard job name, the fail-loud exits (replay error /
-      # total blocker => non-zero), and — since #4965 — the ADMISSION SEAM: the live
-      # workflow `if:` evaluated against the real known-positive event payload, with
-      # the evaluator validated against the pre-fix expression as a known answer.
-      - name: Self-test the nightly selection-bug alarm (correlation + fail-loud — sq-va7at)
-        run: python3 scripts/tests/test_ci_selection_alarm.py
-      # [OPUS-5] The review-lane BLIND-SPOT alarm (scripts/review_lane_alarm.py,
-      # .github/workflows/review-alarm.yml). Hermetic (no gh, no network). Two halves:
-      # the four verdict obligations — no-verdict is not armable, a superseded head does
-      # not count, an author cannot verdict their own PR, and the review brief's own
-      # quoted `VERDICT: pass` instruction text is not a pass — plus the YAML SEAM
-      # inspection (schedule present, self-test ordered before the live step, the call
-      # site intact, and the job's permissions carrying `issues: write` with NO
-      # `pull-requests: write`, so the detector can never acquire arming authority).
-      # The suite also pins its OWN call site here, so it cannot silently leave CI.
-      - name: Self-test the review-lane blind-spot alarm (verdict obligations + YAML seam)
-        run: python3 scripts/tests/test_review_lane_alarm.py
-      # [OPUS-5] sq-huwr8: the three DETECTOR lanes (review-alarm / formal-alarm /
-      # selection-alarm) RED by design, and each one's header used to assert it "can
-      # never enter the `ci-summary / gate` poll set" because it creates no check-run on
-      # a PR head or merge-group ref. True premise, false conclusion: ci-summary.yml also
-      # runs on `push: branches: [main]`, so a scheduled alarm's check-run lands on the
-      # very head SHA that gate polls. MEASURED on main head cb0c6739c, render_verdict()
-      # listed `review-lane blind-spot alarm: failure` as a GATING failure. What makes
-      # these lanes safe to RED is their advisory-registry declaration, nothing else.
-      # This suite drives the REAL render_verdict() so deleting a declaration REDs on the
-      # gate's own exit code, carries an UNDECLARED-lane control so the assertions cannot
-      # go vacuous, and DISCOVERS *alarm*.yml from disk so a fourth detector added with
-      # the same false header reds on arrival.
-      - name: Self-test the alarm/detector lanes are DECLARED non-gating (sq-huwr8)
-        run: python3 scripts/tests/test_alarm_lanes_non_gating.py
-      # [OPUS-5] sq-1lc4i: the CI EXECUTION-LATENCY alarm
-      # (scripts/ci_execution_latency_alarm.py, .github/workflows/ci-latency-alarm.yml).
-      # Hermetic (no gh, no network). Three halves: the classifiers for all three choke
-      # modes — including the two guards that fail SILENTLY if broken, namely the
-      # missing-baseline fallback (a lane whose runs never complete must still be
-      # watchable, or the detector goes quiet exactly when a lane is 100% hung) and the
-      # empty-scan-set fail-loud (reporting health over an empty population); the
-      # DISJOINTNESS with #4368's cron_lane_liveness.py, asserted over the REAL workflow
-      # tree in both directions so neither a duplicate nor a hole can open; and the YAML
-      # SEAM (self-test ordered before the detector, both invocations matched EXACTLY
-      # rather than by containment, no step `if:`/`continue-on-error`, SHA-pinned actions,
-      # the sparse-checkout that M1 reads its expectation from, and permissions carrying
-      # `issues: write` with NO `pull-requests: write` so the detector can never acquire
-      # arming authority). The suite pins its OWN call site here, so it cannot silently
-      # leave CI.
-      - name: Self-test the CI execution-latency alarm (3 choke modes + YAML seam)
-        run: python3 scripts/tests/test_ci_execution_latency_alarm.py
-      # [OPUS-5] sq-6vshe.7 phase 4: the HEAVY-set DRIFT alarm
-      # (scripts/heavy_set_alarm.py, .github/workflows/heavy-set-alarm.yml). Hermetic
-      # (no cargo, no gh, no network) and stdlib-only. Runs the script's own fixture
-      # suite — the UNDECLARED/MISSING/DEMOTED classification, the heavy-floor boundary
-      # and the demotion hysteresis band, libtest-json-plus parsing (binary-id
-      # stripping, slowest-attempt-wins across retries), and BOTH empty-measurement
-      # fail-louds, of which the second is the one that matters: test events carrying no
-      # `exec_time` must RED, because a detector that scores every test at 0s would
-      # report a confident all-clear forever. It also drives the drift → issue-body path
-      # so a finding cannot be raised and then dropped before it is rendered.
-      - name: Self-test the HEAVY-set drift alarm (drift classes + empty-measurement fail-loud)
-        run: python3 scripts/heavy_set_alarm.py --self-test
-      # [SONNET-4.6] sq-1cb6l: the 5 remaining hermetic test suites found by the
-      # #1670 audit, wired here alongside the other ci-scripts self-tests.
-      #
-      # test_cone_coverage.py (49 tests) — the cone-based coverage selector
-      # (scripts/cone_coverage.py): compute_cone() closure math, §4.1 full-run
-      # triggers, dev-dep propagation, shadow/enforce mode flags, report()
-      # label semantics, shard-filtering intersection, and the empty-all_members
-      # fallback. [SONNET-4.6] sq-3dr4t adds the ENFORCE-flip guards: cone_from_selection()
-      # (the path CI uses — narrows for an explicit select mode=selected and NOTHING
-      # else), which cases write a NARROWING --crates-output (cone+enforce ONLY — shadow,
-      # mode=full and every fail-safe write EMPTY), the enforce-mode report's inherited
-      # rows and divergence-detection-unavailable honesty, and coverage.sh's COVERAGE_CONE
-      # intersection driven through `coverage.sh --print-crates` (including the
-      # whitespace-only-cone no-op). Stdlib-only, no cargo/network.
-      - name: Self-test cone_coverage.py (cone selector + cone report — sq-1cb6l)
-        run: python3 scripts/tests/test_cone_coverage.py
-      # test_drift_scan.py (37 tests) — the periodic drift scanner
-      # (scripts/drift-scan.py): all 5 scanner classes (bench-missing,
-      # skill-missing, explain-asymmetry, dashboard-row, conformance-split),
-      # the dedup-key stability contract, main(--dry-run), and the CI-guard
-      # that refuses to mint issues outside CI. Stdlib-only, no gh/git/network.
-      - name: Self-test drift-scan.py (all scanner classes + CI guard — sq-1cb6l)
-        run: python3 scripts/tests/test_drift_scan.py
+      # issue #6349 — HOSTED-RUNNER RESERVATION for the scheduled safety lanes.
+      # miri.yml (24 shards + a doctest job) and kani.yml (per-suite proofs) used to admit
+      # their WHOLE matrices at once, and their jobs are long-lived by construction, so a
+      # nightly burst parked most of the account's standard-runner admissions while current
+      # PR-head checks queued waiting for a runner. Both strategies now declare a bounded
+      # `max-parallel`; this suite reads BOTH workflow files and reds if either cap
+      # disappears, if one lane's footprint outgrows its per-lane ceiling, or if the
+      # COMBINED footprint eats into the majority of the allowance reserved for PR and
+      # merge-group checks. It also pins what the cap must not be paid for with —
+      # `fail-fast: false`, the full shard partition, and no PR-head trigger. Hermetic
+      # fixtures + a mutation pass over the REAL parsed workflows, so a rule that stopped
+      # detecting anything reds here rather than going quietly green. Needs PyYAML
+      # (installed in the shared setup above).
+      - name: Hosted-runner reservation for the miri/kani nightly lanes (issue 6349)
+        run: python3 scripts/tests/test_nightly_runner_reservation.py
+      # #6436: exercise the actual nightly admission helper and
+      # mutation evidence producer offline, including green skipped follow-ups.
+      - name: Heavy nightly completion freshness (issue 6436)
+        run: python3 scripts/tests/test_ci_nightly_freshness.py
       # test_feature_matrix_tiers.py (50 tests) — the feature-matrix tier
       # detector (scripts/feature-matrix-tiers.py): cfg expression parser
       # (feature/test/not/any/all/other nodes + balanced-paren error), all
@@ -1105,7 +961,7 @@ jobs:
       # only, no git/network.
       - name: Self-test check-install-action-tool.py (fixtures + live invariant — sq-1cb6l)
         run: python3 scripts/tests/test_install_action_tool.py
-      # [SONNET-4.6] test_coverage_rustflags.py (17 tests) — supplements the
+      # test_coverage_rustflags.py (17 tests) — supplements the
       # check-coverage-rustflags.py --self-test + enforce run above: the pure
       # fixtures (job-level vs step-level env, CSV `tool:` list, bare `run: cargo
       # llvm-cov`, no-compile coverage job out of scope, value divergence), the
@@ -1116,21 +972,7 @@ jobs:
       # cross-runner .profraw merge to be valid. Stdlib-only, no git/network.
       - name: Self-test check-coverage-rustflags.py (fixtures + live invariant — sq-6vshe.11)
         run: python3 scripts/tests/test_coverage_rustflags.py
-      # [OPUS-5] sparq-org/sparq#4652: the zero-dispatch merge-group watchdog
-      # (scripts/merge-group-watchdog.py, .github/workflows/merge-group-watchdog.yml)
-      # plus the CI_TIMEOUT routing split it feeds in merge-queue-feedback.yml. Both
-      # are queue-critical and neither can be exercised by a PR run, so their whole
-      # contract is pinned here: the hermetic decision tables (script --self-test), and
-      # the three-layer suite — policy, sweep BEHAVIOUR against a scripted gh (assert on
-      # the mutations issued, not the log text), and cross-file YAML-seam inspection of
-      # every `if:`, step and call site. The fail-closed direction matters most: the
-      # demote guard is `route != 'preserve'`, so a classifier failure keeps the
-      # pre-#4652 behaviour; inverting it to `== 'demote'` fails here.
-      - name: Self-test merge-group-watchdog.py (decision tables — #4652)
-        run: python3 scripts/merge-group-watchdog.py --self-test
-      - name: Zero-dispatch watchdog suite (policy + behaviour + YAML seam — #4652)
-        run: python3 scripts/tests/test_merge_group_watchdog.py
-      # [SONNET-4.6] sq-qcnn.32 / [OPUS-5] #3773: the advisory-job registry + gate-intent
+      # sq-qcnn.32 / #3773: the advisory-job registry + gate-intent
       # placement check. Since #3773 the registry is LOAD-BEARING (it is the ONLY thing
       # that makes a check-run non-gating), so this is its integrity gate. THREE
       # directions, all diff-visible instead of review-catch-dependent:
@@ -1155,97 +997,17 @@ jobs:
         run: python3 scripts/check-advisory-registry.py --self-test
       - name: "Enforce advisory-job registry + gate-intent placement (C2/C3/C4) — GATING"
         run: python3 scripts/check-advisory-registry.py
-      # [OPUS-4.8] sparq-org/sparq#3475: the fast-fix ring's ONLY privileged
-      # capability is the cross-repo REGISTRY_RING_TOKEN doorbell. Because a
-      # `workflow_run` workflow is ALSO delivered for fork / cross-repo triggering
-      # runs (and workflow_run grants secret access even when the triggering run
-      # lacked secrets), the ring MUST fail-closed on
-      #   github.event.workflow_run.head_repository.full_name == github.repository
-      # at the job level, with same-repo+same-head-SHA defense in depth in the
-      # head_sha->PR resolution and a live head_repo/head_sha re-check before the
-      # dispatch. This REGRESSION checker PINS THE WHOLE WORKFLOW DOCUMENT byte-exact
-      # against scripts/tests/fast-fix-ring.golden.yml (after semantically-inert
-      # trailing-whitespace/newline normalization only), so ANY edit to the file reds:
-      # a job-level guard weakening (OR-wrap, negation, operand swap, demoted-to-comment
-      # predicate, uncalled-function move, alt dispatch spelling, dropped select conjunct,
-      # inverted `!=`, changed permission, dispatch-target swap), a SECOND token consumer
-      # in ANY syntax (dotted or `secrets['...']` bracket), a workflow-level `env:` a
-      # second job inherits, or a workflow-level `defaults.run.shell` wrapper. The
-      # whole-file pin SUBSUMES the former whole-job pin (there is no level above the
-      # whole file), which is why it is terminal (self-test proves it with the full
-      # round-1..5 mutation table via the live --root path). Pure stdlib — no PyYAML.
-      - name: Self-test the fast-fix ring cross-repo guard (#3475 negative fixtures)
-        run: python3 scripts/check-fast-fix-ring-guard.py --self-test
-      - name: "Enforce the fast-fix ring fail-closed cross-repo guard (#3475) — GATING"
-        run: python3 scripts/check-fast-fix-ring-guard.py
-      # [OPUS-5] #4966: the SAME two doorbells, from the opposite direction — a MISSING
-      # REGISTRY_RING_TOKEN must fail LOUD instead of suppressing ~130 rings into green
-      # runs. Extracts each ring job's real `run:` script from the live YAML and
-      # EXECUTES it under bash with a stubbed `gh`, asserting the exit code and the
-      # emitted annotations in BOTH credential states (empty => non-zero + `::error::`
-      # + no dispatch; present => exit 0 + the dispatch actually attempted, so the fix
-      # cannot be "always fail"). Also drives the REAL ci_summary_gate.render_verdict()
-      # to prove the new hard failure cannot red `ci-summary / gate` — both check-runs
-      # land on the main head SHA that the push-triggered gate polls (sq-huwr8), so the
-      # advisory-registry declaration is what keeps them non-gating. Needs PyYAML,
-      # installed once in the shared setup above.
-      - name: Self-test the ring doorbells fail LOUD on a missing credential (#4966)
-        run: python3 scripts/tests/test_ring_credential_loud.py
-      # [OPUS-5] The VERDICT-comment -> review:pass bridge (scripts/verdict-bridge.py,
-      # .github/workflows/verdict-bridge.yml). It is the ONLY automated writer of the
-      # label the whole arming chain admits on, so a regression in it either strands
-      # green PRs outside the merge queue again or — far worse — attests a PR whose
-      # verdict is stale. The suite pins BOTH: the pure fail-closed predicate
-      # (line-anchored trailing verdict, FULL 40-hex head binding, trusted
-      # author_association, latest-by-immutable-created_at retraction, hold labels,
-      # never-retract-on-absence) AND the YAML seam, parsed STRUCTURALLY with PyYAML so
-      # an `if: false`, a deleted step, a wrong sparse-checkout/ref/cron input, or a
-      # privilege escalation reds here — substring assertions catch none of those.
-      # A cross-file check imports the LIVE auto-arm.py / rearm-sweeper.py so the
-      # bridge can never attest a PR those policies would refuse. Stdlib + PyYAML
-      # (installed in the shared setup above); no gh, no git, no network.
-      - name: Self-test verdict-bridge.py (fail-closed predicate — head binding + retraction)
-        run: python3 scripts/verdict-bridge.py --self-test
-      - name: Verdict-bridge policy + workflow-seam inspection (structural YAML)
-        run: python3 scripts/tests/test_verdict_bridge.py
-      # [OPUS-5] sparq-org/sparq#3760 — THE ARM PATH. The re-arm sweeper spent days unable
-      # to enable auto-merge at all ("Resource not accessible by integration
-      # (enablePullRequestAutoMerge)") because its job declared `contents: read` while the
-      # operation needs repository WRITE. Both arm policies now (a) probe their token's arm
-      # capability at job start and fail with ONE actionable ::error, and (b) collect per-PR
-      # arm failures instead of aborting the sweep. Their own self-tests only ran inside the
-      # scheduled arm workflows, i.e. never on the PR that broke them — so they gate HERE:
-      #   * rearm-sweeper.py --self-test / auto-arm.py --self-test — probe verdicts
-      #     (can-arm / cannot-arm / inconclusive), per-PR failure collection + continue,
-      #     one-::error-per-run, and the exit semantics (an arm failure never exits 0).
-      #     [OPUS-5] #3766 adds the STICKY-FAILURE PRECEDENCE sequences —
-      #     `collected-failure > transient-exhaustion > clean` — because collecting the
-      #     failures was only half the job: the collected state lived in a LOCAL, so a
-      #     LATER candidate's exhausted transient unwound past the accumulated-failure
-      #     check and reported ::warning + exit 0, discarding a real arm failure.
-      #   * test_arm_capability_wiring.py — cross-file pins: `contents: write` +
-      #     `pull-requests: write` on both workflows (a downgrade reproduces #3760 and is
-      #     invisible in a python-only diff), the probe step present and BEFORE the arm step
-      #     with a byte-identical GH_TOKEN expression, the remediation naming every
-      #     flippable lever, and no drift between the two deliberately duplicated copies.
-      # The wiring test needs PyYAML — installed once in the shared setup above.
-      - name: Self-test the re-arm sweeper policy (arm capability + failure isolation — #3760)
-        run: python3 scripts/rearm-sweeper.py --self-test
-      - name: Self-test the auto-arm policy (arm capability + failure isolation — #3760)
-        run: python3 scripts/auto-arm.py --self-test
-      - name: "Arm-path wiring inspection (contents: write + probe-before-arm — #3760)"
-        run: python3 scripts/tests/test_arm_capability_wiring.py
-      # [OPUS-5] sq-w1dxx: release.yml's container contract was pinned by a test that NOTHING
+      # sq-w1dxx: release.yml's container contract was pinned by a test that NOTHING
       # ran, so every assertion in it was decorative. Wire it in beside its sibling tests.
       # sq-fvzi6 pins the multi-arch push; sq-n6rv + sq-p9xq pin sparq-server's trigger-gated
       # GHCR tags so a workflow_dispatch dev build never pushes `:latest`, which deploy/paas
       # and deploy/aws follow.
-      # [GPT-5] sq-fqrv4: also pin multi-arch push + smoke/Trivy pre-push gates for both native
+      # sq-fqrv4: also pin multi-arch push + smoke/Trivy pre-push gates for both native
       # deployment servers, including the sparq-lws-core release contract.
       # Needs PyYAML, installed once in the shared setup above.
       - name: Release container contracts (both multi-arch images + safe ghcr tags)
         run: python3 scripts/tests/test_release_container_multiarch.py
-      # [OPUS-5] sq-toze.25 + #4570 + #4635 (GX-11): the SLSA Build L3 isolation contract for all
+      # sq-toze.25 + #4570 + #4635 (GX-11): the SLSA Build L3 isolation contract for all
       # FOUR isolated-builder lanes — release.yml#provenance (archives),
       # release.yml#provenance-artifacts (GUI bundles + SBOM/VEX + conformance report),
       # dist.yml#provenance (tiered binaries) and release.yml#provenance-container (the ghcr
@@ -1256,7 +1018,7 @@ jobs:
       # needed); non-vacuity proved by its own mutation table.
       - name: SLSA Build L3 isolation contract (release + dist artifacts + container)
         run: python3 scripts/tests/test_release_slsa_l3_provenance.py
-      # [GPT-5] #3770 — structural backstop for the recurring failure-swallow shape:
+      # #3770 — structural backstop for the recurring failure-swallow shape:
       # once a sweep records a hard failure, a later transient exception must never
       # short-circuit to exit 0. The hermetic fixture reproduces exactly that
       # interleaving; enforcement audits every Python script under scripts/.
@@ -1266,9 +1028,9 @@ jobs:
         run: python3 scripts/check-sticky-failure-exits.py
 
   # ----------------------------- ADVISORY -----------------------------
-  # [FABLE-5] sq-6vshe.20: the three former advisory jobs as step-groups on ONE
-  # runner. The job NAME carries the advisory token (ci-summary exclusion +
-  # advisory-registry entry `docs-quality quick-advisory (advisory)`), and every
+  # sq-6vshe.20: the three former advisory jobs as step-groups on ONE
+  # runner. The job NAME carries the advisory token (advisory-registry entry
+  # `docs-quality quick-advisory (advisory)`), and every
   # finding is swallowed AT THE STEP exactly as before (`|| true`, step-level
   # continue-on-error on vale/reviewdog, lychee `fail: false`) so the check-run
   # concludes SUCCESS. Job-level continue-on-error stays as defence-in-depth only
@@ -1292,7 +1054,7 @@ jobs:
           set -uo pipefail
           # The advisory config (same tuned rules) must be named with a supported
           # prefix so it's accepted by --config. Pass whole-repo globs explicitly.
-          # [OPUS-4.8] sq-5reoy: dropped the "#zk/xpath/vendor" exclude — the zk/xpath
+          # sq-5reoy: dropped the "#zk/xpath/vendor" exclude — the zk/xpath
           # tree (and its vendored ieee754 copy) was externalized to sparq-org/noir_XPath
           # (#1599); the generic "#**/vendor" glob still covers any remaining vendor dir.
           npx --yes markdownlint-cli2@0.18.1 \
@@ -1312,7 +1074,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # ---- docs-duplication (jscpd copy/paste detection over the doc surface) ----
-      # [OPUS-5] sq-lrju — a STEP, not a job: sq-6vshe.20 consolidated this workflow to two
+      # sq-lrju — a STEP, not a job: sq-6vshe.20 consolidated this workflow to two
       # runners precisely to stop sub-minute lints each claiming their own, and the registry
       # entry for `docs-quality quick-advisory (advisory)` already owns per-step promotion.
       #
@@ -1404,10 +1166,10 @@ jobs:
 
       # ---- former job: vale (prose, advisory) ----
       - name: vale (prose, advisory) — vendored styles, no network
-        # [OPUS-4.8] STEP-level continue-on-error: reviewdog exits 1 on findings, and
+        # STEP-level continue-on-error: reviewdog exits 1 on findings, and
         # JOB-level continue-on-error does NOT make the job's check-run conclude success
-        # (it only stops the run from failing) — so ci-summary, which fails iff any
-        # check-run concluded failure, would wrongly block on this advisory job. Swallowing
+        # (it only stops the run from failing) — the check-run would still show red on
+        # this advisory job. Swallowing
         # at the step makes the job conclude success while the findings still print.
         continue-on-error: true
         uses: vale-cli/vale-action@518a9136acc6e6668ce7c00d367051e0941e87ff # v3.0.0

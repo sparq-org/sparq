@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# [OPUS-5] sq-ffaa9 — opt-in durable S3 result egress for canonical sparq-bench EC2 gathers.
+# sq-ffaa9 — opt-in durable S3 result egress for canonical sparq-bench EC2 gathers.
 #
 # 🤖 SPARQ agent. This file is a LIBRARY: source it, do not execute it.
 #

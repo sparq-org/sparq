@@ -5,8 +5,9 @@
 
 A by-artifact index of the repo evidence the [`controls.md`](./controls.md) rows cite, so
 the auditor can resolve each claim to a concrete, checkable location. Paths are
-repo-relative. "Gating" means the artifact is a required CI check folded into
-`ci-summary / gate` (the single required status check — `docs/branch-protection.md`).
+repo-relative. "Gating" means the CI step fails its run. Only `ci-fast` (core-crate clippy/tests + SPARQL
+conformance) is a required pre-merge check (`docs/branch-protection.md`); every other gating
+lane (`ci.yml`, `supply-chain.yml`, …) runs post-merge/nightly and detects rather than blocks.
 
 ## 1. Governance & policy artifacts (PO, RV)
 
@@ -41,7 +42,7 @@ repo-relative. "Gating" means the artifact is a required CI check folded into
 | `fuzz.yml#fuzz` | coverage-guided fuzz (parsers + mmap loader) | PW.8.2, RV.3.4 |
 | `scorecard.yml#analysis` | OpenSSF Scorecard → SARIF + public dashboard | PO.3.3 |
 | `dependency-monitoring.yml` | daily advisory watchdog → tracking issue | RV.1.3 (sparq-local `RV.1.4`) |
-| `ci-summary.yml#gate` | the single required aggregator (merge gate) | PO.2.1, PO.4.2, PO.3.3 |
+| `ci-fast.yml#ci-fast` | the single required check (merge gate; core crates only — the former `ci-summary` aggregator is deleted) | PO.2.1, PO.4.2, PO.3.3 |
 
 > **`RV.1.4` is a sparq-local sub-task, not a standard SP 800-218 v1.1 task id.** RV.1 defines
 > only RV.1.1 / RV.1.2 / RV.1.3; the continuous-monitoring obligation lives in RV.1.3's text.
@@ -76,7 +77,7 @@ python3 scripts/unsafe-gate.py --check # the unsafe-count ratchet
 cargo +nightly miri test -p sparq-core # UB lane (needs nightly + miri component)
 
 # Provenance verification of a published release artifact
-gh attestation verify <archive> --repo jeswr/sparq
+gh attestation verify <archive> --repo sparq-org/sparq
 
 # Read the embedded dependency manifest of a released binary
 cargo audit bin <path-to-sparq-cli>

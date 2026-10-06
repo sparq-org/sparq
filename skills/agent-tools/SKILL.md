@@ -123,7 +123,7 @@ at construction — the MCP-Solid proposal draft's local-trusted-agent deploymen
 | `introspect` | `sparq_introspect::Introspection` over the session's authorized projection | schema of the readable documents only — never the whole pod |
 | `shapes` | the same miner, one class | a class only unreadable documents use reports as absent |
 | `stats` | totals over the same projection | two sessions get different totals; no grants ⇒ zeros |
-| `update` *(gated)* | `PodStore::update_as` / `update_as_acp` | per-graph session write check, fail-closed |
+| `update` *(gated)* | `PodStore::update_as_with_budget` / `update_as_acp_with_budget` | per-graph session write check, fail-closed; its SPARQL *evaluation* is bounded by the SAME per-call budget the read tools use (draft §9.4) — the check's `GRAPH ?var` binding SELECT and the apply's `… WHERE`. The rest is NOT budgeted, and a request cap covers only the inline `INSERT`/`DELETE DATA`: `CLEAR`/`DROP` cost whatever the session may write, and `LOAD` is refused unless the embedder installs an allowlisted base |
 | `resource_put` *(gated)* | atomic named-graph swap (+ containment link on create) | `.acl`/`.acr` route through `put_acl`/`put_acl_acp` |
 | `resource_delete` *(gated)* | slot removal + containment unlink | non-empty containers rejected; `.acl` via `delete_acl` |
 | `container_create` *(gated)* | typed `ldp:BasicContainer` graph + containment | slash-terminated IRIs only |
@@ -251,7 +251,10 @@ same `nlq` feature:
   the query may still fail at runtime or match nothing. Note that sparq-nlq's
   dictionary-grounding constraint (`NlqConfig::check_dictionary`) is opt-in and **off** in
   the default config, for `ask` as well as `nl_query` — so an ungrounded predicate/class
-  IRI is accepted by **both** (`ask` just executes it to zero rows). Same backend, same
+  IRI is accepted by **both** (`ask` just executes it to zero rows). Both tools start
+  from one shared config, and the library entry point `run_nl_query_with(graph, question,
+  config, llm)` takes an explicit `NlqConfig`: with `check_dictionary` on it applies the
+  same dictionary repair `ask` does, so the two cannot drift. Same backend, same
   fail-closed "not configured" error.
 
 These are **ergonomics / grounding aids pending measurement** — *not* a token-saving

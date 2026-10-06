@@ -4,16 +4,16 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
@@ -24,7 +24,7 @@
   features: "vec-predicate,provider"
   test: true
 
-# [OPUS-4.8] sq-wuft (actionable part): predicate-constrained (filtered) ANN.
+# sq-wuft (actionable part): predicate-constrained (filtered) ANN.
 # tests/filtered_bgp.rs + tests/filtered_bgp_transitive.rs are
 # `#![cfg(all(feature = "vec-predicate", feature = "filtered-ann"))]`, so BOTH
 # features must be ON together for the engine-side BGP→IdMask wiring tests to run.
@@ -35,7 +35,7 @@
   features: "vec-predicate,filtered-ann"
   test: true
 
-# [OPUS-4.8] sq-2489d.4 (GenAI-KB Phase 4): the structure-aware-vectorisation `kge`
+# sq-2489d.4 (GenAI-KB Phase 4): the structure-aware-vectorisation `kge`
 # measurement foundation + the NEW provenance-weighting surface. `kge` IMPLIES `structure`,
 # so this single leg compiles + clippies + tests BOTH the `kge`-gated suites AND the
 # `structure`-gated ones — the gap this leg closes: NO prior leg exercised `structure`/`kge`
@@ -56,7 +56,7 @@
   features: "kge"
   test: true
 
-# [OPUS-4.8] sq-mztg8.1 (epic sq-mztg8, FO-LLM-bridge Phase 3): the read-path
+# sq-mztg8.1 (epic sq-mztg8, FO-LLM-bridge Phase 3): the read-path
 # URI-hiding `compose` module + the closed NL→NL A/B fidelity/cost harness. The whole
 # `src/compose.rs` module (9 unit tests) and the `examples/compose_ab.rs` harness are
 # `#[cfg(feature = "compose")]` / `required-features = ["compose"]` behind `default = []`,
@@ -73,7 +73,7 @@
   features: "compose"
   test: true
 
-# [OPUS-4.8] sq-0wo9e.6 (epic sq-0wo9e, structure-aware-vectorisation P5): the
+# sq-0wo9e.6 (epic sq-0wo9e, structure-aware-vectorisation P5): the
 # NEURO-SYMBOLIC propose(neural)-then-verify(deductive) grounding pipeline. The whole
 # `src/verify.rs` module (incl. the load-bearing soundness test that a vector-proposed-but-
 # shape-invalid candidate is REJECTED, the OWL-disjointness-clash reject, the fail-closed
@@ -93,7 +93,7 @@
   features: "neuro-symbolic"
   test: true
 
-# [FABLE-5] sq-lhcot.1: the .spqv v3 embedding-provenance WRITE path + the mandatory
+# sq-lhcot.1: the .spqv v3 embedding-provenance WRITE path + the mandatory
 # compatibility REJECTION. The whole write-side v3 record (provenance block + reserved KERN
 # extension area) is `spqv-provenance`-gated behind `default = []`, and the end-to-end negative
 # suite `tests/spqv_v3_provenance.rs` is `#![cfg(feature = "spqv-provenance")]`, so the default
@@ -111,7 +111,7 @@
   features: "spqv-provenance"
   test: true
 
-# [GPT-5.6] sq-lsp7k.25: per-vector opaque metadata persisted in `.spqv` v4 and attached to exact
+# sq-lsp7k.25: per-vector opaque metadata persisted in `.spqv` v4 and attached to exact
 # search hits without affecting ranking. The integration suite is feature-gated and otherwise
 # compiles empty, so this dedicated leg is its CI executor. Compose with `spqv-provenance` to cover
 # the v4 header's optional provenance block as well as tagged/untagged round-trip behavior.

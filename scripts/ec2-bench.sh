@@ -14,9 +14,9 @@ REGION="${AWS_REGION:-eu-west-2}"
 ITYPE="${BENCH_INSTANCE_TYPE:-c7g.4xlarge}"     # arm64 spot; 16 vCPU, far more than a GH runner
 SCALE="${BENCH_SCALE:-2000000}"                 # ~10x the in-CI scale
 SHA="${GITHUB_SHA:-$(git rev-parse HEAD)}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 TAGSPEC='ResourceType=instance,Tags=[{Key=purpose,Value=sparq-ci-bench}]'
-# [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) OUTPUT + FULL-SUITE knobs so the nightly lane can reuse
+# (sq-6vshe.6, MAINTAINER-DIRECTED) OUTPUT + FULL-SUITE knobs so the nightly lane can reuse
 # this SAME script (single source of truth) instead of a forked copy:
 #   BENCH_OUT         — results filename written to the CWD (default ec2-bench-results.json, weekly heavy).
 #   BENCH_FULL_SUITE  — when set (=1), the instance installs the well-known-suite toolchains
@@ -76,7 +76,7 @@ echo "== build + bench on the instance (public repo: clone with no creds) =="
 # The instance clones the public repo at this SHA, installs Rust, builds, runs the same emitter at
 # a larger scale, and prints ONLY the results JSON on stdout (captured below).
 #
-# [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) FULL-SUITE mode: when BENCH_FULL_SUITE is set, ALSO
+# (sq-6vshe.6, MAINTAINER-DIRECTED) FULL-SUITE mode: when BENCH_FULL_SUITE is set, ALSO
 # install the well-known-suite toolchains + the wasm target and run ci-bench.sh with
 # GITHUB_REF=refs/heads/main so the instance runs EVERY latency suite (the noisy timing series moved
 # off the per-PR / merge_group bench lane). These commands mirror bench.yml's "Install well-known-suite

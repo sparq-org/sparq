@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Orchestration automation — Phase A of research/orchestration-automation-design.md
-# (PR #374). Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Orchestration automation — Phase A of research/orchestration-automation-design.md
+# (PR #374).
 #
 # bead-close-on-merge.sh <pr> [--apply]
 #

@@ -1,4 +1,4 @@
-# [OPUS-4.8] Differential SHACL fuzz gate (beads sq-55c1 + sq-evws + sq-vz2v).
+# Differential SHACL fuzz gate (beads sq-55c1 + sq-evws + sq-vz2v).
 #
 # WHAT: generates random but VALID SHACL shapes + data graphs, validates each
 # through `sparq-shacl` AND through every reference SHACL engine that resolves, and
@@ -21,8 +21,7 @@
 # which is too heavy + too slow for the per-PR fast path, and the `#[ignore]`d test
 # is excluded from `cargo nextest run` anyway. Running only on `schedule` +
 # `workflow_dispatch` means this workflow never produces a check-run on a PR head
-# commit, so the `ci-summary / gate` aggregator never sees it and the per-PR gate
-# is unaffected (the intended heavy-lane isolation).
+# commit (the intended heavy-lane isolation).
 #
 # Third-party actions are pinned by full commit SHA (supply-chain hardening); the
 # trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin. The pins
@@ -75,7 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —

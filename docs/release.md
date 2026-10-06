@@ -1,29 +1,52 @@
 # Release runbook
 
-How to cut a sparq release. Everything below is **maintainer-triggered**: nothing publishes
-until you push a `v*` tag (CI) or run `cargo publish` (crates.io) yourself.
+How to cut a sparq release. Everything below is **maintainer-triggered**: the version PR merge
+cuts the tag, while registry uploads require either the one-time bootstrap commands or an
+explicit `publish.yml` dispatch.
 
-## 0. One-time pre-release steps (before the first 0.1.0 tag)
+## 0. One-time pre-release steps (before the first complete v0.1.4 release)
+
+[GPT-6] **Recovery snapshot, 2026-09-12:** `v0.1.1` is an incomplete bootstrap.
+Its immutable tag resolves to `1a63aa7c638bd80da55f1811d5fb97e8d014f631`;
+[release run 33723421273](https://github.com/sparq-org/sparq/actions/runs/33723421273)
+failed at workflow startup. There is no GitHub Release, all 37 crates remain unpublished,
+and PyPI `sparq-rdf` remains unpublished. npm `@sparq-org/sparq@0.1.1` and
+`@sparq-org/solid-server@0.1.1` are already published **without `dist.attestations`**.
+Those versions cannot be republished to add provenance. Keep that evidence gap explicit.
+
+The next complete-release candidate targets **v0.1.4**. Preserve the public `v0.1.0`,
+`v0.1.1`, `v0.1.2`, and `v0.1.3` tags. v0.1.2 published both containers but failed before its
+GitHub Release; the Bash 3.2 fix merged in PR #6544 (see §3b). v0.1.3 then failed in
+the GitHub Release job because its workflow requested a nonexistent provenance output
+(see §3c). Preserve any v0.1.3 containers and artifacts too. The SLSA permission and Cargo bootstrap fixes in
+[PR #6488](https://github.com/sparq-org/sparq/pull/6488) landed after `v0.1.1`;
+building main and attaching those different bytes to the old tag is not a recovery.
+Re-check registry state before any irreversible upload; this snapshot is historical evidence.
 
 These are tracked as beads (`bd list -l area:release`); the procedure is documented
 here for the runbook:
 
-- **Add a `LICENSE` file** (MIT text) at the repo root. `license = "MIT"` in Cargo.toml
-  satisfies crates.io, but the release archives and the Docker/ghcr page should carry the
-  actual text; `release.yml` copies `LICENSE` into every archive *if present*.
+- **Root `LICENSE` — done.** The tracked MIT text is included in release archives by
+  `release.yml`; Cargo manifests also declare `license = "MIT"` for crates.io.
 - See **§0a crate-name availability** below — checked; all crates.io names are clear, the
-  npm scope `@jeswr/sparq` is clear, and the PyPI **distribution** name `sparq` is taken, so
+  npm scope `@sparq-org/sparq` is clear, and the PyPI **distribution** name `sparq` is taken, so
   the Python wheel publishes as **`sparq-rdf`** (owner-approved; the import name stays
   `sparq` — done, see the Python wheels section).
-- `cargo owner` / crates.io API token configured locally (`cargo login`).
+- A crates.io login is configured locally for the one-time bootstrap (`cargo login`).
+- The npm organization **`sparq-org`** exists and the publishing identity has rights to
+  create public scoped packages.
 
 ## 0a. Crate-name availability
 
-Availability snapshot as of **2026-06-14** (crates.io API: a 404 / "does not exist" =
-available; a 200 = taken). The original snapshot covered 16 publishable crates plus the
-top-level `sparq` name; the npm and PyPI surface names are included for completeness. The
-publishable set is **17** (sparq-algos was missed in the 2026-06-14 snapshot — see the row
-flagged *not yet re-checked* below). Re-run before the first publish — registries change.
+The old 2026-06-14 availability snapshot covered only part of the current workspace and
+must not be used to authorize a publish. [GPT-5.6] The authoritative Rust set is derived
+from the manifests by `scripts/release-interval-guard.py`: **12 crates** (§4 "crates.io
+publish set"), plus the `sparq-spargebra` parser fork. Re-run the registry checks
+immediately before the bootstrap because names can be claimed at any time.
+
+**Live re-check, 2026-08-31:** all 37 exact crates.io names returned 404;
+`@sparq-org/sparq` and `@sparq-org/solid-server` returned 404; and
+`@sparq-org/eyereasoner-compat` reported the existing 0.1.0 publication.
 
 For the **PyPI** row, that re-run is one command (`scripts/check-pypi-name.py --check`,
 sq-ed5): it reads the distribution name from `crates/sparq-py/pyproject.toml` (`sparq-rdf`)
@@ -34,42 +57,23 @@ mode needs network; the hermetic decision-table + name-reader self-test runs in 
 `ci-scripts` lane.) crates.io has no separate pre-flight script — `cargo publish` aborts on a
 taken name itself.
 
-| Name | Registry | Status |
+| Name | Registry | Required preflight |
 |---|---|---|
-| `sparq` | crates.io | available |
-| `sparq-core` | crates.io | available |
-| `sparq-engine` | crates.io | available |
-| `sparq-cli` | crates.io | available |
-| `sparq-server` | crates.io | available |
-| `sparq-reason` | crates.io | available |
-| `sparq-introspect` | crates.io | available |
-| `sparq-hdt` | crates.io | available |
-| `sparq-shacl` | crates.io | available |
-| `sparq-sim` | crates.io | available |
-| `sparq-vectors` | crates.io | available |
-| `sparq-geo` | crates.io | available |
-| `sparq-serve` | crates.io | available |
-| `sparq-text` | crates.io | available |
-| `sparq-rsp` | crates.io | available |
-| `sparq-solid` | crates.io | available |
-| `sparq-nlq` | crates.io | available |
-| `sparq-algos` | crates.io | not yet re-checked (added to the publishable set after the 2026-06-14 snapshot — sq-v286.1) |
-| `@jeswr/sparq` | npm | available |
+| the 12 names printed by `python3 scripts/release-interval-guard.py --dry-run`, plus `sparq-spargebra` | crates.io | 12 checked on 2026-08-31 (in the old 37-name set); re-check all 13 before bootstrap |
+| `@sparq-org/sparq` | npm | 0.1.1 exists without provenance; check new-version availability and Trusted Publisher |
+| `@sparq-org/solid-server` | npm | 0.1.1 exists without provenance; check new-version availability and Trusted Publisher |
+| `@sparq-org/eyereasoner-compat` | npm | already published at 0.1.0; no bootstrap needed |
 | `sparq` | PyPI | **taken** — unrelated `shiventi/sparq` (SJSU degree-planning API client, latest 0.2.6) |
 | `sparq-rdf` | PyPI | chosen distribution name (owner-approved; `pip install sparq-rdf`, `import sparq`) |
 
-**Conclusion:** every crates.io name checked in the 2026-06-14 snapshot and the npm scope are
-clear to publish as-is; `sparq-algos` (the 17th publishable crate) still needs its one-off
-availability check before the first publish (the re-run noted above covers it). The PyPI
-**distribution** name `sparq` is taken by a real, unrelated, actively-maintained package, so
-the Python wheel ships as **`sparq-rdf`** (owner-approved; `sq-8slf`). This is the only name
-that changed — the **import** name stays `sparq` (`import sparq`), and no crates.io / npm
-name is affected. Done in `crates/sparq-py/pyproject.toml` (`[project] name = "sparq-rdf"` +
-`[tool.maturin] module-name = "sparq"`); see the Python wheels section below.
+The PyPI **distribution** name `sparq` is taken, so the Python wheel ships as
+**`sparq-rdf`** while the import remains `sparq`. The npm decision from #3399 is
+**`@sparq-org` for all public packages**; the private `@sparq/client` workspace package is
+an internal build dependency and is not a registry surface.
 
-## 0b. v0.1.0 ships ahead of the external ZK review (issue #2552)
+## 0b. Experimental releases precede the external ZK review (issue #2552)
 
-**Decision (maintainer, issue #2552, 2026-07-26): v0.1.0 goes out without waiting for the
+**Decision (maintainer, issue #2552, 2026-07-26): the first complete release goes out without waiting for the
 external accredited-cryptographer review of the ZK estate (bead `sq-qhy4`), carrying
 experimental warnings instead.** Recorded here because it is a release-scope decision and
 nothing in CI encodes it: there is no audit gate in `release.yml`, `release-plz.yml`,
@@ -97,18 +101,35 @@ MPC run as a production-grade guarantee anywhere. That stays false until `sq-qhy
 
 ## 1. Version bump
 
-The version lives in **one place**: `[workspace.package] version` in the root `Cargo.toml`
-(every crate inherits it via `version.workspace = true`). Additionally, the internal
-`path` dependencies carry an explicit `version = "X.Y.Z"` requirement (the standard
-workspace-publish pattern — crates.io strips `path`, so the version is what consumers
-resolve). On a bump, update **both**:
+Rust versions are locked through `[workspace.package] version` and release-plz's single
+`version_group`. Every shipped workspace path dependency also has an explicit registry
+version. Path-only dev-dependencies are the deliberate exception: Cargo omits them from
+published manifests, allowing workspace-only tests without adding a registry edge. The
+version PR must update the root version, every shipped path-dependency requirement, and
+`Cargo.lock` together; the release guard refuses an incomplete dependency closure.
 
-1. `[workspace.package] version` in `/Cargo.toml`.
-2. The `version = "…"` next to each `sparq-* = { path = … }` dependency in
-   `crates/sparq-engine`, `crates/sparq-reason`, `crates/sparq-cli`, `crates/sparq-server`.
-3. `cargo check -p sparq-cli -p sparq-server` to refresh `Cargo.lock`; commit it.
+The recovery version PR must set these files explicitly to **0.1.4**. This is deliberately not a
+release-plz-generated PR: before the first dependency-first crates.io bootstrap,
+`release-plz update` runs `cargo package` while calculating changes and Cargo cannot resolve
+the unpublished inter-crate registry dependencies, including in its temporary package graph.
+While `release-plz.toml` has `git_only = true` and `publish = false`, the Release-PR job
+explicitly skips automatic version calculation. The separate tag job remains active and
+creates the new version's tag after the manual version PR merges.
+After all 12 crates (and the fork) exist, flip `git_only = false` only in the same change that enables
+crates.io OIDC publishing. A generated release-plz PR can resume Cargo versioning then,
+but it is **not merge-ready** until the same PR also aligns every public npm manifest and
+its shared root-lock workspace record. Keep the manual cross-ecosystem version-PR review
+step until that augmentation is automated; the source guard refuses a mismatched tag.
 
-(`cargo release` or `release-plz` can automate 1–3 later; not adopted yet.)
+release-plz does not version npm workspaces. The public `@sparq-org/sparq`,
+`@sparq-org/solid-server`, and `@sparq-org/eyereasoner-compat` manifests and
+their workspace records in the shared root `package-lock.json` must also move to **0.1.4**.
+The compatibility package skips
+0.1.1 and 0.1.2: its registry release is still 0.1.0, while its source has changed since that publish.
+The desktop Cargo manifest, Tauri installer configuration, GUI frontend manifest and
+their lock records also target 0.1.4; private tooling and the independent LWS crate keep
+their own versions. PyPI's version is derived from the Cargo workspace. This version PR prepares 0.1.4;
+its merge is the release-triggering change, not evidence of successful publication.
 
 ## 2. Changelog
 
@@ -116,21 +137,74 @@ Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog form
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
 
+### v0.1.4 recovery sequence
+
+> [GPT-5] v0.1.4 is the new candidate after the v0.1.3 provenance-download failure.
+> Preserve both earlier tags and their completed artifact/container lanes; do not
+> rerun either failed workflow to seek a later source fix. See §§3b–3c. The normal
+> 24-hour cadence rule applies to v0.1.4; the v0.1.3-only exception in §8d does not.
+> The dated [read-only preflight snapshot](release-preflight-v0.1.4.json) is not a
+> reservation or publish authorization; repeat it on the final candidate before merge.
+
+1. Land the reviewed provenance-download workflow fix, then prepare the separate manual
+   0.1.4 version PR, including the new changelog and lockfiles. Before its
+   merge, complete CI and package-file inspection, re-check version availability and the
+   release interval, and confirm registry credentials/Trusted Publishers. **That version
+   PR merge authorizes tag creation and the release workflow's artifact/container uploads.**
+2. Let the new `v0.1.4` tag run `release.yml`, including provenance verification. Keep the
+   tag fixed. If this run needs source changes, fix forward with another version; a
+   dispatch at main with `tag=v0.1.4` is refused. For a transient failure before publication,
+   retry with `gh workflow run release.yml --ref v0.1.4 -f tag=v0.1.4 -f prerelease=false`
+   only after checking no assets/image were already published.
+3. From a clean checkout of `v0.1.4`, bootstrap crates.io in §4's dependency-first order.
+   Run each dry-run immediately before its publish, once its dependencies exist. Do not
+   use main or fill the old 0.1.1 registry gaps with different source.
+4. After bootstrap, explicitly dispatch package publication **at the same immutable tag**:
+
+   ```sh
+   gh workflow run publish.yml --ref v0.1.4 \
+     -f publish_npm=true -f publish_solid_server=true \
+     -f publish_eyereasoner_compat=true \
+     -f publish_pypi=true -f attest_crates=true
+   ```
+
+   `publish.yml` checks source identity and selected package versions before its jobs run.
+   All three public npm manifests must match the tag before this combined dispatch can run.
+   Check which versions/files already exist before retrying any failed publication; never
+   attempt to replace published bytes.
+5. Verify all three npm versions' `dist.attestations`, every PyPI distribution's PEP-740
+   attestation, and the published GitHub assets. Compare attested `.crate` hashes with
+   registry downloads before claiming coverage of the uploaded crate bytes. New-version
+   provenance does not retroactively attest either npm 0.1.1 package.
+
 ## 3. Tag push → what CI does
+
+Merging the maintainer-reviewed first-release/version PR runs `release-plz release`. Only
+the dependency-final `sparq-cli` entry is allowed to create the workspace tag, so exactly
+one `vX.Y.Z` is pushed. Manual fallback only:
 
 ```sh
 git tag vX.Y.Z
-git push jeswr vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 Pushing the tag triggers `.github/workflows/release.yml`:
 
-0. **publish-cadence guard** — the `setup` job runs
+0. **source identity and publish-cadence guards** — `setup` first runs
+   `scripts/check-release-source.py`: the workflow must run at the exact existing release
+   tag, the tag must resolve to the workflow/checkout commit, and manifest versions must
+   match. A branch dispatch naming an older tag refuses before any build or publication.
+   Then the job runs
    `scripts/release-interval-guard.py --enforce --released-tag vX.Y.Z` before anything is
-   built. If the previous release was less than 24h ago the job fails and **every** job
+   built. Outside the fixed v0.1.3 recovery exception (§8d), if the previous release
+   was less than 24h ago the job fails and **every** job
    below it is blocked (they all depend on `setup`). See §8d — this is the tag-push half
-   of the at-most-one-release-per-day policy. The tag stays pushed; delete it
-   (`git push --delete <remote> vX.Y.Z`) and re-push once the window has passed.
+   of the at-most-one-release-per-day policy. Keep the tag immutable. After the window,
+   retry at that same tag only if it already contains working release logic and nothing
+   was published. A source/workflow fix requires a new version and tag; do not overwrite
+   published assets or reuse registry versions. The npm, PyPI, GitHub Release, and GHCR
+   paths also re-read the remote tag immediately before their irreversible write and refuse
+   if it no longer identifies the workflow commit.
 1. **package** — builds `sparq-cli` for every hardware tier (same matrix as `dist.yml`:
    arm64/x64 darwin, x86-64 baseline/v2/v3/v4 + arm64 Linux, x64/arm64 Windows) and packages
    each as `sparq-cli-vX.Y.Z-<tier>.tar.gz` (`.zip` on Windows) containing the binary,
@@ -139,7 +213,7 @@ Pushing the tag triggers `.github/workflows/release.yml`:
    with every archive + the checksum manifest attached (plus auto-generated notes linking
    to `CHANGELOG.md`). Verify with `shasum -a 256 -c SHA256SUMS`.
 3. **docker** — builds the `Dockerfile` and pushes
-   `ghcr.io/jeswr/sparq-server:{X.Y.Z, X.Y, latest}` using the workflow's own
+   `ghcr.io/sparq-org/sparq-server:{X.Y.Z, X.Y, latest}` using the workflow's own
    `GITHUB_TOKEN` (ghcr needs no extra secrets). **To disable container publishing**,
    delete the `docker` job from `release.yml` (or gate it with `if: false`) — the other
    jobs are independent of it.
@@ -190,71 +264,151 @@ crate + name; or a consumer needs a non-container deployment. The change is then
 package/bin selector to `build-matrix.yml` — and it should ship as a clearly EXPERIMENTAL-
 labelled OPT-IN artifact, not silently alongside the `sparq-cli` archives.
 
+## 3b. Recovering a failed immutable-tag release
+
+[GPT-6] **Retry infrastructure failures at the same tag; fix deterministic source or
+workflow failures in a new version.** The existing exact-tag `workflow_dispatch` is
+the reusable retry mechanism. It cannot import a workflow fix from a later commit.
+
+For v0.1.2, [run 35540471918](https://github.com/sparq-org/sparq/actions/runs/35540471918)
+failed because macOS Bash 3.2 rejects `shopt -s nullglob globstar`. The staging loop
+uses only single-directory globs, so `nullglob` alone preserves its file selection.
+Both macOS builds reached staging, but neither uploaded installers or their subject
+digests. The alias gate correctly refused the missing `sparq-gui-arm64-darwin.dmg`
+and `sparq-gui-x64-darwin.dmg`. Successful provenance over the other assets does not
+cover those missing installers. Both container publication workflows already succeeded;
+the GitHub Release did not exist when checked on 2026-09-21.
+
+Preserve the annotated tag object `05efded769a745d5b0e8d6d076425c171732ab1d`,
+which peels to commit `4b37254efe502f8a0aeba36076130ed9b44853ef`.
+Direct recovery of this tag is unavailable **under the current source/provenance
+contract**, for these independently checkable reasons:
+
+| Attempt | Why it cannot apply this fix safely |
+|---|---|
+| Rerun all or failed jobs | GitHub retains the original SHA/ref and workflow; the same staging command fails again. A full rerun also repeats completed container publication. |
+| Dispatch `release.yml --ref v0.1.2 -f tag=v0.1.2` | Selects the workflow stored at v0.1.2, including the broken command. |
+| Dispatch at main, checking out v0.1.2 | Violates the enforced equality of event tag, workflow SHA, tag commit, and checkout HEAD. |
+| Build elsewhere and combine old/new artifacts | The pinned generic generator derives source identity from the caller's workflow context; it has no source-commit override. The existing bundle cannot attest new DMG digests. |
+| Upload manually, suppress aliases, or relabel newer binaries | Bypasses completeness, source identity, or isolated provenance; not an acceptable recovery. |
+
+GitHub documents [rerun identity](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+and [workflow revision selection](https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows).
+The pinned generator's [input contract](https://github.com/slsa-framework/slsa-github-generator/blob/v2.1.0/.github/workflows/generator_generic_slsa3.yml)
+and [attestation implementation](https://github.com/slsa-framework/slsa-github-generator/blob/v2.1.0/internal/builders/generic/attest.go)
+explain why a new checkout alone cannot preserve the old source identity. `upload-tag-name`
+selects a publication destination, not a provenance source. A distinct recovery builder
+would need a separately reviewed trust model and verifier policy; it is not a retry switch.
+
+After the staging fix merges, the operator should:
+
+1. Leave v0.1.2 and its existing container images/provenance untouched. Do not rerun
+   run 35540471918 or dispatch its release workflow as a way to load this fix.
+2. Prepare a separate release version PR for the next unused version (this became 0.1.4,
+   because v0.1.3 is also an immutable, failed tag and must not be reused),
+   following §§1–2 for manifests, lockfiles, changelog and release notes. Explain that
+   v0.1.2 had container publication but no complete GitHub Release. Check registry state
+   and the release interval again; do not assume any version is available.
+3. Complete the repository's merge gates and deliberate release review before merging
+   that version PR. Its new immutable tag must contain this fix and run the normal
+   pipeline, rebuilding all artifacts and generating both provenance bundles from that
+   same commit. Let both container lanes publish the new version normally.
+4. Require all site aliases, checksums, and `verify published provenance` to pass, then
+   follow §§4, 7–8 for the selected registry publication and evidence recording using
+   the new tag. Do not copy or rename v0.1.2 artifacts into the new release.
+
+For future transient failures, inspect completed publication lanes before choosing a
+targeted rerun; do not blindly republish successful lanes. Exact-tag dispatch starts the
+whole pipeline, including containers. Retain source verification, cadence, alias checks,
+and both isolated provenance dependencies in every recovery path.
+
+## 3c. v0.1.3 provenance-download failure
+
+[GPT-5] [Run 35762634287](https://github.com/sparq-org/sparq/actions/runs/35762634287)
+completed its build, container, and isolated provenance jobs, but `create GitHub Release`
+failed before publication. Both provenance downloads requested
+`needs.<job>.outputs.provenance-download-name`; the pinned SLSA generic generator v2.1.0
+exports `provenance-name` instead. With an empty `name` input, `actions/download-artifact`
+downloaded all 38 run artifacts into `assets/` as directories. `sha256sum -- *` then
+refused those directories. The GitHub Release did not exist when checked on 2026-09-26.
+
+Preserve the v0.1.3 tag and any completed containers/provenance artifacts. A rerun or
+exact-tag dispatch uses the same broken workflow and cannot import the later fix;
+rerunning all jobs also repeats completed publication lanes. Do not manually upload
+the old run's assets or mix them with a new checkout: the release's source identity,
+complete asset set, and verifier policy must agree. The workflow fix reads the
+generator's actual output and rejects missing or unexpected versioned names before
+downloading. Merge that fix separately, then release from the next unused version
+after normal review and preflight. The v0.1.3-only cadence exception does not apply.
+
 ## 4. crates.io publication
 
-<!-- [OPUS-4.8] sq-v286.1: reconciled 16 → 17 publishable crates. sparq-algos has full
-crates.io metadata and no `publish = false`, so publish.yml's `crates` job already packages
-+ attests it; it is added below as a core-only leaf (depends on sparq-core only — verified
-in crates/sparq-algos/Cargo.toml — and nothing in the workspace depends on it). -->
-**17 crates publish.** The publish order follows the dependency DAG, leaf-first (a crate's
-deps must exist on crates.io before it can be verified):
+### crates.io publish set
 
-```text
-sparq-core                      # no internal deps — first
-  ├── sparq-introspect          # core only                ┐
-  ├── sparq-reason              # core only                │ order among these
-  ├── sparq-hdt                 # core only                │ seven doesn't matter
-  ├── sparq-shacl               # core only                │
-  ├── sparq-sim                 # core only                │
-  ├── sparq-vectors             # core only                │
-  └── sparq-algos               # core only                ┘
-sparq-engine                    # core + introspect — after both
-  ├── sparq-geo                 # core + engine            ┐
-  ├── sparq-serve               # core + engine            │ order among these
-  ├── sparq-text                # core + engine            │ six doesn't matter
-  ├── sparq-rsp                 # core + engine            │
-  ├── sparq-solid               # core + engine + reason   │
-  └── sparq-nlq                 # core + engine + introspect ┘
-sparq-cli                       # core + engine + reason + hdt
-sparq-server                    # core + engine + geo + serve — last
-```
+**12 crates plus the parser fork publish.** The set is the focused core: `sparq-core`,
+`sparq-substrate`, `sparq-jsonld`, `sparq-engine-serialize`, `sparq-engine-service`,
+`sparq-engine`, `sparq-reason`, `sparq-shacl`, `sparq-hdt`, `sparq-serve`, `sparq-server`
+and `sparq-cli`. Every other workspace crate is `publish = false`. Adding a crate later is
+one new name plus one release, so the set grows deliberately rather than by dependency
+drift.
 
-Exact commands, from the repo root, on the tagged commit:
+- **Research feature edges are stripped at package time.** `sparq-server` and `sparq-cli`
+  reach research crates (ZK, trust, policy, Solid authz, terse, EL, geo, http3, text,
+  introspect) through optional features. `scripts/publish-strip.py` removes those optional
+  dependencies, every feature that needs them, and dev-dependencies on unpublished crates
+  from the packaged manifests; the published crates simply lack those features (they stay
+  available from a git build). `python3 scripts/publish-strip.py --check` prints exactly
+  what is stripped. It refuses a non-optional edge to an unpublished crate, a stripped
+  `default` feature, or one published crate enabling a stripped feature of another.
+- **The spargebra fork ships as `sparq-spargebra`.** Every sparq crate depends on
+  `spargebra = { package = "sparq-spargebra", version = "0.4.6", path = "vendor/spargebra" }`,
+  so the published crates keep the SPARQ-PATCHES.md fixes, including §8's recursion-depth
+  cap on the unauthenticated `/sparql` endpoint and §10's `MULTIPLICITY()`. (A plain
+  `spargebra = "0.4"` would silently resolve unpatched upstream on crates.io.) The library is
+  still named `spargebra`, so no source changes. It is versioned independently of the
+  workspace, sits outside release-plz's version group, and is published by hand only when
+  its own version changes. Third-party crates that name upstream `spargebra` (oxigraph in
+  the bench/differential harnesses) are routed to it through the unpublished re-export shim
+  `vendor/spargebra-shim` in `[patch.crates-io]`.
+
+### Bootstrap (first publish, from the maintainer's machine)
+
+From a clean checkout of the new tagged **v0.1.4** commit, after the recovery version PR has
+merged and the tag's release workflow is green:
 
 ```sh
-cargo publish -p sparq-core
-cargo publish -p sparq-introspect
-cargo publish -p sparq-reason
-cargo publish -p sparq-hdt
-cargo publish -p sparq-shacl
-cargo publish -p sparq-sim
-cargo publish -p sparq-vectors
-cargo publish -p sparq-algos        # [OPUS-4.8] sq-v286.1 — core-only leaf (17th publishable crate)
+python3 -m pip install --require-hashes -r .github/requirements/publish-strip.txt
+python3 scripts/publish-strip.py --with-vendored   # strip + make the fork a member
+cargo publish --workspace --dry-run --allow-dirty  # all 13 must package + verify
 
-# CHECKPOINT before sparq-engine: the crates.io package resolves UPSTREAM spargebra 0.4.6,
-# not the vendored copy (the [patch]/path override is stripped on publish). Dry-run it
-# against upstream first — it must package + compile cleanly:
-#   cargo publish --dry-run -p sparq-engine
-cargo publish -p sparq-engine
+cargo publish --allow-dirty -p sparq-spargebra
+cargo publish --allow-dirty -p sparq-core
+cargo publish --allow-dirty -p sparq-jsonld
+cargo publish --allow-dirty -p sparq-engine-serialize
+cargo publish --allow-dirty -p sparq-engine-service
+cargo publish --allow-dirty -p sparq-hdt
+cargo publish --allow-dirty -p sparq-substrate
+cargo publish --allow-dirty -p sparq-engine
+cargo publish --allow-dirty -p sparq-reason
+cargo publish --allow-dirty -p sparq-serve
+cargo publish --allow-dirty -p sparq-shacl
+cargo publish --allow-dirty -p sparq-server
+cargo publish --allow-dirty -p sparq-cli
 
-cargo publish -p sparq-geo
-cargo publish -p sparq-serve
-cargo publish -p sparq-text
-cargo publish -p sparq-rsp
-cargo publish -p sparq-solid
-cargo publish -p sparq-nlq
-cargo publish -p sparq-cli
-cargo publish -p sparq-server
+git checkout -- .   # never commit the stripped manifests
 ```
 
-- Modern cargo **waits for index propagation** after each publish, so the commands can be
-  run back-to-back; if an older cargo complains a dependency isn't found, wait ~a minute
-  and retry.
-- Dry-run any crate first with `cargo publish --dry-run -p <crate>`
-  (`--dry-run -p sparq-core` was verified for 0.1.0: packages + compiles cleanly).
-- **Not published** (`publish = false` in their manifests — `cargo publish` refuses them):
-  `sparq-bench`, `sparq-conformance`, `sparq-gpu`, `sparq-parse`, `sparq-py` (ships as
-  PyPI wheels later, see below), and `sparq-wasm` (ships via npm).
+- `--allow-dirty` is required because the stripped tree is dirty. The order is the guard's
+  derived order; `scripts/tests/test_release_publish_guard.py` checks this list against it.
+- crates.io rate-limits **new** crate names: a short burst, then roughly one new crate every
+  10 minutes ([rate limits](https://crates.io/docs/rate-limits)). Thirteen new names take
+  about an hour and a half. On a 429, wait and re-run the same line; cargo prints the
+  retry time.
+- Modern cargo waits for index propagation after each publish, so lines run back-to-back.
+- After bootstrap, register the Trusted Publisher on each of the 12 version-group crates
+  (§8c). `sparq-spargebra` does not need one while it is published by hand.
+- Crates still marked `publish = false` are outside the registry closure. In particular,
+  `sparq-py` ships through PyPI and `sparq-wasm` ships through npm.
 - Publishing is **permanent** (versions can only be yanked, not deleted/reused).
 
 > [OPUS-4.8] **Registry-publish signing (sq-jgt3 / GX-OSSF-2).** Scorecard's `Signed-Releases`
@@ -268,10 +422,10 @@ cargo publish -p sparq-server
 >   `cargo package` and attests the resulting `.crate` bytes (identical to what `cargo publish`
 >   uploads) with `actions/attest-build-provenance`. This puts **no** provenance link on the
 >   crates.io page — that needs upstream support — but a consumer who downloads the `.crate` can
->   `gh attestation verify <file> --repo jeswr/sparq`. The crates.io-native sub-gap stays **OPEN**
+>   `gh attestation verify <file> --repo sparq-org/sparq`. The crates.io-native sub-gap stays **OPEN**
 >   (external — see `compliance/openssf/gap-register.md` GX-OSSF-2 / `compliance/gap-register.md`
 >   GX-10). Do **not** describe a crates.io publish as "signed".
-> - **npm `@jeswr/sparq` — native Sigstore provenance** via [`publish.yml`](../.github/workflows/publish.yml)'s
+> - **npm `@sparq-org/sparq` — native Sigstore provenance** via [`publish.yml`](../.github/workflows/publish.yml)'s
 >   `npm` job. [OPUS-4.8] sq-v286.11: the job now authenticates with **OIDC trusted publishing**
 >   (no `NPM_TOKEN`) — npm exchanges the GitHub Actions OIDC token for a short-lived publish
 >   credential and records the Sigstore-signed provenance automatically; consumers verify with
@@ -304,18 +458,18 @@ override the entrypoint defaults — the server's arg parser is last-wins).
 `packaging/homebrew/sparq.rb` is a **formula template**; Homebrew installs from a tap, which
 is a separate repo decision. To ship it:
 
-1. Create the tap repo `jeswr/homebrew-sparq` (one-time).
+1. Create the tap repo `sparq-org/homebrew-sparq` (one-time).
 2. After the GitHub Release exists, copy the template to `Formula/sparq.rb` in the tap,
    set `version`, and replace each `REPLACE_WITH_SHA256_<tier>` with the matching line from
    the release's `SHA256SUMS` asset (tiers used: `arm64-darwin`, `x64-darwin`,
    `arm64-linux`, `x64-v2`).
-3. `brew install jeswr/sparq/sparq` then `brew test sparq` to verify.
+3. `brew install sparq-org/sparq/sparq` then `brew test sparq` to verify.
 
 Users get `sparq-cli` plus a `sparq` symlink on PATH.
 
 ## 7. Post-release
 
-- Check the release page artifacts + `SHA256SUMS`, `docker run ghcr.io/jeswr/sparq-server:X.Y.Z`,
+- Check the release page artifacts + `SHA256SUMS`, `docker run ghcr.io/sparq-org/sparq-server:X.Y.Z`,
   and the crates.io pages render the README.
 - **Confirm the isolated-builder provenance verified** (issue #4571 / GX-11 / SL-B3-b). After the
   Release is cut, `release.yml`'s `verify-provenance` job calls
@@ -356,46 +510,19 @@ Users get `sparq-cli` plus a `sparq` symlink on PATH.
   `## [Unreleased]` section in `CHANGELOG.md`.
 
 <!-- [OPUS-4.8] release publishing tracked: bead sq-7re (wheels matrix). PyPI name resolved by sq-8slf (was sq-ed5). -->
-## Python wheels (PyPI) — release publishing not yet wired (bead `sq-7re`)
+## Python wheels (PyPI) — wired through Trusted Publishing
 
 `crates/sparq-py` packages the engine as the PyPI distribution **`sparq-rdf`** with the
 import name **`sparq`** (`pip install sparq-rdf`, then `import sparq`) — pyo3 + maturin,
-`abi3-py39` so one wheel per platform covers CPython ≥ 3.9. CI builds and tests it
-informationally on pushes to main (`.github/workflows/python.yml`); release publishing is
-**not** wired. To ship wheels with a release later:
+`abi3-py39` so one wheel per platform covers CPython ≥ 3.9.
 
-1. PyPI **distribution** name — **done** (`sq-8slf`, owner-approved). The bare `sparq`
-   distribution name is **taken** by an unrelated package (see §0a), so the
-   `[project] name` in `crates/sparq-py/pyproject.toml` — i.e. the **PyPI project /
-   distribution** name, the `pip install <dist>` name — is **`sparq-rdf`**. The
-   **import/module** name is kept as `sparq` (it comes from the cdylib `[lib] name` + the
-   `#[pymodule] fn sparq`); because the distribution and module names differ,
-   `[tool.maturin] module-name = "sparq"` pins the import name (otherwise maturin would
-   normalise the distribution name to `sparq_rdf`). Net: users `pip install sparq-rdf` but
-   still `import sparq`. (Only the PyPI distribution name was contested — not the import
-   module, not any crate name.)
-2. Add a wheels job to `release.yml` using `PyO3/maturin-action` with a platform
-   matrix (manylinux x86_64/aarch64, macOS arm64/x64, Windows x64), each step:
-   `command: build`, `args: --manifest-path crates/sparq-py/Cargo.toml --profile
-   python-release --out dist` (the `python-release` profile keeps unwinding panics —
-   the default `release` profile's `panic = "abort"` would hard-abort the interpreter
-   on any Rust panic).
-3. Publish with `maturin upload` (or `pypa/gh-action-pypi-publish` + trusted
-   publishing) gated on the `v*` tag, mirroring the cargo/crates.io flow above.
+The bare `sparq` distribution name is taken (see §0a), so `[project].name` is `sparq-rdf`.
+`[tool.maturin].module-name = "sparq"` deliberately preserves the Python import name.
 
-> [OPUS-4.8] **Update (sq-toze.37 / GX-10): the PyPI publish lane is now WIRED** in
-> [`.github/workflows/publish.yml`](../.github/workflows/publish.yml) — jobs `pypi-build`
-> (maturin matrix: manylinux x86_64/aarch64, macOS arm64/x64, Windows x64), `pypi-sdist`,
-> and `pypi-publish` (uploads via PyPI **Trusted Publishing** with native **PEP-740
-> attestations** — `pypa/gh-action-pypi-publish` `attestations: true` + OIDC `id-token: write`,
-> GitHub `environment: pypi`). It fires on `release: published` or `workflow_dispatch` with
-> `publish_pypi: true`. **One maintainer prerequisite remains** (it cannot be a repo file): on
-> the `sparq-rdf` PyPI project, register a **Trusted Publisher** — owner `jeswr`, repo `sparq`,
-> workflow `publish.yml`, environment `pypi` (PyPI → project → *Publishing* → *Add a pending /
-> published publisher*). Until that one-time PyPI-account step is done the upload step correctly
-> fails to mint an OIDC token (no static API token is stored). Once registered, every published
-> release emits native PyPI provenance (the "Provenance" panel on the release-files page;
-> consumers verify with `pypi-attestations verify` / `gh attestation verify`).
+[`publish.yml`](../.github/workflows/publish.yml) builds manylinux x86_64/aarch64,
+macOS arm64/x64, and Windows x64 wheels plus an sdist, then publishes through PyPI OIDC
+Trusted Publishing with native PEP-740 attestations. The only remaining prerequisite is
+the pending publisher registration in §8b; no manual PyPI bootstrap upload is needed.
 
 <!-- [OPUS-4.8] sq-v286.11 (maintainer #758): CI publishing via OIDC trusted publishing. -->
 ## 8. CI publishing — OIDC trusted publishers (the one-time `needs:user` registry-side steps)
@@ -410,22 +537,29 @@ stored**. Honest bootstrap note: **npm and crates.io require the package/crate t
 (register the trusted publisher *after* one manual bootstrap publish); **PyPI supports a *pending*
 publisher** so the very first publish can be trusted-publishing too.
 
-### 8a. npm `@jeswr/sparq` — WIRED (`publish.yml` `npm` job)
+### 8a. npm packages under `@sparq-org` — WIRED
 
-The `npm` job authenticates entirely via OIDC trusted publishing (no `NODE_AUTH_TOKEN`). It pins
+The primary `npm` job authenticates entirely via OIDC trusted publishing (no `NODE_AUTH_TOKEN`). It pins
 `npm@^11.5.1` (the trusted-publishing CLI floor — Node 22's bundled npm can be older) and keeps
 `--provenance --access public`.
 
-**needs:user (npmjs.com):** `@jeswr/sparq` must already exist on npm, so:
-1. ONE bootstrap publish with a short-lived **granular** access token (delete the token after).
-2. npmjs.com → `@jeswr/sparq` → **Settings → Trusted Publisher** → *GitHub Actions*:
-   - Organization or user: **`jeswr`**
+`@sparq-org/sparq` and `@sparq-org/solid-server` already exist at 0.1.1. Their manual
+bootstrap is complete; **do not run it again or try to republish those versions**.
+Before the 0.1.4 release, verify the remaining registry-side configuration:
+
+1. Confirm the `sparq-org` npm organization and the publisher's package-creation rights.
+2. Confirm any bootstrap granular token has been removed.
+3. On each package's **Settings → Trusted Publisher → GitHub Actions**, configure:
+   - Organization or user: **`sparq-org`**
    - Repository: **`sparq`**
    - Workflow filename: **`publish.yml`** (filename only, with extension — **not** a path)
    - Environment: **leave blank** (the `npm` job uses no GitHub Environment)
    - Allowed actions: **`npm publish`**
 
-Every subsequent CI publish is tokenless and provenance-bearing (`npm audit signatures`).
+`@sparq-org/eyereasoner-compat` already exists at 0.1.0, so it only needs its Trusted
+Publisher checked. Subsequent CI publishes use the exact-tag command in §2 and verify
+registry provenance (`npm audit signatures`). The bootstrap versions themselves remain
+unattested; configuring Trusted Publishing now does not add attestations to old versions.
 
 ### 8b. PyPI `sparq-rdf` — WIRED (`publish.yml` `pypi-publish` job)
 
@@ -435,13 +569,13 @@ Already implemented to current best practice: `pypa/gh-action-pypi-publish` with
 **needs:user (pypi.org):** PyPI → (project `sparq-rdf` if it exists, else *Your projects → Publishing*
 for a **pending** publisher) → **Add a new publisher** → *GitHub*:
    - PyPI Project Name: **`sparq-rdf`**
-   - Owner: **`jeswr`**, Repository: **`sparq`**
+   - Owner: **`sparq-org`**, Repository: **`sparq`**
    - Workflow name: **`publish.yml`**
    - Environment: **`pypi`** (matches the `pypi-publish` job's `environment:`)
 
 Because PyPI allows a *pending* publisher, no manual bootstrap upload is required.
 
-### 8c. crates.io (17 crates) — CI side PRE-WIRED, flip is one config change (`release-plz.yml` + `release-plz.toml`)
+### 8c. crates.io (12 crates) — CI side PRE-WIRED, flip follows the bootstrap
 
 crates.io Trusted Publishing (GA 2025-07, RFC 3691) supplies a short-lived OIDC token via
 `rust-lang/crates-io-auth-action` — no `CARGO_REGISTRY_TOKEN`. The CI side is pre-wired as a
@@ -449,17 +583,20 @@ commented block on `release-plz.yml`'s `release-plz-release` job; `release-plz.t
 `publish = false` until the trust config exists (so a `publish=true` with no credential can't break
 tag-cutting). This is the "config-flip" the design record (§6 item 4) calls "the point of adoption".
 
-**needs:user (crates.io), per the 17 publishable crates (`docs/release.md` §4 DAG), leaf-first:**
-1. ONE bootstrap `cargo publish` per crate (crates.io requires each crate to already exist).
+**needs:user (crates.io), per the 12 publishable crates (`docs/release.md` §4), leaf-first:**
+1. ONE bootstrap `cargo publish` per crate (crates.io requires each crate to already exist; §4 "Bootstrap").
 2. For **each** crate: crates.io → crate → **Settings → Trusted Publishing → Add** → *GitHub*:
-   - Repository owner: **`jeswr`**, Repository name: **`sparq`**
+   - Repository owner: **`sparq-org`**, Repository name: **`sparq`**
    - Workflow filename: **`release-plz.yml`**
    - Environment: **leave blank** (the `release-plz-release` job uses no GitHub Environment)
 
 **Then flip (three coordinated edits):**
 - `release-plz.yml`: uncomment `id-token: write`, the `rust-lang/crates-io-auth-action` step
   (SHA-pinned `c6f97d4…` # v1.0.5), and the `CARGO_REGISTRY_TOKEN: ${{ steps.cratesio-auth.outputs.token }}` env.
-- `release-plz.toml`: set `publish = true`.
+- `release-plz.toml`: set `publish = true` and `git_only = false` together.
+- `release-plz.yml`: before `release-plz release` (and after the interval guard), run
+  `python3 -m pip install --require-hashes -r .github/requirements/publish-strip.txt && python3 scripts/publish-strip.py` so
+  release-plz packages the stripped manifests (`allow_dirty = true` is already set).
 - `publish.yml`'s `crates` job then reverts to attest-only over the `.crate` bytes (release-plz
   becomes the publisher; the out-of-band attestation stays as the verifiable-bytes evidence).
 
@@ -469,20 +606,47 @@ tag-cutting). This is the "config-flip" the design record (§6 item 4) calls "th
 
 ### 8d. Publish-rate protections (issues #1135, #2552) — what stops a runaway release
 
-**The policy: at most one release per day.** `MIN_RELEASE_INTERVAL` in
+**The normal policy: at most one release per day.** `MIN_RELEASE_INTERVAL` in
 `scripts/release-interval-guard.py` is the single constant that states it (24h), and it is
 enforced at **both** points a release can start — the Release-PR path (`release-plz.yml`)
-and the `v*` tag push (`release.yml`). There is no override flag: releasing inside the
-window is done by hand, deliberately.
+and the `v*` tag push (`release.yml`). There is no override flag or environment escape.
+
+[GPT-6] **One maintainer-authorized exception, PR #6573:** the complete-release
+candidate v0.1.3 may recover the incomplete v0.1.2 attempt inside that interval.
+The exception is fixed in code and requires every condition below, re-read on both
+the release-plz pre-tag path and `release.yml`'s tag-push path:
+
+- Workspace version is exactly `0.1.3`; an explicit released tag must be `v0.1.3`.
+  Before tag creation, that target must be absent locally and remotely. On tag push,
+  it must exist locally and remotely with matching object/commit, dated no earlier
+  than the predecessor and no later than the current clock.
+- Full local history identifies v0.1.2 as the newest predecessor, created at
+  `2026-09-20T22:03:11Z`, with annotated tag object
+  `05efded769a745d5b0e8d6d076425c171732ab1d` and commit
+  `4b37254efe502f8a0aeba36076130ed9b44853ef`.
+- The canonical GitHub repository's entire `v*` tag inventory must match the pinned
+  four historical tags and their seven object/peeled records, plus only v0.1.3 on
+  its tag-push path. Missing, changed, extra or even backdated new tags refuse.
+  Local tag names must match that inventory; future timestamps refuse.
+- Every publishable crate must return a definitive crates.io **404**. Any registry
+  publication, even an old one, or a 200 response with an empty/malformed versions
+  list invalidates recovery. Unreadable Git state or indeterminate HTTP reads refuse.
+
+`MIN_RELEASE_INTERVAL` remains 24 hours for v0.1.4 and every other version. The
+already-tagged release-plz no-op remains a no-op, not an exception-based publication.
+The rationale is to build the corrected source under a new identity without mutating
+or rerunning v0.1.2 or its completed containers. No source/provenance/alias check is
+relaxed. A partial crates.io bootstrap invalidates this recovery path: inspect any
+failed publication before retrying. Do not broaden the predicate to make it pass.
 
 **A crates.io version can never be unpublished.** Four protections stand between an
 automated pipeline and the registry. All four are already in place; none of them is what
 you flip.
 
 1. **The Release PR can never be armed.** `scripts/release_pr_guard.py` is the single
-   predicate every arming/merging path consults — `auto-arm.py`, `rearm-sweeper.py`, the
-   `check-pr-arm-base.py` PreToolUse hook (which is where agent-typed `gh pr merge --auto`
-   goes), `batch-merge.py`, `pr-backlog.py`. It keys on **head branch, author and title —
+   predicate the arming path consults — the `check-pr-arm-base.py` PreToolUse hook (which
+   is where agent-typed `gh pr merge --auto` goes; the automated arm/merge sweeps were
+   removed). It keys on **head branch, author and title —
    never a label**, because anything holding `pull-requests: write` can add or remove a
    label. Adding `review:pass` to the Release PR does not make it armable. It fails closed:
    an unknown head branch refuses rather than admits. The Release PR is merged by a
@@ -503,7 +667,8 @@ you flip.
    crates.io publication)`. It refuses on any indeterminacy — shallow checkout, unreadable
    tag list, unparseable date, unreachable crates.io, a future-dated last release. A
    definitive crates.io 404 is the only accepted "never published" answer. There is no
-   override flag: publishing inside the window is done by hand, consciously.
+   override flag; only the fixed v0.1.3 recovery evidence above can admit a shorter
+   interval. Ordinary publication still requires the full 24 hours.
 3. **The same interval, on the tag-push path** (issue #2552). Protection 2 only covers
    releases that go through the Release PR. §3's canonical instruction — push a `vX.Y.Z`
    tag — fires `release.yml` **directly**, which was previously uncadenced: a hand-pushed
@@ -518,20 +683,21 @@ you flip.
    against the *previous* release. It refuses if handed anything that is not a `vX.Y.Z`
    tag.
 
-   It is **unconditional** — `workflow_dispatch` builds are guarded too. They look like a
-   developer/test path (pre-release, `dev-`-prefixed image tags), but the Release they
-   create fires `release: published`, and `publish.yml`'s `npm` job runs on *any* `release`
-   event, so a dispatch reaches a registry as well. Two consequences: `inputs.tag` on a
-   dispatch **must** be a `vX.Y.Z` tag (a `-dev` suffix is fine), and the unbounded way to
-   exercise the pipeline is a local build, not a dispatch.
+   It is **unconditional** — `workflow_dispatch` builds are guarded too because they
+   publish Release assets and container images. GitHub suppresses the downstream release
+   event when these assets are published with `GITHUB_TOKEN`; registry uploads then need
+   the separate explicit package dispatch. Both workflows require an exact existing tag,
+   matching checkout commit and manifest versions. A `-dev` tag also needs matching
+   prerelease manifest versions; untagged experiments belong in local builds.
    `scripts/tests/test_release_publish_guard.py` pins the step's `run:`, that it carries
    no `if:` and no `continue-on-error`, the `fetch-depth: 0` checkout it depends on, and
    that no job in `release.yml` escapes `setup`.
-4. **Version-group coverage.** The same guard refuses when a crate cargo *would* publish is
-   absent from `release-plz.toml`'s `version_group` — release-plz would version it
-   independently of the locked workspace version and publish it anyway, so what ships would
-   not be what the config describes. While `publish = false` this is a loud warning; it
-   becomes a hard refusal on the flip.
+4. **Version-group and registry-closure coverage.** The same guard validates all 12 crates,
+   refuses a public crate with a non-optional edge to an unpublished workspace member (optional
+   and dev edges are stripped by `scripts/publish-strip.py`) or one lacking a registry
+   version requirement, and reports any publishable crate absent from the locked
+   `version_group`. Version-group drift is a warning while `publish = false` and a hard
+   refusal after the flip; an invalid dependency closure always refuses.
 
 See what would be published, without touching anything:
 
@@ -542,15 +708,20 @@ python3 scripts/release-interval-guard.py --dry-run
 It prints the publishable crate list, each version, the dependency-first publish order and
 the cadence verdict it *would* return. It only ever runs `git`, never `cargo`.
 
-> **Open item blocking the flip.** As measured by `--dry-run` on 2026-07-26, **26** crates
-> are cargo-publishable (no `publish = false`) while only **17** are in the `version_group`.
-> The nine outside it are `sparq-arrow`, `sparq-fedplan`, `sparq-forms`, `sparq-mcp`,
-> `sparq-reason-el`, `sparq-reason-ql`, `sparq-shaclc`, `sparq-substrate`, `sparq-wrapper`.
-> Each needs a decision: add a `[[package]]` entry with `version_group = "sparq"` (it ships),
-> or set `publish = false` in its `Cargo.toml` (it does not). The "17 crates" figure in §8c
-> and §0a describes the version_group, not cargo's publishable set.
+> **Closure reconciliation:** the publish set was cut from 37 crates to 12 (plus the
+> `sparq-spargebra` fork) before the first crates.io publish (§4 "crates.io publish set").
+> Re-run the guard on the release commit: it must report those 12, and its printed
+> dependency-first order is the exact bootstrap order in §4; any mismatch blocks the
+> crates.io flip.
 
-### 8e. release-plz forge token — one `needs:user` secret unblocks the Release-PR (issue #3273)
+### 8e. release-plz forge token — configured and verified (issue #3273)
+
+For the first complete release, the checked-in v0.1.4 recovery version PR replaces the generated
+Release-PR because `release-plz update` cannot package the unpublished dependency closure.
+The privileged forge token below is still required **before that PR merges**: the
+`release-plz release` job uses it to push `v0.1.4` as a normal actor so the tag starts
+`release.yml`. Once the 13-name crates.io bootstrap (§4) and post-bootstrap config flip are complete,
+the same token also restores normal generated Release-PRs.
 
 `release-plz.yml` cannot open the Release-PR with the workflow's own `GITHUB_TOKEN`: the
 repo/org setting **Settings → Actions → General → "Allow GitHub Actions to create and approve
@@ -568,9 +739,16 @@ App token (ORCHESTRATOR_APP_ID + ORCHESTRATOR_APP_PRIVATE_KEY)  ← preferred
   || GITHUB_TOKEN          (fallback; cannot open PRs while the setting is disabled)
 ```
 
-**needs:user — do exactly one:**
+**Historical verification, 2026-08-31:** `ORCHESTRATOR_APP_ID` and
+`ORCHESTRATOR_APP_PRIVATE_KEY` were present, and run `33434042300` successfully minted the
+App token in both the Release-PR and tag jobs. Reconfirm that the App credentials still mint
+a token before merging the v0.1.4 version PR; no PAT or Actions-setting change is needed
+when that probe succeeds.
+
+**Recovery if that App credential is removed or expires — do exactly one:**
 1. Provision `ORCHESTRATOR_APP_ID` + `ORCHESTRATOR_APP_PRIVATE_KEY` (the App used by
-   `batch-merge.yml`; install it on this repo with contents + pull-requests write), **or**
+   `release-plz.yml`'s token mint; install it on this repo with contents + pull-requests
+   write), **or**
 2. add a `RELEASE_PLZ_TOKEN` repo secret (fine-grained PAT, same two permissions), **or**
 3. enable the repo setting above.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] issue #3811 — the NAMED both-direction + wiring test for the banned-terminology
+# issue #3811 — the NAMED both-direction + wiring test for the banned-terminology
 # HARD gate (scripts/check-terminology.py + scripts/banned-terminology.json).
 #
 # WHY THIS EXISTS: 98 occurrences of a maintainer-banned term reached PR #3451 as a `pub`

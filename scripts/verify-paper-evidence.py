@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-gum8.13 (epic sq-gum8, paper factory F1) — the fail-closed
+# sq-gum8.13 (epic sq-gum8, paper factory F1) — the fail-closed
 # EVIDENCE-BINDING verifier for the academic paper factory.
 #
 # WHAT (design record research/paper-factory-2026-07.md §3.1, option (c) tiered bindings):

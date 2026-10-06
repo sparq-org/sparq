@@ -50,7 +50,7 @@ pub fn explain(graph: &Graph, sparql: &str) -> Result<String, String> {
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+    let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     let (form, pattern) = query_form_pattern(&q);
     let mut out = String::new();
     let _ = writeln!(out, "EXPLAIN ({form}) — planning-only dry run; nothing is executed.");
@@ -78,7 +78,7 @@ pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBu
     let active = crate::active_dataset(graph, &q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = crate::view_scope(&active);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+    let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     let (form, pattern) = query_form_pattern(&q);
     if !matches!(q, Query::Select { .. } | Query::Ask { .. }) {
         return Err("EXPLAIN ANALYZE supports SELECT and ASK queries only (use EXPLAIN for CONSTRUCT/DESCRIBE)".into());
@@ -90,27 +90,28 @@ pub fn explain_analyze_with_budget(graph: &Graph, sparql: &str, budget: &QueryBu
     render_pattern(graph, pattern, &mut out, 1)?;
 
     // Execute under the budget with the operator trace installed.
-    let _bguard = exec::budget::install(budget);
-    let _tguard = exec::trace::install();
-    #[cfg(not(target_arch = "wasm32"))]
-    let start = std::time::Instant::now();
-    let total_rows = match &q {
-        Query::Select { pattern, .. } => exec::eval_select(graph, pattern)?.rows.len(),
-        Query::Ask { pattern, .. } => usize::from(exec::eval_ask(graph, pattern)?),
-        _ => unreachable!(),
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let total_nanos = start.elapsed().as_nanos() as u64;
-    #[cfg(target_arch = "wasm32")]
-    let total_nanos = 0u64;
-    let nodes = exec::trace::take();
+    exec::budget::with_budget(budget, || {
+        let _tguard = exec::trace::install();
+        #[cfg(not(target_arch = "wasm32"))]
+        let start = std::time::Instant::now();
+        let total_rows = match &q {
+            Query::Select { pattern, .. } => exec::eval_select(graph, pattern)?.rows.len(),
+            Query::Ask { pattern, .. } => usize::from(exec::eval_ask(graph, pattern)?),
+            _ => unreachable!(),
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let total_nanos = start.elapsed().as_nanos() as u64;
+        #[cfg(target_arch = "wasm32")]
+        let total_nanos = 0u64;
+        let nodes = exec::trace::take();
 
-    let _ = writeln!(out, "Execution trace (operator → output rows, wall time):");
-    for n in &nodes {
-        let _ = writeln!(out, "{}{}  rows={}  time={}", indent(n.depth + 1), n.label, n.rows, fmt_nanos(n.nanos));
-    }
-    let _ = writeln!(out, "Total: {} result row(s) in {}", total_rows, fmt_nanos(total_nanos));
-    Ok(out)
+        let _ = writeln!(out, "Execution trace (operator → output rows, wall time):");
+        for n in &nodes {
+            let _ = writeln!(out, "{}{}  rows={}  time={}", indent(n.depth + 1), n.label, n.rows, fmt_nanos(n.nanos));
+        }
+        let _ = writeln!(out, "Total: {} result row(s) in {}", total_rows, fmt_nanos(total_nanos));
+        Ok(out)
+    })
 }
 
 fn query_form_pattern(q: &Query) -> (&'static str, &GraphPattern) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-hoaj — orphan-proof EC2 harness for the MPC heavy/ceiling matrix
+# sq-hoaj — orphan-proof EC2 harness for the MPC heavy/ceiling matrix
 # (PLAN.md M6 "Network tiers", the sq-hoaj OPEN slice).
 #
 # WHAT IT RUNS. The Tier-3 (netem-shaped) sweep of the ceiling matrix on a single
@@ -429,7 +429,7 @@ esac
 BRANCH="$1"
 REGION="${2:-${AWS_REGION:-eu-west-2}}"
 ITYPE="${MPC_ITYPE:-c7g.2xlarge}"            # 8 vCPU arm64 — the driver spawns N party procs
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 TAGSPEC='ResourceType=instance,Tags=[{Key=purpose,Value=sparq-bench}]'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

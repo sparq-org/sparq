@@ -42,7 +42,7 @@ Three independent implementations are wired as consumers in-repo:
 
 - `packages/rdfjs-conformance/test/n3-parity.test.mjs` — N3.js `DataFactory` + `Store`, and
   `@rdfjs/dataset` (`DatasetCore`-only, algebra skipped).
-- `js/test/rdfjs-conformance.test.mjs` — `@jeswr/sparq`, exercising all three runners including
+- `js/test/rdfjs-conformance.test.mjs` — `@sparq-org/sparq`, exercising all three runners including
   Stream/Source/Sink.
 - CI runs both: `.github/workflows/js.yml:119-132` (`npm test` at the root, then `npm run typecheck
   && npm test` in `packages/rdfjs-conformance`).
@@ -162,7 +162,7 @@ self-identification, Why before What, @jeswr as the review gate, explicitly not-
 > - **Zero runtime dependencies**; MIT; Node >= 18.
 >
 > It currently runs green against **N3.js** (DataFactory + Store), **`@rdfjs/dataset`**
-> (`DatasetCore`-only, algebra skipped), and **`@jeswr/sparq`** (all three surfaces).
+> (`DatasetCore`-only, algebra skipped), and **`@sparq-org/sparq`** (all three surfaces).
 >
 > **What we're asking:**
 >
@@ -182,10 +182,10 @@ self-identification, Why before What, @jeswr as the review gate, explicitly not-
 None of this is done yet; it is the follow-on work, to be cut as beads when a decision arrives.
 
 - `package.json`: `private: false`, the settled name, and `repository` repointed off
-  `jeswr/sparq`.
+  `sparq-org/sparq`.
 - Attribution/licence: MIT is already compatible, but carry the copyright line explicitly into the
   transferred package rather than relying on this repo's root `LICENSE`.
-- README: strip the sparq-specific framing (the "candidate contribution" banner, the `@jeswr/sparq`
+- README: strip the sparq-specific framing (the "candidate contribution" banner, the `@sparq-org/sparq`
   quickstart as the *second* example) and lead with a neutral implementation.
 - CI: the harness's own parity suite (`test/n3-parity.test.mjs`) moves with it; sparq keeps only
   `js/test/rdfjs-conformance.test.mjs`, retargeted at the published package.

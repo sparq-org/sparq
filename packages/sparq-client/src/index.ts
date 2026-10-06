@@ -21,7 +21,7 @@
 // design's load-bearing "part (A) transfers" property.
 //
 // It does NOT re-implement the engine. `loadSparq()` fetches the same wasm-pack glue the
-// site already syncs into `public/wasm/` (the lean `@jeswr/sparq` bundle, built with
+// site already syncs into `public/wasm/` (the lean `@sparq-org/sparq` bundle, built with
 // `--features shacl,jsonld`), so this stays a thin, honest wrapper. No performance claim is
 // made anywhere here (this repo's work box is non-canonical); a caller MAY time a single
 // query with `performance.now()` and label it as a measured per-query latency, but must
@@ -101,11 +101,99 @@ export interface WasmModule {
 // SPARQL 1.1 JSON + SHACL report shapes (for rendering).
 // ---------------------------------------------------------------------------
 
-export interface SparqlTerm {
+/**
+ * An IRI, blank node or literal in SPARQL-JSON form (`value` is the decoded lexical form).
+ * A literal with an RDF 1.2 base direction carries the bare tag in `xml:lang` and the
+ * direction (`ltr` / `rtl`) in `its:dir`, as SPARQL 1.2 Query Results JSON does.
+ */
+export interface SparqlAtomicTerm {
   type: "uri" | "literal" | "bnode";
   value: string;
   datatype?: string;
   "xml:lang"?: string;
+  "its:dir"?: string;
+}
+
+/** A literal's language suffix with its base direction: `en`, or `en--ltr` for `its:dir`. */
+function langTag(t: SparqlAtomicTerm): string | undefined {
+  const lang = t["xml:lang"];
+  if (!lang) return undefined;
+  const dir = t["its:dir"];
+  return dir ? `${lang}--${dir}` : lang;
+}
+
+/**
+ * An RDF 1.2 triple term in SPARQL 1.2 Query Results JSON form:
+ * `{"type":"triple","value":{"subject":…,"predicate":…,"object":…}}`. The engine emits this
+ * for a `<<( s p o )>>` binding, so `value` is NOT a string: narrow on `type` (or use
+ * {@link isTripleTerm}) before reading it.
+ */
+export interface SparqlTripleTerm {
+  type: "triple";
+  value: { subject: SparqlTerm; predicate: SparqlTerm; object: SparqlTerm };
+  datatype?: undefined;
+  "xml:lang"?: undefined;
+  "its:dir"?: undefined;
+}
+
+/** One SPARQL-JSON term: an IRI / blank node / literal, or an RDF 1.2 triple term. */
+export type SparqlTerm = SparqlAtomicTerm | SparqlTripleTerm;
+
+/** True when `t` is an RDF 1.2 triple term (whose `value` is a nested triple). */
+export function isTripleTerm(t: SparqlTerm): t is SparqlTripleTerm {
+  return t.type === "triple";
+}
+
+/**
+ * A term's plain string value: the lexical form / IRI / blank-node label for an atomic term,
+ * or the N-Triples `<<( s p o )>>` form for a triple term (which has no single lexical value).
+ * `undefined` for an unbound variable.
+ */
+export function termValue(t: SparqlTerm | undefined): string | undefined {
+  if (!t) return undefined;
+  return t.type === "triple" ? termToNTriples(t) : t.value;
+}
+
+const XSD_STRING_IRI = "http://www.w3.org/2001/XMLSchema#string";
+
+function escapeNTriplesString(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r");
+}
+
+/**
+ * Serialises one SPARQL-JSON term to its N-Triples / N-Quads token, including an RDF 1.2
+ * triple term as `<<( s p o )>>`. The single shared term writer: every N-Triples/N-Quads
+ * snapshot built from SPARQL-JSON bindings should route through this so a new term kind
+ * cannot be silently dropped by one writer. A literal's lexical form is escaped the way the
+ * engine's own serialiser does (backslash, double-quote, LF, CR); `xsd:string` is implicit;
+ * an RDF 1.2 base direction (`its:dir`) is kept as `@lang--dir`.
+ */
+export function termToNTriples(t: SparqlTerm): string {
+  switch (t.type) {
+    case "uri":
+      return `<${t.value}>`;
+    case "bnode":
+      return `_:${t.value}`;
+    case "triple": {
+      const { subject, predicate, object } = t.value;
+      return `<<( ${termToNTriples(subject)} ${termToNTriples(predicate)} ${termToNTriples(object)} )>>`;
+    }
+    case "literal": {
+      const quoted = `"${escapeNTriplesString(t.value)}"`;
+      const lang = langTag(t);
+      if (lang) return `${quoted}@${lang}`;
+      if (t.datatype && t.datatype !== XSD_STRING_IRI) return `${quoted}^^<${t.datatype}>`;
+      return quoted;
+    }
+    default: {
+      const unknown: never = t;
+      throw new Error(`termToNTriples: unsupported SPARQL-JSON term ${JSON.stringify(unknown)}`);
+    }
+  }
 }
 
 export interface SparqlResults {
@@ -451,7 +539,7 @@ function matchSelect(
 
 /**
  * RDF/JS `match()`-style quad lookup over a wasm {@link WasmStore}, the same generated-SELECT
- * strategy `@jeswr/sparq`'s `SparqStore.match` uses: each of subject/predicate/object/graph
+ * strategy `@sparq-org/sparq`'s `SparqStore.match` uses: each of subject/predicate/object/graph
  * is either a wildcard (a fresh `?s`/`?p`/`?o`/`?g` variable) or an inlined constant
  * N-Triples term. The graph wildcard spans the default graph AND every named graph. Returns
  * the matching rows as SPARQL-JSON bindings.
@@ -470,7 +558,7 @@ export function matchQuads(
 /**
  * `match(…).length` without materialising the matched terms, via the engine's index-level
  * {@link WasmStore.count} (the count of a generated SELECT over the same pattern
- * {@link matchQuads} builds). This is `countQuads()` in `@jeswr/sparq`.
+ * {@link matchQuads} builds). This is `countQuads()` in `@sparq-org/sparq`.
  */
 export function countQuads(
   store: WasmStore,
@@ -494,7 +582,7 @@ export interface CursorBatch {
 
 /**
  * Stream a SELECT query's rows one BATCH at a time through the wasm `queryCursor` cursor
- * (mirrors `@jeswr/sparq`'s `queryBindingsStream`): pull a batch of up to `batchSize`
+ * (mirrors `@sparq-org/sparq`'s `queryBindingsStream`): pull a batch of up to `batchSize`
  * self-contained SPARQL-JSON rows, hand it to `onBatch`, drop it, pull the next — so the
  * consumer never holds more than one batch. Returns the cursor's introspection (`vars`,
  * `rowCount`, `batchSize`) once drained. The wasm cursor is always freed, even if `onBatch`
@@ -888,7 +976,10 @@ export {
 export {
   type DatasetCompressionCodec,
   type DecompressedDatasetBytes,
+  datasetCodecFromContentType,
+  datasetCodecFromName,
   decompressDatasetBytes,
+  sniffDatasetCodec,
 } from "./decompress.js";
 
 /** Renders a term for display, with a compact datatype/lang suffix. */
@@ -896,7 +987,12 @@ export function formatTerm(t: SparqlTerm | undefined): string {
   if (!t) return "";
   if (t.type === "uri") return `<${t.value}>`;
   if (t.type === "bnode") return `_:${t.value}`;
-  if (t["xml:lang"]) return `"${t.value}"@${t["xml:lang"]}`;
+  if (t.type === "triple") {
+    const { subject, predicate, object } = t.value;
+    return `<<( ${formatTerm(subject)} ${formatTerm(predicate)} ${formatTerm(object)} )>>`;
+  }
+  const lang = langTag(t);
+  if (lang) return `"${t.value}"@${lang}`;
   if (t.datatype && t.datatype !== "http://www.w3.org/2001/XMLSchema#string") {
     const short = t.datatype.replace("http://www.w3.org/2001/XMLSchema#", "xsd:");
     return `"${t.value}"^^${short}`;

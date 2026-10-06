@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Empirical benchmark-noise threshold deriver (noise-reduction-bench-selfmonitor).
+# Empirical benchmark-noise threshold deriver (noise-reduction-bench-selfmonitor).
 #
 # WHY — the benchmark self-monitoring two-zone design (maintainer-directed). The per-PR /
 # merge github-action-benchmark step compares each metric's current value against the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] Hermetic self-tests for the SENTINEL PROTOCOL of
+# Hermetic self-tests for the SENTINEL PROTOCOL of
 # scripts/bench/canonical-beir-gather-instance.sh (PR #3488 review round 1).
 #
 # WHY: the gather deliberately WARN-and-continues past provisioning/build/per-cut

@@ -1,152 +1,71 @@
 name: Benchmarks
 
-# Cross-commit performance tracking (roadmap G2). On every push to main, run the engine over a
-# synthetic dataset, emit per-subsystem latencies, and store them with github-action-benchmark so
-# the trend is graphed across commits and a large regression raises an alert/comment. Runs on free
-# GitHub-hosted runners (no EC2 → no cost). Heavy/long benches that need real hardware are in the
-# separate cost-capped bench-ec2.yml (G3).
+# Cross-commit performance tracking. On every push to main, run the engine over a synthetic
+# dataset, emit per-subsystem latencies, and store them with github-action-benchmark so the
+# trend is graphed across commits and a large regression raises an alert/comment. Runs on free
+# GitHub-hosted runners. Heavy/long benches that need real hardware are in the separate,
+# manual-dispatch bench-ec2.yml.
 #
-# [OPUS-4.8] Also runs on pull_request so contributors get perf feedback BEFORE merge — but PRs only
-# COMPUTE + COMMENT (auto-push gated to main below), so they compare against the published series
-# WITHOUT polluting it. The history branch (benchmark-data) is also the source for a public GitHub
-# Pages dashboard:
+# WHEN:
+#   * push to main     — full suite; publishes the point to the benchmark-data history branch,
+#                        runs the median-of-history hard zone, and keeps the regression
+#                        alert/comment.
+#   * nightly schedule — full suite as a verification run; publishes nothing.
+#   * workflow_dispatch— full suite (publishes only when dispatched on main).
+#   * pull_request     — ONLY when the PR carries the `bench` label: the full suite runs and
+#                        github-action-benchmark comments the comparison against main's
+#                        published series. PR runs never write the history branch.
+#
+# The history branch (benchmark-data) is also the source for the public GitHub Pages dashboard:
 #
 #   PUBLIC DASHBOARD — REPO-OWNER TOGGLE REQUIRED (one-time, can't be set from a workflow):
 #   Settings → Pages → "Build and deployment" → Source = "Deploy from a branch",
 #   Branch = `benchmark-data` / `/ (root)` → Save. The chart then renders at
 #   https://sparq.jeswr.org/dev/bench (the action writes index.html + data.js under dev/bench
-#   on the benchmark-data branch — see gh-pages-branch + benchmark-data-dir-path below). No new
-#   branch is created; Pages just serves the existing benchmark-data branch.
+#   on the benchmark-data branch — see gh-pages-branch + benchmark-data-dir-path below).
 on:
   push:
     branches: [main]
-    # [OPUS-4.8] ANTI-LOOP: the auto-ratchet step below commits bench/perf-baseline.json back to main.
-    # paths-ignore stops that floor-only commit from re-triggering this workflow (belt; the [skip ci]
-    # in the commit message is the suspenders). A real perf change always touches code/scripts too, so
-    # ignoring the baseline path alone never masks a genuine bench-worthy push.
+    # ANTI-LOOP: the auto-ratchet step below commits bench/perf-baseline.json back to main.
+    # paths-ignore stops that floor-only commit from re-triggering this workflow (the [skip ci]
+    # in the commit message is the second guard).
     paths-ignore:
       - 'bench/perf-baseline.json'
-  # [SONNET-4.6] sq-mel85 (design §5.2, phase 2b): react to labeled/unlabeled too so
-  # toggling the `ci-full` label re-evaluates the change-based selection for the bench
-  # lane (ci-select.yml maps the label to `--full`, which forces the perf gate to run).
-  # The default types (opened/synchronize/reopened) are listed explicitly so adding the
-  # label events does NOT drop `synchronize` (the push-to-PR trigger).
-  #
-  # [FABLE-5] (sq-6vshe.6 heavy-lane placement, MAINTAINER-DIRECTED) On a PR the `bench`
-  # job runs the FAST DETERMINISTIC form only — `ci-bench.sh --deterministic-only` — which
-  # hard-gates the byte-count / memory-layout ratchet (store/dict/wasm bytes; a pure
-  # function of the code, immune to shared-runner noise) but SKIPS every wall-clock timing
-  # loop + well-known / crate-example latency suite. Those NOISY, FLAKY timing benchmarks
-  # were dragging the merge queue and flapping the gate; they are RELOCATED to the EC2
-  # full-suite lane (bench-ec2.yml `nightly-full-bench`), which publishes the full at-scale
-  # series to the benchmark-data branch the Pages dashboard reads. See the "Run benchmarks"
-  # step guard below and bench-ec2.yml.
-  # [OPUS-5] #3784 HONEST STATUS: that EC2 lane is MANUAL-DISPATCH ONLY — its cron is retired
-  # because the AWS OIDC role it assumes was descoped, so the at-scale timing series is NOT
-  # being collected automatically. The per-commit deterministic ratchet and the push-to-main
-  # full run below are unaffected; only the AT-SCALE EC2 trend is on hold until the role returns.
-  #
-  # [FABLE-5] LABEL-TRIGGER GUARD (full rationale: ci.yml's pull_request note): only
-  # the `ci-full` / `bench-full` toggles start real work off a label event. The
-  # review pipeline's review:*/status:* flips otherwise re-queued this workflow on an
-  # unchanged head SHA on every flip. The guard is AND-composed into the
-  # `dashboard-labels` and `bench` job `if:`s (the `select` pre-job must stay
-  # unconditional — the ci-summary gate REDs on any non-success selection
-  # check-run), and label events get a per-run concurrency group below.
-  # [FABLE-5] Draft-tier CI: + ready_for_review, so the un-draft moment runs the
-  # deterministic perf ratchet the draft head skipped (the `bench` job is skipped
-  # entirely on draft PR heads — see its `if:` guard + docs/branch-protection.md
-  # §Draft-tier CI). This is independent of the label guard above and AND-composes
-  # with it on the `bench` job.
+  # Opt-in per PR: add the `bench` label. `labeled` starts the run; `synchronize` re-runs it
+  # on each push while the label stays on. The job `if:`s below skip every other PR.
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
-  # [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) merge_group REMOVED. The deterministic
-  # byte-count ratchet is a pure function of the code: it already ran + hard-gated on the
-  # PR head (--deterministic-only above), it re-runs on push-to-main below, and the
-  # merged-tree wasm-feature-OFF invariant is INDEPENDENTLY guarded on merge_group by
-  # vectorized-feature-off.yml's `artifact-exact-equality` leg (a dynamic same-run
-  # byte-identity build of the merged tree). So re-running this job on the ephemeral
-  # merge_group ref added NO protection while occupying a runner slot + adding the full
-  # timing suite's wall-clock to EVERY merge — the queue-drag this change removes. With
-  # the merge_group trigger gone, this job simply does not appear as a check-run on the
-  # merge_group ref, and `ci-summary / gate` (the single required check) aggregates only
-  # the siblings that DO run there — it never waits on a check that was never scheduled
-  # (the branch-protection required set is the single `gate` context, NOT this job by name;
-  # see docs/branch-protection.md). Correctness checks (build/test/clippy/conformance/
-  # coverage/CodeQL/supply-chain) all still run on merge_group and still gate.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
-  # [SONNET-4.6] sq-mel85 (design §6.1): the nightly FULL-RUN BACKSTOP for change-based
-  # selection. bench.yml previously had NO schedule trigger, so a PR that selection-
-  # skipped the bench lane (its closure provably unaffected) had no regular full-matrix
-  # re-run to catch a latent regression other than the next push-to-main. A `schedule`
-  # event carries no PR diff, so ci_select.py returns mode=full and the `bench` job's
-  # `mode != 'selected'` disjunct RUNS the whole suite + the hard perf gate. This run is
-  # a PURE VERIFICATION backstop: the auto-ratchet + benchmark-data history steps are
-  # gated on `github.event_name == 'push'` (see below), so a nightly run NEVER commits
-  # the floor or pushes a duplicate history point — the "one entry per commit" trend and
-  # the source-of-record ratchet stay continuous on the push-to-main path alone.
-  # 05:29 UTC — offset from ci.yml (03:17) + fuzz.yml (04:23) so the three nightly heavy
-  # lanes do not contend for the same runner window.
+  # 05:29 UTC — offset from the other nightly lanes so they do not contend for runners.
   schedule:
     - cron: "29 5 * * *"
 
-# [OPUS-4.8] Least-privilege default (Scorecard TokenPermissions): top-level is read-only
-# so the dashboard-labels job (and any future read-only job) inherits no write scope. The
-# writes the benchmark job needs (push to benchmark-data, deployment status, PR comment) are
-# scoped to the `bench` job below.
+# Least-privilege default: read-only at the top; the writes the benchmark job needs (push to
+# benchmark-data, deployment status, PR comment, bench-flake issue) are scoped to `bench`.
 permissions:
   contents: read
 
-# Do NOT cancel an in-progress benchmark run on main/schedule (it would corrupt the
-# stored series). push/schedule therefore keep cancel-in-progress false (see below).
-# [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events get a PER-RUN
-# group (the run_id suffix) so a label flip is ISOLATED — it can neither cancel nor
-# replace the in-flight/pending real run in the shared per-ref group on the same head
-# SHA (a group holds at most ONE PENDING run; without isolation a flip would evict a
-# pending real run even under cancel-in-progress:false). All other events resolve to
-# the constant `-shared` suffix.
-# [FABLE-5] Draft-tier CI: pull_request runs ARE cancelled when superseded — they
-# never write history (the ratchet/history steps are push-to-main-gated below), so a
-# stale PR bench run burning a runner slot buys nothing. This AND the label guard
-# compose: a label flip sits ALONE in its per-run group, so cancel-in-progress=true
-# there is a no-op on the real run; a PR synchronize sits in `-shared` and correctly
-# supersedes its predecessor; push/schedule stay in `-shared` and are never cancelled.
+# One run per ref; a newer run cancels an older one. A pull_request event that will NOT run
+# the bench (PR without the `bench` label, or a different label being added) gets a unique
+# group, so it can never cancel an in-flight labelled bench run.
 concurrency:
-  group: bench-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: >-
+    bench-${{ github.ref }}${{ github.event_name == 'pull_request'
+    && !(contains(github.event.pull_request.labels.*.name, 'bench')
+    && (github.event.action != 'labeled' || github.event.label.name == 'bench'))
+    && format('-noop-{0}', github.run_id) || '' }}
+  cancel-in-progress: true
 
 jobs:
-  # [SONNET-4.6] sq-mel85 (design §5.2, phase 2b): the change-based test-selection
-  # pre-job (the reusable .github/workflows/ci-select.yml — doctrine there). The
-  # `bench` job below guards on its benchmarked-crate closure so a PR that touches
-  # neither the benchmarked crates NOR their reverse-dependency closure skips the
-  # (release build + full bench suite + perf gate) run entirely. UNCONDITIONAL (no
-  # needs/if): the ci-summary gate REQUIRES every "change-based test selection"
-  # check-run to conclude success before any skipped sibling counts as satisfied, so
-  # this job must exist + be green on every trigger (design §5.3). Fail-closed:
-  # ci_select.py returns mode=full for every §4.1 trigger (shared crate / build file /
-  # .github/** / Cargo.lock / selector-self change) and for ANY internal error, and an
-  # empty/missing output satisfies the guard's `mode != 'selected'` first disjunct =>
-  # the bench lane RUNS. On push-to-main + schedule (the full backstop) the event
-  # carries no PR diff => mode=full => the bench lane runs the whole suite.
-  select:
-    name: select
-    uses: ./.github/workflows/ci-select.yml
-    permissions:
-      contents: read
-
-  # [OPUS-4.8] sq-ocuf: fast, dependency-light gate for the dashboard's readable labels. Runs on
-  # PRs + main (no rust/wasm build) so a query added/renamed without regenerating metric-labels.json
-  # fails BEFORE merge: validates the JSON, runs the generator's --check drift gate, syntax-checks
-  # dashboard.js, and runs the node smoke test (scripts/dashboard-smoke.js).
+  # Fast, dependency-light gate for the dashboard's readable labels (no rust/wasm build):
+  # validates the JSON, runs the generator's --check drift gate, syntax-checks dashboard.js,
+  # and runs the node smoke test (scripts/dashboard-smoke.js).
   dashboard-labels:
     name: dashboard labels (lint + drift)
-    # [FABLE-5] label-trigger guard (see the bench job note below): a root job with
-    # no needs — guard it directly so a non-ci-full/bench-full label flip skips it.
     if: >-
       github.event_name != 'pull_request' ||
-      !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
-      contains(fromJSON('["ci-full","bench-full"]'), github.event.label.name)
+      (contains(github.event.pull_request.labels.*.name, 'bench') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'bench'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -164,62 +83,21 @@ jobs:
 
   bench:
     name: run + track benchmarks
-    # [SONNET-4.6] sq-mel85 (design §5.2, phase 2b): scope the perf gate by the
-    # benchmarked-crate closure. Seeds (single source of truth: `_LANE_SEEDS["bench"]`
-    # in scripts/ci_select.py, pinned by scripts/tests/test_ci_select_wiring.py):
-    # sparq-engine (headline benchmarked crate) + the release binaries this job builds
-    # (sparq-cli + sparq-bench, which depend on sparq-core, so a core change — whose
-    # store/dict/parse byte metrics are HARD-GATED — lands in the affected reverse
-    # closure) + sparq-wasm (the wasm_bundle_bytes floor, enforced ONLY here; a wasm-
-    # only diff does not flow up into engine/cli/bench, so sparq-wasm is a DIRECT seed).
-    # Non-matrix job => the job-level `if:` can read needs.select.outputs (unlike the
-    # ci.yml per-shard case, which must guard in a step). FAIL-CLOSED: the leading
-    # `mode != 'selected'` disjunct means an empty/missing selection output RUNS the
-    # lane; a selection-skipped job reports conclusion `skipped` (= satisfied) to the
-    # ci-summary gate — no per-leg name is individually required (bead sq-fmx4u.4).
-    # CRITICAL (design §6.1 continuity): push-to-main + schedule are NOT pull_request/
-    # merge_group events, so ci_select.py returns mode=full and this disjunct is TRUE =>
-    # the FULL suite runs on every main commit + on the nightly backstop. Selection can
-    # ONLY narrow on pull_request / merge_group. That is what keeps the auto-ratchet
-    # floor + benchmark-data history (both depend on every main commit being benchmarked)
-    # continuous — see the push-gated history/ratchet steps below.
-    # [FABLE-5] Draft-tier CI: benchmarks are SKIPPED ENTIRELY on draft PR heads
-    # (first conjunct — fail-open off the PR path: push/schedule/dispatch satisfy
-    # `github.event_name != 'pull_request'` => the selection disjunction decides as
-    # before). This also removes the per-PR benchmark comparison comment
-    # (comment-always) + alert comment on draft heads — both are steps of THIS job.
-    # The ready_for_review full-tier run executes the deterministic ratchet before
-    # the PR can reach the merge queue; docs/branch-protection.md §Draft-tier CI.
-    needs: select
-    # [FABLE-5] label-trigger guard (full rationale: ci.yml's pull_request note): the
-    # first AND-term skips this job on any labeled/unlabeled event whose label is not
-    # ci-full/bench-full — the review pipeline's label flips must not re-queue the
-    # bench suite on an unchanged head SHA (with cancel-in-progress:false a flip can
-    # still CANCEL a PENDING real run via the one-pending-slot-per-group rule).
-    # `bench-full` passes because its whole point is re-running this workflow with
-    # the well-known suites enabled (the toolchain-install step reads the label).
-    # `select` stays unguarded (required green by the gate). The second AND-term is
-    # the unchanged fail-closed selection guard.
+    # Same opt-in rule as dashboard-labels: every non-PR event, or a PR labelled `bench`
+    # (a `labeled` event for some other label does not start a run).
     if: >-
-      (github.event_name != 'pull_request' ||
-       !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
-       contains(fromJSON('["ci-full","bench-full"]'), github.event.label.name)) &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft != true) &&
-      (needs.select.outputs.mode != 'selected' ||
-       contains(needs.select.outputs.affected, '"sparq-engine"') ||
-       contains(needs.select.outputs.affected, '"sparq-cli"') ||
-       contains(needs.select.outputs.affected, '"sparq-bench"') ||
-       contains(needs.select.outputs.affected, '"sparq-wasm"'))
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'bench') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'bench'))
     runs-on: ubuntu-latest
-    # [OPUS-4.8] Job-scoped writes (least privilege; the rest of the workflow stays read-only):
+    # Job-scoped writes (least privilege; the rest of the workflow stays read-only):
     #   contents: write     — auto-ratchet commits bench/perf-baseline.json back to main and
     #                         github-action-benchmark pushes the point to the benchmark-data branch
     #   deployments: write  — github-action-benchmark records a GitHub deployment status
     #   pull-requests: write— comment-always posts the comparison table on (same-repo) PRs;
     #                         fork PRs get a read-only token, so the action skips the comment.
-    #   issues: write       — [OPUS-4.8] the soft-zone triage step files/updates a deduped
-    #                         `bench-flake` issue instead of @-mentioning anyone (no maintainer CC).
-    #                         Guarded to the canonical repo (fork PRs get a read-only token).
+    #   issues: write       — the soft-zone triage step files/updates a deduped `bench-flake`
+    #                         issue instead of @-mentioning anyone. Guarded to the canonical repo.
     permissions:
       contents: write
       deployments: write
@@ -231,38 +109,25 @@ jobs:
         with:
           targets: wasm32-unknown-unknown   # enables the wasm bundle-size metric in ci-bench.sh
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-      # [OPUS-4.8] (sq-7d3dj.14) binaryen (wasm-opt) — installed unconditionally so the
-      # TREND-ONLY wasm_opt_bundle_bytes metric runs on BOTH PR and main tiers. ci-bench.sh
-      # guards on `command -v wasm-opt` so the step is a no-op skip when absent. The version
-      # is logged per CI run (see ci-bench.sh wasm_opt_bundle_bytes block).
+        with:
+          # sq-3sbrr save-if discipline: SAVE only from main; a branch-scoped save is
+          # unreachable from main and only churns the shared 10 GB Actions-cache budget.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # binaryen (wasm-opt) for the trend-only wasm_opt_bundle_bytes metric. ci-bench.sh guards
+      # on `command -v wasm-opt`, so the metric is skipped when absent.
       - name: Install binaryen (wasm-opt for shipped-size trend metric)
         run: sudo apt-get update -q && sudo apt-get install -y binaryen
-      # [OPUS-4.8] Well-known-suite toolchains (sp2b/dbpsb/watdiv/bsbm/lubm), MAIN + `bench-full` PRs.
-      # On push to main the full well-known-suite set runs; on PRs we DELIBERATELY do NOT install
-      # these BY DEFAULT, so the ci-bench.sh suite hooks SKIP gracefully (each is guarded on
-      # `command -v <tool>`) and PR perf feedback stays lean (synthetic + operator + memory/bundle
-      # metrics only). The full SF/scale tiers are EC2/nightly (beads sq-uubq/xin1/8lgn/yc1q/z31u).
-      #   g++ is preinstalled on ubuntu-latest (watdiv). default-jre = java (bsbm) + JRE for lubm's
-      #   javac comes from default-jdk... but default-jre has NO javac, so install default-jdk for
-      #   lubm's `javac` guard; libboost-all-dev = watdiv's Boost; raptor2-utils = lubm's `rapper`;
-      #   unzip = bsbm's distribution unpack.
-      #
-      # [FABLE-5] sq-6vshe.6 heavy-lane placement: the per-PR bench lane is the LEAN form
-      # (synthetic + operator + the DETERMINISTIC byte-count ratchet — see the Hard-gate step
-      # below; that ratchet is UNCHANGED and always runs on PRs) — the multi-minute well-known
-      # suites are the demoted heavy work and stay off the per-PR default. The `bench-full` PR
-      # LABEL opts BACK IN: a perf-sensitive PR installs the suite toolchains here so the full
-      # well-known series runs pre-merge too (mirroring the `ci-full` / `fuzz-full` label pattern).
-      # NOTE: this only RELOCATES the noisy latency suites; the hard perf-gate ratchet (deterministic
-      # store/dict/wasm byte counts) is NEVER demoted — it gates every PR regardless of this label.
-      - name: Install well-known-suite toolchains (main + bench-full PRs)
-        if: github.ref == 'refs/heads/main' || contains(github.event.pull_request.labels.*.name, 'bench-full')
+      # Well-known-suite toolchains (sp2b/dbpsb/watdiv/bsbm/lubm) — non-PR runs only. On a PR the
+      # ci-bench.sh suite hooks (each guarded on `command -v <tool>`) skip these multi-minute
+      # suites, so a `bench`-labelled PR gets the synthetic + operator + byte-count metrics.
+      #   default-jdk = java (bsbm) + javac (lubm); libboost-all-dev = watdiv's Boost;
+      #   raptor2-utils = lubm's `rapper`; unzip = bsbm's distribution unpack.
+      - name: Install well-known-suite toolchains (non-PR runs)
+        if: github.event_name != 'pull_request'
         run: sudo apt-get update && sudo apt-get install -y libboost-all-dev default-jdk raptor2-utils unzip
-      # [OPUS-4.8] Per-suite generator-cache restore/save so the steady state does NO rebuild/refetch:
-      # each suite's gen.sh/fetch.sh/run.sh build-once-and-cache their generator binary + the fixed
-      # corpus under /tmp/<suite> (sp2b/watdiv/bsbm/lubm) or the pinned slice (/tmp/dbpsb). Keyed on the
-      # generator scripts so a generator/pinning change busts the cache. PRs skip the toolchain install
-      # above, so a cache miss on a PR is harmless (the hook skips); on main it just rebuilds once.
+      # Per-suite generator caches: each suite's gen.sh/fetch.sh builds its generator + fixed corpus
+      # once under /tmp/<suite> (or the pinned slice under /tmp/dbpsb). Keyed on the generator
+      # scripts so a generator/pinning change busts the cache.
       - name: Cache sp2b generator + corpus
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -290,23 +155,11 @@ jobs:
           key: bench-dbpsb-${{ runner.os }}-${{ hashFiles('bench/dbpsb/fetch.sh') }}
       - name: Build release binaries
         run: cargo build --release -p sparq-cli -p sparq-bench
-      # [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) On a PR run ONLY the DETERMINISTIC byte-count
-      # metrics (`--deterministic-only`): the hard-gated store/dict/wasm bytes ratchet — a pure
-      # function of the code, seconds not minutes, immune to shared-runner noise. The full noisy
-      # timing suite (query latencies + well-known / crate-example suites + the parse timing metric)
-      # is RELOCATED to the EC2 full-suite lane (bench-ec2.yml — MANUAL DISPATCH ONLY since #3784
-      # retired its cron) so it no longer drags the merge queue or
-      # flaps the gate. On push-to-main / schedule / workflow_dispatch (NOT a PR) the FULL suite runs,
-      # so the auto-ratchet floor + the benchmark-data history (main-only steps below) stay continuous
-      # exactly as before — the per-commit trend on the Pages dashboard is unaffected. The two-line
-      # split keeps the emitted JSON path identical (bench-results.json) for every downstream step.
-      - name: Run benchmarks (PR — deterministic byte-count ratchet only)
-        if: github.event_name == 'pull_request'
-        run: bash scripts/ci-bench.sh --deterministic-only 200000 bench-results.json
-      - name: Run benchmarks (full suite — main / schedule / dispatch)
-        if: github.event_name != 'pull_request'
+      # The full suite: the deterministic byte-count metrics (store/dict/wasm bytes) plus the
+      # timing suite. Results land in bench-results.json for every step below.
+      - name: Run benchmarks
         run: bash scripts/ci-bench.sh 200000 bench-results.json
-      # [OPUS-4.8] HARD regression RATCHET on the gated metrics (store/dict bytes-per-{triple,term},
+      # HARD regression RATCHET on the gated metrics (store/dict bytes-per-{triple,term},
       # store_bytes_per_triple_small, wasm_bundle_bytes = DETERMINISTIC byte counts; parse_ns_per_byte =
       # TIMING, made noise-robust via best-of-N re-measure — see the Hard gate step below).
       # github-action-benchmark's fail-on-alert is a single GLOBAL switch that would also trip on the noisy
@@ -318,8 +171,8 @@ jobs:
       # can no longer slow-drift unbounded past the floor ("boiling frog"): each creep is measured against
       # the FIXED floor and trips once cumulative drift exceeds the band. See scripts/perf-gate.py header.
       #
-      # Runs on push-to-main AND on PRs (PRs gate against the same committed floor — pre-merge feedback,
-      # zero pollution since the baseline auto-update + benchmark-data push are main-only). DELIBERATE
+      # Runs on every event, including `bench`-labelled PRs (they gate against the same committed floor;
+      # the baseline auto-update + benchmark-data push are main-only). DELIBERATE
       # increases (e.g. a wasm bump from a new feature): EITHER edit bench/perf-baseline.json to raise the
       # floor in the reviewed PR, OR set the workflow var PERF_GATE_ALLOW (e.g. 'wasm_bundle_bytes') — the
       # allowed metric passes AND is re-floored to the new value by the auto-ratchet step below.
@@ -328,7 +181,7 @@ jobs:
         # against the best-ever floor (the sq-52e adversarial test), and passes on noise / improvement /
         # missing-floor / deliberate-allow — and that improvements ratchet the floor DOWN while a one-off
         # noise-low does NOT. Catches a future edit that breaks the gate before it can silently let a
-        # regression through. [OPUS-4.8]
+        # regression through.
         run: python3 scripts/perf-gate.py --self-test
       - name: Fetch previous benchmark series (for the noise-metric sustained-improvement check)
         id: prev_series
@@ -344,7 +197,7 @@ jobs:
           else
             echo "benchmark-data branch not present yet (first run)."
           fi
-      # [OPUS-4.8] (sq-dzfu) The DETERMINISTIC byte-count metrics are hard-gated strictly. The TIMING
+      # (sq-dzfu) The DETERMINISTIC byte-count metrics are hard-gated strictly. The TIMING
       # metric (parse_ns_per_byte) is made robust to GitHub-runner noise via BEST-OF-N re-measure: if it
       # trips the band, the gate re-runs the CHEAP `ci-bench.sh --parse-only` path (no wasm build, no big
       # corpus, no well-known suites — ~sub-second using the binaries already built above) up to K times
@@ -361,7 +214,7 @@ jobs:
           python3 scripts/perf-gate.py bench-results.json bench/perf-baseline.json \
             --remeasure-cmd 'bash scripts/ci-bench.sh --parse-only /tmp/perf-remeasure.json >/dev/null 2>&1 && cat /tmp/perf-remeasure.json' \
             --remeasure-k 4
-      # [OPUS-4.8] AUTO-RATCHET-DOWN (sq-52e): on push to main, AFTER the gate passes, lower any floor a
+      # AUTO-RATCHET-DOWN (sq-52e): on push to main, AFTER the gate passes, lower any floor a
       # genuine improvement beat (auto metrics: current < floor; noise metric: only on a SUSTAINED
       # improvement — the median of recent published points below the floor, never a one-off noise-low),
       # and re-floor any PERF_GATE_ALLOW metric to its new value. If bench/perf-baseline.json changed,
@@ -370,7 +223,7 @@ jobs:
       #   on.push.paths-ignore excludes bench/perf-baseline.json, so a floor-only commit can't re-trigger it.
       # main only — PRs (esp. forks) get a read-only token and must never write to main. exit 3 = no change.
       #
-      # [OPUS-4.8] FAIL-SOFT + FETCH-REBASE the commit-back (sq-llxc; sibling of sq-roe3 / PR #856). The
+      # FAIL-SOFT + FETCH-REBASE the commit-back (sq-llxc; sibling of sq-roe3 / PR #856). The
       # default GITHUB_TOKEN CANNOT push to protected `main`: this `push:main` run's HEAD is already
       # behind the remote tip (other merges land during the long bench job) so the direct `git push
       # HEAD:main` is rejected `! [rejected] HEAD -> main (fetch first)` (a non_fast_forward race), and
@@ -380,7 +233,7 @@ jobs:
       # Benchmarks runs #27827073571 and #27826231986 (both push:main):
       #     1 file changed, 2 insertions(+), 2 deletions(-)
       #     ! [rejected]        HEAD -> main (fetch first)
-      #     error: failed to push some refs to 'https://github.com/jeswr/sparq.git'
+      #     error: failed to push some refs to 'https://github.com/sparq-org/sparq.git'
       # Under `set -euo pipefail` that turned the whole Benchmarks job RED on every improving push, AND
       # the floor never landed (the ratchet is silently a no-op on this path). Two changes below:
       #   (1) FETCH-REBASE: before the push, fetch the latest origin/main and rebase the floor-only commit
@@ -399,7 +252,7 @@ jobs:
       # The fail-soft is the immediate fix (stops the red runs); the floor-landing is deferred to that
       # decision.
       - name: Auto-ratchet the perf floor (commit improvements back to main)
-        # [SONNET-4.6] sq-mel85: push-to-main ONLY (excludes the nightly `schedule`
+        # sq-mel85: push-to-main ONLY (excludes the nightly `schedule`
         # backstop) so a scheduled full-run verifies the gate WITHOUT committing a new
         # floor — the source-of-record ratchet cadence stays tied to code-landing pushes.
         if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
@@ -449,7 +302,7 @@ jobs:
             exit 0
           fi
           echo "committed + pushed tightened perf floor to main."
-      # [OPUS-4.8] First-run bootstrap: github-action-benchmark does
+      # First-run bootstrap: github-action-benchmark does
       # `git fetch origin benchmark-data:benchmark-data` and hard-fails with
       # "couldn't find remote ref benchmark-data" when the history branch does
       # not yet exist (it does NOT auto-create it — see its docs/write.ts). Create
@@ -457,8 +310,8 @@ jobs:
       # after the branch is deleted) self-heals instead of failing. Idempotent.
       - name: Ensure benchmark-data history branch exists
         # main only: PRs (esp. from forks) get a read-only GITHUB_TOKEN and must never write the
-        # history branch — they only compare against it. [OPUS-4.8]
-        # [SONNET-4.6] sq-mel85: push-to-main ONLY (the nightly `schedule` backstop is a pure
+        # history branch — they only compare against it.
+        # sq-mel85: push-to-main ONLY (the nightly `schedule` backstop is a pure
         # verification run — it never writes the history branch, so it needs no bootstrap).
         if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
         env:
@@ -480,7 +333,7 @@ jobs:
               benchmark-data:benchmark-data
             echo "Created and pushed orphan benchmark-data branch."
           fi
-      # [FABLE-5] HARD zone — deterministic median-of-history regression gate (replaces the action's
+      # HARD zone — deterministic median-of-history regression gate (replaces the action's
       # single-previous-point fail-on-alert, which flapped on runner environment shifts; see the
       # fail-on-alert comment on the Store step below). scripts/bench_hardzone.py compares each
       # metric in THIS run's bench-results.json against the MEDIAN of its last up-to-5 published
@@ -494,7 +347,7 @@ jobs:
       # why those four make a masked code regression implausible, not impossible (hence the loud
       # warning + table, never a quiet pass).
       #
-      # ORDERING ([FABLE-5] round-1 review): this step runs BEFORE the Store step DELIBERATELY.
+      # ORDERING (round-1 review): this step runs BEFORE the Store step DELIBERATELY.
       # Store auto-pushes this run's point into the benchmark-data history (main pushes), so if the
       # gate ran after it, a REJECTED regression would already be published — and after a few red
       # runs the regressed points would BECOME the median, silently re-baselining the gate. Gating
@@ -504,19 +357,18 @@ jobs:
       # the script prints its own per-metric table to stdout AND to GITHUB_STEP_SUMMARY; that table
       # is the only visible evidence of what tripped.
       #
-      # Guarded to the SAME main-push condition as auto-push: PR runs are `--deterministic-only`
-      # and already strictly gated by perf-gate.py above, and the nightly `schedule` backstop is a
-      # pure verification run — so PR + schedule behavior is unchanged by this step.
+      # Guarded to the SAME main-push condition as auto-push: PR runs are gated by perf-gate.py
+      # above and commented by the Store step, and the nightly `schedule` run verifies only.
       # The script self-tests first (repo convention: hermetic --self-test over inline fixtures).
       #
-      # --report-out ([FABLE-5] round-2 review): floor-exempt (sub-noise-floor us/milli) metrics
+      # --report-out (round-2 review): floor-exempt (sub-noise-floor us/milli) metrics
       # never fail this gate, and once a few regressed points are accepted the median REBASES —
       # so any floor-exempt hit at >= 2.0x is written to bench-hardzone-report.json, which the
       # "Soft-zone triage" step below merges into the rolling deduped `bench-flake` issue
       # (tagged "floor-exempt hard-band"): the durable trail that survives the rebase. The file
       # is written on pass AND fail; triage runs `if: always()` and tolerates its absence.
       #
-      # CONFIRM BEFORE FAILING ([OPUS-5] sq-jxeqz) — `--remeasure-cmd`. A timing row may only red
+      # CONFIRM BEFORE FAILING (sq-jxeqz) — `--remeasure-cmd`. A timing row may only red
       # main if its breach REPRODUCES in an independent re-measurement. MEASURED motivation:
       # harvesting this step's own output from 153 Benchmarks runs on main (the run logs are the
       # only UNCENSORED record, since a failing run publishes nothing) gives 29 tripped runs — 19%
@@ -550,7 +402,7 @@ jobs:
             --remeasure-cmd 'bash scripts/ci-bench.sh 200000 bench-results-remeasure.json' \
             --remeasure-out bench-results-remeasure.json \
             --remeasure-k 1
-      # [OPUS-4.8] sq-owci — clean the working tree before github-action-benchmark switches branches.
+      # sq-owci — clean the working tree before github-action-benchmark switches branches.
       # ROOT CAUSE: the "Run benchmarks" step (scripts/ci-bench.sh) does `cd bench/zk && cargo bench`
       # and `cd bench/zk-trace && cargo bench` (two STANDALONE cargo projects, run WITHOUT --locked),
       # so Cargo re-resolves and REWRITES their committed bench/zk{,-trace}/Cargo.lock. That leaves the
@@ -560,20 +412,13 @@ jobs:
       # Aborting" (live: Benchmarks run 27867742598). That failed the whole Benchmarks job and masked
       # real CI signal.
       #
-      # [FABLE-5] UNCONDITIONAL — a previous revision (sq-mel85) guarded this step
-      # `github.event_name != 'schedule' && github.ref == 'refs/heads/main'` on the claim that the
-      # nightly `schedule` backstop "never switches branches (auto-push is push-gated)". That claim
-      # was WRONG: github-action-benchmark fetches + switches to the benchmark-data branch to READ
-      # the comparison history on EVERY event, regardless of auto-push (the branch switch serves the
-      # compare, not just the push) — proven live by the nightly schedule run 29989729092, which
-      # aborted on exactly this lockfile churn with auto-push=false. PR runs never bit only because
-      # the PR leg is `--deterministic-only` (sq-6vshe.6), which skips the zk/zk-trace cargo benches
-      # that rewrite the lockfiles — not because the action skipped the switch. Restoring tracked
-      # churn is safe on every event: bench-results.json is already written, so the measurement is
-      # untouched, and the run outputs the later steps read (bench-results.json, prev-data.js) are
-      # UNtracked and left intact. Hence: no `if:` — this cleanup always runs.
+      # UNCONDITIONAL: github-action-benchmark fetches + switches to the benchmark-data branch to
+      # READ the comparison history on EVERY event, regardless of auto-push, so the lockfile churn
+      # would abort a schedule or PR run too. Restoring tracked churn is safe on every event:
+      # bench-results.json is already written and the run outputs the later steps read
+      # (bench-results.json, prev-data.js) are untracked and left intact.
       #
-      # FIX MECHANICS ([FABLE-5] round-1 review): ALLOW-LIST restore, not `git checkout -- .`.
+      # FIX MECHANICS (round-1 review): ALLOW-LIST restore, not `git checkout -- .`.
       # The ONLY tracked churn this bench run is known to induce is the bench/**/Cargo.lock
       # re-resolve (bench/zk + bench/zk-trace today; the glob future-proofs any standalone bench
       # project a future suite adds). Exactly those paths are restored; if ANY OTHER tracked path
@@ -614,11 +459,11 @@ jobs:
           tool: customSmallerIsBetter
           output-file-path: bench-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          # [OPUS-4.8] auto-push ONLY on main: pushes the new point to the benchmark-data history
+          # auto-push ONLY on main: pushes the new point to the benchmark-data history
           # branch (which feeds the public Pages chart). On a PR this is false, so the run COMPUTES
           # + COMPARES against the published series and COMMENTS, but does NOT write benchmark-data —
           # contributors get pre-merge feedback with zero pollution of the public trend.
-          # [SONNET-4.6] sq-mel85: ALSO false on the nightly `schedule` backstop — a scheduled run
+          # sq-mel85: ALSO false on the nightly `schedule` backstop — a scheduled run
           # shares the last main commit's SHA, so pushing would append a DUPLICATE per-commit point
           # and pollute the "one entry per commit" trend. The backstop verifies the gate only; the
           # history + ratchet stay on the push-to-main path (design §6.1 continuity).
@@ -628,7 +473,7 @@ jobs:
           # /(root) the dashboard renders at https://sparq.jeswr.org/dev/bench (see header).
           gh-pages-branch: benchmark-data
           benchmark-data-dir-path: dev/bench
-          # [OPUS-4.8] sq-3g6q: CAP the retained history. github-action-benchmark accumulates EVERY
+          # sq-3g6q: CAP the retained history. github-action-benchmark accumulates EVERY
           # commit's point with NO bound by default, so dev/bench/data.js grew unbounded (was 4.4 MB /
           # ~160k lines → slow dashboard load). max-items-in-chart slices entries["sparq engine"] to the
           # most-recent N COMMITS (one entry per commit; each entry carries ALL metrics, so N commits =
@@ -639,18 +484,18 @@ jobs:
           # (bench/dashboard/dashboard.js) renders the latest values + trend sparklines from exactly
           # this bounded window. Matches the one-time prune of the existing benchmark-data history.
           max-items-in-chart: 20
-          # Comment + job-summary on EVERY run (incl. PRs) so the comparison table is always visible
-          # pre-merge, not only when an alert fires. [OPUS-4.8]
+          # Comment + job-summary on EVERY run (incl. `bench`-labelled PRs) so the comparison table
+          # is always visible, not only when an alert fires.
           comment-always: true
           summary-always: true
-          # [OPUS-4.8] TWO-ZONE self-monitoring thresholds (noise-reduction-bench-selfmonitor;
+          # TWO-ZONE self-monitoring thresholds (noise-reduction-bench-selfmonitor;
           # maintainer-directed). GitHub-hosted runners are noisy, so a single global switch would
           # either trip constantly on µs-scale wall-clock jitter or be so loose it catches nothing.
           #   * alert-threshold: '175%'  — SOFT zone. Emits an alert COMMENT but does NOT fail the
           #     step (comment-only for the soft band; the "Soft-zone triage" step below files/updates a
           #     deduped `bench-flake` issue for it — NO @mention of anyone). 175% ≈ p95 run-to-run
           #     timing swing (43.66%) + ~30pp headroom.
-          # [FABLE-5] fail-on-alert is now FALSE — the HARD zone moved to the deterministic
+          # fail-on-alert is now FALSE — the HARD zone moved to the deterministic
           # median-of-history gate ABOVE (scripts/bench_hardzone.py, which runs BEFORE this Store
           # step so a rejected regression is never auto-pushed into the history it is judged by).
           # The action's fail-on-alert compared each metric against the SINGLE previous
@@ -676,14 +521,14 @@ jobs:
           alert-threshold: '175%'
           comment-on-alert: true
           fail-on-alert: false
-      # [OPUS-4.8] SOFT-ZONE triage (noise-reduction-bench-selfmonitor). Runs AFTER the action —
+      # SOFT-ZONE triage (noise-reduction-bench-selfmonitor). Runs AFTER the action —
       # `if: always()` so it still fires when the hard-zone gate above FAILED; it re-derives
       # the two zones from the SAME thresholds and files/updates a deduped `bench-flake` GitHub issue
       # for any SOFT-zone metric (>=175% and <200%), with NO @mention of anyone. It NEVER weakens the
-      # hard gate: the median-of-history gate above ([FABLE-5] scripts/bench_hardzone.py) owns the
+      # hard gate: the median-of-history gate above (scripts/bench_hardzone.py) owns the
       # hard-zone failure; this step
       # only handles the soft (possible-flakiness) band and always exits 0 (its filing is best-effort).
-      # [FABLE-5] --hardzone-report: additionally merges the median gate's floor-exempt hard-band
+      # --hardzone-report: additionally merges the median gate's floor-exempt hard-band
       # rows (bench-hardzone-report.json, written by the gate's --report-out on main pushes;
       # absent on PR/schedule = no-op) into the same deduped issue, tagged "floor-exempt
       # hard-band" — the gate never reds on those watch-only rows and their median rebases, so
@@ -714,7 +559,7 @@ jobs:
             --soft 175 --hard 200 \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
             || echo "::warning::soft-zone triage filer failed (non-fatal)"
-      # [OPUS-4.8] Seed the custom Pages dashboard onto benchmark-data IF ABSENT (or stale).
+      # Seed the custom Pages dashboard onto benchmark-data IF ABSENT (or stale).
       # github-action-benchmark only writes its DEFAULT index.html when one does NOT already exist
       # (fs.stat early-return) but OVERWRITES data.js every run — so a CUSTOM dashboard committed
       # once is preserved forever while the data refreshes. This step pulls the freshly-pushed
@@ -723,56 +568,93 @@ jobs:
       # Idempotent + MAIN ONLY (PRs/forks get a read-only token and never write the history branch),
       # mirroring the "Ensure benchmark-data history branch exists" bootstrap above.
       - name: Seed Pages dashboard onto benchmark-data (if absent)
-        # [SONNET-4.6] sq-mel85: push-to-main ONLY — the nightly `schedule` backstop never
-        # writes the history branch, so it must not seed/update the Pages dashboard either.
+        # Preserve main push/manual publishing; schedules verify only.
         if: github.event_name != 'schedule' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Retry only a verified concurrent fast-forward. Rebuild
+          # the asset-only commit on the fetched tip; never rebase/force-push data.js.
+          export LC_ALL=C
           src="$GITHUB_WORKSPACE/bench/dashboard"
           tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
           git -C "$tmp" init -q
           git -C "$tmp" remote add origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git -C "$tmp" fetch -q --depth=1 origin benchmark-data
-          git -C "$tmp" checkout -q -B benchmark-data FETCH_HEAD
-          mkdir -p "$tmp/dev/bench"
-          changed=0
-          # [OPUS-4.8] metric-labels.json (sq-ocuf) is part of the served dashboard — copy it
-          # alongside index.html/dashboard.js/dashboard.css so dashboard.js can fetch it.
-          # [OPUS-4.8] vendor/Chart.min.js (sq-0rv3) is loaded by index.html now that the
-          # CDN dep is dropped — seed it (in its subdir) so the published Pages dashboard
-          # doesn't 404. The path has a dirname, so mkdir -p before copying.
-          # [OPUS-4.8] competitors.json (sq-kehk) is FETCHED by dashboard.js boot() (sq-rltn / #200)
-          # as the single competitor-data sink — copy it alongside metric-labels.json so the live
-          # fetch resolves instead of 404ing into the empty embedded COMPETITORS_DATA mirror.
-          for f in index.html dashboard.js dashboard.css metric-labels.json competitors.json vendor/Chart.min.js; do
-            if [ ! -f "$tmp/dev/bench/$f" ] || ! cmp -s "$src/$f" "$tmp/dev/bench/$f"; then
-              mkdir -p "$(dirname "$tmp/dev/bench/$f")"
-              cp "$src/$f" "$tmp/dev/bench/$f"
+          tip="$(git -C "$tmp" rev-parse FETCH_HEAD)"
+          for attempt in 1 2 3; do
+            git -C "$tmp" checkout -q -B benchmark-data "$tip"
+            mkdir -p "$tmp/dev/bench"
+            changed=0
+            # metric-labels.json (sq-ocuf) is part of the served dashboard — copy it
+            # alongside index.html/dashboard.js/dashboard.css so dashboard.js can fetch it.
+            # vendor/Chart.min.js (sq-0rv3) is loaded by index.html now that the
+            # CDN dep is dropped — seed it (in its subdir) so the published Pages dashboard
+            # doesn't 404. The path has a dirname, so mkdir -p before copying.
+            # competitors.json (sq-kehk) is FETCHED by dashboard.js boot() (sq-rltn / #200)
+            # as the single competitor-data sink — copy it alongside metric-labels.json so the live
+            # fetch resolves instead of 404ing into the empty embedded COMPETITORS_DATA mirror.
+            for f in index.html dashboard.js dashboard.css metric-labels.json competitors.json vendor/Chart.min.js; do
+              if [ ! -f "$tmp/dev/bench/$f" ] || ! cmp -s "$src/$f" "$tmp/dev/bench/$f"; then
+                mkdir -p "$(dirname "$tmp/dev/bench/$f")"
+                cp "$src/$f" "$tmp/dev/bench/$f"
+                changed=1
+              fi
+            done
+            # root redirect (sq-pages-root): the bare Pages root would 404 because the
+            # dashboard lives under dev/bench/. Seed bench/dashboard/root-redirect.html to the
+            # benchmark-data branch ROOT as index.html so https://sparq.jeswr.org/ bounces to
+            # dev/bench/. github-action-benchmark only writes data.js + dev/bench/index.html (never a
+            # root index.html), so this coexists with its data and is preserved across runs.
+            if [ ! -f "$tmp/index.html" ] || ! cmp -s "$src/root-redirect.html" "$tmp/index.html"; then
+              cp "$src/root-redirect.html" "$tmp/index.html"
               changed=1
             fi
+            if [ "$changed" = "0" ]; then
+              echo "dev/bench dashboard already up to date — nothing to seed."
+              exit 0
+            fi
+            git -C "$tmp" -c user.name='github-actions[bot]' \
+                          -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                          add index.html dev/bench/index.html dev/bench/dashboard.js dev/bench/dashboard.css \
+                              dev/bench/metric-labels.json dev/bench/competitors.json dev/bench/vendor/Chart.min.js
+            git -C "$tmp" -c user.name='github-actions[bot]' \
+                          -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+                          commit -q -m "chore(bench): seed/update Pages dashboard (dev/bench + root redirect) [skip ci]"
+            if git -C "$tmp" push --porcelain origin benchmark-data:benchmark-data \
+                >"$tmp/.git/push.stdout" 2>"$tmp/.git/push.stderr"; then
+              echo "Seeded/updated the custom Pages dashboard on benchmark-data."
+              exit 0
+            else
+              push_rc=$?
+            fi
+            cat "$tmp/.git/push.stdout"
+            cat "$tmp/.git/push.stderr" >&2
+            # Porcelain's exact ref/status record excludes hook/auth/transport
+            # failures. A changed tip alone never makes an arbitrary error retryable.
+            push_status="$(grep $'\t' "$tmp/.git/push.stdout" || true)"
+            case "$push_status" in
+              $'!\trefs/heads/benchmark-data:refs/heads/benchmark-data\t[rejected] (fetch first)'|\
+              $'!\trefs/heads/benchmark-data:refs/heads/benchmark-data\t[rejected] (non-fast-forward)') ;;
+              *)
+                echo "::error::Dashboard push failed without a single retryable non-fast-forward rejection."
+                exit "$push_rc" ;;
+            esac
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Dashboard publication exhausted its bounded push attempts."
+              exit "$push_rc"
+            fi
+            # Do not repeat --depth=1: retain the fetched ancestry back to tip so
+            # the old snapshot must be an ancestor, not merely a different object.
+            git -C "$tmp" fetch -q origin benchmark-data
+            next_tip="$(git -C "$tmp" rev-parse FETCH_HEAD)"
+            if [ "$next_tip" = "$tip" ] || ! git -C "$tmp" merge-base --is-ancestor "$tip" "$next_tip"; then
+              echo "::error::Dashboard rejection was not followed by a verified branch advance."
+              exit "$push_rc"
+            fi
+            tip="$next_tip"
+            echo "::notice::Concurrent benchmark-data advance verified; rebuilding the dashboard commit."
           done
-          # [OPUS-4.8] root redirect (sq-pages-root): the bare Pages root would 404 because the
-          # dashboard lives under dev/bench/. Seed bench/dashboard/root-redirect.html to the
-          # benchmark-data branch ROOT as index.html so https://sparq.jeswr.org/ bounces to
-          # dev/bench/. github-action-benchmark only writes data.js + dev/bench/index.html (never a
-          # root index.html), so this coexists with its data and is preserved across runs.
-          if [ ! -f "$tmp/index.html" ] || ! cmp -s "$src/root-redirect.html" "$tmp/index.html"; then
-            cp "$src/root-redirect.html" "$tmp/index.html"
-            changed=1
-          fi
-          if [ "$changed" = "0" ]; then
-            echo "dev/bench dashboard already up to date — nothing to seed."
-            exit 0
-          fi
-          git -C "$tmp" -c user.name='github-actions[bot]' \
-                        -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                        add index.html dev/bench/index.html dev/bench/dashboard.js dev/bench/dashboard.css \
-                            dev/bench/metric-labels.json dev/bench/competitors.json dev/bench/vendor/Chart.min.js
-          git -C "$tmp" -c user.name='github-actions[bot]' \
-                        -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-                        commit -q -m "chore(bench): seed/update Pages dashboard (dev/bench + root redirect) [skip ci]"
-          git -C "$tmp" push -q origin benchmark-data:benchmark-data
-          echo "Seeded/updated the custom Pages dashboard on benchmark-data."

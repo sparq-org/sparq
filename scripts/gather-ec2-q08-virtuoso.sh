@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [SONNET-4.6] sq-7d3dj.30.22 — dedicated EC2 launcher for the q08/q12b Virtuoso same-box
+# sq-7d3dj.30.22 — dedicated EC2 launcher for the q08/q12b Virtuoso same-box
 # re-measure.  QLever is DISQUALIFIED on these two queries (wrong count 0 vs 358/1 — the
 # bnode!=IRI strict-type-error divergence adjudicated in sq-ai2wa).  This script measures
 # sparq (current main, with predicate-range id-filter-fastpath from PRs #1785+#1795) vs
@@ -36,11 +36,11 @@ ITYPE="c6i.4xlarge"   # MANDATORY: same arch+class as 2026-07-07 canonical basel
 ITYPE_FB="c6i.2xlarge"  # fallback (same arch, half the vCPUs)
 # x86_64 Ubuntu Noble AMI (matches the canonical c6i.4xlarge box)
 AMI_NAME="${GATHER_AMI_NAME:-ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 SP2B_TRIPLES="${SP2B_TRIPLES:-250000}"   # canonical scale
 ITERS="${GATHER_ITERS:-5}"              # canonical min-of-5
 
-# [SONNET-4.6] per-step timeout caps — same class as gather-ec2-sparql.sh
+# per-step timeout caps — same class as gather-ec2-sparql.sh
 STEP_APT_TIMEOUT="${STEP_APT_TIMEOUT:-900}"
 STEP_RUSTUP_TIMEOUT="${STEP_RUSTUP_TIMEOUT:-600}"
 STEP_BUILD_TIMEOUT="${STEP_BUILD_TIMEOUT:-2400}"
@@ -121,7 +121,7 @@ USERDATA=$(cat <<UD
 set -x
 exec > >(tee /var/log/gather.log) 2>&1
 
-# [SONNET-4.6] sq-7d3dj.30.22: instance-side self-terminate watchdog.
+# sq-7d3dj.30.22: instance-side self-terminate watchdog.
 # Two mechanisms: background sleep + systemd-run (belt-and-braces).
 # --instance-initiated-shutdown-behavior=terminate means shutdown -h = permanent termination.
 ( sleep ${WATCHDOG_S}; echo "[WATCHDOG] ${WATCHDOG_S}s reached, self-terminating" >> /root/GATHER_STEP; shutdown -h now ) &

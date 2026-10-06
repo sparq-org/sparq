@@ -1,5 +1,5 @@
 # feature-matrix — GATING build/test/clippy lane for the OPT-IN (default-OFF) cargo
-# features. [OPUS-4.8]
+# features.
 #
 # WHY (CDMC cert finding sq-kzfi; bead labelled cert,ci,opt-in): ci.yml builds, tests
 # and clippies only the DEFAULT feature set of every crate. Several capabilities ship
@@ -11,13 +11,11 @@
 # the catalogue capability scored 3 not 4). This lane compiles + clippies (and tests,
 # where dedicated offline tests exist) the opt-in features so they stay green.
 #
-# GATING: this workflow is PR/merge_group/push-triggered, and every job NAME here is
-# free of the words "advisory"/"informational", so the single required `ci-summary /
-# gate` aggregator (ci-summary.yml) auto-discovers each matrix leg as a REQUIRED check
-# and fails the merge if any opt-in build/clippy/test breaks. No edit to ci-summary.yml
-# is needed — the aggregator polls by name, not by a hard-coded list.
+# WHEN: nightly (02:47 UTC) and on manual dispatch. It does not run on pull requests;
+# the one required PR check is ci-fast (docs/branch-protection.md). To run the matrix on
+# a branch before merging: `gh workflow run feature-matrix.yml --ref <branch>`.
 #
-# STRUCTURE — DYNAMIC, PER-CRATE-FRAGMENT MATRIX (bead sq-ibrze). [OPUS-4.8] The
+# STRUCTURE — DYNAMIC, PER-CRATE-FRAGMENT MATRIX (bead sq-ibrze). The
 # opt-in leg list used to be ONE static `include:` block inside this file. Every
 # opt-in-feature PR appended a leg to that shared list, so concurrent PRs collided
 # textually on adjacent additions (this cost ~8 merge-fixer passes in a single session:
@@ -26,12 +24,11 @@
 # (scripts/assemble-feature-matrix.py) into the matrix JSON and the `opt-in-features`
 # job consumes it via `fromJSON`. Adding a crate's leg now edits ONLY that crate's
 # fragment, so concurrent PRs for DIFFERENT crates never touch the same file and
-# auto-merge. The emitted check-run NAME is `opt-in <name>` exactly as before — the
-# assembler's `--names` mode dumps the full set and `scripts/tests/test_feature_matrix_
-# assemble.py` asserts it is byte-identical to the pre-split static list, so the gate
-# aggregator + branch protection keep recognising every required leg.
+# auto-merge. The emitted check-run NAME is `opt-in <name>` — the assembler's `--names`
+# mode dumps the full set and `scripts/tests/test_feature_matrix_assemble.py` asserts it
+# is byte-identical to the golden list.
 #
-# [FABLE-5] GROUPED RUNNERS (CI-economy, maintainer directive 2026-07-18): the legs no
+# GROUPED RUNNERS (CI-economy, maintainer directive 2026-07-18): the legs no
 # longer map 1:1 onto runner jobs. The assembler's `--grouped` mode bin-packs them
 # (same-crate legs clustered; per-leg cost = the fragment's optional `weight:` field,
 # defaulting to a crate-source-size heuristic; each group targets <5 min of warm-cache
@@ -49,9 +46,8 @@
 # and metadata this workflow's `setup` job uploads), validates them hostile-input-
 # style against the selected leg set, validates the recorded head SHA against the
 # server-supplied workflow_run.head_sha, and posts the check-runs. Names byte-
-# identical, so the aggregator, branch protection and the golden self-test contract
-# are all unchanged; the group jobs' OWN conclusions remain the always-gating coarse
-# signal on the PR head, independent of reporter timing.
+# identical, so the golden self-test contract is unchanged; the group jobs' OWN
+# conclusions remain the coarse signal, independent of reporter timing.
 #
 # GUARD — THE RULE THAT KEEPS THIS LANE HONEST (sq-vya1). A test module/file behind
 # `#[cfg(feature = "X")]` / `#![cfg(feature = "X")]` for a DEFAULT-OFF feature is compiled
@@ -66,13 +62,12 @@
 #   (b) add a NEW leg (if the feature must be isolated — e.g. it changes a `not(feature=…)`
 #       code path, like brTPF vs TPF — give it its own leg so both code paths are tested).
 # To verify a suite is actually wired: `cargo nextest list -p <crate> --features <set>`
-# must SHOW the previously-skipped test names. The aggregator gate (ci-summary.yml) treats
-# every leg NAME here as REQUIRED (none contains the words "advisory"/"informational"), so
-# a broken opt-in build/clippy/test blocks the merge — but ONLY for suites a leg reaches.
+# must SHOW the previously-skipped test names. A broken opt-in build/clippy/test reds the
+# nightly run — but ONLY for suites a leg reaches.
 # A suite with no leg and no default coverage is the silent gap this whole lane exists to
 # close; do NOT let one back in. (ci.yml carries the mirror-image of this guard.)
 #
-# [OPUS-5] sq-p1ccp — THE GUARD ABOVE IS NOW ENFORCED, NOT MERELY REVIEW DISCIPLINE. The
+# sq-p1ccp — THE GUARD ABOVE IS NOW ENFORCED, NOT MERELY REVIEW DISCIPLINE. The
 # gating `setup` job runs `python3 scripts/feature-matrix-tiers.py --enforce`, which REDs
 # that job (and so withholds the ENTIRE opt-in matrix — see AGENTS.md's MISSING-LEG-
 # ATTRIBUTION rule before triaging a phantom leg failure) on either violation:
@@ -80,7 +75,7 @@
 #       SENSITIVE — a `cfg(feature = "F")` hit under `tests/`/`benches/`, a `#[cfg(test)]`/
 #       `#[test]`-adjacent hit under `src/`, or ANY `cfg(not(feature = "F"))` in the crate —
 #       and the fragment carries no reviewed `tier-reason:` override. This is the RATCHET:
-#       feature-gating a test under a demoted feature reds the NEXT PR until the leg is
+#       feature-gating a test under a demoted feature reds the NEXT run until the leg is
 #       promoted back to `tier: test`.
 #   (2) a SENSITIVE (crate, feature) appears in no `test: true` leg FOR THAT CRATE — the
 #       sq-vya1 guard itself, mechanized. The silent gap now fails the gate instead of
@@ -102,21 +97,16 @@
 #     build+test+clippy leg in the `opt-in-features` matrix. Unchanged behaviour. A
 #     present-but-unrecognised value (typo, null, non-string) is a HARD assembler ERROR,
 #     not a silent fallback — a demotion is only ever a reviewed `tier: check` edit.
-#   • `tier: check` — DEMOTED. On pull_request/merge_group the assembler's `--tier check`
+#   • `tier: check` — DEMOTED. On pull_request/merge_group events the assembler's `--tier check`
 #     mode routes the leg OUT of that matrix and into the `check-tier` job below, which runs
 #     `cargo clippy -p <crate> --features <F> -- -D warnings` and NOTHING else — no test
 #     execution, and deliberately no `--all-targets` (by the demotion criterion the feature
-#     has no gated test code). On push-to-main (and workflow_dispatch/schedule) the check
-#     tier assembles EMPTY and the leg runs as a FULL build+test leg in the matrix above:
-#     the per-merge backstop, so a demoted leg's residual risk surfaces within minutes of
-#     the merge that broke it rather than never.
+#     has no gated test code). On schedule/workflow_dispatch (the only triggers this
+#     workflow now has) the check tier assembles EMPTY and the leg runs as a FULL
+#     build+test leg in the matrix above.
 # Nothing is demoted by default, by omission, or by a detector run — only by a reviewed
 # fragment edit that `--enforce` then holds to the evidence. As of 2026-07-26 NO fragment
 # carries `tier:`, so both `check-tier` shards assemble a zero-leg set and are green-empty.
-# They are REQUIRED checks regardless — post-#3773 a check GATES unless it is DECLARED in
-# .github/advisory-registry.json, and neither `check-tier` shard is declared there — so the
-# first demotion is gated on arrival: its compile/clippy break blocks the merge in the
-# check tier instead of via its former `opt-in <name>` leg.
 #
 # SCOPE — what this lane deliberately does NOT cover, and why (each is a separate gate
 # or a documented exclusion, NOT an oversight):
@@ -125,7 +115,7 @@
 #     perf backend with no first-party Rust code of its own, so compiling it here buys
 #     no rot-protection for sparq's own source. Left out to keep the lane fast + free
 #     of a C build dep.
-#   • [FABLE-5] sq-8ju74: the `hdt`/`hdt-write` (sparq-cli) + `write` (sparq-hdt) legs
+#   • sq-8ju74: the `hdt`/`hdt-write` (sparq-cli) + `write` (sparq-hdt) legs
 #     USED to be excluded here because the wrapped `hdt` crate declares MSRV 1.87 and
 #     the workspace floor was 1.85 ("needs its own toolchain lane"). That reason is
 #     STALE — the floor is 1.88, at/above sparq-hdt's 1.87 — so the legs now exist in
@@ -137,63 +127,36 @@
 #     socket on a runner, so they are not built/tested here.
 #   • `mimalloc` (sparq-cli, default-ON) is not opt-in; it is exercised by the default
 #     build already.
-#   • [OPUS-4.8] sq-evb1: `sparq-reason-el` (the opt-in OWL 2 EL classifier) is a
+#   • sq-evb1: `sparq-reason-el` (the opt-in OWL 2 EL classifier) is a
 #     SEPARATE CRATE with NO intra-crate cargo feature — depending on the crate IS the
 #     opt-in (the spike's preferred shape, keeping sparq-reason lean). Its whole surface
 #     (lib unit tests + the tests/differential.rs ELK-calculus oracle + clippy + rustdoc)
 #     is therefore built/tested by ci.yml's `cargo {build,nextest,clippy,doc} --workspace`
 #     lanes already — for the E1 default surface there is no default-OFF feature to toggle.
-#     [OPUS-4.8] sq-xetf7: Phase E2 ADDED the default-OFF `rbox` feature (RBox / property
+#     sq-xetf7: Phase E2 ADDED the default-OFF `rbox` feature (RBox / property
 #     chain + transitive-role saturation, CR10/CR11), so the leg this NOTE anticipated now
-#     exists below as the `sparq-reason-el (rbox …)` matrix entry. [OPUS-4.8] sq-s2nob: Phase
+#     exists below as the `sparq-reason-el (rbox …)` matrix entry. sq-s2nob: Phase
 #     E3 ADDED the default-OFF `hasse` feature (transitive reduction → direct-subsumer Hasse
 #     diagram), so a second `sparq-reason-el (hasse …)` leg now exists below too.
 
 name: feature-matrix
 
 on:
-  push:
-    branches: [main]
-  # [FABLE-5] sq-fmx4u.5: react to labeled/unlabeled too so toggling the `ci-full`
-  # label re-evaluates change-based selection for the opt-in leg set as well (the
-  # `setup` assembler filters legs by the selection outputs). Default types are
-  # listed explicitly so adding the label events does not drop `synchronize`.
-  # [FABLE-5] LABEL-TRIGGER GUARD (full rationale: ci.yml's pull_request note): only
-  # the `ci-full` toggle starts real work off a label event — the review pipeline's
-  # review:*/status:* flips otherwise restarted this workflow on an unchanged head
-  # SHA, and the concurrency-cancelled `select` check-runs REDdened the ci-summary
-  # gate. The guard is the job-level `if:` on the root `changes` job (everything else
-  # needs:-chains from it); the `select` pre-job stays UNCONDITIONAL and runs to a
-  # cheap success (a skipped select would poison the gate — ci_summary_gate.py
-  # requires every selection check-run to conclude `success`). Label events also get
-  # a per-run concurrency group below so a flip never cancels an in-flight run.
-  # [FABLE-5] Draft-tier CI: + ready_for_review, so the un-draft moment re-assembles
-  # the opt-in leg set at FULL tier (the select job name drops its ", draft-tier"
-  # marker) and the required gate stops honouring the draft-tier-assembled set —
-  # see docs/branch-protection.md §Draft-tier CI. Independent of the label guard
-  # above: a non-`ci-full` label flip stays a no-op regardless of draft state.
-  pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
-  # Merge queue: mirror the PR check-set onto the merge_group ref so the required
-  # ci-summary gate finds the same legs it finds on a PR (matches ci.yml/ci-summary.yml).
-  merge_group:
+  workflow_dispatch:
+  schedule:
+    - cron: "47 2 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  # [FABLE-5] label-trigger guard: labeled/unlabeled pull_request events get a
-  # PER-RUN group — a label-flip run entering the shared per-ref group would cancel
-  # the in-flight real run on the SAME head SHA (run-level cancellation precedes job
-  # `if:` evaluation), leaving cancelled check-runs that RED the ci-summary gate.
-  # All other events keep the shared per-ref group + cancel-in-progress as before.
-  group: feature-matrix-${{ github.workflow }}-${{ github.ref }}-${{ (github.event_name == 'pull_request' && contains(fromJSON('["labeled","unlabeled"]'), github.event.action)) && github.run_id || 'shared' }}
+  group: feature-matrix-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-  # [SONNET-4.6] sq-6vshe.1: CI build-profile speedup (mirrors ci.yml). See ci.yml's
+  # sq-6vshe.1: CI build-profile speedup (mirrors ci.yml). See ci.yml's
   # global env comment for the full rationale. lld is pre-installed on ubuntu-24.04
   # runners and also provided via the Rust toolchain's rust-lld, so no per-job install
   # step is needed.
@@ -202,166 +165,18 @@ env:
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
 
 jobs:
-  # [OPUS-4.8] merge-throughput: path-filtered gate (same pattern as ci.yml's `changes`).
-  # The opt-in feature matrix only compiles/tests Rust, so a doc-only PR can skip it while
-  # the required ci-summary gate still resolves SUCCESS (the aggregator treats the skipped
-  # leg's `skipped` conclusion as non-failing). SAFE-BY-DEFAULT: rust_changed is forced
-  # 'true' on push/schedule/workflow_dispatch, so the canonical push/manual runs ALWAYS
-  # compile the full feature matrix — only a purely non-Rust PR diff skips.
-  # [FABLE-5] MERGE-GROUP CHANGE-CLASS GATE (extends #3420/#3421 to this layer; full
-  # doctrine: ci.yml's `changes` job header). merge_group used to hard-force
-  # rust_changed=true, so a docs-only/orchestration-only queued batch still paid this
-  # workflow's rust_changed-only jobs (setup / check-tier / fedclient-boundary) on every
-  # enqueue. The decide step now diffs the queued batch (base_sha...head_sha, the #3421
-  # fetch pattern) and classifies it with `scripts/ci_select.py --classify-only` — the
-  # SAME classify_change() the `select` pre-job runs on this event (no duplicated path
-  # lists). A class on ci_select.py `_INERT_CLASSES` => rust_changed=false; any other
-  # class ([OPUS-5] sq-g25hr: incl. `mixed`, i.e. engine + something inert), an
-  # unresolvable SHA pair, or any classifier error => true (fail-safe = full run). The
-  # skipped legs report `skipped` and the required ci-summary gate attributes them to
-  # the green same-diff `select` pre-job (attributed skips, never missing legs).
-  changes:
-    name: detect rust changes (feature-matrix)
-    # [FABLE-5] label-trigger guard (see the pull_request trigger note): a
-    # labeled/unlabeled event for any label other than `ci-full` skips this root job,
-    # and with it every needs:-dependent (setup/opt-in legs/check-tier/no-default-
-    # features lanes/fedclient-boundary). The `select` pre-job deliberately stays
-    # unguarded (its success is required by the gate on every trigger).
-    if: >-
-      github.event_name != 'pull_request' ||
-      !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) ||
-      github.event.label.name == 'ci-full'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      rust_changed: ${{ steps.decide.outputs.rust_changed }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: filter
-        if: github.event_name == 'pull_request'
-        with:
-          filters: |
-            rust:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain*'
-              - '.github/workflows/feature-matrix.yml'
-              # [OPUS-4.8] sq-ibrze: editing a per-crate fragment (adding/changing an
-              # opt-in leg) or the assembler MUST re-run the full matrix so the new/edited
-              # leg actually builds+tests — even on an otherwise non-Rust PR.
-              - '.github/feature-matrix.d/**'
-              - 'scripts/assemble-feature-matrix.py'
-              # [FABLE-5] PR #3511 review finding 2: the grouped-runner engine is as
-              # load-bearing as the assembler — a PR changing ONLY this script must
-              # still run setup (its self-test gates there) + the grouped execution
-              # + the reporter. Wiring pinned by test_feature_matrix_assemble.py.
-              - 'scripts/run-feature-matrix-group.py'
-              # [FABLE-5] PR #3511 review round-3 finding 2: the PRIVILEGED reporter
-              # workflow is the trust-boundary half of finding 1. A PR changing ONLY
-              # .github/workflows/feature-matrix-report.yml would otherwise skip setup,
-              # so its dedicated trusted-boundary self-tests (run in setup) never run —
-              # a change to the privileged reporter must re-run them. Wiring pinned by
-              # test_feature_matrix_assemble.py.
-              - '.github/workflows/feature-matrix-report.yml'
-              # [FABLE-5] PR #3511 review finding 4: the assembler/runner self-test is
-              # the mechanized guard for the gate-critical leg-name contract AND the
-              # trusted-boundary wiring. A test-only edit that WEAKENS it must still
-              # re-run the setup self-test (which runs this file) — otherwise a PR
-              # could gut the guard while skipping the very job that enforces it.
-              - 'scripts/tests/test_feature_matrix_assemble.py'
-      - name: Decide rust_changed (safe-by-default off the PR path)
-        id: decide
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          set -euo pipefail
-          if [ "${EVENT_NAME}" = "pull_request" ]; then
-            echo "rust_changed=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
-            echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}"
-          elif [ "${EVENT_NAME}" = "merge_group" ]; then
-            # [FABLE-5] MERGE-GROUP CHANGE-CLASS GATE (see the job header note): diff the
-            # queued batch (#3421 fetch pattern) and classify via scripts/ci_select.py
-            # --classify-only. A batch on ci_select.py's `_INERT_CLASSES` => skip; any
-            # other class, unknown token, unresolvable SHAs, or classifier error => full
-            # (fail-safe).
-            rust=true
-            ok=true
-            # --depth=2147483647 (--unshallow, valid on complete repos too): the
-            # depth-1 checkout leaves the three-dot diff with no merge-base — a
-            # shallow SHA fetch passes the cat-file guards yet the diff dies, so
-            # the fail-safe would force class=engine on EVERY batch (silent
-            # no-op gate). Full rationale: ci.yml's decide step.
-            git fetch --no-tags --quiet --depth=2147483647 origin "${MG_BASE_SHA}" "${MG_HEAD_SHA}" 2>/dev/null \
-              || git fetch --no-tags --quiet --depth=2147483647 origin "${MG_BASE_SHA}" 2>/dev/null \
-              || ok=false
-            git cat-file -e "${MG_BASE_SHA}^{commit}" 2>/dev/null || ok=false
-            git cat-file -e "${MG_HEAD_SHA}^{commit}" 2>/dev/null || ok=false
-            if [ "${ok}" = "true" ]; then
-              cls="$(python3 scripts/ci_select.py --classify-only --event merge_group \
-                       --base "${MG_BASE_SHA}" --head "${MG_HEAD_SHA}")" || cls=engine
-              # [OPUS-5] sq-g25hr: lists ci_select.py `_INERT_CLASSES` verbatim (pinned by
-              # scripts/tests/test_ci_select_wiring.py so the two cannot drift).
-              case "${cls}" in
-                docs-only|orchestration-only|deploy-only|inert-mixed) rust=false ;;
-                *) rust=true ;;
-              esac
-            else
-              echo "::warning::could not resolve merge_group base/head SHAs for the batch diff — running the full feature matrix (fail-safe)."
-            fi
-            echo "rust_changed=${rust}" >> "$GITHUB_OUTPUT"
-            echo "merge_group -> change_class=${cls:-<unresolved>} rust_changed=${rust}"
-          else
-            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
-            echo "event=${EVENT_NAME} -> forcing rust_changed=true (full feature matrix)"
-          fi
-
-  # [FABLE-5] sq-fmx4u.3: change-based test-selection pre-job (reusable — doctrine
-  # in .github/workflows/ci-select.yml; same instance shape as ci.yml's). The
-  # `setup` job below consumes its outputs to FILTER the assembled leg list when
-  # selection is ENFORCED (mode == 'selected'); shadow/full/missing outputs
-  # fail-close to the full leg set inside scripts/assemble-feature-matrix.py.
-  # UNCONDITIONAL (no needs/if): the ci-summary gate requires every selection
-  # check-run to conclude success before any skipped sibling counts as satisfied.
-  # NOTE (why assembly-time filtering, not the per-leg job-level `if:` guard the
-  # design sketched): the `matrix` context is NOT available in jobs.<job_id>.if
-  # (GitHub contexts-availability), where a `matrix.crate` reference silently
-  # evaluates EMPTY — under enforcement that would skip EVERY leg unconditionally.
-  # Filtering in the (unit-tested) assembler keeps the per-leg decision in Python;
-  # an unassembled leg spawns no check-run, which the polling aggregator simply
-  # never waits on (requiredness flows through `ci-summary / gate`, not per-leg
-  # names — bead sq-fmx4u.4 verifies this against live branch protection).
-  select:
-    name: select
-    uses: ./.github/workflows/ci-select.yml
-    permissions:
-      contents: read
-
-  # [OPUS-4.8] sq-ibrze: assemble the dynamic matrix from the per-crate fragment files.
-  # This decouples adding a leg (edit one `.github/feature-matrix.d/<crate>.yml`) from
-  # this shared workflow file, killing the recurring adjacent-append merge conflict. The
-  # job NAME ("assemble feature matrix") is free of the words "advisory"/"informational",
-  # so it is itself a REQUIRED check — correctly: if assembly fails (a malformed fragment
-  # or a duplicate leg name that would collapse two gating checks into one), the gate
-  # MUST block the merge rather than silently run a truncated matrix. It is path-filtered
-  # behind the same `changes` gate as the legs, so a non-Rust PR skips it (and the legs
-  # below `need` it, so they skip too — the aggregator treats both as non-failing).
+  # sq-ibrze: assemble the dynamic matrix from the per-crate fragment files. This
+  # decouples adding a leg (edit one `.github/feature-matrix.d/<crate>.yml`) from this
+  # shared workflow file. If assembly fails (a malformed fragment or a duplicate leg
+  # name) this job fails rather than silently running a truncated matrix.
   setup:
-    needs: [changes, select]
-    if: needs.changes.outputs.rust_changed == 'true'
     name: assemble feature matrix
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       matrix: ${{ steps.assemble.outputs.matrix }}
-      # [FABLE-5] sq-fmx4u.3: leg COUNT, so `opt-in-features` can skip (instead of
-      # exploding on an empty matrix) when enforced selection filters every leg out.
+      # Leg COUNT, so `opt-in-features` can skip instead of exploding on an empty matrix.
       legs: ${{ steps.assemble.outputs.legs }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -371,29 +186,27 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install PyYAML
-        # [OPUS-4.8] HASH-pinned (Scorecard PinnedDependenciesID): reuses the same
+        # HASH-pinned (Scorecard PinnedDependenciesID): reuses the same
         # full-closure PyYAML 6.0.2 hash set the docs-quality skill-frontmatter job pins,
         # so --require-hashes verifies every artifact's sha256 before use. PyYAML has no
         # runtime deps, so that file is the complete dependency closure.
         run: pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Self-test the assembler + gate-critical leg-name preservation
-        # [OPUS-4.8] sq-ibrze: run the hermetic test BEFORE assembling so a fragment edit
-        # that would rename/drop/add a gating leg (or reintroduce a static list, or name a
-        # leg "advisory"/"informational") fails THIS gating job — i.e. the gate-critical
-        # invariant is enforced on every PR that touches a fragment, not just by review.
+        # sq-ibrze: run the hermetic test BEFORE assembling so a fragment edit that would
+        # rename/drop/add a leg (or reintroduce a static list) fails THIS job.
         run: python3 scripts/tests/test_feature_matrix_assemble.py
       - name: Enforce tier ratchet + sq-vya1 guard (feature-matrix-tiers.py --enforce)
-        # [SONNET-4.6] sq-ldg8c (design §4): mechanizes the sq-vya1 GUARD as a HARD gate.
+        # sq-ldg8c (design §4): mechanizes the sq-vya1 GUARD as a HARD gate.
         # Reds THIS gating job if a leg carries `tier: check` while the detector still finds
         # feature-gated test code / a `cfg(not(feature))` brace (and no reviewed
         # `tier-reason:` override), OR if any sensitive feature has no `test: true` leg. So a
         # future feature-gated test added under a demoted feature re-promotes it at the next
-        # PR — the ratchet. Fail-closed: a detector/IO error classifies a leg SENSITIVE (keep
+        # run — the ratchet. Fail-closed: a detector/IO error classifies a leg SENSITIVE (keep
         # the full leg), never a silent demotion. Stdlib + the PyYAML installed above; it
         # scans crates/ (checked out above). At ZERO annotations this is a no-op green.
         run: python3 scripts/feature-matrix-tiers.py --enforce
       - name: Structural guard C1 — feature-gated test execution (sq-qcnn.31)
-        # [SONNET-4.6] sq-qcnn.31: Fail-closed guard — every feature-gated test module or
+        # sq-qcnn.31: Fail-closed guard — every feature-gated test module or
         # target (tests/ files with #![cfg(feature = "F")] inner attributes, OR [[test]]/
         # [[bench]] Cargo.toml entries with required-features) MUST map to a CI executor
         # (a feature-matrix leg, a coverage.sh case arm) or an explicit entry in
@@ -412,52 +225,38 @@ jobs:
         # Emit the leg set as a one-line JSON object on the `matrix` output. The
         # assembler validates every fragment (required keys, non-empty features, no
         # duplicate leg names) and exits non-zero on any malformed fragment, so a bad
-        # fragment fails THIS gating job instead of producing a silently-truncated matrix.
-        # [FABLE-5] sq-fmx4u.3: --select-mode/--affected filter the legs to the
-        # affected closure ONLY when the selection pre-job says mode == 'selected';
-        # shadow/full/empty/malformed inputs fail-close to the FULL leg set inside
-        # the assembler (unit-tested). `legs` is the post-filter count.
-        env:
-          SELECT_MODE: ${{ needs.select.outputs.mode }}
-          SELECT_AFFECTED: ${{ needs.select.outputs.affected }}
+        # fragment fails THIS job instead of producing a silently-truncated matrix.
         run: |
           set -euo pipefail
-          # [FABLE-5] CI-economy: --grouped emits ONE matrix entry per bin-packed
-          # GROUP of legs (see the opt-in-features job note); `legs` is the TOTAL
-          # leg count across groups, so the skip-on-zero contract is unchanged.
-          MATRIX="$(python3 scripts/assemble-feature-matrix.py --grouped --event "${{ github.event_name }}" --select-mode "${SELECT_MODE:-}" --affected "${SELECT_AFFECTED:-}")"
+          # CI-economy: --grouped emits ONE matrix entry per bin-packed GROUP of legs
+          # (see the opt-in-features job note); `legs` is the TOTAL leg count.
+          MATRIX="$(python3 scripts/assemble-feature-matrix.py --grouped --event "${{ github.event_name }}")"
           echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
           LEGS="$(echo "$MATRIX" | python3 -c 'import json,sys; m=json.load(sys.stdin)["include"]; print(sum(g["count"] for g in m))')"
           NGROUPS="$(echo "$MATRIX" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')"
           echo "legs=$LEGS" >> "$GITHUB_OUTPUT"
-          echo "Assembled $LEGS opt-in leg(s) into $NGROUPS group(s) (select mode: ${SELECT_MODE:-<unset>}, event ${{ github.event_name }}). Full leg-name set:"
+          echo "Assembled $LEGS opt-in leg(s) into $NGROUPS group(s) (event ${{ github.event_name }}). Full leg-name set:"
           python3 scripts/assemble-feature-matrix.py --names
       - name: Emit the SELECTED leg set + metadata for the trusted reporter
-        # [FABLE-5] PR #3511 review findings 1+2: the reporter runs in the separate,
+        # PR #3511 review findings 1+2: the reporter runs in the separate,
         # default-branch-owned feature-matrix-report.yml (workflow_run) so it never
-        # executes PR-controlled code with `checks: write`. It needs (a) the EXACT
-        # legs this run should produce — the UNGROUPED selected set (same --event/
-        # --select-mode/--affected filters as the grouped matrix, so byte-identical
-        # legs) — as its completeness ground truth (finding 2), and (b) the head SHA
-        # + originating event as metadata so it can validate the SHA against the
-        # server-supplied workflow_run.head_sha (finding 1). This step runs PR-
-        # controlled assembler code, so it holds NO token and NO checks:write — the
-        # artifact is DATA the trusted reporter validates hostile-input-style.
-        if: needs.changes.outputs.rust_changed == 'true'
+        # executes branch-controlled code with `checks: write`. It needs (a) the EXACT
+        # legs this run should produce — the UNGROUPED set (same --event filter as the
+        # grouped matrix, so byte-identical legs) — as its completeness ground truth,
+        # and (b) the head SHA + originating event as metadata so it can validate the
+        # SHA against the server-supplied workflow_run.head_sha. This step holds NO
+        # token and NO checks:write — the artifact is DATA the reporter validates.
         env:
-          SELECT_MODE: ${{ needs.select.outputs.mode }}
-          SELECT_AFFECTED: ${{ needs.select.outputs.affected }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           mkdir -p fmg-selected fmg-metadata
           python3 scripts/assemble-feature-matrix.py \
-            --event "${EVENT_NAME}" --select-mode "${SELECT_MODE:-}" \
-            --affected "${SELECT_AFFECTED:-}" > fmg-selected/selected-matrix.json
+            --event "${EVENT_NAME}" > fmg-selected/selected-matrix.json
           python3 -c 'import json,os; json.dump({"head_sha": os.environ["HEAD_SHA"], "event": os.environ["EVENT_NAME"]}, open("fmg-metadata/metadata.json","w"))'
       - name: Upload the selected-matrix artifact (reporter completeness ground truth)
-        if: needs.changes.outputs.rust_changed == 'true' && steps.assemble.outputs.legs != '0'
+        if: steps.assemble.outputs.legs != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: feature-matrix-selected
@@ -465,7 +264,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Upload the run metadata artifact (head SHA + event for the reporter)
-        if: needs.changes.outputs.rust_changed == 'true' && steps.assemble.outputs.legs != '0'
+        if: steps.assemble.outputs.legs != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: feature-matrix-metadata
@@ -473,19 +272,17 @@ jobs:
           retention-days: 1
           if-no-files-found: error
       - name: Loud failure attribution — the opt-in matrix was NOT generated
-        # [FABLE-5] sq-2wo5t: when THIS job fails (golden leg-name drift after adding
+        # sq-2wo5t: when THIS job fails (golden leg-name drift after adding
         # a new opt-in leg, the C1 structural guard, the tier ratchet, or a malformed
         # fragment), the matrix output is never produced, so the `opt-in-features` job
-        # spawns ZERO legs and EVERY required `opt-in <crate> (…)` check on the PR goes
-        # expected-but-MISSING. That absence historically misread as "one specific leg
+        # spawns ZERO legs and EVERY `opt-in <crate> (…)` check goes expected-but-MISSING. That absence historically misread as "one specific leg
         # failing across multiple unrelated PRs" — a false main-regression signature
         # (the 2026-07-11 'spqv-provenance' drain-blocker alarm; none of the PRs
         # touched the crate). This step fires ONLY when an earlier step in this job
         # failed and emits an unmissable ::error annotation + job-summary block that
         # attributes the missing legs to THIS job, so triage starts at the real failing
         # step instead of chasing a phantom cross-PR leg regression. It cannot rescue
-        # the job (the earlier failure already decides the job's conclusion, which the
-        # required ci-summary gate REDs on) — the fail-closed guards are unchanged.
+        # the job (the earlier failure already decides the job's conclusion).
         # The wiring + this script's output are pinned by
         # scripts/tests/test_feature_matrix_assemble.py (TestAssembleFailureAnnotation).
         if: failure()
@@ -507,228 +304,39 @@ jobs:
             echo "- **Malformed fragment** — a broken or duplicate-name leg in \`.github/feature-matrix.d/<crate>.yml\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # [OPUS-5] sq-nd4yj — PRE-MERGE C1: run the structural guard on the tree the merge
-  # WOULD produce (PR head ⊕ the base tip AS OF THIS RUN), not the one GitHub froze when
-  # this run was triggered. Read the SCOPE paragraph below before treating a green here
-  # as a verdict about the merge candidate: it is evidence about one named base SHA.
-  #
-  # WHY. C1 (`scripts/check-feature-test-execution.py --check`, run in `setup` above) is
-  # a WHOLE-TREE invariant: a feature-gated test in one crate is covered by an executor
-  # declared elsewhere in the tree (a `.github/feature-matrix.d/*.yml` leg, a coverage.sh
-  # case arm, an allowlist entry). The two halves are separately mergeable, so a MERGE
-  # can break the invariant while NEITHER SIDE breaks it alone — the base grows a gated
-  # test whose leg this PR deletes or renames, or vice versa. `setup`'s C1 cannot see
-  # that: on `pull_request` the checked-out `refs/pull/N/merge` is the head merged with
-  # the base AS OF THE EVENT, and GitHub does not re-run the checks when the base moves
-  # afterwards — a stale green over a tree nobody will ever ship.
-  #
-  # THE INCIDENT, ACCURATELY (sq-nd4yj, traced in git — it is NOT quite what the bead
-  # title says). PR #2193 merged (f65702d1) WITH its `sparq-algos (topology)` leg. The
-  # NEXT drain merge, #2194's f65702d1⊕304fa6fa = 700ec341, conflicted on that same
-  # fragment plus the leg-name golden; the hand resolution kept the branch side and so
-  # DROPPED the topology leg while the gated tests stayed. Neither parent violated C1;
-  # the merge result did. C1 then failed in `setup` on main and on every branch built
-  # off it — no matrix assembled, no opt-in legs spawned, gate RED for every open PR —
-  # until f6a06580 restored the leg.
-  #
-  # WHAT THIS JOB DOES AND DOES NOT CLAIM. It re-merges the current base tip and re-runs
-  # the SAME `--check` — no new rule, no relaxed rule — so a merge-only violation fails
-  # HERE, on the PR. It would NOT have caught 700ec341 itself, and this is worth being
-  # blunt about: that merge (a) CONFLICTED, and GitHub publishes no `refs/pull/N/merge`
-  # for a conflicting PR, so no PR check of any kind grades that tree, and (b) was
-  # resolved locally and pushed straight to main, which runs no PR CI at all. What it
-  # DOES catch is the same class's silent half — two edits git merges CLEANLY into a
-  # tree that violates C1 — which is the reachable-through-PR-CI instance and the one no
-  # existing check sees before the merge queue. The merge_group run does grade the
-  # batch-merged tree, so it is the current catcher; this job moves that verdict onto
-  # the PR, before a red dequeues a whole batch. For a locally-resolved push the
-  # push-to-main run of this workflow remains the only backstop. A CONFLICTING test
-  # merge is reported as a warning and NOT evaluated — grading a conflicted working tree
-  # would be a verdict about a tree that will never exist. Note what that means for the
-  # check-run: the guard STEP is skipped, so the JOB still concludes green (a step skip
-  # is not a job skip) and only the `::warning` annotation records that nothing was
-  # graded. That is deliberate — see the two reasons above — but it is a green that
-  # asserts nothing, so read the annotation before trusting it.
-  #
-  # SCOPE — THE VERDICT IS ABOUT ONE BASE SHA, AND IT GOES STALE (PR #5253 review round
-  # 1). This job NARROWS the stale-green window; it does not close it. It grades head ⊕
-  # the base tip it resolves WHILE RUNNING, and no PR event re-runs it afterwards: a
-  # push to the base branch does not re-trigger workflows for the open PRs targeting it,
-  # so a completed green stays green over a base that has since moved on — the same
-  # lifecycle hole described above for `setup`, merely with a smaller window. Two
-  # consequences, stated plainly rather than papered over:
-  #   (1) This job's green is EVIDENCE ABOUT A NAMED BASE SHA, not proof about the
-  #       current merge candidate. It therefore publishes the SHA it graded to the step
-  #       summary; compare that against the PR's base tip before trusting an old green.
-  #   (2) The proof about the tree that actually ships stays where it already was:
-  #       `setup` re-runs the SAME `--check` on the `merge_group` ref, whose SHA contains
-  #       the latest base BY CONSTRUCTION (GitHub builds it from the queue batch on top
-  #       of the current base). That run is what genuinely withholds a bad merge, and it
-  #       cannot go stale, because the ref IS the merge candidate. (`setup` skips a batch
-  #       the change-class gate calls docs-only/orchestration-only — but no such batch can
-  #       break C1: every C1 input, `crates/**` + `.github/feature-matrix.d/**` +
-  #       scripts/coverage.sh + the allowlist JSON, is deliberately OFF the inert
-  #       allowlist in scripts/ci_select.py, so a batch touching one classifies engine.)
-  # So: this job is a left-shifted EARLY WARNING that keeps a merge-only C1 violation
-  # from dequeuing a whole batch. It is not a pre-queue guarantee, and nothing downstream
-  # may treat it as one. The lifecycle wiring both halves depend on — the merge_group
-  # trigger, and `setup`'s C1 not being pull_request-only — is pinned by
-  # scripts/tests/test_feature_matrix_assemble.py (TestPreMergeC1Job).
-  #
-  # WHY A SEPARATE JOB rather than another step in `setup`: a failing step in `setup`
-  # withholds the ENTIRE opt-in matrix — every `opt-in <crate> (…)` check goes expected-
-  # but-MISSING, the trap the failure-attribution step above exists to explain. A
-  # merge-only C1 violation deserves its own red check-run, not a wall of phantom
-  # missing legs.
-  #
-  # GATING: the job name carries neither "advisory" nor "informational" and is declared
-  # in no `.github/advisory-registry.json` entry, so `ci-summary / gate` treats it as a
-  # required sibling. On merge_group/push/schedule THIS JOB skips (skipped =>
-  # non-failing) — re-merging a ref that is already a merge result is meaningless — but
-  # C1 itself does not skip there: `setup` runs it on that ref, which is the
-  # cannot-go-stale verdict the SCOPE paragraph points at.
-  # Wiring pinned by scripts/tests/test_feature_matrix_assemble.py (TestPreMergeC1Job).
-  premerge-c1:
-    needs: [changes]
-    if: github.event_name == 'pull_request' && needs.changes.outputs.rust_changed == 'true'
-    name: pre-merge C1 (feature-gated test execution)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-          # START THE TEST MERGE AT THE PR HEAD ITSELF (PR #5253 review round 2). A
-          # default pull_request checkout lands on `refs/pull/N/merge` — the SYNTHETIC
-          # merge GitHub froze when this run was triggered, i.e. the head already merged
-          # with the base AS OF THE EVENT. Merging the current base tip into THAT grades
-          # ((stale base ⊕ head) ⊕ current base), which is not the tree this job claims
-          # to grade, and the difference is not purely cosmetic: merge base resolution
-          # and rename detection depend on the history, so the two can disagree even
-          # where the ordinary clean-merge cases agree. Pinning `ref` to the head SHA
-          # makes the test merge's first parent the PR head, so the graded tree really is
-          # "PR head ⊕ current base tip". The merge step re-verifies HEAD against this
-          # same SHA rather than assuming the checkout honoured it.
-          ref: ${{ github.event.pull_request.head.sha }}
-          # The test merge below needs the base BRANCH and a shared ancestor with it. A
-          # default pull_request checkout fetches only `refs/pull/N/merge` at depth 1, so
-          # `origin/<base branch>` is not present there at all, and a shallow graft has no
-          # merge base to work from either (the same class of shallow-checkout breakage
-          # the `changes` job's three-dot diff documents). fetch-depth: 0 fetches the
-          # branches with full history — ~76 MB of .git here, cheaper than hand-rolling a
-          # deepening fetch — and full history is also what gives the pinned head SHA
-          # above a merge base with the base branch to three-way merge from.
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-      - name: Install PyYAML
-        # The same hash-pinned full-closure PyYAML the `setup` job installs — the guard
-        # loads the .github/feature-matrix.d fragments to build its executor map.
-        run: pip install --require-hashes -r .github/requirements/docs-quality.txt
-      - name: Test-merge the current base tip into the PR head
-        id: merge
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          # FAIL CLOSED on a broken assumption: if the base branch is not in the local
-          # repo, the checkout above did not do what this job depends on, and the merge
-          # would "fail" for a reason that has nothing to do with the PR. Red, never a
-          # silent skip.
-          git rev-parse --verify --quiet "origin/${BASE_REF}^{commit}" > /dev/null || {
-            echo "::error title=pre-merge C1 could not run::origin/${BASE_REF} is missing from the checkout — the fetch-depth: 0 checkout in this job is a precondition of the test merge."
-            exit 1
-          }
-          # FAIL CLOSED ON THE OTHER HALF OF THE ASSUMPTION (PR #5253 review round 2).
-          # The merge must START at the PR head, not at the event-time
-          # `refs/pull/N/merge` a default pull_request checkout would leave here; the
-          # checkout above pins `ref` to HEAD_SHA precisely so that holds. Verify it
-          # instead of trusting it — if HEAD is anything else, the merge's first parent
-          # is not the PR head and the tree graded below is not the one this job reports.
-          ACTUAL_HEAD="$(git rev-parse HEAD)"
-          if [ "${ACTUAL_HEAD}" != "${HEAD_SHA}" ]; then
-            echo "::error title=pre-merge C1 could not run::HEAD is ${ACTUAL_HEAD}, not the PR head ${HEAD_SHA} — the test merge would start from the wrong commit (most likely the event-time refs/pull/N/merge), so its result would not be the PR head merged with the current base."
-            exit 1
-          fi
-          # RECORD THE BASE THIS VERDICT IS ABOUT (PR #5253 review round 1). The check-run
-          # this job produces goes stale the moment the base advances — GitHub re-runs
-          # nothing for an open PR when its base moves — so publish the exact SHA graded
-          # instead of leaving "the current base tip" to mean "whenever you happened to
-          # look". A reader (or a merge-fixer triaging an old green) can then tell a
-          # verdict about today's base from one about a base three merges ago.
-          BASE_SHA="$(git rev-parse "origin/${BASE_REF}")"
-          echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
-          {
-            echo "## pre-merge C1 — the tree this run is about"
-            echo
-            echo "PR head \`${HEAD_SHA}\` ⊕ base \`${BASE_REF}\` @ \`${BASE_SHA}\` — graded below unless the test merge conflicts, in which case nothing was graded and a \`::warning\` says so."
-            echo
-            echo "**Any conclusion this job reaches is about that base SHA only.** If \`${BASE_REF}\` has advanced since this run, no PR event re-ran this job, so its conclusion says nothing about the tree the PR would produce now. The C1 verdict that cannot go stale is the \`assemble feature matrix\` job's run on the \`merge_group\` ref, whose SHA contains the latest base by construction."
-          } >> "$GITHUB_STEP_SUMMARY"
-          # `--no-commit` leaves the merged tree in the working directory (all we need);
-          # an unchanged base is "Already up to date." and exits 0, which simply re-runs
-          # the guard on the same tree `setup` saw. A non-zero exit here is a CONFLICT.
-          if git -c user.name=sparq-ci -c user.email=sparq-ci@users.noreply.github.com \
-               merge --no-commit --no-ff "origin/${BASE_REF}"; then
-            echo "merged=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "merged=false" >> "$GITHUB_OUTPUT"
-            git merge --abort || true
-            echo "::warning title=pre-merge C1 not evaluated::This PR conflicts with origin/${BASE_REF}, so the merged tree could not be built and the pre-merge C1 guard did not run. Merge the base branch in (or rebase); the guard re-evaluates on the next push, and the merge queue checks the batch-merged tree regardless."
-          fi
-      - name: Structural guard C1 on the merged tree
-        # Deliberately gated on a CLEAN test merge: running the guard against a
-        # conflicted working tree would grade a tree that is not the merge result.
-        if: steps.merge.outputs.merged == 'true'
-        env:
-          BASE_SHA: ${{ steps.merge.outputs.base_sha }}
-        run: |
-          set -euo pipefail
-          if ! python3 scripts/check-feature-test-execution.py --check; then
-            echo "::error title=pre-merge C1 failed on the MERGED tree::The C1 structural guard FAILS on the tree this PR produces when merged with base ${BASE_SHA}. (The 'assemble feature matrix' job grades the event-time merge ref instead, so it can be green while this is red — the violation lives in the merge, not in either side.) A feature-gated test and the CI executor that runs it — a .github/feature-matrix.d leg, a scripts/coverage.sh case arm, or an allowlist entry — are on opposite sides of it. Add the missing leg in THIS PR: merging as-is reds C1 on main, which withholds the whole opt-in matrix on every branch (sq-nd4yj)."
-            exit 1
-          fi
-
   opt-in-features:
-    needs: [changes, setup]
-    # [FABLE-5] sq-fmx4u.3: `legs != '0'` skips this job when enforced selection
-    # filtered EVERY leg out (an empty `include` would otherwise be a matrix
-    # error, i.e. a false RED). Fail-closed: a missing/empty `legs` output is
-    # != '0' => run; and if `setup` itself failed, this job skips via `needs`
-    # while the gate REDs on setup's failure.
-    if: needs.changes.outputs.rust_changed == 'true' && needs.setup.outputs.legs != '0'
-    # [FABLE-5] CI-economy GROUPED LEGS (maintainer directive 2026-07-18). The matrix
+    needs: setup
+    # `legs != '0'` skips this job on an empty leg set (an empty `include` would
+    # otherwise be a matrix error). A missing/empty `legs` output is != '0' => run.
+    if: needs.setup.outputs.legs != '0'
+    # CI-economy GROUPED LEGS (maintainer directive 2026-07-18). The matrix
     # is ONE ENTRY PER BIN-PACKED GROUP of legs (assembler --grouped; same-crate legs
     # clustered, each group targeting <5 min of warm-cache work) instead of one runner
     # per leg — 159 legs used to mean 159 runners each paying checkout + toolchain +
     # cache-restore + the dependency compile.
     #
-    # NAME CONTRACT PRESERVED: the gate-critical `opt-in <name>` check-run for EVERY
+    # NAME CONTRACT PRESERVED: the `opt-in <name>` check-run for EVERY
     # leg is still emitted, byte-identical (proven against the golden snapshot by
     # scripts/tests/test_feature_matrix_assemble.py) — but NOT from this job. THIS
     # JOB IS DELIBERATELY UNPRIVILEGED (PR #3511 review, critical finding): it
-    # executes PR-controlled code — cargo build scripts, proc macros, tests, clippy
+    # executes branch-controlled code — cargo build scripts, proc macros, tests, clippy
     # lints, plus the whole third-party dependency graph's build-time code — so it
     # must NEVER hold a `checks: write` token (malicious build code could forge
-    # arbitrary check runs, incl. gate-critical sibling names) nor persisted git
+    # arbitrary check runs) nor persisted git
     # credentials. It runs scripts/run-feature-matrix-group.py with NO token in the
     # environment and writes each leg's outcome to a results file, uploaded below as
     # an artifact for the separate, DEFAULT-BRANCH-owned reporter workflow
     # (feature-matrix-report.yml, workflow_run — see finding 1 in this file's header),
     # which executes no PR build code, validates the artifact hostile-input-style, and
     # posts the per-leg check-runs. A failed leg does not stop the group (the old fail-fast: false),
-    # and the group job then FAILS LOUDLY naming exactly which legs failed — this
-    # job's own conclusion is a required gating signal via `ci-summary / gate`
-    # regardless of any check-run posting (sq-fmx4u.4).
+    # and the group job then FAILS LOUDLY naming exactly which legs failed,
+    # regardless of any check-run posting.
     #
-    # [OPUS-4.8] sq-ibrze (unchanged): legs are ASSEMBLED from the per-crate fragment
+    # sq-ibrze: legs are ASSEMBLED from the per-crate fragment
     # files (`.github/feature-matrix.d/<crate>.yml`). To add a leg, edit the relevant
     # crate fragment — do NOT reintroduce a static `include:` list here.
-    # [SONNET-4.6] issue #2384: that is a TWO-FILE change, not a one-file change. A
-    # leg's `name:` is pinned byte-for-byte by the gate-name golden, so adding /
+    # Issue #2384: that is a TWO-FILE change, not a one-file change. A
+    # leg's `name:` is pinned byte-for-byte by the leg-name golden, so adding /
     # renaming / removing a leg ALSO requires regenerating
     # `scripts/tests/feature-matrix-legnames.golden.txt`. Scope both files (never one)
     # — see `.github/feature-matrix.d/README.md`.
@@ -746,7 +354,7 @@ jobs:
           # persisted GITHUB_TOKEN in .git/config (PR #3511 review).
           persist-credentials: false
       - name: Rust (preinstalled stable + clippy)
-        # [FABLE-5] CI-economy: the ubuntu runner image ships a rustup stable
+        # CI-economy: the ubuntu runner image ships a rustup stable
         # toolchain (with the default profile, incl. clippy). dtolnay/rust-toolchain
         # runs `rustup toolchain install stable`, which re-downloads the whole
         # toolchain whenever the image lags the newest release. `component add` is a
@@ -757,7 +365,7 @@ jobs:
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          # [OPUS-4.8] sq-3sbrr — PER-CRATE cache key + save-only-on-main, unchanged
+          # sq-3sbrr — PER-CRATE cache key + save-only-on-main, unchanged
           # in strategy: rust-cache stores the DEPENDENCY build only, so keying by
           # the group's DOMINANT crate (groups are same-crate-clustered by the
           # assembler precisely so this key stays meaningful) keeps ONE dependency
@@ -769,7 +377,7 @@ jobs:
           shared-key: feature-matrix-${{ matrix.cache_crate }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch dependencies (retry transient crates.io fetch)
-        # [OPUS-4.8] sq-hhxc: transient crates.io fetch flake absorbed by a bounded
+        # sq-hhxc: transient crates.io fetch flake absorbed by a bounded
         # retry so the per-leg builds resolve from the warm cache. Fails only if
         # all 3 attempts fail (a genuine outage). No new GitHub Action dependency.
         run: |
@@ -809,8 +417,8 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
-  # [FABLE-5] PR #3511 review, CRITICAL finding 1: the per-leg `opt-in <name>`
-  # check-run reporter is NO LONGER a job in this PR-triggered workflow. It moved to
+  # PR #3511 review, CRITICAL finding 1: the per-leg `opt-in <name>`
+  # check-run reporter is NO LONGER a job in this workflow. It moved to
   # the separate, DEFAULT-BRANCH-owned .github/workflows/feature-matrix-report.yml,
   # triggered by `workflow_run` on this workflow's completion. Rationale: the reporter
   # is the only holder of `checks: write`, and a `checks: write` job that checks out
@@ -823,33 +431,16 @@ jobs:
   # the recorded head SHA against the server-supplied workflow_run.head_sha, and posts
   # the per-leg + `feature-matrix report` summary check-runs onto the head commit.
   # See feature-matrix-report.yml for the full threat model + adversarial self-check.
-  # The ALWAYS-gating coarse signal is unchanged: the opt-in-features group jobs run
-  # on THIS (PR/merge_group) event, so their own conclusions are discovered directly
-  # by ci-summary regardless of reporter timing (sq-fmx4u.4).
+  # The coarse signal is unchanged: the opt-in-features group jobs' own conclusions,
+  # independent of reporter timing.
 
-  # [SONNET-4.6] sq-ldg8c: T1 CHECK TIER — compile+clippy (NO test run) for the opt-in legs a
-  # fragment has DEMOTED with `tier: check`. Design: research/feature-matrix-pyramid.md §3/§5.
-  # The assembler (`--tier check`) emits ONLY the demoted legs on pull_request/merge_group;
-  # on push/schedule/workflow_dispatch it emits NONE — those events run the FULL `opt-in`
-  # matrix above as the per-merge backstop, so the check tier is empty there. TWO shards
-  # (sparq-engine legs vs the rest) each reuse ONE target dir, so a shard's crate+dependency
-  # stack compiles once across its legs (engine's per-feature-state frontend recompile is the
-  # dominant cost — design §3). No `--all-targets`: a demoted leg has, by the demotion
-  # criterion, no feature-gated test code, so the class-A signal is the lib/bin compile+lint.
-  #
-  # BEHAVIOUR-PRESERVING AT MERGE: with ZERO fragments annotated (the state this bead lands
-  # in — the demotion flip is the separate bead sq-s5dvo), the assembler emits an EMPTY leg
-  # set for BOTH shards, so every Rust step is skipped and the job is GREEN-EMPTY (proven by
-  # scripts/tests/test_feature_matrix_assemble.py's behaviour-preservation tests). The job
-  # NAME ("feature-matrix check-tier (<shard>)") is free of the words "advisory"/
-  # "informational", so the single required `ci-summary / gate` aggregator auto-discovers
-  # each shard as a REQUIRED check — once a leg is demoted, its compile/clippy break still
-  # blocks the merge via T1 instead of its old `opt-in <name>` leg. Same assembly-time-
-  # filtering mechanism as the matrix above (sq-fmx4u.4): no ci-summary edit, no ruleset
-  # change. Selection is applied INSIDE the assemble step (env), never the job-level `if:`.
+  # sq-ldg8c: T1 CHECK TIER — compile+clippy (NO test run) for the opt-in legs a fragment
+  # has DEMOTED with `tier: check` (design: research/feature-matrix-pyramid.md §3/§5). The
+  # assembler (`--tier check`) emits demoted legs only on pull_request/merge_group events;
+  # this workflow now runs on schedule/workflow_dispatch only, where the check tier is
+  # EMPTY and demoted legs run as FULL legs in the matrix above. Kept so a future PR
+  # trigger (or a dispatch of a tiered event) has the lane; green-empty today.
   check-tier:
-    needs: [changes, select]
-    if: needs.changes.outputs.rust_changed == 'true'
     name: feature-matrix check-tier (${{ matrix.shard }})
     runs-on: ubuntu-latest
     permissions:
@@ -866,30 +457,24 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install PyYAML
-        # [OPUS-4.8] HASH-pinned (Scorecard PinnedDependenciesID): same full-closure PyYAML
+        # HASH-pinned (Scorecard PinnedDependenciesID): same full-closure PyYAML
         # 6.0.2 hash set the setup job pins; --require-hashes verifies every artifact.
         run: pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Assemble demoted (tier:check) legs for this shard
         id: legs
-        # [SONNET-4.6] sq-ldg8c: --tier check emits the demoted legs for this shard, further
-        # filtered by the SAME change-based selection the setup job applies (fail-closed to
-        # the full set inside the assembler). GREEN-EMPTY today: legs=0 => the Rust steps
-        # below all skip.
-        env:
-          SELECT_MODE: ${{ needs.select.outputs.mode }}
-          SELECT_AFFECTED: ${{ needs.select.outputs.affected }}
+        # sq-ldg8c: --tier check emits the demoted legs for this shard. GREEN-EMPTY
+        # today: legs=0 => the Rust steps below all skip.
         run: |
           set -euo pipefail
           CHECK="$(python3 scripts/assemble-feature-matrix.py \
-            --event "${{ github.event_name }}" --tier check --shard "${{ matrix.shard }}" \
-            --select-mode "${SELECT_MODE:-}" --affected "${SELECT_AFFECTED:-}")"
+            --event "${{ github.event_name }}" --tier check --shard "${{ matrix.shard }}")"
           echo "matrix=$CHECK" >> "$GITHUB_OUTPUT"
           N="$(echo "$CHECK" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["include"]))')"
           echo "legs=$N" >> "$GITHUB_OUTPUT"
-          echo "check-tier shard '${{ matrix.shard }}': $N demoted leg(s) (event ${{ github.event_name }}, select ${SELECT_MODE:-<unset>})"
+          echo "check-tier shard '${{ matrix.shard }}': $N demoted leg(s) (event ${{ github.event_name }})"
       - name: Rust (preinstalled stable + clippy)
         if: steps.legs.outputs.legs != '0'
-        # [FABLE-5] CI-economy: preinstalled runner-image stable (see the
+        # CI-economy: preinstalled runner-image stable (see the
         # opt-in-features note) — `component add` is a no-op when present.
         run: |
           rustup default stable
@@ -898,7 +483,7 @@ jobs:
         if: steps.legs.outputs.legs != '0'
         with:
           shared-key: feature-matrix-check-tier-${{ matrix.shard }}
-          # [OPUS-4.8] sq-3sbrr: restore-only off main (see the opt-in-features note).
+          # sq-3sbrr: restore-only off main (see the opt-in-features note).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch dependencies (retry transient crates.io fetch)
         if: steps.legs.outputs.legs != '0'
@@ -937,17 +522,12 @@ jobs:
             echo "::endgroup::"
           done
 
-  # [GPT-5.6] sq-r1ei8: the opt-in fragment matrix can only add Cargo features,
+  # sq-r1ei8: the opt-in fragment matrix can only add Cargo features,
   # so it cannot express the core tier of a default-on feature. This dedicated
   # lane gates the exact pure-Solid build: `/sparql` and the query-engine normal
   # dependencies are absent, while the feature-off LDP CRUD + WAC test remains
   # executable. The sibling fragment leg covers the explicit full-tier spelling.
   lws-core-no-sparql-endpoint:
-    needs: [changes, select]
-    if: >-
-      needs.changes.outputs.rust_changed == 'true' &&
-      (needs.select.outputs.mode != 'selected' ||
-       contains(needs.select.outputs.affected, '"sparq-lws-core"'))
     name: sparq-lws-core pure Solid (--no-default-features)
     runs-on: ubuntu-latest
     permissions:
@@ -958,7 +538,7 @@ jobs:
           # Cargo build-time code runs here — no persisted token (PR #3511 review).
           persist-credentials: false
       - name: Rust (preinstalled stable + clippy)
-        # [FABLE-5] CI-economy: preinstalled runner-image stable (see the
+        # CI-economy: preinstalled runner-image stable (see the
         # opt-in-features note) — `component add` is a no-op when present.
         run: |
           rustup default stable
@@ -994,7 +574,7 @@ jobs:
       - name: Clippy core tier (--all-targets -D warnings)
         run: cargo clippy -p sparq-lws-core --no-default-features --all-targets -- -D warnings
 
-  # [OPUS-4.8] sq-1b390: THE pure-serialiser-library build of sparq-server — i.e. the crate
+  # sq-1b390: THE pure-serialiser-library build of sparq-server — i.e. the crate
   # with `--no-default-features` (the `server` async HTTP stack OFF), the contract a consumer
   # relies on when it wants only the XML/CSV/TSV/graph serialisers without dragging in
   # axum/hyper/tokio. ci.yml only ever clippies the DEFAULT (server-ON) set and the
@@ -1005,18 +585,8 @@ jobs:
   # imports (the bug sq-1b390 fixes by `#![cfg(feature = "server")]`-gating each server-only
   # suite). This job locks the pure-library build green: build + `clippy --all-targets -D
   # warnings` + `cargo test` of the suites that STAY compiled with the feature off (the two
-  # serialiser-oracle tests). The job NAME is free of "advisory"/"informational", so the
-  # required `ci-summary / gate` aggregator auto-discovers it as REQUIRED (no edit to
-  # ci-summary.yml).
+  # serialiser-oracle tests).
   server-no-default-features:
-    # [FABLE-5] sq-fmx4u.3: single-crate lane (`-p sparq-server` only) — skip when
-    # ENFORCED selection proves sparq-server unaffected (fail-closed guard: empty/
-    # missing outputs or shadow/full mode => run).
-    needs: [changes, select]
-    if: >-
-      needs.changes.outputs.rust_changed == 'true' &&
-      (needs.select.outputs.mode != 'selected' ||
-       contains(needs.select.outputs.affected, '"sparq-server"'))
     name: sparq-server pure-serialiser (--no-default-features)
     runs-on: ubuntu-latest
     permissions:
@@ -1027,7 +597,7 @@ jobs:
           # Cargo build-time code runs here — no persisted token (PR #3511 review).
           persist-credentials: false
       - name: Rust (preinstalled stable + clippy)
-        # [FABLE-5] CI-economy: preinstalled runner-image stable (see the
+        # CI-economy: preinstalled runner-image stable (see the
         # opt-in-features note) — `component add` is a no-op when present.
         run: |
           rustup default stable
@@ -1035,7 +605,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: feature-matrix-sparq-server-no-default-features
-          # [OPUS-4.8] sq-3sbrr: restore-only off main so PR/merge_group runs don't
+          # sq-3sbrr: restore-only off main so PR/merge_group runs don't
           # write branch-scoped caches that churn the shared 10 GB budget.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch dependencies (retry transient crates.io fetch)
@@ -1056,7 +626,7 @@ jobs:
       - name: Test (-p sparq-server --no-default-features) — the still-compiled pure-serialiser suites
         run: cargo test -p sparq-server --no-default-features
       - name: Rustdoc (-p sparq-server --no-default-features, -D warnings)
-        # [OPUS-5] sq-d661l: the repo-wide rustdoc gate (ci.yml) runs --all-features, where
+        # sq-d661l: the repo-wide rustdoc gate (ci.yml) runs --all-features, where
         # an intra-doc link from an ALWAYS-compiled doc-comment to a `server`-gated item
         # RESOLVES — the break only surfaces in the async-stack-less doc build, and this lane
         # ran build/test/clippy but NOT rustdoc, so that state was unchecked and had rotted
@@ -1070,7 +640,7 @@ jobs:
       - name: Clippy (--no-default-features --all-targets -D warnings)
         run: cargo clippy -p sparq-server --no-default-features --all-targets -- -D warnings
 
-  # [FABLE-5] sq-wo5jw: THE pure-geometry-library build of sparq-geo — the crate with
+  # sq-wo5jw: THE pure-geometry-library build of sparq-geo — the crate with
   # `--no-default-features` (the default-ON `engine` feature OFF): WKT/GML parsing, the
   # plain-Rust `geof` API and the R-tree GeoIndex, with no SPARQL engine in the
   # dependency graph. ci.yml exercises only the DEFAULT (engine-ON) set and the
@@ -1082,18 +652,8 @@ jobs:
   # ran them). This job locks the whole engine-less state green: build + `cargo test`
   # (lib + the engine-less integration suites) + an EXPLICIT `--doc` step (so the
   # doctest target stays covered even if a later edit narrows the main test step) +
-  # `clippy --all-targets -D warnings`. The job NAME is free of the words
-  # "advisory"/"informational", so the single required `ci-summary / gate` aggregator
-  # auto-discovers it as a REQUIRED check (no edit to ci-summary.yml).
+  # `clippy --all-targets -D warnings`.
   geo-no-default-features:
-    # Single-crate lane (`-p sparq-geo` only) — skip when ENFORCED selection proves
-    # sparq-geo unaffected (fail-closed guard: empty/missing outputs or shadow/full
-    # mode => run), mirroring server-no-default-features above.
-    needs: [changes, select]
-    if: >-
-      needs.changes.outputs.rust_changed == 'true' &&
-      (needs.select.outputs.mode != 'selected' ||
-       contains(needs.select.outputs.affected, '"sparq-geo"'))
     name: sparq-geo pure-geometry (--no-default-features)
     runs-on: ubuntu-latest
     permissions:
@@ -1104,7 +664,7 @@ jobs:
           # Cargo build-time code runs here — no persisted token (PR #3511 review).
           persist-credentials: false
       - name: Rust (preinstalled stable + clippy)
-        # [FABLE-5] CI-economy: preinstalled runner-image stable (see the
+        # CI-economy: preinstalled runner-image stable (see the
         # opt-in-features note) — `component add` is a no-op when present.
         run: |
           rustup default stable
@@ -1112,7 +672,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: feature-matrix-sparq-geo-no-default-features
-          # [OPUS-4.8] sq-3sbrr: restore-only off main so PR/merge_group runs don't
+          # sq-3sbrr: restore-only off main so PR/merge_group runs don't
           # write branch-scoped caches that churn the shared 10 GB budget.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Fetch dependencies (retry transient crates.io fetch)
@@ -1145,16 +705,12 @@ jobs:
       - name: Clippy (--no-default-features --all-targets -D warnings)
         run: cargo clippy -p sparq-geo --no-default-features --all-targets -- -D warnings
 
-  # [OPUS-4.8] sq-s1uy (epic sq-dnko): THE load-bearing Phase-0 deliverable. Assert the
+  # sq-s1uy (epic sq-dnko): THE load-bearing Phase-0 deliverable. Assert the
   # lean core (sparq-core + sparq-engine) has NO dependency edge to the OPT-IN federation
   # client sparq-fedclient — in BOTH feature states (the guard resolves --all-features, so
   # an edge added under any feature is caught). The dependency arrow points ONE WAY into
-  # the engine; this job fails the merge if a future edit reverses it. The job NAME is
-  # free of the words "advisory"/"informational", so the single required `ci-summary /
-  # gate` aggregator auto-discovers it as a REQUIRED check (no edit to ci-summary.yml).
+  # the engine; this job fails if a future edit reverses it.
   fedclient-boundary:
-    needs: changes
-    if: needs.changes.outputs.rust_changed == 'true'
     name: fedclient dependency-boundary guard
     runs-on: ubuntu-latest
     permissions:
@@ -1165,13 +721,13 @@ jobs:
           # Cargo build-time code runs here — no persisted token (PR #3511 review).
           persist-credentials: false
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy: preinstalled runner-image stable (see the
+        # CI-economy: preinstalled runner-image stable (see the
         # opt-in-features note); no extra component needed here.
         run: rustup default stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: fedclient-boundary
-          # [OPUS-4.8] sq-3sbrr: restore-only off main (see the opt-in-features note).
+          # sq-3sbrr: restore-only off main (see the opt-in-features note).
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Assert sparq-core/sparq-engine have no edge to sparq-fedclient
         run: scripts/fedclient-boundary-guard.sh

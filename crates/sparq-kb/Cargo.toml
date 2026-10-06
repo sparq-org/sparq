@@ -55,7 +55,7 @@ close = ["query", "dep:sparq-reason"]
 # scaffolding is a pure deterministic data-transform. The SHACL gate over the emitted TTL
 # is run by the `literature_pipeline` integration test, which additionally enables
 # `validate`. [OPUS-4.8] sq-2489d.5
-literature = ["dep:serde_json"]
+literature = ["dep:serde_json", "dep:percent-encoding"]
 # OPT-IN (default-OFF, implies `literature`). Enables the LIVE CORE API v3 connector
 # (sq-tzars.1): the networked socket layer of `connector_core` — `UreqTransport` +
 # `CoreClient` (paged search with rate-limit + retry discipline + fail-closed license
@@ -92,6 +92,9 @@ spargebra = { workspace = true, optional = true }
 # [OPUS-4.8] sq-ve5dy
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
+# #3712: the literature path's one query-value encoder (`percent_encode_query`); no_std,
+# zero deps, already in the tree via ureq.
+percent-encoding = { workspace = true, optional = true }
 # Blocking HTTP client for the LIVE CORE connector (only behind `literature-live`).
 # ureq 3 + rustls, mirroring sparq-engine's SERVICE transport EXACTLY (same version +
 # feature set), so it reuses the already-vendored dependency and adds no new lockfile

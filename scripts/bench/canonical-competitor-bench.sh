@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-7d3dj.34 — CANONICAL competitor benchmark EC2 launcher (committed harness).
+# sq-7d3dj.34 — CANONICAL competitor benchmark EC2 launcher (committed harness).
 #
 # The 2026-07-07 canonical 5-engine CLI matrix (bench/canonical-competitor-results/2026-07-07/)
 # was produced by an ad-hoc launcher that never landed in the repo; this is its committed,
@@ -17,7 +17,7 @@
 #   * launcher poll deadline sits BELOW the watchdog, teardown is sentinel-gated.
 #   * EXIT trap: terminate instance (waits), delete ephemeral keypair + security group.
 #   * REFUSES to touch the protected prod/dev instances.
-#   * [OPUS-5] sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
+#   * sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
 #     uploads every envelope to a run-scoped S3 prefix — the channel that survives an AMI
 #     whose serial console returns nothing usable. Opt-in; inert without them.
 #
@@ -34,7 +34,7 @@ set -euo pipefail
 REGION="${REGION:-eu-west-2}"
 ITYPE="${ITYPE:-c6i.4xlarge}"
 BRANCH="${1:-${BRANCH:-main}}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 SP2B_TRIPLES="${SP2B_TRIPLES:-250000}"
 WATDIV_SF="${WATDIV_SF:-1}"
 ITERS="${ITERS:-3}"
@@ -55,7 +55,7 @@ die() { printf '[canonical-bench] ERROR: %s\n' "$*" >&2; exit 1; }
 command -v aws >/dev/null || die "aws CLI not found"
 mkdir -p "$RESULTS_LOCAL"
 
-# [OPUS-5] sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
+# sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
 # Inert unless BOTH are exported; half-configured fails fast here rather than after a
 # multi-hour gather. See scripts/bench/bootstrap-bench-iam.sh (one-time maintainer setup).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -196,7 +196,7 @@ while :; do
   [ "$STATE" = "terminated" ] && { log "instance terminated before sentinel — results may be partial"; break; }
 done
 
-# [OPUS-5] sq-ffaa9 — durable channel first when configured: the box uploaded each
+# sq-ffaa9 — durable channel first when configured: the box uploaded each
 # envelope as it was produced, so this survives a dead SSH path AND an AMI whose serial
 # console returns nothing usable. No-op when egress is off.
 bench_egress_pull "$EGRESS_URI" "$RESULTS_LOCAL"

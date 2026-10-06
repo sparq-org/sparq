@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.25 — bin-packed MULTI-AXIS canonical EC2 bench runner.
+# sq-hmd7l.25 — bin-packed MULTI-AXIS canonical EC2 bench runner.
 #
 # WHY: the workload-triage cost discipline says small benchmark axes do NOT get one
 # EC2 box each (research/comparative-benchmarking-everything.md §4, point 5). This
@@ -75,7 +75,7 @@ set -euo pipefail
 REGION="${REGION:-eu-west-2}"
 ITYPE="${ITYPE:-c6i.4xlarge}"                # canonical quiet-box class (16 vCPU / 32 GiB)
 EBS_GB="${EBS_GB:-80}"
-REPO="https://github.com/jeswr/sparq.git"
+REPO="https://github.com/sparq-org/sparq.git"
 AXES="${AXES:-fts geo hdt update parse}"
 WATCHDOG_S="${WATCHDOG_S:-10800}"            # 3h hard self-terminate cap (backstop)
 POLL_DEADLINE_S="${POLL_DEADLINE_S:-9900}"   # 2h45m < watchdog, so watchdog stays backstop

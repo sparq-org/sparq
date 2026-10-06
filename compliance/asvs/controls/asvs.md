@@ -94,7 +94,7 @@ or an in-module `#[test]` regresses, `.github/workflows/<wf>.yml` gates. Full re
 
 | ASVS | Control | Status | Evidence | Owner |
 |---|---|---|---|---|
-| V10.2.x | No malicious/back-doored code; dependency integrity | **PASS** | `cargo deny check advisories bans sources licenses` — **all GATING** on PR (`.github/workflows/supply-chain.yml`, jobs `cargo-deny … — GATING`); cargo-vet job present; daily `dependency-monitoring.yml` advisory watchdog; SHA-pinned actions; CodeQL SAST (`codeql.yml`, `security-and-quality`). | sparq |
+| V10.2.x | No malicious/back-doored code; dependency integrity | **PASS** | `cargo deny check advisories bans sources licenses` — all failing steps in `.github/workflows/supply-chain.yml` (push to `main` + nightly; **not** a PR gate — post-merge detection); cargo-vet step present; daily `dependency-monitoring.yml` advisory watchdog; SHA-pinned actions; CodeQL SAST (`codeql.yml`, `security-and-quality`). | sparq |
 | V10.3.x | Integrity of the build/deployment pipeline | **PASS / AUDIT-READY** | SLSA build provenance + SHA256SUMS on release (`release.yml`); buildkit `provenance: mode=max`. SLSA *level* is honestly ≈L2 — assessed in `compliance/slsa/`. | sparq |
 | V10.3.2 | Application does not execute unverified code / has no time-bomb | **PASS** | No dynamic code loading; no `unsafe` in the parser/executor (`#![forbid(unsafe_code)]`, MS-13 in `compliance/memsafety/`); fuzz + Miri lanes. | sparq |
 

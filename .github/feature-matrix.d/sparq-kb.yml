@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-u6nmt: the sparq-kb Project-Knowledge-Graph dogfooding crate
+# sq-u6nmt: the sparq-kb Project-Knowledge-Graph dogfooding crate
 # (added by PR #1069). The DEFAULT build is a pure data + Rust-vocab crate; its
 # SHACL-dogfood + ingest suites are entirely behind default-OFF features:
 #   • tests/dogfood_shacl.rs + tests/ingest_shacl.rs are `#![cfg(feature =
@@ -46,7 +46,7 @@
 # `cargo test -p sparq-kb --features validate` runs 3 dogfood_shacl + 2 ingest_shacl
 # (+1 vocab unit) tests, `--features query` adds the 3 ingest_query tests, and
 # `clippy --all-targets -D warnings` is clean in every state.
-# [OPUS-4.8] sq-8cuf8: the optional `close` feature (Cargo.toml: `close =
+# sq-8cuf8: the optional `close` feature (Cargo.toml: `close =
 # ["query", "dep:sparq-reason"]`) landed on main with PR #1075, so the leg the
 # NOTE above deferred is now wired below. `close` is a TRUE `not(feature=…)`
 # divergence — NOT just an additive superset of `query` — so it gets its OWN
@@ -85,7 +85,7 @@
   features: "close"
   test: true
 
-# [OPUS-4.8] sq-2489d.5: the GenAI-KB Phase-5 `literature` ingestion scaffolding
+# sq-2489d.5: the GenAI-KB Phase-5 `literature` ingestion scaffolding
 # (PR #1187). `literature` is an INDEPENDENT opt-in (Cargo.toml: `literature =
 # ["dep:serde_json"]`) — it does NOT imply `validate`, so it is NOT covered by the
 # `validate`/`query`/`close` legs above. tests/literature_pipeline.rs is gated on BOTH

@@ -323,7 +323,7 @@
       "id": "rdf-validate-shacl",
       "name": "Zazuko rdf-validate-shacl",
       "kind": "js-lib",
-      "role": "[OPUS-4.8 sq-eifd] JS-ecosystem SHACL validator (MIT); the WASM-peer datapoint for sparq's browser SHACL story. Adapter kind `js-lib` (in-process Node/RDF-JS), run in the SAME Node runtime that can also bench sparq's own @jeswr/sparq WASM SHACL. Counts `report.results` / reads `report.conforms` — the identical reduction the shared report->count parser performs over the report graph.",
+      "role": "[OPUS-4.8 sq-eifd] JS-ecosystem SHACL validator (MIT); the WASM-peer datapoint for sparq's browser SHACL story. Adapter kind `js-lib` (in-process Node/RDF-JS), run in the SAME Node runtime that can also bench sparq's own @sparq-org/sparq WASM SHACL. Counts `report.results` / reads `report.conforms` — the identical reduction the shared report->count parser performs over the report graph.",
       "pinned_version": "rdf-validate-shacl (pin the exact npm version at gather time)",
       "version_source": "the resolved npm version in the gather box's node_modules, recorded in the results file.",
       "install_recipe": "npm i rdf-validate-shacl @rdfjs/data-model @rdfjs/dataset @rdfjs/term-map @rdfjs/namespace @rdfjs/parser-n3 @rdfjs/environment clownface  (gather-only — NOT committed; set JS_MODULES_DIR to the node_modules parent). Optionally `npm i shacl-engine` for the shacl-engine variant (set adapter.js_engine).",
@@ -964,7 +964,7 @@
       "comparable_suites": [
         {
           "sparq_suite": "wasm-compare",
-          "note": "WASM bundle bytes (deterministic, no quiet-box requirement) vs sparq's @jeswr/sparq shipped bundle; also Node + in-browser query latency. Bundle-bytes comparison is load-robust (quiet_box_sensitive = false for size); latency is advisory (quiet-box). CAVEAT: bundle comparison is shipped-artifact vs shipped-artifact — each engine's default published feature set, not an equalized feature matrix."
+          "note": "WASM bundle bytes (deterministic, no quiet-box requirement) vs sparq's @sparq-org/sparq shipped bundle; also Node + in-browser query latency. Bundle-bytes comparison is load-robust (quiet_box_sensitive = false for size); latency is advisory (quiet-box). CAVEAT: bundle comparison is shipped-artifact vs shipped-artifact — each engine's default published feature set, not an equalized feature matrix."
         }
       ],
       "version_env_metadata": "gather records the resolved oxigraph npm version + tarball sha256, node --version (and the Playwright chromium version for browser rows), and the host env block",

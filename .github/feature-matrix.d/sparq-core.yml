@@ -4,16 +4,16 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
@@ -29,7 +29,7 @@
   features: "mmap,dict-spill"
   test: true
 
-# [OPUS-4.8] sq-dvyi: opt-in JSON-LD ingest (oxjsonld). OFF by default so the
+# sq-dvyi: opt-in JSON-LD ingest (oxjsonld). OFF by default so the
 # lean wasm bundle stays under the perf floor; this leg runs the gated
 # jsonld_* loader tests (object/array/base-IRI/`@graph`/malformed).
 - name: "sparq-core (jsonld)"
@@ -37,14 +37,14 @@
   features: "jsonld"
   test: true
 
-# [SONNET-4.6] #3547: exercise the native Turtle parser's inline differential,
+# #3547: exercise the native Turtle parser's inline differential,
 # malformed-input parity, and loader tests on every feature-matrix run.
 - name: "sparq-core (native-ttl)"
   crate: "sparq-core"
   features: "native-ttl"
   test: true
 
-# [SONNET-4.6] #3547: exercise the opt-in RFC-3987 IRI validation path. These
+# #3547: exercise the opt-in RFC-3987 IRI validation path. These
 # tests live in inline cfg(test) modules, so the structural C1 guard cannot infer
 # their need for a dedicated feature executor.
 - name: "sparq-core (iri-fast)"
@@ -52,7 +52,7 @@
   features: "iri-fast"
   test: true
 
-# [OPUS-4.8] sq-wihld (survey §A1): opt-in per-block Bloom filters on the high-NDV
+# sq-wihld (survey §A1): opt-in per-block Bloom filters on the high-NDV
 # leading column of a block-compressed permutation. OFF by default (lean core); this
 # leg runs the bloom equivalence + block-skip tests (compress::tests::bloom_*).
 - name: "sparq-core (block-bloom)"
@@ -60,7 +60,7 @@
   features: "block-bloom"
   test: true
 
-# [FABLE-5] sq-7d3dj.32.2.6 / sq-7d3dj.32.2.7: SPQCPRM2 frame-of-reference col2-reset format.
+# sq-7d3dj.32.2.6 / sq-7d3dj.32.2.7: SPQCPRM2 frame-of-reference col2-reset format.
 # The V2 EMITTER is OFF by default (the store still WRITES SPQCPRM1 bit-exactly); this leg runs
 # the V2 emit-gate + write/open round-trip + streaming-writer byte-identity + cross-version +
 # corrupt-magic mutation-witness + SPQCPRM1-vs-SPQCPRM2 differential + zigzag tests, PLUS the
@@ -69,4 +69,11 @@
 - name: "sparq-core (spqcprm2, mmap)"
   crate: "sparq-core"
   features: "spqcprm2,mmap"
+  test: true
+
+# #4246: explicitly exercise the experimental deletion cache;
+# ordinary/core defaults remain feature-off. Includes ownership/invalidation tests.
+- name: "sparq-core (overlay-deleted-projections)"
+  crate: "sparq-core"
+  features: "overlay-deleted-projections"
   test: true

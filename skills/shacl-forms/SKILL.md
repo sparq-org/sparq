@@ -4,7 +4,7 @@ description: "Derive a DASH-compatible, renderer-agnostic form description from 
 license: MIT
 metadata:
   version: "0.1.0"
-  homepage: https://github.com/jeswr/sparq
+  homepage: https://github.com/sparq-org/sparq
 ---
 
 # sparq-forms — SHACL/DASH form derivation

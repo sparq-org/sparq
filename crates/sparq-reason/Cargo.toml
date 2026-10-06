@@ -155,9 +155,15 @@ quoted-triples = []
 [dependencies]
 # `version` alongside `path`: cargo uses the path locally and the version on crates.io
 # (required to publish — crates.io strips `path`).
-sparq-core = { path = "../sparq-core", version = "0.1.0", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.4", default-features = false }
 oxrdf.workspace = true
 rustc-hash.workspace = true
+# #3712: `n3::encode_for_uri` (string:encodeForUri) — the workspace's one RFC 3986 encoder.
+percent-encoding.workspace = true
+# #3707: N3/Turtle `<…>` reference resolution goes through the SAME RFC 3986 automaton oxttl
+# (and sparq-core's native Turtle path) use. Already compiled unconditionally via oxrdf/oxttl;
+# sparq-reason is never in the wasm graph, so sparq-core's opt-in-oxiri posture does not apply.
+oxiri = "0.2"
 rayon = { workspace = true, optional = true }
 # [OPUS-4.8] sq-yk6or: the SHARED evaluation substrate (epic sq-qonbz, merged #1300).
 # [OPUS-4.8] sq-pbz04.5.1: this dep is now NON-OPTIONAL, carrying ONLY the `numeric` slice
@@ -173,7 +179,7 @@ rayon = { workspace = true, optional = true }
 # exists to kill. The heavier `rows` / `join` / `compare` slices STAY behind the consumer
 # features above (each names exactly the slices it needs), so the base `numeric` slice never
 # drags the join/compare machinery in.
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.0", default-features = false, features = ["numeric"] }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.4", default-features = false, features = ["numeric"] }
 # [OPUS-4.8] sq-yk6or: the `Row`/`Key` SmallVec aliases the substrate join kernels operate on.
 # OPTIONAL: linked ONLY by `substrate-join`. Same crate sparq-substrate uses, so the row
 # representation is byte-identical across the engine, the substrate and this reasoner.
@@ -194,11 +200,11 @@ quick-xml = { version = "0.41", default-features = false, optional = true }
 # [FABLE-5] sq-pbz04.1.2 / [SONNET-4.6]: the ordering-parity ORACLE for the
 # `substrate-compare` seam — tests/compare_parity.rs runs a REAL engine `ORDER BY`
 # over the same materialised closure and asserts the reasoner-side sort is
-# byte-identical. `sparq-reason` is publishable (no `publish = false`), so the
-# dev-dep MUST carry a `version` alongside `path` (crates.io cannot resolve
-# path-only dev-deps; same pattern as sparq-cli/nlq/mcp). NO cycle: sparq-engine
-# does not depend on sparq-reason.
-sparq-engine = { path = "../sparq-engine", version = "0.1.0" }
+# byte-identical. Keep a `version` alongside `path` so Cargo retains this test-only
+# registry edge in the published manifest; path-only dev-dependencies are instead
+# omitted when packaging. This edge creates no cycle because sparq-engine does not
+# depend on sparq-reason.
+sparq-engine = { path = "../sparq-engine", version = "0.1.4" }
 
 # [FABLE-5] sq-pbz04.1.2: the engine-vs-reasoner ordering-parity test — compiled only with
 # the feature it exercises, so default-feature `--all-targets` builds stay engine-light.

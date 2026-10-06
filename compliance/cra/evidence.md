@@ -22,7 +22,7 @@ documentation) would inspect.
 
 | Evidence | Where | Verify |
 |---|---|---|
-| **GATING** PR-time advisory check (un-degraded) | `.github/workflows/supply-chain.yml#audit` step "cargo-deny check (advisories) — GATING" | `cargo deny check advisories` exits 0 on a clean tree; removing a justified `ignore` makes it exit non-zero (proves it is fail-closed, not cosmetic). |
+| Post-merge/nightly advisory check (un-degraded; not a PR gate) | `.github/workflows/supply-chain.yml` (push to `main` + nightly) step "cargo-deny check (advisories) — GATING" | `cargo deny check advisories` exits 0 on a clean tree; removing a justified `ignore` makes it exit non-zero (proves it is fail-closed, not cosmetic). |
 | Fail-closed advisory/license/source policy | `deny.toml` (`yanked = "deny"`, permissive-only license allowlist, crates.io-only sources) | `cargo deny check bans sources licenses` (the always-gating subset) + `cargo deny check advisories`. |
 | Daily advisory watchdog (defence-in-depth) | `.github/workflows/dependency-monitoring.yml` | Scheduled run opens/updates one idempotent `security:dependency-vuln` issue on a finding. |
 | The tolerated advisory is justified + VEX'd | `deny.toml [advisories].ignore` ↔ `supply-chain/vex.cdx.json` | Four tolerated advisories, each with a justification + tracking bead, and the ignore list and the VEX `vulnerabilities[]` carry the same four ids (1:1, gated by the `VEX ↔ deny.toml drift check — GATING` step of `supply-chain.yml`): RUSTSEC-2024-0436 `paste` and RUSTSEC-2025-0141 `bincode` (maintenance-status notices, `not_affected`), RUSTSEC-2026-0194/0195 `quick-xml` (availability DoS reachable via the transitive oxigraph 0.5.x copy, honestly recorded as `exploitable`). rustls-pemfile/RUSTSEC-2025-0134 was retired by REMOVING the dependency rather than tolerating it — [OPUS-5] sq-5ah3p migrated the `sparq-lws-core`/`sparq-server` mTLS PEM parse to `rustls-pki-types`' `PemObject` and dropped the ignore, the VEX statement and the cargo-vet exemption in one change. That is the preferred remediation; when an advisory genuinely cannot be removed, add the ignore AND a matching VEX entry together. |
@@ -44,7 +44,7 @@ documentation) would inspect.
 |---|---|---|
 | Security-fix flow (main → next release) + supported versions | `SECURITY.md` §"Supported versions" | Read; matches the release pipeline. |
 | Per-advisory **ungrouped** security PRs, 4 ecosystems | `.github/dependabot.yml` | cargo / github-actions / npm / pip; security updates left ungrouped (each its own PR). |
-| Integrity-protected distribution: SHA256SUMS + SLSA provenance | `.github/workflows/release.yml` (`SHA256SUMS`, `actions/attest-build-provenance`, buildkit `provenance: mode=max` + `sbom: true`) | `gh attestation verify <archive> --repo jeswr/sparq`; `shasum -a 256 -c SHA256SUMS`. |
+| Integrity-protected distribution: SHA256SUMS + SLSA provenance | `.github/workflows/release.yml` (`SHA256SUMS`, `actions/attest-build-provenance`, buildkit `provenance: mode=max` + `sbom: true`) | `gh attestation verify <archive> --repo sparq-org/sparq`; `shasum -a 256 -c SHA256SUMS`. |
 | **Reproducible-build statement** (build integrity — GX-8) — characterised, single named cause | [`../slsa/reproducible-build.md`](../slsa/reproducible-build.md) | Run the auditor quick-run in that doc: two `--release --locked` builds of `sparq-cli` → identical size + **byte-identical apart from 22 bytes** (the `mimalloc` build-time `__DATE__`/`__TIME__` banner + the build-id it perturbs). The bit-for-bit *enforcement* (CI rebuild-and-diff) is the residual, tracked under `sq-toze.9`. |
 | `cargo-auditable` self-describing binaries | `release.yml#package`, `Dockerfile` (`cargo auditable build`) | `cargo audit bin <binary>` / `auditable info <binary>` reads the embedded manifest. |
 | `cargo-vet` per-dependency audit attestations (GATING ratchet) | `supply-chain.yml#vet`, `supply-chain/{config.toml,audits.toml,imports.lock}` | `cargo vet --locked` exits 0; a new unaudited dep fails until audited/exempted. |
@@ -99,7 +99,7 @@ documentation**, **not** an incident-response capability proven in a drill. The 
 ```sh
 # Supply-chain gates (the "no known exploitable vuln" + integrity spine)
 cargo deny check bans sources licenses     # always-gating subset
-cargo deny check advisories                # un-degraded PR-time gate
+cargo deny check advisories                # un-degraded; CI runs it post-merge + nightly
 cargo vet --locked                         # per-dependency audit ratchet
 
 # SBOM + VEX
@@ -107,7 +107,7 @@ cargo cyclonedx --all --format json        # CI SBOM shape
 cat supply-chain/vex.cdx.json              # checked-in VEX (mirrors deny.toml ignores)
 
 # Release-artifact provenance (on a published release)
-gh attestation verify <archive> --repo jeswr/sparq
+gh attestation verify <archive> --repo sparq-org/sparq
 shasum -a 256 -c SHA256SUMS
 
 # Disclosure channel

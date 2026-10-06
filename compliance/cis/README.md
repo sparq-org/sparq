@@ -16,7 +16,7 @@
 **What sparq is, for CIS scoping**
 
 sparq is a Rust RDF/SPARQL **data engine** consumed as a dependency, plus an HTTP `sparq-server`
-and a SHA-pinned distroless container image (`Dockerfile` → `ghcr.io/jeswr/sparq-server`). It is
+and a SHA-pinned distroless container image (`Dockerfile` → `ghcr.io/sparq-org/sparq-server`). It is
 **not** an enterprise IT estate. The CIS Controls v8 are written for an *organisation* securing its
 asset/software inventory, accounts, networks, and endpoints — so a large fraction of v8 maps to the
 **operator** who deploys sparq, not to the source/CI of sparq itself. This slice scopes each
@@ -56,7 +56,7 @@ Safeguard honestly into one of:
 The `Dockerfile` hardening is genuinely strong and *verified against the actual file* (distroless
 `cc-debian12:nonroot`, both stages SHA-pinned by digest, `cargo auditable build --locked`,
 no shell/package-manager in the runtime layer, minimal labels-only metadata, `.dockerignore`
-scoping the context). A `docker-smoke` job builds + runs the image and curls it on every PR. **But
+scoping the context). A `docker-smoke` job (`ci.yml`, nightly) builds + runs the image and curls it. **But
 there is no automated container-image vulnerability scan (Trivy/Grype) and no Dockerfile linter
 (Dockle/Hadolint) lane in CI** — verified by `grep -rIl -E 'trivy|grype|dockle|hadolint' .github/`
 returning only false-positive comment matches. That is gap **GX-12** (bead **sq-toze.31**); see

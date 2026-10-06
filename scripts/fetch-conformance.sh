@@ -5,7 +5,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# [OPUS-4.8] sq-nj0pd: retry the shallow clone/fetch — a transient GitHub reset on
+# sq-nj0pd: retry the shallow clone/fetch — a transient GitHub reset on
 # this (the FIRST network op the SPARQL + inference conformance lanes run) used to
 # red-gate the required check in ~18s with no real conformance error, stalling
 # --auto merges on unrelated PRs. The pin check below is unchanged, so a retry can

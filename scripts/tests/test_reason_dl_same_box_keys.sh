@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [SONNET-4.6] Hermetic self-test for scripts/bench/reason-dl-same-box.sh per-input
+# Hermetic self-test for scripts/bench/reason-dl-same-box.sh per-input
 # keying (PR #3479 review): the corpus walk admits subdirectories, so two corpus
 # files may share a basename (a/foo.owl vs b/foo.owl), AND the lossy sanitized stem can
 # alias distinct paths (a/foo.owl and a_foo.owl both sanitize to "a_foo") — so a purely

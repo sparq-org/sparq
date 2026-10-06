@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-xetf7 (Phase E2): sparq-reason-el's `rbox` feature — RBox / property
+# sq-xetf7 (Phase E2): sparq-reason-el's `rbox` feature — RBox / property
 # chain + transitive-role saturation (CR10 role inclusion + CR11 role composition).
 # The NOTE at the head of this file (sq-evb1) anticipated this leg: E1 ships the
 # crate with NO intra-crate feature, but E2 adds the default-OFF `rbox` feature, so
@@ -34,7 +34,7 @@
   features: "rbox"
   test: true
 
-# [OPUS-4.8] sq-s2nob (Phase E3): sparq-reason-el's `hasse` feature — transitive
+# sq-s2nob (Phase E3): sparq-reason-el's `hasse` feature — transitive
 # reduction to the DIRECT-subsumer Hasse diagram (`DirectHierarchy` + `classify_hasse_
 # graph`) + equivalence-class collapse + the membership-indexed reduction. Same gap as
 # the rbox leg above: tests/hasse_reduction.rs is `#![cfg(feature = "hasse")]` (8 Hasse
@@ -50,7 +50,7 @@
   features: "hasse"
   test: true
 
-# [FABLE-5] sq-pbz04.2.2: sparq-reason-el's `cdomain` feature — concrete domains
+# sq-pbz04.2.2: sparq-reason-el's `cdomain` feature — concrete domains
 # (CR7–CR9): faceted `owl:onDatatype`/`owl:withRestrictions` satisfiability +
 # `DataHasValue`/singleton-`DataOneOf` point ranges on the shared
 # `sparq_substrate::numeric` exact tier. Same gap as the rbox/hasse legs above:
@@ -64,7 +64,7 @@
   features: "cdomain"
   test: true
 
-# [OPUS-4.8] sq-pbz04.2.5: sparq-reason-el's `abox` feature — ABox realisation +
+# sq-pbz04.2.5: sparq-reason-el's `abox` feature — ABox realisation +
 # whole-ontology consistency. Same gap as the rbox/hasse/cdomain legs above: the
 # behavioral tests in `src/abox.rs` are gated `#[cfg(feature = "abox")]` (the whole
 # module is feature-gated), so the default build (and ci.yml's `--workspace
@@ -77,7 +77,7 @@
   features: "abox"
   test: true
 
-# [SONNET-4.6] sq-vkq9u: the COMBINED abox+cdomain leg — the `DataPropertyAssertion` POINT-RANGE
+# sq-vkq9u: the COMBINED abox+cdomain leg — the `DataPropertyAssertion` POINT-RANGE
 # RESCUE (`a q 5` ⇒ `{a} ⊑ ∃q.{5}`). Its OWN leg per rule (b) of feature-matrix.yml's guard: the
 # rescue exists ONLY in the CONJUNCTION of the two features, so neither leg above runs a line of
 # it — tests/abox_cdomain.rs is `#![cfg(all(feature = "abox", feature = "cdomain"))]` and the
@@ -92,7 +92,7 @@
   features: "abox,cdomain"
   test: true
 
-# [FABLE-5] sq-wy3i6 (Phase E4): sparq-reason-el's `par` feature — deterministic parallel
+# sq-wy3i6 (Phase E4): sparq-reason-el's `par` feature — deterministic parallel
 # (bulk-synchronous scoped-worker) CR saturation: `Classifier::classify_par` /
 # `classify_graph_par`. Same gap as the legs above: tests/par_differential.rs is
 # `#![cfg(feature = "par")]` (par-vs-sequential closure differentials over the CR1–CR6 +
@@ -108,7 +108,7 @@
   features: "par"
   test: true
 
-# [FABLE-5] sq-wy3i6: the COMBINED par leg — `par` composed with `rbox` (CR10/CR11) and
+# sq-wy3i6: the COMBINED par leg — `par` composed with `rbox` (CR10/CR11) and
 # `cdomain` (CR7–CR9). Its OWN leg per rule (b) of feature-matrix.yml's guard: `par`+`rbox`
 # swaps the parallel apply phase onto the `add_link_rbox` role-closure arm (a
 # `not(feature = …)` split from the plain-par leg above), and the
@@ -121,7 +121,7 @@
   features: "par,rbox,cdomain"
   test: true
 
-# [SONNET-4.6] sq-clsv6 (Phase E5): sparq-reason-el's `incremental` feature — incremental
+# sq-clsv6 (Phase E5): sparq-reason-el's `incremental` feature — incremental
 # classification under TBox edits (`IncrementalClassifier`, the delta-seeded resume of a live
 # CR1–CR6 saturation). Same gap as the legs above: tests/incremental.rs uses
 # `sparq_reason_el::IncrementalClassifier`, which only EXISTS under this feature, and the whole
@@ -137,7 +137,7 @@
   features: "incremental"
   test: true
 
-# [SONNET-4.6] sq-clsv6: the COMBINED incremental leg — `incremental` composed with `rbox`
+# sq-clsv6: the COMBINED incremental leg — `incremental` composed with `rbox`
 # (CR10/CR11) and `cdomain` (CR7–CR9). Its OWN leg per rule (b) of feature-matrix.yml's guard:
 # `incremental`+`rbox` swaps the resume onto the role-box-rebuilding arm (a `not(feature = "rbox")`
 # split from the plain leg above) AND turns on the rbox_non_regular report-parity assertion, while

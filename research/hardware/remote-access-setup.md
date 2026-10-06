@@ -256,7 +256,7 @@ XPS$ vulkaninfo --summary | grep -i "deviceName\|driverName"   # should list the
 ### 4.4 Get the sparq source onto the XPS
 
 ```bash
-XPS$ git clone https://github.com/jeswr/sparq.git ~/sparq    # your fork/remote
+XPS$ git clone https://github.com/sparq-org/sparq.git ~/sparq    # your fork/remote
 XPS$ cd ~/sparq && cargo build --release                     # first build (CPU)
 ```
 

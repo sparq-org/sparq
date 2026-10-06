@@ -1,4 +1,4 @@
-# Conventional-Commits PR-title validator — bead sq-v286.5. [OPUS-4.8] 🤖 SPARQ agent.
+# Conventional-Commits PR-title validator — bead sq-v286.5. 🤖 SPARQ agent.
 #
 # WHY (the release-plz prerequisite): release-plz (release-plz.yml, #792) infers the
 # semver bump from the Conventional-Commit history. Because `main` merges PRs with
@@ -23,11 +23,10 @@
 # Exercising `feat!:` / `BREAKING CHANGE` is the second half of sq-v286.5: it is how a
 # release-plz-driven MAJOR is requested once we are post-1.0.
 #
-# GATING POSTURE — ADVISORY (deliberate, NOT a hard gate yet). [OPUS-4.8]
-# The check NAME below contains the whole word "advisory", so ci-summary.yml's
-# .github/advisory-registry.json declaration EXCLUDES it from the required gating set (#3773:
-# the name token alone no longer does) — a
-# non-conventional title reports a red ✗ here as a SIGNAL but CANNOT block the merge.
+# GATING POSTURE — ADVISORY (deliberate, NOT a hard gate yet).
+# The check NAME below contains the whole word "advisory" and is declared in
+# .github/advisory-registry.json; it is not a required check, so a non-conventional title
+# reports a red ✗ here as a SIGNAL but CANNOT block the merge.
 # WHY advisory and not hard: a hard gate would have to be true of every in-flight PR
 # title the moment it lands, and at authoring time open PR #207 ("design: sparq logo
 # redesign proposals …") uses a non-standard `design:` type, so a hard gate would
@@ -36,16 +35,12 @@
 # ~98% conventional (only #207 open, and historically only #689 `bench:` / #752
 # `docs/ci:`), so promotion to a HARD gate is a small follow-up: once the stragglers are
 # renamed/merged, drop the " (advisory)" suffix from the job NAME below (no logic change)
-# and ci-summary will start gating on it automatically. Tracked as a follow-up bead.
-#
-# We do NOT touch ci-summary.yml's aggregator logic; advisory exclusion is purely by the
-# name token, exactly as the existing advisory legs (markdownlint-advisory, vale, …) do.
+# and delete its registry entry (and add it to the ruleset's required checks if wanted).
 name: pr-title
 
 # Title is only meaningful on a pull_request. Re-validate when the title changes
 # (`edited`), on (re)open, and on new pushes — the activity types the action documents.
-# NOT on merge_group: a merge_group ref has no PR title to validate, and being advisory
-# it needs no presence there; ci-summary handles a smaller sibling set on that ref fine.
+# NOT on merge_group: a merge_group ref has no PR title to validate.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
@@ -61,12 +56,11 @@ concurrency:
 
 jobs:
   validate:
-    # NAME carries the "advisory" token so ci-summary.yml excludes it from the gate
-    # (see the GATING POSTURE note above). Renaming away the suffix later PROMOTES it.
+    # NAME carries the "advisory" token (see the GATING POSTURE note above).
     name: conventional-commits (advisory)
     runs-on: ubuntu-latest
     steps:
-      # [OPUS-4.8] sq-v286.5: amannn/action-semantic-pull-request, SHA-pinned to the
+      # sq-v286.5: amannn/action-semantic-pull-request, SHA-pinned to the
       # v6.1.1 commit (the repo SHA-pins ALL actions; code-scanning=0). Verified the tag
       # peels to this commit via `gh api .../git/ref/tags/v6.1.1 --jq .object.sha`.
       - name: Validate PR title is a Conventional Commit

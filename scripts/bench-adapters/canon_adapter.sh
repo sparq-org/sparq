@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.16 — rdf-canon (zkp-ld/yamdan Rust crate) adapter for the
+# sq-hmd7l.16 — rdf-canon (zkp-ld/yamdan Rust crate) adapter for the
 # bench/canon RDFC-1.0 comparison panel.
 #
 # The rdf-canon crate ships no CLI, so this adapter scaffolds a tiny scratch

@@ -62,7 +62,12 @@ use store::{Pattern, TripleStore};
 
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
+    /// Term dictionary. [GPT-6 Astra] Direct writes bypass numeric/temporal cache
+    /// and memo maintenance; use [`Self::from_parts`] to rebuild a graph from an
+    /// edited dictionary and its matching ID triples.
     pub dict: Dict,
+    /// Indexes using [`Self::dict`]'s IDs. Direct replacement does not rebuild
+    /// private caches; use [`Self::from_parts`] for a coherent replacement graph.
     pub store: TripleStore,
     /// Parallel to the dictionary: the f64 value of each numeric literal (NaN for
     /// non-numeric terms). Lets the engine evaluate numeric filters / comparisons
@@ -1394,7 +1399,7 @@ impl Graph {
     /// [`insert_triple`](Self::insert_triple) / [`apply_delta`](Self::apply_delta), or load into it
     /// via the `apply_delta_nquads` / `apply_delta` paths. This is an IN-MEMORY graph (no directory
     /// association, so `apply_delta` is overlay-only — there is no write-ahead log); use
-    /// [`open`](Self::open) for a durable directory-backed graph. Also reachable as
+    /// `open` for a durable directory-backed graph. Also reachable as
     /// [`Graph::default()`](Default::default).
     #[inline]
     pub fn new() -> Graph {
@@ -1606,42 +1611,16 @@ impl Graph {
         std::thread::scope(|scope| -> Result<(), String> {
             // Stage 1 — read (the caller's decompressor) on its own thread, emitting
             // newline-aligned FULL blocks: loop `read()` until the block is full or EOF.
-            let producer = scope.spawn(move || -> Result<(), String> {
-                let mut reader = reader;
-                let mut readbuf = vec![0u8; block_size];
-                let mut carry: Vec<u8> = Vec::new();
-                loop {
-                    let mut filled = 0;
-                    while filled < block_size {
-                        let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                        if n == 0 {
-                            break;
-                        }
-                        filled += n;
-                    }
-                    if filled == 0 {
-                        // EOF: a final line without a trailing newline lives in `carry`.
-                        if !carry.is_empty() {
-                            let _ = tx.send(std::mem::take(&mut carry));
-                        }
-                        return Ok(());
-                    }
-                    // Emit `carry + readbuf[..filled]` up to the last newline; carry the
-                    // remainder (a partial line split across the block boundary) forward.
-                    let mut block = std::mem::take(&mut carry);
-                    block.extend_from_slice(&readbuf[..filled]);
-                    let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                    carry = block[cut..].to_vec();
-                    block.truncate(cut);
-                    if !block.is_empty() && tx.send(block).is_err() {
-                        return Ok(()); // a downstream stage errored and dropped the receiver
-                    }
-                }
+            let producer = scope.spawn(move || {
+                read_line_blocks(reader, block_size, |block| tx.send(block).is_ok())
             });
             // Stage 2 — parse+intern each block in parallel (per-chunk local dicts, no
             // shared state), forwarding the partials to the merge stage.
             let parser = scope.spawn(move || -> Result<(), String> {
                 for block in rx {
+                    if block.is_empty() {
+                        continue; // a liveness probe from a newline-free round
+                    }
                     let partials = parse_block(&block)?;
                     if ptx.send(partials).is_err() {
                         return Ok(()); // the merge stage errored and dropped the receiver
@@ -2940,7 +2919,7 @@ impl Graph {
     /// DELETE/INSERT application order) — through the store's DELTA-OVERLAY: O(batch)
     /// work instead of the O(n) full rebuild. New terms are interned APPEND-ONLY (the
     /// dictionary grows; existing ids never change), so readers of existing ids are
-    /// unaffected. For a directory-backed graph (opened via [`open`](Self::open)) the
+    /// unaffected. For a directory-backed graph (opened via `open`) the
     /// batch is appended to the write-ahead log and fsync'd BEFORE it is applied, so a
     /// crash replays it on the next open. Fold the overlay back into the immutable base
     /// periodically with [`compact`](Self::compact).
@@ -2965,7 +2944,7 @@ impl Graph {
     /// `INSERT DATA { … }` SPARQL string for what is conceptually one append. The term is interned
     /// APPEND-ONLY and applied through the same delta-overlay path as `apply_delta`, so it inherits
     /// the identical semantics: set-valued (re-inserting an existing triple is a no-op), O(1) work,
-    /// and — for a directory-backed graph (opened via [`open`](Self::open)) — WAL-logged + fsync'd
+    /// and — for a directory-backed graph (opened via `open`) — WAL-logged + fsync'd
     /// before it is applied. To add several triples at once, prefer one
     /// [`apply_delta`](Self::apply_delta) batch over a loop of single inserts (one WAL append).
     ///
@@ -3003,7 +2982,7 @@ impl Graph {
     /// against the CURRENT graph state (so CLEAR/DROP have already been expanded to concrete
     /// retraction records by the caller). One `write_all` + one `sync_data()` makes the body
     /// durable as a unit BEFORE it is materialised across the per-graph WALs; if a crash interrupts
-    /// materialisation, [`open`](Self::open) redoes this frame idempotently. A NO-OP (returns `Ok`)
+    /// materialisation, `open` redoes this frame idempotently. A NO-OP (returns `Ok`)
     /// for an IN-MEMORY graph (no journal) and for an empty record set, so the in-memory live
     /// update path is byte-for-byte unchanged.
     pub fn commit_txn(&mut self, records: &[(bool, Option<Term>, [Term; 3])]) -> Result<(), String> {
@@ -3097,7 +3076,7 @@ impl Graph {
     /// `named.drop-new` → `named`), and only THEN is the shrunk manifest written (the manifest
     /// rewrite is itself atomic+dir-fsync'd via `write_named_manifest`). An interrupted swap
     /// is completed/rolled back deterministically by `recover_named_drop` on the next
-    /// [`open`](Self::open). Surviving sub-graphs are re-opened from their new directories so
+    /// `open`. Surviving sub-graphs are re-opened from their new directories so
     /// each re-acquires a correctly-indexed per-graph WAL.
     ///
     /// Returns `true` if a matching named graph existed (and was removed), `false` if absent —
@@ -3344,7 +3323,7 @@ impl Graph {
     /// [OPUS-4.8] (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
     /// CREATING it if absent. The created sub-graph is DURABLE (its own `dir/named/<i>/` +
     /// per-graph WAL + manifest entry) whenever this parent graph is itself directory-backed
-    /// (opened via [`open`](Self::open)); for an in-memory parent it is a plain in-memory
+    /// (opened via `open`); for an in-memory parent it is a plain in-memory
     /// sub-graph (`wal: None`), byte-identical to the previous `named.push((name, empty()))`
     /// behaviour. This is the durability seam the SPARQL-Update path needs: a `GRAPH <g> { … }`
     /// INSERT that first touches a brand-new named graph on a persisted server must give that
@@ -3370,13 +3349,13 @@ impl Graph {
     /// The in-memory half of [`apply_delta`](Self::apply_delta) (no WAL append) — also
     /// the target the WAL replays into on [`open`](Self::open).
     fn apply_delta_mem(&mut self, inserts: &[[Term; 3]], deletes: &[[Term; 3]]) {
+        let old_len = self.dict.len();
         // A delete only matters if every term resolves — otherwise the triple cannot be
         // present, and deleting must NOT intern the (absent) terms.
         let del_ids: Vec<[Id; 3]> = deletes
             .iter()
             .filter_map(|[s, p, o]| Some([self.id_of(s)?, self.id_of(p)?, self.id_of(o)?]))
             .collect();
-        let old_len = self.dict.len();
         let ins_ids: Vec<[Id; 3]> = inserts
             .iter()
             .map(|[s, p, o]| [self.dict.intern(s), self.dict.intern(p), self.dict.intern(o)])
@@ -3387,12 +3366,17 @@ impl Graph {
         // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
         // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
         // dictionary; a "found" (2) verdict is monotonic (terms are never removed) and stays.
-        let _ = self.high_precision_decimal.compare_exchange(
-            1,
-            0,
-            std::sync::atomic::Ordering::Relaxed,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        // [GPT-6 Astra] Interning is append-only and extend_for touches only new IDs.
+        // Equal lengths therefore preserve every term/numeric value read by the memo.
+        // Any future path changing existing terms or cached values must invalidate it.
+        if self.dict.len() != old_len {
+            let _ = self.high_precision_decimal.compare_exchange(
+                1,
+                0,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
         self.store.apply_delta(&ins_ids, &del_ids);
     }
 
@@ -5602,39 +5586,8 @@ fn build_external_ntriples_parallel<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress + read on its own thread, emitting newline-aligned blocks.
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                // Fill the read buffer (a single read may return less than requested).
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    // EOF: a final line without a trailing newline lives in `carry`.
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                // Emit `carry + readbuf[..filled]` up to the last newline; carry the
-                // remainder (a partial line split across the read boundary) to the next.
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(()); // a downstream stage errored and dropped the receiver
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
 
         // Stage 2 — parse+intern each block in parallel (per-chunk local dicts, no shared
         // state), forwarding the partials to the merge stage. Concurrent with stage 3.
@@ -5712,35 +5665,8 @@ fn build_external_ntriples_sharded<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress (identical to the non-sharded pipeline).
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(());
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
         // Stage 2 — parse (identical).
         // [OPUS-4.8] (sq-t3rt) The sharded consolidation now handles RDF 1.2 triple terms
         // (`ShardedDict::intern_partials` interns them structurally into a dedicated triple
@@ -5866,35 +5792,8 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress (identical to the sharded pipeline).
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(());
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
         // Stage 2 — parse (identical).
         let parser = scope.spawn(move || -> Result<(), String> {
             for block in rx {
@@ -5920,6 +5819,79 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
         parser.join().map_err(|_| "parse thread panicked".to_string())??;
         producer.join().map_err(|_| "decompression thread panicked".to_string())?
     })
+}
+
+/// Stage 1 of every pipelined N-Triples ingest: reads `reader` in rounds of up to
+/// `block_size` fresh bytes (looping over short `read()`s — a gzip/zstd decoder returns
+/// 0.4–1.6 MB per call) and hands `emit` each newline-aligned block, in document order.
+///
+/// A block is `carry + fresh` cut after its LAST `\n`; the remainder (a line split
+/// across the boundary) is carried into the next round. Fresh bytes are read straight
+/// into the block being built (no separate read buffer, so no full-block copy); only the
+/// sub-line carry is copied, via one reused scratch `Vec` (no per-block carry allocation),
+/// into the head of the next block's buffer. Each block buffer is a fresh zeroed allocation
+/// (`calloc`: large sizes are lazily-zeroed pages, no memset), so any `Read` works without
+/// `read_buf` support. A round with no `\n` (a line longer than a block) grows the same
+/// buffer in place and emits an EMPTY block as a liveness probe (consumers skip empty
+/// blocks), so a downstream hang-up still stops the read. At EOF a final line without a
+/// trailing newline is emitted as-is. `emit` returns `false` when the downstream stage hung up (it errored
+/// and dropped its receiver), which stops reading with `Ok(())`; the final EOF emit ignores
+/// it. Read errors propagate as `Err`.
+#[cfg(feature = "parallel")]
+fn read_line_blocks<R: std::io::Read>(
+    mut reader: R,
+    block_size: usize,
+    mut emit: impl FnMut(Vec<u8>) -> bool,
+) -> Result<(), String> {
+    // Invariant: `buf[..carried]` is the carry (no `\n`) and `buf.len() >= carried + block_size`.
+    let mut buf = vec![0u8; block_size];
+    let mut carried = 0;
+    let mut tail: Vec<u8> = Vec::new();
+    loop {
+        let mut filled = 0;
+        while filled < block_size {
+            let n = reader
+                .read(&mut buf[carried + filled..carried + block_size])
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        if filled == 0 {
+            if carried > 0 {
+                buf.truncate(carried);
+                let _ = emit(buf);
+            }
+            return Ok(());
+        }
+        let end = carried + filled;
+        // The carry holds no `\n`, so only the fresh bytes need scanning.
+        let Some(nl) = buf[carried..end].iter().rposition(|&b| b == b'\n') else {
+            // Nothing to send, but probe the consumer with an empty (non-allocating) block so
+            // a downstream that errored still stops a long newline-free read.
+            if !emit(Vec::new()) {
+                return Ok(());
+            }
+            carried = end;
+            if buf.len() < carried + block_size {
+                buf.resize(carried + block_size, 0);
+            }
+            continue;
+        };
+        let cut = carried + nl + 1;
+        // Park the (sub-line) tail in the reused `tail` buffer and allocate the next block
+        // only AFTER the send, so a producer blocked on a full channel holds no extra block.
+        tail.clear();
+        tail.extend_from_slice(&buf[cut..end]);
+        buf.truncate(cut);
+        if !emit(buf) {
+            return Ok(());
+        }
+        carried = tail.len();
+        buf = vec![0u8; carried + block_size];
+        buf[..carried].copy_from_slice(&tail);
+    }
 }
 
 /// Parses one (complete-line) N-Triples byte block in parallel into per-chunk partial
@@ -9462,6 +9434,148 @@ mod tests {
         assert!(bad.is_err());
     }
 
+    /// `read_line_blocks` (stage 1 of every pipelined N-Triples ingest) must cut blocks
+    /// exactly where the former fixed-read-buffer loop did — `carry + up to block_size fresh
+    /// bytes`, cut after the last `\n` — minus that loop's empty blocks: covering short
+    /// reads, no trailing newline, a line longer than a block, empty input, CRLF lines,
+    /// downstream hang-up and read-error propagation.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn read_line_blocks_cuts_at_newlines() {
+        struct ShortReader<'a> {
+            data: &'a [u8],
+            pos: usize,
+            max: usize,
+        }
+        impl std::io::Read for ShortReader<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = (self.data.len() - self.pos).min(self.max).min(buf.len());
+                buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+                self.pos += n;
+                Ok(n)
+            }
+        }
+        fn run(data: &[u8], block: usize, max: usize) -> Vec<Vec<u8>> {
+            let mut out = Vec::new();
+            read_line_blocks(ShortReader { data, pos: 0, max }, block, |b| {
+                if !b.is_empty() {
+                    out.push(b);
+                }
+                true
+            })
+            .unwrap();
+            out
+        }
+        // The pre-refactor algorithm (fixed read buffer + `carry.to_vec()`), as the oracle.
+        fn reference(data: &[u8], block: usize) -> Vec<Vec<u8>> {
+            let (mut out, mut carry, mut pos) = (Vec::new(), Vec::new(), 0);
+            loop {
+                let filled = (data.len() - pos).min(block);
+                if filled == 0 {
+                    if !carry.is_empty() {
+                        out.push(carry);
+                    }
+                    return out;
+                }
+                let mut b = std::mem::take(&mut carry);
+                b.extend_from_slice(&data[pos..pos + filled]);
+                pos += filled;
+                let cut = b.iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1);
+                carry = b[cut..].to_vec();
+                b.truncate(cut);
+                if !b.is_empty() {
+                    out.push(b);
+                }
+            }
+        }
+        let mut lines = String::new();
+        for i in 0..500u32 {
+            lines.push_str(&format!(
+                "<http://ex/s{i}> <http://ex/p> \"{}\" .\n",
+                "x".repeat((i % 37) as usize)
+            ));
+        }
+        let crlf = lines.replace('\n', "\r\n");
+        let no_trailing = format!("{lines}<http://ex/last> <http://ex/p> \"tail\" .");
+        let long_line = format!(
+            "{lines}<http://ex/s> <http://ex/p> \"{}\" .\n{lines}",
+            "L".repeat(10_000)
+        );
+        for (name, data) in [
+            ("lf", lines.as_str()),
+            ("crlf", crlf.as_str()),
+            ("no trailing newline", no_trailing.as_str()),
+            ("line longer than a block", long_line.as_str()),
+            ("empty", ""),
+            ("newline only", "\n"),
+        ] {
+            let data = data.as_bytes();
+            for block in [1usize, 64, 4096, 1 << 20] {
+                for max in [1usize, 7, 1000, usize::MAX] {
+                    let got = run(data, block, max);
+                    let ctx = format!("{name} block={block} max={max}");
+                    let want = reference(data, block);
+                    assert_eq!(got, want, "{ctx}: blocks differ from the reference cut");
+                    assert_eq!(got.concat(), data, "{ctx}: blocks do not reassemble");
+                    assert!(got.iter().all(|b| !b.is_empty()), "{ctx}: empty block");
+                    if let Some((last, init)) = got.split_last() {
+                        let aligned = init.iter().all(|b| b.ends_with(b"\n"));
+                        assert!(aligned, "{ctx}: block not newline-aligned");
+                        let ends_nl = last.ends_with(b"\n");
+                        assert_eq!(ends_nl, data.ends_with(b"\n"), "{ctx}: final partial line");
+                    }
+                    if name == "crlf" {
+                        let pairs = got.iter().all(|b| b.ends_with(b"\r\n"));
+                        assert!(pairs, "{ctx}: CRLF pair split");
+                    }
+                }
+            }
+        }
+        assert!(run(b"", 64, 7).is_empty(), "empty input must emit nothing");
+        // Downstream hang-up: `emit` returning false stops reading cleanly after that block.
+        let mut calls = 0;
+        read_line_blocks(lines.as_bytes(), 64, |_| {
+            calls += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        // A read error propagates as `Err`.
+        struct Failing;
+        impl std::io::Read for Failing {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("boom"))
+            }
+        }
+        let err = read_line_blocks(Failing, 64, |_| true).unwrap_err();
+        assert!(err.contains("boom"), "{err}");
+        // A hang-up during a newline-free run stops the read: "!\n" then an endless line.
+        struct Endless {
+            head: &'static [u8],
+            served: usize,
+        }
+        impl std::io::Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = buf.len().min(4096);
+                for (i, b) in buf[..n].iter_mut().enumerate() {
+                    *b = self.head.get(self.served + i).copied().unwrap_or(b'a');
+                }
+                self.served += n;
+                assert!(self.served < 1 << 20, "reader kept going after the hang-up");
+                Ok(n)
+            }
+        }
+        // The first block is accepted (sent), then the parser rejects it and hangs up, so
+        // every later emit fails; only the empty probes can observe that.
+        let mut calls = 0;
+        read_line_blocks(Endless { head: b"!\n", served: 0 }, 64, |_| {
+            calls += 1;
+            calls == 1
+        })
+        .unwrap();
+        assert_eq!(calls, 2);
+    }
+
     #[test]
     fn load_and_scan() {
         let ttl = "@prefix ex: <http://ex/> . ex:a ex:p ex:b, ex:c . ex:d ex:p ex:b .";
@@ -9632,6 +9746,203 @@ mod tests {
         let o = Term::Literal(Literal::new_typed_literal("2.000000000000000003", xsd::DECIMAL));
         g.apply_delta(&[[s, p, o]], &[]).unwrap();
         assert!(g.has_high_precision_decimal(), "delta-inserted inexact decimal must flip the memo");
+    }
+
+    // [GPT-6 Astra] #6485: observe the memo itself so an unnecessary rescan fails.
+    #[test]
+    fn has_high_precision_decimal_memo_preserves_unchanged_dictionary() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for sparse in [false, true] {
+            let mut g = Graph::load_str(
+                "@prefix : <urn:> . :s :p 7 . :other :p 8 . :s :exact 1.5 .",
+                "turtle",
+            )
+            .unwrap();
+            if sparse {
+                g.numerics = NumData::Sparse(
+                    (1..=g.dict.len() as Id)
+                        .filter_map(|id| g.numerics.lookup(id).map(|value| (id, value)))
+                        .collect(),
+                );
+            }
+            let triple = |s: &str, value: i32| {
+                [
+                    Term::NamedNode(NamedNode::new(s).unwrap()),
+                    Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+                    Term::Literal(Literal::from(value)),
+                ]
+            };
+            let d = g.dict.len();
+            assert!(!g.has_high_precision_decimal());
+            let removed = triple("urn:other", 8);
+            g.apply_delta(&[], std::slice::from_ref(&removed)).unwrap();
+            assert_eq!(g.len(), 2);
+            assert_eq!(
+                g.high_precision_decimal.load(Relaxed),
+                1,
+                "delete, sparse={sparse}"
+            );
+            let absent = triple("urn:s", 8);
+            assert!(absent.iter().all(|term| g.id_of(term).is_some()));
+            g.apply_delta(&[], &[absent]).unwrap();
+            assert_eq!(g.len(), 2);
+            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "absent delete");
+            g.apply_delta(&[removed], &[]).unwrap();
+            assert_eq!(g.len(), 3);
+            assert_eq!(
+                g.high_precision_decimal.load(Relaxed),
+                1,
+                "known reinsertion"
+            );
+            g.apply_delta(&[], &[]).unwrap();
+            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "empty delta");
+            let inline = triple("urn:s", 999999);
+            g.apply_delta(std::slice::from_ref(&inline), &[]).unwrap();
+            assert_eq!(g.id_of(&inline[2]), Some(dict::INLINE_BASE + 999999));
+            assert_eq!(g.dict.len(), d);
+            assert_eq!(g.high_precision_decimal.load(Relaxed), 1, "inline integer");
+            assert!(!g.has_high_precision_decimal());
+        }
+    }
+
+    #[test]
+    fn has_high_precision_decimal_memo_invalidates_stored_growth() {
+        use std::sync::atomic::Ordering::Relaxed;
+        for sparse in [false, true] {
+            let mut g = Graph::load_str("@prefix : <urn:> . :s :p 7 .", "turtle").unwrap();
+            if sparse {
+                g.numerics = NumData::Sparse(rustc_hash::FxHashMap::default());
+            }
+            assert!(!g.has_high_precision_decimal());
+            for (lexical, datatype, high_precision) in [
+                ("1.5", xsd::DECIMAL, false),
+                ("007", xsd::INTEGER, false),
+                ("2.000000000000000003", xsd::DECIMAL, true),
+            ] {
+                let d = g.dict.len();
+                let triple = [
+                    Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+                    Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+                    Term::Literal(Literal::new_typed_literal(lexical, datatype)),
+                ];
+                g.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+                assert!(g.dict.len() > d, "{lexical}");
+                let id = g.id_of(&triple[2]).unwrap();
+                assert!(g.numeric_value(id).is_some(), "{lexical}");
+                assert_eq!(g.dict.term(id), triple[2]);
+                assert_eq!(
+                    g.high_precision_decimal.load(Relaxed),
+                    0,
+                    "growth: {lexical}"
+                );
+                assert_eq!(g.has_high_precision_decimal(), high_precision);
+                if high_precision {
+                    g.apply_delta(&[], &[triple]).unwrap();
+                    assert_eq!(g.high_precision_decimal.load(Relaxed), 2, "sticky found");
+                    assert!(g.has_high_precision_decimal());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn has_high_precision_decimal_memo_fork_compact_isolation() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut parent =
+            Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle").unwrap();
+        assert!(!parent.has_high_precision_decimal());
+        let mut child = parent.fork();
+        assert!(matches!(&child.numerics, NumData::Forked { .. }));
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+        assert!(!child.has_high_precision_decimal());
+        let d = child.dict.len();
+        let removed = [
+            Term::NamedNode(NamedNode::new("urn:other").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::from(7)),
+        ];
+        child
+            .apply_delta(&[], std::slice::from_ref(&removed))
+            .unwrap();
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert_eq!(parent.len(), 2);
+        assert_eq!(child.len(), 1);
+        child.compact().unwrap();
+        assert_eq!(child.dict.len(), d);
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        assert!(!child.has_high_precision_decimal());
+        child.apply_delta(&[removed], &[]).unwrap();
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 1);
+        let snapshot = child.snapshot();
+        assert!(!snapshot.has_high_precision_decimal());
+        let inexact = [
+            Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::new_typed_literal(
+                "2.000000000000000003",
+                xsd::DECIMAL,
+            )),
+        ];
+        parent
+            .apply_delta(std::slice::from_ref(&inexact), &[])
+            .unwrap();
+        assert!(parent.has_high_precision_decimal());
+        assert!(child.id_of(&inexact[2]).is_none());
+        assert!(!child.has_high_precision_decimal());
+        child
+            .apply_delta(std::slice::from_ref(&inexact), &[])
+            .unwrap();
+        assert_eq!(child.high_precision_decimal.load(Relaxed), 0);
+        assert!(child.has_high_precision_decimal());
+        assert!(snapshot.id_of(&inexact[2]).is_none());
+        assert!(!snapshot.has_high_precision_decimal());
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn has_high_precision_decimal_memo_mapped_wal_precision() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let dir = std::env::temp_dir().join(format!("sparq_numeric_memo_{}", std::process::id()));
+        Graph::load_str("@prefix : <urn:> . :s :p 1.5 . :other :p 7 .", "turtle")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        assert!(matches!(&g.numerics, NumData::Mapped(..)));
+        assert!(!g.has_high_precision_decimal());
+        let d = g.dict.len();
+        let removed = [
+            Term::NamedNode(NamedNode::new("urn:other").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::from(7)),
+        ];
+        g.apply_delta(&[], &[removed]).unwrap();
+        assert_eq!(g.dict.len(), d);
+        assert_eq!(g.high_precision_decimal.load(Relaxed), 1);
+        let inexact = [
+            Term::NamedNode(NamedNode::new("urn:s").unwrap()),
+            Term::NamedNode(NamedNode::new("urn:p").unwrap()),
+            Term::Literal(Literal::new_typed_literal(
+                "2.000000000000000003",
+                xsd::DECIMAL,
+            )),
+        ];
+        g.apply_delta(std::slice::from_ref(&inexact), &[]).unwrap();
+        assert_eq!(g.high_precision_decimal.load(Relaxed), 0);
+        assert!(g.numeric_value(g.id_of(&inexact[2]).unwrap()).is_some());
+        drop(g); // Reopen must obtain the new term and numeric cache through WAL replay.
+        let mut reopened = Graph::open(&dir).unwrap();
+        assert_eq!(reopened.high_precision_decimal.load(Relaxed), 0);
+        assert!(reopened.has_high_precision_decimal());
+        reopened.apply_delta(&[], &[inexact]).unwrap();
+        assert_eq!(reopened.high_precision_decimal.load(Relaxed), 2);
+        reopened.compact().unwrap(); // The dictionary retains the now-orphaned decimal.
+        assert!(reopened.has_high_precision_decimal());
+        drop(reopened);
+        let final_graph = Graph::open(&dir).unwrap();
+        assert!(final_graph.has_high_precision_decimal());
+        drop(final_graph);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The full sorted term-triple set of a graph (overlay merged), for state comparison.

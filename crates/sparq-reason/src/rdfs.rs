@@ -131,9 +131,21 @@ const PAR_THRESHOLD: usize = 4096;
 /// subPropertyOf) is small relative to the data, even when deep.
 pub(crate) fn transitive_closure(direct: &FxHashMap<Id, Vec<Id>>) -> FxHashMap<Id, Vec<Id>> {
     let mut closure: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    for_each_reachable(direct, |start, seen| {
+        closure.insert(start, seen.iter().copied().collect());
+    });
+    closure
+}
+
+/// The per-source DFS behind [`transitive_closure`]: calls `f(source, reachable)` for every
+/// key of `direct`, without materializing the closure map.
+pub(crate) fn for_each_reachable(direct: &FxHashMap<Id, Vec<Id>>, mut f: impl FnMut(Id, &FxHashSet<Id>)) {
+    let mut seen: FxHashSet<Id> = FxHashSet::default();
+    let mut stack: Vec<Id> = Vec::new();
     for (&start, succ0) in direct {
-        let mut seen: FxHashSet<Id> = FxHashSet::default();
-        let mut stack: Vec<Id> = succ0.clone();
+        seen.clear();
+        stack.clear();
+        stack.extend_from_slice(succ0);
         while let Some(n) = stack.pop() {
             if seen.insert(n) {
                 if let Some(succ) = direct.get(&n) {
@@ -141,9 +153,8 @@ pub(crate) fn transitive_closure(direct: &FxHashMap<Id, Vec<Id>>) -> FxHashMap<I
                 }
             }
         }
-        closure.insert(start, seen.into_iter().collect());
+        f(start, &seen);
     }
-    closure
 }
 
 /// For each property, the full set of typing classes implied by `dr` (its domain or range
@@ -485,12 +496,23 @@ impl MonoOwl {
 /// predicate is rewritten uniformly (and its domain/range typed); the asserted triple itself is
 /// dropped later by the dedup against `original`.
 fn build_prop_expand(sp_closure: &FxHashMap<Id, Vec<Id>>, m: &MonoOwl) -> PropExpand {
+    PropExpand { map: prop_orientation_closure(sp_closure, &m.inverse, &m.symmetric) }
+}
+
+/// The `(property, orientation)` BFS behind [`build_prop_expand`], over explicit
+/// inverse/symmetric axioms. Shared with the incremental OWL-RL graph so both engines
+/// orient properties identically.
+pub(crate) fn prop_orientation_closure(
+    sp_closure: &FxHashMap<Id, Vec<Id>>,
+    inverse: &FxHashMap<Id, Vec<Id>>,
+    symmetric: &FxHashSet<Id>,
+) -> FxHashMap<Id, Vec<(Id, bool)>> {
     // Every property mentioned anywhere in the property TBox/ABox flows through here; we expand
     // lazily per start property encountered as a key of the union of relevant maps.
     let starts: FxHashSet<Id> = sp_closure
         .keys()
-        .chain(m.inverse.keys())
-        .chain(m.symmetric.iter())
+        .chain(inverse.keys())
+        .chain(symmetric.iter())
         .copied()
         .collect();
     // We must also expand properties that only appear as subPropertyOf SUPERS or inverse targets;
@@ -502,7 +524,7 @@ fn build_prop_expand(sp_closure: &FxHashMap<Id, Vec<Id>>, m: &MonoOwl) -> PropEx
     for sup in sp_closure.values() {
         all_props.extend(sup.iter().copied());
     }
-    for inv in m.inverse.values() {
+    for inv in inverse.values() {
         all_props.extend(inv.iter().copied());
     }
     let mut map: FxHashMap<Id, Vec<(Id, bool)>> = FxHashMap::default();
@@ -522,7 +544,7 @@ fn build_prop_expand(sp_closure: &FxHashMap<Id, Vec<Id>>, m: &MonoOwl) -> PropEx
                 }
             }
             // inverseOf: flip orientation.
-            if let Some(invs) = m.inverse.get(&q) {
+            if let Some(invs) = inverse.get(&q) {
                 for &r in invs {
                     if !seen.contains(&(r, !or)) {
                         stack.push((r, !or));
@@ -530,13 +552,13 @@ fn build_prop_expand(sp_closure: &FxHashMap<Id, Vec<Id>>, m: &MonoOwl) -> PropEx
                 }
             }
             // SymmetricProperty: flip orientation, same predicate.
-            if m.symmetric.contains(&q) && !seen.contains(&(q, !or)) {
+            if symmetric.contains(&q) && !seen.contains(&(q, !or)) {
                 stack.push((q, !or));
             }
         }
         map.insert(p, seen.into_iter().collect());
     }
-    PropExpand { map }
+    map
 }
 
 /// Expand `triples` in place with the RDFS closure. Returns the number of NEW triples added.

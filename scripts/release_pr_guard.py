@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared, fail-closed identification of the release-plz **Release PR**.
 
-[OPUS-5] 🤖 SPARQ agent. Issue #1135 (maintainer, 2026-07-26): *"Before I do this; can I
+🤖 SPARQ agent. Issue #1135 (maintainer, 2026-07-26): *"Before I do this; can I
 make sure that there are protections in place to prevent publishing too regularly, I don't
 want to spam the registry."*
 
@@ -40,7 +40,7 @@ FAIL-CLOSED. `arm_block_reason` blocks when it *cannot prove* the PR is not the 
 * a bot-authored PR with an unknown title blocks.
 
 Over-blocking is cheap: a wrongly-skipped PR is merged by the next sweep or by a human.
-Under-blocking publishes 17 crates to crates.io forever.
+Under-blocking publishes 37 crates to crates.io forever.
 
 Usage:
     import release_pr_guard

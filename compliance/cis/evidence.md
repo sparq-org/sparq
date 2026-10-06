@@ -97,7 +97,7 @@ grep -nE 'provenance:|sbom:|attest-build-provenance' .github/workflows/release.y
 #  release.yml: archives + SBOM also actions/attest-build-provenance (SLSA)
 ```
 
-The pushed `ghcr.io/jeswr/sparq-server` carries max-mode SLSA provenance + an embedded SBOM,
+The pushed `ghcr.io/sparq-org/sparq-server` carries max-mode SLSA provenance + an embedded SBOM,
 verifiable with `gh attestation verify` / cosign. → D-4.5.
 
 ## E-7 — Image boots + serves (the existing smoke gate; NOT a CVE scan)
@@ -147,7 +147,7 @@ grep -nE 'permissions:|contents: read' .github/workflows/ci.yml | head
 #  ci.yml:  permissions: contents: read   (default least-privilege; per-job opt-ins only)
 ```
 
-Branch protection requires the `ci-summary / gate` aggregator (governance per
+Branch protection requires the `ci-fast` check (governance per
 `feedback-pr-workflow`); the default workflow token is read-only with scoped per-job escalation
 (e.g. `release.yml` `docker:` adds only `packages: write`). → C-6.8 PASS (project-side).
 

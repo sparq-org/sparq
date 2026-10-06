@@ -74,19 +74,26 @@ pub(crate) mod budget {
 
     /// Copyable view of a cancellation flag owned by the installed [`QueryBudget`].
     ///
-    /// The [`Guard`] lifetime keeps that budget (and therefore its `Arc<AtomicBool>`)
-    /// alive until the pointer has been cleared from the thread-local state. Rayon
-    /// snapshots are consumed only by scoped parallel iterators that join before the
-    /// guard is dropped. The pointer is dereferenced only for atomic loads.
+    /// [GPT-6 Astra] ACTIVE belongs to the innermost live `with_budget` frame.
+    /// Each pointer is owned by a QueryBudget borrowed by a still-live frame on
+    /// this thread's stack. Private installation/restoration enforces nesting:
+    /// a restored parent's borrow outlives the child. Only `install`/`Guard::drop`
+    /// change ACTIVE's `cancel` pointer; other writers update width/bytes for the
+    /// innermost frame. Private construction and the four synchronous snapshot
+    /// consumers documented on `snapshot` uphold this usage-level invariant:
+    /// their parallel work joins before the owning frame returns, and pointer
+    /// dereferences are atomic loads.
     #[derive(Clone, Copy)]
     struct CancelPtr(NonNull<AtomicBool>);
 
     // SAFETY: `AtomicBool` is `Sync`; moving this shared pointer to a worker is
-    // sound because it is only dereferenced for atomic loads while `Guard` keeps
-    // the owning `Arc` alive, including across scoped rayon work.
+    // sound because only atomic loads occur while the owning `with_budget` frame
+    // borrows its QueryBudget, including until scoped rayon work joins. This relies
+    // on private construction and the four audited consumers documented on `snapshot`.
     unsafe impl Send for CancelPtr {}
     // SAFETY: `AtomicBool` is `Sync`; all shared access through `CancelPtr` is an
-    // atomic load, and `Guard` keeps the allocation alive until worker joins finish.
+    // atomic load; private construction and the four audited scoped-join consumers
+    // documented on `snapshot` keep the owning `with_budget` frame alive.
     unsafe impl Sync for CancelPtr {}
 
     /// Bytes one id-level binding cell occupies in a materialised `Row`. The
@@ -98,7 +105,7 @@ pub(crate) mod budget {
 
     /// The installed limits, flattened for a cheap per-check read.
     #[derive(Clone, Copy)]
-    pub(crate) struct Limits {
+    pub(in crate::exec) struct Limits {
         on: bool,
         #[cfg(not(target_arch = "wasm32"))]
         deadline: Option<std::time::Instant>,
@@ -147,7 +154,7 @@ pub(crate) mod budget {
         /// (sq-qk6ac)
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(crate) fn why(&self, rows: usize) -> Option<&'static str> {
+        pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
             if !self.on {
                 return None;
             }
@@ -162,8 +169,8 @@ pub(crate) mod budget {
                 return Some("timeout");
             }
             if let Some(cancel) = self.cancel {
-                // SAFETY: `CancelPtr`'s invariant and the lifetime-bound `Guard`
-                // keep the `AtomicBool` alive for this scoped snapshot load.
+                // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
+                // QueryBudget alive until this scoped snapshot load finishes.
                 if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
                     return Some("cancelled");
                 }
@@ -179,7 +186,7 @@ pub(crate) mod budget {
         /// (and `snapshot`); the non-parallel (wasm) build compiles them out.
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(crate) fn hit(&self, rows: usize) -> bool {
+        pub(in crate::exec) fn hit(&self, rows: usize) -> bool {
             self.why(rows).is_some()
         }
     }
@@ -189,20 +196,21 @@ pub(crate) mod budget {
         static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
     }
 
-    /// Clears the budget when the `*_with_budget` entry point returns (also on
-    /// error/unwind, so a poisoned thread never leaks a stale budget).
-    pub(crate) struct Guard<'a> {
+    // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
+    struct Guard<'a> {
+        previous: Limits,
+        exceeded: Option<&'static str>,
         _budget: std::marker::PhantomData<&'a QueryBudget>,
         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
     }
     impl Drop for Guard<'_> {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.set(OFF));
-            EXCEEDED.with(|e| e.set(None));
+            ACTIVE.with(|a| a.set(self.previous));
+            EXCEEDED.with(|e| e.set(self.exceeded));
         }
     }
 
-    pub(crate) fn install(b: &QueryBudget) -> Guard<'_> {
+    fn install(b: &QueryBudget) -> Guard<'_> {
         let cancel = b
             .cancel
             .as_ref()
@@ -214,8 +222,8 @@ pub(crate) mod budget {
             || cancel.is_some();
         #[cfg(target_arch = "wasm32")]
         let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
-        ACTIVE.with(|a| {
-            a.set(Limits {
+        let previous = ACTIVE.with(|a| {
+            a.replace(Limits {
                 on,
                 #[cfg(not(target_arch = "wasm32"))]
                 deadline: b.deadline,
@@ -226,11 +234,23 @@ pub(crate) mod budget {
                 cancel,
             })
         });
-        EXCEEDED.with(|e| e.set(None));
+        let exceeded = EXCEEDED.with(|e| e.replace(None));
         Guard {
+            previous,
+            exceeded,
             _budget: std::marker::PhantomData,
             _not_send: std::marker::PhantomData,
         }
+    }
+
+    /// [GPT-6 Astra] Runs a child budget, restoring its parent on return or unwind.
+    ///
+    /// Guard never escapes this frame. This enforces LIFO even for reentrant
+    /// callbacks, keeps each borrowed cancellation owner alive, and restores idle
+    /// OFF/None after a top-level call. Aborting panics have no continuation.
+    pub(crate) fn with_budget<T>(b: &QueryBudget, f: impl FnOnce() -> T) -> T {
+        let _guard = install(b);
+        f()
     }
 
     /// [OPUS-4.8] (sq-s5is) Sets the per-row byte width (= `width_in_ids ×
@@ -289,9 +309,15 @@ pub(crate) mod budget {
     }
 
     /// Snapshot of the installed limits, for the rayon-parallel branches.
+    ///
+    /// [GPT-6 Astra] This lifetime-free Copy is trusted only inside exec. It must
+    /// not escape its owning with_budget frame or enter detached work. The four
+    /// consumers are scan SELECT-JSON, bindings SELECT-JSON, parallel hash join,
+    /// and the parallel residual anti-join; all join before returning. A new
+    /// consumer must establish the same owner lifetime and scoped-join invariant.
     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
     #[inline]
-    pub(crate) fn snapshot() -> Limits {
+    pub(in crate::exec) fn snapshot() -> Limits {
         ACTIVE.with(|a| a.get())
     }
 
@@ -314,10 +340,12 @@ pub(crate) mod budget {
     ///   every 1024 rows and stops early). A blanket "fan out whenever a budget is
     ///   installed" was REJECTED for exactly this reason (roborev 1538 / audit item 6).
     ///
+    /// The returned snapshot has the same owning-frame/scoped-join invariant as
+    /// [`snapshot`]; scan SELECT-JSON is its sole production consumer.
     /// Compiled only for the `parallel` feature — the wasm/serial build never fans out.
     #[cfg(feature = "parallel")]
     #[inline]
-    pub(crate) fn parallel_json_fanout() -> Option<Limits> {
+    pub(in crate::exec) fn parallel_json_fanout() -> Option<Limits> {
         ACTIVE.with(|a| {
             let l = a.get();
             if l.on && (l.max_rows != usize::MAX || l.max_bytes != usize::MAX) {
@@ -383,6 +411,9 @@ pub(crate) mod budget {
     /// here — so the pre-burst snapshot is exactly the current state minus this burst.
     /// A deadline that elapsed during the burst is not masked: the next `exhausted`
     /// re-derives it from the wall clock. [OPUS-4.8] (sq-my8wd.4)
+    /// [GPT-6 Astra] A synchronous nested with_budget may finish between capture
+    /// and restore: it restores this frame verbatim first. Never apply a savepoint
+    /// while a different budget frame is active.
     #[cfg(any(feature = "service", feature = "service-local"))]
     #[inline]
     pub(crate) fn restore_bytes(sp: ByteSavepoint) {
@@ -419,8 +450,8 @@ pub(crate) mod budget {
             return true;
         }
         if let Some(cancel) = a.cancel {
-            // SAFETY: `CancelPtr`'s invariant and the lifetime-bound `Guard` keep
-            // the `AtomicBool` alive until this thread-local pointer is cleared.
+            // SAFETY: `CancelPtr`'s nested-frame invariant keeps this pointer
+            // owned by a live QueryBudget, also when restoring a parent frame.
             // Relaxed is sufficient because cancellation gates control flow only;
             // it never publishes or guards a shared query buffer. If that changes,
             // the load/store pair must become Acquire/Release.
@@ -474,6 +505,272 @@ pub(crate) mod budget {
         cap.min(a.max_rows.saturating_add(1)).min(by_bytes).min(1 << 20)
     }
 
+    // [GPT-6 Astra] Reentrant scopes must restore the complete owning frame.
+    #[cfg(test)]
+    mod nested_budget_tests {
+        use super::*;
+        use std::sync::Arc;
+
+        fn assert_state(want: Limits, sticky: Option<&'static str>) {
+            let got = ACTIVE.with(Cell::get);
+            assert_eq!(got.on, want.on);
+            assert_eq!(got.max_rows, want.max_rows);
+            assert_eq!(got.max_bytes, want.max_bytes);
+            assert_eq!(got.byte_width, want.byte_width);
+            assert_eq!(got.extra_bytes, want.extra_bytes);
+            assert_eq!(got.cancel.map(|p| p.0), want.cancel.map(|p| p.0));
+            #[cfg(not(target_arch = "wasm32"))]
+            assert_eq!(got.deadline, want.deadline);
+            assert_eq!(EXCEEDED.with(Cell::get), sticky);
+        }
+
+        #[test]
+        fn exact_parent_state_survives_three_levels_ok_err_and_unwind() {
+            let outer = QueryBudget {
+                max_rows: Some(7),
+                max_bytes: Some(4096),
+                ..QueryBudget::cancelled_by(Arc::new(AtomicBool::new(false)))
+            };
+            with_budget(&outer, || {
+                set_width(5);
+                add_bytes(37);
+                let parent = snapshot();
+                let child = QueryBudget {
+                    max_rows: Some(2),
+                    max_bytes: Some(128),
+                    ..QueryBudget::unlimited()
+                };
+                let result: Result<(), &str> = with_budget(&child, || {
+                    set_width(2);
+                    add_bytes(11);
+                    let middle = snapshot();
+                    with_budget(&QueryBudget::unlimited(), || {
+                        assert_eq!(check(usize::MAX), Ok(()))
+                    });
+                    assert_state(middle, None);
+                    assert!(check(3).is_err());
+                    Err("child error")
+                });
+                assert_eq!(result, Err("child error"));
+                assert_state(parent, None);
+                let panic = std::panic::catch_unwind(|| {
+                    with_budget(&child, || {
+                        add_bytes(1000);
+                        panic!("controlled child unwind");
+                    })
+                });
+                assert!(panic.is_err());
+                assert_state(parent, None);
+                assert_eq!(check(7), Ok(()));
+                assert!(check(8).is_err());
+            });
+            assert_state(OFF, None);
+            let top_level_panic = std::panic::catch_unwind(|| {
+                with_budget(&outer, || {
+                    set_width(9);
+                    add_bytes(5000);
+                    panic!("controlled top-level unwind");
+                });
+            });
+            assert!(top_level_panic.is_err());
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        fn sticky_parent_errors_survive_clean_and_exhausted_children() {
+            for reason in ["max-rows", "max-bytes"] {
+                let outer = QueryBudget {
+                    max_rows: Some(2),
+                    max_bytes: Some(128),
+                    ..QueryBudget::unlimited()
+                };
+                with_budget(&outer, || {
+                    if reason == "max-rows" {
+                        assert!(check(3).is_err());
+                    } else {
+                        add_bytes(129);
+                    }
+                    let parent = snapshot();
+                    with_budget(&QueryBudget::unlimited(), || {
+                        assert_eq!(check(usize::MAX), Ok(()))
+                    });
+                    assert_state(parent, Some(reason));
+                    with_budget(
+                        &QueryBudget::cancelled_by(Arc::new(AtomicBool::new(true))),
+                        || {
+                            assert_eq!(
+                                check(0),
+                                Err("query budget exceeded (cancelled)".to_owned())
+                            );
+                        },
+                    );
+                    assert_state(parent, Some(reason));
+                    assert_eq!(check(0), Err(format!("query budget exceeded ({})", reason)));
+                });
+                assert_state(OFF, None);
+            }
+        }
+
+        #[test]
+        fn live_parent_cancel_is_distinct_from_child_cancel() {
+            let parent_flag = Arc::new(AtomicBool::new(false));
+            let child_flag = Arc::new(AtomicBool::new(false));
+            let outer = QueryBudget::cancelled_by(Arc::clone(&parent_flag));
+            let child = QueryBudget::cancelled_by(Arc::clone(&child_flag));
+            with_budget(&outer, || {
+                let parent = snapshot();
+                with_budget(&child, || {
+                    parent_flag.store(true, Ordering::Relaxed);
+                    assert_eq!(check(0), Ok(()));
+                    child_flag.store(true, Ordering::Relaxed);
+                    assert!(check(0).is_err());
+                });
+                assert_state(parent, None);
+                assert_eq!(
+                    check(0),
+                    Err("query budget exceeded (cancelled)".to_owned())
+                );
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        #[cfg(not(target_arch = "wasm32"))]
+        fn expired_parent_deadline_returns_after_unlimited_child_without_sleep() {
+            let parent = QueryBudget {
+                deadline: Some(std::time::Instant::now()),
+                ..QueryBudget::unlimited()
+            };
+            with_budget(&parent, || {
+                with_budget(&QueryBudget::unlimited(), || assert_eq!(check(0), Ok(())));
+                assert_eq!(check(0), Err("query budget exceeded (timeout)".to_owned()));
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        #[cfg(any(feature = "service", feature = "service-local"))]
+        fn service_savepoint_brackets_a_fully_returned_nested_budget() {
+            let parent = QueryBudget {
+                max_bytes: Some(128),
+                ..QueryBudget::unlimited()
+            };
+            with_budget(&parent, || {
+                set_width(3);
+                add_bytes(19);
+                let original = snapshot();
+                let mark = byte_savepoint();
+                with_budget(&QueryBudget::unlimited(), || {
+                    assert_eq!(check(usize::MAX), Ok(()))
+                });
+                add_bytes(200);
+                assert!(check(0).is_err());
+                restore_bytes(mark);
+                assert_state(original, None);
+                assert_eq!(check(0), Ok(()));
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        fn snapshots_join_two_workers_before_parent_cancel_owner_returns() {
+            let flag = Arc::new(AtomicBool::new(true));
+            let parent = QueryBudget::cancelled_by(flag);
+            with_budget(&parent, || {
+                let snap = snapshot();
+                let owner = std::thread::current().id();
+                std::thread::scope(|scope| {
+                    let a = scope.spawn(|| (std::thread::current().id(), snap.why(0), check(0)));
+                    let b = scope.spawn(|| (std::thread::current().id(), snap.why(0), check(0)));
+                    let a = a.join().unwrap();
+                    let b = b.join().unwrap();
+                    assert_ne!(a.0, owner);
+                    assert_ne!(b.0, owner);
+                    assert_ne!(a.0, b.0);
+                    assert_eq!(a.1, Some("cancelled"));
+                    assert_eq!(b.1, Some("cancelled"));
+                    assert_eq!(a.2, Ok(()));
+                    assert_eq!(b.2, Ok(()));
+                });
+            });
+            assert_state(OFF, None);
+        }
+
+        #[test]
+        fn public_extension_nested_query_preserves_outer_cancel() {
+            use oxrdf::{Literal, Term};
+            use sparq_core::Graph;
+            use std::sync::atomic::AtomicUsize;
+            for inner in 0..5 {
+                let graph = Graph::load_str("", "turtle").unwrap();
+                let nested = Graph::load_str("", "turtle").unwrap();
+                let flag = Arc::new(AtomicBool::new(false));
+                let calls = Arc::new(AtomicUsize::new(0));
+                let callback_flag = Arc::clone(&flag);
+                let callback_calls = Arc::clone(&calls);
+                let owner = std::thread::current().id();
+                let mut functions = crate::FunctionRegistry::new();
+                functions.register("urn:nested", move |_| {
+                    // Pin this one-row plan to serial callback evaluation: the
+                    // nested call must overwrite the same TLS as the outer query.
+                    assert_eq!(std::thread::current().id(), owner);
+                    callback_calls.fetch_add(1, Ordering::Relaxed);
+                    match inner {
+                        0 => {}
+                        1 => {
+                            assert_eq!(crate::query(&nested, "ASK {}").unwrap().rows.len(), 1);
+                        }
+                        2 => {
+                            let child = QueryBudget {
+                                max_rows: Some(1),
+                                ..QueryBudget::unlimited()
+                            };
+                            assert_eq!(
+                                crate::query_with_budget(&nested, "ASK {}", &child)
+                                    .unwrap()
+                                    .rows
+                                    .len(),
+                                1
+                            );
+                        }
+                        3 => {
+                            // Parse rejection occurs before a child budget is installed.
+                            assert!(crate::query(&nested, "not SPARQL").is_err());
+                        }
+                        _ => {
+                            // [GPT-6 Astra] This valid graph form reaches the error
+                            // arm inside query_prepared_with_budget's budget scope.
+                            let sparql = "CONSTRUCT { ?s ?p ?o } WHERE {}";
+                            assert!(crate::PreparedQuery::parse(sparql).unwrap().is_graph_form());
+                            let outer = ACTIVE.with(Cell::get);
+                            assert_eq!(
+                                crate::query(&nested, sparql).unwrap_err(),
+                                "only SELECT and ASK queries are supported"
+                            );
+                            assert_state(outer, None);
+                        }
+                    }
+                    callback_flag.store(true, Ordering::Relaxed);
+                    Ok(Term::Literal(Literal::from(7)))
+                });
+                let result = crate::query_with_functions_and_budget(
+                    &graph,
+                    "SELECT (<urn:nested>() AS ?value) WHERE {}",
+                    &functions,
+                    &QueryBudget::cancelled_by(flag),
+                );
+                assert_eq!(calls.load(Ordering::Relaxed), 1);
+                assert_eq!(
+                    result.unwrap_err(),
+                    "query budget exceeded (cancelled)",
+                    "inner={}",
+                    inner
+                );
+                assert_eq!(crate::query(&graph, "ASK {}").unwrap().rows.len(), 1);
+            }
+        }
+    }
+
     /// [SONNET-4.6] (sq-qk6ac) Direct tests for `Limits::why` — the pure gate the
     /// rayon-parallel loops poll. Its contract has two load-bearing halves: it agrees
     /// with `Limits::hit`, and its reason string is EXACTLY the one `check` would raise,
@@ -487,27 +784,29 @@ pub(crate) mod budget {
         /// Asserts that under `budget` the snapshot reports `want` at `rows`, that `hit`
         /// agrees, and that the reason is the very string `check` puts in its error.
         fn assert_reason(budget: &QueryBudget, rows: usize, want: &'static str) {
-            let _guard = install(budget);
-            let snap = snapshot();
-            assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
-            assert!(snap.hit(rows), "hit must agree with why for {}", want);
-            assert_eq!(
-                check(rows),
-                Err(format!("query budget exceeded ({})", want)),
-                "the worker-visible reason must match the on-thread error for {}",
-                want
-            );
+            with_budget(budget, || {
+                let snap = snapshot();
+                assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
+                assert!(snap.hit(rows), "hit must agree with why for {}", want);
+                assert_eq!(
+                    check(rows),
+                    Err(format!("query budget exceeded ({})", want)),
+                    "the worker-visible reason must match the on-thread error for {}",
+                    want
+                );
+            })
         }
 
         /// `why` and `hit` are one decision, and an unbudgeted snapshot never trips.
         #[test]
         fn unbudgeted_snapshot_has_no_reason() {
             let budget = QueryBudget::unlimited();
-            let _guard = install(&budget);
-            let snap = snapshot();
-            assert_eq!(snap.why(0), None, "an unlimited budget must report no reason");
-            assert_eq!(snap.why(usize::MAX), None, "no row cap ⇒ no reason at any row count");
-            assert!(!snap.hit(usize::MAX), "hit must agree with why");
+            with_budget(&budget, || {
+                let snap = snapshot();
+                assert_eq!(snap.why(0), None, "an unlimited budget must report no reason");
+                assert_eq!(snap.why(usize::MAX), None, "no row cap ⇒ no reason at any row count");
+                assert!(!snap.hit(usize::MAX), "hit must agree with why");
+            })
         }
 
         /// Each limit reports ITS OWN reason, and the string matches `check`'s message.
@@ -538,10 +837,11 @@ pub(crate) mod budget {
         #[test]
         fn a_limit_not_yet_crossed_reports_nothing() {
             let budget = QueryBudget { max_rows: Some(4), ..QueryBudget::unlimited() };
-            let _guard = install(&budget);
-            let snap = snapshot();
-            assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
-            assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+            with_budget(&budget, || {
+                let snap = snapshot();
+                assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
+                assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+            })
         }
 
         /// The crux the parallel verdict loop depends on: a WORKER thread has no budget
@@ -551,19 +851,20 @@ pub(crate) mod budget {
         fn snapshot_is_the_only_signal_a_worker_thread_can_see() {
             let flag = Arc::new(AtomicBool::new(true));
             let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
-            let _guard = install(&budget);
-            let snap = snapshot();
+            with_budget(&budget, || {
+                let snap = snapshot();
 
-            let (worker_poll, worker_reason) = std::thread::scope(|s| {
-                s.spawn(|| (check(0), snap.why(0))).join().expect("worker must not panic")
-            });
-            assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
-            assert_eq!(
-                worker_reason,
-                Some("cancelled"),
-                "the captured snapshot must carry the cancellation across threads"
-            );
-            assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
+                let (worker_poll, worker_reason) = std::thread::scope(|s| {
+                    s.spawn(|| (check(0), snap.why(0))).join().expect("worker must not panic")
+                });
+                assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
+                assert_eq!(
+                    worker_reason,
+                    Some("cancelled"),
+                    "the captured snapshot must carry the cancellation across threads"
+                );
+                assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
+            })
         }
     }
 
@@ -578,15 +879,25 @@ pub(crate) mod budget {
         fn cancel_flag_zero_vs_one_trips_both_poll_paths() {
             let flag = Arc::new(AtomicBool::new(false));
             let budget = QueryBudget::unlimited().with_cancel(Arc::clone(&flag));
-            let _guard = install(&budget);
+            with_budget(&budget, || {
+                assert!(
+                    !snapshot().hit(0),
+                    "false control must not trip the rayon snapshot"
+                );
+                assert_eq!(
+                    check(0),
+                    Ok(()),
+                    "false control must not trip the local poll"
+                );
 
-            assert!(!snapshot().hit(0), "false control must not trip the rayon snapshot");
-            assert_eq!(check(0), Ok(()), "false control must not trip the local poll");
-
-            flag.store(true, Ordering::Relaxed);
-            assert!(snapshot().hit(0), "true flag must trip the rayon snapshot");
-            assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
-            assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+                flag.store(true, Ordering::Relaxed);
+                assert!(snapshot().hit(0), "true flag must trip the rayon snapshot");
+                assert_eq!(
+                    check(0),
+                    Err("query budget exceeded (cancelled)".to_owned())
+                );
+                assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+            })
         }
 
         #[test]
@@ -1618,18 +1929,19 @@ pub(crate) mod functions {
         static ACTIVE: RefCell<Option<Arc<FunctionRegistry>>> = const { RefCell::new(None) };
     }
 
-    /// Uninstalls the registry when the installing entry point returns (also on
-    /// error/unwind, so a poisoned thread never leaks a stale registry).
-    pub(crate) struct Guard;
+    /// Restores the PREVIOUS registry when the installing entry point returns (also
+    /// on error/unwind). Restoring rather than clearing keeps a nested install from
+    /// unregistering the outer scope's functions for the rest of that scope (#4467).
+    pub(crate) struct Guard(Option<Arc<FunctionRegistry>>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.borrow_mut().take());
+            let prev = self.0.take();
+            ACTIVE.with(|a| *a.borrow_mut() = prev);
         }
     }
 
     pub(crate) fn install(fns: &FunctionRegistry) -> Guard {
-        ACTIVE.with(|a| *a.borrow_mut() = Some(Arc::new(fns.clone())));
-        Guard
+        Guard(ACTIVE.with(|a| a.borrow_mut().replace(Arc::new(fns.clone()))))
     }
 
     /// Snapshot of the installed registry for the rayon-parallel branches
@@ -1761,16 +2073,16 @@ pub(crate) mod aggregates {
         static ACTIVE: RefCell<Option<Arc<CustomAggregateRegistry>>> = const { RefCell::new(None) };
     }
 
-    pub(crate) struct Guard;
+    pub(crate) struct Guard(Option<Arc<CustomAggregateRegistry>>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.borrow_mut().take());
+            let prev = self.0.take();
+            ACTIVE.with(|a| *a.borrow_mut() = prev);
         }
     }
 
     pub(crate) fn install(reg: &CustomAggregateRegistry) -> Guard {
-        ACTIVE.with(|a| *a.borrow_mut() = Some(Arc::new(reg.clone())));
-        Guard
+        Guard(ACTIVE.with(|a| a.borrow_mut().replace(Arc::new(reg.clone()))))
     }
 
     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
@@ -1965,16 +2277,16 @@ pub(crate) mod spatial {
         static ACTIVE: RefCell<Option<Arc<dyn SpatialProvider>>> = const { RefCell::new(None) };
     }
 
-    pub(crate) struct Guard;
+    pub(crate) struct Guard(Option<Arc<dyn SpatialProvider>>);
     impl Drop for Guard {
         fn drop(&mut self) {
-            ACTIVE.with(|a| a.borrow_mut().take());
+            let prev = self.0.take();
+            ACTIVE.with(|a| *a.borrow_mut() = prev);
         }
     }
 
     pub(crate) fn install(idx: Arc<dyn SpatialProvider>) -> Guard {
-        ACTIVE.with(|a| *a.borrow_mut() = Some(idx));
-        Guard
+        Guard(ACTIVE.with(|a| a.borrow_mut().replace(idx)))
     }
 
     /// The installed spatial index, if any.
@@ -2588,7 +2900,8 @@ fn single_pattern_scan_json_emit(
             // deadline-only budget, the now-past wall clock: sets the sticky flag the
             // caller's `budget::check(0)` converts into the budget error (a chunk skipped
             // above means the deadline is globally past, so this fires deterministically).
-            let _ = budget::exhausted(frags.iter().map(|(n, _)| n).sum());
+            let total: usize = frags.iter().map(|(n, _)| n).sum();
+            budget::exhausted(total);
             // Accumulate into `pending` and hand a chunk to `emit` at each flush boundary
             // (byte-identical concatenation to the old `emit_chunk` Vec layout — only the
             // chunk *boundaries* differ, and the concat is what the byte-identity contract
@@ -2604,14 +2917,26 @@ fn single_pattern_scan_json_emit(
                 }
                 wrote = true;
                 pending.push_str(&f);
-                if flush.is_some_and(|n| pending.len() >= n)
-                    && emit(std::mem::take(&mut pending)).is_break()
-                {
-                    return Some(());
+                if flush.is_some_and(|n| pending.len() >= n) {
+                    if emit(std::mem::take(&mut pending)).is_break() {
+                        return Some(());
+                    }
+                    // A cancellation (possibly set by the sink itself) or a deadline that
+                    // passed while emitting stops the stream here, rechecked per chunk.
+                    if budget::exhausted(total) {
+                        return Some(());
+                    }
                 }
             }
-            pending.push_str("]}}");
-            let _ = emit(pending);
+            // Never close the document over a result the budget cut short (#4239): the
+            // caller reports the abort, and a sink that saw `]}}` would hold a complete-
+            // looking but truncated body. Rechecked here, not cached from before emission.
+            if !budget::exhausted(total) {
+                pending.push_str("]}}");
+            }
+            if !pending.is_empty() {
+                let _ = emit(pending);
+            }
             return Some(());
         }
     }
@@ -2630,13 +2955,20 @@ fn single_pattern_scan_json_emit(
         }
         written += 1;
         write_row(row, &mut s);
-        if flush.is_some_and(|n| s.len() >= n) && emit(std::mem::take(&mut s)).is_break() {
+        if flush.is_some_and(|n| s.len() >= n)
+            && (emit(std::mem::take(&mut s)).is_break() || budget::exhausted(written))
+        {
             return Some(());
         }
     }
-    let _ = budget::exhausted(written); // final row-count gate (sticky)
-    s.push_str("]}}");
-    let _ = emit(s);
+    // Final row-count gate (sticky). An exhausted budget leaves the document unclosed
+    // (#4239), as above.
+    if !budget::exhausted(written) {
+        s.push_str("]}}");
+    }
+    if !s.is_empty() {
+        let _ = emit(s);
+    }
     Some(())
 }
 
@@ -2694,6 +3026,9 @@ pub fn eval_select_json_emit(
     flush: Option<usize>,
     emit: &mut dyn FnMut(String) -> ControlFlow<()>,
 ) -> Result<(), String> {
+    // [GPT-6] Refuse an exhausted budget before scanning, emitting a header, or
+    // queuing Rayon work: chunk checks cannot bound time spent waiting for a busy pool.
+    budget::check(0)?;
     // Streaming fast paths — no Bindings materialised at all.
     if single_pattern_scan_json_emit(graph, pattern, flush, emit).is_some() {
         budget::check(0)?; // sticky: the streaming loop may have stopped mid-scan
@@ -3131,6 +3466,17 @@ fn try_topk_orderby(
             try_topk_orderby(graph, local, red_inner, row_budget)
         }
         GraphPattern::OrderBy { inner: ord_inner, expression } => {
+            // [SONNET-5] (sq-artifact-keeper-topk) Try the index-ordered seed path
+            // first: for the narrow "star BGP, ORDER BY a variable bound by exactly
+            // one pattern's object" shape, it walks a value-sorted permutation scan
+            // directly instead of materialising every matching row — see
+            // `try_topk_orderby_indexed`'s doc comment for the soundness argument.
+            // Declines (`Ok(None)`) for any shape/datatype it can't prove safe, in
+            // which case the existing materialize-then-select path below runs
+            // unchanged.
+            if let Some(b) = try_topk_orderby_indexed(graph, local, ord_inner, expression, row_budget)? {
+                return Ok(Some(b));
+            }
             let mut b = eval_modified(graph, local, ord_inner)?;
             // Use the top-k path only when the budget is strictly less than n;
             // otherwise the heap adds overhead with no benefit.
@@ -3141,6 +3487,521 @@ fn try_topk_orderby(
         // Not an OrderBy under transparent wrappers: decline so the caller
         // falls through to the regular eval_modified path.
         _ => Ok(None),
+    }
+}
+
+/// [SONNET-5] (sq-artifact-keeper-topk) Attempts INDEX-ORDERED top-k evaluation for a
+/// `Slice{OrderBy{BGP}}` shape whose primary sort key is bound by exactly one triple
+/// pattern's OBJECT. `try_topk_orderby`'s existing bounded-heap path still calls
+/// `eval_modified` to fully evaluate (and materialise) the WHOLE matching candidate
+/// set before selecting the top `row_budget` rows — `O(n)` in the number of rows
+/// CURRENTLY matching the BGP's equality filters, not in `row_budget`. That is fine
+/// when some pattern is selective, but when every pattern matches nearly the same
+/// rows (e.g. a job-queue "claim the next pending task for peer X, ordered by
+/// priority" query, where `peer` + `status` don't shrink the candidate set at all),
+/// there is no cheaper seed for the cardinality-based planner to pick, and the cost
+/// scales with the size of the whole pending queue on every single claim — profiled
+/// and confirmed via `EXPLAIN ANALYZE` (the BGP operator reports touching every
+/// matching row) in the sparq/artifact-keeper migration's claim-queue throughput
+/// investigation.
+///
+/// SOUNDNESS. Only activates for a narrow, syntactically-verified "star" shape, and
+/// declines (`Ok(None)`) at the first sign of anything it cannot prove safe — the
+/// caller's `eval_modified`-then-select path is always correct, just `O(n)`; this
+/// function's only job is to be a provably-equivalent shortcut, never a new source
+/// of results:
+/// - `ord_inner` is a plain triple-pattern conjunction with NO residual FILTER and
+///   no blank nodes (kept out of scope for this first cut).
+/// - The FIRST order key is a bare `Variable` (secondary tie-break keys, if any,
+///   are resolved by re-using `order_bindings` over the small collected set below —
+///   not reimplemented here).
+/// - Exactly one pattern (the "seed") binds that variable as its OBJECT, with a
+///   CONSTANT predicate and a VARIABLE subject (the join "hub").
+/// - Every OTHER pattern has that same hub variable as its SUBJECT and a CONSTANT
+///   predicate (a star join around the hub); any object variable it introduces must
+///   not appear anywhere else in the BGP. Any other shape (the hub appearing
+///   elsewhere, a variable predicate, a reused object variable) declines.
+/// - Every object id on the seed's sorted scan is an INLINE small integer
+///   (`dict::is_inline`) — the only case where ascending dictionary-id order is
+///   proven to equal ascending SPARQL `value()` order (the same guard
+///   `scan_to_bindings`'s range-pruning already relies on for the same reason).
+///   Checked for the WHOLE scan up front, before any result is built, so a
+///   non-inline id never leaks a partially-computed (and potentially
+///   wrongly-ordered) answer.
+///
+/// Under those conditions, walking the seed's sorted scan in the required
+/// direction, testing each candidate hub value against the OTHER patterns via a
+/// direct bound lookup (index-nested-loop / bind join over a per-pattern
+/// subject-sorted range resolved once, not re-resolved per candidate — see the
+/// `other_pats` construction below), and stopping once a COMPLETE sort-key group
+/// (never split mid-tie) has produced at least `row_budget` confirmed joins
+/// yields valid top rows: an unvisited group is strictly worse in the requested
+/// primary-key direction, so it cannot displace the collected top `row_budget`.
+/// [GPT-6 Astra] If all ORDER BY keys tie, SPARQL permits different surviving
+/// subsets and tie order; equivalence does not require the fallback's input-index
+/// stability. Finishing a primary-key group preserves secondary-key selection.
+///
+/// PERFORMANCE, not soundness: a single escalation block is also capped at a
+/// fraction of the candidate pool (see `max_group` below) — exceeding it
+/// declines (`Ok(None)`) even though continuing would still be CORRECT, because
+/// past that point this function's per-candidate cost stops being cheaper than
+/// the fallback's bulk join (measured; see `max_group`'s comment). This keeps
+/// the walk bounded, but setup and failed probes still precede a decline.
+///
+/// [GPT-6 Astra] Recovery-stage restriction: budgeted queries, repeated variables
+/// and multi-valued probes use the existing evaluator. The historical timing notes
+/// below are unverified on current main; this candidate establishes no speedup.
+fn try_topk_orderby_indexed(
+    graph: &Graph,
+    local: &mut LocalVocab,
+    ord_inner: &GraphPattern,
+    expression: &[OrderExpression],
+    row_budget: usize,
+) -> Result<Option<Bindings>, String> {
+    #[cfg(feature = "zk")]
+    if crate::zk::enabled() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] Preserve the existing evaluator's intermediate row/byte
+    // accounting and cooperative cancellation schedule before doing any new work.
+    if budget::active() {
+        return Ok(None);
+    }
+    if view::default_is_empty() {
+        return Ok(None);
+    }
+    let Some((desc, order_var)) = expression.first().and_then(|oe| match oe {
+        OrderExpression::Asc(Expression::Variable(v)) => Some((false, v.clone())),
+        OrderExpression::Desc(Expression::Variable(v)) => Some((true, v.clone())),
+        _ => None,
+    }) else {
+        return Ok(None);
+    };
+    if !is_conjunctive(ord_inner) {
+        return Ok(None);
+    }
+    let mut patterns = Vec::new();
+    let mut filters = Vec::new();
+    flatten_conjunction(ord_inner, &mut patterns, &mut filters);
+    if !filters.is_empty() || patterns.is_empty() {
+        return Ok(None);
+    }
+    // [GPT-6 Astra] prepare_pattern records repeated slots but does not enforce
+    // their equality. Reuse the existing fast-path guard before bypassing build_row.
+    if patterns.iter().any(has_intra_triple_repeated_var) {
+        return Ok(None);
+    }
+    // `prepare_pattern` resolves a triple term as a ground term, so a variable nested
+    // inside one would error instead of matching; decline and let the evaluator run it.
+    if patterns.iter().any(has_quoted_triple_term) {
+        return Ok(None);
+    }
+    // Out of scope for this first cut: blank nodes are treated as synthetic
+    // variables by `prepare_pattern` (`bnode_var`) but not necessarily by
+    // `collect_vars`'s header-construction — decline rather than risk a header
+    // mismatch.
+    let has_blank_node = patterns.iter().any(|tp| {
+        matches!(tp.subject, TermPattern::BlankNode(_)) || matches!(tp.object, TermPattern::BlankNode(_))
+    });
+    if has_blank_node {
+        return Ok(None);
+    }
+
+    // Locate the ONE seed pattern binding `order_var` as its object with a
+    // constant predicate and a variable subject.
+    let mut seed_idx = None;
+    for (i, tp) in patterns.iter().enumerate() {
+        if !matches!(&tp.object, TermPattern::Variable(v) if *v == order_var) {
+            continue;
+        }
+        if !matches!(&tp.predicate, NamedNodePattern::NamedNode(_)) {
+            return Ok(None);
+        }
+        if !matches!(&tp.subject, TermPattern::Variable(_)) {
+            return Ok(None);
+        }
+        if seed_idx.is_some() {
+            return Ok(None); // order_var bound by more than one pattern: not this shape
+        }
+        seed_idx = Some(i);
+    }
+    let Some(seed_idx) = seed_idx else { return Ok(None) };
+    let hub_var = match &patterns[seed_idx].subject {
+        TermPattern::Variable(v) => v.clone(),
+        _ => unreachable!("checked above"),
+    };
+
+    // Every OTHER pattern must be `hub_var <constant predicate> (var|const)` — a
+    // star around the hub — and any variable it introduces must be fresh.
+    let mut other_vars: FxHashSet<Variable> = FxHashSet::default();
+    for (i, tp) in patterns.iter().enumerate() {
+        if i == seed_idx {
+            continue;
+        }
+        if !matches!(&tp.subject, TermPattern::Variable(v) if *v == hub_var) {
+            return Ok(None);
+        }
+        if !matches!(&tp.predicate, NamedNodePattern::NamedNode(_)) {
+            return Ok(None);
+        }
+        if let TermPattern::Variable(v) = &tp.object {
+            if *v == hub_var || *v == order_var || !other_vars.insert(v.clone()) {
+                return Ok(None);
+            }
+        }
+    }
+
+    let out_vars = collect_vars(&patterns);
+    if row_budget == 0 {
+        return Ok(Some(Bindings::unsorted(out_vars, vec![])));
+    }
+
+    // Resolve + scan the seed pattern sorted by its OBJECT (canonical column 2).
+    let (seed_id_pat, _seed_pos_vars, seed_unsat) = prepare_pattern(graph, &patterns[seed_idx])?;
+    if seed_unsat {
+        return Ok(Some(Bindings::unsorted(out_vars, vec![])));
+    }
+    let scan = graph.store.scan_sorted(&seed_id_pat, 2);
+    let actual_sort = scan.perm.order().into_iter().find(|&c| seed_id_pat[c].is_none());
+    if actual_sort != Some(2) {
+        return Ok(None); // this store build can't give us an object-sorted scan
+    }
+    let rows: &[[Id; 3]] = scan.rows.as_ref();
+    // Guard: EVERY object id on this scan must be an inline integer, or ascending
+    // id order is not proven to be ascending value order.
+    if !rows.iter().all(|r| dict::is_inline(scan.to_spo(r)[2])) {
+        return Ok(None);
+    }
+
+    // [GPT-6 Astra] The first block must include its entire leading key group.
+    // Reject a group larger than the EXISTING block cap before retaining probe
+    // scans and subject vectors. Sorted object ids make equality at the cap's
+    // zero-based edge equivalent to group_len > max_group, in either direction.
+    const MAX_INDEXED_GROUP_FLOOR: usize = 256;
+    let n = rows.len();
+    let max_group = (n / 2).max(MAX_INDEXED_GROUP_FLOOR).max(row_budget.saturating_mul(2));
+    if n > max_group {
+        let first = if desc { n - 1 } else { 0 };
+        let edge = if desc { first - max_group } else { max_group };
+        if scan.to_spo(&rows[first])[2] == scan.to_spo(&rows[edge])[2] {
+            return Ok(None);
+        }
+    }
+
+    // Prepare the other patterns ONCE ON DEMAND, each as a SUBJECT-sorted scan over its
+    // (fixed predicate [+ fixed object]) range — not re-resolved per candidate.
+    // The first cut of this function called `graph.store.scan(&probe_pat)`
+    // fresh for every (candidate, other-pattern) pair, which re-runs
+    // `Store::choose`'s permutation selection + bound computation every single
+    // time even though the choice is IDENTICAL across all candidates for a
+    // given pattern (only the subject varies). That repeated per-call setup —
+    // not the underlying lookup — is what made a large tie-group lose to the
+    // fallback's bulk merge-join (which resolves the permutation ONCE per
+    // pattern, not once per row). Resolving it once here and binary-searching
+    // the resulting sorted slice per candidate removes that repeated cost.
+    struct OtherScan<'g> {
+        scan: sparq_core::store::Scan<'g>,
+        // Precomputed ONCE (not per candidate, not per binary-search
+        // comparison step): the subject id of every row in `scan`, in the
+        // SAME (subject-sorted) order. `partition_point` over this plain
+        // `&[Id]` does a trivial integer compare per step; searching `scan`
+        // directly would call `to_spo` (a permutation-order reconstruction)
+        // on EVERY comparison, i.e. ~log(m) reconstructions per candidate per
+        // pattern — measured as a real remaining cost for a long skip-prefix
+        // (many candidates probed and rejected in a row): reconstructing the
+        // full [S,P,O] triple just to read column 0 is wasted work when the
+        // search only ever needs that one column.
+        subject_ids: Vec<Id>,
+    }
+    // [GPT-6 Astra] Resolve metadata eagerly, but retain a scan/vector only when
+    // a candidate reaches this pattern in the original order. A failed constant
+    // prefix therefore does not prepare later variable probes that it never uses.
+    struct OtherPat<'g> {
+        id_pat: IdPattern,
+        obj_var: Option<Variable>,
+        prepared: Option<OtherScan<'g>>,
+    }
+    fn prepare_other<'g>(graph: &'g Graph, op: &mut OtherPat<'g>, seed_card: usize) -> bool {
+        if op.prepared.is_some() {
+            return true;
+        }
+        let sub_scan = graph.store.scan_sorted(&op.id_pat, 0);
+        let sub_actual_sort = sub_scan.perm.order().into_iter().find(|&c| op.id_pat[c].is_none());
+        if sub_actual_sort != Some(0) {
+            return false;
+        }
+        // The original exact-cardinality admission rule still applies to EVERY
+        // probe before it can contribute to a row, including a late selective one.
+        if sub_scan.rows.len().saturating_mul(2) < seed_card {
+            return false;
+        }
+        let subject_ids: Vec<Id> = sub_scan.rows.iter().map(|r| sub_scan.to_spo(r)[0]).collect();
+        #[cfg(test)]
+        indexed_topk_preparation_tests::observe(subject_ids.len());
+        op.prepared = Some(OtherScan { scan: sub_scan, subject_ids });
+        true
+    }
+    let mut other_pats: Vec<OtherPat> = Vec::with_capacity(patterns.len().saturating_sub(1));
+    for (i, tp) in patterns.iter().enumerate() {
+        if i == seed_idx {
+            continue;
+        }
+        let (id_pat, pos_vars, unsat) = prepare_pattern(graph, tp)?;
+        if unsat {
+            // A constant elsewhere in the BGP absent from the dictionary makes the
+            // WHOLE conjunction empty (a BGP join against an empty relation).
+            return Ok(Some(Bindings::unsorted(out_vars, vec![])));
+        }
+        other_pats.push(OtherPat {
+            id_pat: [None, id_pat[1], id_pat[2]],
+            obj_var: pos_vars[2].clone(),
+            prepared: None,
+        });
+    }
+
+    // [GPT-6 Astra] The previous global min-cardinality check is now applied
+    // by prepare_other to each exact scan count before that probe is used. A
+    // successful row must visit every pattern, so it passes the same admission
+    // rule. Unvisited patterns stay unproved and cannot authorize an empty result.
+
+    // The output column list is FIXED across every candidate (hub, order, then
+    // each other pattern's object variable, in pattern order) — compute it and
+    // the out_vars -> column-position mapping ONCE, not per candidate.
+    let mut cols: Vec<Variable> = Vec::with_capacity(2 + other_pats.len());
+    cols.push(hub_var.clone());
+    cols.push(order_var.clone());
+    for op in &other_pats {
+        if let Some(ov) = &op.obj_var {
+            cols.push(ov.clone());
+        }
+    }
+    let out_to_cols: Vec<Option<usize>> = out_vars.iter().map(|v| cols.iter().position(|c| c == v)).collect();
+    let emit = |ids: &[Id], collected: &mut Vec<Row>| {
+        let mut row = Row::with_capacity(out_to_cols.len());
+        for pos in &out_to_cols {
+            row.push(pos.map(|i| ids[i]).unwrap_or(NO_ID));
+        }
+        collected.push(row);
+    };
+
+    // Walk the sorted scan in the required direction, in escalating blocks aligned
+    // to complete sort-key (object-id) groups, joining each candidate against the
+    // other patterns via a direct bound lookup (index-nested-loop / bind join).
+    //
+    // `rows` is always ASCENDING by object id (the scan's actual sort order). For
+    // DESC, "best first" means walking it back-to-front. Rather than slicing from
+    // the front and reversing per block (which — subtly, and wrongly — visits the
+    // SMALLEST values first regardless of direction, since the slice bounds
+    // themselves were never flipped), define a single LOGICAL index `0..n` where
+    // position 0 is always the best candidate, via `logical`, and do all
+    // block/boundary arithmetic in that space. `logical` and `obj_id_at` are the
+    // only direction-aware code; everything below them is direction-agnostic.
+    let logical = |i: usize| -> usize { if desc { n - 1 - i } else { i } };
+    let obj_id_at = |i: usize| -> Id { scan.to_spo(&rows[logical(i)])[2] };
+    // A single escalation block is dominated by ONE large tie-group when the
+    // sort key has low cardinality (e.g. a handful of discrete priority tiers:
+    // "urgent/high/normal/low", not a near-unique value per row). This
+    // function's per-candidate cost is roughly CONSTANT per candidate (a
+    // binary search per other pattern, resolved against a scan fetched once —
+    // see `other_pats` below), while the fallback's bulk merge-join cost is
+    // roughly constant PER `n` regardless of tie structure (it materialises the
+    // whole matching set before it can sort). So the crossover is a FRACTION of
+    // `n`, not an absolute row count: measured at n=1600, a tie-group of 800
+    // (half of n) still beat the fallback (~228us vs. the fallback's ~269us),
+    // but a tie-group of 1600 (all of n) lost (would be ~450-700us vs. the
+    // fallback's own ~269us) — and the same ~0.5-0.75 fraction held at n=8000
+    // (4000 still competitive, 8000 clearly lost). `max_group` is
+    // therefore `n / 2` (with a floor for small `n`, and never below
+    // `row_budget` itself) — declining past it defers to the fallback, with
+    // any preparation and failed probes already performed adding to its cost.
+    let mut collected: Vec<Row> = Vec::new();
+    let mut visited_to: usize = 0;
+    // Block sizes grow GEOMETRICALLY from a small multiple of `row_budget`, not
+    // from `CAPPED_SEED_BLOCK` (1024): each candidate here costs a real
+    // per-pattern binary search (against the scan `other_pats` already resolved
+    // once, above), unlike the bulk merge-join the fallback path uses, which
+    // amortises its own permutation selection over the WHOLE scan in one pass.
+    // For the common case (small `row_budget`, most candidates
+    // join successfully), starting near `row_budget` means the first block alone
+    // usually satisfies it — starting at 1024 would pay ~1024 point-probes even for
+    // `LIMIT 1`, which is worse than the bulk path it's meant to beat (measured:
+    // this was the actual cause of a regression at moderate `n`, not a win).
+    // Cumulative count of candidates that failed an OTHER-pattern check, across
+    // ALL blocks in this call — distinct from `max_group`'s per-block width
+    // check. A workload that claims strictly in priority order (the realistic
+    // shape: highest priority first) leaves an ever-growing prefix of
+    // ALREADY-CLAIMED, high-priority-but-no-longer-`pending` rows at the head
+    // of the seed scan — each one still costs a real per-pattern probe before
+    // being rejected. That prefix is made of individually DISTINCT priority
+    // values, so it never forms one oversized tie-group `max_group` would
+    // catch; it spreads across many small geometric-growth blocks instead. The
+    // per-pattern cost check (comparing exact scan cardinalities to
+    // the seed's) already declines the CLEAR case — an other-pattern that's
+    // globally selective enough for the fallback's own planner to prefer as
+    // ITS seed — before that probe is used. This counter is a
+    // SAFETY NET for what that check can't see: the seed's global cardinality
+    // vs. an other-pattern's global cardinality doesn't capture every
+    // possible skip-prefix shape (e.g. a correlation between scan order and
+    // an other-pattern's matches that isn't visible from cardinality alone).
+    //
+    // The budget here must stay LARGE (matching `max_group`, not a small
+    // constant): every failed probe before declining is pure waste stacked ON
+    // TOP OF the fallback's full cost, but a SMALL budget bails on the far
+    // more common "moderate skip-prefix" case too — one that would have
+    // SUCCEEDED cheaply if allowed to keep going (a candidate ~100-800
+    // positions in costs only tens of us to walk to, vastly cheaper than a
+    // ~100-350us fallback). Measured directly: tightening this to a small
+    // constant (64) made the COMMON moderate case (already-claimed ~100-400)
+    // cost ~225-275us (forced into a fallback the upfront check didn't catch
+    // and completion would have avoided entirely) instead of the ~15-70us it
+    // gets by simply being allowed to finish. A large budget's own worst case
+    // (a skip-prefix near `n/2`, right at the edge) is bounded and modest by
+    // comparison (~30-50% over a clean fallback, not multiples of it) — an
+    // acceptable price for a case the upfront check should catch almost
+    // always in practice anyway.
+    let failure_budget = max_group;
+    let mut failed_count: usize = 0;
+    let mut block_target = row_budget.saturating_mul(4).max(16);
+    loop {
+        if visited_to >= n {
+            break;
+        }
+        let mut end = block_target.clamp(visited_to, n);
+        // Extend to the next object-id group boundary so a tie is never split
+        // across blocks (the early-stop check below requires a COMPLETE group).
+        if end < n && end > 0 {
+            let boundary_obj = obj_id_at(end - 1);
+            while end < n && obj_id_at(end) == boundary_obj {
+                end += 1;
+            }
+        }
+        if end - visited_to > max_group {
+            return Ok(None);
+        }
+        for i in visited_to..end {
+            let spo = scan.to_spo(&rows[logical(i)]);
+            let hub_id = spo[0];
+            let order_id = spo[2];
+            // [GPT-6 Astra] Only single-valued probes are admitted in this slice.
+            // General Cartesian expansion remains with the existing evaluator.
+            let mut row_ids: SmallVec<[Id; 8]> = SmallVec::from_slice(&[hub_id, order_id]);
+            let mut failed = false;
+            for op in &mut other_pats {
+                if !prepare_other(graph, op, rows.len()) {
+                    return Ok(None);
+                }
+                let prepared = op.prepared.as_ref().expect("successful preparation");
+                // Binary-search the PRECOMPUTED, plain-`Id` subject list for
+                // this pattern (built once, above) — a trivial integer
+                // compare per step, no `to_spo` reconstruction during the
+                // search itself (that only happens below, per ACTUAL match,
+                // not per comparison step — see `subject_ids`'s doc comment).
+                let start = prepared.subject_ids.partition_point(|&id| id < hub_id);
+                let stop = start + prepared.subject_ids[start..].partition_point(|&id| id == hub_id);
+                if start == stop {
+                    failed = true;
+                    break;
+                }
+                let Some(_) = &op.obj_var else {
+                    continue; // `obj_const` — existence-only, no column added
+                };
+                let op_rows: &[[Id; 3]] = prepared.scan.rows.as_ref();
+                let match_count = stop - start;
+                if match_count != 1 {
+                    return Ok(None);
+                }
+                row_ids.push(prepared.scan.to_spo(&op_rows[start])[2]);
+            }
+            if failed {
+                failed_count += 1;
+                if failed_count > failure_budget {
+                    return Ok(None);
+                }
+                continue;
+            }
+            emit(&row_ids, &mut collected);
+        }
+        visited_to = end;
+        if collected.len() >= row_budget {
+            break; // a COMPLETE group boundary was just finished — safe to stop
+        }
+        block_target = block_target.saturating_mul(4).max(visited_to + 1);
+    }
+
+    // [GPT-6 Astra] An empty walk may never visit later patterns. Preserve their
+    // unproved static-sort/cardinality exclusions through the existing fallback.
+    if other_pats.iter().any(|op| op.prepared.is_none()) {
+        return Ok(None);
+    }
+    let mut result = Bindings { vars: out_vars, rows: collected, sorted_by: None };
+    let use_topk = result.rows.len() > row_budget;
+    order_bindings(graph, local, &mut result, expression, if use_topk { Some(row_budget) } else { None })?;
+    Ok(Some(result))
+}
+
+// [GPT-6 Astra] Test-only observations pin retained preparation work, not timing.
+#[cfg(test)]
+mod indexed_topk_preparation_tests {
+    use sparq_core::Graph;
+    use std::cell::Cell;
+    use std::fmt::Write;
+
+    thread_local! { static PREPARED: Cell<(usize, usize)> = const { Cell::new((0, 0)) }; }
+    pub(super) fn observe(rows: usize) {
+        PREPARED.with(|c| { let (scans, ids) = c.get(); c.set((scans + 1, ids + rows)); });
+    }
+    const TEXT: &str = "SELECT ?s WHERE { ?s <urn:peer> <urn:X> ; <urn:status> \"pending\" ; <urn:priority> ?p ; <urn:seq> ?seq ; <urn:a> ?a ; <urn:b> ?b ; <urn:c> ?c } ORDER BY DESC(?p)";
+
+    fn graph(prefix: usize, overlay: bool, selective_last: bool) -> Graph {
+        let mut ttl = String::new();
+        for i in 0..4096 {
+            let status = if i < 4096 - prefix { "pending" } else { "done" };
+            writeln!(ttl, "<urn:s{i}> <urn:peer> <urn:X> ; <urn:status> \"{status}\" ; <urn:priority> {i} ; <urn:seq> {i} ; <urn:a> {i} ; <urn:b> {i} .").unwrap();
+            if !selective_last || i == 4095 { writeln!(ttl, "<urn:s{i}> <urn:c> {i} .").unwrap(); }
+        }
+        let base = Graph::load_str(&ttl, "turtle").unwrap();
+        if !overlay { return base; }
+        let mut changed = base.fork();
+        let mut deletes = String::from("DELETE DATA {");
+        for i in (0..4096).step_by(5) { writeln!(deletes, "<urn:s{i}> <urn:priority> {i} .").unwrap(); }
+        deletes.push('}');
+        crate::update_in_place(&mut changed, &deletes).unwrap();
+        assert_eq!(changed.pending_delta_len(), 820);
+        changed
+    }
+
+    #[test]
+    fn later_variable_preparation_is_avoided_before_block_decline() {
+        for overlay in [false, true] {
+            let g = graph(2047, overlay, false);
+            let full = crate::query(&g, TEXT).unwrap();
+            PREPARED.with(|c| c.set((0, 0)));
+            let got = crate::query(&g, &format!("{TEXT} LIMIT 1")).unwrap();
+            assert_eq!(got.rows, full.rows[..1]);
+            assert_eq!(PREPARED.with(Cell::get), (2, 4096 + 2049), "later variable scans/vectors must remain unprepared");
+        }
+    }
+
+    #[test]
+    fn successful_rows_prepare_each_probe_once() {
+        let g = graph(0, false, false);
+        for k in [1, 32] {
+            PREPARED.with(|c| c.set((0, 0)));
+            assert_eq!(crate::query(&g, &format!("{TEXT} LIMIT {k}")).unwrap().rows.len(), k);
+            let expected = if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) { (6, 6 * 4096) } else { (2, 2 * 4096) };
+            assert_eq!(PREPARED.with(Cell::get), expected);
+        }
+    }
+
+    #[test]
+    fn late_selective_probe_still_declines_before_emitting() {
+        let g = graph(0, false, true);
+        let full = crate::query(&g, TEXT).unwrap();
+        assert_eq!(full.rows.len(), 1);
+        let limited = format!("{TEXT} LIMIT 1");
+        assert_eq!(crate::query(&g, &limited).unwrap().rows, full.rows);
+        let trace = crate::explain_analyze(&g, &limited).unwrap();
+        assert!(trace.contains("BGP [binary GOO]"), "late cardinality guard must decline: {trace}");
     }
 }
 
@@ -4128,8 +4989,9 @@ fn in_scope_vars(p: &GraphPattern) -> Vec<Variable> {
 const CAPPED_SEED_BLOCK: usize = 1024;
 /// Second-tier block: one escalation before the remainder is processed whole, so a
 /// first-block miss still avoids the full chain when a solution lives within the
-/// first ~64k seed rows. Exactly two escalations bound the per-step rhs re-scan
-/// overhead of a NO-solution (ASK false) query at 3x the single-pass scans.
+/// first ~64k seed rows. Exactly two escalations bound a NO-solution query to
+/// three blocks; identical non-bind RHS scans may be reused within a private storage
+/// allowance when no budget is armed.
 const CAPPED_SEED_BLOCK_2: usize = 65_536;
 
 /// Capped conjunctive (BGP + FILTER) evaluation — the ASK / LIMIT-k first-solutions
@@ -4191,9 +5053,19 @@ fn eval_bgp_binary_capped(
         None,
     );
 
+    #[cfg(test)]
+    capped_rhs_tests::observe(0);
+    // [GPT-6 Astra] Query-local and lazy: never scan an unreached step. Pattern
+    // filters are immutable here; each slot also keys the requested scan order.
+    // Armed budgets retain the old per-step lifetime and polling: their working-set
+    // estimate does not account for multiple retained RHS relations.
+    let reuse_rhs = !budget::active();
+    let (mut rhs_cache, mut rhs_remaining) = capped_rhs_cache(prepared.len(), reuse_rhs);
     let mut acc: Option<Bindings> = None;
     let mut start = 0usize;
     while start < seed_all.rows.len() {
+        #[cfg(test)]
+        capped_rhs_tests::observe(1);
         let end = if start == 0 {
             CAPPED_SEED_BLOCK.min(seed_all.rows.len())
         } else if start == CAPPED_SEED_BLOCK {
@@ -4231,28 +5103,50 @@ fn eval_bgp_binary_capped(
                 let jv = &connecting[0];
                 let rk = result.col(jv).unwrap();
                 let pp = prepared[i].var_pos(jv).unwrap();
+                #[cfg(test)]
+                capped_rhs_tests::observe(3);
+                #[cfg(test)]
+                capped_rhs_tests::step(start, i, "bind", None, false, None);
                 result = bind_join(graph, result, &prepared[i].id_pat, &prepared[i].pos_vars, rk, pp, pfilter(i));
             } else {
                 let filt = pfilter(i);
                 let merge_var = result.sorted_by.clone().filter(|sv| prepared[i].var_pos(sv).is_some());
                 let scan_sort = filt.map(|(c, _)| c).or_else(|| merge_var.as_ref().map(|jv| prepared[i].var_pos(jv).unwrap()));
-                let rhs = scan_to_bindings(
-                    graph,
-                    &prepared[i].id_pat,
-                    &prepared[i].pos_vars,
-                    scan_sort,
-                    filt,
-                    None,
-                    #[cfg(feature = "semijoin-bitmap")]
-                    None,
-                );
+                let mut uncached = None;
+                let mut spare_slot = None;
+                let slot = rhs_cache.get_mut(i).unwrap_or(&mut spare_slot);
+                #[cfg(test)]
+                let mut scanned = false;
+                let rhs = capped_rhs(slot, &mut rhs_remaining, &mut uncached, scan_sort, || {
+                    #[cfg(test)]
+                    {
+                        capped_rhs_tests::observe(2);
+                        scanned = true;
+                    }
+                    scan_to_bindings(
+                        graph,
+                        &prepared[i].id_pat,
+                        &prepared[i].pos_vars,
+                        scan_sort,
+                        filt,
+                        None,
+                        #[cfg(feature = "semijoin-bitmap")]
+                        None,
+                    )
+                });
                 let connected = prepared[i].pos_vars.iter().flatten().any(|v| result.vars.contains(v));
                 if let Some(jv) = merge_var.filter(|jv| rhs.sorted_by.as_ref() == Some(jv)) {
-                    result = merge_join(result, rhs, &jv);
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "merge", scan_sort, scanned, rhs.sorted_by.as_ref());
+                    result = merge_join_ref(&result, rhs, &jv);
                 } else if connected {
-                    result = hash_join(result, rhs);
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "hash", scan_sort, scanned, rhs.sorted_by.as_ref());
+                    result = hash_join_ref(&result, rhs);
                 } else {
-                    result = cross_product(result, rhs);
+                    #[cfg(test)]
+                    capped_rhs_tests::step(start, i, "cross", scan_sort, scanned, rhs.sorted_by.as_ref());
+                    result = cross_product_ref(&result, rhs);
                 }
             }
             record_pattern_ndv(graph, &prepared, i, cur_card, &mut var_ndv, &cs_ctx);
@@ -4293,6 +5187,95 @@ fn eval_bgp_binary_capped(
         start = end;
     }
     Ok(Some(acc.unwrap_or_else(|| Bindings::unsorted(collect_vars(patterns), vec![]))))
+}
+
+// [GPT-6 Astra] Conservative private allowance for retained scan storage, not a
+// public QueryBudget or a limit on transient join/scan allocations. Keep room below
+// the diagnostic's extra-heap rejection threshold; do not retain one RHS per pattern.
+const CAPPED_RHS_STORAGE: usize = 4 * 1024 * 1024;
+// Requested order, immutable scan relation, and its charged allocated storage.
+type CappedRhs = (Option<usize>, Bindings, usize);
+
+fn capped_rhs_cache(len: usize, enabled: bool) -> (Vec<Option<CappedRhs>>, usize) {
+    let mut slots = Vec::new();
+    if !enabled
+        || len
+            .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+            .is_none_or(|bytes| bytes > CAPPED_RHS_STORAGE)
+        || slots.try_reserve_exact(len).is_err()
+    {
+        return (slots, 0);
+    }
+    let Some(bytes) = slots
+        .capacity()
+        .checked_mul(std::mem::size_of::<Option<CappedRhs>>())
+        .filter(|&bytes| bytes <= CAPPED_RHS_STORAGE)
+    else {
+        return (Vec::new(), 0);
+    };
+    slots.resize_with(len, || None);
+    (slots, CAPPED_RHS_STORAGE - bytes)
+}
+
+// [GPT-6 Astra] Count capacities, not planner estimates or populated lengths.
+// Scan rows have at most three ids and fit inline; decline an unproved spilled
+// representation. Variable owns a String, whose capacity is exposed by its safe
+// consuming API; move it out and back without cloning or allocating its text.
+fn capped_rhs_storage(rhs: &mut Bindings, allowance: usize) -> Option<usize> {
+    let mut bytes = rhs
+        .rows
+        .capacity()
+        .checked_mul(std::mem::size_of::<Row>())?
+        .checked_add(
+            rhs.vars
+                .capacity()
+                .checked_mul(std::mem::size_of::<Variable>())?,
+        )?;
+    if bytes > allowance || rhs.rows.iter().any(Row::spilled) {
+        return None;
+    }
+    for variable in rhs.vars.iter_mut().chain(rhs.sorted_by.iter_mut()) {
+        let name =
+            std::mem::replace(variable, Variable::new_unchecked(String::new())).into_string();
+        let capacity = name.capacity();
+        *variable = Variable::new_unchecked(name);
+        bytes = bytes.checked_add(capacity)?;
+        if bytes > allowance {
+            return None;
+        }
+    }
+    Some(bytes)
+}
+
+// [GPT-6 Astra] Reuse requires a pure scan of the same immutable prepared pattern,
+// filters and requested order. Actual sorted_by remains the scan's truthful value.
+// Fitting entries live until order replacement/query exit; non-fitting entries live
+// only in the caller's per-step scratch. Allocator metadata is outside this allowance.
+fn capped_rhs<'a>(
+    slot: &'a mut Option<CappedRhs>,
+    remaining: &mut usize,
+    uncached: &'a mut Option<Bindings>,
+    sort: Option<usize>,
+    scan: impl FnOnce() -> Bindings,
+) -> &'a Bindings {
+    if slot
+        .as_ref()
+        .is_none_or(|(cached_sort, _, _)| *cached_sort != sort)
+    {
+        if let Some(old) = slot.take() {
+            *remaining += old.2;
+            drop(old); // release stale ownership/accounting before its replacement scan
+        }
+        let mut rhs = scan();
+        if let Some(bytes) = capped_rhs_storage(&mut rhs, *remaining) {
+            *remaining -= bytes;
+            *slot = Some((sort, rhs, bytes));
+        } else {
+            *uncached = Some(rhs);
+            return uncached.as_ref().unwrap();
+        }
+    }
+    &slot.as_ref().unwrap().1
 }
 
 /// Distinct (non-repeated) variable positions of a prepared pattern, or `None` if
@@ -4957,26 +5940,29 @@ fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPatt
             Ok(b)
         }
         GraphPattern::Join { left, right } => {
-            let l = eval_graph_pattern(graph, local, left)?;
-            // Bind-join pushdown: if the RIGHT side is a SERVICE and the left has
-            // already bound its join variables, push those bindings to the remote as a
-            // VALUES block instead of materialising the whole remote relation. Join is
+            // Bind-join pushdown: if one side is a SERVICE and the other has already
+            // bound its join variables, push those bindings to the remote as a VALUES
+            // block instead of materialising the whole remote relation. Join is
             // symmetric, so try either side as the SERVICE. [OPUS-4.8] (sq-sjkj)
+            //
+            // SERVICE on the left (and not on the right): evaluate the right FIRST and
+            // the SERVICE at most once — evaluating it eagerly and again on a declined
+            // pushdown fetched the endpoint (or ran a local handler) twice (#4438).
             #[cfg(feature = "service")]
+            if matches!(left.as_ref(), GraphPattern::Service { .. })
+                && !matches!(right.as_ref(), GraphPattern::Service { .. })
             {
-                if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
-                    return Ok(join_bindings(l, r));
+                let r = eval_graph_pattern(graph, local, right)?;
+                if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
+                    return Ok(join_bindings(r, sl));
                 }
-                // Symmetric: SERVICE on the left, bindings produced by the right.
-                if matches!(left.as_ref(), GraphPattern::Service { .. }) {
-                    let r = eval_graph_pattern(graph, local, right)?;
-                    if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
-                        return Ok(join_bindings(r, sl));
-                    }
-                    // Fall through with the already-evaluated right; recompute left verbatim.
-                    let l2 = eval_graph_pattern(graph, local, left)?;
-                    return Ok(join_bindings(l2, r));
-                }
+                let l = eval_graph_pattern(graph, local, left)?;
+                return Ok(join_bindings(l, r));
+            }
+            let l = eval_graph_pattern(graph, local, left)?;
+            #[cfg(feature = "service")]
+            if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
+                return Ok(join_bindings(l, r));
             }
             // Sideways information passing (SIP): when the already-evaluated `l` is
             // SMALL, evaluate the big `right` child CORRELATED on it — seeding scans
@@ -8574,6 +9560,11 @@ fn scan_to_bindings(
 }
 
 fn merge_join(left: Bindings, right: Bindings, jv: &Variable) -> Bindings {
+    merge_join_ref(&left, &right, jv)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn merge_join_ref(left: &Bindings, right: &Bindings, jv: &Variable) -> Bindings {
     let lk = left.col(jv).unwrap();
     let rk = right.col(jv).unwrap();
     let mut out_vars = left.vars.clone();
@@ -8626,6 +9617,11 @@ use sjoin::{any_unbound, compatible, merge_rows};
 use sjoin::{key_hash, JOIN_PARTS};
 
 fn hash_join(left: Bindings, right: Bindings) -> Bindings {
+    hash_join_ref(&left, &right)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // Build the hash table on the smaller side.
     let (build, probe) = if left.rows.len() <= right.rows.len() {
         (left, right)
@@ -8728,11 +9724,44 @@ fn bind_join(
         out_vars.push(pos_vars[p].clone().unwrap());
     }
 
-    // Group result rows by the join value so each distinct value is looked up once.
-    let mut groups: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
-    for (ri, row) in result.rows.iter().enumerate() {
-        groups.entry(row[rk]).or_default().push(ri);
+    // [GPT-6-ASTRA] Verify metadata candidates without allocating: stale sortedness
+    // must not split a key across runs and repeat scans (or accumulate duplicate zk
+    // matches). Unsorted bags keep the existing hash grouping. Verified runs carry
+    // contiguous row ranges, avoiding an allocated identity-index vector.
+    let nrows = result.rows.len();
+    let presorted = result.sorted_by.as_ref().is_some_and(|sv| result.vars.get(rk) == Some(sv))
+        && result.rows.windows(2).all(|pair| pair[0][rk] <= pair[1][rk]);
+    #[cfg(test)]
+    bind_join_run_grouping::observe_strategy(presorted);
+    enum GroupRows {
+        Contiguous(std::ops::Range<usize>),
+        Indexed(Vec<usize>),
     }
+    let mut groups: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
+    if !presorted {
+        for (ri, row) in result.rows.iter().enumerate() {
+            groups.entry(row[rk]).or_default().push(ri);
+        }
+    }
+
+    debug_assert!(!presorted || groups.is_empty());
+    // Both strategies share the scan/filter/budget body. Owned hash-group vectors
+    // still drop after their iteration; contiguous ranges contain only two indices.
+    let mut start = 0usize;
+    let runs = std::iter::from_fn(|| {
+        if !presorted || start == nrows {
+            return None;
+        }
+        let val = result.rows[start][rk];
+        let mut end = start + 1;
+        while end < nrows && result.rows[end][rk] == val {
+            end += 1;
+        }
+        let range = start..end;
+        start = end;
+        Some((val, GroupRows::Contiguous(range)))
+    });
+    let hashed = groups.into_iter().map(|(val, ris)| (val, GroupRows::Indexed(ris)));
 
     let mut out_rows: Vec<Row> = Vec::new();
     // zk-trace hook: accumulate the matched triples across all bound rescans
@@ -8740,13 +9769,15 @@ fn bind_join(
     // the input set merges with any full scans of the same pattern).
     #[cfg(feature = "zk")]
     let mut zk_matched: Vec<[Id; 3]> = Vec::new();
-    for (val, ris) in groups {
+    for (val, ris) in runs.chain(hashed) {
         // Coarse budget check once per distinct join value.
         if budget::exhausted(out_rows.len()) {
             break;
         }
         let mut bound = *id_pat;
         bound[pp] = Some(val);
+        #[cfg(test)]
+        bind_join_run_grouping::observe_scan();
         let scan = graph.store.scan(&bound);
         for prow in scan.rows.iter() {
             let pspo = scan.to_spo(prow);
@@ -8763,7 +9794,14 @@ fn bind_join(
             // The per-(result-row, match) combine is the shared substrate's `bind_combine`
             // (sq-hknqs): the scan + filter pushdown above stay engine-private (they own the
             // store + `ScanCmp`); only the id-tuple combine is shared.
-            sjoin::bind_combine(&result.rows, &ris, &new_vals, &mut out_rows);
+            match &ris {
+                GroupRows::Contiguous(range) => {
+                    sjoin::bind_combine_rows(&result.rows[range.clone()], &new_vals, &mut out_rows);
+                }
+                GroupRows::Indexed(indices) => {
+                    sjoin::bind_combine(&result.rows, indices, &new_vals, &mut out_rows);
+                }
+            }
         }
     }
     #[cfg(feature = "zk")]
@@ -8773,7 +9811,368 @@ fn bind_join(
     Bindings::unsorted(out_vars, out_rows)
 }
 
+/// Bag equivalence, bounded per-key scans, and real-query reachability for bind-join
+/// grouping. Test-only counters observe the chosen path without depending on hash-map
+/// iteration order; the randomized oracle is independent of either grouping strategy.
+/// [SONNET-4.6] [GPT-6-ASTRA]
+#[cfg(test)]
+mod bind_join_run_grouping {
+    use super::*;
+    use oxrdf::NamedNode;
+
+    // Thread-local observation keeps parallel tests independent and compiles out of
+    // production. Small reachability fixtures execute on the calling thread.
+    std::thread_local! {
+        static OBSERVED: std::cell::Cell<(usize, usize, usize)> = const {
+            std::cell::Cell::new((0, 0, 0))
+        };
+    }
+
+    pub(super) fn observe_strategy(presorted: bool) {
+        OBSERVED.with(|state| {
+            let (runs, hashed, scans) = state.get();
+            state.set((runs + usize::from(presorted), hashed + usize::from(!presorted), scans));
+        });
+    }
+
+    pub(super) fn observe_scan() {
+        OBSERVED.with(|state| {
+            let (runs, hashed, scans) = state.get();
+            state.set((runs, hashed, scans + 1));
+        });
+    }
+
+    fn take_observed() -> (usize, usize, usize) {
+        OBSERVED.with(|state| state.replace((0, 0, 0)))
+    }
+
+    /// `ex:n2` carries TWO ages, so one run must fan out to two matches.
+    const TTL: &str = "@prefix ex: <http://ex/> .\n\
+        ex:n1 ex:age 10 .\n\
+        ex:n2 ex:age 20 .\n\
+        ex:n2 ex:age 21 .\n\
+        ex:n3 ex:age 30 .\n";
+
+    fn id(g: &Graph, iri: &str) -> Id {
+        g.dict.lookup(&Term::NamedNode(NamedNode::new(iri).unwrap()))
+    }
+
+    /// Runs `bind_join` of `result` (one column `?k`, subject position) with
+    /// `?k ex:age ?v`, returning the output `(k, v)` pairs in emission order.
+    fn run(g: &Graph, rows: Vec<Row>, sorted_by: Option<Variable>) -> Vec<(Id, Id)> {
+        let k = Variable::new("k").unwrap();
+        let v = Variable::new("v").unwrap();
+        let result = Bindings { vars: vec![k.clone()], rows, sorted_by };
+        let id_pat: IdPattern = [None, Some(id(g, "http://ex/age")), None];
+        let pos_vars = [Some(k), None, Some(v)];
+        let out = bind_join(g, result, &id_pat, &pos_vars, 0, 0, None);
+        assert_eq!(out.vars.len(), 2, "join var + the new object var");
+        assert!(out.sorted_by.is_none(), "preserve the existing output metadata contract");
+        out.rows.iter().map(|r| (r[0], r[1])).collect()
+    }
+
+    /// The expected bag: every result row paired with every `ex:age` object of its subject.
+    fn expected(g: &Graph, subjects: &[Id]) -> Vec<(Id, Id)> {
+        let ages: Vec<(Id, Id)> = ["http://ex/n1", "http://ex/n2", "http://ex/n2", "http://ex/n3"]
+            .iter()
+            .zip(["10", "20", "21", "30"])
+            .map(|(s, a)| {
+                (id(g, s), g.dict.lookup_lit(a, "http://www.w3.org/2001/XMLSchema#integer", None))
+            })
+            .collect();
+        let mut out: Vec<(Id, Id)> =
+            subjects.iter().flat_map(|&s| ages.iter().filter(move |(a, _)| *a == s).copied()).collect();
+        out.sort_unstable();
+        out
+    }
+
+    #[test]
+    fn scrambled_result_hash_grouping_preserves_the_bag() {
+        let g = Graph::load_str(TTL, "turtle").unwrap();
+        // Scrambled join values, with `n1` DUPLICATED: the duplicate must be emitted twice
+        // (one group, two result rows) — this is the multiplicity a bag join owes.
+        let subjects = [id(&g, "http://ex/n3"), id(&g, "http://ex/n1"), id(&g, "http://ex/n2"), id(&g, "http://ex/n1")];
+        let rows: Vec<Row> = subjects.iter().map(|&s| Row::from_slice(&[s])).collect();
+        take_observed();
+        let got = run(&g, rows, None);
+        assert_eq!(take_observed(), (0, 1, 3));
+
+        assert_eq!(got.len(), 5, "n1 twice, n2 twice (two ages), n3 once: {:?}", got);
+        let mut sorted = got.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, expected(&g, &subjects), "output bag must match the per-row expansion");
+
+    }
+
+    #[test]
+    fn presorted_result_takes_the_no_sort_path_with_the_same_bag() {
+        let g = Graph::load_str(TTL, "turtle").unwrap();
+        // Verified ascending on `?k`: run grouping must preserve the same bag.
+        let mut subjects = [id(&g, "http://ex/n3"), id(&g, "http://ex/n1"), id(&g, "http://ex/n2"), id(&g, "http://ex/n1")];
+        subjects.sort_unstable();
+        let rows: Vec<Row> = subjects.iter().map(|&s| Row::from_slice(&[s])).collect();
+        take_observed();
+        let got = run(&g, rows, Some(Variable::new("k").unwrap()));
+        assert_eq!(take_observed(), (1, 0, 3));
+
+        let mut sorted = got.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, expected(&g, &subjects));
+        assert!(got.windows(2).all(|w| w[0].0 <= w[1].0), "{:?}", got);
+    }
+
+    #[test]
+    fn stale_sorted_by_uses_hash_grouping_and_scans_each_key_once() {
+        let g = Graph::load_str(TTL, "turtle").unwrap();
+        let mut keys = [id(&g, "http://ex/n1"), id(&g, "http://ex/n2")];
+        keys.sort_unstable();
+        // Alternation guarantees stale metadata regardless of dictionary-id assignment.
+        // Repeated matches must not be accumulated once per split run by zk tracing.
+        let subjects: Vec<Id> = (0..128).map(|i| keys[i % 2]).collect();
+        let rows = subjects.iter().map(|&s| Row::from_slice(&[s])).collect();
+        take_observed();
+        let mut got = run(&g, rows, Some(Variable::new("k").unwrap()));
+        assert_eq!(take_observed(), (0, 1, 2));
+        got.sort_unstable();
+        assert_eq!(got, expected(&g, &subjects));
+    }
+
+    const SORTED_QUERY: &str = "PREFIX ex: <http://ex/> SELECT ?key ?rank ?value WHERE {
+        ?key ex:seed ?rank . ?key ex:payload ?value . }";
+    const HASH_QUERY: &str = "PREFIX ex: <http://ex/> SELECT ?key ?rank ?value WHERE {
+        ?key ex:seed ?rank . ?key ex:payload ?value . FILTER(?rank >= 0) }";
+
+    fn query_graph() -> Graph {
+        let mut ttl = String::from("@prefix ex: <http://ex/> .\n");
+        for key in 0..1024 {
+            ttl.push_str(&format!("ex:k{key} ex:payload {}, {} .\n", 2 * key, 2 * key + 1));
+            if key < 32 {
+                // Rank order differs from key order; the filter chooses the rank scan.
+                ttl.push_str(&format!("ex:k{key} ex:seed {} .\n", 31 - key));
+            }
+        }
+        Graph::load_str(&ttl, "turtle").unwrap()
+    }
+
+    fn query_bag(result: crate::QueryResult) -> Vec<String> {
+        let mut bag: Vec<String> = result.rows.iter().map(|row| format!("{row:?}")).collect();
+        bag.sort_unstable();
+        bag
+    }
+
+    #[test]
+    fn sparql_seed_scan_reaches_verified_runs_and_filter_scan_reaches_hash_fallback() {
+        let g = query_graph();
+        take_observed();
+        let sorted = crate::query(&g, SORTED_QUERY).unwrap();
+        assert_eq!(take_observed(), (1, 0, 32), "shared-key seed scan must reach run grouping");
+        assert_eq!(sorted.rows.len(), 64, "each seed has two payload matches");
+        take_observed();
+        let hashed = crate::query(&g, HASH_QUERY).unwrap();
+        assert_eq!(take_observed(), (0, 1, 32), "rank-filter seed scan must reach hash grouping");
+        assert_eq!(query_bag(sorted), query_bag(hashed));
+    }
+
+    #[test]
+    fn sparql_join_budget_fails_instead_of_returning_a_partial_bag() {
+        let g = query_graph();
+        let limit = crate::QueryBudget { max_rows: Some(40), ..crate::QueryBudget::unlimited() };
+        for (query, expected_path) in [(SORTED_QUERY, (1, 0)), (HASH_QUERY, (0, 1))] {
+            take_observed();
+            let err = crate::query_with_budget(&g, query, &limit).unwrap_err();
+            assert_eq!(err, "query budget exceeded (max-rows)");
+            let (runs, hashed, _) = take_observed();
+            assert_eq!((runs, hashed), expected_path, "the seed fits; join fan-out trips the budget");
+            assert_eq!(crate::query(&g, query).unwrap().rows.len(), 64, "budget state must not leak");
+        }
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Randomized differential vs a grouping-free reference join.
+    // ---------------------------------------------------------------------------------
+
+    /// Which output the faulty reference drops. Each variant is a way the run grouping
+    /// could silently lose bag cardinality, and the differential MUST go red against it —
+    /// otherwise the comparison below proves nothing.
+    #[derive(Clone, Copy)]
+    enum Fault {
+        /// Honest reference.
+        None,
+        /// Emit a join value's matches for its FIRST result row only — loses the
+        /// multiplicity a duplicated result row owes.
+        DropDuplicateRows,
+        /// Skip one whole join value — loses a group.
+        DropOneGroup,
+        /// Keep one match per result row — loses the multi-match fan-out.
+        DropExtraMatches,
+    }
+
+    /// Reference join with NEITHER grouping strategy: one full scan of the pattern, then a
+    /// nested loop over the result rows. Independent of both the old `FxHashMap` grouping
+    /// and the new sorted-run walk, so agreement with it is real evidence about the bag. It
+    /// also reaches the store differently — ONE unbound-subject scan, against `bind_join`'s
+    /// per-value BOUND binary-search ranges — so that probe is cross-checked as well.
+    /// Rows are `[payload, k, v]`, returned sorted so callers compare MULTISETS rather than
+    /// emission order.
+    fn naive_bind_join(g: &Graph, rows: &[Row], age: Id, fault: Fault) -> Vec<[Id; 3]> {
+        let pat: IdPattern = [None, Some(age), None];
+        let scan = g.store.scan(&pat);
+        let triples: Vec<[Id; 3]> = scan.rows.iter().map(|r| scan.to_spo(r)).collect();
+        let mut out: Vec<[Id; 3]> = Vec::new();
+        let mut emitted_keys: Vec<Id> = Vec::new();
+        let mut victim: Option<Id> = None;
+        for row in rows {
+            let key = row[1];
+            let mut objs: Vec<Id> =
+                triples.iter().filter(|t| t[0] == key).map(|t| t[2]).collect();
+            if objs.is_empty() {
+                continue;
+            }
+            match fault {
+                Fault::None => {}
+                Fault::DropDuplicateRows => {
+                    if emitted_keys.contains(&key) {
+                        continue;
+                    }
+                    emitted_keys.push(key);
+                }
+                Fault::DropOneGroup => {
+                    if *victim.get_or_insert(key) == key {
+                        continue;
+                    }
+                }
+                Fault::DropExtraMatches => objs.truncate(1),
+            }
+            objs.sort_unstable();
+            out.extend(objs.into_iter().map(|v| [row[0], key, v]));
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// `bind_join` of a two-column result `(?p, ?k)` — the join column is NOT column 0, so
+    /// the run walk's index arithmetic is exercised too — with `?k ex:age ?v`. Returns the
+    /// output rows sorted, for multiset comparison.
+    fn run_multiset(g: &Graph, rows: Vec<Row>, age: Id, sorted: bool) -> Vec<[Id; 3]> {
+        let p = Variable::new("p").unwrap();
+        let k = Variable::new("k").unwrap();
+        let v = Variable::new("v").unwrap();
+        let sorted_by = sorted.then(|| k.clone());
+        let result = Bindings { vars: vec![p, k.clone()], rows, sorted_by };
+        let id_pat: IdPattern = [None, Some(age), None];
+        let pos_vars = [Some(k), None, Some(v)];
+        let out = bind_join(g, result, &id_pat, &pos_vars, 1, 0, None);
+        let mut got: Vec<[Id; 3]> = out.rows.iter().map(|r| [r[0], r[1], r[2]]).collect();
+        got.sort_unstable();
+        got
+    }
+
+    /// xorshift64 — a deterministic generator, so a failure reproduces from its seed
+    /// (the workspace has no test-only `rand` dependency, and CI must not flake).
+    struct Rng(u64);
+
+    impl Rng {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0 % n
+        }
+    }
+
+    /// The result-equivalence obligation for the run-grouping rewrite: over randomized
+    /// graphs and result bags, `bind_join` must agree as a MULTISET with the grouping-free
+    /// reference — on the hash fallback branch (`sorted_by: None`) and on the presorted branch
+    /// (truthfully sorted rows plus matching `sorted_by`) alike.
+    ///
+    /// The generated domain spans what the finding asks for: empty graphs and empty result
+    /// bags; subjects with 0 / 1 / 2-3 `ex:age` objects (no match, singleton, multi-match
+    /// fan-out); a payload column drawn from a tiny pool so IDENTICAL duplicate rows occur
+    /// and their multiplicity is checked; mostly-singleton high-NDV groups; real subject ids
+    /// that have no `ex:age` triple; and `NO_ID` join values from rows naming a subject the
+    /// graph never mentions.
+    #[test]
+    fn randomized_differential_vs_naive_reference() {
+        // Per-fault detection counts: a control that never fires would make the
+        // differential vacuous, so each must be exercised at least once.
+        let mut caught = [0usize; 3];
+        let mut total_out = 0usize;
+        let mut stale_cases = 0usize;
+        for seed in 1u64..=64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let n_subj = rng.below(12) as usize; // 0 → an empty graph
+            let mut ttl = String::from("@prefix ex: <http://ex/> .\n");
+            for s in 0..n_subj {
+                // 0 ages → a real id with no match; 2-3 → the multi-match fan-out.
+                for a in 0..rng.below(4) {
+                    ttl.push_str(&format!("ex:n{} ex:age {} .\n", s, 100 * s as u64 + a));
+                }
+                // Keeps `ex:n{s}` in the dictionary even with zero ages.
+                ttl.push_str(&format!("ex:n{} ex:name \"n{}\" .\n", s, s));
+            }
+            let g = Graph::load_str(&ttl, "turtle").unwrap();
+            let age = id(&g, "http://ex/age");
+
+            let n_rows = rng.below(20) as usize; // 0 → an empty result bag
+            let pool = (n_subj + 3) as u64; // the last 3 are absent → NO_ID join values
+            let mut rows: Vec<Row> = Vec::new();
+            for _ in 0..n_rows {
+                let s = rng.below(pool);
+                let key = id(&g, &format!("http://ex/n{}", s));
+                // Payload from a 3-value pool, so identical rows repeat.
+                rows.push(Row::from_slice(&[rng.below(3) as Id + 1, key]));
+            }
+
+            let want = naive_bind_join(&g, &rows, age, Fault::None);
+            total_out += want.len();
+
+            // The hash fallback branch: scrambled rows, no sortedness claimed.
+            let got = run_multiset(&g, rows.clone(), age, false);
+            assert_eq!(got, want, "hash branch, seed {}", seed);
+
+            // Claimed sortedness over the original random bag must be checked. Stale
+            // candidates fall back and still scan each distinct key only once.
+            let is_sorted = rows.windows(2).all(|pair| pair[0][1] <= pair[1][1]);
+            let distinct = rows.iter().map(|row| row[1]).collect::<std::collections::BTreeSet<_>>().len();
+            take_observed();
+            assert_eq!(run_multiset(&g, rows.clone(), age, true), want, "claimed-sorted branch, seed {}", seed);
+            assert_eq!(take_observed(), (usize::from(is_sorted), usize::from(!is_sorted), distinct));
+            stale_cases += usize::from(!is_sorted);
+
+            // The no-sort branch: truthfully sorted rows WITH matching metadata. The
+            // reference is row-order-independent, so the same `want` applies.
+            let mut asc = rows.clone();
+            asc.sort_by_key(|r| r[1]);
+            assert_eq!(run_multiset(&g, asc, age, true), want, "presorted branch, seed {}", seed);
+
+            // Controls: a reference that drops a duplicate row, a group, or an extra match
+            // must be REJECTED by the very comparison that just passed.
+            for (i, fault) in
+                [Fault::DropDuplicateRows, Fault::DropOneGroup, Fault::DropExtraMatches]
+                    .into_iter()
+                    .enumerate()
+            {
+                let faulty = naive_bind_join(&g, &rows, age, fault);
+                if faulty != want {
+                    assert_ne!(got, faulty, "differential must reject fault {}, seed {}", i, seed);
+                    caught[i] += 1;
+                }
+            }
+        }
+        assert!(total_out > 0, "the generated corpus produced no output rows at all");
+        assert!(stale_cases > 0, "the randomized corpus must exercise stale metadata");
+        for (i, n) in caught.iter().enumerate() {
+            assert!(*n > 0, "control fault {} never fired — the differential is vacuous", i);
+        }
+    }
+}
+
 fn cross_product(left: Bindings, right: Bindings) -> Bindings {
+    cross_product_ref(&left, &right)
+}
+
+// [GPT-6 Astra] Borrow rows so the capped caller can reuse its RHS without cloning it.
+fn cross_product_ref(left: &Bindings, right: &Bindings) -> Bindings {
     let mut out_vars = left.vars.clone();
     out_vars.extend(right.vars.iter().cloned());
     let mut rows = Vec::with_capacity(budget::cap_alloc(left.rows.len().saturating_mul(right.rows.len())));
@@ -9323,7 +10722,7 @@ fn try_theta_antijoin(
 
     // ---- SIP-seed anti-join (small correlation cardinality / literal keys) ----
     let mut fired = false;
-    for key in &order {
+    'groups: for key in &order {
         let members = &groups[key];
         let ri0 = members[0];
 
@@ -9391,8 +10790,11 @@ fn try_theta_antijoin(
         let all_cands: Vec<usize> = (0..b_prime.rows.len()).collect();
         for &ri in members {
             let lrow = &left_b.rows[ri];
+            // Stop the whole SIP strategy, not just this correlation group, so it ends
+            // exactly like the hash strategy: no further seeded `B'` is evaluated and the
+            // caller's operator-exit check raises the budget error (#4158).
             if budget::exhausted(result_rows.len()) {
-                break;
+                break 'groups;
             }
             let matched = antijoin_row_matches(
                 graph, local, lrow, &b_prime, &all_cands, &shared, &out_src, &tmp_vars, &checks,
@@ -10616,11 +12018,14 @@ fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell)
         (SortCell::Temp { id, .. }, SortCell::Num { f, .. }) => {
             compare_values(&sort_cell_term(graph, local, *id), &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Num { f, .. }, SortCell::Val { v, .. }) => {
-            compare_values(&Value::Num(Num::Double(*f)), v).unwrap_or(Ordering::Equal)
+        // A stored numeric against a computed value compares the stored term EXACTLY: its
+        // cached f64 would collapse a high-precision decimal or a big integer and misorder it
+        // against an exact computed key in the same column.
+        (SortCell::Num { id, .. }, SortCell::Val { v, .. }) => {
+            compare_values(&sort_cell_term(graph, local, *id), v).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Val { v, .. }, SortCell::Num { f, .. }) => {
-            compare_values(v, &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
+        (SortCell::Val { v, .. }, SortCell::Num { id, .. }) => {
+            compare_values(v, &sort_cell_term(graph, local, *id)).unwrap_or(Ordering::Equal)
         }
         // Two IRI sort cells: direct string comparison — no allocation, no term_class
         // dispatch. [SONNET-4.6] sq-7d3dj.30.2
@@ -10915,10 +12320,13 @@ fn order_bindings(
                 return Ok(sort_cell_val(Value::Term(term)));
             }
         }
-        Ok(match eval_compiled_numeric(graph, local, row, e) {
-            Some(n) => sort_cell_val(Value::Num(Num::Double(n))),
-            None => sort_cell_val(eval_compiled(graph, local, b, row, e)?),
-        })
+        // A computed key (arithmetic, a BIND-computed local value, any other expression)
+        // keeps its EXACT value: an `f64` fast path here collapsed integers beyond 2^53 and
+        // high-precision decimals into one tie, kept their input order, and turned an
+        // integer/decimal division by zero (a type error, so an unbound key) into infinity.
+        // The exact `Value` is ordered by `compare_values`, which already rechecks numeric
+        // ties exactly — the same order `cmp_expr` and MIN/MAX give (#3198).
+        Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?))
     };
     // The sort key (vector of (descending, SortCell)) for one row.
     let key_of = |row: &Row| -> Result<Vec<(bool, SortCell)>, String> {
@@ -14191,8 +15599,28 @@ thread_local! {
 
 /// Installs the active query's base IRI for expression evaluation (IRI()/URI()
 /// relative-reference resolution). Called by the query entry points; `None` clears it.
-pub(crate) fn set_query_base(base: Option<&str>) {
-    QUERY_BASE.with(|b| *b.borrow_mut() = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok()));
+///
+/// The returned guard restores the previous base when dropped (including on unwind), so
+/// a query run re-entrantly on the same thread — e.g. from an extension function — cannot
+/// leak its BASE (or its lack of one) into the enclosing query (#6479). Bind it to a named
+/// variable for the duration of evaluation.
+pub(crate) fn set_query_base(base: Option<&str>) -> QueryBaseGuard {
+    let new = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok());
+    QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(new))) }
+}
+
+/// Restores the enclosing query's base IRI on drop; see [`set_query_base`].
+#[must_use = "the query base is restored when the guard drops; bind it to a named variable"]
+pub(crate) struct QueryBaseGuard {
+    previous: Option<Option<oxiri::Iri<String>>>,
+}
+
+impl Drop for QueryBaseGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.take() {
+            QUERY_BASE.with(|b| *b.borrow_mut() = previous);
+        }
+    }
 }
 
 /// `IRI(str)`: absolute IRIs pass through; relative references resolve against the
@@ -16949,10 +18377,11 @@ mod service_exec_tests {
         // A cap the ONE discarded remote literal (interned twice) blows, but the SILENT
         // fallback's own working set (one identity row) fits well under.
         let b = crate::QueryBudget { max_bytes: Some(64), ..crate::QueryBudget::unlimited() };
-        let _bg = budget::install(&b);
-        let res = eval_select(&g, &p)
-            .expect("SILENT mid-stream error must roll back the discarded row's byte charge");
-        assert_eq!(res.rows.len(), 1, "SILENT verbatim -> identity -> one (unbound ?o) row");
+        budget::with_budget(&b, || {
+            let res = eval_select(&g, &p)
+                .expect("SILENT mid-stream error must roll back the discarded row's byte charge");
+            assert_eq!(res.rows.len(), 1, "SILENT verbatim -> identity -> one (unbound ?o) row");
+        })
     }
 
     #[test]
@@ -16971,10 +18400,11 @@ mod service_exec_tests {
              { ?s a ex:T . SERVICE SILENT <http://remote/> { ?s ex:p ?o } }",
         );
         let b = crate::QueryBudget { max_bytes: Some(64), ..crate::QueryBudget::unlimited() };
-        let _bg = budget::install(&b);
-        let res = eval_select(&g, &p)
-            .expect("bind-join SILENT mid-stream error must roll back the discarded row's byte charge");
-        assert_eq!(res.rows.len(), 1, "SILENT block failure -> identity -> local ?s=ex:a row survives");
+        budget::with_budget(&b, || {
+            let res = eval_select(&g, &p)
+                .expect("bind-join SILENT mid-stream error must roll back the discarded row's byte charge");
+            assert_eq!(res.rows.len(), 1, "SILENT block failure -> identity -> local ?s=ex:a row survives");
+        })
     }
 
     #[test]
@@ -17485,16 +18915,21 @@ mod service_exec_tests {
             deadline: Some(Instant::now() + Duration::from_secs(10)),
             ..crate::QueryBudget::unlimited()
         };
-        let _g = budget::install(&b);
-        let r = budget::remaining_timeout().expect("deadline installed");
-        assert!(r <= Duration::from_secs(10) && r > Duration::from_secs(8), "got {r:?}");
-        // An expired deadline saturates to ZERO (never panics / underflows).
-        let b2 = crate::QueryBudget {
-            deadline: Some(Instant::now() - Duration::from_millis(1)),
-            ..crate::QueryBudget::unlimited()
-        };
-        let _g2 = budget::install(&b2);
-        assert_eq!(budget::remaining_timeout(), Some(Duration::ZERO));
+        budget::with_budget(&b, || {
+            let r = budget::remaining_timeout().expect("deadline installed");
+            assert!(
+                r <= Duration::from_secs(10) && r > Duration::from_secs(8),
+                "got {r:?}"
+            );
+            // An expired deadline saturates to ZERO (never panics / underflows).
+            let b2 = crate::QueryBudget {
+                deadline: Some(Instant::now() - Duration::from_millis(1)),
+                ..crate::QueryBudget::unlimited()
+            };
+            budget::with_budget(&b2, || {
+                assert_eq!(budget::remaining_timeout(), Some(Duration::ZERO));
+            })
+        })
     }
 }
 
@@ -20787,5 +22222,700 @@ mod order_bindings_worker_reinstall {
             n,
             "all {n} rows must survive ORDER BY with custom function on parallel dataset"
         );
+    }
+}
+
+// [GPT-6 Astra] Actual public-query path and physical RHS-work witness for #3105.
+#[cfg(test)]
+mod capped_rhs_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    thread_local! {
+        static WORK: Cell<[usize; 4]> = const { Cell::new([0; 4]) };
+        static STEPS: RefCell<Option<Vec<Step>>> = const { RefCell::new(None) };
+    }
+
+    // [GPT-6 Astra] Observe the actual branch, scan closure and returned metadata.
+    #[derive(Debug, PartialEq, Eq)]
+    struct Step {
+        start: usize,
+        pattern: usize,
+        kernel: &'static str,
+        requested: Option<usize>,
+        scanned: bool,
+        actual: Option<String>,
+    }
+
+    pub(super) fn step(
+        start: usize,
+        pattern: usize,
+        kernel: &'static str,
+        requested: Option<usize>,
+        scanned: bool,
+        actual: Option<&Variable>,
+    ) {
+        STEPS.with_borrow_mut(|steps| {
+            if let Some(steps) = steps {
+                steps.push(Step {
+                    start,
+                    pattern,
+                    kernel,
+                    requested,
+                    scanned,
+                    actual: actual.map(|v| v.as_str().to_owned()),
+                });
+            }
+        });
+    }
+
+    fn trace<T>(f: impl FnOnce() -> T) -> (T, Vec<Step>) {
+        STEPS.with_borrow_mut(|steps| *steps = Some(Vec::new()));
+        let result = f();
+        let steps = STEPS.with_borrow_mut(|steps| steps.take().unwrap());
+        (result, steps)
+    }
+
+    fn bag(result: &crate::QueryResult) -> std::collections::BTreeMap<Vec<String>, usize> {
+        let mut bag = std::collections::BTreeMap::new();
+        for row in &result.rows {
+            *bag.entry(
+                row.iter()
+                    .map(|v| v.as_ref().unwrap().to_string())
+                    .collect(),
+            )
+            .or_default() += 1;
+        }
+        bag
+    }
+
+    #[test]
+    fn capped_rhs_changing_sort_mixed_kernels_preserves_full_bag() {
+        let mut ttl = String::from("@prefix : <http://ex/> .\n");
+        for i in 0..70_000 {
+            // Projection deliberately collapses pairs, making multiplicity observable.
+            ttl.push_str(&format!(":s{i} :p {} ; :q {i} ; :r {i} .\n", i / 2));
+        }
+        ttl.push_str(":extra1 :q 70001 ; :r 70001 . :extra2 :r 70002 .");
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        let query = "PREFIX : <http://ex/> SELECT ?o WHERE { ?s :p ?o . ?s :q ?x . ?s :r ?x . FILTER(?o + 0 >= 0) }";
+        let full = crate::query(&graph, query).unwrap();
+        let (limited, steps) =
+            trace(|| crate::query(&graph, &format!("{query} LIMIT 70001")).unwrap());
+        println!("changing-sort actual steps: {steps:?}");
+        assert_eq!(limited.rows.len(), 70_000);
+        assert_eq!(bag(&limited), bag(&full));
+        let expected: std::collections::BTreeMap<_, _> = (0..35_000)
+            .map(|i| (vec![oxrdf::Literal::from(i).to_string()], 2))
+            .collect();
+        assert_eq!(bag(&limited), expected);
+        let q: Vec<_> = steps
+            .iter()
+            .filter(|s| s.pattern == 1)
+            .map(|s| {
+                (
+                    s.start,
+                    s.kernel,
+                    s.requested,
+                    s.scanned,
+                    s.actual.as_deref(),
+                )
+            })
+            .collect();
+        let r: Vec<_> = steps
+            .iter()
+            .filter(|s| s.pattern == 2)
+            .map(|s| (s.start, s.requested, s.scanned, s.actual.as_deref()))
+            .collect();
+        if sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso) {
+            assert_eq!(
+                q,
+                [
+                    (0, "bind", None, false, None),
+                    (1024, "merge", Some(0), true, Some("s")),
+                    (65536, "bind", None, false, None)
+                ]
+            );
+            assert_eq!(
+                r,
+                [
+                    (0, None, true, Some("s")),
+                    (1024, Some(0), true, Some("s")),
+                    (65536, None, true, Some("s"))
+                ]
+            );
+        } else {
+            // Three permutations return object order: no false subject-order claim,
+            // and the unchanged None request must reuse the actually unsorted-for-s RHS.
+            assert_eq!(
+                q,
+                [
+                    (0, "bind", None, false, None),
+                    (1024, "hash", None, true, Some("x")),
+                    (65536, "bind", None, false, None)
+                ]
+            );
+            assert_eq!(
+                r,
+                [
+                    (0, None, true, Some("x")),
+                    (1024, None, false, Some("x")),
+                    (65536, None, false, Some("x"))
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn capped_rhs_replacement_releases_old_slot_before_scan() {
+        let mut initial = Bindings::unsorted(
+            vec![Variable::new("x").unwrap()],
+            vec![Row::from_slice(&[1])],
+        );
+        let bytes = capped_rhs_storage(&mut initial, CAPPED_RHS_STORAGE).unwrap();
+        let mut slot = Some((None, initial, bytes));
+        let mut remaining = CAPPED_RHS_STORAGE - bytes;
+        let mut uncached = None;
+        // A failed replacement leaves the actual slot empty only if old ownership
+        // was released before invoking the scan. This is not a timing/heap estimate.
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+                panic!("replacement scan sentinel")
+            });
+        }));
+        assert!(failed.is_err());
+        assert_eq!(
+            remaining, CAPPED_RHS_STORAGE,
+            "stale charge must be refunded before scan"
+        );
+        assert!(
+            slot.is_none(),
+            "old RHS remained live through replacement scan"
+        );
+        let replacement = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+            Bindings::unsorted(
+                vec![Variable::new("x").unwrap()],
+                vec![Row::from_slice(&[2])],
+            )
+        });
+        assert_eq!(replacement.rows, [Row::from_slice(&[2])]);
+    }
+
+    #[test]
+    fn capped_rhs_disconnected_cross_preserves_multiplicity() {
+        let graph = Graph::load_str(
+            "@prefix : <http://ex/> . :a :p 1 . :b :p 2 . :c :q 3, 4, 5 .",
+            "turtle",
+        )
+        .unwrap();
+        let query =
+            "PREFIX : <http://ex/> SELECT ?s WHERE { ?s :p ?o . ?t :q ?x . FILTER(?o + 0 >= 0) }";
+        let (limited, steps) = trace(|| crate::query(&graph, &format!("{query} LIMIT 7")).unwrap());
+        assert_eq!(bag(&limited), bag(&crate::query(&graph, query).unwrap()));
+        assert_eq!(limited.rows.len(), 6);
+        assert_eq!(bag(&limited).values().copied().collect::<Vec<_>>(), [3, 3]);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].kernel, "cross");
+        assert!(steps[0].scanned);
+        println!("disconnected actual steps: {steps:?}");
+    }
+
+    #[test]
+    fn capped_rhs_named_view_overlay_and_residual_exists() {
+        let mut graph = Graph::load_dataset("@prefix : <http://ex/> . :g { :a :p 1, 2 ; :q 1, 2 ; :visible true . :b :p 3 ; :q 3 . }", "trig").unwrap();
+        let query = "PREFIX : <http://ex/> SELECT ?s WHERE { GRAPH :g { SELECT ?s WHERE { ?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0 && EXISTS { ?s :visible true }) } LIMIT 10 } }";
+        let (base, steps) = trace(|| crate::query(&graph, query).unwrap());
+        assert_eq!(base.rows.len(), 2);
+        assert_eq!(base.rows[0], base.rows[1]);
+        // EXISTS is deliberately non-conjunctive: prove the existing fallback remains.
+        assert!(
+            steps.is_empty(),
+            "EXISTS must retain the scope-safe fallback"
+        );
+        let eligible = query.replace(" && EXISTS { ?s :visible true }", "");
+        let (eligible_base, eligible_steps) = trace(|| crate::query(&graph, &eligible).unwrap());
+        assert_eq!(eligible_base.rows.len(), 3);
+        assert!(
+            eligible_steps.iter().any(|s| s.scanned),
+            "named subquery must reach capped RHS: {eligible_steps:?}"
+        );
+        let visible = crate::DatasetView {
+            base: &graph,
+            named: std::sync::Arc::new([graph.named[0].0.clone()].into_iter().collect()),
+            default: crate::DefaultGraphMode::Empty,
+        };
+        assert_eq!(
+            bag(&crate::query_view(&visible, query).unwrap()),
+            bag(&base)
+        );
+        let (visible_rows, visible_steps) =
+            trace(|| crate::query_view(&visible, &eligible).unwrap());
+        assert_eq!(bag(&visible_rows), bag(&eligible_base));
+        assert!(visible_steps.iter().any(|s| s.scanned));
+        let hidden = crate::DatasetView {
+            base: &graph,
+            named: std::sync::Arc::new(Default::default()),
+            default: crate::DefaultGraphMode::StoreDefault,
+        };
+        assert!(crate::query_view(&hidden, query).unwrap().rows.is_empty());
+        let (hidden_rows, hidden_steps) = trace(|| crate::query_view(&hidden, &eligible).unwrap());
+        assert!(hidden_rows.rows.is_empty());
+        assert!(
+            hidden_steps.is_empty(),
+            "hidden graph must not enter RHS cache"
+        );
+        let mut fork = graph.named[0].1.fork();
+        fork.apply_delta(
+            &[],
+            &[[
+                oxrdf::NamedNode::new("http://ex/a").unwrap().into(),
+                oxrdf::NamedNode::new("http://ex/q").unwrap().into(),
+                oxrdf::Literal::from(2).into(),
+            ]],
+        )
+        .unwrap();
+        graph.named[0].1 = fork;
+        let (changed, changed_steps) = trace(|| crate::query(&graph, query).unwrap());
+        assert_eq!(changed.rows.len(), 1);
+        assert_eq!(changed.rows[0], base.rows[0]);
+        assert!(changed_steps.is_empty(), "overlay EXISTS retains fallback");
+        let (eligible_overlay, overlay_steps) = trace(|| crate::query(&graph, &eligible).unwrap());
+        assert_eq!(eligible_overlay.rows.len(), 2);
+        assert!(overlay_steps.iter().any(|s| s.scanned));
+        println!("named EXISTS fallback: {steps:?}, {changed_steps:?}; eligible base/overlay: {eligible_steps:?}, {overlay_steps:?}");
+    }
+
+    // [GPT-6 Astra] Capacity accounting must include spare buffers and variable text.
+    #[test]
+    fn capped_rhs_storage_counts_allocated_capacity() {
+        let mut name = String::with_capacity(4096);
+        name.push('x');
+        let mut order = String::with_capacity(2048);
+        order.push('x');
+        let mut vars = Vec::with_capacity(8);
+        let text_bytes = name.capacity() + order.capacity();
+        vars.push(Variable::new(name).unwrap());
+        let mut rows = Vec::with_capacity(32);
+        rows.push(Row::from_slice(&[1]));
+        let expected = rows.capacity() * std::mem::size_of::<Row>()
+            + vars.capacity() * std::mem::size_of::<Variable>()
+            + text_bytes;
+        let mut rhs = Bindings {
+            vars,
+            rows,
+            sorted_by: Some(Variable::new(order).unwrap()),
+        };
+        assert_eq!(capped_rhs_storage(&mut rhs, expected), Some(expected));
+        assert_eq!(capped_rhs_storage(&mut rhs, expected - 1), None);
+        assert_eq!(rhs.vars[0].as_str(), "x");
+        assert_eq!(rhs.sorted_by.as_ref().unwrap().as_str(), "x");
+        assert_eq!(rhs.rows, [Row::from_slice(&[1])]);
+        assert_eq!(
+            capped_rhs_storage(&mut rhs, expected),
+            Some(expected),
+            "rejected accounting must preserve all capacities"
+        );
+        let (slots, remaining) = capped_rhs_cache(3, true);
+        assert_eq!(
+            remaining + slots.capacity() * std::mem::size_of::<Option<CappedRhs>>(),
+            CAPPED_RHS_STORAGE
+        );
+        let too_many = CAPPED_RHS_STORAGE / std::mem::size_of::<Option<CappedRhs>>() + 1;
+        for (len, enabled) in [(too_many, true), (usize::MAX, true), (3, false)] {
+            let (slots, remaining) = capped_rhs_cache(len, enabled);
+            assert_eq!((slots.len(), slots.capacity(), remaining), (0, 0, 0));
+        }
+    }
+
+    #[test]
+    fn capped_rhs_exact_fit_and_nonfitting_lifetime() {
+        let make = || {
+            Bindings::unsorted(
+                vec![Variable::new("x").unwrap()],
+                vec![Row::from_slice(&[1])],
+            )
+        };
+        let bytes = capped_rhs_storage(&mut make(), CAPPED_RHS_STORAGE).unwrap();
+        let mut slot = None;
+        let mut uncached = None;
+        let mut remaining = bytes;
+        let ptr = capped_rhs(&mut slot, &mut remaining, &mut uncached, None, make)
+            .rows
+            .as_ptr();
+        assert_eq!(remaining, 0);
+        assert!(uncached.is_none());
+        assert_eq!(
+            capped_rhs(&mut slot, &mut remaining, &mut uncached, None, || panic!(
+                "fit was rescanned"
+            ))
+            .rows
+            .as_ptr(),
+            ptr
+        );
+        drop(slot.take());
+        remaining = bytes - 1;
+        for _ in 0..2 {
+            let rhs = capped_rhs(&mut slot, &mut remaining, &mut uncached, None, make);
+            assert_eq!(rhs.rows, [Row::from_slice(&[1])]);
+            assert!(slot.is_none(), "non-fitting scan must not survive its step");
+            assert_eq!(remaining, bytes - 1);
+            drop(uncached.take());
+        }
+        let mut oversized = Bindings::unsorted(
+            vec![],
+            Vec::with_capacity(CAPPED_RHS_STORAGE / std::mem::size_of::<Row>() + 1),
+        );
+        assert_eq!(capped_rhs_storage(&mut oversized, CAPPED_RHS_STORAGE), None);
+        let mut spilled = Row::with_capacity(16);
+        spilled.push(1);
+        assert!(spilled.spilled());
+        let mut rhs = Bindings::unsorted(vec![Variable::new("x").unwrap()], vec![spilled]);
+        assert_eq!(capped_rhs_storage(&mut rhs, CAPPED_RHS_STORAGE), None);
+        assert_eq!(rhs.rows[0].as_slice(), [1]);
+    }
+
+    #[test]
+    fn capped_rhs_many_relations_respect_storage_allowance() {
+        for n in [5usize, 8] {
+            let mut ttl = String::new();
+            for i in 0..70_000 {
+                for j in 0..n {
+                    ttl.push_str(&format!("<urn:s:{i}> <urn:p{j}> {i} .\n"));
+                }
+            }
+            for i in 0..8192 {
+                ttl.push_str(&format!("<urn:d:{i}> <urn:dead> <urn:o> .\n"));
+            }
+            let graph = Graph::load_str(&ttl, "turtle").unwrap();
+            let patterns: String = (0..n).map(|j| format!("?s <urn:p{j}> ?o . ")).collect();
+            let positive =
+                crate::query(&graph, &format!("SELECT ?s ?o WHERE {{ {patterns} }}")).unwrap();
+            assert_eq!(positive.rows.len(), 70_000);
+            for row in &positive.rows {
+                let o = row[1].as_ref().unwrap().to_string();
+                let i = o.split('"').nth(1).unwrap().parse::<usize>().unwrap();
+                assert!(i < 70_000);
+                assert_eq!(row[0].as_ref().unwrap().to_string(), format!("<urn:s:{i}>"));
+            }
+            take_work();
+            let (answer, steps) = trace(|| {
+                crate::ask(&graph, &format!("ASK {{ {patterns} FILTER(?o + 0 < 0) }}")).unwrap()
+            });
+            assert!(!answer);
+            let work = take_work();
+            assert_eq!((work[0], work[1], work[3]), (1, 3, 0));
+            assert!(
+                work[2] > n - 1,
+                "non-fitting RHS must be rescanned, not retained without a bound: {work:?}"
+            );
+            assert!(work[2] < 3 * (n - 1), "fitting RHS must still be reused");
+            assert_eq!(steps.len(), 3 * (n - 1));
+            for start in [0usize, 1024, 65536] {
+                let reached: Vec<_> = steps.iter().filter(|s| s.start == start).collect();
+                assert_eq!(reached.len(), n - 1);
+                assert!(reached.iter().all(|s| s.kernel != "bind"));
+                let ids: std::collections::BTreeSet<_> =
+                    reached.iter().map(|s| s.pattern).collect();
+                assert_eq!(ids.len(), n - 1);
+            }
+            println!("patterns={n} work={work:?} steps={steps:?}");
+        }
+    }
+
+    pub(super) fn observe(index: usize) {
+        WORK.with(|cell| {
+            let mut counts = cell.get();
+            counts[index] += 1;
+            cell.set(counts);
+        });
+    }
+
+    fn take_work() -> [usize; 4] {
+        WORK.with(|cell| cell.replace([0; 4]))
+    }
+
+    #[test]
+    fn capped_rhs_three_block_miss() {
+        let mut ttl = String::from("@prefix : <http://ex/> .\n");
+        // More than the second block boundary; two shared variables prohibit bind join.
+        for i in 0..70_000 {
+            ttl.push_str(&format!(":s{i} :p {i} ; :q {} .\n", i + 1));
+        }
+        let graph = Graph::load_str(&ttl, "turtle").unwrap();
+        // Arithmetic keeps this filter residual and defeats the count shortcut.
+        let body = "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)";
+        take_work();
+        assert!(!crate::ask(&graph, &format!("PREFIX : <http://ex/> ASK {{ {body} }}")).unwrap());
+        let ask_work = take_work();
+        assert_eq!(ask_work, [1, 3, 1, 0]);
+        assert!(
+            crate::query(
+                &graph,
+                &format!("PREFIX : <http://ex/> SELECT * WHERE {{ {body} }} LIMIT 1")
+            )
+            .unwrap()
+            .rows
+            .is_empty()
+        );
+        let limit_work = take_work();
+        assert_eq!(limit_work, [1, 3, 1, 0]);
+        println!(
+            "ASK and LIMIT miss: entries/blocks/RHS scans/bind calls = {ask_work:?}, {limit_work:?}"
+        );
+        // The budget permits the old scan. Its presence must disable retention,
+        // independently of whether it actually trips on this query.
+        let generous = crate::QueryBudget {
+            max_rows: Some(100_000),
+            ..Default::default()
+        };
+        assert!(
+            !crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &generous
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            take_work(),
+            [1, 3, 3, 0],
+            "armed budget must retain original scan behavior"
+        );
+        // [GPT-6 Astra] Armed but untripped cancellation/deadline must still disable reuse.
+        let live_budgets = [
+            crate::QueryBudget {
+                cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))),
+                ..Default::default()
+            },
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::QueryBudget {
+                deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(300)),
+                ..Default::default()
+            },
+        ];
+        for live in live_budgets {
+            assert!(!crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &live
+            ).unwrap());
+            assert_eq!(take_work(), [1, 3, 3, 0], "armed but untripped budget must not retain RHS");
+        }
+        let row_limited = crate::QueryBudget {
+            max_rows: Some(10),
+            ..Default::default()
+        };
+        // A nonempty intermediate, unlike the all-miss witness, exercises the row ceiling.
+        let expansion =
+            "PREFIX : <http://ex/> ASK { ?s :p ?o . ?s :q ?other . FILTER(?o + 0 >= 0) }";
+        assert!(
+            crate::ask_with_budget(&graph, expansion, &row_limited)
+                .unwrap_err()
+                .contains("max-rows")
+        );
+        take_work();
+        let cancelled = crate::QueryBudget {
+            cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            ))),
+            ..Default::default()
+        };
+        assert!(
+            crate::ask_with_budget(
+                &graph,
+                &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                &cancelled
+            )
+            .unwrap_err()
+            .contains("cancelled")
+        );
+        take_work();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let expired = crate::QueryBudget {
+                deadline: Some(std::time::Instant::now()),
+                ..Default::default()
+            };
+            assert!(
+                crate::ask_with_budget(
+                    &graph,
+                    &format!("PREFIX : <http://ex/> ASK {{ {body} }}"),
+                    &expired
+                )
+                .is_err()
+            );
+            take_work();
+        }
+    }
+    #[test]
+    fn capped_rhs_keeps_rows_and_actual_order_until_request_changes() {
+        let mut slot = None;
+        let mut remaining = CAPPED_RHS_STORAGE;
+        let mut uncached = None;
+        let variable = Variable::new("x").unwrap();
+        let first = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+            Bindings {
+                vars: vec![variable.clone()],
+                rows: vec![Row::from_slice(&[1]), Row::from_slice(&[1])],
+                // Requested and actual order need not agree on restricted permutations.
+                sorted_by: None,
+            }
+        });
+        let pointer = first.rows.as_ptr();
+        assert_eq!(first.rows.len(), 2);
+        assert_eq!(first.sorted_by, None);
+        let reused = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(0), || {
+            panic!("identical scan was repeated")
+        });
+        assert_eq!(
+            reused.rows.as_ptr(),
+            pointer,
+            "reuse must not deep-clone rows"
+        );
+        assert_eq!(
+            reused.rows[0], reused.rows[1],
+            "bag multiplicity is retained"
+        );
+        let changed = capped_rhs(&mut slot, &mut remaining, &mut uncached, Some(2), || {
+            Bindings {
+                vars: vec![variable.clone()],
+                rows: vec![Row::from_slice(&[2])],
+                sorted_by: Some(variable.clone()),
+            }
+        });
+        assert_eq!(changed.rows, vec![Row::from_slice(&[2])]);
+        assert_eq!(changed.sorted_by, Some(variable));
+    }
+
+    #[test]
+    fn capped_rhs_public_bags_repeated_variables_and_first_block_hit() {
+        let graph = Graph::load_str(
+            "@prefix : <http://ex/> . :a :p 1, 2 ; :q 1, 2 . :b :p :b ; :q :b . :c :p :b .",
+            "turtle",
+        )
+        .unwrap();
+        let body = "?s :p ?o . ?s :q ?o . FILTER(?o + 0 >= 0)";
+        let full = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {body} }}"),
+        )
+        .unwrap();
+        take_work();
+        let limited = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {body} }} LIMIT 10"),
+        )
+        .unwrap();
+        assert_eq!(take_work(), [1, 1, 1, 0]);
+        assert_eq!(limited.rows, full.rows);
+        assert_eq!(limited.rows.len(), 2);
+        assert_eq!(
+            limited.rows[0], limited.rows[1],
+            "projection preserves multiplicity"
+        );
+        take_work();
+        assert!(crate::ask(&graph, &format!("PREFIX : <http://ex/> ASK {{ {body} }}")).unwrap());
+        assert_eq!(take_work(), [1, 1, 1, 0]);
+        let repeated = "?s :p ?s . ?s :q ?o . FILTER(?s != <http://ex/missing>)";
+        let result = crate::query(
+            &graph,
+            &format!("PREFIX : <http://ex/> SELECT ?s WHERE {{ {repeated} }} LIMIT 10"),
+        )
+        .unwrap();
+        assert_eq!(
+            result.rows.len(),
+            1,
+            "off-diagonal repeated-variable rows must not survive"
+        );
+    }
+}
+
+/// #4467 — the scoped registry guards restore the registry the install replaced
+/// (rather than clearing it), so a nested install hands the outer scope its own
+/// registry back, on normal return and on unwind alike.
+#[cfg(test)]
+mod scoped_registry_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    const F: &str = "http://ex/f";
+
+    fn registry(tag: &'static str) -> crate::FunctionRegistry {
+        let mut reg = crate::FunctionRegistry::new();
+        reg.register(F, move |_: &[Term]| Ok(Term::Literal(oxrdf::Literal::new_simple_literal(tag))));
+        reg
+    }
+
+    fn call() -> Option<Term> {
+        functions::lookup(F).map(|f| f(&[]).unwrap())
+    }
+
+    fn lit(tag: &str) -> Option<Term> {
+        Some(Term::Literal(oxrdf::Literal::new_simple_literal(tag)))
+    }
+
+    #[test]
+    fn nested_function_registry_restores_the_outer_one() {
+        crate::with_functions(&registry("outer"), || {
+            assert_eq!(call(), lit("outer"));
+            crate::with_functions(&registry("inner"), || assert_eq!(call(), lit("inner")));
+            assert_eq!(call(), lit("outer"), "outer registry lost after the inner scope");
+            let g = sparq_core::Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
+            let r = crate::query(&g, "SELECT ?v WHERE { BIND(<http://ex/f>() AS ?v) }").unwrap();
+            assert_eq!(r.rows[0][0], lit("outer"));
+        });
+        assert_eq!(call(), None, "registry leaked past the outermost scope");
+    }
+
+    #[test]
+    fn nested_function_registry_restores_the_outer_one_on_unwind() {
+        crate::with_functions(&registry("outer"), || {
+            let unwound = std::panic::catch_unwind(|| {
+                crate::with_functions(&registry("inner"), || panic!("inner scope panics"))
+            });
+            assert!(unwound.is_err());
+            assert_eq!(call(), lit("outer"));
+        });
+        assert_eq!(call(), None);
+    }
+
+    #[cfg(feature = "window-functions")]
+    #[test]
+    fn nested_aggregate_registry_restores_the_outer_one() {
+        let reg = |tag: &'static str| {
+            let mut reg = crate::CustomAggregateRegistry::new();
+            reg.register(F, move |_: &[Option<Term>]| Ok(lit(tag)));
+            reg
+        };
+        let call = || aggregates::lookup(F).map(|f| f(&[]).unwrap());
+        crate::aggregate::with_aggregates(&reg("outer"), || {
+            crate::aggregate::with_aggregates(&reg("inner"), || assert_eq!(call(), Some(lit("inner"))));
+            assert_eq!(call(), Some(lit("outer")));
+        });
+        assert_eq!(call(), None);
+    }
+
+    struct NoIndex;
+    impl crate::SpatialProvider for NoIndex {
+        fn candidates(&self, _: &crate::SpatialQuery) -> Option<Vec<Term>> {
+            None
+        }
+        fn is_indexed(&self, _: &Term) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn nested_spatial_index_restores_the_outer_one() {
+        let outer: Arc<dyn crate::SpatialProvider> = Arc::new(NoIndex);
+        let inner: Arc<dyn crate::SpatialProvider> = Arc::new(NoIndex);
+        let is = |want: &Arc<dyn crate::SpatialProvider>| {
+            spatial::active().is_some_and(|a| std::ptr::addr_eq(Arc::as_ptr(&a), Arc::as_ptr(want)))
+        };
+        crate::with_spatial_index(outer.clone(), || {
+            crate::with_spatial_index(inner.clone(), || assert!(is(&inner)));
+            assert!(is(&outer), "outer spatial index lost after the inner scope");
+        });
+        assert!(spatial::active().is_none());
     }
 }

@@ -21,10 +21,8 @@ or async-runtime types (consumers such as `sparq-server` wrap it), and it must
 never enter `sparq-wasm`'s dependency graph.
 
 > **Mostly library-internal plumbing — with one deliberate public surface** (the
-> `embed` seam below). It is wrapped by `sparq-server` and otherwise has no
-> standalone API. It is a *publishable* crate (its `Cargo.toml` does **not** set
-> `publish = false`) and must stay that way: the published `sparq-server` depends
-> on it, and a crates.io crate cannot depend on a `publish = false` crate.
+> `embed` seam below); otherwise wrapped by `sparq-server`. Publishable (not
+> `publish = false`) because `sparq-server` depends on it.
 
 ## 🔌 `embed` — in-process embedding seam (#1248)
 
@@ -37,7 +35,7 @@ re-export of the runtime-agnostic concurrency wrapper (`GenerationRing` +
 embedder reuses sparq's *tested* fork → update → publish + generation-pinning model).
 It is the proposed **API tier-1 (proposed-stable)** embedding surface (the
 [API stability policy](../../docs/api-stability.md)) — but **NOT yet frozen**: the
-semver freeze is the maintainer's to ratify ([#1248](https://github.com/jeswr/sparq/issues/1248)),
+semver freeze is the maintainer's to ratify ([#1248](https://github.com/sparq-org/sparq/issues/1248)),
 and until then a minor pre-`1.0` release MAY still change it.
 
 ## 🚀 Quickstart
@@ -78,6 +76,8 @@ cargo run -p sparq-server -- --format turtle data.ttl
   thread), with one std-only `NatsSink` (core NATS, plain TCP, no TLS). Kafka / TLS / SASL: impl
   the trait over your own client — no broker client or async runtime enters this crate.
 - **Response-bytes result cache** *(opt-in `result-cache`, OFF by default)* — see below.
+- **Prepared-update applier** *(opt-in `params`, OFF by default)* — `PreparedGraphApplier`
+  applies a parsed-once, bound `PreparedUpdate`, avoiding `GraphApplier`'s per-commit re-parse.
 
 ## 🗃️ Result cache (opt-in, `result-cache` feature)
 

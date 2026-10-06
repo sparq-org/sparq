@@ -1,20 +1,15 @@
 # Supply-chain gate (sq-0sye / sq-2abm / sq-jfer) — practices mapped from
 # prod-solid-server onto this Rust workspace.
 #
-# [FABLE-5] sq-6vshe.20 (design: research/ci-runner-consolidation-2026-07.md §4.4):
-# CONSOLIDATED from 9 sub-minute-to-few-minute jobs to ONE fail-fast gating job.
-# Every former job survives VERBATIM as a named step-group (log greppability +
-# blame attribution); the in-job `detect rust changes` step-group leads, and the
-# formerly job-`if:`-gated legs (cargo-deny / cargo-vet / the SBOM artifact upload)
-# become step-`if:` guards on the same `rust_changed` output. The whole-workspace
-# CycloneDX SBOM — previously generated THREE times (sbom + sbom-purl-canonical +
-# sbom-supplier each regenerated it) — is generated ONCE and asserted twice:
-# strictly less work, identical coverage. Gate-contract safety: the job name
-# carries NO advisory/informational whole word ("advisories" plural in a STEP name
-# is token-safe and pinned so by scripts/tests/test_ci_summary_gate.py), so the
-# required ci-summary `gate` still reds if ANY former gate fails. Both artifacts
-# (`sbom-cyclonedx` on the rust_changed cadence; `sbom-js-cyclonedx` always)
-# survive by name.
+# One fail-fast job (sq-6vshe.20; design: research/ci-runner-consolidation-2026-07.md
+# §4.4): every former job survives as a named step-group. The whole-workspace CycloneDX
+# SBOM is generated ONCE and asserted twice. Artifacts: `sbom-cyclonedx` and
+# `sbom-js-cyclonedx`.
+#
+# WHEN: push to main, nightly (05:11 UTC; re-audits the unchanged graph for newly
+# disclosed advisories) and manual dispatch. It does not run on pull requests; the one
+# required PR check is ci-fast (docs/branch-protection.md). To check a dependency change
+# before merging: `gh workflow run supply-chain.yml --ref <branch>`.
 #
 #   deny  : cargo-deny over advisories + bans + sources + licenses. ALL GATING
 #           (advisories un-degraded — sq-toze.2/GX-1; CVSS-4.0 blocker sq-q8de resolved).
@@ -22,31 +17,20 @@
 #
 # Third-party actions are pinned by full commit SHA (supply-chain hardening);
 # the trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin.
-# [OPUS-4.8]
 name: supply-chain
 
 on:
   push:
     branches: [main]
-  pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
-    types: [opened, synchronize, reopened, ready_for_review]
-  # [FABLE-5] (2026-07-18 maintainer directive, merge-queue subset) merge_group
-  # REMOVED: cargo-deny/vet/SBOM already ran + gated on the PR head, re-run on every
-  # push-to-main above (post-merge detection), and dependency-monitoring.yml's weekly
-  # cron re-audits the unchanged graph for advisories disclosed between PRs. The
-  # polling `ci-summary / gate` never waits on a check that was never scheduled
-  # (bench.yml sq-6vshe.6 rationale; the old "would wait ... and time out" comment
-  # was stale pre-polling doctrine). The Decide-rust_changed merge_group branch
-  # below is now dead code on a live fail-safe path — kept for a cheap revert.
+  schedule:
+    - cron: "11 5 * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: supply-chain-${{ github.workflow }}-${{ github.ref }}
+  group: supply-chain-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -55,92 +39,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # dorny/paths-filter lists the PR's changed files via the API.
-      pull-requests: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # ---- former job: detect rust changes (supply-chain) ----
-      # [OPUS-4.8] merge-throughput: path-filtered gate (same pattern as ci.yml's
-      # `changes`). cargo-deny / cargo-vet / the SBOM artifact all read the resolved
-      # DEPENDENCY GRAPH (Cargo.lock / Cargo.toml) and the source tree — a doc-only PR
-      # changes none of that, so the result is identical and those step-groups can skip
-      # (a skipped STEP, like the formerly skipped JOBS, is non-failing to the required
-      # ci-summary gate). The daily dependency-monitoring.yml watchdog remains the
-      # defence-in-depth for advisories disclosed BETWEEN PRs on an unchanged graph.
-      # SAFE-BY-DEFAULT: rust_changed is forced 'true' on every event except
-      # `pull_request` and `merge_group`, so the canonical push/manual supply-chain runs
-      # ALWAYS execute the full set. The VEX/OpenSSF/js-sbom/SBOM-assertion step-groups
-      # are deliberately NOT gated (they validate checked-in evidence a doc/config PR
-      # can touch without changing Rust, and ran unconditionally before).
-      #
-      # [OPUS-4.8] MERGE-GROUP (path-aware CI audit, sq path-aware CI): GitHub ignores
-      # `paths`/dorny-filter semantics for merge_group, so this gate previously forced
-      # rust_changed=true on EVERY enqueue — installing cargo-deny/vet/cyclonedx + running
-      # the full workspace deny/vet/SBOM on every merge, even for an orchestration/docs-only
-      # batch (the maintainer's merge-queue-heaviness complaint). The deny/vet/SBOM output is
-      # a pure function of the resolved dependency graph + the Rust source tree; a batch that
-      # touches none of the `rust` path set below cannot change it — so we now diff the queued
-      # batch's base_sha..head_sha against the SAME `rust` path set the PR filter uses and skip
-      # the heavy rust step-groups when nothing matched (fail-safe: any diff error → full run).
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: filter
-        if: github.event_name == 'pull_request'
-        with:
-          filters: |
-            rust:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - 'Cargo.lock'
-              - 'rust-toolchain*'
-              - 'deny.toml'
-              - 'supply-chain/**'
-              - '.github/workflows/supply-chain.yml'
-      - name: Decide rust_changed (safe-by-default off the PR path)
-        id: changes
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          set -euo pipefail
-          if [ "${EVENT_NAME}" = "pull_request" ]; then
-            echo "rust_changed=${{ steps.filter.outputs.rust }}" >> "$GITHUB_OUTPUT"
-            echo "pull_request -> paths-filter says rust=${{ steps.filter.outputs.rust }}"
-          elif [ "${EVENT_NAME}" = "merge_group" ]; then
-            # Diff the queued batch; fail-safe to the full run on any resolution error.
-            rust=true
-            ok=true
-            git fetch --no-tags --quiet origin "${MG_BASE_SHA}" "${MG_HEAD_SHA}" 2>/dev/null \
-              || git fetch --no-tags --quiet origin "${MG_BASE_SHA}" 2>/dev/null \
-              || ok=false
-            git cat-file -e "${MG_BASE_SHA}^{commit}" 2>/dev/null || ok=false
-            git cat-file -e "${MG_HEAD_SHA}^{commit}" 2>/dev/null || ok=false
-            if [ "${ok}" = "true" ]; then
-              changed="$(git diff --name-only "${MG_BASE_SHA}" "${MG_HEAD_SHA}")"
-              echo "Changed files in queued batch (${MG_BASE_SHA}..${MG_HEAD_SHA}):"
-              printf '%s\n' "${changed}"
-              # SAME `rust` path set as the pull_request dorny filter above (kept in sync by
-              # scripts/tests/test_ci_select_wiring.py::TestSupplyChainMergeGroupGate).
-              if printf '%s\n' "${changed}" | grep -Eq \
-                '(\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|(^|/)rust-toolchain([^/]*)$|^deny\.toml$|^supply-chain/|^\.github/workflows/supply-chain\.yml$)'; then
-                rust=true
-              else
-                rust=false
-              fi
-            else
-              echo "::warning::could not resolve merge_group base/head SHAs for the diff — running the full supply-chain gate (fail-safe)."
-              rust=true
-            fi
-            echo "rust_changed=${rust}" >> "$GITHUB_OUTPUT"
-            echo "merge_group -> rust_changed=${rust}"
-          else
-            echo "rust_changed=true" >> "$GITHUB_OUTPUT"
-            echo "event=${EVENT_NAME} -> forcing rust_changed=true (full supply-chain)"
-          fi
-
       # ---- former job: VEX ↔ deny.toml sync (GS-5) — GATING ----
-      # [OPUS-4.8] sq-toze.29 (GS-5): the published VEX (supply-chain/vex.cdx.json) and
+      # sq-toze.29 (GS-5): the published VEX (supply-chain/vex.cdx.json) and
       # the ACTUAL cargo-deny gate (deny.toml [advisories].ignore) name the same set of
       # tolerated advisories; they were kept in step by a "KEEP THIS IN SYNC" comment +
       # manual review. This gate makes the invariant CI-enforced: it fails if the
@@ -156,7 +59,7 @@ jobs:
         run: python3 scripts/check-vex-deny-drift.py
 
       # ---- former job: OpenSSF Best-Practices self-cert evidence (GX-4) — GATING ----
-      # [OPUS-4.8] sq-toze.5 (GX-4): the machine-readable badge self-certification
+      # sq-toze.5 (GX-4): the machine-readable badge self-certification
       # (compliance/openssf/best-practices-self-cert.json) is the import-ready, structured
       # form of the drafted bestpractices.dev answers. This gate keeps it HONEST at PR
       # time: every cited evidence path must resolve to a real repo artifact, every
@@ -174,7 +77,7 @@ jobs:
         run: python3 scripts/check-bestpractices-evidence.py
 
       # ---- Dependabot ecosystem coverage (sq-bqjv) — GATING ----
-      # [SONNET-4.6] A Dependabot entry aimed at a directory with no resolvable
+      # A Dependabot entry aimed at a directory with no resolvable
       # manifest/lock does NOT error — it just yields no PRs, which looks exactly like
       # "no updates available". That silence hid a real hole: the npm entry pointed at
       # the workspace MEMBER `/js` (whose lock is gitignored; only the repo-root lock is
@@ -191,7 +94,7 @@ jobs:
         run: python3 scripts/tests/test_dependabot_coverage.py
 
       # ---- npm advisory-disposition record vs the live lock (#3767) — GATING ----
-      # [OPUS-5] Dependabot keeps concluding `security_update_not_possible` on the npm
+      # Dependabot keeps concluding `security_update_not_possible` on the npm
       # graph: a patched `brace-expansion` / `postcss` exists, but the reachable update
       # path cannot land it, so no PR is opened and the alert stays open. The honest
       # response is NOT a `dependabot.yml` ignore (that would suppress the future patch
@@ -213,7 +116,7 @@ jobs:
         run: python3 scripts/check-npm-advisory-record.py
 
       # ---- JS/npm CycloneDX SBOMs (published WASM + shared browser clients) ----
-      # [OPUS-4.8] sq-toze.27 / [GPT-5.6] sq-epbw4: SBOM both `@jeswr/sparq` and the
+      # sq-toze.27 / sq-epbw4: SBOM both `@sparq-org/sparq` and the
       # `@sparq/client` code bundled into the site/GUI artifacts. Each gets a strict runtime
       # tree and a full build tree, schema-validated as CycloneDX 1.5 and uploaded together.
       # The generator derives transient member locks from the committed root lock without
@@ -232,7 +135,7 @@ jobs:
           if-no-files-found: error
 
       # ---- shared Rust setup (deny + vet + cyclonedx in one install-action shot) ----
-      # [OPUS-4.8] (sq-qmth) Run cargo-deny on the HOST stable toolchain, NOT the
+      # (sq-qmth) Run cargo-deny on the HOST stable toolchain, NOT the
       # EmbarkStudios Docker action. That action runs inside a container whose bundled
       # cargo is too old (1.83) to parse the vendored `spargebra` (it requires the
       # `edition2024` cargo feature, stabilized in 1.85), so `cargo metadata` — which
@@ -240,7 +143,7 @@ jobs:
       # (>=1.85) parses it fine; `cargo deny check` then passes (verified locally).
       # The vendored spargebra path source is allowlisted in deny.toml.
       #
-      # [OPUS-4.8] PIN the cargo-vet version. The committed supply-chain/imports.lock
+      # PIN the cargo-vet version. The committed supply-chain/imports.lock
       # contains a `trusted-publisher = "github:..."` publisher entry (crates.io Trusted
       # Publishing), whose parsing was ONLY added in cargo-vet 0.10.2 (CHANGELOG #671,
       # 2026-01-12). An UNPINNED `tool: cargo-vet` resolves to whatever the installed
@@ -252,15 +155,8 @@ jobs:
       # Pinning to >= 0.10.2 makes the version independent of the install-action default so
       # the GATING parse is reproducible. Bump this in lock-step with any new imports.lock
       # schema feature. (bead sq-miwt)
-      # [OPUS-4.8] NOTE: the toolchain + cargo-tool install stay UNCONDITIONAL on purpose —
-      # the SBOM self-tests + `Generate SBOM` step-group below run `cargo cyclonedx`
-      # UNCONDITIONALLY (the always-on SBOM cadence, sq-6vshe.20), so gating the install on
-      # rust_changed would break them on the merge_group/doc-only skip path. The dominant
-      # merge-queue cost this audit removes is the cargo-deny + cargo-vet check step-groups
-      # (already rust_changed-gated below); the SBOM generation is a pure function of
-      # Cargo.lock and its unconditional regeneration is a deliberate design choice.
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -274,11 +170,10 @@ jobs:
           tool: cargo-deny,cargo-vet@0.10.2,cargo-cyclonedx
 
       # ---- former job: cargo-deny (advisories + bans + sources + licenses) ----
-      # [OPUS-4.8] GATING: integrity checks that don't read the RustSec advisory DB.
+      # GATING: integrity checks that don't read the RustSec advisory DB.
       - name: cargo-deny check (bans + sources + licenses) — GATING
-        if: steps.changes.outputs.rust_changed == 'true'
         run: cargo deny check bans sources licenses
-      # [OPUS-4.8] sq-toze.2 (GX-1): advisories is GATING again. The CVSS-4.0 parse
+      # sq-toze.2 (GX-1): advisories is GATING again. The CVSS-4.0 parse
       # blocker (sq-q8de) that forced `continue-on-error` is RESOLVED — cargo-deny >= 0.19
       # parses CVSS v4.0 advisories, so the freshly-cloned RustSec DB loads and the
       # per-advisory `ignore` rules apply as intended. The deny.toml policy is fail-closed:
@@ -290,15 +185,14 @@ jobs:
       # This is the PR-time gate; the daily watchdog
       # (dependency-monitoring.yml) remains as defence-in-depth for advisories disclosed
       # between PRs.
-      # [OPUS-5] The preferred remediation is REMOVING the dependency, not adding an ignore —
+      # The preferred remediation is REMOVING the dependency, not adding an ignore —
       # sq-5ah3p retired RUSTSEC-2025-0134 (`rustls-pemfile`) that way, migrating the mTLS PEM
       # parse onto `rustls-pki-types`' `PemObject`.
       - name: cargo-deny check (advisories) — GATING
-        if: steps.changes.outputs.rust_changed == 'true'
         run: cargo deny check advisories
 
       # ---- former job: cargo-vet (per-dependency audit attestations) — GATING ----
-      # [OPUS-4.8] sq-toze.8 (GX-7): GATING. `cargo vet` verifies every crate in the tree
+      # sq-toze.8 (GX-7): GATING. `cargo vet` verifies every crate in the tree
       # is either (a) audited by us, (b) covered by an imported trusted audit set (Mozilla,
       # Google, Bytecode Alliance, ISRG, Embark, Zcash — see supply-chain/config.toml
       # [imports.*]), or (c) carries an explicit `[[exemptions.*]]` entry in
@@ -308,24 +202,20 @@ jobs:
       # unaudited supply cannot enter silently. Run `cargo vet` locally to reproduce;
       # `cargo vet suggest` lists what to audit to shrink the exemption set.
       #
-      # [OPUS-4.8] `--locked` pins evaluation to the committed Cargo.lock. `--frozen`
+      # `--locked` pins evaluation to the committed Cargo.lock. `--frozen`
       # (requires the cargo cache populated, hence the `cargo fetch --locked` first) keeps
       # the verification deterministic — it does NOT re-resolve the tree — while still
       # FAILING on a genuinely new/unaudited crate (the committed imports.lock won't cover
       # it). Imports are refreshed deliberately by re-running `cargo vet` (without
       # `--frozen`) when updating the checked-in supply-chain/ evidence, not in the gate.
       - name: Populate cargo cache (for --frozen vet)
-        if: steps.changes.outputs.rust_changed == 'true'
         run: cargo fetch --locked
       - name: cargo-vet check — GATING
-        if: steps.changes.outputs.rust_changed == 'true'
         run: cargo vet --locked --frozen
 
       # ---- former jobs: generate CycloneDX SBOM + purl/supplier assertions ----
-      # [FABLE-5] sq-6vshe.20: the SBOM is generated + normalized ONCE, unconditionally
-      # (the purl/supplier assertion jobs already regenerated it unconditionally on every
-      # PR — one generation now feeds both assertions AND the artifact upload, which keeps
-      # its former rust_changed cadence).
+      # sq-6vshe.20: the SBOM is generated + normalized ONCE; one generation feeds both
+      # assertions AND the artifact upload.
       #
       # ORDERING CONSTRAINT (learned on this PR's own first run): the three SBOM-check
       # self-test suites each run their OWN live `cargo cyclonedx` and DELETE every
@@ -340,7 +230,7 @@ jobs:
       - name: supplier-name check self-test
         run: python3 scripts/tests/test_sbom_supplier.py
       - name: Warm registry cache (retry transient crates.io fetch)
-        # [OPUS-4.8] sq-hxn7: `cargo cyclonedx` runs `cargo metadata`, which fetches the
+        # sq-hxn7: `cargo cyclonedx` runs `cargo metadata`, which fetches the
         # crates.io registry. That fetch is TRANSIENTLY flaky on hosted runners (observed
         # `curl ... [16] Error in the HTTP2 framing layer` -> `cargo metadata exited with
         # an error`, which failed this GATING lane on unrelated PRs #719/#734/#749).
@@ -361,10 +251,10 @@ jobs:
           done
       - name: Generate SBOM (CycloneDX 1.5 JSON, whole workspace)
         # --all emits one SBOM per workspace member + an aggregate; JSON format.
-        # [OPUS-4.8] sq-toze.28 (GS-4 / CDX-3): --spec-version 1.5 (cargo-cyclonedx
+        # sq-toze.28 (GS-4 / CDX-3): --spec-version 1.5 (cargo-cyclonedx
         # 0.5.9 defaults to 1.3) so the CI SBOM matches the published 1.5 SBOM/VEX;
         # the 1.5 metadata.lifecycles slot is populated by scripts/sbom-normalize.jq.
-        # [OPUS-4.8] sq-hxn7: wrapped in a bounded shell retry — cargo-cyclonedx's internal
+        # sq-hxn7: wrapped in a bounded shell retry — cargo-cyclonedx's internal
         # `cargo metadata` can still touch the network even with the cache warmed above, so
         # retry the transient HTTP2-framing crates.io flake here too (fail only if all
         # attempts fail). No new GitHub Action dependency (keeps code-scanning posture).
@@ -381,12 +271,12 @@ jobs:
             sleep 10
           done
       - name: Normalize SBOM (strip host-revealing absolute build paths)
-        # [OPUS-4.8] sq-toze.30 (GS-6 / F-6): cargo-cyclonedx stamps the absolute build dir
+        # sq-toze.30 (GS-6 / F-6): cargo-cyclonedx stamps the absolute build dir
         # into every workspace/path-dependency bom-ref + purl, which would leak the CI
         # runner's filesystem layout into this uploaded artifact. Rewrite each generated SBOM
         # in place through the same deterministic, idempotent jq transform release.yml uses
         # (scripts/sbom-normalize.jq), keeping the dependency graph internally consistent.
-        # [FABLE-5] sq-6vshe.20: `./sbom` (the JS/npm SBOMs generated by the step-group
+        # sq-6vshe.20: `./sbom` (the JS/npm SBOMs generated by the step-group
         # above, normalized by their own tool) is excluded so this covers exactly the file
         # set the former standalone job saw (crates/*.cdx.json + the committed VEX).
         run: |
@@ -400,10 +290,8 @@ jobs:
             fi
           done < <(find . -path './sbom' -prune -o -name '*.cdx.json' -print0)
       - name: Upload SBOM artifact
-        # Kept on the former `sbom` job's rust_changed cadence. The JS SBOMs (uploaded
-        # above as sbom-js-cyclonedx) are excluded to preserve this artifact's exact
+        # The JS SBOMs (uploaded above as sbom-js-cyclonedx) are excluded to preserve this artifact's exact
         # former contents.
-        if: steps.changes.outputs.rust_changed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-cyclonedx
@@ -413,7 +301,7 @@ jobs:
           if-no-files-found: error
 
       # ---- former job: SBOM purl-canonicality assertion (GS-6/GS-7) — GATING ----
-      # [OPUS-4.8] sq-tmyw: BACKSTOP for the GS-6/GS-7 normalizer. cargo-cyclonedx 0.5.9
+      # sq-tmyw: BACKSTOP for the GS-6/GS-7 normalizer. cargo-cyclonedx 0.5.9
       # decorates workspace/path purls with the runner's filesystem layout
       # (`?download_url=file://…`, `#src/…`); scripts/sbom-normalize.jq strips that so the
       # PUBLISHED SBOM carries only canonical `pkg:cargo/<name>@<version>` purls (sq-toze.30 +
@@ -450,7 +338,7 @@ jobs:
           python3 scripts/check-sbom-purl-canonical.py "${generated[@]}"
 
       # ---- former job: SBOM per-component supplier-name assertion (GS-1) — GATING ----
-      # [OPUS-4.8] sq-toze.26 (GS-1 / NTIA N1): BACKSTOP for the supplier-derivation in
+      # sq-toze.26 (GS-1 / NTIA N1): BACKSTOP for the supplier-derivation in
       # scripts/sbom-normalize.jq. cargo-cyclonedx 0.5.9 leaves the per-component
       # `supplier`/`publisher` slot empty, so the NTIA "Supplier Name" minimum element was
       # unpopulated. The normalizer now derives a supplier HONESTLY from each component's

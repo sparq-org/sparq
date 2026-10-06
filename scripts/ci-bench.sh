@@ -7,7 +7,7 @@
 #
 #   scripts/ci-bench.sh [scale_entities=200000] [out.json=bench-results.json]
 #
-# [OPUS-4.8] (sq-dzfu) CHEAP TIMING RE-MEASURE MODE for the perf-gate's best-of-N flake fix:
+# (sq-dzfu) CHEAP TIMING RE-MEASURE MODE for the perf-gate's best-of-N flake fix:
 #   scripts/ci-bench.sh --parse-only [out.json=bench-results.json]
 # emits ONLY the TIMING metric (parse_ns_per_byte) over the fixed corpus — NO wasm build, NO big-scale
 # corpus, NO well-known suites — so the perf-gate (scripts/perf-gate.py --remeasure-cmd) can re-measure
@@ -17,7 +17,7 @@
 # GitHub-hosted runners are small + noisy, so absolute numbers drift; the value is the cross-commit
 # TREND and large-regression alerting (the workflow sets a generous threshold + fail-on-alert=false).
 #
-# [OPUS-4.8] The load-bearing REGRESSION GATES are the DETERMINISTIC (runner-noise-immune) metrics —
+# The load-bearing REGRESSION GATES are the DETERMINISTIC (runner-noise-immune) metrics —
 # store/dict bytes-per-{triple,term} (memory layout), wasm_bundle_bytes, and two added on a FIXED
 # corpus: store_bytes_per_triple_small (a SECOND scale, catches per-triple-overhead regressions the
 # primary scale hides) and parse_ns_per_byte (parse cost on a fixed byte count; emitted as ns/byte =
@@ -25,11 +25,11 @@
 # trend-only on free runners.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# [OPUS-4.8] (sq-dzfu) --parse-only: cheap TIMING re-measure for the perf-gate best-of-N flake fix.
+# (sq-dzfu) --parse-only: cheap TIMING re-measure for the perf-gate best-of-N flake fix.
 # When present as the first arg, ONLY the parse_ns_per_byte metric is (re-)measured (see measure_parse
 # below) and written out — no big corpus, no wasm build, no well-known suites.
 #
-# [FABLE-5] (sq-6vshe.6 heavy-lane placement, MAINTAINER-DIRECTED extension) --deterministic-only:
+# (sq-6vshe.6 heavy-lane placement, MAINTAINER-DIRECTED extension) --deterministic-only:
 #   scripts/ci-bench.sh --deterministic-only [scale=200000] [out.json=bench-results.json]
 # emits ONLY the DETERMINISTIC (runner-noise-immune) hard-gated byte-count / memory-layout metrics —
 # store_bytes_per_triple, comp_store_bytes_per_triple, store_bytes_per_triple_small, dict_bytes_per_term,
@@ -40,7 +40,7 @@ cd "$(dirname "$0")/.."
 # bench gate (bench.yml): the deterministic byte-count RATCHET (scripts/perf-gate.py) still hard-gates
 # every PR against bench/perf-baseline.json — a pure function of the code, seconds not minutes, immune to
 # shared-runner noise — while the noisy latency suites are RELOCATED to the EC2 full-suite lane
-# (bench-ec2.yml; [OPUS-5] #3784: MANUAL DISPATCH ONLY, cron retired with the descoped AWS OIDC role)
+# (bench-ec2.yml; #3784: MANUAL DISPATCH ONLY, cron retired with the descoped AWS OIDC role)
 # so they no longer drag the merge queue or flap the gate. The stanzas below are the EXACT same load/wasm
 # commands the full run uses (single source of truth), just without the timing/suite blocks.
 PARSE_ONLY=0
@@ -62,18 +62,18 @@ fi
 CLI=target/release/sparq-cli
 GEN=target/release/sparq-bench
 Q=bench/qlever-synthetic/queries
-# [OPUS-4.8] Operator-coverage suite (one query per SPARQL operator family). Wall-clock /
+# Operator-coverage suite (one query per SPARQL operator family). Wall-clock /
 # trend-only like the query latencies above — NOT a hard perf-gate (only the byte/parse
 # metrics in scripts/perf-gate.py are gated). Registry: bench/benchmarks.toml (operator-coverage).
 OPQ=bench/operators/queries
-# [OPUS-4.8] SP2Bench (well-known suite) — per-commit subset + fixed-corpus generator.
+# SP2Bench (well-known suite) — per-commit subset + fixed-corpus generator.
 # Trend-only latency like the operator suite, PLUS a hard expected-rows correctness diff.
 # Registry: bench/benchmarks.toml (sp2b); details: bench/sp2b/README.md. (sq-0jp)
 SP2B_GEN=bench/sp2b/gen.sh
 SP2B_Q=bench/sp2b/queries
 SP2B_EXP=bench/sp2b/expected-rows.tsv
 SP2B_TRIPLES="${SP2B_TRIPLES:-250000}"
-# [OPUS-4.8] DBPSB/FEASIBLE (well-known suite) — per-commit subset over a pinned, fetched +
+# DBPSB/FEASIBLE (well-known suite) — per-commit subset over a pinned, fetched +
 # cached DBpedia Databus slice (NO generator; fetch.sh verifies sha256 + emits a deterministic
 # 750k-triple N-Triples cut). Trend-only latency like sp2b, PLUS a hard expected-rows
 # correctness diff. Registry: bench/benchmarks.toml (dbpsb); details: bench/dbpsb/README.md.
@@ -81,7 +81,7 @@ DBPSB_FETCH=bench/dbpsb/fetch.sh
 DBPSB_Q=bench/dbpsb/queries
 DBPSB_EXP=bench/dbpsb/expected-rows.tsv
 DBPSB_TRIPLES="${DBPSB_TRIPLES:-750000}"
-# [OPUS-4.8] WatDiv (Waterloo SPARQL Diversity, sq-13i) — per-commit subset over the FIXED SF=1
+# WatDiv (Waterloo SPARQL Diversity, sq-13i) — per-commit subset over the FIXED SF=1
 # corpus from the real Waterloo generator (gen.sh; g++ + Boost). Trend-only latency like sp2b,
 # PLUS a hard expected-rows correctness diff (count mode). Registry: bench/benchmarks.toml (watdiv);
 # details: bench/watdiv/README.md. Mirrors the sp2b inline pattern.
@@ -89,7 +89,7 @@ WATDIV_GEN=bench/watdiv/gen.sh
 WATDIV_Q=bench/watdiv/queries
 WATDIV_EXP=bench/watdiv/expected-rows.tsv
 WATDIV_SF="${WATDIV_SF:-1}"
-# [OPUS-4.8] BSBM (Berlin SPARQL Benchmark, Explore mix) — per-commit subset over the FIXED -pc 300
+# BSBM (Berlin SPARQL Benchmark, Explore mix) — per-commit subset over the FIXED -pc 300
 # corpus from the prebuilt bsbmtools distribution (gen.sh; JRE + unzip). The Explore mix includes a
 # CONSTRUCT (query12) + a DESCRIBE (query09), so the expected-rows diff runs against MATERIALIZE
 # mode (graph-valued forms report produced-triple counts). Trend-only latency + hard correctness
@@ -98,14 +98,14 @@ BSBM_GEN=bench/bsbm/gen.sh
 BSBM_Q=bench/bsbm/queries
 BSBM_EXP=bench/bsbm/expected-rows.tsv
 BSBM_PC="${BSBM_PC:-300}"
-# [OPUS-4.8] LUBM (Lehigh University Benchmark) — the REASONING suite. Its run.sh is fully
+# LUBM (Lehigh University Benchmark) — the REASONING suite. Its run.sh is fully
 # self-contained: it builds the LUBM(1) corpus (gen.sh; javac + rapper), materializes the OWL-RL
 # closure with `sparq-cli reason`, runs BOTH the extensional + entailed tiers in count mode, and
 # asserts every solution count vs expected-rows.tsv internally (exit 1 on mismatch). So the hook
 # below just invokes run.sh (the self-asserting path) and harvests its count-mode TSV lines into
 # `lubm_<query>_count_us`. Registry: bench/benchmarks.toml (lubm); details: bench/lubm/README.md.
 LUBM_RUN=bench/lubm/run.sh
-# [OPUS-4.8] Deep Taxonomy (DeepTaxonomy, sq-1hgz; parent sq-i0nm "design D") — the rule-heavy N3
+# Deep Taxonomy (DeepTaxonomy, sq-1hgz; parent sq-i0nm "design D") — the rule-heavy N3
 # REASONING suite. Like LUBM, its run.sh is the self-asserting entry point: it reuses the existing
 # generator (bench/inference/gen_deeptaxonomy.py via bench/deep-taxonomy/gen.sh), materializes the
 # N3 forward closure per depth tier with `sparq-cli reason … n3`, runs query.rq over the closure,
@@ -115,7 +115,7 @@ LUBM_RUN=bench/lubm/run.sh
 # (deep-taxonomy); details: bench/deep-taxonomy/README.md. (sq-1hgz)
 DEEPTAX_RUN=bench/deep-taxonomy/run.sh
 DEEPTAX_DEPTHS="${DEEPTAX_DEPTHS:-1000 10000}"
-# [OPUS-4.8] OWL sameAs equality micro-suite (sq-msl6, design A3 + A5) — the EQUALITY reasoning
+# OWL sameAs equality micro-suite (sq-msl6, design A3 + A5) — the EQUALITY reasoning
 # suite (the owl:sameAs analogue of Deep Taxonomy's subclass transitivity). Like LUBM/deep-taxonomy
 # its run.sh is the self-asserting entry point: it builds K owl:sameAs classes of N members per tier
 # (bench/owl-sameas/gen_sameas.py via bench/owl-sameas/gen.sh — pure Python, NO javac/rapper),
@@ -126,7 +126,7 @@ DEEPTAX_DEPTHS="${DEEPTAX_DEPTHS:-1000 10000}"
 # details: bench/owl-sameas/README.md. (sq-msl6)
 SAMEAS_RUN=bench/owl-sameas/run.sh
 SAMEAS_TIERS="${SAMEAS_TIERS:-8 32}"
-# [OPUS-4.8] SHACL VALIDATION suite (sq-7iai, design §3.1) — the cleanest competitor surface.
+# SHACL VALIDATION suite (sq-7iai, design §3.1) — the cleanest competitor surface.
 # Reuses the LUBM(1) ABox as its data substrate (so it shares the javac/rapper guard) x the 5
 # committed shape graphs in bench/shacl/shapes/. Like LUBM, run.sh is the self-asserting entry
 # point: it validates with examples/bench_shacl, asserts each workload's violations/conforms/
@@ -135,7 +135,7 @@ SAMEAS_TIERS="${SAMEAS_TIERS:-8 32}"
 # `shacl_<workload>_validate_us` (trend-only, NOT in scripts/perf-gate.py). Registry:
 # bench/benchmarks.toml (shacl-validate-bench); details: bench/shacl/README.md.
 SHACL_RUN=bench/shacl/run.sh
-# [OPUS-4.8] FULL-TEXT-SEARCH suite (sq-ustq, design §3.4). Exercises sparq-text (BM25 inverted
+# FULL-TEXT-SEARCH suite (sq-ustq, design §3.4). Exercises sparq-text (BM25 inverted
 # index + text: magic predicates). Unlike LUBM/SHACL the corpus is SYNTHETIC + generated
 # in-process by examples/bench_text from a deterministic seed — NO external generator (no
 # rapper/javac). run.sh is the self-asserting entry point: it runs bench_text on the pinned
@@ -145,7 +145,7 @@ SHACL_RUN=bench/shacl/run.sh
 # (text_*_us/text_build_s, trend-only, NOT in scripts/perf-gate.py). The integer bytes-per-doc
 # additionally gets a mode:auto ratchet in bench/perf-baseline.json (fts_bytes_per_doc).
 FTS_RUN=bench/fts/run.sh
-# [OPUS-4.8] VECTOR / ANN suite (sq-v02y, design §3.3). Exercises sparq-vectors (mmap'd .spqv
+# VECTOR / ANN suite (sq-v02y, design §3.3). Exercises sparq-vectors (mmap'd .spqv
 # vector store + HNSW / Vamana / PQ ANN). Like FTS the corpus is SYNTHETIC + generated in-process
 # by examples/bench_vectors from a deterministic seed — NO external generator. run.sh is the
 # self-asserting entry point: it runs bench_vectors on the pinned corpus, asserts each workload's
@@ -157,7 +157,7 @@ FTS_RUN=bench/fts/run.sh
 # scripts/perf-gate.py). The deterministic diskann/pq deficits additionally get a mode:auto ratchet
 # in bench/perf-baseline.json (vectors_diskann_recall_at10 / vectors_pq_recall_at10).
 VECTOR_RUN=bench/vector/run.sh
-# [OPUS-4.8] GeoSPARQL suite (sq-tf8n, design §3.5). A FIXED ~100k-point CRS84 corpus
+# GeoSPARQL suite (sq-tf8n, design §3.5). A FIXED ~100k-point CRS84 corpus
 # (bench/geo/gen.sh -> bench_geo gen; pure Rust, no javac/rapper/Docker) x within/nearest/
 # geof: workloads. Like LUBM/SHACL, run.sh is the self-asserting entry point: it asserts each
 # workload's result-set SIZE / compliance pass COUNT vs expected.tsv (counts-not-coords, since
@@ -166,7 +166,7 @@ VECTOR_RUN=bench/vector/run.sh
 # DEFICIT geo_compliance_deficit (mode:auto in bench/perf-baseline.json). Registry:
 # bench/benchmarks.toml (geo-bench); details: bench/geo/README.md.
 GEO_RUN=bench/geo/run.sh
-# [OPUS-4.8] RSP-QL streaming suite (sq-b1hn, design §3.6). sparq-rsp is a CLOCK-FREE library, so a
+# RSP-QL streaming suite (sq-b1hn, design §3.6). sparq-rsp is a CLOCK-FREE library, so a
 # fixed (triple,ts) replay is a pure function — the gate is a DETERMINISTIC per-window result-row
 # count (single-window tumbling/sliding/GROUP-BY x three EvalModes, encoding the 3-EvalMode
 # equivalence) + an SRBench correctness ORACLE (multi-window observation⋈metadata join). Like FTS
@@ -177,7 +177,7 @@ GEO_RUN=bench/geo/run.sh
 # scripts/perf-gate.py). NO competitor perf column — the RSP peers are wall-clock service engines
 # (apples-to-oranges). Registry: bench/benchmarks.toml (rsp-ql); details: bench/rsp/README.md.
 RSP_RUN=bench/rsp/run.sh
-# [OPUS-4.8] HDT load-and-decode suite (sq-lrp9, design §3.7). Like FTS/RSP the runner is a crate
+# HDT load-and-decode suite (sq-lrp9, design §3.7). Like FTS/RSP the runner is a crate
 # EXAMPLE (bench_oracle) that only needs `cargo` (sparq-hdt is isolated, not a sparq-cli dependency,
 # and is behind the `hdt` cargo feature). run.sh is the self-asserting entry point: it loads the
 # VENDORED snikmeta.hdt, decodes it to a native sparq Graph, resolves triple patterns, and asserts
@@ -187,7 +187,7 @@ RSP_RUN=bench/rsp/run.sh
 # (a contention-robust RATIO) are trend-only (NOT in scripts/perf-gate.py). Registry:
 # bench/benchmarks.toml (hdt-suite); details: bench/hdt/README.md.
 HDT_RUN=bench/hdt/run.sh
-# [OPUS-4.8] Solid WAC/ACP per-commit hook (sq-k0km). Like RSP/HDT the runner is a crate
+# Solid WAC/ACP per-commit hook (sq-k0km). Like RSP/HDT the runner is a crate
 # EXAMPLE (sparq-solid's `bench`) that only needs `cargo`. run.sh is the self-asserting entry
 # point: it materialises the in-crate WAC + ACP fixtures and asserts every DETERMINISTIC
 # STRUCTURAL count (named-graph/quad/auth-triple/authorized-row counts — a pure function of the
@@ -196,7 +196,7 @@ HDT_RUN=bench/hdt/run.sh
 # control family row (familyOf: `solid_*` -> solid). Registry: bench/benchmarks.toml
 # (solid-wac-bench); details: bench/solid/README.md.
 SOLID_RUN=bench/solid/run.sh
-# [OPUS-4.8] sparq-nlq OFFLINE NL->SPARQL per-commit hook (sq-k0km). Crate-example runner
+# sparq-nlq OFFLINE NL->SPARQL per-commit hook (sq-k0km). Crate-example runner
 # (sparq-nlq's `bench`), cargo-only, FULLY OFFLINE (no network, no `live` feature). run.sh pins
 # N and asserts the DETERMINISTIC counts (synthetic triples / grounded-prompt chars / ask rows /
 # repair rounds — a pure function of N + the synthetic schema) vs bench/nlq/expected.tsv (exit 1
@@ -218,7 +218,7 @@ print(json.dumps([{"name": n, "unit": u, "value": float(v)} for n, u, v in rows]
 PY
 }
 
-# [FABLE-5] (sq-3ul2n.2) assert_wasm_simd128 — prove the root-invoked wasm32 gate build actually
+# (sq-3ul2n.2) assert_wasm_simd128 — prove the root-invoked wasm32 gate build actually
 # carries +simd128. `+simd128` lives in the WORKSPACE .cargo/config.toml (not a crate-level file
 # cargo discovers by CWD), so every wasm32 build — this gate build AND the shipped wasm-pack build —
 # gets it identically. The `release-wasm` profile's `strip = "symbols"` REMOVES the tiny
@@ -244,7 +244,7 @@ assert_wasm_simd128() {
   fi
 }
 
-# [OPUS-4.8] (sq-dzfu) measure_parse — the TIMING metric (parse_ns_per_byte) over the FIXED corpus.
+# (sq-dzfu) measure_parse — the TIMING metric (parse_ns_per_byte) over the FIXED corpus.
 # Factored out so BOTH the full run and the cheap `--parse-only` re-measure path use the IDENTICAL
 # measurement (min-of-5 parse timing on the deterministic byte count). Leaves $TMP/fe populated so the
 # full run can still extract store_bytes_per_triple_small from the same load summary afterwards.
@@ -270,7 +270,7 @@ measure_parse() {
   fi
 }
 
-# [OPUS-4.8] (sq-dzfu) --parse-only: measure ONLY the TIMING metric and emit it, then exit. This is the
+# (sq-dzfu) --parse-only: measure ONLY the TIMING metric and emit it, then exit. This is the
 # cheap re-measure path the perf-gate shells out to (best-of-N) — it deliberately skips the big corpus,
 # the wasm build, and every well-known suite so a re-measure of the noisy parse metric is fast.
 if [ "$PARSE_ONLY" = "1" ]; then
@@ -280,7 +280,7 @@ if [ "$PARSE_ONLY" = "1" ]; then
   exit 0
 fi
 
-# [FABLE-5] (sq-6vshe.6, MAINTAINER-DIRECTED) --deterministic-only: emit ONLY the DETERMINISTIC
+# (sq-6vshe.6, MAINTAINER-DIRECTED) --deterministic-only: emit ONLY the DETERMINISTIC
 # byte-count / memory-layout metrics the perf-gate HARD-gates, then exit. This is the FAST per-PR /
 # merge_group form (bench.yml): NO timing loops, NO well-known / crate-example suites. Every command
 # here is byte-for-byte the same one the full run below uses (one load summary for store/dict bytes,
@@ -312,7 +312,7 @@ if [ "$DET_ONLY" = "1" ]; then
       [ -n "${DET_WASM:-}" ] && add wasm_bundle_bytes bytes "$(wc -c < "$DET_WASM" | tr -d ' ')"
     fi
   fi
-  # [FABLE-5] (sq-3ul2n.2) assert the gate build carries +simd128 — AFTER wasm_bundle_bytes read the
+  # (sq-3ul2n.2) assert the gate build carries +simd128 — AFTER wasm_bundle_bytes read the
   # stripped artifact (this clobbers it with an unstripped probe; nothing below reuses it).
   assert_wasm_simd128
   emit_json > "$OUT"
@@ -339,7 +339,7 @@ btriple=$(grep -oE '\([0-9]+ B/triple\)' "$TMP/e" | head -1 | grep -oE '[0-9]+' 
 bterm=$(grep -oE '[0-9]+ B/term' "$TMP/e" | head -1 | grep -oE '[0-9]+' | head -1)
 [ -n "${bterm:-}" ] && add dict_bytes_per_term bytes "$bterm"
 
-# [SONNET-4.6] (sq-7d3dj.32.2.5) comp_store_bytes_per_triple — DETERMINISTIC compressed-profile
+# (sq-7d3dj.32.2.5) comp_store_bytes_per_triple — DETERMINISTIC compressed-profile
 # B/triple ratchet. Mirrors the raw store_bytes_per_triple stanza exactly, differing only in that
 # SPARQ_STORE_PROFILE=compressed instructs load_quiet to call into_compressed() after the raw
 # index-build, so the stderr load summary line reports the compressed store's heap_bytes()/len().
@@ -350,7 +350,7 @@ SPARQ_STORE_PROFILE=compressed "$CLI" bench "$TMP/data.nt" ntriples "$Q" 1 count
 cbtriple=$(grep -oE '\([0-9]+ B/triple\)' "$TMP/e_comp" | head -1 | grep -oE '[0-9]+' | head -1)
 [ -n "${cbtriple:-}" ] && add comp_store_bytes_per_triple bytes "$cbtriple"
 
-# [OPUS-4.8] Two more DETERMINISTIC (runner-noise-immune) regression GATES on a FIXED corpus.
+# Two more DETERMINISTIC (runner-noise-immune) regression GATES on a FIXED corpus.
 # The bytes-per-triple figures vary with scale (fixed per-graph overhead amortises differently),
 # so a SECOND, fixed scale catches per-triple-overhead regressions that the primary scale hides;
 # and a parse-cost metric on a FIXED byte count tracks raw ingest throughput. The corpus comes
@@ -375,7 +375,7 @@ for mode in count materialize json; do
   done < "$TMP/o"
 done
 
-# [OPUS-4.8] operator-coverage latencies — one *.rq per SPARQL operator family
+# operator-coverage latencies — one *.rq per SPARQL operator family
 # (BGP/star/chain/triangle, UNION, OPTIONAL/!bound, MINUS, FILTER {num,string,IN,EXISTS},
 # BIND, VALUES, aggregates+GROUP BY+HAVING, DISTINCT, ORDER BY+LIMIT/OFFSET, property paths
 # {+,*,?,seq,alt,inverse,negated-set}, subquery, ASK/CONSTRUCT/DESCRIBE). Same TSV runner +
@@ -393,7 +393,7 @@ if [ -d "$OPQ" ]; then
   done
 fi
 
-# [OPUS-4.8] SP2Bench per-commit subset (sq-0jp). Builds+caches the real Freiburg sp2b_gen
+# SP2Bench per-commit subset (sq-0jp). Builds+caches the real Freiburg sp2b_gen
 # and generates a FIXED, deterministic 250k-triple DBLP-in-RDF corpus (Turtle), then runs the
 # 14 sub-second canonical queries (the 3 pathological ones — q05a/q06/q12a — are in
 # queries-heavy/ for the EC2/nightly tier). Emits `sp2b_<query>_<mode>_us` (trend-only, NOT in
@@ -428,7 +428,7 @@ if [ -x "$SP2B_GEN" ] && [ -d "$SP2B_Q" ]; then
   fi
 fi
 
-# [SONNET-4.6] EC2/nightly-only SP2Bench heavy queries and full reference scales.
+# EC2/nightly-only SP2Bench heavy queries and full reference scales.
 # The runner applies a timeout to each query and fails closed on result-size drift.
 if [ "${SP2B_EC2:-0}" = 1 ]; then
   bench/sp2b/run-ec2.sh > "$TMP/sp2b-ec2.tsv"
@@ -437,7 +437,7 @@ if [ "${SP2B_EC2:-0}" = 1 ]; then
   done < "$TMP/sp2b-ec2.tsv"
 fi
 
-# [OPUS-4.8] DBPSB/FEASIBLE per-commit subset. fetch.sh downloads ONE sha256-pinned DBpedia
+# DBPSB/FEASIBLE per-commit subset. fetch.sh downloads ONE sha256-pinned DBpedia
 # Databus slice (mappingbased-objects_lang=en 2019.09.01, CC-BY-SA — see bench/dbpsb/README.md)
 # and emits a FIXED, deterministic 750k-triple N-Triples cut, then runs the 13 sub-second
 # curated FEASIBLE/DBPSB queries (BGP/star/chain joins, OPTIONAL, UNION, FILTER, DISTINCT,
@@ -474,7 +474,7 @@ if [ -x "$DBPSB_FETCH" ] && [ -d "$DBPSB_Q" ]; then
   fi
 fi
 
-# [OPUS-4.8] WatDiv per-commit subset (sq-13i). Builds+caches the real Waterloo generator and
+# WatDiv per-commit subset (sq-13i). Builds+caches the real Waterloo generator and
 # emits a FIXED, deterministic SF=1 corpus (N-Triples), then runs the 16 sub-ms Basic-Testing
 # queries (Linear/Star/Snowflake/Complex; the 4 SF=1-empty ones live in queries-heavy/ for the
 # EC2/nightly tier). Emits `watdiv_sf<SF>_<query>_<mode>_us` (trend-only, NOT in
@@ -484,7 +484,7 @@ fi
 # whole block is skipped gracefully so ci-bench still emits valid JSON for everything else. (CI
 # keys actions/cache on /tmp/watdiv so the steady state does NO rebuild — see bench/watdiv/README.md.)
 #
-# [OPUS-4.8] (sq-1wrw) The metric stem carries the scale factor as an `_sf<SF>` token so the per-
+# (sq-1wrw) The metric stem carries the scale factor as an `_sf<SF>` token so the per-
 # commit tier (`watdiv_sf1_*`) and the EC2/nightly full-scale tier (e.g. `watdiv_sf1000_*`) form
 # DISTINCT github-action-benchmark series instead of colliding into one (gh-action-benchmark keys
 # series by metric NAME, so an SF-less stem makes the two tiers overwrite each other and a scaling
@@ -522,7 +522,7 @@ else
   echo "note: watdiv skipped (g++ not on PATH)" >&2
 fi
 
-# [OPUS-4.8] BSBM Explore-mix per-commit subset. gen.sh fetches+caches the prebuilt bsbmtools
+# BSBM Explore-mix per-commit subset. gen.sh fetches+caches the prebuilt bsbmtools
 # distribution (JRE-only; sha256-pinned zip) and emits a FIXED, deterministic -pc 300 corpus
 # (~116k N-Triples), then runs the 11 sub-ms Explore queries. The Explore mix includes a CONSTRUCT
 # (query12) + a DESCRIBE (query09), so the HARD expected-rows diff runs against MATERIALIZE mode
@@ -561,7 +561,7 @@ else
   echo "note: bsbm skipped (java/unzip not on PATH)" >&2
 fi
 
-# [OPUS-4.8] LUBM reasoning suite per-commit. Unlike watdiv/bsbm (inline sp2b-style), LUBM's
+# LUBM reasoning suite per-commit. Unlike watdiv/bsbm (inline sp2b-style), LUBM's
 # run.sh is the self-asserting entry point: it ensures the LUBM(1) corpus + Univ-Bench TBox
 # (gen.sh), materializes the OWL-RL closure with `sparq-cli reason`, runs the extensional tier on
 # the raw ABox + the entailed tier on the closure (count mode), and asserts EVERY count vs
@@ -588,7 +588,7 @@ else
   echo "note: lubm skipped (javac/rapper not on PATH)" >&2
 fi
 
-# [OPUS-4.8] Deep Taxonomy reasoning suite per-commit (sq-1hgz). Like the LUBM hook above, this
+# Deep Taxonomy reasoning suite per-commit (sq-1hgz). Like the LUBM hook above, this
 # suite's run.sh is the self-asserting entry point: it reuses bench/inference/gen_deeptaxonomy.py
 # (via gen.sh) to build the DT N3 corpus at each depth tier, materializes the N3 forward closure
 # with `sparq-cli reason … n3`, runs query.rq over the closure, and asserts EVERY closure
@@ -618,7 +618,7 @@ else
   echo "note: deep-taxonomy skipped (python3 not on PATH)" >&2
 fi
 
-# [OPUS-4.8] OWL sameAs equality micro-suite per-commit (sq-msl6, design A3 + A5). Exactly the
+# OWL sameAs equality micro-suite per-commit (sq-msl6, design A3 + A5). Exactly the
 # deep-taxonomy hook shape: run.sh is the self-asserting entry point — it reuses
 # bench/owl-sameas/gen_sameas.py (via gen.sh) to build K owl:sameAs equivalence classes of N members
 # per tier, materializes the OWL-RL closure with `sparq-cli reason … owl`, runs query.rq over the
@@ -649,7 +649,7 @@ else
   echo "note: owl-sameas skipped (python3 not on PATH)" >&2
 fi
 
-# [OPUS-4.8] SHACL validation suite per-commit (sq-7iai). Reuses the LUBM(1) ABox, so it shares
+# SHACL validation suite per-commit (sq-7iai). Reuses the LUBM(1) ABox, so it shares
 # the javac + rapper guard (gen.sh delegates to bench/lubm/gen.sh). run.sh is the self-asserting
 # entry point: it validates the ABox against the 5 committed shape graphs with examples/bench_shacl
 # and asserts each workload's violations/conforms/focus_nodes vs expected.tsv internally (exit 1 on
@@ -683,7 +683,7 @@ else
   echo "note: shacl skipped (javac/rapper not on PATH)" >&2
 fi
 
-# [OPUS-4.8] GeoSPARQL suite per-commit (sq-tf8n). Unlike SHACL/LUBM this suite needs NO
+# GeoSPARQL suite per-commit (sq-tf8n). Unlike SHACL/LUBM this suite needs NO
 # heavyweight toolchain — only cargo (the corpus is pure Rust via bench_geo gen). run.sh is the
 # self-asserting entry point: it ensures the fixed ~100k-point corpus (bench/geo/gen.sh), runs
 # bench_geo in `bench` mode, and asserts each workload's result-set SIZE / compliance pass COUNT
@@ -733,7 +733,7 @@ else
   echo "note: geo skipped (cargo not on PATH or $GEO_RUN missing)" >&2
 fi
 
-# [OPUS-4.8] FULL-TEXT-SEARCH suite per-commit (sq-ustq). The corpus is SYNTHETIC (generated
+# FULL-TEXT-SEARCH suite per-commit (sq-ustq). The corpus is SYNTHETIC (generated
 # in-process by examples/bench_text from a seed), so there is NO external-toolchain guard like
 # the LUBM/SHACL javac/rapper — bench_text only needs `cargo`, which is ALWAYS present (incl. on
 # PRs). The other suites avoid per-PR cost because their toolchains (javac/rapper/g++/JRE) are
@@ -788,7 +788,7 @@ else
   echo "note: fts skipped (cargo not on PATH or $FTS_RUN missing)" >&2
 fi
 
-# [OPUS-4.8] VECTOR / ANN per-commit hook (sq-v02y). Like FTS, bench_vectors only needs `cargo`
+# VECTOR / ANN per-commit hook (sq-v02y). Like FTS, bench_vectors only needs `cargo`
 # (sparq-vectors is the ISOLATED ANN crate, not a sparq-cli dependency), which is ALWAYS present —
 # so to match the main-only-toolchain skip the LUBM/SHACL hooks get for free (and keep the vector
 # index BUILD + corpus off per-PR CI), we PIN this hook to the MAIN tier: it runs on push-to-main
@@ -802,7 +802,7 @@ elif command -v cargo >/dev/null 2>&1 && [ -x "$VECTOR_RUN" ]; then
   # Always (re)build: rust-cache restores target/, so a file-exists check can run a STALE binary.
   # Let cargo's staleness detection decide (a no-op rebuild is cheap); do NOT swallow a real
   # compile failure (it must fail the gate, not silently skip the ANN recall check).
-  # [OPUS-4.8] sq-k9o2: --features approx-ann is REQUIRED here. The example links `VectorIndex`
+  # sq-k9o2: --features approx-ann is REQUIRED here. The example links `VectorIndex`
   # (the in-RAM HNSW backend, `#[cfg(feature = "approx-ann")]` in src/lib.rs) and its Cargo.toml
   # `[[example]]` block declares `required-features = ["approx-ann"]`. Naming the target WITHOUT
   # the feature is a hard `error: target bench_vectors requires the features: approx-ann` (exit
@@ -840,7 +840,7 @@ else
   echo "note: vector skipped (cargo not on PATH or $VECTOR_RUN missing)" >&2
 fi
 
-# [OPUS-4.8] RSP-QL streaming per-commit hook (sq-b1hn). Like FTS/vector the runner is a crate
+# RSP-QL streaming per-commit hook (sq-b1hn). Like FTS/vector the runner is a crate
 # EXAMPLE (rsp_oracle) that only needs `cargo`, so to match the main-only-toolchain skip the
 # LUBM/SHACL hooks get for free — and keep the example build off per-PR CI — we PIN this hook to the
 # MAIN/local tier: it runs on push-to-main (GITHUB_REF=refs/heads/main) and on a LOCAL run
@@ -881,7 +881,7 @@ else
   echo "note: rsp skipped (cargo not on PATH or $RSP_RUN missing)" >&2
 fi
 
-# [OPUS-4.8] HDT load-and-decode per-commit hook (sq-lrp9). Like RSP/FTS the runner is a crate
+# HDT load-and-decode per-commit hook (sq-lrp9). Like RSP/FTS the runner is a crate
 # EXAMPLE (bench_oracle) that only needs `cargo`, so — to match the main-only-toolchain skip the
 # LUBM/SHACL hooks get for free and keep the example build off per-PR CI — we PIN this hook to the
 # MAIN/local tier: it runs on push-to-main (GITHUB_REF=refs/heads/main) and on a LOCAL run
@@ -919,7 +919,7 @@ else
   echo "note: hdt skipped (cargo not on PATH or $HDT_RUN missing)" >&2
 fi
 
-# [OPUS-4.8] ZERO-KNOWLEDGE family (sq dashboard-data-feed) — feeds the dashboard's
+# ZERO-KNOWLEDGE family (sq dashboard-data-feed) — feeds the dashboard's
 # Zero-knowledge family (FAMILIES key `zk`, #253) so its rows show real data instead of
 # "not yet reported". EVERY ZK metric name leads with the token `zk` so the dashboard's
 # prefix routing (familyOf: name.split('_')[0]) buckets it into the ZK family. Three feeds,
@@ -983,7 +983,7 @@ else
   echo "note: zk criterion suites skipped (cargo not on PATH or $ZK_HARVEST missing)" >&2
 fi
 
-# [OPUS-4.8] Solid WAC/ACP per-commit hook (sq-k0km). Crate-example runner (sparq-solid's
+# Solid WAC/ACP per-commit hook (sq-k0km). Crate-example runner (sparq-solid's
 # `bench`), cargo-only — so, exactly like the RSP/HDT/ZK-criterion hooks, PINNED to the
 # MAIN/local tier (run on push-to-main or a LOCAL run where GITHUB_REF is unset; SKIPPED on
 # the PR tier) to keep the example build off per-PR CI. run.sh asserts every DETERMINISTIC
@@ -1017,7 +1017,7 @@ else
   echo "note: solid skipped (cargo not on PATH or $SOLID_RUN missing)" >&2
 fi
 
-# [OPUS-4.8] sparq-nlq OFFLINE NL->SPARQL per-commit hook (sq-k0km). Crate-example runner
+# sparq-nlq OFFLINE NL->SPARQL per-commit hook (sq-k0km). Crate-example runner
 # (sparq-nlq's `bench`), cargo-only + FULLY OFFLINE — so, like the solid/rsp/hdt hooks, PINNED
 # to the MAIN/local tier (SKIPPED on the PR tier). run.sh pins N and asserts every DETERMINISTIC
 # count vs expected.tsv internally (exit 1 on drift), failing the whole ci-bench run on a
@@ -1060,7 +1060,7 @@ infs=$("$CLI" reason "$TMP/inf.ttl" turtle rdfs 2>&1 | grep -oE 'in [0-9.]+s' | 
 
 # WASM bundle size (bytes, deterministic) — enforces the "zero wasm bundle impact" rule for
 # opt-in features: any feature that leaks into the browser bundle shows up here per commit.
-# [OPUS-4.8] sq-7d3dj.1: built with the `release-wasm` profile (NOT plain `release`) so the
+# sq-7d3dj.1: built with the `release-wasm` profile (NOT plain `release`) so the
 # GATE BUILDS UNDER THE SAME CARGO PROFILE AS THE SHIPPED BUNDLE — js `build:wasm{,:lean}`
 # builds the same profile via `wasm-pack --profile release-wasm` (size-optimised cold parse
 # crates + strip=symbols; hot engine crates stay opt-level 3). This ratchets the raw `cargo
@@ -1076,7 +1076,7 @@ if rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; 
   fi
 fi
 
-# [OPUS-4.8] (sq-7d3dj.14) wasm_opt_bundle_bytes — TREND-ONLY shipped size after wasm-opt -Oz.
+# (sq-7d3dj.14) wasm_opt_bundle_bytes — TREND-ONLY shipped size after wasm-opt -Oz.
 # The raw wasm_bundle_bytes above is the HARD-GATED deterministic ratchet (scripts/perf-gate.py,
 # 2% band). This companion series emits the post-wasm-opt -Oz size (the "shipped" artifact after
 # the same wasm-bindgen/wasm-opt pass that `wasm-pack build` runs for the published npm bundle).
@@ -1094,7 +1094,7 @@ if command -v wasm-opt >/dev/null 2>&1 && [ -n "${WASM_BIN:-}" ] && [ -f "${WASM
   fi
 fi
 
-# [FABLE-5] (sq-3ul2n.2) assert the gate build carries +simd128 — LAST, after wasm_bundle_bytes and
+# (sq-3ul2n.2) assert the gate build carries +simd128 — LAST, after wasm_bundle_bytes and
 # wasm_opt have read the stripped artifact ($WASM_BIN); this clobbers it with an unstripped probe.
 assert_wasm_simd128
 

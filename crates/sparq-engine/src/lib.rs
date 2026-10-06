@@ -268,6 +268,11 @@ use spargebra::{Query, SparqlParser};
 /// trips, evaluation stops and the query fails with
 /// `"query budget exceeded (timeout)"` / `"query budget exceeded (max-rows)"` /
 /// `"query budget exceeded (max-bytes)"` / `"query budget exceeded (cancelled)"`.
+///
+/// [GPT-6 Astra] A nested engine call from a callback uses its own budget. The
+/// outer budget resumes when that call returns (also after errors or unwind).
+/// Its deadline and cancellation are checked at the next outer poll; this does
+/// not interrupt arbitrary callback work or combine budgets across queries.
 #[derive(Debug, Clone, Default)]
 pub struct QueryBudget {
     /// Wall-clock deadline. Native only: `std::time::Instant` is unusable on
@@ -1033,18 +1038,19 @@ pub fn query_prepared_with_budget(
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
-        // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
-        // is satisfiable — the standard "unit row" encoding of a boolean result.
-        Query::Ask { pattern, .. } => Ok(QueryResult {
-            vars: Vec::new(),
-            rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
-        }),
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::eval_select(graph, pattern),
+            // ASK as a QueryResult: zero variables, and one (empty) row iff the pattern
+            // is satisfiable — the standard "unit row" encoding of a boolean result.
+            Query::Ask { pattern, .. } => Ok(QueryResult {
+                vars: Vec::new(),
+                rows: if exec::eval_ask(graph, pattern)? { vec![Vec::new()] } else { Vec::new() },
+            }),
+            _ => Err("only SELECT and ASK queries are supported".into()),
+        }
+    })
 }
 
 /// Executes an ASK query: `true` iff the pattern has at least one solution.
@@ -1070,12 +1076,13 @@ pub fn ask_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budget:
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
-        _ => Err("ask() requires an ASK query".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Ask { pattern, .. } => exec::eval_ask(graph, pattern),
+            _ => Err("ask() requires an ASK query".into()),
+        }
+    })
 }
 
 /// Executes a SELECT and serialises it directly to a SPARQL 1.1 JSON results string,
@@ -1106,14 +1113,15 @@ pub fn query_json_prepared_with_budget(
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
-        // The SPARQL 1.1 JSON results boolean form.
-        Query::Ask { pattern, .. } => Ok(format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)),
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::eval_select_json(graph, pattern),
+            // The SPARQL 1.1 JSON results boolean form.
+            Query::Ask { pattern, .. } => Ok(format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)),
+            _ => Err("only SELECT and ASK queries are supported".into()),
+        }
+    })
 }
 
 /// Flush threshold for [`query_json_chunks_with_budget`]: large enough that the
@@ -1131,15 +1139,16 @@ pub fn query_json_chunks_with_budget(graph: &Graph, sparql: &str, budget: &Query
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
-        Query::Ask { pattern, .. } => {
-            Ok(vec![format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)])
+    exec::budget::with_budget(budget, || {
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::eval_select_json_chunks(graph, pattern, Some(JSON_CHUNK_BYTES)),
+            Query::Ask { pattern, .. } => {
+                Ok(vec![format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?)])
+            }
+            _ => Err("only SELECT and ASK queries are supported".into()),
         }
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    })
 }
 
 /// Streams the SPARQL-JSON serialisation of a SELECT (or ASK) result, invoking `sink` for
@@ -1186,19 +1195,20 @@ pub fn query_json_stream_prepared_with_budget(
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => {
-            exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
+    exec::budget::with_budget(budget, || {
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => {
+                exec::eval_select_json_emit(graph, pattern, Some(JSON_CHUNK_BYTES), &mut sink)
+            }
+            Query::Ask { pattern, .. } => {
+                let doc = format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?);
+                let _ = sink(doc);
+                Ok(())
+            }
+            _ => Err("only SELECT and ASK queries are supported".into()),
         }
-        Query::Ask { pattern, .. } => {
-            let doc = format!("{{\"head\":{{}},\"boolean\":{}}}", exec::eval_ask(graph, pattern)?);
-            let _ = sink(doc);
-            Ok(())
-        }
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    })
 }
 
 /// Counts the solutions of a SELECT query *without* materialising the result
@@ -1224,14 +1234,15 @@ pub fn count_prepared_with_budget(graph: &Graph, prepared: &PreparedQuery, budge
     let active = active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
     let _view_scope = view_scope(&active);
-    let _guard = exec::budget::install(budget);
-    exec::set_query_base(q.base_iri().map(|b| b.as_str()));
-    match q {
-        Query::Select { pattern, .. } => exec::count_select(graph, pattern),
-        // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.
-        Query::Ask { pattern, .. } => Ok(usize::from(exec::eval_ask(graph, pattern)?)),
-        _ => Err("only SELECT and ASK queries are supported".into()),
-    }
+    exec::budget::with_budget(budget, || {
+        let _query_base = exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+        match q {
+            Query::Select { pattern, .. } => exec::count_select(graph, pattern),
+            // An ASK counts its unit row: 1 when satisfiable, 0 otherwise.
+            Query::Ask { pattern, .. } => Ok(usize::from(exec::eval_ask(graph, pattern)?)),
+            _ => Err("only SELECT and ASK queries are supported".into()),
+        }
+    })
 }
 
 #[derive(Debug)]
@@ -2570,6 +2581,82 @@ mod tests {
         assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
     }
 
+    /// #4239 — a row cap that trips on the streaming scan fast path must not close the
+    /// JSON document: the sink never receives the `]}}` terminator of a truncated result.
+    #[test]
+    fn budget_tripped_select_json_stream_leaves_the_document_unclosed() {
+        use std::ops::ControlFlow;
+        let b = QueryBudget { max_rows: Some(1), ..QueryBudget::unlimited() };
+        let mut body = String::new();
+        let e = query_json_stream_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &b, |c| {
+            body.push_str(&c);
+            ControlFlow::Continue(())
+        })
+        .unwrap_err();
+        assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
+        assert!(!body.ends_with("]}}"), "truncated stream was closed: {body}");
+        // Under the cap, the same query streams a complete document.
+        let mut whole = String::new();
+        query_json_stream_with_budget(&g(), "SELECT * WHERE { ?s ?p ?o }", &QueryBudget::unlimited(), |c| {
+            whole.push_str(&c);
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+        assert!(whole.ends_with("]}}"));
+    }
+
+    /// A cancellation raised by the sink after its first chunk stops a large parallel
+    /// stream: no later chunk and no `]}}`, so the aborted body never looks complete.
+    #[test]
+    fn cancel_from_the_first_chunk_stops_a_parallel_select_json_stream() {
+        use std::fmt::Write as _;
+        use std::ops::ControlFlow;
+        use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+        let mut nt = String::new();
+        for i in 0..60_000 {
+            writeln!(nt, "<http://ex/s{i}> <http://ex/p> \"v{i}\" .").unwrap();
+        }
+        let graph = Graph::load_str(&nt, "ntriples").unwrap();
+        let flag = Arc::new(AtomicBool::new(false));
+        let budget = QueryBudget::cancelled_by(flag.clone());
+        let (mut body, mut chunks) = (String::new(), 0);
+        let result = query_json_stream_with_budget(&graph, "SELECT ?s ?o WHERE { ?s <http://ex/p> ?o }", &budget, |c| {
+            chunks += 1;
+            body.push_str(&c);
+            flag.store(true, Ordering::Relaxed);
+            ControlFlow::Continue(())
+        });
+        assert_eq!(result.unwrap_err(), "query budget exceeded (cancelled)");
+        assert_eq!(chunks, 1, "chunks kept flowing after cancellation");
+        assert!(!body.ends_with("]}}"), "a cancelled stream was closed");
+    }
+
+    // [GPT-6] Refusal precedes any output, including empty-result headers, on both
+    // the scan fast path and the general evaluator. Cancellation works on wasm too.
+    #[test]
+    fn cancelled_select_json_emits_nothing() {
+        use std::ops::ControlFlow;
+        use std::sync::{atomic::AtomicBool, Arc};
+
+        let graph = g();
+        let budget = QueryBudget::cancelled_by(Arc::new(AtomicBool::new(true)));
+        for query in [
+            "SELECT * WHERE { ?s ?p ?o }",
+            "SELECT * WHERE { ?s <http://ex/absent> ?o }",
+            "SELECT ?s WHERE { ?s ?p ?o . ?s ?p2 ?o }",
+        ] {
+            let mut emitted = 0;
+            let result = query_json_stream_with_budget(&graph, query, &budget, |_| {
+                emitted += 1;
+                ControlFlow::Continue(())
+            });
+            assert_eq!(result.unwrap_err(), "query budget exceeded (cancelled)");
+            assert_eq!(emitted, 0, "cancelled SELECT emitted output: {query}");
+            assert_eq!(query_json_with_budget(&graph, query, &budget).unwrap_err(), "query budget exceeded (cancelled)");
+            assert_eq!(query_json_chunks_with_budget(&graph, query, &budget).unwrap_err(), "query budget exceeded (cancelled)");
+        }
+    }
+
     /// [SONNET-4.6] (sq-yfcu2) The general (multi-pattern) SELECT-JSON path bounds the
     /// SERIALIZE step by the budget, not just evaluation. The pre-serialize gate prices the
     /// row/byte caps exactly (the rows are materialised, so the count is known), but
@@ -2740,8 +2827,8 @@ mod tests {
     /// enforced mid-fan-out (fragments are built before any count is known), so it takes
     /// the cooperative serial loop that stops within ~1024 scanned rows. A DEADLINE-only
     /// budget IS allowed to fan out (audit item 6), but the coarse per-par-chunk deadline
-    /// re-check bounds the overrun: an already-expired deadline makes every chunk produce
-    /// nothing, so the call still returns near-instantly. We build >50k matching rows and
+    /// re-check bounds the overrun. [GPT-6] An already-expired deadline is rejected before
+    /// entering the pool. We build >50k matching rows and
     /// assert (a) the row-cap budget error fires, and (b) an already-expired deadline
     /// returns the timeout error near-instantly (a full 60k-row materialisation would be
     /// far slower) — guarding against an UNBOUNDED fan-out under a deadline.
@@ -2758,11 +2845,8 @@ mod tests {
         let b = QueryBudget { max_rows: Some(5), ..QueryBudget::unlimited() };
         let e = query_json_with_budget(&big, q, &b).unwrap_err();
         assert!(e.contains("query budget exceeded (max-rows)"), "got: {e}");
-        // Already-expired deadline-only budget: the multi-core fan-out is now ADMITTED
-        // (no row/byte cap to enforce mid-serialize), but the coarse per-par-chunk
-        // deadline re-check sees the passed deadline so every chunk produces nothing —
-        // the call returns near-instantly without serialising the 60k rows, and the
-        // installing thread's post-fan-out gate reports the timeout.
+        // [GPT-6] Already-expired budgets refuse before queuing work on the pool;
+        // deadlines that expire later retain the per-chunk and post-fan-out checks.
         let b = QueryBudget {
             deadline: Some(std::time::Instant::now() - std::time::Duration::from_millis(1)),
             ..QueryBudget::unlimited()
@@ -2828,8 +2912,8 @@ mod tests {
         }
 
         // Bounded overrun: a huge result under an ALREADY-EXPIRED deadline-only budget
-        // must NOT serialise the whole thing — every par-chunk re-check trips, so the
-        // call returns the timeout error near-instantly rather than 60k serialised rows.
+        // must NOT serialise the whole thing. [GPT-6] The entry check refuses before
+        // fan-out; json_deadline_pool also verifies this while the pool is occupied.
         let expired = QueryBudget {
             deadline: Some(Instant::now() - Duration::from_millis(1)),
             ..QueryBudget::unlimited()

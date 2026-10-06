@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-qcnn.31: Structural guard C1 — every feature-gated test module/
+# sq-qcnn.31: Structural guard C1 — every feature-gated test module/
 # target must have a CI executor. Design: research/test-quality-program-plan.md Wave 2
 # (W2-G1). Authored by the SPARQ Sonnet agent (sq-qcnn.31).
 #
@@ -8,13 +8,14 @@
 # .github/workflows/feature-matrix.yml (the "setup" job, free of the words
 # "advisory"/"informational").
 #
-# BACKGROUND: ci.yml runs `cargo nextest archive --workspace --all-targets` with NO
-# `--features`. Test files behind `#![cfg(feature = "X")]` for a default-OFF feature
-# compile to an EMPTY binary — cargo runs it, finds 0 tests, and reports success.
-# The ONLY thing that exercises those tests is a CI executor that passes the right
-# `--features` set. This script makes the class STRUCTURAL: every gated test must map
-# to an executor or an explicit allowlist entry; a new gated test with no wiring FAILS
-# the gate immediately instead of silently never running.
+# BACKGROUND: ci.yml's `cargo nextest archive` carries exactly the default-OFF
+# features `approx-ann`, `filtered-ann`, and `vec-predicate`. Test files behind
+# `#![cfg(feature = "X")]` for any OTHER default-OFF feature compile to an EMPTY
+# binary there — cargo runs it, finds 0 tests, and reports success. Such tests need
+# a CI executor that passes the right `--features` set. This script makes the class
+# STRUCTURAL: every gated test must map to an executor or an explicit allowlist entry;
+# a new gated test with no wiring FAILS the gate immediately instead of silently never
+# running.
 #
 # SCANNED SURFACES
 #   (a) crates/*/tests/**/*.rs with any ``#![cfg(feature = "F")]`` inner attribute.

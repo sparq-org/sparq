@@ -1,4 +1,3 @@
-<!-- [OPUS-4.8] -->
 # agent-telemetry — per-agent / per-wave token + cost telemetry
 
 Phase-1 measurement tool for the agent-efficiency program

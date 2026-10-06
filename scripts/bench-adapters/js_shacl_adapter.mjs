@@ -1,11 +1,10 @@
-// [OPUS-4.8] sq-eifd: JS-LIB (node-rdfjs) adapter KIND. Authored by Opus 4.8
-// (Fable unavailable; flag for re-review when Fable returns).
+// sq-eifd: JS-LIB (node-rdfjs) adapter KIND.
 //
 // In-process Node / RDF-JS SHACL harness. Covers the JS-ecosystem SHACL engines
 // (research/capability-benchmark-program.md §3.1c Tier-2 / WASM-peer):
 //   - Zazuko `rdf-validate-shacl`   (engine=rdf-validate-shacl)  [default]
 //   - Zazuko `shacl-engine`         (engine=shacl-engine)        [if installed]
-//   - sparq's OWN @jeswr/sparq WASM/JS SHACL (engine=sparq-js)   [if installed]
+//   - sparq's OWN @sparq-org/sparq WASM/JS SHACL (engine=sparq-js)   [if installed]
 // run in the SAME Node runtime as the others — the natural way to bench sparq's
 // browser SHACL story against its JS peers.
 //
@@ -212,7 +211,7 @@ async function main() {
   if (args.json) process.stderr.write(JSON.stringify(res) + '\n');
 }
 
-// [OPUS-4.8] Attach a rejection handler so an uncaught error inside the async
+// Attach a rejection handler so an uncaught error inside the async
 // main() reliably exits non-zero with a clear message, rather than relying on
 // Node's version-dependent unhandled-rejection exit behaviour.
 main().catch((e) => {
