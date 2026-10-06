@@ -11201,7 +11201,7 @@ fn minmax_values(vals: Vec<Value>, keep: Ordering) -> Value {
         Some(nums) => {
             let mut best = nums[0];
             for &n in &nums[1..] {
-                if num_compare(n, best) == Some(keep) {
+                if num_extremum_compare(n, best) == Some(keep) {
                     best = n;
                 }
             }
@@ -11288,6 +11288,21 @@ fn minmax_temporal(
 /// `f64`s.
 fn num_compare(a: Num, c: Num) -> Option<Ordering> {
     a.cmp_relational(c)
+}
+
+/// The order MIN/MAX fold numerics by: exact when both are int/decimal, `f64` otherwise.
+///
+/// Deliberately NOT [`num_compare`]: MAX is defined through `ORDER BY DESC`, so the float-tier
+/// promotion must not create a tie that lets a later member displace a strictly larger one
+/// (`MAX(0.1, "0.1"^^xsd:float, 0.1000000001e0)` is the float, whose value is
+/// 0.10000000149…). `f64` widening is exact for a float, so this keeps every strict order.
+fn num_extremum_compare(a: Num, c: Num) -> Option<Ordering> {
+    if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
+        if let Some(o) = x.cmp(y) {
+            return Some(o);
+        }
+    }
+    a.f64().partial_cmp(&c.f64())
 }
 
 /// Whether two DISTINCT cached `f64` operand values could still compare EQUAL under XPath
@@ -14117,9 +14132,9 @@ impl CompareTerm for Value {
         // expansion for the MIXED exact/inexact pair (the pre-fix `num_compare`
         // fallback kept the collapsed f64 verdict there, which made the order
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
-        // `<`/`=` (`cmp_expr`) and MIN/MAX (`minmax_values`) deliberately KEEP the
-        // XPath promoted semantics via `num_compare`; this total order refines only
-        // their ties. `None` (a lexical beyond the exact tower) keeps the tie.
+        // `<`/`=` (`cmp_expr`, via `num_compare`) and MIN/MAX (`minmax_values`, via
+        // `num_extremum_compare`) deliberately KEEP their own semantics; this total
+        // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
             (Some(a), Some(b)) => Some(a.cmp_total(b)),
             _ => None,

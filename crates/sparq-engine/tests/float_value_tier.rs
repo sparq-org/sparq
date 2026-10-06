@@ -360,3 +360,22 @@ fn incompatible_operands_of_an_ordering_stay_errors() {
     assert!(!ask(&g, "ASK { FILTER(!(1 + 1 < \"a\")) }"));
     assert_eq!(bound_bool(&g, "0e0 / 0e0 < \"a\""), None);
 }
+
+// ── MIN/MAX keep the ORDER BY order, not the float-tier tie ─────────────────────────────
+// MAX is defined through ORDER BY DESC. Promoting `0.1` to float makes it tie with the float
+// `0.1` (0.10000000149…), but that tie must not let the later double 0.1000000001, which is
+// strictly smaller than the float, displace it.
+
+#[test]
+fn max_keeps_the_float_over_a_smaller_later_double() {
+    let g = promo_graph();
+    let q = |agg: &str, vals: &str| {
+        let r = query(&g, &format!("SELECT ({agg}(?v) AS ?m) WHERE {{ VALUES ?v {{ {vals} }} }}")).unwrap();
+        r.rows[0][0].as_ref().map(|t| t.to_string()).unwrap_or_default()
+    };
+    let f = format!("\"0.1\"^^<{XSD}float>");
+    let m = q("MAX", &format!("0.1 {f} 0.1000000001e0"));
+    assert!(m.contains("float"), "MAX must be the float, got {m}");
+    let m = q("MIN", &format!("0.1 {f} 0.0999999999e0"));
+    assert!(m.contains("double"), "MIN must be the smaller double, got {m}");
+}
