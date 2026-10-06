@@ -95,10 +95,15 @@ _MOD_CHUNK_PATTERN = re.compile(r'\b(?:mod|pub use)\s+chunk\b')
 _CFG_VECTORIZED = re.compile(r'#\[cfg\(feature\s*=\s*"vectorized"\)\]')
 # Out-of-line module declaration, after any same-line attributes are removed.
 _MOD_DECL = re.compile(
-    r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;')
-# Anything that looks like an out-of-line `mod x;`, used to fail closed on a
-# declaration the parser above does not understand.
-_MOD_DECL_LOOSE = re.compile(r'\bmod\s+[A-Za-z_][A-Za-z0-9_]*\s*;')
+    r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+((?:r#)?[A-Za-z_][A-Za-z0-9_]*)\s*;')
+# The `mod` keyword anywhere in a line's code (string literals removed first). Every
+# such line must be either an inline `mod name {` or a declaration `_MOD_DECL`
+# parses; anything else (`mod` and its name split across lines, an unusual
+# spelling) fails closed instead of being skipped.
+_MOD_KEYWORD = re.compile(r'(?<![A-Za-z0-9_#])mod\b')
+_MOD_INLINE = re.compile(
+    r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*\s*\{')
+_STRING_LIT = re.compile(r'"(?:[^"\\]|\\.)*"')
 # Fail-closed `path` handling. The ONLY supported spelling is the simple form
 # `#[path = "<plain chars>"]`: a normal string with no backslash or quote, optional
 # whitespace. Any other attribute on a `mod` declaration whose text contains the
@@ -516,15 +521,19 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
     base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
     for lineno, line in enumerate(lines, start=1):
         code = line.split("//", 1)[0] if not line.lstrip().startswith("//") else ""
-        if not _MOD_DECL_LOOSE.search(code):
+        if not _MOD_KEYWORD.search(_STRING_LIT.sub('""', code)):
             continue
         same_line_attrs, rest = _split_leading_attrs(code)
+        rest = rest.strip()
+        if _MOD_INLINE.match(rest):
+            continue
         m = _MOD_DECL.match(rest)
         if not m:
             yield lineno, "?", None, False, (
-                "unparseable out-of-line `mod` declaration: " + line.strip())
+                "unparseable `mod` declaration (only `mod name;` / `mod name {` on one "
+                "line are understood): " + line.strip())
             continue
-        name = m.group(1)
+        name = m.group(1)[2:] if m.group(1).startswith("r#") else m.group(1)
         attrs: list[str] = list(same_line_attrs)
         problem = None
         i = lineno - 2
@@ -897,6 +906,20 @@ _LEG3_TREES_PATH_UNSUPPORTED = [
     _leg3_tree_cfg_attr('#[path = concat!("else", "where.rs")]\nmod child;\n'),
     _leg3_tree_cfg_attr('#[path = "elsewhere.rs"]\n#[path = "child.rs"]\nmod child;\n'),
 ]
+# Raw-identifier names and `mod` split across lines: each must be resolved (and so
+# rejected as an unscanned child) or fail as unparseable, never skipped.
+_LEG3_TREES_ODD_MOD_SYNTAX = [
+    _leg3_tree_outside('#[path = "elsewhere.rs"] mod r#hidden;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"]\npub(crate) mod r#hidden ;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"]\nmod\nhidden;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"] pub mod\n    hidden;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"]\nmod /* c */ hidden;\n'),
+]
+# Inline modules and `mod` inside strings or identifiers are not declarations.
+_LEG3_TREES_INLINE_MOD_OK = [
+    {_EXEC_RS: 'mod inner {\n    fn f() {}\n}\npub(crate) mod r#other { }\n'},
+    {_EXEC_RS: 'const S: &str = "mod x;";\nfn mod_name() {}\n'},
+]
 # cfg_attr without `path` (a `path` inside a doc string does not count) is fine.
 _LEG3_TREES_CFG_ATTR_OK = [
     _leg3_tree_cfg_attr('#[cfg_attr(test, allow(dead_code))]\nmod child;\n'),
@@ -1086,6 +1109,17 @@ def run_self_test() -> int:
               f"rejected as unsupported ({len(_LEG3_TREES_PATH_UNSUPPORTED)} spellings)")
     else:
         print(f"TRIPWIRE 15 (leg3): FAIL — unsupported path spellings {missed} accepted")
+        all_passed = False
+
+    # ----- Tripwire 16: raw identifiers and split `mod` declarations are not skipped -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_ODD_MOD_SYNTAX) if _leg3_on_tree(t) == 0]
+    wrong = [i for i, t in enumerate(_LEG3_TREES_INLINE_MOD_OK) if _leg3_on_tree(t) != 0]
+    if not missed and not wrong:
+        print("TRIPWIRE 16 (leg3): PASS — raw-identifier and multi-line `mod` declarations "
+              "rejected; inline modules and `mod` in strings accepted")
+    else:
+        print(f"TRIPWIRE 16 (leg3): FAIL — odd declarations accepted {missed}, "
+              f"inline/string cases rejected {wrong}")
         all_passed = False
 
     # ----- Tripwire 14: a file is gated only if EVERY declaration reaching it is -----
