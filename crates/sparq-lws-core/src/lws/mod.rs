@@ -442,6 +442,12 @@ pub struct ResourceMeta {
     /// in Turtle.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub types: Vec<String>,
+    /// The part of `types` declared by Link headers (on the create, or with `Prefer:
+    /// set-linkset`), kept apart from those the content states: replacing the content replaces
+    /// only its own. `None` in metadata written before the two were kept apart, whose declared
+    /// types are `types` less those its content states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_types: Option<Vec<String>>,
     /// Descriptive links the client sent as Link headers: relation to targets.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub links: BTreeMap<String, Vec<String>>,
@@ -623,6 +629,7 @@ impl<S: Store + 'static> LwsState<S> {
 }
 
 /// One request, read in full.
+#[derive(Clone)]
 pub struct LwsRequest {
     pub method: Method,
     /// The raw path, percent-encoded, starting with `/`.
@@ -669,6 +676,24 @@ impl LwsRequest {
                     .to_ascii_lowercase()
             })
             .filter(|v| !v.is_empty())
+    }
+}
+
+/// Delete the stored record `iri` of a service container (a grant, a request, a subscription).
+/// The index commit is the deletion point: when the store reports a failure but the record no
+/// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
+/// record is gone.
+pub(crate) async fn delete_record<S: Store + 'static>(
+    state: &LwsState<S>,
+    iri: &str,
+    container: &str,
+) -> Result<(), crate::error::ServerError> {
+    match state.store.delete(iri, Some(container)).await {
+        Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
+        Err(e) => match state.store.exists(iri).await {
+            Ok(false) => Ok(()),
+            _ => Err(e),
+        },
     }
 }
 
@@ -1109,6 +1134,9 @@ pub(crate) mod test_store {
         CompositeStore, InMemoryBlobStore, InMemorySparqClient, Resource, Store, ValidatedChildIri,
     };
 
+    /// A gate held for one IRI (see [`FlakyStore::hold_next_write_of`]).
+    pub type GateOf = Arc<std::sync::Mutex<Option<(String, Arc<tokio::sync::Semaphore>)>>>;
+
     #[derive(Clone)]
     pub struct FlakyStore {
         inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
@@ -1132,6 +1160,13 @@ pub(crate) mod test_store {
         /// backend. The create is already sent: dropping the call does not stop it, and it
         /// commits once the gate opens.
         pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
+        /// As `hold_next_create`, for the next `write` of the IRI named.
+        pub hold_next_write_of: GateOf,
+        /// `delete` of this IRI removes it, then reports a failure, as when the cleanup of its
+        /// bytes fails after the index commit.
+        pub fail_after_delete_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// As `hold_next_create`, for the next `delete` of the IRI named.
+        pub hold_next_delete_of: GateOf,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
     }
@@ -1146,6 +1181,9 @@ pub(crate) mod test_store {
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
+                hold_next_write_of: Default::default(),
+                hold_next_delete_of: Default::default(),
+                fail_after_delete_of: Default::default(),
                 fail_exists_of: Default::default(),
                 occupied: Default::default(),
                 fail_delete_of: Default::default(),
@@ -1155,6 +1193,15 @@ pub(crate) mod test_store {
                 hide: Default::default(),
             }
         }
+    }
+
+    /// The gate held for `iri`, taken (so only the next call waits on it).
+    fn held(slot: &GateOf, iri: &str) -> Option<Arc<tokio::sync::Semaphore>> {
+        let mut slot = slot.lock().unwrap();
+        if slot.as_ref().is_some_and(|(i, _)| i == iri) {
+            return slot.take().map(|(_, g)| g);
+        }
+        None
     }
 
     #[async_trait]
@@ -1195,6 +1242,14 @@ pub(crate) mod test_store {
                 }
                 *left -= 1;
             }
+            if let Some(gate) = held(&self.hold_next_write_of, iri) {
+                let (inner, iri, ct) = (self.inner.clone(), iri.to_string(), ct.to_string());
+                let sent = tokio::spawn(async move {
+                    gate.acquire().await.expect("gate").forget();
+                    inner.write(&iri, body, &ct).await
+                });
+                return sent.await.expect("write");
+            }
             self.inner.write(iri, body, ct).await
         }
         async fn create_in_container(
@@ -1230,7 +1285,23 @@ pub(crate) mod test_store {
             {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.delete(iri, parent).await
+            if let Some(gate) = held(&self.hold_next_delete_of, iri) {
+                let (inner, iri, parent) = (
+                    self.inner.clone(),
+                    iri.to_string(),
+                    parent.map(str::to_string),
+                );
+                let sent = tokio::spawn(async move {
+                    gate.acquire().await.expect("gate").forget();
+                    inner.delete(&iri, parent.as_deref()).await
+                });
+                return sent.await.expect("delete");
+            }
+            self.inner.delete(iri, parent).await?;
+            if self.fail_after_delete_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("blob cleanup failed".into()));
+            }
+            Ok(())
         }
         async fn delete_container_if_empty(
             &self,

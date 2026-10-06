@@ -40,7 +40,6 @@ use super::{
     service_linkset, service_listing, set, Agent, LwsConfig, LwsRequest, LwsState, AS_CONTEXT,
     LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX, SUBSCRIPTIONS_PATH,
 };
-use crate::error::ServerError;
 use crate::store::Store;
 
 /// The one subscription type this NotificationService offers.
@@ -320,25 +319,29 @@ impl Notifier {
     /// Remove a subscription from the store, then from memory. A store failure leaves it in place
     /// (a cancelled subscription whose stored copy survived would come back at the next boot) and
     /// is returned.
+    ///
+    /// Once the stored record is gone the subscription is cancelled in memory too, whatever
+    /// happens after (a cleanup that fails, a caller that goes away): the removal and the
+    /// cancellation run in a task of their own.
     async fn remove<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
         id: &str,
     ) -> Result<(), String> {
-        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
-        match state
-            .store
-            .delete(&format!("{container}{id}"), Some(&container))
-            .await
-        {
-            Ok(_) | Err(ServerError::NotFound) => {}
-            Err(e) => return Err(e.to_string()),
-        }
-        if self.subs.write().expect("lock").remove(id).is_some() {
-            *self.etag.write().expect("lock") = new_etag();
-        }
-        self.failures.lock().expect("lock").remove(id);
-        Ok(())
+        let (state, id) = (state.clone(), id.to_string());
+        let cancel = async move {
+            let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+            super::delete_record(&state, &format!("{container}{id}"), &container)
+                .await
+                .map_err(|e| e.to_string())?;
+            let me = &state.notify;
+            if me.subs.write().expect("lock").remove(&id).is_some() {
+                *me.etag.write().expect("lock") = new_etag();
+            }
+            me.failures.lock().expect("lock").remove(&id);
+            Ok(())
+        };
+        tokio::spawn(cancel).await.map_err(|e| e.to_string())?
     }
 
     /// Tell every subscriber whose topic covers `event.uri`, and who may read it now, that it
@@ -422,7 +425,37 @@ impl Notifier {
         let Some(target) = inbox_url(inbox, state.cfg.allow_insecure_fetch) else {
             return;
         };
-        let Some(admitted) = self.admit() else {
+        let Some(admitted) = self.admit_or_drop(&target) else {
+            return;
+        };
+        self.run(state, admitted, target, activity, watch);
+    }
+
+    /// Deliver a notification wrapping `activity` to the inbox `find` looks up, in the background.
+    /// The delivery takes its place in the queue before the lookup starts, so lookups are bounded
+    /// as deliveries are: past the queue's limit the notification is dropped, lookup and all.
+    pub fn deliver_found<S, F>(&self, state: &LwsState<S>, activity: Value, find: F)
+    where
+        S: Store + 'static,
+        F: std::future::Future<Output = Option<String>> + Send + 'static,
+    {
+        let Some(admitted) = self.admit_or_drop(&"an inbox still to be looked up") else {
+            return;
+        };
+        let state = state.clone();
+        tokio::spawn(async move {
+            let Some(inbox) = find.await else { return };
+            let Some(target) = inbox_url(&inbox, state.cfg.allow_insecure_fetch) else {
+                return;
+            };
+            state.notify.run(&state, admitted, target, activity, None);
+        });
+    }
+
+    /// A place in the delivery queue, or `None` (the drop counted and logged) when it is full.
+    fn admit_or_drop(&self, target: &dyn std::fmt::Display) -> Option<Admitted> {
+        let admitted = self.admit();
+        if admitted.is_none() {
             let dropped = self.dropped.fetch_add(1, Ordering::SeqCst) + 1;
             // Logged at the first drop and then at each power of two, so a flood cannot flood the
             // log too.
@@ -433,8 +466,19 @@ impl Notifier {
                     self.limits.queue
                 );
             }
-            return;
-        };
+        }
+        admitted
+    }
+
+    /// Run one admitted delivery in the background.
+    fn run<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        admitted: Admitted,
+        target: url::Url,
+        activity: Value,
+        watch: Option<Watch>,
+    ) {
         let inbox_slot = self.inbox_slot(&target);
         let workers = self.workers.clone();
         let body = Bytes::from(envelope(&state.cfg.storage(), activity).to_string());
@@ -1374,6 +1418,22 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(total.load(Ordering::SeqCst), 1);
+    }
+
+    /// Review finding: a cancellation removed the stored subscription, then waited on the
+    /// cleanup of its bytes; when that failed the subscription stayed live in memory. The index
+    /// commit is now the point of cancellation.
+    #[tokio::test]
+    async fn a_cancellation_takes_effect_once_the_record_is_gone() {
+        let (state, store) = test_store::state(100).await;
+        let path = subscribe_root(&state, "s1").await;
+        let iri = state.cfg.absolute(&path);
+        *store.fail_after_delete_of.lock().unwrap() = Some(iri.clone());
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(!state.store.exists(&iri).await.unwrap());
+        assert!(state.notify.get("s1").is_none());
     }
 
     #[tokio::test]

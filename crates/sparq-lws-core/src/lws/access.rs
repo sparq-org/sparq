@@ -311,6 +311,8 @@ pub struct Record {
 pub struct AccessStore {
     grants: RwLock<BTreeMap<String, Record>>,
     requests: RwLock<BTreeMap<String, Record>>,
+    /// The owner's inbox as last looked up, and when (see [`owner_inbox_cached`]).
+    owner_inbox: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
     grants_etag: RwLock<String>,
     requests_etag: RwLock<String>,
 }
@@ -344,6 +346,7 @@ impl AccessStore {
         let me = Self {
             grants: RwLock::new(BTreeMap::new()),
             requests: RwLock::new(BTreeMap::new()),
+            owner_inbox: Default::default(),
             grants_etag: RwLock::new(new_etag()),
             requests_etag: RwLock::new(new_etag()),
         };
@@ -740,19 +743,32 @@ pub async fn handle<S: Store + 'static>(
         }
         Method::DELETE => {
             // A revocation is durable before it is reported: a grant whose stored copy survives
-            // would be reloaded, and so reinstated, at the next boot.
-            match state.store.delete(&iri, Some(&container)).await {
-                Ok(_) | Err(ServerError::NotFound) => {}
-                Err(e) => {
-                    return problem(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Some(&format!("cannot delete {iri}: {e}")),
-                    )
+            // would be reloaded, and so reinstated, at the next boot. Once the stored record is
+            // gone the grant is revoked in memory too, whatever happens after (a cleanup that
+            // fails, a client that goes away): the removal and the revocation run in a task of
+            // their own.
+            let revoke = {
+                let (state, iri, container, id) = (
+                    state.clone(),
+                    iri.clone(),
+                    container.clone(),
+                    id.to_string(),
+                );
+                async move {
+                    super::delete_record(&state, &iri, &container).await?;
+                    state.access.map(grants).write().expect("lock").remove(&id);
+                    state.access.bump(grants);
+                    Ok::<_, ServerError>(())
                 }
+            };
+            match tokio::spawn(revoke).await {
+                Ok(Ok(())) => problem(StatusCode::NO_CONTENT, None),
+                Ok(Err(e)) => problem(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Some(&format!("cannot delete {iri}: {e}")),
+                ),
+                Err(e) => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string())),
             }
-            state.access.map(grants).write().expect("lock").remove(id);
-            state.access.bump(grants);
-            problem(StatusCode::NO_CONTENT, None)
         }
         _ => method_not_allowed("GET, HEAD, DELETE"),
     }
@@ -862,13 +878,13 @@ async fn create<S: Store + 'static>(
     } else {
         // "When a new access request is submitted, the storage controller SHOULD be notified": at
         // the inbox the owner's identity document names, looked up in the background.
-        let state = state.clone();
-        let activity = activity.clone();
-        tokio::spawn(async move {
-            if let Some(inbox) = owner_inbox(&state).await {
-                state.notify.deliver(&state, &inbox, activity, None);
-            }
-        });
+        // The lookup holds a place in the delivery queue (so lookups are as bounded as
+        // deliveries), and lookups share one fetch and its answer (see [`owner_inbox_cached`]).
+        let find = {
+            let state = state.clone();
+            async move { owner_inbox_cached(&state).await }
+        };
+        state.notify.deliver_found(state, activity.clone(), find);
     }
     for inbox in inboxes {
         state.notify.deliver(state, &inbox, activity.clone(), None);
@@ -900,6 +916,23 @@ fn requester_inboxes<S: Store + 'static>(state: &LwsState<S>, grant: &Value) -> 
         .filter(|i| is_uri(i))
         .map(str::to_string)
         .collect()
+}
+
+/// How long a looked-up owner inbox (or its absence) is reused.
+const OWNER_INBOX_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// [`owner_inbox`], looked up once at a time and reused for [`OWNER_INBOX_TTL`]: a burst of
+/// access requests makes one fetch of the owner's identity document, not one each.
+async fn owner_inbox_cached<S: Store + 'static>(state: &LwsState<S>) -> Option<String> {
+    let mut cached = state.access.owner_inbox.lock().await;
+    if let Some((at, inbox)) = cached.as_ref() {
+        if at.elapsed() < OWNER_INBOX_TTL {
+            return inbox.clone();
+        }
+    }
+    let inbox = owner_inbox(state).await;
+    *cached = Some((std::time::Instant::now(), inbox.clone()));
+    inbox
 }
 
 /// The storage controller's inbox: the `inbox` (or `ldp:inbox`) its identity document names.
@@ -1255,6 +1288,63 @@ mod tests {
         assert!(!state.store.exists(&location).await.unwrap());
     }
 
+    /// Review finding: a revocation removed the stored grant, then waited on the cleanup of its
+    /// bytes; when that failed, or the client went away, the grant stayed in force in memory
+    /// though its record was gone. The index commit is now the point of revocation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revocation_takes_effect_once_the_record_is_gone() {
+        use std::sync::Arc;
+        use std::time::Duration;
+        let (state, store) = test_store::state(100).await;
+        let grant = || async {
+            let req = test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                &[],
+                &access_doc("AccessGrant", "https://a/", None),
+            );
+            let resp = handle(&state, &req, &Agent::anonymous()).await;
+            let location = resp.headers()[header::LOCATION]
+                .to_str()
+                .unwrap()
+                .to_string();
+            let path = location
+                .strip_prefix(&state.cfg.base_url)
+                .unwrap()
+                .to_string();
+            (
+                location,
+                test_store::request(Method::DELETE, &path, &[], ""),
+            )
+        };
+        // The cleanup after the index commit fails: the grant is revoked all the same.
+        let (location, delete) = grant().await;
+        *store.fail_after_delete_of.lock().unwrap() = Some(location.clone());
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(!state.store.exists(&location).await.unwrap());
+        assert!(state.access.grant_policies().is_empty());
+        // The client goes away while the removal is pending: once it lands, the grant is gone.
+        let (location, delete) = grant().await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_delete_of.lock().unwrap() = Some((location.clone(), gate.clone()));
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            handle(&state, &delete, &Agent::anonymous()),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        assert_eq!(state.access.grant_policies().len(), 1);
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if state.access.grant_policies().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(state.access.grant_policies().is_empty());
+    }
+
     #[tokio::test]
     async fn grants_reach_the_inboxes_of_their_requests() {
         let (state, _) = test_store::state(100).await;
@@ -1299,6 +1389,81 @@ mod tests {
         let public: Value =
             serde_json::from_str(&access_doc("AccessGrant", FOAF_AGENT, None)).unwrap();
         assert!(requester_inboxes(&state, &public).is_empty());
+    }
+
+    /// Review finding: every access request spawned its own fetch of the owner's identity
+    /// document, outside the bounded delivery queue. The lookup now takes a place in the queue
+    /// first, and lookups share one fetch.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn owner_lookups_are_bounded_and_shared() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        let (fetched, delivered) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = {
+            let (fetched, delivered) = (fetched.clone(), delivered.clone());
+            axum::Router::new()
+                .route(
+                    "/profile",
+                    axum::routing::get(move || {
+                        let fetched = fetched.clone();
+                        async move {
+                            fetched.fetch_add(1, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            (
+                                [(header::CONTENT_TYPE, "application/json")],
+                                json!({"inbox": format!("http://{addr}/inbox")}).to_string(),
+                            )
+                        }
+                    }),
+                )
+                .route(
+                    "/inbox",
+                    axum::routing::post(move || {
+                        let delivered = delivered.clone();
+                        async move {
+                            delivered.fetch_add(1, Ordering::SeqCst);
+                            StatusCode::NO_CONTENT
+                        }
+                    }),
+                )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.owner = Some(format!("http://{addr}/profile#me"));
+        cfg.delivery = super::super::notify::DeliveryLimits {
+            queue: 3,
+            workers: 4,
+            per_inbox: 4,
+        };
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        for _ in 0..10 {
+            let req = test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[],
+                &access_doc("AccessRequest", "https://bob.example/#me", None),
+            );
+            let resp = handle(&state, &req, &Agent::anonymous()).await;
+            assert_eq!(resp.status(), StatusCode::CREATED);
+        }
+        // Three admitted (the queue's limit), the rest dropped and counted.
+        assert_eq!(state.notify.dropped(), 7);
+        for _ in 0..200 {
+            if delivered.load(Ordering::SeqCst) >= 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(delivered.load(Ordering::SeqCst), 3);
+        // One fetch served them all.
+        assert_eq!(fetched.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

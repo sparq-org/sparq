@@ -26,6 +26,7 @@
 //! itself), the client's resolver hands out public addresses only, so the connection goes where
 //! the check looked, and no proxy is used.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 use serde_json::Value;
@@ -740,11 +741,11 @@ pub fn names_issuer(
             return None;
         }
         let services = match doc.get("service") {
-            Some(Value::Array(a)) => a.clone(),
-            Some(o @ Value::Object(_)) => vec![o.clone()],
-            _ => Vec::new(),
+            Some(Value::Array(a)) => a.as_slice(),
+            Some(o @ Value::Object(_)) => std::slice::from_ref(o),
+            _ => &[],
         };
-        let provider = services.iter().any(|s| {
+        let provider = services.iter().take(MAX_IDENTITY_SERVICES).any(|s| {
             s.get("type").is_some_and(|t| has_type(t, "OpenIdProvider"))
                 && match s.get("serviceEndpoint") {
                     Some(Value::String(e)) => same_issuer(e, issuer),
@@ -791,17 +792,29 @@ pub fn names_issuer(
     }
     let base = subject.split('#').next().unwrap_or(subject);
     let parser = oxttl::TurtleParser::new().with_base_iri(base).ok()?;
-    let triples: Vec<oxrdf::Triple> = parser.for_slice(body).filter_map(Result::ok).collect();
-    let iri = |t: &oxrdf::Term| match t {
-        oxrdf::Term::NamedNode(n) => Some(n.as_str().to_string()),
-        _ => None,
-    };
-    let subj_is = |t: &oxrdf::Triple, s: &str| matches!(&t.subject, oxrdf::NamedOrBlankNode::NamedNode(n) if n.as_str() == s);
-    let node_key = |s: &oxrdf::NamedOrBlankNode| s.to_string();
-    let of_subject: Vec<&oxrdf::Triple> = triples.iter().filter(|t| subj_is(t, subject)).collect();
+    // The document is the subject's to write (and is read before any signature is checked), so
+    // the work is bounded: so many triples are read, so many services looked at, and the triples
+    // are indexed by subject once, so each service costs only its own triples.
+    let triples: Vec<oxrdf::Triple> = parser
+        .for_slice(body)
+        .filter_map(Result::ok)
+        .take(MAX_IDENTITY_TRIPLES)
+        .collect();
+    let mut by_subject: HashMap<&oxrdf::NamedOrBlankNode, Vec<&oxrdf::Triple>> = HashMap::new();
+    for t in &triples {
+        by_subject.entry(&t.subject).or_default().push(t);
+    }
+    fn iri(t: &oxrdf::Term) -> Option<&str> {
+        match t {
+            oxrdf::Term::NamedNode(n) => Some(n.as_str()),
+            _ => None,
+        }
+    }
+    let me = oxrdf::NamedOrBlankNode::NamedNode(oxrdf::NamedNode::new(subject).ok()?);
+    let of_subject = by_subject.get(&me).map(Vec::as_slice).unwrap_or_default();
     if of_subject.iter().any(|t| {
         t.predicate.as_str() == SOLID_OIDC_ISSUER
-            && iri(&t.object).is_some_and(|o| same_issuer(&o, issuer))
+            && iri(&t.object).is_some_and(|o| same_issuer(o, issuer))
     }) {
         return Some(IssuerLink::SolidOidcIssuer);
     }
@@ -809,24 +822,23 @@ pub fn names_issuer(
     for t in of_subject
         .iter()
         .filter(|t| t.predicate.as_str() == CID_SERVICE)
+        .take(MAX_IDENTITY_SERVICES)
     {
         let service = match &t.object {
             oxrdf::Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n.clone()),
             oxrdf::Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b.clone()),
             _ => continue,
         };
-        let key = node_key(&service);
-        let about: Vec<&oxrdf::Triple> = triples
-            .iter()
-            .filter(|u| node_key(&u.subject) == key)
-            .collect();
+        let about = by_subject
+            .get(&service)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         let typed = about.iter().any(|u| {
-            u.predicate.as_str() == RDF_TYPE
-                && iri(&u.object).as_deref() == Some(provider_type.as_str())
+            u.predicate.as_str() == RDF_TYPE && iri(&u.object) == Some(provider_type.as_str())
         });
         let endpoint = about.iter().any(|u| {
             u.predicate.as_str() == CID_SERVICE_ENDPOINT
-                && iri(&u.object).is_some_and(|o| same_issuer(&o, issuer))
+                && iri(&u.object).is_some_and(|o| same_issuer(o, issuer))
         });
         if typed && endpoint {
             return Some(IssuerLink::OpenIdProvider);
@@ -834,6 +846,11 @@ pub fn names_issuer(
     }
     None
 }
+
+/// How many triples of an identity document are read.
+const MAX_IDENTITY_TRIPLES: usize = 10_000;
+/// How many services of an identity document are looked at.
+const MAX_IDENTITY_SERVICES: usize = 64;
 
 // ---------------------------------------------------------------- fetching
 
@@ -1473,6 +1490,63 @@ mod tests {
         );
         assert_eq!(
             names_issuer("text/turtle", ttl.as_bytes(), "https://bob.example/id", op),
+            None
+        );
+    }
+
+    /// Review finding: each `cid:service` link scanned every triple of the document, with an
+    /// allocation per comparison, so a document of many services was quadratic work, done before
+    /// any signature is checked. The triples are indexed once and the work is capped.
+    #[test]
+    fn issuer_lookup_is_bounded() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let provider = format!(
+            "<{s}> cid:service [ a <https://www.w3.org/ns/lws#OpenIdProvider> ; cid:serviceEndpoint <{op}> ] ."
+        );
+        let filler = |n: usize| {
+            (0..n)
+                .map(|i| format!("<{s}> cid:service _:s{i} . _:s{i} a <https://e.example/T{i}> ; <https://e.example/p> \"{i}\" .\n"))
+                .collect::<String>()
+        };
+        let doc = |services: usize, provider_first: bool| {
+            let head = "@prefix cid: <https://www.w3.org/ns/cid/v1#> .\n";
+            if provider_first {
+                format!("{head}{provider}\n{}", filler(services))
+            } else {
+                format!("{head}{}{provider}\n", filler(services))
+            }
+        };
+        // Within the caps the provider is found wherever it is.
+        let ttl = doc(MAX_IDENTITY_SERVICES - 1, false);
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            Some(IssuerLink::OpenIdProvider)
+        );
+        // Thousands of services: quick, and only the first ones are looked at.
+        let ttl = doc(3000, true);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            Some(IssuerLink::OpenIdProvider)
+        );
+        let ttl = doc(3000, false);
+        assert_eq!(names_issuer("text/turtle", ttl.as_bytes(), s, op), None);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        // JSON: the same cap on services.
+        let mut services: Vec<Value> = (0..MAX_IDENTITY_SERVICES)
+            .map(|i| json!({"type": "Other", "serviceEndpoint": format!("https://x{i}.example")}))
+            .collect();
+        services.push(
+            json!({"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}),
+        );
+        let body = json!({"id": s, "service": services}).to_string();
+        assert_eq!(
+            names_issuer("application/json", body.as_bytes(), s, op),
             None
         );
     }

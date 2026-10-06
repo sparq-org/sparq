@@ -245,7 +245,8 @@ What the server exposes, all discoverable from the storage description
   Errors are `application/problem+json`. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
-  patches as well as JSON Patch. `livez` and `readyz` are never
+  patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
+  full serialized size (keys and separators as well as values). `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
   `PATCH` whose result nests too deeply to store gets `422`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
@@ -276,6 +277,16 @@ What the server exposes, all discoverable from the storage description
 - A PUT or PATCH that changes a resource's metadata (its types, its linkset) and fails part way
   leaves the resource **fail-closed**: only the owner and its creator may act on it until a write
   completes.
+- A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
+  `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
+  the header-declared types only if it sends `rel="type"` headers of its own. Other Link
+  relations change only with `Prefer: set-linkset`.
+- Every write and delete runs its store calls in a task that holds the resource's locks until
+  the store answers, so a client that disconnects cannot release them early.
+- A grant or subscription `DELETE` takes effect once its stored record is gone, even if cleaning
+  up its bytes then fails.
+- An access request notifies the owner through the bounded delivery queue. The lookup of the
+  owner's inbox is shared and cached.
 - The grant, request and subscription services are containers: their listings are
   negotiated (`lws+json`, `ld+json` or `json`), paged at the page size, and carry an ETag
   and `up`/`type`/`linkset` links. The linksets are read-only.

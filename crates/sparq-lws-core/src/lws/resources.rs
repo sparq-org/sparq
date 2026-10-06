@@ -49,6 +49,26 @@ pub async fn handle<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
+    // A write or a delete runs in a task of its own, spawned before it takes any lock: a client
+    // that goes away then cannot cut its store calls off half way, nor release its locks while a
+    // call is still pending (see [`hold_locks`]). (A create spawns its writes itself, under the
+    // container's shared lock.)
+    if matches!(req.method, Method::PUT | Method::PATCH | Method::DELETE) {
+        let (state, req, agent) = (state.clone(), req.clone(), agent.clone());
+        return tokio::spawn(async move { handle_now(&state, &req, &agent).await })
+            .await
+            .unwrap_or_else(|e| {
+                store_error(ServerError::Storage(format!("the request failed: {e}")))
+            });
+    }
+    handle_now(state, req, agent).await
+}
+
+async fn handle_now<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+) -> Response {
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         let uri = state.cfg.absolute(stem);
@@ -982,15 +1002,15 @@ fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Vec<String> {
     types
 }
 
-/// The types and user-managed links a client declared on a create.
-fn declared(req: &LwsRequest, uri: &str, content_type: &str, body: &[u8]) -> (Vec<String>, Links) {
-    let (mut types, links) = link_declared(req, uri);
-    for t in content_types(uri, content_type, body) {
+/// The types a resource has: those declared by Link headers, then those its content states.
+fn all_types(declared: &[String], stated: Vec<String>) -> Vec<String> {
+    let mut types = declared.to_vec();
+    for t in stated {
         if !types.contains(&t) {
             types.push(t);
         }
     }
-    (types, links)
+    types
 }
 
 /// Whether the request asks, with `Prefer: set-linkset`, for its Link headers to update the
@@ -1083,15 +1103,18 @@ async fn create<S: Store + 'static>(
     } else {
         req.body.clone()
     };
-    let (types, links) = if is_container {
-        (Vec::new(), Default::default())
+    let (declared_types, types, links) = if is_container {
+        (Vec::new(), Vec::new(), Default::default())
     } else {
-        declared(req, &child, &content_type, &body)
+        let (declared, links) = link_declared(req, &child);
+        let types = all_types(&declared, content_types(&child, &content_type, &body));
+        (declared, types, links)
     };
     let meta = ResourceMeta {
         creator: agent.subject.clone(),
         linkset: initial_linkset(&child, &links),
         types,
+        declared_types: Some(declared_types),
         links,
         modified_ms: is_container.then(now_ms),
         ..Default::default()
@@ -1304,6 +1327,21 @@ async fn stored_meta<S: Store + 'static>(
     }
 }
 
+/// Run a mutation's store writes (`writes`) while `locks` are held; the locks come back with the
+/// outcome. The mutations run in a task of their own ([`handle`] spawns them, before any lock is
+/// taken), so a client that goes away cannot release the locks while a write is still pending (a
+/// remote store may commit a request that was already sent): nobody else acts on the resource
+/// until the writes are over, and none of them is cut off half way. The task is spawned before
+/// the locks are taken, not here, so its scheduling never sits inside the critical section that
+/// every writer of the resource waits on.
+async fn hold_locks<L, T, F>(locks: L, writes: F) -> Result<(T, L), ServerError>
+where
+    F: std::future::Future<Output = T>,
+{
+    let out = writes.await;
+    Ok((out, locks))
+}
+
 /// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, such that a
 /// failure (or the request being dropped) never leaves content visible under metadata that does
 /// not describe it: the types (and the creator) in the metadata are what grants rest on, so new
@@ -1318,9 +1356,9 @@ async fn stored_meta<S: Store + 'static>(
 ///   and creator may act on it (see [`access::allowed`](super::access::allowed)) until a write
 ///   completes.
 ///
-/// The writes run in a task of their own that holds the resource's lock (`guard`, handed back
-/// when they are done), so a client that goes away mid-way cancels neither the writes nor the
-/// rollback, and nobody sees the steps in between.
+/// The writes, a lone content write included, run with the resource's lock (`guard`, handed back
+/// when they are done) held, in the request's own task (see [`hold_locks`]), so a client that goes
+/// away mid-way cancels neither the writes nor the rollback, and nobody sees the steps in between.
 async fn write_with_meta<S: Store + 'static>(
     state: &LwsState<S>,
     guard: IriGuard,
@@ -1338,39 +1376,35 @@ async fn write_with_meta<S: Store + 'static>(
             (new, old)
         })
         .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
-    let Some((new, old)) = changed else {
-        let written = state.store.write(uri, body, content_type).await;
-        return (written, Some(guard));
-    };
     let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
-    let task = tokio::spawn(async move {
-        let outcome = async {
-            let mut closed = old.clone().unwrap_or_default();
-            closed.pending = true;
-            state.put_resource_meta(&uri, &closed).await?;
-            let written = match state.store.write(&uri, body, &content_type).await {
-                Ok(m) => m,
-                Err(e) => {
-                    // A failed rollback leaves the mark: fail closed.
-                    let _ = match &old {
-                        Some(old) => state.put_resource_meta(&uri, old).await,
-                        None => state.store.delete(&meta_key(&uri), None).await,
-                    };
-                    return Err(e);
-                }
-            };
-            state.put_resource_meta(&uri, &new).await?;
-            Ok(written)
-        }
-        .await;
-        (outcome, guard)
-    });
-    match task.await {
+    let Some((new, old)) = changed else {
+        let write = async move { state.store.write(&uri, body, &content_type).await };
+        return match hold_locks(guard, write).await {
+            Ok((written, guard)) => (written, Some(guard)),
+            Err(e) => (Err(e), None),
+        };
+    };
+    let writes = async move {
+        let mut closed = old.clone().unwrap_or_default();
+        closed.pending = true;
+        state.put_resource_meta(&uri, &closed).await?;
+        let written = match state.store.write(&uri, body, &content_type).await {
+            Ok(m) => m,
+            Err(e) => {
+                // A failed rollback leaves the mark: fail closed.
+                let _ = match &old {
+                    Some(old) => state.put_resource_meta(&uri, old).await,
+                    None => state.store.delete(&meta_key(&uri), None).await,
+                };
+                return Err(e);
+            }
+        };
+        state.put_resource_meta(&uri, &new).await?;
+        Ok(written)
+    };
+    match hold_locks(guard, writes).await {
         Ok((outcome, guard)) => (outcome, Some(guard)),
-        Err(e) => (
-            Err(ServerError::Storage(format!("the write failed: {e}"))),
-            None,
-        ),
+        Err(e) => (Err(e), None),
     }
 }
 
@@ -1403,17 +1437,6 @@ async fn update<S: Store + 'static>(
         .header(header::CONTENT_TYPE)
         .map(str::to_string)
         .unwrap_or(meta.content_type.clone());
-    // The types the old content stated, so the replacement can drop them.
-    let old_content_types = if meta.content_type.starts_with("text/turtle") {
-        // Unreadable old content is a failure, not "states no types": otherwise the types it
-        // stated would outlive it.
-        match state.store.read_at(uri, &meta).await {
-            Ok(b) => content_types(uri, &meta.content_type, &b),
-            Err(e) => return store_error(e),
-        }
-    } else {
-        Vec::new()
-    };
     let set_linkset = prefers_set_linkset(req);
     let old_rmeta = match stored_meta(state, uri).await {
         Ok(m) => m,
@@ -1422,15 +1445,33 @@ async fn update<S: Store + 'static>(
     let mut rmeta = old_rmeta.clone().unwrap_or_default();
     // "LWS servers MUST handle PUT and PATCH requests on resource URIs as modifications to the
     // resource content only, with no default impact on the associated linkset resource." The
-    // types the content states are derived from the content, so they follow it; the types and
-    // links Link headers declare change only with Prefer: set-linkset, which replaces them.
-    let mut types: Vec<String> = if set_linkset {
-        let (link_types, links) = link_declared(req, uri);
+    // user-managed links Link headers carry change only with Prefer: set-linkset, which replaces
+    // them. Types are not user-managed links but derived ("types-from-content",
+    // "types-from-link-headers", on every write): the types the content states follow the
+    // content (and only they do), and the types a PUT's own Link headers declare replace the
+    // declared ones; a PUT that declares none keeps them.
+    let (link_types, links) = link_declared(req, uri);
+    let declared = if set_linkset {
         rmeta.linkset = initial_linkset(uri, &links);
         rmeta.links = links;
         rmeta.linkset_etag = None;
         link_types
+    } else if !link_types.is_empty() {
+        link_types
+    } else if let Some(declared) = rmeta.declared_types.clone() {
+        declared
     } else {
+        // Metadata from before declared types were kept apart: they are the types less those
+        // the old content states. Unreadable old content is a failure, not "states no types":
+        // otherwise the types it stated would outlive it.
+        let old_content_types = if meta.content_type.starts_with("text/turtle") {
+            match state.store.read_at(uri, &meta).await {
+                Ok(b) => content_types(uri, &meta.content_type, &b),
+                Err(e) => return store_error(e),
+            }
+        } else {
+            Vec::new()
+        };
         rmeta
             .types
             .iter()
@@ -1438,12 +1479,8 @@ async fn update<S: Store + 'static>(
             .cloned()
             .collect()
     };
-    for t in content_types(uri, &content_type, &req.body) {
-        if !types.contains(&t) {
-            types.push(t);
-        }
-    }
-    rmeta.types = types;
+    rmeta.types = all_types(&declared, content_types(uri, &content_type, &req.body));
+    rmeta.declared_types = Some(declared);
     let (written, _guard) = write_with_meta(
         state,
         guard,
@@ -1693,12 +1730,14 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 let v = &op["value"];
                 fits(v)?;
                 let minus = replaced(&doc);
-                grow(&mut size, json_size(v), minus)?;
+                let by = json_size(v) + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
             }
             "remove" => {
+                let overhead = member_overhead(&doc, &path, false);
                 let old = pointer_remove(&mut doc, &path).ok_or(Failed)?;
-                size = size.saturating_sub(json_size(&old));
+                size = size.saturating_sub(json_size(&old) + overhead);
             }
             "replace" => {
                 let v = &op["value"];
@@ -1714,15 +1753,23 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 if path.starts_with(&format!("{from}/")) {
                     return Err(Failed);
                 }
+                // The value moves; what changes is the member around it (its key, a separator), and
+                // what an add at `path` replaces.
+                let overhead = member_overhead(&doc, &from, false);
                 let v = pointer_remove(&mut doc, &from).ok_or(Failed)?;
                 fits(&v)?;
+                let moved = json_size(&v);
+                size = size.saturating_sub(moved + overhead);
+                let minus = replaced(&doc);
+                let by = moved + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "copy" => {
                 let from = str_of(op, "from");
                 let source = doc.pointer(&from).ok_or(Failed)?;
                 fits(source)?;
-                let added = json_size(source);
+                let added = json_size(source) + member_overhead(&doc, &path, true);
                 let minus = replaced(&doc);
                 grow(&mut size, added, minus)?;
                 let v = doc.pointer(&from).ok_or(Failed)?.clone();
@@ -1736,7 +1783,42 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
             _ => unreachable!("validated"),
         }
     }
+    // The running size is an upper bound kept without serializing; the result itself is held to
+    // the budget too.
+    if json_size(&doc) > budget {
+        return Err(PatchError::TooLarge);
+    }
     Ok(doc)
+}
+
+/// The bytes a member at `path` of `doc` takes beside its value: in an object its key (quoted and
+/// escaped) and colon, and in either container the comma between it and a sibling. `adding`: for a
+/// member about to be added (nothing for an object member that would be replaced); otherwise for
+/// the member there now.
+fn member_overhead(doc: &Value, path: &str, adding: bool) -> usize {
+    let Some((parent, key)) = split_pointer(path) else {
+        return 0;
+    };
+    if path.is_empty() {
+        return 0;
+    }
+    let comma = |others: usize| usize::from(others > 0);
+    match doc.pointer(&parent) {
+        Some(Value::Object(m)) => {
+            let present = m.contains_key(&key);
+            if adding && present {
+                return 0;
+            }
+            let others = m.len() - usize::from(present);
+            json_size(&Value::String(key)) + 1 + comma(others)
+        }
+        Some(Value::Array(a)) => comma(if adding {
+            a.len()
+        } else {
+            a.len().saturating_sub(1)
+        }),
+        _ => 0,
+    }
 }
 
 /// RFC 6902 section 4.6 equality: numbers are equal when their values are (`1` and `1.0`), strings
@@ -1980,11 +2062,21 @@ async fn patch<S: Store + 'static>(
         };
         let (link_types, links) = link_declared(req, uri);
         let mut rmeta = old.clone().unwrap_or_default();
+        // Declared types are added to (update-resource is partial); in metadata from before they
+        // were kept apart, every type counts as declared, as a JSON resource states none.
+        let mut declared = rmeta
+            .declared_types
+            .clone()
+            .unwrap_or_else(|| rmeta.types.clone());
         for t in link_types {
             if !rmeta.types.contains(&t) {
-                rmeta.types.push(t);
+                rmeta.types.push(t.clone());
+            }
+            if !declared.contains(&t) {
+                declared.push(t);
             }
         }
+        rmeta.declared_types = Some(declared);
         let mut user = rmeta
             .linkset
             .clone()
@@ -2132,11 +2224,25 @@ async fn delete<S: Store + 'static>(
         };
         notices.push(state.notify.prepare(state, &event).await);
     }
-    let (removed, outcome) = remove(state, &doomed).await;
-    for pending in notices.into_iter().take(removed) {
-        state.notify.send(state, pending);
-    }
-    drop(guards);
+    // The removals, the notifications of those that happened and the touch of the container run
+    // in a task that holds the subtree's locks until the removals are over (see [`hold_locks`]).
+    let removal = {
+        let state = state.clone();
+        async move {
+            let (removed, outcome) = remove(&state, &doomed).await;
+            for pending in notices.into_iter().take(removed) {
+                state.notify.send(&state, pending);
+            }
+            (removed, outcome, state)
+        }
+    };
+    let (removed, outcome) = match hold_locks(guards, removal).await {
+        Ok(((removed, outcome, _), guards)) => {
+            drop(guards);
+            (removed, outcome)
+        }
+        Err(e) => return store_error(e),
+    };
     if removed > 0 {
         if let Some(p) = parent {
             touch_container(state, &p).await;
@@ -2426,7 +2532,7 @@ async fn linkset<S: Store + 'static>(
     // The resource's lock is taken before the permission check, so the decision holds for what is
     // served or changed: shared for a read, exclusive for a patch (from the precondition through
     // the write).
-    let (_shared, _exclusive) = if req.method == Method::PATCH {
+    let (_shared, mut exclusive) = if req.method == Method::PATCH {
         (None, Some(state.locks.lock(uri).await))
     } else {
         (Some(state.locks.read(uri).await), None)
@@ -2516,9 +2622,19 @@ async fn linkset<S: Store + 'static>(
                     Some("the linkset nests too deeply to be stored"),
                 );
             }
-            if let Err(e) = state.put_resource_meta(uri, &meta).await {
-                return store_error(e);
-            }
+            // The write runs in a task that holds the lock (see [`hold_locks`]).
+            let Some(guard) = exclusive.take() else {
+                return store_error(ServerError::Storage("the lock is not held".into()));
+            };
+            let write = {
+                let (state, uri, meta) = (state.clone(), uri.to_string(), meta.clone());
+                async move { state.put_resource_meta(&uri, &meta).await }
+            };
+            // Held on until the response is made, as before the write.
+            let _held = match hold_locks(guard, write).await {
+                Ok((Ok(()), guard)) => guard,
+                Ok((Err(e), _)) | Err(e) => return store_error(e),
+            };
             let new_etag = match linkset_document(state, uri, &meta).await {
                 Ok(d) => linkset_etag(&d),
                 Err(e) => return store_error(e),
@@ -3129,7 +3245,8 @@ mod tests {
         )
         .await;
         let p = path_of(&uri);
-        // Link headers without Prefer: set-linkset change nothing; the content's own type follows it.
+        // Link headers without Prefer: set-linkset leave the links alone; the types they declare
+        // replace the declared ones, and the content's own type follows the content.
         let r = call(
             &st,
             "PUT",
@@ -3148,7 +3265,7 @@ mod tests {
         assert_eq!(
             m.types,
             vec![
-                "https://ex.org/Declared".to_string(),
+                "https://ex.org/Other".to_string(),
                 "https://ex.org/Beta".to_string()
             ]
         );
@@ -3281,6 +3398,55 @@ mod tests {
         )
         .await;
         assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// Review finding: a JSON Patch `move` was not counted against the budget at all, and adds and
+    /// copies counted their values but not the keys and separators around them, so a patch could
+    /// build a document larger than the budget.
+    #[test]
+    fn json_patch_counts_keys_separators_and_moves() {
+        let long = "k".repeat(1000);
+        // Many members with long keys and empty values: the keys are most of the document.
+        let ops: Vec<Value> = (0..20)
+            .map(|i| json!({"op": "add", "path": format!("/{long}{i}"), "value": 0}))
+            .collect();
+        let ops = Value::Array(ops);
+        let built = json_patch(&json!({}), &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&built);
+        assert!(size > 20_000);
+        // Exact: the budget the result takes is enough, a byte less is not.
+        assert_eq!(json_patch(&json!({}), &ops, size), Ok(built));
+        assert_eq!(
+            json_patch(&json!({}), &ops, size - 1),
+            Err(PatchError::TooLarge)
+        );
+        // A move to a longer key grows the document by the difference.
+        let doc = json!({"a": [1, 2, 3], "b": {}});
+        let ops = json!([{"op": "move", "from": "/a", "path": format!("/b/{long}")}]);
+        let moved = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&moved);
+        assert_eq!(json_patch(&doc, &ops, size), Ok(moved));
+        assert_eq!(json_patch(&doc, &ops, size - 1), Err(PatchError::TooLarge));
+        // Moves, copies, removes and escaped keys, counted exactly along the way.
+        let ops = json!([
+            {"op": "add", "path": "/x", "value": {"q\"uote": [1, 2]}},
+            {"op": "copy", "from": "/x", "path": "/y~1z"},
+            {"op": "move", "from": "/x/q\"uote/0", "path": "/x/q\"uote/-"},
+            {"op": "remove", "path": "/b"},
+            {"op": "add", "path": "/arr", "value": []},
+            {"op": "move", "from": "/a", "path": "/arr/0"},
+        ]);
+        let out = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        // The largest the document gets along the way.
+        let peak = (1..=ops.as_array().unwrap().len())
+            .map(|n| {
+                let prefix = Value::Array(ops.as_array().unwrap()[..n].to_vec());
+                json_size(&json_patch(&doc, &prefix, PATCH_BUDGET).unwrap())
+            })
+            .max()
+            .unwrap();
+        assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
+        assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
     }
 
     #[test]
@@ -4613,6 +4779,153 @@ mod tests {
         }
     }
 
+    /// Review finding: a linkset PATCH, a content-only PUT and a DELETE made their store writes
+    /// inline, so a client that went away released the resource's lock while a write sent to a
+    /// remote store could still commit. A delete and a re-create by someone else could then slip
+    /// in, and the late write landed on the new resource: the old creator over it, or old content
+    /// under the new creator. A cancelled DELETE stopped half way, leaving metadata behind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_mutations_hold_their_locks_until_the_store_answers() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::time::Duration;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let (owner, bob) = (
+            agent("https://owner.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        // A container of Bob's, so both may create in it.
+        let c = format!("{}c/", st.cfg.storage());
+        let h = [
+            ("slug", "c"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, ""),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(hdr(&r, "location"), c);
+        let mut meta = st.resource_meta(&c).await.unwrap();
+        meta.creator = bob.subject.clone();
+        st.put_resource_meta(&c, &meta).await.unwrap();
+        async fn post(
+            st: LwsState<FlakyStore>,
+            who: Agent,
+            slug: &'static str,
+            body: &'static str,
+        ) -> Response {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let c = format!("{}c/", st.cfg.storage());
+            create(&st, &req(Method::POST, "/c/", &h, body), &who, &c).await
+        }
+        // Once the cancelled request's write is let through, the owner deletes the resource and
+        // Bob creates one at the IRI.
+        let replace = |name: &'static str, gate: Arc<tokio::sync::Semaphore>| {
+            let (st, owner, bob) = (st.clone(), owner.clone(), bob.clone());
+            async move {
+                let next = tokio::spawn({
+                    let (st, bob) = (st.clone(), bob.clone());
+                    async move {
+                        let path = format!("/c/{name}");
+                        let r = handle(&st, &req(Method::DELETE, &path, &[], ""), &owner).await;
+                        assert_eq!(r.status(), StatusCode::NO_CONTENT, "{name}");
+                        post(st, bob, name, "bob's").await
+                    }
+                });
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                gate.add_permits(1);
+                let r = tokio::time::timeout(Duration::from_secs(5), next)
+                    .await
+                    .expect("the replacement never finished")
+                    .unwrap();
+                assert_eq!(r.status(), StatusCode::CREATED, "{name}");
+                let uri = format!("{}c/{name}", st.cfg.storage());
+                assert_eq!(hdr(&r, "location"), uri);
+                // Whatever was late is over: the resource is Bob's, content and metadata.
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                assert_eq!(
+                    st.store.read(&uri).await.unwrap().body,
+                    Bytes::from("bob's")
+                );
+                let m = st.resource_meta(&uri).await.unwrap();
+                assert_eq!(m.creator, bob.subject, "{name}");
+            }
+        };
+        // A linkset PATCH whose metadata write is pending when the client goes away.
+        let x = format!("{c}x");
+        assert_eq!(
+            post(st.clone(), owner.clone(), "x", "owner's")
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((meta_key(&x), gate.clone()));
+        let patch = format!(
+            r#"{{"linkset":[{{"anchor":"{x}","https://e.example/rel":[{{"href":"https://e.example/t"}}]}}]}}"#
+        );
+        let h = [("content-type", MERGE_PATCH)];
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            handle(&st, &req(Method::PATCH, "/c/x.meta", &h, &patch), &owner),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        replace("x", gate).await;
+        // A content-only PUT whose write is pending when the client goes away.
+        let y = format!("{c}y");
+        assert_eq!(
+            post(st.clone(), owner.clone(), "y", "owner's")
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((y.clone(), gate.clone()));
+        let h = [("content-type", "text/plain")];
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            handle(&st, &req(Method::PUT, "/c/y", &h, "late"), &owner),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        replace("y", gate).await;
+        // A DELETE whose removal is pending when the client goes away still finishes: the
+        // metadata goes too.
+        let z = format!("{c}z");
+        assert_eq!(
+            post(st.clone(), owner.clone(), "z", "owner's")
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_delete_of.lock().unwrap() = Some((z.clone(), gate.clone()));
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            handle(&st, &req(Method::DELETE, "/c/z", &[], ""), &owner),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if stored_meta(&st, &z).await.unwrap().is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!st.store.exists(&z).await.unwrap());
+        assert!(stored_meta(&st, &z).await.unwrap().is_none());
+    }
+
     /// Review finding: a linkset nested to the parser's limit validated, but stored inside the
     /// metadata it nested one level deeper, so the metadata never read back and every later read
     /// took the defaults (no creator, no types, no links).
@@ -4767,8 +5080,75 @@ mod tests {
         assert_eq!(hdr(&r, "location"), format!("{c}livez"));
     }
 
+    /// Review finding: the types the content stated and those Link headers declared were kept
+    /// as one list, so replacing the content dropped a declared type the old content also stated.
+    #[tokio::test]
+    async fn replacing_content_keeps_the_declared_types() {
+        let st = state().await;
+        let (t, u, v) = (
+            "https://e.example/T",
+            "https://e.example/U",
+            "https://e.example/V",
+        );
+        let uri = post(
+            &st,
+            "d.ttl",
+            "text/turtle",
+            &format!("<> a <{t}>, <{u}> ."),
+            &[("link", &format!("<{t}>; rel=\"type\""))],
+        )
+        .await;
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.types, vec![t.to_string(), u.to_string()]);
+        assert_eq!(m.declared_types, Some(vec![t.to_string()]));
+        let r = call(
+            &st,
+            "PUT",
+            path_of(&uri),
+            &[("content-type", "text/turtle")],
+            &format!("<> a <{v}> ."),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        // The declared type stays; the old content's own goes; the new content's comes.
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.types, vec![t.to_string(), v.to_string()]);
+        assert_eq!(m.declared_types, Some(vec![t.to_string()]));
+        // Content that states none leaves the declared type alone.
+        let r = call(
+            &st,
+            "PUT",
+            path_of(&uri),
+            &[("content-type", "text/turtle")],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            st.resource_meta(&uri).await.unwrap().types,
+            vec![t.to_string()]
+        );
+        // A PUT that declares types of its own replaces the declared ones.
+        let r = call(
+            &st,
+            "PUT",
+            path_of(&uri),
+            &[
+                ("content-type", "text/turtle"),
+                ("link", &format!("<{u}>; rel=\"type\"")),
+            ],
+            &format!("<> a <{v}> ."),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.types, vec![u.to_string(), v.to_string()]);
+        assert_eq!(m.declared_types, Some(vec![u.to_string()]));
+    }
+
     /// Review finding: a PUT that could not read the old Turtle content took it to state no
-    /// types, so the types it did state outlived it.
+    /// types, so the types it did state outlived it. (Only metadata from before declared types
+    /// were kept apart needs the old content read.)
     #[tokio::test]
     async fn a_put_that_cannot_read_the_old_content_fails() {
         use super::super::route;
@@ -4797,6 +5177,11 @@ mod tests {
             .unwrap()
             .types
             .contains(&"https://e.example/Old".to_string()));
+        // Metadata from before declared types were kept apart: the old content says which of
+        // the types are its own.
+        let mut legacy = st.resource_meta(&uri).await.unwrap();
+        legacy.declared_types = None;
+        st.put_resource_meta(&uri, &legacy).await.unwrap();
         *store.fail_read_of.lock().unwrap() = Some(uri.clone());
         let r = route(
             &st,
