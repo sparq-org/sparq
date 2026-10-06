@@ -4012,13 +4012,10 @@ ex:bob
         )
         .unwrap();
         let framed = graph_to_jsonld_framed(&g0, &frame);
-        // Under `p`'s scoped context `type` is ex:data; the map key carries the type.
-        // (oxjsonld's streaming reader rejects type maps whose entries start with @id,
-        // so the shape is pinned instead of reloaded.)
-        assert!(
-            framed.contains(r#""p":{"http://ex/T":{"@id":"http://ex/b","type":"kept"}}"#),
-            "{framed}"
-        );
+        // oxjsonld cannot read node objects inside a type map, so `p` is written as a plain
+        // property (still under its scoped context, where `type` is ex:data).
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
     }
 
     // A `@type` map item whose own type-scoped context re-aliases `@type`, and reuses
@@ -4038,8 +4035,16 @@ ex:bob
         )
         .unwrap();
         let framed = graph_to_jsonld_framed(&g0, &frame);
-        // Under `T`'s type-scoped context `t` is ex:data; the map key carries the type.
-        assert!(framed.contains(r#""p":{"T":{"@id":"http://ex/b","t":"kept"}}"#), "{framed}");
+        // `p` becomes a plain property (sparq's reader can't read node objects in a type
+        // map); under `T`'s type-scoped context `t` is ex:data and `type` the type. The
+        // shape is pinned: oxjsonld doesn't apply a type-scoped context after `@id`.
+        assert!(framed.contains(r#""p":{"@id":"http://ex/b","type":"T","t":"kept"}"#), "{framed}");
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(exp.contains(r#""http://ex/data":[{"@value":"kept"}]"#), "{exp}");
+        assert!(!exp.contains("http://ex/kept"), "{exp}");
     }
 
     // Same-document references with a colon in the query or fragment stay relative to
@@ -4096,6 +4101,32 @@ ex:bob
         let tagged = |g: &Graph| nt_sorted(g).iter().filter(|t| t.contains("\"@en")).count();
         assert_eq!(nt_sorted(&g1).len(), 6, "{doc}");
         assert_eq!(tagged(&g1), 2, "{doc}");
+    }
+
+    // Type maps holding node objects are written as plain properties, which sparq's
+    // reader can load; type maps of bare references stay.
+    #[test]
+    fn type_maps_stay_readable() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> , <http://ex/c> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let ctx = r#"{"p":{"@id":"http://ex/p","@container":"@type"},"q":"http://ex/p","data":"http://ex/data"}"#;
+        let frame = parse_context_json(&format!(r#"{{"@context":{ctx},"@id":"http://ex/a"}}"#)).unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+        let (doc, g1) = compact_then_reload(&g0, ctx);
+        assert_eq!(nt_sorted(&g1), nt_sorted(&g0), "{doc}");
+        let refs = Graph::load_str(r#"<http://ex/a> <http://ex/p> <http://ex/b> ."#, "turtle").unwrap();
+        let (doc, g1) = compact_then_reload(
+            &refs,
+            r#"{"p":{"@id":"http://ex/p","@container":"@type","@type":"@id"}}"#,
+        );
+        assert!(doc.contains(r#""@container":"@type""#), "{doc}");
+        assert_eq!(nt_sorted(&g1), nt_sorted(&refs), "{doc}");
     }
 
     // A property-valued index whose value reads as an `@none` alias stays on the node.

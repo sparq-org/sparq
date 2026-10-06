@@ -146,9 +146,79 @@ fn render(doc: &Json) -> String {
 /// dataset. A `context` the processor rejects yields the expanded document (module docs).
 pub fn write_jsonld_compact(graphs: &[NamedGraph<'_>], context: &Json) -> String {
     let doc = expanded(graphs);
-    match compact_expanded(&doc, context, &JsonLdOptions::default(), &NoopLoader) {
-        Ok(compacted) => render(&compacted),
+    let compact = |ctx: &Json| compact_expanded(&doc, ctx, &JsonLdOptions::default(), &NoopLoader);
+    match compact(context) {
+        Ok(compacted) => match readable_type_maps(&compacted, context) {
+            None => render(&compacted),
+            Some(stripped) => render(&compact(&stripped).unwrap_or(doc)),
+        },
         Err(_) => render(&doc),
+    }
+}
+
+/// `None` when every `@type` map in `out` holds only node references. Otherwise a copy of
+/// `context` without `@type` containers: oxjsonld (sparq's JSON-LD reader) cannot read a
+/// node object inside a type map, so such output is redone with plain properties.
+fn readable_type_maps(out: &Json, context: &Json) -> Option<Json> {
+    let mut stripped = context.clone();
+    let mut terms = Vec::new();
+    strip_type_containers(&mut stripped, &mut terms);
+    (!terms.is_empty() && holds_typed_nodes(out, &terms)).then_some(stripped)
+}
+
+/// Removes `@type` from every term's `@container` in `ctx` (and its scoped contexts),
+/// collecting the names of the terms changed.
+fn strip_type_containers(ctx: &mut Json, terms: &mut Vec<String>) {
+    match ctx {
+        Json::Arr(items) => items.iter_mut().for_each(|c| strip_type_containers(c, terms)),
+        Json::Obj(members) => {
+            for (name, def) in members.iter_mut() {
+                if name == "@context" {
+                    strip_type_containers(def, terms);
+                    continue;
+                }
+                let Json::Obj(fields) = def else { continue };
+                for (key, val) in fields.iter_mut() {
+                    match (key.as_str(), val) {
+                        ("@context", scoped) => strip_type_containers(scoped, terms),
+                        ("@container", Json::Arr(cs)) => {
+                            let n = cs.len();
+                            cs.retain(|c| c.as_str() != Some("@type"));
+                            if cs.len() != n {
+                                terms.push(name.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if def.get("@container").and_then(Json::as_str) == Some("@type") {
+                    if let Json::Obj(fields) = def {
+                        fields.retain(|(k, _)| k != "@container");
+                    }
+                    terms.push(name.clone());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether some entry of `doc` named in `terms` is a map holding a node object.
+fn holds_typed_nodes(doc: &Json, terms: &[String]) -> bool {
+    let is_node = |v: &Json| match v {
+        Json::Obj(_) => true,
+        Json::Arr(a) => a.iter().any(|x| matches!(x, Json::Obj(_))),
+        _ => false,
+    };
+    match doc {
+        Json::Arr(items) => items.iter().any(|d| holds_typed_nodes(d, terms)),
+        Json::Obj(members) => members.iter().any(|(k, v)| {
+            k != "@context"
+                && ((terms.contains(k)
+                    && matches!(v, Json::Obj(m) if m.iter().any(|(_, x)| is_node(x))))
+                    || holds_typed_nodes(v, terms))
+        }),
+        _ => false,
     }
 }
 
@@ -163,8 +233,21 @@ pub fn write_jsonld_compact(graphs: &[NamedGraph<'_>], context: &Json) -> String
 pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> String {
     let doc = expanded(graphs);
     let opts = JsonLdOptions::default();
-    match frame(&doc, frame_doc, &opts, &FrameOptions::default(), &NoopLoader) {
-        Ok(framed) => render(&framed),
+    let run = |f: &Json| frame(&doc, f, &opts, &FrameOptions::default(), &NoopLoader);
+    match run(frame_doc) {
+        Ok(framed) => {
+            let stripped = frame_doc
+                .get("@context")
+                .and_then(|ctx| readable_type_maps(&framed, ctx));
+            match stripped {
+                None => render(&framed),
+                Some(ctx) => {
+                    let mut f = frame_doc.clone();
+                    f.set("@context", ctx);
+                    render(&run(&f).unwrap_or(doc))
+                }
+            }
+        }
         Err(_) => render(&doc),
     }
 }
