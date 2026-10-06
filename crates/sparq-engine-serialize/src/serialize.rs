@@ -4021,6 +4021,42 @@ ex:bob
         );
     }
 
+    // A `@type` map item whose own type-scoped context re-aliases `@type`, and reuses
+    // the outer alias for data, keeps that data and adds no type.
+    #[test]
+    fn frame_type_map_under_type_scoped_alias_keeps_data() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","t":"@type","type":"@type",
+                "T":{"@id":"http://ex/T","@context":{"t":"http://ex/data"}},
+                "p":{"@id":"http://ex/p","@container":"@type"}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        // Under `T`'s type-scoped context `t` is ex:data; the map key carries the type.
+        assert!(framed.contains(r#""p":{"T":{"@id":"http://ex/b","t":"kept"}}"#), "{framed}");
+    }
+
+    // Same-document references with a colon in the query or fragment stay relative to
+    // the whole base (no "./" that would drop its last segment).
+    #[test]
+    fn compact_keeps_same_document_refs_with_colons() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/doc#part:one> <http://ex/p> <http://ex/doc?q=a:b> ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(
+            &g0,
+            r#"{"@base":"http://ex/doc","p":{"@id":"http://ex/p","@type":"@id"}}"#,
+        );
+    }
+
     // An `@id` map key that would read back as an `@none` alias keeps the full IRI.
     #[test]
     fn compact_id_map_key_never_reads_as_none() {

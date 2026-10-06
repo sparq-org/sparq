@@ -510,40 +510,7 @@ fn compact_element(
     // step 8: reverse-property scope.
     let inside_reverse = active_property == Some("@reverse");
 
-    // step 9: apply any type-scoped contexts declared on the node's (compacted) types,
-    // in lexicographic order of the compacted forms, with propagate false. Lookups run
-    // against the retained type-scoped context (step 1).
-    let mut owned_t: Option<Rc<Ctx>> = None;
-    if let Some(types) = element.get("@type") {
-        let mut compacted_types: Vec<String> = type_strings(types)
-            .into_iter()
-            .map(|t| type_scoped.ciri(t, None, true, false))
-            .collect();
-        compacted_types.sort();
-        for term in &compacted_types {
-            if let Some(def) = type_scoped.active.term_definition(term) {
-                if let Some(local) = def.context() {
-                    let base: &Ctx = owned_t.as_deref().unwrap_or(cur);
-                    let key = DerivedKey::Scoped {
-                        lookup: type_scoped,
-                        base,
-                        term: term.clone(),
-                        type_scoped: true,
-                    };
-                    owned_t = Some(env.derived(key, || {
-                        base.active.process_scoped(
-                            local,
-                            def.base_url.as_deref(),
-                            false, // override protected
-                            false, // propagate
-                            env.loader,
-                            env.options,
-                        )
-                    })?);
-                }
-            }
-        }
-    }
+    let owned_t = type_ctx(type_scoped, cur, element, env)?;
     let cur: &Ctx = owned_t.as_deref().unwrap_or(cur);
 
     // steps 10-12: build the compacted node.
@@ -877,6 +844,50 @@ fn node_ctx(
     Ok(owned)
 }
 
+/// Step 9 — the context with the type-scoped contexts of `element`'s types applied
+/// onto `cur` (in lexicographic order of the compacted types, propagate false; type
+/// terms are looked up in `type_scoped`, the incoming context). `None` when no type
+/// carries a scoped context.
+fn type_ctx(
+    type_scoped: &Ctx,
+    cur: &Ctx,
+    element: &Json,
+    env: &Env,
+) -> Result<Option<Rc<Ctx>>, JsonLdError> {
+    let mut owned_t: Option<Rc<Ctx>> = None;
+    if let Some(types) = element.get("@type") {
+        let mut compacted_types: Vec<String> = type_strings(types)
+            .into_iter()
+            .map(|t| type_scoped.ciri(t, None, true, false))
+            .collect();
+        compacted_types.sort();
+        for term in &compacted_types {
+            if let Some(def) = type_scoped.active.term_definition(term) {
+                if let Some(local) = def.context() {
+                    let base: &Ctx = owned_t.as_deref().unwrap_or(cur);
+                    let key = DerivedKey::Scoped {
+                        lookup: type_scoped,
+                        base,
+                        term: term.clone(),
+                        type_scoped: true,
+                    };
+                    owned_t = Some(env.derived(key, || {
+                        base.active.process_scoped(
+                            local,
+                            def.base_url.as_deref(),
+                            false, // override protected
+                            false, // propagate
+                            env.loader,
+                            env.options,
+                        )
+                    })?);
+                }
+            }
+        }
+    }
+    Ok(owned_t)
+}
+
 /// Step 12.8.9 — add one compacted item into a `@language` / `@index` / `@id` / `@type`
 /// container map under its map key.
 #[allow(clippy::too_many_arguments)]
@@ -953,9 +964,12 @@ fn add_to_container_map(
         // 12.8.9.8: type maps key on the first compacted type; remaining types stay. The
         // spec names the entry by this context's @type alias, but the item was compacted
         // under the term's scoped context, which may alias @type differently and reuse
-        // this alias for data, so the alias is taken from that context.
-        let item_ctx = node_ctx(cur, Some(iap), item, env)?;
-        let container_key = item_ctx.as_deref().unwrap_or(cur).ciri("@type", None, true, false);
+        // this alias for data, so the alias is taken from that context (including the
+        // type-scoped contexts of the item's own types).
+        let node = node_ctx(cur, Some(iap), item, env)?;
+        let node: &Ctx = node.as_deref().unwrap_or(cur);
+        let typed = type_ctx(cur, node, item, env)?;
+        let container_key = typed.as_deref().unwrap_or(node).ciri("@type", None, true, false);
         if let Some(taken) = take_entry(&mut compacted_item, &container_key) {
             let mut vals = match taken {
                 Json::Arr(a) => a,

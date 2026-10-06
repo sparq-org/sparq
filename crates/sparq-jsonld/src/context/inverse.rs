@@ -706,8 +706,10 @@ pub fn compact_iri(
                 }
                 // Likewise a reference spelled like a keyword alias (e.g. of `@id`;
                 // other terms are not consulted for ids) or with a colon in its first
-                // segment (read as a compact or absolute IRI) would not expand back.
-                let first_segment = relative.split('/').next().unwrap_or("");
+                // path segment (read as a compact or absolute IRI) would not expand
+                // back. A colon in the query or fragment is harmless, and a "./"
+                // before "#…"/"?…" would drop the base's last segment.
+                let first_segment = relative.split(['/', '?', '#']).next().unwrap_or("");
                 let alias = ctx
                     .term_definitions
                     .get(relative.as_str())
@@ -1018,6 +1020,11 @@ mod tests {
         assert_eq!(compact_iri(&ac, &inv, "http://ex/id", None, false, false), "./id");
         assert_eq!(compact_iri(&ac, &inv, "http://ex/a:b", None, false, false), "./a:b");
         assert_eq!(compact_iri(&ac, &inv, "http://ex/other", None, false, false), "other");
+        assert_eq!(compact_iri(&ac, &inv, "http://ex/a?q=b:c", None, false, false), "a?q=b:c");
+        let ac = ctx_of(r#"{"@base": "http://ex/doc"}"#);
+        let inv = ac.inverse_context();
+        assert_eq!(compact_iri(&ac, &inv, "http://ex/doc#part:one", None, false, false), "#part:one");
+        assert_eq!(compact_iri(&ac, &inv, "http://ex/doc?q=a:b", None, false, false), "?q=a:b");
     }
 
     /// A vocab-relative suffix containing a colon or starting with `@` would not
