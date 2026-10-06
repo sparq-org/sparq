@@ -284,8 +284,8 @@ fn antijoin_declines_without_shared_variable() {
 /// ranges `?s` over graph terms. Rewritten and un-rewritten results must agree.
 #[test]
 fn zero_length_path_endpoint_not_substituted() {
-    let g = load("<http://ex/a> <http://ex/q> <http://ex/b> .\n");
-    for path in ["ex:p*", "ex:p?", "^ex:p*", "ex:p*/ex:q?", "ex:p*|ex:q"] {
+    let g = load("<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/a> <http://ex/missing> <http://ex/b> .\n");
+    for path in ["ex:p*", "ex:p?", "^ex:p*", "ex:p*/ex:q?", "ex:p*|ex:q", "(ex:p?)+", "(ex:p*)+"] {
         for (s, o) in [("?s", "?o"), ("?o", "?s")] {
             let q = format!("{PFX} SELECT ?s ?o WHERE {{ {s} {path} {o} FILTER(?s = ex:missing) }}");
             assert_eq!(result_bag(&g, &q), result_bag_raw(&g, &q), "{q}");

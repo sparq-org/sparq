@@ -10105,6 +10105,7 @@ fn try_theta_antijoin(
             let lsv = local_services::snapshot();
             #[cfg(not(target_arch = "wasm32"))]
             let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+            let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
             let verdicts: Vec<bool> = left_b
                 .rows
                 .par_iter()
@@ -10121,6 +10122,7 @@ fn try_theta_antijoin(
                     let _lsv = local_services::worker_install(&lsv);
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
+                    let _qb = query_base_worker_install(&qb);
                     eliminated(lrow)
                 })
                 .collect::<Result<Vec<bool>, String>>()?;
@@ -10682,6 +10684,7 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
         let lsv = local_services::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         b.rows
             .par_iter()
             .enumerate()
@@ -10693,6 +10696,7 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
                 let _lsv = local_services::worker_install(&lsv);
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
+                let _qb = query_base_worker_install(&qb);
                 ROW_SCOPE.set((scope, i));
                 let v = eval_compiled(graph, lv, bref, row, &compiled)?;
                 Ok(value_to_id_readonly(graph, lv, &v))
@@ -10878,6 +10882,7 @@ fn group_aggregate(
         let aggs = self::aggregates::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         // Process `members`/`order` in PAR_THRESHOLD-sized batches: evaluate + read-only
         // resolve each batch in parallel, then serially intern only that batch's genuinely
         // new terms and emit its rows. Peak `Value` footprint is one batch, not all groups.
@@ -10896,6 +10901,7 @@ fn group_aggregate(
                     let _aggs = self::aggregates::worker_install(&aggs);
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
+                    let _qb = query_base_worker_install(&qb);
                     aggregates
                         .iter()
                         .map(|(_, agg)| eval_aggregate(graph, lv, bref, members, agg).map(|v| value_to_id_readonly(graph, lv, &v)))
@@ -11816,6 +11822,7 @@ fn order_bindings(
                 let lsv = local_services::snapshot();
                 #[cfg(not(target_arch = "wasm32"))]
                 let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+                let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
                 b.rows
                     .par_iter()
                     .enumerate()
@@ -11827,6 +11834,7 @@ fn order_bindings(
                         let _lsv = local_services::worker_install(&lsv);
                         #[cfg(not(target_arch = "wasm32"))]
                         let _qn = query_now::worker_install(qn);
+                        let _qb = query_base_worker_install(&qb);
                         Ok((key_of(row)?, i))
                     })
                     .collect::<Result<Vec<_>, String>>()?
@@ -11896,6 +11904,7 @@ fn order_bindings(
         let lsv = local_services::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         b.rows
             .par_iter()
             .map(|row| {
@@ -11906,6 +11915,7 @@ fn order_bindings(
                 let _lsv = local_services::worker_install(&lsv);
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
+                let _qb = query_base_worker_install(&qb);
                 Ok((key_of(row)?, row.clone()))
             })
             .collect::<Result<_, String>>()?
@@ -12808,6 +12818,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
         let lsv = local_services::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         b.rows
             .par_iter()
             .enumerate()
@@ -12819,6 +12830,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
                 let _lsv = local_services::worker_install(&lsv);
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
+                let _qb = query_base_worker_install(&qb);
                 ROW_SCOPE.set((scope, i));
                 Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?))
             })
@@ -15039,6 +15051,21 @@ thread_local! {
 pub(crate) fn set_query_base(base: Option<&str>) -> QueryBaseGuard {
     let new = base.and_then(|s| oxiri::Iri::parse(s.to_string()).ok());
     QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(new))) }
+}
+
+/// The calling thread's query base, for re-installing on rayon workers with
+/// [`query_base_worker_install`] (a worker thread has its own, empty, `QUERY_BASE`).
+pub(crate) fn query_base_snapshot() -> Option<oxiri::Iri<String>> {
+    QUERY_BASE.with(|b| b.borrow().clone())
+}
+
+/// Installs a [`query_base_snapshot`] on the current (worker) thread until the guard drops.
+/// Free when the query declares no BASE and the worker has none installed.
+pub(crate) fn query_base_worker_install(base: &Option<oxiri::Iri<String>>) -> QueryBaseGuard {
+    if base.is_none() && QUERY_BASE.with(|b| b.borrow().is_none()) {
+        return QueryBaseGuard { previous: None };
+    }
+    QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(base.clone()))) }
 }
 
 /// Restores the enclosing query's base IRI on drop; see [`set_query_base`].

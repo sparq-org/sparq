@@ -289,7 +289,8 @@ fn path_may_be_empty(p: &PropertyPathExpression) -> bool {
     use PropertyPathExpression as P;
     match p {
         P::ZeroOrMore(_) | P::ZeroOrOne(_) => true,
-        P::NamedNode(_) | P::NegatedPropertySet(_) | P::OneOrMore(_) => false,
+        P::NamedNode(_) | P::NegatedPropertySet(_) => false,
+        P::OneOrMore(q) => path_may_be_empty(q),
         P::Reverse(q) => path_may_be_empty(q),
         P::Sequence(a, b) => path_may_be_empty(a) && path_may_be_empty(b),
         P::Alternative(a, b) => path_may_be_empty(a) || path_may_be_empty(b),

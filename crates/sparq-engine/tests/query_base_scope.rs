@@ -102,3 +102,20 @@ fn construct_and_describe_resolve_relative_iris_against_the_query_base() {
     let d = r#"BASE <http://ex/> DESCRIBE ?x WHERE { BIND(IRI("s") AS ?x) }"#;
     assert_eq!(sparq_engine::describe(&g, d).expect("describe").len(), 1);
 }
+
+/// Above the parallel-evaluation threshold, BIND runs on rayon workers: each worker must
+/// see the query's BASE, or relative IRI() results go unbound and rows silently vanish.
+#[test]
+fn base_reaches_parallel_bind_workers() {
+    let n = 60_000;
+    let nt: String = (0..n).map(|i| format!("<http://ex/s{i}> <http://ex/p> \"{i}\" .\n")).collect();
+    let g = Graph::load_str(&nt, "ntriples").unwrap();
+    let sel = "BASE <https://base.example/> SELECT ?r WHERE { ?s ?p ?o BIND(IRI(\"rel\") AS ?r) }";
+    let r = query(&g, sel).unwrap();
+    assert_eq!(r.rows.len(), n);
+    assert!(r.rows.iter().all(|row| row[0].as_ref().map(|t| t.to_string()).as_deref()
+        == Some("<https://base.example/rel>")));
+    let c = "BASE <https://base.example/> CONSTRUCT { ?s <http://ex/q> ?r } \
+             WHERE { ?s ?p ?o BIND(IRI(\"rel\") AS ?r) }";
+    assert_eq!(sparq_engine::construct_or_describe(&g, c).unwrap().len(), n);
+}
