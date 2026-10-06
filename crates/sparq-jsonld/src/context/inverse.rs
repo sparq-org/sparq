@@ -704,6 +704,17 @@ pub fn compact_iri(
                 if has_keyword_form(&relative) {
                     return format!("./{}", relative);
                 }
+                // Likewise a reference spelled like a keyword alias (e.g. of `@id`;
+                // other terms are not consulted for ids) or with a colon in its first
+                // segment (read as a compact or absolute IRI) would not expand back.
+                let first_segment = relative.split('/').next().unwrap_or("");
+                let alias = ctx
+                    .term_definitions
+                    .get(relative.as_str())
+                    .is_some_and(|d| d.iri.as_deref().is_some_and(|i| i.starts_with('@')));
+                if alias || first_segment.contains(':') {
+                    return format!("./{}", relative);
+                }
                 return relative;
             }
         }
@@ -996,6 +1007,17 @@ mod tests {
             false,
         );
         assert_eq!(dc_result, "dc11:title");
+    }
+
+    /// A base-relative reference spelled like a keyword alias or with a colon in its first
+    /// segment gets a `./` prefix, so it expands back to the same IRI.
+    #[test]
+    fn compact_iri_relative_reference_must_round_trip() {
+        let ac = ctx_of(r#"{"@base": "http://ex/", "id": "@id"}"#);
+        let inv = ac.inverse_context();
+        assert_eq!(compact_iri(&ac, &inv, "http://ex/id", None, false, false), "./id");
+        assert_eq!(compact_iri(&ac, &inv, "http://ex/a:b", None, false, false), "./a:b");
+        assert_eq!(compact_iri(&ac, &inv, "http://ex/other", None, false, false), "other");
     }
 
     /// A vocab-relative suffix containing a colon or starting with `@` would not

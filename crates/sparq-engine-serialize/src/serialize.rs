@@ -4031,6 +4031,21 @@ ex:bob
         );
     }
 
+    // Node ids and `@type: @id` values whose base-relative form spells a keyword alias
+    // keep expanding to the same IRI.
+    #[test]
+    fn compact_relative_ids_never_read_as_aliases() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/id> <http://ex/p> "v" . <http://ex/s> <http://ex/r> <http://ex/id> ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(
+            &g0,
+            r#"{"@base":"http://ex/","id":"@id","r":{"@id":"http://ex/r","@type":"@id"}}"#,
+        );
+    }
+
     // A predicate whose @vocab suffix has a colon keeps its full IRI.
     #[test]
     fn compact_keeps_colon_suffix_iris() {

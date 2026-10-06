@@ -292,7 +292,13 @@ impl Ctx {
     /// ids differ per document, so without this the memos would keep every IRI ever
     /// compacted on the thread; within one call they stay unbounded, which keeps large
     /// documents fast. Each IRI holds at most [`MEMO_SHAPES`] value shapes.
+    /// The derived contexts are dropped once there are more than [`DERIVED_CAP`] of
+    /// them: their keys hold addresses of contexts in the same list, so the list is
+    /// only ever cleared whole, and only between calls.
     fn trim_memos(&self) {
+        if self.derived.borrow().len() > DERIVED_CAP {
+            self.derived.borrow_mut().clear();
+        }
         let derived = self.derived.borrow();
         for memo in std::iter::once(&self.memo).chain(derived.iter().map(|(_, c)| &c.memo)) {
             if memo.borrow().len() > MEMO_CAP {
@@ -337,6 +343,9 @@ const MEMO_CAP: usize = 4096;
 
 /// Most value shapes memoised per IRI.
 const MEMO_SHAPES: usize = 8;
+
+/// Most derived (scoped or reverted) contexts a root keeps between calls.
+const DERIVED_CAP: usize = 256;
 
 /// One memoised IRI Compaction: (value shape, vocab, reverse, result).
 type MemoEntry = (OwnedShape, bool, bool, String);
@@ -1255,6 +1264,26 @@ mod tests {
         }
         let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.memo.borrow().len()));
         assert!(len.is_some_and(|n| n <= MEMO_CAP), "memo size {len:?}");
+    }
+
+    // Distinct scoped-context sequences across calls must not grow the cached root's
+    // derived contexts without bound.
+    #[test]
+    fn derived_contexts_are_bounded() {
+        let terms: Vec<String> = (0..2 * DERIVED_CAP)
+            .map(|i| format!(r#""T{i}":{{"@id":"http://ex/T{i}","@context":{{"@language":"en"}}}}"#))
+            .collect();
+        let ctx = Json::parse(&format!(r#"{{"@vocab":"http://ex/",{}}}"#, terms.join(","))).unwrap();
+        let opts = JsonLdOptions::default();
+        for i in 0..2 * DERIVED_CAP {
+            let doc = Json::parse(&format!(
+                r#"[{{"@id":"http://ex/s","@type":["http://ex/T{i}"],"http://ex/p":[{{"@id":"http://ex/o","http://ex/q":[{{"@value":"v"}}]}}]}}]"#
+            ))
+            .unwrap();
+            compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        }
+        let n = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
+        assert!(n.is_some_and(|n| n <= DERIVED_CAP + 4), "derived {n:?}");
     }
 
     // Language tags and datatypes make value shapes unbounded under one IRI, so the
