@@ -521,13 +521,22 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
     base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
     for lineno, line in enumerate(lines, start=1):
         code = line.split("//", 1)[0] if not line.lstrip().startswith("//") else ""
-        if not _MOD_KEYWORD.search(_STRING_LIT.sub('""', code)):
+        n_mod = len(_MOD_KEYWORD.findall(_STRING_LIT.sub('""', code)))
+        if not n_mod:
             continue
         same_line_attrs, rest = _split_leading_attrs(code)
         rest = rest.strip()
+        if n_mod > 1:
+            yield lineno, "?", None, False, (
+                "more than one `mod` on a line is unsupported: " + line.strip())
+            continue
         if _MOD_INLINE.match(rest):
             continue
         m = _MOD_DECL.match(rest)
+        if m and rest[m.end():].strip():
+            yield lineno, "?", None, False, (
+                "trailing code after a `mod` declaration is unsupported: " + line.strip())
+            continue
         if not m:
             yield lineno, "?", None, False, (
                 "unparseable `mod` declaration (only `mod name;` / `mod name {` on one "
@@ -914,6 +923,10 @@ _LEG3_TREES_ODD_MOD_SYNTAX = [
     _leg3_tree_outside('#[path = "elsewhere.rs"]\nmod\nhidden;\n'),
     _leg3_tree_outside('#[path = "elsewhere.rs"] pub mod\n    hidden;\n'),
     _leg3_tree_outside('#[path = "elsewhere.rs"]\nmod /* c */ hidden;\n'),
+    {**_leg3_tree_outside('mod child; #[path = "elsewhere.rs"] mod hidden;\n'),
+     f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
+    _leg3_tree_outside('mod inner { #[path = "../elsewhere.rs"] mod hidden; }\n'),
+    {**_leg3_tree_outside('mod child; fn f() {}\n'), f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
 ]
 # Inline modules and `mod` inside strings or identifiers are not declarations.
 _LEG3_TREES_INLINE_MOD_OK = [
@@ -1115,8 +1128,8 @@ def run_self_test() -> int:
     missed = [i for i, t in enumerate(_LEG3_TREES_ODD_MOD_SYNTAX) if _leg3_on_tree(t) == 0]
     wrong = [i for i, t in enumerate(_LEG3_TREES_INLINE_MOD_OK) if _leg3_on_tree(t) != 0]
     if not missed and not wrong:
-        print("TRIPWIRE 16 (leg3): PASS — raw-identifier and multi-line `mod` declarations "
-              "rejected; inline modules and `mod` in strings accepted")
+        print("TRIPWIRE 16 (leg3): PASS — raw-identifier, multi-line and several-per-line `mod` "
+              "declarations rejected; inline modules and `mod` in strings accepted")
     else:
         print(f"TRIPWIRE 16 (leg3): FAIL — odd declarations accepted {missed}, "
               f"inline/string cases rejected {wrong}")
