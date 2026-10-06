@@ -460,6 +460,16 @@ def test_leg3_all_declarations_gated_accepted() -> bool:
     return False
 
 
+def test_leg3_unsupported_path_spellings_rejected() -> bool:
+    """r"..", r#".."#, escaped, byte-string, macro and duplicate #[path] all fail."""
+    bad = _all_rc(_check._LEG3_TREES_PATH_UNSUPPORTED, want_fail=True)
+    if not bad:
+        print("  PASS — every non-simple #[path] spelling rejected as unsupported")
+        return True
+    print(f"  FAIL — non-simple #[path] spellings {bad} accepted")
+    return False
+
+
 def test_leg3_real_tree_passes() -> bool:
     """The repo's own exec tree passes leg 3."""
     root = os.path.dirname(_SCRIPT_DIR)
@@ -503,6 +513,7 @@ def main() -> int:
         ("leg3 cfg_attr without path accepted", test_leg3_cfg_attr_without_path_accepted),
         ("leg3 gated+ungated declarations do not exempt a file", test_leg3_mixed_declarations_not_gated),
         ("leg3 all-gated declarations accepted", test_leg3_all_declarations_gated_accepted),
+        ("leg3 raw/escaped/byte/macro #[path] rejected", test_leg3_unsupported_path_spellings_rejected),
         ("leg3 repo exec tree passes", test_leg3_real_tree_passes),
     ]
 

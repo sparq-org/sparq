@@ -99,11 +99,14 @@ _MOD_DECL = re.compile(
 # Anything that looks like an out-of-line `mod x;`, used to fail closed on a
 # declaration the parser above does not understand.
 _MOD_DECL_LOOSE = re.compile(r'\bmod\s+[A-Za-z_][A-Za-z0-9_]*\s*;')
-_PATH_ATTR = re.compile(r'^#\s*\[\s*path\s*=\s*"([^"]+)"\s*\]$')
-# `#[cfg_attr(<pred>, ..., path = "x.rs")]` switches a module's file per
-# configuration. Leg 3 does not model that; such a declaration fails as unsupported.
-_CFG_ATTR_HEAD = re.compile(r'^#\s*\[\s*cfg_attr\s*\(')
-_STRING_LIT = re.compile(r'"(?:[^"\\]|\\.)*"')
+# Fail-closed `path` handling. The ONLY supported spelling is the simple form
+# `#[path = "<plain chars>"]`: a normal string with no backslash or quote, optional
+# whitespace. Any other attribute on a `mod` declaration whose text contains the
+# token `path` (outside a `doc = "..."` string) fails the audit as unsupported:
+# raw strings, escapes, byte strings, cfg_attr(..., path = ...), macros, and so on.
+_PATH_ATTR = re.compile(r'^#\s*\[\s*path\s*=\s*"([^"\\]+)"\s*\]$')
+_DOC_STRING = re.compile(r'\bdoc\s*=\s*"(?:[^"\\]|\\.)*"')
+_PATH_TOKEN = re.compile(r'\bpath\b')
 _CFG_ATTR = re.compile(r'^#\s*\[\s*cfg\s*\((.*)\)\s*\]$', re.S)
 _CFG_TOKEN = re.compile(r'\s*(?:([A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*")|([(),=]))')
 
@@ -542,11 +545,14 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
                            "unsupported: " + prev)
             break
         is_gated = any(_attr_gates_vectorized(a) for a in attrs)
-        if problem is None and any(
-                _CFG_ATTR_HEAD.match(a.strip())
-                and re.search(r'\bpath\b', _STRING_LIT.sub('""', a)) for a in attrs):
-            problem = ("`cfg_attr(..., path = ...)` on a `mod` declaration is "
-                       "unsupported: leg 3 cannot tell which file rustc compiles")
+        path_like = [a.strip() for a in attrs if _PATH_TOKEN.search(_DOC_STRING.sub("", a))]
+        if problem is None:
+            odd = [a for a in path_like if not _PATH_ATTR.match(a)]
+            if odd:
+                problem = ("unsupported `path` attribute on a `mod` declaration (only "
+                           '`#[path = "plain.rs"]` is understood): ' + odd[0])
+            elif len(path_like) > 1:
+                problem = "more than one `path` attribute on a `mod` declaration"
         if problem is not None:
             yield lineno, name, None, is_gated, problem
             continue
@@ -554,8 +560,7 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
             yield lineno, name, None, is_gated, (
                 "indented out-of-line `mod` declaration (inside an inline module)")
             continue
-        path_attr = next((pm.group(1) for a in attrs
-                          for pm in [_PATH_ATTR.match(a.strip())] if pm), None)
+        path_attr = _PATH_ATTR.match(path_like[0]).group(1) if path_like else None
         if path_attr is not None:
             child = os.path.normpath(f"{d}/{path_attr}").replace(os.sep, "/")
         else:
@@ -586,8 +591,9 @@ def check_leg3(repo_root: str = ".") -> int:
        gated on `vectorized`.
     3. Tripwire: every `mod x;` declared by exec.rs (or by a scanned child) resolves
        to a file in that scanned set; otherwise the audit fails. A declaration
-       carrying `cfg_attr(..., path = ...)` or a multi-line attribute is
-       unsupported and also fails.
+       carrying any `path` attribute other than `#[path = "plain.rs"]` (raw or
+       escaped strings, cfg_attr(..., path = ...), ...) or a multi-line attribute
+       is unsupported and also fails.
     """
     violations: list[str] = []
     findings: list[str] = []
@@ -880,10 +886,22 @@ _LEG3_TREES_CFG_ATTR_PATH = [
     _leg3_tree_cfg_attr('#[cfg_attr(test, cfg_attr(unix, path = "elsewhere.rs"))]\nmod child;\n'),
     _leg3_tree_cfg_attr('#[cfg_attr(\n    test,\n    path = "elsewhere.rs"\n)]\nmod child;\n'),
 ]
-# cfg_attr without `path` (a `path` inside a string does not count) is fine.
+# `#[path]` spellings other than the simple form: raw, raw-hash, escaped and byte
+# strings, and a path built by a macro. All fail as unsupported (the old resolver
+# skipped them and audited the clean default exec/child.rs).
+_LEG3_TREES_PATH_UNSUPPORTED = [
+    _leg3_tree_cfg_attr('#[path = r"elsewhere.rs"] mod child;\n'),
+    _leg3_tree_cfg_attr('#[path = r#"elsewhere.rs"#]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "else\\x77here.rs"]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = b"elsewhere.rs"]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = concat!("else", "where.rs")]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"]\n#[path = "child.rs"]\nmod child;\n'),
+]
+# cfg_attr without `path` (a `path` inside a doc string does not count) is fine.
 _LEG3_TREES_CFG_ATTR_OK = [
     _leg3_tree_cfg_attr('#[cfg_attr(test, allow(dead_code))]\nmod child;\n'),
     _leg3_tree_cfg_attr('#[cfg_attr(test, doc = "see path = x")] mod child;\n'),
+    _leg3_tree_cfg_attr('#[doc = "path"]\nmod child;\n'),
 ]
 
 _LEG3_GATED_DECL = '#[cfg(feature = "vectorized")]\n#[path = "exec/child.rs"]\nmod vec_child;\n'
@@ -1059,6 +1077,15 @@ def run_self_test() -> int:
     else:
         print(f"TRIPWIRE 13 (leg3): FAIL — cfg_attr path missed {missed}, "
               f"path-free cfg_attr rejected {wrong}")
+        all_passed = False
+
+    # ----- Tripwire 15: only `#[path = "plain.rs"]` is understood; other spellings fail -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_PATH_UNSUPPORTED) if _leg3_on_tree(t) == 0]
+    if not missed:
+        print("TRIPWIRE 15 (leg3): PASS — raw/escaped/byte/macro/duplicate path attributes "
+              f"rejected as unsupported ({len(_LEG3_TREES_PATH_UNSUPPORTED)} spellings)")
+    else:
+        print(f"TRIPWIRE 15 (leg3): FAIL — unsupported path spellings {missed} accepted")
         all_passed = False
 
     # ----- Tripwire 14: a file is gated only if EVERY declaration reaching it is -----
