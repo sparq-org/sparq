@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-0kq6k) `dump <file> <in> turtle|trig` under the opt-in
+//! (sq-0kq6k) `dump <file> <in> turtle|trig` under the opt-in
 //! `streaming-serialization` feature: the document is written STRAIGHT to stdout through the
 //! engine's streaming writers instead of being built as one rendered `String` first.
 //!

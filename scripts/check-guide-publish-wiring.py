@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] CI lint (issue #5022): anti-drift guard for the mdBook guide's Pages mount.
+# CI lint (issue #5022): anti-drift guard for the mdBook guide's Pages mount.
 #
 # WHY THIS GATE EXISTS — the guide reaches the web through a wiring nobody re-derives:
 #   GitHub Pages has ONE deploy slot and pages.yml owns it, so the guide is NOT published

@@ -42,7 +42,7 @@ cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT * WHERE { ?s ?
 - **`dump <file> <in-fmt> <out-fmt>`** — re-serialize to stdout: `turtle[-pretty]` / `trig[-pretty]` /
   `nquads` / `ntriples` / `jsonld[-expanded|-flattened|-compacted]` / `jsonld-pretty…`; `jsonld-compact[-pretty]`
   runs full W3C JSON-LD 1.1 Compaction against `--context <ctx.jsonld>`. The matrix is the `serialize-rdf`
-  feature (default-on via `jsonld`). <!-- [FABLE-5] sq-0kq6k --> Opt-in **`streaming-serialization`** streams
+  feature (default-on via `jsonld`). <!-- sq-0kq6k --> Opt-in **`streaming-serialization`** streams
   `turtle`/`trig` straight to stdout (byte-identical, no whole-document `String`); a broken pipe
   (`dump … | head`) exits quietly instead of panicking.
 - **`to-hdt <file> <in-fmt> <out.hdt[.gz|.zst|.bz2]>`** *(opt-in `hdt-write` feature, which

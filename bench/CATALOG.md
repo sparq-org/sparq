@@ -110,7 +110,7 @@ Notes on a few that need care:
   timing, with a corrupt-the-body non-vacuity self-check. First read (work box, no numbers
   transcribed): TTFB moved as hypothesised; **peak RSS did not separate** — the CONSTRUCT
   result graph is materialised in full before rendering, so it, not the rendering, sets the
-  high-water mark. Read the README before quoting this harness. [FABLE-5]
+  high-water mark. Read the README before quoting this harness.
 - **`sp2b` (SP2Bench) is tiered** — see [`bench/sp2b/README.md`](./sp2b/README.md).
   The per-commit path builds+caches the real Freiburg generator (BSD; sha256-pinned, g++
   `-O2` not `-O3`) and runs 14 sub-second queries on a fixed 250k-triple corpus, emitting

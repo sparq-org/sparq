@@ -4,16 +4,16 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
@@ -26,20 +26,20 @@
 # sparq-geo: the OGC GeoSPARQL query-rewrite extension (topology PROPERTY forms).
 # OPT-IN and OFF by default so the rewrite surface compiles out of the default build
 # and standard SPARQL behaviour is unchanged; this leg builds + tests it in isolation
-# (including the ogc_query_rewrite_ratchet). [OPUS-4.8] sq-wf9qg
+# (including the ogc_query_rewrite_ratchet). sq-wf9qg
 - name: "sparq-geo (geosparql_rewrite)"
   crate: "sparq-geo"
   features: "geosparql_rewrite"
   test: true
 
-# [GPT-5.6] Exact DE-9IM refinement for topology-index containment scans is
+# Exact DE-9IM refinement for topology-index containment scans is
 # default-OFF, and tests/topology_index.rs is compiled only with this feature.
 - name: "sparq-geo (topology_index)"
   crate: "sparq-geo"
   features: "topology_index"
   test: true
 
-# [FABLE-5] sq-248: the full embedded EPSG registry fallback behind the curated
+# sq-248: the full embedded EPSG registry fallback behind the curated
 # reproject table is default-OFF (implies `reproject`), and the `epsg_full` test
 # module in tests/reproject.rs is compiled only with this feature.
 - name: "sparq-geo (epsg_full)"
@@ -47,7 +47,7 @@
   features: "epsg_full"
   test: true
 
-# [FABLE-5] sq-lsp7k: the GeoSPARQL 1.1 non-topological ACCESSOR functions
+# sq-lsp7k: the GeoSPARQL 1.1 non-topological ACCESSOR functions
 # (geof:dimension/coordinateDimension/spatialDimension/isSimple/geometryType)
 # register into geof_registry() only under this default-OFF feature; the
 # differential + SPARQL-level accessor tests compile only with it.

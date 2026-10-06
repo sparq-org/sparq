@@ -3960,21 +3960,37 @@ fn tpf_base(headers: &HeaderMap) -> String {
 }
 
 /// [OPUS-4.8] sq-bzh1: percent-encodes a query-parameter VALUE for building the `hydra:next` /
-/// `hydra:previous` page URLs. Encodes everything outside the RFC 3986 unreserved set plus the
-/// few sub-delims safe in a query value, so an N-Triples term value (`<`, `>`, `"`, spaces, …)
-/// round-trips through the URL back to the same term. Hand-rolled to avoid a new dependency.
+/// `hydra:previous` page URLs: the RFC 3986 unreserved set passes through, everything else is
+/// uppercase `%XX` per UTF-8 byte, so an N-Triples term value (`<`, `>`, `"`, spaces, …)
+/// round-trips through the URL back to the same term. The SAME `percent-encoding` set as
+/// sparq-fedclient's `pct_encode` (the client that reads these links) — #3712.
 #[cfg(feature = "tpf")]
 fn pct_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for b in value.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
+    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(value, UNRESERVED).to_string()
+}
+
+#[cfg(all(test, feature = "tpf"))]
+mod pct_encode_tests {
+    use super::pct_encode;
+
+    /// #3712 tripwire: every printable ASCII byte + a control + 2-/4-byte UTF-8 — exactly the
+    /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
+    #[test]
+    fn pct_encode_pins_the_unreserved_set() {
+        let all: String = (0x20u8..0x7f)
+            .map(char::from)
+            .chain("\t\né😀".chars())
+            .collect();
+        assert_eq!(
+            pct_encode(&all),
+            "%20%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%09%0A%C3%A9%F0%9F%98%80"
+        );
     }
-    out
 }
 
 /// [OPUS-4.8] sq-bzh1: builds a `/tpf` page URL for the given pattern parameters and page,
@@ -6711,7 +6727,7 @@ async fn run_query_pinned(
             #[cfg(not(feature = "query-registry"))]
             let (budget, qr_guard): (QueryBudget, Option<Box<dyn std::any::Any + Send>>) =
                 (make_budget(&config, true), None);
-            // [FABLE-5] (sq-0kq6k) A GET streams its body: the rendered RDF document is fed to
+            // (sq-0kq6k) A GET streams its body: the rendered RDF document is fed to
             // the response in chunks as it is written, so a large CONSTRUCT never holds the
             // whole document in memory and its first bytes reach the socket early (TTFB). A
             // result small enough to fit one chunk still answers buffered, with the same
@@ -7684,7 +7700,7 @@ async fn recv_first_chunk<T>(
 }
 
 // ---------------------------------------------------------------------------
-// Streamed CONSTRUCT / DESCRIBE bodies ([FABLE-5] sq-0kq6k)
+// Streamed CONSTRUCT / DESCRIBE bodies (sq-0kq6k)
 // ---------------------------------------------------------------------------
 
 /// How many rendered bytes accumulate before a chunk is handed to the response body.
@@ -7696,7 +7712,7 @@ async fn recv_first_chunk<T>(
 /// per-chunk channel send is noise against the serialisation work.
 const GRAPH_STREAM_CHUNK_BYTES: usize = 64 * 1024;
 
-/// [FABLE-5] sq-0kq6k: an [`std::io::Write`] that forwards the rendered RDF document to the
+/// sq-0kq6k: an [`std::io::Write`] that forwards the rendered RDF document to the
 /// response body in ~[`GRAPH_STREAM_CHUNK_BYTES`] pieces instead of accumulating it.
 ///
 /// This is the whole point of the streaming path: peak resident memory for the response body
@@ -7770,7 +7786,7 @@ impl std::io::Write for ChunkSink {
     }
 }
 
-/// [FABLE-5] sq-0kq6k: evaluates a CONSTRUCT / DESCRIBE and STREAMS the negotiated RDF
+/// sq-0kq6k: evaluates a CONSTRUCT / DESCRIBE and STREAMS the negotiated RDF
 /// document as the response body, so a large result does not buffer the whole rendered
 /// document in the server before the first byte reaches the socket.
 ///
@@ -9325,7 +9341,7 @@ async fn serialise_graph(
 /// canonical line form; Turtle compacts the [`crate::graph::COMMON_PREFIXES`]; RDF/XML is the
 /// `application/rdf+xml` document. The writers are guaranteed to emit well-formed output.
 ///
-/// [FABLE-5] sq-0kq6k: implemented BY [`serialise_graph_triples_to`] over an in-memory buffer,
+/// sq-0kq6k: implemented BY [`serialise_graph_triples_to`] over an in-memory buffer,
 /// so the buffered response body and the streamed one are the same bytes by construction.
 ///
 /// The in-memory writer cannot fail, but the serialiser can refuse the graph (RDF/XML cannot
@@ -9336,7 +9352,7 @@ fn serialise_graph_triples(triples: &[oxrdf::Triple], gfmt: GraphFormat) -> Resu
     String::from_utf8(out).map_err(|e| format!("serialising the graph result: {e}"))
 }
 
-/// [FABLE-5] sq-0kq6k: the sink-shaped twin of [`serialise_graph_triples`] — renders the graph
+/// sq-0kq6k: the sink-shaped twin of [`serialise_graph_triples`] — renders the graph
 /// in the negotiated syntax straight into `w` instead of into a `String`. Feeding it a
 /// [`ChunkSink`] is what makes a large CONSTRUCT / DESCRIBE a chunked-transfer response whose
 /// first bytes reach the socket before the last triple is rendered.

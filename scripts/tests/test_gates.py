@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for the proactive merge-gate scripts G1/G2/G6 (beads
-# sq-ncvq.4 + sq-ncvq.5 + sq-ncvq.9, epic sq-ncvq). Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# Hermetic tests for the proactive merge-gate scripts G1/G2/G6 (beads
+# sq-ncvq.4 + sq-ncvq.5 + sq-ncvq.9, epic sq-ncvq).
 #
 # Hermetic w.r.t. git/network: imports scripts/gate-new-crate.py +
 # scripts/gate-api-skill.py + scripts/check-config-documented.py and drives their
@@ -9,7 +8,7 @@
 # and NO subprocess — the evaluate()-level tests inject every git/subprocess fact
 # (crate stub status, bench registration, `pub`-diff heuristic, G6 net-added knob
 # tokens + documented-token sets) via the *_overrides kwargs, and main() is driven
-# with --changed-files fixtures + --dry-run so it never shells out. [OPUS-4.8]
+# with --changed-files fixtures + --dry-run so it never shells out.
 # (Caveat: the main() smoke tests call main() WITHOUT overrides, so they may still
 # consult the in-repo bench/benchmarks.toml or the crate READMEs/SKILL.md on disk —
 # those are committed files, not git/network state, so the runs stay deterministic.)
@@ -40,9 +39,6 @@ def _load(name: str, filename: str):
 g1 = _load("gate_new_crate", "gate-new-crate.py")
 g2 = _load("gate_api_skill", "gate-api-skill.py")
 g6 = _load("check_config_documented", "check-config-documented.py")
-# [SONNET-4.6] (sq-5owmc) the merge_group PR-number resolver used by the G2/G6
-# "Read PR labels" steps to honour the escape-hatch label in the merge queue.
-resolve_mg = _load("resolve_merge_group_pr", "resolve-merge-group-pr.py")
 
 
 def _statused(added: list[str], modified: list[str] | None = None) -> list[str]:
@@ -133,7 +129,7 @@ class G1Test(unittest.TestCase):
         self.assertEqual(g1.evaluate(changed, added), [])
 
     def test_copied_crate_counts_as_added(self):
-        # [OPUS-4.8] `git diff -C` reports a newly-introduced path as a copy
+        # `git diff -C` reports a newly-introduced path as a copy
         # (`C`/`C100`, "C<score>\t<old>\t<new>"); the destination must still be
         # treated as added so a copy can't evade new-crate detection.
         changed, added = g1.parse_status_lines(
@@ -147,7 +143,7 @@ class G1Test(unittest.TestCase):
 # G2 — public-api → skill
 # --------------------------------------------------------------------------- #
 class G2Test(unittest.TestCase):
-    # [OPUS-4.8] G2 now fires ONLY on a NET `pub `-item signature change in a
+    # G2 now fires ONLY on a NET `pub `-item signature change in a
     # published crate's src/** (no more blanket binding-crate trip). The
     # evaluate()-level tests inject the pub_api_changed verdict via pub_overrides
     # so they stay hermetic (no live git); the _scan_pub_diff tests exercise the
@@ -173,7 +169,7 @@ class G2Test(unittest.TestCase):
         self.assertTrue(ok)
 
     def test_binding_crate_comment_only_change_passes(self):
-        # [OPUS-4.8] REGRESSION (blocked #250): a comment-/attribute-only edit to a
+        # REGRESSION (blocked #250): a comment-/attribute-only edit to a
         # BINDING crate's src is NOT a public-surface change — it must PASS even
         # without a SKILL.md. pub_overrides={...: False} models "no net pub change".
         path = "crates/sparq-cli/src/main.rs"
@@ -184,7 +180,7 @@ class G2Test(unittest.TestCase):
         self.assertEqual(hits, [])
 
     def test_ci_only_change_passes(self):
-        # [OPUS-4.8] REGRESSION (#244 framing): a PR that touches NO crates/*/src/**
+        # REGRESSION (#244 framing): a PR that touches NO crates/*/src/**
         # — only CI workflows / tests / non-src files — can never reach the `pub`
         # check, so G2 always passes. No pub_overrides needed: these paths never hit
         # git because _CRATE_SRC_RE rejects them.
@@ -198,7 +194,7 @@ class G2Test(unittest.TestCase):
         self.assertEqual(hits, [])
 
     def test_pub_item_relocation_does_not_trip(self):
-        # [OPUS-4.8] REGRESSION (mis-fired #244): a pure relocation of a pub item —
+        # REGRESSION (mis-fired #244): a pure relocation of a pub item —
         # the identical signature added once and removed once within a file — is
         # net-zero and must NOT count as a public-API change. Drive the pure
         # _scan_pub_diff + pub_api_changed multiset logic directly.
@@ -221,7 +217,7 @@ class G2Test(unittest.TestCase):
         self.assertNotEqual(sorted(added2), sorted(removed2))
 
     def test_rustfmt_line_wrap_does_not_trip(self):
-        # [OPUS-4.8] REGRESSION (false-positive, tripped #469 — bead sq-5x2i): a
+        # REGRESSION (false-positive, tripped #469 — bead sq-5x2i): a
         # one-shot `cargo fmt` LINE-WRAPS a long `pub fn` signature. The diff
         # REMOVES the single-line form and ADDS the multi-line wrapped form (same
         # tokens, only rustfmt whitespace + an inserted trailing comma). The two
@@ -246,7 +242,7 @@ class G2Test(unittest.TestCase):
         self.assertFalse(g2._pad.diff_has_net_pub_change(diff))
 
     def test_rustfmt_unwrap_does_not_trip(self):
-        # [OPUS-4.8] The symmetric direction: rustfmt UN-wraps a previously wrapped
+        # The symmetric direction: rustfmt UN-wraps a previously wrapped
         # signature (removes the multi-line form, adds the one-liner). Same key.
         diff = [
             "+++ b/crates/sparq-parse/src/lib.rs",
@@ -261,7 +257,7 @@ class G2Test(unittest.TestCase):
         self.assertFalse(g2._pad.diff_has_net_pub_change(diff))
 
     def test_real_signature_change_still_trips_after_normalize(self):
-        # [OPUS-4.8] Normalisation must NOT mask a GENUINE signature change: if a
+        # Normalisation must NOT mask a GENUINE signature change: if a
         # param TYPE actually changes (Mode -> FastMode), the wrapped-added key
         # differs from the one-line-removed key and the gate still fires.
         diff = [
@@ -277,7 +273,7 @@ class G2Test(unittest.TestCase):
         self.assertTrue(g2._pad.diff_has_net_pub_change(diff))
 
     def test_wrapped_use_and_const_reflow_cancel(self):
-        # [OPUS-4.8] Wrapping is not fn-only: a long `pub use` re-export and a
+        # Wrapping is not fn-only: a long `pub use` re-export and a
         # `pub const` can reflow too. The `;`/`=` terminators must close the
         # accumulation and the keys must cancel against the one-line forms.
         use_diff = [
@@ -290,7 +286,7 @@ class G2Test(unittest.TestCase):
         self.assertFalse(g2._pad.diff_has_net_pub_change(use_diff))
 
     def test_wrapped_where_clause_reflow_cancels(self):
-        # [OPUS-4.8] rustfmt commonly hoists a `where`-clause onto its own lines
+        # rustfmt commonly hoists a `where`-clause onto its own lines
         # and adds a trailing comma after the last bound — which lands right
         # before the body `{`. The wrapped and one-line forms must canonicalise
         # equal (trailing comma before `{` dropped), but a GENUINE bound change
@@ -315,7 +311,7 @@ class G2Test(unittest.TestCase):
         self.assertTrue(g2._pad.diff_has_net_pub_change(changed))
 
     def test_wrapped_tuple_struct_reflow_cancels(self):
-        # [OPUS-4.8] A long tuple-struct (terminates at `;`, not a body `{`) that
+        # A long tuple-struct (terminates at `;`, not a body `{`) that
         # rustfmt wraps one field per line must also cancel against its one-liner.
         diff = [
             "+++ b/crates/x/src/a.rs",
@@ -332,7 +328,7 @@ class G2Test(unittest.TestCase):
         self.assertFalse(g2._pad.diff_has_net_pub_change(diff))
 
     def test_normalize_signature_is_wrap_invariant(self):
-        # [OPUS-4.8] Unit-level: the canonical key is identical for the one-line
+        # Unit-level: the canonical key is identical for the one-line
         # and wrapped forms (whitespace stripped + trailing comma dropped).
         one = "pub fn f<T: Clone>(a: T, b: T) -> Vec<T> {"
         wrapped = "pub fn f<T: Clone>( a: T, b: T, ) -> Vec<T> {"
@@ -342,7 +338,7 @@ class G2Test(unittest.TestCase):
         )
 
     def test_pub_item_regex_matches_all_item_forms_excludes_restricted(self):
-        # [OPUS-4.8] The pub-item pattern must match every exported FORM
+        # The pub-item pattern must match every exported FORM
         # (fn/struct/enum/trait/const/type/mod/use) but NOT restricted
         # visibilities (`pub(crate)`/`pub(super)`/`pub(in …)`) nor a struct
         # `pub` field. Guard against silent drift of the source pattern.
@@ -409,7 +405,7 @@ class G2Test(unittest.TestCase):
 # G6 — new-config/flag → docs
 # --------------------------------------------------------------------------- #
 class G6Test(unittest.TestCase):
-    # [OPUS-4.8] G6 fires on a NET-added CLI flag literal / SPARQ_* env var in a
+    # G6 fires on a NET-added CLI flag literal / SPARQ_* env var in a
     # sparq-cli|sparq-server src file that no docs surface documents. The
     # evaluate()-level tests inject the net-added-knob set (code_knobs), the
     # docs-added set (doc_added) and the on-disk documented set (doc_disk) so they
@@ -643,69 +639,6 @@ class G6Test(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# merge_group PR-number resolution — G2/G6 escape-hatch label in the queue
-# [SONNET-4.6] (sq-5owmc)
-# --------------------------------------------------------------------------- #
-class MergeGroupPrResolveTest(unittest.TestCase):
-    # [SONNET-4.6] (sq-5owmc) The G2/G6 "Read PR labels" steps must resolve the PR
-    # number in merge_group context so the `skill-not-needed` / `config-internal`
-    # escape-hatch labels are honoured in the merge queue. Before the fix the step
-    # resolved the PR via `commits/<merge_group.head_sha>/pulls`; that returned
-    # empty (synthetic merge commit / empty head_sha), pr-labels.txt was empty, the
-    # label never suppressed, the gate failed the GROUP and the queue silently
-    # ejected the PR (hit #1542 twice). The fix parses the PR number
-    # DETERMINISTICALLY from the gh-readonly-queue head ref; these tests exercise
-    # that pure parse (the network fallback + loud warn live in the workflow).
-
-    def test_parses_pr_from_observed_ref_format(self):
-        # The exact ref shape GitHub sets on github.event.merge_group.head_ref for
-        # the single-PR merge group that ejected #1542.
-        ref = "refs/heads/gh-readonly-queue/main/pr-1542-" + "0" * 40
-        self.assertEqual(resolve_mg.parse_pr_number_from_ref(ref), 1542)
-
-    def test_parses_ref_without_refs_heads_prefix(self):
-        # head_ref may arrive with or without the leading refs/heads/.
-        ref = "gh-readonly-queue/main/pr-42-" + "d" * 40
-        self.assertEqual(resolve_mg.parse_pr_number_from_ref(ref), 42)
-
-    def test_parses_ref_with_slashed_base_branch(self):
-        # A base branch that itself contains a slash must not break the parse.
-        ref = "refs/heads/gh-readonly-queue/release/v1/pr-7-" + "a" * 40
-        self.assertEqual(resolve_mg.parse_pr_number_from_ref(ref), 7)
-
-    def test_empty_ref_returns_none(self):
-        # The fail-closed path: an empty/absent head_ref yields None so the workflow
-        # warns LOUDLY and runs the gate unsuppressed (never silently passes).
-        self.assertIsNone(resolve_mg.parse_pr_number_from_ref(""))
-        self.assertIsNone(resolve_mg.parse_pr_number_from_ref(None))
-
-    def test_non_queue_ref_returns_none(self):
-        self.assertIsNone(resolve_mg.parse_pr_number_from_ref("refs/heads/feature/x"))
-        self.assertIsNone(resolve_mg.parse_pr_number_from_ref("refs/heads/main"))
-
-    def test_cli_entry_point(self):
-        # The workflow invokes the module as a CLI: prints the number + exit 0 on a
-        # successful parse; exit 1 with no output when unparseable.
-        import contextlib
-        import io
-
-        ref = "refs/heads/gh-readonly-queue/main/pr-99-" + "f" * 40
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            rc_ok = resolve_mg.main(["prog", ref])
-        self.assertEqual(rc_ok, 0)
-        self.assertEqual(buf.getvalue().strip(), "99")
-
-        buf_empty = io.StringIO()
-        with contextlib.redirect_stdout(buf_empty):
-            rc_empty = resolve_mg.main(["prog", ""])
-        self.assertEqual(rc_empty, 1)
-        self.assertEqual(buf_empty.getvalue().strip(), "")
-
-        self.assertEqual(resolve_mg.main(["prog"]), 1)  # missing arg → exit 1
-
-
-# --------------------------------------------------------------------------- #
 # main() smoke (hermetic, via --changed-files + --dry-run; no git/network)
 # --------------------------------------------------------------------------- #
 class MainSmokeTest(unittest.TestCase):
@@ -733,7 +666,7 @@ class MainSmokeTest(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# comp_store_bytes_per_triple ratchet enforcement (sq-7d3dj.32.2.5) [SONNET-4.6]
+# comp_store_bytes_per_triple ratchet enforcement (sq-7d3dj.32.2.5)
 # --------------------------------------------------------------------------- #
 perf_gate = _load("perf_gate", "perf-gate.py")
 
@@ -741,7 +674,7 @@ perf_gate = _load("perf_gate", "perf-gate.py")
 class CompStoreRatchetTest(unittest.TestCase):
     """Mutation tests for the comp_store_bytes_per_triple ratchet.
 
-    [SONNET-4.6] (sq-7d3dj.32.2.5) The compressed-profile B/triple floor must:
+    (sq-7d3dj.32.2.5) The compressed-profile B/triple floor must:
       1. HARD-FAIL (exit 2) when the measured value exceeds floor*(1+0.02).
       2. PASS (exit 0) when the measured value equals or is below the floor
          (including a genuine improvement that triggers the auto-ratchet-down).

@@ -396,7 +396,7 @@ well-formed, correctly-terminated SHORT `200` is a forbidden outcome** — `--ma
 an honest refusal, never a silent truncation, and hitting it mid-stream drops the closing `]}}`
 rather than emitting a clean short document.
 
-<!-- [FABLE-5] sq-0kq6k -->
+<!-- sq-0kq6k -->
 **CONSTRUCT / DESCRIBE bodies stream (TTFB).** The RDF-graph response body is written through a
 chunk sink instead of being rendered into one whole document `String` first, so the first
 subject blocks reach the socket before the last triple is rendered. The two response shapes

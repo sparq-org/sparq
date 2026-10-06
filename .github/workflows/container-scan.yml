@@ -1,42 +1,18 @@
-# container-scan (GX-12 / sq-toze.31) — the CIS Docker §4 image-assurance lane the CIS
-# audit (#231) confirmed missing: a container-image VULNERABILITY SCAN (Trivy) + a
-# Dockerfile LINT (Hadolint). Closes the one P1 technical gap in the CIS slice
-# (compliance/cis/gap-register.md, GX-12). [OPUS-4.8] Authored while Fable unavailable —
-# re-review when Fable returns.
+# container-scan (GX-12 / sq-toze.31) — the CIS Docker §4 image-assurance lane: a
+# container-image VULNERABILITY SCAN (Trivy) + a Dockerfile LINT (Hadolint).
 #
 #   hadolint : lints the Dockerfile against the CIS Docker Benchmark style (non-root USER,
-#              digest-pinned base, COPY-not-ADD, no secrets, …). GATING. Fast + deterministic.
+#              digest-pinned base, COPY-not-ADD, no secrets, ...). Fast + deterministic.
 #              Config: .hadolint.yaml (failure-threshold: warning; DL3059 waived w/ reason).
 #   trivy    : builds the server image and scans the OS + library layers for vulnerabilities,
-#              failing on FIXABLE HIGH/CRITICAL (--ignore-unfixed). GATING. Allowlist:
-#              .trivyignore (empty by design — distroless base has a tiny CVE surface; a real
-#              fixable finding must be fixed or triaged WITH justification, never blanket-
-#              suppressed). SARIF is also uploaded to the code-scanning dashboard.
+#              failing on FIXABLE HIGH/CRITICAL (--ignore-unfixed). Allowlist: .trivyignore
+#              (empty by design; a real fixable finding is fixed or triaged WITH justification,
+#              never blanket-suppressed). SARIF is also uploaded to the code-scanning dashboard.
 #
-# GATING CHOICE: both jobs have GATING names (no "advisory"/"informational" whole word), so
-# the ci-summary aggregator (ci-summary.yml) auto-discovers them and REQUIRES them on PRs and
-# in the merge queue. This is sound because (a) the base is distroless/digest-pinned so the
-# scan surface is tiny + stable, (b) trivy only fails on FIXABLE HIGH/CRITICAL — a CVE with no
-# upstream fix yet cannot wedge an unrelated PR, and (c) the .trivyignore allowlist gives a
-# documented escape hatch for any triaged finding. The weekly `schedule` re-scans the
-# unchanged base so a newly-disclosed (and now-fixable) CVE is caught between PRs.
-#
-# On PRs the lane runs only when something that affects the image changed (Dockerfile, the
-# build sources via Cargo manifests, the allowlist/lint configs, or this workflow) so an
-# unrelated docs/test PR does not pay the image build — but it ALWAYS runs on push-to-main,
-# schedule, and manual dispatch. Because ci-summary only aggregates checks that
-# actually register on a given ref, a PR that does not touch these paths simply has no
-# container-scan check to wait on (it is not a missing-required-check hang).
-#
-# [OPUS-4.8] MERGE-GROUP (path-aware CI audit, sq path-aware CI): GitHub ignores `paths` for
-# the merge_group event, so the workflow triggers on every enqueue. Rather than rebuild + scan
-# the full fat-LTO image on every merge (the maintainer's merge-queue-heaviness complaint), the
-# heavy `trivy` job now leads with a `detect container changes` step that diffs the queued
-# batch's base_sha..head_sha against the SAME container path set as the PR filter; the build +
-# scan steps skip (job still concludes SUCCESS — non-failing to ci-summary) when no
-# container-relevant path is in the batch. The `trivy (…)` check-run still ALWAYS appears on the
-# merge_group ref (fast green on the skip path), so the required gate never hangs on an absent
-# sibling. Fail-safe: any diff error runs the full build+scan. See the step comment.
+# WHEN: nightly (a newly-disclosed, now-fixable CVE in the unchanged base is caught without
+# anyone touching the Dockerfile), on manual dispatch, and on push-to-main when the
+# Dockerfile or its lint/scan configs change. It does not run on pull requests: the only
+# required PR check is ci-fast (docs/branch-protection.md).
 #
 # Third-party actions are pinned by full commit SHA (supply-chain hardening; Scorecard
 # PinnedDependencies); the trailing `# vX.Y.Z` is what Dependabot follows to bump the pin.
@@ -45,31 +21,14 @@ name: container-scan
 on:
   push:
     branches: [main]
-  pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
-    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "Dockerfile"
       - ".dockerignore"
       - ".trivyignore"
       - ".hadolint.yaml"
       - ".github/workflows/container-scan.yml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/**/Cargo.toml"
-  # [FABLE-5] (2026-07-18 maintainer directive, merge-queue subset) merge_group
-  # REMOVED: the image scan already ran + gated on any container-relevant PR (paths
-  # filter above), re-runs on every push-to-main (post-merge detection), and the
-  # weekly schedule catches CVEs disclosed between changes. The polling `ci-summary
-  # / gate` never waits on a check that was never scheduled (bench.yml sq-6vshe.6
-  # rationale; the old "queue would wait" comment was stale pre-polling doctrine).
-  # The trivy job's `detect container changes` step stays — it short-circuits to a
-  # full scan on every remaining event.
-  # Weekly re-scan of the (unchanged) base image so a CVE disclosed between PRs — that now
-  # has a fix — is surfaced even when nobody touches the Dockerfile.
   schedule:
-    - cron: "41 5 * * 1" # Mondays 05:41 UTC
+    - cron: "41 5 * * *" # nightly 05:41 UTC
   workflow_dispatch:
 
 # Default read-only; trivy's SARIF upload opts into security-events: write below.
@@ -77,11 +36,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: container-scan-${{ github.workflow }}-${{ github.ref }}
+  group: container-scan-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  # ---- Dockerfile lint (fast, deterministic) — GATING ----
+  # ---- Dockerfile lint (fast, deterministic) ----
   hadolint:
     name: hadolint (Dockerfile lint, CIS Docker §4)
     runs-on: ubuntu-latest
@@ -96,7 +54,7 @@ jobs:
           # warning+ even if a future config edit forgets it. INFO/STYLE stay non-failing.
           failure-threshold: warning
 
-  # ---- image build + vulnerability scan — GATING ----
+  # ---- image build + vulnerability scan ----
   # Builds the server image from the committed Dockerfile (the SAME image release.yml ships)
   # and scans its OS + library layers. Fails on FIXABLE HIGH/CRITICAL; .trivyignore is the
   # documented allowlist. The build is cached to GHA so repeated runs are cheap.
@@ -109,79 +67,11 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      # [OPUS-4.8] MERGE-GROUP changed-files gate (path-aware CI audit, sq path-aware CI).
-      # The `pull_request` trigger above already narrows this heavy trivy image build+scan
-      # to container-relevant PRs via native `on.pull_request.paths`. But GitHub IGNORES
-      # `paths`/`paths-ignore` for the `merge_group` event, so a BARE `merge_group:` trigger
-      # would rebuild the full fat-LTO release image + run trivy on EVERY enqueue — even when
-      # the queued batch touches no Dockerfile/base-image/dependency path — dragging the
-      # serialized merge queue (the maintainer's exact merge-queue-heaviness complaint).
-      # Mirroring zk-toolchain.yml's proven `detect zk changes` pattern: the job ALWAYS runs
-      # (so the `trivy (…)` check-run ALWAYS appears on the merge_group ref and ci-summary —
-      # the single required gate — never hangs waiting for an absent sibling), but this cheap
-      # leading step diffs the queued batch's base_sha..head_sha and the heavy build+scan
-      # steps below are gated `if: steps.changes.outputs.container == 'true'`:
-      #   • container paths changed in the batch → full build+scan runs and GATES (posture kept),
-      #   • no container paths changed           → heavy steps skip → FAST GREEN check-run with
-      #     the identical name, matching the paths-gated PR posture.
-      # For every NON-merge_group event the step short-circuits to container=true, so the
-      # paths-filtered pull_request / push / schedule / dispatch behaviour is UNCHANGED
-      # (those events only trigger this workflow when container paths changed in the first
-      # place, except the weekly base-image re-scan, which must run in full). SAFE-BY-DEFAULT:
-      # any fetch/diff error leaves container=true (full scan), so a skip is always a proof.
-      # The path set is the SAME as the `on.pull_request.paths` filter above.
-      - name: Detect container changes (merge_group changed-files gate)
-        id: changes
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
-          MG_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
-        run: |
-          set -euo pipefail
-          # Default: run the full build+scan (fail-safe — see step comment).
-          container=true
-          if [ "${EVENT_NAME}" = "merge_group" ]; then
-            container=false
-            # The default checkout is shallow, so the base may be absent. Best-effort fetch;
-            # on any fetch/diff error we leave container=true via the fallbacks below.
-            ok=true
-            git fetch --no-tags --quiet origin "${MG_BASE_SHA}" "${MG_HEAD_SHA}" 2>/dev/null \
-              || git fetch --no-tags --quiet origin "${MG_BASE_SHA}" 2>/dev/null \
-              || ok=false
-            git cat-file -e "${MG_BASE_SHA}^{commit}" 2>/dev/null || ok=false
-            git cat-file -e "${MG_HEAD_SHA}^{commit}" 2>/dev/null || ok=false
-            if [ "${ok}" = "true" ]; then
-              changed="$(git diff --name-only "${MG_BASE_SHA}" "${MG_HEAD_SHA}")"
-              echo "Changed files in queued batch (${MG_BASE_SHA}..${MG_HEAD_SHA}):"
-              printf '%s\n' "${changed}"
-              # Container-relevant paths — the SAME set as the pull_request paths filter:
-              # the Dockerfile + its ignore/lint/vuln-allowlist configs, this workflow,
-              # and the manifests that change what the image resolves + installs
-              # (root Cargo.toml/Cargo.lock + any crate manifest).
-              if printf '%s\n' "${changed}" | grep -Eq \
-                '^(Dockerfile$|\.dockerignore$|\.trivyignore$|\.hadolint\.yaml$|\.github/workflows/container-scan\.yml$|Cargo\.toml$|Cargo\.lock$|crates/[^/]+/Cargo\.toml$)'; then
-                container=true
-              else
-                container=false
-              fi
-            else
-              echo "::warning::could not resolve merge_group base/head SHAs for the diff — running the full image build + scan (fail-safe)."
-              container=true
-            fi
-          fi
-          echo "container=${container}" >> "$GITHUB_OUTPUT"
-          if [ "${container}" = "true" ]; then
-            echo "Container-relevant paths changed (or non-merge_group / fail-safe) — building + scanning the image."
-          else
-            echo "No container-relevant paths in this merge_group batch — fast-passing (image build + scan skipped, check stays green)."
-          fi
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-        if: steps.changes.outputs.container == 'true'
       # Build the image LOCALLY (load into the runner's docker) so trivy scans the exact
       # artifact this repo would publish. Cached to GHA — the slow fat-LTO release build is
       # a cache hit on unchanged sources. (Mirrors release.yml's smoke-build step.)
       - name: Build image (load locally)
-        if: steps.changes.outputs.container == 'true'
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -190,14 +80,13 @@ jobs:
           tags: sparq-server:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # Trivy image scan — GATING on fixable HIGH/CRITICAL OS+library vulns.
+      # Trivy image scan — fails on fixable HIGH/CRITICAL OS+library vulns.
       #   exit-code: 1     => the step (and job) FAILS when a non-ignored finding matches.
       #   ignore-unfixed   => only FIXABLE vulns gate; a CVE with no upstream fix yet is
-      #                       reported but cannot wedge an unrelated PR (it is surfaced in
-      #                       the SARIF run below for triage, not used as a merge blocker).
+      #                       reported, not failed on (it is surfaced in the SARIF run
+      #                       below for triage).
       #   trivyignores     => .trivyignore allowlist for triaged/accepted CVEs.
       - name: Trivy image scan (fail on fixable HIGH/CRITICAL)
-        if: steps.changes.outputs.container == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: sparq-server:scan
@@ -212,10 +101,8 @@ jobs:
       # never fails the job (the gating decision is the table pass above); it includes
       # unfixed findings too so the Security tab shows the full picture for triage.
       - name: Trivy image scan (SARIF for code-scanning)
-        # always() so a FAILED gating scan still uploads its SARIF — but only when the image
-        # was actually built (container==true); on the merge_group skip path there is no
-        # image to scan and nothing to upload.
-        if: always() && steps.changes.outputs.container == 'true'
+        # always() so a FAILED gating scan still uploads its SARIF.
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: sparq-server:scan
@@ -227,7 +114,7 @@ jobs:
           vuln-type: os,library
           trivyignores: .trivyignore
       - name: Upload Trivy SARIF to code-scanning
-        if: always() && steps.changes.outputs.container == 'true'
+        if: always()
         uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: trivy-results.sarif

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic regression tests for the agent-telemetry harness
-# (bead sq-dhss, epic sq-lhwo). Authored by Opus 4.8 (Fable unavailable; flag for
-# re-review when Fable returns).
+# Hermetic regression tests for the agent-telemetry harness
+# (bead sq-dhss, epic sq-lhwo).
 #
 # Fully hermetic: imports scripts/agent-telemetry/agent_telemetry.py and runs the
 # parser/aggregator against a CHECKED-IN SYNTHETIC fixture transcript (a handful of
@@ -11,7 +10,7 @@
 # optional price-table cost model, and the JSON + table renderers.
 #
 # Run:  python3 scripts/agent-telemetry/tests/test_agent_telemetry.py
-# (stdlib only; no pytest required — mirrors scripts/tests/test_drift_scan.py.)
+# (stdlib only; no pytest required.)
 
 from __future__ import annotations
 

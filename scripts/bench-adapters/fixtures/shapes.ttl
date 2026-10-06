@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-eifd cross-engine SHACL fixture — SHAPES graph.
+# sq-eifd cross-engine SHACL fixture — SHAPES graph.
 # A minimal shapes graph designed to produce a KNOWN, engine-stable violation
 # count over fixtures/data.ttl, used by the adapter unit tests to prove that
 # sparq-shacl, pySHACL and rdf-validate-shacl all agree on (conforms, #violations).

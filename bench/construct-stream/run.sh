@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement.
+# sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement.
 #
 # THE HYPOTHESIS UNDER TEST. sparq-server now writes a CONSTRUCT / DESCRIBE response body
 # through a chunk sink instead of rendering the whole RDF document into one `String` first

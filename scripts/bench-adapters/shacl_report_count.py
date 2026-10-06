@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-eifd: SHARED SHACL-validation-report -> (conforms, violation-count)
-# parser. Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable
-# returns).
+# sq-eifd: SHARED SHACL-validation-report -> (conforms, violation-count)
+# parser.
 #
 # This is THE contract that makes cross-engine SHACL counts comparable. Every
 # report-cli adapter (pySHACL, Jena `shacl validate`, TopBraid) emits a SHACL

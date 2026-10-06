@@ -8,7 +8,12 @@ import { test } from "node:test";
 import { deflateRawSync } from "node:zlib";
 import ts from "typescript";
 
-import { decompressDatasetBytes } from "../src/index.ts";
+import {
+  datasetCodecFromContentType,
+  datasetCodecFromName,
+  decompressDatasetBytes,
+  sniffDatasetCodec,
+} from "../src/index.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -78,41 +83,47 @@ function crc32(bytes) {
   return ~crc >>> 0;
 }
 
-function makeZip(name, text) {
-  const nameBytes = encoder.encode(name);
-  const raw = encoder.encode(text);
-  const compressed = new Uint8Array(deflateRawSync(raw));
-  const checksum = crc32(raw);
+/** A minimal ZIP writer: `members` is `[{ name, text, method }]` (0 = STORED, 8 = DEFLATE). */
+function makeZip(members) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+  for (const { name, text, method = 8 } of members) {
+    const nameBytes = encoder.encode(name);
+    const raw = encoder.encode(text);
+    const compressed = method === 8 ? new Uint8Array(deflateRawSync(raw)) : raw;
+    const checksum = crc32(raw);
 
-  const local = new DataView(new ArrayBuffer(30));
-  local.setUint32(0, 0x04034b50, true);
-  local.setUint16(4, 20, true);
-  local.setUint16(8, 8, true);
-  local.setUint32(14, checksum, true);
-  local.setUint32(18, compressed.length, true);
-  local.setUint32(22, raw.length, true);
-  local.setUint16(26, nameBytes.length, true);
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(8, method, true);
+    local.setUint32(14, checksum, true);
+    local.setUint32(18, compressed.length, true);
+    local.setUint32(22, raw.length, true);
+    local.setUint16(26, nameBytes.length, true);
 
-  const central = new DataView(new ArrayBuffer(46));
-  central.setUint32(0, 0x02014b50, true);
-  central.setUint16(4, 20, true);
-  central.setUint16(6, 20, true);
-  central.setUint16(10, 8, true);
-  central.setUint32(16, checksum, true);
-  central.setUint32(20, compressed.length, true);
-  central.setUint32(24, raw.length, true);
-  central.setUint16(28, nameBytes.length, true);
+    const central = new DataView(new ArrayBuffer(46));
+    central.setUint32(0, 0x02014b50, true);
+    central.setUint16(4, 20, true);
+    central.setUint16(6, 20, true);
+    central.setUint16(10, method, true);
+    central.setUint32(16, checksum, true);
+    central.setUint32(20, compressed.length, true);
+    central.setUint32(24, raw.length, true);
+    central.setUint16(28, nameBytes.length, true);
+    central.setUint32(42, offset, true);
 
-  const localBytes = concat([
-    new Uint8Array(local.buffer),
-    nameBytes,
-    compressed,
-  ]);
-  const centralBytes = concat([new Uint8Array(central.buffer), nameBytes]);
+    localParts.push(new Uint8Array(local.buffer), nameBytes, compressed);
+    centralParts.push(new Uint8Array(central.buffer), nameBytes);
+    offset += 30 + nameBytes.length + compressed.length;
+  }
+  const localBytes = concat(localParts);
+  const centralBytes = concat(centralParts);
   const eocd = new DataView(new ArrayBuffer(22));
   eocd.setUint32(0, 0x06054b50, true);
-  eocd.setUint16(8, 1, true);
-  eocd.setUint16(10, 1, true);
+  eocd.setUint16(8, members.length, true);
+  eocd.setUint16(10, members.length, true);
   eocd.setUint32(12, centralBytes.length, true);
   eocd.setUint32(16, localBytes.length, true);
   return concat([localBytes, centralBytes, new Uint8Array(eocd.buffer)]);
@@ -128,7 +139,7 @@ test("gzip decodes through the native browser stream and strips its suffix", asy
 
 test("ZIP selects and inflates an RDF member", async () => {
   const result = await decompressDatasetBytes(
-    makeZip("graph.ttl", SAMPLE),
+    makeZip([{ name: "graph.ttl", text: SAMPLE }]),
     "bundle.zip",
   );
   assert.equal(result.codec, "zip");
@@ -238,4 +249,119 @@ test("unknown bytes fail instead of being returned as decoded RDF", async () => 
     decompressDatasetBytes(encoder.encode("plain RDF?"), "dataset.bin"),
     /Unrecognised compressed payload/,
   );
+});
+
+// --- Cases migrated from the site's former dataset-archive.ts suite (#5114) ---------------
+
+// Reference `zstd -c` frames of SAMPLE's two lines, for the RFC 8878 multi-frame cases.
+const ZSTD_FRAME_1 = fromBase64(
+  "KLUv/QRYlQEAtAI8aHR0cDovL2V4YW1wbGUub3JnL3M+IHA+ICJvYmplY3QgdmFsdWUiIC4KAQCVnk16yiII",
+);
+const ZSTD_FRAME_2 = fromBase64(
+  "KLUv/QRYNQEA8DxodHRwOi8vZXhhbXBsZS5vcmcvcz4gcW8yPiAuCgIAQBGVnk3A/O7R",
+);
+const SAMPLE_LINE_1 = SAMPLE.slice(0, SAMPLE.indexOf("\n") + 1);
+
+/** A zstd SKIPPABLE frame (RFC 8878 §3.1.2): magic 0x184D2A50 LE + LE32 size + payload. */
+function zstdSkippableFrame(payload) {
+  const frame = new Uint8Array(8 + payload.length);
+  const view = new DataView(frame.buffer);
+  view.setUint32(0, 0x184d2a50, true);
+  view.setUint32(4, payload.length, true);
+  frame.set(payload, 8);
+  return frame;
+}
+
+test("sniffDatasetCodec recognises every supported magic number", async () => {
+  assert.equal(sniffDatasetCodec(await compressNative("x", "gzip")), "gzip");
+  assert.equal(sniffDatasetCodec(makeZip([{ name: "a.nt", text: "x" }])), "zip");
+  assert.equal(sniffDatasetCodec(ZSTD_SAMPLE), "zstd");
+  assert.equal(sniffDatasetCodec(zstdSkippableFrame(new Uint8Array([1]))), "zstd");
+  assert.equal(sniffDatasetCodec(BZIP2_SAMPLE), "bzip2");
+  assert.equal(sniffDatasetCodec(encoder.encode("plain")), undefined);
+  assert.equal(sniffDatasetCodec(new Uint8Array()), undefined);
+});
+
+test("datasetCodecFromName / FromContentType map names and media types", () => {
+  assert.equal(datasetCodecFromName("dataset.nt.gz"), "gzip");
+  assert.equal(datasetCodecFromName("dump.zip?x=1#frag"), "zip");
+  assert.equal(datasetCodecFromName("lod.nt.ZSTD"), "zstd");
+  assert.equal(datasetCodecFromName("lod.nt.tbz2"), "bzip2");
+  assert.equal(datasetCodecFromName("data.ttl"), undefined);
+  assert.equal(datasetCodecFromContentType("application/x-gzip; charset=x"), "gzip");
+  assert.equal(datasetCodecFromContentType("application/zip"), "zip");
+  assert.equal(datasetCodecFromContentType("application/zstd"), "zstd");
+  assert.equal(datasetCodecFromContentType("application/x-bzip2"), "bzip2");
+  assert.equal(datasetCodecFromContentType("text/turtle"), undefined);
+  assert.equal(datasetCodecFromContentType(null), undefined);
+});
+
+test("inner names strip a compression suffix; tar wrappers force a fallback", async () => {
+  const gz = await compressNative(SAMPLE, "gzip");
+  const inner = async (name) => (await decompressDatasetBytes(gz, name)).innerName;
+  assert.equal(await inner("watdiv.ttl.GZ"), "watdiv.ttl");
+  assert.equal(await inner("dump.nt.gz?download=1"), "dump.nt");
+  assert.equal(await inner("dump.tgz"), null);
+  assert.equal(await inner("unnamed-download"), "unnamed-download");
+});
+
+test("ZIP copies a STORED member, prefers the first RDF member, else the first file", async () => {
+  const stored = await decompressDatasetBytes(
+    makeZip([{ name: "data.ttl", text: SAMPLE, method: 0 }]),
+    "data.zip",
+  );
+  assert.equal(stored.innerName, "data.ttl");
+  assert.equal(decoder.decode(stored.bytes), SAMPLE);
+
+  const bundle = await decompressDatasetBytes(
+    makeZip([
+      { name: "README.txt", text: "not rdf" },
+      { name: "graph.nt", text: SAMPLE },
+    ]),
+    "bundle.zip",
+  );
+  assert.equal(bundle.innerName, "graph.nt");
+  assert.equal(decoder.decode(bundle.bytes), SAMPLE);
+
+  const fallback = await decompressDatasetBytes(
+    makeZip([{ name: "dump.dat", text: SAMPLE, method: 0 }]),
+    "dump.zip",
+  );
+  assert.equal(fallback.innerName, "dump.dat");
+});
+
+test("ZIP rejects an unsupported member compression method", async () => {
+  // Method 12 is bzip2-in-zip, which the native DecompressionStream path cannot inflate.
+  const zip = makeZip([{ name: "a.nt", text: SAMPLE, method: 0 }]);
+  const view = new DataView(zip.buffer);
+  view.setUint16(8, 12, true);
+  for (let i = 0; i + 4 <= zip.length; i++) {
+    if (view.getUint32(i, true) === 0x02014b50) {
+      view.setUint16(i + 10, 12, true);
+      break;
+    }
+  }
+  await assert.rejects(
+    decompressDatasetBytes(zip, "a.zip"),
+    /Unsupported zip compression method 12/,
+  );
+});
+
+test("zstd decodes concatenated frames and skips a leading skippable frame", async () => {
+  const multi = await decompressDatasetBytes(
+    concat([ZSTD_FRAME_1, ZSTD_FRAME_2]),
+    "chunks.nt.zst",
+  );
+  assert.equal(decoder.decode(multi.bytes), SAMPLE);
+
+  const skipped = await decompressDatasetBytes(
+    concat([zstdSkippableFrame(new Uint8Array([9, 9, 9, 9])), ZSTD_FRAME_1]),
+    "meta.nt.zst",
+  );
+  assert.equal(decoder.decode(skipped.bytes), SAMPLE_LINE_1);
+});
+
+test("corrupt zstd bytes reject instead of mis-decoding", async () => {
+  const corrupt = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0xff, 0xff, 0xff]);
+  await assert.rejects(decompressDatasetBytes(corrupt, "bad.nt.zst"));
 });

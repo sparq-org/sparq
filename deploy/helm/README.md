@@ -106,9 +106,9 @@ multiple replicas consistent.
 
 `helm lint`, adversarial `helm template` cases, and strict `kubeconform` validation
 are run in `.github/workflows/deploy-lint.yml` on every change to `deploy/helm/**`.
-[GPT-5.6] The schema checks the selector, HTTPS URLs, TLS settings, Secret refs,
+The schema checks the selector, HTTPS URLs, TLS settings, Secret refs,
 Service exposure, and LWS replay-store requirement before Kubernetes sees a
-manifest. The workflow is separate from the native Rust engine gate (`ci-summary`).
+manifest. The workflow is separate from the native Rust engine gate (`ci-fast`).
 
 To run locally:
 

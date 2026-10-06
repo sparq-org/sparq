@@ -73,6 +73,15 @@ what RDFC-1.0 canonicalizes). Transforming a JSON-LD credential to RDF (context
 expansion) is the caller's job — doing it here would force a JSON-LD context
 processor onto the lean build. `bbs-2023` is out of scope.
 
+**W3C vector + incompatibility** [OPUS-5.5]: the proof config maps `created` to
+`dcterms:created` and types `cryptosuite` as `sec:cryptosuiteString`, matching the
+published [vc-di-eddsa test vectors](https://www.w3.org/TR/vc-di-eddsa/#test-vectors)
+(`tests/w3c_eddsa_rdfc.rs` verifies the published `proofValue`). Proofs signed by
+earlier releases (`sec:created`, plain `cryptosuite` literal) **no longer verify** —
+there is no legacy fallback; re-sign them. Only `ProofConfig`'s typed fields are
+represented; other proof options/`@context` are not preserved, field values are not
+fully validated, and issuer authorization / credential status are not checked.
+
 ## Opt-in by construction
 
 Nothing in sparq's default build or the wasm artifact depends on this crate —

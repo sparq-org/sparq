@@ -1231,8 +1231,16 @@ fn cmd_reason(args: &[String]) {
         return;
     }
     let g = load_with_reasoning(path, format, profile);
-    println!("{} triples after {profile} reasoning", g.len());
-    if let Some(out) = args.get(5) {
+    let out = args.get(5);
+    // With an output path the closure is the data product (and may itself be stdout, e.g.
+    // `/dev/stdout`), so the summary is a diagnostic on stderr; without one the count is
+    // the command's only result and stays on stdout (#6466).
+    if out.is_some() {
+        eprintln!("{} triples after {profile} reasoning", g.len());
+    } else {
+        println!("{} triples after {profile} reasoning", g.len());
+    }
+    if let Some(out) = out {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
             eprintln!("create {out}: {e}");
@@ -1635,7 +1643,7 @@ fn cmd_dump(args: &[String]) {
         })),
     };
     let g = load_quiet(path, in_fmt);
-    // [FABLE-5] (sq-0kq6k) The two out-formats that HAVE a streaming writer go straight to
+    // (sq-0kq6k) The two out-formats that HAVE a streaming writer go straight to
     // stdout instead of through the `serialized` String below, so `dump` never holds the whole
     // rendered document in memory on top of the loaded store. Byte-identical to the buffered
     // writers (the engine's own `streamed == buffered` tests pin that), so this is a
@@ -1669,14 +1677,14 @@ fn cmd_dump(args: &[String]) {
                 sparq_engine::serialize::graph_to_jsonld_compact(&g, &ctx)
             }
         }
-        // [FABLE-5] (sq-0kq6k) With `streaming-serialization` on, `turtle` / `ttl` / `trig`
+        // (sq-0kq6k) With `streaming-serialization` on, `turtle` / `ttl` / `trig`
         // NEVER reach here — `dump_streaming` above returned already. Compiling these arms out
         // in that feature state keeps ONE live path per format instead of a silent buffered
         // fallback, so deleting the streaming dispatch is a loud "unknown out-format" (exit 2)
         // rather than a quiet regression to buffering.
         #[cfg(not(feature = "streaming-serialization"))]
         "turtle" | "ttl" => sparq_engine::serialize::graph_to_turtle(&g),
-        // [OPUS-4.8] (sq-ixc3.2) idiomatic, deterministic pretty Turtle / TriG. The PRETTY
+        // (sq-ixc3.2) idiomatic, deterministic pretty Turtle / TriG. The PRETTY
         // writers sort their output, so they have no streaming counterpart and stay buffered.
         "turtle-pretty" | "ttl-pretty" => sparq_engine::serialize::graph_to_turtle_pretty(&g),
         "trig-pretty" => sparq_engine::serialize::graph_to_trig_pretty(&g),
@@ -1732,7 +1740,7 @@ fn cmd_dump(args: &[String]) {
     print!("{serialized}");
 }
 
-/// [FABLE-5] (sq-0kq6k) Streams a `dump` in Turtle or TriG straight to stdout via the engine's
+/// (sq-0kq6k) Streams a `dump` in Turtle or TriG straight to stdout via the engine's
 /// streaming writers (`graph_to_turtle_streaming` / `graph_to_trig_streaming`), so the whole
 /// rendered document is never materialised — only the loaded store plus one subject block.
 ///

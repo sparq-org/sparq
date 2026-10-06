@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-[OPUS-4.8] sq-pntvh.8 / [OPUS-4.8] sq-v3nel: standalone test suite for
+sq-pntvh.8 / sq-v3nel: standalone test suite for
 check-vectorized-feature-off.py.
 
 Covers leg1 (feature-resolution guard) and the RE-DESIGNED leg2 dynamic byte-identity

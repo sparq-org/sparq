@@ -503,6 +503,19 @@ pub fn apply_rules(data: &Graph, shapes: &Graph) -> Inference {
 /// across many data graphs). `shapes` is still required because rule node
 /// expressions / CONSTRUCT prefixes are read directly from the shapes graph.
 pub fn apply_rules_with_model(data: &Graph, shapes: &Graph, model: &ShapesModel) -> Inference {
+    run_rules(data, &[], shapes, model)
+}
+
+/// The rule fixpoint over the working default graph `data`, with `named` exposed
+/// as the ONLY named graphs a `sh:SPARQLRule` body can reach (`GRAPH <g>` /
+/// `GRAPH ?g` / `FROM NAMED`). Inferred triples feed later passes through the
+/// working default graph. The legacy entry points pass no named graphs.
+fn run_rules(
+    data: &Graph,
+    named: &[(Term, Graph)],
+    shapes: &Graph,
+    model: &ShapesModel,
+) -> Inference {
     let ruleset = RuleSet::parse(shapes, model);
     if ruleset.scheduled.is_empty() {
         return Inference::default();
@@ -518,7 +531,8 @@ pub fn apply_rules_with_model(data: &Graph, shapes: &Graph, model: &ShapesModel)
         iterations += 1;
         // Each pass runs over data ∪ inferred-so-far. Build the augmented graph
         // once per pass (cheap relative to the rule SPARQL/conformance work).
-        let augmented = expand_graph(data, &inferred);
+        let mut augmented = expand_graph(data, &inferred);
+        augmented.named = named.iter().map(|(n, g)| (n.clone(), g.fork())).collect();
         let view = GraphView::new(&augmented);
         let mut pass_new = false;
 
@@ -560,6 +574,163 @@ pub fn apply_rules_with_model(data: &Graph, shapes: &Graph, model: &ShapesModel)
 pub fn expand(data: &Graph, shapes: &Graph) -> Graph {
     let inf = apply_rules(data, shapes);
     expand_graph(data, &inf.triples)
+}
+
+/// (gh-6614) Which asserted graphs of a dataset the SHACL-AF rule engine sees.
+///
+/// The selected graphs are merged into the **working default graph** that target
+/// selection, paths, `sh:condition`, node expressions and `sh:SPARQLRule` bodies
+/// evaluate against. The selected *named* graphs are additionally exposed as the
+/// only named graphs a SPARQL rule body can reach (`GRAPH <g>` / `GRAPH ?g`); an
+/// unselected graph is indistinguishable from an absent one, and a query dataset
+/// clause (`FROM` / `FROM NAMED`) cannot widen the boundary. Nothing is ever
+/// unioned implicitly: including the default graph in a union is explicit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphScope {
+    /// The default graph only — the same view as [`apply_rules`].
+    Default,
+    /// One named graph (an absent name denotes the empty graph).
+    Named(Term),
+    /// The merge of the listed named graphs, plus the default graph iff `default`.
+    Union {
+        /// Whether the default graph is part of the union.
+        default: bool,
+        /// The named graphs in the union (duplicates are ignored; an absent name
+        /// contributes nothing).
+        named: Vec<Term>,
+    },
+}
+
+/// (gh-6614) Where [`expand_dataset`] materializes the derived triples. The
+/// destination only affects the returned dataset: during the fixpoint, inferred
+/// triples always feed later passes through the working scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Destination {
+    /// Into the default graph.
+    Default,
+    /// Into this named graph (merged with it if the dataset already has it,
+    /// otherwise appended as a new named graph). Typed as an IRI or blank node so a
+    /// literal or triple term can never become a graph name.
+    Named(NamedOrBlankNode),
+}
+
+/// (gh-6614) The result of [`expand_dataset`]: the expanded dataset plus the
+/// rule-engine diagnostics (`iterations`, `capped`) and the inferred triples.
+pub struct DatasetExpansion {
+    /// The input dataset with every asserted graph preserved and the derived
+    /// triples added to the chosen [`Destination`] (deduplicated there).
+    pub dataset: Graph,
+    /// The inference run that produced the derived triples.
+    pub inference: Inference,
+}
+
+/// (gh-6614) [`apply_rules`] over an explicit [`GraphScope`] of a dataset (a
+/// `Graph` with named graphs). `GraphScope::Default` is equivalent to
+/// [`apply_rules`]. The input is never mutated.
+pub fn apply_rules_in_scope(data: &Graph, shapes: &Graph, scope: &GraphScope) -> Inference {
+    let model = ShapesModel::parse(shapes);
+    apply_rules_in_scope_with_model(data, shapes, &model, scope)
+}
+
+/// (gh-6614) [`apply_rules_in_scope`] against an already-parsed shapes model.
+pub fn apply_rules_in_scope_with_model(
+    data: &Graph,
+    shapes: &Graph,
+    model: &ShapesModel,
+    scope: &GraphScope,
+) -> Inference {
+    match scope {
+        GraphScope::Default => apply_rules_with_model(data, shapes, model),
+        _ => {
+            let (working, named) = scoped_working_graph(data, scope);
+            run_rules(&working, &named, shapes, model)
+        }
+    }
+}
+
+/// (gh-6614) Dataset-preserving SHACL-AF expansion: runs the rules over `scope`
+/// and returns a fresh copy of the WHOLE input dataset — every asserted named
+/// graph, selected or not, is preserved — with the derived triples materialized
+/// into `destination` (deduplicated against what that graph already asserts; an
+/// identical triple asserted in another graph is left alone). The input is not
+/// mutated, and the fixpoint diagnostics are returned rather than hidden.
+pub fn expand_dataset(
+    data: &Graph,
+    shapes: &Graph,
+    scope: &GraphScope,
+    destination: &Destination,
+) -> DatasetExpansion {
+    let inference = apply_rules_in_scope(data, shapes, scope);
+    let copy_named = |skip: Option<&Term>| -> Vec<(Term, Graph)> {
+        data.named
+            .iter()
+            .filter(|(n, _)| Some(n) != skip)
+            .map(|(n, g)| (n.clone(), g.fork()))
+            .collect()
+    };
+    let dataset = match destination {
+        Destination::Default => {
+            let mut out = merge_into(data, &inference.triples);
+            out.named = copy_named(None);
+            out
+        }
+        Destination::Named(name) => {
+            let name = &Term::from(name.clone());
+            let mut out = data.fork();
+            let merged = match data.named_graph(name) {
+                Some(g) => merge_into(g, &inference.triples),
+                None => merge_into(&Graph::default(), &inference.triples),
+            };
+            // Keep the positional order of the existing graphs; replace in place.
+            match out.named.iter().position(|(n, _)| n == name) {
+                Some(i) => out.named[i].1 = merged,
+                None => out.named.push((name.clone(), merged)),
+            }
+            out
+        }
+    };
+    DatasetExpansion { dataset, inference }
+}
+
+/// `g`'s own triples plus `extra`, deduplicated, as a fresh graph (no named graphs).
+fn merge_into(g: &Graph, extra: &[Triple]) -> Graph {
+    let mut seen: FxHashSet<Triple> = FxHashSet::default();
+    let triples: Vec<Triple> = graph_triples(g)
+        .chain(extra.iter().cloned())
+        .filter(|t| seen.insert(t.clone()))
+        .collect();
+    crate::graph_from_triples(triples)
+}
+
+/// The working default graph for `scope` (the merge of the selected graphs) and
+/// the selected named graphs a SPARQL rule body may reach.
+fn scoped_working_graph(data: &Graph, scope: &GraphScope) -> (Graph, Vec<(Term, Graph)>) {
+    let (include_default, names): (bool, Vec<&Term>) = match scope {
+        GraphScope::Default => (true, Vec::new()),
+        GraphScope::Named(n) => (false, vec![n]),
+        GraphScope::Union { default, named } => (*default, named.iter().collect()),
+    };
+    let mut selected: Vec<(Term, &Graph)> = Vec::new();
+    for n in names {
+        if selected.iter().any(|(s, _)| s == n) {
+            continue;
+        }
+        if let Some(g) = data.named_graph(n) {
+            selected.push((n.clone(), g));
+        }
+    }
+    let mut seen: FxHashSet<Triple> = FxHashSet::default();
+    let default_part = include_default.then_some(data).into_iter();
+    let triples: Vec<Triple> = default_part
+        .chain(selected.iter().map(|(_, g)| *g))
+        .flat_map(graph_triples)
+        .filter(|t| seen.insert(t.clone()))
+        .collect();
+    let named = selected
+        .into_iter()
+        .map(|(n, g)| (n, merge_into(g, &[])))
+        .collect();
+    (crate::graph_from_triples(triples), named)
 }
 
 /// Evaluates the SHACL-AF **node expression** rooted at `expr` (a term in the
@@ -822,8 +993,13 @@ fn conforms_to_all(
 /// `data` expanded with `extra` triples as a fresh `Graph`. Interns both the data
 /// (re-read from its dictionary) and the extra triples into a new dictionary.
 pub(crate) fn expand_graph(data: &Graph, extra: &[Triple]) -> Graph {
+    crate::graph_from_triples(graph_triples(data).chain(extra.iter().cloned()))
+}
+
+/// `data`'s own (default-graph) triples, decoded from its dictionary.
+fn graph_triples(data: &Graph) -> impl Iterator<Item = Triple> {
     let view = GraphView::new(data);
-    let base = view.triples(None, None, None).into_iter().map(|[s, p, o]| {
+    view.triples(None, None, None).into_iter().map(|[s, p, o]| {
         Triple {
             subject: as_subject(&s).unwrap_or_else(|| {
                 // A literal subject is impossible in a well-formed graph; fall back
@@ -836,8 +1012,7 @@ pub(crate) fn expand_graph(data: &Graph, extra: &[Triple]) -> Graph {
             },
             object: o,
         }
-    });
-    crate::graph_from_triples(base.chain(extra.iter().cloned()))
+    })
 }
 
 /// An RDF term as a triple subject (IRI or blank node); `None` for a literal.

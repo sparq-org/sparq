@@ -66,7 +66,7 @@ Scope invariants (enforced by `run.sh`, non-negotiable):
   serd/oxrdfio on Turtle, profile `write_prefix_header`/abbreviation lookup
   first. Buffered-vs-streaming already favors streaming.
 
-<!-- [FABLE-5] sq-0kq6k — CORRECTION. This section previously read "…favors
+<!-- sq-0kq6k — CORRECTION. This section previously read "…favors
 streaming, which is the shipped HTTP path". That was wrong in two ways and is
 recorded here rather than quietly deleted. (1) At the time it was written NO
 HTTP path called the streaming writers at all — wiring them was the open bead

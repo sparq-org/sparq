@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-7d3dj.34 — dedicated same-box sparq-server load->serve->query->teardown
+# sq-7d3dj.34 — dedicated same-box sparq-server load->serve->query->teardown
 # recipe: sparq measured in the SAME HTTP regime as Fuseki/Virtuoso/QLever.
 #
 # WHY THIS SCRIPT EXISTS

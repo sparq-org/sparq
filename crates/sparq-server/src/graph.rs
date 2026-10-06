@@ -19,7 +19,7 @@
 //! These are deliberately pure (no async, no HTTP types), like [`crate::results`], so they
 //! are unit-testable and the `server` feature is not required to use them.
 //!
-//! ## Buffered vs streaming ([FABLE-5] sq-0kq6k)
+//! ## Buffered vs streaming (sq-0kq6k)
 //!
 //! Each syntax has TWO entry points and exactly ONE implementation:
 //!
@@ -62,7 +62,7 @@ pub const COMMON_PREFIXES: &[(&str, &str)] = &[
     ("schema", "https://schema.org/"),
 ];
 
-/// [FABLE-5] sq-0kq6k: Streams an RDF graph as canonical **N-Triples** into `w` — one
+/// sq-0kq6k: Streams an RDF graph as canonical **N-Triples** into `w` — one
 /// `s p o .` line per triple in `oxrdf` Display term syntax, written straight to the sink
 /// with no whole-document `String`. [`triples_to_ntriples`] is this function over a `Vec<u8>`.
 ///
@@ -109,7 +109,7 @@ fn turtle_serializer() -> oxttl::TurtleSerializer {
     ser
 }
 
-/// [FABLE-5] sq-0kq6k: Streams an RDF graph as **prefix-compacting Turtle** into `w`.
+/// sq-0kq6k: Streams an RDF graph as **prefix-compacting Turtle** into `w`.
 /// `oxttl`'s `TurtleSerializer` is already an incremental writer — it holds only the current
 /// subject/predicate grouping state — so handing it the caller's sink emits the `@prefix`
 /// header and early subject blocks before the last triple is rendered, with no whole-document
@@ -130,7 +130,7 @@ pub fn triples_to_turtle(triples: &[Triple]) -> Result<String, String> {
     buffer(triples.len() * 64, |w| write_turtle_to(triples, w))
 }
 
-/// [FABLE-5] sq-0kq6k: Streams an RDF graph as **RDF/XML** into `w`. Like the Turtle writer,
+/// sq-0kq6k: Streams an RDF graph as **RDF/XML** into `w`. Like the Turtle writer,
 /// `oxrdfxml`'s `RdfXmlSerializer` writes incrementally, so no whole-document `String` is
 /// built. [`triples_to_rdfxml`] is this function over a `Vec<u8>`.
 pub fn write_rdfxml_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std::io::Result<()> {
@@ -184,7 +184,7 @@ pub fn triples_to_jsonld(triples: &[Triple]) -> String {
     write_jsonld(&view, JsonLdForm::Flattened, &default_prefixes())
 }
 
-/// [FABLE-5] sq-0kq6k: Writes the JSON-LD document into `w`, the sink-shaped twin of
+/// sq-0kq6k: Writes the JSON-LD document into `w`, the sink-shaped twin of
 /// [`triples_to_jsonld`] so the graph-format dispatch is uniform.
 ///
 /// HONEST CAVEAT: this one does NOT stream. The engine's `write_jsonld` returns a whole
@@ -198,7 +198,7 @@ pub fn write_jsonld_to<W: std::io::Write>(triples: &[Triple], w: &mut W) -> std:
     w.write_all(triples_to_jsonld(triples).as_bytes())
 }
 
-/// [FABLE-5] sq-0kq6k: Runs one of the `write_*_to` primitives over an in-memory `Vec<u8>`
+/// sq-0kq6k: Runs one of the `write_*_to` primitives over an in-memory `Vec<u8>`
 /// and returns the rendered document — the single shared implementation of every buffered
 /// `triples_to_*` wrapper, so buffered output is byte-identical to streamed output by
 /// construction.

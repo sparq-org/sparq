@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-pfae.5: the trust-document STORAGE/AUTHORING model. The whole
+# sq-pfae.5: the trust-document STORAGE/AUTHORING model. The whole
 # `store` module + the `tests/trust_store_cache_key.rs` integration suite are
 # `#[cfg(feature = "store")]` behind `default = []`, so the default build/clippy/
 # test (and ci.yml's archive) compile them EMPTY and run ZERO of the store unit
@@ -33,7 +33,7 @@
   features: "store"
   test: true
 
-# [OPUS-4.8] sq-pfae.6: the delegation stratum's PROV-O AUDIT half. The whole
+# sq-pfae.6: the delegation stratum's PROV-O AUDIT half. The whole
 # `delegation_prov` module + the `tests/delegation_prov_audit.rs` integration suite
 # are `#[cfg(feature = "delegation-prov")]` / `#![cfg(feature = "delegation-prov")]`
 # behind `default = []`, so the default build/clippy/test (and ci.yml's
@@ -52,13 +52,13 @@
   features: "delegation-prov"
   test: true
 
-# [OPUS-4.8] sq-5oru9 (epic sq-0dksu): the sparq sec-prop: EXTENSION vocab.
+# sq-5oru9 (epic sq-0dksu): the sparq sec-prop: EXTENSION vocab.
 # The `secprop` module + its `secprop::tests` unit test are behind the
 # default-OFF `secprop-vocab` feature, so ci.yml's default-feature `nextest
 # archive` compiles them EMPTY and runs ZERO of them — the silent-skip gap
 # (#1171) this leg closes.
 #
-# [OPUS-5] sq-3705 moved the vocabulary itself OUT of this crate: the IRI
+# sq-3705 moved the vocabulary itself OUT of this crate: the IRI
 # constants, `secprop-ext.ttl` and the drift tests (5 unit + 4 integration)
 # now live in the ZERO-dependency `sparq-secprop-vocab` leaf, which has NO
 # features — so ITS tests run in the ordinary default `cargo test` lane and
@@ -74,7 +74,7 @@
   features: "secprop-vocab"
   test: true
 
-# [OPUS-4.8] sq-ufsi9 (epic sq-0dksu, Phase 2): the N3 proof-admissibility
+# sq-ufsi9 (epic sq-0dksu, Phase 2): the N3 proof-admissibility
 # ruleset over `sparq-reason` (the §4.3 ODRL → admissible-proof-set
 # reduction). The `admissibility` module + its `admissibility::tests` unit
 # suite + the `secprop_admissibility.rs` golden integration suite
@@ -93,7 +93,7 @@
   features: "secprop-admissibility"
   test: true
 
-# [OPUS-4.8] sq-pfae.7 (epic sq-pfae P6): the live-status / revocation stratum. The
+# sq-pfae.7 (epic sq-pfae P6): the live-status / revocation stratum. The
 # whole `status_list` module + the `admit::admit_with_status` wiring + the
 # `tests/live_status_e2e.rs` integration suite (`#![cfg(feature = "status-list")]`)
 # are behind the default-OFF `status-list` feature, so ci.yml's default-feature
@@ -115,7 +115,7 @@
   features: "status-list-flate2"
   test: true
 
-# [OPUS-4.8] sq-pfae.13 (epic sq-pfae P6 follow-up): the VERIFIED status-list issuer
+# sq-pfae.13 (epic sq-pfae P6 follow-up): the VERIFIED status-list issuer
 # signature. The `status_list::VerifyingLiveStatusCheck` path verifies the status-list
 # VC's OWN issuer signature (the same sparq-zk Schnorr-over-RDFC-1.0 path `admit` uses)
 # against a trusted status-authority key BEFORE trusting its bits — fail-closed on
@@ -139,7 +139,7 @@
   features: "status-list-flate2,did"
   test: true
 
-# [OPUS-4.8] sq-dt5hv (epic sq-0dksu, Phase 5) + sq-nrwqs (Phase 5.1): the opt-in
+# sq-dt5hv (epic sq-0dksu, Phase 5) + sq-nrwqs (Phase 5.1): the opt-in
 # property-admissibility PRE-CHECK in the admission gate. The `admit::precheck` module
 # (`admit_with_precheck` + `AdmissibilityPreference` + `PrecheckOutcome`), its
 # `admit::precheck::tests` unit tests, and the `secprop_precheck_e2e.rs` golden
@@ -169,7 +169,7 @@
   features: "secprop-precheck"
   test: true
 
-# [OPUS-4.8] sq-pfae.15: the depth-bounded certification-edge trust-graph closure. The whole
+# sq-pfae.15: the depth-bounded certification-edge trust-graph closure. The whole
 # `graph` module (`derive_effective_rules` + `certification_message` + the target-set-
 # contravariant / conformance-covariant shape-containment matcher) + its `graph::tests` unit
 # suite + the `tests/certification_graph_e2e.rs` adversarial matrix
@@ -192,7 +192,7 @@
   features: "cert-graph"
   test: true
 
-# [SONNET-4.6] sq-pfae.16 — TrustStore x certification-graph composition: the
+# sq-pfae.16 — TrustStore x certification-graph composition: the
 # `TrustDocument::with_certifications` constructor + `TrustStore::effective_rules_at`
 # that pipes direct rules through `derive_effective_rules` + the cert-set-aware
 # `policy_version` that folds certifier IRI / certified-issuer IRI / valid_from /
@@ -219,7 +219,7 @@
   features: "store,cert-graph"
   test: true
 
-# [FABLE-5] sq-6syab.4 (epic sq-6syab, issue #1592): holder-side trust-expression
+# sq-6syab.4 (epic sq-6syab, issue #1592): holder-side trust-expression
 # contract evaluation, clear path. The whole `expression` module (request parsing,
 # the §3.1 normative reference rewrite Q→Q', sparq-engine evaluation over the
 # holder's attested named-graph dataset, the RDF 1.2 reifier + named-graph/PROV-O
@@ -241,7 +241,7 @@
 # expression expression` runs the 41 unit tests; build/test green in default and
 # feature-ON states, rustdoc `--all-features -D warnings` clean.
 #
-# [SONNET-4.6] sq-6syab.6 also rides this leg: `tests/trust_expression_conformance.rs`
+# sq-6syab.6 also rides this leg: `tests/trust_expression_conformance.rs`
 # (`#![cfg(feature = "expression")]`) drives the ten-entry W3C manifest under
 # `tests/trust-expression/` through the SAME public API and asserts, per case, the
 # required answer, the exact number of disclosed contributing statements (0 for every

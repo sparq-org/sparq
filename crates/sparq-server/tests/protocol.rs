@@ -362,7 +362,7 @@ async fn streamed_select_large_multichunk_is_byte_identical() {
 }
 
 // ---------------------------------------------------------------------------
-// Streamed CONSTRUCT / DESCRIBE bodies ([FABLE-5] sq-0kq6k)
+// Streamed CONSTRUCT / DESCRIBE bodies (sq-0kq6k)
 //
 // Same contract as the streamed SELECT above: a small result keeps its buffered
 // `Content-Length` wire shape; a result too big for one chunk streams under chunked

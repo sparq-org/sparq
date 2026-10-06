@@ -5,7 +5,7 @@ description: Secure Multi-Party Computation primitives and the honest SOTA for M
 
 # MPC protocols for federated SPARQL (RQ2)
 
-[OPUS-4.8] Design-for-review (Fable unavailable — flag for re-review). Ground
+Design-for-review. Ground
 truth: `research/mpc-zkp-research-and-architecture.md` and the `sparq-mpc` crate
 (`crates/sparq-mpc/{src/lib.rs,PLAN.md}`, currently a Milestone-0 scaffold). Every
 crypto claim must trace to a citation in the architecture doc — do not invent.

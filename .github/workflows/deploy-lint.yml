@@ -1,8 +1,8 @@
 # deploy-lint.yml — static validation for deploy/ templates
-# [OPUS-4.8] sq-0d744 — cloud-deploy epic sq-3vjdr §4 CI-smoke contract
-# [GPT-5.6] Mandatory, checksum-pinned Helm + kubeconform validation.
+# sq-0d744 — cloud-deploy epic sq-3vjdr §4 CI-smoke contract
+# Mandatory, checksum-pinned Helm + kubeconform validation.
 #
-# This workflow is separate from the native Rust workspace gate (ci-summary).
+# This workflow is separate from the native Rust workspace checks (ci-fast).
 
 name: deploy-lint
 
@@ -35,7 +35,7 @@ jobs:
           KUBECONFORM_VERSION="0.6.7"
           ARCH="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
 
-          # [GPT-5.6] Digests are pinned per architecture; do not pipe unverified
+          # Digests are pinned per architecture; do not pipe unverified
           # downloads into tar or silently skip a missing validator.
           case "${ARCH}" in
             amd64)
@@ -74,7 +74,7 @@ jobs:
       - name: Secret-literal hygiene check (R4)
         run: |
           set -euo pipefail
-          # [GPT-5.6] Quickstarts may reference a Secret but must never create an
+          # Quickstarts may reference a Secret but must never create an
           # editable placeholder Secret in a committed manifest.
           if grep -RIn --include="*.yaml" --include="*.yml" \
                -E 'kind:[[:space:]]*Secret' deploy/helm/quickstart; then
@@ -125,7 +125,7 @@ jobs:
             --set ingress.tls.secretName=lws-tls \
             > /tmp/lws-rendered.yaml
 
-          # [GPT-5.6] Exercise the conditional storage path; it was a silent
+          # Exercise the conditional storage path; it was a silent
           # branch before review.
           helm template sparq ./deploy/helm/sparq \
             --set auth.existingSecret=my-auth-secret \
@@ -135,7 +135,7 @@ jobs:
       - name: Assert rendered security and runtime contracts
         run: |
           set -euo pipefail
-          # [GPT-5.6] Pin the provider-specific facts that schema validation cannot
+          # Pin the provider-specific facts that schema validation cannot
           # infer: canonical image, bind address, per-server probes, TLS redirect,
           # Secret injection, and non-root/read-only execution.
           grep -q 'image: "ghcr.io/sparq-org/sparq-server:latest"' /tmp/sparq-server-rendered.yaml
@@ -176,7 +176,7 @@ jobs:
             fi
           }
 
-          # [GPT-5.6] Each case previously rendered an unsafe or broken workload.
+          # Each case previously rendered an unsafe or broken workload.
           assert_fails
           assert_fails --set auth.existingSecret=my-auth-secret --set server=typo
           assert_fails --set auth.existingSecret=my-auth-secret --set service.type=LoadBalancer
@@ -206,7 +206,7 @@ jobs:
       - name: Strict Kubernetes schema validation
         run: |
           set -euo pipefail
-          # [GPT-5.6] kubeconform is a required validator, not best-effort.
+          # kubeconform is a required validator, not best-effort.
           kubeconform -strict -summary -exit-on-error \
             /tmp/sparq-server-rendered.yaml \
             /tmp/sparq-server-ingress-rendered.yaml \

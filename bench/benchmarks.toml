@@ -1820,7 +1820,7 @@ records_to  = "bench/competitor-results/gsp-<UTC>.json via GSP_JSON_OUT (git-ign
 featured    = false  # external-competitor differential harness, not a dashboard-promoted capability suite
 status      = "ok"  # smoke (sparq loopback) is self-contained; competitor columns are gather-time external cost
 
-# [FABLE-5] sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement
+# sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement
 [[benchmark]]
 id          = "construct-stream"
 name        = "Streamed vs buffered CONSTRUCT/DESCRIBE response bodies (sparq-server, self-differential)"

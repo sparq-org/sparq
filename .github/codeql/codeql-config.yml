@@ -1,4 +1,4 @@
-# CodeQL configuration for the Rust workspace SAST gate. [OPUS-4.8]
+# CodeQL configuration for the Rust workspace SAST gate.
 #
 # Referenced from .github/workflows/codeql.yml's `github/codeql-action/init`
 # step via `config-file:`. It keeps the full `security-and-quality` query suite

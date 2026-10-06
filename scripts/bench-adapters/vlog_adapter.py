@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-hmd7l.7 / sq-hmd7l.30 — VLog materialization adapter for the same-box
+# sq-hmd7l.7 / sq-hmd7l.30 — VLog materialization adapter for the same-box
 # reasoning comparison harness (scripts/bench/materialize-same-box.sh).
 #
 # 🤖 SPARQ agent. VLog (github.com/karmaresearch/vlog, Apache-2.0) is a Datalog /

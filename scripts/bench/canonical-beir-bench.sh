@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-tvzyi — CANONICAL BEIR IR-quality gather EC2 launcher (committed).
+# sq-tvzyi — CANONICAL BEIR IR-quality gather EC2 launcher (committed).
 #
 # 🤖 SPARQ agent. Sibling of scripts/bench/canonical-materialize-bench.sh (same
 # orphan-proof pattern — that header + canonical-competitor-bench.sh document the
@@ -20,7 +20,7 @@
 #   * results are ALSO cat'd to the console log by the instance script, so
 #     `aws ec2 get-console-output` recovers the envelopes even with no SSH pull
 #     (parsed by scripts/bench/extract-console-envelopes.sh).
-#   * [OPUS-5] sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
+#   * sq-ffaa9: with BENCH_IAM_PROFILE + BENCH_RESULTS_S3 exported the box also
 #     uploads every envelope + gather-meta.json to a run-scoped S3 prefix — the channel
 #     that survives an AMI whose serial console returns nothing usable. Opt-in.
 #
@@ -72,7 +72,7 @@ command -v aws >/dev/null || die "aws CLI not found"
 command -v python3 >/dev/null || die "python3 not found (verifies the recovered gather-meta.json)"
 mkdir -p "$RESULTS_LOCAL"
 
-# [OPUS-5] sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
+# sq-ffaa9 — optional durable S3 egress (BENCH_IAM_PROFILE + BENCH_RESULTS_S3).
 # Inert unless BOTH are exported; half-configured fails fast here rather than after a
 # multi-hour gather. See scripts/bench/bootstrap-bench-iam.sh (one-time maintainer setup).
 . "$HERE/bench-result-egress.sh"
@@ -224,7 +224,7 @@ while :; do
   [ "$STATE" = "terminated" ] && { log "instance terminated before sentinel — results may be partial"; break; }
 done
 
-# [OPUS-5] sq-ffaa9 — durable channel first when configured: the box uploaded each
+# sq-ffaa9 — durable channel first when configured: the box uploaded each
 # envelope (and gather-meta.json, the canonical-success artifact this launcher checks
 # below) as it was produced, so a run survives both a dead SSH path AND an AMI whose
 # serial console returns nothing usable. No-op when egress is off.

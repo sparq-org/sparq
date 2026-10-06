@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic tests for the A/B statistics + verdict emitter (bead sq-lhwo.4,
-# epic sq-lhwo). Authored by Opus 4.8 (Fable unavailable; flag for re-review when
-# Fable returns). 🤖 SPARQ agent.
+# Hermetic tests for the A/B statistics + verdict emitter (bead sq-lhwo.4,
+# epic sq-lhwo). 🤖 SPARQ agent.
 #
 # Fully hermetic (stdlib unittest, NO scipy/numpy, NO network, NO real transcripts):
 # imports ab_stats.py and exercises the Wilcoxon signed-rank math against a textbook

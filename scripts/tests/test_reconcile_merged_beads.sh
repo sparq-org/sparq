@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic end-to-end tests for scripts/reconcile-merged-beads.sh (bead
+# Hermetic end-to-end tests for scripts/reconcile-merged-beads.sh (bead
 # sq-13uyp — the recurrent sweep that closes bd-OPEN beads whose fix already MERGED, so
-# they stop wasting frontier dispatches). Authored by Opus 4.8 (Fable unavailable; flag
-# for re-review when Fable returns).
+# they stop wasting frontier dispatches).
 #
 # WHY: the script's value rests on a few load-bearing, dangerous-if-wrong invariants that a
 # future refactor must not silently break. The in-script self-test covers the PURE
@@ -55,12 +54,12 @@ cat >"${BIN}/gh" <<'EOF'
 #!/usr/bin/env bash
 # Only `gh pr list --state merged ...` is exercised. Emit fixture lines.
 printf '%s\n' \
-  "#101 fix/sq-merged1-thing fix(core): the merged fix (sq-merged1) [OPUS-4.8]" \
-  "#102 feat/sq-epicmerge-x EPIC: paper factory umbrella merged child (sq-epicmerge) [OPUS-4.8]" \
-  "#103 feat/sq-parent9-roll feat: parent with children, a child PR landed (sq-parent9) [OPUS-4.8]" \
-  "#104 feat/sq-needs1-ui needs-user surface shipped (sq-needs1) [OPUS-4.8]" \
-  "#105 feat/sq-ixc3.11-big feat(gui): the .11 molecule (sq-ixc3.11) [OPUS-4.8]" \
-  "#106 fix/sq-brokey-fail bd-show-will-fail bead landed (sq-brokey) [OPUS-4.8]" \
+  "#101 fix/sq-merged1-thing fix(core): the merged fix (sq-merged1)" \
+  "#102 feat/sq-epicmerge-x EPIC: paper factory umbrella merged child (sq-epicmerge)" \
+  "#103 feat/sq-parent9-roll feat: parent with children, a child PR landed (sq-parent9)" \
+  "#104 feat/sq-needs1-ui needs-user surface shipped (sq-needs1)" \
+  "#105 feat/sq-ixc3.11-big feat(gui): the .11 molecule (sq-ixc3.11)" \
+  "#106 fix/sq-brokey-fail bd-show-will-fail bead landed (sq-brokey)" \
   "#107 fix/sq-onbranch-only branch-only match, no id in title here"
 exit 0
 EOF

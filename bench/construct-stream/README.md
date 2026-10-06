@@ -1,4 +1,4 @@
-<!-- [FABLE-5] sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement. -->
+<!-- sq-0kq6k — streamed-vs-buffered CONSTRUCT/DESCRIBE response measurement. -->
 # Streamed vs buffered CONSTRUCT / DESCRIBE responses
 
 Measures what wiring `sparq-server`'s CONSTRUCT / DESCRIBE response body through a chunk sink

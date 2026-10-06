@@ -1,5 +1,5 @@
 # vectors-aarch64 — EXECUTE the `sparq-vectors` distance-kernel guards on a REAL aarch64 host.
-# [SONNET-4.6] issue #5028.
+# issue #5028.
 #
 # WHY THIS LANE EXISTS
 # --------------------
@@ -40,9 +40,8 @@
 #     the maintainer-directed risk posture (2026-07-18)" records for `formal-verification.yml`
 #     / `fuzz.yml` / `bench.yml`: the lane already ran and GATED on the PR head, and GitHub does
 #     not support `paths` filters on `merge_group`, so a queue re-run would tax EVERY enqueue (including
-#     doc-only ones) with an arm build for no new signal. `ci-summary / gate` polls the
-#     check-runs that actually exist on the ref and requires only its own single context, so a
-#     lane absent from `merge_group` is never "expected but missing" and never hangs the gate.
+#     doc-only ones) with an arm build for no new signal. It is not a required check, so its
+#     absence from `merge_group` blocks nothing.
 #     The residual risk is the accepted one: a break only a specific QUEUED COMBINATION could
 #     produce is caught by the `push`-to-`main` run below, then reverted / fixed forward.
 #   • no `schedule`: an unwatched nightly is a lane that can die quietly — `miri.yml`'s own
@@ -56,7 +55,7 @@ name: vectors-aarch64
 
 on:
   pull_request:
-    # `ready_for_review` per docs/branch-protection.md §Draft-tier CI rule 2: the default types
+    # `ready_for_review`: the default types
     # are only opened/synchronize/reopened, so without it the un-draft moment would run nothing
     # and the head would keep whatever this lane concluded while the PR was a draft.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -151,7 +150,7 @@ jobs:
           fi
           grep -m1 '^Features' /proc/cpuinfo
 
-      # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image ships a rustup
+      # CI-economy (2026-07-18 directive): the ubuntu runner image ships a rustup
       # stable toolchain; a SHA-pinned toolchain action re-downloads the whole toolchain
       # whenever the image lags the newest release. `rustup default` never triggers a download.
       - name: Rust (preinstalled stable)

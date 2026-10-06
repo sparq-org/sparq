@@ -1,6 +1,5 @@
-<!-- [OPUS-4.8] sq-lhwo.4 (epic sq-lhwo). 🤖 SPARQ agent — the cache-discounted
-token A/B PRE-REGISTRATION for the ast-grep+outline intervention. Written while
-Fable unavailable; flag for re-review when Fable returns. Design record / shared
+<!-- sq-lhwo.4 (epic sq-lhwo). 🤖 SPARQ agent — the cache-discounted
+token A/B PRE-REGISTRATION for the ast-grep+outline intervention. Design record / shared
 protocol: research/dogfooding-sparq-knowledge-graph.md §5.1-§5.6. This file fixes
 the hypotheses, arms, metric, and KILL criteria BEFORE any run; editing it to fit a
 result is forbidden. No measured number lives here (check-no-perf-numbers.py). -->

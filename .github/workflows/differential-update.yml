@@ -1,4 +1,4 @@
-# [FABLE-5] Standing nightly SPARQL UPDATE differential vs Oxigraph (beads sq-3dyje.4,
+# Standing nightly SPARQL UPDATE differential vs Oxigraph (beads sq-3dyje.4,
 # sq-hodke).
 #
 # WHAT: runs the sparq-bench UPDATE differential fuzzer
@@ -53,8 +53,7 @@
 #
 # TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
 # differential.yml / shacl-diff-fuzz.yml: this workflow never produces a check-run
-# on a PR head commit, so the `ci-summary / gate` aggregator never sees it and the
-# per-PR gate is unaffected.
+# on a PR head commit.
 #
 # Third-party actions are pinned by full commit SHA (supply-chain hardening); the
 # trailing `# vX.Y.Z` comment is what Dependabot follows to bump the pin. Pins
@@ -118,7 +117,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -220,7 +219,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .beads/issues.jsonl
           git commit -m "chore(beads): auto-file update-differential P1 bug bead (${SHARD}) [skip ci]" \
-                     -m "Nightly UPDATE differential lane finding (sq-3dyje.4). [FABLE-5]"
+                     -m "Nightly UPDATE differential lane finding (sq-3dyje.4)."
           # Best-effort push, exactly the differential.yml fail-soft pattern: the
           # protected-main ruleset (GH013) rejects direct pushes until a bypass
           # exists (sq-roe3); the GitHub issue filed above is the reliable channel.
