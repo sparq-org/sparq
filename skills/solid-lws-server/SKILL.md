@@ -242,8 +242,10 @@ What the server exposes, all discoverable from the storage description
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH`
   (`application/merge-patch+json` or `application/json-patch+json`), `DELETE` (with
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
-  Errors are `application/problem+json`. A `POST` whose name is taken gets a numbered name and
-  then a random suffix; when every try is taken it gets `409`. `livez` and `readyz` are never
+  Errors are `application/problem+json`. A `POST` whose name is taken (or is being created,
+  written or deleted right now) gets a numbered name and then a random suffix; when every try is
+  taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
+  patches as well as JSON Patch. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
   `PATCH` whose result nests too deeply to store gets `422`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
@@ -269,7 +271,8 @@ What the server exposes, all discoverable from the storage description
   key in the storage description's `verificationMethod`. Deliveries go through a bounded queue and worker pool (see the
   `SOLID_SERVER_LWS_DELIVERY_*` variables); a Delete is announced only once the removal happened.
   Each delivery attempt, retries included, first checks that its subscription still exists and
-  has not expired. Queued work for a cancelled subscription is dropped.
+  has not expired, and that the subscriber may still read the resource. A Delete is checked against
+  the resource as it was before removal. A delivery that fails a check is dropped.
 - A PUT or PATCH that changes a resource's metadata (its types, its linkset) and fails part way
   leaves the resource **fail-closed**: only the owner and its creator may act on it until a write
   completes.

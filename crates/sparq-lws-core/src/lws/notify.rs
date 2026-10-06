@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::access::{format_rfc3339, parse_rfc3339, Action};
+use super::access::{self, format_rfc3339, parse_rfc3339, Action};
 use super::{
     etag_of, jose, json_is_uri, method_not_allowed, none_match, problem, service_links,
     service_linkset, service_listing, set, Agent, LwsConfig, LwsRequest, LwsState, AS_CONTEXT,
@@ -106,7 +106,34 @@ const SIGNATURE_COMPONENTS: [&str; 6] = [
 pub struct Pending {
     inbox: String,
     activity: Value,
+    watch: Watch,
+}
+
+/// What a delivery for a subscription is checked against before every attempt: the subscription
+/// must still stand, and its subscriber still be allowed to read the resource the notification is
+/// about.
+#[derive(Debug, Clone)]
+pub struct Watch {
     subscription: String,
+    uri: String,
+    agent: Agent,
+    /// For a Delete, the resource as it was before it went (see [`access::Snapshot`]); otherwise
+    /// the resource is read as it is at each attempt.
+    snapshot: Option<Arc<access::Snapshot>>,
+}
+
+impl Watch {
+    /// Whether the delivery may still be made: the subscription stands (not cancelled, not
+    /// expired) and its subscriber may read the resource (grants revoked or expired since count).
+    async fn stands<S: Store + 'static>(&self, state: &LwsState<S>) -> bool {
+        if !state.notify.is_live(&self.subscription) {
+            return false;
+        }
+        match &self.snapshot {
+            Some(s) => access::allowed_as(state, Action::Read, &self.uri, &self.agent, s).await,
+            None => state.allowed(Action::Read, &self.uri, &self.agent).await,
+        }
+    }
 }
 
 /// A change to a storage resource, announced to the subscriptions whose topics cover it.
@@ -336,6 +363,16 @@ impl Notifier {
             .filter(|s| s.covers(&event.uri))
             .collect();
         let mut out = Vec::new();
+        // A Delete is prepared while the resource is still there; its deliveries, made once it
+        // is gone, are authorized against what it was.
+        let snapshot = if event.kind == "Delete" && !candidates.is_empty() {
+            match access::Snapshot::take(state, &event.uri).await {
+                Ok(s) => Some(Arc::new(s)),
+                Err(_) => return out,
+            }
+        } else {
+            None
+        };
         for sub in candidates {
             // Delivery-time authorization (section 10.3.3): a subscriber that may not read the
             // resource now hears nothing about it.
@@ -349,10 +386,16 @@ impl Notifier {
             if let Some((rel, container)) = &event.relation {
                 activity[*rel] = Value::String(container.clone());
             }
+            let agent = sub.agent();
             out.push(Pending {
                 inbox: sub.inbox,
                 activity,
-                subscription: sub.id,
+                watch: Watch {
+                    agent,
+                    subscription: sub.id,
+                    uri: event.uri.clone(),
+                    snapshot: snapshot.clone(),
+                },
             });
         }
         out
@@ -361,19 +404,20 @@ impl Notifier {
     /// Deliver notifications [`Notifier::prepare`]d earlier.
     pub fn send<S: Store + 'static>(&self, state: &LwsState<S>, pending: Vec<Pending>) {
         for p in pending {
-            self.deliver(state, &p.inbox, p.activity, Some(&p.subscription));
+            self.deliver(state, &p.inbox, p.activity, Some(p.watch));
         }
     }
 
-    /// Deliver one notification wrapping `activity` to `inbox` in the background. `subscription`
-    /// names the subscription it is for, whose failure count it feeds; `None` for a notification
-    /// that belongs to no subscription (an access grant's or request's inbox).
+    /// Deliver one notification wrapping `activity` to `inbox` in the background. `watch` names
+    /// the subscription it is for, whose failure count it feeds, and what each attempt is checked
+    /// against; `None` for a notification that belongs to no subscription (an access grant's or
+    /// request's inbox).
     pub fn deliver<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
         inbox: &str,
         activity: Value,
-        subscription: Option<&str>,
+        watch: Option<Watch>,
     ) {
         let Some(target) = inbox_url(inbox, state.cfg.allow_insecure_fetch) else {
             return;
@@ -396,7 +440,6 @@ impl Notifier {
         let body = Bytes::from(envelope(&state.cfg.storage(), activity).to_string());
         let keyid = format!("{}#{}", state.cfg.storage(), state.cfg.notify_key.kid());
         let state = state.clone();
-        let subscription = subscription.map(str::to_string);
         tokio::spawn(async move {
             let _admitted = admitted;
             // The inbox's turn first, then a worker: a delivery waiting on a busy inbox holds no
@@ -407,15 +450,20 @@ impl Notifier {
             let Ok(_worker) = workers.acquire_owned().await else {
                 return;
             };
-            // Waiting for the permits (and between retries) can take a while; the subscription is
-            // checked again before every attempt, and work for one that went meanwhile is
-            // discarded.
+            // Waiting for the permits (and between retries) can take a while; the subscription and
+            // the subscriber's access are checked again before every attempt, and work that no
+            // longer stands is discarded.
             let Some(status) =
-                attempt_delivery(&state, &target, &body, &keyid, subscription.as_deref()).await
+                attempt_delivery(&state, &target, &body, &keyid, watch.as_ref()).await
             else {
                 return;
             };
-            let Some(id) = subscription else { return };
+            let Some(Watch {
+                subscription: id, ..
+            }) = watch
+            else {
+                return;
+            };
             let notifier = &state.notify;
             if status.is_some_and(|s| s.is_success()) {
                 notifier.failures.lock().expect("lock").remove(&id);
@@ -470,20 +518,22 @@ impl Notifier {
 }
 
 /// POST `body` to `target` up to [`DELIVERY_ATTEMPTS`] times, re-signing each time; the last
-/// status, or `Some(None)` when the inbox could not be reached at all. `None` when the
-/// `subscription` the delivery is for was cancelled or expired before an attempt: nothing more is
-/// sent for it.
+/// status, or `Some(None)` when the inbox could not be reached at all. `None` when, before an
+/// attempt, the delivery no longer stands ([`Watch::stands`]: its subscription was cancelled or
+/// expired, or its subscriber may no longer read the resource): nothing more is sent for it.
 async fn attempt_delivery<S: Store + 'static>(
     state: &LwsState<S>,
     target: &url::Url,
     body: &Bytes,
     keyid: &str,
-    subscription: Option<&str>,
+    watch: Option<&Watch>,
 ) -> Option<Option<StatusCode>> {
     let mut last = None;
     for attempt in 1..=DELIVERY_ATTEMPTS {
-        if subscription.is_some_and(|id| !state.notify.is_live(id)) {
-            return None;
+        if let Some(w) = watch {
+            if !w.stands(state).await {
+                return None;
+            }
         }
         let signed = sign(&state.cfg.notify_key, target, body, keyid, jose::now_secs());
         let result = state
@@ -1141,7 +1191,13 @@ mod tests {
             // for the inbox's turn.
             for _ in 0..2 {
                 let activity = json!({"type": ["Update"]});
-                state.notify.deliver(&state, &inbox, activity, Some(id));
+                let watch = Watch {
+                    subscription: id.into(),
+                    uri: state.cfg.storage(),
+                    agent: Agent::anonymous(),
+                    snapshot: None,
+                };
+                state.notify.deliver(&state, &inbox, activity, Some(watch));
             }
             for _ in 0..100 {
                 if total.load(Ordering::SeqCst) == 1 {
@@ -1171,6 +1227,153 @@ mod tests {
             assert_eq!(state.notify.admitted.load(Ordering::SeqCst), 0, "{id}");
             total.store(0, Ordering::SeqCst);
         }
+    }
+
+    /// Review finding: read access was checked when a notification was prepared, never again;
+    /// a grant revoked (or expired) meanwhile still let the queued delivery and its retries go
+    /// out. A Delete, delivered once the resource is gone, is checked against the resource as it
+    /// was.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn deliveries_stop_once_read_access_is_gone() {
+        use super::super::access::Policy;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let total = Arc::new(AtomicUsize::new(0));
+        let accept = Arc::new(AtomicBool::new(false));
+        let app = {
+            let (total, accept) = (total.clone(), accept.clone());
+            axum::Router::new().route(
+                "/inbox",
+                axum::routing::post(move || {
+                    let (total, accept) = (total.clone(), accept.clone());
+                    async move {
+                        total.fetch_add(1, Ordering::SeqCst);
+                        if accept.load(Ordering::SeqCst) {
+                            return StatusCode::NO_CONTENT;
+                        }
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                }),
+            )
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        cfg.allow_insecure_fetch = true;
+        cfg.delivery = DeliveryLimits {
+            queue: 8,
+            workers: 4,
+            per_inbox: 1,
+        };
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let bob = "https://bob.example/#me";
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let sub = Subscription {
+            id: "s".into(),
+            subscriber: Some(bob.into()),
+            client: None,
+            topics: vec![state.cfg.storage()],
+            inbox: format!("http://{addr}/inbox"),
+            expires: None,
+            expires_at: None,
+        };
+        state
+            .store
+            .create_in_container(
+                &container,
+                &format!("{container}s"),
+                Bytes::from(serde_json::to_vec(&sub).unwrap()),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        state.notify.subs.write().unwrap().insert("s".into(), sub);
+        let r = state.cfg.absolute("/r");
+        state
+            .store
+            .write(&r, Bytes::from("r"), "text/plain")
+            .await
+            .unwrap();
+        state.access.put_grant_for_test(
+            "g",
+            vec![Policy {
+                actions: vec![Action::Read],
+                assignee: bob.into(),
+                target: None,
+                storage: state.cfg.storage(),
+                constraints: Vec::new(),
+            }],
+        );
+        let update = Event {
+            kind: "Update",
+            uri: r.clone(),
+            is_container: false,
+            relation: None,
+        };
+        // Two notifications: the first in flight (failing, so it would be retried), the second
+        // waiting for the inbox's turn.
+        for _ in 0..2 {
+            let pending = state.notify.prepare(&state, &update).await;
+            assert_eq!(pending.len(), 1);
+            state.notify.send(&state, pending);
+        }
+        for _ in 0..100 {
+            if total.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(total.load(Ordering::SeqCst), 1);
+        // The grant is revoked: neither the retry nor the queued delivery goes out.
+        state.access.remove_grant_for_test("g");
+        tokio::time::sleep(RETRY_DELAY + Duration::from_millis(700)).await;
+        assert_eq!(total.load(Ordering::SeqCst), 1);
+        for _ in 0..100 {
+            if state.notify.admitted.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // A Delete of Bob's own resource reaches him once it is gone: he was its creator.
+        total.store(0, Ordering::SeqCst);
+        accept.store(true, Ordering::SeqCst);
+        let d = state.cfg.absolute("/d");
+        state
+            .store
+            .write(&d, Bytes::from("d"), "text/plain")
+            .await
+            .unwrap();
+        let meta = super::super::ResourceMeta {
+            creator: Some(bob.into()),
+            ..Default::default()
+        };
+        state.put_resource_meta(&d, &meta).await.unwrap();
+        let delete = Event {
+            kind: "Delete",
+            uri: d.clone(),
+            is_container: false,
+            relation: None,
+        };
+        let pending = state.notify.prepare(&state, &delete).await;
+        assert_eq!(pending.len(), 1);
+        state.store.delete(&d, None).await.unwrap();
+        state
+            .store
+            .delete(&super::super::meta_key(&d), None)
+            .await
+            .unwrap();
+        state.notify.send(&state, pending);
+        for _ in 0..200 {
+            if total.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(total.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

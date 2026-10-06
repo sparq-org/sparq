@@ -26,7 +26,8 @@ use serde_json::{json, Value};
 use super::{
     has_lws_context, has_type, is_uri, jose, json_is_uri, method_not_allowed, none_match, problem,
     service_links, service_linkset, service_listing, set, subject_tokens, Agent, LwsConfig,
-    LwsRequest, LwsState, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX, REQUESTS_PATH,
+    LwsRequest, LwsState, ResourceMeta, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX,
+    REQUESTS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -319,6 +320,25 @@ fn new_etag() -> String {
 }
 
 impl AccessStore {
+    /// Put a grant of `policies` in force under `id`, in memory only.
+    #[cfg(test)]
+    pub fn put_grant_for_test(&self, id: &str, policies: Vec<Policy>) {
+        let record = Record {
+            id: id.into(),
+            document: Value::Null,
+            policies,
+            author: None,
+            etag: new_etag(),
+        };
+        self.grants.write().expect("lock").insert(id.into(), record);
+    }
+
+    /// Revoke the grant `id`, in memory only.
+    #[cfg(test)]
+    pub fn remove_grant_for_test(&self, id: &str) {
+        self.grants.write().expect("lock").remove(id);
+    }
+
     /// Ensure the two service containers exist and load what they hold.
     pub async fn load<S: Store>(store: &S, cfg: &LwsConfig) -> Result<Self, String> {
         let me = Self {
@@ -421,15 +441,87 @@ pub async fn allowed<S: Store + 'static>(
     action: Action,
     uri: &str,
     agent: &Agent,
-) -> Result<bool, crate::error::ServerError> {
-    if state.cfg.open {
-        return Ok(true);
-    }
-    let subject = agent.subject.as_deref();
-    if subject.is_some() && subject == state.cfg.owner.as_deref() {
+) -> Result<bool, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
         return Ok(true);
     }
     let meta = state.resource_meta(uri).await?;
+    decide(state, action, uri, agent, &meta, None).await
+}
+
+/// What a decision about a resource rests on, taken while the resource is there: its metadata
+/// and its format. A Delete is announced once the resource is gone, so each delivery of it is
+/// authorized against this snapshot (and the grants as they stand then).
+#[derive(Debug, Clone, Default)]
+pub struct Snapshot {
+    meta: ResourceMeta,
+    format: Option<String>,
+}
+
+impl Snapshot {
+    /// The state of the resource at `uri` now.
+    pub async fn take<S: Store + 'static>(
+        state: &LwsState<S>,
+        uri: &str,
+    ) -> Result<Self, ServerError> {
+        Ok(Self {
+            meta: state.resource_meta(uri).await?,
+            format: format_of(state, uri).await?,
+        })
+    }
+}
+
+/// As [`allowed`], against `snapshot` rather than the resource as it is now; the grants are those
+/// in force now.
+pub async fn allowed_as<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+    snapshot: &Snapshot,
+) -> bool {
+    if state.cfg.open || is_owner(state, agent) {
+        return true;
+    }
+    decide(
+        state,
+        action,
+        uri,
+        agent,
+        &snapshot.meta,
+        Some(snapshot.format.clone()),
+    )
+    .await
+    .unwrap_or(false)
+}
+
+fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
+    let subject = agent.subject.as_deref();
+    subject.is_some() && subject == state.cfg.owner.as_deref()
+}
+
+/// The format a format constraint is checked against: a container's is its listing's.
+async fn format_of<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+) -> Result<Option<String>, ServerError> {
+    if uri.ends_with('/') {
+        return Ok(Some(LWS_JSON.to_string()));
+    }
+    Ok(state.store.meta(uri).await?.map(|m| m.content_type))
+}
+
+/// The decision past the owner: the creator, then the grants. `format` is looked up only when a
+/// grant needs it, unless it is given.
+async fn decide<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+    meta: &ResourceMeta,
+    format: Option<Option<String>>,
+) -> Result<bool, ServerError> {
+    let subject = agent.subject.as_deref();
     if subject.is_some() && subject == meta.creator.as_deref() {
         return Ok(true);
     }
@@ -448,10 +540,9 @@ pub async fn allowed<S: Store + 'static>(
         return Ok(false);
     }
     let is_container = uri.ends_with('/');
-    let format = if is_container {
-        Some(LWS_JSON.to_string())
-    } else {
-        state.store.meta(uri).await?.map(|m| m.content_type)
+    let format = match format {
+        Some(f) => f,
+        None => format_of(state, uri).await?,
     };
     let mut types = vec![format!(
         "{LWS_NS}{}",

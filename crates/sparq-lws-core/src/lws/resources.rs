@@ -300,8 +300,15 @@ fn resource_links<S: Store>(
 }
 
 /// Record that a container's membership or a member changed.
+///
+/// The container's lock is taken shared, as a create in it takes it: a touch after each create
+/// must not wait for every other create in flight in the container (nor hold up the ones queued
+/// behind it), which taking it exclusively would. What changes the container's metadata
+/// otherwise takes the lock exclusively, so it never interleaves with a touch; touches among
+/// themselves are ordered by a lock of their own (no lock is taken under it).
 async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
-    let _guard = state.locks.lock(container).await;
+    let _guard = state.locks.read(container).await;
+    let _touch = state.locks.lock(&format!("{container}\0touch")).await;
     // Metadata that cannot be read is left as it is, not replaced by a default.
     let Ok(mut meta) = state.resource_meta(container).await else {
         return;
@@ -1034,56 +1041,31 @@ async fn create<S: Store + 'static>(
         });
     let base_name = sanitize_slug(req.header("slug"))
         .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
-    // The container's lock is held from the choice of a free name through the create and the new
-    // member's creator metadata: the store's create replaces whatever is at the IRI, so two POSTs
-    // with one Slug must never both find the name free. Every create in a container, and a
-    // recursive delete of it, takes this lock, so under it a name found free stays free.
+    // The container's lock is held shared from the choice of a free name through the create and
+    // the new member's creator metadata. Shared, because creates in one container do not need to
+    // exclude each other: what keeps two POSTs with one Slug from both taking a name is the new
+    // member's own lock (both of its spellings, `name` and `name/`), which [`free_name`] takes
+    // before it checks the name is free, and which is held until the member's content and metadata
+    // are written. A name whose lock is busy (a create, write or delete of that IRI in flight) is
+    // taken. What does need the container to stand still (a delete of it, a change to its own
+    // metadata, the touch below) takes its lock exclusively and waits for the creates in flight.
     //
-    // The new member's own lock (both of its spellings, `name` and `name/`) is held too: a DELETE
-    // holds the doomed resource's lock across the removal of its content and then its metadata,
-    // and a create that slipped in between would have its fresh metadata removed. Locks are taken
-    // member before container ([`lock_order`]), so under the container's lock the member's are
-    // only tried. When one is busy (a DELETE or a write of that IRI is in flight), the container's
-    // lock is released, the member's and then the container's are waited for in order, and the
-    // name is checked again; when it was taken meanwhile, the choice starts over.
+    // The member's lock also orders the create after a DELETE in flight at the IRI, which holds
+    // it across the removal of the content and then the metadata: a create that slipped in between
+    // would have its fresh metadata removed. Locks are taken member before container
+    // ([`lock_order`]), so under the container's lock the member's are only tried.
     //
     // Both are released before the container's own metadata is touched (which takes its lock
-    // again).
-    let spellings = |name: &str| (format!("{parent}{name}/"), format!("{parent}{name}"));
-    let mut attempt = 0;
-    let (child, _child_guards, parent_guard) = loop {
-        attempt += 1;
-        if attempt > 16 {
-            return problem(
-                StatusCode::CONFLICT,
-                Some("the container kept changing while a member was being created"),
-            );
-        }
-        let parent_guard = state.locks.lock(parent).await;
-        let name = match free_name(state, parent, &base_name).await {
-            Ok(name) => name,
-            Err(r) => return r,
-        };
-        // `name/` is longer than `name`, so each pair below is in lock order.
-        let (b, a) = spellings(&name);
-        if let (Some(gb), Some(ga)) = (state.locks.try_lock(&b), state.locks.try_lock(&a)) {
-            break (if is_container { b } else { a }, (gb, ga), parent_guard);
-        }
-        drop(parent_guard);
-        let child_guards = (state.locks.lock(&b).await, state.locks.lock(&a).await);
-        let parent_guard = state.locks.lock(parent).await;
-        match state.store.exists(parent).await {
-            Ok(true) => {}
-            Ok(false) => return problem(StatusCode::NOT_FOUND, None),
-            Err(e) => return store_error(e),
-        }
-        let taken = match (state.store.exists(&a).await, state.store.exists(&b).await) {
-            (Ok(x), Ok(y)) => x || y,
-            (Err(e), _) | (_, Err(e)) => return store_error(e),
-        };
-        if !taken {
-            break (if is_container { b } else { a }, child_guards, parent_guard);
-        }
+    // exclusively).
+    let parent_guard = state.locks.read(parent).await;
+    let (name, child_guards) = match free_name(state, parent, &base_name).await {
+        Ok(found) => found,
+        Err(r) => return r,
+    };
+    let child = if is_container {
+        format!("{parent}{name}/")
+    } else {
+        format!("{parent}{name}")
     };
     // Under the container's lock, against the container the member goes into.
     if let Err(r) = recheck(state, Action::Create, parent, agent).await {
@@ -1119,26 +1101,40 @@ async fn create<S: Store + 'static>(
     // exists under metadata that is not its own. When the content cannot be created the metadata
     // is removed again; one left behind describes nothing, and the next create replaces it.
     //
-    // This order is also what makes the create safe to cancel without a task of its own (whose
-    // scheduling would sit inside the container's critical section, which every create in the
-    // container serializes on): a request dropped after the metadata write leaves metadata that
-    // describes nothing, and the content write is the last step.
-    if let Err(e) = state.put_resource_meta(&child, &meta).await {
-        return store_error(e);
-    }
-    let created = match state
-        .store
-        .create_in_container(parent, &child, body, &content_type)
+    // The writes run in a task of their own that holds the locks, so a client that goes away
+    // cannot release them while a write is still pending (with a remote store, a create sent
+    // before the request was dropped may still commit): until the writes are over the name stays
+    // taken, and no other create can put its metadata under this content. The container's lock is
+    // shared, so the task's scheduling holds up no other create in the container.
+    let created = {
+        let (state, parent, child, meta) = (
+            state.clone(),
+            parent.to_string(),
+            child.clone(),
+            meta.clone(),
+        );
+        tokio::spawn(async move {
+            let _locks = (child_guards, parent_guard);
+            state.put_resource_meta(&child, &meta).await?;
+            match state
+                .store
+                .create_in_container(&parent, &child, body, &content_type)
+                .await
+            {
+                Ok(m) => Ok(m),
+                Err(e) => {
+                    let _ = state.store.delete(&meta_key(&child), None).await;
+                    Err(e)
+                }
+            }
+        })
         .await
-    {
-        Ok(m) => m,
-        Err(e) => {
-            let _ = state.store.delete(&meta_key(&child), None).await;
-            return store_error(e);
-        }
     };
-    drop(parent_guard);
-    drop(_child_guards);
+    let created = match created {
+        Ok(Ok(m)) => m,
+        Ok(Err(e)) => return store_error(e),
+        Err(e) => return store_error(ServerError::Storage(format!("the create failed: {e}"))),
+    };
     touch_container(state, parent).await;
     state
         .notify
@@ -1165,33 +1161,38 @@ async fn create<S: Store + 'static>(
     resp
 }
 
-/// A member name in `parent` that is free (neither `name` nor `name/` exists): `base_name`, else
-/// `base_name-2`, `-3`, ... and past [`NUMBERED_NAMES`] a random suffix, [`RANDOM_NAMES`] times,
-/// then a 409. A reserved name ([`RESERVED_ROOT_NAMES`]) is never free. Run under the container's
-/// lock.
+/// A member name in `parent` that is free, with the locks of both its spellings (`name/`, then
+/// `name`, in [`lock_order`]): `base_name`, else `base_name-2`, `-3`, ... and past
+/// [`NUMBERED_NAMES`] a random suffix, [`RANDOM_NAMES`] times, then a 409. A name is free when
+/// its locks can be taken now and, under them, neither spelling exists; a reserved name
+/// ([`RESERVED_ROOT_NAMES`]) never is. Under the locks the answer holds: only a create makes a
+/// member, and a create of this IRI needs them.
 async fn free_name<S: Store + 'static>(
     state: &LwsState<S>,
     parent: &str,
     base_name: &str,
-) -> Result<String, Response> {
+) -> Result<(String, (IriGuard, IriGuard)), Response> {
     match state.store.exists(parent).await {
         Ok(true) => {}
         Ok(false) => return Err(problem(StatusCode::NOT_FOUND, None)),
         Err(e) => return Err(store_error(e)),
     }
     // The probes are bounded: the container's lock is held throughout, so a search that never
-    // ends would hold every create in the container. A backend failure is an error, not a name
-    // that is taken.
+    // ends would hold up whatever waits to take it exclusively. A backend failure is an error,
+    // not a name that is taken.
     let at_root = parent == state.cfg.storage();
     let mut name = base_name.to_string();
     for n in 2..=(NUMBERED_NAMES + RANDOM_NAMES + 1) {
-        let a = format!("{parent}{name}");
-        let b = format!("{parent}{name}/");
-        let taken = (at_root && RESERVED_ROOT_NAMES.contains(&name.as_str()))
-            || state.store.exists(&a).await.map_err(store_error)?
-            || state.store.exists(&b).await.map_err(store_error)?;
-        if !taken {
-            return Ok(name);
+        if !(at_root && RESERVED_ROOT_NAMES.contains(&name.as_str())) {
+            let a = format!("{parent}{name}");
+            let b = format!("{parent}{name}/");
+            if let (Some(gb), Some(ga)) = (state.locks.try_lock(&b), state.locks.try_lock(&a)) {
+                let taken = state.store.exists(&a).await.map_err(store_error)?
+                    || state.store.exists(&b).await.map_err(store_error)?;
+                if !taken {
+                    return Ok((name, (gb, ga)));
+                }
+            }
         }
         name = if n > NUMBERED_NAMES {
             format!("{base_name}-{}", jose::random_id())
@@ -1234,8 +1235,9 @@ async fn current<S: Store + 'static>(
 /// the write, and an If-Match can never pass against a state another writer is replacing. Metadata
 /// read-modify-writes of a container (membership touches) take the container's lock too.
 ///
-/// A create takes its container's lock across the choice of a free name and the create, and the
-/// new member's lock across its content and metadata (as a delete holds it across their removal),
+/// A create takes its container's lock (shared: creates in one container exclude each other by
+/// the new member's lock alone) across the choice of a free name and the create, and the new
+/// member's lock across its content and metadata (as a delete holds it across their removal),
 /// and a recursive delete takes the lock of every resource it removes (see [`lock_subtree`]), so neither
 /// can interleave with the other or with a conditional write.
 ///
@@ -1472,14 +1474,8 @@ async fn update<S: Store + 'static>(
 /// ("Update — an existing resource's content or metadata was modified").
 async fn changed<S: Store + 'static>(state: &LwsState<S>, uri: &str) {
     if let Some(parent) = parent_of(uri, &state.cfg.storage()) {
-        let _guard = state.locks.lock(&parent).await;
-        // A member's listed fields (format, size, modified) changed, so the listing did. Metadata
-        // that cannot be read is left as it is, not replaced by a default.
-        if let Ok(mut meta) = state.resource_meta(&parent).await {
-            meta.modified_ms = Some(now_ms());
-            meta.version = Some(jose::random_id());
-            let _ = state.put_resource_meta(&parent, &meta).await;
-        }
+        // A member's listed fields (format, size, modified) changed, so the listing did.
+        touch_container(state, &parent).await;
     }
     state
         .notify
@@ -1500,22 +1496,43 @@ async fn changed<S: Store + 'static>(state: &LwsState<S>, uri: &str) {
 /// RFC 7386: a non-object patch replaces the target; otherwise members merge recursively and a
 /// null member removes the name.
 pub fn merge_patch(target: &Value, patch: &Value) -> Value {
+    let mut out = target.clone();
+    merge_patch_into(&mut out, patch);
+    out
+}
+
+/// [`merge_patch`] in place: `target` is changed where it stands, so nothing of it is copied
+/// (a copy of the rest of the target at every level of the patch would grow with the patch's
+/// depth times the target's size). Only the patch's own values are cloned into it.
+fn merge_patch_into(target: &mut Value, patch: &Value) {
     let Value::Object(p) = patch else {
-        return patch.clone();
+        *target = patch.clone();
+        return;
     };
-    let mut out = match target {
-        Value::Object(t) => t.clone(),
-        _ => Map::new(),
+    if !target.is_object() {
+        *target = Value::Object(Map::new());
+    }
+    let Value::Object(out) = target else {
+        unreachable!("made an object above")
     };
     for (k, v) in p {
         if v.is_null() {
             out.remove(k);
         } else {
-            let merged = merge_patch(out.get(k).unwrap_or(&Value::Null), v);
-            out.insert(k.clone(), merged);
+            merge_patch_into(out.entry(k.clone()).or_insert(Value::Null), v);
         }
     }
-    Value::Object(out)
+}
+
+/// [`merge_patch`] held to `budget` serialized bytes: the target is cloned once and patched in
+/// place, and a result larger than the budget is refused, as a JSON Patch's is.
+fn merge_patch_bounded(target: &Value, patch: &Value, budget: usize) -> Result<Value, PatchError> {
+    let mut out = target.clone();
+    merge_patch_into(&mut out, patch);
+    if json_size(&out) > budget {
+        return Err(PatchError::TooLarge);
+    }
+    Ok(out)
 }
 
 /// How far a patched document may grow, in serialized bytes: the request body limit. A JSON Patch
@@ -1853,23 +1870,24 @@ impl Patch {
     /// Apply the patch to `target`. `Err` carries the response.
     fn apply(&self, target: &Value) -> Result<Value, Response> {
         match self {
-            Patch::Merge(p) => Ok(merge_patch(target, p)),
-            Patch::Json(ops) => json_patch(target, ops, PATCH_BUDGET).map_err(|e| match e {
-                PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
-                PatchError::Failed => problem(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Some("the JSON Patch cannot be applied"),
-                ),
-                PatchError::TooLarge => problem(
-                    StatusCode::PAYLOAD_TOO_LARGE,
-                    Some("the patched document would be too large"),
-                ),
-                PatchError::TooDeep => problem(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    Some("the patched document would nest too deeply"),
-                ),
-            }),
+            Patch::Merge(p) => merge_patch_bounded(target, p, PATCH_BUDGET),
+            Patch::Json(ops) => json_patch(target, ops, PATCH_BUDGET),
         }
+        .map_err(|e| match e {
+            PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
+            PatchError::Failed => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the JSON Patch cannot be applied"),
+            ),
+            PatchError::TooLarge => problem(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some("the patched document would be too large"),
+            ),
+            PatchError::TooDeep => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the patched document would nest too deeply"),
+            ),
+        })
     }
 }
 
@@ -2162,8 +2180,8 @@ pub type IriGuard = tokio::sync::OwnedRwLockWriteGuard<()>;
 /// Lock `uri` and everything under it, in [`lock_order`], and return the guards with the subtree
 /// (as [`subtree`] lists it) that holds while they are held. The subtree is listed, locked, and
 /// listed again; when a member arrived or left in between, the locks are released and it starts
-/// over. A create takes its container's lock, so once every container is locked no member can
-/// arrive.
+/// over. A create holds its container's lock (shared) until its member exists, so once every
+/// container is locked (exclusively) no member can arrive.
 async fn lock_subtree<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
@@ -2608,6 +2626,106 @@ mod tests {
             "\"a\"",
             Some(1_700_000_000)
         ));
+    }
+
+    /// Review finding: a merge patch copied the rest of the target at every level it descended,
+    /// so a deep patch over a large target allocated its depth times the target's size; and it
+    /// had no size bound, unlike JSON Patch.
+    #[test]
+    fn merge_patch_copies_the_target_once_and_is_bounded() {
+        const DEPTH: usize = 120;
+        let big = "x".repeat(1 << 20);
+        let target = (0..DEPTH).fold(json!({ "big": big }), |v, _| json!({ "a": v }));
+        let patch = (0..DEPTH).fold(json!({ "n": 1 }), |v, _| json!({ "a": v }));
+        // Patched where it stands: the large value at the bottom is the same allocation after
+        // the merge, never a copy (one per level, before).
+        let leaf_of = |v: &Value| (0..DEPTH).fold(v, |v, _| &v["a"]).clone();
+        let mut doc = target.clone();
+        let before = (0..DEPTH).fold(&doc, |v, _| &v["a"])["big"]
+            .as_str()
+            .unwrap()
+            .as_ptr();
+        merge_patch_into(&mut doc, &patch);
+        let leaf = (0..DEPTH).fold(&doc, |v, _| &v["a"]);
+        assert_eq!(leaf["big"].as_str().unwrap().as_ptr(), before);
+        assert_eq!(leaf["n"], json!(1));
+        // The same result as the definition (RFC 7386), within the budget.
+        let out = merge_patch_bounded(&target, &patch, PATCH_BUDGET).unwrap();
+        assert_eq!(out, doc);
+        assert_eq!(leaf_of(&out)["big"].as_str().map(str::len), Some(1 << 20));
+        // The RFC 7386 appendix A cases.
+        for (t, p, want) in [
+            (json!({"a": "b"}), json!({"a": "c"}), json!({"a": "c"})),
+            (
+                json!({"a": "b"}),
+                json!({"b": "c"}),
+                json!({"a": "b", "b": "c"}),
+            ),
+            (json!({"a": "b"}), json!({"a": null}), json!({})),
+            (
+                json!({"a": "b", "b": "c"}),
+                json!({"a": null}),
+                json!({"b": "c"}),
+            ),
+            (json!({"a": ["b"]}), json!({"a": "c"}), json!({"a": "c"})),
+            (json!({"a": "c"}), json!({"a": ["b"]}), json!({"a": ["b"]})),
+            (
+                json!({"a": {"b": "c"}}),
+                json!({"a": {"b": "d", "c": null}}),
+                json!({"a": {"b": "d"}}),
+            ),
+            (
+                json!({"a": [{"b": "c"}]}),
+                json!({"a": [1]}),
+                json!({"a": [1]}),
+            ),
+            (json!(["a", "b"]), json!(["c", "d"]), json!(["c", "d"])),
+            (json!({"a": "b"}), json!(["c"]), json!(["c"])),
+            (json!({"a": "foo"}), json!(null), json!(null)),
+            (json!({"a": "foo"}), json!("bar"), json!("bar")),
+            (
+                json!({"e": null}),
+                json!({"a": 1}),
+                json!({"e": null, "a": 1}),
+            ),
+            (
+                json!([1, 2]),
+                json!({"a": "b", "c": null}),
+                json!({"a": "b"}),
+            ),
+            (
+                json!({}),
+                json!({"a": {"bb": {"ccc": null}}}),
+                json!({"a": {"bb": {}}}),
+            ),
+        ] {
+            assert_eq!(merge_patch(&t, &p), want, "{t} + {p}");
+        }
+        // Past the budget: refused, as a JSON Patch would be.
+        assert_eq!(
+            merge_patch_bounded(&target, &patch, 1 << 20),
+            Err(PatchError::TooLarge)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_oversized_merge_patch_result_is_a_413() {
+        {
+            let st = state().await;
+            let uri = post(&st, "m.json", "application/json", "{\"a\": 1}", &[]).await;
+            let grow = json!({ "b": "y".repeat(PATCH_BUDGET) }).to_string();
+            let r = call(
+                &st,
+                "PATCH",
+                path_of(&uri),
+                &[("content-type", MERGE_PATCH)],
+                &grow,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+            let body = body_of(call(&st, "GET", path_of(&uri), &[], "").await).await;
+            assert_eq!(body, Bytes::from("{\"a\": 1}"));
+        }
     }
 
     #[test]
@@ -3692,53 +3810,43 @@ mod tests {
     /// Review finding: a POST locked only the container, while a DELETE of a data resource holds
     /// the resource's own lock from removing its content to removing its metadata. A POST with
     /// the same Slug in between recreated the IRI, and the DELETE then removed the new resource's
-    /// metadata. The create now waits for the member's lock.
+    /// metadata. A name whose lock is held is now taken: the create goes elsewhere.
     #[tokio::test]
-    async fn create_waits_for_a_delete_of_the_same_name() {
+    async fn create_never_takes_a_name_whose_lock_is_held() {
         let st = state().await;
         let x = format!("{}x", st.cfg.storage());
         // A DELETE of `x` is mid-flight: its content is gone, its lock still held.
         let held = st.locks.lock(&x).await;
-        let task = {
-            let st = st.clone();
-            tokio::spawn(async move {
-                post(
-                    &st,
-                    "x",
-                    "text/plain",
-                    "new",
-                    &[("link", "<https://e.example/T>; rel=\"type\"")],
-                )
-                .await
-            })
-        };
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            !task.is_finished(),
-            "the create did not wait for the member's lock"
-        );
+        let uri = post(
+            &st,
+            "x",
+            "text/plain",
+            "new",
+            &[("link", "<https://e.example/T>; rel=\"type\"")],
+        )
+        .await;
+        assert_eq!(uri, format!("{x}-2"));
+        assert!(!st.store.exists(&x).await.unwrap());
         // The delete removes the (old) metadata and releases the lock.
         let _ = st.store.delete(&meta_key(&x), None).await;
         drop(held);
-        assert_eq!(task.await.unwrap(), x);
         // The new resource keeps its metadata.
         assert!(st
-            .resource_meta(&x)
+            .resource_meta(&uri)
             .await
             .unwrap()
             .types
             .contains(&"https://e.example/T".to_string()));
-        // A container holds its spellings' locks as well: a held `y/` delays a POST of `y`.
+        // A container holds its spellings' locks as well: a held `y/` keeps a POST off `y`.
         let y = format!("{}y/", st.cfg.storage());
         let held = st.locks.lock(&y).await;
-        let task = {
-            let st = st.clone();
-            tokio::spawn(async move { post(&st, "y", "text/plain", "y", &[]).await })
-        };
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(!task.is_finished());
+        let uri = post(&st, "y", "text/plain", "y", &[]).await;
+        assert_eq!(uri, format!("{}y-2", st.cfg.storage()));
         drop(held);
-        assert_eq!(task.await.unwrap(), format!("{}y", st.cfg.storage()));
+        assert_eq!(
+            post(&st, "y", "text/plain", "y", &[]).await,
+            format!("{}y", st.cfg.storage())
+        );
     }
 
     /// Review finding: the permission check ran before the resource's lock was taken, so a write
@@ -4350,14 +4458,12 @@ mod tests {
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
     }
 
-    /// Benchmark finding: a create ran its writes in a task of its own, whose scheduling sat
-    /// inside the container's critical section. Inline, a client that goes away mid-create drops
-    /// the writes; the metadata-first order keeps that safe: the stale metadata is already gone,
-    /// no content exists, the locks are free, and the next create at the IRI is whole.
+    /// A create whose client goes away mid-way still finishes whole: its writes hold the new
+    /// member's locks until they are over. The stale metadata an earlier resource left is replaced
+    /// before any content exists, and the content lands under the creator's own metadata.
     #[tokio::test]
     async fn a_cancelled_create_leaves_nothing_behind() {
         use super::super::test_store::{request as req, FlakyStore};
-        use std::sync::atomic::Ordering;
         use std::time::Duration;
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.owner = Some("https://owner.example/#me".into());
@@ -4391,21 +4497,120 @@ mod tests {
         st.store.delete(&x, Some(&st.cfg.storage())).await.unwrap();
         assert_eq!(st.resource_meta(&x).await.unwrap().creator, bob.subject);
         // A create whose content write stalls, and whose client goes away.
-        store.hang_create.store(true, Ordering::SeqCst);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
         let cancelled = tokio::time::timeout(Duration::from_millis(50), post(owner.clone())).await;
         assert!(cancelled.is_err());
-        store.hang_create.store(false, Ordering::SeqCst);
+        // Mid-way: Bob's metadata is already gone, and no content exists.
         assert!(!st.store.exists(&x).await.unwrap());
         assert_eq!(st.resource_meta(&x).await.unwrap().creator, owner.subject);
-        // The container is not left locked: the next create goes through, whole and the owner's.
+        // The write lands, whole and the owner's.
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.store.exists(&x).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            st.store.read(&x).await.unwrap().body,
+            Bytes::from("owner's")
+        );
+        assert_eq!(st.resource_meta(&x).await.unwrap().creator, owner.subject);
+        let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // Nothing is left locked: the next create goes through.
         let r = tokio::time::timeout(Duration::from_secs(5), post(owner.clone()))
             .await
             .expect("the container stayed locked");
         assert_eq!(r.status(), StatusCode::CREATED);
-        assert_eq!(hdr(&r, "location"), x);
-        assert_eq!(st.resource_meta(&x).await.unwrap().creator, owner.subject);
-        let r = handle(&st, &req(Method::GET, &px, &[], ""), &bob).await;
+        assert_eq!(hdr(&r, "location"), format!("{x}-2"));
+    }
+
+    /// Review finding: with the create's writes inline, a client that went away released the
+    /// locks while a remote create it had sent was still pending. A second POST with the same
+    /// Slug took the name and wrote its creator's metadata, and the late commit then put the first
+    /// content under it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_late_commit_never_lands_under_another_creators_metadata() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::time::Duration;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let (owner, bob) = (
+            agent("https://owner.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        let post = |who: Agent, body: &'static str| {
+            let st = st.clone();
+            async move {
+                let h = [("slug", "x"), ("content-type", "text/plain")];
+                let c = format!("{}c/", st.cfg.storage());
+                create(&st, &req(Method::POST, "/c/", &h, body), &who, &c).await
+            }
+        };
+        // A container of Bob's, so both may create in it.
+        let c = format!("{}c/", st.cfg.storage());
+        let h = [
+            ("slug", "c"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, ""),
+            &bob,
+            &st.cfg.storage(),
+        )
+        .await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, ""),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(hdr(&r, "location"), c);
+        let mut meta = st.resource_meta(&c).await.unwrap();
+        meta.creator = bob.subject.clone();
+        st.put_resource_meta(&c, &meta).await.unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let cancelled =
+            tokio::time::timeout(Duration::from_millis(50), post(owner.clone(), "owner's")).await;
+        assert!(cancelled.is_err());
+        // Bob's POST with the same Slug, while the owner's create is still pending.
+        let second = tokio::spawn(post(bob.clone(), "bob's"));
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        gate.add_permits(1);
+        let r = tokio::time::timeout(Duration::from_secs(5), second)
+            .await
+            .expect("the second create never finished")
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = format!("{c}x");
+        for _ in 0..200 {
+            if st.store.exists(&x).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        // Each member's content is under its own creator's metadata.
+        let bobs = hdr(&r, "location");
+        for (uri, body, who) in [(&x, "owner's", &owner), (&bobs, "bob's", &bob)] {
+            assert_eq!(
+                st.store.read(uri).await.unwrap().body,
+                Bytes::from(body),
+                "{uri}"
+            );
+            let creator = st.resource_meta(uri).await.unwrap().creator;
+            assert_eq!(creator, who.subject, "{uri}");
+        }
     }
 
     /// Review finding: a linkset nested to the parser's limit validated, but stored inside the

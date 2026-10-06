@@ -1128,8 +1128,10 @@ pub(crate) mod test_store {
         pub fail_exists_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `exists` reports every IRI that starts with this present.
         pub occupied: Arc<std::sync::Mutex<Option<String>>>,
-        /// `create_in_container` never completes, as on a stalled backend.
-        pub hang_create: Arc<AtomicBool>,
+        /// The next `create_in_container` waits for a permit of this gate, as on a slow remote
+        /// backend. The create is already sent: dropping the call does not stop it, and it
+        /// commits once the gate opens.
+        pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
     }
@@ -1143,7 +1145,7 @@ pub(crate) mod test_store {
                 )),
                 fail_delete: Arc::new(AtomicBool::new(false)),
                 fail_exists: Arc::new(AtomicBool::new(false)),
-                hang_create: Arc::new(AtomicBool::new(false)),
+                hold_next_create: Default::default(),
                 fail_exists_of: Default::default(),
                 occupied: Default::default(),
                 fail_delete_of: Default::default(),
@@ -1202,8 +1204,21 @@ pub(crate) mod test_store {
             body: Bytes,
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
-            if self.hang_create.load(Ordering::SeqCst) {
-                std::future::pending::<()>().await;
+            let gate = self.hold_next_create.lock().unwrap().take();
+            if let Some(gate) = gate {
+                let (inner, container, child, ct) = (
+                    self.inner.clone(),
+                    container.to_string(),
+                    child.to_string(),
+                    ct.to_string(),
+                );
+                let sent = tokio::spawn(async move {
+                    gate.acquire().await.expect("gate").forget();
+                    inner
+                        .create_in_container(&container, &child, body, &ct)
+                        .await
+                });
+                return sent.await.expect("create");
             }
             self.inner
                 .create_in_container(container, child, body, ct)
