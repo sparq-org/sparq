@@ -507,6 +507,26 @@ def _attr_gates_vectorized(attr: str) -> bool:
     return bool(m) and _cfg_requires_vectorized(_parse_cfg(m.group(1)))
 
 
+def _strip_line_comment(line: str) -> str:
+    """`line` up to its `//` comment, if any; a `//` inside a string literal is kept."""
+    in_str = False
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if in_str:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif line.startswith("//", i):
+            return line[:i]
+        i += 1
+    return line
+
+
 def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
     """Yield (lineno, name, child_rel_or_None, gated_on_vectorized, problem) for every
     out-of-line `mod name;` declaration in `rel`, resolved with rustc's rules:
@@ -520,7 +540,7 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
     stem = os.path.splitext(os.path.basename(rel))[0]
     base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
     for lineno, line in enumerate(lines, start=1):
-        code = line.split("//", 1)[0] if not line.lstrip().startswith("//") else ""
+        code = _strip_line_comment(line)
         n_mod = len(_MOD_KEYWORD.findall(_STRING_LIT.sub('""', code)))
         if not n_mod:
             continue
@@ -547,15 +567,22 @@ def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
         problem = None
         i = lineno - 2
         while i >= 0:
-            prev = lines[i].strip()
-            if not prev or prev.startswith("//"):
+            prev = _strip_line_comment(lines[i]).strip()
+            if not prev:
                 i -= 1
                 continue
+            if "/*" in prev or "*/" in prev:
+                problem = ("block comment before the `mod` declaration is unsupported: "
+                           + prev)
+                break
             more, tail = _split_leading_attrs(prev)
             if prev.startswith("#") and more and not tail.strip():
                 attrs.extend(more)
                 i -= 1
                 continue
+            if prev.startswith("#"):
+                problem = ("unparseable attribute before the `mod` declaration: " + prev)
+                break
             if prev.endswith("]"):
                 # The tail of an attribute that spans several lines: its content
                 # (cfg, path, cfg_attr) cannot be read line by line.
@@ -927,6 +954,10 @@ _LEG3_TREES_ODD_MOD_SYNTAX = [
      f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
     _leg3_tree_outside('mod inner { #[path = "../elsewhere.rs"] mod hidden; }\n'),
     {**_leg3_tree_outside('mod child; fn f() {}\n'), f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"] // rationale\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"]\n/* note */\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"] /* note */\nmod child;\n'),
+    _leg3_tree_outside('#[path = "x//../../elsewhere.rs"] mod hidden;\n'),
 ]
 # Inline modules and `mod` inside strings or identifiers are not declarations.
 _LEG3_TREES_INLINE_MOD_OK = [
