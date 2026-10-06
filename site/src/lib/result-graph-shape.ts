@@ -21,14 +21,16 @@ import type { SparqlResults, SparqlTerm } from "./sparq-wasm";
 export const MAX_GRAPH_NODES = 24;
 
 /**
- * A stable, INJECTIVE identity key for a term: same lexical value but different datatype/lang ⇒
+ * A stable, INJECTIVE identity key for a term: same lexical value but different datatype/lang/dir ⇒
  * different node. Shared with deriveGraph (result-graph.ts) so the predicate's admission order and
  * the derivation's node identity can never disagree.
  */
 export function termKey(t: SparqlTerm): string {
   const dt = t.type === "literal" ? (t.datatype ?? "") : "";
   const lang = t.type === "literal" ? (t["xml:lang"] ?? "") : "";
-  return JSON.stringify([t.type, t.value, dt, lang]);
+  // RDF 1.2 base direction is part of the literal's identity (`"hi"@en--ltr` ≠ `"hi"@en`).
+  const dir = t.type === "literal" ? (t["its:dir"] ?? "") : "";
+  return JSON.stringify([t.type, t.value, dt, lang, dir]);
 }
 
 /**
