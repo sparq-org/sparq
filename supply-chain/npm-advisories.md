@@ -1,17 +1,15 @@
-<!-- [OPUS-5] #3767 — advisory-disposition record for the npm graph (the tracked
-     repo-root `package-lock.json`). Authored by Opus 5. NON-CANONICAL timing; no
-     measured performance numbers baked here. The fenced block under
+<!-- #3767 — advisory-disposition record for the npm graph (the tracked
+     repo-root `package-lock.json`). No measured performance numbers baked here. The fenced block under
      "Machine-readable record" is parsed by scripts/check-npm-advisory-record.py —
      edit the block and the prose together. -->
 
 # npm graph — advisory disposition (repo-root `package-lock.json`)
 
-> 🤖 SPARQ agent. This records the disposition of the Dependabot **npm** advisories that
-> historically concluded `security_update_not_possible` on this repo, and — unlike a
+> 🤖 SPARQ agent. This records the disposition of the **npm** advisories that have no
+> non-breaking fix reachable from this repo's lock, and — unlike a
 > `dependabot.yml` `ignore:` entry — it suppresses **nothing**. The alerts stay open, the
 > GitHub-managed `Dependabot` check keeps reporting, and the check below REDs the moment
-> the lock moves off the state recorded here. Historical tracking: **#3767** (closed);
-> the current sharp follow-up is tracked by **#6480 / #6481**.
+> the lock moves off the state recorded here. Historical tracking: **#3767** (closed).
 
 ## Why this file exists (and why not the VEX)
 
@@ -30,73 +28,26 @@ does not change that; it makes the *disposition* checkable, not the *advisory fe
 
 ## The findings
 
-### `brace-expansion` — Dependabot alerts #25, #26, #27, #46
+### Resolved (2026-10-08)
 
-The lock carries **four independent instances**, each pinned by a different `minimatch`
-generation. Every row below is asserted against the live lock by the check:
+The earlier entries are closed. `brace-expansion` (alerts #25/#26/#27/#46) moved to
+patched 1.1.21 / 2.1.7 / 5.0.12 with #6676. `postcss` (#45) moved to 8.5.29 through the
+root override, and `sharp` (#32) to 0.35.5 under next 15.5.27, both in #6692.
 
-| lock path | version | pinned by | range |
-|---|---|---|---|
-| `node_modules/brace-expansion` | 1.1.15 | `node_modules/minimatch` 3.1.5 | `^1.1.7` |
-| `node_modules/glob/node_modules/brace-expansion` | 2.1.1 | `node_modules/glob/node_modules/minimatch` 9.0.9 | `^2.0.2` |
-| `node_modules/readdir-glob/node_modules/brace-expansion` | 2.1.1 | `node_modules/readdir-glob/node_modules/minimatch` 5.1.9 | `^2.0.1` |
-| `node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion` | 5.0.6 | `node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch` 10.2.5 | `^5.0.5` |
+### Open, dev-only: no non-breaking fix upstream
 
-Per the Dependabot job output quoted in #3767 (run `30136987253`, 2026-07-25 — **not**
-re-verified offline here), the advisory set includes an entry whose affected range is
-`<= 5.0.7`, so the only unaffected release is `5.0.8`. From `^1.1.7` / `^2.0.x` a resolver
-reaches at most the 1.x / 2.x tips, which are still in range — hence
-`security_update_not_possible`. Dependabot will not move the `minimatch` *dependents*, so it
-can never clear these four alerts on its own.
+Each remaining instance is reached only from lint or end-to-end test tooling, never from a
+published package or a built site/GUI bundle. Every row is asserted against the live lock:
 
-### `postcss` — Dependabot alert #45
+| package | lock path | version | pinned by | advisories |
+|---|---|---|---|---|
+| `braces` | `node_modules/braces` | 3.0.3 | `node_modules/micromatch` 4.0.8 (`^3.0.3`), via `fast-glob` ← `@next/eslint-plugin-next` ← `eslint-config-next` | GHSA-vfj7-8cjw-p6xm |
+| `extract-zip` | `node_modules/extract-zip` | 2.0.1 | `node_modules/@puppeteer/browsers` 2.13.2 (`^2.0.1`), via `webdriverio` 9 (GUI e2e) | GHSA-jmr9-qjv8-65gv, GHSA-7pqw-9j4j-h8q3 |
+| `basic-ftp` | `node_modules/basic-ftp` | 5.3.1 | `node_modules/get-uri` 6.0.5 (`^5.0.2`), via `proxy-agent` ← `@puppeteer/browsers` | GHSA-c475-qrg2-pj4r |
 
-One hoisted instance, and the pin is **ours, not a dependent's**:
-
-| lock path | version | pinned by |
-|---|---|---|
-| `node_modules/postcss` | 8.5.15 | root `package.json` `overrides.postcss` = `8.5.15` |
-
-This corrects the reading in #3767, which attributed the block to `next` / `@tailwindcss/postcss`
-pins. Those pins exist (`next@15.5.24` requires `postcss` exactly `8.4.31`;
-`@tailwindcss/postcss@4.3.1` requires exactly `8.5.15`) — but the lock resolves a **single**
-hoisted `postcss@8.5.15` with **no nested copy under `next`**, which is only possible because
-the root `overrides` already force it past `next`'s exact pin. That override was added for
-exactly this reason (`86dc0e94`, "bump next/postcss 8.4.31->8.5.15"); the sibling precedent
-for the technique is `b978324f`, "remediate Dependabot npm devDep advisories via root
-overrides".
-
-So the effective blocker for `postcss` is a **one-line override bump**, not an upstream wall.
-It is not taken in this change because the bump requires regenerating `package-lock.json`
-(new `resolved` URL + `integrity` hash) and re-verifying the `site` / `gui/app` Next.js
-builds — neither is possible in an environment without `npm`, and a hand-edited lock would be
-unverifiable. `site/package.json` also declares a looser `postcss` override (`>=8.5.10`); a
-future bump should reconcile both declarations in one PR.
-
-### `sharp` — Dependabot alert #32
-
-The historical #3767 record reported three `security_update_not_possible` runs on
-2026-07-22. Next's dependency range has since widened; that historical result does not
-establish a current resolver block. One instance is reached as an **optional** dependency:
-
-| lock path | version | pinned by |
-|---|---|---|
-| `node_modules/sharp` | 0.35.4 | `node_modules/next` 15.5.24, `optionalDependencies.sharp` = `^0.34.3 \|\| ^0.35.3` |
-
-<!-- [GPT-6 ASTRA] #6481: distinguish the candidate lock from default-branch alert state. -->
-On 2026-09-10, alert #32 was still **open** against the default branch's `sharp@0.34.5`.
-Its affected range is `<0.35.0`. The matching
-[upstream advisory](https://github.com/lovell/sharp/security/advisories/GHSA-f88m-g3jw-g9cj)
-describes vulnerabilities inherited from libvips when processing untrusted images and
-recommends updated prebuilt binaries. This candidate lock selects `sharp@0.35.4`, outside
-that affected range, under Next's existing range. Its published metadata requires
-libvips `>=8.18.6`; the native libvips packages are locked at `1.3.3`.
-
-This is a version-based candidate update, not evidence that the default branch or a
-deployment has been patched. Supported CI must still install and exercise the changed
-packages; globally installed libvips requires separate verification. The alert has not
-been dismissed, and closure awaits post-merge re-evaluation. The tripwire retains this
-entry to detect later lock drift, without asserting application exposure or exploitability.
+`braces` 3.0.3 and `extract-zip` 2.0.1 are the latest releases, so no resolver move can fix
+them. `basic-ftp` is fixed only in 6.x, outside `get-uri`'s `^5` range; the upstream route
+is webdriverio 10 (a major bump of the GUI e2e harness).
 
 ## Do NOT add `dependabot.yml` `ignore:` entries
 
@@ -111,11 +62,11 @@ leaving it red suppresses no alert and no scanner.
 machine-readable record below against the live `package-lock.json`:
 
 - the set of lock paths for each recorded package is **exactly** the recorded set — a new
-  fifth `brace-expansion` copy, or a removed one, REDs;
+  second copy of a recorded package, or a removed one, REDs;
 - each instance resolves at the recorded version;
 - each recorded pin still holds — for a `package` pin, the pinning entry exists at the
   recorded version and still declares the recorded range **in the recorded manifest field**
-  (`dependencies` by default, `optionalDependencies` for `sharp`); for a `root_override`
+  (`dependencies` by default); for a `root_override`
   pin, the root `overrides` entry still carries the recorded value.
 
 It reads only checked-in files (`package-lock.json`, `package.json`, this record) and has no
@@ -125,14 +76,7 @@ package is **vulnerable**.
 **If this check REDs, that is usually the good news.** It means the graph moved — most likely
 a patch became reachable and Dependabot opened its PR. The response is to re-check
 `gh api repos/sparq-org/sparq/dependabot/alerts?state=open`, update or delete the entry, and
-close #3767 — *not* to relax the check.
-
-To close the finding sooner rather than waiting on Dependabot: move the dependents. For
-`brace-expansion` that means bumping/deduping the packages pinning `minimatch@3` / `@5` so
-`>= 5.0.8` becomes resolvable — note a root `overrides` force from `^1.1.7` to `5.0.8` is a
-**cross-major** jump that would need the lint lanes actually re-run, not just a green lock.
-For `postcss` it is the override bump described above. Verify either with a clean `npm ci`
-plus `npm ls <package>`.
+close the finding — *not* to relax the check.
 
 ## Machine-readable record
 
@@ -143,79 +87,56 @@ plus `npm ls <package>`.
   "tracking_issue": 3767,
   "packages": [
     {
-      "name": "brace-expansion",
-      "dependabot_alerts": [25, 26, 27, 46],
+      "name": "braces",
+      "advisories": [
+        "GHSA-vfj7-8cjw-p6xm"
+      ],
       "instances": [
         {
-          "path": "node_modules/brace-expansion",
-          "version": "1.1.15",
+          "path": "node_modules/braces",
+          "version": "3.0.3",
           "pinned_by": {
             "kind": "package",
-            "path": "node_modules/minimatch",
-            "version": "3.1.5",
-            "range": "^1.1.7"
+            "path": "node_modules/micromatch",
+            "version": "4.0.8",
+            "range": "^3.0.3"
           }
-        },
+        }
+      ]
+    },
+    {
+      "name": "extract-zip",
+      "advisories": [
+        "GHSA-jmr9-qjv8-65gv",
+        "GHSA-7pqw-9j4j-h8q3"
+      ],
+      "instances": [
         {
-          "path": "node_modules/glob/node_modules/brace-expansion",
-          "version": "2.1.1",
+          "path": "node_modules/extract-zip",
+          "version": "2.0.1",
           "pinned_by": {
             "kind": "package",
-            "path": "node_modules/glob/node_modules/minimatch",
-            "version": "9.0.9",
-            "range": "^2.0.2"
-          }
-        },
-        {
-          "path": "node_modules/readdir-glob/node_modules/brace-expansion",
-          "version": "2.1.1",
-          "pinned_by": {
-            "kind": "package",
-            "path": "node_modules/readdir-glob/node_modules/minimatch",
-            "version": "5.1.9",
+            "path": "node_modules/@puppeteer/browsers",
+            "version": "2.13.2",
             "range": "^2.0.1"
           }
-        },
-        {
-          "path": "node_modules/@typescript-eslint/typescript-estree/node_modules/brace-expansion",
-          "version": "5.0.6",
-          "pinned_by": {
-            "kind": "package",
-            "path": "node_modules/@typescript-eslint/typescript-estree/node_modules/minimatch",
-            "version": "10.2.5",
-            "range": "^5.0.5"
-          }
         }
       ]
     },
     {
-      "name": "postcss",
-      "dependabot_alerts": [45],
+      "name": "basic-ftp",
+      "advisories": [
+        "GHSA-c475-qrg2-pj4r"
+      ],
       "instances": [
         {
-          "path": "node_modules/postcss",
-          "version": "8.5.15",
-          "pinned_by": {
-            "kind": "root_override",
-            "key": "postcss",
-            "value": "8.5.15"
-          }
-        }
-      ]
-    },
-    {
-      "name": "sharp",
-      "dependabot_alerts": [32],
-      "instances": [
-        {
-          "path": "node_modules/sharp",
-          "version": "0.35.4",
+          "path": "node_modules/basic-ftp",
+          "version": "5.3.1",
           "pinned_by": {
             "kind": "package",
-            "path": "node_modules/next",
-            "version": "15.5.24",
-            "field": "optionalDependencies",
-            "range": "^0.34.3 || ^0.35.3"
+            "path": "node_modules/get-uri",
+            "version": "6.0.5",
+            "range": "^5.0.2"
           }
         }
       ]

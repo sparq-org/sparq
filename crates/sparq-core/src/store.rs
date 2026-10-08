@@ -1421,7 +1421,13 @@ mod tests {
             (3_000_000, 900, 5_000_000), // all multi-byte
         ];
         for (si, pi, oi) in shapes {
-            for n in [0usize, 1, 2, 997, 6_000] {
+            // Under Miri only the small sizes: the edge cases are all in them (sq-0s15k).
+            let sizes: &[usize] = if cfg!(miri) {
+                &[0, 1, 2, 97]
+            } else {
+                &[0, 1, 2, 997, 6_000]
+            };
+            for &n in sizes {
                 let mut triples: Vec<[Id; 3]> = (0..n)
                     .map(|_| [1 + rng() % si, 1 + rng() % pi, 1 + rng() % oi])
                     .collect();
@@ -1898,7 +1904,7 @@ mod tests {
             st
         };
         let mut triples: Vec<[Id; 3]> = Vec::new();
-        for _ in 0..20_000 {
+        for _ in 0..if cfg!(miri) { 600 } else { 20_000 } {
             triples.push([1 + rng() % 400, 1 + rng() % 9, 1 + rng() % 2000]);
         }
         let mut store = TripleStore::from_triples(triples.clone());

