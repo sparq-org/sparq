@@ -81,7 +81,10 @@ mod gated {
     #[test]
     fn d_entailment_ratchet() {
         let root = rdf_tests_root();
-        if !root.join("sparql/sparql11/entailment/manifest.ttl").exists() {
+        if !root
+            .join("sparql/sparql11/entailment/manifest.ttl")
+            .exists()
+        {
             eprintln!(
                 "SKIP: rdf-tests `sparql11/entailment` not present under {} — run \
                  scripts/fetch-inference-suites.sh",
@@ -186,39 +189,120 @@ mod gated {
     fn eq_cases() -> Vec<EqCase> {
         vec![
             // ── value-equal-distinct-lexical POSITIVES ──
-            EqCase { a_lex: "1", a_dt: "integer", b_lex: "1.0", b_dt: "decimal", equal: true,
-                     why: "integer ⊂ decimal: 1 == 1.0" },
-            EqCase { a_lex: "01", a_dt: "integer", b_lex: "+1", b_dt: "integer", equal: true,
-                     why: "leading zero / sign are the same value" },
-            EqCase { a_lex: "-0", a_dt: "integer", b_lex: "0", b_dt: "decimal", equal: true,
-                     why: "signed zero == zero" },
-            EqCase { a_lex: "1.50", a_dt: "decimal", b_lex: "1.5", b_dt: "decimal", equal: true,
-                     why: "trailing fraction zeros are insignificant" },
-            EqCase { a_lex: "true", a_dt: "boolean", b_lex: "1", b_dt: "boolean", equal: true,
-                     why: "boolean true == 1" },
-            EqCase { a_lex: "false", a_dt: "boolean", b_lex: "0", b_dt: "boolean", equal: true,
-                     why: "boolean false == 0" },
-            EqCase { a_lex: "61", a_dt: "hexBinary", b_lex: "YQ==", b_dt: "base64Binary", equal: true,
-                     why: "octet [0x61] is one value across hex/base64 (D2)" },
+            EqCase {
+                a_lex: "1",
+                a_dt: "integer",
+                b_lex: "1.0",
+                b_dt: "decimal",
+                equal: true,
+                why: "integer ⊂ decimal: 1 == 1.0",
+            },
+            EqCase {
+                a_lex: "01",
+                a_dt: "integer",
+                b_lex: "+1",
+                b_dt: "integer",
+                equal: true,
+                why: "leading zero / sign are the same value",
+            },
+            EqCase {
+                a_lex: "-0",
+                a_dt: "integer",
+                b_lex: "0",
+                b_dt: "decimal",
+                equal: true,
+                why: "signed zero == zero",
+            },
+            EqCase {
+                a_lex: "1.50",
+                a_dt: "decimal",
+                b_lex: "1.5",
+                b_dt: "decimal",
+                equal: true,
+                why: "trailing fraction zeros are insignificant",
+            },
+            EqCase {
+                a_lex: "true",
+                a_dt: "boolean",
+                b_lex: "1",
+                b_dt: "boolean",
+                equal: true,
+                why: "boolean true == 1",
+            },
+            EqCase {
+                a_lex: "false",
+                a_dt: "boolean",
+                b_lex: "0",
+                b_dt: "boolean",
+                equal: true,
+                why: "boolean false == 0",
+            },
+            EqCase {
+                a_lex: "61",
+                a_dt: "hexBinary",
+                b_lex: "YQ==",
+                b_dt: "base64Binary",
+                equal: true,
+                why: "octet [0x61] is one value across hex/base64 (D2)",
+            },
             // ── DISJOINT-space + distinct-value NEGATIVES ──
-            EqCase { a_lex: "1.0", a_dt: "decimal", b_lex: "1.0", b_dt: "double", equal: false,
-                     why: "decimal and double are DISJOINT primitive value spaces" },
-            EqCase { a_lex: "1", a_dt: "integer", b_lex: "1.0", b_dt: "double", equal: false,
-                     why: "integer/decimal space is disjoint from IEEE double" },
-            EqCase { a_lex: "1.0", a_dt: "decimal", b_lex: "1.0", b_dt: "float", equal: false,
-                     why: "decimal and float are DISJOINT value spaces" },
-            EqCase { a_lex: "2004-04-12T13:20:00Z", a_dt: "dateTime",
-                     b_lex: "2004-04-12", b_dt: "date", equal: false,
-                     why: "date and dateTime are DISJOINT value spaces even at a shared instant" },
-            EqCase { a_lex: "1", a_dt: "integer", b_lex: "2", b_dt: "decimal", equal: false,
-                     why: "distinct numeric values" },
+            EqCase {
+                a_lex: "1.0",
+                a_dt: "decimal",
+                b_lex: "1.0",
+                b_dt: "double",
+                equal: false,
+                why: "decimal and double are DISJOINT primitive value spaces",
+            },
+            EqCase {
+                a_lex: "1",
+                a_dt: "integer",
+                b_lex: "1.0",
+                b_dt: "double",
+                equal: false,
+                why: "integer/decimal space is disjoint from IEEE double",
+            },
+            EqCase {
+                a_lex: "1.0",
+                a_dt: "decimal",
+                b_lex: "1.0",
+                b_dt: "float",
+                equal: false,
+                why: "decimal and float are DISJOINT value spaces",
+            },
+            EqCase {
+                a_lex: "2004-04-12T13:20:00Z",
+                a_dt: "dateTime",
+                b_lex: "2004-04-12",
+                b_dt: "date",
+                equal: false,
+                why: "date and dateTime are DISJOINT value spaces even at a shared instant",
+            },
+            EqCase {
+                a_lex: "1",
+                a_dt: "integer",
+                b_lex: "2",
+                b_dt: "decimal",
+                equal: false,
+                why: "distinct numeric values",
+            },
             // ── the 2^53+1 NON-ALIASING guard (an f64 would wrongly equate these) ──
-            EqCase { a_lex: "9007199254740993", a_dt: "integer",
-                     b_lex: "9007199254740992", b_dt: "integer", equal: false,
-                     why: "2^53+1 must NOT alias 2^53 (unsound-f64 guard)" },
-            EqCase { a_lex: "9007199254740993", a_dt: "integer",
-                     b_lex: "9007199254740993.0", b_dt: "decimal", equal: true,
-                     why: "2^53+1 exactly equals its own decimal spelling" },
+            EqCase {
+                a_lex: "9007199254740993",
+                a_dt: "integer",
+                b_lex: "9007199254740992",
+                b_dt: "integer",
+                equal: false,
+                why: "2^53+1 must NOT alias 2^53 (unsound-f64 guard)",
+            },
+            EqCase {
+                a_lex: "9007199254740993",
+                a_dt: "integer",
+                b_lex: "9007199254740993.0",
+                b_dt: "decimal",
+                equal: true,
+                why: "2^53+1 exactly equals its own decimal spelling",
+            },
         ]
     }
 
@@ -227,25 +311,67 @@ mod gated {
     fn well_formed_cases() -> Vec<WellFormedCase> {
         vec![
             // ── facet-ill-formed NEGATIVES (rdfD1 must NOT type) ──
-            WellFormedCase { lex: "200", dt: "byte", well_formed: false,
-                             why: "200 is outside xsd:byte [-128,127] — no D-value" },
-            WellFormedCase { lex: " a", dt: "token", well_formed: false,
-                             why: "leading space is illegal for xsd:token" },
-            WellFormedCase { lex: "4294967296", dt: "unsignedInt", well_formed: false,
-                             why: "exceeds xsd:unsignedInt max" },
-            WellFormedCase { lex: "abc", dt: "integer", well_formed: false,
-                             why: "non-numeric lexical is ill-formed for xsd:integer" },
+            WellFormedCase {
+                lex: "200",
+                dt: "byte",
+                well_formed: false,
+                why: "200 is outside xsd:byte [-128,127] — no D-value",
+            },
+            WellFormedCase {
+                lex: " a",
+                dt: "token",
+                well_formed: false,
+                why: "leading space is illegal for xsd:token",
+            },
+            WellFormedCase {
+                lex: "4294967296",
+                dt: "unsignedInt",
+                well_formed: false,
+                why: "exceeds xsd:unsignedInt max",
+            },
+            WellFormedCase {
+                lex: "abc",
+                dt: "integer",
+                well_formed: false,
+                why: "non-numeric lexical is ill-formed for xsd:integer",
+            },
             // ── well-formed POSITIVES ──
-            WellFormedCase { lex: "127", dt: "byte", well_formed: true, why: "xsd:byte max" },
-            WellFormedCase { lex: "a b", dt: "token", well_formed: true,
-                             why: "single internal space is a valid xsd:token" },
-            WellFormedCase { lex: "1", dt: "integer", well_formed: true, why: "valid integer" },
-            WellFormedCase { lex: "2004-04-12T13:20:00Z", dt: "dateTime", well_formed: true,
-                             why: "valid dateTime with tz" },
-            WellFormedCase { lex: "en-US", dt: "language", well_formed: true,
-                             why: "valid xsd:language" },
-            WellFormedCase { lex: "YQ==", dt: "base64Binary", well_formed: true,
-                             why: "valid base64 octet" },
+            WellFormedCase {
+                lex: "127",
+                dt: "byte",
+                well_formed: true,
+                why: "xsd:byte max",
+            },
+            WellFormedCase {
+                lex: "a b",
+                dt: "token",
+                well_formed: true,
+                why: "single internal space is a valid xsd:token",
+            },
+            WellFormedCase {
+                lex: "1",
+                dt: "integer",
+                well_formed: true,
+                why: "valid integer",
+            },
+            WellFormedCase {
+                lex: "2004-04-12T13:20:00Z",
+                dt: "dateTime",
+                well_formed: true,
+                why: "valid dateTime with tz",
+            },
+            WellFormedCase {
+                lex: "en-US",
+                dt: "language",
+                well_formed: true,
+                why: "valid xsd:language",
+            },
+            WellFormedCase {
+                lex: "YQ==",
+                dt: "base64Binary",
+                well_formed: true,
+                why: "valid base64 octet",
+            },
         ]
     }
 
@@ -283,17 +409,18 @@ mod gated {
 
         // The floor is the MEASURED count and may only RISE.
         assert_eq!(
-            asserted,
-            D_VALUE_MATRIX_FLOOR,
+            asserted, D_VALUE_MATRIX_FLOOR,
             "D value-space matrix asserted {} cases but the pinned floor is {} — raise the \
              floor (and the scoreboard mirror) in the same commit when you add cases; a floor \
              may only RISE",
-            asserted,
-            D_VALUE_MATRIX_FLOOR
+            asserted, D_VALUE_MATRIX_FLOOR
         );
         println!("\nsparq D value-space matrix (EXTENSION, NOT W3C conformance)");
         // Positional args per the CodeQL `rust/unused-variable` false-positive guard.
-        println!("TOTAL d-value-matrix {} (floor {})", asserted, D_VALUE_MATRIX_FLOOR);
+        println!(
+            "TOTAL d-value-matrix {} (floor {})",
+            asserted, D_VALUE_MATRIX_FLOOR
+        );
     }
 
     /// Broadened-map END-TO-END case: a recognized well-formed literal is driven through
@@ -307,8 +434,12 @@ mod gated {
     fn d_materialize_answer_restriction_end_to_end() {
         let mut dict = Dict::new();
         // Data: <s> <p> "1"^^xsd:integer .   (a recognized, well-formed literal object)
-        let s = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://e/s")));
-        let p = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://e/p")));
+        let s = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+            "http://e/s",
+        )));
+        let p = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+            "http://e/p",
+        )));
         let one = dict.intern(&oxrdf::Term::Literal(oxrdf::Literal::new_typed_literal(
             "1",
             oxrdf::NamedNode::new_unchecked(dt("integer")),
@@ -317,7 +448,10 @@ mod gated {
 
         // Materialize the D closure through the REAL Profile::D (STANDARD recognized map).
         let added = sparq_reason::materialize(Profile::D, &mut dict, &mut ids);
-        assert_eq!(added, 1, "rdfD1 types the recognized integer literal (generalized triple)");
+        assert_eq!(
+            added, 1,
+            "rdfD1 types the recognized integer literal (generalized triple)"
+        );
 
         // Serialize the closure DROPPING literal-subject rows — the answer restriction.
         let mut nt = String::new();
@@ -358,21 +492,32 @@ mod gated {
     fn d_materialize_idempotent_and_fail_closed() {
         // Unrecognized-shaped datatype: the STANDARD map does not cover it → no typing.
         let mut dict = Dict::new();
-        let s = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://e/s")));
-        let p = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://e/p")));
+        let s = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+            "http://e/s",
+        )));
+        let p = dict.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+            "http://e/p",
+        )));
         let custom = dict.intern(&oxrdf::Term::Literal(oxrdf::Literal::new_typed_literal(
             "x",
             oxrdf::NamedNode::new_unchecked("http://example.org/myType"),
         )));
         let mut ids: Vec<[Id; 3]> = vec![[s, p, custom]];
         let added = sparq_reason::materialize(Profile::D, &mut dict, &mut ids);
-        assert_eq!(added, 0, "an unrecognized datatype is fail-closed: no rdfD1 typing");
+        assert_eq!(
+            added, 0,
+            "an unrecognized datatype is fail-closed: no rdfD1 typing"
+        );
 
         // Idempotence over a custom recognized map: materialize_d twice adds nothing the
         // second time.
         let mut dict2 = Dict::new();
-        let s2 = dict2.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://e/s")));
-        let p2 = dict2.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://e/p")));
+        let s2 = dict2.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+            "http://e/s",
+        )));
+        let p2 = dict2.intern(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+            "http://e/p",
+        )));
         let two = dict2.intern(&oxrdf::Term::Literal(oxrdf::Literal::new_typed_literal(
             "2",
             oxrdf::NamedNode::new_unchecked(dt("integer")),

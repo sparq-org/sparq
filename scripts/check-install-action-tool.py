@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] CI lint (bead sq-ur7o): every SHA-pinned `taiki-e/install-action`
+# CI lint (bead sq-ur7o): every SHA-pinned `taiki-e/install-action`
 # step MUST carry an explicit `with: tool:` input.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
 #
 # WHY THIS GATE EXISTS — the coverage-gate regression (root-caused 2026-06-18):
 # taiki-e/install-action selects WHICH tool to install from its git-ref TAG, i.e.
@@ -25,7 +24,7 @@
 # omission is only dangerous under a SHA pin — exactly the case the policy forces.
 #
 # WHY A HAND-ROLLED STDLIB PARSER (no PyYAML): this runs in the docs-quality
-# `ci-scripts` job, which — like coverage-gate.py's self-test — installs no Python
+# `quick-gates` job, which — like coverage-gate.py's self-test — installs no Python
 # deps. GitHub-Actions workflow files are written in a tightly-constrained block
 # style (2-space indent, `- name:` step lists, `uses:`/`with:` siblings), so a
 # small indentation-aware step splitter is sufficient and keeps the gate

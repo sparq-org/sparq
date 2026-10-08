@@ -174,3 +174,27 @@ fn scoped_incoming_traversal_deduplicates_and_missing_write_graph_is_created() {
         vec![Term::NamedNode(iri("carol"))]
     );
 }
+
+#[test]
+fn literal_write_graph_is_rejected_before_a_graph_is_created() {
+    let mut graph = Graph::new();
+    {
+        let mut scope = GraphScope::new(
+            &mut graph,
+            [graph_term("g1")],
+            Literal::new_simple_literal("g"),
+        );
+        let rejected = Err(GraphScopeError::InvalidGraphName(
+            Literal::new_simple_literal("g").into(),
+        ));
+        assert_eq!(
+            scope.insert(iri("alice"), iri("knows"), iri("bob")),
+            rejected
+        );
+        assert_eq!(
+            scope.remove(iri("alice"), iri("knows"), iri("bob")),
+            rejected
+        );
+    }
+    assert!(graph.named.is_empty());
+}

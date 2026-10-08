@@ -146,7 +146,7 @@ The canonical 5-engine competitor matrices under
 `bench/canonical-competitor-results/<date>/` are produced by a **dedicated quiet
 c6i.4xlarge** (one engine active at a time, same corpus + query files, counts
 cross-checked before any timing is trusted). The committed harness
-([FABLE-5] sq-7d3dj.34):
+(sq-7d3dj.34):
 
 - `canonical-competitor-bench.sh` — the orphan-proof EC2 **launcher**
   (`AWS_PROFILE=pss scripts/bench/canonical-competitor-bench.sh <branch>`):
@@ -161,7 +161,7 @@ cross-checked before any timing is trusted). The committed harness
   AND TTFB** in **both keep-alive and fresh-connect** regimes
   (`http_sparql_adapter.py --profile`, 6-col TSVs).
 - `canonical-beir-bench.sh` / `canonical-beir-gather-instance.sh` — the **BEIR
-  IR-quality gather pair** ([FABLE-5] sq-tvzyi), same orphan-proof launcher rails:
+  IR-quality gather pair** (sq-tvzyi), same orphan-proof launcher rails:
   the instance side carries the heavy pip `pyserini`+`beir` provisioning (venv,
   JDK 21) that the wave-1 bin-packed box did not, builds the sparq-text
   `beir_text` example, and runs `scripts/gather-competitors.sh --run --only

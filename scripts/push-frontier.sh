@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Orchestration automation — the push SCHEDULER (decision layer).
-# Bead sq-o09o. Authored by Opus 4.8 (Fable unavailable; flag for re-review when
-# Fable returns). Design: research/orchestration-automation-design.md §8.
+# Orchestration automation — the push SCHEDULER (decision layer).
+# Bead sq-o09o. Design: research/orchestration-automation-design.md §8.
 #
 # push-frontier.sh   (READ-ONLY; NO mutation, NO dispatch — fast, deterministic)
 #
@@ -164,7 +163,7 @@ infer_surface() {
   printf '\n'
 }
 
-# [OPUS-4.8] sq-6ip4: PRIMARY-CODE-CRATE probe (partition by touched .rs paths, not just label).
+# sq-6ip4: PRIMARY-CODE-CRATE probe (partition by touched .rs paths, not just label).
 # Given a bead's TITLE+DESCRIPTION text on $1 and the known crate short-names on $2, echo the
 # crate that the bead's CODE changes land in -- inferred from an explicit `crates/<crate>/.../*.rs`
 # path mention -- or "" if none is found. This is a SEPARATE signal from infer_surface: a bead's
@@ -196,7 +195,7 @@ infer_code_crate() {
   printf '\n'
 }
 
-# [OPUS-4.8] sq-751l: HELD-scope predicate — is a bead in the sparq-zk value-lane that the
+# sq-751l: HELD-scope predicate — is a bead in the sparq-zk value-lane that the
 # maintainer holds while PR #514 (the signed typed-value-representation design) is open?
 #
 # WHY this exists separately from infer_surface: the scheduler reserves a surface only when an
@@ -231,7 +230,7 @@ is_zk_value_lane() {
   return 1
 }
 
-# [OPUS-4.8] sq-8rpq: in-flight reservation by UNPUSHED worktree branches (not every branch).
+# sq-8rpq: in-flight reservation by UNPUSHED worktree branches (not every branch).
 # inflight_wt_branch <branch> <unpushed-count> : echo <branch> iff it is an IN-FLIGHT
 # signal, i.e. iff it has UNPUSHED local commits. <unpushed-count> is the number of
 # commits on the branch's HEAD that are absent from its push target (origin/<branch> or

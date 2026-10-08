@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic self-tests for scripts/ci-free-disk.sh (bead sq-6uc7 —
+# Hermetic self-tests for scripts/ci-free-disk.sh (bead sq-6uc7 —
 # folding the two genuinely-new purge paths from the closed #462 into the shared
-# reclaim script with existence guards). Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# reclaim script with existence guards).
 #
 # WHY: #462 added `/usr/local/share/boost` and `$AGENT_TOOLSDIRECTORY` as a SECOND
 # inline reclaim step; sq-6uc7 folds them into the ONE shared script instead. The

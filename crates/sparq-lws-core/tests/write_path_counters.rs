@@ -32,6 +32,12 @@
 //! EXISTENCE probes (`nearest_existing_container` / `ensure_ancestor_containers`) are a separate
 //! follow-up lever (write-3), deliberately not folded here (one concern per commit).
 //!
+//! A REWRITE (PUT overwrite, PATCH) then pays one more metadata query for superseded-blob reclaim:
+//! the store reads the record it is replacing so it can delete the old blob key after the commit
+//! (`SparqClient::replace_meta` — one indivisible step on the in-memory/embedded backends, a SELECT
+//! plus the UPDATE on the live HTTP client, which is what these counters model), plus that one blob
+//! delete (`blob_others`). So PUT overwrite pins 4 → 5 queries and PATCH 3 → 4.
+//!
 //! `max_in_flight == 1` in every scenario is the await-depth witness (strictly sequential).
 
 mod common;
@@ -194,10 +200,14 @@ async fn put_overwrite_k3_counts() {
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "overwrite 204");
     assert_eq!(
-        d.sparql_queries, 4,
-        "PUT overwrite = existence meta + planned walk (plan + re-confirm) + slash probe, depth-independent (was 6): {d:?}"
+        d.sparql_queries, 5,
+        "PUT overwrite = existence meta + planned walk (plan + re-confirm) + slash probe + replace_meta's previous-record read, depth-independent: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one body write: {d:?}");
+    assert_eq!(
+        d.blob_others, 1,
+        "one reclaim of the superseded blob: {d:?}"
+    );
     assert_eq!(d.sparql_updates, 1, "one meta upsert: {d:?}");
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }
@@ -292,9 +302,13 @@ _:patch a solid:InsertDeletePatch;\n\
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "patch 204");
     assert_eq!(
-        d.sparql_queries, 3,
-        "PATCH = planned walk (2) + target read meta, depth-independent (was 5): {d:?}"
+        d.sparql_queries, 4,
+        "PATCH = planned walk (2) + target read meta + replace_meta's previous-record read, depth-independent: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one rewritten body: {d:?}");
+    assert_eq!(
+        d.blob_others, 1,
+        "one reclaim of the superseded blob: {d:?}"
+    );
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
 }

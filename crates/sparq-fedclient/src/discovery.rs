@@ -66,6 +66,7 @@
 // Reused: SourceDescriptor::from_void_nt for the VoID+scs statistics half. Flagged for
 // Fable re-review when available.
 
+use crate::source::pct_encode;
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -694,7 +695,7 @@ impl<'a> PatternProbeSession<'a> {
 #[cfg(feature = "pattern_probe")]
 fn probe_url(endpoint: &str, query: &str) -> String {
     let separator = if endpoint.contains('?') { '&' } else { '?' };
-    format!("{endpoint}{separator}query={}", urlencode(query))
+    format!("{endpoint}{separator}query={}", pct_encode(query))
 }
 
 /// An in-memory fetcher mapping exact URLs → response bodies. Any URL not in the map yields a
@@ -1000,7 +1001,7 @@ pub fn discover(endpoint: &str, fetcher: &dyn Fetcher) -> Result<Discovery, Stri
 /// [`Fetcher`] can express. Returns the boolean answer, or an error if the endpoint is
 /// unreachable or returns a non-ASK body.
 fn ask_probe(endpoint: &str, fetcher: &dyn Fetcher) -> Result<bool, String> {
-    let url = format!("{endpoint}?query={}", urlencode(ASK_PROBE));
+    let url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
     let body = fetcher
         .get(&url, "application/sparql-results+json")
         .map_err(|e| format!("discovery: ASK probe to {endpoint} failed: {e}"))?;
@@ -1041,22 +1042,6 @@ fn parse_ask_boolean(body: &str) -> Result<bool, String> {
     } else {
         Err("discovery: ASK response \"boolean\" was not an exact JSON true/false".to_string())
     }
-}
-
-/// Minimal percent-encoding for a SPARQL query in a URL query string — encodes everything
-/// outside the unreserved set so spaces / braces / `?` in the query are safe. Kept tiny
-/// (no url crate) because the only caller is the fixed ASK probe.
-fn urlencode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
 }
 
 // ─── Tests (parser + orchestration; NO public network) ────────────────────────────────
@@ -1384,7 +1369,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         // The endpoint serves no SD (no-query GET 404s in the map) and no VoID, but answers
         // the ASK probe affirmatively.
         let endpoint = "http://bare/sparql";
-        let ask_url = format!("{endpoint}?query={}", urlencode(ASK_PROBE));
+        let ask_url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
         let fetcher = MapFetcher::new().with(ask_url, r#"{ "head": {}, "boolean": true }"#);
 
         let d = discover(endpoint, &fetcher).expect("ASK-reachable endpoint discovers");
@@ -1413,7 +1398,7 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         // An ASK that returns false STILL proves the endpoint is a live SPARQL service (it
         // evaluated the query) — so discovery succeeds with the fallback capability.
         let endpoint = "http://empty/sparql";
-        let ask_url = format!("{endpoint}?query={}", urlencode(ASK_PROBE));
+        let ask_url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
         let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": false }"#);
         let d = discover(endpoint, &fetcher).expect("a false ASK still proves reachability");
         assert_eq!(d.provenance, Provenance::AskProbe);

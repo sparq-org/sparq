@@ -75,7 +75,7 @@ gap (see [`gap-register.md`](./gap-register.md)).
 | A.5.5 | Contact with authorities | N/A(op) | Operator owns for their deployment | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.6 | Contact with special interest groups | IMPL | OpenSSF Scorecard published; RustSec/GHSA/CodeQL participation | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.7 | Threat intelligence | IMPL | Daily `dependency-monitoring.yml`; Dependabot; CodeQL | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
-| A.5.8 | Information security in project management | IMPL | CI gate stack (`ci.yml`, `codeql.yml`, `supply-chain.yml`, `miri.yml`, `fuzz.yml`, `scorecard.yml`, `ci-summary.yml`); threat model | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
+| A.5.8 | Information security in project management | IMPL | CI gate stack (`ci.yml`, `codeql.yml`, `supply-chain.yml`, `miri.yml`, `fuzz.yml`, `scorecard.yml`; `ci-fast.yml` required); threat model | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.9 | Inventory of information & associated assets | AUDIT-READY | CycloneDX SBOM per build; crate list; threat-model §Assets. Operator data inventory is the operator's | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.10 | Acceptable use of information & assets | N/A(op) | Operator policy for deployed instance + data | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.11 | Return of assets | N/A(op) | People/asset-return; no employees | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
@@ -103,7 +103,7 @@ gap (see [`gap-register.md`](./gap-register.md)).
 | A.5.33 | Protection of records | N/A(op) | Operator records retention | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.34 | Privacy & protection of PII | AUDIT-READY | sparq processes no PII of its own; loaded-RDF PII is operator-controller (`compliance/data-flow.md` + `dpia.md`) | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.35 | Independent review of information security | AUDIT-READY | OpenSSF Scorecard, CodeQL, adversarial threat model + ZK soundness audit, engineer↔auditor loop; accredited internal-audit programme is an org act | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
-| A.5.36 | Compliance with policies, rules & standards | IMPL | `ci-summary.yml` required branch-protection gate fails merge on any red policy lane; `docs/branch-protection.md` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
+| A.5.36 | Compliance with policies, rules & standards | PARTIAL | required `ci-fast` check fails merge on core-crate/SPARQL lanes only; other policy lanes post-merge/nightly; `docs/branch-protection.md` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.5.37 | Documented operating procedures | IMPL | `AGENTS.md`, `CONTRIBUTING.md`, `docs/branch-protection.md`, workflows as executable procedure | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 
 ### A.6 — People controls (8)
@@ -150,7 +150,7 @@ gap (see [`gap-register.md`](./gap-register.md)).
 | A.8.1 | User endpoint devices | N/A(op) | Operator/org workstation control | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.2 | Privileged access rights | N/A(op) → AUDIT-READY | Branch-protection disallows direct push incl. admins; privileged access to a deployment is operator-owned | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.3 | Information access restriction | N/A(op) | Restriction within a deployed instance is operator-owned (B3 no-auth) | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
-| A.8.4 | Access to source code | IMPL | Branch protection on `main` (PR + review + `ci-summary` gate); `CODEOWNERS`; SHA-pinned actions; SLSA-attested releases + SHA256SUMS | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
+| A.8.4 | Access to source code | IMPL | Branch protection on `main` (PR + review + `ci-fast` check); `CODEOWNERS`; SHA-pinned actions; SLSA-attested releases + SHA256SUMS | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.5 | Secure authentication | N/A(op) → AUDIT-READY | Optional bearer token; full secure-auth (MFA/session) is operator's gateway (B3); repo-side GitHub auth + signed attestations | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.6 | Capacity management | N/A(op) → IMPL(partial) | `QueryBudget` DoS-limit primitive (`sparq-engine`, T-DoS); capacity of a running deployment is operator-owned | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.7 | Protection against malware | IMPL | CodeQL SAST; supply-chain advisory gating + daily watchdog; SHA-pinned actions; distroless non-root image | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
@@ -178,7 +178,7 @@ gap (see [`gap-register.md`](./gap-register.md)).
 | A.8.29 | Security testing in development & acceptance | IMPL | `cargo test --workspace`; W3C conformance ratchets; `cargo-fuzz`; Miri lane; mmap corruption oracle | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.30 | Outsourced development | N/A | No outsourced development | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.31 | Separation of dev/test/production environments | AUDIT-READY | Branch model separates in-progress from released; release artifacts built only on tags; operator owns prod env separation | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
-| A.8.32 | Change management | IMPL | PR + review + `ci-summary` gate + conformance "never-lower" ratchets; `CHANGELOG.md`; beads | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
+| A.8.32 | Change management | IMPL | PR + review + `ci-fast` check + conformance "never-lower" ratchets; `CHANGELOG.md`; beads | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.33 | Test information | N/A(op) | Use of operator production data in test is operator-owned; sparq tests use W3C/synthetic fixtures | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 | A.8.34 | Protection of information systems during audit testing | N/A(op) | Operator-owned (auditing a running system) | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` | `<FILL-IN>` |
 

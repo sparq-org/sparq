@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-hmd7l.18 — Python-binding benchmark adapter: sparq-py vs pyoxigraph vs rdflib.
+# sq-hmd7l.18 — Python-binding benchmark adapter: sparq-py vs pyoxigraph vs rdflib.
 """One adapter, three engines, four modes — the `python-bindings-bench` suite driver.
 
 Measures the cost of driving an RDF engine FROM PYTHON, per engine:

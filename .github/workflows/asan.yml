@@ -1,6 +1,5 @@
 # asan — standalone AddressSanitizer lane over the mmap CORRUPTION CORPUS (bead sq-hybl,
-# epic sq-toze; closes memsafety gap MS-G3). [OPUS-4.8] authored while Fable unavailable —
-# re-review when Fable returns.
+# epic sq-toze; closes memsafety gap MS-G3).
 #
 # WHY (the MS-G3 gap, from compliance/memsafety/gap-register.md): AddressSanitizer already
 # runs INSIDE the cargo-fuzz build (MS-9, fuzz.yml) — but only as deep as the libFuzzer
@@ -51,9 +50,7 @@
 #   • schedule (nightly) — the standing ASan safety net over the corruption corpus.
 #   • workflow_dispatch  — on demand.
 # There is intentionally NO pull_request / merge_group / push trigger, so this workflow
-# creates NO check-run on a PR head or merge-queue ref — the required `ci-summary / gate`
-# aggregator (which POLLS sibling check-runs on the head commit) therefore never discovers it
-# and never waits on it. This lane is INFORMATIONAL / NON-BLOCKING, exactly the
+# creates NO check-run on a PR head. This lane is INFORMATIONAL / NON-BLOCKING, exactly the
 # nightly-safety-net posture of miri.yml + the nightly fuzz tier. (It is ALSO belt-and-braces
 # named "…, informational" so that even if it were ever wired onto a PR ref it would be
 # excluded from the gate by its .github/advisory-registry.json declaration — #3773.)
@@ -102,7 +99,7 @@ jobs:
     # then run instrumented. Generous ceiling so a hung run fails with a clear timeout rather
     # than running away (matches miri.yml's posture).
     timeout-minutes: 90
-    # [OPUS-5] PINNED-TOOLCHAIN ESCAPE. The repo root carries a `rust-toolchain.toml`
+    # PINNED-TOOLCHAIN ESCAPE. The repo root carries a `rust-toolchain.toml`
     # pinning STABLE, and rustup resolves that file (precedence 4) ABOVE the `rustup
     # default <toolchain>` that `dtolnay/rust-toolchain` performs (precedence 5). The
     # `cargo +nightly-2026-06-11 test -Zbuild-std …` calls below are precedence 1 and were
@@ -116,7 +113,7 @@ jobs:
       RUSTUP_TOOLCHAIN: nightly-2026-06-11
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      # [OPUS-4.8] sq-czlh: reclaim ~20-30 GB of pre-installed SDKs/toolchains BEFORE the
+      # sq-czlh: reclaim ~20-30 GB of pre-installed SDKs/toolchains BEFORE the
       # heavy build. -Zbuild-std recompiles the ENTIRE standard library under ASan
       # instrumentation into a distinct target tree, on a runner that starts with only
       # ~14 GB free on `/` — exactly the `No space left on device` profile sq-c76x fixed in

@@ -102,9 +102,8 @@ entry to detect later lock drift, without asserting application exposure or expl
 
 An `ignore:` entry for these packages would suppress the **future patch notification** too.
 The alerts are deliberately left open and noisy-but-honest. The GitHub-managed `Dependabot`
-check-run is non-gating via the exact, fail-closed allow-list in `scripts/ci_summary_gate.py`
-(`PLATFORM_MANAGED_ADVISORY_NAMES`) — that is a *gate-classification* decision about a check
-this repo cannot fix, and it suppresses no alert and no scanner.
+check-run is not a required check (the only one is `ci-fast`), so it blocks nothing — and
+leaving it red suppresses no alert and no scanner.
 
 ## The monitor
 

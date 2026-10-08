@@ -410,3 +410,32 @@ fn without_the_service_feature_an_unregistered_iri_is_unsupported() {
         .expect("SILENT degrades to the join identity");
     assert_eq!(res.rows.len(), 2);
 }
+
+/// #4438 — a SERVICE on the LEFT of a join whose bind-join pushdown declines (a local
+/// handler always declines it) runs the handler ONCE, not once eagerly and once more
+/// on the fall-through.
+#[test]
+fn service_on_the_left_of_a_join_runs_the_handler_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut reg = LocalServiceRegistry::new();
+    let counter = calls.clone();
+    reg.register(HANDLER, move |_req| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Ok(LocalServiceRows::new(
+            vec![var("s"), var("name")],
+            vec![vec![Some(iri("http://ex/alice")), Some(lit("Alice"))]],
+        ))
+    });
+    let g = local_graph();
+    let q = format!(
+        "PREFIX ex: <http://ex/>\n\
+         SELECT ?s ?name WHERE {{ SERVICE <{}> {{ ?s ex:name ?name }} . ?s a ex:Person }}",
+        HANDLER
+    );
+    let res = with_local_services(&reg, || query(&g, &q)).expect("query");
+    assert_eq!(column(&res, "name"), vec!["\"Alice\"".to_string()]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "handler ran more than once");
+}

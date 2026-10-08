@@ -16,7 +16,7 @@
 
 import * as React from "react";
 
-import type { SparqlResults } from "@/lib/sparq-wasm";
+import { termValue, type SparqlResults } from "@/lib/sparq-wasm";
 import {
   circularLayout,
   deriveGraph,
@@ -35,12 +35,14 @@ const KIND_FILL: Record<NodeKind, string> = {
   uri: "var(--chart-1)", // IRI (teal)
   literal: "var(--chart-4)", // literal (string token)
   bnode: "var(--muted-foreground)", // blank node
+  triple: "var(--chart-2)", // RDF 1.2 triple term
 };
 
 const KIND_LABEL: Record<NodeKind, string> = {
   uri: "Resource",
   literal: "Literal",
   bnode: "Blank node",
+  triple: "Triple term",
 };
 
 /** Truncate a long node label for the compact view; the full value stays in the `<title>` tooltip. */
@@ -167,7 +169,7 @@ export function ResultGraphView({ results }: { results: SparqlResults }) {
                   stroke="var(--card)"
                   strokeWidth={1.5}
                 >
-                  <title>{n.term.value}</title>
+                  <title>{termValue(n.term)}</title>
                 </circle>
                 <text
                   x={lx.toFixed(1)}
@@ -179,7 +181,7 @@ export function ResultGraphView({ results }: { results: SparqlResults }) {
                   fill="var(--foreground)"
                 >
                   {clip(n.label)}
-                  <title>{n.term.value}</title>
+                  <title>{termValue(n.term)}</title>
                 </text>
               </g>
             );

@@ -55,7 +55,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use sparq_kb::literature::connector_core::{
-    fetch_paginated, HttpResponse, RetryPolicy, Transport, UreqTransport, CORE_SEARCH_WORKS_URL,
+    fetch_paginated, percent_encode_query, HttpResponse, RetryPolicy, Transport, UreqTransport,
+    CORE_SEARCH_WORKS_URL,
 };
 use sparq_kb::literature::extract::{Extractor, RecordedExtractor};
 use sparq_kb::literature::extract_live::{CommandRunner, LiveExtractor};
@@ -508,17 +509,17 @@ fn fetch_openalex(
         let mut url = format!(
             "{}?search={}&per-page={}&page={}",
             OPENALEX_WORKS_URL,
-            percent_encode(&seed.query),
+            percent_encode_query(&seed.query),
             per_page,
             page
         );
         if let Some(m) = &mailto {
             url.push_str("&mailto=");
-            url.push_str(&percent_encode(m));
+            url.push_str(&percent_encode_query(m));
         }
         if let Some(k) = &api_key {
             url.push_str("&api_key=");
-            url.push_str(&percent_encode(k));
+            url.push_str(&percent_encode_query(k));
         }
         let resp = get_with_retry(&transport, &url, &policy)?;
         let page_records = normalise_openalex_records(&resp.body)?;
@@ -629,18 +630,4 @@ fn fetch_core(
         stats,
         CORE_SEARCH_WORKS_URL,
     ))
-}
-
-/// RFC 3986 unreserved-set percent-encoding for query-string values.
-fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }

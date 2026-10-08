@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Benchmark self-monitoring triage (noise-reduction-bench-selfmonitor).
+# Benchmark self-monitoring triage (noise-reduction-bench-selfmonitor).
 #
 # WHY — the maintainer gets @-mentioned on every benchmark alert. This script replaces the
 # @-mention noise with SELF-MONITORING: it classifies each flagged benchmark into a two-zone
@@ -17,7 +17,7 @@
 #             update ONE rolling deduped GitHub issue per benchmark suite (label `bench-flake`),
 #             listing the flagged benchmarks + runs. No @mentions.
 #
-# FLOOR-EXEMPT HARD-BAND ([FABLE-5]): the median-of-history hard gate (scripts/bench_hardzone.py)
+# FLOOR-EXEMPT HARD-BAND: the median-of-history hard gate (scripts/bench_hardzone.py)
 # never fails on a floor-exempt (sub-noise-floor us/milli) metric, and after a few accepted
 # points the regressed median REBASES — so those hits would leave NO durable trail from the gate
 # itself. `--hardzone-report` points at bench_hardzone.py's --report-out JSON; its
@@ -115,7 +115,7 @@ def log(msg: str) -> None:
 def _finite_num(v) -> float | None:
     """v as a float iff v is a REAL, FINITE number — else None. THE numeric admission gate.
 
-    [FABLE-5 round 4] Every numeric field this script consumes from an artifact routes
+    Every numeric field this script consumes from an artifact routes
     through here. Admissible inputs are int/float instances that are NOT bool (json
     true/false must never pass as 1/0), whose float() conversion succeeds — an
     out-of-float-range int like 10**400 raises OverflowError, which must DROP the value,
@@ -438,7 +438,7 @@ def _post_issue(title: str, body: str, labels: list[str], existing: str | None) 
 
 # ── defense-in-depth sanitizer for artifact-derived text in issue bodies ────────────
 def _sanitize(text, *, code: bool = False) -> str:
-    """[FABLE-5 round 4] THE sanitizer — every artifact-derived string interpolated into an
+    """THE sanitizer — every artifact-derived string interpolated into an
     issue/comment body routes through here (via _md_cell / _md_code_cell / directly).
 
     Layer 1 — HTML, first and unconditional: GitHub renders raw HTML in issue bodies, so a
@@ -500,7 +500,7 @@ def build_flake_body(suite: str, rows: list[dict], soft: float, hard: float, run
         "(noise-reduction-bench-selfmonitor). No human is @-mentioned by design.",
         "",
     ]
-    # [FABLE-5 round 4] the class sentence is derived from the row classes ACTUALLY present —
+    # the class sentence is derived from the row classes ACTUALLY present —
     # soft-band only, floor-exempt only, or mixed — so the preamble never describes a class
     # the table below does not contain.
     if tagged_rows and plain_rows:
@@ -762,7 +762,7 @@ def self_test() -> int:
     assert _to_ratio_pct(10, 0) is None
     assert _to_ratio_pct(1e308, 1e-308) is None   # finite/finite can still overflow to inf
 
-    # [FABLE-5 round 4] _finite_num — THE numeric admission gate for every consumed field:
+    # _finite_num — THE numeric admission gate for every consumed field:
     # bool rejected, NaN/inf rejected, the float() conversion guarded (10**400 raises
     # OverflowError — a drop, never a crash), strings/None rejected, real numbers pass.
     assert _finite_num(5) == 5.0 and _finite_num(2.5) == 2.5 and _finite_num(0) == 0.0
@@ -796,7 +796,7 @@ def self_test() -> int:
             {"name": "q02_type_person_count_us", "current": 11.0, "previous": 10.0},      # 110% ok
             {"name": "new_metric_us", "current": 5.0},                                    # no prev -> skip
             {"name": "zero_prev_us", "current": 5.0, "previous": 0.0},                    # prev 0 -> skip
-            # [FABLE-5 round 4] malformed numerics: dropped with a warning, NEVER a crash —
+            # malformed numerics: dropped with a warning, NEVER a crash —
             # bool current, string current (the old float() call ValueError'd on this),
             # out-of-float-range int previous (OverflowError), NaN current.
             {"name": "bool_cur_us", "current": True, "previous": 10.0},
@@ -843,7 +843,7 @@ def self_test() -> int:
         assert by["watdiv_q1_us"]["previous"] == 10.0, by["watdiv_q1_us"]  # newest prev value
         assert by["watdiv_q1_us"]["current"] == 30.0
         assert by["new_only_us"]["previous"] is None
-        # [FABLE-5 round 4] non-finite/bool/out-of-range values never survive admission.
+        # non-finite/bool/out-of-range values never survive admission.
         assert "bool_val_us" not in by and "huge_val_us" not in by, sorted(by)
         # feeding it through parse_comparison drops the no-previous row + computes ratio.
         cmp_file = Path(tdc) / "cmp.json"
@@ -859,7 +859,7 @@ def self_test() -> int:
         assert baseline_sha(str(prev), "nonexistent suite") == "c2"  # falls back to only suite
         assert baseline_sha(str(Path(tdc) / "absent.js"), "sparq engine") == ""
 
-    # [FABLE-5] hardzone floor-exempt hard-band rows: loaded fail-soft, merged into the soft
+    # hardzone floor-exempt hard-band rows: loaded fail-soft, merged into the soft
     # partition (tagged row wins on a name collision), rendered tagged in the flake body.
     with tempfile.TemporaryDirectory() as td3:
         hz = Path(td3) / "hardzone-report.json"
@@ -868,7 +868,7 @@ def self_test() -> int:
              "unit": "us",
              "note": "floor-exempt hard-band (>= 2x median-of-history; watch-only for the gate)"},
             {"name": "malformed_row", "current": "not-a-number"},   # dropped, never crashes
-            # [FABLE-5 round 4] numeric admission on EVERY consumed field: bool current
+            # numeric admission on EVERY consumed field: bool current
             # (isinstance(int,float) passes it — must be rejected), NaN current and inf
             # previous (json.loads emits both by default), and an out-of-float-range int
             # ratio_pct whose float() raises OverflowError — all dropped with a counted
@@ -894,7 +894,7 @@ def self_test() -> int:
         assert "median-of-history" in mbody   # the tagged-row explainer paragraph
         stripped3 = mbody.replace("@-mentioned", "").replace("@-mention", "")
         assert "@" not in stripped3, "flake body with hardzone rows must not @-mention anyone"
-        # [FABLE-5 round 3] the preamble distinguishes the two row classes — a merged
+        # the preamble distinguishes the two row classes — a merged
         # floor-exempt row sits AT/ABOVE the hard ratio, so the soft-only "below the hard
         # fail-threshold" framing would contradict the table it introduces.
         assert "two classes" in mbody, "tagged body must distinguish soft vs floor-exempt rows"
@@ -903,7 +903,7 @@ def self_test() -> int:
         plain = build_flake_body("sparq-geo", soft_rows[1:], 175, 200, "http://run/4")
         assert "floor-exempt hard-band" not in plain
         assert "regressed into the **soft zone**" in plain and "two classes" not in plain
-        # [FABLE-5 round 4] three-way class sentence — the FLOOR-EXEMPT-ONLY case: every row
+        # three-way class sentence — the FLOOR-EXEMPT-ONLY case: every row
         # tagged, no soft-band row, so the body must claim NEITHER "two classes" NOR the
         # soft-zone framing; the all-floor-exempt sentence + explainer paragraph instead.
         fe_only = build_flake_body("sparq-engine+sparq-core", extra, 175, 200, "http://run/7")
@@ -920,7 +920,7 @@ def self_test() -> int:
         bad = Path(td3) / "bad.json"
         bad.write_text("{not json", encoding="utf-8")
         assert load_hardzone_soft_rows(str(bad)) == []
-        # [FABLE-5 round 3] fail-soft on WRONG-TYPED payloads: {"floor_exempt_hard": null},
+        # fail-soft on WRONG-TYPED payloads: {"floor_exempt_hard": null},
         # a number, and a non-object top level must all degrade to zero merged rows with a
         # warning — never TypeError out of ordinary soft filing.
         nul = Path(td3) / "nul.json"
@@ -933,7 +933,7 @@ def self_test() -> int:
         arr.write_text(json.dumps([1, 2]), encoding="utf-8")
         assert load_hardzone_soft_rows(str(arr)) == []
 
-        # [FABLE-5 round 3] Markdown-injection hardening: pipes/backticks/newlines/@ in
+        # Markdown-injection hardening: pipes/backticks/newlines/@ in
         # artifact-derived fields render escaped — no forged table rows, no code-span
         # breakout, no naked @-mention.
         evil = [{"name": "evil_us|`name\ninjected", "current": 12.0, "previous": 4.0,
@@ -950,7 +950,7 @@ def self_test() -> int:
         assert "@someone" not in ebody                     # mention split by an HTML comment
         assert "@<!-- -->someone" in ebody
 
-        # [FABLE-5 round 4] defense-in-depth HTML layer: GitHub renders raw HTML in issue
+        # defense-in-depth HTML layer: GitHub renders raw HTML in issue
         # bodies, so a raw-HTML table breakout in ANY interpolated field must render with
         # < > & escaped — in plain cells AND inside code spans (belt-and-braces) alike.
         breakout = "</td></tr></table><h1>forged</h1>"
@@ -1002,7 +1002,7 @@ def self_test() -> int:
         # no naked @mention (the only '@' allowed is inside '@-mention' prose).
         stripped = rbody.replace("@-mentioned", "").replace("@-mention", "")
         assert "@" not in stripped, "regression body must not @-mention anyone"
-        # [FABLE-5 round 4] a forged-HTML commit SUBJECT renders escaped in the suspect
+        # a forged-HTML commit SUBJECT renders escaped in the suspect
         # table too (every interpolated field routes through the one sanitizer).
         evil_commits = [{"sha": "f" * 40, "subject": f"pwn {breakout} (#104)", "author": "m",
                          "paths": ["crates/sparq-geo/src/lib.rs"]}]
@@ -1069,7 +1069,7 @@ def main() -> int:
 
     repo = args.repo_url or "https://github.com/sparq-org/sparq"
     if args.mode == "soft":
-        # [FABLE-5] durable trail: floor-exempt hard-band hits from the median-of-history gate
+        # durable trail: floor-exempt hard-band hits from the median-of-history gate
         # never red that gate and would vanish once the median rebases — merge them into the
         # soft partition so the deduped bench-flake issue records every one.
         extra = load_hardzone_soft_rows(args.hardzone_report)

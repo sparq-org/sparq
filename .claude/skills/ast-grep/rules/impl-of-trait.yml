@@ -1,4 +1,4 @@
-# [OPUS-4.8] ast-grep rule: find every `impl <Trait> for <T>` regardless of how the
+# ast-grep rule: find every `impl <Trait> for <T>` regardless of how the
 # trait path is qualified (Display / fmt::Display / std::fmt::Display all match).
 # A bare `--pattern 'impl Display for $T'` MISSES these because ast-grep matches the
 # syntax as written and the path is a single scoped node. See ../SKILL.md §2.3.

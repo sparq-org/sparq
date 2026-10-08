@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-t5bne (epic sq-pbz04, Phase Q1): sparq-reason-ql's `experimental` feature —
+# sq-t5bne (epic sq-pbz04, Phase Q1): sparq-reason-ql's `experimental` feature —
 # the OWL 2 QL (DL-Lite_R) PerfectRef query rewriter. The crate ships the (cheap, always-present)
 # CQ-shape gate with NO feature; the rewriter itself is behind the OFF-by-default `experimental`
 # feature. Without the feature, the rewriter modules (perfectref.rs, emit.rs) and the
@@ -33,7 +33,7 @@
   features: "experimental"
   test: true
 
-# [FABLE-5] sq-p6yb7: DL-Lite_R KB consistency checking by violation-query composition —
+# sq-p6yb7: DL-Lite_R KB consistency checking by violation-query composition —
 # `check_consistency`/`check_consistency_with` + the structural negative-inclusion capture
 # (`TBox::neg_incl`/`consistency_uncaptured`) behind the OFF-by-default `ql-consistency`
 # feature (which pulls `experimental` for the PerfectRef machinery it reuses). Without the

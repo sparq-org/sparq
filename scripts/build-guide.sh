@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] issue #5022 — shared mdBook guide builder (build + broken-include teeth).
+# issue #5022 — shared mdBook guide builder (build + broken-include teeth).
 #
 # WHY THIS IS A SCRIPT AND NOT AN INLINE `run:` BLOCK: the guide is now built in TWO
 # workflows — docs.yml VALIDATES it on PRs that touch the guide or any embedded source,

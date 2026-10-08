@@ -1,6 +1,6 @@
 {
   "$comment": [
-    "[OPUS-5] issue #3811 — the SINGLE data-driven source of truth for sparq's banned-terminology",
+    "issue #3811 — the SINGLE data-driven source of truth for sparq's banned-terminology",
     "gate (scripts/check-terminology.py). Adding a future banned term is ONE object in `terms`,",
     "not a code change.",
     "",

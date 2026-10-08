@@ -60,7 +60,10 @@ pub fn run_suite(rdf_tests_root: &Path, out: &mut Vec<TestResult>) -> Result<(),
 
     for entry in &entries {
         if entry.kind != EntryKind::QueryEval {
-            out.push(result(entry, Outcome::OutOfScope("not a QueryEvaluationTest".into())));
+            out.push(result(
+                entry,
+                Outcome::OutOfScope("not a QueryEvaluationTest".into()),
+            ));
             continue;
         }
         let regimes: FxHashSet<&str> = entry
@@ -175,6 +178,22 @@ fn result(entry: &TestEntry, outcome: Outcome) -> TestResult {
     }
 }
 
+/// True iff the entry's query file parses and carries its own `FROM`/`FROM NAMED`
+/// clause. An unreadable or unparsable query is left to the evaluation path to report.
+fn query_file_carries_dataset(entry: &TestEntry) -> bool {
+    let Some(path) = &entry.action.query else {
+        return false;
+    };
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    SparqlParser::new()
+        .with_base_iri(crate::rdf::file_iri(path))
+        .ok()
+        .and_then(|p| p.parse_query(&text).ok())
+        .is_some_and(|q| query_carries_dataset(&q))
+}
+
 fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outcome {
     // [OPUS-4.8] sq-oy1f — the `sparql11/entailment` manifest at the pinned
     // rdf-tests revision contains NO `qt:graphData` entries (every entailment test
@@ -188,6 +207,13 @@ fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outc
     // properly is tracked as a deferred bead; do NOT drop the guard to "make it run"
     // until the reasoner models named-graph materialization.
     if !entry.action.graph_data.is_empty() {
+        return Outcome::OutOfScope("named-graph entailment dataset not wired".into());
+    }
+    // The same hold for a dataset the QUERY declares (#6403): the runner appends a
+    // `FROM`/`FROM NAMED` document to the graph names but, with the closure passed as the
+    // data override, never loads it, so the query would run over declared-but-empty
+    // graphs. No entailment query at the pinned rdf-tests revision carries one.
+    if query_file_carries_dataset(entry) {
         return Outcome::OutOfScope("named-graph entailment dataset not wired".into());
     }
     // Load and materialize the default-graph data. The blank-node labels of
@@ -211,7 +237,11 @@ fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outc
                             data_bnodes.insert(b.as_str().to_string());
                         }
                     }
-                    ids.push([dict.intern(&row[0]), dict.intern(&row[1]), dict.intern(&row[2])]);
+                    ids.push([
+                        dict.intern(&row[0]),
+                        dict.intern(&row[1]),
+                        dict.intern(&row[2]),
+                    ]);
                 }
             }
             Err(e) => return Outcome::Fail(format!("data parse error: {e}")),
@@ -420,11 +450,7 @@ fn add_eq_ref(dict: &mut Dict, ids: &mut Vec<[sparq_core::dict::Id; 3]>) {
 /// bloat): every declared class is its own subclass (rdfs10/scm-cls), every
 /// declared property its own subproperty (rdfs6/scm-op), and — under the OWL
 /// regimes — every declared named individual an `owl:Thing`.
-fn add_declared_reflexives(
-    dict: &mut Dict,
-    ids: &mut Vec<[sparq_core::dict::Id; 3]>,
-    owl: bool,
-) {
+fn add_declared_reflexives(dict: &mut Dict, ids: &mut Vec<[sparq_core::dict::Id; 3]>, owl: bool) {
     let ty = dict.intern_iri(rdf::TYPE.as_str());
     let sc = dict.intern_iri(oxrdf::vocab::rdfs::SUB_CLASS_OF.as_str());
     let sp = dict.intern_iri(oxrdf::vocab::rdfs::SUB_PROPERTY_OF.as_str());
@@ -618,7 +644,10 @@ impl QlHoldReason {
             QlHoldReason::PendingGate(why) => {
                 format!("held at the CQ-shape gate, fail-closed: {}", why)
             }
-            QlHoldReason::PendingCapture { skipped, unrecognised_schema } => format!(
+            QlHoldReason::PendingCapture {
+                skipped,
+                unrecognised_schema,
+            } => format!(
                 "TBox not totally captured ({} skipped, {} unrecognised schema) — \
                  the rewrite may be incomplete for this TBox",
                 skipped, unrecognised_schema
@@ -650,7 +679,10 @@ impl QlHoldReason {
                 disjuncts, detail
             ),
             QlHoldReason::UnclassifiedAbstain(why) => {
-                format!("rewriter abstain not yet classified by the taxonomy: {}", why)
+                format!(
+                    "rewriter abstain not yet classified by the taxonomy: {}",
+                    why
+                )
             }
             QlHoldReason::Inconclusive(why) => why.clone(),
         };
@@ -844,10 +876,14 @@ fn ql_graduation_one(entry: &TestEntry) -> QlGraduationVerdict {
         return Held(QlHoldReason::NamedGraphDataset);
     }
     let Some(query_path) = &entry.action.query else {
-        return Held(QlHoldReason::Inconclusive("manifest entry has no qt:query".into()));
+        return Held(QlHoldReason::Inconclusive(
+            "manifest entry has no qt:query".into(),
+        ));
     };
     let Some(result_path) = &entry.result_file else {
-        return Held(QlHoldReason::Inconclusive("manifest entry has no mf:result".into()));
+        return Held(QlHoldReason::Inconclusive(
+            "manifest entry has no mf:result".into(),
+        ));
     };
 
     let query_text = match std::fs::read_to_string(query_path) {
@@ -863,7 +899,12 @@ fn ql_graduation_one(entry: &TestEntry) -> QlGraduationVerdict {
     };
     let query = match parser.parse_query(&query_text) {
         Ok(q) => q,
-        Err(e) => return Held(QlHoldReason::Inconclusive(format!("query parse error: {}", e))),
+        Err(e) => {
+            return Held(QlHoldReason::Inconclusive(format!(
+                "query parse error: {}",
+                e
+            )))
+        }
     };
     // CONDITION (4, continued) — the query must not carry its own `FROM`/`FROM
     // NAMED` dataset clause either: the CQ-shape gate DROPS `dataset` rather
@@ -906,7 +947,10 @@ fn ql_graduation_one(entry: &TestEntry) -> QlGraduationVerdict {
         match crate::rdf::parse_file(d) {
             Ok(triples) => data.extend(triples),
             Err(e) => {
-                return Held(QlHoldReason::Inconclusive(format!("data parse error: {}", e)))
+                return Held(QlHoldReason::Inconclusive(format!(
+                    "data parse error: {}",
+                    e
+                )))
             }
         }
     }
@@ -1050,8 +1094,7 @@ fn ql_regime_coincides(
     if tbox.exists_super.is_empty() {
         return Ok(());
     }
-    let distinguished: FxHashSet<&str> =
-        cq.distinguished.iter().map(|v| v.as_str()).collect();
+    let distinguished: FxHashSet<&str> = cq.distinguished.iter().map(|v| v.as_str()).collect();
     let check = |t: &TermPattern| -> Result<(), String> {
         match t {
             TermPattern::Variable(v) if !distinguished.contains(v.as_str()) => Err(format!(
@@ -1243,7 +1286,6 @@ fn classify_rewrite_abstain(reason: &str) -> QlHoldReason {
 /// (condition (4): the CQ-shape gate drops `dataset` rather than honouring it,
 /// so a dataset-carrying query must be HELD, never rewritten over the wrong
 /// graph). [FABLE-5] sq-pbz04.3.4
-#[cfg(feature = "ql-experimental")]
 fn query_carries_dataset(query: &Query) -> bool {
     match query {
         Query::Select { dataset, .. }
@@ -1647,7 +1689,10 @@ PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
     let mut nt = String::new();
     for t in oxttl::TurtleParser::new().for_slice(abox_src.as_bytes()) {
         match t {
-            Ok(tr) => nt.push_str(&format!("{} {} {} .\n", tr.subject, tr.predicate, tr.object)),
+            Ok(tr) => nt.push_str(&format!(
+                "{} {} {} .\n",
+                tr.subject, tr.predicate, tr.object
+            )),
             Err(e) => return QlOracleOutcome::Inconclusive(format!("ABox parse: {}", e)),
         }
     }
@@ -1692,7 +1737,10 @@ PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
             binds
                 .iter()
                 .map(|name| {
-                    Some(Term::NamedNode(NamedNode::new_unchecked(format!("{}{}", QL_EX, name))))
+                    Some(Term::NamedNode(NamedNode::new_unchecked(format!(
+                        "{}{}",
+                        QL_EX, name
+                    ))))
                 })
                 .collect::<Row>()
         })
@@ -1771,14 +1819,20 @@ mod ql_tests {
         let all: [QlHoldReason; 10] = [
             QlHoldReason::PermanentlyOutside("BIND (Extend) is not conjunctive".into()),
             QlHoldReason::PendingGate("FILTER is not conjunctive".into()),
-            QlHoldReason::PendingCapture { skipped: 1, unrecognised_schema: 2 },
+            QlHoldReason::PendingCapture {
+                skipped: 1,
+                unrecognised_schema: 2,
+            },
             QlHoldReason::PendingConsistency { negative_axioms: 3 },
             QlHoldReason::InconsistentKb {
                 violated: "<http://ex/A> ⊑ ¬<http://ex/B>".into(),
             },
             QlHoldReason::NamedGraphDataset,
             QlHoldReason::PendingCoincidence("non-distinguished body variable ?y".into()),
-            QlHoldReason::OracleDivergent { disjuncts: 1, detail: "differ".into() },
+            QlHoldReason::OracleDivergent {
+                disjuncts: 1,
+                detail: "differ".into(),
+            },
             QlHoldReason::UnclassifiedAbstain("new abstain class".into()),
             QlHoldReason::Inconclusive("data parse error".into()),
         ];
@@ -1786,12 +1840,19 @@ mod ql_tests {
         labels.sort_unstable();
         let n = labels.len();
         labels.dedup();
-        assert_eq!(labels.len(), n, "taxonomy labels must be distinct (no catch-all)");
+        assert_eq!(
+            labels.len(),
+            n,
+            "taxonomy labels must be distinct (no catch-all)"
+        );
         for r in &all {
             let s = r.reason();
             assert!(s.starts_with("QL experimental ("), "reason: {s}");
             assert!(s.contains(r.label()), "reason must carry its label: {s}");
-            assert!(!s.contains("graduated"), "a hold must never read graduated: {s}");
+            assert!(
+                !s.contains("graduated"),
+                "a hold must never read graduated: {s}"
+            );
         }
         // The consistency bucket carries its measured count (the §8 report input).
         assert!(QlHoldReason::PendingConsistency { negative_axioms: 3 }
@@ -1840,7 +1901,9 @@ mod ql_tests {
         // that slip past the gate (rdf:type with class-position variable or schema-ns constant).
 
         // Schema-vocabulary predicate (paper-sparqldl-Q1 shape): gate now rejects. [SONNET-4.6]
-        let q_sub = parse(&format!("{PRE} SELECT ?c WHERE {{ ?c rdfs:subClassOf :Student }}"));
+        let q_sub = parse(&format!(
+            "{PRE} SELECT ?c WHERE {{ ?c rdfs:subClassOf :Student }}"
+        ));
         assert!(
             sparq_reason_ql::as_conjunctive_query(&q_sub).is_err(),
             "rdfs:subClassOf as predicate: gate must reject (B6 now in gate)"
@@ -1855,12 +1918,18 @@ mod ql_tests {
         // rdf:type with a class-position VARIABLE: gate admits (predicate rdf:type is not
         // schema-vocabulary), but intensional_atom() flags it. [SONNET-4.6]
         let cq = cq_of(&format!("{PRE} SELECT ?c WHERE {{ :a rdf:type ?c }}"));
-        assert!(intensional_atom(&cq).unwrap().contains("class-name-position"));
+        assert!(intensional_atom(&cq)
+            .unwrap()
+            .contains("class-name-position"));
         // rdf:type with a schema-namespace class constant: likewise gate admits, harness catches.
-        let cq = cq_of(&format!("{PRE} SELECT ?x WHERE {{ ?x rdf:type owl:Class }}"));
+        let cq = cq_of(&format!(
+            "{PRE} SELECT ?x WHERE {{ ?x rdf:type owl:Class }}"
+        ));
         assert!(intensional_atom(&cq).is_some());
         // Extensional class + role atoms are admitted by both gate and intensional_atom().
-        let cq = cq_of(&format!("{PRE} SELECT ?x WHERE {{ ?x rdf:type :A . ?x :r ?y }}"));
+        let cq = cq_of(&format!(
+            "{PRE} SELECT ?x WHERE {{ ?x rdf:type :A . ?x :r ?y }}"
+        ));
         assert!(intensional_atom(&cq).is_none());
         // Annotation predicates stay admitted (no QL axiom changes their extension).
         let cq = cq_of(&format!("{PRE} SELECT ?x ?l WHERE {{ ?x rdfs:label ?l }}"));
@@ -1871,9 +1940,10 @@ mod ql_tests {
     fn regime_coincidence_guard_is_fail_closed() {
         use sparq_reason_ql::{Basic, Role, TBox};
         let mut tbox_with_exists = TBox::default();
-        tbox_with_exists
-            .exists_super
-            .push((Basic::Class("http://ex/Employee".into()), Role::named("http://ex/worksFor")));
+        tbox_with_exists.exists_super.push((
+            Basic::Class("http://ex/Employee".into()),
+            Role::named("http://ex/worksFor"),
+        ));
         let empty_tbox = TBox::default();
 
         // Non-distinguished ?y + an existential generator: MAY diverge — held.
@@ -1989,11 +2059,17 @@ mod ql_tests {
         // test lane is not in any CI leg, so the drift went unnoticed; bead filed.)
         let r = classify(&format!("{PRE} SELECT ?x WHERE {{ ?x (:p|:q) ?y }}"));
         assert_eq!(r.label(), "pending-gate");
-        assert!(r.reason().contains("B1 UCQ input"), "reason: {}", r.reason());
+        assert!(
+            r.reason().contains("B1 UCQ input"),
+            "reason: {}",
+            r.reason()
+        );
         let r = classify(&format!("{PRE} SELECT ?x WHERE {{ ?x :p+ ?y }}"));
         assert_eq!(r.label(), "permanently-outside");
         // Design-permanent shapes → permanently-outside.
-        let r = classify(&format!("{PRE} SELECT ?x WHERE {{ ?x rdf:type :A BIND(:b AS ?y) }}"));
+        let r = classify(&format!(
+            "{PRE} SELECT ?x WHERE {{ ?x rdf:type :A BIND(:b AS ?y) }}"
+        ));
         assert_eq!(r.label(), "permanently-outside");
         let r = classify(&format!(
             "{PRE} SELECT ?x WHERE {{ ?x rdf:type :A MINUS {{ ?x rdf:type :B }} }}"
@@ -2003,19 +2079,25 @@ mod ql_tests {
         assert_eq!(r.label(), "permanently-outside");
         // An unmatched reason lands in the LOUD unclassified bucket, never silently.
         assert_eq!(
-            classify_gate_rejection(&parse(&format!("{PRE} SELECT ?x WHERE {{ ?x :p :a }}")), "some future rejection"),
+            classify_gate_rejection(
+                &parse(&format!("{PRE} SELECT ?x WHERE {{ ?x :p :a }}")),
+                "some future rejection"
+            ),
             QlHoldReason::UnclassifiedAbstain("some future rejection".into())
         );
     }
 
     #[test]
     fn rewrite_abstains_classify_into_the_taxonomy() {
-        let r = classify_rewrite_abstain("literal in a class/role atom position is out of DL-Lite scope");
+        let r = classify_rewrite_abstain(
+            "literal in a class/role atom position is out of DL-Lite scope",
+        );
         assert_eq!(r.label(), "pending-gate");
         assert!(r.reason().contains("B2"));
         let r = classify_rewrite_abstain("blank-node term is out of DL-Lite atom scope");
         assert_eq!(r.label(), "pending-gate");
-        let r = classify_rewrite_abstain("rdf:type object must be a named class for DL-Lite rewriting");
+        let r =
+            classify_rewrite_abstain("rdf:type object must be a named class for DL-Lite rewriting");
         assert_eq!(r.label(), "permanently-outside");
         let r = classify_rewrite_abstain("something the taxonomy has never seen");
         assert_eq!(r.label(), "unclassified-abstain");
@@ -2056,9 +2138,12 @@ mod ql_tests {
     fn arm_reports_only_out_of_scope_rows() {
         // The arm appends ONLY OutOfScope rows — never a Pass / Fail that would
         // count toward the inference binary's conformance rate or ratchet floor.
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/w3c/rdf-tests");
-        if !root.join("sparql/sparql11/entailment/manifest.ttl").exists() {
+        let root =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/w3c/rdf-tests");
+        if !root
+            .join("sparql/sparql11/entailment/manifest.ttl")
+            .exists()
+        {
             eprintln!("SKIP: rdf-tests entailment fixtures absent");
             return;
         }
@@ -2125,7 +2210,9 @@ mod ql_tests {
         // A genuine certain-answer oracle must include a case whose answer set is a
         // STRICT subset of the naive asserted matches (the soundness direction).
         assert!(
-            QL_DLLITE_ORACLE.iter().any(|c| c.id == "ql-exists-super-blocked-bound"),
+            QL_DLLITE_ORACLE
+                .iter()
+                .any(|c| c.id == "ql-exists-super-blocked-bound"),
             "the applicability-condition (bound-filler) soundness case must be present"
         );
     }
@@ -2150,5 +2237,59 @@ mod ql_tests {
             panic!("select");
         };
         assert_eq!(projected_vars(pattern), vec!["x".to_string()]);
+    }
+}
+
+/// #6403 — a query-declared `FROM`/`FROM NAMED` dataset is held like a manifest
+/// `qt:graphData` one, instead of evaluating over declared-but-empty named graphs.
+#[cfg(test)]
+mod query_dataset_guard_tests {
+    use super::*;
+    use crate::manifest::{EntryKind, QueryAction, TestEntry, UpdateState};
+
+    fn entry_with_query(dir: &Path, name: &str, query: &str) -> TestEntry {
+        let data = dir.join("data.ttl");
+        std::fs::write(&data, "<http://ex/s> <http://ex/p> <http://ex/o> .").unwrap();
+        let q = dir.join(name);
+        std::fs::write(&q, query).unwrap();
+        TestEntry {
+            id: format!("urn:test:{name}"),
+            name: name.into(),
+            suite: "sparql11/entailment".into(),
+            kind: EntryKind::QueryEval,
+            withdrawn: false,
+            action: QueryAction {
+                query: Some(q),
+                data: vec![data],
+                ..QueryAction::default()
+            },
+            result_file: None,
+            update_request: None,
+            update_pre: UpdateState::default(),
+            update_post: UpdateState::default(),
+        }
+    }
+
+    #[test]
+    fn query_declared_dataset_is_held() {
+        let dir = std::env::temp_dir().join(format!("sparq_6403_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, q) in [
+            ("from.rq", "SELECT * FROM <data.ttl> WHERE { ?s ?p ?o }"),
+            (
+                "from_named.rq",
+                "SELECT * FROM NAMED <data.ttl> WHERE { GRAPH ?g { ?s ?p ?o } }",
+            ),
+        ] {
+            let e = entry_with_query(&dir, name, q);
+            assert!(query_file_carries_dataset(&e), "{name}");
+            match run_one(&e, Profile::Rdfs, false) {
+                Outcome::OutOfScope(r) => assert_eq!(r, "named-graph entailment dataset not wired"),
+                other => panic!("{name}: expected a hold, got {other:?}"),
+            }
+        }
+        let plain = entry_with_query(&dir, "plain.rq", "SELECT * WHERE { ?s ?p ?o }");
+        assert!(!query_file_carries_dataset(&plain));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

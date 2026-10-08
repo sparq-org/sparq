@@ -178,6 +178,24 @@ test("deriveGraph: literals with the same value but different datatype are disti
   assert.equal(g.nodes.length, 3);
 });
 
+test("deriveGraph: literals differing only by base direction are distinct nodes", () => {
+  const a = { type: "uri", value: "http://ex/a" };
+  const hi = (dir) => ({ type: "literal", value: "hi", "xml:lang": "en", "its:dir": dir });
+  const g = deriveGraph({
+    head: { vars: ["s", "v"] },
+    results: {
+      bindings: [
+        { s: a, v: hi("ltr") },
+        { s: a, v: hi("rtl") },
+        { s: a, v: hi(undefined) },
+      ],
+    },
+  });
+  assert.ok(g);
+  // http://ex/a + "hi"@en--ltr + "hi"@en--rtl + "hi"@en = 4 distinct nodes.
+  assert.equal(g.nodes.length, 4);
+});
+
 test("deriveGraph: delimiter-containing lexical/datatype fields keep terms distinct (no key collision)", () => {
   // Regression: the term identity key must be INJECTIVE. It once concatenated (value, datatype,
   // lang) with a single-character delimiter, so a delimiter INSIDE one field could forge another

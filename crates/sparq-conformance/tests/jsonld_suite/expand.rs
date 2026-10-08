@@ -141,7 +141,10 @@ pub fn run_expand_native(root: &Path) -> Score {
                 Err(err) if err.code().as_str() == want_code => s.pass(),
                 Err(err) => s.fail(
                     &e.id,
-                    format!("expected error {want_code:?}, got {:?}", err.code().as_str()),
+                    format!(
+                        "expected error {want_code:?}, got {:?}",
+                        err.code().as_str()
+                    ),
                 ),
                 Ok(_) => s.fail(&e.id, format!("expected error {want_code:?}, got success")),
             }

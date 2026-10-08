@@ -5,7 +5,8 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { EngineProvider } from "@/lib/engine-context";
 import { WorkspaceProvider } from "@/lib/workspace-context";
-import { withBasePath } from "@/lib/base-path";
+import { basePath } from "@/lib/base-path";
+import { enginePreloadHrefs, readWasmManifest } from "@/lib/wasm-preload";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -31,6 +32,9 @@ export const viewport: Viewport = {
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  // #2422 — resolve the hints through the content-hash manifest so they match the loader's
+  // request exactly (an unhashed hint made a hosted build download the engine wasm twice).
+  const preload = enginePreloadHrefs(readWasmManifest(), basePath());
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
@@ -44,11 +48,11 @@ export default function RootLayout({
             same-origin) so the preload cache is HIT, not doubled; the glue is a dynamic ESM
             import → `modulepreload`. Tier-b bundles (reason/text/rsp) are opt-in tools and are
             deliberately NOT preloaded. */}
-        <link rel="modulepreload" href={withBasePath("/wasm/sparq_wasm.js")} />
+        <link rel="modulepreload" href={preload.glue} />
         <link
           rel="preload"
           as="fetch"
-          href={withBasePath("/wasm/sparq_wasm_bg.wasm")}
+          href={preload.wasm}
           crossOrigin="anonymous"
         />
         <ThemeProvider

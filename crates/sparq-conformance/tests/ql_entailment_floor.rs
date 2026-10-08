@@ -218,7 +218,10 @@ mod gated {
         let mut sorted = QL_ENTAILMENT_FLOOR_CASES.to_vec();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted, QL_ENTAILMENT_FLOOR_CASES, "pinned list must be sorted + unique");
+        assert_eq!(
+            sorted, QL_ENTAILMENT_FLOOR_CASES,
+            "pinned list must be sorted + unique"
+        );
     }
 
     /// The RATCHET: the measured graduated set equals the pinned named-case set
@@ -227,7 +230,10 @@ mod gated {
     #[test]
     fn ql_entailment_graduated_floor_is_pinned() {
         let root = rdf_tests_root();
-        if !root.join("sparql/sparql11/entailment/manifest.ttl").exists() {
+        if !root
+            .join("sparql/sparql11/entailment/manifest.ttl")
+            .exists()
+        {
             eprintln!(
                 "SKIP: rdf-tests `sparql11/entailment` not present under {} — run \
                  scripts/fetch-inference-suites.sh",
@@ -238,14 +244,21 @@ mod gated {
 
         let verdicts = run_ql_graduation(&root)
             .unwrap_or_else(|e| panic!("QL graduation predicate error: {e}"));
-        assert!(!verdicts.is_empty(), "the entailment suite has pr:QL-tagged tests");
+        assert!(
+            !verdicts.is_empty(),
+            "the entailment suite has pr:QL-tagged tests"
+        );
 
         // Case ids are the floor's identity — they must be unique.
         let mut ids: Vec<&str> = verdicts.iter().map(|c| c.id.as_str()).collect();
         ids.sort_unstable();
         let n = ids.len();
         ids.dedup();
-        assert_eq!(ids.len(), n, "pr:QL case ids must be unique (the pinned floor is named over them)");
+        assert_eq!(
+            ids.len(),
+            n,
+            "pr:QL case ids must be unique (the pinned floor is named over them)"
+        );
 
         let graduated: BTreeSet<&str> = verdicts
             .iter()

@@ -1,4 +1,4 @@
-# Hash-pinned pyarrow for the Arrow-export CI lane (python.yml `arrow` job). [OPUS-4.8]
+# Hash-pinned pyarrow for the Arrow-export CI lane (python.yml `arrow` job).
 # sq-lt1ml (gh-910): pyarrow is the CONSUMER side of the Arrow C Data Interface that
 # `Graph.query_arrow` produces — needed only to run crates/sparq-py/tests/test_arrow.py
 # against an `arrow`-feature wheel. Kept SEPARATE from python-build.txt so the lean

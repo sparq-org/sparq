@@ -1,0 +1,69 @@
+{
+  "checked_on_utc": "2026-09-26",
+  "version": "0.1.4",
+  "kind": "read-only release-preparation snapshot; not a reservation or publish authorization",
+  "git": {
+    "base_commit": "4b0c17a367dfadb999c4d19682d2eb30d68208f5",
+    "candidate_tag": "v0.1.4",
+    "candidate_tag_present_on_origin": false,
+    "preserved_tag": "v0.1.3",
+    "preserved_tag_object": "4dd548154cb6e317d60502cd41e2b59732eae63c",
+    "preserved_tag_commit": "4b0c17a367dfadb999c4d19682d2eb30d68208f5",
+    "preserved_tag_created_at": "2026-09-22T17:44:15Z"
+  },
+  "registry_availability": {
+    "method": "HTTP GET with sparq-release-preflight/1.0 User-Agent; all responses were 404",
+    "checked_on_utc": "2026-09-26",
+    "crates_io": {
+      "url_template": "https://crates.io/api/v1/crates/{package}/0.1.4",
+      "status": 404,
+      "packages": [
+        "sparq-core", "sparq-fedplan", "sparq-http3", "sparq-jsonld",
+        "sparq-reason-ql", "sparq-secprop-vocab", "sparq-shaclc", "sparq-algos",
+        "sparq-canon", "sparq-engine-serialize", "sparq-engine-service", "sparq-hdt",
+        "sparq-introspect", "sparq-sim", "sparq-substrate", "sparq-wrapper",
+        "sparq-engine", "sparq-reason-el", "sparq-vc", "sparq-arrow",
+        "sparq-nlq", "sparq-policy", "sparq-reason", "sparq-rsp",
+        "sparq-serve", "sparq-shacl", "sparq-text", "sparq-zk",
+        "sparq-forms", "sparq-geo", "sparq-trust", "sparq-vectors",
+        "sparq-solid", "sparq-terse", "sparq-mcp", "sparq-server", "sparq-cli"
+      ]
+    },
+    "npm": {
+      "url_template": "https://registry.npmjs.org/{encoded-package}/0.1.4",
+      "status": 404,
+      "packages": [
+        "@sparq-org/sparq", "@sparq-org/solid-server",
+        "@sparq-org/eyereasoner-compat"
+      ]
+    },
+    "pypi": {
+      "url": "https://pypi.org/pypi/sparq-rdf/0.1.4/json",
+      "status": 404,
+      "package": "sparq-rdf"
+    }
+  },
+  "cadence": {
+    "commands": [
+      "python3 scripts/release-interval-guard.py --dry-run",
+      "python3 scripts/release-interval-guard.py --enforce"
+    ],
+    "latest_tag": "v0.1.3",
+    "latest_tag_created_at": "2026-09-22T17:44:15Z",
+    "minimum_hours": 24,
+    "verdict": "ALLOW after fetching origin tags; 88h53m since v0.1.3 at enforce check time",
+    "requires_fresh_check_before_merge": true,
+    "v0_1_3_exception": "does not apply to v0.1.4"
+  },
+  "local_validation": {
+    "cargo_package_lists": "37/37 passed with --list --allow-dirty --locked --offline; file inventory only, not registry-resolution verification",
+    "cargo_metadata": "root, desktop, bench/zk, and bench/serve passed with --locked --offline --no-deps",
+    "npm_package_lists": "3/3 passed with npm pack --dry-run --ignore-scripts; generated JS/WASM outputs require hosted builds",
+    "release_source_tests": "21 passed",
+    "release_publish_guard_tests": "86 passed with RUSTC_WRAPPER= because this host denied its configured sccache invocation",
+    "external_cargo_dependency_changes": 0,
+    "external_npm_dependency_changes": 0
+  },
+  "publication": "not performed; v0.1.2 and v0.1.3 tags and completed artifacts preserved",
+  "registry_credentials": "not checked; maintainer must verify Trusted Publishers before publication"
+}
