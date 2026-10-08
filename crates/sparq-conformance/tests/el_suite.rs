@@ -162,7 +162,7 @@ mod gated {
     /// ratchet floor; adding one is a conscious reviewed act (the `push` mapping reports
     /// a stale entry that actually passes, and an undocumented fail fails the lane).
     ///
-    /// The 28 entries below were each audited from their raw export premise/conclusion.
+    /// The entries below were each audited from their raw export premise/conclusion.
     /// They fall into three PERMANENT mechanisms, none of which is a fixable bug within
     /// the classifier's documented (sound, TBox-only, CR1–CR6, `rbox`/`cdomain` off)
     /// contract:

@@ -553,6 +553,9 @@ struct CanonState {
     /// contains, matching the standard algorithm.
     bnode_to_quads: BTreeMap<String, Vec<Quad>>,
     canonical_issuer: IdentifierIssuer,
+    /// First-degree hash of every bnode, for the label-independent tie-break keys
+    /// (the standard path's SPARQ PATCH §1/§2, `src/rdfc/SPARQ-PATCHES.md`).
+    first_degree_hashes: BTreeMap<String, String>,
 }
 
 impl CanonState {
@@ -560,15 +563,19 @@ impl CanonState {
         let mut state = CanonState {
             bnode_to_quads: BTreeMap::new(),
             canonical_issuer: IdentifierIssuer::new("c14n"),
+            first_degree_hashes: BTreeMap::new(),
         };
         state.build_bnode_to_quads(dataset);
 
         // §4.4(3) first-degree hashes.
         let mut hash_to_bnodes: HashToBnodes = BTreeMap::new();
+        let mut first_degree_hashes = BTreeMap::new();
         for n in state.bnode_to_quads.keys() {
             let h = state.hash_first_degree_quads::<D>(n)?;
+            first_degree_hashes.insert(n.clone(), h.clone());
             hash_to_bnodes.entry(h).or_default().push(n.clone());
         }
+        state.first_degree_hashes = first_degree_hashes;
 
         // §4.4(4) unique first-degree hashes → issue canonical labels.
         let mut shared: HashToBnodes = BTreeMap::new();
@@ -594,6 +601,22 @@ impl CanonState {
                 hash_path_list.push(result);
             }
             hash_path_list.sort_by(|a, b| a.hash.cmp(&b.hash));
+            // Same label-independent tie-break as the standard path (SPARQ PATCH §1):
+            // each run of tied hashes is ordered by a structural key, so the two
+            // paths keep agreeing on triple-term-free input.
+            let mut start = 0;
+            while start < hash_path_list.len() {
+                let end = start
+                    + hash_path_list[start..]
+                        .iter()
+                        .take_while(|r| r.hash == hash_path_list[start].hash)
+                        .count();
+                if end - start > 1 {
+                    hash_path_list[start..end]
+                        .sort_by_cached_key(|r| state.canonical_tie_break_key(&r.issuer));
+                }
+                start = end;
+            }
             for result in &hash_path_list {
                 // Issue canonical labels in temporary-issuance order (§4.4 5.3.1).
                 for existing in result.issuer.order.values() {
@@ -710,6 +733,8 @@ impl CanonState {
             data_to_hash.push_str(&related_hash);
             let mut chosen_path = String::new();
             let mut chosen_issuer: Option<IdentifierIssuer> = None;
+            // Lazily computed `path_tie_break_key` of the chosen issuer (SPARQ PATCH §2).
+            let mut chosen_key: Option<String> = None;
 
             // §4.8(5.4) permutations, enumerated lazily (#5469): materializing
             // all k! orderings up front would exhaust memory before the guard
@@ -723,7 +748,7 @@ impl CanonState {
                 let mut recursion_list: Vec<String> = Vec::new();
                 let mut skip = false;
 
-                for related in perm.iter().map(|&i| &blank_node_list[i]) {
+                for (i, related) in perm.iter().map(|&j| &blank_node_list[j]).enumerate() {
                     if let Some(cid) = self.canonical_issuer.get(related) {
                         path.push_str(&format!("_:{}", cid));
                     } else {
@@ -732,9 +757,13 @@ impl CanonState {
                         }
                         path.push_str(&format!("_:{}", issuer_copy.issue(related)));
                     }
+                    // Equality skips only when more will be appended (SPARQ PATCH §2),
+                    // so a complete tie reaches the tie-break below.
                     if !chosen_path.is_empty()
                         && path.len() >= chosen_path.len()
-                        && path >= chosen_path
+                        && (path > chosen_path
+                            || (path == chosen_path
+                                && (i + 1 < perm.len() || !recursion_list.is_empty())))
                     {
                         skip = true;
                         break;
@@ -744,7 +773,7 @@ impl CanonState {
                     continue;
                 }
 
-                for related in &recursion_list {
+                for (k, related) in recursion_list.iter().enumerate() {
                     let result = self.hash_n_degree_quads::<D>(related, &issuer_copy, counter)?;
                     path.push_str(&format!("_:{}", issuer_copy.issue(related)));
                     path.push('<');
@@ -753,7 +782,8 @@ impl CanonState {
                     issuer_copy = result.issuer;
                     if !chosen_path.is_empty()
                         && path.len() >= chosen_path.len()
-                        && path >= chosen_path
+                        && (path > chosen_path
+                            || (path == chosen_path && k + 1 < recursion_list.len()))
                     {
                         skip = true;
                         break;
@@ -766,6 +796,20 @@ impl CanonState {
                 if chosen_path.is_empty() || path < chosen_path {
                     chosen_path = path;
                     chosen_issuer = Some(issuer_copy);
+                    chosen_key = None;
+                } else if let Some(current_issuer) = chosen_issuer
+                    .as_ref()
+                    .filter(|c| path == chosen_path && **c != issuer_copy)
+                {
+                    // Equal paths: pick by structural key, not permutation order
+                    // (SPARQ PATCH §2).
+                    let key = self.path_tie_break_key(&issuer, &issuer_copy);
+                    let current = chosen_key
+                        .get_or_insert_with(|| self.path_tie_break_key(&issuer, current_issuer));
+                    if key < *current {
+                        *current = key;
+                        chosen_issuer = Some(issuer_copy);
+                    }
                 }
             }
 
@@ -779,6 +823,70 @@ impl CanonState {
             hash: hash_hex::<D>(data_to_hash.as_bytes()),
             issuer,
         })
+    }
+
+    // ---- Label-independent tie-break keys (standard path: src/rdfc, SPARQ PATCH §1/§2) ----
+
+    /// §4.4 (5.3) key for results whose N-degree hashes tie: the result's identifiers
+    /// issued, in 5.3.1 order, on a prospective overlay that only reads the canonical
+    /// issuer, then the quads of every newly issued node (see `structural_key`).
+    fn canonical_tie_break_key(&self, issuer: &IdentifierIssuer) -> String {
+        let canonical = &self.canonical_issuer;
+        let mut prospective = BTreeMap::<&str, String>::new();
+        let mut newly_issued = Vec::new();
+        for existing in issuer.order.values() {
+            if !canonical.issued.contains_key(existing) {
+                let counter = canonical.counter + prospective.len();
+                prospective.insert(existing, format!("{}{counter}", canonical.prefix));
+                newly_issued.push(existing);
+            }
+        }
+        self.structural_key(&newly_issued, |b| {
+            canonical.issued.get(b).or_else(|| prospective.get(b))
+        })
+    }
+
+    /// §4.8 (5.4.6) key for equal chosen-path candidates: the quads of the nodes
+    /// `candidate` issued on top of `base`, the issuer at the start of the Hn entry.
+    fn path_tie_break_key(&self, base: &IdentifierIssuer, candidate: &IdentifierIssuer) -> String {
+        let newly_issued: Vec<&String> = candidate
+            .order
+            .values()
+            .filter(|n| !base.issued.contains_key(*n))
+            .collect();
+        self.structural_key(&newly_issued, |b| {
+            self.canonical_issuer
+                .issued
+                .get(b)
+                .or_else(|| candidate.issued.get(b))
+        })
+    }
+
+    /// Sorted, deduplicated quads mentioning any of `nodes`, every bnode (also inside
+    /// triple terms) written as `_:<id>` when `id` gives it one, else as
+    /// `_:h<first-degree hash>`. Byte-identical to the standard path's key on
+    /// triple-term-free input.
+    fn structural_key<'a>(
+        &self,
+        nodes: &[&String],
+        id: impl Fn(&str) -> Option<&'a String>,
+    ) -> String {
+        let label = |b: &str| match id(b) {
+            Some(id) => BlankNode::new_unchecked(id.as_str()),
+            None => BlankNode::new_unchecked(format!(
+                "h{}",
+                self.first_degree_hashes.get(b).map_or("", String::as_str)
+            )),
+        };
+        let mut lines: Vec<String> = Vec::new();
+        for n in nodes {
+            for quad in self.quads_for(n).into_iter().flatten() {
+                lines.push(serialize_quad_line(&map_bnodes_quad(quad, &label)));
+            }
+        }
+        lines.sort_unstable();
+        lines.dedup();
+        lines.concat()
     }
 
     // ---- §4.7 Hash Related Blank Node ----
@@ -932,6 +1040,37 @@ fn relabel_graph(graph: &GraphName, reference: &str) -> GraphName {
         GraphName::BlankNode(b) => GraphName::BlankNode(special_label(b.as_str(), reference)),
         other => other.clone(),
     }
+}
+
+/// Rewrites every bnode of `quad` (recursing through triple terms) with `f`.
+fn map_bnodes_quad(quad: &Quad, f: &dyn Fn(&str) -> BlankNode) -> Quad {
+    fn subject(s: &NamedOrBlankNode, f: &dyn Fn(&str) -> BlankNode) -> NamedOrBlankNode {
+        match subject_bnode(s) {
+            Some(b) => NamedOrBlankNode::BlankNode(f(b.as_str())),
+            None => s.clone(),
+        }
+    }
+    fn term(t: &Term, f: &dyn Fn(&str) -> BlankNode) -> Term {
+        match t {
+            Term::BlankNode(b) => Term::BlankNode(f(b.as_str())),
+            Term::Triple(t) => Term::Triple(Box::new(Triple::new(
+                subject(&t.subject, f),
+                t.predicate.clone(),
+                term(&t.object, f),
+            ))),
+            other => other.clone(),
+        }
+    }
+    let graph = match &quad.graph_name {
+        GraphName::BlankNode(b) => GraphName::BlankNode(f(b.as_str())),
+        other => other.clone(),
+    };
+    Quad::new(
+        subject(&quad.subject, f),
+        quad.predicate.clone(),
+        term(&quad.object, f),
+        graph,
+    )
 }
 
 fn special_label(label: &str, reference: &str) -> BlankNode {
