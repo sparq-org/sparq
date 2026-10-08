@@ -40,7 +40,9 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Add the feature with `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features arrow`.
+Add the feature with `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features arrow`. Take `sparq-core` and `sparq-engine` from the same git source
+(`cargo add sparq-core sparq-engine --git https://github.com/sparq-org/sparq`): a crates.io
+engine's `QueryResult` is a different type from the one `sparq-arrow` accepts.
 
 ## Use Parquet bytes
 

@@ -363,7 +363,9 @@ The loaders desugar every RDF 1.2 quotation form (`<< :s :p :o >>`, `:s :p :o ~ 
 OWL 2 RL is **sound but silently incomplete for class classification**: it has no rule that reasons *through* an existential successor, so `--reason owl` over an EL ontology (GO/ChEBI/SNOMED-style) returns a `rdfs:subClassOf` hierarchy that **silently omits** subsumptions like `A ⊑ D` from `A ⊑ ∃r.B`, `B ⊑ C`, `∃r.C ⊑ D` (Krötzsch, ISWC 2012). **`sparq-reason-el`** closes that gap — a consequence-based classifier that normalizes the TBox (Baader–Brandt–Lutz forms) and saturates `S(C)`/`R(r)` under completion rules **CR1–CR5** to compute the **complete** subsumption lattice, then emits it into the **same** `(Dict, Vec<[Id;3]>)` seam as the RL `scm-*` rules (queryable by plain BGP eval).
 
 ```rust,ignore
-// Cargo.toml:  sparq-reason-el = { path = "../sparq-reason-el" }  // SEPARATE, publish = false; depending on it is the opt-in
+// Cargo.toml (publish = false: take sparq-core from the SAME git source, or Dict types differ):
+//   sparq-core      = { git = "https://github.com/sparq-org/sparq" }
+//   sparq-reason-el = { git = "https://github.com/sparq-org/sparq" }  // SEPARATE; depending on it is the opt-in
 use sparq_core::Graph;
 use sparq_reason_el::{classify_graph, Classifier};
 
@@ -400,7 +402,9 @@ let _ = h.report().thing_unsatisfiable; // global owl:Thing ⊑ owl:Nothing clas
 OWL 2 QL (DL-Lite_R) is **FO-rewritable**: instead of materializing a closure, you **rewrite the query** into a **union of conjunctive queries** (UCQ) that, evaluated over the **unmodified data**, returns the **certain answers** under the schema (Calvanese et al., *PerfectRef*, JAR 2007). **`sparq-reason-ql`** is a query-rewriter (not a materializer): it reuses the engine's query path — it emits a rewritten `spargebra::Query` (a `Union`-folded UCQ) that the planner/executor run unchanged.
 
 ```rust,ignore
-// Cargo.toml:  sparq-reason-ql = { path = "../sparq-reason-ql", features = ["experimental"] }  // publish = false
+// Cargo.toml (publish = false; take spargebra from the SAME git source so `Query` types match):
+//   sparq-reason-ql = { git = "https://github.com/sparq-org/sparq", features = ["experimental"] }
+//   spargebra       = { git = "https://github.com/sparq-org/sparq", package = "sparq-spargebra" }
 use sparq_reason_ql::{rewrite, rewrite_production, as_conjunctive_query, CqError};
 use spargebra::SparqlParser;
 

@@ -39,8 +39,8 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features arrow` (or, in this workspace,
-`cargo build -p sparq-arrow --features arrow`).
+`cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features arrow`, with `sparq-core` and
+`sparq-engine` from the same git source so `QueryResult` types match (in-workspace: `cargo build -p sparq-arrow --features arrow`).
 
 To serialize the same term-struct batch as an in-memory Parquet file, enable the
 default-OFF `parquet` feature:
