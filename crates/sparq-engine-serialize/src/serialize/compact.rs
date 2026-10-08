@@ -160,10 +160,26 @@ pub fn write_jsonld_compact(graphs: &[NamedGraph<'_>], context: &Json) -> String
 /// `context` without `@type` containers: oxjsonld (sparq's JSON-LD reader) cannot read a
 /// node object inside a type map, so such output is redone with plain properties.
 fn readable_type_maps(out: &Json, context: &Json) -> Option<Json> {
+    if !has_type_container(context) {
+        return None;
+    }
     let mut stripped = context.clone();
     let mut terms = Vec::new();
     strip_type_containers(&mut stripped, &mut terms);
     (!terms.is_empty() && holds_typed_nodes(out, &terms)).then_some(stripped)
+}
+
+/// Whether some `@container` in `ctx` (or its scoped contexts) names `@type`.
+fn has_type_container(ctx: &Json) -> bool {
+    match ctx {
+        Json::Arr(items) => items.iter().any(has_type_container),
+        Json::Obj(members) => members.iter().any(|(k, v)| match (k.as_str(), v) {
+            ("@container", Json::Str(c)) => c == "@type",
+            ("@container", Json::Arr(cs)) => cs.iter().any(|c| c.as_str() == Some("@type")),
+            _ => has_type_container(v),
+        }),
+        _ => false,
+    }
 }
 
 /// Removes `@type` from every term's `@container` in `ctx` (and its scoped contexts),
