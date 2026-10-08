@@ -213,8 +213,16 @@ mod unit {
         let a = graph("<https://p.ex/a> <https://p.ex/p> <https://p.ex/b> .\n<https://p.ex/c> <https://p.ex/p> <https://p.ex/d> .\n");
         let b = graph("<https://p.ex/c> <https://p.ex/p> <https://p.ex/d> .\n<https://p.ex/a> <https://p.ex/p> <https://p.ex/b> .\n");
         let c = graph("<https://p.ex/a> <https://p.ex/p> <https://p.ex/z> .\n<https://p.ex/c> <https://p.ex/p> <https://p.ex/d> .\n");
-        assert_eq!(TopicDigest::of(&a), TopicDigest::of(&b), "a graph is a set, not a list");
-        assert_ne!(TopicDigest::of(&a), TopicDigest::of(&c), "an object swap must be detected");
+        assert_eq!(
+            TopicDigest::of(&a),
+            TopicDigest::of(&b),
+            "a graph is a set, not a list"
+        );
+        assert_ne!(
+            TopicDigest::of(&a),
+            TopicDigest::of(&c),
+            "an object swap must be detected"
+        );
     }
 
     #[test]
@@ -228,7 +236,9 @@ mod unit {
     #[test]
     fn classify_maps_every_transition_to_its_as2_verb() {
         let empty = TopicDigest::of(&graph(""));
-        let one = TopicDigest::of(&graph("<https://p.ex/c/> <http://www.w3.org/ns/ldp#contains> <https://p.ex/c/x> .\n"));
+        let one = TopicDigest::of(&graph(
+            "<https://p.ex/c/> <http://www.w3.org/ns/ldp#contains> <https://p.ex/c/x> .\n",
+        ));
         let other = TopicDigest::of(&graph("<https://p.ex/c/> <https://p.ex/p> \"v\" .\n"));
 
         assert_eq!(classify(None, None), None);
@@ -236,8 +246,14 @@ mod unit {
         assert_eq!(classify(Some(&one), None), Some(ActivityType::Delete));
         assert_eq!(classify(Some(&one), Some(&one)), None);
         assert_eq!(classify(Some(&empty), Some(&one)), Some(ActivityType::Add));
-        assert_eq!(classify(Some(&one), Some(&empty)), Some(ActivityType::Remove));
-        assert_eq!(classify(Some(&empty), Some(&other)), Some(ActivityType::Update));
+        assert_eq!(
+            classify(Some(&one), Some(&empty)),
+            Some(ActivityType::Remove)
+        );
+        assert_eq!(
+            classify(Some(&empty), Some(&other)),
+            Some(ActivityType::Update)
+        );
     }
 
     #[test]
@@ -258,7 +274,11 @@ mod unit {
         assert_eq!(msg["params"]["activity"], "Update");
         // Load-bearing for §10: the payload carries the topic + verb and NOTHING else.
         let params = msg["params"].as_object().expect("params object");
-        assert_eq!(params.len(), 2, "notification payloads must stay content-free");
+        assert_eq!(
+            params.len(),
+            2,
+            "notification payloads must stay content-free"
+        );
         assert!(msg.get("result").is_none() && msg.get("id").is_none());
     }
 
@@ -267,7 +287,10 @@ mod unit {
         let mut subs = Subscriptions::default();
         assert!(subs.is_empty());
         assert!(subs.subscribe("https://p.ex/a"));
-        assert!(!subs.subscribe("https://p.ex/a"), "re-subscribe is idempotent");
+        assert!(
+            !subs.subscribe("https://p.ex/a"),
+            "re-subscribe is idempotent"
+        );
         assert!(!subs.is_empty());
         assert_eq!(subs.topics(), vec!["https://p.ex/a".to_string()]);
 
@@ -278,7 +301,10 @@ mod unit {
         assert!(subs.take().is_empty(), "draining twice yields nothing");
 
         assert!(subs.unsubscribe("https://p.ex/a"));
-        assert!(!subs.unsubscribe("https://p.ex/a"), "unsubscribe is idempotent");
+        assert!(
+            !subs.unsubscribe("https://p.ex/a"),
+            "unsubscribe is idempotent"
+        );
         assert!(subs.is_empty());
     }
 }

@@ -136,7 +136,11 @@ fn iri_equality_filter_answers_correctly_through_the_mcp_query_tool() {
     );
     assert!(reply.contains("http://ex/a"), "row a expected: {}", reply);
     assert!(reply.contains("http://ex/c"), "row c expected: {}", reply);
-    assert!(!reply.contains("http://ex/b"), "row b must be filtered out: {}", reply);
+    assert!(
+        !reply.contains("http://ex/b"),
+        "row b must be filtered out: {}",
+        reply
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -178,8 +182,16 @@ fn dp_planner_forwarded_and_default_on_across_the_mcp_tool_path() {
         dp_planned, greedy,
         "the DPccp planner only reorders joins — it must never change a tool's answer"
     );
-    assert!(dp_planned.contains("Acme"), "org name Acme expected: {}", dp_planned);
-    assert!(dp_planned.contains("Umbrella"), "org name Umbrella expected: {}", dp_planned);
+    assert!(
+        dp_planned.contains("Acme"),
+        "org name Acme expected: {}",
+        dp_planned
+    );
+    assert!(
+        dp_planned.contains("Umbrella"),
+        "org name Umbrella expected: {}",
+        dp_planned
+    );
 }
 
 /// The scoped opt-out is not sticky: after a `without_dp_planner` scope ends the next tool
@@ -193,7 +205,10 @@ fn dp_planner_opt_out_scope_does_not_leak_into_later_tool_calls() {
     let _ = sparq_engine::without_dp_planner(|| tool_call_query(JOIN_FIXTURE, JOIN_QUERY));
     let after = tool_call_query(JOIN_FIXTURE, JOIN_QUERY);
 
-    assert_eq!(before, after, "the opt-out scope must restore the previous install state");
+    assert_eq!(
+        before, after,
+        "the opt-out scope must restore the previous install state"
+    );
     assert!(after.contains("Acme"), "org name Acme expected: {}", after);
 }
 
@@ -210,7 +225,9 @@ fn tool_call_query(fixture: &str, sparql: &str) -> String {
         "params": { "name": "query", "arguments": { "sparql": sparql } },
     })
     .to_string();
-    let reply = server.handle_message(&request).expect("tools/call must produce a response");
+    let reply = server
+        .handle_message(&request)
+        .expect("tools/call must produce a response");
     assert!(
         !reply.contains("\"isError\":true"),
         "the query tool must succeed: {}",

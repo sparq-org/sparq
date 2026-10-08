@@ -44,7 +44,9 @@ fn note_update_template() -> Template {
     Template::new(
         "http://ex/tpl/add-note",
         "INSERT { <http://ex/m> <http://ex/note> ?note } WHERE { }",
-        [("note".to_string(), ParamType::String)].into_iter().collect(),
+        [("note".to_string(), ParamType::String)]
+            .into_iter()
+            .collect(),
         None,
     )
     .unwrap()
@@ -75,7 +77,10 @@ fn tool_call(server: &mut McpServer, name: &str, args: Value) -> Value {
 fn tool_text(resp: &Value) -> (String, bool) {
     let result = &resp["result"];
     (
-        result["content"][0]["text"].as_str().unwrap_or("").to_string(),
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string(),
         result["isError"].as_bool().unwrap_or(false),
     )
 }
@@ -121,7 +126,10 @@ fn template_list_grounds_invocation() {
     let defs: Value = serde_json::from_str(&text).unwrap();
     let arr = defs.as_array().unwrap();
     assert_eq!(arr.len(), 2);
-    let friends = arr.iter().find(|d| d["name"] == "http://ex/tpl/friends").unwrap();
+    let friends = arr
+        .iter()
+        .find(|d| d["name"] == "http://ex/tpl/friends")
+        .unwrap();
     assert_eq!(friends["kind"], "query");
     assert_eq!(friends["parameters"], json!({"who": "iri"}));
 }
@@ -146,7 +154,10 @@ fn template_invoke_binds_typed_params_result_equivalent() {
         json!({"sparql": "SELECT ?f WHERE { <http://ex/alice> <http://ex/knows> ?f }"}),
     ));
     let direct: Value = serde_json::from_str(&direct).unwrap();
-    assert_eq!(results["results"]["bindings"], direct["results"]["bindings"]);
+    assert_eq!(
+        results["results"]["bindings"],
+        direct["results"]["bindings"]
+    );
 }
 
 #[test]
@@ -173,7 +184,10 @@ fn template_invoke_fail_closed_arguments() {
         "template_invoke",
         json!({"name": "http://ex/tpl/friends"}),
     ));
-    assert!(is_err && text.contains("missing required parameter"), "{text}");
+    assert!(
+        is_err && text.contains("missing required parameter"),
+        "{text}"
+    );
     // Mistyped parameter (a number is not an IRI string — no coercion).
     let (text, is_err) = tool_text(&tool_call(
         &mut server,
@@ -253,7 +267,10 @@ fn text_search_ranks_and_filters() {
     assert!(!is_err, "{text}");
     let out: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(out["total_matches"], 1);
-    assert!(out["hits"][0]["literal"].as_str().unwrap().contains("quick brown fox"));
+    assert!(out["hits"][0]["literal"]
+        .as_str()
+        .unwrap()
+        .contains("quick brown fox"));
     assert!(out["hits"][0]["score"].as_f64().unwrap() > 0.0);
     // ANY semantics: fox OR dog matches both bios.
     let (text, _) = tool_text(&tool_call(
@@ -317,5 +334,8 @@ fn text_search_observes_updates_via_reconcile() {
     ));
     let out: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(out["total_matches"], 1);
-    assert!(out["hits"][0]["literal"].as_str().unwrap().contains("zebra"));
+    assert!(out["hits"][0]["literal"]
+        .as_str()
+        .unwrap()
+        .contains("zebra"));
 }

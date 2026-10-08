@@ -14,6 +14,7 @@
 //! the `server` feature is not required to use them.
 
 use oxrdf::Term;
+use std::io::Write;
 use sparq_engine::QueryResult;
 
 /// SPARQL Results XML media type.
@@ -32,85 +33,161 @@ const XSD_DOUBLE: &str = "http://www.w3.org/2001/XMLSchema#double";
 const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
 
 // ---------------------------------------------------------------------------
+// Streaming output
+// ---------------------------------------------------------------------------
+//
+// Every serialiser below writes straight into an `io::Write`: fixed markup is written as
+// static strings and term text as borrowed slices of the term itself, with escapes emitted
+// between unescaped runs. Nothing renders a row (or even a term) into an owned buffer, so a
+// sink that forwards bytes as they arrive (the HTTP server's chunked body) holds at most its
+// own chunk, however large one literal is. The `select_to_*` String forms are the same
+// writers driven into a `Vec<u8>`, which keeps the two byte-identical by construction.
+
+type Res = std::io::Result<()>;
+
+/// Runs a writer into memory. The writers only emit UTF-8 (static ASCII markup plus slices
+/// of `&str` cut at ASCII boundaries), and writing to a `Vec` cannot fail.
+fn render(cap: usize, f: impl FnOnce(&mut Vec<u8>) -> Res) -> String {
+    let mut v = Vec::with_capacity(cap);
+    f(&mut v).expect("writing to a Vec cannot fail");
+    String::from_utf8(v).expect("results writers emit UTF-8")
+}
+
+/// Writes `s`, replacing each ASCII byte that `esc` maps to `Some(replacement)`. Unescaped
+/// runs go out as borrowed slices; the split points are ASCII, so every slice is valid UTF-8.
+fn write_escaped<W: Write + ?Sized>(w: &mut W, s: &str, esc: impl Fn(u8) -> Option<&'static str>) -> Res {
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        if let Some(rep) = esc(b) {
+            if start < i {
+                w.write_all(&bytes[start..i])?;
+            }
+            w.write_all(rep.as_bytes())?;
+            start = i + 1;
+        }
+    }
+    if start < bytes.len() {
+        w.write_all(&bytes[start..])?;
+    }
+    Ok(())
+}
+
+/// A `fmt::Write` that forwards to an `io::Write`, applying an escape map, and keeps the
+/// first I/O error. Lets `Display` output (RDF 1.2 triple terms) stream without a `String`.
+struct FmtEscape<'a, W: Write + ?Sized, F: Fn(u8) -> Option<&'static str>> {
+    w: &'a mut W,
+    esc: F,
+    err: Option<std::io::Error>,
+}
+
+impl<W: Write + ?Sized, F: Fn(u8) -> Option<&'static str>> std::fmt::Write for FmtEscape<'_, W, F> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        write_escaped(self.w, s, &self.esc).map_err(|e| {
+            self.err = Some(e);
+            std::fmt::Error
+        })
+    }
+}
+
+/// Streams `t`'s `Display` form through `esc` into `w`.
+fn write_display<W: Write + ?Sized>(
+    w: &mut W,
+    t: &dyn std::fmt::Display,
+    esc: impl Fn(u8) -> Option<&'static str>,
+) -> Res {
+    let mut f = FmtEscape { w, esc, err: None };
+    match std::fmt::write(&mut f, format_args!("{t}")) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(f.err.unwrap_or_else(|| std::io::Error::other("term formatting failed"))),
+    }
+}
+
+fn no_escape(_: u8) -> Option<&'static str> {
+    None
+}
+
+// ---------------------------------------------------------------------------
 // SELECT → XML  (https://www.w3.org/TR/rdf-sparql-XMLres/)
 // ---------------------------------------------------------------------------
 
 /// Serialises a SELECT result to the SPARQL Query Results XML Format.
 pub fn select_to_xml(r: &QueryResult) -> String {
-    let mut s = String::with_capacity(128 + r.rows.len() * 48);
-    s.push_str("<?xml version=\"1.0\"?>\n");
-    s.push_str("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">\n");
-    s.push_str("  <head>\n");
-    for v in &r.vars {
-        s.push_str("    <variable name=\"");
-        xml_attr_escape(&mut s, v.as_str());
-        s.push_str("\"/>\n");
-    }
-    s.push_str("  </head>\n");
-    s.push_str("  <results>\n");
-    for row in &r.rows {
-        s.push_str("    <result>\n");
-        for (vi, cell) in row.iter().enumerate() {
-            if let Some(term) = cell {
-                s.push_str("      <binding name=\"");
-                xml_attr_escape(&mut s, r.vars[vi].as_str());
-                s.push_str("\">");
-                term_to_xml(&mut s, term);
-                s.push_str("</binding>\n");
-            }
-        }
-        s.push_str("    </result>\n");
-    }
-    s.push_str("  </results>\n");
-    s.push_str("</sparql>\n");
-    s
+    render(128 + r.rows.len() * 48, |v| write_select_xml(r, v))
 }
 
-fn term_to_xml(s: &mut String, t: &Term) {
+/// [`select_to_xml`] written incrementally to `w`, byte-identical to the single-string form.
+///
+/// Markup and term text are written straight to `w` (no per-row or per-term buffer), so a
+/// caller that hands `w`'s bytes on as they arrive (the HTTP server's streamed body) never
+/// holds the document, a row, or one large literal in memory.
+pub fn write_select_xml<W: Write + ?Sized>(r: &QueryResult, w: &mut W) -> Res {
+    w.write_all(b"<?xml version=\"1.0\"?>\n<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">\n  <head>\n")?;
+    for v in &r.vars {
+        w.write_all(b"    <variable name=\"")?;
+        xml_attr_escape(w, v.as_str())?;
+        w.write_all(b"\"/>\n")?;
+    }
+    w.write_all(b"  </head>\n  <results>\n")?;
+    for row in &r.rows {
+        w.write_all(b"    <result>\n")?;
+        for (vi, cell) in row.iter().enumerate() {
+            if let Some(term) = cell {
+                w.write_all(b"      <binding name=\"")?;
+                xml_attr_escape(w, r.vars[vi].as_str())?;
+                w.write_all(b"\">")?;
+                term_to_xml(w, term)?;
+                w.write_all(b"</binding>\n")?;
+            }
+        }
+        w.write_all(b"    </result>\n")?;
+    }
+    w.write_all(b"  </results>\n</sparql>\n")
+}
+
+fn term_to_xml<W: Write + ?Sized>(w: &mut W, t: &Term) -> Res {
     match t {
         Term::NamedNode(n) => {
-            s.push_str("<uri>");
-            xml_text_escape(s, n.as_str());
-            s.push_str("</uri>");
+            w.write_all(b"<uri>")?;
+            xml_text_escape(w, n.as_str())?;
+            w.write_all(b"</uri>")
         }
         Term::BlankNode(b) => {
-            s.push_str("<bnode>");
-            xml_text_escape(s, b.as_str());
-            s.push_str("</bnode>");
+            w.write_all(b"<bnode>")?;
+            xml_text_escape(w, b.as_str())?;
+            w.write_all(b"</bnode>")
         }
         Term::Literal(l) => {
             if let Some(lang) = l.language() {
-                s.push_str("<literal xml:lang=\"");
-                xml_attr_escape(s, lang);
-                s.push_str("\">");
-                xml_text_escape(s, l.value());
-                s.push_str("</literal>");
+                w.write_all(b"<literal xml:lang=\"")?;
+                xml_attr_escape(w, lang)?;
+                w.write_all(b"\">")?;
             } else {
                 let dt = l.datatype();
                 if dt.as_str() != XSD_STRING {
-                    s.push_str("<literal datatype=\"");
-                    xml_attr_escape(s, dt.as_str());
-                    s.push_str("\">");
+                    w.write_all(b"<literal datatype=\"")?;
+                    xml_attr_escape(w, dt.as_str())?;
+                    w.write_all(b"\">")?;
                 } else {
-                    s.push_str("<literal>");
+                    w.write_all(b"<literal>")?;
                 }
-                xml_text_escape(s, l.value());
-                s.push_str("</literal>");
             }
+            xml_text_escape(w, l.value())?;
+            w.write_all(b"</literal>")
         }
         // RDF 1.2 triple term — the SPARQL 1.2 XML results encoding:
         // <triple><subject>…</subject><predicate>…</predicate><object>…</object></triple>.
         Term::Triple(t) => {
-            s.push_str("<triple><subject>");
+            w.write_all(b"<triple><subject>")?;
             match &t.subject {
-                oxrdf::NamedOrBlankNode::NamedNode(n) => term_to_xml(s, &Term::NamedNode(n.clone())),
-                oxrdf::NamedOrBlankNode::BlankNode(b) => term_to_xml(s, &Term::BlankNode(b.clone())),
+                oxrdf::NamedOrBlankNode::NamedNode(n) => term_to_xml(w, &Term::NamedNode(n.clone()))?,
+                oxrdf::NamedOrBlankNode::BlankNode(b) => term_to_xml(w, &Term::BlankNode(b.clone()))?,
             }
-            s.push_str("</subject><predicate>");
-            term_to_xml(s, &Term::NamedNode(t.predicate.clone()));
-            s.push_str("</predicate><object>");
-            term_to_xml(s, &t.object);
-            s.push_str("</object></triple>");
+            w.write_all(b"</subject><predicate>")?;
+            term_to_xml(w, &Term::NamedNode(t.predicate.clone()))?;
+            w.write_all(b"</predicate><object>")?;
+            term_to_xml(w, &t.object)?;
+            w.write_all(b"</object></triple>")
         }
     }
 }
@@ -139,113 +216,31 @@ pub fn ask_to_json(value: bool) -> String {
 /// NO datatype/lang), unbound = empty; CSV-quote a field iff it contains `"`, `,`, CR or LF;
 /// line terminator is CRLF.
 pub fn select_to_csv(r: &QueryResult) -> String {
-    let mut s = String::with_capacity(64 + r.rows.len() * 32);
-    for (i, v) in r.vars.iter().enumerate() {
-        if i > 0 {
-            s.push(',');
-        }
-        csv_field(&mut s, v.as_str());
-    }
-    s.push_str("\r\n");
-    for row in &r.rows {
-        for (vi, cell) in row.iter().enumerate() {
-            if vi > 0 {
-                s.push(',');
-            }
-            if let Some(term) = cell {
-                let mut buf = String::new();
-                term_lexical_csv(&mut buf, term);
-                csv_field(&mut s, &buf);
-            }
-        }
-        s.push_str("\r\n");
-    }
-    s
+    render(64 + r.rows.len() * 32, |v| write_select_csv(r, v))
 }
 
-/// Flush threshold for [`select_to_csv_chunks`] / [`select_to_tsv_chunks`]: mirrors the
-/// engine's `JSON_CHUNK_BYTES` constant (64 KiB) so all three SELECT formats share the same
-/// chunking granularity — large enough that per-chunk overhead is negligible, small enough
-/// that a streamed body never holds a second whole-result copy in memory. [SONNET-4.6]
-const CSV_TSV_CHUNK_BYTES: usize = 64 * 1024;
-
-/// [`select_to_csv`] as an ordered sequence of string chunks whose concatenation is
-/// **byte-identical** to the single-string result.
-///
-/// Row-oriented chunking: rows are accumulated into the current chunk until the chunk
-/// exceeds `CSV_TSV_CHUNK_BYTES`, at which point the chunk is flushed and a new one
-/// starts. The HTTP server streams these via `chunked_response` (the same path as JSON /
-/// T16) so peak memory never holds a second full-result copy. [SONNET-4.6]
-pub fn select_to_csv_chunks(r: &QueryResult) -> Vec<String> {
-    let mut chunks: Vec<String> = Vec::new();
-    let mut current = String::new();
-    // Header row (same logic as select_to_csv).
+/// [`select_to_csv`] written incrementally to `w`, byte-identical to the single-string form.
+/// Holds no row or term buffer, like [`write_select_xml`].
+pub fn write_select_csv<W: Write + ?Sized>(r: &QueryResult, w: &mut W) -> Res {
     for (i, v) in r.vars.iter().enumerate() {
         if i > 0 {
-            current.push(',');
+            w.write_all(b",")?;
         }
-        csv_field(&mut current, v.as_str());
+        csv_field(w, v.as_str())?;
     }
-    current.push_str("\r\n");
-    // Data rows — flush when the current chunk reaches the threshold.
+    w.write_all(b"\r\n")?;
     for row in &r.rows {
         for (vi, cell) in row.iter().enumerate() {
             if vi > 0 {
-                current.push(',');
+                w.write_all(b",")?;
             }
             if let Some(term) = cell {
-                let mut buf = String::new();
-                term_lexical_csv(&mut buf, term);
-                csv_field(&mut current, &buf);
+                term_to_csv(w, term)?;
             }
         }
-        current.push_str("\r\n");
-        if current.len() >= CSV_TSV_CHUNK_BYTES {
-            chunks.push(std::mem::take(&mut current));
-        }
+        w.write_all(b"\r\n")?;
     }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
-}
-
-/// [`select_to_tsv`] as an ordered sequence of string chunks whose concatenation is
-/// **byte-identical** to the single-string result.
-///
-/// Row-oriented chunking: mirrors [`select_to_csv_chunks`] — rows are accumulated until
-/// the current chunk exceeds `CSV_TSV_CHUNK_BYTES`. [SONNET-4.6]
-pub fn select_to_tsv_chunks(r: &QueryResult) -> Vec<String> {
-    let mut chunks: Vec<String> = Vec::new();
-    let mut current = String::new();
-    // Header row (same logic as select_to_tsv).
-    for (i, v) in r.vars.iter().enumerate() {
-        if i > 0 {
-            current.push('\t');
-        }
-        current.push('?');
-        current.push_str(v.as_str());
-    }
-    current.push('\n');
-    // Data rows — flush when the current chunk reaches the threshold.
-    for row in &r.rows {
-        for (vi, cell) in row.iter().enumerate() {
-            if vi > 0 {
-                current.push('\t');
-            }
-            if let Some(term) = cell {
-                term_to_tsv(&mut current, term);
-            }
-        }
-        current.push('\n');
-        if current.len() >= CSV_TSV_CHUNK_BYTES {
-            chunks.push(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
+    Ok(())
 }
 
 /// Serialises a SELECT result to SPARQL Results TSV.
@@ -255,57 +250,105 @@ pub fn select_to_tsv_chunks(r: &QueryResult) -> Vec<String> {
 /// `_:label`); TAB/newline/CR/`"`/`\` inside literals are escaped; unbound = empty;
 /// fields are TAB-separated, rows LF-terminated.
 pub fn select_to_tsv(r: &QueryResult) -> String {
-    let mut s = String::with_capacity(64 + r.rows.len() * 32);
+    render(64 + r.rows.len() * 32, |v| write_select_tsv(r, v))
+}
+
+/// [`select_to_tsv`] written incrementally to `w`, byte-identical to the single-string form.
+/// Holds no row or term buffer, like [`write_select_xml`].
+pub fn write_select_tsv<W: Write + ?Sized>(r: &QueryResult, w: &mut W) -> Res {
     for (i, v) in r.vars.iter().enumerate() {
         if i > 0 {
-            s.push('\t');
+            w.write_all(b"\t")?;
         }
-        s.push('?');
-        s.push_str(v.as_str());
+        w.write_all(b"?")?;
+        w.write_all(v.as_str().as_bytes())?;
     }
-    s.push('\n');
+    w.write_all(b"\n")?;
     for row in &r.rows {
         for (vi, cell) in row.iter().enumerate() {
             if vi > 0 {
-                s.push('\t');
+                w.write_all(b"\t")?;
             }
             if let Some(term) = cell {
-                term_to_tsv(&mut s, term);
+                term_to_tsv(w, term)?;
             }
         }
-        s.push('\n');
+        w.write_all(b"\n")?;
     }
-    s
+    Ok(())
 }
 
-/// CSV value lexical form: IRI verbatim, bnode `_:label`, literal = its string value only.
-fn term_lexical_csv(s: &mut String, t: &Term) {
-    match t {
-        Term::NamedNode(n) => s.push_str(n.as_str()),
-        Term::BlankNode(b) => {
-            s.push_str("_:");
-            s.push_str(b.as_str());
-        }
-        Term::Literal(l) => s.push_str(l.value()),
-        other => s.push_str(&other.to_string()),
-    }
+/// A CSV field needs RFC 4180 quoting iff it contains `"`, `,`, CR or LF.
+fn csv_needs_quote(b: u8) -> bool {
+    matches!(b, b'"' | b',' | b'\n' | b'\r')
+}
+
+/// Inside a quoted CSV field `"` is doubled; everything else is verbatim.
+fn csv_quoted_escape(b: u8) -> Option<&'static str> {
+    (b == b'"').then_some("\"\"")
 }
 
 /// Writes one CSV field, quoting per RFC 4180 only when required.
-fn csv_field(out: &mut String, v: &str) {
-    let needs_quote = v.bytes().any(|b| matches!(b, b'"' | b',' | b'\n' | b'\r'));
-    if !needs_quote {
-        out.push_str(v);
-        return;
+fn csv_field<W: Write + ?Sized>(w: &mut W, v: &str) -> Res {
+    if !v.bytes().any(csv_needs_quote) {
+        return w.write_all(v.as_bytes());
     }
-    out.push('"');
-    for ch in v.chars() {
-        if ch == '"' {
-            out.push('"'); // doubled per RFC 4180
+    w.write_all(b"\"")?;
+    write_escaped(w, v, csv_quoted_escape)?;
+    w.write_all(b"\"")
+}
+
+/// CSV value lexical form: IRI verbatim, bnode `_:label`, literal = its string value only,
+/// each quoted by [`csv_field`]'s rule.
+fn term_to_csv<W: Write + ?Sized>(w: &mut W, t: &Term) -> Res {
+    match t {
+        Term::NamedNode(n) => csv_field(w, n.as_str()),
+        Term::BlankNode(b) => {
+            // `_:` never needs quoting, so the field's quoting depends on the label alone.
+            let quote = b.as_str().bytes().any(csv_needs_quote);
+            if quote {
+                w.write_all(b"\"")?;
+            }
+            w.write_all(b"_:")?;
+            write_escaped(w, b.as_str(), csv_quoted_escape)?;
+            if quote {
+                w.write_all(b"\"")?;
+            }
+            Ok(())
         }
-        out.push(ch);
+        Term::Literal(l) => csv_field(w, l.value()),
+        other => {
+            // Triple term: its `Display` form, quoted when that form needs it. Decided by a
+            // streaming pre-scan so the form is never materialised.
+            let quote = display_has(other, csv_needs_quote);
+            if !quote {
+                return write_display(w, other, no_escape);
+            }
+            w.write_all(b"\"")?;
+            write_display(w, other, csv_quoted_escape)?;
+            w.write_all(b"\"")
+        }
     }
-    out.push('"');
+}
+
+/// Whether `t`'s `Display` form contains a byte matching `pred`, without building it.
+fn display_has(t: &dyn std::fmt::Display, pred: fn(u8) -> bool) -> bool {
+    struct Scan {
+        pred: fn(u8) -> bool,
+        hit: bool,
+    }
+    impl std::fmt::Write for Scan {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            if s.bytes().any(self.pred) {
+                self.hit = true;
+                return Err(std::fmt::Error); // stop formatting early
+            }
+            Ok(())
+        }
+    }
+    let mut scan = Scan { pred, hit: false };
+    let _ = std::fmt::write(&mut scan, format_args!("{t}"));
+    scan.hit
 }
 
 /// TSV value: full SPARQL term syntax with TSV escaping inside literals.
@@ -322,16 +365,16 @@ fn csv_field(out: &mut String, v: &str) {
 /// too, so they abbreviate canonically). `xsd:string` and `rdf:langString` keep the
 /// implicit-datatype short forms; every other datatype (incl. integer/decimal SUBTYPES like
 /// `xsd:negativeInteger`, and custom datatypes) is quoted + typed.
-fn term_to_tsv(s: &mut String, t: &Term) {
+fn term_to_tsv<W: Write + ?Sized>(w: &mut W, t: &Term) -> Res {
     match t {
         Term::NamedNode(n) => {
-            s.push('<');
-            s.push_str(n.as_str());
-            s.push('>');
+            w.write_all(b"<")?;
+            w.write_all(n.as_str().as_bytes())?;
+            w.write_all(b">")
         }
         Term::BlankNode(b) => {
-            s.push_str("_:");
-            s.push_str(b.as_str());
+            w.write_all(b"_:")?;
+            w.write_all(b.as_str().as_bytes())
         }
         Term::Literal(l) => {
             // Numeric / boolean abbreviation: write the bare lexical form when its datatype
@@ -348,26 +391,26 @@ fn term_to_tsv(s: &mut String, t: &Term) {
                 };
                 if bare {
                     // Tokens contain no TAB/newline/quote/backslash, so no escaping needed.
-                    s.push_str(value);
-                    return;
+                    return w.write_all(value.as_bytes());
                 }
             }
-            s.push('"');
-            tsv_escape(s, l.value());
-            s.push('"');
+            w.write_all(b"\"")?;
+            write_escaped(w, l.value(), tsv_escape)?;
+            w.write_all(b"\"")?;
             if let Some(lang) = l.language() {
-                s.push('@');
-                s.push_str(lang);
+                w.write_all(b"@")?;
+                w.write_all(lang.as_bytes())
             } else {
                 let dt = l.datatype();
                 if dt.as_str() != XSD_STRING {
-                    s.push_str("^^<");
-                    s.push_str(dt.as_str());
-                    s.push('>');
+                    w.write_all(b"^^<")?;
+                    w.write_all(dt.as_str().as_bytes())?;
+                    w.write_all(b">")?;
                 }
+                Ok(())
             }
         }
-        other => s.push_str(&other.to_string()),
+        other => write_display(w, other, no_escape),
     }
 }
 
@@ -433,17 +476,15 @@ fn strip_sign(value: &[u8]) -> &[u8] {
     }
 }
 
-/// Escapes a literal lexical form for the quoted TSV string production.
-fn tsv_escape(out: &mut String, v: &str) {
-    for ch in v.chars() {
-        match ch {
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            _ => out.push(ch),
-        }
+/// Escape map for a literal lexical form in the quoted TSV string production.
+fn tsv_escape(b: u8) -> Option<&'static str> {
+    match b {
+        b'\t' => Some("\\t"),
+        b'\n' => Some("\\n"),
+        b'\r' => Some("\\r"),
+        b'"' => Some("\\\""),
+        b'\\' => Some("\\\\"),
+        _ => None,
     }
 }
 
@@ -451,7 +492,7 @@ fn tsv_escape(out: &mut String, v: &str) {
 // XML escaping
 // ---------------------------------------------------------------------------
 
-fn xml_text_escape(out: &mut String, s: &str) {
+fn xml_text_escape<W: Write + ?Sized>(w: &mut W, s: &str) -> Res {
     // [OPUS-4.8] Leading/trailing whitespace in element TEXT content is silently dropped by
     // any XML parser that trims text events (the default for quick-xml / the `sparesults`
     // reference parser, and most SAX-style consumers) — so a literal `"  pad  "` written as
@@ -465,54 +506,46 @@ fn xml_text_escape(out: &mut String, s: &str) {
     let trimmed = s.trim_matches(XML_BOUND_WS);
     if trimmed.len() == s.len() {
         // No boundary whitespace — the common path.
-        xml_text_escape_body(out, s);
-        return;
+        return write_escaped(w, s, xml_text_body_escape);
     }
     let prefix_len = s.len() - s.trim_start_matches(XML_BOUND_WS).len();
-    for ch in s[..prefix_len].chars() {
-        push_ws_charref(out, ch);
-    }
-    xml_text_escape_body(out, trimmed);
-    for ch in s[prefix_len + trimmed.len()..].chars() {
-        push_ws_charref(out, ch);
-    }
+    write_escaped(w, &s[..prefix_len], ws_charref)?;
+    write_escaped(w, trimmed, xml_text_body_escape)?;
+    write_escaped(w, &s[prefix_len + trimmed.len()..], ws_charref)
 }
 
 /// Escapes the XML-significant characters (`&`, `<`, `>`) in text content; boundary
 /// whitespace handling is done by [`xml_text_escape`]. [OPUS-4.8]
-fn xml_text_escape_body(out: &mut String, s: &str) {
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            _ => out.push(ch),
-        }
+fn xml_text_body_escape(b: u8) -> Option<&'static str> {
+    match b {
+        b'&' => Some("&amp;"),
+        b'<' => Some("&lt;"),
+        b'>' => Some("&gt;"),
+        _ => None,
     }
 }
 
-/// Writes a whitespace character as its XML numeric character reference. [OPUS-4.8]
-fn push_ws_charref(out: &mut String, ch: char) {
-    match ch {
-        '\t' => out.push_str("&#9;"),
-        '\n' => out.push_str("&#10;"),
-        '\r' => out.push_str("&#13;"),
-        ' ' => out.push_str("&#32;"),
-        // `trim_matches` above strips only these four, so nothing else reaches here.
-        _ => out.push(ch),
+/// A boundary whitespace character as its XML numeric character reference. [OPUS-4.8]
+/// `trim_matches` in [`xml_text_escape`] strips only these four, so the boundary slices it
+/// passes here contain nothing else.
+fn ws_charref(b: u8) -> Option<&'static str> {
+    match b {
+        b'\t' => Some("&#9;"),
+        b'\n' => Some("&#10;"),
+        b'\r' => Some("&#13;"),
+        b' ' => Some("&#32;"),
+        _ => None,
     }
 }
 
-fn xml_attr_escape(out: &mut String, s: &str) {
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            _ => out.push(ch),
-        }
-    }
+fn xml_attr_escape<W: Write + ?Sized>(w: &mut W, s: &str) -> Res {
+    write_escaped(w, s, |b| match b {
+        b'&' => Some("&amp;"),
+        b'<' => Some("&lt;"),
+        b'>' => Some("&gt;"),
+        b'"' => Some("&quot;"),
+        _ => None,
+    })
 }
 
 #[cfg(test)]
@@ -558,7 +591,7 @@ mod tests {
         // [OPUS-4.8] sq-4vao: a literal value containing XML-significant characters must be
         // escaped in the `<literal>` text body, NOT emitted verbatim — otherwise a literal like
         // `<script>` would break the results document (and be an injection vector). Exercises the
-        // `<` and `>` body arms (the `&` arm too) of `xml_text_escape_body`.
+        // `<` and `>` body arms (the `&` arm too) of `xml_text_body_escape`.
         let g = Graph::load_str(
             "@prefix ex: <http://ex/> . ex:a ex:v \"a < b & c > d\" .",
             "turtle",
@@ -787,94 +820,69 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Chunked serialiser tests (sq-7d3dj.12) [SONNET-4.6]
+    // Row-streaming writer tests: each `write_select_*` must be byte-identical to its
+    // single-string form, since the HTTP server streams the writer and HEAD uses the string.
     // -----------------------------------------------------------------------
 
-    /// select_to_csv_chunks concatenates to exactly select_to_csv for a typical small result.
-    #[test]
-    fn csv_chunks_byte_identical_small() {
-        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a WHERE { ?s ex:age ?a }").unwrap();
-        let single = select_to_csv(&r);
-        let chunks = select_to_csv_chunks(&r);
-        assert!(!chunks.is_empty(), "chunks must not be empty");
-        assert_eq!(chunks.concat(), single, "CSV chunks must concatenate to the single-string form");
+    fn written(r: &QueryResult, f: fn(&QueryResult, &mut Vec<u8>) -> std::io::Result<()>) -> String {
+        let mut out = Vec::new();
+        f(r, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
     }
 
-    /// select_to_tsv_chunks concatenates to exactly select_to_tsv for a typical small result.
-    #[test]
-    fn tsv_chunks_byte_identical_small() {
-        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a WHERE { ?s ex:age ?a }").unwrap();
-        let single = select_to_tsv(&r);
-        let chunks = select_to_tsv_chunks(&r);
-        assert!(!chunks.is_empty(), "chunks must not be empty");
-        assert_eq!(chunks.concat(), single, "TSV chunks must concatenate to the single-string form");
+    fn assert_writers_match(r: &QueryResult) {
+        assert_eq!(written(r, write_select_csv), select_to_csv(r), "CSV writer must match the string form");
+        assert_eq!(written(r, write_select_tsv), select_to_tsv(r), "TSV writer must match the string form");
+        assert_eq!(written(r, write_select_xml), select_to_xml(r), "XML writer must match the string form");
     }
 
-    /// An empty result (zero rows) produces exactly the header row as a single chunk.
     #[test]
-    fn csv_chunks_empty_result() {
+    fn writers_byte_identical_small() {
+        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a ?n WHERE { ?s ex:age ?a OPTIONAL { ?s ex:name ?n } }")
+            .unwrap();
+        assert_writers_match(&r);
+    }
+
+    /// An empty result (zero rows) still writes the header (and the XML envelope).
+    #[test]
+    fn writers_byte_identical_empty_result() {
         let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s WHERE { ?s ex:age 9999 }").unwrap();
         assert!(r.rows.is_empty(), "expected no rows");
-        let single = select_to_csv(&r);
-        let chunks = select_to_csv_chunks(&r);
-        assert_eq!(chunks.concat(), single, "empty CSV must still produce a header chunk");
+        assert_writers_match(&r);
+        assert_eq!(written(&r, write_select_csv), "s\r\n");
     }
 
-    /// An empty result (zero rows) for TSV produces exactly the header row as a single chunk.
     #[test]
-    fn tsv_chunks_empty_result() {
-        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s WHERE { ?s ex:age 9999 }").unwrap();
-        assert!(r.rows.is_empty(), "expected no rows");
-        let single = select_to_tsv(&r);
-        let chunks = select_to_tsv_chunks(&r);
-        assert_eq!(chunks.concat(), single, "empty TSV must still produce a header chunk");
-    }
-
-    /// A large result (> CSV_TSV_CHUNK_BYTES bytes) produces multiple CSV chunks, all
-    /// concatenating byte-identically to the single-string form. [SONNET-4.6]
-    #[test]
-    fn csv_chunks_splits_large_result() {
-        // ~2 000 rows × ~80 bytes/row ≈ 160 KiB > 64 KiB chunk threshold.
+    fn writers_byte_identical_large_result_with_escapes() {
         let mut data = String::new();
         for i in 0..2000_u32 {
-            data.push_str(&format!(
-                "<http://ex/s{}> <http://ex/p> \"{:0>60}\" .\n",
-                i, i
-            ));
+            data.push_str(&format!("<http://ex/s{i}> <http://ex/p> \"a,\\\"b<&>\\t{i:0>60}\" .\n"));
         }
         let g = Graph::load_str(&data, "ntriples").unwrap();
         let r = query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
-        let single = select_to_csv(&r);
-        let chunks = select_to_csv_chunks(&r);
-        assert!(
-            chunks.len() > 1,
-            "expected multiple CSV chunks for a large result; got {} chunk(s)",
-            chunks.len()
-        );
-        assert_eq!(chunks.concat(), single, "large CSV chunk concat must equal single-string form");
+        assert_eq!(r.rows.len(), 2000);
+        assert_writers_match(&r);
     }
 
-    /// A large result (> CSV_TSV_CHUNK_BYTES bytes) produces multiple TSV chunks, all
-    /// concatenating byte-identically to the single-string form. [SONNET-4.6]
+    /// A failing sink stops the writer with that error instead of rendering the rest.
     #[test]
-    fn tsv_chunks_splits_large_result() {
-        let mut data = String::new();
-        for i in 0..2000_u32 {
-            data.push_str(&format!(
-                "<http://ex/s{}> <http://ex/p> \"{:0>60}\" .\n",
-                i, i
-            ));
+    fn writers_propagate_sink_errors() {
+        struct Refuse(usize);
+        impl Write for Refuse {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                self.0 += 1;
+                Err(std::io::Error::other("client gone"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
         }
-        let g = Graph::load_str(&data, "ntriples").unwrap();
-        let r = query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
-        let single = select_to_tsv(&r);
-        let chunks = select_to_tsv_chunks(&r);
-        assert!(
-            chunks.len() > 1,
-            "expected multiple TSV chunks for a large result; got {} chunk(s)",
-            chunks.len()
-        );
-        assert_eq!(chunks.concat(), single, "large TSV chunk concat must equal single-string form");
+        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a WHERE { ?s ex:age ?a }").unwrap();
+        for f in [write_select_csv::<Refuse>, write_select_tsv::<Refuse>, write_select_xml::<Refuse>] {
+            let mut w = Refuse(0);
+            assert!(f(&r, &mut w).is_err());
+            assert_eq!(w.0, 1, "the writer must stop at the first failed write");
+        }
     }
 
     /// Helper: true iff some line of `tsv` ends with `suffix` (TSV rows are LF-terminated).
@@ -895,25 +903,70 @@ mod tests {
     #[test]
     fn xml_attr_escape_encodes_xml_special_characters() {
         // Each XML special character must be encoded to its entity reference.
-        let mut s = String::new();
-        xml_attr_escape(&mut s, "&<>\"");
-        assert_eq!(s, "&amp;&lt;&gt;&quot;");
+        let mut s = Vec::new();
+        xml_attr_escape(&mut s, "&<>\"").unwrap();
+        assert_eq!(s, b"&amp;&lt;&gt;&quot;");
         // Plain characters pass through unchanged.
-        let mut t = String::new();
-        xml_attr_escape(&mut t, "hello");
-        assert_eq!(t, "hello");
+        let mut t = Vec::new();
+        xml_attr_escape(&mut t, "hello").unwrap();
+        assert_eq!(t, b"hello");
+    }
+
+    /// Records each write's size, so a test can see whether a writer handed the sink a
+    /// rendered row (one write as large as the term) or streamed it piece by piece.
+    #[derive(Default)]
+    struct WriteSizes {
+        bytes: Vec<u8>,
+        largest: usize,
+    }
+
+    impl Write for WriteSizes {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.largest = self.largest.max(buf.len());
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
-    fn push_ws_charref_encodes_tab_and_carriage_return() {
+    fn writers_stream_a_large_escaped_literal_without_buffering_it() {
+        // #6708 review: one literal far larger than the server's 64 KiB chunk, dense with
+        // characters every format escapes or quotes. The writers must emit it as a series of
+        // small writes (unescaped runs and escapes), never as one rendered row or term: the
+        // largest single write stays tiny although the literal's rendering is ~1 MB.
+        let unit = "ab&c<d>e\"f,g\th\\i";
+        let big = unit.repeat(64 * 1024 / unit.len() * 8);
+        let ttl = format!(
+            "<http://ex/s> <http://ex/p> \"  {}  \" .",
+            big.replace('\\', "\\\\").replace('"', "\\\"").replace('\t', "\\t")
+        );
+        let g = Graph::load_str(&ttl, "turtle").unwrap();
+        let r = query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
+        type Writer = fn(&QueryResult, &mut WriteSizes) -> std::io::Result<()>;
+        let cases: [(&str, Writer, String); 3] = [
+            ("csv", |r, w| write_select_csv(r, w), select_to_csv(&r)),
+            ("tsv", |r, w| write_select_tsv(r, w), select_to_tsv(&r)),
+            ("xml", |r, w| write_select_xml(r, w), select_to_xml(&r)),
+        ];
+        for (name, write, whole) in cases {
+            assert!(whole.len() > 8 * 64 * 1024, "{name}: fixture must dwarf a chunk");
+            assert!(whole.contains("ab&c<d>e") || whole.contains("ab&amp;c&lt;d&gt;e"), "{name}");
+            let mut w = WriteSizes::default();
+            write(&r, &mut w).unwrap();
+            assert_eq!(w.bytes, whole.as_bytes(), "{name}: streamed bytes must match");
+            assert!(w.largest <= 128, "{name}: largest single write was {} bytes", w.largest);
+        }
+    }
+
+    #[test]
+    fn ws_charref_encodes_tab_and_carriage_return() {
         // \t must map to &#9; (the XML numeric character reference for HT).
-        let mut s = String::new();
-        push_ws_charref(&mut s, '\t');
-        assert_eq!(s, "&#9;");
+        assert_eq!(ws_charref(b'\t'), Some("&#9;"));
         // \r must map to &#13; (CR — used in some OS line endings).
-        let mut r = String::new();
-        push_ws_charref(&mut r, '\r');
-        assert_eq!(r, "&#13;");
+        assert_eq!(ws_charref(b'\r'), Some("&#13;"));
     }
 
     #[test]
@@ -928,21 +981,12 @@ mod tests {
     }
 
     #[test]
-    fn push_ws_charref_covers_newline_space_and_passthrough_arms() {
+    fn ws_charref_covers_newline_space_and_passthrough_arms() {
         // [OPUS-4.8] sq-qcnn.37: cover the two arms not exercised by the tab/CR test above.
-        // '\n' must map to &#10;
-        let mut nl = String::new();
-        push_ws_charref(&mut nl, '\n');
-        assert_eq!(nl, "&#10;");
-        // ' ' must map to &#32;
-        let mut sp = String::new();
-        push_ws_charref(&mut sp, ' ');
-        assert_eq!(sp, "&#32;");
-        // Any other character passes through verbatim (the defensive `_` arm that the
-        // comment notes is unreachable in normal use but that the match must have).
-        let mut pt = String::new();
-        push_ws_charref(&mut pt, 'a');
-        assert_eq!(pt, "a");
+        assert_eq!(ws_charref(b'\n'), Some("&#10;"));
+        assert_eq!(ws_charref(b' '), Some("&#32;"));
+        // Any other byte passes through verbatim (the defensive `_` arm).
+        assert_eq!(ws_charref(b'a'), None);
     }
 
     #[test]
