@@ -48,6 +48,7 @@ use crate::loader::DocumentLoader;
 use crate::options::{JsonLdOptions, ProcessingMode};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
@@ -222,12 +223,12 @@ struct Env<'a> {
 }
 
 /// Identity of a derived context: the context reverted to, or the scoped context of
-/// `term` (looked up in `lookup`) applied onto `base`.
+/// `term` (looked up in `lookup`) applied onto `base`, both named by [`Ctx::id`].
 enum DerivedKey {
     Revert(Arc<ActiveContext>),
     Scoped {
-        lookup: *const Ctx,
-        base: *const Ctx,
+        lookup: u64,
+        base: u64,
         term: String,
         type_scoped: bool,
     },
@@ -248,39 +249,43 @@ impl DerivedKey {
 
 impl Env<'_> {
     /// The memoised context for `key`, building it with `build` on first use.
+    ///
+    /// Every build, cached or not, is charged `cost` (the definitions it will process)
+    /// against one per-call budget before it runs; past the budget compaction fails with
+    /// `context overflow`. A built context is cached while the cache holds fewer than
+    /// [`DERIVED_CAP`] contexts and [`RETAIN_BUDGET`] definitions; from the first one that
+    /// does not fit until the call ends, contexts are used and dropped, as without the
+    /// cache.
     fn derived(
         &self,
         key: DerivedKey,
+        cost: usize,
         build: impl FnOnce() -> Result<ActiveContext, JsonLdError>,
     ) -> Result<Rc<Ctx>, JsonLdError> {
-        let derived = &self.root.derived;
-        if let Some((_, c)) = derived.borrow().iter().find(|(k, _)| k.same(&key)) {
+        let root = self.root;
+        if let Some((_, c)) = root.derived.borrow().iter().find(|(k, _)| k.same(&key)) {
             return Ok(Rc::clone(c));
         }
-        let active = build()?;
-        let terms = active.term_count() + 1;
-        let retained = self.root.retained.get() + terms;
-        let cache = derived.borrow().len() < DERIVED_CAP && retained <= RETAIN_BUDGET;
-        if cache {
-            self.root.retained.set(retained);
-        } else {
-            // Past the cap a context is built per use and dropped, as without the cache,
-            // so a document with many distinct scoped contexts cannot make the list grow.
-            // Each rebuild costs a pass over the term table, so the rebuilds share a budget.
-            let spent = self.root.rebuilt.get() + terms;
-            if spent > REBUILD_BUDGET {
-                return Err(JsonLdError::with_detail(
-                    E::ContextOverflow,
-                    "scoped contexts exceed the compaction work budget",
-                ));
-            }
-            self.root.rebuilt.set(spent);
+        let work = root.work.get() + cost + 1;
+        if work > WORK_BUDGET {
+            return Err(JsonLdError::with_detail(
+                E::ContextOverflow,
+                "scoped contexts exceed the compaction work budget",
+            ));
         }
-        let ctx = Rc::new(Ctx::with_budget(active, Rc::clone(&self.root.memo_used)));
-        // The list only shrinks between calls, so a key never names a dropped context's
-        // address.
-        if cache {
-            derived.borrow_mut().push((key, Rc::clone(&ctx)));
+        root.work.set(work);
+        let active = build()?;
+        let retained = root.retained.get() + active.term_count() + 1;
+        let ctx = Rc::new(Ctx::with_budget(active, Rc::clone(&root.memo_used)));
+        // Once a context has not fitted, the cache takes no more until the next call.
+        let fits = !root.overflowed.get()
+            && root.derived.borrow().len() < DERIVED_CAP
+            && retained <= RETAIN_BUDGET;
+        if fits {
+            root.retained.set(retained);
+            root.derived.borrow_mut().push((key, Rc::clone(&ctx)));
+        } else {
+            root.overflowed.set(true);
         }
         Ok(ctx)
     }
@@ -298,17 +303,20 @@ struct Ctx {
     /// On the root context only: contexts derived mid-walk (step 4 reversion, step 5
     /// property-scoped and step 9 type-scoped contexts), memoised so each distinct switch
     /// builds its active and inverse context once rather than once per node (and, with
-    /// the root cached in [`LAST_ROOT`], once across calls). The entries own every
-    /// derived [`Ctx`] (and each reverted-to `Arc`) for the root's lifetime, so the
-    /// address keys can never be reused by another context.
+    /// the root cached in [`LAST_ROOT`], once across calls), within the limits in
+    /// [`Env::derived`]. Keys name contexts by id, so a dropped context is never mistaken
+    /// for a later one.
     derived: RefCell<Vec<(DerivedKey, Rc<Ctx>)>>,
     /// IRIs memoised across a root and its derived contexts, shared between them.
     memo_used: Rc<Cell<usize>>,
+    /// This context's identity in [`DerivedKey`]s; never reused.
+    id: u64,
     /// On the root context only: term definitions held by the cached derived contexts.
     retained: Cell<usize>,
-    /// On the root context only: term definitions processed this call for derived
-    /// contexts built past the cache's limits.
-    rebuilt: Cell<usize>,
+    /// On the root context only: the definitions charged this call (see [`Env::derived`]).
+    work: Cell<usize>,
+    /// On the root context only: whether a context this call did not fit in the cache.
+    overflowed: Cell<bool>,
 }
 
 impl Ctx {
@@ -325,8 +333,10 @@ impl Ctx {
             memo: RefCell::default(),
             derived: RefCell::default(),
             memo_used,
+            id: NEXT_CTX_ID.fetch_add(1, Ordering::Relaxed),
             retained: Cell::new(0),
-            rebuilt: Cell::new(0),
+            work: Cell::new(0),
+            overflowed: Cell::new(false),
         }
     }
 
@@ -335,14 +345,11 @@ impl Ctx {
     /// [`LAST_ROOT`] and node ids differ per document, so without this the memos would keep
     /// every IRI ever compacted on the thread. Within one call they hold up to
     /// [`MEMO_CALL_CAP`] IRIs, which keeps large documents fast, and each IRI holds at most
-    /// [`MEMO_SHAPES`] value shapes. The derived contexts are capped at [`DERIVED_CAP`] as
-    /// they are added and are dropped here once the list is full: their keys hold
-    /// addresses of contexts in the same list, so the list is only ever cleared whole, and
-    /// only between calls.
+    /// [`MEMO_SHAPES`] value shapes. The derived contexts are dropped here once the cache
+    /// has run out of room, and the per-call work budget is reset.
     fn trim_memos(&self) {
-        // A call that built contexts past the cache's limits found it full.
-        let full = self.rebuilt.replace(0) > 0;
-        if full || self.derived.borrow().len() >= DERIVED_CAP {
+        self.work.set(0);
+        if self.overflowed.replace(false) || self.derived.borrow().len() >= DERIVED_CAP {
             self.derived.borrow_mut().clear();
             self.retained.set(0);
             self.memo_used.set(self.memo.borrow().len());
@@ -411,12 +418,28 @@ const RETAIN_BUDGET: usize = 1 << 18;
 #[cfg(test)]
 const RETAIN_BUDGET: usize = 1 << 16;
 
-/// Most term definitions one call may process building derived contexts past the
-/// cache's limits; beyond it compaction fails with `context overflow`.
+/// Most definitions one call may charge building derived contexts; beyond it compaction
+/// fails with `context overflow`.
 #[cfg(not(test))]
-const REBUILD_BUDGET: usize = 1 << 22;
+const WORK_BUDGET: usize = 1 << 22;
 #[cfg(test)]
-const REBUILD_BUDGET: usize = 1 << 18;
+const WORK_BUDGET: usize = 1 << 18;
+
+/// The source of [`Ctx::id`]s.
+static NEXT_CTX_ID: AtomicU64 = AtomicU64::new(0);
+
+/// The definitions processing `local` onto `base` may touch: the base's term table, which
+/// is copied, and every member of `local`, including those a later `null` discards.
+fn scoped_cost(base: &ActiveContext, local: &Json) -> usize {
+    fn size(j: &Json) -> usize {
+        match j {
+            Json::Obj(m) => m.iter().map(|(_, v)| 1 + size(v)).sum(),
+            Json::Arr(a) => a.iter().map(|v| 1 + size(v)).sum(),
+            _ => 0,
+        }
+    }
+    base.term_count() + size(local)
+}
 
 /// One memoised IRI Compaction: (value shape, vocab, reverse, result).
 type MemoEntry = (OwnedShape, bool, bool, String);
@@ -581,6 +604,9 @@ fn compact_element(
     // step 8: reverse-property scope.
     let inside_reverse = active_property == Some("@reverse");
 
+    // Expansion finds @type entries here, after property-scoped contexts and before
+    // type-scoped ones.
+    let before_types = cur;
     let owned_t = type_ctx(type_scoped, cur, element, env)?;
     let cur: &Ctx = owned_t.as_deref().unwrap_or(cur);
 
@@ -631,9 +657,9 @@ fn compact_element(
                     other => other.clone(),
                 };
                 // Expansion finds @type entries before it applies their type-scoped
-                // contexts, so the key must read as @type under both contexts; an alias
-                // only the type-scoped context defines would turn the types into data.
-                let alias = type_scoped.ciri("@type", None, true, false);
+                // contexts, so the key must read as @type both then and after; an alias
+                // only one of those contexts defines would turn the types into data.
+                let alias = before_types.ciri("@type", None, true, false);
                 let alias = if cur.active.expand_iri(&alias, false, true).as_deref() == Some("@type") {
                     alias
                 } else {
@@ -911,7 +937,7 @@ fn node_ctx(
     if let Some(prev) = &ctx.active.previous_context {
         let single_id = matches!(element, Json::Obj(m) if m.len() == 1 && m[0].0 == "@id");
         if element.get("@value").is_none() && !single_id {
-            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), || {
+            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), prev.term_count(), || {
                 Ok((**prev).clone())
             })?);
         }
@@ -927,12 +953,12 @@ fn node_ctx(
             if let Some(local) = def.context() {
                 let base: &Ctx = owned.as_deref().unwrap_or(ctx);
                 let key = DerivedKey::Scoped {
-                    lookup: ctx,
-                    base,
+                    lookup: ctx.id,
+                    base: base.id,
                     term: ap.to_string(),
                     type_scoped: false,
                 };
-                owned = Some(env.derived(key, || {
+                owned = Some(env.derived(key, scoped_cost(&base.active, local), || {
                     base.active.process_scoped(
                         local,
                         def.base_url.as_deref(),
@@ -970,12 +996,12 @@ fn type_ctx(
                 if let Some(local) = def.context() {
                     let base: &Ctx = owned_t.as_deref().unwrap_or(cur);
                     let key = DerivedKey::Scoped {
-                        lookup: type_scoped,
-                        base,
+                        lookup: type_scoped.id,
+                        base: base.id,
                         term: term.clone(),
                         type_scoped: true,
                     };
-                    owned_t = Some(env.derived(key, || {
+                    owned_t = Some(env.derived(key, scoped_cost(&base.active, local), || {
                         base.active.process_scoped(
                             local,
                             def.base_url.as_deref(),
@@ -1481,7 +1507,7 @@ mod tests {
     // compacts correctly, and the cache is emptied for the next call.
     #[test]
     fn derived_contexts_are_bounded_within_a_call() {
-        let n = 2 * DERIVED_CAP;
+        let n = DERIVED_CAP + 64;
         let terms: Vec<String> = (0..n)
             .map(|i| format!(r#""T{i}":{{"@id":"http://ex/T{i}","@context":{{"q{i}":"http://ex/q"}}}}"#))
             .collect();
@@ -1525,6 +1551,48 @@ mod tests {
         assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
     }
 
+    // A property-scoped context that redefines the outer @type alias hides it from
+    // expansion, so the embedded node's types use @type itself.
+    #[test]
+    fn type_key_is_readable_under_a_property_scoped_context() {
+        let ctx = Json::parse(
+            r#"{"@vocab":"http://ex/","type":"@type",
+                "T":{"@id":"http://ex/T","@context":{"type":"@type","label":"http://ex/q"}},
+                "p":{"@id":"http://ex/p","@context":{"type":"http://ex/data","t":"@type"}}}"#,
+        )
+        .unwrap();
+        let doc = Json::parse(
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b","@type":["http://ex/T"],
+                "http://ex/q":[{"@value":"v"}]}]}]"#,
+        )
+        .unwrap();
+        let opts = JsonLdOptions::default();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        let back = expand(&out, &opts, &NoopLoader).unwrap();
+        assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+    }
+
+    // Definitions a scoped context discards with a later null are charged too: once the
+    // cache is full, re-applying `[{...}, null]` (an empty result) exhausts the budget.
+    #[test]
+    fn context_resets_are_charged() {
+        let defs: Vec<String> = (0..1024).map(|i| format!(r#""u{i}":"http://ex/u{i}""#)).collect();
+        let mut terms: Vec<String> = (0..DERIVED_CAP)
+            .map(|i| format!(r#""T{i}":{{"@id":"http://ex/T{i}","@context":{{"q":"http://ex/q"}}}}"#))
+            .collect();
+        terms.push(format!(r#""B":{{"@id":"http://ex/B","@context":[{{{}}},null]}}"#, defs.join(",")));
+        let ctx = Json::parse(&format!(r#"{{"@vocab":"http://ex/",{}}}"#, terms.join(","))).unwrap();
+        let nodes: Vec<String> = (0..DERIVED_CAP)
+            .map(|i| format!("T{i}"))
+            .chain(std::iter::repeat_n("B".to_string(), 2 * WORK_BUDGET / 1024))
+            .enumerate()
+            .map(|(n, t)| format!(r#"{{"@id":"http://ex/s{n}","@type":["http://ex/{t}"]}}"#))
+            .collect();
+        let doc = Json::parse(&format!("[{}]", nodes.join(","))).unwrap();
+        let err = compact_expanded(&doc, &ctx, &JsonLdOptions::default(), &NoopLoader).unwrap_err();
+        assert_eq!(err.code(), E::ContextOverflow);
+    }
+
     // Rebuilding derived contexts past the cache cap shares one work budget per call.
     #[test]
     fn post_cap_rebuilds_are_budgeted() {
@@ -1537,7 +1605,7 @@ mod tests {
         let ctx = Json::parse(&format!(r#"{{"@vocab":"http://ex/",{}}}"#, terms.join(","))).unwrap();
         // Fill the cache, then use the last type (never cached) until the budget runs out.
         let nodes: Vec<String> = (0..DERIVED_CAP)
-            .chain(std::iter::repeat_n(DERIVED_CAP, 2 * REBUILD_BUDGET / plain))
+            .chain(std::iter::repeat_n(DERIVED_CAP, 2 * WORK_BUDGET / plain))
             .enumerate()
             .map(|(n, t)| format!(r#"{{"@id":"http://ex/s{n}","@type":["http://ex/T{t}"]}}"#))
             .collect();
