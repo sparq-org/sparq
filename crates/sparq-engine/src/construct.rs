@@ -141,9 +141,30 @@ pub fn construct_ntriples(graph: &Graph, sparql: &str) -> Result<String, String>
 }
 
 /// [`construct_ntriples`] under a cooperative [`QueryBudget`].
+///
+/// The budget also bounds the SERIALIZE step (#4344): writing out a large graph is itself
+/// unbounded work, so a deadline or cancellation that falls due during it is reported as
+/// the budget error instead of a complete-but-late body. Row/byte caps were already priced
+/// during evaluation, so the serialize gate checks only the deadline and cancellation.
 pub fn construct_ntriples_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<String, String> {
     let triples = construct_or_describe_with_budget(graph, sparql, budget)?;
-    Ok(triples_to_ntriples(&triples))
+    crate::exec::budget::with_budget(budget, || ntriples_budgeted(&triples))
+}
+
+/// [`triples_to_ntriples`] under the installed budget: a coarse deadline/cancel re-check
+/// every 1024 triples stops early, and the post-serialization gate turns that (or a trip
+/// after the last re-check) into the budget error, so a late body is never returned.
+fn ntriples_budgeted(triples: &[Triple]) -> Result<String, String> {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(triples.len() * 64);
+    for (i, t) in triples.iter().enumerate() {
+        if i & 1023 == 0 && crate::exec::budget::exhausted(0) {
+            break;
+        }
+        let _ = writeln!(out, "{} {} {} .", t.subject, t.predicate, t.object);
+    }
+    crate::exec::budget::check(0)?;
+    Ok(out)
 }
 
 /// Serialises triples as canonical N-Triples (one `s p o .` line per triple).
@@ -319,6 +340,22 @@ mod tests {
 
     fn nts(ts: &[Triple]) -> Vec<String> {
         ts.iter().map(|t| format!("{} {} {} .", t.subject, t.predicate, t.object)).collect()
+    }
+
+    /// #4344: the serialize step is budget-bounded. A cancellation raised after evaluation
+    /// (here: before the serialize step runs) is the answer, not the late body; an
+    /// untripped budget yields the same bytes as the unbudgeted writer.
+    #[test]
+    fn ntriples_serialize_is_budget_bounded() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        let q = "PREFIX ex: <http://ex/> CONSTRUCT { ?s ex:years ?a } WHERE { ?s ex:age ?a }";
+        let triples = construct_or_describe(&g(), q).unwrap();
+        let tripped = QueryBudget::cancelled_by(Arc::new(AtomicBool::new(true)));
+        let err = crate::exec::budget::with_budget(&tripped, || ntriples_budgeted(&triples)).unwrap_err();
+        assert_eq!(err, "query budget exceeded (cancelled)");
+        let ok = QueryBudget::cancelled_by(Arc::new(AtomicBool::new(false)));
+        assert_eq!(construct_ntriples_with_budget(&g(), q, &ok).unwrap(), triples_to_ntriples(&triples));
     }
 
     #[test]
