@@ -46,6 +46,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
 const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
+const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const LOG_CONCLUSION: &str = "http://www.w3.org/2000/10/swap/log#conclusion";
 
 /// What the N3 engines do with rules that negate through a dependency cycle: store-scoped
@@ -99,11 +100,36 @@ impl Strata {
     }
 }
 
-/// A predicate a rule consumes or produces: a ground IRI, or UNKNOWN (every predicate).
+/// A predicate a rule consumes or produces: a ground IRI, one class of `rdf:type`, or
+/// UNKNOWN (every predicate).
+///
+/// `rdf:type` with a constant IRI object is keyed by its class, so negating one class from
+/// a rule that concludes another is no cycle. Any other `rdf:type` atom (a variable, blank
+/// or non-IRI object) is `Iri(rdf:type)`, which overlaps EVERY class ([`overlaps`]): an
+/// atom with a constant IRI object can only match or derive triples with that object.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Pred<'a> {
     Iri(&'a str),
+    Class(&'a str),
     Unknown,
+}
+
+/// Whether a triple one atom matches or derives can be a triple of the other.
+fn overlaps(a: Pred<'_>, b: Pred<'_>) -> bool {
+    match (a, b) {
+        (Pred::Unknown, _) | (_, Pred::Unknown) => true,
+        (Pred::Iri(x), Pred::Iri(y)) | (Pred::Class(x), Pred::Class(y)) => x == y,
+        (Pred::Class(_), Pred::Iri(t)) | (Pred::Iri(t), Pred::Class(_)) => t == RDF_TYPE,
+    }
+}
+
+/// The [`Pred`] of an atom.
+fn atom_pred(atom: &[Term; 3]) -> Pred<'_> {
+    match (&atom[1], &atom[2]) {
+        (Term::Iri(p), Term::Iri(c)) if p == RDF_TYPE => Pred::Class(c),
+        (Term::Iri(p), _) => Pred::Iri(p),
+        _ => Pred::Unknown,
+    }
 }
 
 /// A predicate dependency: `(predicate, negative)`.
@@ -186,21 +212,12 @@ fn premise_deps<'a>(atoms: &'a [[Term; 3]], neg: bool, out: &mut Vec<Dep<'a>>) {
         if builtin(p).is_some() || binder_builtin(p).is_some() {
             continue;
         }
-        match p {
-            Term::Iri(i) => out.push((Pred::Iri(i), neg)),
-            _ => out.push((Pred::Unknown, neg)),
-        }
+        out.push((atom_pred(atom), neg));
     }
 }
 
 fn produces(rule: &Rule) -> Vec<Pred<'_>> {
-    rule.conclusion
-        .iter()
-        .map(|c| match &c[1] {
-            Term::Iri(p) => Pred::Iri(p),
-            _ => Pred::Unknown,
-        })
-        .collect()
+    rule.conclusion.iter().map(atom_pred).collect()
 }
 
 /// Stratify a document's forward `rules`, with its `backward` rules as proof-time
@@ -236,13 +253,10 @@ pub(crate) fn stratify(
 
     // Fast exit: every negated predicate is a base predicate (no rule derives it).
     let produced: FxHashSet<Pred<'_>> = prods.iter().flatten().copied().collect();
-    let any_produced = produced.contains(&Pred::Unknown);
-    let negates_derived = deps.iter().flatten().any(|&(p, neg)| {
-        neg && match p {
-            Pred::Unknown => !produced.is_empty(),
-            Pred::Iri(_) => any_produced || produced.contains(&p),
-        }
-    });
+    let negates_derived = deps
+        .iter()
+        .flatten()
+        .any(|&(p, neg)| neg && produced.iter().any(|&q| overlaps(p, q)));
     if !negates_derived {
         return Ok(Strata::single(None));
     }
@@ -253,6 +267,8 @@ pub(crate) fn stratify(
     // reads every predicate node.
     let mut pred_ix: FxHashMap<Pred<'_>, usize> = FxHashMap::default();
     pred_ix.insert(Pred::Unknown, n_rules);
+    // The any-class `rdf:type` node, which every class node feeds.
+    pred_ix.insert(Pred::Iri(RDF_TYPE), n_rules + 1);
     for p in prods
         .iter()
         .flatten()
@@ -265,13 +281,29 @@ pub(crate) fn stratify(
     let mut edges: FxHashMap<usize, FxHashSet<usize>> = FxHashMap::default();
     let mut neg_edges: FxHashSet<(usize, usize)> = FxHashSet::default();
     let pred_nodes: Vec<usize> = pred_ix.values().copied().collect();
+    let class_nodes: Vec<usize> = pred_ix
+        .iter()
+        .filter(|(p, _)| matches!(p, Pred::Class(_)))
+        .map(|(_, &ix)| ix)
+        .collect();
+    // A producer feeds the node of what it derives, and every node that reads it: a class
+    // also feeds the any-class `rdf:type` node; an any-class `rdf:type` also feeds every
+    // class node. A consumer reads only its own node (UNKNOWN: every node).
+    let any_type = pred_ix[&Pred::Iri(RDF_TYPE)];
     for (r, ps) in prods.iter().enumerate() {
         for p in ps {
             let e = edges.entry(r).or_default();
             match p {
                 Pred::Unknown => e.extend(pred_nodes.iter().copied()),
-                Pred::Iri(_) => {
+                Pred::Iri(i) => {
                     e.insert(pred_ix[p]);
+                    if *i == RDF_TYPE {
+                        e.extend(class_nodes.iter().copied());
+                    }
+                }
+                Pred::Class(_) => {
+                    e.insert(pred_ix[p]);
+                    e.insert(any_type);
                 }
             }
         }
@@ -280,7 +312,7 @@ pub(crate) fn stratify(
         for &(p, neg) in ds {
             let sources: &[usize] = match p {
                 Pred::Unknown => &pred_nodes,
-                Pred::Iri(_) => std::slice::from_ref(&pred_ix[&p]),
+                Pred::Iri(_) | Pred::Class(_) => std::slice::from_ref(&pred_ix[&p]),
             };
             for &s in sources {
                 edges.entry(s).or_default().insert(r);
@@ -333,6 +365,7 @@ pub(crate) fn stratify(
             .find(|&(_, &ix)| ix == s)
             .map(|(p, _)| match p {
                 Pred::Iri(i) => format!("<{i}>"),
+                Pred::Class(c) => format!("<{RDF_TYPE}> <{c}>"),
                 Pred::Unknown => "an unknown predicate".to_string(),
             })
             .unwrap_or_default();

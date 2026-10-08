@@ -143,19 +143,47 @@ fn multi_stratum_chain() {
 }
 
 #[test]
-fn negation_over_one_class_of_a_shared_predicate_is_a_cycle() {
-    // Dependencies are tracked per PREDICATE: `?i a :Clean` negating `?i a :Flagged`
-    // negates rdf:type from a rule that concludes rdf:type, which is a cycle through
-    // negation. The document is rejected by default.
-    let e = rejected(
-        ":x a :Item . :x :flag true .\n\
+fn negation_over_one_class_of_rdf_type_is_stratified_by_class() {
+    // `rdf:type` with a constant class is keyed by its class: `?i a :Clean` negating
+    // `?i a :Flagged` is two strata, not a cycle.
+    let (c, w) = run(":x a :Item . :x :flag true . :y a :Item .\n\
          { ?i :flag true } => { ?i a :Flagged } .\n\
-         { ?i a :Item . ?s log:notIncludes { ?i a :Flagged } } => { ?i a :Clean } .",
-    );
+         { ?i a :Item . ?s log:notIncludes { ?i a :Flagged } } => { ?i a :Clean } .");
+    assert!(w.is_empty(), "{w:?}");
+    let rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    let typed = |s: &str, class: &str| [ex(s), Term::Iri(rdf_type.into()), ex(class)];
+    assert!(c.contains(&typed("x", "Flagged")));
     assert!(
-        e.contains("22-rdf-syntax-ns#type") && e.contains("cycle"),
-        "{e}"
+        !c.contains(&typed("x", "Clean")),
+        "flagged item must not be clean"
     );
+    assert!(c.contains(&typed("y", "Clean")));
+    // The same rule as the second of two explicit strata (the documented workaround for
+    // shapes the per-class analysis cannot separate) is accepted too.
+    let s1 = format!(
+        "{PRE}:x a :Item . :x :flag true . :y a :Item .\n\
+         {{ ?i :flag true }} => {{ ?i a :Flagged }} ."
+    );
+    let s2 = format!(
+        "{PRE}{{ ?i a :Item . ?s log:notIncludes {{ ?i a :Flagged }} }} => {{ ?i a :Clean }} ."
+    );
+    assert!(reason_n3_stratified(&mut Dict::new(), &[&s1, &s2]).is_ok());
+}
+
+#[test]
+fn rdf_type_with_a_variable_class_still_conflicts_with_every_class() {
+    // A conclusion `?i a ?c` may derive any class, including the negated one: a cycle.
+    let e = rejected(
+        ":x a :Item . :x :cls :Flagged .\n\
+         { ?i a :Item . ?i :cls ?c . ?s log:notIncludes { ?i a :Flagged } } => { ?i a ?c } .",
+    );
+    assert!(e.contains("cycle"), "{e}");
+    // A negation over `?i a ?c` reads every class, including one a rule derives: a cycle.
+    let e = rejected(
+        ":x a :Item .\n\
+         { ?i a :Item . ?s log:notIncludes { ?i a ?c } } => { ?i a :Clean } .",
+    );
+    assert!(e.contains("cycle"), "{e}");
 }
 
 /// :r negates :q, and :q is derived from :r: a cycle through negation.
@@ -424,4 +452,126 @@ fn query_conclusions_do_not_feed_back_into_the_analysis() {
     let q = format!("{PRE}{{ :a :r :b }} => {{ :a :q :b }} .");
     let out = reason_n3_query_terms(&data, &q).expect("no cycle through a projection");
     assert_eq!(out, vec![t("a", "q", "b")]);
+}
+
+/// A chain of 65 backward rules `{ :a :pN :b } <= { :a :p(N+1) :b }` over the fact
+/// `:a :p65 :b`: proving `:a :p0 :b` needs one more rule application than the backward
+/// search depth allows.
+fn deep_chain() -> String {
+    let mut s = String::from(":a :p65 :b .\n");
+    for n in 0..65 {
+        s.push_str(&format!("{{ :a :p{n} :b }} <= {{ :a :p{} :b }} .\n", n + 1));
+    }
+    s
+}
+
+/// A negation over the truncated proof must not read the cut as absence.
+#[test]
+fn truncated_backward_proof_cannot_authorize_through_negation() {
+    let body = format!(
+        "{}{{ ?s log:notIncludes {{ :a :p0 :b }} }} => {{ :r :permittedBy :g }} .",
+        deep_chain()
+    );
+    let e = rejected(&body);
+    assert!(e.contains("depth limit"), "{e}");
+    // The query entry points, with the chain in the data and the negation in the query.
+    let data = format!("{PRE}{}", deep_chain());
+    let q = format!("{PRE}{{ ?s log:notIncludes {{ :a :p0 :b }} }} => {{ :r :permittedBy :g }} .");
+    let e = reason_n3_query_terms(&data, &q).expect_err("query refuses");
+    assert!(e.contains("depth limit"), "{e}");
+    assert!(sparq_reason::reason_n3_query(&mut Dict::new(), &data, &q).is_err());
+    // The explicit opt-in keeps the legacy (incomplete) answer.
+    let (c, _) = run_with(&body, NegationCycles::SinglePass);
+    assert!(c.contains(&t("r", "permittedBy", "g")));
+}
+
+/// Every negation and aggregation builtin, through every entry point, over an input
+/// whose backward proof search is cut short: each is refused (an error, never an answer
+/// that read the cut as absence).
+#[test]
+fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point() {
+    // Rule 0 runs first and cuts its search; the probe rule then negates or aggregates.
+    let trigger = "{ :a :p0 :b } => { :a :proved :b } .\n";
+    let probes: [(&str, &str); 6] = [
+        (
+            "notIncludes, store scope",
+            "?s log:notIncludes { :a :p0 :b }",
+        ),
+        (
+            "notIncludes, formula scope",
+            "{ :c :d :e } log:notIncludes { :a :p0 :b }",
+        ),
+        (
+            "notIncludes, empty formula scope",
+            "{} log:notIncludes { :a :p0 :b }",
+        ),
+        (
+            "collectAllIn, store scope",
+            "( ?x { :a :p0 ?x } ?l ) log:collectAllIn ?s",
+        ),
+        (
+            "forAllIn, store scope",
+            "( { :a :p0 ?x } { :a :never ?x } ) log:forAllIn ?s",
+        ),
+        (
+            "collectAllIn, formula scope",
+            "( ?x { :c :d ?x } ?l ) log:collectAllIn { :c :d :e }",
+        ),
+    ];
+    for (what, probe) in probes {
+        let rules = format!("{trigger}{{ {probe} }} => {{ :r :permittedBy :g }} .");
+        let body = format!("{}{rules}", deep_chain());
+        let src = format!("{PRE}{body}");
+        let refused = |r: Result<(), String>, entry: &str| match r {
+            Err(e) => assert!(e.contains("incomplete"), "{what} / {entry}: {e}"),
+            Ok(()) => panic!("{what} / {entry}: accepted a truncated input"),
+        };
+        refused(reason_n3(&mut Dict::new(), &src).map(drop), "reason_n3");
+        refused(reason_n3_terms(&src, None).map(drop), "reason_n3_terms");
+        for cycles in [NegationCycles::Reject, NegationCycles::FailClosed] {
+            refused(
+                reason_n3_terms_with_cycles(&src, None, None, cycles).map(drop),
+                "reason_n3_terms_with_cycles",
+            );
+        }
+        refused(
+            sparq_reason::reason_n3_proof(&mut Dict::new(), &src).map(drop),
+            "proof",
+        );
+        refused(
+            sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).map(drop),
+            "pass_all",
+        );
+        refused(
+            reason_n3_stratified(&mut Dict::new(), &[&src]).map(drop),
+            "stratified",
+        );
+        // Query: the chain is data, the trigger and the probe are the query's premise.
+        let data = format!("{PRE}{}", deep_chain());
+        let q = format!("{PRE}{{ :a :p0 :b }} => {{ :a :proved :b }} .\n{{ {probe} }} => {{ :r :permittedBy :g }} .");
+        refused(reason_n3_query_terms(&data, &q).map(drop), "query_terms");
+        refused(
+            sparq_reason::reason_n3_query(&mut Dict::new(), &data, &q).map(drop),
+            "query",
+        );
+        // Nested closure: the whole document inside log:conclusion, negation inside.
+        let nested = format!(
+            "{PRE}{{ {{ {body} }} log:conclusion ?c . ?c log:notIncludes {{ :r :x :y }} }} => {{ :r :ok :g }} ."
+        );
+        refused(
+            reason_n3_terms(&nested, None).map(drop),
+            "nested log:conclusion",
+        );
+        // Incremental: the fallback runs the checked engine; construction refuses.
+        refused(
+            MaterializedN3Graph::new(&src, &[]).map(drop),
+            "MaterializedN3Graph::new",
+        );
+        // Compiled: backward rules (the truncation source) are outside the subset.
+        #[cfg(feature = "compiled-rules")]
+        assert!(
+            sparq_reason::n3::compiled::compile(&src).is_err(),
+            "{what} / compiled"
+        );
+    }
 }

@@ -220,8 +220,50 @@ struct BwCtx<'a> {
     visited: VisitedDocs,
     /// The run's [`NegationCycles`] policy, inherited by nested `log:conclusion` closures.
     cycles: NegationCycles,
-    /// The first error a nested closure met; it fails the enclosing run.
+    /// The first error a nested closure met, or the first refusal of [`negation_gate`]; it
+    /// fails the enclosing run.
     nested_error: std::cell::RefCell<Option<String>>,
+    /// Why a search of this run (or of a nested closure it reached) was cut short, if one
+    /// was ([`Truncation`]).
+    truncated: Truncation,
+}
+
+/// The first reason any search of a run was cut short: the backward proof depth limit, the
+/// formula-containment budget, the data-list walk cap, or a nested closure left unclosed
+/// by the import-cycle guard. A cut search under-approximates the facts it reports, so
+/// once this is set nothing that reads absence may trust the store ([`negation_gate`]).
+/// Shared with every nested closure of the run.
+type Truncation = std::rc::Rc<std::cell::Cell<Option<&'static str>>>;
+
+/// Record that a search was cut short (keeps the first reason).
+fn truncate(bw: &BwCtx, why: &'static str) {
+    if bw.truncated.get().is_none() {
+        bw.truncated.set(Some(why));
+    }
+}
+
+/// The ONE gate every negation and aggregation evaluation of the text engine passes
+/// (`log:notIncludes`, `log:collectAllIn`, `log:forAllIn`, any scope), called after its
+/// inner search: the set it read is complete only if the run is stratified (checked
+/// before any matching by [`strata::stratify`]) and no search was cut short
+/// ([`Truncation`]). Otherwise, unless the caller opted in to
+/// [`NegationCycles::SinglePass`], the evaluation is refused: the binding is dropped and
+/// the run fails with the reason. Truncation is sticky and only grows, so a cut search
+/// that happened before the negation, or during its inner search, is always seen here;
+/// a later cut cannot change a set a stratified negation already read.
+fn negation_gate(bw: &BwCtx) -> bool {
+    let Some(why) = bw.truncated.get() else { return true };
+    if bw.cycles == NegationCycles::SinglePass {
+        return true;
+    }
+    bw.nested_error.borrow_mut().get_or_insert_with(|| {
+        format!(
+            "n3: refused a negation or aggregation (log:notIncludes / log:collectAllIn / \
+             log:forAllIn) over an incomplete set: {why}, so missing facts would read as \
+             absent. Opt in to NegationCycles::SinglePass to accept the incomplete result."
+        )
+    });
+    false
 }
 
 impl<'a> BwCtx<'a> {
@@ -234,6 +276,7 @@ impl<'a> BwCtx<'a> {
             visited: VisitedDocs::default(),
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
+            truncated: Truncation::default(),
         }
     }
 }
@@ -262,9 +305,15 @@ pub struct ProofStep {
 /// closure over such a formula; [`reason_n3_with_cycles`] and
 /// [`reason_n3_terms_with_cycles`] opt in to failing closed or to the legacy single-pass
 /// evaluation instead ([`NegationCycles`]).
-/// Dependencies are tracked per predicate, so negating one class of `rdf:type` from a
-/// rule that concludes another `rdf:type` is such a cycle; use distinct predicates, or
-/// [`reason_n3_stratified`] with explicit strata.
+/// Dependencies are tracked per predicate, and per class for `rdf:type` with a constant
+/// class: negating `?i a :Flagged` from a rule that concludes `?i a :Clean` is two strata,
+/// while an `rdf:type` atom with a variable class still overlaps every class.
+///
+/// A negation or aggregation also refuses to read a store that some search of the run
+/// cut short (the backward proof depth limit, the formula containment budget, the data
+/// list walk cap, a nested closure left unclosed by the import-cycle guard): the run
+/// fails rather than read missing facts as absent. Only
+/// [`NegationCycles::SinglePass`] accepts that incomplete result.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     reason_n3_with_cycles(dict, src, NegationCycles::Reject)
 }
@@ -423,10 +472,17 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
         }))
         .collect();
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
-    let (facts, _steps, _) =
-        run_closure(data_parsed, None, None, StepMode::None, NegationCycles::Reject)?;
+    let truncated = Truncation::default();
+    let (facts, _steps, _) = run_closure(
+        data_parsed,
+        None,
+        Some((VisitedDocs::default(), truncated.clone())),
+        StepMode::None,
+        NegationCycles::Reject,
+    )?;
     let mut bw = BwCtx::new(&backward);
     bw.base = base;
+    bw.truncated = truncated;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -544,10 +600,12 @@ pub struct StratifiedN3Closure {
 /// serialize/re-parse round-trip between strata (formula-valued facts, which
 /// a text round-trip cannot represent, carry over intact).
 ///
-/// Each document is itself stratified automatically (see [`reason_n3`]); explicit
-/// strata are for programs the per-predicate analysis cannot separate (a negation
-/// cycle it rejects, e.g. one class of `rdf:type` negating another) and for pipelines
-/// that already ship their rules as separate documents. The engine's NON-MONOTONIC premise operators (store-scoped
+/// Each document is itself stratified automatically (see [`reason_n3`]) and refuses a
+/// negation cycle of its own, even when an earlier stratum completes the negated
+/// predicate (the per-document analysis cannot know that). Explicit strata are for
+/// pipelines that ship their rules as separate documents; a stratum the analysis still
+/// refuses needs [`reason_n3_stratified_with_cycles`] with
+/// [`NegationCycles::SinglePass`], and then the caller guarantees completeness. The engine's NON-MONOTONIC premise operators (store-scoped
 /// `log:notIncludes`, `log:collectAllIn` / `log:forAllIn`) are reliable over
 /// predicates FULLY PRESENT before their stratum starts (derived facts are never
 /// retracted), which an earlier stratum here guarantees.
@@ -795,7 +853,9 @@ fn run_closure(
     // The import-cycle guard ([`VisitedDocs`]). `None` for a TOP-LEVEL run (a fresh,
     // empty set); a nested run reached through `formula_closure` passes the PARENT's set so
     // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
-    visited: Option<VisitedDocs>,
+    // The run's [`Truncation`] flag: a nested run shares its parent's, and a caller that
+    // evaluates more over the closure (the query projection) passes its own.
+    inherit: Option<(VisitedDocs, Truncation)>,
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
@@ -824,8 +884,9 @@ fn run_closure(
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
-    if let Some(v) = visited {
+    if let Some((v, t)) = inherit {
         bw.visited = v;
+        bw.truncated = t;
     }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
@@ -1318,15 +1379,16 @@ fn match_premise_seeded(
                         } else {
                             ts
                         };
-                        formula_containment(&scope, inner, &b)
+                        formula_containment(&scope, inner, &b, bw)
                     }
                     // `{}` parses as the literal true — the EMPTY formula:
                     // it includes nothing (and notIncludes everything).
-                    Term::Lit(v, _, _) if v == "true" => formula_containment(&[], inner, &b),
+                    Term::Lit(v, _, _) if v == "true" => formula_containment(&[], inner, &b, bw),
                     _ => match_premise_seeded(inner, facts, &b, None, bw, depth),
                 };
+                // Every negation passes the gate, whatever it found.
                 if is_not {
-                    if matches.is_empty() {
+                    if negation_gate(bw) && matches.is_empty() {
                         next.push(b);
                     }
                 } else {
@@ -1375,8 +1437,10 @@ fn match_premise_seeded(
                         _ => return None,
                     };
                     Some(match apply_deep(&pat[2], seed) {
-                        Term::Formula(scope) => formula_containment(&scope, atoms, seed),
-                        Term::Lit(v, _, _) if v == "true" => formula_containment(&[], atoms, seed),
+                        Term::Formula(scope) => formula_containment(&scope, atoms, seed, bw),
+                        Term::Lit(v, _, _) if v == "true" => {
+                            formula_containment(&[], atoms, seed, bw)
+                        }
                         _ => match_premise_seeded(atoms, facts, seed, None, bw, depth),
                     })
                 };
@@ -1386,6 +1450,9 @@ fn match_premise_seeded(
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
                         let Some(sols) = solve(clause, &b) else { continue };
+                        if !negation_gate(bw) {
+                            continue;
+                        }
                         let collected =
                             Term::List(sols.iter().map(|s| apply_deep(template, s)).collect());
                         let mut nb = b.clone();
@@ -1396,8 +1463,10 @@ fn match_premise_seeded(
                     CollectOp::ForAll => {
                         let [ca, cb] = &members[..] else { continue };
                         let Some(sols_a) = solve(ca, &b) else { continue };
-                        if sols_a.iter().all(|s| matches!(solve(cb, s), Some(ss) if !ss.is_empty()))
-                        {
+                        let holds = sols_a
+                            .iter()
+                            .all(|s| matches!(solve(cb, s), Some(ss) if !ss.is_empty()));
+                        if negation_gate(bw) && holds {
                             next.push(b);
                         }
                     }
@@ -1423,7 +1492,7 @@ fn match_premise_seeded(
                 // variable (walked from the fact store).
                 let members: Option<Vec<Term>> = match &head {
                     Term::List(ms) => Some(ms.clone()),
-                    _ => fact_list(&head, facts),
+                    _ => fact_list(&head, facts, bw),
                 };
                 if let Some(members) = members {
                     for (ix, m) in members.iter().enumerate() {
@@ -1484,8 +1553,14 @@ fn match_premise_seeded(
                         next.push(nb);
                     }
                 }
-                if !bw.rules.is_empty() && depth > 0 {
-                    next.extend(backward_prove(pat, b, facts, bw, depth - 1));
+                if !bw.rules.is_empty() {
+                    if depth > 0 {
+                        next.extend(backward_prove(pat, b, facts, bw, depth - 1));
+                    } else if bw.rules.iter().flat_map(|r| &r.conclusion).any(|c| {
+                        !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b)
+                    }) {
+                        truncate(bw, "backward proof search reached its depth limit");
+                    }
                 }
             }
             bindings = next;
@@ -1707,7 +1782,7 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
 /// asserted in the data, reached through a bound variable) — the complement of
 /// [`extract_lists`], which resolves rule-local structure. `rdf:nil` is the
 /// empty list.
-fn fact_list(head: &Term, facts: &FactIndex) -> Option<Vec<Term>> {
+fn fact_list(head: &Term, facts: &FactIndex, bw: &BwCtx) -> Option<Vec<Term>> {
     let first = Term::Iri(parser::RDF_FIRST.into());
     let rest = Term::Iri(parser::RDF_REST.into());
     let nil = Term::Iri(parser::RDF_NIL.into());
@@ -1720,6 +1795,7 @@ fn fact_list(head: &Term, facts: &FactIndex) -> Option<Vec<Term>> {
             return Some(out);
         }
         if guard > 100_000 {
+            truncate(bw, "a data list walk passed its length cap");
             return None;
         }
         guard += 1;
@@ -2125,7 +2201,12 @@ fn apply_deep(t: &Term, b: &Binding) -> Term {
 /// with pattern blanks as wildcards, pattern variables binding, and scope
 /// terms — including its quantified variables — as opaque constants. Returns
 /// one binding per complete match.
-fn formula_containment(scope: &[[Term; 3]], pattern: &[[Term; 3]], seed: &Binding) -> Vec<Binding> {
+fn formula_containment(
+    scope: &[[Term; 3]],
+    pattern: &[[Term; 3]],
+    seed: &Binding,
+    bw: &BwCtx,
+) -> Vec<Binding> {
     // Pattern existentials (blanks) become wildcard variables.
     let pat: Vec<[Term; 3]> = pattern
         .iter()
@@ -2140,6 +2221,9 @@ fn formula_containment(scope: &[[Term; 3]], pattern: &[[Term; 3]], seed: &Bindin
     let mut out = Vec::new();
     let mut budget = 100_000usize;
     containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut budget);
+    if budget == 0 {
+        truncate(bw, "formula containment search exhausted its step budget");
+    }
     out
 }
 
@@ -2234,6 +2318,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
     let key = formula_key(ts);
     if !bw.visited.borrow_mut().insert(key) {
+        truncate(bw, "a nested closure re-entered a document already being closed and was left unclosed");
         return ts.to_vec();
     }
 
@@ -2267,7 +2352,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     let closed = match run_closure(
         parsed,
         bw.resolver,
-        Some(bw.visited.clone()),
+        Some((bw.visited.clone(), bw.truncated.clone())),
         StepMode::None,
         cycles,
     ) {
@@ -2790,7 +2875,7 @@ fn eval_functional(
         // First-class list value (already substituted by `apply`).
         Term::List(ms) => Some(ms.clone()),
         // A data list written as rdf:first/rest triples, via a bound variable.
-        _ => fact_list(&subj_applied, facts).map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
+        _ => fact_list(&subj_applied, facts, bw).map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
     };
     let was_list = resolved_list.is_some();
     // The list:-namespace ops are only defined ON lists.
@@ -3010,7 +3095,7 @@ fn eval_functional(
             for a in &args {
                 match a {
                     Term::List(ms) => merged.extend(ms.iter().cloned()),
-                    other => merged.extend(fact_list(other, facts)?),
+                    other => merged.extend(fact_list(other, facts, bw)?),
                 }
             }
             Term::List(merged)

@@ -92,12 +92,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // carries the stratification diagnostic of an opted-in negation cycle (see below).
 // Every N3 entry point STRATIFIES store-scoped negation automatically (GH #6201): a rule whose
 // log:notIncludes / log:collectAllIn / log:forAllIn negates a predicate the same document
-// derives runs after that predicate's fixpoint. Per-PREDICATE analysis, fail-closed by
+// derives runs after that predicate's fixpoint. Per-PREDICATE analysis (per CLASS for
+// `rdf:type` with a constant class; a variable class overlaps every class), fail-closed by
 // construction: a `{ … }` literal scope reads its own atoms; anything not pinned to one IRI
 // predicate (variable premise/conclusion predicate, clause given by a variable, nested
 // log:conclusion / log:supports closure) counts as EVERY predicate; list builtins depend on
-// rdf:first/rdf:rest. A cycle through negation (e.g. `a :Clean` negating `a :Flagged`, both
-// rdf:type, or a variable-predicate conclusion beside store-scoped negation) is an ERROR by
+// rdf:first/rdf:rest. Every negation/aggregation evaluation also passes ONE gate that refuses
+// a store some search cut short (backward depth limit, containment budget, list-walk cap,
+// import-cycle-unclosed nested closure): the run errors unless SinglePass. A cycle through
+// negation (e.g. `a ?c` concluded beside a negated `a :Flagged`, or a variable-predicate
+// conclusion beside store-scoped negation) is an ERROR by
 // default at every entry point, nested closures included; only the rules on/after the cycle
 // are affected by an opt-in:
 pub fn reason_n3_terms_with_cycles(src, base, resolver, cycles: NegationCycles)
@@ -127,7 +131,9 @@ pub enum RuleVars { N3, VarIris }  // `?x` (re-parses as the same rule, so re-ru
     // form is for RDF consumers, not re-reasoning)
 pub fn reason_n3_stratified(dict: &mut Dict, strata: &[&str])   // stratum-by-stratum closure; carries
     -> Result<StratifiedN3Closure, String>;  // each closure in memory (no re-serialize); the sound
-    // driver when the automatic stratification rejects a cycle (explicit strata instead);
+    // driver for pipelines shipped as separate documents; each stratum is still checked on
+    // its own, so a stratum that negates through its own conclusions needs
+    // reason_n3_stratified_with_cycles(.., SinglePass) and caller-guaranteed completeness;
     // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes).
 pub fn reason_n3_stratified_with_cycles(dict, strata, cycles: NegationCycles)
     -> Result<StratifiedN3Closure, String>;  // same, with the per-stratum cycle opt-in
