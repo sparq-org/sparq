@@ -36,9 +36,9 @@ use sha2::{Digest, Sha256};
 
 use super::access::{self, format_rfc3339, parse_rfc3339, Action};
 use super::{
-    etag_of, jose, json_is_uri, method_not_allowed, none_match, problem, service_links,
-    service_linkset, service_listing, set, Agent, LwsConfig, LwsRequest, LwsState, AS_CONTEXT,
-    LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX, SUBSCRIPTIONS_PATH,
+    etag_of, jose, json_is_uri, method_not_allowed, problem, service_links, service_linkset,
+    service_listing, set, Agent, LwsConfig, LwsRequest, LwsState, AS_CONTEXT, LWS_CONTEXT,
+    LWS_JSON, LWS_NS, META_SUFFIX, SUBSCRIPTIONS_PATH,
 };
 use crate::store::Store;
 
@@ -134,6 +134,9 @@ impl Watch {
         }
     }
 }
+
+/// Most distinct topics one subscription may name.
+pub const MAX_TOPICS: usize = 64;
 
 /// A change to a storage resource, announced to the subscriptions whose topics cover it.
 #[derive(Debug, Clone)]
@@ -842,8 +845,12 @@ pub async fn handle<S: Store + 'static>(
             let iri = state.cfg.absolute(&format!("{SUBSCRIPTIONS_PATH}{id}"));
             // A subscription never changes once made, so its document is its entity tag.
             let etag = etag_of([doc.to_string().as_str()]);
-            let mut resp = if none_match(req, &etag) {
-                StatusCode::NOT_MODIFIED.into_response()
+            let refusal = super::resources::read_refusal(req, &etag);
+            if refusal == Some(StatusCode::PRECONDITION_FAILED) {
+                return problem(StatusCode::PRECONDITION_FAILED, None);
+            }
+            let mut resp = if let Some(status) = refusal {
+                status.into_response()
             } else {
                 super::json_response(StatusCode::OK, LWS_JSON, &doc)
             };
@@ -946,8 +953,10 @@ async fn subscribe<S: Store + 'static>(
             Some("type must be WebhookSubscription"),
         );
     }
-    // topic is REQUIRED: a non-empty array of URIs.
-    let topics: Vec<String> = match body.get("topic") {
+    // topic is REQUIRED: a non-empty array of URIs. Repeats count once; each topic is checked
+    // against the store and the subscriber's access, and weighed at every change announced, so
+    // a subscription names at most MAX_TOPICS.
+    let mut topics: Vec<String> = match body.get("topic") {
         Some(Value::Array(a)) if !a.is_empty() && a.iter().all(json_is_uri) => a
             .iter()
             .filter_map(Value::as_str)
@@ -960,6 +969,14 @@ async fn subscribe<S: Store + 'static>(
             )
         }
     };
+    let mut seen = std::collections::HashSet::new();
+    topics.retain(|t| seen.insert(t.clone()));
+    if topics.len() > MAX_TOPICS {
+        return problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some(&format!("a subscription names at most {MAX_TOPICS} topics")),
+        );
+    }
     // A WebhookSubscription's inbox is REQUIRED.
     let Some(inbox) = body
         .get("inbox")
@@ -1072,9 +1089,46 @@ mod tests {
         let r = handle(&state, &delete("\"other\""), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
         assert!(state.notify.get("s1").is_some());
+        // A read is held to If-Match as well.
+        let other = test_store::request(Method::GET, &path, &[("if-match", "\"other\"")], "");
+        let r = handle(&state, &other, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
         let r = handle(&state, &delete(&tag), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert!(state.notify.get("s1").is_none());
+    }
+
+    /// Sweep finding: a subscription could name any number of topics, each checked against the
+    /// store and the subscriber's access, and weighed at every change announced. Repeats count
+    /// once, and more than [`MAX_TOPICS`] distinct ones are refused.
+    #[tokio::test]
+    async fn subscriptions_name_a_bounded_number_of_topics() {
+        let (state, _store) = test_store::state(100).await;
+        let body = |topics: Vec<String>| {
+            json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": WEBHOOK,
+                "topic": topics,
+                "inbox": "https://inbox.example/",
+            })
+            .to_string()
+        };
+        let post = |b: String| {
+            test_store::request(
+                Method::POST,
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON)],
+                &b,
+            )
+        };
+        let many = (0..=MAX_TOPICS)
+            .map(|i| state.cfg.absolute(&format!("/t{i}")))
+            .collect();
+        let r = handle(&state, &post(body(many)), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let repeated = vec![state.cfg.storage(); 10 * MAX_TOPICS];
+        let r = handle(&state, &post(body(repeated)), &Agent::anonymous()).await;
+        assert_ne!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     /// Review finding: a subscription's cancellation ran in a task of its own that held no

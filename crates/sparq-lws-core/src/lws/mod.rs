@@ -835,7 +835,16 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
     };
     let is_head = req.is_head();
     let mut resp = route(&state, req).await;
-    if is_head {
+    // A 304 or 204 has no content, and no length to declare: a 304's Content-Length would have
+    // to be the 200's (RFC 9110 section 8.6), which an empty body is not. Its body declares no
+    // length, so none is derived from it on the way out either.
+    if matches!(
+        resp.status(),
+        StatusCode::NOT_MODIFIED | StatusCode::NO_CONTENT
+    ) {
+        resp.headers_mut().remove(header::CONTENT_LENGTH);
+        *resp.body_mut() = Body::new(NoContent);
+    } else if is_head {
         // HEAD carries the headers a GET would, never a body: the length is the one the body
         // would have had (read before the body goes, since the length is otherwise derived from
         // the body once the response is sent).
@@ -856,6 +865,22 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
         }
     }
     resp
+}
+
+/// The body of a response that has no content (a 304 or 204): empty, with no exact length, so
+/// none is declared for it.
+struct NoContent;
+
+impl axum::body::HttpBody for NoContent {
+    type Data = Bytes;
+    type Error = std::convert::Infallible;
+
+    fn poll_frame(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>> {
+        std::task::Poll::Ready(None)
+    }
 }
 
 async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Response {
@@ -1057,15 +1082,6 @@ pub fn service_links(cfg: &LwsConfig, headers: &mut HeaderMap, uri: &str, up: &s
     add_link(headers, &meta_key(uri), "linkset", Some(LINKSET_JSON));
 }
 
-/// Whether `If-None-Match` names `etag` (weak comparison) or is `*`.
-pub fn none_match(req: &LwsRequest, etag: &str) -> bool {
-    let header = req.header_all(header::IF_NONE_MATCH);
-    let bare = |t: &str| t.trim().trim_start_matches("W/").to_string();
-    header
-        .split(',')
-        .any(|t| t.trim() == "*" || (!t.trim().is_empty() && bare(t) == bare(etag)))
-}
-
 /// A strong entity tag over `parts`.
 pub fn etag_of<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
     use sha2::Digest;
@@ -1108,8 +1124,12 @@ pub fn service_listing(
             .into_iter()
             .chain(shown.iter().filter_map(|i| i["id"].as_str())),
     );
-    let mut resp = if none_match(req, &etag) {
-        StatusCode::NOT_MODIFIED.into_response()
+    let refusal = resources::read_refusal(req, &etag);
+    if refusal == Some(StatusCode::PRECONDITION_FAILED) {
+        return problem(StatusCode::PRECONDITION_FAILED, None);
+    }
+    let mut resp = if let Some(status) = refusal {
+        status.into_response()
     } else {
         let body = json!({
             "@context": LWS_CONTEXT,

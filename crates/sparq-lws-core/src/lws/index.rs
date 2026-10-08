@@ -34,6 +34,10 @@ pub const LWS_QUERY: &str = "application/lws-query+json";
 /// Groups a type search may hold before it is refused with 422 (section 7.2).
 pub const MAX_FILTER_GROUPS: usize = 32;
 
+/// Most IRIs a search filter's groups may hold between them: each is matched against every
+/// readable resource.
+pub const MAX_FILTER_IRIS: usize = 256;
+
 /// Relations the search never indexes: structural or protocol ones (section 7.1).
 const STRUCTURAL_RELATIONS: &[&str] = &[
     "type",
@@ -67,7 +71,7 @@ pub struct Filter {
 pub enum FilterError {
     /// Not a JSON object, or a value that breaks the grammar: 400.
     Malformed,
-    /// More than [`MAX_FILTER_GROUPS`] groups: 422.
+    /// More than [`MAX_FILTER_GROUPS`] groups, or [`MAX_FILTER_IRIS`] IRIs in them: 422.
     TooManyGroups,
 }
 
@@ -84,6 +88,7 @@ pub fn parse_filter(bytes: &[u8]) -> Result<Filter, FilterError> {
     };
     let mut filter = Filter::default();
     let mut count = 0;
+    let mut iris = 0;
     for (key, v) in &fields {
         if key.starts_with('@') {
             continue;
@@ -92,6 +97,10 @@ pub fn parse_filter(bytes: &[u8]) -> Result<Filter, FilterError> {
         // after at most one past the limit, not after all of them were collected.
         let parsed = groups(v, MAX_FILTER_GROUPS - count)?;
         count += parsed.len();
+        iris += parsed.iter().map(Vec::len).sum::<usize>();
+        if iris > MAX_FILTER_IRIS {
+            return Err(FilterError::TooManyGroups);
+        }
         if key == "type" {
             filter.types.extend(parsed);
         } else if !parsed.is_empty() {
@@ -252,11 +261,16 @@ async fn readable<S: Store + 'static>(
                 "DataResource"
             }
         )];
-        for t in &meta.types {
-            if !types.contains(t) {
-                types.push(t.clone());
-            }
-        }
+        // A resource may state any number of types: repeats are found with a set.
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        seen.insert(&types[0]);
+        let more: Vec<String> = meta
+            .types
+            .iter()
+            .filter(|t| seen.insert(t.as_str()))
+            .cloned()
+            .collect();
+        types.extend(more);
         out.insert(uri, Seen { types, meta });
     }
     Ok(out)
@@ -338,7 +352,7 @@ pub async fn handle<S: Store + 'static>(
                 return problem(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     Some(&format!(
-                        "a filter may hold at most {MAX_FILTER_GROUPS} groups"
+                        "a filter may hold at most {MAX_FILTER_GROUPS} groups of {MAX_FILTER_IRIS} IRIs in all"
                     )),
                 )
             }
@@ -363,7 +377,8 @@ pub async fn handle<S: Store + 'static>(
     let doc = if search {
         let mut items = Vec::new();
         for (uri, Seen { types, meta }) in &resources {
-            let mut matched = all_groups(&filter.types, |v| types.iter().any(|t| t == v));
+            let have: std::collections::HashSet<&str> = types.iter().map(String::as_str).collect();
+            let mut matched = all_groups(&filter.types, |v| have.contains(v));
             if matched && !filter.relations.is_empty() {
                 matched = filter.relations.iter().all(|(rel, groups)| {
                     let targets = relation_targets(uri, meta, rel);
@@ -371,11 +386,7 @@ pub async fn handle<S: Store + 'static>(
                 });
             }
             if matched {
-                let shown: Vec<Value> = types
-                    .iter()
-                    .map(|t| Value::String(t.strip_prefix(LWS_NS).unwrap_or(t).to_string()))
-                    .collect();
-                items.push(json!({"id": uri, "type": shown}));
+                items.push((uri, types));
             }
         }
         let size = state.cfg.page_size.max(1);
@@ -412,10 +423,18 @@ pub async fn handle<S: Store + 'static>(
             links.push(format!("<{base}{}>; rel=\"next\"", page + 1));
         }
         links.push(format!("<{base}{pages}>; rel=\"last\""));
+        // Only the members a page shows are written out.
         let shown: Vec<Value> = items
             .into_iter()
             .skip((page - 1) * size)
             .take(size)
+            .map(|(uri, types)| {
+                let types: Vec<Value> = types
+                    .iter()
+                    .map(|t| Value::String(t.strip_prefix(LWS_NS).unwrap_or(t).to_string()))
+                    .collect();
+                json!({"id": uri, "type": types})
+            })
             .collect();
         json!({"@context": LWS_CONTEXT, "type": "ContainerPage", "totalItems": total, "items": shown})
     } else {
@@ -620,6 +639,21 @@ mod tests {
         ] {
             assert_eq!(parse(bad), Err(FilterError::Malformed), "{bad}");
         }
+    }
+
+    /// Sweep finding: the group limit did not bound the IRIs inside a group, and each is matched
+    /// against every readable resource.
+    #[test]
+    fn filters_hold_a_bounded_number_of_iris() {
+        let group = |n: usize| {
+            let iris: Vec<String> = (0..n).map(|i| format!("\"https://a/T{i}\"")).collect();
+            format!("{{\"type\": [[{}]]}}", iris.join(","))
+        };
+        assert!(parse(&group(MAX_FILTER_IRIS)).is_ok());
+        assert!(matches!(
+            parse(&group(MAX_FILTER_IRIS + 1)),
+            Err(FilterError::TooManyGroups)
+        ));
     }
 
     #[test]

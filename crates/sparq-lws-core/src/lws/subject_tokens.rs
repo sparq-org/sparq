@@ -55,6 +55,9 @@ pub const DPOP_WINDOW_SECS: i64 = 60;
 /// proof is refused rather than remembered, so replay protection never silently lapses.
 const MAX_DPOP_JTIS: usize = 65_536;
 
+/// How many of an OpenID Provider's keys an ID Token's signature is tried against.
+const MAX_UNNAMED_KEYS: usize = 8;
+
 /// The DPoP proof ids (`jti`) seen at the token endpoint, until their proofs are too old to be
 /// accepted anyway.
 #[derive(Default)]
@@ -443,25 +446,25 @@ pub fn cid_method_key(
             _ => Vec::new(),
         }
     };
-    let defined = as_list(doc.get("verificationMethod"));
+    // Only `method_id` is looked for: the method it names, defined once, and a reference to it
+    // (or an embedded method with its id) in `authentication`. Each list is read once, however
+    // long a document makes them.
+    let named = |m: &Value| m.is_object() && id_of(m).as_deref() == Some(method_id.as_str());
+    let defined = as_list(doc.get("verificationMethod"))
+        .into_iter()
+        .find(|c| named(c));
     let mut method = None;
     for entry in as_list(doc.get("authentication")) {
-        let m = match &entry {
-            Value::String(r) => {
-                let r = resolve_ref(r, subject);
-                defined
-                    .iter()
-                    .find(|c| c.is_object() && id_of(c).as_deref() == Some(r.as_str()))
-                    .cloned()
-            }
-            Value::Object(_) => Some(entry.clone()),
-            _ => None,
-        };
-        if let Some(m) = m {
-            if id_of(&m).as_deref() == Some(method_id.as_str()) {
-                method = Some(m);
+        match &entry {
+            Value::String(r) if defined.is_some() && resolve_ref(r, subject) == method_id => {
+                method = defined;
                 break;
             }
+            Value::Object(_) if named(&entry) => {
+                method = Some(entry);
+                break;
+            }
+            _ => {}
         }
     }
     let method = method.ok_or_else(|| {
@@ -658,12 +661,16 @@ async fn oidc(
         .get("keys")
         .and_then(Value::as_array)
         .ok_or("the OpenID Provider's JWKS has no keys")?;
+    // Each candidate costs a signature verification, and the provider (any issuer an identity
+    // document names) chooses how many keys it publishes: a token without a `kid` is tried
+    // against a few of them only, as is a `kid` the set repeats.
     let candidates: Vec<&Value> = match jws.kid() {
         Some(kid) => keys
             .iter()
             .filter(|k| k.get("kid").and_then(Value::as_str) == Some(kid))
+            .take(MAX_UNNAMED_KEYS)
             .collect(),
-        None => keys.iter().collect(),
+        None => keys.iter().take(MAX_UNNAMED_KEYS).collect(),
     };
     if candidates.is_empty() {
         return Err(format!(
@@ -1396,6 +1403,31 @@ mod tests {
             "id": subject,
             "authentication": [{"id": format!("{subject}#k"), "type": "JsonWebKey", "controller": subject, "publicKeyJwk": jwk}],
         })
+    }
+
+    /// Sweep finding: each `authentication` reference was looked up by scanning every
+    /// `verificationMethod`, so a document of a hundred thousand of each, fetched before any
+    /// signature is checked, cost billions of comparisons. Each list is now read once.
+    #[test]
+    fn cid_lookup_reads_each_list_once() {
+        let s = "https://alice.example/id";
+        let key = jose::EcKey::generate("k");
+        let jwk = jose::public_jwk_of(&key.public_key());
+        let n = 50_000;
+        let mut refs: Vec<Value> = (0..n).map(|i| json!(format!("#x{i}"))).collect();
+        let mut methods: Vec<Value> = (0..n)
+            .map(|i| json!({"id": format!("#y{i}"), "controller": s, "publicKeyJwk": jwk}))
+            .collect();
+        refs.push(json!("#k"));
+        methods.push(json!({"id": "#k", "controller": s, "publicKeyJwk": jwk}));
+        let doc = json!({"id": s, "authentication": refs, "verificationMethod": methods});
+        let started = std::time::Instant::now();
+        assert!(cid_method_key(&doc, s, "k", jose::now_secs()).is_ok());
+        assert!(cid_method_key(&doc, s, "nope", jose::now_secs()).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // A reference to a method the document does not define gives way to an embedded one.
+        let doc = json!({"id": s, "authentication": ["#k", {"id": "#k", "controller": s, "publicKeyJwk": jwk}]});
+        assert!(cid_method_key(&doc, s, "k", jose::now_secs()).is_ok());
     }
 
     #[test]

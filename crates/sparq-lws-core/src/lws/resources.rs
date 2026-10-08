@@ -241,6 +241,17 @@ enum Precondition {
     Failed,
 }
 
+/// How a read of a service resource (a grant, request or subscription, or a service listing)
+/// whose current entity tag is `etag` is answered under the request's preconditions: 304, 412,
+/// or `None` to serve it, as [`evaluate`] decides for storage resources.
+pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
+    match evaluate(&req.headers, Some(etag), None, true) {
+        Precondition::Proceed => None,
+        Precondition::NotModified => Some(StatusCode::NOT_MODIFIED),
+        Precondition::Failed => Some(StatusCode::PRECONDITION_FAILED),
+    }
+}
+
 fn evaluate(
     headers: &HeaderMap,
     etag: Option<&str>,
@@ -756,7 +767,26 @@ fn parse_range(header: &str, len: u64) -> ByteRange {
     ByteRange::Single(from, to.map_or(len - 1, |t| t.min(len - 1)))
 }
 
-/// A container's members, sorted, with what a listing shows about each.
+/// `items` (listing entries from [`members`]) with the size of each data resource's content.
+async fn with_sizes<S: Store + 'static>(state: &LwsState<S>, items: &mut [Value]) {
+    for item in items {
+        if item["type"] != "DataResource" {
+            continue;
+        }
+        let Some(id) = item["id"].as_str().map(str::to_string) else {
+            continue;
+        };
+        let size = match state.store.read(&id).await {
+            Ok(r) => r.body.len(),
+            Err(_) => 0,
+        };
+        item["size"] = json!(size);
+    }
+}
+
+/// A container's members, sorted, with what a listing shows about each but a data resource's
+/// size (which [`with_sizes`] adds for the members shown). Each member's own entity tag stands
+/// for its content.
 async fn members<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
@@ -790,15 +820,11 @@ async fn members<S: Store + 'static>(
             );
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         } else {
-            let size = match state.store.read(&child).await {
-                Ok(r) => r.body.len(),
-                Err(_) => 0,
-            };
             item.insert("type".into(), Value::String("DataResource".into()));
             // "format: The media type of the resource ... MUST be present for DataResources"; size
-            // and modified SHOULD be.
+            // and modified SHOULD be. The size is measured only for the members a page shows
+            // (see [`with_sizes`]): every member's content is not read to serve one page.
             item.insert("format".into(), Value::String(meta.content_type.clone()));
-            item.insert("size".into(), json!(size));
             let modified = meta.last_modified.map(epoch_ms).unwrap_or_default();
             item.insert(
                 "modified".into(),
@@ -883,7 +909,7 @@ async fn read_container<S: Store + 'static>(
         }
         Precondition::Proceed => {}
     }
-    let items: Vec<Value> = all
+    let mut items: Vec<Value> = all
         .iter()
         .skip((page - 1) * page_size)
         .take(page_size)
@@ -895,6 +921,7 @@ async fn read_container<S: Store + 'static>(
             m
         })
         .collect();
+    with_sizes(state, &mut items).await;
     let body = json!({
         "@context": LWS_CONTEXT,
         "id": uri,
@@ -1269,6 +1296,10 @@ async fn create<S: Store + 'static>(
                         || super::delete_record(&state, &child, &parent).await.is_ok();
                     if gone {
                         let _ = state.store.delete(&meta_key(&child), None).await;
+                    } else {
+                        // The member may exist: the container's listing may have changed.
+                        drop(locks);
+                        touch_container(&state, &parent).await;
                     }
                     return Err(e);
                 }
@@ -1390,9 +1421,18 @@ async fn current<S: Store + 'static>(
 /// Limit: the locks live in this process. Several server processes over one store do not see each
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
-pub struct IriLocks(
-    std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::RwLock<()>>>>,
-);
+pub struct IriLocks(std::sync::Mutex<LockMap>);
+
+/// The locks by IRI, held weakly, and how many entries the map may reach before the dropped ones
+/// are swept out.
+#[derive(Default)]
+struct LockMap {
+    locks: std::collections::HashMap<String, std::sync::Weak<tokio::sync::RwLock<()>>>,
+    sweep_at: usize,
+}
+
+/// The size of [`LockMap`] below which it is never swept.
+const LOCK_SWEEP_FLOOR: usize = 1024;
 
 impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
@@ -1416,9 +1456,17 @@ impl IriLocks {
     }
 
     fn mutex(&self, iri: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
-        let mut map = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if map.len() > 1024 {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let LockMap {
+            locks: map,
+            sweep_at,
+        } = &mut *guard;
+        // Swept once the map has doubled since the last sweep, so a sweep that finds most locks
+        // still held (a recursive delete holding thousands) is not repeated at every call: the
+        // sweeps cost constant time per lock taken.
+        if map.len() > (*sweep_at).max(LOCK_SWEEP_FLOOR) {
             map.retain(|_, w| w.strong_count() > 0);
+            *sweep_at = map.len() * 2;
         }
         match map.get(iri).and_then(std::sync::Weak::upgrade) {
             Some(m) => m,
@@ -1602,10 +1650,12 @@ async fn update<S: Store + 'static>(
         } else {
             Vec::new()
         };
+        let old_content_types: std::collections::HashSet<String> =
+            old_content_types.into_iter().collect();
         rmeta
             .types
             .iter()
-            .filter(|t| !old_content_types.contains(t))
+            .filter(|t| !old_content_types.contains(*t))
             .cloned()
             .collect()
     };
@@ -1622,7 +1672,10 @@ async fn update<S: Store + 'static>(
     .await;
     let written = match written {
         Ok(m) => m,
-        Err(e) => return store_error(e),
+        Err(e) => {
+            drop(listing);
+            return unsettled(state, uri, e).await;
+        }
     };
     drop(listing);
     changed(state, uri).await;
@@ -1636,6 +1689,19 @@ async fn update<S: Store + 'static>(
         );
     }
     resp
+}
+
+/// The response to a write that failed with `e`. A backend failure may follow a write that
+/// committed (a remote store's lost reply), so the container is touched as for a change: a
+/// conditional request against its listing must not pass on validators from before. No
+/// notification goes out for a change that may not have happened.
+async fn unsettled<S: Store + 'static>(state: &LwsState<S>, uri: &str, e: ServerError) -> Response {
+    if matches!(e, ServerError::Storage(_)) {
+        if let Some(parent) = parent_of(uri, &state.cfg.storage()) {
+            touch_container(state, &parent).await;
+        }
+    }
+    store_error(e)
 }
 
 /// After a resource or its metadata changed: its container changes too, and subscribers hear of it
@@ -2301,7 +2367,10 @@ async fn patch<S: Store + 'static>(
     .await;
     let written = match written {
         Ok(m) => m,
-        Err(e) => return store_error(e),
+        Err(e) => {
+            drop(listing);
+            return unsettled(state, uri, e).await;
+        }
     };
     drop(listing);
     changed(state, uri).await;
@@ -2414,7 +2483,8 @@ async fn delete<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     listing.take();
-    if removed > 0 {
+    // A removal whose outcome is unknown may have happened: the container is touched for it too.
+    if removed > 0 || matches!(outcome, Err(ServerError::Storage(_))) {
         if let Some(p) = parent {
             touch_container(state, &p).await;
         }
@@ -2569,6 +2639,8 @@ fn user_linkset(doc: &Value, uri: &str) -> Value {
 /// type index matches relations against, kept equal to the document.
 fn links_of(doc: &Value, uri: &str) -> Links {
     let mut links = Links::new();
+    // Repeats are found with a set, as in [`link_declared`].
+    let mut seen = std::collections::HashSet::new();
     for entry in doc
         .get("linkset")
         .and_then(Value::as_array)
@@ -2588,9 +2660,8 @@ fn links_of(doc: &Value, uri: &str) -> Links {
                 .filter_map(|t| t.get("href").and_then(Value::as_str))
             {
                 let resolved = resolve_against(uri, href);
-                let entry = links.entry(key.clone()).or_default();
-                if !entry.contains(&resolved) {
-                    entry.push(resolved);
+                if seen.insert((key.clone(), resolved.clone())) {
+                    links.entry(key.clone()).or_default().push(resolved);
                 }
             }
         }
@@ -2623,11 +2694,12 @@ fn add_links(doc: &mut Value, uri: &str, links: &Links) {
             *targets = json!([]);
         }
         let arr = targets.as_array_mut().expect("an array");
+        let mut have: std::collections::HashSet<String> = arr
+            .iter()
+            .filter_map(|t| t.get("href").and_then(Value::as_str).map(str::to_string))
+            .collect();
         for h in hrefs {
-            if !arr
-                .iter()
-                .any(|t| t.get("href").and_then(Value::as_str) == Some(h))
-            {
+            if have.insert(h.clone()) {
                 arr.push(json!({"href": h}));
             }
         }
@@ -2814,7 +2886,10 @@ async fn linkset<S: Store + 'static>(
             // Held on until the response is made, as before the write.
             let _held = match hold_locks(guard, write).await {
                 Ok((Ok(()), guard)) => guard,
-                Ok((Err(e), _)) | Err(e) => return store_error(e),
+                Ok((Err(e), _)) | Err(e) => {
+                    listing.take();
+                    return unsettled(state, uri, e).await;
+                }
             };
             let new_etag = match linkset_document(state, uri, &meta).await {
                 Ok(d) => linkset_etag(&d),
@@ -5112,6 +5187,92 @@ mod tests {
         }
     }
 
+    /// Sweep finding: HEAD on a 304 carried `Content-Length: 0`, which RFC 9110 section 8.6
+    /// forbids unless the 200 has that length; and service resources and listings answered GET
+    /// with a failing `If-Match` as if it held.
+    #[tokio::test]
+    async fn bodiless_heads_and_service_reads_follow_their_preconditions() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let store = super::super::test_store::FlakyStore::new();
+        let app = super::super::router(store, cfg).await.expect("router");
+        let send = |method: &str, uri: &str, headers: &[(&str, &str)], body: String| {
+            let mut req = axum::http::Request::builder().method(method).uri(uri);
+            for (k, v) in headers {
+                req = req.header(*k, *v);
+            }
+            app.clone().oneshot(req.body(Body::from(body)).unwrap())
+        };
+        let text = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = send("POST", "/", &text, "twelve bytes".into())
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": "http://localhost:3000/",
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        });
+        let r = send(
+            "POST",
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            grant.to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let member = hdr(&r, "location")
+            .strip_prefix("http://localhost:3000")
+            .unwrap()
+            .to_string();
+        for uri in ["/doc.txt", GRANTS_PATH, member.as_str()] {
+            let tag = hdr(&send("GET", uri, &[], String::new()).await.unwrap(), "etag");
+            let head = send("HEAD", uri, &[("if-none-match", &tag)], String::new())
+                .await
+                .unwrap();
+            assert_eq!(head.status(), StatusCode::NOT_MODIFIED, "{uri}");
+            assert!(
+                head.headers().get("content-length").is_none(),
+                "{uri} {:?}",
+                head.headers()
+            );
+            let r = send("GET", uri, &[("if-match", "\"other\"")], String::new())
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{uri}");
+            let r = send("GET", uri, &[("if-match", &tag)], String::new())
+                .await
+                .unwrap();
+            assert_eq!(r.status(), StatusCode::OK, "{uri}");
+        }
+    }
+
+    /// Sweep finding: once more than a thousand IRI locks were held at once (a recursive delete
+    /// of a large container holds one per member) every lock taken swept the whole map, and the
+    /// sweep removed nothing. A sweep now waits for the map to double.
+    #[tokio::test]
+    async fn the_lock_map_is_swept_in_amortised_time() {
+        let locks = IriLocks::default();
+        let mut held = Vec::new();
+        for i in 0..5000 {
+            held.push(locks.lock(&format!("http://h/{i}")).await);
+        }
+        let sweeps = locks.0.lock().unwrap().sweep_at;
+        assert!(sweeps >= 2 * LOCK_SWEEP_FLOOR, "{sweeps}");
+        // Between sweeps the map grows to twice what the last one left.
+        for i in 5000..5100 {
+            held.push(locks.lock(&format!("http://h/{i}")).await);
+        }
+        assert_eq!(locks.0.lock().unwrap().sweep_at, sweeps);
+        drop(held);
+        let _ = locks.lock("http://h/x").await;
+        assert!(locks.0.lock().unwrap().locks.len() <= 5101);
+    }
+
     /// Review finding: a write detached from its request held no admission permit. Once the
     /// request timed out its slot was free again while the write still waited on the store, so
     /// stalled writes could pile up past the concurrency ceiling. The write now holds the slot
@@ -5233,10 +5394,14 @@ mod tests {
         assert!(r.status().is_success(), "{}", r.status());
         assert_eq!(handle(&st, &get, &stranger).await.status(), StatusCode::OK);
         // Made private; the store commits the content and then reports a failure.
+        let version = || async { st.resource_meta(&st.cfg.storage()).await.unwrap().version };
+        let before = version().await;
         *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
         let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
         assert!(r.status().is_server_error(), "{}", r.status());
         *store.fail_after_write_of.lock().unwrap() = None;
+        // The write may have happened: the container's listing is not left looking unchanged.
+        assert_ne!(version().await, before);
         assert_eq!(
             st.store.read(&uri).await.unwrap().body,
             Bytes::from("private")

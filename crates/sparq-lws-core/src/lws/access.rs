@@ -24,7 +24,7 @@ use bytes::Bytes;
 use serde_json::{json, Value};
 
 use super::{
-    has_lws_context, has_type, is_uri, jose, json_is_uri, method_not_allowed, none_match, problem,
+    has_lws_context, has_type, is_uri, jose, json_is_uri, method_not_allowed, problem,
     service_links, service_linkset, service_listing, set, subject_tokens, Agent, LwsConfig,
     LwsRequest, LwsState, ResourceMeta, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX,
     REQUESTS_PATH,
@@ -66,11 +66,14 @@ const LEFT_OPERANDS: &[&str] = &["client", "format", "type", "purpose", "dateTim
 const OPERATORS: &[&str] = &["eq", "isAnyOf", "gt", "gteq", "lt", "lteq"];
 
 /// One ODRL constraint of the Access Profile.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Constraint {
     left: String,
     operator: String,
     right: Value,
+    /// An `isAnyOf` operand's strings, as a set: a resource's types are each looked up in it, so
+    /// a check costs what the types do, not their product with the operand.
+    any_of: std::sync::Arc<std::collections::HashSet<String>>,
 }
 
 /// What a constraint is checked against.
@@ -104,10 +107,7 @@ impl Constraint {
     fn matches(&self, actual: &str) -> bool {
         match self.operator.as_str() {
             "eq" => self.right.as_str() == Some(actual),
-            "isAnyOf" => self
-                .right
-                .as_array()
-                .is_some_and(|a| a.iter().any(|v| v.as_str() == Some(actual))),
+            "isAnyOf" => self.any_of.contains(actual),
             _ => false,
         }
     }
@@ -613,10 +613,18 @@ pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
                         return None;
                     }
                     let right = c.get("rightOperand")?.clone();
+                    let any_of = right
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect();
                     out.push(Constraint {
                         left: left.into(),
                         operator: op.into(),
                         right,
+                        any_of: std::sync::Arc::new(any_of),
                     });
                 }
                 out
@@ -739,7 +747,11 @@ pub async fn handle<S: Store + 'static>(
     }
     match req.method {
         Method::GET | Method::HEAD => {
-            if none_match(req, &record.etag) {
+            let refusal = super::resources::read_refusal(req, &record.etag);
+            if refusal == Some(StatusCode::PRECONDITION_FAILED) {
+                return problem(StatusCode::PRECONDITION_FAILED, None);
+            }
+            if refusal.is_some() {
                 let mut resp = StatusCode::NOT_MODIFIED.into_response();
                 set(resp.headers_mut(), header::ETAG, &record.etag);
                 service_links(&state.cfg, resp.headers_mut(), &iri, &container);
@@ -1570,12 +1582,41 @@ mod tests {
         assert_eq!(owner_inbox(&state).await, None);
     }
 
+    /// Sweep finding: an `isAnyOf` type constraint compared every type of the resource with
+    /// every operand. The operand is a set, built once with the grant.
+    #[test]
+    fn any_of_constraints_are_sets() {
+        let operands: Vec<String> = (0..20_000).map(|i| format!("https://t/{i}")).collect();
+        let p = policies(
+            &json!([{"type": "AccessPolicy", "action": "read", "assignee": "https://a/",
+                "constraint": [{"leftOperand": "type", "operator": "isAnyOf", "rightOperand": operands}]}]),
+            "https://s/",
+        )
+        .unwrap()
+        .remove(0);
+        let c = &p.constraints[0];
+        let mut types: Vec<String> = (0..20_000).map(|i| format!("https://u/{i}")).collect();
+        let started = std::time::Instant::now();
+        let held = |t: &[String]| {
+            c.satisfied(&ConstraintContext {
+                client: None,
+                format: None,
+                types: t,
+            })
+        };
+        assert!(!held(&types));
+        types.push("https://t/19999".into());
+        assert!(held(&types));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
     #[test]
     fn constraints() {
         let c = Constraint {
             left: "client".into(),
             operator: "eq".into(),
             right: json!("app"),
+            ..Default::default()
         };
         let types = vec![format!("{LWS_NS}DataResource")];
         assert!(c.satisfied(&ConstraintContext {
@@ -1592,6 +1633,7 @@ mod tests {
             left: "type".into(),
             operator: "eq".into(),
             right: json!("DataResource"),
+            ..Default::default()
         };
         assert!(t.satisfied(&ConstraintContext {
             client: None,
@@ -1602,6 +1644,7 @@ mod tests {
             left: "dateTime".into(),
             operator: "lt".into(),
             right: json!("2000-01-01T00:00:00Z"),
+            ..Default::default()
         };
         assert!(!past.satisfied(&ConstraintContext {
             client: None,
