@@ -12,12 +12,13 @@
 //! - `rdf-canon` — the `rdf_canon` crate driven natively over oxrdf-0.2 quads
 //!   parsed directly from the fixture bytes (no bridge).
 //!
-//! HONESTY: `sparq-canon` delegates its RDFC-1.0 algorithm to this same
-//! `rdf-canon` crate at the same lockfile pin, so the delta between the two
-//! columns is a **bridge-overhead measure** (serialize-0.3→text→parse-0.2 +
-//! guard configuration), NOT an independent-implementation comparison (that is
-//! the JS `rdf-canonize` column of `bench/canon/run.sh`). `rdf-canon` is
-//! already a regular dependency of this crate — this example adds no new dep.
+//! HONESTY: `sparq-canon` runs this same `rdf-canon` algorithm, vendored as its
+//! private `src/rdfc/` module plus sparq's label-independence tie-breaks
+//! (`src/rdfc/SPARQ-PATCHES.md`), so the delta between the two columns is a
+//! **bridge + patch overhead measure** (serialize-0.3→text→parse-0.2, guard
+//! configuration, and the tie-break keys), NOT an independent-implementation
+//! comparison (that is the JS `rdf-canonize` column of `bench/canon/run.sh`).
+//! The `rdf-canon` column is upstream, unpatched, pulled as a dev-dependency.
 //!
 //! INVARIANT (the sq-p3ssl gate): **no timing row is emitted unless BOTH
 //! implementations produced canonical N-Quads byte-identical to the vendored
@@ -496,8 +497,9 @@ fn main() {
             "rdf_canon": rdf_canon_pin,
         },
         "red": red,
-        "note": "bridge-overhead measure: both columns run the same rdf-canon algorithm pin; \
-                 the sparq column adds the oxrdf-0.3<->0.2 bridge. Work-box timings are \
+        "note": "bridge + patch overhead measure: the rdf-canon column is upstream at this pin; \
+                 the sparq column runs the vendored, label-independence-patched copy of it \
+                 plus the oxrdf-0.3<->0.2 bridge. Work-box timings are \
                  NON-canonical (bench/CATALOG.md QUIET-BOX); the independent-implementation \
                  check is the rdf-canonize JS column of bench/canon/run.sh.",
     });

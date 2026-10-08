@@ -22,6 +22,7 @@ import { useEngine, type QueryOutcome } from "@/lib/engine-context";
 import { GraphView, type InferredAffordance } from "@/components/workbench/graph-view";
 import { ProofPanel, type ExplainTarget } from "@/components/workbench/proof-panel";
 import { WorkbenchSparqlEditor } from "@/components/workbench/sparql-editor";
+import { graphViewRefusal } from "@/lib/query-form";
 
 // [FABLE-5] sq-qgkwy.2 — the override lives in the sibling `.meta.ts` (eagerly bundled for the
 // rail/tab honesty read path) so THIS panel module can stay behind a lazy dynamic import().
@@ -55,6 +56,12 @@ export function GraphViewTool() {
   const onRun = React.useCallback(async () => {
     // A run already in flight: ignore (no parallel runs for this tool).
     if (abortRef.current) return;
+    // Refuse a non-graph form BEFORE executing it, so a typed UPDATE never mutates the store.
+    const refusal = graphViewRefusal(query);
+    if (refusal !== null) {
+      setOutcome({ kind: "error", message: refusal });
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     setRunning(true);
