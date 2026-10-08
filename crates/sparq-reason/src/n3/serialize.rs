@@ -120,9 +120,8 @@ pub fn write_term(t: &Term, out: &mut String) {
         }
         Term::Var(v) => {
             out.push('?');
-            // Outside a rule (a formula-valued fact) there is no rule scope to de-duplicate
-            // against, so a universal just takes its declared name ([`write_rule`] does the
-            // collision-free renaming for rules).
+            // A caller with no scope to de-duplicate against gets the declared name; the
+            // `--pass-all` writer renames collision-free first ([`universal_names_in`]).
             match universal_name(v) {
                 Some(name) => out.push_str(&name),
                 None => out.push_str(v),
@@ -230,32 +229,41 @@ pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) {
     out.push_str(" .\n");
 }
 
-/// The output name of each `@forAll` universal in `r`: its [`universal_name`], suffixed
-/// `_2`, `_3`, … until it differs from every other variable of the rule (source variables
-/// and the universals named before it, in first-occurrence order — so the result is
-/// deterministic). A clash would merge two variables and change what the rule matches.
+/// The output name of each `@forAll` universal in `r` — see [`universal_names_in`].
 fn universal_names(r: &Rule) -> HashMap<String, String> {
-    fn walk<'a>(t: &'a Term, seen: &mut HashSet<&'a str>, order: &mut Vec<&'a str>) {
+    universal_names_in(r.premise.iter().chain(&r.conclusion))
+}
+
+/// The output name of each `@forAll` universal occurring anywhere in `stmts` (at any depth,
+/// quoted formulae included): its [`universal_name`], suffixed `_2`, `_3`, … until it
+/// differs from EVERY other variable name in `stmts` — all source variables are reserved
+/// first, then universals are named in sorted internal-name order, so the result is
+/// deterministic whatever order `stmts` comes in. A clash would merge two variables and
+/// change what the output matches when reasoned over again.
+pub(super) fn universal_names_in<'a>(
+    stmts: impl Iterator<Item = &'a [Term; 3]>,
+) -> HashMap<String, String> {
+    fn walk<'a>(t: &'a Term, seen: &mut HashSet<&'a str>) {
         match t {
             Term::Var(v) => {
-                if seen.insert(v) {
-                    order.push(v);
-                }
+                seen.insert(v);
             }
-            Term::List(ms) => ms.iter().for_each(|m| walk(m, seen, order)),
-            Term::Triple(tr) => tr.iter().for_each(|m| walk(m, seen, order)),
-            Term::Formula(ts) => ts.iter().flatten().for_each(|m| walk(m, seen, order)),
+            Term::List(ms) => ms.iter().for_each(|m| walk(m, seen)),
+            Term::Triple(tr) => tr.iter().for_each(|m| walk(m, seen)),
+            Term::Formula(ts) => ts.iter().flatten().for_each(|m| walk(m, seen)),
             _ => {}
         }
     }
-    let (mut seen, mut order) = (HashSet::new(), Vec::new());
-    for t in r.premise.iter().chain(&r.conclusion).flatten() {
-        walk(t, &mut seen, &mut order);
+    let mut seen = HashSet::new();
+    for t in stmts.flatten() {
+        walk(t, &mut seen);
     }
-    let mut taken: HashSet<String> =
-        order.iter().filter(|v| !v.starts_with(UNIVERSAL_VAR)).map(|v| v.to_string()).collect();
+    let (mut universals, rest): (Vec<&str>, Vec<&str>) =
+        seen.into_iter().partition(|v| v.starts_with(UNIVERSAL_VAR));
+    universals.sort_unstable();
+    let mut taken: HashSet<String> = rest.into_iter().map(str::to_string).collect();
     let mut names = HashMap::new();
-    for v in order {
+    for v in universals {
         let Some(base) = universal_name(v) else { continue };
         let mut name = base.clone();
         let mut n = 2;
@@ -266,6 +274,37 @@ fn universal_names(r: &Rule) -> HashMap<String, String> {
         names.insert(v.to_string(), name);
     }
     names
+}
+
+/// Write one statement of DATA (a closure fact) as `s p o .` plus a newline, renaming
+/// every `@forAll` universal per `names` ([`universal_names_in`]) at any depth. Unlike
+/// [`write_rule`] nothing else is touched: a formula-valued fact's variables stay `?v`.
+pub(super) fn write_statement_named(
+    f: &[Term; 3],
+    names: &HashMap<String, String>,
+    out: &mut String,
+) {
+    fn rename(t: &Term, names: &HashMap<String, String>) -> Term {
+        match t {
+            Term::Var(v) => names.get(v).map_or_else(|| t.clone(), |n| Term::Var(n.clone())),
+            Term::List(ms) => Term::List(ms.iter().map(|m| rename(m, names)).collect()),
+            Term::Triple(tr) => Term::Triple(Box::new([
+                rename(&tr[0], names),
+                rename(&tr[1], names),
+                rename(&tr[2], names),
+            ])),
+            Term::Formula(ts) => Term::Formula(
+                ts.iter()
+                    .map(|r| [rename(&r[0], names), rename(&r[1], names), rename(&r[2], names)])
+                    .collect(),
+            ),
+            _ => t.clone(),
+        }
+    }
+    if names.is_empty() {
+        return write_statement(f, out);
+    }
+    write_statement(&[rename(&f[0], names), rename(&f[1], names), rename(&f[2], names)], out);
 }
 
 /// `{ s p o . … }` over rule-side statements, with each term put through [`rule_term`].

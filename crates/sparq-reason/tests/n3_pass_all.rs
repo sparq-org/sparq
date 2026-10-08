@@ -212,6 +212,17 @@ fn a_for_all_universal_never_collides_with_another_variable() {
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
 }
 
+/// GH #5391 review: a universal inside a formula-valued FACT must not merge with a source
+/// variable of the same name either — `{ :x :q ?x }` holds two distinct variables.
+#[test]
+fn a_for_all_universal_in_a_formula_fact_never_collides() {
+    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n";
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!doc.contains("__ua"), "{doc}");
+    assert!(doc.contains("{ ?x_2 <http://ex/q> ?x . }"), "{doc}");
+    assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+}
+
 #[test]
 fn a_parse_error_propagates() {
     assert!(reason_n3_pass_all("{ ?x a :Human } =>", RuleVars::N3).is_err());

@@ -293,12 +293,15 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
     let (facts, _steps) = run_closure(parsed, None, None, StepMode::None);
+    // `@forAll` universals inside formula-valued facts are renamed against EVERY variable
+    // name in the closure, so a declared `:x` never merges with a source `?x` (GH #5391).
+    let names = serialize::universal_names_in(facts.all.iter());
     let mut statements: Vec<String> = facts
         .all
         .iter()
         .map(|f| {
             let mut s = String::new();
-            serialize::write_statement(f, &mut s);
+            serialize::write_statement_named(f, &names, &mut s);
             s
         })
         .collect();
