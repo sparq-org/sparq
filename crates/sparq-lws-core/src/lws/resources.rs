@@ -1158,7 +1158,15 @@ async fn create<S: Store + 'static>(
             {
                 Ok(m) => m,
                 Err(e) => {
-                    let _ = state.store.delete(&meta_key(&child), None).await;
+                    // A refusal created nothing, and the metadata goes. A backend failure may
+                    // follow a create that committed (a remote store's lost reply): the metadata
+                    // goes only once the content is known to be gone too, so committed content is
+                    // never left without its creator.
+                    let gone = !matches!(e, ServerError::Storage(_))
+                        || super::delete_record(&state, &child, &parent).await.is_ok();
+                    if gone {
+                        let _ = state.store.delete(&meta_key(&child), None).await;
+                    }
                     return Err(e);
                 }
             };
@@ -4664,6 +4672,86 @@ mod tests {
             handle(&st, &get(&secret), &stranger).await.status(),
             StatusCode::OK
         );
+    }
+
+    /// Review finding: a create whose store call reported a failure removed the new member's
+    /// metadata, though a remote store may have committed the content before its reply was lost:
+    /// the content stayed, without its creator, types and links. The metadata now goes only once
+    /// the content is known to be gone.
+    #[tokio::test]
+    async fn a_create_whose_outcome_is_unknown_keeps_its_creator() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::sync::atomic::Ordering;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let post = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        // The content lands, the reply is lost, and the content cannot be removed: the creator
+        // stays recorded.
+        let kept = st.cfg.absolute("/kept.txt");
+        store.fail_after_create.store(true, Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(kept.clone());
+        let r = create(&st, &post("kept.txt"), &owner, &st.cfg.storage()).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_delete_of.lock().unwrap() = None;
+        assert!(st.store.exists(&kept).await.unwrap());
+        assert_eq!(
+            st.resource_meta(&kept).await.unwrap().creator,
+            owner.subject
+        );
+        // When the content can be removed, it goes, and its metadata with it.
+        let gone = st.cfg.absolute("/gone.txt");
+        let r = create(&st, &post("gone.txt"), &owner, &st.cfg.storage()).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        assert!(!st.store.exists(&gone).await.unwrap());
+        assert!(stored_meta(&st, &gone).await.unwrap().is_none());
+    }
+
+    /// Review finding: HEAD responses dropped the body before the length was derived from it, so
+    /// they advertised `Content-Length: 0` for every representation.
+    #[tokio::test]
+    async fn head_advertises_the_representation_length() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let store = super::super::test_store::FlakyStore::new();
+        let app = super::super::router(store, cfg).await.expect("router");
+        let send = |method: &str, uri: &str, body: &'static str| {
+            let req = axum::http::Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("slug", "doc.txt")
+                .header("content-type", "text/plain")
+                .body(Body::from(body))
+                .unwrap();
+            app.clone().oneshot(req)
+        };
+        let r = send("POST", "/", "twelve bytes").await.unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        for uri in ["/doc.txt", "/"] {
+            let get = send("GET", uri, "").await.unwrap();
+            let body = body_of(get).await;
+            assert!(!body.is_empty());
+            let head = send("HEAD", uri, "").await.unwrap();
+            assert_eq!(head.status(), StatusCode::OK);
+            assert_eq!(
+                hdr(&head, "content-length"),
+                body.len().to_string(),
+                "{uri}"
+            );
+            assert!(body_of(head).await.is_empty());
+        }
     }
 
     /// Review finding: a write detached from its request held no admission permit. Once the

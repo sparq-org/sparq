@@ -47,11 +47,15 @@ const MAX_ASSERTION: usize = 256 * 1024;
 /// Deepest element nesting accepted.
 const MAX_DEPTH: usize = 64;
 
-/// How many namespace bindings a document may copy, summed over the elements that declare one: an
-/// element that declares a namespace gets its own copy of every binding in scope, so without a
-/// bound a few thousand declarations repeated on many small elements would hold a quadratic number
-/// of them. Elements that declare none share their parent's bindings.
-const MAX_SCOPE_COPIES: usize = 1 << 16;
+/// How many bytes of namespace bindings a document may copy, summed over the elements that declare
+/// one: an element that declares a namespace gets its own copy of every binding in scope, so
+/// without a bound a few long or numerous declarations repeated on many small elements would hold
+/// a quadratic amount of them. Each binding counts its prefix, its URI and [`BINDING_OVERHEAD`].
+/// Elements that declare none share their parent's bindings.
+const MAX_SCOPE_BYTES: usize = 4 << 20;
+
+/// What a copied binding costs beside its prefix and URI: the map entry and two string headers.
+const BINDING_OVERHEAD: usize = 64;
 
 /// Verify a base64url-encoded SAML 2.0 assertion for an exchange at this authorization server.
 pub fn verify(cfg: &LwsConfig, token: &str) -> Result<Verified, String> {
@@ -727,8 +731,11 @@ fn start_element(
     let scope = if declared.is_empty() {
         parent_scope.clone()
     } else {
-        *copies = copies.saturating_add(parent_scope.len() + declared.len());
-        if *copies > MAX_SCOPE_COPIES {
+        let bytes = |(k, v): (&String, &String)| k.len() + v.len() + BINDING_OVERHEAD;
+        let copied = parent_scope.iter().map(bytes).sum::<usize>()
+            + declared.iter().map(|(k, v)| bytes((k, v))).sum::<usize>();
+        *copies = copies.saturating_add(copied);
+        if *copies > MAX_SCOPE_BYTES {
             return Err("too many namespace declarations".into());
         }
         let mut scope = BTreeMap::clone(parent_scope);
@@ -1009,6 +1016,19 @@ mod tests {
             parse(&copied).unwrap_err(),
             "too many namespace declarations"
         );
+        // A few bindings with long URIs cost what their bytes do.
+        let long = format!("<r xmlns:p=\"urn:{}\">", "x".repeat(128 * 1024));
+        let copied = format!("{long}{}</r>", "<a xmlns:q=\"urn:q\"/>".repeat(6_000));
+        assert_eq!(
+            parse(&copied).unwrap_err(),
+            "too many namespace declarations"
+        );
+        // An ordinary assertion's declarations are far inside the budget.
+        let some: String = (0..32)
+            .map(|i| format!(" xmlns:p{i}=\"urn:{i}\""))
+            .collect();
+        let few = format!("<r{some}>{}</r>", "<a xmlns:q=\"urn:q\"/>".repeat(20));
+        assert!(parse(&few).is_ok());
     }
 
     #[test]

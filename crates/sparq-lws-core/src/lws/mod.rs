@@ -799,8 +799,20 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
     let is_head = req.is_head();
     let mut resp = route(&state, req).await;
     if is_head {
-        // HEAD carries the headers a GET would, never a body.
-        let len = resp.headers().get(header::CONTENT_LENGTH).cloned();
+        // HEAD carries the headers a GET would, never a body: the length is the one the body
+        // would have had (read before the body goes, since the length is otherwise derived from
+        // the body once the response is sent).
+        use axum::body::HttpBody;
+        let len = resp
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .cloned()
+            .or_else(|| {
+                resp.body()
+                    .size_hint()
+                    .exact()
+                    .map(header::HeaderValue::from)
+            });
         *resp.body_mut() = Body::empty();
         if let Some(len) = len {
             resp.headers_mut().insert(header::CONTENT_LENGTH, len);
