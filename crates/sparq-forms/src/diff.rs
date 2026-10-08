@@ -1,9 +1,10 @@
 //! Pure form-value differencing and SPARQL 1.1 Update rendering.
 //! [GPT-5.6] sq-wn788
 
-use crate::{FormDescription, FormField, TermRef};
+use crate::{derive::render_path, FormDescription, FormField, TermRef};
 use oxrdf::{BaseDirection, BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use serde::{Deserialize, Serialize};
+use sparq_shacl::Path;
 
 /// One value added to or removed from a bare forward-predicate field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,20 +79,21 @@ impl FormDiff {
 /// that does not parse as one RDF 1.2 triple term, or an unknown `kind`), no
 /// update is produced and the empty string is returned, so a deserialized
 /// [`TermRef`] or field path can never splice update syntax into the request.
+/// Every editable forward field's path must be a single valid `<IRI>` or a
+/// recognised complex SHACL path as derive renders it; any other path fails
+/// the whole update rather than being skipped.
 pub fn to_sparql_update(before: &FormDescription, after: &FormDescription) -> String {
     render_update(before, after).unwrap_or_default()
 }
 
 fn render_update(before: &FormDescription, after: &FormDescription) -> Option<String> {
-    // `FormDiff::between` skips fields it cannot write, so check every
-    // candidate predicate first: a malformed `<...>` path on an editable,
-    // forward field fails the whole update instead of being dropped from it.
-    // Recognised complex paths (`^<p>`, `<a>/<b>`, ...) stay excluded.
+    // `FormDiff::between` skips fields it cannot write, so classify every
+    // editable forward path first. It must be the exact rendering of a valid
+    // SHACL path: a single IRI (writable) or a complex path (excluded). Any
+    // other text is malformed and fails the whole update, never just its field.
     for field in fields(before).chain(fields(after)) {
         if field.editable && !field.inverse {
-            if let Some(predicate) = bare_predicate(&field.path) {
-                iri(predicate)?;
-            }
+            parse_field_path(&field.path)?;
         }
     }
     let diff = FormDiff::between(before, after);
@@ -240,9 +242,11 @@ impl TermParser<'_> {
 
     fn blank_node(&mut self) -> Option<BlankNode> {
         self.eat("_:")?;
+        // The label token ends at the first character BLANK_NODE_LABEL cannot
+        // contain; `blank_node` then checks the full production.
         let end = self
             .rest
-            .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '(' | ')'))
+            .find(|c: char| !(is_pn_chars(c) || c == '.'))
             .unwrap_or(self.rest.len());
         let label = &self.rest[..end];
         self.rest = &self.rest[end..];
@@ -301,6 +305,136 @@ impl TermParser<'_> {
         } else {
             Some(Literal::new_simple_literal(value))
         }
+    }
+}
+
+/// Parses a field path as derive renders it (`Path::to_sparql_property_path`,
+/// or `Path::to_turtle` when that has no SPARQL form), with every predicate a
+/// valid IRI. Returns `None` unless the text is exactly such a rendering.
+fn parse_field_path(text: &str) -> Option<Path> {
+    for turtle in [false, true] {
+        let mut parser = PathParser {
+            rest: text,
+            depth: 0,
+        };
+        let parsed = if turtle {
+            parser.turtle()
+        } else {
+            parser.sparql()
+        };
+        if let Some(path) = parsed.filter(|_| parser.rest.is_empty()) {
+            if render_path(&path) == text {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+const SH: &str = "http://www.w3.org/ns/shacl#";
+
+/// Nesting cap for path text, so deep input fails closed instead of
+/// overflowing the stack (same bound as triple terms).
+const MAX_PATH_DEPTH: usize = MAX_TRIPLE_TERM_DEPTH;
+
+struct PathParser<'a> {
+    rest: &'a str,
+    depth: usize,
+}
+
+impl PathParser<'_> {
+    fn eat(&mut self, token: &str) -> Option<()> {
+        self.rest = self.rest.strip_prefix(token)?;
+        Some(())
+    }
+
+    fn descend(&mut self) -> Option<()> {
+        self.depth += 1;
+        (self.depth <= MAX_PATH_DEPTH).then_some(())
+    }
+
+    fn predicate(&mut self) -> Option<Path> {
+        self.eat("<")?;
+        let end = self.rest.find('>')?;
+        let iri = NamedNode::new(&self.rest[..end]).ok()?;
+        self.rest = &self.rest[end + 1..];
+        Some(Path::Predicate(iri.into_string()))
+    }
+
+    /// `<p>`, `^(P)`, `(P/P..)`, `(P|P..)`, `(P)*`, `(P)+`, `(P)?`.
+    fn sparql(&mut self) -> Option<Path> {
+        if self.rest.starts_with('<') {
+            return self.predicate();
+        }
+        self.descend()?;
+        let path = if self.eat("^(").is_some() {
+            let inner = self.sparql()?;
+            self.eat(")")?;
+            Path::Inverse(Box::new(inner))
+        } else {
+            self.eat("(")?;
+            let mut items = vec![self.sparql()?];
+            let alternative = self.rest.starts_with('|');
+            while self.eat(if alternative { "|" } else { "/" }).is_some() {
+                items.push(self.sparql()?);
+            }
+            self.eat(")")?;
+            let single = || Box::new(items[0].clone());
+            if items.len() == 1 && self.eat("*").is_some() {
+                Path::ZeroOrMore(single())
+            } else if items.len() == 1 && self.eat("+").is_some() {
+                Path::OneOrMore(single())
+            } else if items.len() == 1 && self.eat("?").is_some() {
+                Path::ZeroOrOne(single())
+            } else if alternative {
+                Path::Alternative(items)
+            } else {
+                Path::Sequence(items)
+            }
+        };
+        self.depth -= 1;
+        Some(path)
+    }
+
+    /// `<p>`, `( P .. )`, and `[ <sh:…Path> P ]` (alternative takes a list).
+    fn turtle(&mut self) -> Option<Path> {
+        if self.rest.starts_with('<') {
+            return self.predicate();
+        }
+        self.descend()?;
+        let path = if self.rest.starts_with('(') {
+            Path::Sequence(self.turtle_list()?)
+        } else {
+            self.eat("[ <")?;
+            self.eat(SH)?;
+            let end = self.rest.find("> ")?;
+            let kind = &self.rest[..end];
+            self.rest = &self.rest[end + 2..];
+            let path = match kind {
+                "alternativePath" => Path::Alternative(self.turtle_list()?),
+                "inversePath" => Path::Inverse(Box::new(self.turtle()?)),
+                "zeroOrMorePath" => Path::ZeroOrMore(Box::new(self.turtle()?)),
+                "oneOrMorePath" => Path::OneOrMore(Box::new(self.turtle()?)),
+                "zeroOrOnePath" => Path::ZeroOrOne(Box::new(self.turtle()?)),
+                _ => return None,
+            };
+            self.eat(" ]")?;
+            path
+        };
+        self.depth -= 1;
+        Some(path)
+    }
+
+    fn turtle_list(&mut self) -> Option<Vec<Path>> {
+        self.eat("( ")?;
+        let mut items = Vec::new();
+        while self.eat(" )").is_none() {
+            if !items.is_empty() {
+                self.eat(" ")?;
+            }
+            items.push(self.turtle()?);
+        }
+        Some(items)
     }
 }
 

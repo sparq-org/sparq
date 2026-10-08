@@ -337,16 +337,70 @@ fn malformed_path_with_valid_edit_fails_closed() {
     };
     let ok = edit(None);
     assert!(ok.contains("\"edited\""), "valid edit alone renders: {ok}");
+    let deep = format!("{}<http://a>{}", "(".repeat(100_000), ")".repeat(100_000));
+    let unclosed = "^(".repeat(1_000_000);
     for bad_path in [
         "<http://example.org/greet ing>",
         "<relative>",
         "<http://example.org/x\\u003E>",
+        // Codex round 4: shapes that are neither one IRI nor a recognised path.
+        "<http://example.org/greeting>>",
+        "<<http://example.org/greeting>",
+        "<http://example.org/greeting> ",
+        " <http://example.org/greeting>",
+        "<http://example.org/a><http://example.org/b>",
+        "http://example.org/greeting",
+        "",
+        "^<http://example.org/greeting>",
+        "(<http://example.org/a>/<http://example.org/b>",
+        "(<http://example.org/a>/<relative>)",
+        "(<http://example.org/a>/<http://example.org/b>)*",
+        "(<http://example.org/a>|<http://example.org/b>/<http://example.org/c>)",
+        "[ <http://www.w3.org/ns/shacl#inversePath> <relative> ]",
+        "[ <http://www.w3.org/ns/shacl#bogusPath> <http://example.org/a> ]",
+        &deep,
+        &unclosed,
     ] {
         let update_text = edit(Some(bad_path));
-        assert_eq!(
-            update_text, "",
-            "{bad_path} must fail closed: {update_text}"
+        let shown: String = bad_path.chars().take(80).collect();
+        assert_eq!(update_text, "", "{shown} must fail closed: {update_text}");
+    }
+    // Recognised complex paths (both renderings derive can emit) are still
+    // excluded, not rejected, so the valid edit next to them is saved.
+    for complex in [
+        "(<http://example.org/a>/<http://example.org/b>)",
+        "(<http://example.org/a>|<http://example.org/b>)",
+        "^(<http://example.org/a>)",
+        "((<http://example.org/a>)*/(<http://example.org/b>)?)",
+        "(^(<http://example.org/a>))+",
+        "(  )",
+        "[ <http://www.w3.org/ns/shacl#alternativePath> (  ) ]",
+        "[ <http://www.w3.org/ns/shacl#inversePath> ( <http://example.org/a> (  ) ) ]",
+    ] {
+        let ok = edit(Some(complex));
+        assert!(ok.contains("\"edited\""), "{complex} is excluded: {ok}");
+        assert!(
+            !ok.contains("<http://example.org/a>"),
+            "{complex} not written: {ok}"
         );
+    }
+}
+
+/// Codex round 4 on #6707: a triple-term blank-node label ends where
+/// BLANK_NODE_LABEL ends, not at Unicode whitespace: U+1680 is a PN_CHARS_BASE
+/// character.
+#[test]
+fn triple_term_bnode_labels_use_grammar_boundaries() {
+    let label = "a\u{1680}b";
+    let ok = update_with_greeting(term("bnode", label, None));
+    assert!(ok.contains(&format!("_:{label} .")), "{ok}");
+    for text in [
+        format!("<<( _:{label} <http://b> <http://c> )>>"),
+        format!("<<( <http://a> <http://b> _:{label} )>>"),
+        format!("<<( <http://a> <http://b> _:{label})>>"),
+    ] {
+        let ok = update_with_greeting(term("triple", &text, None));
+        assert!(ok.contains(&format!("_:{label} ")), "{text}: {ok}");
     }
 }
 

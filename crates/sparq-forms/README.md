@@ -79,7 +79,8 @@ assert_eq!(field.widget.editor.as_deref(),
   invalid IRI, blank-node label or language tag. IRIs are validated, never
   escaped; triple terms accept the full RDF 1.2 grammar (e.g. `_:a..b`),
   nested up to 128 levels like sparq-core's N-Triples parser.
-  A malformed editable path fails the whole update, never just its field.
+  An editable path that is not exactly a path derive renders (one valid
+  `<IRI>` or a recognised complex path) fails the whole update.
 - **Headless & opt-in** — consumes `sparq-shacl`'s shapes model; no GUI deps;
   builds for `wasm32-unknown-unknown`; nothing in the default workspace
   depends on it, so the engine core stays lean.
