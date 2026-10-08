@@ -4659,6 +4659,33 @@ ex:bob
         assert!(!exp.contains("http://ex/kept"), "{exp}");
     }
 
+    // A type-scoped context's own `@type` alias is not used for the node's types: expansion
+    // finds `@type` entries before applying type-scoped contexts. Checked through both
+    // writers by expansion, since oxjsonld doesn't apply a type-scoped context after `@id`.
+    #[test]
+    fn type_scoped_type_alias_round_trips_through_both_writers() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/s> a <http://ex/T> ; <http://ex/q> "v" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let ctx = r#"{"@vocab":"http://ex/","type":"@type",
+            "T":{"@id":"http://ex/T","@context":{"t":"@type","label":"http://ex/q"}}}"#;
+        let compacted = graph_to_jsonld_compact(&g0, &parse_context_json(ctx).unwrap());
+        let frame = format!(r#"{{"@context":{ctx},"@id":"http://ex/s"}}"#);
+        let framed = graph_to_jsonld_framed(&g0, &parse_context_json(&frame).unwrap());
+        for out in [compacted, framed] {
+            let doc = sparq_jsonld::Json::parse(&out).unwrap();
+            let opts = sparq_jsonld::JsonLdOptions::default();
+            let mut exp = String::new();
+            sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+            assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{out}\n{exp}");
+            assert!(exp.contains(r#""http://ex/q":[{"@value":"v"}]"#), "{out}\n{exp}");
+            assert!(!exp.contains("http://ex/t\""), "{out}\n{exp}");
+            assert!(!exp.contains("http://ex/label"), "{out}\n{exp}");
+        }
+    }
+
     // Same-document references with a colon in the query or fragment stay relative to
     // the whole base (no "./" that would drop its last segment).
     #[test]
