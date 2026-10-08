@@ -90,7 +90,8 @@ pub const EXPLORE_DATASET: PromptSpec = PromptSpec {
                   in what order, and a first query to run.",
     arguments: &[],
     render: |_| {
-        Ok("You have MCP access to an RDF dataset served by sparq. Orient yourself \
+        Ok(
+            "You have MCP access to an RDF dataset served by sparq. Orient yourself \
             before writing SPARQL:\n\
             \n\
             1. Call the `stats` tool for the dataset totals.\n\
@@ -109,7 +110,8 @@ pub const EXPLORE_DATASET: PromptSpec = PromptSpec {
             \n\
             Ground every statement in rows the tools actually returned; do not invent \
             IRIs or counts."
-            .to_string())
+                .to_string(),
+        )
     },
 };
 
@@ -120,7 +122,8 @@ pub const COUNT_BY_CLASS: PromptSpec = PromptSpec {
                   populous first.",
     arguments: &[],
     render: |_| {
-        Ok("Run this query with the `query` tool and report the result rows:\n\
+        Ok(
+            "Run this query with the `query` tool and report the result rows:\n\
             \n\
             SELECT ?class (COUNT(?s) AS ?instances)\n\
             WHERE { ?s a ?class }\n\
@@ -130,7 +133,8 @@ pub const COUNT_BY_CLASS: PromptSpec = PromptSpec {
             The `classes` tool answers the same question without SPARQL; prefer it when \
             you only need the counts, and this query when you want to extend it (extra \
             filters, joins, a LIMIT)."
-            .to_string())
+                .to_string(),
+        )
     },
 };
 
@@ -232,7 +236,10 @@ mod tests {
     fn to_json_carries_name_description_and_declared_arguments() {
         let json = CLASS_OVERVIEW.to_json();
         assert_eq!(json["name"].as_str(), Some("class-overview"));
-        assert!(!json["description"].as_str().expect("description").is_empty());
+        assert!(!json["description"]
+            .as_str()
+            .expect("description")
+            .is_empty());
         let args = json["arguments"].as_array().expect("arguments array");
         assert_eq!(args.len(), 1);
         assert_eq!(args[0]["name"].as_str(), Some("class"));
@@ -240,7 +247,9 @@ mod tests {
 
         // A prompt with no arguments still renders an (empty) array, as MCP expects.
         assert_eq!(
-            EXPLORE_DATASET.to_json()["arguments"].as_array().map(Vec::len),
+            EXPLORE_DATASET.to_json()["arguments"]
+                .as_array()
+                .map(Vec::len),
             Some(0)
         );
     }

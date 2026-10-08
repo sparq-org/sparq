@@ -537,6 +537,93 @@ async fn large_construct_row_cap_is_a_clean_413() {
 }
 
 // ---------------------------------------------------------------------------
+// Streamed CSV / TSV / XML SELECT bodies (#5517)
+//
+// The CONSTRUCT contract above, for the SELECT formats rendered from a materialised
+// `QueryResult`: a result larger than one chunk streams with no `Content-Length`, a small one
+// keeps it, HEAD still advertises the GET length, and the bytes equal the buffered writer's.
+// ---------------------------------------------------------------------------
+
+const SELECT_ALL: &str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
+
+/// `(Accept, content type, buffered rendering)` for each materialised SELECT format.
+fn select_formats(ttl: &str, query: &str) -> Vec<(&'static str, &'static str, String)> {
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let r = sparq_engine::query(&graph, query).unwrap();
+    vec![
+        ("text/csv", "text/csv; charset=utf-8", sparq_server::results::select_to_csv(&r)),
+        ("text/tab-separated-values", "text/tab-separated-values; charset=utf-8", sparq_server::results::select_to_tsv(&r)),
+        ("application/sparql-results+xml", "application/sparql-results+xml", sparq_server::results::select_to_xml(&r)),
+    ]
+}
+
+#[tokio::test]
+async fn streamed_select_csv_tsv_xml_large_multichunk_is_byte_identical() {
+    assert_select_formats_stream(&big_graph_ttl()).await;
+}
+
+/// #6708 review: a single row whose one literal is many chunks long. The writers stream
+/// it term-piece by term-piece rather than rendering the row first, and the body must still
+/// be byte-identical and chunked. The literal is dense with characters each format escapes
+/// or quotes (XML entity expansion, CSV quote doubling, TSV backslash escapes).
+#[tokio::test]
+async fn streamed_select_single_huge_literal_is_byte_identical_and_chunked() {
+    let unit = "ab&c<d>e\\\"f,g\\th\\\\i "; // turtle-escaped: ab&c<d>e"f,g<TAB>h\i
+    let ttl = format!("<http://ex/s> <http://ex/p> \"{}\" .\n", unit.repeat(40_000));
+    assert_select_formats_stream(&ttl).await;
+}
+
+async fn assert_select_formats_stream(ttl: &str) {
+    let base = spawn_over(ttl).await;
+    for (accept, ct, expect) in select_formats(ttl, SELECT_ALL) {
+        assert!(expect.len() > 64 * 1024, "{accept}: the fixture must exceed one chunk");
+        let resp = client()
+            .get(format!("{base}/sparql"))
+            .header("accept", accept)
+            .query(&[("query", SELECT_ALL)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "{accept}");
+        assert_eq!(resp.headers()["content-type"], ct, "{accept}");
+        assert!(
+            resp.headers().get("content-length").is_none(),
+            "{accept}: a streamed multi-chunk SELECT must not advertise Content-Length"
+        );
+        assert_eq!(resp.text().await.unwrap(), expect, "{accept}");
+
+        let head = client()
+            .head(format!("{base}/sparql"))
+            .header("accept", accept)
+            .query(&[("query", SELECT_ALL)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(head.status(), 200, "{accept}");
+        let advertised: usize = head.headers()["content-length"].to_str().unwrap().parse().unwrap();
+        assert_eq!(advertised, expect.len(), "{accept}: HEAD must advertise the GET body length");
+    }
+}
+
+#[tokio::test]
+async fn small_select_csv_tsv_xml_stays_buffered_with_content_length() {
+    let base = spawn().await;
+    for (accept, _ct, expect) in select_formats(DATA, SELECT_ALL) {
+        let resp = client()
+            .get(format!("{base}/sparql"))
+            .header("accept", accept)
+            .query(&[("query", SELECT_ALL)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "{accept}");
+        let advertised: usize = resp.headers()["content-length"].to_str().unwrap().parse().unwrap();
+        assert_eq!(advertised, expect.len(), "{accept}");
+        assert_eq!(resp.text().await.unwrap(), expect, "{accept}");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP semantics: 400 / 405 / 501 / HEAD
 // ---------------------------------------------------------------------------
 
