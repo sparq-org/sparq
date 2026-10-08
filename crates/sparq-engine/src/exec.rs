@@ -7057,7 +7057,8 @@ fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
 /// graph with no f64-inexact decimal keeps the numeric fast path.
 fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)> {
-    fn lit_num(e: &Expression) -> Option<f64> {
+    // (threshold, whether the float tier could round it) — see the decline below.
+    fn lit_num(e: &Expression) -> Option<(f64, bool)> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
                 // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant (`numeric_cache_f64`).
@@ -7071,10 +7072,19 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
                 // large integers or high-precision decimals) makes the sargable f64 scan
                 // unsafe; decline so the filter takes the exact general comparison path.
                 if sig_digits(l.value()) > 15 {
-                    None
-                } else {
-                    Some(v)
+                    return None;
                 }
+                // XPath compares an `xs:float` against a non-double operand in the FLOAT tier,
+                // which the untyped f64 cache cannot reproduce (`"0.1"^^xsd:float = 0.1` is
+                // true; their f64 images differ). A FLOAT constant is never pushed down (any
+                // integer/decimal row would need f32 promotion); an integer/decimal constant
+                // is unsafe only if it is not exactly an `f32`, and only against a float row.
+                // A double constant promotes every row to double: the f64 compare is exact.
+                let dt = l.datatype();
+                if dt == xsd::FLOAT {
+                    return None;
+                }
+                Some((v, dt != xsd::DOUBLE && f64::from(v as f32) != v))
             }
             _ => None,
         }
@@ -7114,12 +7124,13 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
     };
     for (var, konst, op) in [(l, r, on_left), (r, l, on_right)] {
         let Some(v) = var_of(var) else { continue };
-        if let Some(c) = lit_num(konst) {
+        if let Some((c, float_tier_rounds)) = lit_num(konst) {
             // sq-lr2ii: decline the f64 numeric fast path when the graph holds an f64-inexact
             // decimal — the scan's per-row f64 compare could be wrong for it. A numeric
             // constant is never also a temporal one, so declining here yields `None` for this
             // orientation; the exact general evaluator handles the residual FILTER correctly.
-            if !graph.has_high_precision_decimal() {
+            // Likewise when a float row would compare against an `f32`-rounded constant.
+            if !graph.has_high_precision_decimal() && !(float_tier_rounds && graph.has_float_literal()) {
                 return Some((v, num_cmp(op, c)));
             }
             continue;
@@ -11752,7 +11763,7 @@ fn minmax_values(vals: Vec<Value>, keep: Ordering) -> Value {
         Some(nums) => {
             let mut best = nums[0];
             for &n in &nums[1..] {
-                if num_compare(n, best) == Some(keep) {
+                if num_extremum_compare(n, best) == Some(keep) {
                     best = n;
                 }
             }
@@ -11833,13 +11844,49 @@ fn minmax_temporal(
 }
 
 /// Value comparison of two typed numerics: exact when both are int/decimal, f64 otherwise.
+///
+/// XPath `op:numeric-*` promotion via [`Num::cmp_relational`]: an `xs:float` against an
+/// integer/decimal compares in the FLOAT tier (`"0.1"^^xsd:float = 0.1` is true), not as two
+/// `f64`s.
 fn num_compare(a: Num, c: Num) -> Option<Ordering> {
+    a.cmp_relational(c)
+}
+
+/// The order MIN/MAX fold numerics by: exact when both are int/decimal, `f64` otherwise.
+///
+/// Deliberately NOT [`num_compare`]: MAX is defined through `ORDER BY DESC`, so the float-tier
+/// promotion must not create a tie that lets a later member displace a strictly larger one
+/// (`MAX(0.1, "0.1"^^xsd:float, 0.1000000001e0)` is the float, whose value is
+/// 0.10000000149…). `f64` widening is exact for a float, so this keeps every strict order.
+fn num_extremum_compare(a: Num, c: Num) -> Option<Ordering> {
     if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
         if let Some(o) = x.cmp(y) {
             return Some(o);
         }
     }
     a.f64().partial_cmp(&c.f64())
+}
+
+/// Whether two DISTINCT cached `f64` operand values could still compare EQUAL under XPath
+/// promotion to `xs:float`. The numeric caches are untyped, but `"0.1"^^xsd:float` caches its
+/// `f32` value (0.100000001490116…) while `0.1` caches 0.1: unequal as `f64`, equal once the
+/// decimal is promoted to float. `f32` rounding is monotonic, so promotion can only turn an
+/// `f64` inequality into a tie, never flip an order — and only when both values round to the
+/// same `f32`. A cached decimal's `f64` may sit one rounding away from its exact value, so
+/// adjacent `f32`s count too. The fast paths decide every other unequal pair by `f64` and send
+/// this rare one to the typed evaluator.
+#[inline]
+fn f32_promotion_may_tie(x: f64, y: f64) -> bool {
+    #[inline]
+    fn key(f: f32) -> i64 {
+        let b = f.to_bits() as i32;
+        i64::from(if b < 0 { -(b & i32::MAX) } else { b })
+    }
+    if x.is_nan() || y.is_nan() {
+        return false;
+    }
+    let (a, b) = (x as f32, y as f32);
+    a == b || key(a).abs_diff(key(b)) <= 1
 }
 
 fn dedup_values(vals: &mut Vec<Value>) {
@@ -13624,11 +13671,12 @@ fn compile_expr(e: &Expression, b: &Bindings) -> CompiledExpr {
     }
 }
 
-/// Whether a compiled expression contains an arithmetic sub-expression (`+ - *`). [OPUS-4.8] sq-7d3dj.4.
+/// Whether a compiled expression contains an arithmetic sub-expression (`+ - * /`). Mirrors
+/// [`expr_has_arith`]. [OPUS-4.8] sq-7d3dj.4.
 fn compiled_expr_has_arith(e: &CompiledExpr) -> bool {
     use CompiledExpr::*;
     match e {
-        Add(..) | Subtract(..) | Multiply(..) => true,
+        Add(..) | Subtract(..) | Multiply(..) | Divide(..) => true,
         UnaryPlus(a) | UnaryMinus(a) => compiled_expr_has_arith(a),
         _ => false,
     }
@@ -13677,7 +13725,9 @@ fn ebv(v: &Value) -> Option<bool> {
                 // [OPUS-4.8] sq-rkzhr: XSD acceptance set (via `parse_xsd_f64`) — a
                 // numeric-typed literal with an ill-formed lexical is a type error (`None`),
                 // matching `as_num` rather than silently swallowing Rust-only spellings.
-                parse_xsd_f64(l.value()).map(|n| n != 0.0 && !n.is_nan())
+                // Valued per datatype (#3825): a tiny `xsd:float` lexical whose `f32` value is
+                // zero is false, even though its nearest `f64` is not zero.
+                sparq_core::numeric_lexical_f64(l.value(), dt).map(|n| n != 0.0 && !n.is_nan())
             } else if dt == xsd::STRING.as_str() {
                 Some(!l.value().is_empty())
             } else {
@@ -14178,14 +14228,16 @@ fn sig_digits(s: &str) -> usize {
     }
 }
 
-/// `true` if the expression performs arithmetic (`+ - *` / unary sign), so a comparison
-/// over it must be evaluated EXACTLY rather than via f64 — the only case where f64 can
-/// produce a wrong ordering for integer/decimal data (value comparison is monotonic;
-/// arithmetic introduces flippable rounding error).
+/// `true` if the expression performs arithmetic (`+ - * /`, possibly under a unary sign), so a
+/// comparison over it must not use the untyped f64 fast path: integer/decimal arithmetic is
+/// decided exactly, and float/double arithmetic in its promoted tier by the typed evaluator
+/// (value comparison is monotonic; arithmetic introduces rounding the tier determines). The
+/// unary sign alone is exact in every tier, and numeric functions are not evaluated by the
+/// fast path at all.
 fn expr_has_arith(e: &Expression) -> bool {
     use Expression::*;
     match e {
-        Add(..) | Subtract(..) | Multiply(..) => true,
+        Add(..) | Subtract(..) | Multiply(..) | Divide(..) => true,
         UnaryPlus(a) | UnaryMinus(a) => expr_has_arith(a),
         _ => false,
     }
@@ -14231,7 +14283,8 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
     // present (the common, arithmetic-free comparison keeps the f64 fast path below).
-    if expr_has_arith(a) || expr_has_arith(c) {
+    let arith = expr_has_arith(a) || expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
             if let Some(o) = da.cmp(db) {
                 return Ok(Value::Bool(f(o)));
@@ -14241,7 +14294,12 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
     // Fast path: both sides numeric -> compare f64 directly, no term materialised.
     // Reaching here means BOTH operands are numeric, so a `None` partial_cmp is a
     // NaN value (op:numeric ordering of NaN is false) — NOT a cross-type error.
-    if let (Some(x), Some(y)) = (eval_numeric(graph, local, b, row, a), eval_numeric(graph, local, b, row, c)) {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith { None } else { eval_numeric(graph, local, b, row, a).zip(eval_numeric(graph, local, b, row, c)) };
+    if let Some((x, y)) = fast {
         // f64 rounding is monotonic — it only ever COLLAPSES distinct values to equal,
         // never flips an ordering. So re-check exactly ONLY when f64 says equal (catches
         // integers > 2^53 and high-precision decimals that share an f64).
@@ -14252,7 +14310,10 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
                 }
             }
         }
-        return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        }
     }
     // Fast path: both sides temporal -> compare cached/parsed timeline values, no term
     // materialised. `None` from `cmp_t` is exactly the strict path's type-error cases
@@ -14264,16 +14325,28 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
         });
     }
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-    Ok(match value_compare_strict(&x, &y) {
+    Ok(relational_value(&x, &y, arith, f))
+}
+
+/// The typed result of a relational operator (`<`, `<=`, `>`, `>=`) once both operands are
+/// evaluated. An incomparable pair is a type error, EXCEPT two numerics that are unordered
+/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there.
+/// That case is only applied when `arith` sent the comparison here (an arithmetic operand,
+/// which the f64 fast path used to decide, returning false for NaN); the NaN-free typed path
+/// is unchanged.
+fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
+    match value_compare_strict(x, y) {
         Some(o) => Value::Bool(f(o)),
+        None if arith && as_numeric(x).is_some() && as_numeric(y).is_some() => Value::Bool(false),
         None => Value::Error,
-    })
+    }
 }
 
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
 fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression) -> Result<Value, String> {
     // EXACT integer/decimal arithmetic equality (see `cmp_expr`) — `0.1 + 0.2 = 0.3`.
-    if expr_has_arith(a) || expr_has_arith(c) {
+    let arith = expr_has_arith(a) || expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
             if let Some(o) = da.cmp(db) {
                 return Ok(Value::Bool(o == Ordering::Equal));
@@ -14281,7 +14354,12 @@ fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &E
         }
     }
     // Fast path: both numeric (NaN == NaN is false, matching op:numeric-equal).
-    if let (Some(x), Some(y)) = (eval_numeric(graph, local, b, row, a), eval_numeric(graph, local, b, row, c)) {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith { None } else { eval_numeric(graph, local, b, row, a).zip(eval_numeric(graph, local, b, row, c)) };
+    if let Some((x, y)) = fast {
         // Re-check exactly when f64 says equal (see `cmp_expr`): distinct integers > 2^53
         // or high-precision decimals can share an f64 and must not be reported equal.
         if x == y {
@@ -14291,7 +14369,10 @@ fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &E
                 }
             }
         }
-        return Ok(Value::Bool(x == y));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x == y));
+        }
     }
     // Fast path: both temporal. Same-family operands decide by timeline (`None` =
     // the indeterminate mixed-timezone window -> type error); dateTime and date are
@@ -14555,7 +14636,7 @@ fn is_numeric_dt(l: &Literal) -> bool {
 #[inline]
 fn numeric_cache_f64(l: &Literal) -> Option<f64> {
     if is_numeric_dt(l) && Num::of_literal(l).is_some() {
-        parse_xsd_f64(l.value().trim())
+        sparq_core::numeric_lexical_f64(l.value().trim(), l.datatype().as_str())
     } else {
         None
     }
@@ -14619,9 +14700,9 @@ impl CompareTerm for Value {
         // expansion for the MIXED exact/inexact pair (the pre-fix `num_compare`
         // fallback kept the collapsed f64 verdict there, which made the order
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
-        // `<`/`=` (`cmp_expr`) and MIN/MAX (`minmax_values`) deliberately KEEP the
-        // XPath promoted semantics via `num_compare`; this total order refines only
-        // their ties. `None` (a lexical beyond the exact tower) keeps the tie.
+        // `<`/`=` (`cmp_expr`, via `num_compare`) and MIN/MAX (`minmax_values`, via
+        // `num_extremum_compare`) deliberately KEEP their own semantics; this total
+        // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
             (Some(a), Some(b)) => Some(a.cmp_total(b)),
             _ => None,
@@ -15143,7 +15224,8 @@ fn cmp_compiled(
     c: &CompiledExpr,
     f: impl Fn(Ordering) -> bool,
 ) -> Result<Value, String> {
-    if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
+    let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
         {
@@ -15152,9 +15234,16 @@ fn cmp_compiled(
             }
         }
     }
-    if let (Some(x), Some(y)) =
-        (eval_compiled_numeric(graph, local, row, a), eval_compiled_numeric(graph, local, row, c))
-    {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith {
+        None
+    } else {
+        eval_compiled_numeric(graph, local, row, a).zip(eval_compiled_numeric(graph, local, row, c))
+    };
+    if let Some((x, y)) = fast {
         if x == y {
             if let (Some(la), Some(lb)) = (
                 eval_compiled_exact_lexical(graph, local, row, a),
@@ -15165,7 +15254,10 @@ fn cmp_compiled(
                 }
             }
         }
-        return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        }
     }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
@@ -15176,10 +15268,7 @@ fn cmp_compiled(
         });
     }
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-    Ok(match value_compare_strict(&x, &y) {
-        Some(o) => Value::Bool(f(o)),
-        None => Value::Error,
-    })
+    Ok(relational_value(&x, &y, arith, f))
 }
 
 /// [FABLE-5] (sq-7d3dj.30.11) The single RAW ID an operand resolves to, if it is a bound column
@@ -15241,7 +15330,8 @@ fn equal_compiled(
             return Ok(Value::Bool(true));
         }
     }
-    if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
+    let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
         {
@@ -15250,9 +15340,16 @@ fn equal_compiled(
             }
         }
     }
-    if let (Some(x), Some(y)) =
-        (eval_compiled_numeric(graph, local, row, a), eval_compiled_numeric(graph, local, row, c))
-    {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith {
+        None
+    } else {
+        eval_compiled_numeric(graph, local, row, a).zip(eval_compiled_numeric(graph, local, row, c))
+    };
+    if let Some((x, y)) = fast {
         if x == y {
             if let (Some(la), Some(lb)) = (
                 eval_compiled_exact_lexical(graph, local, row, a),
@@ -15263,7 +15360,10 @@ fn equal_compiled(
                 }
             }
         }
-        return Ok(Value::Bool(x == y));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x == y));
+        }
     }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))

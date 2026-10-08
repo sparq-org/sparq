@@ -45,7 +45,13 @@ fn row_match(
 /// Term equality under (an extension of) the current blank-node bijection,
 /// recursing into RDF 1.2 triple terms so their inner blank nodes are mapped
 /// too. Mutates the maps; the caller backtracks via [`undo`].
-fn term_match(e: &Term, a: &Term, fwd: &mut BnodeMap, rev: &mut BnodeMap, added: &mut Vec<String>) -> bool {
+fn term_match(
+    e: &Term,
+    a: &Term,
+    fwd: &mut BnodeMap,
+    rev: &mut BnodeMap,
+    added: &mut Vec<String>,
+) -> bool {
     match (e, a) {
         (Term::BlankNode(eb), Term::BlankNode(ab)) => {
             let (eb, ab) = (eb.as_str(), ab.as_str());

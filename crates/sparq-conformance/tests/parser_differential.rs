@@ -158,7 +158,9 @@ fn oxttl_turtle() -> DiffParser<'static> {
 // ---------------------------------------------------------------------------
 
 fn w3c_suite_root(dir: &str) -> Option<PathBuf> {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/w3c/rdf-tests/rdf/rdf11").join(dir);
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/w3c/rdf-tests/rdf/rdf11")
+        .join(dir);
     match p.canonicalize() {
         Ok(p) if p.join("manifest.ttl").is_file() => Some(p),
         _ => {
@@ -169,7 +171,9 @@ fn w3c_suite_root(dir: &str) -> Option<PathBuf> {
 }
 
 fn fuzz_seeds_dir(target: &str) -> Option<PathBuf> {
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fuzz/seeds").join(target);
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fuzz/seeds")
+        .join(target);
     p.canonicalize().ok().filter(|p| p.is_dir())
 }
 
@@ -213,10 +217,20 @@ const NT_ADJUDICATED: &[&str] = &[
 
 #[test]
 fn differential_nt_native_vs_oxttl_over_w3c_actions() {
-    let Some(root) = w3c_suite_root("rdf-n-triples") else { return };
+    let Some(root) = w3c_suite_root("rdf-n-triples") else {
+        return;
+    };
     let report = run_suite_actions(&sparq_nt(), &oxttl_nt(), &root).expect("suite walked");
-    assert!(report.compared >= 70, "suite shrank: {} actions", report.compared);
-    assert!(report.unverified.is_empty(), "unverified inputs: {:?}", report.unverified);
+    assert!(
+        report.compared >= 70,
+        "suite shrank: {} actions",
+        report.compared
+    );
+    assert!(
+        report.unverified.is_empty(),
+        "unverified inputs: {:?}",
+        report.unverified
+    );
     assert_eq!(
         divergent_stems(&report),
         stems(NT_ADJUDICATED),
@@ -232,10 +246,20 @@ fn differential_nt_native_vs_oxttl_over_w3c_actions() {
 
 #[test]
 fn differential_nq_native_vs_oxttl_over_w3c_actions() {
-    let Some(root) = w3c_suite_root("rdf-n-quads") else { return };
+    let Some(root) = w3c_suite_root("rdf-n-quads") else {
+        return;
+    };
     let report = run_suite_actions(&sparq_nq(), &oxttl_nq(), &root).expect("suite walked");
-    assert!(report.compared >= 87, "suite shrank: {} actions", report.compared);
-    assert!(report.unverified.is_empty(), "unverified inputs: {:?}", report.unverified);
+    assert!(
+        report.compared >= 87,
+        "suite shrank: {} actions",
+        report.compared
+    );
+    assert!(
+        report.unverified.is_empty(),
+        "unverified inputs: {:?}",
+        report.unverified
+    );
     // The N-Quads manifest embeds the N-Triples cases (N-Quads is a superset), so the
     // adjudicated set is the NT set (as .nq copies where the manifest uses them) plus
     // the graph-position IRI case.
@@ -262,10 +286,20 @@ fn differential_nq_native_vs_oxttl_over_w3c_actions() {
 
 #[test]
 fn differential_trig_sparq_vs_oxttl_over_w3c_actions() {
-    let Some(root) = w3c_suite_root("rdf-trig") else { return };
+    let Some(root) = w3c_suite_root("rdf-trig") else {
+        return;
+    };
     let report = run_suite_actions(&sparq_trig(), &oxttl_trig(), &root).expect("suite walked");
-    assert!(report.compared >= 300, "suite shrank: {} actions", report.compared);
-    assert!(report.unverified.is_empty(), "unverified inputs: {:?}", report.unverified);
+    assert!(
+        report.compared >= 300,
+        "suite shrank: {} actions",
+        report.compared
+    );
+    assert!(
+        report.unverified.is_empty(),
+        "unverified inputs: {:?}",
+        report.unverified
+    );
     assert!(
         report.divergences.is_empty(),
         "sparq TriG dataset path diverged from oxttl:\n{}",
@@ -293,13 +327,18 @@ fn differential_fuzz_seeds_format_prefixed() {
         let Some(dir) = fuzz_seeds_dir(target) else {
             panic!("committed fuzz seed dir fuzz/seeds/{target} missing");
         };
-        let mut entries: Vec<_> =
-            std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).collect();
+        let mut entries: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
         entries.sort();
         for path in entries.into_iter().filter(|p| p.is_file()) {
             let bytes = std::fs::read(&path).unwrap();
-            let Some((&sel, rest)) = bytes.split_first() else { continue };
-            let Some((candidate, incumbent)) = pairs.get(sel as usize % 4) .map(|(c, i)| (c, i))
+            let Some((&sel, rest)) = bytes.split_first() else {
+                continue;
+            };
+            let Some((candidate, incumbent)) = pairs.get(sel as usize % 4).map(|(c, i)| (c, i))
             else {
                 continue;
             };
@@ -317,7 +356,10 @@ fn differential_fuzz_seeds_format_prefixed() {
             }
         }
     }
-    assert!(compared >= 8, "expected the committed seed corpus to be compared, got {compared}");
+    assert!(
+        compared >= 8,
+        "expected the committed seed corpus to be compared, got {compared}"
+    );
 }
 
 /// The larger committed N-Quads seed set (`fuzz/seeds/canonicalize_nquads`) — plain
@@ -336,8 +378,16 @@ fn differential_fuzz_seeds_nquads_corpus() {
         panic!("committed fuzz seed dir fuzz/seeds/canonicalize_nquads missing");
     };
     let report = run_dir(&sparq_nq(), &oxttl_nq(), &dir, &|p| p.is_file());
-    assert!(report.compared >= 100, "seed corpus shrank: {}", report.compared);
-    assert!(report.unverified.is_empty(), "unverified: {:?}", report.unverified);
+    assert!(
+        report.compared >= 100,
+        "seed corpus shrank: {}",
+        report.compared
+    );
+    assert!(
+        report.unverified.is_empty(),
+        "unverified: {:?}",
+        report.unverified
+    );
     for d in &report.divergences {
         assert!(
             matches!(d.kind, DivergenceKind::CandidateAccepts(_)),
@@ -364,8 +414,11 @@ fn differential_fuzz_seeds_nquads_corpus() {
 /// the "generated parser loses data" failure mode.
 fn quad_drop_mutant() -> DiffParser<'static> {
     DiffParser::new("mutant: drops poisoned quads", |text, base| {
-        (oxttl_nt().parse)(text, base)
-            .map(|qs| qs.into_iter().filter(|q| !q[2].contains("POISON")).collect())
+        (oxttl_nt().parse)(text, base).map(|qs| {
+            qs.into_iter()
+                .filter(|q| !q[2].contains("POISON"))
+                .collect()
+        })
     })
 }
 
@@ -427,9 +480,17 @@ fn mutation_quad_drop_detected_with_minimal_repro() {
 
     assert_eq!(report.compared, 2);
     assert_eq!(report.agreements, 1, "the clean file must agree");
-    assert_eq!(report.divergences.len(), 1, "the seeded mutant MUST be detected");
+    assert_eq!(
+        report.divergences.len(),
+        1,
+        "the seeded mutant MUST be detected"
+    );
     let d = &report.divergences[0];
-    assert!(d.label.ends_with("poisoned.nt"), "wrong file blamed: {}", d.label);
+    assert!(
+        d.label.ends_with("poisoned.nt"),
+        "wrong file blamed: {}",
+        d.label
+    );
     assert!(
         matches!(&d.kind, DivergenceKind::QuadSet { only_candidate, only_incumbent }
             if only_candidate.is_empty() && only_incumbent.len() == 1),
@@ -437,7 +498,10 @@ fn mutation_quad_drop_detected_with_minimal_repro() {
         d.kind
     );
     // The minimal repro must shrink 31 lines to exactly the one diverging statement.
-    assert_eq!(d.minimal_repro, "<http://ex/s> <http://ex/p> \"POISON\" .\n");
+    assert_eq!(
+        d.minimal_repro,
+        "<http://ex/s> <http://ex/p> \"POISON\" .\n"
+    );
 }
 
 #[test]
@@ -466,7 +530,10 @@ fn mutation_lenient_accept_detected() {
 fn mutation_term_mangle_detected() {
     let doc = "<http://ex/s> <http://ex/p> \"chat\"@fr .\n";
     match compare_doc(&term_mangle_mutant(), &oxttl_nt(), doc, "http://ex/") {
-        Ok(Some(DivergenceKind::QuadSet { only_candidate, only_incumbent })) => {
+        Ok(Some(DivergenceKind::QuadSet {
+            only_candidate,
+            only_incumbent,
+        })) => {
             assert_eq!(only_candidate.len(), 1);
             assert_eq!(only_incumbent.len(), 1);
             assert!(only_candidate[0][2].ends_with("@FR"));
@@ -481,14 +548,19 @@ fn mutation_term_mangle_detected() {
 /// diverges. Self-skips without the fetched data.
 #[test]
 fn mutation_detected_through_suite_mode() {
-    let Some(root) = w3c_suite_root("rdf-n-triples") else { return };
+    let Some(root) = w3c_suite_root("rdf-n-triples") else {
+        return;
+    };
     // Mutant drops quads whose object contains "x" — several suite actions contain one.
     let mutant = DiffParser::new("mutant: drops objects containing x", |text, base| {
         (oxttl_nt().parse)(text, base)
             .map(|qs| qs.into_iter().filter(|q| !q[2].contains('x')).collect())
     });
     let baseline = run_suite_actions(&oxttl_nt(), &oxttl_nt(), &root).expect("suite walked");
-    assert!(baseline.divergences.is_empty(), "oxttl-vs-oxttl must be divergence-free");
+    assert!(
+        baseline.divergences.is_empty(),
+        "oxttl-vs-oxttl must be divergence-free"
+    );
     let mutated = run_suite_actions(&mutant, &oxttl_nt(), &root).expect("suite walked");
     assert!(
         !mutated.divergences.is_empty(),

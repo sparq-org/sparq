@@ -40,15 +40,15 @@ fn assert_graph_roundtrips(label: &str, triples: &[Triple]) {
     let expect = triple_set(triples);
 
     // N-Triples (sanity — it is the canonical form, re-parsed as Turtle since NT ⊂ Turtle).
-    let nt = triples_to_ntriples(triples);
+    let nt = triples_to_ntriples(triples).unwrap();
     assert_eq!(triple_set(&reparse_turtle(&nt)), expect, "[{label}/N-Triples] set must round-trip\n{nt}");
 
     // Prefix-compacting Turtle.
-    let ttl = triples_to_turtle(triples);
+    let ttl = triples_to_turtle(triples).unwrap();
     assert_eq!(triple_set(&reparse_turtle(&ttl)), expect, "[{label}/Turtle] set must round-trip\n{ttl}");
 
     // RDF/XML.
-    let xml = triples_to_rdfxml(triples);
+    let xml = triples_to_rdfxml(triples).unwrap();
     let back = parse_rdfxml(xml.as_bytes(), None)
         .unwrap_or_else(|e| panic!("[{label}/RDF-XML] reference parser REJECTED our output: {e}\n{xml}"));
     assert_eq!(triple_set(&back), expect, "[{label}/RDF-XML] set must round-trip\n{xml}");
@@ -117,4 +117,23 @@ fn graph_writers_roundtrip_engine_constructs() {
 fn graph_writers_roundtrip_empty_graph() {
     // Zero triples: every writer must emit a valid (empty-graph) document.
     assert_graph_roundtrips("empty", &[]);
+}
+
+/// RDF/XML cannot use `rdf:about` as a predicate. The buffered writer must refuse the graph
+/// with an `Err` rather than return an unterminated document that silently lacks the bad
+/// triple and every triple after it. The other writers encode the same graph fine.
+#[test]
+fn rdfxml_refuses_a_forbidden_predicate_instead_of_truncating() {
+    let ttl = "<http://ex/a> <http://ex/p> \"before\" .\n\
+               <http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#about> \"bad\" .\n\
+               <http://ex/b> <http://ex/p> \"after\" .\n";
+    let g = Graph::load_str(ttl, "turtle").unwrap();
+    let triples = construct_or_describe(&g, "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }").unwrap();
+    assert_eq!(triples.len(), 3);
+
+    let err = triples_to_rdfxml(&triples).expect_err("rdf:about as a predicate must be refused");
+    assert!(err.contains("serialising the graph"), "unexpected message: {err}");
+
+    assert_eq!(reparse_turtle(&triples_to_ntriples(&triples).unwrap()).len(), 3);
+    assert_eq!(reparse_turtle(&triples_to_turtle(&triples).unwrap()).len(), 3);
 }

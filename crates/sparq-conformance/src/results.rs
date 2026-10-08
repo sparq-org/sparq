@@ -63,7 +63,9 @@ fn parse_tsv(path: &Path) -> Result<Expected, String> {
     let text =
         std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let mut lines = text.lines();
-    let header = lines.next().ok_or_else(|| format!("{}: empty TSV", path.display()))?;
+    let header = lines
+        .next()
+        .ok_or_else(|| format!("{}: empty TSV", path.display()))?;
     let vars: Vec<String> = header
         .split('\t')
         .map(|v| v.trim().trim_start_matches('?').to_string())
@@ -79,12 +81,18 @@ fn parse_tsv(path: &Path) -> Result<Expected, String> {
             if cell.is_empty() {
                 continue; // unbound
             }
-            let var = vars
-                .get(i)
-                .ok_or_else(|| format!("{}: row {} has more cells than variables", path.display(), lineno + 2))?;
-            binding.push((var.clone(), parse_tsv_term(cell).map_err(|e| {
-                format!("{}: row {}: {e}", path.display(), lineno + 2)
-            })?));
+            let var = vars.get(i).ok_or_else(|| {
+                format!(
+                    "{}: row {} has more cells than variables",
+                    path.display(),
+                    lineno + 2
+                )
+            })?;
+            binding.push((
+                var.clone(),
+                parse_tsv_term(cell)
+                    .map_err(|e| format!("{}: row {}: {e}", path.display(), lineno + 2))?,
+            ));
         }
         rows.push(binding);
     }
@@ -152,12 +160,20 @@ fn parse_srj(path: &Path) -> Result<Expected, String> {
 fn srj_term(val: &serde_json::Value) -> Result<Term, String> {
     let get = |k: &str| val.get(k).and_then(|s| s.as_str());
     match get("type") {
-        Some("uri") => {
-            make_term("uri", None, None, None, get("value").unwrap_or_default().to_string())
-        }
-        Some("bnode") => {
-            make_term("bnode", None, None, None, get("value").unwrap_or_default().to_string())
-        }
+        Some("uri") => make_term(
+            "uri",
+            None,
+            None,
+            None,
+            get("value").unwrap_or_default().to_string(),
+        ),
+        Some("bnode") => make_term(
+            "bnode",
+            None,
+            None,
+            None,
+            get("value").unwrap_or_default().to_string(),
+        ),
         Some("triple") => {
             let v = val
                 .get("value")
@@ -203,8 +219,13 @@ fn parse_srx(path: &Path) -> Result<Expected, String> {
     let mut cur_var: Option<String> = None;
     // Value element currently open: (kind, lang, its:dir, datatype, text).
     #[allow(clippy::type_complexity)]
-    let mut cur_val: Option<(String, Option<String>, Option<String>, Option<String>, String)> =
-        None;
+    let mut cur_val: Option<(
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    )> = None;
     // SPARQL 1.2 `<triple>` nesting: each frame is (active slot, [s, p, o]).
     let mut triple_stack: Vec<(usize, [Option<Term>; 3])> = Vec::new();
     let mut boolean: Option<bool> = None;

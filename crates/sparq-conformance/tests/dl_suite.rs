@@ -168,7 +168,7 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): +1 (137 → 138). Enabling fail-closed extraction
     /// of `owl:TransitiveProperty` makes one formerly-abstained negative-profile row
     /// definitively refutable; the two other newly checkable rows enter the measured In-gap.
-        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −4
+    /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −4
     /// (138 → 134). Four explicit-negation rows whose input carries `owl:topObjectProperty` /
     /// `owl:bottomObjectProperty` in a property position now REFUSE extraction, so L2 can no
     /// longer answer `NotIn` on them — they move from refuted to abstained
@@ -191,7 +191,7 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): +2 (180 → 182) as two transitive-property inputs
     /// become structurally checkable but L2 axiom-grammar membership cannot refute their
     /// full-profile negations. This is the existing honest In-gap, never a fabricated pass.
-        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −1
+    /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −1
     /// (182 → 181), denominator 320 → 315. One In-gap row left the checkable set with the
     /// four refuted ones; the gap is now 181 of 315. [SONNET-4.6]
     pub const DL_PROFILE_NEGATIVE_IN_GAP: usize = 181;
@@ -204,7 +204,7 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): −3 (617 → 614); all three rows moved out only
     /// because `dl_transitive` now extracts their transitivity axiom, closing accounting
     /// with +1 refuted pass and +2 measured In-gap rows above.
-        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +5
+    /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +5
     /// (614 → 619) — the four rows that left [`DL_PROFILE_NEGATIVE_REFUTED`] plus the one
     /// that left [`DL_PROFILE_NEGATIVE_IN_GAP`] land here, closing the accounting.
     /// [SONNET-4.6]
@@ -323,7 +323,7 @@ mod gated {
     /// `WebOnt-I5.3-015` positive profile row (EL-tagged; its premise carries `xsd:integer`/
     /// `xsd:string` ranges) now REFUSES extraction, moving from a pass to an abstention (see
     /// [`DL_PROFILE_FLOOR`]). [FABLE-5]
-        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +1
+    /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +1
     /// (118 → 119). The `New-Feature-BottomObjectProperty-001` positive profile row (EL-tagged)
     /// now REFUSES extraction — see [`DL_PROFILE_FLOOR`]. [SONNET-4.6]
     pub const DL_PROFILE_ABSTAINED: usize = 119;
@@ -453,7 +453,7 @@ mod gated {
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): +5 (291 → 296). Five corpus documents whose
     /// only formerly-unmodelled role characteristic was `owl:TransitiveProperty` now
     /// extract and round-trip through the feature-gated structural axiom; violations stay 0.
-        /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −2
+    /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −2
     /// (296 → 294), with `DL_RENDER_ROUNDTRIP_REFUSED` +2 (375 → 377) — the accounting stays
     /// closed at 672 documents. The two `New-Feature-{Top,Bottom}ObjectProperty-001` premise
     /// documents no longer extract, so they leave the round-trip pass set for the
@@ -465,7 +465,7 @@ mod gated {
     /// Re-pinned by sq-pbz04.4.9: +2 (378 → 380) — see [`DL_RENDER_ROUNDTRIP_FLOOR`].
     /// Re-pinned by sq-zfwzq ([GPT-5.6]): −5 (380 → 375), exactly the five documents
     /// graduated to [`DL_RENDER_ROUNDTRIP_FLOOR`].
-        /// Re-pinned by sq-pbz04.4.8: +2 (375 → 377). See [`DL_RENDER_ROUNDTRIP_FLOOR`].
+    /// Re-pinned by sq-pbz04.4.8: +2 (375 → 377). See [`DL_RENDER_ROUNDTRIP_FLOOR`].
     /// [SONNET-4.6]
     pub const DL_RENDER_ROUNDTRIP_REFUSED: usize = 377;
     /// See [`DL_RENDER_ROUNDTRIP_FLOOR`] — documents whose RDF/XML literal oxrdfxml
@@ -548,9 +548,7 @@ mod gated {
         println!("{}", report.render());
         println!(
             "OWL 2 DL render round-trip ratchet pass {} of {} (floor {})",
-            report.round_tripped,
-            report.documents,
-            DL_RENDER_ROUNDTRIP_FLOOR
+            report.round_tripped, report.documents, DL_RENDER_ROUNDTRIP_FLOOR
         );
         // The invariant: NO violations, ever — not a pinnable divergence set.
         assert!(
@@ -578,7 +576,10 @@ mod gated {
             report.documents, DL_RENDER_ROUNDTRIP_DOCUMENTS,
             "render round-trip document count moved — the accounting is pinned"
         );
-        assert!(report.accounting_closed(), "every document in exactly one bucket");
+        assert!(
+            report.accounting_closed(),
+            "every document in exactly one bucket"
+        );
     }
 
     /// The RENDER ROUND-TRIP arm over the **RDF-BASED-only** slice (sq-pbz04.4.18) — the
@@ -599,14 +600,11 @@ mod gated {
         }
         let text = std::fs::read_to_string(&export)
             .unwrap_or_else(|e| panic!("read {}: {e}", export.display()));
-        let report =
-            dl_suite::run_render_roundtrip_rdf_based_arm(&text).expect("all.rdf parses");
+        let report = dl_suite::run_render_roundtrip_rdf_based_arm(&text).expect("all.rdf parses");
         println!("{}", report.render());
         println!(
             "OWL 2 RDF-Based-only render round-trip ratchet pass {} of {} (floor {})",
-            report.round_tripped,
-            report.documents,
-            DL_RDF_BASED_ROUNDTRIP_FLOOR
+            report.round_tripped, report.documents, DL_RDF_BASED_ROUNDTRIP_FLOOR
         );
         assert!(
             report.violations.is_empty(),
@@ -632,7 +630,10 @@ mod gated {
             report.documents, DL_RDF_BASED_ROUNDTRIP_DOCUMENTS,
             "RDF-BASED-only document count moved — the accounting is pinned"
         );
-        assert!(report.accounting_closed(), "every document in exactly one bucket");
+        assert!(
+            report.accounting_closed(),
+            "every document in exactly one bucket"
+        );
     }
 
     /// The two round-trip arms must be DISJOINT (sq-pbz04.4.18): the RDF-BASED-only slice
@@ -751,7 +752,10 @@ mod gated {
             dl_suite::run_render_roundtrip_rdf_based_arm(mini).expect("canary export parses");
         // DIRECT arm: the dual-tagged case ONLY (the RDF-BASED-only case is not sanctioned
         // under Direct semantics).
-        assert_eq!(direct.documents, 1, "DIRECT arm must see only the dual-tagged case");
+        assert_eq!(
+            direct.documents, 1,
+            "DIRECT arm must see only the dual-tagged case"
+        );
         assert_eq!(direct.round_tripped, 1);
         // RDF-BASED-only arm: the RDF-BASED-only case ONLY. `2` here means the `!DIRECT`
         // exclusion was dropped and the arms now overlap.
@@ -763,7 +767,11 @@ mod gated {
         assert_eq!(rdf_based.round_tripped, 1);
         assert_eq!(rdf_based.extraction_refused, 0);
         assert_eq!(rdf_based.parse_failed, 0);
-        assert!(rdf_based.violations.is_empty(), "{:?}", rdf_based.violations);
+        assert!(
+            rdf_based.violations.is_empty(),
+            "{:?}",
+            rdf_based.violations
+        );
         assert!(rdf_based.accounting_closed());
         // Violation keys are segmented per arm, so concatenating two reports keeps the
         // rows distinguishable even for the same case identifier.
@@ -823,21 +831,37 @@ mod gated {
             .map(|(k, _)| (*k).to_string())
             .collect();
         assert_eq!(
-            reasoning_fails, pinned_reasoning,
+            reasoning_fails,
+            pinned_reasoning,
             "reasoning-lane divergence set moved — unpinned new fails: {:?}; stale pins \
              (now passing/abstaining — re-audit + re-pin): {:?}",
-            reasoning_fails.difference(&pinned_reasoning).collect::<Vec<_>>(),
-            pinned_reasoning.difference(&reasoning_fails).collect::<Vec<_>>()
+            reasoning_fails
+                .difference(&pinned_reasoning)
+                .collect::<Vec<_>>(),
+            pinned_reasoning
+                .difference(&reasoning_fails)
+                .collect::<Vec<_>>()
         );
-        let profile_fails: BTreeSet<String> =
-            report.profile.fails.iter().map(|(k, _)| k.clone()).collect();
-        let pinned_profile: BTreeSet<String> =
-            PROFILE_DIVERGENCES.iter().map(|(k, _)| (*k).to_string()).collect();
+        let profile_fails: BTreeSet<String> = report
+            .profile
+            .fails
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect();
+        let pinned_profile: BTreeSet<String> = PROFILE_DIVERGENCES
+            .iter()
+            .map(|(k, _)| (*k).to_string())
+            .collect();
         assert_eq!(
-            profile_fails, pinned_profile,
+            profile_fails,
+            pinned_profile,
             "profile-lane divergence set moved — unpinned new fails: {:?}; stale pins: {:?}",
-            profile_fails.difference(&pinned_profile).collect::<Vec<_>>(),
-            pinned_profile.difference(&profile_fails).collect::<Vec<_>>()
+            profile_fails
+                .difference(&pinned_profile)
+                .collect::<Vec<_>>(),
+            pinned_profile
+                .difference(&profile_fails)
+                .collect::<Vec<_>>()
         );
 
         // The EXACT pins (module docs: `==`, not `>=`, so abstention-inflation and
@@ -965,11 +989,9 @@ mod gated {
         assert!(report.all_fails().is_empty(), "{:?}", report.all_fails());
         // And the tri-state mapping itself: an abstention maps to OutOfFragment.
         assert!(matches!(
-            dl_suite::positive_entailment_tri(
-                &sparq_reason_dl::check::EntailmentVerdict::Unknown(
-                    sparq_reason_dl::check::UnknownReason::QlConsistencyPending
-                )
-            ),
+            dl_suite::positive_entailment_tri(&sparq_reason_dl::check::EntailmentVerdict::Unknown(
+                sparq_reason_dl::check::UnknownReason::QlConsistencyPending
+            )),
             TriState::OutOfFragment(_)
         ));
     }

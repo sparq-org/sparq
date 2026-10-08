@@ -24,7 +24,7 @@
 # omission is only dangerous under a SHA pin — exactly the case the policy forces.
 #
 # WHY A HAND-ROLLED STDLIB PARSER (no PyYAML): this runs in the docs-quality
-# `ci-scripts` job, which — like coverage-gate.py's self-test — installs no Python
+# `quick-gates` job, which — like coverage-gate.py's self-test — installs no Python
 # deps. GitHub-Actions workflow files are written in a tightly-constrained block
 # style (2-space indent, `- name:` step lists, `uses:`/`with:` siblings), so a
 # small indentation-aware step splitter is sufficient and keeps the gate
