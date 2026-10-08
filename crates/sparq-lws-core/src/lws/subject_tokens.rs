@@ -58,22 +58,60 @@ const MAX_DPOP_JTIS: usize = 65_536;
 /// How many of an OpenID Provider's keys an ID Token's signature is tried against.
 const MAX_UNNAMED_KEYS: usize = 8;
 
-/// The DPoP proof ids (`jti`) seen at the token endpoint, until their proofs are too old to be
-/// accepted anyway.
+/// How many live proof ids one key may hold in the replay cache: a client presents a proof per
+/// token request, so a key with more than this many in one window is refused rather than let it
+/// crowd out every other key.
+const MAX_DPOP_JTIS_PER_KEY: usize = 32;
+
+/// The DPoP proof ids (`jti`) seen at the token endpoint, by the key that signed them, until
+/// their proofs are too old to be accepted anyway. Expired entries leave in expiry order, a few at
+/// a time as new ones arrive, so no request scans the whole cache.
 #[derive(Default)]
-pub struct DpopReplay(std::sync::Mutex<std::collections::HashMap<String, i64>>);
+pub struct DpopReplay(std::sync::Mutex<Replay>);
+
+#[derive(Default)]
+struct Replay {
+    seen: std::collections::HashMap<(String, String), i64>,
+    by_key: std::collections::HashMap<String, usize>,
+    expiry: std::collections::BinaryHeap<std::cmp::Reverse<(i64, String, String)>>,
+}
 
 impl DpopReplay {
-    /// Remember `jti` until `until`; `false` when it was seen already (a replay) or there is no room.
-    fn first_use(&self, jti: &str, until: i64, now: i64) -> bool {
-        let mut seen = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if seen.len() >= MAX_DPOP_JTIS {
-            seen.retain(|_, t| *t > now);
+    /// Remember `jti` from the key `jkt` until `until`; `false` when it was seen already (a
+    /// replay), or there is no room: for this key, or at all. Fails closed: an entry is never
+    /// evicted before it expires.
+    fn first_use(&self, jkt: &str, jti: &str, until: i64, now: i64) -> bool {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Replay {
+            seen,
+            by_key,
+            expiry,
+        } = &mut *guard;
+        while let Some(std::cmp::Reverse((t, _, _))) = expiry.peek() {
+            if *t > now {
+                break;
+            }
+            let Some(std::cmp::Reverse((_, k, j))) = expiry.pop() else {
+                break;
+            };
+            seen.remove(&(k.clone(), j));
+            if let Some(n) = by_key.get_mut(&k) {
+                *n -= 1;
+                if *n == 0 {
+                    by_key.remove(&k);
+                }
+            }
         }
-        if seen.contains_key(jti) || seen.len() >= MAX_DPOP_JTIS {
+        let entry = (jkt.to_string(), jti.to_string());
+        if seen.contains_key(&entry)
+            || seen.len() >= MAX_DPOP_JTIS
+            || by_key.get(jkt).is_some_and(|n| *n >= MAX_DPOP_JTIS_PER_KEY)
+        {
             return false;
         }
-        seen.insert(jti.to_string(), until);
+        seen.insert(entry, until);
+        *by_key.entry(jkt.to_string()).or_default() += 1;
+        expiry.push(std::cmp::Reverse((until, jkt.to_string(), jti.to_string())));
         true
     }
 }
@@ -152,7 +190,7 @@ pub fn check_dpop(
         .claim_str("jti")
         .filter(|j| !j.is_empty() && j.len() <= 256)
         .ok_or("the DPoP proof has no jti")?;
-    if !replay.first_use(jti, iat + DPOP_WINDOW_SECS + 1, now) {
+    if !replay.first_use(jkt, jti, iat + DPOP_WINDOW_SECS + 1, now) {
         return Err("the DPoP proof was used before".into());
     }
     Ok(())
@@ -802,11 +840,17 @@ pub fn names_issuer(
     // The document is the subject's to write (and is read before any signature is checked), so
     // the work is bounded: so many triples are read, so many services looked at, and the triples
     // are indexed by subject once, so each service costs only its own triples.
-    let triples: Vec<oxrdf::Triple> = parser
-        .for_slice(body)
-        .filter_map(Result::ok)
-        .take(MAX_IDENTITY_TRIPLES)
-        .collect();
+    // The expanded terms are bounded too (see [`super::expansion_budget`]): a document whose
+    // prefixes expand past it is refused.
+    let mut budget = super::expansion_budget(body.len());
+    let mut triples: Vec<oxrdf::Triple> = Vec::new();
+    for t in parser.for_slice(body).filter_map(Result::ok) {
+        budget = budget.checked_sub(super::triple_bytes(&t))?;
+        triples.push(t);
+        if triples.len() == MAX_IDENTITY_TRIPLES {
+            break;
+        }
+    }
     let mut by_subject: HashMap<&oxrdf::NamedOrBlankNode, Vec<&oxrdf::Triple>> = HashMap::new();
     for t in &triples {
         by_subject.entry(&t.subject).or_default().push(t);
@@ -1038,6 +1082,49 @@ mod tests {
             header,
             &json!({"htm": htm, "htu": htu, "iat": iat, "jti": jti}),
         )
+    }
+
+    /// Review finding: one key could fill the whole replay cache, refusing every other client's
+    /// proofs until its entries expired, and each refusal scanned the cache. A key holds at most
+    /// [`MAX_DPOP_JTIS_PER_KEY`] live entries, and entries leave in expiry order.
+    #[test]
+    fn one_key_cannot_fill_the_replay_cache() {
+        let replay = DpopReplay::default();
+        let now = 1_000;
+        for i in 0..MAX_DPOP_JTIS_PER_KEY {
+            assert!(replay.first_use("k", &format!("j{i}"), now + 60, now));
+        }
+        assert!(!replay.first_use("k", "one more", now + 60, now));
+        assert!(replay.first_use("other", "j0", now + 60, now));
+        // A replay stays refused while it is live; once expired its room comes back.
+        assert!(!replay.first_use("k", "j0", now + 60, now + 30));
+        assert!(replay.first_use("k", "later", now + 200, now + 61));
+        assert!(replay.first_use("k", "j0", now + 200, now + 61));
+        // Everything from before expired; only the two new entries are held.
+        assert_eq!(replay.0.lock().unwrap().seen.len(), 2);
+    }
+
+    /// Review finding: the triple limit did not bound what the triples hold: a prefix of half a
+    /// megabyte used ten thousand times expanded to gigabytes. Expanded terms are held to
+    /// [`super::super::expansion_budget`], and a document past it is refused.
+    #[test]
+    fn identity_documents_are_held_to_an_expansion_budget() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let long = format!("https://p.example/{}#", "x".repeat(100_000));
+        let uses: String = (0..200)
+            .map(|i| format!("<{s}> <urn:p> p:o{i} .\n"))
+            .collect();
+        let doc = format!("@prefix p: <{long}> .\n<{s}> <http://www.w3.org/ns/solid/terms#oidcIssuer> <{op}> .\n{uses}");
+        assert_eq!(names_issuer("text/turtle", doc.as_bytes(), s, op), None);
+        let few: String = (0..5)
+            .map(|i| format!("<{s}> <urn:p> p:o{i} .\n"))
+            .collect();
+        let doc = format!("@prefix p: <{long}> .\n<{s}> <http://www.w3.org/ns/solid/terms#oidcIssuer> <{op}> .\n{few}");
+        assert_eq!(
+            names_issuer("text/turtle", doc.as_bytes(), s, op),
+            Some(IssuerLink::SolidOidcIssuer)
+        );
     }
 
     #[test]

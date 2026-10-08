@@ -62,6 +62,15 @@ impl Action {
     }
 }
 
+/// Most access requests held at once, from all authors together.
+pub const MAX_REQUESTS: usize = 512;
+
+/// Most access requests one author may hold open at once.
+pub const MAX_REQUESTS_PER_AUTHOR: usize = 16;
+
+/// Largest access request document accepted.
+pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
+
 const LEFT_OPERANDS: &[&str] = &["client", "format", "type", "purpose", "dateTime"];
 const OPERATORS: &[&str] = &["eq", "isAnyOf", "gt", "gteq", "lt", "lteq"];
 
@@ -863,6 +872,36 @@ async fn create<S: Store + 'static>(
     else {
         return problem(StatusCode::BAD_REQUEST, Some("not a valid access document"));
     };
+    // Anyone authenticated may ask for access, and each request is stored as a resource is:
+    // requests are held to a share of their own, overall and per author, so asking can never
+    // fill the storage that resources and grants need.
+    if !grants {
+        if req.body.len() > MAX_REQUEST_BYTES {
+            return problem(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some(&format!(
+                    "an access request is at most {MAX_REQUEST_BYTES} bytes"
+                )),
+            );
+        }
+        let requests = state.access.map(false).read().expect("lock");
+        let mine = requests
+            .values()
+            .filter(|r| r.author == agent.subject)
+            .count();
+        if mine >= MAX_REQUESTS_PER_AUTHOR {
+            return problem(
+                StatusCode::TOO_MANY_REQUESTS,
+                Some("this agent has as many open access requests as it may"),
+            );
+        }
+        if requests.len() >= MAX_REQUESTS {
+            return problem(
+                StatusCode::INSUFFICIENT_STORAGE,
+                Some("the server holds as many access requests as it may"),
+            );
+        }
+    }
     let id = jose::random_id();
     let base = if grants { GRANTS_PATH } else { REQUESTS_PATH };
     let container = state.cfg.absolute(base);
@@ -1608,6 +1647,51 @@ mod tests {
         types.push("https://t/19999".into());
         assert!(held(&types));
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// Review finding: anyone authenticated could store access requests without limit, each
+    /// costing the storage quota resources need. Requests are held to a share of their own.
+    #[tokio::test]
+    async fn access_requests_are_held_to_their_share() {
+        let (state, _store) = super::super::test_store::state(100).await;
+        let body = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessRequest"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let post = |body: &str| {
+            super::super::test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[("content-type", LWS_JSON)],
+                body,
+            )
+        };
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        for _ in 0..MAX_REQUESTS_PER_AUTHOR {
+            let r = handle(&state, &post(&body), &asker).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = handle(&state, &post(&body), &asker).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        let other = Agent {
+            subject: Some("https://other.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let r = handle(&state, &post(&body), &other).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let big = format!(
+            "{}{}",
+            &body[..body.len() - 1],
+            format!(",\"x\":\"{}\"}}", "y".repeat(MAX_REQUEST_BYTES))
+        );
+        let r = handle(&state, &post(&big), &other).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[test]

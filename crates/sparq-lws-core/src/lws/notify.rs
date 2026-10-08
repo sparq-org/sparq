@@ -380,15 +380,30 @@ impl Notifier {
     /// covers `event.uri` and who may read it now. A delete prepares its notifications before the
     /// resource goes, while who may read it can still be decided, and [`Notifier::send`]s them only
     /// once the removal is confirmed.
+    ///
+    /// At most as many as the delivery queue holds are prepared ([`Notifier::prepare_at_most`]):
+    /// past that they would be dropped when sent.
     pub async fn prepare<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
         event: &Event,
     ) -> Vec<Pending> {
+        self.prepare_at_most(state, event, self.limits.queue).await
+    }
+
+    /// [`Notifier::prepare`], for at most `limit` subscriptions: a change that prepares many
+    /// (a recursive delete prepares one per resource it removes) shares one bound between them.
+    pub async fn prepare_at_most<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+        event: &Event,
+        limit: usize,
+    ) -> Vec<Pending> {
         let candidates: Vec<Subscription> = self
             .live()
             .into_iter()
             .filter(|s| s.covers(&event.uri))
+            .take(limit)
             .collect();
         let mut out = Vec::new();
         // A Delete is prepared while the resource is still there; its deliveries, made once it
@@ -1096,6 +1111,42 @@ mod tests {
         let r = handle(&state, &delete(&tag), &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert!(state.notify.get("s1").is_none());
+    }
+
+    /// Review finding: a recursive delete prepared every notification for every descendant
+    /// before removing anything, past what the delivery queue would ever take. Preparation shares
+    /// the queue's bound.
+    #[tokio::test]
+    async fn preparation_is_bounded_by_the_delivery_queue() {
+        let (state, _store) = test_store::state(100).await;
+        for i in 0..10 {
+            let sub = Subscription {
+                id: format!("s{i}"),
+                subscriber: None,
+                client: None,
+                topics: vec![state.cfg.storage()],
+                inbox: "https://inbox.example/".into(),
+                expires: None,
+                expires_at: None,
+            };
+            state
+                .notify
+                .subs
+                .write()
+                .unwrap()
+                .insert(sub.id.clone(), sub);
+        }
+        let event = Event {
+            kind: "Update",
+            is_container: true,
+            uri: state.cfg.storage(),
+            relation: None,
+        };
+        assert_eq!(
+            state.notify.prepare_at_most(&state, &event, 3).await.len(),
+            3
+        );
+        assert_eq!(state.notify.prepare(&state, &event).await.len(), 10);
     }
 
     /// Sweep finding: a subscription could name any number of topics, each checked against the

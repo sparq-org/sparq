@@ -663,8 +663,11 @@ fn ranged(
     modified_secs: Option<u64>,
 ) -> Response {
     let len = body.len() as u64;
+    // Range applies to GET only: a HEAD answers with the headers of the whole representation
+    // (RFC 9110 section 14.2).
     let range = req
         .header(header::RANGE)
+        .filter(|_| req.method == Method::GET)
         .filter(|_| if_range_holds(req.header(header::IF_RANGE), etag, modified_secs));
     match range.map(|r| parse_range(r, len)) {
         Some(ByteRange::Unsatisfiable) => {
@@ -767,20 +770,25 @@ fn parse_range(header: &str, len: u64) -> ByteRange {
     ByteRange::Single(from, to.map_or(len - 1, |t| t.min(len - 1)))
 }
 
-/// `items` (listing entries from [`members`]) with the size of each data resource's content.
-async fn with_sizes<S: Store + 'static>(state: &LwsState<S>, items: &mut [Value]) {
-    for item in items {
+/// `items` (listing entries from [`members`], each with the stored metadata it was made from)
+/// with the size of each data resource's content: the content of the version the entry
+/// describes, so the size never comes from a later write than the fields and entity tag beside
+/// it. When that version is gone (a write replaced it since), the size is left out (it is a
+/// SHOULD), rather than taken from another version.
+async fn with_sizes<S: Store + 'static>(
+    state: &LwsState<S>,
+    items: &mut [(Value, crate::store::sparq::ResourceMeta)],
+) {
+    for (item, meta) in items {
         if item["type"] != "DataResource" {
             continue;
         }
         let Some(id) = item["id"].as_str().map(str::to_string) else {
             continue;
         };
-        let size = match state.store.read(&id).await {
-            Ok(r) => r.body.len(),
-            Err(_) => 0,
-        };
-        item["size"] = json!(size);
+        if let Ok(body) = state.store.read_at(&id, meta).await {
+            item["size"] = json!(body.len());
+        }
     }
 }
 
@@ -790,7 +798,7 @@ async fn with_sizes<S: Store + 'static>(state: &LwsState<S>, items: &mut [Value]
 async fn members<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
-) -> Result<Vec<Value>, ServerError> {
+) -> Result<Vec<(Value, crate::store::sparq::ResourceMeta)>, ServerError> {
     let mut children: Vec<String> = state
         .store
         .list_children(uri)
@@ -832,7 +840,7 @@ async fn members<S: Store + 'static>(
             );
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         }
-        out.push(Value::Object(item));
+        out.push((Value::Object(item), meta));
     }
     Ok(out)
 }
@@ -860,7 +868,7 @@ async fn read_container<S: Store + 'static>(
     let mut hasher = Sha256::new();
     hasher.update(meta.etag.as_bytes());
     hasher.update(cmeta.version.as_deref().unwrap_or_default().as_bytes());
-    for m in &all {
+    for (m, _) in &all {
         hasher.update(serde_json::to_vec(m).unwrap_or_default());
         hasher.update(b"\n");
     }
@@ -870,7 +878,7 @@ async fn read_container<S: Store + 'static>(
     // 304 for a listing whose members moved on since.
     let modified = all
         .iter()
-        .filter_map(|m| m["modified"].as_str().and_then(parse_rfc3339))
+        .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
         .filter_map(|t| u64::try_from(t).ok())
         .fold(
             to_secs(
@@ -909,19 +917,20 @@ async fn read_container<S: Store + 'static>(
         }
         Precondition::Proceed => {}
     }
-    let mut items: Vec<Value> = all
+    let mut shown: Vec<(Value, crate::store::sparq::ResourceMeta)> = all
         .iter()
         .skip((page - 1) * page_size)
         .take(page_size)
-        .map(|m| {
+        .map(|(m, meta)| {
             let mut m = m.clone();
             if let Some(o) = m.as_object_mut() {
                 o.remove("etag");
             }
-            m
+            (m, meta.clone())
         })
         .collect();
-    with_sizes(state, &mut items).await;
+    with_sizes(state, &mut shown).await;
+    let items: Vec<Value> = shown.into_iter().map(|(m, _)| m).collect();
     let body = json!({
         "@context": LWS_CONTEXT,
         "id": uri,
@@ -1094,15 +1103,25 @@ fn resolve_against(base: &str, target: &str) -> String {
 }
 
 /// The types a representation states for the resource itself: `<> a <T>` in Turtle.
-fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Vec<String> {
+fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Result<Vec<String>, Response> {
     let mut types = Vec::new();
     if !content_type.starts_with("text/turtle") {
-        return types;
+        return Ok(types);
     }
     // Repeats are found with a set: a representation may state tens of thousands of types.
     let mut seen = std::collections::HashSet::new();
+    let mut budget = super::expansion_budget(body.len());
     if let Ok(parser) = oxttl::TurtleParser::new().with_base_iri(uri) {
         for t in parser.for_slice(body).flatten() {
+            budget = match budget.checked_sub(super::triple_bytes(&t)) {
+                Some(left) => left,
+                None => {
+                    return Err(problem(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        Some("the representation's terms expand past what the server reads"),
+                    ))
+                }
+            };
             if let (oxrdf::NamedOrBlankNode::NamedNode(s), oxrdf::Term::NamedNode(o)) =
                 (&t.subject, &t.object)
             {
@@ -1115,7 +1134,7 @@ fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Vec<String> {
             }
         }
     }
-    types
+    Ok(types)
 }
 
 /// The types a resource has: those declared by Link headers, then those its content states.
@@ -1245,7 +1264,10 @@ async fn create<S: Store + 'static>(
     let stated = if is_container {
         Vec::new()
     } else {
-        content_types(&child, &content_type, &body)
+        match content_types(&child, &content_type, &body) {
+            Ok(t) => t,
+            Err(r) => return r,
+        }
     };
     let types = all_types(&declared_types, stated);
     let meta = ResourceMeta {
@@ -1644,7 +1666,10 @@ async fn update<S: Store + 'static>(
         // otherwise the types it stated would outlive it.
         let old_content_types = if meta.content_type.starts_with("text/turtle") {
             match state.store.read_at(uri, &meta).await {
-                Ok(b) => content_types(uri, &meta.content_type, &b),
+                Ok(b) => match content_types(uri, &meta.content_type, &b) {
+                    Ok(t) => t,
+                    Err(r) => return r,
+                },
                 Err(e) => return store_error(e),
             }
         } else {
@@ -1659,7 +1684,11 @@ async fn update<S: Store + 'static>(
             .cloned()
             .collect()
     };
-    rmeta.types = all_types(&declared, content_types(uri, &content_type, &req.body));
+    let stated = match content_types(uri, &content_type, &req.body) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    rmeta.types = all_types(&declared, stated);
     rmeta.declared_types = Some(declared);
     let (written, _guard) = write_with_meta(
         state,
@@ -2454,6 +2483,9 @@ async fn delete<S: Store + 'static>(
     // still be decided; the notifications go out only for removals that happened. A recursive
     // delete removes every descendant, and each removal is a Delete of its own.
     let mut notices = Vec::with_capacity(doomed.len());
+    // They share the delivery queue's bound: what is prepared past it would be dropped when
+    // sent, and is not held while the removals run.
+    let mut room = state.cfg.delivery.queue;
     for (gone, origin) in doomed.iter().cloned() {
         let event = Event {
             kind: "Delete",
@@ -2461,7 +2493,9 @@ async fn delete<S: Store + 'static>(
             uri: gone,
             relation: origin.map(|p| ("origin", p)),
         };
-        notices.push(state.notify.prepare(state, &event).await);
+        let pending = state.notify.prepare_at_most(state, &event, room).await;
+        room -= pending.len();
+        notices.push(pending);
     }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks until the removals are over (see [`hold_locks`]).
@@ -4906,12 +4940,81 @@ mod tests {
         let uri = "http://h/r";
         let list: Vec<String> = (0..100_000).map(|i| format!("<urn:t{i}>")).collect();
         let body = format!("<> a {}, <urn:t1>, <urn:t0> .", list.join(", "));
-        let types = content_types(uri, "text/turtle", body.as_bytes());
+        let types = content_types(uri, "text/turtle", body.as_bytes()).unwrap();
         assert_eq!(types.len(), 100_000);
         assert_eq!(types[..2], ["urn:t0".to_string(), "urn:t1".to_string()]);
         let all = all_types(&["urn:t5".into(), "urn:x".into()], types);
         assert_eq!(all.len(), 100_001);
         assert_eq!(all[..3], ["urn:t5", "urn:x", "urn:t0"].map(String::from));
+    }
+
+    /// Review finding: a Turtle body could state types through a long prefix used many times,
+    /// so a small upload expanded to gigabytes of IRIs before any quota applied. Expanded terms
+    /// are held to a budget, and a body past it is refused.
+    #[tokio::test]
+    async fn stated_types_are_held_to_an_expansion_budget() {
+        let st = state().await;
+        let long = format!("https://p.example/{}#", "x".repeat(100_000));
+        let types: Vec<String> = (0..200).map(|i| format!("p:T{i}")).collect();
+        let body = format!("@prefix p: <{long}> .\n<> a {} .", types.join(", "));
+        assert!(content_types("http://h/r", "text/turtle", body.as_bytes()).is_err());
+        let turtle = ("content-type", "text/turtle");
+        let r = call(&st, "POST", "/", &[turtle, ("slug", "t.ttl")], &body).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let r = call(
+            &st,
+            "POST",
+            "/",
+            &[turtle, ("slug", "t.ttl")],
+            "<> a <urn:t> .",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = call(&st, "PUT", "/t.ttl", &[turtle], &body).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// Review finding: HEAD applied Range, answering 206 or 416 with a part's length, where it
+    /// must describe the whole representation (RFC 9110 section 14.2).
+    #[tokio::test]
+    async fn head_ignores_range() {
+        let st = state().await;
+        let text = [("content-type", "text/plain"), ("slug", "r.txt")];
+        let r = call(&st, "POST", "/", &text, "twelve bytes").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        for range in ["bytes=0-0", "bytes=100-200"] {
+            let r = call(&st, "HEAD", "/r.txt", &[("range", range)], "").await;
+            assert_eq!(r.status(), StatusCode::OK, "{range}");
+            let r = call(&st, "GET", "/r.txt", &[("range", range)], "").await;
+            assert_ne!(r.status(), StatusCode::OK, "{range}");
+        }
+    }
+
+    /// Review finding: a listing took each member's fields and entity tag from one version and
+    /// its size from whatever the content was when the page was written, so a write in between
+    /// gave one tag to two bodies. The size is read from the version the entry describes.
+    #[tokio::test]
+    async fn a_listing_sizes_the_version_it_describes() {
+        let st = state().await;
+        let text = [("content-type", "text/plain"), ("slug", "m.txt")];
+        let r = call(&st, "POST", "/", &text, "four").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let all = members(&st, &st.cfg.storage()).await.unwrap();
+        let r = call(
+            &st,
+            "PUT",
+            "/m.txt",
+            &[("content-type", "text/plain")],
+            "eleven long",
+        )
+        .await;
+        assert!(r.status().is_success());
+        let mut shown: Vec<_> = all
+            .into_iter()
+            .filter(|(m, _)| m["id"].as_str().is_some_and(|i| i.ends_with("/m.txt")))
+            .collect();
+        with_sizes(&st, &mut shown).await;
+        assert_ne!(shown[0].0["size"], json!(11), "{}", shown[0].0);
     }
 
     /// Review finding: a container created with a custom `rel="type"` (and other links) lost

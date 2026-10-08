@@ -787,6 +787,31 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
     }
 }
 
+/// How many bytes of expanded terms the triples parsed from `body_len` bytes of Turtle may hold
+/// between them. A prefix is written once and expanded at every use, so a short document can
+/// stand for an unbounded amount of text: parsing stops (and the document is refused) past this.
+pub(crate) fn expansion_budget(body_len: usize) -> usize {
+    body_len.saturating_mul(16).saturating_add(1 << 20)
+}
+
+/// The bytes a parsed triple's terms hold once expanded, as [`expansion_budget`] counts them.
+pub(crate) fn triple_bytes(t: &oxrdf::Triple) -> usize {
+    let node = |n: &oxrdf::NamedOrBlankNode| match n {
+        oxrdf::NamedOrBlankNode::NamedNode(n) => n.as_str().len(),
+        oxrdf::NamedOrBlankNode::BlankNode(b) => b.as_str().len(),
+    };
+    #[allow(unreachable_patterns)]
+    let object = match &t.object {
+        oxrdf::Term::NamedNode(n) => n.as_str().len(),
+        oxrdf::Term::BlankNode(b) => b.as_str().len(),
+        oxrdf::Term::Literal(l) => {
+            l.value().len() + l.datatype().as_str().len() + l.language().map_or(0, str::len)
+        }
+        other => other.to_string().len(),
+    };
+    node(&t.subject) + t.predicate.as_str().len() + object
+}
+
 /// Stored metadata of `iri`, parsed; metadata that does not parse is an error.
 pub(crate) fn parse_meta(
     iri: &str,
