@@ -4713,6 +4713,30 @@ ex:bob
         assert!(!exp.contains("http://ex/data"), "{framed}\n{exp}");
     }
 
+    // A property-scoped @vocab does not re-read an embedded node's type as another IRI.
+    #[test]
+    fn framed_type_survives_a_property_scoped_vocab() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/",
+                "p":{"@id":"http://ex/p","@context":{"@vocab":"http://other/"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{framed}\n{exp}");
+        assert!(!exp.contains("http://other/T"), "{framed}\n{exp}");
+    }
+
     // Same-document references with a colon in the query or fragment stay relative to
     // the whole base (no "./" that would drop its last segment).
     #[test]

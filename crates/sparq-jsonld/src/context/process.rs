@@ -22,6 +22,12 @@ use crate::options::{JsonLdOptions, ProcessingMode};
 /// `context overflow` error condition (JSON-LD 1.1 API §4.1.2 step 5.2).
 const MAX_REMOTE_CONTEXTS: usize = 100;
 
+/// A processor-defined ceiling on how deeply term definitions may depend on one another
+/// (`"a": "b"`, `"b": "c"`, ...). Create Term Definition recurses once per link, so an
+/// unbounded chain would exhaust the native stack; past this depth processing fails with
+/// `context overflow` instead.
+const MAX_TERM_DEPTH: usize = 256;
+
 /// Shared, mutable processing environment threaded through Context Processing and Create
 /// Term Definition — the loader, processing mode, current base URL, the remote-context
 /// recursion guard, and the scoped-context validation flag. Bundled to keep argument
@@ -32,6 +38,8 @@ pub(crate) struct Env<'a> {
     pub(crate) base_url: Option<String>,
     pub(crate) remote_contexts: Vec<String>,
     pub(crate) validate_scoped: bool,
+    /// Create Term Definition calls currently on the stack (bounded by `MAX_TERM_DEPTH`).
+    pub(crate) term_depth: usize,
 }
 
 impl ActiveContext {
@@ -57,6 +65,7 @@ impl ActiveContext {
             base_url: base_url.map(str::to_string),
             remote_contexts: Vec::new(),
             validate_scoped: true,
+            term_depth: 0,
         };
         super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))
     }
@@ -87,6 +96,7 @@ impl ActiveContext {
             base_url: base_url.map(str::to_string),
             remote_contexts: Vec::new(),
             validate_scoped: true,
+            term_depth: 0,
         };
         process_inner(self, local_context, override_protected, propagate, &mut env)
     }
@@ -378,6 +388,28 @@ pub(crate) fn create_term_definition(
     env: &mut Env,
 ) -> Result<(), JsonLdError> {
     super::budget::charge(1)?;
+    if env.term_depth >= MAX_TERM_DEPTH {
+        return Err(JsonLdError::with_detail(
+            E::ContextOverflow,
+            "term definitions depend on one another too deeply",
+        ));
+    }
+    env.term_depth += 1;
+    let result = define_term(active, local, term, defined, protected, override_protected, env);
+    env.term_depth -= 1;
+    result
+}
+
+/// The body of [`create_term_definition`], run under its depth guard.
+fn define_term(
+    active: &mut ActiveContext,
+    local: &Json,
+    term: &str,
+    defined: &mut BTreeMap<String, bool>,
+    protected: bool,
+    override_protected: bool,
+    env: &mut Env,
+) -> Result<(), JsonLdError> {
     // step 1: already built, or a cycle.
     match defined.get(term) {
         Some(true) => return Ok(()),

@@ -637,11 +637,11 @@ fn compact_element(
             // array-ness follows the alias's @set container (1.1) or compactArrays.
             "@type" => {
                 let compacted = match expanded_value {
-                    Json::Str(s) => Json::Str(type_scoped.ciri(s, None, true, false)),
+                    Json::Str(s) => Json::Str(type_term(type_scoped, before_types, s)),
                     Json::Arr(ts) => Json::Arr(
                         ts.iter()
                             .map(|t| match t {
-                                Json::Str(s) => Json::Str(type_scoped.ciri(s, None, true, false)),
+                                Json::Str(s) => Json::Str(type_term(type_scoped, before_types, s)),
                                 other => other.clone(),
                             })
                             .collect(),
@@ -967,10 +967,31 @@ fn node_ctx(
     Ok(owned)
 }
 
+/// Step 12.2's spelling of the type `iri`. The spec compacts it against `type_scoped`, the
+/// incoming context, but expansion reads @type values under `expansion` (the node's
+/// property-scoped context), which may give that spelling another meaning; then the
+/// spelling is taken from `expansion` itself, or the IRI is kept whole.
+fn type_term(type_scoped: &Ctx, expansion: &Ctx, iri: &str) -> String {
+    if std::ptr::eq(type_scoped, expansion) {
+        return type_scoped.ciri(iri, None, true, false);
+    }
+    let reads_back = |t: &str| expansion.active.expand_iri(t, true, true).as_deref() == Some(iri);
+    let term = type_scoped.ciri(iri, None, true, false);
+    if reads_back(&term) {
+        return term;
+    }
+    let term = expansion.ciri(iri, None, true, false);
+    if reads_back(&term) {
+        term
+    } else {
+        iri.to_string()
+    }
+}
+
 /// Step 9 — the context with the type-scoped contexts of `element`'s types applied
-/// onto `cur` (in lexicographic order of the compacted types, propagate false; type
-/// terms are looked up in `type_scoped`, the incoming context). `None` when no type
-/// carries a scoped context.
+/// onto `cur` (in lexicographic order of the compacted types, propagate false). Type
+/// terms are spelled by [`type_term`] and looked up in `cur`, as expansion will read
+/// them. `None` when no type carries a scoped context.
 fn type_ctx(
     type_scoped: &Ctx,
     cur: &Ctx,
@@ -981,15 +1002,15 @@ fn type_ctx(
     if let Some(types) = element.get("@type") {
         let mut compacted_types: Vec<String> = type_strings(types)
             .into_iter()
-            .map(|t| type_scoped.ciri(t, None, true, false))
+            .map(|t| type_term(type_scoped, cur, t))
             .collect();
         compacted_types.sort();
         for term in &compacted_types {
-            if let Some(def) = type_scoped.active.term_definition(term) {
+            if let Some(def) = cur.active.term_definition(term) {
                 if let Some(local) = def.context() {
                     let base: &Ctx = owned_t.as_deref().unwrap_or(cur);
                     let key = DerivedKey::Scoped {
-                        lookup: type_scoped.id,
+                        lookup: cur.id,
                         base: base.id,
                         term: term.clone(),
                         type_scoped: true,
@@ -1621,6 +1642,24 @@ mod tests {
         assert_eq!(err.code(), E::ContextOverflow);
     }
 
+    // A long chain of terms defined through one another fails cleanly instead of
+    // recursing once per link until the stack runs out; a short chain still resolves.
+    #[test]
+    fn term_dependency_chains_are_depth_bounded() {
+        let chain = |n: usize| {
+            let mut defs: Vec<String> = (0..n).map(|i| format!(r#""t{i}":"t{}""#, i + 1)).collect();
+            defs.push(format!(r#""t{n}":"http://ex/p""#));
+            Json::parse(&format!("{{{}}}", defs.join(","))).unwrap()
+        };
+        let process = |local: &Json| {
+            ActiveContext::new(None).process(local, None, &NoopLoader, &JsonLdOptions::default())
+        };
+        let short = process(&chain(100)).unwrap();
+        assert_eq!(short.expand_iri("t0", false, true).as_deref(), Some("http://ex/p"));
+        let err = process(&chain(4096)).unwrap_err();
+        assert_eq!(err.code(), E::ContextOverflow);
+    }
+
     // Retention counts the term table a null-reset context keeps for reversion.
     #[test]
     fn retention_counts_reversion_targets() {
@@ -1655,6 +1694,33 @@ mod tests {
         let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         let back = expand(&out, &opts, &NoopLoader).unwrap();
         assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+    }
+
+    // Expansion reads an embedded node's types, and picks their scoped contexts, under
+    // the property-scoped context, so compaction spells and selects them there too.
+    #[test]
+    fn types_are_spelled_under_the_property_scoped_context() {
+        let opts = JsonLdOptions::default();
+        let round_trip = |ctx: &str, doc: &str| {
+            let ctx = Json::parse(ctx).unwrap();
+            let doc = Json::parse(doc).unwrap();
+            let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+            let back = expand(&out, &opts, &NoopLoader).unwrap();
+            assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+        };
+        // The scoped @vocab would read the outer spelling "T" as http://other/T.
+        round_trip(
+            r#"{"@vocab":"http://ex/","p":{"@id":"http://ex/p","@context":{"@vocab":"http://other/"}}}"#,
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b","@type":["http://ex/T"]}]}]"#,
+        );
+        // The scoped redefinition of "T" carries no context, so expansion never sees "label".
+        round_trip(
+            r#"{"@vocab":"http://ex/",
+                "T":{"@id":"http://ex/T","@context":{"label":"http://ex/q"}},
+                "p":{"@id":"http://ex/p","@context":{"T":{"@id":"http://ex/T"}}}}"#,
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b","@type":["http://ex/T"],
+                "http://ex/q":[{"@value":"v"}]}]}]"#,
+        );
     }
 
     // Definitions a scoped context discards with a later null are charged too: once the
