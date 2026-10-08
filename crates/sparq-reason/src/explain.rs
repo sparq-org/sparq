@@ -190,6 +190,15 @@ impl ProofBuilder {
         Some((self.nodes.len() - 1) as u32)
     }
 
+    /// Overwrite every node's conclusion strings, in node order — for a prover that can only
+    /// render once it has seen ALL its nodes (the N3 prover names `@forAll` universals with
+    /// one map over the whole proof).
+    pub(crate) fn render_conclusions(&mut self, mut render: impl FnMut(usize) -> [String; 3]) {
+        for (ix, n) in self.nodes.iter_mut().enumerate() {
+            n.conclusion = render(ix);
+        }
+    }
+
     /// Finish with `root` as the explained triple. The root must be the LAST node (the
     /// provers' memoized recursion guarantees it; debug-asserted here).
     pub(crate) fn finish(self, root: u32) -> ProofTree {

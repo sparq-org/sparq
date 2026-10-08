@@ -298,7 +298,7 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // name in all of them. A declared `:x` then never merges with a source `?x` (GH #5391),
     // and a universal shared between a fact and a rule keeps one name in both, so
     // re-reasoning the output compares them as the same term (GH #6701 review round 2).
-    let names = serialize::universal_names_in(
+    let names = serialize::UniversalNames::over(
         facts
             .all
             .iter()

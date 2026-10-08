@@ -207,3 +207,35 @@ fn id_level_bridge_from_reason_n3_proof() {
         .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/parent")));
     assert!(n3_proof_tree(&dict, &steps, [a, par, b], ExplainOpts::default()).is_none());
 }
+
+/// GH #6701 review round 3: a proof is ONE output document, so its `@forAll` universals
+/// are named by one collision-free map over every node. Rendering each term on its own
+/// wrote `{ :x :q ?x }` as `{ ?x :q ?x }` — a formula requiring the two to be equal.
+#[test]
+fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
+    // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
+    // through the batch engine (the counting path does not currently derive through a
+    // formula that carries a variable — a separate issue).
+    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.
+{ :a ?p ?f } => { :b :r ?f }.
+";
+    let formula = "{ ?x_2 <http://ex/q> ?x . }";
+    let closure = reason_n3_terms(src, None).expect("oracle").facts;
+    let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
+    let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    assert_eq!(g.mode(), N3Mode::Fallback);
+
+    let proof = g.why(asserted).expect("asserted fact explains");
+    assert_eq!(proof.conclusion()[2], formula, "{}", proof.to_text());
+
+    let proof = g.why(derived).expect("derived fact explains");
+    let nodes = proof.nodes();
+    assert_eq!(nodes.len(), 2, "{}", proof.to_text());
+    // The premise and the conclusion carry the same formula, named the same way.
+    for n in nodes {
+        assert_eq!(n.conclusion[2], formula, "{}", proof.to_text());
+    }
+    assert_eq!(nodes[1].premises, vec![0]);
+}
+
