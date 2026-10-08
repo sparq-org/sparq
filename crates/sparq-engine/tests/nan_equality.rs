@@ -129,14 +129,54 @@ fn special_numerics_agree_between_normal_and_strict_execution() {
         expressions.push(format!("(?a {op} ?b) = (?a {op} ?b)"));
         expressions.push(format!("(?a {op} ?b) < 1"));
     }
-    expressions.extend(["sameTerm(?a, ?b)", "-?a", "ABS(?a)", "?a IN (?b)"].map(String::from));
+    expressions.extend(
+        [
+            "sameTerm(?a, ?b)",
+            "-?a",
+            "+?a",
+            "ABS(?a)",
+            "ROUND(?a)",
+            "CEIL(?a)",
+            "FLOOR(?a)",
+            "?a IN (?b)",
+            "?a NOT IN (?b)",
+            "?a IN (0, \"NaN\"^^<http://www.w3.org/2001/XMLSchema#double>)",
+            "?a > -1 && ?a < 1",
+            "?a >= ?b || ?a < ?b",
+            "COALESCE(?a < ?b, \"err\")",
+            "IF(?a < ?b, 1, 2)",
+            "xsd:double(?a) = ?b",
+            "xsd:float(?a) < ?b",
+            "xsd:integer(?a)",
+            "xsd:decimal(?a)",
+            "xsd:string(?a)",
+        ]
+        .map(String::from),
+    );
     for expression in &expressions {
         for query in [
-            format!("SELECT ?x ?y ({expression} AS ?v) WHERE {{ ?x <urn:p> ?a . ?y <urn:p> ?b }} ORDER BY ?x ?y"),
-            format!("SELECT ?x ?y WHERE {{ ?x <urn:p> ?a . ?y <urn:p> ?b FILTER({expression}) }} ORDER BY ?x ?y"),
-            format!("SELECT ?x ?y WHERE {{ ?x <urn:p> ?a . ?y <urn:p> ?b FILTER(!({expression})) }} ORDER BY ?x ?y"),
+            format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x ?y ({expression} AS ?v) WHERE {{ ?x <urn:p> ?a . ?y <urn:p> ?b }} ORDER BY ?x ?y"),
+            format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x ?y WHERE {{ ?x <urn:p> ?a . ?y <urn:p> ?b FILTER({expression}) }} ORDER BY ?x ?y"),
+            format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ?x ?y WHERE {{ ?x <urn:p> ?a . ?y <urn:p> ?b FILTER(!({expression})) }} ORDER BY ?x ?y"),
         ] {
             assert_eq!(cells(&graph, &query, false), cells(&graph, &query, true), "{query}");
         }
+    }
+    // Ordering, grouping, aggregation, joins and index lookups on stored special values.
+    for query in [
+        "SELECT ?x WHERE { ?x <urn:p> ?a } ORDER BY ?a ?x",
+        "SELECT ?x WHERE { ?x <urn:p> ?a } ORDER BY DESC(?a) ?x",
+        "SELECT DISTINCT ?a WHERE { ?x <urn:p> ?a } ORDER BY ?a",
+        "SELECT ?a (COUNT(*) AS ?n) WHERE { ?x <urn:p> ?a } GROUP BY ?a ORDER BY ?a",
+        "SELECT (MIN(?a) AS ?lo) (MAX(?a) AS ?hi) (SUM(?a) AS ?s) (AVG(?a) AS ?m) WHERE { ?x <urn:p> ?a }",
+        "SELECT ?x ?y WHERE { ?x <urn:p> ?a . ?y <urn:p> ?a } ORDER BY ?x ?y",
+        "SELECT ?x WHERE { ?x <urn:p> \"NaN\"^^<http://www.w3.org/2001/XMLSchema#double> }",
+        "SELECT ?x WHERE { ?x <urn:p> \"-0\"^^<http://www.w3.org/2001/XMLSchema#double> }",
+        "SELECT ?x WHERE { ?x <urn:p> ?a FILTER(?a < 0) } ORDER BY ?x",
+        "SELECT ?x WHERE { ?x <urn:p> ?a FILTER(!(?a >= 0)) } ORDER BY ?x",
+        "SELECT ?x WHERE { ?x <urn:p> ?a VALUES ?a { 0 \"NaN\"^^<http://www.w3.org/2001/XMLSchema#double> } } ORDER BY ?x",
+    ] {
+        let query = format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> {query}");
+        assert_eq!(cells(&graph, &query, false), cells(&graph, &query, true), "{query}");
     }
 }
