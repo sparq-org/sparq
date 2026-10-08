@@ -18,7 +18,8 @@
 //!   `query` tool evaluates over (draft §6.4: the two read surfaces cannot disagree).
 //! - `container_list` (Class R) — the direct `ldp:contains` members of one container,
 //!   derived ONLY from stored containment triples in the container's own graph — never
-//!   from IRI-path guessing (draft §6.4).
+//!   from IRI-path guessing (draft §6.4) — and filtered to the members the session may
+//!   read, so an unreadable member is not disclosed (gh #5287).
 //! - `introspect`, `shapes`, `stats` (Class R) — the schema/statistics tools, mined from
 //!   the session's authorized projection rather than the whole pod. [SONNET-4.6] sq-8n6iv
 //! - `update`, `resource_put`, `resource_delete`, `container_create` (Class U) — all
@@ -160,7 +161,6 @@
 //!   supplies a request clock.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
 
 use oxrdf::{NamedNode, Term, Triple};
 use serde_json::{json, Value};
@@ -213,7 +213,11 @@ pub struct SolidServerConfig {
     /// server is strictly read-only, exactly like [`crate::ServerConfig`].
     pub allow_update: bool,
     /// Wall-clock deadline per tool-issued query, in seconds (`None` = unbounded).
+    /// [`Self::query_timeout_ms`] overrides it when set.
     pub query_timeout_secs: Option<u64>,
+    /// The same deadline in milliseconds, for a sub-second bound; takes precedence
+    /// over [`Self::query_timeout_secs`] when `Some` (default `None`). (gh #5696)
+    pub query_timeout_ms: Option<u64>,
     /// Row cap on any materialised query result (`None` = uncapped).
     pub max_rows: Option<usize>,
     /// The server name reported in the `initialize` handshake.
@@ -231,6 +235,7 @@ impl Default for SolidServerConfig {
             // Security default: read-only, exactly like the base server.
             allow_update: false,
             query_timeout_secs: Some(30),
+            query_timeout_ms: None,
             max_rows: Some(1_000_000),
             server_name: "sparq-mcp-solid".to_string(),
         }
@@ -319,7 +324,8 @@ pub const CONTAINER_LIST: ToolSpec = ToolSpec {
                   ldp:contains), derived ONLY from the containment triples stored in the \
                   container's own document — never guessed from IRI paths. Each member \
                   carries a container flag. A container this session cannot read is \
-                  reported with the SAME error as one that does not exist.",
+                  reported with the SAME error as one that does not exist, and a member \
+                  it cannot read is omitted from the listing.",
     input_schema: || {
         json!({
             "type": "object",
@@ -742,8 +748,11 @@ impl SolidMcpServer {
     /// The per-call query budget (same defaults as the base server).
     fn budget(&self) -> QueryBudget {
         let mut b = QueryBudget::unlimited();
-        if let Some(secs) = self.config.query_timeout_secs {
-            b.deadline = Some(std::time::Instant::now() + Duration::from_secs(secs));
+        if let Some(d) = crate::server::timeout_duration(
+            self.config.query_timeout_secs,
+            self.config.query_timeout_ms,
+        ) {
+            b.deadline = Some(std::time::Instant::now() + d);
         }
         b.max_rows = self.config.max_rows;
         b
@@ -957,6 +966,12 @@ impl SolidMcpServer {
 
     /// `container_list`: direct `ldp:contains` members from the container's OWN stored
     /// graph — data-derived, never IRI-path guessing (draft §6.4).
+    ///
+    /// Each member then passes the SAME read decision `resource_get` applies: a member
+    /// this session may not read is omitted, so the listing never discloses the existence
+    /// of a resource the read tools would report as absent (§9.3, gh #5287). The
+    /// decision is the store's fail-closed one whatever the member's IRI, so a dangling
+    /// `ldp:contains` link (no stored document, no materialized grant) is omitted too.
     fn tool_container_list(&self, args: &Value) -> Result<String, String> {
         let url = arg_str(args, "url")?;
         NamedNode::new(url).map_err(|e| format!("invalid container IRI <{url}>: {e}"))?;
@@ -971,6 +986,9 @@ impl SolidMcpServer {
         let mut members: Vec<Value> = Vec::with_capacity(res.rows.len());
         for row in &res.rows {
             if let Some(Some(Term::NamedNode(m))) = row.first() {
+                if !self.allowed(m.as_str(), Mode::Read) {
+                    continue;
+                }
                 members.push(json!({
                     "url": m.as_str(),
                     "container": m.as_str().ends_with('/'),

@@ -62,6 +62,17 @@ pub(crate) fn negotiate_protocol_version(params: &Value) -> &'static str {
         .unwrap_or(PROTOCOL_VERSION)
 }
 
+/// The default [`ServerConfig::max_request_bytes`]: 16 MiB per JSON-RPC request line —
+/// far above any realistic tool call, small enough that one request cannot exhaust
+/// memory.
+pub const DEFAULT_MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+
+/// The per-tool-call deadline duration from a config's seconds and milliseconds fields:
+/// the milliseconds field wins when set (gh #5696), else the seconds field, else none.
+pub(crate) fn timeout_duration(secs: Option<u64>, ms: Option<u64>) -> Option<Duration> {
+    ms.map(Duration::from_millis).or_else(|| secs.map(Duration::from_secs))
+}
+
 /// Server configuration. The security-relevant field is [`Self::allow_update`]:
 /// it is **`false` by default**, so a freshly-built server is strictly read-only
 /// and never advertises or accepts the mutating `update` tool.
@@ -76,13 +87,27 @@ pub struct ServerConfig {
     /// Wall-clock deadline applied to every tool-issued query/update, in seconds.
     /// Bounds an expensive or adversarial query so one `tools/call` cannot run the
     /// server unbounded. `None` disables the deadline (unbounded — not recommended
-    /// for an agent-facing server).
+    /// for an agent-facing server). [`Self::query_timeout_ms`] overrides it when set.
     pub query_timeout_secs: Option<u64>,
+    /// The same deadline in MILLISECONDS, for a sub-second per-tool bound (e.g. 250 ms
+    /// for an interactive agent loop). When `Some`, it takes precedence over
+    /// [`Self::query_timeout_secs`]; `None` (the default) defers to the seconds field,
+    /// so existing configurations are unchanged. (gh #5696)
+    pub query_timeout_ms: Option<u64>,
     /// Upper bound on the rows of any materialised result, applied to every
     /// tool-issued query. `None` disables the row cap.
     pub max_rows: Option<usize>,
     /// The server name reported in the `initialize` handshake (`serverInfo.name`).
     pub server_name: String,
+    /// Upper bound, in bytes, on one line-delimited JSON-RPC request read by the stdio
+    /// transport (`serve` / `serve_stdio`). A longer line is answered with an
+    /// `INVALID_REQUEST` error and discarded as it streams in — never buffered whole —
+    /// so a client cannot make the server allocate without bound (this caps the operand
+    /// of a whereless update such as `INSERT DATA`, which the query budget does not).
+    /// Defaults to [`DEFAULT_MAX_REQUEST_BYTES`]; `None` disables the cap. An embedder
+    /// driving [`McpServer::handle_message`] with its own transport must cap the
+    /// request itself. (gh #6051)
+    pub max_request_bytes: Option<usize>,
     /// [FABLE-5] (sq-lsp7k.10, feature `templates`) The named parameterized templates this
     /// server exposes through the `template_list` / `template_invoke` tools. Registered by
     /// the embedder as ALREADY-VALIDATED [`sparq_engine::templates::Template`]s (parse +
@@ -102,8 +127,10 @@ impl Default for ServerConfig {
             // A generous-but-bounded default deadline so an agent's runaway query
             // cannot hang the server; opt out explicitly with `None`.
             query_timeout_secs: Some(30),
+            query_timeout_ms: None,
             max_rows: Some(1_000_000),
             server_name: "sparq-mcp".to_string(),
+            max_request_bytes: Some(DEFAULT_MAX_REQUEST_BYTES),
             // [FABLE-5] sq-lsp7k.10: no templates unless the embedder registers them.
             #[cfg(feature = "templates")]
             templates: Vec::new(),
@@ -153,8 +180,10 @@ impl McpServer {
     /// The configured query budget for one tool call.
     fn budget(&self) -> QueryBudget {
         let mut b = QueryBudget::unlimited();
-        if let Some(secs) = self.config.query_timeout_secs {
-            b.deadline = Some(std::time::Instant::now() + Duration::from_secs(secs));
+        if let Some(d) =
+            timeout_duration(self.config.query_timeout_secs, self.config.query_timeout_ms)
+        {
+            b.deadline = Some(std::time::Instant::now() + d);
         }
         b.max_rows = self.config.max_rows;
         b
@@ -165,8 +194,9 @@ impl McpServer {
         &self.graph
     }
 
-    /// The server's configuration (crate-internal: template-tool advertisement reads it).
-    #[cfg(feature = "templates")]
+    /// The server's configuration (crate-internal: template-tool advertisement and the
+    /// stdio transport's request cap read it).
+    #[cfg(any(feature = "templates", feature = "stdio"))]
     pub(crate) fn config(&self) -> &ServerConfig {
         &self.config
     }
@@ -849,4 +879,19 @@ where
         Err(e) => return Some(serialize(&parse_error(e))),
     };
     dispatch_request(&req, &mut dispatch).map(|resp| serialize(&resp))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // gh #5696: a sub-second budget is expressible, and the ms field takes precedence.
+    #[test]
+    fn timeout_ms_overrides_secs() {
+        assert_eq!(timeout_duration(None, None), None);
+        assert_eq!(timeout_duration(Some(30), None), Some(Duration::from_secs(30)));
+        assert_eq!(timeout_duration(Some(30), Some(250)), Some(Duration::from_millis(250)));
+        assert_eq!(timeout_duration(None, Some(250)), Some(Duration::from_millis(250)));
+        assert_eq!(ServerConfig::default().query_timeout_ms, None, "default unchanged");
+    }
 }

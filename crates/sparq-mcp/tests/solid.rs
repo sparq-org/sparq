@@ -33,16 +33,18 @@ use sparq_solid::PodStore;
 const ALICE: &str = "https://alice.ex/card#me";
 const BOB: &str = "https://bob.ex/card#me";
 
-/// A small WAC pod: a root container; `notes/` (one doc, one out-of-path member, one
-/// UNLISTED doc); a `secret/` subtree governed by its own ACL (bob-only); and a root
-/// ACL granting alice Read/Write/Control on the root and by default.
+/// A small WAC pod: a root container; `notes/` (one doc, one out-of-path member stored
+/// at `shared/doc`, one UNLISTED doc); a `secret/` subtree governed by its own ACL
+/// (bob-only); and a root ACL granting alice Read/Write/Control on the root and by
+/// default.
 fn pod() -> PodStore {
     let nq = r#"
 <https://pod.ex/> <http://www.w3.org/ns/ldp#contains> <https://pod.ex/notes/> <https://pod.ex/> .
 <https://pod.ex/> <http://www.w3.org/ns/ldp#contains> <https://pod.ex/secret/> <https://pod.ex/> .
 <https://pod.ex/notes/> <http://www.w3.org/ns/ldp#contains> <https://pod.ex/notes/n1> <https://pod.ex/notes/> .
-<https://pod.ex/notes/> <http://www.w3.org/ns/ldp#contains> <https://elsewhere.example/shared/doc> <https://pod.ex/notes/> .
+<https://pod.ex/notes/> <http://www.w3.org/ns/ldp#contains> <https://pod.ex/shared/doc> <https://pod.ex/notes/> .
 <https://pod.ex/notes/n1#it> <https://ex.dev/ns#title> "hello" <https://pod.ex/notes/n1> .
+<https://pod.ex/shared/doc#it> <https://ex.dev/ns#title> "shared" <https://pod.ex/shared/doc> .
 <https://pod.ex/notes/unlisted#it> <https://ex.dev/ns#title> "orphan" <https://pod.ex/notes/unlisted> .
 <https://pod.ex/secret/s1#it> <https://ex.dev/ns#title> "classified" <https://pod.ex/secret/s1> .
 <https://pod.ex/.acl#owner> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
@@ -312,7 +314,7 @@ fn container_list_derives_members_from_stored_containment_only() {
         .map(|m| (m["url"].as_str().unwrap(), m["container"].as_bool().unwrap()))
         .collect();
     // The out-of-path member IS listed (containment is data, not IRI prefixes)…
-    assert!(members.contains(&("https://elsewhere.example/shared/doc", false)));
+    assert!(members.contains(&("https://pod.ex/shared/doc", false)));
     assert!(members.contains(&("https://pod.ex/notes/n1", false)));
     // …and the stored-but-unlisted document is NOT (no ldp:contains triple).
     assert!(
@@ -321,7 +323,8 @@ fn container_list_derives_members_from_stored_containment_only() {
     );
     assert_eq!(members.len(), 2);
 
-    // The root lists its two child containers with the container flag set.
+    // The root lists its readable child container with the container flag set (the
+    // unreadable `secret/` is omitted — see the gh #5287 test below).
     let (text, _) = tool(&mut s, "container_list", json!({"url": "https://pod.ex/"}));
     let v: Value = serde_json::from_str(&text).expect("JSON");
     let flags: Vec<bool> = v["members"]
@@ -330,7 +333,22 @@ fn container_list_derives_members_from_stored_containment_only() {
         .iter()
         .map(|m| m["container"].as_bool().unwrap())
         .collect();
-    assert_eq!(flags, [true, true]);
+    assert_eq!(flags, [true]);
+}
+
+/// gh #5287: a member the session may not read is NOT listed — the same existence
+/// non-disclosure `resource_get` gives it. Alice can read the root but not `secret/`, so
+/// the root listing must not name `secret/`.
+#[test]
+fn container_list_omits_members_the_session_may_not_read() {
+    let mut alice = server_for(ALICE, false);
+    let (text, is_err) = tool(&mut alice, "container_list", json!({"url": "https://pod.ex/"}));
+    assert!(!is_err, "{text}");
+    let v: Value = serde_json::from_str(&text).expect("JSON");
+    let urls: Vec<&str> =
+        v["members"].as_array().unwrap().iter().map(|m| m["url"].as_str().unwrap()).collect();
+    assert_eq!(urls, ["https://pod.ex/notes/"], "the unreadable `secret/` is not listed");
+    assert!(!text.contains("secret"), "{text}");
 }
 
 #[test]
@@ -399,7 +417,7 @@ fn introspect_mines_only_the_authorized_documents() {
     // What legitimately DOES appear is the `https://pod.ex/secret/` container IRI: the
     // root container — which alice may read — stores `<pod.ex/> ldp:contains
     // <pod.ex/secret/>`, so the name is part of a document she is authorized to read
-    // (the same disclosure `container_list` already makes). The boundary this test pins
+    // (`container_list`, by contrast, omits it: gh #5287). The boundary this test pins
     // is the unreadable document's own subjects and terms, not the mention of its
     // container's name in a readable one.
     let mut alice = server_for(ALICE, false);
@@ -708,6 +726,12 @@ fn a_pathological_update_trips_the_tool_budget() {
     let (text, is_err) = tool(&mut timed, "update", json!({"sparql": pathological}));
     assert!(is_err, "an over-deadline update must be a tool error: {text}");
     assert!(text.contains("query budget exceeded (timeout)"), "{text}");
+
+    // gh #5696: the millisecond field is honoured and overrides a generous seconds bound.
+    let ms = SolidServerConfig { query_timeout_ms: Some(0), ..budgeted(Some(3600), None) };
+    let mut timed = SolidMcpServer::with_config(pod(), ms).expect("materializes");
+    let (text, is_err) = tool(&mut timed, "update", json!({"sparql": pathological}));
+    assert!(is_err && text.contains("query budget exceeded (timeout)"), "{text}");
 
     // Positive control: alice IS authorized for this exact update, and under the DEFAULT
     // budget it applies — so the two aborts above are the budget biting, not a denial or a

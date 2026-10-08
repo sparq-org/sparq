@@ -119,7 +119,7 @@ at construction — the MCP-Solid proposal draft's local-trusted-agent deploymen
 | --- | --- | --- |
 | `query` | `wrap_for_view_opt_in` + `query_json_view_with_budget` | session-scoped; empty default graph, union opt-in via the reserved `FROM` IRI |
 | `resource_get` | the document's named graph, serialized | same dataset `query` reads — the two surfaces cannot disagree; optional `accept` picks `application/n-triples` (default) or `text/turtle` |
-| `container_list` | `ldp:contains` triples in the container's OWN graph | data-derived, never IRI-path guessing |
+| `container_list` | `ldp:contains` triples in the container's OWN graph | data-derived, never IRI-path guessing; a member the session cannot read is omitted (existence non-disclosure) |
 | `introspect` | `sparq_introspect::Introspection` over the session's authorized projection | schema of the readable documents only — never the whole pod |
 | `shapes` | the same miner, one class | a class only unreadable documents use reports as absent |
 | `stats` | totals over the same projection | two sessions get different totals; no grants ⇒ zeros |
@@ -150,7 +150,7 @@ under the configured `QueryBudget`, whose `max_rows` **refuses rather than trunc
 so an over-budget pod yields an error, never a quietly undercounted schema. What the
 projection *does* legitimately include is data in readable documents that happens to name
 an unreadable one — e.g. a readable container's `ldp:contains` link to a container the
-session cannot read, the same disclosure `container_list` already makes.
+session cannot read (the raw document says so; `container_list` itself omits such a member).
 
 **Content negotiation + the non-RDF story — [SONNET-4.6] sq-wbsf5.** `resource_get`
 takes an optional `accept` and serves either `application/n-triples` (the default when
@@ -330,6 +330,10 @@ keeps them lit and that the forwarding actually reaches the engine.
 The standard MCP stdio transport is behind the **`stdio`** feature:
 `sparq_mcp::serve_stdio(&mut server)` runs the line-delimited JSON-RPC loop over this
 process's stdin/stdout. For an arbitrary reader/writer pair use `sparq_mcp::serve`.
+Each request line is capped by `ServerConfig::max_request_bytes` (default
+`DEFAULT_MAX_REQUEST_BYTES`, 16 MiB; `None` disables it): an over-cap line gets an
+`INVALID_REQUEST` error (id `null`) and is discarded as it streams, never buffered whole.
+An embedder calling `handle_message` from its own transport must cap requests itself.
 
 ## Running the server binary
 
@@ -369,7 +373,8 @@ was configured with.
   there is no finer per-tool ACL.
 - **Queries are bounded** by a `QueryBudget` (deadline + row cap; default 30 s / 1M rows)
   so one `tools/call` cannot run the server unbounded — a blunt anti-DoS ceiling, not a
-  fairness quota.
+  fairness quota. For a sub-second deadline set `query_timeout_ms` (on `ServerConfig` and
+  `SolidServerConfig`), which overrides `query_timeout_secs` when set.
 
 ## Status / scope
 
