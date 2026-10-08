@@ -2073,7 +2073,10 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
                 })
                 .sum();
             if occurrences > 1 {
-                return Err(format!("rule {rix}: notIncludes subject ?{sv} is used elsewhere"));
+                return Err(format!(
+                    "rule {rix}: notIncludes subject {} is used elsewhere",
+                    crate::n3::serialize::display(&N3Term::Var(sv.clone()))
+                ));
             }
         }
         // Conclusions: simple ground-predicate atoms, no blanks (existentials).

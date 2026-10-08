@@ -1093,16 +1093,6 @@ impl OwlProver<'_> {
 // N3 — MaterializedN3Graph
 // ════════════════════════════════════════════════════════════════════════════════════════
 
-/// Render an N3 term as its serialized form (the engine's own writer). Context-free — an
-/// `@forAll` universal is written by its IRI, never under a per-proof name — so a fact's
-/// strings, which `sparq-prov` hashes into its identity, are the same in every proof it
-/// appears in (GH #6701 review round 4).
-fn n3_term_string(t: &N3Term) -> String {
-    let mut s = String::new();
-    crate::n3::serialize::write_term(t, &mut s);
-    s
-}
-
 impl MaterializedN3Graph {
     /// One derivation of `fact` from the current asserted base under the graph's rules, or
     /// `None` if `fact` is not in the closure (or cannot be matched to a derivation — e.g.
@@ -1125,7 +1115,7 @@ impl MaterializedN3Graph {
         }
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
-            let root = b.push(fact.clone().map(|t| n3_term_string(&t)), "asserted", vec![])?;
+            let root = b.push(crate::n3::serialize::statement_strings(fact), "asserted", vec![])?;
             return Some(b.finish(root));
         }
         // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
@@ -1175,7 +1165,9 @@ impl N3Prover<'_> {
     }
 
     fn prove_inner(&mut self, f: &[N3Term; 3], depth: usize) -> Option<u32> {
-        let rendered = f.clone().map(|t| n3_term_string(&t));
+        // One unit per fact (`statement_strings`): the same strings in every proof, which
+        // `sparq-prov` hashes into the fact's identity (GH #6701 review rounds 4–5).
+        let rendered = crate::n3::serialize::statement_strings(f);
         if self.base.contains(f) {
             let ix = self.b.push(rendered, "asserted", vec![])?;
             self.memo.insert(f.clone(), ix);
