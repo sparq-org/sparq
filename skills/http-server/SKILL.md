@@ -336,10 +336,12 @@ and the Graph-Store-Protocol read path keeps its lenient default):
 | ASK | json (default) / xml | `application/sparql-results+json` / `+xml` |
 | CONSTRUCT / DESCRIBE | `application/n-triples` (default) / `text/turtle` / `application/rdf+xml` / `application/ld+json` (the `jsonld` feature — **default-on**) | matching RDF media; N-Triples, prefix-compacting Turtle, RDF/XML, <!-- [OPUS-4.8] sq-rt6v --> or flattened JSON-LD <!-- [OPUS-4.8] sq-oy1f.1/.4 --> |
 
-<!-- [SONNET-4.6] sq-7d3dj.12: CSV/TSV SELECT responses are now streamed as row-oriented
-chunks (mirrors the JSON T16 path): Content-Length is known up-front (chunks are fully
-evaluated first), the body streams chunk-by-chunk via hyper, and peak memory never holds a
-second full-result copy. XML stays buffered (prefix compaction). -->
+**CSV / TSV / XML SELECT bodies stream too** (#5517), with the CONSTRUCT / DESCRIBE contract
+below: the engine materialises the `QueryResult`, then the document is rendered row by row
+into the chunked body, so the serialised bytes (which no row or byte cap prices) are never held
+whole. One-chunk results keep their `Content-Length`; `HEAD` stays buffered. The library writers
+`sparq_server::results::write_select_{csv,tsv,xml}` write to any `io::Write` and are
+byte-identical to `select_to_{csv,tsv,xml}`.
 
 <!-- [OPUS-4.8] sq-u79ee (survey §C1 / FINDINGS F21) -->
 Per the W3C SPARQL Results TSV format, the **TSV** serialiser abbreviates an
@@ -366,7 +368,7 @@ shapes: a **single-chunk** (small, ≤ one 64 KiB chunk) result is returned buff
 DISTINCT / join / ORDER-BY SELECT must fully evaluate before any solution exists, so its first
 byte still lands after the join materialises (the header is flushed the instant that finishes,
 before serialisation) — the earliest-first-byte win is largest on scan-shaped and
-below-parallel-threshold results; XML/CSV/TSV stay buffered. **Error mid-stream (honest
+below-parallel-threshold results. **Error mid-stream (honest
 contract):** the status is chosen from the *first* chunk, so a failure detected before any byte
 (parse error, or a row/byte cap / deadline the engine confirms before the header) still returns
 the correct `400` / `413` / `503`. But once the header has been flushed for a genuinely
@@ -414,7 +416,7 @@ still stop a graph body that has started streaming, and both **abort the chunked
 terminating chunk) rather than end it as if complete: the RDF/XML writer refusing a predicate it
 cannot encode (e.g. `rdf:about`), and a client that stops reading past the read deadline.
 
-**Stalled readers are bounded.** A streamed body (SELECT JSON or CONSTRUCT / DESCRIBE) hands
+**Stalled readers are bounded.** A streamed body (any SELECT format, or CONSTRUCT / DESCRIBE) hands
 chunks to a small bounded channel. A client that stops reading without disconnecting makes the
 worker wait, but only until `query_timeout` + the 2 s grace (or a `DELETE /queries/{id}` cancel);
 then the worker gives up and frees its blocking thread and the result it holds. Each streaming

@@ -14,6 +14,7 @@
 //! the `server` feature is not required to use them.
 
 use oxrdf::Term;
+use std::io::Write;
 use sparq_engine::QueryResult;
 
 /// SPARQL Results XML media type.
@@ -38,33 +39,61 @@ const XSD_BOOLEAN: &str = "http://www.w3.org/2001/XMLSchema#boolean";
 /// Serialises a SELECT result to the SPARQL Query Results XML Format.
 pub fn select_to_xml(r: &QueryResult) -> String {
     let mut s = String::with_capacity(128 + r.rows.len() * 48);
+    xml_head(&mut s, r);
+    for row in &r.rows {
+        xml_row(&mut s, r, row);
+    }
+    s.push_str(XML_TAIL);
+    s
+}
+
+/// [`select_to_xml`] written row by row to `w`, byte-identical to the single-string form.
+///
+/// Only one rendered row is held at a time, so a caller that hands `w`'s bytes on as they
+/// arrive (the HTTP server's streamed body) never holds the whole document in memory.
+pub fn write_select_xml<W: Write>(r: &QueryResult, w: &mut W) -> std::io::Result<()> {
+    let mut s = String::with_capacity(ROW_SCRATCH_BYTES);
+    xml_head(&mut s, r);
+    w.write_all(s.as_bytes())?;
+    for row in &r.rows {
+        s.clear();
+        xml_row(&mut s, r, row);
+        w.write_all(s.as_bytes())?;
+    }
+    w.write_all(XML_TAIL.as_bytes())
+}
+
+const XML_TAIL: &str = "  </results>\n</sparql>\n";
+
+fn xml_head(s: &mut String, r: &QueryResult) {
     s.push_str("<?xml version=\"1.0\"?>\n");
     s.push_str("<sparql xmlns=\"http://www.w3.org/2005/sparql-results#\">\n");
     s.push_str("  <head>\n");
     for v in &r.vars {
         s.push_str("    <variable name=\"");
-        xml_attr_escape(&mut s, v.as_str());
+        xml_attr_escape(s, v.as_str());
         s.push_str("\"/>\n");
     }
     s.push_str("  </head>\n");
     s.push_str("  <results>\n");
-    for row in &r.rows {
-        s.push_str("    <result>\n");
-        for (vi, cell) in row.iter().enumerate() {
-            if let Some(term) = cell {
-                s.push_str("      <binding name=\"");
-                xml_attr_escape(&mut s, r.vars[vi].as_str());
-                s.push_str("\">");
-                term_to_xml(&mut s, term);
-                s.push_str("</binding>\n");
-            }
-        }
-        s.push_str("    </result>\n");
-    }
-    s.push_str("  </results>\n");
-    s.push_str("</sparql>\n");
-    s
 }
+
+fn xml_row(s: &mut String, r: &QueryResult, row: &[Option<Term>]) {
+    s.push_str("    <result>\n");
+    for (vi, cell) in row.iter().enumerate() {
+        if let Some(term) = cell {
+            s.push_str("      <binding name=\"");
+            xml_attr_escape(s, r.vars[vi].as_str());
+            s.push_str("\">");
+            term_to_xml(s, term);
+            s.push_str("</binding>\n");
+        }
+    }
+    s.push_str("    </result>\n");
+}
+
+/// Initial capacity of the per-row scratch buffer the `write_select_*` writers reuse.
+const ROW_SCRATCH_BYTES: usize = 256;
 
 fn term_to_xml(s: &mut String, t: &Term) {
     match t {
@@ -140,112 +169,54 @@ pub fn ask_to_json(value: bool) -> String {
 /// line terminator is CRLF.
 pub fn select_to_csv(r: &QueryResult) -> String {
     let mut s = String::with_capacity(64 + r.rows.len() * 32);
-    for (i, v) in r.vars.iter().enumerate() {
-        if i > 0 {
-            s.push(',');
-        }
-        csv_field(&mut s, v.as_str());
-    }
-    s.push_str("\r\n");
+    csv_head(&mut s, r);
+    let mut scratch = String::new();
     for row in &r.rows {
-        for (vi, cell) in row.iter().enumerate() {
-            if vi > 0 {
-                s.push(',');
-            }
-            if let Some(term) = cell {
-                let mut buf = String::new();
-                term_lexical_csv(&mut buf, term);
-                csv_field(&mut s, &buf);
-            }
-        }
-        s.push_str("\r\n");
+        csv_row(&mut s, &mut scratch, row);
     }
     s
 }
 
-/// Flush threshold for [`select_to_csv_chunks`] / [`select_to_tsv_chunks`]: mirrors the
-/// engine's `JSON_CHUNK_BYTES` constant (64 KiB) so all three SELECT formats share the same
-/// chunking granularity — large enough that per-chunk overhead is negligible, small enough
-/// that a streamed body never holds a second whole-result copy in memory. [SONNET-4.6]
-const CSV_TSV_CHUNK_BYTES: usize = 64 * 1024;
-
-/// [`select_to_csv`] as an ordered sequence of string chunks whose concatenation is
-/// **byte-identical** to the single-string result.
+/// [`select_to_csv`] written row by row to `w`, byte-identical to the single-string form.
 ///
-/// Row-oriented chunking: rows are accumulated into the current chunk until the chunk
-/// exceeds `CSV_TSV_CHUNK_BYTES`, at which point the chunk is flushed and a new one
-/// starts. The HTTP server streams these via `chunked_response` (the same path as JSON /
-/// T16) so peak memory never holds a second full-result copy. [SONNET-4.6]
-pub fn select_to_csv_chunks(r: &QueryResult) -> Vec<String> {
-    let mut chunks: Vec<String> = Vec::new();
-    let mut current = String::new();
-    // Header row (same logic as select_to_csv).
-    for (i, v) in r.vars.iter().enumerate() {
-        if i > 0 {
-            current.push(',');
-        }
-        csv_field(&mut current, v.as_str());
-    }
-    current.push_str("\r\n");
-    // Data rows — flush when the current chunk reaches the threshold.
+/// Only one rendered row is held at a time, so a caller that hands `w`'s bytes on as they
+/// arrive (the HTTP server's streamed body) never holds the whole document in memory.
+pub fn write_select_csv<W: Write>(r: &QueryResult, w: &mut W) -> std::io::Result<()> {
+    let mut s = String::with_capacity(ROW_SCRATCH_BYTES);
+    let mut scratch = String::new();
+    csv_head(&mut s, r);
+    w.write_all(s.as_bytes())?;
     for row in &r.rows {
-        for (vi, cell) in row.iter().enumerate() {
-            if vi > 0 {
-                current.push(',');
-            }
-            if let Some(term) = cell {
-                let mut buf = String::new();
-                term_lexical_csv(&mut buf, term);
-                csv_field(&mut current, &buf);
-            }
-        }
-        current.push_str("\r\n");
-        if current.len() >= CSV_TSV_CHUNK_BYTES {
-            chunks.push(std::mem::take(&mut current));
-        }
+        s.clear();
+        csv_row(&mut s, &mut scratch, row);
+        w.write_all(s.as_bytes())?;
     }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
+    Ok(())
 }
 
-/// [`select_to_tsv`] as an ordered sequence of string chunks whose concatenation is
-/// **byte-identical** to the single-string result.
-///
-/// Row-oriented chunking: mirrors [`select_to_csv_chunks`] — rows are accumulated until
-/// the current chunk exceeds `CSV_TSV_CHUNK_BYTES`. [SONNET-4.6]
-pub fn select_to_tsv_chunks(r: &QueryResult) -> Vec<String> {
-    let mut chunks: Vec<String> = Vec::new();
-    let mut current = String::new();
-    // Header row (same logic as select_to_tsv).
+fn csv_head(s: &mut String, r: &QueryResult) {
     for (i, v) in r.vars.iter().enumerate() {
         if i > 0 {
-            current.push('\t');
+            s.push(',');
         }
-        current.push('?');
-        current.push_str(v.as_str());
+        csv_field(s, v.as_str());
     }
-    current.push('\n');
-    // Data rows — flush when the current chunk reaches the threshold.
-    for row in &r.rows {
-        for (vi, cell) in row.iter().enumerate() {
-            if vi > 0 {
-                current.push('\t');
-            }
-            if let Some(term) = cell {
-                term_to_tsv(&mut current, term);
-            }
+    s.push_str("\r\n");
+}
+
+/// One CSV row; `scratch` holds a cell's lexical form before quoting and is reused.
+fn csv_row(s: &mut String, scratch: &mut String, row: &[Option<Term>]) {
+    for (vi, cell) in row.iter().enumerate() {
+        if vi > 0 {
+            s.push(',');
         }
-        current.push('\n');
-        if current.len() >= CSV_TSV_CHUNK_BYTES {
-            chunks.push(std::mem::take(&mut current));
+        if let Some(term) = cell {
+            scratch.clear();
+            term_lexical_csv(scratch, term);
+            csv_field(s, scratch);
         }
     }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
+    s.push_str("\r\n");
 }
 
 /// Serialises a SELECT result to SPARQL Results TSV.
@@ -256,6 +227,28 @@ pub fn select_to_tsv_chunks(r: &QueryResult) -> Vec<String> {
 /// fields are TAB-separated, rows LF-terminated.
 pub fn select_to_tsv(r: &QueryResult) -> String {
     let mut s = String::with_capacity(64 + r.rows.len() * 32);
+    tsv_head(&mut s, r);
+    for row in &r.rows {
+        tsv_row(&mut s, row);
+    }
+    s
+}
+
+/// [`select_to_tsv`] written row by row to `w`, byte-identical to the single-string form.
+/// Holds one rendered row at a time, like [`write_select_csv`].
+pub fn write_select_tsv<W: Write>(r: &QueryResult, w: &mut W) -> std::io::Result<()> {
+    let mut s = String::with_capacity(ROW_SCRATCH_BYTES);
+    tsv_head(&mut s, r);
+    w.write_all(s.as_bytes())?;
+    for row in &r.rows {
+        s.clear();
+        tsv_row(&mut s, row);
+        w.write_all(s.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn tsv_head(s: &mut String, r: &QueryResult) {
     for (i, v) in r.vars.iter().enumerate() {
         if i > 0 {
             s.push('\t');
@@ -264,18 +257,18 @@ pub fn select_to_tsv(r: &QueryResult) -> String {
         s.push_str(v.as_str());
     }
     s.push('\n');
-    for row in &r.rows {
-        for (vi, cell) in row.iter().enumerate() {
-            if vi > 0 {
-                s.push('\t');
-            }
-            if let Some(term) = cell {
-                term_to_tsv(&mut s, term);
-            }
+}
+
+fn tsv_row(s: &mut String, row: &[Option<Term>]) {
+    for (vi, cell) in row.iter().enumerate() {
+        if vi > 0 {
+            s.push('\t');
         }
-        s.push('\n');
+        if let Some(term) = cell {
+            term_to_tsv(s, term);
+        }
     }
-    s
+    s.push('\n');
 }
 
 /// CSV value lexical form: IRI verbatim, bnode `_:label`, literal = its string value only.
@@ -787,94 +780,69 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Chunked serialiser tests (sq-7d3dj.12) [SONNET-4.6]
+    // Row-streaming writer tests: each `write_select_*` must be byte-identical to its
+    // single-string form, since the HTTP server streams the writer and HEAD uses the string.
     // -----------------------------------------------------------------------
 
-    /// select_to_csv_chunks concatenates to exactly select_to_csv for a typical small result.
-    #[test]
-    fn csv_chunks_byte_identical_small() {
-        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a WHERE { ?s ex:age ?a }").unwrap();
-        let single = select_to_csv(&r);
-        let chunks = select_to_csv_chunks(&r);
-        assert!(!chunks.is_empty(), "chunks must not be empty");
-        assert_eq!(chunks.concat(), single, "CSV chunks must concatenate to the single-string form");
+    fn written(r: &QueryResult, f: fn(&QueryResult, &mut Vec<u8>) -> std::io::Result<()>) -> String {
+        let mut out = Vec::new();
+        f(r, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
     }
 
-    /// select_to_tsv_chunks concatenates to exactly select_to_tsv for a typical small result.
-    #[test]
-    fn tsv_chunks_byte_identical_small() {
-        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a WHERE { ?s ex:age ?a }").unwrap();
-        let single = select_to_tsv(&r);
-        let chunks = select_to_tsv_chunks(&r);
-        assert!(!chunks.is_empty(), "chunks must not be empty");
-        assert_eq!(chunks.concat(), single, "TSV chunks must concatenate to the single-string form");
+    fn assert_writers_match(r: &QueryResult) {
+        assert_eq!(written(r, write_select_csv), select_to_csv(r), "CSV writer must match the string form");
+        assert_eq!(written(r, write_select_tsv), select_to_tsv(r), "TSV writer must match the string form");
+        assert_eq!(written(r, write_select_xml), select_to_xml(r), "XML writer must match the string form");
     }
 
-    /// An empty result (zero rows) produces exactly the header row as a single chunk.
     #[test]
-    fn csv_chunks_empty_result() {
+    fn writers_byte_identical_small() {
+        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a ?n WHERE { ?s ex:age ?a OPTIONAL { ?s ex:name ?n } }")
+            .unwrap();
+        assert_writers_match(&r);
+    }
+
+    /// An empty result (zero rows) still writes the header (and the XML envelope).
+    #[test]
+    fn writers_byte_identical_empty_result() {
         let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s WHERE { ?s ex:age 9999 }").unwrap();
         assert!(r.rows.is_empty(), "expected no rows");
-        let single = select_to_csv(&r);
-        let chunks = select_to_csv_chunks(&r);
-        assert_eq!(chunks.concat(), single, "empty CSV must still produce a header chunk");
+        assert_writers_match(&r);
+        assert_eq!(written(&r, write_select_csv), "s\r\n");
     }
 
-    /// An empty result (zero rows) for TSV produces exactly the header row as a single chunk.
     #[test]
-    fn tsv_chunks_empty_result() {
-        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s WHERE { ?s ex:age 9999 }").unwrap();
-        assert!(r.rows.is_empty(), "expected no rows");
-        let single = select_to_tsv(&r);
-        let chunks = select_to_tsv_chunks(&r);
-        assert_eq!(chunks.concat(), single, "empty TSV must still produce a header chunk");
-    }
-
-    /// A large result (> CSV_TSV_CHUNK_BYTES bytes) produces multiple CSV chunks, all
-    /// concatenating byte-identically to the single-string form. [SONNET-4.6]
-    #[test]
-    fn csv_chunks_splits_large_result() {
-        // ~2 000 rows × ~80 bytes/row ≈ 160 KiB > 64 KiB chunk threshold.
+    fn writers_byte_identical_large_result_with_escapes() {
         let mut data = String::new();
         for i in 0..2000_u32 {
-            data.push_str(&format!(
-                "<http://ex/s{}> <http://ex/p> \"{:0>60}\" .\n",
-                i, i
-            ));
+            data.push_str(&format!("<http://ex/s{i}> <http://ex/p> \"a,\\\"b<&>\\t{i:0>60}\" .\n"));
         }
         let g = Graph::load_str(&data, "ntriples").unwrap();
         let r = query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
-        let single = select_to_csv(&r);
-        let chunks = select_to_csv_chunks(&r);
-        assert!(
-            chunks.len() > 1,
-            "expected multiple CSV chunks for a large result; got {} chunk(s)",
-            chunks.len()
-        );
-        assert_eq!(chunks.concat(), single, "large CSV chunk concat must equal single-string form");
+        assert_eq!(r.rows.len(), 2000);
+        assert_writers_match(&r);
     }
 
-    /// A large result (> CSV_TSV_CHUNK_BYTES bytes) produces multiple TSV chunks, all
-    /// concatenating byte-identically to the single-string form. [SONNET-4.6]
+    /// A failing sink stops the writer with that error instead of rendering the rest.
     #[test]
-    fn tsv_chunks_splits_large_result() {
-        let mut data = String::new();
-        for i in 0..2000_u32 {
-            data.push_str(&format!(
-                "<http://ex/s{}> <http://ex/p> \"{:0>60}\" .\n",
-                i, i
-            ));
+    fn writers_propagate_sink_errors() {
+        struct Refuse(usize);
+        impl Write for Refuse {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                self.0 += 1;
+                Err(std::io::Error::other("client gone"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
         }
-        let g = Graph::load_str(&data, "ntriples").unwrap();
-        let r = query(&g, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
-        let single = select_to_tsv(&r);
-        let chunks = select_to_tsv_chunks(&r);
-        assert!(
-            chunks.len() > 1,
-            "expected multiple TSV chunks for a large result; got {} chunk(s)",
-            chunks.len()
-        );
-        assert_eq!(chunks.concat(), single, "large TSV chunk concat must equal single-string form");
+        let r = query(&g(), "PREFIX ex: <http://ex/> SELECT ?s ?a WHERE { ?s ex:age ?a }").unwrap();
+        for f in [write_select_csv::<Refuse>, write_select_tsv::<Refuse>, write_select_xml::<Refuse>] {
+            let mut w = Refuse(0);
+            assert!(f(&r, &mut w).is_err());
+            assert_eq!(w.0, 1, "the writer must stop at the first failed write");
+        }
     }
 
     /// Helper: true iff some line of `tsv` ends with `suffix` (TSV rows are LF-terminated).
