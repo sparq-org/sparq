@@ -205,7 +205,9 @@ SHA-256 and byte-identical to before; a different `D` may produce a different
 (still canonical, isomorphism-stable under that `D`) relabelling. Triple terms
 appear only as objects in oxrdf 0.3 (a triple's subject is `NamedOrBlankNode`), so
 nesting descends strictly through the object position; the HNDQ poison-graph call
-limit still fails closed. This is a sparq-local extension, **not** a W3C standard
+limit still fails closed, and §4.8 permutations are enumerated lazily under a
+total-permutation budget so a large blank-node clique returns
+`CanonError::Canonicalization` instead of exhausting memory (#5469). This is a sparq-local extension, **not** a W3C standard
 — do not represent its output as W3C RDFC-1.0.
 
 **Soundness audit + distinguishing-power regression (sq-mu1cd / sq-63g0).** An
