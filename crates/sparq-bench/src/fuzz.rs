@@ -1537,7 +1537,8 @@ enum Compared {
     Multiset,
     /// `SELECT … ORDER BY`: compared up to permutation within each sort-key-equivalence class.
     Ordered,
-    /// `SELECT` projecting a blank node: compared up to blank-node ISOMORPHISM (RDFC-1.0).
+    /// `SELECT` projecting a blank node: compared up to blank-node ISOMORPHISM (RDFC-1.0), and
+    /// under a modelled `ORDER BY` also in order (blank nodes masked).
     Isomorphic,
     /// `ASK`: the boolean itself was compared.
     AskBoolean,
@@ -1651,11 +1652,24 @@ fn compare_answers(sparq: &Answer, oxi: &Answer, q: &str) -> Result<Compared, St
     let (sparq, oxi) = (&sparq.rows, &oxi.rows);
     // Blank-node labels are engine-local, so a bnode-bearing answer is comparable only up to a
     // bijection. RDFC-1.0 canonicalises the whole TABLE at once (so identity shared between
-    // rows is part of what is compared), which necessarily discards row ORDER — an ordered
-    // bnode answer therefore has its order un-checked, and lands in its own counter.
+    // rows is part of what is compared), which necessarily discards row ORDER; an ordered
+    // answer then has its order checked separately, over the rows with every blank node
+    // masked to one placeholder (SPARQL leaves the order AMONG blank nodes undefined, so two
+    // bnode keys form one tie class; everything else must line up).
     if solutions_have_blank_nodes(sparq) || solutions_have_blank_nodes(oxi) {
         return match solutions_isomorphic(sparq, oxi) {
-            Ok(true) => Ok(Compared::Isomorphic),
+            Ok(true) => match &sort_vars {
+                Some(vs) if !vs.is_empty() => {
+                    let refs: Vec<&str> = vs.iter().map(String::as_str).collect();
+                    let (ms, mo) = (mask_blank_nodes(sparq), mask_blank_nodes(oxi));
+                    if order_by_equal(&ms, &mo, &refs) {
+                        Ok(Compared::Isomorphic)
+                    } else {
+                        Err(order_detail(&ms, &mo, &refs))
+                    }
+                }
+                _ => Ok(Compared::Isomorphic),
+            },
             Ok(false) => Err(multiset_detail(
                 "solution table is NOT isomorphic (no bijection of the blank nodes matches it)",
                 sparq,
@@ -1681,6 +1695,23 @@ fn compare_answers(sparq: &Answer, oxi: &Answer, q: &str) -> Result<Compared, St
             }
         }
     }
+}
+
+/// `rows` with every blank node (including inside triple terms) replaced by one placeholder,
+/// for the ORDER check of a bnode-bearing answer whose identity was already checked by
+/// isomorphism.
+fn mask_blank_nodes(rows: &[Solution]) -> Vec<Solution> {
+    fn mask(t: &sparq_difftest::Term) -> sparq_difftest::Term {
+        use sparq_difftest::Term as T;
+        match t {
+            T::Blank(_) => T::Blank("b".to_string()),
+            T::Triple(parts) => T::Triple(Box::new([mask(&parts[0]), mask(&parts[1]), mask(&parts[2])])),
+            other => other.clone(),
+        }
+    }
+    rows.iter()
+        .map(|r| r.iter().map(|(v, t)| (v.clone(), mask(t))).collect())
+        .collect()
 }
 
 /// `ASK` differential: the BOOLEAN itself. A cardinality oracle is doubly blind here — it maps
@@ -3378,6 +3409,32 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
             compare_select(&g, &store, unwindowed),
             Ok(Compared::Ordered)
         );
+    }
+
+    /// #5038: a bnode-bearing `ORDER BY` answer is compared up to isomorphism AND in order. A
+    /// pure reordering of the sort key used to pass, because RDFC-1.0 canonicalisation
+    /// discards row order.
+    #[test]
+    fn an_ordered_bnode_answer_has_its_order_checked() {
+        let row = |b: &str, a: &str| {
+            nsol(&[("s", Term::BlankNode(oxrdf::BlankNode::new_unchecked(b))), ("a", nint(a))])
+        };
+        let answer = |rows| Answer { vars: vec!["s".to_string(), "a".to_string()], rows };
+        let sparq = answer(vec![row("x", "1"), row("y", "2")]);
+        let q = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?a";
+        // Relabelled blank nodes, same order: a pass.
+        let relabelled = answer(vec![row("p", "1"), row("q", "2")]);
+        assert_eq!(compare_answers(&sparq, &relabelled, q), Ok(Compared::Isomorphic));
+        // Same table, rows swapped: isomorphic, but out of ORDER BY order.
+        let swapped = answer(vec![row("q", "2"), row("p", "1")]);
+        assert!(solutions_isomorphic(&sparq.rows, &swapped.rows).unwrap());
+        assert!(compare_answers(&sparq, &swapped, q).is_err(), "a reordering must not pass");
+        // Without ORDER BY the order is free.
+        let unordered = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a }";
+        assert_eq!(compare_answers(&sparq, &swapped, unordered), Ok(Compared::Isomorphic));
+        // Two blank-node sort keys tie: their relative order is undefined in SPARQL.
+        let by_s = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?s";
+        assert_eq!(compare_answers(&sparq, &swapped, by_s), Ok(Compared::Isomorphic));
     }
 
     /// [SONNET-4.6] A HEADER-only disagreement is a MISMATCH, not a pass and not a skip.
