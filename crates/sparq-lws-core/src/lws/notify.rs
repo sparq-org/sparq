@@ -399,12 +399,16 @@ impl Notifier {
         event: &Event,
         limit: usize,
     ) -> Vec<Pending> {
-        let candidates: Vec<Subscription> = self
+        let mut candidates: Vec<Subscription> = self
             .live()
             .into_iter()
             .filter(|s| s.covers(&event.uri))
-            .take(limit)
             .collect();
+        // Those past the bound are dropped as a full queue drops them, and counted so.
+        if candidates.len() > limit {
+            self.note_dropped(candidates.len() - limit, &event.uri);
+            candidates.truncate(limit);
+        }
         let mut out = Vec::new();
         // A Delete is prepared while the resource is still there; its deliveries, made once it
         // is gone, are authorized against what it was.
@@ -496,18 +500,24 @@ impl Notifier {
     fn admit_or_drop(&self, target: &dyn std::fmt::Display) -> Option<Admitted> {
         let admitted = self.admit();
         if admitted.is_none() {
-            let dropped = self.dropped.fetch_add(1, Ordering::SeqCst) + 1;
-            // Logged at the first drop and then at each power of two, so a flood cannot flood the
-            // log too.
-            if dropped.is_power_of_two() {
-                eprintln!(
-                    "lws: webhook delivery queue full ({} waiting or in flight); dropped a \
-                     notification to {target} ({dropped} dropped so far)",
-                    self.limits.queue
-                );
-            }
+            self.note_dropped(1, target);
         }
         admitted
+    }
+
+    /// Count `n` notifications about or to `target` as dropped for want of queue room. Logged at
+    /// the first drop and then each time the count passes a power of two, so a flood cannot flood
+    /// the log too.
+    fn note_dropped(&self, n: usize, target: &dyn std::fmt::Display) {
+        let before = self.dropped.fetch_add(n as u64, Ordering::SeqCst);
+        let after = before + n as u64;
+        if before == 0 || before.ilog2() != after.ilog2() {
+            eprintln!(
+                "lws: webhook delivery queue full ({} waiting or in flight); dropped {n} \
+                 notification(s) for {target} ({after} dropped so far)",
+                self.limits.queue
+            );
+        }
     }
 
     /// Run one admitted delivery in the background.

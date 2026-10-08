@@ -1686,9 +1686,9 @@ mod tests {
         let r = handle(&state, &post(&body), &other).await;
         assert_eq!(r.status(), StatusCode::CREATED);
         let big = format!(
-            "{}{}",
+            "{},\"x\":\"{}\"}}",
             &body[..body.len() - 1],
-            format!(",\"x\":\"{}\"}}", "y".repeat(MAX_REQUEST_BYTES))
+            "y".repeat(MAX_REQUEST_BYTES)
         );
         let r = handle(&state, &post(&big), &other).await;
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
