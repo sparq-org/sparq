@@ -386,7 +386,7 @@ impl<'a> Parser<'a> {
                 Some(b'<') => self.read_iriref()?,
                 _ => match self.read_prefixed_name()? {
                     Term::Iri(i) => i,
-                    other => return Err(format!("expected IRI in quantifier, got {other:?}")),
+                    other => return Err(format!("expected IRI in quantifier, got {}", super::serialize::display(&other))),
                 },
             };
             // A universal is keyed by its FULL IRI under the unforgeable [`UNIVERSAL_VAR`]
@@ -1211,7 +1211,7 @@ impl<'a> Parser<'a> {
         let node = if !self.strict && self.keyword("id") {
             let named = self.term(out)?;
             if !matches!(named, Term::Iri(_)) {
-                return Err(format!("iriPropertyList id must be an IRI, got {named:?}"));
+                return Err(format!("iriPropertyList id must be an IRI, got {}", super::serialize::display(&named)));
             }
             named
         } else {
