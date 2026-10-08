@@ -120,6 +120,11 @@ use std::collections::BTreeMap;
 /// The default HNDQ call limit (matches the standard `rdf-canon` path's guard).
 const DEFAULT_HNDQ_CALL_LIMIT: usize = 4000;
 
+/// The default cap on §4.8 (5.4) permutations visited across one
+/// canonicalization (2^24). Far above what non-poison input needs; it only
+/// bounds the work of groups whose orderings are pruned without recursing.
+const DEFAULT_PERMUTATION_LIMIT: usize = 1 << 24;
+
 // ---------------------------------------------------------------------------
 // Subject-position tripwires ([OPUS-5] sq-tx21). Every read of a triple's
 // subject in this module goes through one of these two functions, and both
@@ -706,14 +711,19 @@ impl CanonState {
             let mut chosen_path = String::new();
             let mut chosen_issuer: Option<IdentifierIssuer> = None;
 
-            // §4.8(5.4) permutations.
-            for perm in permutations(&blank_node_list) {
+            // §4.8(5.4) permutations, enumerated lazily (#5469): materializing
+            // all k! orderings up front would exhaust memory before the guard
+            // below is reachable. Each ordering visited is charged to the
+            // poison-graph budget.
+            let mut perms = Permutations::new(blank_node_list.len());
+            while let Some(perm) = perms.next_perm() {
+                counter.add_permutation()?;
                 let mut issuer_copy = issuer.clone();
                 let mut path = String::new();
                 let mut recursion_list: Vec<String> = Vec::new();
                 let mut skip = false;
 
-                for related in &perm {
+                for related in perm.iter().map(|&i| &blank_node_list[i]) {
                     if let Some(cid) = self.canonical_issuer.get(related) {
                         path.push_str(&format!("_:{}", cid));
                     } else {
@@ -812,15 +822,39 @@ struct HndqResult {
 
 /// Poison-graph guard: caps total HNDQ invocations (RDFC-1.0 §4.8 worst case is
 /// super-polynomial). Mirrors the standard path's default limit so the v2
-/// profile fails closed identically.
+/// profile fails closed identically. It also caps the total number of §4.8
+/// (5.4) permutations visited, because a related-hash group whose orderings
+/// are all pruned without recursing would otherwise walk k! orderings without
+/// ever reaching the call check.
 struct HndqCallCounter {
     count: usize,
     limit: usize,
+    permutations: usize,
+    permutation_limit: usize,
 }
 
 impl HndqCallCounter {
     fn new(limit: usize) -> Self {
-        Self { count: 0, limit }
+        Self::with_permutation_limit(limit, DEFAULT_PERMUTATION_LIMIT)
+    }
+    fn with_permutation_limit(limit: usize, permutation_limit: usize) -> Self {
+        Self {
+            count: 0,
+            limit,
+            permutations: 0,
+            permutation_limit,
+        }
+    }
+    fn add_permutation(&mut self) -> Result<(), CanonError> {
+        self.permutations += 1;
+        if self.permutations > self.permutation_limit {
+            Err(CanonError::Canonicalization(format!(
+                "HNDQ permutation limit ({}) exceeded (poison graph)",
+                self.permutation_limit
+            )))
+        } else {
+            Ok(())
+        }
     }
     fn add(&mut self) -> Result<(), CanonError> {
         self.count += 1;
@@ -1044,23 +1078,40 @@ fn hash_hex<D: Digest>(data: &[u8]) -> String {
     s
 }
 
-/// All permutations of `items` (RDFC-1.0 §4.8 5.4). Lists here are the bnodes
-/// sharing one related hash; the spec's factorial blow-up is bounded by the
-/// HNDQ call limit applied in the recursion.
-fn permutations(items: &[String]) -> Vec<Vec<String>> {
-    if items.is_empty() {
-        return vec![vec![]];
-    }
-    let mut out = Vec::new();
-    for i in 0..items.len() {
-        let mut rest = items.to_vec();
-        let head = rest.remove(i);
-        for mut p in permutations(&rest) {
-            p.insert(0, head.clone());
-            out.push(p);
+/// Lazy enumeration of every ordering of the indices `0..n` (RDFC-1.0 §4.8
+/// 5.4), in lexicographic order — the same order the former eager recursive
+/// enumeration produced, so the first minimal path (and its issuer) chosen is
+/// unchanged. Holds one `n`-element index buffer; nothing is materialized up
+/// front, so the poison-graph guard is checked before each ordering is visited.
+struct Permutations {
+    indices: Vec<usize>,
+    started: bool,
+}
+
+impl Permutations {
+    fn new(n: usize) -> Self {
+        Self {
+            indices: (0..n).collect(),
+            started: false,
         }
     }
-    out
+
+    /// The next ordering, or `None` once all `n!` have been yielded. `n == 0`
+    /// yields exactly one empty ordering.
+    fn next_perm(&mut self) -> Option<&[usize]> {
+        if !self.started {
+            self.started = true;
+            return Some(&self.indices);
+        }
+        let v = &mut self.indices;
+        // Classic next-permutation: rightmost ascent, swap with the rightmost
+        // larger element, reverse the suffix.
+        let i = (1..v.len()).rev().find(|&i| v[i - 1] < v[i])?;
+        let j = (i..v.len()).rev().find(|&j| v[j] > v[i - 1])?;
+        v.swap(i - 1, j);
+        v[i..].reverse();
+        Some(&self.indices)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,44 +1375,79 @@ mod private_tests {
 
     // ---- permutations ----
 
-    /// `permutations` must return the complete factorial-sized set of orderings.
-    /// Kills `replace with vec![]` and `replace with vec![vec![...]]`.
+    /// Drain a lazy [`Permutations`] into owned index orderings.
+    fn permutations(n: usize) -> Vec<Vec<usize>> {
+        let mut out = Vec::new();
+        let mut perms = Permutations::new(n);
+        while let Some(p) = perms.next_perm() {
+            out.push(p.to_vec());
+        }
+        out
+    }
+
+    /// The pre-#5469 eager recursive enumeration, kept as the ordering oracle:
+    /// the lazy enumerator must visit orderings in exactly this order so the
+    /// first minimal path (and its issuer) chosen by HNDQ is unchanged.
+    fn eager_reference(items: &[usize]) -> Vec<Vec<usize>> {
+        if items.is_empty() {
+            return vec![vec![]];
+        }
+        let mut out = Vec::new();
+        for i in 0..items.len() {
+            let mut rest = items.to_vec();
+            let head = rest.remove(i);
+            for mut p in eager_reference(&rest) {
+                p.insert(0, head);
+                out.push(p);
+            }
+        }
+        out
+    }
+
     #[test]
     fn permutations_empty_gives_one_empty_perm() {
-        let result = permutations(&[]);
-        assert_eq!(result, vec![vec![] as Vec<String>]);
+        assert_eq!(permutations(0), vec![Vec::<usize>::new()]);
     }
 
     #[test]
     fn permutations_one_item() {
-        let result = permutations(&["a".to_string()]);
-        assert_eq!(result, vec![vec!["a".to_string()]]);
+        assert_eq!(permutations(1), vec![vec![0]]);
     }
 
     #[test]
     fn permutations_two_items_exact() {
-        let mut result = permutations(&["a".to_string(), "b".to_string()]);
-        result.sort();
-        // Both orderings must appear.
-        assert_eq!(
-            result,
-            vec![
-                vec!["a".to_string(), "b".to_string()],
-                vec!["b".to_string(), "a".to_string()],
-            ],
-            "two-item permutations must yield exactly [a,b] and [b,a]"
-        );
+        assert_eq!(permutations(2), vec![vec![0, 1], vec![1, 0]]);
     }
 
     #[test]
-    fn permutations_three_items_count() {
-        let result = permutations(&["a".to_string(), "b".to_string(), "c".to_string()]);
-        assert_eq!(result.len(), 6, "3! = 6 permutations");
-        // Every distinct item must appear as the first element in exactly 2 perms.
-        for head in &["a", "b", "c"] {
-            let count = result.iter().filter(|p| p[0].as_str() == *head).count();
-            assert_eq!(count, 2, "each item must head exactly 2 permutations");
+    fn permutations_match_eager_order() {
+        for n in 0..=6 {
+            let items: Vec<usize> = (0..n).collect();
+            assert_eq!(permutations(n), eager_reference(&items), "n = {n}");
         }
+    }
+
+    /// The enumerator is exhausted after n! orderings and stays exhausted.
+    #[test]
+    fn permutations_exhaust_and_stay_exhausted() {
+        let mut perms = Permutations::new(3);
+        let mut count = 0;
+        while perms.next_perm().is_some() {
+            count += 1;
+        }
+        assert_eq!(count, 6, "3! = 6 permutations");
+        assert!(perms.next_perm().is_none());
+    }
+
+    #[test]
+    fn hndq_counter_permutation_limit() {
+        let mut c = HndqCallCounter::with_permutation_limit(10, 2);
+        assert!(c.add_permutation().is_ok());
+        assert!(c.add_permutation().is_ok());
+        assert!(matches!(
+            c.add_permutation(),
+            Err(CanonError::Canonicalization(_))
+        ));
     }
 
     // ---- serialize_quad_line ----
