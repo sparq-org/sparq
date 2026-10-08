@@ -19,7 +19,6 @@ import * as React from "react";
 
 import {
   parseNTriples,
-  COMMON_PREFIXES,
   type RdfStatement,
   type RdfTerm,
 } from "@sparq/client";
@@ -27,6 +26,7 @@ import {
 // [FABLE-5] sq-ixc3.20 — canonical triple identity (the inferred-edge membership test) +
 // the clicked-triple shape the proof panel consumes.
 import { tripleKeyOfTerms } from "@/lib/inferred-facts";
+import { abbreviateIri } from "@/lib/iri-label";
 import type { ExplainTarget } from "@/components/workbench/proof-panel";
 
 /**
@@ -44,18 +44,6 @@ export interface InferredAffordance {
 
 /** The max triples we lay out before capping (a render bound, labelled — not a result bound). */
 const MAX_TRIPLES = 200;
-
-/** Abbreviate an IRI with a common prefix (`foaf:name`), else shorten to its last path segment. */
-function abbreviateIri(iri: string): string {
-  for (const { prefix, iri: ns } of COMMON_PREFIXES) {
-    if (iri.startsWith(ns)) return `${prefix}:${iri.slice(ns.length)}`;
-  }
-  // Fall back to the fragment / last path segment so a bare IRI is still legible.
-  const hash = iri.lastIndexOf("#");
-  const slash = iri.lastIndexOf("/");
-  const cut = Math.max(hash, slash);
-  return cut >= 0 && cut < iri.length - 1 ? iri.slice(cut + 1) : iri;
-}
 
 /** A short, human label for a term (the node/edge caption). */
 function termLabel(t: RdfTerm): string {

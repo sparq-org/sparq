@@ -16,7 +16,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { nextFileMode, runImportBatch } from "./import-batch.js";
+import { nextFileMode, runImportBatch, summariseImportedBatch } from "./import-batch.js";
 import type { ImportMode } from "./engine-context.js";
 
 // ── A fake store that mirrors runImport's replace/add semantics (engine-context.tsx §2) ─────────
@@ -160,4 +160,36 @@ test("a single failure does not abort the batch (sq-eydh9 invariant preserved)",
   assert.equal(statuses["good-2.ttl"].kind, "ok"); // batch continued past the failure
   assert.equal(summary.okCount, 2);
   assert.equal(summary.errCount, 1);
+});
+
+// ── #6257 — the web batch's workspace-history entry carries real bytes + format ──────────────
+
+test("summariseImportedBatch: nothing imported records nothing", () => {
+  assert.equal(summariseImportedBatch([]), null);
+});
+
+test("summariseImportedBatch: one file keeps its own label, format and bytes", () => {
+  assert.deepEqual(summariseImportedBatch([{ label: "a.ttl", format: "turtle", bytes: 42 }]), {
+    label: "a.ttl",
+    format: "turtle",
+    bytes: 42,
+  });
+});
+
+test("summariseImportedBatch: sums real bytes; a shared format is kept, else 'mixed'", () => {
+  assert.deepEqual(
+    summariseImportedBatch([
+      { label: "a.ttl", format: "turtle", bytes: 100 },
+      { label: "b.ttl", format: "turtle", bytes: 23 },
+    ]),
+    { label: "2 files", format: "turtle", bytes: 123 },
+  );
+  assert.deepEqual(
+    summariseImportedBatch([
+      { label: "a.ttl", format: "turtle", bytes: 100 },
+      { label: "b.nq", format: "nquads", bytes: 5 },
+      { label: "c.ttl", format: "turtle", bytes: 1 },
+    ]),
+    { label: "3 files", format: "mixed", bytes: 106 },
+  );
 });
