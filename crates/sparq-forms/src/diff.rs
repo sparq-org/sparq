@@ -83,6 +83,17 @@ pub fn to_sparql_update(before: &FormDescription, after: &FormDescription) -> St
 }
 
 fn render_update(before: &FormDescription, after: &FormDescription) -> Option<String> {
+    // `FormDiff::between` skips fields it cannot write, so check every
+    // candidate predicate first: a malformed `<...>` path on an editable,
+    // forward field fails the whole update instead of being dropped from it.
+    // Recognised complex paths (`^<p>`, `<a>/<b>`, ...) stay excluded.
+    for field in fields(before).chain(fields(after)) {
+        if field.editable && !field.inverse {
+            if let Some(predicate) = bare_predicate(&field.path) {
+                iri(predicate)?;
+            }
+        }
+    }
     let diff = FormDiff::between(before, after);
     if diff.added.is_empty() && diff.removed.is_empty() {
         return None;
@@ -115,9 +126,11 @@ fn eligible(field: &FormField) -> bool {
     field.editable && !field.inverse && bare_predicate(&field.path).is_some()
 }
 
+/// The IRI of a path that is a single `<...>` token, or `None` for a complex
+/// path. Whether that IRI is valid is checked separately (see `render_update`).
 fn bare_predicate(path: &str) -> Option<&str> {
     let iri = path.strip_prefix('<')?.strip_suffix('>')?;
-    (!iri.is_empty() && !iri.contains(['<', '>', ' ', '\t', '\r', '\n'])).then_some(iri)
+    (!iri.is_empty() && !iri.contains(['<', '>'])).then_some(iri)
 }
 
 /// Renders one term for the update template, or `None` when a component has
@@ -166,7 +179,7 @@ fn parse_triple_term(text: &str) -> Option<Triple> {
         depth: 0,
     };
     let triple = parser.triple_term()?;
-    parser.rest.trim_start().is_empty().then_some(triple)
+    skip_ws(parser.rest).is_empty().then_some(triple)
 }
 
 /// Maximum `<<(` nesting, matching `MAX_TRIPLE_TERM_DEPTH` in sparq-core's
@@ -180,7 +193,7 @@ struct TermParser<'a> {
 
 impl TermParser<'_> {
     fn eat(&mut self, token: &str) -> Option<()> {
-        self.rest = self.rest.trim_start().strip_prefix(token)?;
+        self.rest = skip_ws(self.rest).strip_prefix(token)?;
         Some(())
     }
 
@@ -190,7 +203,7 @@ impl TermParser<'_> {
         if self.depth > MAX_TRIPLE_TERM_DEPTH {
             return None;
         }
-        let subject: NamedOrBlankNode = match self.rest.trim_start().chars().next()? {
+        let subject: NamedOrBlankNode = match skip_ws(self.rest).chars().next()? {
             '<' => self.iri()?.into(),
             '_' => self.blank_node()?.into(),
             _ => return None,
@@ -203,7 +216,7 @@ impl TermParser<'_> {
     }
 
     fn object(&mut self) -> Option<Term> {
-        let rest = self.rest.trim_start();
+        let rest = skip_ws(self.rest);
         Some(if rest.starts_with("<<(") {
             self.triple_term()?.into()
         } else if rest.starts_with('<') {
@@ -255,7 +268,8 @@ impl TermParser<'_> {
         }
         let end = end?;
         let value = unescape(&self.rest[..end], true)?;
-        self.rest = &self.rest[end + 1..];
+        // N-Triples allows whitespace between the string and its suffix.
+        self.rest = skip_ws(&self.rest[end + 1..]);
         if let Some(tagged) = self.rest.strip_prefix('@') {
             let end = tagged
                 .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
@@ -278,8 +292,8 @@ impl TermParser<'_> {
                 Some(_) => None,
                 None => Literal::new_language_tagged_literal(value, tag).ok(),
             }
-        } else if self.rest.starts_with("^^") {
-            self.rest = &self.rest[2..];
+        } else if let Some(datatype) = self.rest.strip_prefix("^^") {
+            self.rest = skip_ws(datatype);
             if !self.rest.starts_with('<') {
                 return None;
             }
@@ -288,6 +302,11 @@ impl TermParser<'_> {
             Some(Literal::new_simple_literal(value))
         }
     }
+}
+
+/// Skips N-Triples whitespace (`WS ::= #x20 | #x9`), and nothing else.
+fn skip_ws(text: &str) -> &str {
+    text.trim_start_matches([' ', '\t'])
 }
 
 /// Builds a blank node whose label matches the N-Triples / SPARQL

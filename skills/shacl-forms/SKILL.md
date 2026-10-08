@@ -54,6 +54,9 @@ validated rather than escaped (SPARQL decodes `\uXXXX` before parsing), and
 triple terms accept the full RDF 1.2 grammar, including labels like `_:a..b`,
 nested up to 128 levels (the sparq-core N-Triples cap); deeper input, a `:` in a
 blank-node label or a raw line break in a quoted string also fails closed.
+A malformed `<...>` path on any editable forward field fails the whole update,
+even when other fields carry valid edits (complex and inverse paths stay
+excluded, not rejected).
 
 What the description carries (all serde `Serialize + Deserialize`):
 
