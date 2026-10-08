@@ -6672,6 +6672,17 @@ async fn run_query_pinned(
                 return stream_select_json(gen, prepared.query, budget, shape, allow, held, &config)
                     .await;
             }
+            // #5517: a GET of the CSV / TSV / XML SELECT forms streams its rendered body too,
+            // so the serialised document (which no row or byte budget prices) is never held
+            // whole. HEAD keeps the buffered path below to compute its `Content-Length`.
+            if !is_ask && !head_only {
+                let Some(slot) = state.try_stream_worker() else {
+                    return stream_workers_exhausted();
+                };
+                let held = StreamHeld { qr_guard, slot };
+                return stream_select_rendered(gen, prepared.runnable, fmt, budget, allow, held, &config)
+                    .await;
+            }
             let pquery = prepared.query;
             let select = prepared.runnable;
             let task = tokio::task::spawn_blocking(move || {
@@ -6966,27 +6977,18 @@ fn render_select(
             }
             Err(e) => return engine_error_response(&e, config, true),
         },
-        // CSV/TSV: row-oriented chunked streaming — mirrors the JSON T16 path; the peak
-        // never holds a second full-result copy. Byte-identical to the buffered form per
-        // the chunked invariant. XML stays buffered (prefix compaction). [SONNET-4.6]
-        Format::Csv | Format::Tsv => {
+        // CSV/TSV/XML: a GET streams through `stream_select_rendered`; this buffered arm
+        // serves HEAD, which must render the document to advertise its `Content-Length`.
+        Format::Csv | Format::Tsv | Format::Xml => {
             let result = match sparq_engine::query_with_budget(graph, select, budget) {
                 Ok(r) => r,
                 Err(e) => return engine_error_response(&e, config, true),
             };
-            let chunks = match fmt {
-                Format::Csv => results::select_to_csv_chunks(&result),
-                Format::Tsv => results::select_to_tsv_chunks(&result),
-                _ => unreachable!(),
-            };
-            return chunked_response(StatusCode::OK, ct, chunks, head_only, gen.clone())
-        }
-        Format::Xml => {
-            let result = match sparq_engine::query_with_budget(graph, select, budget) {
-                Ok(r) => r,
-                Err(e) => return engine_error_response(&e, config, true),
-            };
-            results::select_to_xml(&result)
+            match fmt {
+                Format::Csv => results::select_to_csv(&result),
+                Format::Tsv => results::select_to_tsv(&result),
+                _ => results::select_to_xml(&result),
+            }
         }
     };
     text_response(StatusCode::OK, ct, body, head_only)
@@ -7820,7 +7822,74 @@ async fn stream_graph_result(
     held: StreamHeld,
     config: &ServerConfig,
 ) -> Response {
-    let ct = gfmt.content_type();
+    let job = MaterialisedStream {
+        ct: gfmt.content_type(),
+        eval: move |graph: &Graph, budget: &QueryBudget| {
+            sparq_engine::construct_or_describe_with_budget(graph, &runnable, budget)
+        },
+        render: move |triples: &Vec<oxrdf::Triple>, sink: &mut ChunkSink| {
+            serialise_graph_triples_to(triples, gfmt, sink)
+        },
+    };
+    stream_materialised_result(gen, job, budget, allow, held, config).await
+}
+
+/// #5517: the CSV / TSV / XML SELECT counterpart of [`stream_graph_result`]. The engine
+/// materialises the `QueryResult` (bounded by the row/byte budgets, which price it), and the
+/// rendered document — which those budgets do NOT price — is written straight into the
+/// chunk sink term piece by term piece (no row or term buffer, so one huge literal is not held
+/// either) instead of being built in memory. Same status semantics as the graph stream: every evaluation
+/// failure is known before the first byte, and a single-chunk answer keeps its
+/// `Content-Length`.
+async fn stream_select_rendered(
+    gen: PinnedGen,
+    select: String,
+    fmt: Format,
+    budget: QueryBudget,
+    allow: crate::service_config::ServiceAllowlist,
+    held: StreamHeld,
+    config: &ServerConfig,
+) -> Response {
+    let job = MaterialisedStream {
+        ct: fmt.select_content_type(),
+        eval: move |graph: &Graph, budget: &QueryBudget| {
+            sparq_engine::query_with_budget(graph, &select, budget)
+        },
+        render: move |result: &sparq_engine::QueryResult, sink: &mut ChunkSink| match fmt {
+            Format::Csv => results::write_select_csv(result, sink),
+            Format::Tsv => results::write_select_tsv(result, sink),
+            Format::Xml => results::write_select_xml(result, sink),
+            // JSON has its own incremental stream (`stream_select_json`).
+            Format::Json => Err(std::io::Error::other("SELECT JSON is not rendered here")),
+        },
+    };
+    stream_materialised_result(gen, job, budget, allow, held, config).await
+}
+
+/// A read whose engine result is materialised first and then rendered into the streamed body:
+/// `eval` runs the query, `render` writes the result to the chunk sink.
+struct MaterialisedStream<E, W> {
+    ct: &'static str,
+    eval: E,
+    render: W,
+}
+
+/// The shared worker of [`stream_graph_result`] and [`stream_select_rendered`]: evaluates on a
+/// blocking worker, renders into a [`ChunkSink`] (one chunk held at a time, back-pressured by
+/// the client) and hands the channel to [`graph_stream_response`].
+async fn stream_materialised_result<R, E, W>(
+    gen: PinnedGen,
+    job: MaterialisedStream<E, W>,
+    budget: QueryBudget,
+    allow: crate::service_config::ServiceAllowlist,
+    held: StreamHeld,
+    config: &ServerConfig,
+) -> Response
+where
+    E: FnOnce(&Graph, &QueryBudget) -> Result<R, String> + Send + 'static,
+    W: FnOnce(&R, &mut ChunkSink) -> std::io::Result<()> + Send + 'static,
+{
+    let MaterialisedStream { ct, eval, render } = job;
     let limits = SendLimits::for_budget(&budget);
     let read_deadline = limits.deadline;
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, String>>(STREAM_CHANNEL_CAP);
@@ -7832,11 +7901,7 @@ async fn stream_graph_result(
     tokio::task::spawn_blocking(move || {
         let _held = held;
         with_engine_scope_allow(&allow, || {
-            match sparq_engine::construct_or_describe_with_budget(
-                gen.snapshot(),
-                &runnable,
-                &budget,
-            ) {
+            match eval(gen.snapshot(), &budget) {
                 // Nothing has been rendered yet, so this still maps to the right status.
                 // If the error cannot be delivered (cancelled, past the deadline), record it.
                 Err(e) => {
@@ -7844,10 +7909,9 @@ async fn stream_graph_result(
                         worker_outcome.record(e);
                     }
                 }
-                Ok(triples) => {
+                Ok(result) => {
                     let mut sink = ChunkSink::new(tx.clone(), limits.clone());
-                    let rendered =
-                        serialise_graph_triples_to(&triples, gfmt, &mut sink).and_then(|()| sink.finish());
+                    let rendered = render(&result, &mut sink).and_then(|()| sink.finish());
                     let stopped = sink.stopped;
                     drop(sink);
                     match (rendered, stopped) {
@@ -7859,7 +7923,7 @@ async fn stream_graph_result(
                         // response is an error status (nothing sent yet, or one chunk held)
                         // or an aborted chunked body, never a 200 with a truncated document.
                         (Err(e), None) => {
-                            let msg = format!("serialising the graph result: {e}");
+                            let msg = format!("serialising the result: {e}");
                             if limits.send(&tx, Err(msg.clone())).is_err() {
                                 worker_outcome.record(msg);
                             }
@@ -7945,7 +8009,7 @@ async fn graph_stream_response(
                                 // body, never end it as if the document were complete.
                                 None if !outcome.is_complete() => {
                                     let e = std::io::Error::other(format!(
-                                        "graph result stream truncated ({}) before the document was complete",
+                                        "result stream truncated ({}) before the document was complete",
                                         outcome.truncation()
                                     ));
                                     return Some((Err(e), (prefix, None)));

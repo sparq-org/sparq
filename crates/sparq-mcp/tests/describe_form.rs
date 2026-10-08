@@ -106,7 +106,11 @@ fn returns_derive_form_json_verbatim() {
         &mut server,
         json!({ "focus": ALICE, "shapes": PERSON_SHAPE }),
     ));
-    assert!(!is_error, "well-formed inputs must not be a tool error: {}", text);
+    assert!(
+        !is_error,
+        "well-formed inputs must not be a tool error: {}",
+        text
+    );
 
     let focus = Term::NamedNode(NamedNode::new(ALICE).expect("focus IRI"));
     assert_eq!(
@@ -135,7 +139,11 @@ fn returns_derive_form_json_verbatim() {
     assert_eq!(name["required"], true);
     assert_eq!(name["values"][0]["term"]["value"], "Alice");
 
-    assert_eq!(server.graph().len(), before, "describe_form must be read-only");
+    assert_eq!(
+        server.graph().len(),
+        before,
+        "describe_form must be read-only"
+    );
 }
 
 #[test]
@@ -152,7 +160,8 @@ fn honours_mode_and_explicit_shape_arguments() {
     assert!(!is_error, "{}", text);
 
     let focus = Term::NamedNode(NamedNode::new(ALICE).expect("focus IRI"));
-    let shape = Term::NamedNode(NamedNode::new("http://example.com/PersonShape").expect("shape IRI"));
+    let shape =
+        Term::NamedNode(NamedNode::new("http://example.com/PersonShape").expect("shape IRI"));
     let opts = FormOptions {
         mode: Mode::View,
         shape: Some(shape),
@@ -203,7 +212,10 @@ fn bad_focus_shapes_or_mode_are_tool_errors_not_protocol_errors() {
             json!({ "focus": ALICE, "shapes": PERSON_SHAPE, "shape": "not an iri" }),
             "invalid shape IRI",
         ),
-        (json!({ "shapes": PERSON_SHAPE }), "missing required string argument"),
+        (
+            json!({ "shapes": PERSON_SHAPE }),
+            "missing required string argument",
+        ),
     ];
     for (arguments, needle) in cases {
         let response = describe(&mut server(), arguments.clone());

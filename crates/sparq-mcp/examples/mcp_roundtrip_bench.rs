@@ -39,14 +39,17 @@ fn time_call(server: &mut McpServer, raw: &str, iters: u32) -> f64 {
 }
 
 fn main() {
-    let json_path = std::env::args().collect::<Vec<_>>().windows(2).find_map(|w| {
-        // Positional format args (CodeQL rust/unused-variable false-positive guard).
-        if w[0] == "--json" {
-            Some(w[1].clone())
-        } else {
-            None
-        }
-    });
+    let json_path = std::env::args()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .find_map(|w| {
+            // Positional format args (CodeQL rust/unused-variable false-positive guard).
+            if w[0] == "--json" {
+                Some(w[1].clone())
+            } else {
+                None
+            }
+        });
 
     let graph = Graph::load_str(TTL, "turtle").expect("load");
     let triples = graph.len();
