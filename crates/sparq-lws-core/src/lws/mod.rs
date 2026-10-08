@@ -14,9 +14,9 @@
 //!   and RFC 9457 problem details;
 //! - a **linkset** (RFC 9264) per resource, patchable;
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
-//!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
-//!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
-//!   it issues ([`tokens`]);
+//!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key,
+//!   controlled identifier and SAML 2.0 subject tokens; the storage accepts the RFC 9068 access
+//!   tokens it issues ([`tokens`]);
 //! - **access grants and access requests** ([`access`]): the LWS Access Profile;
 //! - **webhook notifications** ([`notify`]), signed per RFC 9421;
 //! - the **type index and type search** services ([`index`]).
@@ -31,6 +31,7 @@ pub mod index;
 pub mod jose;
 pub mod notify;
 pub mod resources;
+pub mod saml;
 pub mod subject_tokens;
 pub mod tokens;
 
@@ -104,6 +105,9 @@ pub struct LwsConfig {
     /// private addresses (identity documents, webhook inboxes). Development and
     /// conformance testing only.
     pub allow_insecure_fetch: bool,
+    /// SAML identity providers trusted by the authorization server: entity id to PEM certificate
+    /// or public key. Empty means the SAML suite is not offered.
+    pub saml_idps: BTreeMap<String, String>,
     /// Largest request body read, in bytes; a larger one is refused with 413 before it is
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
@@ -125,6 +129,7 @@ impl LwsConfig {
             notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
+            saml_idps: BTreeMap::new(),
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
         }
@@ -148,6 +153,7 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
+    /// - `SOLID_SERVER_LWS_SAML_IDPS_FILE`: a JSON object of trusted SAML IdP entity ids to PEM;
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
@@ -229,6 +235,10 @@ impl LwsConfig {
         }
         if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", Some("notify-key"))? {
             cfg.notify_key = k;
+        }
+        if let Some(idps) = read("SOLID_SERVER_LWS_SAML_IDPS_FILE")? {
+            cfg.saml_idps = serde_json::from_str(&idps)
+                .map_err(|e| format!("SOLID_SERVER_LWS_SAML_IDPS_FILE: {e}"))?;
         }
         Ok(cfg)
     }

@@ -226,6 +226,9 @@ p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 bs58 = "0.5"
 httpdate = "1"
+# SAML 2.0 subject tokens (`src/lws/saml.rs`): XML parsing for enveloped XML-DSig with exclusive
+# canonicalization. 0.37 is already in the resolved graph, so this adds no new crate.
+quick-xml = "0.37"
 # Preserve the native dependency graph and feature set exactly. The target split keeps listener,
 # runtime, verifier, filesystem, TLS, PoP, notification, and non-memory backend code out of wasm.
 axum = { version = "0.8", features = ["ws"] }
