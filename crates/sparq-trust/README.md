@@ -18,9 +18,6 @@ the issuer-tagged fact so the existing N3 reasoner merges it with the `.acr` rul
 > The ZK estate it composes with is externally **unaudited** (`sq-qhy4`), pending
 > accredited-cryptographer sign-off.
 
-<!-- separate blockquote (MD028): the model-provenance note is a distinct callout. -->
-
-
 ## 🚀 Quickstart
 
 `sparq-trust` is **opt-in**: nothing in the default build depends on it; the gate is wired into `sparq-solid` behind its default-OFF `trust-graph` cargo feature.

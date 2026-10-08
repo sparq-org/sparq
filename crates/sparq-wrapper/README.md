@@ -5,7 +5,6 @@ store, follow predicates, and convert literal values without handling raw
 dictionary IDs or triples. The crate is opt-in; `sparq-core` and
 `sparq-engine` do not depend on it.
 
-
 ## 🚀 Quickstart
 
 ```rust
