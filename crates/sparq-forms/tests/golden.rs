@@ -67,3 +67,41 @@ fn golden_inverse_multi() {
 fn golden_predicate_targets() {
     check("predicate_targets", "alice", &FormOptions::default());
 }
+
+/// #6284: every fixture source names its generated golden companion and the
+/// regeneration command, so a change scoped to one source file still sees the
+/// two-file rule (editing a source's content moves the golden JSON).
+#[test]
+fn every_fixture_source_names_its_golden() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let file = path.file_name().unwrap().to_str().unwrap().to_string();
+        let Some(name) = file
+            .strip_suffix(".data.ttl")
+            .or_else(|| file.strip_suffix(".shapes.ttl"))
+        else {
+            continue;
+        };
+        let golden = format!("{name}.golden.json");
+        assert!(
+            dir.join(&golden).exists(),
+            "{file}: missing companion {golden}"
+        );
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains(&format!("fixtures/{golden}")),
+            "{file} must name its golden companion fixtures/{golden}"
+        );
+        assert!(
+            text.contains("UPDATE_GOLDENS=1 cargo test -p sparq-forms --test golden"),
+            "{file} must state the golden regeneration command"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 8,
+        "expected the 8 fixture sources, checked {checked}"
+    );
+}
