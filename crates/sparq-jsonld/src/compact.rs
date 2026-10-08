@@ -46,7 +46,7 @@ use crate::fx::FxMap;
 use crate::json::Json;
 use crate::loader::DocumentLoader;
 use crate::options::{JsonLdOptions, ProcessingMode};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -257,8 +257,13 @@ impl Env<'_> {
         if let Some((_, c)) = derived.borrow().iter().find(|(k, _)| k.same(&key)) {
             return Ok(Rc::clone(c));
         }
-        let ctx = Rc::new(Ctx::new(build()?));
-        derived.borrow_mut().push((key, Rc::clone(&ctx)));
+        let ctx = Rc::new(Ctx::with_budget(build()?, Rc::clone(&self.root.memo_used)));
+        // Past the cap a context is built per use and dropped, as without the cache, so a
+        // document with many distinct scoped contexts cannot make the list grow. The list
+        // only shrinks between calls, so a key never names a dropped context's address.
+        if derived.borrow().len() < DERIVED_CAP {
+            derived.borrow_mut().push((key, Rc::clone(&ctx)));
+        }
         Ok(ctx)
     }
 }
@@ -279,31 +284,41 @@ struct Ctx {
     /// derived [`Ctx`] (and each reverted-to `Arc`) for the root's lifetime, so the
     /// address keys can never be reused by another context.
     derived: RefCell<Vec<(DerivedKey, Rc<Ctx>)>>,
+    /// IRIs memoised across a root and its derived contexts, shared between them.
+    memo_used: Rc<Cell<usize>>,
 }
 
 impl Ctx {
     fn new(active: ActiveContext) -> Ctx {
+        Ctx::with_budget(active, Rc::default())
+    }
+
+    /// A context whose memo insertions count against `memo_used`.
+    fn with_budget(active: ActiveContext, memo_used: Rc<Cell<usize>>) -> Ctx {
         let inverse = active.inverse_context();
-        Ctx { active, inverse, memo: RefCell::default(), derived: RefCell::default() }
+        Ctx { active, inverse, memo: RefCell::default(), derived: RefCell::default(), memo_used }
     }
 
     /// Clears this root's IRI memos (its own and its derived contexts') once they hold
-    /// more than [`MEMO_CAP`] IRIs. The root outlives the call in [`LAST_ROOT`] and node
-    /// ids differ per document, so without this the memos would keep every IRI ever
-    /// compacted on the thread; within one call they stay unbounded, which keeps large
-    /// documents fast. Each IRI holds at most [`MEMO_SHAPES`] value shapes.
-    /// The derived contexts are dropped once there are more than [`DERIVED_CAP`] of
-    /// them: their keys hold addresses of contexts in the same list, so the list is
-    /// only ever cleared whole, and only between calls.
+    /// more than [`MEMO_CAP`] IRIs between them. The root outlives the call in
+    /// [`LAST_ROOT`] and node ids differ per document, so without this the memos would keep
+    /// every IRI ever compacted on the thread. Within one call they hold up to
+    /// [`MEMO_CALL_CAP`] IRIs, which keeps large documents fast, and each IRI holds at most
+    /// [`MEMO_SHAPES`] value shapes. The derived contexts are capped at [`DERIVED_CAP`] as
+    /// they are added and are dropped here once the list is full: their keys hold
+    /// addresses of contexts in the same list, so the list is only ever cleared whole, and
+    /// only between calls.
     fn trim_memos(&self) {
-        if self.derived.borrow().len() > DERIVED_CAP {
+        if self.derived.borrow().len() >= DERIVED_CAP {
             self.derived.borrow_mut().clear();
+            self.memo_used.set(self.memo.borrow().len());
         }
-        let derived = self.derived.borrow();
-        for memo in std::iter::once(&self.memo).chain(derived.iter().map(|(_, c)| &c.memo)) {
-            if memo.borrow().len() > MEMO_CAP {
-                memo.borrow_mut().clear();
+        if self.memo_used.get() > MEMO_CAP {
+            self.memo.borrow_mut().clear();
+            for (_, c) in self.derived.borrow().iter() {
+                c.memo.borrow_mut().clear();
             }
+            self.memo_used.set(0);
         }
     }
 
@@ -328,7 +343,12 @@ impl Ctx {
         let mut memo = self.memo.borrow_mut();
         let entries = match memo.get_mut(iri) {
             Some(entries) => entries,
-            None => memo.entry(iri.to_string()).or_default(),
+            // A new IRI is memoised only within the budget shared with the root.
+            None if self.memo_used.get() < MEMO_CALL_CAP => {
+                self.memo_used.set(self.memo_used.get() + 1);
+                memo.entry(iri.to_string()).or_default()
+            }
+            None => return result,
         };
         // Shapes vary with datatypes and language tags, so they are capped per IRI too.
         if entries.len() < MEMO_SHAPES {
@@ -338,8 +358,12 @@ impl Ctx {
     }
 }
 
-/// Most distinct IRIs a [`Ctx`] keeps memoised between calls (see [`Ctx::trim_memos`]).
+/// Most distinct IRIs a root and its derived contexts keep memoised between calls (see
+/// [`Ctx::trim_memos`]).
 const MEMO_CAP: usize = 4096;
+
+/// Most distinct IRIs a root and its derived contexts memoise within one call.
+const MEMO_CALL_CAP: usize = 1 << 16;
 
 /// Most value shapes memoised per IRI.
 const MEMO_SHAPES: usize = 8;
@@ -1385,6 +1409,46 @@ mod tests {
         let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
         let back = expand(&out, &opts, &NoopLoader).unwrap();
         assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+    }
+
+    // Within one call, new IRIs stop being memoised once the shared budget is spent.
+    #[test]
+    fn memo_is_bounded_within_a_call() {
+        let ctx = Ctx::new(ActiveContext::new(None));
+        for i in 0..MEMO_CALL_CAP + 10 {
+            ctx.ciri(&format!("http://ex/n{i}"), None, false, false);
+        }
+        assert_eq!(ctx.memo.borrow().len(), MEMO_CALL_CAP);
+        assert_eq!(ctx.memo_used.get(), MEMO_CALL_CAP);
+    }
+
+    // One document with more distinct type-scoped contexts than the cache holds still
+    // compacts correctly, and the cache is emptied for the next call.
+    #[test]
+    fn derived_contexts_are_bounded_within_a_call() {
+        let n = 2 * DERIVED_CAP;
+        let terms: Vec<String> = (0..n)
+            .map(|i| format!(r#""T{i}":{{"@id":"http://ex/T{i}","@context":{{"q{i}":"http://ex/q"}}}}"#))
+            .collect();
+        let ctx = Json::parse(&format!(r#"{{"@vocab":"http://ex/",{}}}"#, terms.join(","))).unwrap();
+        let nodes: Vec<String> = (0..n)
+            .map(|i| format!(r#"{{"@id":"http://ex/s{i}","@type":["http://ex/T{i}"],"http://ex/q":[{{"@value":"v"}}]}}"#))
+            .collect();
+        let doc = Json::parse(&format!("[{}]", nodes.join(","))).unwrap();
+        let opts = JsonLdOptions::default();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        let back = expand(&out, &opts, &NoopLoader).unwrap();
+        let sorted = |j: &Json| {
+            let mut v = match j {
+                Json::Arr(a) => a.clone(),
+                _ => vec![],
+            };
+            v.sort_by_key(|x| x.get("@id").and_then(Json::as_str).map(str::to_string));
+            Json::Arr(v)
+        };
+        assert!(same_entries(&sorted(&back), &sorted(&doc)), "round trip changed the data");
+        let len = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
+        assert_eq!(len, Some(0));
     }
 
     // Language tags and datatypes make value shapes unbounded under one IRI, so the
