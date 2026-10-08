@@ -18,7 +18,8 @@
 //!   `query` tool evaluates over (draft §6.4: the two read surfaces cannot disagree).
 //! - `container_list` (Class R) — the direct `ldp:contains` members of one container,
 //!   derived ONLY from stored containment triples in the container's own graph — never
-//!   from IRI-path guessing (draft §6.4).
+//!   from IRI-path guessing (draft §6.4) — and filtered to the members the session may
+//!   read, so an unreadable member is not disclosed (gh #5287).
 //! - `introspect`, `shapes`, `stats` (Class R) — the schema/statistics tools, mined from
 //!   the session's authorized projection rather than the whole pod. [SONNET-4.6] sq-8n6iv
 //! - `update`, `resource_put`, `resource_delete`, `container_create` (Class U) — all
@@ -160,7 +161,6 @@
 //!   supplies a request clock.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Duration;
 
 use oxrdf::{NamedNode, Term, Triple};
 use serde_json::{json, Value};
@@ -213,7 +213,11 @@ pub struct SolidServerConfig {
     /// server is strictly read-only, exactly like [`crate::ServerConfig`].
     pub allow_update: bool,
     /// Wall-clock deadline per tool-issued query, in seconds (`None` = unbounded).
+    /// [`Self::query_timeout_ms`] overrides it when set.
     pub query_timeout_secs: Option<u64>,
+    /// The same deadline in milliseconds, for a sub-second bound; takes precedence
+    /// over [`Self::query_timeout_secs`] when `Some` (default `None`). (gh #5696)
+    pub query_timeout_ms: Option<u64>,
     /// Row cap on any materialised query result (`None` = uncapped).
     pub max_rows: Option<usize>,
     /// The server name reported in the `initialize` handshake.
@@ -231,6 +235,7 @@ impl Default for SolidServerConfig {
             // Security default: read-only, exactly like the base server.
             allow_update: false,
             query_timeout_secs: Some(30),
+            query_timeout_ms: None,
             max_rows: Some(1_000_000),
             server_name: "sparq-mcp-solid".to_string(),
         }
@@ -319,7 +324,8 @@ pub const CONTAINER_LIST: ToolSpec = ToolSpec {
                   ldp:contains), derived ONLY from the containment triples stored in the \
                   container's own document — never guessed from IRI paths. Each member \
                   carries a container flag. A container this session cannot read is \
-                  reported with the SAME error as one that does not exist.",
+                  reported with the SAME error as one that does not exist, and a member \
+                  it cannot read is omitted from the listing.",
     input_schema: || {
         json!({
             "type": "object",
@@ -510,7 +516,12 @@ pub const CONTAINER_CREATE: ToolSpec = ToolSpec {
 };
 
 /// The tool names only reachable when [`SolidServerConfig::allow_update`] is on.
-const MUTATING: [&str; 4] = ["update", "resource_put", "resource_delete", "container_create"];
+const MUTATING: [&str; 4] = [
+    "update",
+    "resource_put",
+    "resource_delete",
+    "container_create",
+];
 
 /// The existence-non-disclosure error (draft §9.3): used **byte-identically** for a
 /// resource that does not exist and for one this session may not read, so no
@@ -529,7 +540,12 @@ fn write_denied_error(url: &str) -> String {
 /// parameters (`; charset=…`) are ignored; only the RDF text formats a pod document
 /// can round-trip are accepted.
 fn rdf_format(content_type: &str) -> Option<&'static str> {
-    let base = content_type.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let base = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     match base.as_str() {
         "text/turtle" | "turtle" | "ttl" => Some("turtle"),
         "application/n-triples" | "ntriples" | "n-triples" | "nt" => Some("ntriples"),
@@ -583,7 +599,9 @@ impl Representation {
 /// One media type only (`;`-parameters such as `q=` are ignored) — an HTTP-style
 /// comma-separated `Accept` list matches nothing and is refused rather than guessed at.
 fn negotiate(accept: Option<&str>) -> Result<Representation, String> {
-    let Some(accept) = accept else { return Ok(Representation::NTriples) };
+    let Some(accept) = accept else {
+        return Ok(Representation::NTriples);
+    };
     match rdf_format(accept) {
         Some("ntriples") => Ok(Representation::NTriples),
         Some("turtle") => Ok(Representation::Turtle),
@@ -627,14 +645,18 @@ fn triples_to_turtle(triples: &[Triple]) -> Result<String, String> {
         // `with_prefix` fails only on a syntactically invalid namespace IRI; ours are
         // constants, so fall back to the un-prefixed writer rather than panic if a future
         // edit breaks one (less compaction, never wrong output).
-        ser = ser.with_prefix(*name, *iri).unwrap_or_else(|_| oxttl::TurtleSerializer::new());
+        ser = ser
+            .with_prefix(*name, *iri)
+            .unwrap_or_else(|_| oxttl::TurtleSerializer::new());
     }
     let mut w = ser.for_writer(Vec::new());
     for t in triples {
         w.serialize_triple(t.as_ref())
             .map_err(|e| format!("Turtle serialization failed: {}", e))?;
     }
-    let bytes = w.finish().map_err(|e| format!("Turtle serialization failed: {}", e))?;
+    let bytes = w
+        .finish()
+        .map_err(|e| format!("Turtle serialization failed: {}", e))?;
     String::from_utf8(bytes).map_err(|e| format!("Turtle serialization was not UTF-8: {}", e))
 }
 
@@ -662,7 +684,9 @@ fn parent_iri(iri: &str) -> Option<String> {
 /// `urn:sparq:` space.
 fn valid_target(url: &str) -> Result<NamedNode, String> {
     if url.starts_with(RESERVED_PREFIX) {
-        return Err(format!("invalid target <{url}>: the `{RESERVED_PREFIX}` graph space is reserved"));
+        return Err(format!(
+            "invalid target <{url}>: the `{RESERVED_PREFIX}` graph space is reserved"
+        ));
     }
     NamedNode::new(url).map_err(|e| format!("invalid resource IRI <{url}>: {e}"))
 }
@@ -671,7 +695,10 @@ fn valid_target(url: &str) -> Result<NamedNode, String> {
 /// invalid-params error naming the method. [SONNET-4.6] sq-cmjmr
 fn resource_uri_param<'a>(params: &'a Value, method: &str) -> Result<&'a str, RpcError> {
     params.get("uri").and_then(Value::as_str).ok_or_else(|| {
-        RpcError::new(INVALID_PARAMS, format!("{} requires a string `uri`", method))
+        RpcError::new(
+            INVALID_PARAMS,
+            format!("{} requires a string `uri`", method),
+        )
     })
 }
 
@@ -705,7 +732,11 @@ impl SolidMcpServer {
     ///
     /// Returns `Err` if that materialization fails.
     pub fn with_config(store: PodStore, config: SolidServerConfig) -> Result<Self, String> {
-        let mut server = SolidMcpServer { store, config, subs: Subscriptions::default() };
+        let mut server = SolidMcpServer {
+            store,
+            config,
+            subs: Subscriptions::default(),
+        };
         server.rematerialize()?;
         Ok(server)
     }
@@ -742,8 +773,11 @@ impl SolidMcpServer {
     /// The per-call query budget (same defaults as the base server).
     fn budget(&self) -> QueryBudget {
         let mut b = QueryBudget::unlimited();
-        if let Some(secs) = self.config.query_timeout_secs {
-            b.deadline = Some(std::time::Instant::now() + Duration::from_secs(secs));
+        if let Some(d) = crate::server::timeout_duration(
+            self.config.query_timeout_secs,
+            self.config.query_timeout_ms,
+        ) {
+            b.deadline = Some(std::time::Instant::now() + d);
         }
         b.max_rows = self.config.max_rows;
         b
@@ -774,7 +808,12 @@ impl SolidMcpServer {
             &POD_STATS,
         ];
         if self.allow_update() {
-            tools.extend([&POD_UPDATE, &RESOURCE_PUT, &RESOURCE_DELETE, &CONTAINER_CREATE]);
+            tools.extend([
+                &POD_UPDATE,
+                &RESOURCE_PUT,
+                &RESOURCE_DELETE,
+                &CONTAINER_CREATE,
+            ]);
         }
         tools
     }
@@ -810,9 +849,10 @@ impl SolidMcpServer {
             "resources/read" => self.resources_read(&req.params),
             "resources/subscribe" => self.resources_subscribe(&req.params),
             "resources/unsubscribe" => self.resources_unsubscribe(&req.params),
-            other => {
-                Err(RpcError::new(METHOD_NOT_FOUND, format!("method not found: {other}")))
-            }
+            other => Err(RpcError::new(
+                METHOD_NOT_FOUND,
+                format!("method not found: {other}"),
+            )),
         }
     }
 
@@ -863,7 +903,10 @@ impl SolidMcpServer {
             "resource_delete" => self.tool_resource_delete(&args),
             "container_create" => self.tool_container_create(&args),
             other => {
-                return Err(RpcError::new(METHOD_NOT_FOUND, format!("unknown tool: {other}")))
+                return Err(RpcError::new(
+                    METHOD_NOT_FOUND,
+                    format!("unknown tool: {other}"),
+                ))
             }
         };
 
@@ -893,7 +936,12 @@ impl SolidMcpServer {
     fn find_doc(&self, url: &str) -> Option<&Graph> {
         let name = NamedNode::new(url).ok()?;
         let term = Term::NamedNode(name);
-        self.store.graph.named.iter().find(|(n, _)| *n == term).map(|(_, g)| g)
+        self.store
+            .graph
+            .named
+            .iter()
+            .find(|(n, _)| *n == term)
+            .map(|(_, g)| g)
     }
 
     /// The index of the named-graph slot for `term`, if present.
@@ -957,6 +1005,23 @@ impl SolidMcpServer {
 
     /// `container_list`: direct `ldp:contains` members from the container's OWN stored
     /// graph — data-derived, never IRI-path guessing (draft §6.4).
+    ///
+    /// A member is listed only when `resource_get` would serve it (§9.3, gh #5287): the
+    /// session may read it AND it is a stored document. The second half matters because
+    /// the authorization view also grants inherited modes to STRUCTURAL container
+    /// prefixes that have no document of their own; listing such a prefix would reveal
+    /// that something exists beneath it while `resource_get` reports it absent. A
+    /// dangling `ldp:contains` link is omitted for the same reason.
+    ///
+    /// The read decision is the point decision [`PodStore::decide`] makes (a governing
+    /// ACL exists and the resource is in the session's materialized Read set), evaluated
+    /// against the session's cached Read set plus one scan of the stored graph names, so
+    /// filtering costs no whole-origin sweep per member. It runs under the same deadline
+    /// as the containment query.
+    ///
+    /// Scope: this filters the LISTING only. `query`, `resource_get` and `resources/read`
+    /// still return a readable container's own `ldp:contains` triples verbatim, so member
+    /// NAMES in a readable container are not confidential pod-wide.
     fn tool_container_list(&self, args: &Value) -> Result<String, String> {
         let url = arg_str(args, "url")?;
         NamedNode::new(url).map_err(|e| format!("invalid container IRI <{url}>: {e}"))?;
@@ -966,15 +1031,42 @@ impl SolidMcpServer {
         let Some(doc) = self.find_doc(url) else {
             return Err(not_found_error(url));
         };
+        let budget = self.budget();
         let q = format!("SELECT ?m WHERE {{ <{url}> <{LDP_CONTAINS}> ?m }}");
-        let res = sparq_engine::query_with_budget(doc, &q, &self.budget())?;
-        let mut members: Vec<Value> = Vec::with_capacity(res.rows.len());
+        let res = sparq_engine::query_with_budget(doc, &q, &budget)?;
+        let readable = self.store.accessible_set(&self.session(), Mode::Read);
+        let timed_out = || {
+            budget
+                .deadline
+                .is_some_and(|d| std::time::Instant::now() >= d)
+        };
+        // Pass 1: members the session may read (point-decision semantics).
+        let mut candidates: BTreeSet<&str> = BTreeSet::new();
         for row in &res.rows {
-            if let Some(Some(Term::NamedNode(m))) = row.first() {
-                members.push(json!({
-                    "url": m.as_str(),
-                    "container": m.as_str().ends_with('/'),
-                }));
+            if timed_out() {
+                return Err("query budget exceeded (timeout)".to_owned());
+            }
+            if let Some(Some(term @ Term::NamedNode(m))) = row.first() {
+                if readable.contains(term) && self.store.resolve_acl(m.as_str()).is_some() {
+                    candidates.insert(m.as_str());
+                }
+            }
+        }
+        // Pass 2: keep only those that are stored documents (one scan of the graph names).
+        let mut members: Vec<Value> = Vec::with_capacity(candidates.len());
+        if !candidates.is_empty() {
+            for (name, _) in &self.store.graph.named {
+                if let Term::NamedNode(m) = name {
+                    if candidates.contains(m.as_str()) {
+                        members.push(json!({
+                            "url": m.as_str(),
+                            "container": m.as_str().ends_with('/'),
+                        }));
+                    }
+                }
+            }
+            if timed_out() {
+                return Err("query budget exceeded (timeout)".to_owned());
             }
         }
         members.sort_by(|a, b| a["url"].as_str().cmp(&b["url"].as_str()));
@@ -1039,7 +1131,10 @@ impl SolidMcpServer {
                     .unwrap_or(4000);
                 Ok(ix.to_text_summary(budget))
             }
-            other => Err(format!("unknown format `{}` (expected \"json\" or \"text\")", other)),
+            other => Err(format!(
+                "unknown format `{}` (expected \"json\" or \"text\")",
+                other
+            )),
         }
     }
 
@@ -1184,7 +1279,9 @@ impl SolidMcpServer {
     fn resources_list(&self) -> Value {
         let mut resources: Vec<Value> = Vec::new();
         for (name, _) in &self.store.graph.named {
-            let Term::NamedNode(node) = name else { continue };
+            let Term::NamedNode(node) = name else {
+                continue;
+            };
             let uri = node.as_str();
             // The reserved space holds the materialized auth view, not pod content.
             if uri.starts_with(RESERVED_PREFIX) || !self.allowed(uri, Mode::Read) {
@@ -1229,7 +1326,10 @@ impl SolidMcpServer {
     fn resources_subscribe(&mut self, params: &Value) -> Result<Value, RpcError> {
         let uri = resource_uri_param(params, "resources/subscribe")?;
         NamedNode::new(uri).map_err(|e| {
-            RpcError::new(INVALID_PARAMS, format!("invalid resource IRI <{}>: {}", uri, e))
+            RpcError::new(
+                INVALID_PARAMS,
+                format!("invalid resource IRI <{}>: {}", uri, e),
+            )
         })?;
         if uri.starts_with(RESERVED_PREFIX)
             || !self.allowed(uri, Mode::Read)
@@ -1273,9 +1373,11 @@ impl SolidMcpServer {
         };
         let budget = self.budget();
         if self.config.acp {
-            self.store.update_as_acp_with_budget(&session, &sparql, &budget)?;
+            self.store
+                .update_as_acp_with_budget(&session, &sparql, &budget)?;
         } else {
-            self.store.update_as_with_budget(&session, &sparql, &budget)?;
+            self.store
+                .update_as_with_budget(&session, &sparql, &budget)?;
         }
         Ok("ok".to_string())
     }
@@ -1392,7 +1494,11 @@ impl SolidMcpServer {
         self.store.graph.named.push((term.clone(), new_graph));
 
         // A CREATED document becomes a member of its parent containers (draft §7.3).
-        let links = if existed { Ok((Vec::new(), Vec::new())) } else { self.link_containment(&url) };
+        let links = if existed {
+            Ok((Vec::new(), Vec::new()))
+        } else {
+            self.link_containment(&url)
+        };
         let (created_graphs, added_links) = match links {
             Ok(x) => x,
             Err(e) => {
@@ -1409,7 +1515,9 @@ impl SolidMcpServer {
             let _ = self.rematerialize(); // restore the prior (already-valid) view
             return Err(format!("resource_put rolled back for <{url}>: {e}"));
         }
-        Ok(pretty(&json!({ "url": url, "created": !existed, "triples": triples })))
+        Ok(pretty(
+            &json!({ "url": url, "created": !existed, "triples": triples }),
+        ))
     }
 
     /// `resource_delete`: delete one document (LDP DELETE). Rejects non-empty
@@ -1447,7 +1555,9 @@ impl SolidMcpServer {
             let doc = self.find_doc(&url).expect("slot checked above");
             let q = format!("ASK {{ <{url}> <{LDP_CONTAINS}> ?m }}");
             if sparq_engine::ask(doc, &q)? {
-                return Err(format!("container <{url}> is not empty — delete its members first"));
+                return Err(format!(
+                    "container <{url}> is not empty — delete its members first"
+                ));
             }
         }
 
@@ -1534,7 +1644,10 @@ impl SolidMcpServer {
             let pos = match self.slot_index(&pterm) {
                 Some(i) => i,
                 None => {
-                    self.store.graph.named.push((pterm.clone(), container_graph(&parent)?));
+                    self.store
+                        .graph
+                        .named
+                        .push((pterm.clone(), container_graph(&parent)?));
                     created.push(pterm.clone());
                     self.store.graph.named.len() - 1
                 }
@@ -1565,8 +1678,11 @@ impl SolidMcpServer {
     fn unlink_containment(&mut self, created: &[Term], added: &[AddedLink]) {
         for (pterm, t) in added.iter().rev() {
             if let Some(i) = self.slot_index(pterm) {
-                let _ =
-                    self.store.graph.named[i].1.remove_triple(t[0].clone(), t[1].clone(), t[2].clone());
+                let _ = self.store.graph.named[i].1.remove_triple(
+                    t[0].clone(),
+                    t[1].clone(),
+                    t[2].clone(),
+                );
             }
         }
         for term in created.iter().rev() {
@@ -1615,10 +1731,22 @@ mod unit {
 
     #[test]
     fn parent_iri_walks_slash_semantics_to_the_origin_root() {
-        assert_eq!(parent_iri("https://h.ex/a/b/doc.ttl").as_deref(), Some("https://h.ex/a/b/"));
-        assert_eq!(parent_iri("https://h.ex/a/b/").as_deref(), Some("https://h.ex/a/"));
-        assert_eq!(parent_iri("https://h.ex/a/").as_deref(), Some("https://h.ex/"));
-        assert_eq!(parent_iri("https://h.ex/doc"), Some("https://h.ex/".to_string()));
+        assert_eq!(
+            parent_iri("https://h.ex/a/b/doc.ttl").as_deref(),
+            Some("https://h.ex/a/b/")
+        );
+        assert_eq!(
+            parent_iri("https://h.ex/a/b/").as_deref(),
+            Some("https://h.ex/a/")
+        );
+        assert_eq!(
+            parent_iri("https://h.ex/a/").as_deref(),
+            Some("https://h.ex/")
+        );
+        assert_eq!(
+            parent_iri("https://h.ex/doc"),
+            Some("https://h.ex/".to_string())
+        );
         assert_eq!(parent_iri("https://h.ex/"), None);
         assert_eq!(parent_iri("urn:sparq:auth"), None); // no slash hierarchy
     }
@@ -1638,16 +1766,26 @@ mod unit {
         // [SONNET-4.6] sq-wbsf5 — absent `accept` must keep the v1 default, or every
         // existing caller silently changes syntax.
         assert_eq!(negotiate(None), Ok(Representation::NTriples));
-        assert_eq!(negotiate(Some("application/n-triples")), Ok(Representation::NTriples));
+        assert_eq!(
+            negotiate(Some("application/n-triples")),
+            Ok(Representation::NTriples)
+        );
         assert_eq!(negotiate(Some("text/turtle")), Ok(Representation::Turtle));
         // Media-type parameters are ignored, so a `q=` weight still resolves.
-        assert_eq!(negotiate(Some("text/turtle; q=0.9")), Ok(Representation::Turtle));
+        assert_eq!(
+            negotiate(Some("text/turtle; q=0.9")),
+            Ok(Representation::Turtle)
+        );
     }
 
     #[test]
     fn negotiate_refuses_an_unservable_accept_naming_what_is_served() {
         // No silent coercion, and the message must enumerate the real served set.
-        for accept in ["application/rdf+xml", "image/png", "application/n-triples, text/turtle"] {
+        for accept in [
+            "application/rdf+xml",
+            "image/png",
+            "application/n-triples, text/turtle",
+        ] {
             let err = negotiate(Some(accept)).expect_err("unservable accept is an error");
             assert!(err.contains("unsupported accept"), "honest error: {err}");
             assert!(err.contains("application/n-triples") && err.contains("text/turtle"));
@@ -1663,7 +1801,10 @@ mod unit {
 
     #[test]
     fn representation_media_types_are_the_wire_spellings() {
-        assert_eq!(Representation::NTriples.media_type(), "application/n-triples");
+        assert_eq!(
+            Representation::NTriples.media_type(),
+            "application/n-triples"
+        );
         assert_eq!(Representation::Turtle.media_type(), "text/turtle");
     }
 
@@ -1674,11 +1815,13 @@ mod unit {
             "ntriples",
         )
         .expect("fixture parses");
-        let triples =
-            sparq_engine::construct(&graph, "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")
-                .expect("CONSTRUCT evaluates");
+        let triples = sparq_engine::construct(&graph, "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")
+            .expect("CONSTRUCT evaluates");
         let ttl = triples_to_turtle(&triples).expect("in-memory serialization succeeds");
-        assert!(ttl.contains("ldp:contains"), "registered prefixes compact: {ttl}");
+        assert!(
+            ttl.contains("ldp:contains"),
+            "registered prefixes compact: {ttl}"
+        );
         // Well-formed: it parses back to the same one triple.
         let back = Graph::load_str(&ttl, "turtle").expect("output is valid Turtle");
         assert_eq!(back.len(), 1);
@@ -1698,7 +1841,10 @@ mod unit {
     #[test]
     fn rdf_format_accepts_jsonld_when_feature_on() {
         assert_eq!(rdf_format("application/ld+json"), Some("jsonld"));
-        assert_eq!(rdf_format("application/ld+json; charset=utf-8"), Some("jsonld"));
+        assert_eq!(
+            rdf_format("application/ld+json; charset=utf-8"),
+            Some("jsonld")
+        );
         assert_eq!(rdf_format("jsonld"), Some("jsonld"));
         assert_eq!(rdf_format("json-ld"), Some("jsonld"));
     }
@@ -1736,7 +1882,10 @@ mod unit {
             }))
             .expect("JSON-LD resource_put succeeds");
 
-        assert_eq!(serde_json::from_str::<Value>(&result).unwrap()["triples"], 1);
+        assert_eq!(
+            serde_json::from_str::<Value>(&result).unwrap()["triples"],
+            1
+        );
         let graph = server
             .store()
             .graph
@@ -1745,20 +1894,21 @@ mod unit {
             .find(|(name, _)| name.to_string() == "<https://pod.ex/profile>")
             .map(|(_, graph)| graph)
             .expect("resource graph was stored");
-        assert!(
-            sparq_engine::ask(
-                graph,
-                "ASK { <https://pod.ex/profile#me> <https://schema.org/name> \"Alice\" }"
-            )
-            .expect("ASK evaluates")
-        );
+        assert!(sparq_engine::ask(
+            graph,
+            "ASK { <https://pod.ex/profile#me> <https://schema.org/name> \"Alice\" }"
+        )
+        .expect("ASK evaluates"));
     }
 
     #[test]
     fn not_found_error_is_a_pure_function_of_the_url() {
         // Load-bearing for §9.3: the SAME template must serve both the nonexistent
         // and the unauthorized case, so it may depend on nothing but the URL.
-        assert_eq!(not_found_error("https://p.ex/x"), "resource not found: <https://p.ex/x>");
+        assert_eq!(
+            not_found_error("https://p.ex/x"),
+            "resource not found: <https://p.ex/x>"
+        );
     }
 
     #[test]
@@ -1833,7 +1983,12 @@ mod unit {
     fn authorized_projection_is_empty_for_a_grant_less_session() {
         // Fail-closed: no grants ⇒ no aggregate at all, not the pod's totals.
         let anon = split_server(None);
-        assert_eq!(anon.authorized_projection().expect("projection builds").len(), 0);
+        assert_eq!(
+            anon.authorized_projection()
+                .expect("projection builds")
+                .len(),
+            0
+        );
     }
 
     #[test]
@@ -1847,13 +2002,22 @@ mod unit {
         assert_eq!(stats["classes"], 1);
 
         let ix = alice.tool_introspect(&json!({})).expect("introspect");
-        assert!(ix.contains("ns#Public"), "the readable class is present: {ix}");
-        assert!(!ix.contains("ns#Secret"), "the unreadable class must not appear: {ix}");
+        assert!(
+            ix.contains("ns#Public"),
+            "the readable class is present: {ix}"
+        );
+        assert!(
+            !ix.contains("ns#Secret"),
+            "the unreadable class must not appear: {ix}"
+        );
         assert!(!ix.contains("secretField"), "nor its predicate: {ix}");
 
         // The mirror image: bob sees his own document and none of alice's.
         let ix = bob.tool_introspect(&json!({})).expect("introspect");
-        assert!(ix.contains("ns#Secret") && !ix.contains("ns#Public"), "{ix}");
+        assert!(
+            ix.contains("ns#Secret") && !ix.contains("ns#Public"),
+            "{ix}"
+        );
     }
 
     #[test]
@@ -1868,7 +2032,10 @@ mod unit {
         let err = alice
             .tool_shapes(&json!({ "class": "https://ex.dev/ns#Secret" }))
             .expect_err("an unreadable class is not describable");
-        assert!(!err.contains("secretField"), "the error must not leak the shape: {err}");
+        assert!(
+            !err.contains("secretField"),
+            "the error must not leak the shape: {err}"
+        );
     }
 
     #[test]
