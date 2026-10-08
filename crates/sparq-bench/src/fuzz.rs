@@ -1661,7 +1661,7 @@ fn compare_answers(sparq: &Answer, oxi: &Answer, q: &str) -> Result<Compared, St
             Ok(true) => match &sort_vars {
                 Some(vs) if !vs.is_empty() => {
                     let refs: Vec<&str> = vs.iter().map(String::as_str).collect();
-                    let (ms, mo) = (mask_blank_nodes(sparq), mask_blank_nodes(oxi));
+                    let (ms, mo) = (mask_blank_nodes(sparq, &refs), mask_blank_nodes(oxi, &refs));
                     if order_by_equal(&ms, &mo, &refs) {
                         Ok(Compared::Isomorphic)
                     } else {
@@ -1700,17 +1700,39 @@ fn compare_answers(sparq: &Answer, oxi: &Answer, q: &str) -> Result<Compared, St
 /// `rows` with every blank node (including inside triple terms) replaced by one placeholder,
 /// for the ORDER check of a bnode-bearing answer whose identity was already checked by
 /// isomorphism.
-fn mask_blank_nodes(rows: &[Solution]) -> Vec<Solution> {
-    fn mask(t: &sparq_difftest::Term) -> sparq_difftest::Term {
-        use sparq_difftest::Term as T;
+///
+/// A sort key after one holding a blank node is masked too. Later keys order only rows whose
+/// earlier keys are the SAME term, and two DISTINCT blank nodes have an undefined relative
+/// order, so `[(_:x, 1), (_:y, 2)]` and `[(_:q, 2), (_:p, 1)]` are both correct under
+/// `ORDER BY ?s ?a`. The masking cannot tell same from distinct, so it conservatively stops
+/// checking the order at the first blank-node key of each row.
+fn mask_blank_nodes(rows: &[Solution], sort_vars: &[&str]) -> Vec<Solution> {
+    use sparq_difftest::Term as T;
+    fn mask(t: &T) -> T {
         match t {
             T::Blank(_) => T::Blank("b".to_string()),
             T::Triple(parts) => T::Triple(Box::new([mask(&parts[0]), mask(&parts[1]), mask(&parts[2])])),
             other => other.clone(),
         }
     }
+    fn has_blank(t: &T) -> bool {
+        match t {
+            T::Blank(_) => true,
+            T::Triple(parts) => parts.iter().any(has_blank),
+            _ => false,
+        }
+    }
     rows.iter()
-        .map(|r| r.iter().map(|(v, t)| (v.clone(), mask(t))).collect())
+        .map(|r| {
+            let mut out: Solution = r.iter().map(|(v, t)| (v.clone(), mask(t))).collect();
+            let first_blank = sort_vars.iter().position(|v| r.get(*v).is_some_and(has_blank));
+            if let Some(i) = first_blank {
+                for v in &sort_vars[i + 1..] {
+                    out.insert((*v).to_string(), T::Blank("b".to_string()));
+                }
+            }
+            out
+        })
         .collect()
 }
 
@@ -3435,6 +3457,12 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
         // Two blank-node sort keys tie: their relative order is undefined in SPARQL.
         let by_s = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?s";
         assert_eq!(compare_answers(&sparq, &swapped, by_s), Ok(Compared::Isomorphic));
+        // ...and a later key does not order rows whose distinct blank-node keys tie.
+        let by_s_a = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?s ?a";
+        assert_eq!(compare_answers(&sparq, &swapped, by_s_a), Ok(Compared::Isomorphic));
+        // A key BEFORE the blank-node key is still checked.
+        let by_a_s = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?a ?s";
+        assert!(compare_answers(&sparq, &swapped, by_a_s).is_err());
     }
 
     /// [SONNET-4.6] A HEADER-only disagreement is a MISMATCH, not a pass and not a skip.
