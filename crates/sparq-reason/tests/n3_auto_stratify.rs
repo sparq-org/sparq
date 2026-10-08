@@ -7,12 +7,17 @@
 //! persisted: an access decision failed OPEN. Each probe below derived the prohibited
 //! fact on the pre-fix engine.
 
+use sparq_core::dict::Dict;
 use sparq_reason::n3::Term;
-use sparq_reason::{reason_n3_query_terms, reason_n3_terms, MaterializedN3Graph, N3Mode};
+use sparq_reason::{
+    reason_n3, reason_n3_query_terms, reason_n3_stratified, reason_n3_terms,
+    reason_n3_terms_with_cycles, MaterializedN3Graph, N3Mode, NegationCycles,
+};
 
 const PRE: &str = "@prefix : <http://ex/> .\n\
     @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
-    @prefix list: <http://www.w3.org/2000/10/swap/list#> .\n";
+    @prefix list: <http://www.w3.org/2000/10/swap/list#> .\n\
+    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
 
 fn ex(l: &str) -> Term {
     Term::Iri(format!("http://ex/{l}"))
@@ -25,6 +30,19 @@ fn t(s: &str, p: &str, o: &str) -> [Term; 3] {
 fn run(body: &str) -> (Vec<[Term; 3]>, Vec<String>) {
     let c = reason_n3_terms(&format!("{PRE}{body}"), None).expect("reason_n3_terms");
     (c.facts, c.warnings)
+}
+
+fn run_with(body: &str, cycles: NegationCycles) -> (Vec<[Term; 3]>, Vec<String>) {
+    let c = reason_n3_terms_with_cycles(&format!("{PRE}{body}"), None, None, cycles)
+        .expect("reason_n3_terms_with_cycles");
+    (c.facts, c.warnings)
+}
+
+fn rejected(body: &str) -> String {
+    match reason_n3_terms(&format!("{PRE}{body}"), None) {
+        Ok(c) => panic!("expected a stratification error; got {:?}", c.facts),
+        Err(e) => e,
+    }
 }
 
 /// A request :r against target :g, prohibited by :p; a second request :s on :h that no
@@ -128,29 +146,144 @@ fn multi_stratum_chain() {
 fn negation_over_one_class_of_a_shared_predicate_is_a_cycle() {
     // Dependencies are tracked per PREDICATE: `?i a :Clean` negating `?i a :Flagged`
     // negates rdf:type from a rule that concludes rdf:type, which is a cycle through
-    // negation. The document stays single-pass and says so.
-    let (_, w) = run(":x a :Item . :x :flag true .\n\
+    // negation. The document is rejected by default.
+    let e = rejected(
+        ":x a :Item . :x :flag true .\n\
          { ?i :flag true } => { ?i a :Flagged } .\n\
-         { ?i a :Item . ?s log:notIncludes { ?i a :Flagged } } => { ?i a :Clean } .");
-    assert_eq!(w.len(), 1, "{w:?}");
-    assert!(w[0].contains("22-rdf-syntax-ns#type"), "{w:?}");
+         { ?i a :Item . ?s log:notIncludes { ?i a :Flagged } } => { ?i a :Clean } .",
+    );
+    assert!(
+        e.contains("22-rdf-syntax-ns#type") && e.contains("cycle"),
+        "{e}"
+    );
+}
+
+/// :r negates :q, and :q is derived from :r: a cycle through negation.
+const CYCLE: &str = ":a :p :b .\n\
+    { :a :p :b . ?s log:notIncludes { :a :q :b } } => { :a :r :b } .\n\
+    { :a :r :b } => { :a :q :b } .";
+
+#[test]
+fn negation_cycle_is_rejected_by_default_everywhere() {
+    let e = rejected(CYCLE);
+    assert!(e.contains("<http://ex/q>") && e.contains("cycle"), "{e}");
+    let src = format!("{PRE}{CYCLE}");
+    assert!(reason_n3(&mut Dict::new(), &src).is_err());
+    assert!(sparq_reason::reason_n3_proof(&mut Dict::new(), &src).is_err());
+    assert!(sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).is_err());
+    assert!(reason_n3_stratified(&mut Dict::new(), &[&src]).is_err());
+    let q = format!("{PRE}{{ ?x :r ?y }} => {{ ?x :r ?y }} .");
+    assert!(reason_n3_query_terms(&src, &q).is_err());
+    let rules = format!(
+        "{PRE}{{ :a :p :b . ?s log:notIncludes {{ :a :q :b }} }} => {{ :a :r :b }} .\n\
+         {{ :a :r :b }} => {{ :a :q :b }} ."
+    );
+    assert!(MaterializedN3Graph::new(&rules, &[t("a", "p", "b")]).is_err());
 }
 
 #[test]
-fn negation_cycle_keeps_single_pass_result_and_warns() {
-    // :r negates :q, and :q is derived from :r — a cycle through negation, not
-    // stratifiable. The single-pass result is kept (round 0 fires the negation, round 1
-    // derives :q; nothing is retracted) and a diagnostic names the predicate.
-    let (c, w) = run(":a :p :b .\n\
-         { :a :p :b . ?s log:notIncludes { :a :q :b } } => { :a :r :b } .\n\
-         { :a :r :b } => { :a :q :b } .");
-    assert!(c.contains(&t("a", "r", "b")), "{c:?}");
-    assert!(c.contains(&t("a", "q", "b")), "{c:?}");
-    assert_eq!(w.len(), 1, "one stratification diagnostic: {w:?}");
+fn negation_cycle_opt_ins_report_the_cycle() {
+    // Legacy single-pass keeps the pre-stratification result.
+    let (c, w) = run_with(CYCLE, NegationCycles::SinglePass);
     assert!(
-        w[0].contains("<http://ex/q>") && w[0].contains("cycle"),
-        "{w:?}"
+        c.contains(&t("a", "r", "b")) && c.contains(&t("a", "q", "b")),
+        "{c:?}"
     );
+    assert_eq!(w.len(), 1, "{w:?}");
+    // Fail-closed derives nothing from the cyclic rules.
+    let (c, w) = run_with(CYCLE, NegationCycles::FailClosed);
+    assert!(
+        !c.contains(&t("a", "r", "b")) && !c.contains(&t("a", "q", "b")),
+        "{c:?}"
+    );
+    assert_eq!(w.len(), 1, "{w:?}");
+}
+
+#[test]
+fn an_unrelated_cycle_does_not_unstratify_the_rest() {
+    // A self-negating rule elsewhere in the document must not pull the access rules back
+    // into one stratum.
+    let body = format!(
+        "{ACCESS_FACTS}\
+         {{ ?r :target ?g . ?scope log:notIncludes {{ ?r :prohibitedIn ?g }} }}\n\
+           => {{ ?r :allowedBy ?g }} .\n\
+         {{ ?s log:notIncludes {{ :x :cycle true }} }} => {{ :x :cycle true }} ."
+    );
+    assert!(rejected(&body).contains("cycle"));
+    let yes = Term::Lit(
+        "true".into(),
+        "http://www.w3.org/2001/XMLSchema#boolean".into(),
+        None,
+    );
+    for mode in [NegationCycles::FailClosed, NegationCycles::SinglePass] {
+        let (c, w) = run_with(&body, mode);
+        assert!(
+            !c.contains(&t("r", "allowedBy", "g")),
+            "{mode:?}: prohibited request allowed"
+        );
+        assert!(c.contains(&t("s", "allowedBy", "h")), "{mode:?}: {c:?}");
+        assert_eq!(w.len(), 1, "{w:?}");
+        let cyc = c.contains(&[ex("x"), ex("cycle"), yes.clone()]);
+        assert_eq!(cyc, mode == NegationCycles::SinglePass, "{mode:?}: {c:?}");
+    }
+}
+
+#[test]
+fn aggregation_clause_supplied_through_a_variable_is_tracked() {
+    // The clause formula is a rule-produced value; its :prohibitedIn dependency must still
+    // order the permit after the prohibition.
+    let (c, w) = run(":r :target :g .\n\
+         { :r :target :g } => { :policy :clause { :r :prohibitedIn :g } . :r :pending :g . } .\n\
+         { ?r :pending ?g } => { ?r :prohibitedIn ?g } .\n\
+         { :policy :clause ?C . ( true ?C ?L ) log:collectAllIn _:s . ?L list:length 0 . }\n\
+           => { :r :permittedBy :g } .");
+    assert!(c.contains(&t("r", "prohibitedIn", "g")), "{c:?}");
+    assert!(
+        !c.contains(&t("r", "permittedBy", "g")),
+        "permit despite prohibition: {c:?}"
+    );
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn for_all_in_clause_supplied_through_a_variable_is_tracked() {
+    let (c, _) = run(":x :risk :high . :gate :when { ?i :flagged true } .\n\
+         { ?i :risk :high } => { ?i :flagged true } .\n\
+         { :gate :when ?A . ( ?A { ?i :approved true } ) log:forAllIn ?s } => { :batch :ok true } .");
+    assert!(
+        !c.iter().any(|f| f[0] == ex("batch")),
+        "vacuous forAllIn: {c:?}"
+    );
+}
+
+#[test]
+fn list_builtin_over_a_derived_list_is_tracked() {
+    let (c, w) = run(":seed :p :v .\n\
+         { :seed :p :v } => { :h rdf:first :blocked . :h rdf:rest rdf:nil . } .\n\
+         { :seed :p :v . ?scope log:notIncludes { :h list:member :blocked } . }\n\
+           => { :r :permittedBy :g } .");
+    assert!(
+        !c.contains(&t("r", "permittedBy", "g")),
+        "permit despite membership: {c:?}"
+    );
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn variable_predicate_conclusion_resolves_through_facts() {
+    // ?pred takes its values from :allowPred facts, so the grant rule produces :read
+    // only; negating :noneOf does not close a cycle and nothing is rejected.
+    let body = ":Read :allowPred :read . :pol :allow :Read . :pol :appliesTo :doc .\n\
+         :pol :agent :alice .\n\
+         { ?pol :allow ?m . ?m :allowPred ?pred . ?pol :appliesTo ?d . ?pol :agent ?a .\n\
+           ?s log:notIncludes { ?pol :noneOf ?x } } => { ?a ?pred ?d } .\n\
+         { ?a :read ?d } => { ?d :readBy ?a } .";
+    let (c, w) = run(body);
+    assert!(c.contains(&t("alice", "read", "doc")), "{c:?}");
+    assert!(w.is_empty(), "{w:?}");
+    // Data that binds ?pred to the negated predicate makes it a real cycle.
+    let e = rejected(&format!("{body}\n:Read :allowPred :noneOf ."));
+    assert!(e.contains("cycle"), "{e}");
 }
 
 #[test]

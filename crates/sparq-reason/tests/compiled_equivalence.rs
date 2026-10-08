@@ -345,13 +345,12 @@ fn every_corpus_rules_file_compiles() {
 
 /// GH #6201 / #5756: store-scoped `log:notIncludes` over a predicate the SAME rule set
 /// derives. Both engines stratify automatically, so the negating rule waits for the
-/// deriving rule's fixpoint and the closures stay set-equal; `n_strata` and the cycle
-/// diagnostic agree with the text engine.
+/// deriving rule's fixpoint and the closures stay set-equal; both refuse a negation cycle.
 #[test]
 fn auto_stratified_negation_is_identical() {
     const PRE: &str = "@prefix : <http://ex/> .\n\
         @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
-    let cases: [(&str, &str, &str, usize, bool); 3] = [
+    let cases: [(&str, &str, &str, usize); 2] = [
         (
             "notIncludes probe (#6201)",
             ":r :target :g . :p :prohibits :g . :s :target :h .",
@@ -359,7 +358,6 @@ fn auto_stratified_negation_is_identical() {
              { ?r :target ?g . ?scope log:notIncludes { ?r :prohibitedIn ?g } }\n\
                => { ?r :allowedBy ?g } .",
             2,
-            false,
         ),
         (
             "three-stratum chain",
@@ -369,18 +367,9 @@ fn auto_stratified_negation_is_identical() {
              { ?i :item :t . ?s log:notIncludes { ?i :clean :t } } => { ?i :suspect :t } .\n\
              { ?a :suspect :t . ?b :clean :t } => { ?a :contrast ?b } .",
             3,
-            false,
-        ),
-        (
-            "negation cycle (single-pass + diagnostic)",
-            ":a :p :b .",
-            "{ :a :p :b . ?s log:notIncludes { :a :q :b } } => { :a :r :b } .\n\
-             { :a :r :b } => { :a :q :b } .",
-            1,
-            true,
         ),
     ];
-    for (what, facts, rules, n_strata, warns) in cases {
+    for (what, facts, rules, n_strata) in cases {
         let (facts, rules) = (format!("{PRE}{facts}"), format!("{PRE}{rules}"));
         let (td, tc) = text_closure(&format!("{facts}\n{rules}"));
         let text = triples_as_strings(&td, &tc);
@@ -389,8 +378,16 @@ fn auto_stratified_negation_is_identical() {
         assert_set_equal(&text, &compiled, what);
         let set = compile(&rules).expect("compile");
         assert_eq!(set.n_strata(), n_strata, "{what}");
-        assert_eq!(set.stratification_warning().is_some(), warns, "{what}");
     }
+    // A negation cycle: both engines refuse it.
+    let cyclic = format!(
+        "{PRE}:a :p :b .\n\
+         {{ :a :p :b . ?s log:notIncludes {{ :a :q :b }} }} => {{ :a :r :b }} .\n\
+         {{ :a :r :b }} => {{ :a :q :b }} ."
+    );
+    assert!(reason_n3(&mut Dict::new(), &cyclic).is_err());
+    let e = compile(&cyclic).expect_err("compile refuses a negation cycle");
+    assert!(e.contains("cycle"), "{e}");
     // Spot asserts: the prohibited request is NOT allowed, the free one is.
     let facts = format!("{PRE}:r :target :g . :p :prohibits :g . :s :target :h .");
     let rules = format!("{PRE}{}", cases[0].2);
@@ -400,24 +397,52 @@ fn auto_stratified_negation_is_identical() {
     assert!(has(&compiled, "http://ex/s", "http://ex/allowedBy", "http://ex/h"));
 }
 
-/// The access-control corpus under the automatic stratification. common/wac/acp-a/acp-b
-/// are stratifiable as written. acp-c.n3 and odrl-spike.n3 each have a rule CONCLUDING a
-/// variable predicate (`{ ?p ?pred ?r }`, bound from data), which the predicate-level
-/// analysis must assume derives anything, so their negation is conservatively on a cycle:
-/// they keep the single-pass evaluation and report why. (The sparq-solid pipeline runs
-/// each as its own stratum after the predicates it negates are complete.)
+/// The access-control corpus is stratifiable as written: every rules file compiles
+/// (a negation cycle would be a compile error). acp-c.n3 and odrl-spike.n3 conclude a
+/// VARIABLE predicate (`{ ?p ?pred ?r }`); the analysis resolves it through the
+/// document's own mode-mapping facts, so it produces only the auth predicates.
 #[test]
-fn corpus_rules_files_stratification() {
+fn corpus_rules_files_stratify() {
     for name in ["common.n3", "wac.n3", "acp-a.n3", "acp-b.n3", "acp-c.n3", "odrl-spike.n3"] {
         let compiled = compile(&solid_rules(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let variable_conclusion = matches!(name, "acp-c.n3" | "odrl-spike.n3");
-        match compiled.stratification_warning() {
-            None => assert!(!variable_conclusion, "{name}"),
-            Some(w) => {
-                assert!(variable_conclusion, "{name}: {w}");
-                assert!(w.contains("variable predicate"), "{w}");
-                assert_eq!(compiled.n_strata(), 1);
+        assert!(compiled.n_strata() >= 1, "{name}");
+    }
+    let rules_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../sparq-solid/rules");
+    for entry in std::fs::read_dir(rules_dir).expect("rules dir") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_some_and(|e| e == "n3") {
+            let src = std::fs::read_to_string(&path).expect("read");
+            if let Err(e) = compile(&src) {
+                assert!(!e.contains("cycle"), "{}: {e}", path.display());
             }
         }
+    }
+}
+
+/// A cycle the INPUT facts create (binding a variable conclusion predicate to the negated
+/// predicate) cannot be refused at compile time: compiled evaluation fails closed on the
+/// affected rules and reports why; the text engine refuses the same document.
+#[test]
+fn input_facts_that_create_a_negation_cycle_fail_closed() {
+    const PRE: &str = "@prefix : <http://ex/> .\n\
+        @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let rules = format!(
+        "{PRE}{{ ?m :pred ?p . ?x :item :t . ?s log:notIncludes {{ ?x :blocked :t }} }}\n\
+           => {{ ?x ?p :t }} .\n\
+         {{ ?x :item :t }} => {{ ?x :seen :t }} ."
+    );
+    let set = compile(&rules).expect("no cycle over the document alone");
+    let facts_ok = format!("{PRE}:m :pred :granted . :a :item :t .");
+    let facts_bad = format!("{PRE}:m :pred :blocked . :a :item :t .");
+    for (facts, cyclic) in [(&facts_ok, false), (&facts_bad, true)] {
+        let mut dict = Dict::new();
+        let ids = intern_facts(&mut dict, facts).expect("facts");
+        let (closure, warning) = set.bind(&mut dict).eval_with_diagnostics(&mut dict, &ids);
+        let got = triples_as_strings(&dict, &closure);
+        assert!(has(&got, "http://ex/a", "http://ex/seen", "http://ex/t"), "{got:?}");
+        assert_eq!(warning.is_some(), cyclic, "{warning:?}");
+        assert_eq!(has(&got, "http://ex/a", "http://ex/granted", "http://ex/t"), !cyclic);
+        assert!(!has(&got, "http://ex/a", "http://ex/blocked", "http://ex/t"), "{got:?}");
+        assert_eq!(reason_n3(&mut Dict::new(), &format!("{facts}\n{rules}")).is_err(), cyclic);
     }
 }

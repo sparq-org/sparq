@@ -1513,6 +1513,12 @@ struct N3Compiled {
 /// deletes — the N3 sibling of [`MaterializedGraph`] / [`MaterializedOwlGraph`], operating at
 /// the [`Term`](crate::n3::Term) level. The closure always equals a from-scratch
 /// [`crate::reason_n3_terms`] run over the rules document plus the current base.
+///
+/// A rules document that negates through a dependency cycle is refused by
+/// [`new`](Self::new). When a later mutation makes it cyclic (a base fact binding a rule's
+/// variable predicate to a negated predicate), the rules on the cycle and those depending
+/// on it are not evaluated ([`crate::NegationCycles::FailClosed`]) and
+/// [`stratification_warning`](Self::stratification_warning) says why.
 pub struct MaterializedN3Graph {
     rules_src: String,
     compiled: Option<Rc<N3Compiled>>,
@@ -1536,6 +1542,8 @@ pub struct MaterializedN3Graph {
     layer_derived: Vec<FxHashSet<[N3Term; 3]>>,
     fallback_closure: FxHashSet<[N3Term; 3]>,
     rebuilds: usize,
+    /// The batch engine's stratification diagnostic from the last fallback rebuild.
+    strat_warning: Option<String>,
 }
 
 /// Evaluation phase of a non-seed plain atom relative to the delta seed (the counting
@@ -2277,9 +2285,13 @@ impl MaterializedN3Graph {
             layer_derived: vec![FxHashSet::default(); n_layers],
             fallback_closure: FxHashSet::default(),
             rebuilds: 0,
+            strat_warning: None,
         };
         g.rematerialize();
         g.rebuilds = 0;
+        if let Some(w) = g.strat_warning.take() {
+            return Err(format!("{w} The rules document is rejected."));
+        }
         Ok(g)
     }
 
@@ -2298,6 +2310,7 @@ impl MaterializedN3Graph {
     }
 
     fn rematerialize(&mut self) {
+        self.strat_warning = None;
         self.rebuilds += 1;
         self.counts.clear();
         self.index = N3Index::default();
@@ -2336,8 +2349,14 @@ impl MaterializedN3Graph {
         }
         self.mode = N3Mode::Fallback;
         let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
-        let closure = crate::n3::reason_n3_terms(&src, None)
-            .expect("re-serialized base must re-parse (serializer bug)");
+        let closure = crate::n3::reason_n3_terms_with_cycles(
+            &src,
+            None,
+            None,
+            crate::NegationCycles::FailClosed,
+        )
+        .expect("re-serialized base must re-parse (serializer bug)");
+        self.strat_warning = closure.warnings.into_iter().next();
         self.fallback_closure = closure.facts.into_iter().collect();
     }
 
@@ -2664,6 +2683,12 @@ impl MaterializedN3Graph {
     /// The active maintenance regime.
     pub fn mode(&self) -> N3Mode {
         self.mode
+    }
+
+    /// Set while the current base makes the rules negate through a dependency cycle: the
+    /// rules on the cycle and those depending on it are not evaluated (fail closed).
+    pub fn stratification_warning(&self) -> Option<&str> {
+        self.strat_warning.as_deref()
     }
 
     /// Why the graph is (or would be) in fallback mode: the rule-analysis disqualification, the

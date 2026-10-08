@@ -100,6 +100,7 @@ pub mod parser;
 pub mod serialize;
 // Automatic stratification for store-scoped negation-as-failure (GH #6201, #5756).
 mod strata;
+pub use strata::NegationCycles;
 
 pub use model::{Rule, Term};
 pub use serialize::{RuleKind, RuleVars};
@@ -217,6 +218,8 @@ struct BwCtx<'a> {
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
+    /// The run's [`NegationCycles`] policy, inherited by nested `log:conclusion` closures.
+    cycles: NegationCycles,
 }
 
 impl<'a> BwCtx<'a> {
@@ -227,6 +230,7 @@ impl<'a> BwCtx<'a> {
             base: String::new(),
             resolver: None,
             visited: VisitedDocs::default(),
+            cycles: NegationCycles::Reject,
         }
     }
 }
@@ -246,18 +250,21 @@ pub struct ProofStep {
 /// Store-scoped negation-as-failure (`log:notIncludes`, `log:collectAllIn`, `log:forAllIn`
 /// over the current store) is STRATIFIED automatically: a rule that negates or aggregates
 /// over a predicate the same document derives runs only after every rule deriving it has
-/// reached its fixpoint. A document whose negation sits on a dependency cycle through its
-/// own conclusions cannot be stratified; it is evaluated single-pass, where that negation
-/// can see an incomplete store, and [`reason_n3_terms`] reports it in
-/// [`N3Closure::warnings`]. Dependencies are tracked per predicate (a variable predicate
-/// counts as every predicate), so negating one class of `rdf:type` from a rule that
-/// concludes another `rdf:type` is such a cycle; use distinct predicates, or
+/// reached its fixpoint. Clauses supplied through variables are resolved to the formulas
+/// the variable can take, list builtins depend on the stored `rdf:first`/`rdf:rest`
+/// triples they walk, and a variable conclusion predicate produces the predicates it can
+/// be bound to (from the facts and conclusions). A document whose negation sits on a
+/// dependency cycle through its own conclusions cannot be stratified and is REJECTED
+/// with an error naming the cycle; [`reason_n3_terms_with_cycles`] opts in to failing
+/// closed or to the legacy single-pass evaluation instead ([`NegationCycles`]).
+/// Dependencies are tracked per predicate, so negating one class of `rdf:type` from a
+/// rule that concludes another `rdf:type` is such a cycle; use distinct predicates, or
 /// [`reason_n3_stratified`] with explicit strata.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None);
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?;
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -265,7 +272,7 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::Full);
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?;
     intern_closure(dict, &facts, &steps)
 }
 
@@ -305,7 +312,8 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
-    let (facts, _steps, _) = run_closure(parsed, None, None, StepMode::None);
+    let (facts, _steps, _) =
+        run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?;
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -376,7 +384,8 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
     for r in &mut backward {
         r.premise = order_premise(&r.premise);
     }
-    let (facts, _steps, _) = run_closure(data_parsed, None, None, StepMode::None);
+    let (facts, _steps, _) =
+        run_closure(data_parsed, None, None, StepMode::None, NegationCycles::Reject)?;
     let mut bw = BwCtx::new(&backward);
     bw.base = base;
 
@@ -495,8 +504,7 @@ pub struct StratifiedN3Closure {
 ///
 /// Each document is itself stratified automatically (see [`reason_n3`]); explicit
 /// strata are for programs the per-predicate analysis cannot separate (a negation
-/// cycle it reports in [`N3Closure::warnings`], e.g. one class of `rdf:type`
-/// negating another) and for pipelines that already ship their rules as separate
+/// cycle it rejects, e.g. one class of `rdf:type` negating another) and for pipelines that already ship their rules as separate
 /// documents. The engine's NON-MONOTONIC premise operators (store-scoped
 /// `log:notIncludes`, `log:collectAllIn` / `log:forAllIn`) are reliable over
 /// predicates FULLY PRESENT before their stratum starts (derived facts are never
@@ -533,7 +541,8 @@ pub fn reason_n3_stratified(
             }
         }
         parsed.facts.append(&mut carried);
-        let (f, _steps, _) = run_closure(parsed, None, None, StepMode::None);
+        let (f, _steps, _) =
+            run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?;
         strata_facts.push(f.all.len());
         if i + 1 < strata.len() {
             carried = f.all.iter().cloned().collect();
@@ -639,7 +648,8 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::Full);
+    let (facts, steps, _) =
+        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?;
     Ok((facts.all, steps))
 }
 
@@ -654,11 +664,10 @@ pub struct N3Closure {
     /// Forward (`=>`) / backward (`<=`) rule counts of the parsed document.
     pub n_rules: usize,
     pub n_backward_rules: usize,
-    /// Non-fatal diagnostics. Today: a document whose store-scoped negation
-    /// (`log:notIncludes` / `log:collectAllIn` / `log:forAllIn`) sits on a dependency
-    /// cycle through its own conclusions is NOT stratifiable; it is evaluated single-pass
-    /// and that negation may see an incomplete store (fail open). Empty for every
-    /// stratifiable document.
+    /// Non-fatal diagnostics. Today: under [`NegationCycles::FailClosed`] /
+    /// [`NegationCycles::SinglePass`] ([`reason_n3_terms_with_cycles`]), the negation
+    /// cycle that made some rules unstratifiable. Empty for every stratifiable document
+    /// (the default entry points reject an unstratifiable one).
     pub warnings: Vec<String>,
 }
 
@@ -679,13 +688,28 @@ pub fn reason_n3_terms_with_resolver(
     base: Option<&str>,
     resolver: Option<&Resolver>,
 ) -> Result<N3Closure, String> {
+    reason_n3_terms_with_cycles(src, base, resolver, NegationCycles::Reject)
+}
+
+/// As [`reason_n3_terms_with_resolver`], choosing what happens to rules that negate
+/// through a dependency cycle ([`NegationCycles`]). Every other N3 entry point REJECTS
+/// such a document; [`NegationCycles::FailClosed`] skips the affected rules and
+/// [`NegationCycles::SinglePass`] (legacy, may fail open) runs them single-pass after the
+/// stratifiable rules. Both report the cycle in [`N3Closure::warnings`].
+pub fn reason_n3_terms_with_cycles(
+    src: &str,
+    base: Option<&str>,
+    resolver: Option<&Resolver>,
+    cycles: NegationCycles,
+) -> Result<N3Closure, String> {
     let parsed = match base {
         Some(b) => parser::parse_with_base(src, b)?,
         None => parser::parse(src)?,
     };
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
-    let (facts, steps, warning) = run_closure(parsed, resolver, None, StepMode::Conclusions);
+    let (facts, steps, warning) =
+        run_closure(parsed, resolver, None, StepMode::Conclusions, cycles)?;
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
@@ -722,7 +746,9 @@ fn run_closure(
     // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
     visited: Option<VisitedDocs>,
     mode: StepMode,
-) -> (FactIndex, Vec<DerivationStep>, Option<String>) {
+    // What to do with rules on a cycle through negation ([`strata::stratify`]).
+    cycles: NegationCycles,
+) -> Result<(FactIndex, Vec<DerivationStep>, Option<String>), String> {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
@@ -737,8 +763,14 @@ fn run_closure(
     for r in rules.iter_mut().chain(backward_rules.iter_mut()) {
         r.premise = order_premise(&r.premise);
     }
+    // STRATA (GH #6201, #5756): a rule that store-scope negates / aggregates over a
+    // predicate this document derives runs in a later stratum than every rule deriving it.
+    // A program with no such negation is ONE stratum and takes exactly the single-pass
+    // loop below. Rules on a cycle through negation follow `cycles`.
+    let strata = strata::stratify(&rules, &backward_rules, &facts0, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
     let mut bw = BwCtx::new(&backward_rules);
+    bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
     if let Some(v) = visited {
@@ -878,11 +910,6 @@ fn run_closure(
         }
     }
 
-    // STRATA (GH #6201, #5756): a rule that store-scope negates / aggregates over a
-    // predicate this document derives runs in a later stratum than every rule deriving it.
-    // A program with no such negation is ONE stratum and takes exactly the single-pass
-    // loop below; a cycle through negation also stays single-pass and reports a warning.
-    let strata = strata::stratify(&rules, &backward_rules);
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
     for stratum in 0..strata.n_strata {
         if stratum > 0 {
@@ -1050,7 +1077,7 @@ fn run_closure(
             delta = new_delta;
         }
     }
-    (facts, steps, strata.warning)
+    Ok((facts, steps, strata.warning))
 }
 
 /// Intern a term-level closure + derivation into the dictionary ([`reason_n3`] /
@@ -2175,8 +2202,17 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
     // `log:content` document active up the stack is still recognised when its own closure
     // re-imports it through this nested run.
-    let (closed, _steps, _) =
-        run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None);
+    // A nested document cannot report an error: a negation cycle there fails closed
+    // unless the top-level run opted in to the legacy single-pass behaviour.
+    let cycles = match bw.cycles {
+        NegationCycles::SinglePass => NegationCycles::SinglePass,
+        _ => NegationCycles::FailClosed,
+    };
+    let Ok((closed, _steps, _)) =
+        run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None, cycles)
+    else {
+        unreachable!("only NegationCycles::Reject makes run_closure fail")
+    };
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations.
     let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
