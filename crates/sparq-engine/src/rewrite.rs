@@ -36,7 +36,7 @@
 
 use oxrdf::{NamedNode, Variable};
 use rustc_hash::FxHashSet;
-use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, OrderExpression};
+use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, OrderExpression, PropertyPathExpression};
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
 use spargebra::Query;
 
@@ -260,9 +260,16 @@ fn scan_var_inner(p: &GraphPattern, var: &Variable, in_spine: &mut bool, in_opaq
                 *in_spine = true;
             }
         }
-        GraphPattern::Path { subject, object, .. } => {
+        GraphPattern::Path { subject, path, object } => {
             if term_has_var(subject, var) || term_has_var(object, var) {
-                *in_spine = true;
+                // A path that can match zero steps pairs a CONSTANT endpoint with itself
+                // even when it is not in the graph, while a variable endpoint ranges only
+                // over graph terms: substituting would invent matches. Decline.
+                if path_may_be_empty(path) {
+                    *in_opaque = true;
+                } else {
+                    *in_spine = true;
+                }
             }
         }
         GraphPattern::Join { left, right } => {
@@ -274,6 +281,19 @@ fn scan_var_inner(p: &GraphPattern, var: &Variable, in_spine: &mut bool, in_opaq
                 *in_opaque = true;
             }
         }
+    }
+}
+
+/// Whether `p` can match a zero-length path (conservative: `true` when unsure).
+fn path_may_be_empty(p: &PropertyPathExpression) -> bool {
+    use PropertyPathExpression as P;
+    match p {
+        P::ZeroOrMore(_) | P::ZeroOrOne(_) => true,
+        P::NamedNode(_) | P::NegatedPropertySet(_) => false,
+        P::OneOrMore(q) => path_may_be_empty(q),
+        P::Reverse(q) => path_may_be_empty(q),
+        P::Sequence(a, b) => path_may_be_empty(a) && path_may_be_empty(b),
+        P::Alternative(a, b) => path_may_be_empty(a) || path_may_be_empty(b),
     }
 }
 
