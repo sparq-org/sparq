@@ -427,8 +427,18 @@ fn auto_stratified_negation_is_identical() {
     let rules = format!("{PRE}{}", cases[0].2);
     let (cd, cc) = compiled_closure(&facts, &rules);
     let compiled = triples_as_strings(&cd, &cc);
-    assert!(!has(&compiled, "http://ex/r", "http://ex/allowedBy", "http://ex/g"));
-    assert!(has(&compiled, "http://ex/s", "http://ex/allowedBy", "http://ex/h"));
+    assert!(!has(
+        &compiled,
+        "http://ex/r",
+        "http://ex/allowedBy",
+        "http://ex/g"
+    ));
+    assert!(has(
+        &compiled,
+        "http://ex/s",
+        "http://ex/allowedBy",
+        "http://ex/h"
+    ));
 }
 
 /// The access-control corpus under the automatic stratification. A rule file that
@@ -493,7 +503,12 @@ fn not_includes_scope_forms_agree_or_are_refused() {
     let empty = rules("{}");
     let (td, tc) = text_closure(&format!("{facts}\n{empty}"));
     let text = triples_as_strings(&td, &tc);
-    assert!(has(&text, "http://ex/r", "http://ex/allowed", "http://ex/g"));
+    assert!(has(
+        &text,
+        "http://ex/r",
+        "http://ex/allowed",
+        "http://ex/g"
+    ));
     let e = compile(&empty).expect_err("`{}` scope is outside the compiled subset");
     assert!(e.contains("empty formula"), "{e}");
     // A store scope: both engines agree (the blocked fact suppresses `:allowed`).
@@ -504,7 +519,10 @@ fn not_includes_scope_forms_agree_or_are_refused() {
         let (cd, cc) = compiled_closure(&facts, &store);
         let compiled = triples_as_strings(&cd, &cc);
         assert_set_equal(&text, &compiled, scope);
-        assert!(!has(&compiled, "http://ex/r", "http://ex/allowed", "http://ex/g"), "{scope}");
+        assert!(
+            !has(&compiled, "http://ex/r", "http://ex/allowed", "http://ex/g"),
+            "{scope}"
+        );
     }
     // A scope variable a premise atom binds could be bound to `true` (the empty formula)
     // by the data: refused.
