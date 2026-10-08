@@ -36,7 +36,9 @@ harness doubles as their **regression oracle**.
 ## Two cross-checks, and what happens when they fire
 
 No expected value is hand-written; each is read back from a real `BIND(<expr> AS ?out)`.
-Each answer is then cross-checked, and a mismatch **aborts generation**:
+The double and substring answers are then cross-checked, and a mismatch **aborts generation**.
+The other answers (string length, string predicates, mixed-comparison results, casts, dateTime)
+rest on sparq-engine alone.
 
 - **IEEE** — every `xs:double` answer is recomputed with native Rust `f64` and compared
   bit-for-bit, so a lossy serialization can never pin a wrong bit pattern.
