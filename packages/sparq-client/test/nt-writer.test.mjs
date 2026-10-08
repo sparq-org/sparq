@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseNTriples, termToNTriples } from "../src/index.ts";
+import { countQuads, matchQuads, parseNTriples, termToNTriples } from "../src/index.ts";
 
 const iri = (value) => ({ type: "uri", value });
 const bnode = (value) => ({ type: "bnode", value });
@@ -164,4 +164,53 @@ test("valid terms round-trip through a snapshot line", () => {
   // A quad (the N-Quads graph slot) goes through the same writer.
   const quad = `${line(bnode("b0")).slice(0, -2)} ${termToNTriples(iri("http://ex/g"))} .`;
   assert.equal(parseNTriples(quad).statements[0].g.value, "http://ex/g");
+});
+
+// matchQuads / countQuads inline caller-supplied term strings into a generated SELECT, so
+// each one must be exactly one N-Triples term token.
+test("matchQuads / countQuads accept only a single N-Triples term per position", () => {
+  const seen = [];
+  const store = {
+    query: (q) => {
+      seen.push(q);
+      return JSON.stringify({ head: { vars: [] }, results: { bindings: [] } });
+    },
+    count: (q) => {
+      seen.push(q);
+      return 0;
+    },
+  };
+  for (const ok of [
+    "<http://ex/a>",
+    " <http://ex/a> ",
+    "_:b0",
+    '"x"',
+    '"a\\"b\\n"@en-GB--rtl',
+    '"5"^^<http://ex/dt>',
+    '"} ; DROP ALL ; #"',
+  ]) {
+    matchQuads(store, ok, null, null, null);
+    countQuads(store, null, null, ok, "<http://ex/g>");
+  }
+  assert.equal(seen.length, 14);
+  assert.match(seen[1], /^SELECT \* WHERE \{ GRAPH <http:\/\/ex\/g> \{ \?s \?p <http:\/\/ex\/a> \} \}$/);
+  for (const bad of [
+    "<http://ex/a> . ?x ?y ?z",
+    "<http://ex/a> } UNION { ?s ?p ?o",
+    "<a\\u003E>",
+    '"x\\u0022 } UNION { ?s ?p ?o"',
+    "?x",
+    '"x"@en ?y',
+    '"x"@en--up',
+    "<a> <b>",
+    '"x"^^<a b>',
+    "_:a b",
+    '"a\nb"',
+    '"a\uD800"',
+  ]) {
+    assert.throws(() => countQuads(store, null, bad, null), /single N-Triples/, bad);
+    assert.throws(() => matchQuads(store, null, null, bad), /single N-Triples/, bad);
+    assert.throws(() => matchQuads(store, null, null, null, bad), /single N-Triples/, bad);
+  }
+  assert.equal(seen.length, 14);
 });

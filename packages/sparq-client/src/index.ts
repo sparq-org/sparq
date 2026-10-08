@@ -582,14 +582,38 @@ export function prewarmSparqWhenIdle(
 // ---------------------------------------------------------------------------
 
 // The RDF/JS `match()` term shape: `null` (and the empty string in a UI) is a wildcard; a
-// non-empty string is an N-Triples term (`<iri>`, `"literal"`, `"v"^^<dt>` …) inlined
-// verbatim into the generated SELECT.
+// non-empty string is ONE N-Triples term (`<iri>`, `_:label`, `"literal"`, `"v"@lang`,
+// `"v"^^<dt>`), checked by {@link checkMatchTerm} and then inlined into the generated SELECT.
 export type MatchTerm = string | null;
+
+const MATCH_IRI = '<[^\\u0000-\\u0020<>"{}|^`\\\\]*>';
+// A single N-Triples term token, with no `\uXXXX` escapes: SPARQL decodes those before it
+// tokenises, so an escaped quote or `>` could still end the token in the generated query.
+const MATCH_TERM = new RegExp(
+  `^(?:${MATCH_IRI}` +
+    `|_:[${PN_CHARS_BASE}_:0-9](?:[${PN_CHARS}.]*[${PN_CHARS}])?` +
+    `|"(?:[^"\\\\\\n\\r]|\\\\[tbnrf"'\\\\])*"` +
+    `(?:@[a-zA-Z]+(?:-[a-zA-Z0-9]+)*(?:--(?:ltr|rtl))?|\\^\\^${MATCH_IRI})?)$`,
+  "u",
+);
+
+/**
+ * Throws unless `term` is exactly one N-Triples IRI, blank-node or literal token, so a
+ * caller-supplied string cannot add patterns or clauses to a generated query.
+ */
+function checkMatchTerm(term: string): string {
+  if (!MATCH_TERM.test(term) || LONE_SURROGATE.test(term)) {
+    throw new Error(
+      `match term ${JSON.stringify(term)} is not a single N-Triples IRI, blank node or literal`,
+    );
+  }
+  return term;
+}
 
 /** One position of a generated triple pattern: a constant term or a fresh variable. */
 function patternPosition(term: MatchTerm, variable: string): string {
   const t = term?.trim();
-  return t ? t : `?${variable}`;
+  return t ? checkMatchTerm(t) : `?${variable}`;
 }
 
 /** The generated SELECT a `match()`/`countQuads()` lookup runs (shared so both agree). */
@@ -603,7 +627,7 @@ function matchSelect(
   const p = patternPosition(predicate, "p");
   const o = patternPosition(object, "o");
   const triple = `${s} ${p} ${o}`;
-  const g = graph?.trim();
+  const g = graph?.trim() ? checkMatchTerm(graph.trim()) : undefined;
   const where = g
     ? `{ GRAPH ${g} { ${triple} } }`
     : `{ { ${triple} } UNION { GRAPH ?g { ${triple} } } }`;
@@ -615,7 +639,8 @@ function matchSelect(
  * strategy `@sparq-org/sparq`'s `SparqStore.match` uses: each of subject/predicate/object/graph
  * is either a wildcard (a fresh `?s`/`?p`/`?o`/`?g` variable) or an inlined constant
  * N-Triples term. The graph wildcard spans the default graph AND every named graph. Returns
- * the matching rows as SPARQL-JSON bindings.
+ * the matching rows as SPARQL-JSON bindings. Throws if a constant is not exactly one
+ * N-Triples IRI, blank-node or literal token (no `\uXXXX` escapes, no triple terms).
  */
 export function matchQuads(
   store: WasmStore,
