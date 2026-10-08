@@ -21,9 +21,16 @@
 //!   no document can write — an N3 variable name cannot contain a `.` — so this reverses the
 //!   parser's own rewrite and only that: a source variable spelled `?__bn0_x` is legal, is
 //!   NOT the rewrite, and stays a variable.
+//! * **`@forAll` universals.** The parser reads an `@forAll`-declared IRI as the variable
+//!   `?__ua.<iri>` ([`UNIVERSAL_VAR`], unforgeable for the same reason). [`write_rule`]
+//!   writes it under the declared IRI's local name (`@forAll :x` → `?x`, or `var:x` under
+//!   [`RuleVars::VarIris`]), suffixed `_2`, `_3`, … when that name is already taken by
+//!   another variable of the same rule, so renaming never merges two variables (GH #5391).
 //! * **Prefixes / layout.** Everything is written in full `<…>` IRI form, one statement per
 //!   line — no `@prefix` declarations are reconstructed. The document is semantically the
 //!   same N3, not byte-identical to the input.
+
+use std::collections::{HashMap, HashSet};
 
 use super::model::{Rule, Term};
 
@@ -43,6 +50,29 @@ pub const VAR_NS: &str = "http://www.w3.org/2000/10/swap/var#";
 /// guess from a spelling a user could also pick — `?__bn0_x`, the underscore form, IS a
 /// legal source variable and must stay a variable.
 pub(super) const PREMISE_BLANK_VAR: &str = "__bn.";
+
+/// The engine-internal prefix the N3 parser gives an `@forAll` universal (`@forAll :x`
+/// reads `:x` as the variable `__ua.<full IRI of :x>`) — reversed by [`write_rule`]. The
+/// `.` makes it unforgeable exactly as for [`PREMISE_BLANK_VAR`], and keying on the full
+/// IRI keeps `@forAll a:x, b:x` two variables.
+pub(super) const UNIVERSAL_VAR: &str = "__ua.";
+
+/// The name an `@forAll` universal is written under — its declared IRI's local name, with
+/// every character an N3 variable name cannot carry replaced by `_` — or `None` for any
+/// other variable.
+fn universal_name(v: &str) -> Option<String> {
+    let iri = v.strip_prefix(UNIVERSAL_VAR)?;
+    let local = iri.rsplit(['#', '/']).next().unwrap_or(iri);
+    let name: String = local
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' => c,
+            _ if !c.is_ascii() => c,
+            _ => '_',
+        })
+        .collect();
+    Some(if name.is_empty() { "u".to_string() } else { name })
+}
 
 fn quote_into(v: &str, out: &mut String) {
     for c in v.chars() {
@@ -90,7 +120,13 @@ pub fn write_term(t: &Term, out: &mut String) {
         }
         Term::Var(v) => {
             out.push('?');
-            out.push_str(v);
+            // Outside a rule (a formula-valued fact) there is no rule scope to de-duplicate
+            // against, so a universal just takes its declared name ([`write_rule`] does the
+            // collision-free renaming for rules).
+            match universal_name(v) {
+                Some(name) => out.push_str(&name),
+                None => out.push_str(v),
+            }
         }
         Term::List(ms) => {
             out.push('(');
@@ -187,19 +223,63 @@ pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) {
         RuleKind::Forward => (&r.premise, " => ", &r.conclusion),
         RuleKind::Backward => (&r.conclusion, " <= ", &r.premise),
     };
-    write_formula(left, vars, out);
+    let names = universal_names(r);
+    write_formula(left, vars, &names, out);
     out.push_str(arrow);
-    write_formula(right, vars, out);
+    write_formula(right, vars, &names, out);
     out.push_str(" .\n");
 }
 
+/// The output name of each `@forAll` universal in `r`: its [`universal_name`], suffixed
+/// `_2`, `_3`, … until it differs from every other variable of the rule (source variables
+/// and the universals named before it, in first-occurrence order — so the result is
+/// deterministic). A clash would merge two variables and change what the rule matches.
+fn universal_names(r: &Rule) -> HashMap<String, String> {
+    fn walk<'a>(t: &'a Term, seen: &mut HashSet<&'a str>, order: &mut Vec<&'a str>) {
+        match t {
+            Term::Var(v) => {
+                if seen.insert(v) {
+                    order.push(v);
+                }
+            }
+            Term::List(ms) => ms.iter().for_each(|m| walk(m, seen, order)),
+            Term::Triple(tr) => tr.iter().for_each(|m| walk(m, seen, order)),
+            Term::Formula(ts) => ts.iter().flatten().for_each(|m| walk(m, seen, order)),
+            _ => {}
+        }
+    }
+    let (mut seen, mut order) = (HashSet::new(), Vec::new());
+    for t in r.premise.iter().chain(&r.conclusion).flatten() {
+        walk(t, &mut seen, &mut order);
+    }
+    let mut taken: HashSet<String> =
+        order.iter().filter(|v| !v.starts_with(UNIVERSAL_VAR)).map(|v| v.to_string()).collect();
+    let mut names = HashMap::new();
+    for v in order {
+        let Some(base) = universal_name(v) else { continue };
+        let mut name = base.clone();
+        let mut n = 2;
+        while !taken.insert(name.clone()) {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        names.insert(v.to_string(), name);
+    }
+    names
+}
+
 /// `{ s p o . … }` over rule-side statements, with each term put through [`rule_term`].
-fn write_formula(stmts: &[[Term; 3]], vars: RuleVars, out: &mut String) {
+fn write_formula(
+    stmts: &[[Term; 3]],
+    vars: RuleVars,
+    names: &HashMap<String, String>,
+    out: &mut String,
+) {
     out.push('{');
     for row in stmts {
         for t in row {
             out.push(' ');
-            write_term(&rule_term(t, vars), out);
+            write_term(&rule_term(t, vars, names), out);
         }
         out.push_str(" .");
     }
@@ -220,24 +300,26 @@ fn write_formula(stmts: &[[Term; 3]], vars: RuleVars, out: &mut String) {
 /// graph is the same rule variable (`apply_deep` substitutes bindings into formulae). Left
 /// alone it would leave a `?x` in a document whose whole point is to carry none — N3
 /// builtins routinely take formula arguments, so that is a common shape, not a corner.
-fn rule_term(t: &Term, vars: RuleVars) -> Term {
+/// For the same reason an `@forAll` universal is renamed (per `names`, see
+/// [`universal_names`]) at every depth, in both styles.
+fn rule_term(t: &Term, vars: RuleVars, names: &HashMap<String, String>) -> Term {
+    let sub = |m: &Term| rule_term(m, vars, names);
     match t {
-        Term::List(ms) => Term::List(ms.iter().map(|m| rule_term(m, vars)).collect()),
-        Term::Triple(tr) => Term::Triple(Box::new([
-            rule_term(&tr[0], vars),
-            rule_term(&tr[1], vars),
-            rule_term(&tr[2], vars),
-        ])),
-        Term::Formula(ts) if vars == RuleVars::VarIris => Term::Formula(
-            ts.iter()
-                .map(|r| [rule_term(&r[0], vars), rule_term(&r[1], vars), rule_term(&r[2], vars)])
-                .collect(),
-        ),
-        Term::Var(v) => match premise_blank_label(v) {
-            Some(label) => Term::Blank(label.to_string()),
-            None if vars == RuleVars::VarIris => Term::Iri(format!("{VAR_NS}{v}")),
-            None => t.clone(),
-        },
+        Term::List(ms) => Term::List(ms.iter().map(sub).collect()),
+        Term::Triple(tr) => Term::Triple(Box::new([sub(&tr[0]), sub(&tr[1]), sub(&tr[2])])),
+        Term::Formula(ts) if vars == RuleVars::VarIris || !names.is_empty() => {
+            Term::Formula(ts.iter().map(|r| [sub(&r[0]), sub(&r[1]), sub(&r[2])]).collect())
+        }
+        Term::Var(v) => {
+            if let Some(label) = premise_blank_label(v) {
+                return Term::Blank(label.to_string());
+            }
+            let v = names.get(v).unwrap_or(v);
+            match vars {
+                RuleVars::VarIris => Term::Iri(format!("{VAR_NS}{v}")),
+                RuleVars::N3 => Term::Var(v.clone()),
+            }
+        }
         _ => t.clone(),
     }
 }
@@ -309,18 +391,18 @@ mod tests {
             Term::Iri("http://ex/p".into()),
             Term::Var("y".into()),
         ]]);
-        let ground = rendered(&rule_term(&inner, RuleVars::VarIris));
+        let ground = rendered(&rule_term(&inner, RuleVars::VarIris, &HashMap::new()));
         assert!(!ground.contains('?'), "{ground}");
         assert_eq!(ground, format!("{{ <{VAR_NS}y> <http://ex/p> <{VAR_NS}y> . }}"));
         // `RuleVars::N3` leaves the formula exactly as parsed.
-        assert_eq!(rendered(&rule_term(&inner, RuleVars::N3)), rendered(&inner));
+        assert_eq!(rendered(&rule_term(&inner, RuleVars::N3, &HashMap::new())), rendered(&inner));
         // A rewritten premise blank goes back to `_:x` in BOTH styles.
         for style in [RuleVars::N3, RuleVars::VarIris] {
-            let t = rule_term(&Term::Var("__bn.3.x".into()), style);
+            let t = rule_term(&Term::Var("__bn.3.x".into()), style, &HashMap::new());
             assert_eq!(rendered(&t), "_:x");
         }
         assert_eq!(
-            rendered(&rule_term(&Term::Var("z".into()), RuleVars::VarIris)),
+            rendered(&rule_term(&Term::Var("z".into()), RuleVars::VarIris, &HashMap::new())),
             "<http://www.w3.org/2000/10/swap/var#z>"
         );
     }

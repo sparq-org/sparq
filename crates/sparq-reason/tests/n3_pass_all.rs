@@ -167,6 +167,51 @@ fn a_source_variable_spelled_like_the_rewrite_stays_a_variable() {
     assert!(reason_n3_pass_all(forged, RuleVars::N3).is_err(), "{forged}");
 }
 
+/// GH #5391: the parser rewrites an `@forAll :x` universal to an engine-internal rule
+/// variable. That name must never reach the output: `--pass-all` writes the declared
+/// quantifier's own local name (`?x`), `--pass-all-ground` its `var:x` IRI, and the
+/// emitted document still re-parses to the same rule.
+#[test]
+fn a_for_all_universal_is_echoed_under_its_declared_name() {
+    let src = "@prefix : <http://ex/>. @forAll :x.
+{ :x a :Human } => { :x a :Mortal }. :a a :Human.
+";
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!doc.contains("__ua"), "no engine-internal variable name: {doc}");
+    let rule =
+        format!("{{ ?x <{TYPE}> <http://ex/Human> . }} => {{ ?x <{TYPE}> <http://ex/Mortal> . }} .");
+    assert!(doc.contains(&rule), "{doc}");
+    assert!(doc.contains(&format!("<http://ex/a> <{TYPE}> <http://ex/Mortal> .")), "{doc}");
+    assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+
+    let ground = reason_n3_pass_all(src, RuleVars::VarIris).expect("pass-all-ground");
+    assert!(!ground.contains("__ua"), "{ground}");
+    assert!(ground.contains("<http://www.w3.org/2000/10/swap/var#x>"), "{ground}");
+}
+
+/// GH #5391: stripping the internal prefix must not capture a source variable of the same
+/// name, nor merge two universals that share a local name across namespaces — either would
+/// change which positions must bind equal terms.
+#[test]
+fn a_for_all_universal_never_collides_with_another_variable() {
+    let src = r#"@prefix : <http://ex/>. @prefix o: <http://other/>.
+@forAll :x, o:x.
+{ :x :p ?x . o:x :q :x } => { :x :r ?x , o:x }.
+:a :p :b . :c :q :a .
+"#;
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!doc.contains("__ua"), "{doc}");
+    // Three distinct variables survive as three distinct names.
+    let rule = doc.lines().find(|l| l.contains("=>")).expect("the rule line");
+    let mut names: Vec<&str> = rule.split_whitespace().filter(|w| w.starts_with('?')).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 3, "{rule}");
+    assert!(doc.contains("<http://ex/a> <http://ex/r> <http://ex/b> ."), "{doc}");
+    assert!(doc.contains("<http://ex/a> <http://ex/r> <http://ex/c> ."), "{doc}");
+    assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+}
+
 #[test]
 fn a_parse_error_propagates() {
     assert!(reason_n3_pass_all("{ ?x a :Human } =>", RuleVars::N3).is_err());

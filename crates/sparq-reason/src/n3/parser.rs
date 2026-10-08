@@ -25,7 +25,7 @@
 //! (the TurtleTests suite passes 297/297 in this mode).
 
 use super::model::{Rule, Term};
-use super::serialize::PREMISE_BLANK_VAR;
+use super::serialize::{PREMISE_BLANK_VAR, UNIVERSAL_VAR};
 
 pub const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 pub const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
@@ -371,10 +371,13 @@ impl<'a> Parser<'a> {
                     other => return Err(format!("expected IRI in quantifier, got {other:?}")),
                 },
             };
-            let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri).to_string();
+            // A universal is keyed by its FULL IRI under the unforgeable [`UNIVERSAL_VAR`]
+            // prefix (GH #5391): two `@forAll` IRIs sharing a local name stay two variables,
+            // no source `?…` can capture it, and the serializer recovers the declared name.
             let term = if universal {
-                Term::Var(format!("__ua_{local}"))
+                Term::Var(format!("{UNIVERSAL_VAR}{iri}"))
             } else {
+                let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri);
                 Term::Blank(format!("__ex_{local}"))
             };
             self.quants.last_mut().expect("scope stack").insert(iri, term);
