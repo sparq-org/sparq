@@ -64,12 +64,22 @@ pub struct Response {
 impl Response {
     /// A success response echoing `id` and carrying `result`.
     pub fn ok(id: Value, result: Value) -> Self {
-        Response { jsonrpc: "2.0", id, result: Some(result), error: None }
+        Response {
+            jsonrpc: "2.0",
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
 
     /// An error response echoing `id` and carrying a JSON-RPC error object.
     pub fn err(id: Value, error: RpcError) -> Self {
-        Response { jsonrpc: "2.0", id, result: None, error: Some(error) }
+        Response {
+            jsonrpc: "2.0",
+            id,
+            result: None,
+            error: Some(error),
+        }
     }
 }
 
@@ -85,7 +95,11 @@ pub struct RpcError {
 impl RpcError {
     /// Build an error with no `data` payload.
     pub fn new(code: i64, message: impl Into<String>) -> Self {
-        RpcError { code, message: message.into(), data: None }
+        RpcError {
+            code,
+            message: message.into(),
+            data: None,
+        }
     }
 }
 
