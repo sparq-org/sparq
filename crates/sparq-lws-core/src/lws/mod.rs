@@ -716,6 +716,7 @@ pub(crate) async fn create_record<S, F>(
     iri: &str,
     body: Bytes,
     admission: Option<crate::overload::AdmissionSlot>,
+    held: Option<resources::IriGuard>,
     register: F,
 ) -> Result<(), crate::error::ServerError>
 where
@@ -726,6 +727,14 @@ where
     let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
+        // The container's listing changes once the record is registered: a create holds the
+        // container (shared, unless the caller holds it exclusively) until then, so a conditional
+        // create sees no member arrive between its check and its own registration.
+        let _shared = match held {
+            None => Some(state.locks.read(&container).await),
+            Some(_) => None,
+        };
+        let _held = held;
         match state
             .store
             .create_in_container(&container, &iri, body, LWS_JSON)
@@ -748,6 +757,34 @@ where
     tokio::spawn(task)
         .await
         .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
+}
+
+/// The preconditions of a create in a service container (grants, requests, subscriptions),
+/// evaluated against `listing` with the container held exclusively: `Ok(None)` when the create is
+/// unconditional, `Ok(Some(guard))` when its preconditions hold (the guard is passed on to
+/// [`create_record`], so no member arrives or leaves until the new one is registered), and the
+/// response to send otherwise. A listing that cannot be produced (a representation the client does
+/// not accept, a page that does not exist) is that response: its absent `ETag` is not the absence
+/// of the container.
+pub(crate) async fn service_preconditions<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    container: &str,
+    listing: impl FnOnce(&LwsRequest) -> axum::response::Response,
+) -> Result<Option<resources::IriGuard>, axum::response::Response> {
+    if !resources::is_conditional(req) {
+        return Ok(None);
+    }
+    let guard = state.locks.lock(container).await;
+    let current = listing(&resources::plain_get(req));
+    if !current.status().is_success() {
+        return Err(current);
+    }
+    let (etag, modified) = resources::validators_of(&current);
+    match resources::unless_preconditions(req, etag.as_deref(), modified) {
+        Some(refused) => Err(refused),
+        None => Ok(Some(guard)),
+    }
 }
 
 /// Stored metadata of `iri`, parsed; metadata that does not parse is an error.

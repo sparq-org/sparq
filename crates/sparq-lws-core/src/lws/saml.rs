@@ -54,6 +54,10 @@ const MAX_DEPTH: usize = 64;
 /// Elements that declare none share their parent's bindings.
 const MAX_SCOPE_BYTES: usize = 4 << 20;
 
+/// How many prefixes an exclusive canonicalization transform may render inclusively. Real
+/// assertions name a handful; canonicalization weighs each at every element it renders.
+const MAX_INCLUSIVE_PREFIXES: usize = 64;
+
 /// What a copied binding costs beside its prefix and URI: the map entry and two string headers.
 const BINDING_OVERHEAD: usize = 64;
 
@@ -280,7 +284,7 @@ fn verify_signature(root: &Element, key: &TrustKey) -> Result<(), String> {
             match (t.is(DS_NS, "Transform"), t.attr("Algorithm")) {
                 (true, Some(ENVELOPED)) if !enveloped && exclusive.is_none() => enveloped = true,
                 (true, Some(EXC_C14N)) if exclusive.is_none() => {
-                    exclusive = Some(inclusive_prefixes(t))
+                    exclusive = Some(inclusive_prefixes(t)?)
                 }
                 _ => return Err("the reference has a transform this server does not accept".into()),
             }
@@ -325,7 +329,7 @@ fn verify_signature(root: &Element, key: &TrustKey) -> Result<(), String> {
     canonicalize(
         signed_info,
         None,
-        &inclusive_prefixes(c14n),
+        &inclusive_prefixes(c14n)?,
         &BTreeMap::new(),
         &mut signed,
     )?;
@@ -346,8 +350,8 @@ fn b64_decode(s: &str) -> Option<Vec<u8>> {
 }
 
 /// The `InclusiveNamespaces PrefixList` of an exclusive canonicalization method or transform.
-fn inclusive_prefixes(method: &Element) -> Vec<String> {
-    method
+fn inclusive_prefixes(method: &Element) -> Result<Vec<String>, String> {
+    let mut prefixes: Vec<String> = method
         .elements()
         .find(|e| e.is(EXC_C14N, "InclusiveNamespaces"))
         .and_then(|e| e.attr("PrefixList"))
@@ -362,7 +366,14 @@ fn inclusive_prefixes(method: &Element) -> Vec<String> {
                 })
                 .collect()
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    prefixes.sort();
+    prefixes.dedup();
+    // Canonicalization weighs every inclusive prefix at every element it renders.
+    if prefixes.len() > MAX_INCLUSIVE_PREFIXES {
+        return Err("the transform names too many inclusive namespace prefixes".into());
+    }
+    Ok(prefixes)
 }
 
 /// A trusted identity provider's signing key.
@@ -910,6 +921,19 @@ pub fn canonicalize(
     rendered: &BTreeMap<String, String>,
     out: &mut String,
 ) -> Result<(), String> {
+    render(el, exclude, inclusive, &mut rendered.clone(), out)
+}
+
+/// [`canonicalize`] over one map of what the output ancestors rendered: an element adds its
+/// declarations for its descendants and takes them back after, so no element copies the map and
+/// the work stays proportional to the declarations rendered.
+fn render(
+    el: &Element,
+    exclude: Option<*const Element>,
+    inclusive: &[String],
+    rendered: &mut BTreeMap<String, String>,
+    out: &mut String,
+) -> Result<(), String> {
     if exclude == Some(el as *const Element) {
         return Ok(());
     }
@@ -931,25 +955,22 @@ pub fn canonicalize(
     }
     wanted.sort();
     wanted.dedup();
-    let mut now_rendered = rendered.clone();
     let mut decls = Vec::new();
     for p in wanted {
         if p == "xml" {
             continue;
         }
-        let uri = el.scope.get(&p).cloned().unwrap_or_default();
+        let uri = el.scope.get(&p).map(String::as_str).unwrap_or_default();
         if p.is_empty() {
             let before = rendered.get("").map(String::as_str).unwrap_or("");
             if uri != before {
-                decls.push((p.clone(), uri.clone()));
-                now_rendered.insert(p, uri);
+                decls.push((p, uri.to_string()));
             }
-        } else if rendered.get(&p) != Some(&uri) {
+        } else if rendered.get(&p).map(String::as_str) != Some(uri) {
             if uri.is_empty() {
                 return Err(format!("unbound prefix {p}"));
             }
-            decls.push((p.clone(), uri.clone()));
-            now_rendered.insert(p, uri);
+            decls.push((p, uri.to_string()));
         }
     }
     let qname = el.qname();
@@ -980,12 +1001,25 @@ pub fn canonicalize(
         out.push('"');
     }
     out.push('>');
-    for c in &el.children {
-        match c {
-            Node::Text(t) => escape_text(t, out),
-            Node::Element(e) => canonicalize(e, exclude, inclusive, &now_rendered, out)?,
+    // What the descendants see as rendered, taken back once they are written.
+    let before: Vec<(String, Option<String>)> = decls
+        .into_iter()
+        .map(|(p, uri)| (p.clone(), rendered.insert(p, uri)))
+        .collect();
+    let children = el.children.iter().try_for_each(|c| match c {
+        Node::Text(t) => {
+            escape_text(t, out);
+            Ok(())
         }
+        Node::Element(e) => render(e, exclude, inclusive, rendered, out),
+    });
+    for (p, old) in before.into_iter().rev() {
+        match old {
+            Some(uri) => rendered.insert(p, uri),
+            None => rendered.remove(&p),
+        };
     }
+    children?;
     out.push_str("</");
     out.push_str(&qname);
     out.push('>');
@@ -1093,6 +1127,46 @@ mod tests {
         let mut out = String::new();
         canonicalize(&root, None, &[String::new()], &BTreeMap::new(), &mut out).unwrap();
         assert_eq!(out, r#"<p:s xmlns:p="urn:p"></p:s>"#);
+    }
+
+    /// Review finding: canonicalization copied the rendered namespaces at every element that
+    /// rendered one, and weighed every inclusive prefix a transform named at every element. The
+    /// prefixes are capped, and one map is extended and taken back instead of copied, so a
+    /// declaration an element renders reaches its descendants and none of its siblings.
+    #[test]
+    fn canonicalization_work_is_bounded() {
+        let method = |n: usize| {
+            let list: Vec<String> = (0..n).map(|i| format!("p{i}")).collect();
+            let xml = format!(
+                r#"<m xmlns="{EXC_C14N}"><InclusiveNamespaces PrefixList="{} p0"/></m>"#,
+                list.join(" ")
+            );
+            inclusive_prefixes(&parse(&xml).unwrap())
+        };
+        assert_eq!(
+            method(MAX_INCLUSIVE_PREFIXES).unwrap().len(),
+            MAX_INCLUSIVE_PREFIXES
+        );
+        assert!(method(MAX_INCLUSIVE_PREFIXES + 1).is_err());
+        assert_eq!(
+            c14n(
+                r#"<r xmlns:p="urn:p"><p:a><p:c/></p:a><p:b/><s xmlns:p="urn:q"><p:d/></s><p:e/></r>"#
+            ),
+            concat!(
+                r#"<r><p:a xmlns:p="urn:p"><p:c></p:c></p:a><p:b xmlns:p="urn:p"></p:b>"#,
+                r#"<s><p:d xmlns:p="urn:q"></p:d></s><p:e xmlns:p="urn:p"></p:e></r>"#
+            )
+        );
+        let decls: String = (0..4096)
+            .map(|i| format!(" xmlns:p{i}=\"urn:{i}\" p{i}:a=\"1\""))
+            .collect();
+        // The root renders thousands of declarations; each child renders one more of its own.
+        let wide = format!(
+            "<r xmlns:q=\"urn:q\"{decls}>{}</r>",
+            "<q:x/>".repeat(20_000)
+        );
+        let out = c14n(&wide);
+        assert_eq!(out.matches("xmlns:q=").count(), 20_000);
     }
 
     #[test]

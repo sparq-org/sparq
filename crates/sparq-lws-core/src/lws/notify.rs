@@ -351,6 +351,8 @@ impl Notifier {
         let cancel = async move {
             let _admission = admission;
             let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+            // Shared with other members' changes; a conditional create holds it alone.
+            let _listing = state.locks.read(&container).await;
             super::delete_record(&state, &format!("{container}{id}"), &container)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -804,16 +806,16 @@ pub async fn handle<S: Store + 'static>(
                     return state.challenge(None);
                 }
                 // A conditional create is evaluated against the listing.
-                if super::resources::is_conditional(req) {
-                    let current = listing(state, &super::resources::plain_get(req), agent, owner);
-                    let (etag, modified) = super::resources::validators_of(&current);
-                    if let Some(refused) =
-                        super::resources::unless_preconditions(req, etag.as_deref(), modified)
-                    {
-                        return refused;
-                    }
-                }
-                subscribe(state, req, agent).await
+                let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+                let held = match super::service_preconditions(state, req, &container, |get| {
+                    listing(state, get, agent, owner)
+                })
+                .await
+                {
+                    Ok(held) => held,
+                    Err(refused) => return refused,
+                };
+                subscribe(state, req, agent, held).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
         };
@@ -918,6 +920,7 @@ async fn subscribe<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     agent: &Agent,
+    held: Option<super::resources::IriGuard>,
 ) -> Response {
     // "The request body MUST conform to the application/lws+json media type."
     if req.content_type().as_deref() != Some(LWS_JSON) {
@@ -1035,6 +1038,7 @@ async fn subscribe<S: Store + 'static>(
         &iri,
         Bytes::from(stored),
         req.admission.clone(),
+        held,
         register,
     );
     if let Err(e) = created.await {

@@ -384,6 +384,19 @@ fn resource_links<S: Store>(
     add_link(headers, &meta_key(uri), "linkset", Some(LINKSET_JSON));
 }
 
+/// The shared lock of the container `uri` is a member of, taken after the member's own (locks go
+/// member before container). A change to a member changes its container's listing, so it waits
+/// for, and holds off, a create evaluating its preconditions against that listing (which takes
+/// the container's lock exclusively). Released before the container is touched, which takes the
+/// lock again.
+async fn listing_guard<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+    let parent = parent_of(uri, &state.cfg.storage())?;
+    Some(state.locks.read(&parent).await)
+}
+
 /// Record that a container's membership or a member changed.
 ///
 /// The container's lock is taken shared, as a create in it takes it: a touch after each create
@@ -1521,6 +1534,7 @@ async fn update<S: Store + 'static>(
     uri: &str,
 ) -> Response {
     let guard = state.locks.lock(uri).await;
+    let listing = listing_guard(state, uri).await;
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -1600,6 +1614,7 @@ async fn update<S: Store + 'static>(
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
+    drop(listing);
     changed(state, uri).await;
     let mut resp = StatusCode::NO_CONTENT.into_response();
     set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
@@ -1678,9 +1693,18 @@ fn merge_patch_bounded(target: &Value, patch: &Value, budget: usize) -> Result<V
     Ok(out)
 }
 
-/// How far a patched document may grow, in serialized bytes: the request body limit. A JSON Patch
-/// `copy` doubles what it copies, so without a bound a few dozen operations exhaust memory.
+/// The most a patched document may grow to, in serialized bytes, whatever the configured body
+/// limit. A JSON Patch `copy` doubles what it copies, so without a bound a few dozen operations
+/// exhaust memory. A server patches within the smaller of this and its request body limit
+/// ([`patch_budget`]).
 pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
+
+/// How far a patched document may grow on this server: no larger than a request body may be (a
+/// document a PUT could not store is no more acceptable from a PATCH), and never past
+/// [`PATCH_BUDGET`]. The work a JSON Patch may do follows from it.
+fn patch_budget<S: Store + 'static>(state: &LwsState<S>) -> usize {
+    state.cfg.max_body.min(PATCH_BUDGET)
+}
 
 /// How many operations a JSON Patch may have.
 pub const MAX_PATCH_OPS: usize = 1000;
@@ -2119,11 +2143,11 @@ impl Patch {
         matches!(self, Patch::Json(ops) if json_patch_reads(ops))
     }
 
-    /// Apply the patch to `target`. `Err` carries the response.
-    fn apply(&self, target: &Value) -> Result<Value, Response> {
+    /// Apply the patch to `target` within `budget` serialized bytes. `Err` carries the response.
+    fn apply(&self, target: &Value, budget: usize) -> Result<Value, Response> {
         match self {
-            Patch::Merge(p) => merge_patch_bounded(target, p, PATCH_BUDGET),
-            Patch::Json(ops) => json_patch(target, ops, PATCH_BUDGET),
+            Patch::Merge(p) => merge_patch_bounded(target, p, budget),
+            Patch::Json(ops) => json_patch(target, ops, budget),
         }
         .map_err(|e| match e {
             PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
@@ -2164,6 +2188,7 @@ async fn patch<S: Store + 'static>(
     uri: &str,
 ) -> Response {
     let guard = state.locks.lock(uri).await;
+    let listing = listing_guard(state, uri).await;
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -2213,7 +2238,7 @@ async fn patch<S: Store + 'static>(
             }
         }
     };
-    let patched = match patch.apply(&target) {
+    let patched = match patch.apply(&target, patch_budget(state)) {
         Ok(v) => v,
         Err(r) => return r,
     };
@@ -2274,6 +2299,7 @@ async fn patch<S: Store + 'static>(
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
+    drop(listing);
     changed(state, uri).await;
     let mut resp = StatusCode::NO_CONTENT.into_response();
     set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
@@ -2310,6 +2336,7 @@ async fn delete<S: Store + 'static>(
         Ok(locked) => locked,
         Err(e) => return store_error(e),
     };
+    let mut listing = listing_guard(state, uri).await;
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -2382,6 +2409,7 @@ async fn delete<S: Store + 'static>(
         }
         Err(e) => return store_error(e),
     };
+    listing.take();
     if removed > 0 {
         if let Some(p) = parent {
             touch_container(state, &p).await;
@@ -2686,6 +2714,11 @@ async fn linkset<S: Store + 'static>(
     } else {
         (Some(state.locks.read(uri).await), None)
     };
+    let mut listing = if req.method == Method::PATCH {
+        listing_guard(state, uri).await
+    } else {
+        None
+    };
     let exists = match state.store.exists(uri).await {
         Ok(e) => e,
         Err(e) => return store_error(e),
@@ -2741,7 +2774,7 @@ async fn linkset<S: Store + 'static>(
             if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
                 return r;
             }
-            let patched = match patch.apply(&document) {
+            let patched = match patch.apply(&document, patch_budget(state)) {
                 Ok(v) => v,
                 Err(r) => return r,
             };
@@ -2783,6 +2816,7 @@ async fn linkset<S: Store + 'static>(
                 Ok(d) => linkset_etag(&d),
                 Err(e) => return store_error(e),
             };
+            listing.take();
             changed(state, uri).await;
             let mut r = StatusCode::NO_CONTENT.into_response();
             set(r.headers_mut(), header::ETAG, &new_etag);
@@ -4782,6 +4816,143 @@ mod tests {
         );
         let r = call(&st, "DELETE", &path, &[("if-match", &tag)], "").await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Review finding: a resource or linkset PATCH was held to the fixed [`PATCH_BUDGET`], so a
+    /// small patch could grow a document far past the configured body limit. Its result is now
+    /// held to `max_body`.
+    #[tokio::test]
+    async fn a_patch_is_held_to_the_body_limit() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let doc = json!({ "a": "x".repeat(20 << 10) }).to_string();
+        let json = ("content-type", "application/json");
+        let r = call(&st, "POST", "/", &[json, ("slug", "d.json")], &doc).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let copies = |n: usize| {
+            let ops: Vec<Value> = (0..n)
+                .map(|i| json!({"op": "copy", "from": "/a", "path": format!("/b{i}")}))
+                .collect();
+            Value::Array(ops).to_string()
+        };
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(1)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(4)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// Review finding: a conditional create in a service container checked the listing without
+    /// holding it, so two creates under the same `If-Match` both succeeded; a listing that could
+    /// not be produced (a representation the client does not accept) carried no `ETag` and so
+    /// passed `If-None-Match: *`; and members of an ordinary container were written and deleted
+    /// without waiting for a conditional create holding their container.
+    #[tokio::test]
+    async fn conditional_creates_hold_the_listing_they_checked() {
+        let st = state().await;
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("accept", "text/plain"), ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert!(!r.status().is_success(), "{}", r.status());
+        let tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let matching = [json, ("if-match", tag.as_str())];
+        let both = tokio::join!(
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+        );
+        let mut statuses = [both.0.status(), both.1.status()];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [StatusCode::CREATED, StatusCode::PRECONDITION_FAILED]
+        );
+        // While a conditional create holds a container, its members' changes wait.
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let r = call(&st, "POST", "/", &[("slug", "c"), ("link", &container)], "").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = ("content-type", "text/plain");
+        for name in ["put", "patch", "delete"] {
+            let r = call(&st, "POST", "/c/", &[text, ("slug", name)], "x").await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let merge = ("content-type", "application/merge-patch+json");
+        let r = call(
+            &st,
+            "POST",
+            "/c/",
+            &[("content-type", "application/json"), ("slug", "patch.json")],
+            "{}",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let put_tag = current(&st, &st.cfg.absolute("/c/put"))
+            .await
+            .ok()
+            .map(|m| m.etag);
+        let patch_tag = current(&st, &st.cfg.absolute("/c/patch.json"))
+            .await
+            .ok()
+            .map(|m| m.etag);
+        let grants_tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let held = st.locks.lock(&st.cfg.absolute("/c/")).await;
+        let grants = st.locks.lock(&st.cfg.absolute(GRANTS_PATH)).await;
+        let spawn = |method: &'static str,
+                     path: &'static str,
+                     headers: Vec<(&'static str, &'static str)>,
+                     body: &'static str| {
+            let st = st.clone();
+            tokio::spawn(async move { call(&st, method, path, &headers, body).await.status() })
+        };
+        let waiting = [
+            spawn("PUT", "/c/put", vec![text], "y"),
+            spawn("PATCH", "/c/patch.json", vec![merge], "{\"a\": 1}"),
+            spawn("DELETE", "/c/delete", vec![], ""),
+            spawn(
+                "POST",
+                GRANTS_PATH,
+                vec![json],
+                Box::leak(grant.into_boxed_str()),
+            ),
+        ];
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        for w in &waiting {
+            assert!(!w.is_finished());
+        }
+        // Nothing changed meanwhile: each waits before its write, not only before its touch.
+        let tag = |path: &'static str| {
+            let iri = st.cfg.absolute(path);
+            let st = st.clone();
+            async move { current(&st, &iri).await.ok().map(|m| m.etag) }
+        };
+        assert_eq!(tag("/c/put").await, put_tag);
+        assert_eq!(tag("/c/patch.json").await, patch_tag);
+        assert!(st
+            .store
+            .exists(&st.cfg.absolute("/c/delete"))
+            .await
+            .unwrap());
+        let listed = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        assert_eq!(listed, grants_tag);
+        drop((held, grants));
+        for w in waiting {
+            assert!(w.await.unwrap().is_success());
+        }
     }
 
     /// Review finding: a create whose store call reported a failure removed the new member's

@@ -702,16 +702,15 @@ pub async fn handle<S: Store + 'static>(
                     return state.deny(agent);
                 }
                 // A conditional create is evaluated against the listing.
-                if super::resources::is_conditional(req) {
-                    let current = listing(state, &super::resources::plain_get(req), grants);
-                    let (etag, modified) = super::resources::validators_of(&current);
-                    if let Some(refused) =
-                        super::resources::unless_preconditions(req, etag.as_deref(), modified)
-                    {
-                        return refused;
-                    }
-                }
-                create(state, req, agent, grants).await
+                let held = match super::service_preconditions(state, req, &container, |get| {
+                    listing(state, get, grants)
+                })
+                .await
+                {
+                    Ok(held) => held,
+                    Err(refused) => return refused,
+                };
+                create(state, req, agent, grants, held).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
         };
@@ -772,6 +771,8 @@ pub async fn handle<S: Store + 'static>(
                 );
                 async move {
                     let _admission = admission;
+                    // Shared with other members' changes; a conditional create holds it alone.
+                    let _listing = state.locks.read(&container).await;
                     super::delete_record(&state, &iri, &container).await?;
                     state.access.map(grants).write().expect("lock").remove(&id);
                     state.access.bump(grants);
@@ -817,6 +818,7 @@ async fn create<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
     grants: bool,
+    held: Option<super::resources::IriGuard>,
 ) -> Response {
     let Ok(body) = serde_json::from_slice::<Value>(&req.body) else {
         return problem(StatusCode::BAD_REQUEST, Some("the body is not JSON"));
@@ -881,6 +883,7 @@ async fn create<S: Store + 'static>(
         &iri,
         Bytes::from(stored.to_string()),
         req.admission.clone(),
+        held,
         register,
     );
     if let Err(e) = created.await {
