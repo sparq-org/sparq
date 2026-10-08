@@ -48,7 +48,7 @@ oxttl = { workspace = true }
 # N-Quads text (the interchange form the RDFC10 spec is defined over — lossless by
 # construction, and exercised end-to-end by the W3C suite). The four deps below are
 # exactly upstream rdf-canon 0.15.3's non-optional runtime deps (plus digest/sha2).
-base16ct = { version = "0.2", features = ["alloc"] }
+base16ct = { version = "1.0", features = ["alloc"] }
 itertools = "0.14"
 thiserror = "2.0"
 oxrdf02 = { package = "oxrdf", version = "0.2.4" }
