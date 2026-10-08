@@ -638,3 +638,36 @@ fn data_rule_fallback_reports_reason_and_clears() {
     assert_eq!(g.mode(), N3Mode::Counting, "removing the data rule resumes counting");
     assert!(g.fallback_reason().is_none(), "reason must clear when counting resumes");
 }
+
+/// GH #6701 review round 2: the fallback re-reasons the base. It used to re-serialize the
+/// base to N3 text, which wrote the `@forAll` universal `:x` as `?x` and merged it with the
+/// source `?x` of the same formula — so the variable-predicate rule saw an extra, wrong
+/// fact `:a :p { ?x :q ?x }` and derived `:a :r` of it. The base now goes in as terms.
+#[test]
+fn fallback_keeps_a_for_all_universal_distinct_from_a_source_variable() {
+    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.
+{ ?s ?p ?o } => { ?s :r ?o }.
+";
+    let oracle = |extra: &[[Term; 3]]| -> FxHashSet<[Term; 3]> {
+        let mut s: FxHashSet<[Term; 3]> =
+            reason_n3_terms(src, None).expect("oracle").facts.into_iter().collect();
+        s.extend(extra.iter().cloned());
+        s
+    };
+    let mut g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    assert_eq!(g.mode(), N3Mode::Fallback, "a variable-predicate rule is outside the counting profile");
+    let closure: FxHashSet<[Term; 3]> = g.closure().into_iter().collect();
+    assert_eq!(closure, oracle(&[]), "{closure:?}");
+    for f in &closure {
+        if let Term::Formula(ts) = &f[2] {
+            assert!(ts.iter().all(|t| t[0] != t[2]), "two distinct variables merged: {f:?}");
+        }
+    }
+    // A mutation re-runs the fallback over the held base: still exact.
+    let extra = [ex("c"), ex("p"), ex("d")];
+    g.insert(std::slice::from_ref(&extra));
+    let mut want = oracle(&[]);
+    want.insert(extra.clone());
+    want.insert([ex("c"), ex("r"), ex("d")]);
+    assert_eq!(g.closure().into_iter().collect::<FxHashSet<_>>(), want);
+}

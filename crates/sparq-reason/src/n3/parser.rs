@@ -76,9 +76,27 @@ pub fn parse_turtle_with_base(src: &str, base: &str) -> Result<Parsed, String> {
 /// directives) against `base` — the document's own location, RFC 3986-style.
 /// An empty `base` keeps relative IRIs as written (the historical behavior).
 pub fn parse_with_base(src: &str, base: &str) -> Result<Parsed, String> {
+    parse_with_extra(src, base, std::iter::empty())
+}
+
+/// As [`parse_with_base`], with `extra` statements appended AS TERMS after the document's
+/// own — classified (facts / forward rules / backward rules) and premise-blank-rewritten
+/// exactly as if they had been written at the end of `src`, but never put through text.
+///
+/// This is the lossless path for a caller that holds parsed terms and must reason over
+/// them again with a rules document (the incremental N3 fallback and its `why`): a term
+/// carrying an `@forAll` universal (`?__ua.<iri>`) has no surface spelling that re-parses
+/// to the same variable, so a serialize-then-parse round trip would rename it — and a
+/// rename can merge it with another variable (GH #6701 review).
+pub(crate) fn parse_with_extra(
+    src: &str,
+    base: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+) -> Result<Parsed, String> {
     let mut p = Parser::new(src);
     p.base = base.to_string();
-    let stmts = p.document()?;
+    let mut stmts = p.document()?;
+    stmts.extend(extra);
     let mut facts = Vec::new();
     let mut rules = Vec::new();
     let mut backward_rules = Vec::new();

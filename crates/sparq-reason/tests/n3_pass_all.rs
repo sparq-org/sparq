@@ -227,3 +227,26 @@ fn a_for_all_universal_in_a_formula_fact_never_collides() {
 fn a_parse_error_propagates() {
     assert!(reason_n3_pass_all("{ ?x a :Human } =>", RuleVars::N3).is_err());
 }
+
+/// GH #6701 review round 2: facts and echoed rules must name one universal the SAME way.
+/// Here the closure holds both a source `?x` and the universal `:x`, so the universal
+/// becomes `?x_2` in the fact; if the rule kept its own per-rule `?x`, the two formulae
+/// the rule compares would stop being equal and re-reasoning would derive `:bad :is true`.
+#[test]
+fn a_for_all_universal_gets_one_name_across_facts_and_rules() {
+    let src = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
+@forAll :x.
+:a :p { :x :q :z }.
+:b :p { ?x :q :z }.
+{ :a :p ?f. ?f log:notEqualTo { :x :q :z } } => { :bad :is true }.
+";
+    // The echoed rule mentions `:bad` too — only a closure LINE starting with it is a
+    // derivation.
+    let derives_bad = |doc: &str| doc.lines().any(|l| l.starts_with("<http://ex/bad> "));
+    let first = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!derives_bad(&first), "the source does not derive :bad: {first}");
+    assert!(!first.contains("__ua"), "{first}");
+    let again = reason_n3_pass_all(&first, RuleVars::N3).expect("round two");
+    assert!(!derives_bad(&again), "re-reasoning the output changed its meaning: {again}");
+    assert_eq!(first, again);
+}

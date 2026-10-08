@@ -120,8 +120,9 @@ pub fn write_term(t: &Term, out: &mut String) {
         }
         Term::Var(v) => {
             out.push('?');
-            // A caller with no scope to de-duplicate against gets the declared name; the
-            // `--pass-all` writer renames collision-free first ([`universal_names_in`]).
+            // A lone term has no scope to de-duplicate against, so it gets the declared
+            // name (display only); every DOCUMENT writer here renames collision-free
+            // first ([`universal_names_in`]).
             match universal_name(v) {
                 Some(name) => out.push_str(&name),
                 None => out.push_str(v),
@@ -172,11 +173,20 @@ pub fn write_statement(f: &[Term; 3], out: &mut String) {
     out.push_str(" .\n");
 }
 
-/// Serialize ground facts back to N3 (the fallback / differential-oracle path).
+/// Serialize facts back to N3 as one document.
+///
+/// Any `@forAll` universal inside a formula-valued fact is written under a name
+/// ([`universal_names_in`]) that differs from every other variable in `facts`, so two
+/// distinct variables never merge in the output. A universal has no surface spelling
+/// that re-parses to the SAME internal variable, though, so this is not an identity
+/// round trip for such facts: a caller that must reason over held terms again hands
+/// them over as terms instead (`reason_n3_terms_with_facts`, the incremental fallback).
 pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> String {
+    let facts: Vec<&[Term; 3]> = facts.collect();
+    let names = universal_names_in(facts.iter().copied());
     let mut out = String::new();
     for f in facts {
-        write_statement(f, &mut out);
+        write_statement_named(f, &names, &mut out);
     }
     out
 }
@@ -217,15 +227,30 @@ pub enum RuleKind {
 ///
 /// The premise-blank rewrite the parser applies is undone first — see the module docs — so
 /// a `RuleVars::N3` round trip yields an equivalent rule.
+///
+/// Universals are named collision-free within `r` alone. A caller writing several rules
+/// and facts into ONE document uses [`write_rule_named`] with a document-wide map instead.
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) {
+    write_rule_named(r, kind, vars, &universal_names(r), out);
+}
+
+/// As [`write_rule`], naming each `@forAll` universal per `names` — a map
+/// [`universal_names_in`] built over EVERYTHING written into the same document, so one
+/// universal gets one name in every rule and fact that carries it.
+pub(super) fn write_rule_named(
+    r: &Rule,
+    kind: RuleKind,
+    vars: RuleVars,
+    names: &HashMap<String, String>,
+    out: &mut String,
+) {
     let (left, arrow, right) = match kind {
         RuleKind::Forward => (&r.premise, " => ", &r.conclusion),
         RuleKind::Backward => (&r.conclusion, " <= ", &r.premise),
     };
-    let names = universal_names(r);
-    write_formula(left, vars, &names, out);
+    write_formula(left, vars, names, out);
     out.push_str(arrow);
-    write_formula(right, vars, &names, out);
+    write_formula(right, vars, names, out);
     out.push_str(" .\n");
 }
 

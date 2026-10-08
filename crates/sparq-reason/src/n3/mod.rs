@@ -293,9 +293,17 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
     let (facts, _steps) = run_closure(parsed, None, None, StepMode::None);
-    // `@forAll` universals inside formula-valued facts are renamed against EVERY variable
-    // name in the closure, so a declared `:x` never merges with a source `?x` (GH #5391).
-    let names = serialize::universal_names_in(facts.all.iter());
+    // ONE renaming of the `@forAll` universals for the whole output document — closure
+    // facts and every echoed forward and backward rule — allocated against EVERY variable
+    // name in all of them. A declared `:x` then never merges with a source `?x` (GH #5391),
+    // and a universal shared between a fact and a rule keeps one name in both, so
+    // re-reasoning the output compares them as the same term (GH #6701 review round 2).
+    let names = serialize::universal_names_in(
+        facts
+            .all
+            .iter()
+            .chain(rules.iter().chain(&backward_rules).flat_map(|r| r.premise.iter().chain(&r.conclusion))),
+    );
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -308,10 +316,10 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     statements.sort_unstable();
     let mut out = statements.concat();
     for r in &rules {
-        serialize::write_rule(r, RuleKind::Forward, vars, &mut out);
+        serialize::write_rule_named(r, RuleKind::Forward, vars, &names, &mut out);
     }
     for r in &backward_rules {
-        serialize::write_rule(r, RuleKind::Backward, vars, &mut out);
+        serialize::write_rule_named(r, RuleKind::Backward, vars, &names, &mut out);
     }
     Ok(out)
 }
@@ -625,8 +633,9 @@ fn stratum_blanks(t: &[Term; 3], prefix: &str) -> [Term; 3] {
 #[allow(clippy::type_complexity)]
 pub(crate) fn reason_n3_terms_proof(
     src: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
-    let parsed = parser::parse(src)?;
+    let parsed = parser::parse_with_extra(src, "", extra)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
     Ok((facts.all, steps))
 }
@@ -668,6 +677,26 @@ pub fn reason_n3_terms_with_resolver(
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
     let (facts, steps) = run_closure(parsed, resolver, None, StepMode::Conclusions);
+    Ok(N3Closure {
+        facts: facts.all.into_iter().collect(),
+        derived: steps.into_iter().map(|(g, _, _)| g).collect(),
+        n_rules,
+        n_backward_rules,
+    })
+}
+
+/// The term-level closure of the rules document `src` plus `extra` statements handed over
+/// AS TERMS ([`parser::parse_with_extra`]) — the lossless re-reasoning entry point of the
+/// incremental N3 fallback. `extra` is classified exactly as statements written at the end
+/// of `src` would be (so `log:implies`-family triples still become rules), but no term is
+/// serialized, so `@forAll` universals keep their identity.
+pub(crate) fn reason_n3_terms_with_facts(
+    src: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+) -> Result<N3Closure, String> {
+    let parsed = parser::parse_with_extra(src, "", extra)?;
+    let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::Conclusions);
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),

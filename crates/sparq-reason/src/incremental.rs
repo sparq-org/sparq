@@ -2238,13 +2238,6 @@ fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usiz
     out
 }
 
-// ---- serialization (the fallback / oracle path) --------------------------------------------
-//
-// [OPUS-5] sq-xqchl.2 — the writer itself now lives in `n3::serialize`, shared with the
-// rule writer that echoes rules back into an EYE `--pass-all` document. One definition, so
-// a serializer and its parser cannot drift apart.
-pub(crate) use crate::n3::serialize::serialize_facts as n3_serialize;
-
 // ---- the graph -----------------------------------------------------------------------------
 
 impl MaterializedN3Graph {
@@ -2335,9 +2328,11 @@ impl MaterializedN3Graph {
             }
         }
         self.mode = N3Mode::Fallback;
-        let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
-        let closure = crate::n3::reason_n3_terms(&src, None)
-            .expect("re-serialized base must re-parse (serializer bug)");
+        // The base goes in AS TERMS, not re-serialized text: an `@forAll` universal has no
+        // surface spelling that re-parses to the same variable, and a rename could merge it
+        // with another variable of the same formula (GH #6701 review round 2).
+        let closure = crate::n3::reason_n3_terms_with_facts(&self.rules_src, self.base.iter().cloned())
+            .expect("the rules document parsed when the graph was built");
         self.fallback_closure = closure.facts.into_iter().collect();
     }
 

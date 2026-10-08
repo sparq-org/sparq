@@ -1125,12 +1125,14 @@ impl MaterializedN3Graph {
             let root = b.push(fact.clone().map(|t| n3_term_string(&t)), "asserted", vec![])?;
             return Some(b.finish(root));
         }
-        // Deterministic re-derivation: serialize the base SORTED so rule-firing order (and
-        // therefore the chosen witness) is stable across calls.
-        let mut lines: Vec<String> = self.base.iter().map(|f| n3_serialize(std::iter::once(f))).collect();
-        lines.sort_unstable();
-        let src = format!("{}\n{}", self.rules_src, lines.concat());
-        let (_facts, steps) = crate::n3::reason_n3_terms_proof(&src).ok()?;
+        // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
+        // therefore the chosen witness) is stable across calls — as terms, not re-parsed
+        // text, so `@forAll` universals keep their identity (see `rematerialize`).
+        let mut keyed: Vec<(String, &[N3Term; 3])> =
+            self.base.iter().map(|f| (crate::n3::serialize::serialize_facts(std::iter::once(f)), f)).collect();
+        keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let (_facts, steps) =
+            crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone())).ok()?;
         // One step per derived fact (first derivation wins).
         let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
         for (conclusion, rule, premises) in &steps {
