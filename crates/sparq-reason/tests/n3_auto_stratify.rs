@@ -392,3 +392,36 @@ fn incremental_n3_falls_back_to_the_stratified_engine() {
     assert!(!g.contains(&t("s", "allowedBy", "h")));
     assert!(g.contains(&t("s", "prohibitedIn", "h")));
 }
+
+/// A self-negating backward rule supplied by the QUERY document (not the data document)
+/// must be refused like one in the data: the evaluated rule set is data plus query.
+#[test]
+fn query_supplied_backward_negation_cycle_is_rejected_at_both_query_entry_points() {
+    let query = format!(
+        "{PRE}{{ :r :blocked :g }} <= {{ ?s log:notIncludes {{ :r :blocked :g }} }} .\n\
+         {{ ?s log:notIncludes {{ :r :blocked :g }} }} => {{ :r :permittedBy :g }} ."
+    );
+    let e = reason_n3_query_terms(PRE, &query).expect_err("query-supplied cycle refused");
+    assert!(
+        e.contains("cycle") && e.contains("<http://ex/blocked>"),
+        "{e}"
+    );
+    assert!(sparq_reason::reason_n3_query(&mut Dict::new(), PRE, &query).is_err());
+    // The same backward rule split across the two documents is refused too.
+    let data =
+        format!("{PRE}{{ :r :blocked :g }} <= {{ ?s log:notIncludes {{ :r :blocked :g }} }} .");
+    let q = format!("{PRE}{{ :r :blocked :g }} => {{ :r :seen :g }} .");
+    assert!(reason_n3_query_terms(&data, &q).is_err());
+}
+
+/// A query rule's conclusions are projected, never added to the store, so a query that
+/// concludes a predicate the data negates is no cycle.
+#[test]
+fn query_conclusions_do_not_feed_back_into_the_analysis() {
+    let data = format!(
+        "{PRE}:a :p :b .\n{{ :a :p :b . ?s log:notIncludes {{ :a :q :b }} }} => {{ :a :r :b }} ."
+    );
+    let q = format!("{PRE}{{ :a :r :b }} => {{ :a :q :b }} .");
+    let out = reason_n3_query_terms(&data, &q).expect("no cycle through a projection");
+    assert_eq!(out, vec![t("a", "q", "b")]);
+}

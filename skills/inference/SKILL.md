@@ -117,6 +117,8 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String>;
 // an answer (unlike --pass-only-new). The premise uses the chainer's own matcher, so builtins,
 // quoted `{ … }` formulae and `( … )` lists all work. The query document's FACTS are not loaded
 // as data; its `<=` rules ARE available to the premise. No forward rule => error, not "".
+// Stratification covers the evaluated set (data rules + both documents' `<=` rules + query
+// premises): a negation cycle a query-supplied `<=` rule closes is an error.
 pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term;3]>, String>; // term-level
 pub enum RuleVars { N3, VarIris }  // `?x` (re-parses as the same rule, so re-running is a

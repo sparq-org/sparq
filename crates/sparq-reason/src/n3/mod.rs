@@ -375,6 +375,11 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
 /// query conclusion are existentials, instantiated fresh once per distinct conclusion-relevant
 /// binding — the same quant-implies semantics [`reason_n3`] gives a document rule.
 ///
+/// Store-scoped negation is stratified as in [`reason_n3`], over the rule set the call
+/// evaluates: the data document's rules plus the query document's backward rules and
+/// forward premises. A negation cycle in it, including one a query-supplied backward rule
+/// closes, is an error.
+///
 /// Errors when either document fails to parse, or when the query document has no forward rule
 /// (a fact-only or backward-only query document has nothing to project — fail loudly rather
 /// than return an empty answer that reads like "the query matched nothing").
@@ -403,6 +408,21 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
     for r in &mut backward {
         r.premise = order_premise(&r.premise);
     }
+    // Stratification check over the rule set this call actually evaluates, before any
+    // matching: the data document's forward rules, the backward rules of BOTH documents,
+    // and the query's forward rules as consumers. A query conclusion is projected, never
+    // added to the store, so those rules produce nothing. A negation cycle anywhere in it
+    // (e.g. a self-negating backward rule supplied by the query) is an error.
+    let forward: Vec<Rule> = data_parsed
+        .rules
+        .iter()
+        .cloned()
+        .chain(query_parsed.rules.iter().map(|r| Rule {
+            premise: r.premise.clone(),
+            conclusion: Vec::new(),
+        }))
+        .collect();
+    strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     let (facts, _steps, _) =
         run_closure(data_parsed, None, None, StepMode::None, NegationCycles::Reject)?;
     let mut bw = BwCtx::new(&backward);
