@@ -10,6 +10,12 @@
 //!   URI. The controlled identifier document is fetched from the subject, its `id` must be the
 //!   subject, and `kid` must name a method of its `authentication` relationship (embedded or
 //!   referenced) that the subject controls and that is neither revoked nor expired.
+//! - **OpenID Connect** (`lws10-authn-openid`): an ID Token. The subject's identity document must
+//!   name the token's issuer, as an `lws:OpenIdProvider` service or (Solid-OIDC, as the Community
+//!   Solid Server accepts) with `solid:oidcIssuer`; the issuer's key comes from OpenID Connect
+//!   Discovery; `azp` names the client. A Solid-OIDC ID Token (one addressed to `solid`, or bound
+//!   to a key by `cnf.jkt`) is exchanged only with a DPoP proof of that key on the token request
+//!   (RFC 9449 section 4.3, see [`check_dpop`]): a copied ID Token is worth nothing without it.
 //!
 //! Self-issued credentials need `sub = iss = client_id`, an `aud` that includes this authorization
 //! server, an `exp` in the future and an `iat` not ahead of now. `alg: none` is always refused.
@@ -20,20 +26,175 @@
 //! itself), the client's resolver hands out public addresses only, so the connection goes where
 //! the check looked, and no proxy is used.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 use serde_json::Value;
 
 use super::jose::{self, Jws};
-use super::LwsConfig;
+use super::{has_type, is_uri, LwsConfig, LWS_NS};
 
 pub const JWT_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:jwt";
+pub const ID_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:id_token";
 
 /// Allowed clock skew, in seconds, for subject token times (the reference's).
 pub const SKEW_SECS: i64 = 60;
 
 /// Largest identity document, discovery document or JWKS read.
 const MAX_DOC: usize = 1024 * 1024;
+
+const SOLID_OIDC_ISSUER: &str = "http://www.w3.org/ns/solid/terms#oidcIssuer";
+const CID_SERVICE: &str = "https://www.w3.org/ns/cid/v1#service";
+const CID_SERVICE_ENDPOINT: &str = "https://www.w3.org/ns/cid/v1#serviceEndpoint";
+const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+
+/// How long a DPoP proof's `iat` may lie from now, in seconds.
+pub const DPOP_WINDOW_SECS: i64 = 60;
+
+/// Most DPoP proof ids remembered at once; past it (after the expired ones are dropped) a new
+/// proof is refused rather than remembered, so replay protection never silently lapses.
+const MAX_DPOP_JTIS: usize = 65_536;
+
+/// How many of an OpenID Provider's keys an ID Token's signature is tried against.
+const MAX_UNNAMED_KEYS: usize = 8;
+
+/// How many live proof ids one key may hold in the replay cache: a client presents a proof per
+/// token request, so a key with more than this many in one window is refused rather than let it
+/// crowd out every other key.
+const MAX_DPOP_JTIS_PER_KEY: usize = 32;
+
+/// The DPoP proof ids (`jti`) seen at the token endpoint, by the key that signed them, until
+/// their proofs are too old to be accepted anyway. Expired entries leave in expiry order, a few at
+/// a time as new ones arrive, so no request scans the whole cache.
+#[derive(Default)]
+pub struct DpopReplay(std::sync::Mutex<Replay>);
+
+#[derive(Default)]
+struct Replay {
+    seen: std::collections::HashMap<(String, String), i64>,
+    by_key: std::collections::HashMap<String, usize>,
+    expiry: std::collections::BinaryHeap<std::cmp::Reverse<(i64, String, String)>>,
+}
+
+impl DpopReplay {
+    /// Remember `jti` from the key `jkt` until `until`; `false` when it was seen already (a
+    /// replay), or there is no room: for this key, or at all. Fails closed: an entry is never
+    /// evicted before it expires.
+    fn first_use(&self, jkt: &str, jti: &str, until: i64, now: i64) -> bool {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let Replay {
+            seen,
+            by_key,
+            expiry,
+        } = &mut *guard;
+        while let Some(std::cmp::Reverse((t, _, _))) = expiry.peek() {
+            if *t > now {
+                break;
+            }
+            let Some(std::cmp::Reverse((_, k, j))) = expiry.pop() else {
+                break;
+            };
+            seen.remove(&(k.clone(), j));
+            if let Some(n) = by_key.get_mut(&k) {
+                *n -= 1;
+                if *n == 0 {
+                    by_key.remove(&k);
+                }
+            }
+        }
+        let entry = (jkt.to_string(), jti.to_string());
+        if seen.contains_key(&entry)
+            || seen.len() >= MAX_DPOP_JTIS
+            || by_key.get(jkt).is_some_and(|n| *n >= MAX_DPOP_JTIS_PER_KEY)
+        {
+            return false;
+        }
+        seen.insert(entry, until);
+        *by_key.entry(jkt.to_string()).or_default() += 1;
+        expiry.push(std::cmp::Reverse((until, jkt.to_string(), jti.to_string())));
+        true
+    }
+}
+
+/// What the token request carries for proof of possession: its `DPoP` header and the replay
+/// store the proofs' ids go into.
+pub struct DpopContext<'a> {
+    pub proof: Option<&'a str>,
+    pub replay: &'a DpopReplay,
+}
+
+/// The `cnf.jkt` a token is bound to, if any.
+fn bound_jkt(jws: &Jws) -> Option<&str> {
+    jws.claims
+        .get("cnf")
+        .and_then(|c| c.get("jkt"))
+        .and_then(Value::as_str)
+}
+
+/// RFC 9449 section 4.3: `proof` is a DPoP proof JWT (`typ` `dpop+jwt`, an asymmetric `alg`, a
+/// public `jwk` it verifies with) for a POST to `htu`, issued within [`DPOP_WINDOW_SECS`] of `now`,
+/// with a `jti` not seen before, by the key whose RFC 7638 thumbprint is `jkt`.
+pub fn check_dpop(
+    proof: Option<&str>,
+    htu: &str,
+    jkt: &str,
+    now: i64,
+    replay: &DpopReplay,
+) -> Result<(), String> {
+    let proof = proof.ok_or("a DPoP-bound ID Token needs a DPoP proof on the token request")?;
+    let jws = Jws::parse(proof).ok_or("the DPoP proof is not a JWT")?;
+    if jws.typ() != Some("dpop+jwt") {
+        return Err("the DPoP proof's typ is not dpop+jwt".into());
+    }
+    if !matches!(jws.alg(), Some("ES256" | "RS256" | "EdDSA")) {
+        return Err("the DPoP proof's alg is not a supported asymmetric one".into());
+    }
+    let jwk = jws
+        .header
+        .get("jwk")
+        .filter(|k| k.is_object())
+        .ok_or("the DPoP proof carries no jwk")?;
+    if ["d", "p", "q", "dp", "dq", "qi", "k"]
+        .iter()
+        .any(|m| jwk.get(m).is_some())
+    {
+        return Err("the DPoP proof's jwk is not a public key".into());
+    }
+    if !jws.verify_jwk(jwk) {
+        return Err("the DPoP proof's signature does not verify".into());
+    }
+    if jose::thumbprint(jwk) != jkt {
+        return Err("the DPoP proof is not signed by the key the ID Token is bound to".into());
+    }
+    if jws.claim_str("htm") != Some("POST") {
+        return Err("the DPoP proof's htm is not POST".into());
+    }
+    let same_target = |a: &str, b: &str| {
+        let strip = |u: &str| {
+            url::Url::parse(u).ok().map(|mut u| {
+                u.set_query(None);
+                u.set_fragment(None);
+                u
+            })
+        };
+        strip(a).is_some_and(|a| Some(a) == strip(b))
+    };
+    if !jws.claim_str("htu").is_some_and(|u| same_target(u, htu)) {
+        return Err("the DPoP proof's htu is not the token endpoint".into());
+    }
+    let iat = jws.claim_time("iat").ok_or("the DPoP proof has no iat")?;
+    if (now - iat).abs() > DPOP_WINDOW_SECS {
+        return Err("the DPoP proof is not fresh".into());
+    }
+    let jti = jws
+        .claim_str("jti")
+        .filter(|j| !j.is_empty() && j.len() <= 256)
+        .ok_or("the DPoP proof has no jti")?;
+    if !replay.first_use(jkt, jti, iat + DPOP_WINDOW_SECS + 1, now) {
+        return Err("the DPoP proof was used before".into());
+    }
+    Ok(())
+}
 
 /// Who a valid subject token authenticates, and the client presenting it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +210,7 @@ pub async fn verify(
     http: &reqwest::Client,
     token: &str,
     token_type: &str,
+    dpop: &DpopContext<'_>,
 ) -> Result<Verified, String> {
     match token_type {
         JWT_TOKEN_TYPE => {
@@ -62,6 +224,7 @@ pub async fn verify(
                 cid(cfg, http, &jws).await
             }
         }
+        ID_TOKEN_TYPE => oidc(cfg, http, &parse(token)?, dpop).await,
         other => Err(format!("unsupported subject_token_type {other}")),
     }
 }
@@ -444,6 +607,302 @@ pub fn parse_datetime(s: &str) -> Option<i64> {
     Some(days * 86_400 + h * 3600 + mi * 60 + se - offset)
 }
 
+// ---------------------------------------------------------------- OpenID Connect
+
+/// The client an ID Token was issued to: its `azp`, which becomes the access token's `client_id`
+/// and so MUST be a URI (core section 5.2.3).
+pub fn id_token_client(jws: &Jws) -> Result<String, String> {
+    let azp = jws
+        .claim_str("azp")
+        .filter(|s| !s.is_empty())
+        .ok_or("the ID Token names no azp, so the client it was issued to is unknown")?;
+    if !is_uri(azp) {
+        return Err("the ID Token's azp is not a URI".into());
+    }
+    Ok(azp.to_string())
+}
+
+async fn oidc(
+    cfg: &LwsConfig,
+    http: &reqwest::Client,
+    jws: &Jws,
+    dpop: &DpopContext<'_>,
+) -> Result<Verified, String> {
+    let issuer = jws
+        .claim_str("iss")
+        .filter(|s| !s.is_empty())
+        .ok_or("an ID Token needs iss and sub")?
+        .to_string();
+    let sub = jws
+        .claim_str("sub")
+        .filter(|s| !s.is_empty())
+        .ok_or("an ID Token needs iss and sub")?;
+    // Solid-OIDC ID Tokens name the agent in `webid` when `sub` is not a URL.
+    let subject = match jws.claim_str("webid") {
+        Some(w) if !is_http_url(sub) && is_http_url(w) => w.to_string(),
+        _ => sub.to_string(),
+    };
+    let azp = id_token_client(jws)?;
+    check_times(jws, jose::now_secs())?;
+    if !is_http_url(&subject) || !is_http_url(&issuer) {
+        return Err("the subject and issuer of an ID Token must be http(s) URLs".into());
+    }
+    let audience_ok = addressed_to_us(cfg, jws);
+    let (content_type, body) = fetch(
+        cfg,
+        http,
+        &subject,
+        "application/ld+json, application/cid+json, application/json;q=0.9, text/turtle;q=0.8",
+    )
+    .await?;
+    let named = names_issuer(&content_type, &body, &subject, &issuer);
+    match named {
+        Some(IssuerLink::OpenIdProvider) if audience_ok => {}
+        // Solid-OIDC ID Tokens are addressed to `solid` rather than to each authorization server.
+        Some(IssuerLink::SolidOidcIssuer)
+            if audience_ok || jws.audiences().iter().any(|a| a == "solid") => {}
+        Some(_) => return Err("aud does not include this authorization server".into()),
+        None => {
+            return Err(format!(
+                "the subject's identity document names no OpenID Provider {issuer}"
+            ))
+        }
+    }
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        issuer.trim_end_matches('/')
+    );
+    let (_, body) = fetch(cfg, http, &discovery_url, "application/json").await?;
+    let discovery: Value = serde_json::from_slice(&body)
+        .map_err(|_| "the OpenID Provider's discovery document is not JSON")?;
+    if !discovery
+        .get("issuer")
+        .and_then(Value::as_str)
+        .is_some_and(|i| same_issuer(i, &issuer))
+    {
+        return Err("the OpenID Provider's discovery document names another issuer".into());
+    }
+    let jwks_uri = discovery
+        .get("jwks_uri")
+        .and_then(Value::as_str)
+        .ok_or("the OpenID Provider's discovery document names no jwks_uri")?;
+    let (_, body) = fetch(
+        cfg,
+        http,
+        jwks_uri,
+        "application/jwk-set+json, application/json",
+    )
+    .await?;
+    let jwks: Value =
+        serde_json::from_slice(&body).map_err(|_| "the OpenID Provider's JWKS does not parse")?;
+    let keys = jwks
+        .get("keys")
+        .and_then(Value::as_array)
+        .ok_or("the OpenID Provider's JWKS has no keys")?;
+    // Each candidate costs a signature verification, and the provider (any issuer an identity
+    // document names) chooses how many keys it publishes: a token without a `kid` is tried
+    // against a few of them only, as is a `kid` the set repeats.
+    let candidates: Vec<&Value> = match jws.kid() {
+        Some(kid) => keys
+            .iter()
+            .filter(|k| k.get("kid").and_then(Value::as_str) == Some(kid))
+            .take(MAX_UNNAMED_KEYS)
+            .collect(),
+        None => keys.iter().take(MAX_UNNAMED_KEYS).collect(),
+    };
+    if candidates.is_empty() {
+        return Err(format!(
+            "the OpenID Provider publishes no key {}",
+            jws.kid().unwrap_or_default()
+        ));
+    }
+    if !matches!(jws.alg(), Some("ES256" | "RS256" | "EdDSA")) {
+        return Err(format!(
+            "unsupported ID Token alg {}",
+            jws.alg().unwrap_or_default()
+        ));
+    }
+    if !candidates.iter().any(|k| {
+        k.get("use")
+            .and_then(Value::as_str)
+            .is_none_or(|u| u == "sig")
+            && jws.verify_jwk(k)
+    }) {
+        return Err("the ID Token's signature does not verify".into());
+    }
+    // A Solid-OIDC ID Token is DPoP-bound: whoever presents it must prove the key.
+    let solid = jws.audiences().iter().any(|a| a == "solid");
+    match bound_jkt(jws) {
+        Some(jkt) => check_dpop(
+            dpop.proof,
+            &cfg.absolute(super::AS_TOKEN_PATH),
+            jkt,
+            jose::now_secs(),
+            dpop.replay,
+        )?,
+        None if solid => {
+            return Err("a Solid-OIDC ID Token must be bound to a key (cnf.jkt)".into());
+        }
+        None => {}
+    }
+    Ok(Verified {
+        subject,
+        client: azp,
+    })
+}
+
+fn is_http_url(s: &str) -> bool {
+    (s.starts_with("https://") || s.starts_with("http://")) && url::Url::parse(s).is_ok()
+}
+
+fn same_issuer(a: &str, b: &str) -> bool {
+    a.trim_end_matches('/') == b.trim_end_matches('/')
+}
+
+/// How a subject's identity document names its OpenID Provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssuerLink {
+    /// A controlled identifier `service` typed `lws:OpenIdProvider`.
+    OpenIdProvider,
+    /// A Solid WebID's `solid:oidcIssuer`.
+    SolidOidcIssuer,
+}
+
+/// Whether the identity document of `subject` (a compact CID JSON document, or Turtle) names
+/// `issuer` as its OpenID Provider.
+pub fn names_issuer(
+    content_type: &str,
+    body: &[u8],
+    subject: &str,
+    issuer: &str,
+) -> Option<IssuerLink> {
+    if let Ok(doc) = serde_json::from_slice::<Value>(body) {
+        if doc
+            .get("id")
+            .or_else(|| doc.get("@id"))
+            .and_then(Value::as_str)
+            != Some(subject)
+        {
+            return None;
+        }
+        let services = match doc.get("service") {
+            Some(Value::Array(a)) => a.as_slice(),
+            Some(o @ Value::Object(_)) => std::slice::from_ref(o),
+            _ => &[],
+        };
+        let provider = services.iter().take(MAX_IDENTITY_SERVICES).any(|s| {
+            s.get("type").is_some_and(|t| has_type(t, "OpenIdProvider"))
+                && match s.get("serviceEndpoint") {
+                    Some(Value::String(e)) => same_issuer(e, issuer),
+                    Some(Value::Array(a)) => a
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .any(|e| same_issuer(e, issuer)),
+                    _ => false,
+                }
+        });
+        if provider {
+            return Some(IssuerLink::OpenIdProvider);
+        }
+        let solid = ["solid:oidcIssuer", "oidcIssuer", SOLID_OIDC_ISSUER]
+            .iter()
+            .any(|k| match doc.get(*k) {
+                Some(Value::String(e)) => same_issuer(e, issuer),
+                Some(Value::Object(o)) => o
+                    .get("@id")
+                    .or_else(|| o.get("id"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|e| same_issuer(e, issuer)),
+                Some(Value::Array(a)) => a.iter().any(|v| {
+                    v.as_str()
+                        .or_else(|| v.get("@id").or_else(|| v.get("id")).and_then(Value::as_str))
+                        .is_some_and(|e| same_issuer(e, issuer))
+                }),
+                _ => false,
+            });
+        return solid.then_some(IssuerLink::SolidOidcIssuer);
+    }
+    let ct = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    if !(ct == "text/turtle"
+        || ct == "application/n-triples"
+        || ct.is_empty()
+        || ct == "text/plain")
+    {
+        return None;
+    }
+    let base = subject.split('#').next().unwrap_or(subject);
+    let parser = oxttl::TurtleParser::new().with_base_iri(base).ok()?;
+    // The document is the subject's to write (and is read before any signature is checked), so
+    // the work is bounded: so many triples are read, so many services looked at, and the triples
+    // are indexed by subject once, so each service costs only its own triples.
+    // The expanded terms are bounded too (see [`super::expansion_budget`]): a document whose
+    // prefixes expand past it is refused.
+    let mut budget = super::expansion_budget(body.len());
+    let mut triples: Vec<oxrdf::Triple> = Vec::new();
+    for t in parser.for_slice(body).filter_map(Result::ok) {
+        budget = budget.checked_sub(super::triple_bytes(&t))?;
+        triples.push(t);
+        if triples.len() == MAX_IDENTITY_TRIPLES {
+            break;
+        }
+    }
+    let mut by_subject: HashMap<&oxrdf::NamedOrBlankNode, Vec<&oxrdf::Triple>> = HashMap::new();
+    for t in &triples {
+        by_subject.entry(&t.subject).or_default().push(t);
+    }
+    fn iri(t: &oxrdf::Term) -> Option<&str> {
+        match t {
+            oxrdf::Term::NamedNode(n) => Some(n.as_str()),
+            _ => None,
+        }
+    }
+    let me = oxrdf::NamedOrBlankNode::NamedNode(oxrdf::NamedNode::new(subject).ok()?);
+    let of_subject = by_subject.get(&me).map(Vec::as_slice).unwrap_or_default();
+    if of_subject.iter().any(|t| {
+        t.predicate.as_str() == SOLID_OIDC_ISSUER
+            && iri(&t.object).is_some_and(|o| same_issuer(o, issuer))
+    }) {
+        return Some(IssuerLink::SolidOidcIssuer);
+    }
+    let provider_type = format!("{LWS_NS}OpenIdProvider");
+    for t in of_subject
+        .iter()
+        .filter(|t| t.predicate.as_str() == CID_SERVICE)
+        .take(MAX_IDENTITY_SERVICES)
+    {
+        let service = match &t.object {
+            oxrdf::Term::NamedNode(n) => oxrdf::NamedOrBlankNode::NamedNode(n.clone()),
+            oxrdf::Term::BlankNode(b) => oxrdf::NamedOrBlankNode::BlankNode(b.clone()),
+            _ => continue,
+        };
+        let about = by_subject
+            .get(&service)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let typed = about.iter().any(|u| {
+            u.predicate.as_str() == RDF_TYPE && iri(&u.object) == Some(provider_type.as_str())
+        });
+        let endpoint = about.iter().any(|u| {
+            u.predicate.as_str() == CID_SERVICE_ENDPOINT
+                && iri(&u.object).is_some_and(|o| same_issuer(o, issuer))
+        });
+        if typed && endpoint {
+            return Some(IssuerLink::OpenIdProvider);
+        }
+    }
+    None
+}
+
+/// How many triples of an identity document are read.
+const MAX_IDENTITY_TRIPLES: usize = 10_000;
+/// How many services of an identity document are looked at.
+const MAX_IDENTITY_SERVICES: usize = 64;
+
 // ---------------------------------------------------------------- fetching
 
 pub use super::is_forbidden_ip;
@@ -613,6 +1072,189 @@ mod tests {
     fn claims(did: &str, cfg: &LwsConfig) -> Value {
         let now = jose::now_secs();
         json!({"sub": did, "iss": did, "client_id": did, "aud": [cfg.issuer()], "iat": now, "exp": now + 300})
+    }
+
+    fn dpop_proof(key: &jose::EcKey, htm: &str, htu: &str, iat: i64, jti: &str) -> String {
+        let mut header = serde_json::Map::new();
+        header.insert("typ".into(), json!("dpop+jwt"));
+        header.insert("jwk".into(), key.public_jwk());
+        key.sign_jws(
+            header,
+            &json!({"htm": htm, "htu": htu, "iat": iat, "jti": jti}),
+        )
+    }
+
+    /// Review finding: one key could fill the whole replay cache, refusing every other client's
+    /// proofs until its entries expired, and each refusal scanned the cache. A key holds at most
+    /// [`MAX_DPOP_JTIS_PER_KEY`] live entries, and entries leave in expiry order.
+    #[test]
+    fn one_key_cannot_fill_the_replay_cache() {
+        let replay = DpopReplay::default();
+        let now = 1_000;
+        for i in 0..MAX_DPOP_JTIS_PER_KEY {
+            assert!(replay.first_use("k", &format!("j{i}"), now + 60, now));
+        }
+        assert!(!replay.first_use("k", "one more", now + 60, now));
+        assert!(replay.first_use("other", "j0", now + 60, now));
+        // A replay stays refused while it is live; once expired its room comes back.
+        assert!(!replay.first_use("k", "j0", now + 60, now + 30));
+        assert!(replay.first_use("k", "later", now + 200, now + 61));
+        assert!(replay.first_use("k", "j0", now + 200, now + 61));
+        // Everything from before expired; only the two new entries are held.
+        assert_eq!(replay.0.lock().unwrap().seen.len(), 2);
+    }
+
+    /// Review finding: the triple limit did not bound what the triples hold: a prefix of half a
+    /// megabyte used ten thousand times expanded to gigabytes. Expanded terms are held to
+    /// [`super::super::expansion_budget`], and a document past it is refused.
+    #[test]
+    fn identity_documents_are_held_to_an_expansion_budget() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let long = format!("https://p.example/{}#", "x".repeat(100_000));
+        let uses: String = (0..200)
+            .map(|i| format!("<{s}> <urn:p> p:o{i} .\n"))
+            .collect();
+        let doc = format!("@prefix p: <{long}> .\n<{s}> <http://www.w3.org/ns/solid/terms#oidcIssuer> <{op}> .\n{uses}");
+        assert_eq!(names_issuer("text/turtle", doc.as_bytes(), s, op), None);
+        let few: String = (0..5)
+            .map(|i| format!("<{s}> <urn:p> p:o{i} .\n"))
+            .collect();
+        let doc = format!("@prefix p: <{long}> .\n<{s}> <http://www.w3.org/ns/solid/terms#oidcIssuer> <{op}> .\n{few}");
+        assert_eq!(
+            names_issuer("text/turtle", doc.as_bytes(), s, op),
+            Some(IssuerLink::SolidOidcIssuer)
+        );
+    }
+
+    #[test]
+    fn dpop_proofs_are_checked() {
+        let htu = "http://localhost:3000/.well-known/lws/token";
+        let key = jose::EcKey::generate("c");
+        let jkt = key.thumbprint();
+        let now = jose::now_secs();
+        let replay = DpopReplay::default();
+        let ok = dpop_proof(&key, "POST", htu, now, "a");
+        assert_eq!(check_dpop(Some(&ok), htu, &jkt, now, &replay), Ok(()));
+        // Replayed, missing, another key, another target or method, stale, a private jwk.
+        assert!(check_dpop(Some(&ok), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(None, htu, &jkt, now, &replay).is_err());
+        let other = jose::EcKey::generate("o");
+        let p = dpop_proof(&other, "POST", htu, now, "b");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let p = dpop_proof(&key, "POST", "http://localhost:3000/elsewhere", now, "c");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let p = dpop_proof(&key, "GET", htu, now, "d");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let p = dpop_proof(&key, "POST", htu, now - 600, "e");
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        let mut header = serde_json::Map::new();
+        header.insert("typ".into(), json!("dpop+jwt"));
+        header.insert("jwk".into(), key.private_jwk());
+        let p = key.sign_jws(
+            header,
+            &json!({"htm": "POST", "htu": htu, "iat": now, "jti": "f"}),
+        );
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        // A query on htu is ignored, as RFC 9449 says.
+        let p = dpop_proof(&key, "POST", &format!("{htu}?x=1"), now, "g");
+        assert_eq!(check_dpop(Some(&p), htu, &jkt, now, &replay), Ok(()));
+    }
+
+    /// Review finding: a Solid-OIDC ID Token (aud `solid`, bound by `cnf.jkt`) was exchanged
+    /// without any DPoP proof, so a copied ID Token was as good as the key.
+    #[tokio::test]
+    async fn solid_oidc_id_tokens_need_a_dpop_proof() {
+        let op = jose::EcKey::generate("op-key");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let alice = format!("{base}/alice");
+        let app = {
+            let (base, alice, jwks) = (
+                base.clone(),
+                alice.clone(),
+                json!({"keys": [op.public_jwk()]}),
+            );
+            axum::Router::new()
+                .route(
+                    "/alice",
+                    axum::routing::get({
+                        let body = format!("<{alice}> <{SOLID_OIDC_ISSUER}> <{base}> .");
+                        move || {
+                        let body = body.clone();
+                        async move { ([(axum::http::header::CONTENT_TYPE, "text/turtle")], body) }
+                    }}),
+                )
+                .route(
+                    "/.well-known/openid-configuration",
+                    axum::routing::get({
+                        let base = base.clone();
+                        move || {
+                            let doc = json!({"issuer": base, "jwks_uri": format!("{base}/jwks")});
+                            async move { axum::Json(doc) }
+                        }
+                    }),
+                )
+                .route(
+                    "/jwks",
+                    axum::routing::get(move || {
+                        let jwks = jwks.clone();
+                        async move { axum::Json(jwks) }
+                    }),
+                )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = cfg();
+        cfg.allow_insecure_fetch = true;
+        let http = super::super::fetch_client(&cfg).unwrap();
+        let client = jose::EcKey::generate("client");
+        let now = jose::now_secs();
+        let id_token = |cnf: bool| {
+            let mut claims = json!({"iss": base, "sub": alice, "azp": "https://app.example/",
+                "aud": ["solid"], "iat": now, "exp": now + 300});
+            if cnf {
+                claims["cnf"] = json!({"jkt": client.thumbprint()});
+            }
+            op.sign_jws(serde_json::Map::new(), &claims)
+        };
+        let replay = DpopReplay::default();
+        let exchange = |token: String, proof: Option<String>| {
+            let (cfg, http, replay) = (&cfg, &http, &replay);
+            async move {
+                let ctx = DpopContext {
+                    proof: proof.as_deref(),
+                    replay,
+                };
+                verify(cfg, http, &token, ID_TOKEN_TYPE, &ctx).await
+            }
+        };
+        let htu = cfg.absolute(super::super::AS_TOKEN_PATH);
+        // Without a proof, or with one by another key: refused.
+        let err = exchange(id_token(true), None).await.unwrap_err();
+        assert!(err.contains("DPoP"), "{err}");
+        let stolen = dpop_proof(&jose::EcKey::generate("thief"), "POST", &htu, now, "t");
+        assert!(exchange(id_token(true), Some(stolen)).await.is_err());
+        // A Solid-OIDC token that is not bound to a key: refused.
+        let proof = dpop_proof(&client, "POST", &htu, now, "u");
+        assert!(exchange(id_token(false), Some(proof)).await.is_err());
+        // With the key's proof: exchanged, once.
+        let proof = dpop_proof(&client, "POST", &htu, now, "v");
+        let ok = exchange(id_token(true), Some(proof.clone())).await.unwrap();
+        assert_eq!(ok.subject, alice);
+        assert!(exchange(id_token(true), Some(proof)).await.is_err());
+    }
+
+    #[test]
+    fn id_token_azp_must_be_a_uri() {
+        let key = jose::EcKey::generate("x");
+        let with = |azp: Value| sign(&key, "x", json!({"azp": azp}));
+        assert_eq!(
+            id_token_client(&with(json!("https://app.example/id"))).unwrap(),
+            "https://app.example/id"
+        );
+        assert!(id_token_client(&with(json!("my-app"))).is_err());
+        assert!(id_token_client(&with(json!(""))).is_err());
+        assert!(id_token_client(&sign(&key, "x", json!({}))).is_err());
     }
 
     #[test]
@@ -932,6 +1574,100 @@ mod tests {
         ] {
             assert_eq!(parse_datetime(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn issuer_links() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let doc = json!({"id": s, "service": [{"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}]});
+        let body = doc.to_string();
+        assert_eq!(
+            names_issuer("application/json", body.as_bytes(), s, op),
+            Some(IssuerLink::OpenIdProvider)
+        );
+        assert_eq!(
+            names_issuer(
+                "application/json",
+                body.as_bytes(),
+                s,
+                "https://evil.example"
+            ),
+            None
+        );
+        let ttl = format!("<{s}> <{SOLID_OIDC_ISSUER}> <{op}/> .");
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            Some(IssuerLink::SolidOidcIssuer)
+        );
+        let ttl = format!(
+            "@prefix cid: <https://www.w3.org/ns/cid/v1#> . <{s}> cid:service [ a <https://www.w3.org/ns/lws#OpenIdProvider> ; cid:serviceEndpoint <{op}> ] ."
+        );
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            Some(IssuerLink::OpenIdProvider)
+        );
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), "https://bob.example/id", op),
+            None
+        );
+    }
+
+    /// Review finding: each `cid:service` link scanned every triple of the document, with an
+    /// allocation per comparison, so a document of many services was quadratic work, done before
+    /// any signature is checked. The triples are indexed once and the work is capped.
+    #[test]
+    fn issuer_lookup_is_bounded() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let provider = format!(
+            "<{s}> cid:service [ a <https://www.w3.org/ns/lws#OpenIdProvider> ; cid:serviceEndpoint <{op}> ] ."
+        );
+        let filler = |n: usize| {
+            (0..n)
+                .map(|i| format!("<{s}> cid:service _:s{i} . _:s{i} a <https://e.example/T{i}> ; <https://e.example/p> \"{i}\" .\n"))
+                .collect::<String>()
+        };
+        let doc = |services: usize, provider_first: bool| {
+            let head = "@prefix cid: <https://www.w3.org/ns/cid/v1#> .\n";
+            if provider_first {
+                format!("{head}{provider}\n{}", filler(services))
+            } else {
+                format!("{head}{}{provider}\n", filler(services))
+            }
+        };
+        // Within the caps the provider is found wherever it is.
+        let ttl = doc(MAX_IDENTITY_SERVICES - 1, false);
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            Some(IssuerLink::OpenIdProvider)
+        );
+        // Thousands of services: quick, and only the first ones are looked at.
+        let ttl = doc(3000, true);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            Some(IssuerLink::OpenIdProvider)
+        );
+        let ttl = doc(3000, false);
+        assert_eq!(names_issuer("text/turtle", ttl.as_bytes(), s, op), None);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+        // JSON: the same cap on services.
+        let mut services: Vec<Value> = (0..MAX_IDENTITY_SERVICES)
+            .map(|i| json!({"type": "Other", "serviceEndpoint": format!("https://x{i}.example")}))
+            .collect();
+        services.push(
+            json!({"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}),
+        );
+        let body = json!({"id": s, "service": services}).to_string();
+        assert_eq!(
+            names_issuer("application/json", body.as_bytes(), s, op),
+            None
+        );
     }
 
     #[test]

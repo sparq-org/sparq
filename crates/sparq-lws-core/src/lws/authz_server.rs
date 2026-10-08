@@ -8,7 +8,7 @@ use axum::response::Response;
 use serde_json::{json, Value};
 
 use super::subject_tokens;
-pub use super::subject_tokens::JWT_TOKEN_TYPE;
+pub use super::subject_tokens::{ID_TOKEN_TYPE, JWT_TOKEN_TYPE};
 use super::{
     is_uri, json_response, method_not_allowed, set, tokens, LwsRequest, LwsState, AS_JWKS_PATH,
     AS_TOKEN_PATH, JSON,
@@ -54,7 +54,7 @@ pub fn jwks(cfg: &super::LwsConfig) -> Value {
 /// excludes it, and the subject token and identifier types say which suites this server accepts.
 pub fn metadata<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
-    let token_types = vec![JWT_TOKEN_TYPE];
+    let token_types = vec![JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
     json!({
         "issuer": cfg.issuer(),
         "token_endpoint": cfg.absolute(AS_TOKEN_PATH),
@@ -93,12 +93,19 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
         );
     }
     let verified = match form.subject_token_type.as_str() {
-        JWT_TOKEN_TYPE => {
+        JWT_TOKEN_TYPE | ID_TOKEN_TYPE => {
             subject_tokens::verify(
                 &state.cfg,
                 &state.http,
                 &form.subject_token,
                 &form.subject_token_type,
+                &subject_tokens::DpopContext {
+                    // Exactly one DPoP header (RFC 9449 section 4.3).
+                    proof: (req.headers.get_all("dpop").iter().count() == 1)
+                        .then(|| req.header("dpop"))
+                        .flatten(),
+                    replay: &state.dpop_replay,
+                },
             )
             .await
         }
