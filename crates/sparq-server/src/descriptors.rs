@@ -437,7 +437,12 @@ fn sd_ntriples(
     // can discover triple-term / dir-lang support without probing. The list is pre-built (already
     // deterministic) and EMPTY in the default `Capabilities`, so a profile that opts out of the
     // version posture emits nothing here (no over-promise, byte-stable).
+    // `sd:supportedVersion` sits on the service, so it describes every advertised language.
+    // UPDATE refuses `VERSION "1.2"`, so a service that advertises Update leaves out 1.2.
     for v in &caps.sparql_versions {
+        if caps.update && v == SPARQL_VERSION_1_2 {
+            continue;
+        }
         let _ = writeln!(out, "{svc} <{}> {} .", sd("supportedVersion"), iri(v));
     }
 
@@ -930,6 +935,37 @@ mod tests {
         for r in oxttl::NTriplesParser::new().for_slice(b.as_bytes()) {
             r.expect("SD with sd:supportedVersion must be valid N-Triples");
         }
+
+        // UPDATE refuses `VERSION "1.2"`, so an Update-capable service must not claim 1.2.
+        let writable = service_description(
+            "http://host/sparql",
+            "http://host/sparql",
+            "http://host/ds",
+            &Capabilities {
+                update: true,
+                sparql_versions: CONFORMANCE_VERIFIED_VERSIONS
+                    .iter()
+                    .map(|v| (*v).to_string())
+                    .collect(),
+                ..Capabilities::default()
+            },
+            &[],
+            Some("application/n-triples"),
+        )
+        .unwrap();
+        let w = &writable.body;
+        assert!(w.contains(&format!("{sv} <{SPARQL_VERSION_1_1}>")), "{w}");
+        assert!(
+            !w.contains(SPARQL_VERSION_1_2),
+            "Update-capable service claims 1.2: {w}"
+        );
+        assert!(
+            sparq_engine::parse_update_rec2013(
+                "VERSION \"1.2\" INSERT DATA { <urn:s> <urn:p> <urn:o> }"
+            )
+            .is_err(),
+            "UPDATE accepts 1.2 now; advertise it for writable services again"
+        );
     }
 
     #[test]
