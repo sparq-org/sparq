@@ -1,6 +1,6 @@
 ---
 name: jsonld
-description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with sparq — the native, dependency-free document-level pipeline in the `sparq-jsonld` crate (expand/flatten/compact/frame/fromRdf over a JSON AST, deny-by-default document loader) and how each surface exposes it (native CLI `dump … jsonld[-compact] --context/--frame`, the HTTP server's `application/ld+json` content-negotiation, the Solid/LWS server's profile-aware expanded/compacted negotiation, the wasm `serializeCompact`, the engine's RDF-first writer matrix). Use when converting JSON-LD document forms, choosing a surface, or reasoning about the honest conformance / remote-loading posture.
+description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with sparq — the native, dependency-free document-level pipeline in the `sparq-jsonld` crate (expand/flatten/compact/frame/fromRdf over a JSON AST, deny-by-default document loader) and how each surface exposes it (native CLI `dump … jsonld[-compact] --context`; CLI framing is planned, the HTTP server's `application/ld+json` content-negotiation, the Solid/LWS server's profile-aware expanded/compacted negotiation, the wasm `serializeCompact`, the engine's RDF-first writer matrix). Use when converting JSON-LD document forms, choosing a surface, or reasoning about the honest conformance / remote-loading posture.
 license: MIT
 metadata:
   version: "0.1.0"
