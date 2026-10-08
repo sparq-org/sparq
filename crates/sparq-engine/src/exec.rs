@@ -15723,12 +15723,14 @@ pub(crate) fn set_query_base(base: Option<&str>) -> QueryBaseGuard {
 
 /// The calling thread's query base, for re-installing on rayon workers with
 /// [`query_base_worker_install`] (a worker thread has its own, empty, `QUERY_BASE`).
+#[cfg_attr(not(feature = "parallel"), allow(dead_code))]
 pub(crate) fn query_base_snapshot() -> Option<oxiri::Iri<String>> {
     QUERY_BASE.with(|b| b.borrow().clone())
 }
 
 /// Installs a [`query_base_snapshot`] on the current (worker) thread until the guard drops.
 /// Free when the query declares no BASE and the worker has none installed.
+#[cfg_attr(not(feature = "parallel"), allow(dead_code))]
 pub(crate) fn query_base_worker_install(base: &Option<oxiri::Iri<String>>) -> QueryBaseGuard {
     if base.is_none() && QUERY_BASE.with(|b| b.borrow().is_none()) {
         return QueryBaseGuard { previous: None };
