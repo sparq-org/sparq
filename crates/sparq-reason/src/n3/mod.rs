@@ -98,6 +98,8 @@ pub mod parser;
 // whole rules). Rule serialization is what lets a caller emit EYE's "closure PLUS rules"
 // output ([`reason_n3_pass_all`]) even though the chainer itself consumes rules.
 pub mod serialize;
+// Automatic stratification for store-scoped negation-as-failure (GH #6201, #5756).
+mod strata;
 
 pub use model::{Rule, Term};
 pub use serialize::{RuleKind, RuleVars};
@@ -240,11 +242,22 @@ pub struct ProofStep {
 
 /// Parse N3 `src`, run the rule closure, and return the entailed GROUND triples interned into
 /// `dict`. The rules/formulae/variables are consumed by reasoning; only ground facts remain.
+///
+/// Store-scoped negation-as-failure (`log:notIncludes`, `log:collectAllIn`, `log:forAllIn`
+/// over the current store) is STRATIFIED automatically: a rule that negates or aggregates
+/// over a predicate the same document derives runs only after every rule deriving it has
+/// reached its fixpoint. A document whose negation sits on a dependency cycle through its
+/// own conclusions cannot be stratified; it is evaluated single-pass, where that negation
+/// can see an incomplete store, and [`reason_n3_terms`] reports it in
+/// [`N3Closure::warnings`]. Dependencies are tracked per predicate (a variable predicate
+/// counts as every predicate), so negating one class of `rdf:type` from a rule that
+/// concludes another `rdf:type` is such a cycle; use distinct predicates, or
+/// [`reason_n3_stratified`] with explicit strata.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(parsed, None, None, StepMode::None);
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None);
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -252,7 +265,7 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::Full);
     intern_closure(dict, &facts, &steps)
 }
 
@@ -292,7 +305,7 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
-    let (facts, _steps) = run_closure(parsed, None, None, StepMode::None);
+    let (facts, _steps, _) = run_closure(parsed, None, None, StepMode::None);
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -363,7 +376,7 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
     for r in &mut backward {
         r.premise = order_premise(&r.premise);
     }
-    let (facts, _steps) = run_closure(data_parsed, None, None, StepMode::None);
+    let (facts, _steps, _) = run_closure(data_parsed, None, None, StepMode::None);
     let mut bw = BwCtx::new(&backward);
     bw.base = base;
 
@@ -480,12 +493,14 @@ pub struct StratifiedN3Closure {
 /// serialize/re-parse round-trip between strata (formula-valued facts, which
 /// a text round-trip cannot represent, carry over intact).
 ///
-/// This is the sound driver for the engine's NON-MONOTONIC premise operators
-/// (store-scoped `log:notIncludes`, `log:collectAllIn` / `log:forAllIn`):
-/// those are only reliable over predicates FULLY PRESENT before their stratum
-/// starts (rules containing them re-evaluate every fixpoint round but derived
-/// facts are never retracted), so derive such predicates to a fixpoint in an
-/// earlier stratum and negate/aggregate over them in a later one.
+/// Each document is itself stratified automatically (see [`reason_n3`]); explicit
+/// strata are for programs the per-predicate analysis cannot separate (a negation
+/// cycle it reports in [`N3Closure::warnings`], e.g. one class of `rdf:type`
+/// negating another) and for pipelines that already ship their rules as separate
+/// documents. The engine's NON-MONOTONIC premise operators (store-scoped
+/// `log:notIncludes`, `log:collectAllIn` / `log:forAllIn`) are reliable over
+/// predicates FULLY PRESENT before their stratum starts (derived facts are never
+/// retracted), which an earlier stratum here guarantees.
 ///
 /// Blank-node scope is PER STRATUM, exactly as if each stratum were its own
 /// re-parsed document: carried blank nodes (input blanks and minted rule
@@ -518,7 +533,7 @@ pub fn reason_n3_stratified(
             }
         }
         parsed.facts.append(&mut carried);
-        let (f, _steps) = run_closure(parsed, None, None, StepMode::None);
+        let (f, _steps, _) = run_closure(parsed, None, None, StepMode::None);
         strata_facts.push(f.all.len());
         if i + 1 < strata.len() {
             carried = f.all.iter().cloned().collect();
@@ -624,7 +639,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::Full);
     Ok((facts.all, steps))
 }
 
@@ -639,6 +654,12 @@ pub struct N3Closure {
     /// Forward (`=>`) / backward (`<=`) rule counts of the parsed document.
     pub n_rules: usize,
     pub n_backward_rules: usize,
+    /// Non-fatal diagnostics. Today: a document whose store-scoped negation
+    /// (`log:notIncludes` / `log:collectAllIn` / `log:forAllIn`) sits on a dependency
+    /// cycle through its own conclusions is NOT stratifiable; it is evaluated single-pass
+    /// and that negation may see an incomplete store (fail open). Empty for every
+    /// stratifiable document.
+    pub warnings: Vec<String>,
 }
 
 /// As [`reason_n3`], but returns the closure at the TERM level (no dictionary)
@@ -664,12 +685,13 @@ pub fn reason_n3_terms_with_resolver(
     };
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
-    let (facts, steps) = run_closure(parsed, resolver, None, StepMode::Conclusions);
+    let (facts, steps, warning) = run_closure(parsed, resolver, None, StepMode::Conclusions);
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
         n_rules,
         n_backward_rules,
+        warnings: warning.into_iter().collect(),
     })
 }
 
@@ -700,7 +722,7 @@ fn run_closure(
     // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
     visited: Option<VisitedDocs>,
     mode: StepMode,
-) -> (FactIndex, Vec<DerivationStep>) {
+) -> (FactIndex, Vec<DerivationStep>, Option<String>) {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
@@ -856,45 +878,39 @@ fn run_closure(
         }
     }
 
+    // STRATA (GH #6201, #5756): a rule that store-scope negates / aggregates over a
+    // predicate this document derives runs in a later stratum than every rule deriving it.
+    // A program with no such negation is ONE stratum and takes exactly the single-pass
+    // loop below; a cycle through negation also stays single-pass and reports a warning.
+    let strata = strata::stratify(&rules, &backward_rules);
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
-    let mut first_round = true;
-    loop {
-        let mut produced: Vec<DerivationStep> = Vec::new();
-        for (ri, rule) in rules.iter().enumerate() {
-            if let Some(&si) = trans_rules.get(&ri) {
-                // Transitivity fast path (linearized; see `TransState` above). Bypasses the
-                // generic binding machinery: the join is two adjacency lookups per delta fact.
-                let st = &trans_states[si];
-                for f in &delta {
-                    if f[1] != st.pred {
-                        continue;
-                    }
-                    // forward: Δ ⋈ GEN — extend the new path by generator edges at its end.
-                    if let Some(zs) = st.gen_out.get(&f[2]) {
-                        for z in zs {
-                            let g = [f[0].clone(), st.pred.clone(), z.clone()];
-                            if !facts.contains(&g) {
-                                let prem = if mode == StepMode::Full {
-                                    vec![f.clone(), [f[2].clone(), st.pred.clone(), z.clone()]]
-                                } else {
-                                    Vec::new()
-                                };
-                                produced.push((g, ri, prem));
-                            }
+    for stratum in 0..strata.n_strata {
+        if stratum > 0 {
+            // Stratum boundary: everything closed so far is "new" to this stratum's rules.
+            delta = facts.all.clone();
+        }
+        let mut first_round = true;
+        loop {
+            let mut produced: Vec<DerivationStep> = Vec::new();
+            for (ri, rule) in rules.iter().enumerate() {
+                if strata.rule_stratum.as_ref().is_some_and(|rs| rs[ri] != stratum) {
+                    continue;
+                }
+                if let Some(&si) = trans_rules.get(&ri) {
+                    // Transitivity fast path (linearized; see `TransState` above). Bypasses the
+                    // generic binding machinery: the join is two adjacency lookups per delta fact.
+                    let st = &trans_states[si];
+                    for f in &delta {
+                        if f[1] != st.pred {
+                            continue;
                         }
-                    }
-                    // backward: full ⋈ Δgen — a new GENERATOR edge extends every existing
-                    // path ending at its start (the po index, incl. same-round delta paths).
-                    if st.gen_set.contains(f) {
-                        if let Some(xs) = facts.po.get(&(st.pred.clone(), f[0].clone())) {
-                            for x in xs {
-                                let g = [x.clone(), st.pred.clone(), f[2].clone()];
+                        // forward: Δ ⋈ GEN — extend the new path by generator edges at its end.
+                        if let Some(zs) = st.gen_out.get(&f[2]) {
+                            for z in zs {
+                                let g = [f[0].clone(), st.pred.clone(), z.clone()];
                                 if !facts.contains(&g) {
                                     let prem = if mode == StepMode::Full {
-                                        vec![
-                                            [x.clone(), st.pred.clone(), f[0].clone()],
-                                            f.clone(),
-                                        ]
+                                        vec![f.clone(), [f[2].clone(), st.pred.clone(), z.clone()]]
                                     } else {
                                         Vec::new()
                                     };
@@ -902,119 +918,139 @@ fn run_closure(
                                 }
                             }
                         }
+                        // backward: full ⋈ Δgen — a new GENERATOR edge extends every existing
+                        // path ending at its start (the po index, incl. same-round delta paths).
+                        if st.gen_set.contains(f) {
+                            if let Some(xs) = facts.po.get(&(st.pred.clone(), f[0].clone())) {
+                                for x in xs {
+                                    let g = [x.clone(), st.pred.clone(), f[2].clone()];
+                                    if !facts.contains(&g) {
+                                        let prem = if mode == StepMode::Full {
+                                            vec![
+                                                [x.clone(), st.pred.clone(), f[0].clone()],
+                                                f.clone(),
+                                            ]
+                                        } else {
+                                            Vec::new()
+                                        };
+                                        produced.push((g, ri, prem));
+                                    }
+                                }
+                            }
+                        }
                     }
+                    continue;
                 }
-                continue;
-            }
-            let (joins, needs_full) = &rule_meta[ri];
-            let bindings: Vec<Binding> = if *needs_full || joins.is_empty() {
-                // non-monotonic / backward-supported / constant rule: full evaluation
-                // (negation + backward) every round, or round-0 only (constant).
-                if *needs_full || first_round {
-                    match_premise(&rule.premise, &facts, &bw)
-                } else {
-                    Vec::new()
-                }
-            } else {
-                // Semi-naive: union over delta-at-each-join-position (dedup via facts.insert).
-                let mut bs = Vec::new();
-                for &k in joins {
-                    bs.extend(match_premise_seeded(
-                        &rule.premise,
-                        &facts,
-                        &Binding::new(),
-                        Some((&delta, k)),
-                        &bw,
-                        BW_DEPTH,
-                    ));
-                }
-                bs
-            };
-            let (concl_blanks, concl_vars) = &concl_meta[ri];
-            for b in bindings {
-                // Fresh conclusion existentials: rename the conclusion's blanks
-                // once per distinct (rule, conclusion-binding) firing.
-                let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                    None
-                } else {
-                    let key: String = concl_vars
-                        .iter()
-                        .map(|v| format!("{:?};", b.get(v)))
-                        .collect();
-                    if !fired.insert((ri, key)) {
-                        continue; // this firing already instantiated its existentials
+                let (joins, needs_full) = &rule_meta[ri];
+                let bindings: Vec<Binding> = if *needs_full || joins.is_empty() {
+                    // non-monotonic / backward-supported / constant rule: full evaluation
+                    // (negation + backward) every round, or round-0 only (constant).
+                    if *needs_full || first_round {
+                        match_premise(&rule.premise, &facts, &bw)
+                    } else {
+                        Vec::new()
                     }
-                    sk_counter += 1;
-                    Some(
-                        concl_blanks
-                            .iter()
-                            .map(|l| {
-                                (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l))
-                            })
-                            .collect(),
-                    )
+                } else {
+                    // Semi-naive: union over delta-at-each-join-position (dedup via facts.insert).
+                    let mut bs = Vec::new();
+                    for &k in joins {
+                        bs.extend(match_premise_seeded(
+                            &rule.premise,
+                            &facts,
+                            &Binding::new(),
+                            Some((&delta, k)),
+                            &bw,
+                            BW_DEPTH,
+                        ));
+                    }
+                    bs
                 };
-                for c in &rule.conclusion {
-                    let c = match &sk {
-                        Some(map) => rename_blanks(c, map),
-                        None => c.clone(),
+                let (concl_blanks, concl_vars) = &concl_meta[ri];
+                for b in bindings {
+                    // Fresh conclusion existentials: rename the conclusion's blanks
+                    // once per distinct (rule, conclusion-binding) firing.
+                    let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
+                        None
+                    } else {
+                        let key: String = concl_vars
+                            .iter()
+                            .map(|v| format!("{:?};", b.get(v)))
+                            .collect();
+                        if !fired.insert((ri, key)) {
+                            continue; // this firing already instantiated its existentials
+                        }
+                        sk_counter += 1;
+                        Some(
+                            concl_blanks
+                                .iter()
+                                .map(|l| {
+                                    (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l))
+                                })
+                                .collect(),
+                        )
                     };
-                    if let Some(g) = ground_triple(&c, &b) {
-                        if !facts.contains(&g) {
-                            // The supporting facts: premise patterns instantiated under b that
-                            // are actual facts (excludes builtins / list structure).
-                            let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
-                                rule.premise
-                                    .iter()
-                                    .filter_map(|p| ground_triple(p, &b))
-                                    .filter(|t| facts.contains(t))
-                                    .collect()
-                            } else {
-                                Vec::new()
-                            };
-                            produced.push((g, ri, prem));
+                    for c in &rule.conclusion {
+                        let c = match &sk {
+                            Some(map) => rename_blanks(c, map),
+                            None => c.clone(),
+                        };
+                        if let Some(g) = ground_triple(&c, &b) {
+                            if !facts.contains(&g) {
+                                // The supporting facts: premise patterns instantiated under b that
+                                // are actual facts (excludes builtins / list structure).
+                                let prem: Vec<[Term; 3]> = if mode == StepMode::Full {
+                                    rule.premise
+                                        .iter()
+                                        .filter_map(|p| ground_triple(p, &b))
+                                        .filter(|t| facts.contains(t))
+                                        .collect()
+                                } else {
+                                    Vec::new()
+                                };
+                                produced.push((g, ri, prem));
+                            }
                         }
                     }
                 }
             }
-        }
-        let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
-        // Generator marking for the transitivity fast path: among this round's NEW facts on a
-        // transitive predicate, those with at least one NON-transitive-rule derivation are
-        // generators (a fact may be produced by several rules in one round — OR the flags).
-        let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
-        for (g, ri, prem) in produced {
-            let is_new = facts.insert(g.clone());
-            if is_new {
-                new_delta.insert(g.clone());
-            }
-            if !trans_states.is_empty()
-                && (is_new || new_delta.contains(&g))
-                && trans_states.iter().any(|st| st.pred == g[1])
-            {
-                *trans_new.entry(g.clone()).or_insert(false) |= !trans_rules.contains_key(&ri);
-            }
-            if is_new && mode != StepMode::None {
-                steps.push((g, ri, prem));
-            }
-        }
-        for (g, non_trans) in trans_new {
-            if !non_trans {
-                continue;
-            }
-            if let Some(st) = trans_states.iter_mut().find(|st| st.pred == g[1]) {
-                if st.gen_set.insert(g.clone()) {
-                    st.gen_out.entry(g[0].clone()).or_default().push(g[2].clone());
+            let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
+            // Generator marking for the transitivity fast path: among this round's NEW facts on a
+            // transitive predicate, those with at least one NON-transitive-rule derivation are
+            // generators (a fact may be produced by several rules in one round — OR the flags).
+            let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
+            for (g, ri, prem) in produced {
+                let is_new = facts.insert(g.clone());
+                if is_new {
+                    new_delta.insert(g.clone());
+                }
+                if !trans_states.is_empty()
+                    && (is_new || new_delta.contains(&g))
+                    && trans_states.iter().any(|st| st.pred == g[1])
+                {
+                    *trans_new.entry(g.clone()).or_insert(false) |= !trans_rules.contains_key(&ri);
+                }
+                if is_new && mode != StepMode::None {
+                    steps.push((g, ri, prem));
                 }
             }
+            for (g, non_trans) in trans_new {
+                if !non_trans {
+                    continue;
+                }
+                if let Some(st) = trans_states.iter_mut().find(|st| st.pred == g[1]) {
+                    if st.gen_set.insert(g.clone()) {
+                        st.gen_out.entry(g[0].clone()).or_default().push(g[2].clone());
+                    }
+                }
+            }
+            first_round = false;
+            if new_delta.is_empty() {
+                break;
+            }
+            delta = new_delta;
         }
-        first_round = false;
-        if new_delta.is_empty() {
-            break;
-        }
-        delta = new_delta;
     }
-    (facts, steps)
+    (facts, steps, strata.warning)
 }
 
 /// Intern a term-level closure + derivation into the dictionary ([`reason_n3`] /
@@ -1239,8 +1275,9 @@ fn match_premise_seeded(
         // solution set can grow as the closure grows, their rules re-evaluate
         // every round (`needs_full`), and derived facts are never retracted —
         // so, exactly like scoped negation, they are only sound over
-        // predicates fully present before the stratum starts
-        // ([`reason_n3_stratified`] is the stratified driver). A malformed
+        // predicates fully present before the stratum starts (`run_closure`
+        // stratifies a document automatically; [`reason_n3_stratified`] takes
+        // explicit strata). A malformed
         // subject (wrong arity, non-formula clause) FAILS the premise for
         // that binding (fail-closed).
         if let Some(op) = collect_op(&pat[1]) {
@@ -2138,7 +2175,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
     // `log:content` document active up the stack is still recognised when its own closure
     // re-imports it through this nested run.
-    let (closed, _steps) =
+    let (closed, _steps, _) =
         run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None);
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations.

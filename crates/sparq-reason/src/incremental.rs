@@ -2184,7 +2184,7 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
 }
 
 /// Iterative Tarjan SCC; emitted in DEPENDENCY-FIRST (topological) order of the condensation.
-fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usize>> {
+pub(crate) fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usize>> {
     let succ: Vec<Vec<usize>> = (0..n)
         .map(|i| edges.get(&i).map(|s| s.iter().copied().collect()).unwrap_or_default())
         .collect();

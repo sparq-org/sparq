@@ -46,10 +46,11 @@
 //!   pattern quoting a nested triple in SUBJECT position (which the term-level engine
 //!   does match) is a loud compile error here rather than a rule that never fires;
 //! * **store-scoped `log:notIncludes`** — negation as failure against the current fact
-//!   store, with the engine's no-retraction semantics. Set-equivalence with
-//!   [`crate::reason_n3`] therefore requires every negated predicate to be
-//!   **stratum-complete** (fully derived before the stratum that negates it runs) —
-//!   the same §3.5 stratification discipline the WAC/ACP pipeline already obeys;
+//!   store, with the engine's no-retraction semantics. [`compile`] stratifies the rule
+//!   set exactly as [`crate::reason_n3`] does (a rule negating a predicate the set
+//!   derives runs after the deriving rules' fixpoint; see
+//!   [`CompiledRuleSet::n_strata`] and [`CompiledRuleSet::stratification_warning`]), so
+//!   the two engines stay set-equal on stratified and on single-pass rule sets alike;
 //! * `log:uri` (both directions), `log:equalTo` / `log:notEqualTo`;
 //! * `string:concatenation` (with the engine's typed-literal value coercion),
 //!   `string:encodeForUri`, `string:scrape` (constant regex), `string:notGreaterThan`
@@ -211,6 +212,10 @@ pub struct CompiledRuleSet {
     regexes: Vec<Option<regex::Regex>>,
     facts: Vec<[u32; 3]>,
     rules: Vec<CompiledRule>,
+    /// The engine's automatic stratification (GH #6201): `None` ⇔ one stratum.
+    rule_stratum: Option<Vec<usize>>,
+    n_strata: usize,
+    strat_warning: Option<String>,
 }
 
 impl CompiledRuleSet {
@@ -222,6 +227,21 @@ impl CompiledRuleSet {
     /// Number of ground facts carried by the rule document itself.
     pub fn n_facts(&self) -> usize {
         self.facts.len()
+    }
+
+    /// Number of strata [`BoundRuleSet::eval`] runs: 1 unless a rule's store-scoped
+    /// `log:notIncludes` negates a predicate another rule of the set derives, in which
+    /// case the negating rule runs after the deriving rules reach their fixpoint — the
+    /// same automatic stratification [`crate::reason_n3`] applies.
+    pub fn n_strata(&self) -> usize {
+        self.n_strata
+    }
+
+    /// Set when the rule set negates through a dependency cycle (not stratifiable): it is
+    /// evaluated single-pass and that negation may see an incomplete store. The same
+    /// diagnostic [`crate::n3::N3Closure::warnings`] carries for the text engine.
+    pub fn stratification_warning(&self) -> Option<&str> {
+        self.strat_warning.as_deref()
     }
 
     /// Intern the rule vocabulary (the symbol table) into `dict`, producing a rule set
@@ -283,11 +303,15 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
     for r in &parsed.rules {
         c.lower_rule(r)?;
     }
+    let strata = super::strata::stratify(&parsed.rules, &[]);
     Ok(CompiledRuleSet {
         symbols: c.symbols,
         regexes: c.regexes,
         facts: c.facts,
         rules: c.rules,
+        rule_stratum: strata.rule_stratum,
+        n_strata: strata.n_strata,
+        strat_warning: strata.warning,
     })
 }
 
@@ -956,33 +980,45 @@ impl BoundRuleSet<'_> {
         // each round (needs_full); pure-constant rules fire in round 0 only — the text
         // engine's exact round discipline.
         let mut delta: Vec<[Id; 3]> = store.list.clone();
-        let mut first_round = true;
-        loop {
-            let mut produced: Vec<[Id; 3]> = Vec::new();
-            for rule in &self.compiled.rules {
-                if rule.needs_full || rule.join_steps.is_empty() {
-                    if rule.needs_full || first_round {
-                        self.run_rule(rule, &store, None, dict, &mut produced);
+        // One semi-naive fixpoint per stratum (the text engine's automatic stratification,
+        // GH #6201): a single-stratum set runs exactly one loop; at each later stratum
+        // boundary the whole store is the delta and round-0 handling restarts.
+        let cs = self.compiled;
+        for stratum in 0..cs.n_strata {
+            if stratum > 0 {
+                delta = store.list.clone();
+            }
+            let mut first_round = true;
+            loop {
+                let mut produced: Vec<[Id; 3]> = Vec::new();
+                for (ri, rule) in cs.rules.iter().enumerate() {
+                    if cs.rule_stratum.as_ref().is_some_and(|rs| rs[ri] != stratum) {
+                        continue;
                     }
-                } else {
-                    // Semi-naive: once per join position, with that pattern restricted
-                    // to the delta (dedup happens at store insertion).
-                    for &k in &rule.join_steps {
-                        self.run_rule(rule, &store, Some((&delta, k)), dict, &mut produced);
+                    if rule.needs_full || rule.join_steps.is_empty() {
+                        if rule.needs_full || first_round {
+                            self.run_rule(rule, &store, None, dict, &mut produced);
+                        }
+                    } else {
+                        // Semi-naive: once per join position, with that pattern restricted
+                        // to the delta (dedup happens at store insertion).
+                        for &k in &rule.join_steps {
+                            self.run_rule(rule, &store, Some((&delta, k)), dict, &mut produced);
+                        }
                     }
                 }
-            }
-            let mut new_delta: Vec<[Id; 3]> = Vec::new();
-            for f in produced {
-                if store.insert(f) {
-                    new_delta.push(f);
+                let mut new_delta: Vec<[Id; 3]> = Vec::new();
+                for f in produced {
+                    if store.insert(f) {
+                        new_delta.push(f);
+                    }
                 }
+                first_round = false;
+                if new_delta.is_empty() {
+                    break;
+                }
+                delta = new_delta;
             }
-            first_round = false;
-            if new_delta.is_empty() {
-                break;
-            }
-            delta = new_delta;
         }
         store.list
     }

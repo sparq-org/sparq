@@ -342,3 +342,82 @@ fn every_corpus_rules_file_compiles() {
         );
     }
 }
+
+/// GH #6201 / #5756: store-scoped `log:notIncludes` over a predicate the SAME rule set
+/// derives. Both engines stratify automatically, so the negating rule waits for the
+/// deriving rule's fixpoint and the closures stay set-equal; `n_strata` and the cycle
+/// diagnostic agree with the text engine.
+#[test]
+fn auto_stratified_negation_is_identical() {
+    const PRE: &str = "@prefix : <http://ex/> .\n\
+        @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let cases: [(&str, &str, &str, usize, bool); 3] = [
+        (
+            "notIncludes probe (#6201)",
+            ":r :target :g . :p :prohibits :g . :s :target :h .",
+            "{ ?r :target ?g . ?p :prohibits ?g } => { ?r :prohibitedIn ?g } .\n\
+             { ?r :target ?g . ?scope log:notIncludes { ?r :prohibitedIn ?g } }\n\
+               => { ?r :allowedBy ?g } .",
+            2,
+            false,
+        ),
+        (
+            "three-stratum chain",
+            ":x :item :t . :y :item :t . :x :flag :t .",
+            "{ ?i :flag :t } => { ?i :flagged :t } .\n\
+             { ?i :item :t . ?s log:notIncludes { ?i :flagged :t } } => { ?i :clean :t } .\n\
+             { ?i :item :t . ?s log:notIncludes { ?i :clean :t } } => { ?i :suspect :t } .\n\
+             { ?a :suspect :t . ?b :clean :t } => { ?a :contrast ?b } .",
+            3,
+            false,
+        ),
+        (
+            "negation cycle (single-pass + diagnostic)",
+            ":a :p :b .",
+            "{ :a :p :b . ?s log:notIncludes { :a :q :b } } => { :a :r :b } .\n\
+             { :a :r :b } => { :a :q :b } .",
+            1,
+            true,
+        ),
+    ];
+    for (what, facts, rules, n_strata, warns) in cases {
+        let (facts, rules) = (format!("{PRE}{facts}"), format!("{PRE}{rules}"));
+        let (td, tc) = text_closure(&format!("{facts}\n{rules}"));
+        let text = triples_as_strings(&td, &tc);
+        let (cd, cc) = compiled_closure(&facts, &rules);
+        let compiled = triples_as_strings(&cd, &cc);
+        assert_set_equal(&text, &compiled, what);
+        let set = compile(&rules).expect("compile");
+        assert_eq!(set.n_strata(), n_strata, "{what}");
+        assert_eq!(set.stratification_warning().is_some(), warns, "{what}");
+    }
+    // Spot asserts: the prohibited request is NOT allowed, the free one is.
+    let facts = format!("{PRE}:r :target :g . :p :prohibits :g . :s :target :h .");
+    let rules = format!("{PRE}{}", cases[0].2);
+    let (cd, cc) = compiled_closure(&facts, &rules);
+    let compiled = triples_as_strings(&cd, &cc);
+    assert!(!has(&compiled, "http://ex/r", "http://ex/allowedBy", "http://ex/g"));
+    assert!(has(&compiled, "http://ex/s", "http://ex/allowedBy", "http://ex/h"));
+}
+
+/// The access-control corpus under the automatic stratification. common/wac/acp-a/acp-b
+/// are stratifiable as written. acp-c.n3 and odrl-spike.n3 each have a rule CONCLUDING a
+/// variable predicate (`{ ?p ?pred ?r }`, bound from data), which the predicate-level
+/// analysis must assume derives anything, so their negation is conservatively on a cycle:
+/// they keep the single-pass evaluation and report why. (The sparq-solid pipeline runs
+/// each as its own stratum after the predicates it negates are complete.)
+#[test]
+fn corpus_rules_files_stratification() {
+    for name in ["common.n3", "wac.n3", "acp-a.n3", "acp-b.n3", "acp-c.n3", "odrl-spike.n3"] {
+        let compiled = compile(&solid_rules(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let variable_conclusion = matches!(name, "acp-c.n3" | "odrl-spike.n3");
+        match compiled.stratification_warning() {
+            None => assert!(!variable_conclusion, "{name}"),
+            Some(w) => {
+                assert!(variable_conclusion, "{name}: {w}");
+                assert!(w.contains("variable predicate"), "{w}");
+                assert_eq!(compiled.n_strata(), 1);
+            }
+        }
+    }
+}

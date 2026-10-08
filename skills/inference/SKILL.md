@@ -88,6 +88,13 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_proof(dict: &mut Dict, src: &str)
     -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String>; // term-level, no Dict
+// N3Closure { facts, derived, n_rules, n_backward_rules, warnings: Vec<String> } — `warnings`
+// carries the stratification diagnostic below (empty for every stratifiable document).
+// Every N3 entry point STRATIFIES store-scoped negation automatically (GH #6201): a rule whose
+// log:notIncludes / log:collectAllIn / log:forAllIn negates a predicate the same document
+// derives runs after that predicate's fixpoint. Per-PREDICATE analysis (a variable predicate =
+// every predicate; a `{ … }` literal scope adds no dependency); a cycle through negation (e.g.
+// `a :Clean` negating `a :Flagged`, both rdf:type) stays single-pass + a `warnings` entry.
 pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>;
 // EYE --pass-all / --pass-all-ground: the closure PLUS the document's own rules, echoed
 // back as ONE N3 document (the chainer consumes rules, so --pass output alone can derive
@@ -107,7 +114,7 @@ pub enum RuleVars { N3, VarIris }  // `?x` (re-parses as the same rule, so re-ru
     // form is for RDF consumers, not re-reasoning)
 pub fn reason_n3_stratified(dict: &mut Dict, strata: &[&str])   // stratum-by-stratum closure; carries
     -> Result<StratifiedN3Closure, String>;  // each closure in memory (no re-serialize); the sound
-    // driver for the non-monotonic ops (store-scoped log:notIncludes, log:collectAllIn/forAllIn);
+    // driver when the automatic stratification reports a cycle (explicit strata instead);
     // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes).
 
 // Incremental closure maintenance (closure stays == from-scratch materialize on the current base).
@@ -156,11 +163,13 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String>;   // parse + lower
 pub fn eval(dict: &mut Dict, facts: &[[Id;3]], rules: &CompiledRuleSet) -> Vec<[Id;3]>;
 pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>; // test/harness fact loader
 impl CompiledRuleSet { pub fn bind(&self, dict: &mut Dict) -> BoundRuleSet<'_>; // intern the symbol table
-                       pub fn n_rules(&self) -> usize; pub fn n_facts(&self) -> usize; }
+                       pub fn n_rules(&self) -> usize; pub fn n_facts(&self) -> usize;
+                       pub fn n_strata(&self) -> usize;  // automatic stratification, as reason_n3
+                       pub fn stratification_warning(&self) -> Option<&str>; } // negation cycle
 impl BoundRuleSet<'_> { pub fn eval(&self, dict: &mut Dict, facts: &[[Id;3]]) -> Vec<[Id;3]>; }
 ```
 
-Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (scoped `log:notIncludes` over stratum-complete predicates, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
+Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (store-scoped `log:notIncludes`, stratified automatically like `reason_n3`, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
 
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.
 
