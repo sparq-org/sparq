@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-geo
 
 <p>
@@ -58,7 +58,7 @@ The `geof::*` / `geof::lex::*` plain-Rust API and the R-tree `GeoIndex`
   hand-derived assertions.
 - **WKT + GML, two serializations** — `geo:wktLiteral` and the GML Simple-Features
   profile of `geo:gmlLiteral` parse to the same `geo_types` + CRS and interoperate in
-  one `geof:` call. [GPT-5.6] `GeoGeometry::to_gml_literal` emits the six GML 3
+  one `geof:` call. `GeoGeometry::to_gml_literal` emits the six GML 3
   Simple Features forms with CRS-preserving axis order. Beyond GML-SF, non-SF forms are
   parsed additively into the same 2-D model: `gml:Envelope` (-> bbox `Polygon`),
   arc-segment `gml:Curve` / `gml:Surface` (`gml:Arc` / `gml:ArcString` /
@@ -97,7 +97,7 @@ pairs (bounded by vertex arc spacing; uncommon for typical GeoSPARQL geometries)
 `uom:degree`/`radian` measure coordinate-space distance. `geof:buffer` and the metric
 area/length/perimeter functions use one local equirectangular frame; undefined
 dimensions are errors, and `geof:centroid` preserves the input CRS. `geof:simplify`
-uses coordinate-space Douglas–Peucker, retains input vertices, and preserves CRS. [GPT-5.6] sq-lsp7k.18 / sq-lsp7k.23. Line/polygon
+uses coordinate-space Douglas–Peucker, retains input vertices, and preserves CRS. sq-lsp7k.18 / sq-lsp7k.23. Line/polygon
 set-subtraction is rolled in-crate over `i_overlay`; a `LineString` difference is proposed
 upstream to [georust/geo](https://github.com/georust/geo) (bead `sq-fxv3`).
 

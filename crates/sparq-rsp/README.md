@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-puyy: trimmed to the concise per-crate README template (sq-9jw5). -->
+<!-- sq-puyy: trimmed to the concise per-crate README template (sq-9jw5). -->
 # sparq-rsp
 
 <p>
@@ -56,7 +56,7 @@ q.flush(|result| { /* end-of-stream: close everything up to max ts */ })?;
 - **Closed-window aggregates** — the default-off `window-aggregate` feature adds
   `window_aggregate(&WindowResult, var, Agg)` for deterministic
   COUNT/SUM/AVG/MIN/MEDIAN/MAX scalar folds over emitted rows, without a clock read or
-  another query. <!-- [GPT-5.6] sq-sfle1 -->
+  another query. <!-- sq-sfle1 -->
 - **Relation-to-stream (R2S)** — `R2S::{RStream, IStream, DStream}`: full / added /
   removed rows per window, computed as exact term-level multiset differences.
 - **RSP-QL surface syntax + multi-window joins** — `RspqlQuery::parse` reads
@@ -71,7 +71,7 @@ q.flush(|result| { /* end-of-stream: close everything up to max ts */ })?;
   poll rather than instantly — a shape answered straight from the index, or one that
   finishes before the first poll, runs to completion unchecked. `max_bytes` caps the
   executor-accounted ESTIMATED working set of one evaluation, not total process memory nor
-  the memory of the materialised windows themselves. <!-- [SONNET-4.6] sq-xqu -->
+  the memory of the materialised windows themselves. <!-- sq-xqu -->
 - **Pluggable materialisation (`EvalMode`)** — `PersistentDict` (default, compacted
   dictionary), `Rebuild` (v1 baseline), `Delta` (one live graph, per-slide delta), and
   `Snapshot` (one live graph + a cheap O(overlay) immutable point-in-time snapshot per

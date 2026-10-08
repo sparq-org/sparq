@@ -27,7 +27,7 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
    says which is which for every surface.
 
 > This document was verified against the source on branch `main` (2026-07-13,
-> `[GPT-5.6]`). Every function, flag, and conformance number below exists today; where a
+> ` `). Every function, flag, and conformance number below exists today; where a
 > form is *not* exposed on a surface, it is called out as planned, not implied.
 
 ## Native pipeline — the `sparq-jsonld` crate
@@ -191,7 +191,7 @@ compacted / framed forms (`Accept: application/ld+json;profile=…`) is planned
 
 ### Solid/LWS server (`sparq-lws-core`, experimental)
 
-[FABLE-5] The experimental Solid/LDP server serialises RDF resource reads through the
+The experimental Solid/LDP server serialises RDF resource reads through the
 vendored oxjsonld writer (neither the native pipeline nor the engine writer) and —
 unlike `sparq-server` — already honours the JSON-LD `profile` media-type parameter on
 an explicit `Accept: application/ld+json;profile="…"` range, for the LDP and identity

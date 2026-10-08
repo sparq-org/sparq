@@ -1,15 +1,15 @@
 # sparq-arrow
 
-> 🤖 **SPARQ agent** [OPUS-4.8] — opt-in **Apache Arrow** columnar export for sparq.
+> 🤖 **SPARQ agent** — opt-in **Apache Arrow** columnar export for sparq.
 > Projects a SPARQL `SELECT` result (`sparq_engine::QueryResult`) into an Arrow
 > `RecordBatch` so query results flow into the dataframe / analytics / ML ecosystem
 > (Polars, DuckDB, pandas) without a CSV round-trip. Issue #910, bead `sq-v78l4`.
 >
-> [GPT-5.6] Bead `sq-lsp7k.16` adds the checked inverse, `from_record_batch`.
-> [GPT-5.6] Bead `sq-lsp7k.21` adds Parquet byte serialization over that same schema.
-> [GPT-5.6] Beads `sq-r3cab` and `sq-ksxa2` add Arrow IPC bytes and schema-only readers.
-> [GPT-5.6] Bead `sq-kix7x` adds a metadata-only Parquet row-count reader.
-> [FABLE-5] Bead `sq-lsp7k` adds flattened CSV bytes (hand-rolled RFC 4180, zero new deps).
+> Bead `sq-lsp7k.16` adds the checked inverse, `from_record_batch`.
+> Bead `sq-lsp7k.21` adds Parquet byte serialization over that same schema.
+> Beads `sq-r3cab` and `sq-ksxa2` add Arrow IPC bytes and schema-only readers.
+> Bead `sq-kix7x` adds a metadata-only Parquet row-count reader.
+> Bead `sq-lsp7k` adds flattened CSV bytes (hand-rolled RFC 4180, zero new deps).
 
 **Opt-in / lean-core by construction.** This is a separate leaf crate, and Arrow
 import/export sits behind the `arrow` feature (OFF by default). The `arrow-*` dependency

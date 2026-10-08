@@ -224,7 +224,7 @@ an independent oracle before asserting the canon differs, so a future
 false-equal would be caught. The whether-the-marker-needs-a-sub-discriminator
 question is a spec-clarity / robustness matter, not a latent defect.
 
-## Opt-in `urn:concept:` record verification (`concept` feature) — [SONNET-4.6] issue #1746
+## Opt-in `urn:concept:` record verification (`concept` feature) — issue #1746
 
 **OFF by default.** A federated concept record is named by a content address,
 `urn:concept:<multibase-multihash>`; before indexing a record you were handed,
@@ -298,7 +298,7 @@ suite](https://github.com/w3c/rdf-canon) — all eval (canonical-output),
 issued-map, and negative (poison-graph) cases, under both SHA-256 and SHA-384 —
 through this crate's own public API. See `crates/sparq-canon/tests/`.
 
-## Comparative panel (bench/canon) — [FABLE-5] sq-hmd7l.16
+## Comparative panel (bench/canon) — sq-hmd7l.16
 
 `bash bench/canon/run.sh --smoke` drives the public API over the vendored W3C
 suite via `crates/sparq-canon/examples/canon_bench.rs` (also a deterministic
@@ -325,18 +325,18 @@ its algorithm to that same crate). Honesty notes + tunables:
 Verified against `sparq-canon` 0.1.0 source. The standard RDFC-1.0 path is
 `rdf-canon` 0.15.3 (W3C-suite validated); `sparq-canon` is the single-sourced
 bridge + public API. The opt-in, off-by-default `rdf12-triple-terms` profile
-(sq-hslb [OPUS-4.8]) is a native RDFC-1.0 re-implementation extended to RDF 1.2
+(sq-hslb) is a native RDFC-1.0 re-implementation extended to RDF 1.2
 triple terms — **non-standard** (W3C RDFC-1.0 is RDF-1.1-only) — now with a
 `*_with::<D: Digest>` hash-profile sibling on every entry point for SHA-384
-parity (sq-5i1d [OPUS-4.8]) and a constrained ground-triple-term
+parity (sq-5i1d) and a constrained ground-triple-term
 (error-on-nested-bnode) `*_ground_terms` wrapper family for the common
-credential/VC case (sq-iaxd [FABLE-5]). The `canonicalize_nquads` / `parse_nquads` text seam
+credential/VC case (sq-iaxd ). The `canonicalize_nquads` / `parse_nquads` text seam
 and the `sparq-wasm` opt-in `canon` feature (`canonicalizeNQuads` binding for the
-`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
+`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t; that wasm consumer pulls
 `sparq-canon` with `default-features = false` (the crate now disables
 `sparq-core`'s default `parallel` and re-enables it via its own default `parallel`
 feature, so native builds are byte-identical and the wasm build drops rayon).
-The opt-in, off-by-default `concept` feature ([SONNET-4.6] issue #1746) adds the
+The opt-in, off-by-default `concept` feature (issue #1746) adds the
 `urn:concept:` multibase/multihash envelope plus the recompute-and-byte-compare
 ingestion guard; it fixes no scope-extraction rule and makes no independence
 claim beyond producer-side re-derivation (see that section).

@@ -483,7 +483,7 @@ sites; tripping it fails with `"query budget exceeded (timeout)"` / `"... (max-r
 evaluation (`sq-yfcu2`): a SELECT-JSON body whose deadline falls due while the (already
 materialised) result is being written out is reported as the budget error, not returned as a
 complete-but-late result — on the streamed entry points some chunks may already have reached the
-sink when the trip is detected. [GPT-6] A SELECT-JSON budget already expired or cancelled
+sink when the trip is detected. A SELECT-JSON budget already expired or cancelled
 at evaluator entry refuses before scanning, queuing Rayon work, or emitting any chunks:
 
 ```rust
@@ -500,9 +500,7 @@ let budget = QueryBudget {
 let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budget);
 // Another thread may call cancel.store(true, std::sync::atomic::Ordering::Relaxed).
 // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
-```
-
-[GPT-6 Astra] A nested public query from an extension callback uses an independent child
+``` A nested public query from an extension callback uses an independent child
 budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
 budget rather than combining limits. After the child returns, returns an error, or unwinds,
 the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
@@ -561,7 +559,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
 - **SPARQL `SERVICE` federation** is the non-default `service` cargo feature (pulls `ureq`; off on
   wasm). Internally the SERVICE client (HTTP transport, SPARQL-Results JSON/XML parse, bound-join
   batching, SSRF egress policy) is housed in the `sparq-engine-service` sub-crate (published only to satisfy `sparq-engine`'s
-  crates.io dependency closure; not a supported front door; [OPUS-4.8] sq-6vshe.4, seam A2 of the facade split) and re-exported through the facade — the
+  crates.io dependency closure; not a supported front door; sq-6vshe.4, seam A2 of the facade split) and re-exported through the facade — the
   `service` feature name and the `sparq_engine::with_service_egress_allow` / `…egress_policy` /
   `…SERVICE_EGRESS_REFUSED_MARKER` / `…allowlist_entry_permits` paths below are unchanged and remain
   the supported surface.
@@ -635,7 +633,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   `sparq_engine_service::service` and are not re-exported through the `sparq-engine` facade (they
   are implementation-internal); test transports continue to implement `Transport` and are wrapped
   via `TransportAsReader` so the streaming path is exercised without rewriting every canned mock.
-  [OPUS-4.8] [FABLE-5]
+
 - **`SERVICE` evaluation is W3C-conformance-tested end-to-end** (`sq-ddpgx`, epic sq-my8wd) — the
   W3C SPARQL 1.1 `sparql11/service` evaluation suite runs against the engine's REAL `ureq` transport
   through an in-process **loopback** harness: each `qt:serviceData` block is served by a real
@@ -971,7 +969,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   the-DP-table are NOT implemented. When off, zero DP code compiles, the default build is byte-identical,
   and no new dependencies are added (no `unsafe`).
 - **Membership-cluster pre-materialisation** is the non-default `cluster-materialize` cargo feature
-  ([FABLE-5] bead `sq-7d3dj.30.14`; SP2Bench q07, research/sp2bench-complex-shape-deficit.md §5). It
+  (bead `sq-7d3dj.30.14`; SP2Bench q07, research/sp2bench-complex-shape-deficit.md §5). It
   targets the container-membership idiom `?bag ?member ?doc` — a pattern with an UNBOUND predicate (the
   `rdf:_n` bag members are ordinary triples, so no single bound-predicate scan enumerates a whole bag).
   When such a pattern sits in a BGP next to a small BOUND-predicate anchor it shares exactly one variable
@@ -992,7 +990,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   wasm builds are byte-identical, and no new dependencies are added (no `unsafe`).
 - **Pre-execution algebra rewrite pass** is the `algebra-rewrite` cargo feature — non-default in the
   sparq-engine LIBRARY, but lit BY DEFAULT in the shipped `sparq-cli` + `sparq-server` binaries and in
-  the conformance/differential-fuzz harnesses ([FABLE-5] sq-7d3dj.30.13), so it is what real users and
+  the conformance/differential-fuzz harnesses (sq-7d3dj.30.13), so it is what real users and
   the canonical benchmarks execute (bead
   `sq-7d3dj.30.1`; design record `research/sp2bench-complex-shape-deficit.md` §2.1/§2.5/§4). With it ON,
   `PreparedQuery::parse` (the single seam every string query entry point funnels through) and the two
@@ -1061,7 +1059,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
-- **Experimental deletion projection caching** — [GPT-6 Astra] opt in only on the
+- **Experimental deletion projection caching** — opt in only on the
   direct core dependency:
 
   ```toml

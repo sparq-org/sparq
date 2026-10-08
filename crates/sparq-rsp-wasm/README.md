@@ -1,8 +1,8 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — tier-b W-rsp WASM showcase bundle. -->
+<!-- sq-inzv: full-template README — tier-b W-rsp WASM showcase bundle. -->
 # sparq-rsp-wasm
 
 The sparq windowed **RSP-QL stream processor** ([`sparq-rsp`](../sparq-rsp/README.md))
-compiled to WebAssembly — the tier-b **"W-rsp"** bundle ([OPUS-4.8] sq-nzcb).
+compiled to WebAssembly — the tier-b **"W-rsp"** bundle (sq-nzcb).
 
 A SEPARATE, lazy-loaded bundle from the lean [`sparq-wasm`](../sparq-wasm/README.md)
 triplestore bundle (the [`sparq-reason-wasm`](../sparq-reason-wasm/README.md)

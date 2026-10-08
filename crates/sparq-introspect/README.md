@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4lvq: README brought to template (deferred from sq-inzv). -->
+<!-- sq-4lvq: README brought to template (deferred from sq-inzv). -->
 # sparq-introspect
 
 **Ontology / schema introspection** for the sparq RDF engine — an **opt-in** crate
@@ -45,7 +45,7 @@ let f = facets(&graph, &FacetRequest { class: Some("http://e/Person".into()),
   per-predicate triple counts (avg multiplicity), and the `rdf:type` histogram of its
   subjects. Top sets retained, exact tail aggregates.
 - **Facet counts** (`facets`) — deterministic type/predicate/value distributions; default-off
-  `numeric-facets` adds finite XSD numeric min/max/count plus ten equal-width buckets. [GPT-5.6]
+  `numeric-facets` adds finite XSD numeric min/max/count plus ten equal-width buckets.
 - **Schema summary** — classes with instance counts; per-class predicate usage with
   subject/triple counts, **coverage ratios**, and **per-class sample object labels**
   (`ClassPredicate::samples`, drawn only from *this* class's triples, so a minority class
@@ -117,4 +117,4 @@ cargo run -p sparq-introspect --example olympics_introspect --release
 
 ## License
 
-MIT. [OPUS-4.8] sq-4lvq
+MIT. sq-4lvq

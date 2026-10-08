@@ -74,7 +74,7 @@ let order = topological_sort(&g)?;                         // Err(CycleError) on
   strongly connected components, their count accessor, and a canonical topological sort.
   SCC ids are densified by ascending node index; topological-sort ties choose the smallest
   ready node and cycles, including self-loops, return `CycleError`; `is_acyclic` exposes the
-  same check as a boolean. [GPT-5.6] sq-awq7n.
+  same check as a boolean. sq-awq7n.
 - **Opt-in & lean** — consumes only sparq-core's public read API; the only dependencies
   are `sparq-core`, `oxrdf`, and `rustc-hash`. The heavier all-pairs algorithms are behind
   `centrality-extended`, and directed topology is behind `topology`; both features are OFF

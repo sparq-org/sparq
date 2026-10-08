@@ -1,7 +1,7 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — tier-b W-text WASM showcase bundle. -->
+<!-- sq-inzv: full-template README — tier-b W-text WASM showcase bundle. -->
 # sparq-text-wasm
 
-**The tier-b "W-text" WebAssembly bundle** ([OPUS-4.8] sq-jbe6) for
+**The tier-b "W-text" WebAssembly bundle** (sq-jbe6) for
 [`sparq-text`](../sparq-text/README.md) — an owned **BM25 full-text index** over RDF
 literals plus the `text:` magic predicates, **live in the browser tab**.
 

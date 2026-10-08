@@ -91,7 +91,7 @@ for row in GENAI_RETRIEVAL_EXPRESSIBILITY {
 }
 ```
 
-<!-- [GPT-5.6] sq-oti9m: public catalogue maintenance note. -->
+<!-- sq-oti9m: public catalogue maintenance note. -->
 
 `sparq-introspect`:
 
@@ -395,7 +395,7 @@ graph carries PROV-O provenance (e.g. the PKG's Findings with `prov:wasDerivedFr
 each answer-row binding to a numbered footnote. Citations are **emitted from provenance,
 never generated** — every one resolves to a real in-graph source (resolution rate 1.0,
 zero fabricated refs), and a binding with no provenance is reported as "no source
-recorded", never guessed. [OPUS-4.8] sq-2489d.1
+recorded", never guessed. sq-2489d.1
 
 ```rust
 let answer = nlq.ask("which findings are about the merge discipline?")?;
@@ -416,7 +416,7 @@ supporting `pkg:assurance`/`pkg:confidence` **weakest-link** into a verb hedge +
 band, and below a `min_confidence` floor **abstain**. The knob lives on `NlqConfig::qualify`
 and `Nlq::ask_qualified` returns the `Answer` plus an `AnswerQualification`. The band
 *reflects asserted assurance* — it is **NOT** a calibrated confidence; no reliability
-measurement exists yet, and none is claimed. [OPUS-4.8] sq-2489d.2
+measurement exists yet, and none is claimed. sq-2489d.2
 
 ```rust
 use sparq_nlq::{NlqConfig, qualify::QualifyConfig};
@@ -517,7 +517,7 @@ the fixtures encode.)
 
 ## sparq-terse — the verifiable LLM-ergonomic query surface (opt-in)
 
-[OPUS-4.8] `sparq-terse` (epic `sq-2m6zm`, design `research/llm-ergonomic-sparql-surface.md`,
+`sparq-terse` (epic `sq-2m6zm`, design `research/llm-ergonomic-sparql-surface.md`,
 PR #1074) is a **pre-parse transpiler** layered over this stack: it lets an agent write the
 *concept it means* instead of guessing an opaque IRI, while only ever executing canonical,
 conformant SPARQL. It **never** touches the vendored `spargebra` grammar — the engine sees
@@ -607,7 +607,7 @@ the IRIs the exact engine produced and renders each one under one of two views �
 (the raw IRI, the NL→SPARQL incumbent) or `View::UriHidden` (a label/grounded view + a
 `ResolutionEcho`, so the IRI never reaches the agent). It reuses the `verbalize` label machinery
 (the feature implies `structure`), adds no new dependency, calls no model, and is **off the default
-build** (`compose` feature). [OPUS-4.8] sq-mztg8.1, design `research/fo-llm-bridge.md` §2.3/§3.3/§6.
+build** (`compose` feature). sq-mztg8.1, design `research/fo-llm-bridge.md` §2.3/§3.3/§6.
 
 ```rust
 use sparq_vectors::compose::{ab_report, compose, ComposeConfig, View};
@@ -648,7 +648,7 @@ everywhere." And it is still **not a token-saver**: the model-free A/B shows the
 long descriptions, so `char_ratio` runs *above* 1.0 overall, and the very class that drives the
 accuracy gain (long task titles) is the one that inflates the read cost — hiding buys accuracy on
 opaque ids *with* tokens, it does not save them. The measured figures + the per-kind breakdown live
-in `bench/compose/RESULTS.md` and `bench/compose/k4/` (work-box, NON-CANONICAL). [OPUS-4.8]
+in `bench/compose/RESULTS.md` and `bench/compose/k4/` (work-box, NON-CANONICAL).
 
 ## Gotchas / feature flags / prerequisites
 
@@ -671,13 +671,13 @@ in `bench/compose/RESULTS.md` and `bench/compose/k4/` (work-box, NON-CANONICAL).
   bring their own cheap-model endpoint (Ollama / vLLM / llama.cpp / OpenAI / …). **Answer
   quality depends ENTIRELY on the user-chosen model** — this crate makes no accuracy claim.
   Unlike `live`, the loopback-stub tests exercise the real request/parse path **offline**
-  (no live network), so this lane gates in the feature matrix. [OPUS-4.8]
+  (no live network), so this lane gates in the feature matrix.
 - **`citations` feature (sparq-nlq).** OFF by default — without it the `cite` /
   `provenance` modules and `Answer::citations` are not compiled, and the lean loop carries
   zero provenance machinery. The renderer is read-only and **never invents a citation**:
   it emits only `prov:wasDerivedFrom` sources the graph actually asserts (so resolution
   rate is 1.0 by construction), and reports un-sourced bindings as "no source recorded".
-  It works on any PROV-O-annotated graph; the PKG is the lowest-friction case. [OPUS-4.8]
+  It works on any PROV-O-annotated graph; the PKG is the lowest-friction case.
 - **`citations` feature ALSO gates answer-qualification** (`qualify` module,
   `Nlq::ask_qualified`, `NlqConfig::qualify`). Reuses the SAME provenance join — no second
   machinery. Weakest-link by design: `min` confidence + weakest assurance, so an extra
@@ -686,7 +686,7 @@ in `bench/compose/RESULTS.md` and `bench/compose/k4/` (work-box, NON-CANONICAL).
   needs a reliability-diagram measurement on calibrated confidences, which does not exist
   yet (deferred, `research/provenance-driven-genai-kb.md` §5 Phase 2). Qualification is
   post-hoc + read-only (the prompt/query/transcript are unchanged), so it is
-  fixture-compatible — flipping it on needs no re-record. [OPUS-4.8] sq-2489d.2
+  fixture-compatible — flipping it on needs no re-record. sq-2489d.2
 - **`ReplayLlm` is exact-prompt match.** Prompts are deterministic functions of the
   graph + `NlqConfig` + examples, so a miss means the prompt template, the default
   `NlqConfig`, or the dataset drifted — re-record (e.g.

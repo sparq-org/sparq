@@ -65,7 +65,7 @@ let g = Graph::from_parts(dict, triples);
   over the shared exact/float/double tower. The **stratification checker** rejects cycles
   through NOT/AGGREGATE and conservatively couples variable predicates to every relation;
   the semi-naive evaluator and incremental maintainer share that invariant. Surfaced by
-  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- [GPT-5.6] sq-a7bmo, [SONNET-4.6] sq-p4zci -->
+  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- sq-a7bmo, sq-p4zci -->
 - **Quoted-triple inference** (opt-in `quoted-triples`) — RDF 1.2 reifier rules for the
   OWL-RL profile: **reif-dtr** destructures `R rdf:reifies <<( s p o )>>` into the classic
   `rdf:subject`/`rdf:predicate`/`rdf:object` view of `R` (so RL rules reason over reifier

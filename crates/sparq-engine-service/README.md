@@ -11,8 +11,6 @@ and the SSRF egress-policy allowlist.
 > **`sparq-engine`** — its `service` feature forwards here and its public
 > `with_service_egress_allow` / `SERVICE_EGRESS_REFUSED_MARKER` / `allowlist_entry_permits`
 > / … re-exports are unchanged by the split.
->
-> Model: Opus 4.8 ([OPUS-4.8], Fable unavailable). Flag for re-review when Fable returns.
 
 [`sparq-engine`]: ../sparq-engine
 
@@ -21,12 +19,14 @@ and the SSRF egress-policy allowlist.
 ```rust
 // Consume it through the facade — never depend on this crate directly.
 // (sparq-engine, features = ["service"])
-use sparq_engine::{query, with_service_egress_allow};
+use sparq_engine::{query, with_service_egress_policy};
 use sparq_core::Graph;
 
 let local = Graph::default();
-// SERVICE egress is deny-by-default: only the allow-listed host is dialled.
-let out = with_service_egress_allow(["sparql.example.org".to_string()], || {
+// Strict mode: only the listed host is dialled; every other host is refused.
+// (`with_service_egress_allow` only blocks private addresses, so it is not enough
+// for untrusted queries.)
+let out = with_service_egress_policy(true, ["sparql.example.org".to_string()], || {
     query(&local, "SELECT * WHERE { SERVICE <https://sparql.example.org/> { ?s ?p ?o } }")
 });
 // (`out` is a transport error here — there is no live endpoint in the doctest.)

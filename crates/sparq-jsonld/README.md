@@ -6,8 +6,8 @@ Context Processing, Expansion, Flattening, Compaction, Framing, and RDF
 
 [JSON-LD 1.1]: https://www.w3.org/TR/json-ld11/
 
-> [GPT-5.6] Build-out status reconciled in `sq-ci15w`; implementation provenance remains
-> recorded on the individual algorithms. [OPUS-5] (`sq-ghdfw`) Re-verified against the
+> Build-out status reconciled in `sq-ci15w`; implementation provenance remains
+> recorded on the individual algorithms. (`sq-ghdfw`) Re-verified against the
 > tree: `to_rdf` and `api` are the only remaining stubs.
 > Epic `sq-oy1f` (design record `research/jsonld-1.1-design.md`).
 

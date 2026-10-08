@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-qcnn.4: internal-stub README for a publish=false crate. -->
+<!-- sq-qcnn.4: internal-stub README for a publish=false crate. -->
 # sparq-difftest
 
 The **engine-independent value-normalisation** library for [sparq](../../README.md)'s

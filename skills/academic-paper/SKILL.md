@@ -102,7 +102,7 @@ Paper-bound numbers live in a **dedicated evidence file, `site/src/data/paper-ev
 - **`paper-evidence.json`** — the *canonical-only* paper evidence. Every record is a
   deterministic, machine-INDEPENDENT metric (a recall floor, an answer-safety invariant, a
   cost-model crossover) lifted from a named test, so each is `environment: "canonical"` and
-  carries a `source` field tracing it to that test/dataset. [OPUS-4.8: as-built, PR #336.]
+  carries a `source` field tracing it to that test/dataset. (As-built, PR #336.)
 - **`benchmarks.generated.json`** — per-commit *timing* on the dev work-box, **all
   `environment: "indicative"`** (folded in by `site/scripts/sync-benchmarks.mjs` from the
   `benchmark-data` branch). It feeds the site's benchmark widgets, **never** a paper headline.
@@ -249,9 +249,7 @@ typst compile papers/<source>.typ src/generated/papers/<slug>.html \
 # anonymized build for a double-blind venue (the .typ's authors()/anon honour this):
 typst compile papers/<source>.typ /tmp/<slug>-anon.pdf \
   --root . --input data="$(cat src/data/paper-evidence.json)" --input anon=true
-```
-
-[OPUS-4.8: as-built, PR #336.] The **in-site HTML** page at `/papers/<slug>` uses **Typst's
+``` (As-built, PR #336.) The **in-site HTML** page at `/papers/<slug>` uses **Typst's
 native HTML export** — *not* typst.ts/`@myriaddreamin/typst.react`. The build extracts the
 `<body>` inner HTML and the React route (`components/papers/paper-html.tsx`) injects it as a
 static fragment into a scoped `.paper-prose` block (no WASM compiler shipped to the browser).
@@ -283,7 +281,7 @@ subagent section-reviewers + one cross-cutting honesty/repro reviewer) **blocks*
 - **Overclaiming / implied generality, weak/unfair baselines, missing ablations, no error
   bars, irreproducibility** (the SIGPLAN-7 + benchmarking-crimes findings from Stage 3).
 
-**What is — and is NOT — mechanically gated (do not over-sell the gate).** [OPUS-4.8] As of
+**What is — and is NOT — mechanically gated (do not over-sell the gate).** As of
 beads sq-mkza / sq-4hga / sq-mraf, the two CI honesty gates also scan the paper-factory's own
 surface: `check-no-perf-numbers.py` scans the paper `.typ` sources (accessor-aware, result-
 shaped numbers only) **and** the prose (`note`/free-text) fields of `paper-evidence.json`;
@@ -344,7 +342,7 @@ eval). See `research/paper-contributions-inventory.md` (Part 2) and
 
 ## Paper P2 instrument — the SPARQL logic-bug harness (`crates/sparq-metamorph`)
 
-[FABLE-5] sq-gum8.6. Paper **P2** (draft bead `sq-gum8.7`) is the first dedicated
+sq-gum8.6. Paper **P2** (draft bead `sq-gum8.7`) is the first dedicated
 logic-bug testing paper for SPARQL engines (SQL/Datalog/Cypher are covered by
 SQLancer/queryFuzz/GDsmith; SPARQL is not). Its instrument is the opt-in
 `crates/sparq-metamorph` crate (`publish = false`; nothing in the shipping graph links

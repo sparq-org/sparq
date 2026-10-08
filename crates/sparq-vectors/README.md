@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-vectors
 
 <p>
@@ -92,7 +92,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
 - **Live embeddings (opt-in)** — the default build is **socket-free**. The non-default `provider`
   feature carries the OpenAI-compatible `/v1/embeddings` shape with a caller-supplied `Transport`;
   `embeddings` adds a concrete reqwest client + `RemoteEmbedder::from_env(dim)`. Never in the wasm bundle.
-- **Structure-aware vectorisation (opt-in `structure` / `structure-shacl`; measurement behind `kge`)** — research-grade. **P0:** `close_for_vectorise` materialises the `sparq-reason` closure **before** vectorising; a `NegativeSampler` emits type-constrained corruptions (Krompass 2015) with an **on/off ablation**. [GPT-5.6] `TermScope::IriBlank` is the default, byte-stable entity scope; opt into `TermScope::Embeddable` with `NegativeSampler::new_scoped` to admit RDF 1.2 triple terms while keeping atomic and triple-term corruption pools separate.
+- **Structure-aware vectorisation (opt-in `structure` / `structure-shacl`; measurement behind `kge`)** — research-grade. **P0:** `close_for_vectorise` materialises the `sparq-reason` closure **before** vectorising; a `NegativeSampler` emits type-constrained corruptions (Krompass 2015) with an **on/off ablation**. `TermScope::IriBlank` is the default, byte-stable entity scope; opt into `TermScope::Embeddable` with `NegativeSampler::new_scoped` to admit RDF 1.2 triple terms while keeping atomic and triple-term corruption pools separate.
   **P1/P2:** typed-literal encoders — `route`r, **order-preserving** `NumericEncoder`, `BooleanEncoder`, `DateEncoder`, enum `Codebook`, `SchemaHeader` (metric guard); QUDT unit-`normalise` (`1000 m` ≡ `1 km`); **`structure-shacl`** adds the `ShaclPriors` reader (enum/datatype/cardinality from `sparq-shacl`).
   **P3:** `TaxonomyDag` + `EuclideanTaxonomyEncoder` (Euclidean default; hyperbolic **only past** the measured-distortion `GeometryGate`) + an **answer-safe** `DisjointnessOracle` (train-time repulsion + serve-time hard mask dropping *provably-disjoint* candidates only).
   **P4:** `ground` — a per-request modality dispatcher (subgraph / typed sub-vector / NL / typed value), **profile-relative** completeness + ABSTAT-style minimality; ambiguous → the exact subgraph; opt-in `reconcile_units` canonicalises **known** commensurable units (`1 mi`≡`1.609344 km`), unknown/compound units stay as-declared. **P5 (`neuro-symbolic`):** `propose_then_verify` — vectors **propose** candidate bindings (recall only, NOT sound), then a **deductive gate** admits one only if it adds no new SHACL violation (`sparq-shacl`) **and** no new OWL inconsistency (`sparq-reason`); a failing candidate is **rejected** (fail-closed), so the verified set only ever **shrinks to a sound subset**.

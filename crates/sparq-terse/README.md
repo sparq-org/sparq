@@ -1,6 +1,6 @@
 # sparq-terse
 
-> 🤖 **SPARQ agent** [OPUS-4.8] — an opt-in, **verifiable** LLM-ergonomic SPARQL
+> 🤖 **SPARQ agent** — an opt-in, **verifiable** LLM-ergonomic SPARQL
 > surface: a *pre-parse* transpiler that always emits **canonical, conformant
 > SPARQL** — it never touches the vendored `spargebra` grammar. The engine only ever
 > runs standard SPARQL the agent can inspect. Research prototype (epic `sq-2m6zm`,

@@ -9,8 +9,6 @@ The RDF **writer matrix** for [`sparq-engine`] — Turtle, TriG, N-Quads, and JS
 > **no stability guarantee of its own**. Depend on the
 > re-export **`sparq_engine::serialize`** — its public API and the `serialize-rdf` /
 > `streaming-serialization` feature names are unchanged by the split.
->
-> Model: Opus 4.8 ([OPUS-4.8], Fable unavailable). Flag for re-review when Fable returns.
 
 [`sparq-engine`]: ../sparq-engine
 

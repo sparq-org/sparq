@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-text
 
 <p>
@@ -73,7 +73,7 @@ let r = query_text(&graph, r#"
 - **`text:` magic predicates** — `text:matches` (AND), `text:matchesAny` (OR), `text:phrase` (adjacency), `text:near` (proximity/slop, relevance-ranked) with the
   `text:slop N` and `text:score ?s` companions. The query string must be a **constant**
   literal, the match subject a variable, and an unknown `text:` IRI is a hard error.
-- **Opt-in fuzzy search** — the default-OFF `fuzzy` feature adds `TextIndex::fuzzy(term, max_distance)` and `text:fuzzy`, backed by bounded deletion-neighbour candidates and exact Levenshtein verification (default one, hard cap two). [GPT-5.6] sq-lsp7k.14
+- **Opt-in fuzzy search** — the default-OFF `fuzzy` feature adds `TextIndex::fuzzy(term, max_distance)` and `text:fuzzy`, backed by bounded deletion-neighbour candidates and exact Levenshtein verification (default one, hard cap two). sq-lsp7k.14
 - **BM25 ranking, exact-token semantics** — UAX #29 word segmentation + Unicode
   lowercasing; **no stemming, no stopword list, no diacritic folding** (`café` ≠ `cafe`)
   — language-neutral by design. Only plain / `xsd:string` / language-tagged literals are

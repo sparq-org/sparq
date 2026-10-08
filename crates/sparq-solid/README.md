@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-solid
 
 <p>
@@ -15,7 +15,7 @@ depended on by nothing else in the workspace).
 ## 🚀 Quickstart
 
 ```rust
-# // [OPUS-4.8] hidden main returns Result<(), String>: engine API errors are `String` (no Error impl).
+# // hidden main returns Result<, String>: engine API errors are `String` (no Error impl).
 # fn main() -> Result<(), String> {
 use sparq_core::Graph;
 use sparq_solid::{Mode, PodStore, Session};
@@ -36,7 +36,7 @@ let _public_only = store.query_as(&Session::default(), Mode::Read, q)?.rows.len(
 - **WAC + ACP** — Web Access Control (`.acl`) and Access Control Policy (`.acr`): inheritance, agent
   classes, groups, `allOf`/`anyOf`/`noneOf`, the ACP `(agent, client, issuer)` principal,
   `acp:CreatorAgent`/`acp:OwnerAgent`, normative deny-overrides.
-  [GPT-6] Empty matchers never match; policies require a positive `allOf` or `anyOf` condition ([ACP §§6.4–6.5](https://solidproject.org/TR/acp#satisfied-policy)).
+  Empty matchers never match; policies require a positive `allOf` or `anyOf` condition ([ACP §§6.4–6.5](https://solidproject.org/TR/acp#satisfied-policy)).
 - **Trusted caller-asserted channels — creator/owner and verified credentials** — `acp:CreatorAgent`/`acp:OwnerAgent` resolve only against per-resource WebIDs the storage layer supplies through the trusted `AccessProvenance` channel, and `acp:vc <requirement>` (`sq-ysv3u`) only against holdings supplied through the trusted `VerifiedCredentials` channel — **never** graph content (the loader hard-rejects `solidx:` triples, so a writer cannot self-grant). `acp:vc` matches its requirement by exact IRI, conjunctively with `acp:agent`/`acp:client`/`acp:issuer`, and is **fail-closed**: with no credential supplied it accepts nobody (before `sq-ysv3u`, `acp:vc` was an unrecognized attribute, so a credential-gated matcher looked agent-unconstrained and granted everyone, anonymous included).
   Verification never runs in the reasoner — the opt-in `acp-vc` feature adds the [`sparq-vc`](../sparq-vc) **trust-the-issuer** backend that populates the channel (`VcRequirement` + `VerifiedCredentials::admit_data_integrity`: W3C Data Integrity `eddsa-rdfc-2022`, checking issuer, credential type and exact-match claims). Authenticity/integrity only — **no** privacy, unlinkability or selective disclosure, and no revocation or expiry check; a zero-knowledge backend would need the ZK estate, whose external crypto audit is pending (`sq-qhy4`).
 - **Triples-native + zero-copy enforcement** — pods, ACL/ACR docs, and the auth view are all ordinary
@@ -63,7 +63,7 @@ a grant materializes **only** on a definite Permit + mappable action + concrete 
 **only** on a genuine prohibition match); a Deny, unsatisfied constraint, undischarged duty, unmapped
 action, or partyless/targetless request materializes **nothing**.
 
-**SPARQL-query action contract ([SONNET-4.6] sq-lrtc3.2).** Represent a query request with standard `odrl:read`, which maps exactly to `Mode::Read`; sparq does not mint a profile-specific query action IRI. A request carrying only the `odrl:use` umbrella remains unmapped and grants no `query_as` visibility. Although ODRL defines `read` below `use`, hierarchy matching is the policy evaluator's concern: the bridge maps the concrete request action and will not guess that the broader `use` request meant read rather than one of the mutation actions it also covers.
+**SPARQL-query action contract (sq-lrtc3.2).** Represent a query request with standard `odrl:read`, which maps exactly to `Mode::Read`; sparq does not mint a profile-specific query action IRI. A request carrying only the `odrl:use` umbrella remains unmapped and grants no `query_as` visibility. Although ODRL defines `read` below `use`, hierarchy matching is the policy evaluator's concern: the bridge maps the concrete request action and will not guess that the broader `use` request meant read rather than one of the mutation actions it also covers.
 
 **Conditions, refresh & revocation.** A *faithfully-mappable* constraint (`materialize_odrl_permission_conditional`) persists as a per-session-rechecked ACP `auth:ConditionalGrant`
 (recipient/assignee matchers; an inclusive `odrl:dateTime` window vs `Session::now`, **fail-closed with no

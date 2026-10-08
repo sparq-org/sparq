@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-nlq
 
 <p>
@@ -45,7 +45,7 @@ fixtures; `--features nlq-endpoint` points `EndpointLlm` at **your own** base UR
   `NlqConfig::link_values` adds the **exact dictionary** tier: a question span that IS a literal the store
   holds binds with its **datatype and language tag** (`"1994"^^xsd:gYear`, `"France"@en`) plus the predicates
   it objects, and an IRI written verbatim is probed via `Graph::id_of` — so `FILTER`/value-bound queries stop
-  guessing lexical forms the store does not have. <!-- [OPUS-4.8] sq-uw40 · [SONNET-4.6] sq-na0q -->
+  guessing lexical forms the store does not have. <!-- sq-uw40 · sq-na0q -->
 - **Validate before execute** — parses with `spargebra` *before* the engine sees the
   query; execution failures (unsupported forms, budget trips) are repair signals too.
 - **Dictionary-grounded repair** ([`constrain`](src/constrain.rs), opt-in via
@@ -61,7 +61,7 @@ fixtures; `--features nlq-endpoint` points `EndpointLlm` at **your own** base UR
   the exfiltration/SSRF payload) is **refused before execution** as a repair signal. No-op
   on benign text, so fixtures still replay. This bounds an injection's **consequences**;
   no text transform *prevents* one, and none is claimed —
-  [`research/nlq-threat-model.md`](../../research/nlq-threat-model.md). <!-- [SONNET-4.6] sq-j1wv -->
+  [`research/nlq-threat-model.md`](../../research/nlq-threat-model.md). <!-- sq-j1wv -->
 - **Budgeted execution** — LLM output is untrusted, so every query runs under a
   [`QueryBudget`] (default **bounded**: 10 s, 1M rows; opting out is explicit). Mutation
   is unreachable, not filtered: the loop parses with `parse_query`.
@@ -96,11 +96,11 @@ fixtures; `--features nlq-endpoint` points `EndpointLlm` at **your own** base UR
   offline scores demonstrate the *harness* + *mechanism*, **not** a real model's accuracy;
   the live/endpoint paths need a key + a **canonical** host (`sq-g0lw`), and both clients
   are stub-tested, never networked. Grammar-constrained decoding stays unimplemented and
-  unclaimed (`sq-9yjp`). <!-- [OPUS-4.8] sq-05rv sq-g0lw sq-9yjp -->
+  unclaimed (`sq-9yjp`). <!-- sq-05rv sq-g0lw sq-9yjp -->
 - **NOT solved — prompt injection itself.** The hardening bounds an injection's
   *consequences*; it does not stop a model being talked into a different query.
   [`research/nlq-threat-model.md`](../../research/nlq-threat-model.md) states exactly what
-  is and is not contained. <!-- [SONNET-4.6] sq-j1wv -->
+  is and is not contained. <!-- sq-j1wv -->
 
 ## 📚 Learn more
 
@@ -115,4 +115,4 @@ fixtures; `--features nlq-endpoint` points `EndpointLlm` at **your own** base UR
 
 ## License
 
-[MIT](../../LICENSE). <!-- [OPUS-4.8] sq-lsxd -->
+[MIT](../../LICENSE). <!-- sq-lsxd -->

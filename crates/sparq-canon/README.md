@@ -10,7 +10,6 @@ signing, diffing, deduplication, and content-addressing.
 
 [RDF Dataset Canonicalization]: https://www.w3.org/TR/rdf-canon/
 
-> Model: Opus 4.8 (Fable unavailable — flag for re-review when Fable returns).
 > Surfaced from `sparq-zk::canon` per bead sq-0qip.
 
 ## 🚀 Quickstart

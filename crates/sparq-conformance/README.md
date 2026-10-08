@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4kr5: internal-stub README for a publish=false crate. -->
+<!-- sq-4kr5: internal-stub README for a publish=false crate. -->
 # sparq-conformance
 
 The **W3C conformance harness** for [sparq](../../README.md): it runs the official test suites against

@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: internal-stub README for a publish=false crate; full surface lives in skills/usage-control-policy/SKILL.md. -->
+<!-- sq-inzv: internal-stub README for a publish=false crate; full surface lives in skills/usage-control-policy/SKILL.md. -->
 # sparq-policy
 
 **ODRL usage-control** over the [sparq](../../README.md) engine — the declarative

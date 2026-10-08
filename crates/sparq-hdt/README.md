@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4lvq: README brought to template (deferred from sq-inzv). -->
+<!-- sq-4lvq: README brought to template (deferred from sq-inzv). -->
 # sparq-hdt
 
 Opt-in [HDT](https://www.rdfhdt.org/) (Header Dictionary Triples) reader (and,
@@ -64,7 +64,7 @@ export direction over `save` (sq-8ju74).
 - **Header access**: `header()` / `header_reader()` decode just the dataset
   metadata triples (the "H" in HDT) into a queryable `Graph` without touching
   the dictionary/triples sections.
-- **Filtered loading and stats** (opt-in `load-filter` feature, [GPT-5.6]
+- **Filtered loading and stats** (opt-in `load-filter` feature,
   sq-lsp7k.24 / sq-obhf1): `load_reader_filtered(reader, &pattern)` loads matches;
   `stats_reader_filtered(reader, &pattern)` counts them without constructing a
   result graph. Both filter during the one-shot SPO walk; an all-wildcard pattern
@@ -117,4 +117,4 @@ cargo run --release -p sparq-hdt --example bench_load -- --json /tmp/hdt.json
 
 ## License
 
-MIT. [OPUS-4.8] sq-4lvq
+MIT. sq-4lvq

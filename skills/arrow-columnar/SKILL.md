@@ -129,4 +129,4 @@ error. `csv_variables_from_bytes` validates and reads only the header row.
 Treat the Arrow batch, Parquet bytes, or IPC stream as a transport projection, not as a
 canonical RDF serialization or an RDF document.
 
-[GPT-5.6] Verified against `sparq-arrow` for beads `sq-r3cab` and `sq-kix7x`.
+Verified against `sparq-arrow` for beads `sq-r3cab` and `sq-kix7x`.
