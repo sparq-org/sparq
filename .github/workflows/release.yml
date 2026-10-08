@@ -740,7 +740,7 @@ jobs:
             exit 1
           fi
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum -- "${bundles[@]}" > "$OUT"
+            sha256sum --text -- "${bundles[@]}" > "$OUT"
           else
             shasum -a 256 -- "${bundles[@]}" > "$OUT"
           fi

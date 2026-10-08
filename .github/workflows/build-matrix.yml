@@ -223,8 +223,10 @@ jobs:
             echo "ERROR: packaging produced no archive to attest for tier ${{ matrix.tier }}" >&2
             exit 1
           fi
+          # `--text`: Git Bash's sha256sum on the Windows rows defaults to binary mode and
+          # writes `<hex> *<name>`; the `*` breaks the collector's name check and the subject name.
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"
+            sha256sum --text -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"
           else
             shasum -a 256 -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"
           fi
@@ -288,7 +290,7 @@ jobs:
             fi
           done
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"
+            sha256sum --text -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"
           else
             shasum -a 256 -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"
           fi
