@@ -24,9 +24,9 @@
 use super::{coerce_native, NamedGraph};
 use oxrdf::{NamedOrBlankNode, Term, Triple};
 use sparq_jsonld::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
-use sparq_jsonld::frame::{frame, FrameOptions};
+use sparq_jsonld::frame::{compact_framed, frame_match, FrameOptions};
 use sparq_jsonld::compact::compact_expanded;
-use sparq_jsonld::{expand, JsonLdOptions, NoopLoader, ProcessingMode};
+use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
 
 pub use sparq_jsonld::{ActiveContext, Json};
 
@@ -234,23 +234,19 @@ fn holds_typed_nodes(doc: &Json, terms: &[String]) -> bool {
 pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> String {
     let doc = expanded(graphs);
     let opts = JsonLdOptions::default();
-    let run = |f: &Json| frame(&doc, f, &opts, &FrameOptions::default(), &NoopLoader);
-    match run(frame_doc) {
-        Ok(framed) => {
-            let stripped = frame_doc
-                .get("@context")
-                .and_then(|ctx| readable_type_maps(&framed, ctx));
-            match stripped {
-                None => render(&framed),
-                // The match stands; only the framed result is compacted again (re-framing
-                // under the new context would change what the frame selects).
-                Some(ctx) => {
-                    let again = expand(&framed, &opts, &NoopLoader)
-                        .and_then(|exp| compact_expanded(&exp, &ctx, &opts, &NoopLoader));
-                    render(&again.unwrap_or(framed))
-                }
-            }
-        }
+    let fopts = FrameOptions::default();
+    let ctx = frame_doc.get("@context").cloned().unwrap_or_default();
+    let out = frame_match(&doc, frame_doc, &opts, &fopts, &NoopLoader).and_then(|matched| {
+        let framed = compact_framed(&matched, &ctx, &opts, &fopts, &NoopLoader)?;
+        // The match stands; only its compaction is redone for a readable shape.
+        Ok(match readable_type_maps(&framed, &ctx) {
+            None => framed,
+            Some(stripped) => compact_framed(&matched, &stripped, &opts, &fopts, &NoopLoader)
+                .unwrap_or(framed),
+        })
+    });
+    match out {
+        Ok(framed) => render(&framed),
         Err(_) => render(&doc),
     }
 }

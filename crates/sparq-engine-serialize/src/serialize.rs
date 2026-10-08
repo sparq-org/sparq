@@ -4180,6 +4180,26 @@ ex:bob
         assert!(framed.contains(r#""p":{"@none":"#), "{framed}");
     }
 
+    // The readable re-rendering of a type map keeps the frame's `@null` defaults.
+    #[test]
+    fn readable_type_maps_keep_null_defaults() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "D" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","p":{"@container":"@type"}},
+                "@id":"http://ex/a","missing":{"@default":"@null"}}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        assert!(framed.contains(r#""missing":null"#), "{framed}");
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+    }
+
     // A property-valued index whose value reads as an `@none` alias stays on the node.
     #[test]
     fn frame_index_map_keeps_values_spelled_like_none() {

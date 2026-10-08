@@ -109,6 +109,21 @@ pub fn frame(
     frame_options: &FrameOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
+    let framed = frame_match(input, frame_doc, options, frame_options, loader)?;
+    let ctx_value = frame_doc.get("@context").cloned().unwrap_or_default();
+    compact_framed(&framed, &ctx_value, options, frame_options, loader)
+}
+
+/// The matching half of [`frame`] (§4.1 steps 2–7): expands `input` and `frame_doc` and
+/// returns the framed **expanded** output of [`frame_expanded`], `@preserve` fills
+/// included, ready for [`compact_framed`].
+pub fn frame_match(
+    input: &Json,
+    frame_doc: &Json,
+    options: &JsonLdOptions,
+    frame_options: &FrameOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
     // §4.1 steps 2–3: expand the input (ordinary mode) and the frame (frameExpansion).
     let mut in_opts = options.clone();
     in_opts.frame_expansion = false;
@@ -126,21 +141,27 @@ pub fn frame(
     }
 
     // §4.1 steps 4–7: frame the expanded input (returns the pruned expanded output).
-    let framed = frame_expanded(&expanded_input, &expanded_frame, options, &fopts)?;
-    let framed_len = match &framed {
+    frame_expanded(&expanded_input, &expanded_frame, options, &fopts)
+}
+
+/// The output half of [`frame`] (§4.1 step 8): compacts `framed` (from [`frame_match`])
+/// against `context`, unwraps `@preserve` (with `@null` → `null`) and applies the
+/// `omitGraph` shaping. The same match can be compacted against more than one context.
+pub fn compact_framed(
+    framed: &Json,
+    context: &Json,
+    options: &JsonLdOptions,
+    frame_options: &FrameOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
+    let framed_len = match framed {
         Json::Arr(items) => items.len(),
         _ => 1,
     };
-
-    // §4.1 step 8: compact against the frame's @context (the caller-facing envelope).
-    let ctx_value = frame_doc.get("@context").cloned().unwrap_or_default();
-    let compacted = compact_expanded(&framed, &ctx_value, options, loader)?;
-
-    // Framing post-processing: unwrap @preserve (with @null → null), then apply the
-    // omitGraph shaping.
+    let compacted = compact_expanded(framed, context, options, loader)?;
     let mut result = cleanup_preserve(compacted, options.compact_arrays);
     if !frame_options.omit_graph(options.processing_mode) {
-        result = ensure_graph_envelope(result, &ctx_value, framed_len);
+        result = ensure_graph_envelope(result, context, framed_len);
     }
     Ok(result)
 }
