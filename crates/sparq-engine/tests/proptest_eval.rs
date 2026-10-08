@@ -80,9 +80,9 @@
 //!   shortest-round-trip mantissa-E-exponent form with ≥ 1 fraction digit ("2.5E0",
 //!   "2.0E-1"). The oracle re-derives this INDEPENDENTLY via the `ryu` shortest
 //!   formatter (`fmt_double_oracle`), not the engine's `format!("{:E}")` path.
-//! * xsd:double NaN (sq-ilweo): `=` on NaN is sameTerm-true for the identical
-//!   `"NaN"^^xsd:double` term (the open-world identical-terms fast path) and FALSE
-//!   against any other numeric (op:numeric-equal is undecided → known-different);
+//! * xsd:double NaN (sq-ilweo): `=` on NaN is FALSE against every numeric, the
+//!   identical `"NaN"^^xsd:double` term included (op:numeric-equal(NaN, NaN) is
+//!   false, so the identical-terms fast path skips NaN; `sameTerm` stays true);
 //!   `<` `>` against a numeric constant is a TYPE ERROR (the stored-NaN numeric
 //!   cache reads back as a miss, so NaN takes the strict path, where num_compare is
 //!   undecided); ORDER BY totalises NaN FIRST — before -INF, equal to itself.
@@ -368,11 +368,10 @@ fn eq_spec(a: &T, b: &T) -> Result<bool, ()> {
         _ => match (num_of(a), num_of(b)) {
             (Some(x), Some(y)) => {
                 if num_f64(&x).is_nan() || num_f64(&y).is_nan() {
-                    // NaN `=` (probe-pinned, sq-ilweo): the IDENTICAL "NaN" term is
-                    // equal via the engine's open-world sameTerm fast path; any
-                    // OTHER numeric pairing is undecided by op:numeric-equal and
-                    // therefore known-different (false, not a type error).
-                    Ok(a == b)
+                    // NaN `=` (sq-ilweo): op:numeric-equal is false for every NaN
+                    // pairing, the identical "NaN" term included (known-different,
+                    // not a type error), in normal and strict-capacity execution alike.
+                    Ok(false)
                 } else {
                     Ok(num_cmp(&x, &y) == std::cmp::Ordering::Equal)
                 }
@@ -1718,8 +1717,8 @@ fn oracle_known_answer_computed_double() {
 }
 
 /// NaN value semantics, hand-computed (sq-ilweo): `=` against the NaN constant is
-/// sameTerm-TRUE for the stored NaN term and FALSE (not an error!) for any other
-/// numeric — pinned by the NEGATED filter, which keeps exactly the false rows;
+/// FALSE (not an error!) for every numeric, the stored NaN term included
+/// (op:numeric-equal) — pinned by the NEGATED filter, which keeps every row;
 /// `<` against a numeric constant is a TYPE ERROR (not false!) — pinned by the
 /// negated filter dropping the NaN row (`!err = err`); ORDER BY totalises NaN
 /// FIRST, before -INF.
@@ -1746,10 +1745,11 @@ fn oracle_known_answer_nan() {
     };
     let row = |i: usize| vec![Some(s(i).render())];
     let cases: Vec<(Expr, Vec<Vec<Option<String>>>)> = vec![
-        // ?v = NaN keeps exactly the identical NaN term (sameTerm fast path).
-        (Expr::EqVC(1, nan()), vec![row(0)]),
-        // !(?v = NaN) keeps the OTHER numerics: their verdict is false, not error.
-        (Expr::Not(Box::new(Expr::EqVC(1, nan()))), vec![row(1), row(2)]),
+        // ?v = NaN keeps nothing: op:numeric-equal(NaN, NaN) is false even for the
+        // identical NaN term.
+        (Expr::EqVC(1, nan()), vec![]),
+        // !(?v = NaN) keeps every row: each verdict is false, not error.
+        (Expr::Not(Box::new(Expr::EqVC(1, nan()))), vec![row(0), row(1), row(2)]),
         // ?v < 7 drops NaN as a TYPE ERROR and keeps the comparable rows.
         (Expr::LtVK(1, 7), vec![row(1), row(2)]),
         // !(?v < 7) drops EVERYTHING: !err = err for NaN, !true = false for the rest.

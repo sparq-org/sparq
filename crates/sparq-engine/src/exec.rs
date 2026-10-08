@@ -14966,6 +14966,29 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
     }
 }
 
+/// Whether `t` is an `xsd:double` / `xsd:float` `NaN` literal: the one RDF term that is
+/// not `=` to itself (op:numeric-equal), so identical-term shortcuts must skip it.
+fn term_is_nan_literal(t: &Term) -> bool {
+    matches!(t, Term::Literal(l) if l.language().is_none() && is_nan_lexical(l.value(), l.datatype().as_str()))
+}
+
+/// [`term_is_nan_literal`] for an id, without materialising the term.
+#[cfg(feature = "id-filter-fastpath")]
+fn id_is_nan_literal(graph: &Graph, local: &LocalVocab, id: Id) -> bool {
+    if id == NO_ID || dict::is_inline(id) {
+        false
+    } else if is_local(id) {
+        term_is_nan_literal(local.term(id))
+    } else {
+        matches!(graph.dict.term_parts(id), dict::TermParts::Lit { value, datatype, lang: None } if is_nan_lexical(value, datatype))
+    }
+}
+
+/// XSD's only `NaN` lexical is the exact string `NaN` (no padding, no sign).
+fn is_nan_lexical(value: &str, datatype: &str) -> bool {
+    value == "NaN" && (datatype == xsd::DOUBLE.as_str() || datatype == xsd::FLOAT.as_str())
+}
+
 // Exact borrowed date/dateTime keys live in core; approximate load-time epoch
 // caches remain available separately for representation consumers.
 
@@ -14989,7 +15012,9 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
     }
     if let (Value::Term(p), Value::Term(q)) = (x, y) {
         if p == q {
-            return Some(true); // sameTerm decides even for unknown datatypes
+            // sameTerm decides even for unknown datatypes, except a float/double NaN:
+            // op:numeric-equal(NaN, NaN) is false, matching the strict-capacity path above.
+            return Some(!term_is_nan_literal(p));
         }
         // RDF 1.2 triple terms compare componentwise, with VALUE equality on the
         // objects (`<<(:a :b 01)>> = <<(:a :b 1)>>` is true, errors propagate).
@@ -15909,7 +15934,7 @@ fn equal_compiled(
     #[cfg(feature = "id-filter-fastpath")]
     if !budget::temporal_capacity_active() {
         if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
-            if ida != NO_ID && ida == idc {
+            if ida != NO_ID && ida == idc && !id_is_nan_literal(graph, local, ida) {
                 return Ok(Value::Bool(true));
             }
         }
