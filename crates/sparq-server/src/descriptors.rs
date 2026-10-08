@@ -75,19 +75,13 @@ const SD_SPARQL_UPDATE: &str = "http://www.w3.org/ns/sparql-service-description#
 const SPARQL_VERSION_1_0: &str = "http://www.w3.org/ns/sparql#version-1.0";
 /// [OPUS-4.8] sq-2msb: `sparql:version-1.1`.
 const SPARQL_VERSION_1_1: &str = "http://www.w3.org/ns/sparql#version-1.1";
-/// Existing `sparql:version-1.2` service label; see the scoped contract below.
-const SPARQL_VERSION_1_2: &str = "http://www.w3.org/ns/sparql#version-1.2";
-
-/// Existing service-description version labels, in ascending order.
+/// The SPARQL language versions advertised via `sd:supportedVersion`, in ascending order.
 ///
-/// The legacy public constant name and emitted IRIs are retained for
-/// compatibility, not a claim of complete SPARQL 1.2 conformance. Unannounced
-/// queries retain REC 2013 expression semantics; `VERSION "1.2"` selects only
-/// the implemented, pinned 2026-09-12 WD EBV behavior. UPDATE remains REC 2013
-/// only and refuses 1.2 announcements. Suite totals and documented divergences
-/// are evidence for their tested scope, not blanket language-version support.
-pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] =
-    &[SPARQL_VERSION_1_0, SPARQL_VERSION_1_1, SPARQL_VERSION_1_2];
+/// `sparql:version-1.2` is not advertised: `sd:supportedVersion` claims the whole language
+/// version, but `VERSION "1.2"` selects only the pinned 2026-09-12 WD EBV rule, temporal
+/// values keep the REC 2013 (XSD 1.0) lexical space (no year `0000`), and UPDATE refuses 1.2
+/// announcements. Advertise 1.2 again only once those semantics follow the announced version.
+pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] = &[SPARQL_VERSION_1_0, SPARQL_VERSION_1_1];
 
 /// [OPUS-4.8] sq-qfcb: `sd:BasicFederatedQuery` — the SPARQL 1.1 Federated Query feature
 /// (the `SERVICE` clause). Advertised ONLY when the server is built with the `service`
@@ -269,10 +263,8 @@ pub struct Capabilities {
     /// the BASE `sparq-engine` and always on, so this is NOT keyed off a `cfg!(feature = …)`.
     /// Instead it is keyed off the engine's DOCUMENTED, conformance-verified state: this list
     /// must name exactly the versions whose official W3C suites this build PASSES, never an
-    /// aspiration. A blanket `version-1.2` may be advertised ONLY while the full `sparql12`
-    /// suite is green (it is — see `conformance-report.md`); were any 1.2 group to fall to a
-    /// partial pass, the honest move is to drop to `version-1.2-basic` or omit 1.2 here, NOT to
-    /// keep over-promising. The caller ([`service_capabilities`](crate::descriptors)) sources it
+    /// aspiration. `version-1.2` is omitted while the announced 1.2 semantics are only partly
+    /// implemented (see [`CONFORMANCE_VERIFIED_VERSIONS`]). The caller ([`service_capabilities`](crate::descriptors)) sources it
     /// from a single documented constant so the gate stays visible in one place.
     ///
     /// EMPTY by [`Default`] (the same fail-closed default as every other capability), so a unit
@@ -437,12 +429,7 @@ fn sd_ntriples(
     // can discover triple-term / dir-lang support without probing. The list is pre-built (already
     // deterministic) and EMPTY in the default `Capabilities`, so a profile that opts out of the
     // version posture emits nothing here (no over-promise, byte-stable).
-    // `sd:supportedVersion` sits on the service, so it describes every advertised language.
-    // UPDATE refuses `VERSION "1.2"`, so a service that advertises Update leaves out 1.2.
     for v in &caps.sparql_versions {
-        if caps.update && v == SPARQL_VERSION_1_2 {
-            continue;
-        }
         let _ = writeln!(out, "{svc} <{}> {} .", sd("supportedVersion"), iri(v));
     }
 
@@ -922,50 +909,29 @@ mod tests {
                 "must advertise sd:supportedVersion <{ver}>: {b}"
             );
         }
-        // Preserve the existing label serialization, independently of
-        // the explicitly scoped execution contract above.
+        // 1.2 is not advertised while the announced 1.2 semantics are only partly implemented.
         assert!(
-            b.contains("<http://www.w3.org/ns/sparql#version-1.2>"),
-            "existing version-1.2 label must be serialized: {b}"
-        );
-        assert!(
-            !b.contains("version-1.2-basic"),
-            "existing label set does not include version-1.2-basic: {b}"
+            !b.contains("http://www.w3.org/ns/sparql#version-1.2"),
+            "version-1.2 must not be advertised: {b}"
         );
         for r in oxttl::NTriplesParser::new().for_slice(b.as_bytes()) {
             r.expect("SD with sd:supportedVersion must be valid N-Triples");
         }
 
-        // UPDATE refuses `VERSION "1.2"`, so an Update-capable service must not claim 1.2.
-        let writable = service_description(
-            "http://host/sparql",
-            "http://host/sparql",
-            "http://host/ds",
-            &Capabilities {
-                update: true,
-                sparql_versions: CONFORMANCE_VERIFIED_VERSIONS
-                    .iter()
-                    .map(|v| (*v).to_string())
-                    .collect(),
-                ..Capabilities::default()
-            },
-            &[],
-            Some("application/n-triples"),
+        // Tripwires: once UPDATE accepts 1.2 and 1.2 dateTimes admit year 0000 (XSD 1.1),
+        // revisit CONFORMANCE_VERIFIED_VERSIONS.
+        assert!(sparq_engine::parse_update_rec2013(
+            "VERSION \"1.2\" INSERT DATA { <urn:s> <urn:p> <urn:o> }"
+        )
+        .is_err());
+        let empty = sparq_core::Graph::load_str("", "turtle").unwrap();
+        let year_zero = sparq_engine::query(
+            &empty,
+            "VERSION \"1.2\" PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> \
+             SELECT (YEAR(\"0000-01-01T00:00:00Z\"^^xsd:dateTime) AS ?y) WHERE {}",
         )
         .unwrap();
-        let w = &writable.body;
-        assert!(w.contains(&format!("{sv} <{SPARQL_VERSION_1_1}>")), "{w}");
-        assert!(
-            !w.contains(SPARQL_VERSION_1_2),
-            "Update-capable service claims 1.2: {w}"
-        );
-        assert!(
-            sparq_engine::parse_update_rec2013(
-                "VERSION \"1.2\" INSERT DATA { <urn:s> <urn:p> <urn:o> }"
-            )
-            .is_err(),
-            "UPDATE accepts 1.2 now; advertise it for writable services again"
-        );
+        assert_eq!(year_zero.rows[0][0], None);
     }
 
     #[test]

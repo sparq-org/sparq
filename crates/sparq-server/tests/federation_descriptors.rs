@@ -342,26 +342,20 @@ async fn sd_parses_and_carries_mandatory_terms() {
     );
 
     // The REAL served SD (through `service_capabilities`) carries sd:supportedVersion 1.0 and
-    // 1.1. UPDATE refuses `VERSION "1.2"`, so 1.2 is advertised only while Update is not.
+    // 1.1 only: the announced 1.2 semantics are only partly implemented.
     let versions = objects_of(&triples, &format!("{SD}supportedVersion"));
-    for v in [
-        "http://www.w3.org/ns/sparql#version-1.0",
-        "http://www.w3.org/ns/sparql#version-1.1",
-    ] {
-        assert!(
-            versions.contains(&v.to_string()),
-            "sd:supportedVersion {v} advertised: {versions:?}"
-        );
-    }
-    let update = langs.contains(&format!("{SD}SPARQLUpdate"));
     assert_eq!(
-        versions.contains(&"http://www.w3.org/ns/sparql#version-1.2".to_string()),
-        !update,
-        "version-1.2 is advertised exactly when Update is not: {versions:?} {langs:?}"
-    );
-    assert!(
-        !versions.iter().any(|v| v.contains("version-1.2-basic")),
-        "the -basic profile is not advertised: {versions:?}"
+        versions
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            "http://www.w3.org/ns/sparql#version-1.0",
+            "http://www.w3.org/ns/sparql#version-1.1"
+        ]
+        .into_iter()
+        .collect(),
+        "sd:supportedVersion: {versions:?}"
     );
 
     // sd:resultFormat advertises the four SPARQL-results serialisations + the three RDF ones.

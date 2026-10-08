@@ -512,7 +512,7 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > port, so it does not touch the engine's egress allowlist). It ratchets a MEASURED PASS floor
 > over **(A) the Service Description** (`GET /sparql` with no query): the `sd:Service` advertises
 > exactly the result/input formats (SRJ/SRX/CSV/TSV + Turtle/N-Triples/RDF-XML), the query/update
-> languages, the SPARQL versions (`sd:supportedVersion` 1.0/1.1, plus 1.2 when Update is not advertised) and `sd:BasicFederatedQuery`
+> languages, the SPARQL versions (`sd:supportedVersion` 1.0/1.1) and `sd:BasicFederatedQuery`
 > that the server GENUINELY implements — **no over-advertising** (each advertised result format is
 > cross-checked against a real SELECT request, and JSON-LD — not served in this build — must NOT
 > appear) — and **(B) the Graph Store Protocol**: a GET/PUT/POST/DELETE round-trip on a named graph
@@ -1071,12 +1071,12 @@ advertise itself as a discoverable federation node by serving two read-only RDF 
       conformance-verifies, as `sparql:version-*` IRIs (`http://www.w3.org/ns/sparql#`). SPARQL
       1.2 SD moves version negotiation off `sd:Language` onto `sd:supportedVersion`, so a
       1.2-aware federation client can discover triple-term / `dir`-lang support without probing.
-      sparq advertises query syntax labels `version-1.0`, `version-1.1` and
-      `version-1.2`; these do not certify complete draft semantics. Clients must announce
-      `VERSION "1.2"` (or `1.2-basic`) for the pinned draft EBV rule; unannounced queries
-      use REC 2013. UPDATE supports REC 2013 only and rejects non-`1.1` announcements,
-      including through protocol dataset overrides, so a service that advertises Update omits
-      `version-1.2` (`sd:supportedVersion` describes the whole service). See the
+      sparq advertises `version-1.0` and `version-1.1` only. `VERSION "1.2"` (or
+      `1.2-basic`) selects just the pinned draft EBV rule; unannounced queries use REC 2013,
+      temporal values keep the REC 2013 lexical space, and UPDATE supports REC 2013 only and
+      rejects non-`1.1` announcements, including through protocol dataset overrides. Because
+      `sd:supportedVersion` claims the whole language version, `version-1.2` stays unadvertised
+      until those semantics follow the announcement. See the
       [version-pinned EBV contract](../sparql-query/ebv-dialects.md) and generated
       conformance report for the exact tested scope;
     - `sd:resultFormat` — the four SPARQL-results serialisations (JSON/XML/CSV/TSV) plus the RDF
