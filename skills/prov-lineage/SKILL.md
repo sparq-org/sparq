@@ -215,7 +215,8 @@ the vector is empty because that target would satisfy the BGP.
 ```toml
 [dependencies]
 sparq-prov = { path = "crates/sparq-prov", features = ["why-not"] }
-spargebra = { version = "0.4", features = ["sparql-12", "sep-0006"] }
+# Same checkout: sparq-prov uses the vendored fork, so take spargebra from it too.
+spargebra = { path = "vendor/spargebra", package = "sparq-spargebra", features = ["sparql-12", "sep-0006"] }
 ```
 
 The accepted algebra node is exactly `GraphPattern::Bgp`. `OPTIONAL`, `UNION`,

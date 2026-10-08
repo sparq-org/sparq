@@ -249,7 +249,9 @@ typst compile papers/<source>.typ src/generated/papers/<slug>.html \
 # anonymized build for a double-blind venue (the .typ's authors()/anon honour this):
 typst compile papers/<source>.typ /tmp/<slug>-anon.pdf \
   --root . --input data="$(cat src/data/paper-evidence.json)" --input anon=true
-``` (As-built, PR #336.) The **in-site HTML** page at `/papers/<slug>` uses **Typst's
+```
+
+(As-built, PR #336.) The **in-site HTML** page at `/papers/<slug>` uses **Typst's
 native HTML export** — *not* typst.ts/`@myriaddreamin/typst.react`. The build extracts the
 `<body>` inner HTML and the React route (`components/papers/paper-html.tsx`) injects it as a
 static fragment into a scoped `.paper-prose` block (no WASM compiler shipped to the browser).
