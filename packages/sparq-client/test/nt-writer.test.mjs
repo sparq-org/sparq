@@ -198,7 +198,7 @@ test("matchQuads / countQuads accept only a single N-Triples term per position",
     "<http://ex/a> . ?x ?y ?z",
     "<http://ex/a> } UNION { ?s ?p ?o",
     "<a\\u003E>",
-    '"x\\u0022 } UNION { ?s ?p ?o"',
+    '"x\\u000A"\\u0020?s',
     "?x",
     '"x"@en ?y',
     '"x"@en--up',
@@ -213,4 +213,53 @@ test("matchQuads / countQuads accept only a single N-Triples term per position",
     assert.throws(() => matchQuads(store, null, null, null, bad), /single N-Triples/, bad);
   }
   assert.equal(seen.length, 14);
+});
+
+// The shared writer's own output (control characters written as \uXXXX, quotes, backslashes,
+// non-ASCII, U+2028, language tags, directions, datatypes) must round-trip through
+// matchQuads unchanged, and escapes that decode to quote or newline must stay inside the literal.
+test("every literal termToNTriples writes round-trips through matchQuads", () => {
+  let query = "";
+  const store = {
+    query: (q) => {
+      query = q;
+      return JSON.stringify({ head: { vars: [] }, results: { bindings: [] } });
+    },
+  };
+  const controls = Array.from({ length: 0x20 }, (_, c) => String.fromCharCode(c)).join("") + "\u007F";
+  const values = [controls, 'q"uo\\te', "café", "a b c", "😀 \u0080", "} UNION { ?s ?p ?o", ""];
+  const extras = [
+    {},
+    { "xml:lang": "en" },
+    { "xml:lang": "en-GB", "its:dir": "rtl" },
+    { datatype: "http://ex/dt" },
+    { datatype: "http://www.w3.org/2001/XMLSchema#string" },
+  ];
+  for (const value of values) {
+    for (const extra of extras) {
+      const token = termToNTriples({ type: "literal", value, ...extra });
+      matchQuads(store, null, null, token);
+      const expected = `SELECT * WHERE { { ?s ?p ${token} } UNION { GRAPH ?g { ?s ?p ${token} } } }`;
+      assert.equal(query, expected, token);
+      // The query string has no raw line breaks: every one is escaped inside the literal.
+      assert.doesNotMatch(query, /[\n\r]/);
+    }
+  }
+  // An escaped spelling of the same term is parsed, decoded and re-serialised canonically.
+  matchQuads(store, null, null, '"caf\\u00E9\\U0001F600"@en');
+  assert.match(query, /\?s \?p "café😀"@en \}/);
+  // An escape that decodes to a quote or newline stays inside the literal.
+  matchQuads(store, null, null, '"x\\u0022 } UNION { ?s ?p ?o \\u000A"');
+  assert.match(query, /\?s \?p "x\\" \} UNION \{ \?s \?p \?o \\n" \}/);
+  // IRIs and blank nodes round-trip too; an IRI escape that decodes to '>' is rejected.
+  for (const t of [{ type: "uri", value: "http://ex/é" }, { type: "bnode", value: "a.b" }]) {
+    matchQuads(store, termToNTriples(t), null, null);
+    assert.ok(query.includes(`{ ${termToNTriples(t)} ?p ?o }`));
+  }
+  assert.equal(
+    (matchQuads(store, "<http://ex/\\u00E9>", null, null), query.includes("<http://ex/é>")),
+    true,
+  );
+  assert.throws(() => matchQuads(store, "<http://ex/\\u003E>", null, null), /single N-Triples/);
+  assert.throws(() => matchQuads(store, '"\\uD800"', null, null), /single N-Triples/);
 });
