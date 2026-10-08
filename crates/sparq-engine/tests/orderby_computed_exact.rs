@@ -142,3 +142,32 @@ fn min_max_over_integers_beyond_i128_use_value_order() {
     assert!(q("MAX")[0].starts_with("\"10000000000000000000000000000000000000000\""), "{:?}", q("MAX"));
     assert!(q("MIN")[0].starts_with("\"9999999999999999999999999999999999999999\""), "{:?}", q("MIN"));
 }
+
+// Unbounded integer subtypes beyond i128 are numbers too, so a negativeInteger sorts
+// below a positive integer; a subtype whose sign facet the lexical breaks stays opaque.
+#[test]
+fn integer_subtypes_beyond_i128_order_by_value() {
+    let big = "10000000000000000000000000000000000000000";
+    check_plain(&graph(&[
+        ("a", &format!("\"{big}\"^^xsd:positiveInteger")),
+        ("b", &format!("\"-{big}\"^^xsd:negativeInteger")),
+        ("c", &format!("\"{big}0\"^^xsd:nonNegativeInteger")),
+    ]));
+    let g = graph(&[
+        ("a", &format!("\"-{big}\"^^xsd:nonPositiveInteger")),
+        ("b", &format!("\"{big}\"^^xsd:integer")),
+    ]);
+    let q = |agg: &str| subjects(&g, &format!("SELECT ({agg}(?v) AS ?m) WHERE {{ ?s <http://ex/v> ?v }}"));
+    assert!(q("MIN")[0].starts_with(&format!("\"-{big}\"")), "{:?}", q("MIN"));
+    assert!(q("MAX")[0].starts_with(&format!("\"{big}\"")), "{:?}", q("MAX"));
+}
+
+// A whitespace-padded raw lexical is not a well-formed beyond-tower number, so it is not
+// ordered as one: a padded huge NEGATIVE integer does not sort below the in-range numbers.
+#[test]
+fn padded_beyond_i128_lexical_is_not_a_number() {
+    let big = "10000000000000000000000000000000000000000";
+    let g = graph(&[("a", &format!("\" -{big} \"^^xsd:integer")), ("b", "5"), ("c", "7")]);
+    let order = subjects(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?v } ORDER BY ?v");
+    assert_ne!(order[0], "<http://ex/a>", "{order:?}");
+}
