@@ -115,3 +115,31 @@ export async function runImportBatch<T>(
     },
   };
 }
+
+/** One successfully imported document of a batch, as recorded in workspace history. */
+export interface ImportedDocument {
+  label: string;
+  /** The serialisation the document was parsed as (`turtle`, `nquads`, ...). */
+  format: string;
+  /** Byte length of the imported document (`ImportResult.bytes`). */
+  bytes: number;
+}
+
+/**
+ * The single workspace-history entry for a web multi-file batch (#6257): the successful
+ * documents' REAL byte total, their shared format (or `mixed` when they differ), and a label that
+ * is the file's own name for a one-file batch, else the count of files actually imported.
+ * Returns `null` when nothing imported.
+ */
+export function summariseImportedBatch(
+  docs: readonly ImportedDocument[],
+): ImportedDocument | null {
+  if (docs.length === 0) return null;
+  if (docs.length === 1) return { ...docs[0] };
+  const formats = new Set(docs.map((d) => d.format));
+  return {
+    label: `${docs.length} files`,
+    format: formats.size === 1 ? docs[0].format : "mixed",
+    bytes: docs.reduce((sum, d) => sum + d.bytes, 0),
+  };
+}
