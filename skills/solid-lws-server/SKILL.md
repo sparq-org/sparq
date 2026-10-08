@@ -243,7 +243,6 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
 | `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
-| `SOLID_SERVER_LWS_SAML_IDPS_FILE` | JSON map of SAML IdP entity id to signing certificate; enables the SAML subject-token suite. |
 
 What the server exposes, all discoverable from the storage description
 (`GET /` with `Accept: application/lws+cid`):

@@ -10,14 +10,13 @@ use serde_json::{json, Value};
 use super::subject_tokens;
 pub use super::subject_tokens::{ID_TOKEN_TYPE, JWT_TOKEN_TYPE};
 use super::{
-    is_uri, json_response, method_not_allowed, saml, set, tokens, LwsRequest, LwsState,
-    AS_JWKS_PATH, AS_TOKEN_PATH, JSON,
+    is_uri, json_response, method_not_allowed, set, tokens, LwsRequest, LwsState, AS_JWKS_PATH,
+    AS_TOKEN_PATH, JSON,
 };
 use crate::store::Store;
 
 pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
 pub const ACCESS_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:access_token";
-pub const SAML2_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:saml2";
 
 pub async fn handle<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Response {
     if req.path == AS_TOKEN_PATH {
@@ -55,10 +54,7 @@ pub fn jwks(cfg: &super::LwsConfig) -> Value {
 /// excludes it, and the subject token and identifier types say which suites this server accepts.
 pub fn metadata<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
-    let mut token_types = vec![JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
-    if !cfg.saml_idps.is_empty() {
-        token_types.push(SAML2_TOKEN_TYPE);
-    }
+    let token_types = vec![JWT_TOKEN_TYPE, ID_TOKEN_TYPE];
     json!({
         "issuer": cfg.issuer(),
         "token_endpoint": cfg.absolute(AS_TOKEN_PATH),
@@ -112,9 +108,6 @@ async fn token<S: Store + 'static>(state: &LwsState<S>, req: &LwsRequest) -> Res
                 },
             )
             .await
-        }
-        SAML2_TOKEN_TYPE if !state.cfg.saml_idps.is_empty() => {
-            saml::verify(&state.cfg, &form.subject_token)
         }
         other => Err(format!("unsupported subject_token_type {other}")),
     };
