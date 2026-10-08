@@ -48,8 +48,13 @@ fn text_closure(src: &str) -> (Dict, Vec<[sparq_core::dict::Id; 3]>) {
 const LEGACY: NegationCycles = NegationCycles::SinglePass;
 
 /// The sparq-solid rule files the automatic stratification refuses by default.
-const REFUSED_CORPUS_FILES: &[&str] =
-    &["acp-c.n3", "odrl-b.n3", "odrl-c.n3", "odrl-d.n3", "odrl-spike.n3"];
+const REFUSED_CORPUS_FILES: &[&str] = &[
+    "acp-c.n3",
+    "odrl-b.n3",
+    "odrl-c.n3",
+    "odrl-d.n3",
+    "odrl-spike.n3",
+];
 
 fn text_closure_legacy(src: &str) -> (Dict, Vec<[sparq_core::dict::Id; 3]>) {
     let mut dict = Dict::new();
@@ -462,4 +467,49 @@ fn variable_predicate_negation_cycle_is_refused_by_both_engines() {
     let e = compile(&rules).expect_err("compile refuses the cycle");
     assert!(e.contains("cycle"), "{e}");
     assert!(reason_n3(&mut Dict::new(), &format!("{PRE}:m :pred :ok .\n{rules}")).is_err());
+}
+
+/// The compiled anti-join always reads the store, so the compiled subset admits only a
+/// `log:notIncludes` subject that the text engine also reads as the store. `{}` (the empty
+/// formula, parsed as the literal `true`) and a subject a premise atom can bind are
+/// refused rather than evaluated differently.
+#[test]
+fn not_includes_scope_forms_agree_or_are_refused() {
+    const PRE: &str = "@prefix : <http://ex/> .\n\
+        @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n";
+    let facts = format!("{PRE}:seed :p :x .");
+    let rules = |scope: &str| {
+        format!(
+            "{PRE}{{ :seed :p :x }} => {{ :r :blocked :g }} .\n\
+             {{ :missing :p :x }} => {{ :r :other :g }} .\n\
+             {{ :seed :p :x .\n\
+                ?s log:notIncludes {{ :r :other :g }} .\n\
+                {scope} log:notIncludes {{ :r :blocked :g }}\n\
+             }} => {{ :r :allowed :g }} ."
+        )
+    };
+    // `{}`: the text engine checks the empty formula (so `:allowed` holds); the compiled
+    // subset refuses the rule instead of reading the store.
+    let empty = rules("{}");
+    let (td, tc) = text_closure(&format!("{facts}\n{empty}"));
+    let text = triples_as_strings(&td, &tc);
+    assert!(has(&text, "http://ex/r", "http://ex/allowed", "http://ex/g"));
+    let e = compile(&empty).expect_err("`{}` scope is outside the compiled subset");
+    assert!(e.contains("empty formula"), "{e}");
+    // A store scope: both engines agree (the blocked fact suppresses `:allowed`).
+    for scope in ["?u", "?s", "_:b", "<http://ex/doc>"] {
+        let store = rules(scope);
+        let (td, tc) = text_closure(&format!("{facts}\n{store}"));
+        let text = triples_as_strings(&td, &tc);
+        let (cd, cc) = compiled_closure(&facts, &store);
+        let compiled = triples_as_strings(&cd, &cc);
+        assert_set_equal(&text, &compiled, scope);
+        assert!(!has(&compiled, "http://ex/r", "http://ex/allowed", "http://ex/g"), "{scope}");
+    }
+    // A scope variable a premise atom binds could be bound to `true` (the empty formula)
+    // by the data: refused.
+    let bound = format!(
+        "{PRE}{{ ?x :scope ?s . ?s log:notIncludes {{ ?x :blocked :g }} }} => {{ ?x :ok :g }} ."
+    );
+    assert!(compile(&bound).is_err());
 }

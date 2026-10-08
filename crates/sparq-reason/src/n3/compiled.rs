@@ -49,7 +49,11 @@
 //!   store, with the engine's no-retraction semantics. [`compile`] stratifies the rule
 //!   set exactly as [`crate::reason_n3`] does (a rule negating a predicate the set
 //!   derives runs after the deriving rules' fixpoint, see [`CompiledRuleSet::n_strata`];
-//!   a rule set that negates through a dependency cycle is a [`compile`] error);
+//!   a rule set that negates through a dependency cycle is a [`compile`] error). The
+//!   subject must denote the store on every evaluation, as the text engine reads it: an
+//!   IRI, a literal other than `true`, or a variable / blank node the rule uses only as a
+//!   `log:notIncludes` subject. `{}` (the empty formula, which parses as `true`), a
+//!   formula, and a subject a premise atom can bind are [`compile`] errors;
 //! * `log:uri` (both directions), `log:equalTo` / `log:notEqualTo`;
 //! * `string:concatenation` (with the engine's typed-literal value coercion),
 //!   `string:encodeForUri`, `string:scrape` (constant regex), `string:notGreaterThan`
@@ -319,6 +323,49 @@ pub fn compile_with_cycles(
         rules: c.rules,
         strata,
     })
+}
+
+/// Whether a `log:notIncludes` subject denotes the current store on every evaluation, as
+/// the compiled anti-join assumes: an IRI, a literal other than `true` (which is how `{}`
+/// parses), or a variable / blank node that `rule` uses only as a `log:notIncludes`
+/// subject, so no premise atom can bind it to a formula or to `true`.
+fn store_scope_subject(subject: &Term, rule: &super::model::Rule) -> bool {
+    fn count(t: &Term, target: &Term) -> usize {
+        if t == target {
+            return 1;
+        }
+        match t {
+            Term::Formula(ts) => ts.iter().flatten().map(|x| count(x, target)).sum(),
+            Term::List(ms) => ms.iter().map(|x| count(x, target)).sum(),
+            Term::Triple(tr) => tr.iter().map(|x| count(x, target)).sum(),
+            _ => 0,
+        }
+    }
+    match subject {
+        Term::Iri(_) => true,
+        Term::Lit(v, _, _) => v != "true",
+        Term::Var(_) | Term::Blank(_) => {
+            // Every occurrence is as the subject of a top-level `log:notIncludes` (which
+            // binds nothing), e.g. one `?S` shared by several negations.
+            let as_scope = rule
+                .premise
+                .iter()
+                .filter(|a| {
+                    &a[0] == subject
+                        && matches!(super::scope_op(&a[1]), Some(super::ScopeOp::NotIncludes))
+                })
+                .count();
+            let uses: usize = rule
+                .premise
+                .iter()
+                .chain(&rule.conclusion)
+                .flatten()
+                .map(|t| count(t, subject))
+                .sum();
+            uses == as_scope
+        }
+        _ => false,
+    }
 }
 
 /// Parse an N3 **fact** document (no rules) and intern its ground triples into `dict` —
@@ -662,6 +709,17 @@ impl Compiler {
                     return Err(
                         "compiled-rules: a formula-scoped log:notIncludes subject is not in the compiled subset (formula values have no id representation)".into(),
                     );
+                }
+                // The anti-join always reads the STORE. The text engine reads the store only
+                // when the subject is not a formula and not the literal `true` (`{}`, the
+                // empty formula) at evaluation time. Admit exactly the subjects that are
+                // never either: an IRI, a literal other than `true`, or a variable / blank
+                // node the rule uses only in this position (so nothing can bind it).
+                if !store_scope_subject(&atom[0], rule) {
+                    return Err(format!(
+                        "compiled-rules: log:notIncludes subject {:?} is not in the compiled subset (only an IRI, a literal other than `true`, or a variable used only as a log:notIncludes subject always denotes the current store; `{{}}` is the empty formula)",
+                        atom[0]
+                    ));
                 }
                 let Term::Formula(inner) = &atom[2] else {
                     return Err(
