@@ -4927,7 +4927,7 @@ dependencies = [
  "sha2 0.10.9",
  "sparq-core",
  "sparq-engine",
- "thiserror 2.0.18",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -60,7 +60,7 @@ digest = "0.10"
 
 # SHA-256: the RDFC-1.0 default hash of the vendored `src/rdfc/` core (always on),
 # also backing the opt-in `rdf12-triple-terms` profile and the SHA-256/384/512 outer
-# digests of the opt-in `concept` verifier. [OPUS-4.8] sq-hslb.
+# digests of the opt-in `concept` verifier. sq-hslb.
 # Pinned to 0.10 alongside the suite's `sha2` dev-dep (rdf-canon 0.15.3 / digest
 # 0.10 — lift only when rdf-canon publishes a digest-0.11 release).
 sha2 = "0.10"
