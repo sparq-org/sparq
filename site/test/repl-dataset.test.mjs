@@ -20,6 +20,7 @@ import {
   DEFAULT_GRAPH_COUNT_QUERY,
   parseGraphStats,
 } from "../src/lib/repl-dataset.ts";
+import { parseNTriples } from "@sparq/client";
 
 test("isDatasetFormat is true exactly for the quad-bearing formats", () => {
   // Quad formats carry named graphs and must be loaded with loadDataset.
@@ -82,6 +83,59 @@ test("rowsToNQuads emits a triple line for default-graph rows (no ?g)", () => {
   assert.equal(
     rowsToNQuads(rows),
     '<http://ex/a> <http://ex/p> "default" .',
+  );
+});
+
+// #6044: SPARQL 1.2 JSON nests an RDF 1.2 triple term under `value`. The old local
+// writer had no "triple" case and wrote the string "undefined" into the snapshot.
+test("rowsToNQuads writes an RDF 1.2 triple term as <<( s p o )>>", () => {
+  const rows = [
+    {
+      s: { type: "bnode", value: "r1" },
+      p: { type: "uri", value: "http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies" },
+      o: {
+        type: "triple",
+        value: {
+          subject: { type: "uri", value: "http://ex/alice" },
+          predicate: { type: "uri", value: "http://ex/says" },
+          object: { type: "literal", value: 'hi "there"', "xml:lang": "en" },
+        },
+      },
+      g: { type: "uri", value: "http://ex/g1" },
+    },
+  ];
+  const out = rowsToNQuads(rows);
+  assert.equal(
+    out,
+    '_:r1 <http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies> ' +
+      '<<( <http://ex/alice> <http://ex/says> "hi \\"there\\""@en )>> <http://ex/g1> .',
+  );
+  assert.ok(!out.includes("undefined"));
+});
+
+// RDF 1.2 base direction (`its:dir` in SPARQL 1.2 JSON) is part of a literal's identity:
+// a snapshot must write `"hi"@en--ltr`, at the top level and inside a triple term.
+test("rowsToNQuads round-trips a directional literal, top-level and in a triple term", () => {
+  const a = { type: "uri", value: "http://ex/a" };
+  const p = { type: "uri", value: "http://ex/p" };
+  const hi = (dir) => ({ type: "literal", value: "hi", "xml:lang": "en", "its:dir": dir });
+  const tt = (o) => ({ type: "triple", value: { subject: a, predicate: p, object: o } });
+  const rows = [
+    { s: a, p, o: hi("ltr") },
+    { s: a, p, o: tt(hi("rtl")) },
+    { s: a, p, o: tt(hi(undefined)) },
+  ];
+  const nq = rowsToNQuads(rows);
+  assert.equal(
+    nq,
+    '<http://ex/a> <http://ex/p> "hi"@en--ltr .\n' +
+      '<http://ex/a> <http://ex/p> <<( <http://ex/a> <http://ex/p> "hi"@en--rtl )>> .\n' +
+      '<http://ex/a> <http://ex/p> <<( <http://ex/a> <http://ex/p> "hi"@en )>> .',
+  );
+  const { statements } = parseNTriples(nq);
+  assert.deepEqual(
+    statements.map((st) => (st.o.kind === "triple" ? st.o.o.lang : st.o.lang)),
+    ["en--ltr", "en--rtl", "en"],
   );
 });
 

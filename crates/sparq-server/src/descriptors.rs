@@ -177,18 +177,19 @@ fn is_wildcard_only(accept: &str) -> bool {
 
 /// Serialises a triple list in the negotiated [`GraphFormat`], reusing the crate's graph
 /// serialisers (the same writers the GSP-read path uses), so the descriptor is guaranteed
-/// well-formed in whichever syntax is chosen.
-fn serialise(triples: &[Triple], fmt: GraphFormat) -> (&'static str, String) {
+/// well-formed in whichever syntax is chosen. A writer that refuses the graph (RDF/XML cannot
+/// encode some predicates) is an `Err`, never a truncated descriptor.
+fn serialise(triples: &[Triple], fmt: GraphFormat) -> Result<(&'static str, String), String> {
     let body = match fmt {
-        GraphFormat::NTriples => crate::graph::triples_to_ntriples(triples),
-        GraphFormat::Turtle => crate::graph::triples_to_turtle(triples),
-        GraphFormat::RdfXml => crate::graph::triples_to_rdfxml(triples),
+        GraphFormat::NTriples => crate::graph::triples_to_ntriples(triples)?,
+        GraphFormat::Turtle => crate::graph::triples_to_turtle(triples)?,
+        GraphFormat::RdfXml => crate::graph::triples_to_rdfxml(triples)?,
         // [OPUS-4.8] sq-oy1f.1: a descriptor may be requested as JSON-LD too (only matchable
         // when the `jsonld` feature is on; the variant does not exist otherwise).
         #[cfg(feature = "jsonld")]
         GraphFormat::JsonLd => crate::graph::triples_to_jsonld(triples),
     };
-    (fmt.content_type(), body)
+    Ok((fmt.content_type(), body))
 }
 
 /// Parses an N-Triples document (the output of [`Introspection::to_void`] / [`sd_ntriples`])
@@ -225,7 +226,7 @@ pub fn void_descriptor(
     let nt = Introspection::build(graph).to_void_with_cs(dataset_iri);
     let triples = parse_ntriples(&nt)?;
     let fmt = negotiate_descriptor(accept);
-    let (content_type, body) = serialise(&triples, fmt);
+    let (content_type, body) = serialise(&triples, fmt)?;
     Ok(Descriptor { content_type, body })
 }
 
@@ -356,7 +357,7 @@ pub fn service_description(
     let nt = sd_ntriples(service_iri, endpoint_iri, dataset_iri, caps, named_graphs);
     let triples = parse_ntriples(&nt)?;
     let fmt = negotiate_descriptor(accept);
-    let (content_type, body) = serialise(&triples, fmt);
+    let (content_type, body) = serialise(&triples, fmt)?;
     Ok(Descriptor { content_type, body })
 }
 

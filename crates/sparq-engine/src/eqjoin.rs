@@ -426,6 +426,14 @@ fn key_of(graph: &Graph, id: Id) -> JKey {
         return JKey::Hard;
     }
     if let Some(v) = graph.numeric_value(id) {
+        // An `xsd:float` is `=`-equal to every integer/decimal that ROUNDS to it in the float
+        // tier (`"0.1"^^xsd:float = 0.1`), whose cached f64 differs from the float's, so no
+        // f64-bits key covers it: pair it through the exact evaluator.
+        if !dict::is_inline(id)
+            && matches!(graph.dict.term_parts(id), dict::TermParts::Lit { datatype, .. } if datatype == xsd::FLOAT.as_str())
+        {
+            return JKey::Hard;
+        }
         let v = if v == 0.0 { 0.0 } else { v };
         return JKey::Num(v.to_bits());
     }

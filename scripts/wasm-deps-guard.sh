@@ -37,7 +37,16 @@ FORBIDDEN=(rayon flate2 zstd zstd-safe bzip2 sparq-parse mio tokio)
 
 fail=0
 for pkg in "${BUNDLES[@]}"; do
-  tree="$(cargo tree -p "$pkg" --target "$TARGET" -e no-dev 2>/dev/null)"
+  # Fail LOUD, not silently (#6093): under `set -e` a failing `cargo tree` (unfetched
+  # registry, offline runner, manifest/lockfile error) used to abort here with zero output.
+  tree_err="$(mktemp)"
+  if ! tree="$(cargo tree -p "$pkg" --target "$TARGET" -e no-dev 2>"$tree_err")"; then
+    echo "::error::cargo tree failed for ${pkg} — the ${TARGET} dependency graph could not be computed (not a forbidden-crate finding)"
+    sed 's/^/  cargo tree: /' "$tree_err" | head -20
+    rm -f "$tree_err"
+    exit 1
+  fi
+  rm -f "$tree_err"
   for crate in "${FORBIDDEN[@]}"; do
     # Match a tree line whose package name is exactly $crate (followed by a space+version
     # or end-of-line), ignoring the leading tree-drawing glyphs.

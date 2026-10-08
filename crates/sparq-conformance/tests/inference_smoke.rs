@@ -23,6 +23,12 @@ fn inference_runner_produces_a_report_when_data_present() {
         .expect("run sparq-inference-conformance");
     assert!(status.success(), "runner must exit 0 without --strict");
     let text = std::fs::read_to_string(&report).expect("report written");
-    assert!(text.contains("| rdf-mt | 48 | 0 |"), "rdf-mt stays at 48/48:\n{text}");
-    assert!(text.contains("Overall (all inference suites)"), "overall line present");
+    assert!(
+        text.contains("| rdf-mt | 48 | 0 |"),
+        "rdf-mt stays at 48/48:\n{text}"
+    );
+    assert!(
+        text.contains("Overall (all inference suites)"),
+        "overall line present"
+    );
 }

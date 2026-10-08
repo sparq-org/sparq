@@ -193,8 +193,10 @@ pub fn run_compact(root: &Path) -> CompactScores {
                     strict.pass();
                 }
                 Err(err) => {
-                    let why =
-                        format!("expected error {want_code:?}, got {:?}", err.code().as_str());
+                    let why = format!(
+                        "expected error {want_code:?}, got {:?}",
+                        err.code().as_str()
+                    );
                     s.fail(&e.id, why.clone());
                     strict.fail(&e.id, why);
                 }

@@ -35,7 +35,12 @@ pub fn quad_strings(q: &Quad) -> [String; 4] {
         GraphName::NamedNode(n) => format!("<{}>", n.as_str()),
         GraphName::BlankNode(b) => format!("_:{}", b.as_str()),
     };
-    [nob_str(&q.subject), format!("<{}>", q.predicate.as_str()), term_str(&q.object), g]
+    [
+        nob_str(&q.subject),
+        format!("<{}>", q.predicate.as_str()),
+        term_str(&q.object),
+        g,
+    ]
 }
 
 /// Extract the full quad set of a loaded dataset [`sparq_core::Graph`]: the default
@@ -110,13 +115,19 @@ pub fn compare_quad_sets(a: &[[String; 4]], b: &[[String; 4]]) -> SetCompare {
     // declaring a difference (bounded by the same budget).
     let (ra, rb) = cancel_exact(&sa, &sb);
     if ra.len() != rb.len() {
-        return SetCompare::Different { only_a: sample(&ra), only_b: sample(&rb) };
+        return SetCompare::Different {
+            only_a: sample(&ra),
+            only_b: sample(&rb),
+        };
     }
     match iso4(&ra, &rb) {
         Some(true) => SetCompare::Equal,
         Some(false) => match iso4(&sa, &sb) {
             Some(true) => SetCompare::Equal,
-            Some(false) => SetCompare::Different { only_a: sample(&ra), only_b: sample(&rb) },
+            Some(false) => SetCompare::Different {
+                only_a: sample(&ra),
+                only_b: sample(&rb),
+            },
             None => SetCompare::Unverified,
         },
         None => SetCompare::Unverified,
@@ -168,8 +179,17 @@ fn iso4(a: &[[String; 4]], b: &[[String; 4]]) -> Option<bool> {
     let mut used = vec![false; b.len()];
     let mut steps = 0usize;
     let mut exhausted = false;
-    let found =
-        iso_search(0, a, b, &mut used, &mut fwd, &mut rev, &mut trail, &mut steps, &mut exhausted);
+    let found = iso_search(
+        0,
+        a,
+        b,
+        &mut used,
+        &mut fwd,
+        &mut rev,
+        &mut trail,
+        &mut steps,
+        &mut exhausted,
+    );
     if exhausted && !found {
         return None;
     }
@@ -277,7 +297,10 @@ mod tests {
     fn bnode_vs_iri_never_matches() {
         let a = vec![q("_:x", "<p>", "<o>", "")];
         let b = vec![q("<s>", "<p>", "<o>", "")];
-        assert!(matches!(compare_quad_sets(&a, &b), SetCompare::Different { .. }));
+        assert!(matches!(
+            compare_quad_sets(&a, &b),
+            SetCompare::Different { .. }
+        ));
     }
 
     #[test]

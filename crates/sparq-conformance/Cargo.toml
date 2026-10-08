@@ -40,6 +40,11 @@ path = "src/bin/scoreboard.rs"
 name = "served-conformance-report"
 path = "src/bin/served-conformance-report.rs"
 
+# Issue #6467: the community notation3tests suite runner (suite fetched at run time).
+[[bin]]
+name = "sparq-notation3tests"
+path = "src/bin/notation3tests.rs"
+
 [features]
 # [OPUS-4.8] sq-oy1f.2 — the W3C JSON-LD 1.1 conformance lane (toRdf + fromRdf
 # ratchets, the crate-local `tests/jsonld_suite.rs` runner). OPT-IN and OFF by

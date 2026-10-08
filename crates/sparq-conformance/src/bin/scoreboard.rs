@@ -60,6 +60,9 @@ fn main() {
             eprintln!("could not write {}: {e}", json_path.display());
             std::process::exit(1);
         }
-        eprintln!("machine-readable scoreboard written to {}", json_path.display());
+        eprintln!(
+            "machine-readable scoreboard written to {}",
+            json_path.display()
+        );
     }
 }
