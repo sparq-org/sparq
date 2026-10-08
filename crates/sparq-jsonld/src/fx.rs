@@ -1,10 +1,15 @@
 //! A fast keyed hash for internal maps keyed by IRIs, blank-node labels and terms. The keys
 //! can come from untrusted documents, so each process draws a random key (from std's
 //! `RandomState`) and every block goes through a folded 64×64→128-bit multiply with it:
-//! unlike FxHash, collisions cannot be precomputed without the key. Kept in-crate so
-//! `sparq-jsonld` stays dependency-free.
+//! unlike FxHash, collisions cannot be precomputed without the key. On
+//! wasm32-unknown-unknown, which has no entropy source, the maps are ordered instead.
+//! Kept in-crate so `sparq-jsonld` stays dependency-free.
+
+// The hasher is unused where the maps are ordered.
+#![cfg_attr(all(target_arch = "wasm32", target_os = "unknown"), allow(dead_code))]
 
 use std::collections::hash_map::RandomState;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::OnceLock;
@@ -86,8 +91,17 @@ impl BuildHasher for FxBuild {
     }
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) type FxMap<K, V> = HashMap<K, V, FxBuild>;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 pub(crate) type FxSet<K> = HashSet<K, FxBuild>;
+
+// `RandomState` has no entropy source on wasm32-unknown-unknown, so a key there would be
+// predictable; ordered maps keep the worst case at O(log n) per lookup instead.
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub(crate) type FxMap<K, V> = std::collections::BTreeMap<K, V>;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+pub(crate) type FxSet<K> = std::collections::BTreeSet<K>;
 
 #[cfg(test)]
 mod tests {

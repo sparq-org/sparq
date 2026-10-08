@@ -883,7 +883,7 @@ fn expand_property_value(
 
 /// **Value Expansion** (JSON-LD 1.1 API §5.3.2): expands a scalar `value` for `active_property`
 /// into a value object (or a node reference under an `@id` / `@vocab` type coercion).
-fn expand_value(active_context: &ActiveContext, active_property: &str, value: &Json) -> Json {
+pub(crate) fn expand_value(active_context: &ActiveContext, active_property: &str, value: &Json) -> Json {
     let td = active_context.term_definition(active_property);
     let type_mapping = td.and_then(|t| t.type_mapping());
 

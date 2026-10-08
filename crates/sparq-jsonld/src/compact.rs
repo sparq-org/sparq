@@ -41,7 +41,7 @@
 use crate::context::inverse::{compact_iri, InverseContext};
 use crate::context::{ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
-use crate::expand::expand;
+use crate::expand::{expand, expand_value};
 use crate::fx::FxMap;
 use crate::json::Json;
 use crate::loader::DocumentLoader;
@@ -971,10 +971,20 @@ fn add_to_container_map(
             };
             if !vals.is_empty() {
                 let first = vals.remove(0);
-                // A key that reads back as an @none alias would drop the value on
-                // expansion, so such a value stays on the property too.
+                // Expansion re-reads the key by Value Expansion under this context, which
+                // may differ from the item's (e.g. a type-scoped @type: @id). A key that
+                // does not read back as the original value, or that reads as an @none
+                // alias and would be dropped, stays on the property instead.
+                let original = item.get(&index_iri).and_then(|v| match v {
+                    Json::Arr(a) => a.first(),
+                    other => Some(other),
+                });
                 map_key = first.as_str().map(str::to_string).filter(|k| {
                     cur.active.expand_iri(k, false, true).as_deref() != Some("@none")
+                        && original.is_some_and(|o| {
+                            let key = Json::Str(k.clone());
+                            same_entries(&expand_value(&cur.active, &index_key, &key), o)
+                        })
                 });
                 for v in vals {
                     add_value(&mut compacted_item, &container_key, v, false);
@@ -1216,6 +1226,20 @@ fn obj_get_mut<'a>(obj: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 }
 
 /// Removes and returns the `key` member of a JSON object, if present.
+/// JSON equality ignoring the order of object members.
+fn same_entries(a: &Json, b: &Json) -> bool {
+    match (a, b) {
+        (Json::Obj(x), Json::Obj(y)) => {
+            x.len() == y.len()
+                && x.iter().all(|(k, v)| y.iter().any(|(k2, v2)| k == k2 && same_entries(v, v2)))
+        }
+        (Json::Arr(x), Json::Arr(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(v, w)| same_entries(v, w))
+        }
+        _ => a == b,
+    }
+}
+
 fn take_entry(obj: &mut Json, key: &str) -> Option<Json> {
     match obj {
         Json::Obj(members) => {
@@ -1339,6 +1363,28 @@ mod tests {
         }
         let n = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.derived.borrow().len()));
         assert!(n.is_some_and(|n| n <= DERIVED_CAP + 4), "derived {n:?}");
+    }
+
+    // A property-valued index key is re-read by expansion under the enclosing context;
+    // when a type-scoped context reads the index property as @id, the extracted string
+    // would come back as a literal, so the value stays on the property.
+    #[test]
+    fn index_key_must_expand_back_to_the_original_value() {
+        let ctx = Json::parse(
+            r#"{"@vocab":"http://ex/","key":"http://ex/key",
+                "T":{"@id":"http://ex/T","@context":{"key":{"@id":"http://ex/key","@type":"@id"}}},
+                "p":{"@id":"http://ex/p","@container":"@index","@index":"key"}}"#,
+        )
+        .unwrap();
+        let doc = Json::parse(
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b","@type":["http://ex/T"],
+                "http://ex/key":[{"@id":"http://ex/x"}]}]}]"#,
+        )
+        .unwrap();
+        let opts = JsonLdOptions::default();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        let back = expand(&out, &opts, &NoopLoader).unwrap();
+        assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
     }
 
     // Language tags and datatypes make value shapes unbounded under one IRI, so the

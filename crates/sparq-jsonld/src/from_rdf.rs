@@ -57,8 +57,9 @@
 //! accepted and keyed as `_:label` properties.
 
 use std::borrow::Cow;
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+use std::collections::HashMap;
 use std::hash::Hash;
 
 use crate::error::{JsonLdError, JsonLdErrorCode};
@@ -356,6 +357,7 @@ impl<V> StrMap<V> for BTreeMap<String, V> {
     }
 }
 
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 impl<V> StrMap<V> for FxMap<String, V> {
     fn contains_key(&self, key: &str) -> bool {
         HashMap::contains_key(self, key)
@@ -455,14 +457,13 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
             Some(oid) if oid == RDF_NIL => {
                 entry_mut(&mut nil_usages, &graph_key).push(usage());
             }
-            Some(oid) if oid.starts_with("_:") => match referenced_once.entry(oid.to_string()) {
-                Entry::Vacant(v) => {
-                    v.insert(RefState::Once(usage()));
+            Some(oid) if oid.starts_with("_:") => {
+                if let Some(state) = referenced_once.get_mut(&oid[..]) {
+                    *state = RefState::Shared;
+                } else {
+                    referenced_once.insert(oid.to_string(), RefState::Once(usage()));
                 }
-                Entry::Occupied(mut o) => {
-                    *o.get_mut() = RefState::Shared;
-                }
-            },
+            }
             _ => {}
         }
     }
@@ -628,12 +629,14 @@ fn take_emitted(
     let Some(map) = graphs.get_mut(graph) else {
         return Vec::new();
     };
-    let mut entries: Vec<(String, Node)> = if consumed.is_empty() {
-        map.drain().collect()
-    } else {
-        map.extract_if(|id, _| !consumed.contains(&(graph.to_string(), id.clone())))
-            .collect()
-    };
+    let mut entries: Vec<(String, Node)> = Vec::with_capacity(map.len());
+    for (id, node) in std::mem::take(map) {
+        if !consumed.is_empty() && consumed.contains(&(graph.to_string(), id.clone())) {
+            map.insert(id, node);
+        } else {
+            entries.push((id, node));
+        }
+    }
     entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     entries
 }
