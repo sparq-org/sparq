@@ -120,6 +120,11 @@ use std::collections::BTreeMap;
 /// The default HNDQ call limit (matches the standard `rdf-canon` path's guard).
 const DEFAULT_HNDQ_CALL_LIMIT: usize = 4000;
 
+/// The default cap on §4.8 (5.4) permutations visited across one
+/// canonicalization (2^24). Far above what non-poison input needs; it only
+/// bounds the work of groups whose orderings are pruned without recursing.
+const DEFAULT_PERMUTATION_LIMIT: usize = 1 << 24;
+
 // ---------------------------------------------------------------------------
 // Subject-position tripwires ([OPUS-5] sq-tx21). Every read of a triple's
 // subject in this module goes through one of these two functions, and both
@@ -548,6 +553,9 @@ struct CanonState {
     /// contains, matching the standard algorithm.
     bnode_to_quads: BTreeMap<String, Vec<Quad>>,
     canonical_issuer: IdentifierIssuer,
+    /// First-degree hash of every bnode, for the label-independent tie-break keys
+    /// (the standard path's SPARQ PATCH §1/§2, `src/rdfc/SPARQ-PATCHES.md`).
+    first_degree_hashes: BTreeMap<String, String>,
 }
 
 impl CanonState {
@@ -555,15 +563,19 @@ impl CanonState {
         let mut state = CanonState {
             bnode_to_quads: BTreeMap::new(),
             canonical_issuer: IdentifierIssuer::new("c14n"),
+            first_degree_hashes: BTreeMap::new(),
         };
         state.build_bnode_to_quads(dataset);
 
         // §4.4(3) first-degree hashes.
         let mut hash_to_bnodes: HashToBnodes = BTreeMap::new();
+        let mut first_degree_hashes = BTreeMap::new();
         for n in state.bnode_to_quads.keys() {
             let h = state.hash_first_degree_quads::<D>(n)?;
+            first_degree_hashes.insert(n.clone(), h.clone());
             hash_to_bnodes.entry(h).or_default().push(n.clone());
         }
+        state.first_degree_hashes = first_degree_hashes;
 
         // §4.4(4) unique first-degree hashes → issue canonical labels.
         let mut shared: HashToBnodes = BTreeMap::new();
@@ -589,6 +601,22 @@ impl CanonState {
                 hash_path_list.push(result);
             }
             hash_path_list.sort_by(|a, b| a.hash.cmp(&b.hash));
+            // Same label-independent tie-break as the standard path (SPARQ PATCH §1):
+            // each run of tied hashes is ordered by a structural key, so the two
+            // paths keep agreeing on triple-term-free input.
+            let mut start = 0;
+            while start < hash_path_list.len() {
+                let end = start
+                    + hash_path_list[start..]
+                        .iter()
+                        .take_while(|r| r.hash == hash_path_list[start].hash)
+                        .count();
+                if end - start > 1 {
+                    hash_path_list[start..end]
+                        .sort_by_cached_key(|r| state.canonical_tie_break_key(&r.issuer));
+                }
+                start = end;
+            }
             for result in &hash_path_list {
                 // Issue canonical labels in temporary-issuance order (§4.4 5.3.1).
                 for existing in result.issuer.order.values() {
@@ -705,15 +733,22 @@ impl CanonState {
             data_to_hash.push_str(&related_hash);
             let mut chosen_path = String::new();
             let mut chosen_issuer: Option<IdentifierIssuer> = None;
+            // Lazily computed `path_tie_break_key` of the chosen issuer (SPARQ PATCH §2).
+            let mut chosen_key: Option<String> = None;
 
-            // §4.8(5.4) permutations.
-            for perm in permutations(&blank_node_list) {
+            // §4.8(5.4) permutations, enumerated lazily (#5469): materializing
+            // all k! orderings up front would exhaust memory before the guard
+            // below is reachable. Each ordering visited is charged to the
+            // poison-graph budget.
+            let mut perms = Permutations::new(blank_node_list.len());
+            while let Some(perm) = perms.next_perm() {
+                counter.add_permutation()?;
                 let mut issuer_copy = issuer.clone();
                 let mut path = String::new();
                 let mut recursion_list: Vec<String> = Vec::new();
                 let mut skip = false;
 
-                for related in &perm {
+                for (i, related) in perm.iter().map(|&j| &blank_node_list[j]).enumerate() {
                     if let Some(cid) = self.canonical_issuer.get(related) {
                         path.push_str(&format!("_:{}", cid));
                     } else {
@@ -722,9 +757,13 @@ impl CanonState {
                         }
                         path.push_str(&format!("_:{}", issuer_copy.issue(related)));
                     }
+                    // Equality skips only when more will be appended (SPARQ PATCH §2),
+                    // so a complete tie reaches the tie-break below.
                     if !chosen_path.is_empty()
                         && path.len() >= chosen_path.len()
-                        && path >= chosen_path
+                        && (path > chosen_path
+                            || (path == chosen_path
+                                && (i + 1 < perm.len() || !recursion_list.is_empty())))
                     {
                         skip = true;
                         break;
@@ -734,7 +773,7 @@ impl CanonState {
                     continue;
                 }
 
-                for related in &recursion_list {
+                for (k, related) in recursion_list.iter().enumerate() {
                     let result = self.hash_n_degree_quads::<D>(related, &issuer_copy, counter)?;
                     path.push_str(&format!("_:{}", issuer_copy.issue(related)));
                     path.push('<');
@@ -743,7 +782,8 @@ impl CanonState {
                     issuer_copy = result.issuer;
                     if !chosen_path.is_empty()
                         && path.len() >= chosen_path.len()
-                        && path >= chosen_path
+                        && (path > chosen_path
+                            || (path == chosen_path && k + 1 < recursion_list.len()))
                     {
                         skip = true;
                         break;
@@ -756,6 +796,20 @@ impl CanonState {
                 if chosen_path.is_empty() || path < chosen_path {
                     chosen_path = path;
                     chosen_issuer = Some(issuer_copy);
+                    chosen_key = None;
+                } else if let Some(current_issuer) = chosen_issuer
+                    .as_ref()
+                    .filter(|c| path == chosen_path && **c != issuer_copy)
+                {
+                    // Equal paths: pick by structural key, not permutation order
+                    // (SPARQ PATCH §2).
+                    let key = self.path_tie_break_key(&issuer, &issuer_copy);
+                    let current = chosen_key
+                        .get_or_insert_with(|| self.path_tie_break_key(&issuer, current_issuer));
+                    if key < *current {
+                        *current = key;
+                        chosen_issuer = Some(issuer_copy);
+                    }
                 }
             }
 
@@ -769,6 +823,70 @@ impl CanonState {
             hash: hash_hex::<D>(data_to_hash.as_bytes()),
             issuer,
         })
+    }
+
+    // ---- Label-independent tie-break keys (standard path: src/rdfc, SPARQ PATCH §1/§2) ----
+
+    /// §4.4 (5.3) key for results whose N-degree hashes tie: the result's identifiers
+    /// issued, in 5.3.1 order, on a prospective overlay that only reads the canonical
+    /// issuer, then the quads of every newly issued node (see `structural_key`).
+    fn canonical_tie_break_key(&self, issuer: &IdentifierIssuer) -> String {
+        let canonical = &self.canonical_issuer;
+        let mut prospective = BTreeMap::<&str, String>::new();
+        let mut newly_issued = Vec::new();
+        for existing in issuer.order.values() {
+            if !canonical.issued.contains_key(existing) {
+                let counter = canonical.counter + prospective.len();
+                prospective.insert(existing, format!("{}{counter}", canonical.prefix));
+                newly_issued.push(existing);
+            }
+        }
+        self.structural_key(&newly_issued, |b| {
+            canonical.issued.get(b).or_else(|| prospective.get(b))
+        })
+    }
+
+    /// §4.8 (5.4.6) key for equal chosen-path candidates: the quads of the nodes
+    /// `candidate` issued on top of `base`, the issuer at the start of the Hn entry.
+    fn path_tie_break_key(&self, base: &IdentifierIssuer, candidate: &IdentifierIssuer) -> String {
+        let newly_issued: Vec<&String> = candidate
+            .order
+            .values()
+            .filter(|n| !base.issued.contains_key(*n))
+            .collect();
+        self.structural_key(&newly_issued, |b| {
+            self.canonical_issuer
+                .issued
+                .get(b)
+                .or_else(|| candidate.issued.get(b))
+        })
+    }
+
+    /// Sorted, deduplicated quads mentioning any of `nodes`, every bnode (also inside
+    /// triple terms) written as `_:<id>` when `id` gives it one, else as
+    /// `_:h<first-degree hash>`. Byte-identical to the standard path's key on
+    /// triple-term-free input.
+    fn structural_key<'a>(
+        &self,
+        nodes: &[&String],
+        id: impl Fn(&str) -> Option<&'a String>,
+    ) -> String {
+        let label = |b: &str| match id(b) {
+            Some(id) => BlankNode::new_unchecked(id.as_str()),
+            None => BlankNode::new_unchecked(format!(
+                "h{}",
+                self.first_degree_hashes.get(b).map_or("", String::as_str)
+            )),
+        };
+        let mut lines: Vec<String> = Vec::new();
+        for n in nodes {
+            for quad in self.quads_for(n).into_iter().flatten() {
+                lines.push(serialize_quad_line(&map_bnodes_quad(quad, &label)));
+            }
+        }
+        lines.sort_unstable();
+        lines.dedup();
+        lines.concat()
     }
 
     // ---- §4.7 Hash Related Blank Node ----
@@ -812,15 +930,39 @@ struct HndqResult {
 
 /// Poison-graph guard: caps total HNDQ invocations (RDFC-1.0 §4.8 worst case is
 /// super-polynomial). Mirrors the standard path's default limit so the v2
-/// profile fails closed identically.
+/// profile fails closed identically. It also caps the total number of §4.8
+/// (5.4) permutations visited, because a related-hash group whose orderings
+/// are all pruned without recursing would otherwise walk k! orderings without
+/// ever reaching the call check.
 struct HndqCallCounter {
     count: usize,
     limit: usize,
+    permutations: usize,
+    permutation_limit: usize,
 }
 
 impl HndqCallCounter {
     fn new(limit: usize) -> Self {
-        Self { count: 0, limit }
+        Self::with_permutation_limit(limit, DEFAULT_PERMUTATION_LIMIT)
+    }
+    fn with_permutation_limit(limit: usize, permutation_limit: usize) -> Self {
+        Self {
+            count: 0,
+            limit,
+            permutations: 0,
+            permutation_limit,
+        }
+    }
+    fn add_permutation(&mut self) -> Result<(), CanonError> {
+        self.permutations += 1;
+        if self.permutations > self.permutation_limit {
+            Err(CanonError::Canonicalization(format!(
+                "HNDQ permutation limit ({}) exceeded (poison graph)",
+                self.permutation_limit
+            )))
+        } else {
+            Ok(())
+        }
     }
     fn add(&mut self) -> Result<(), CanonError> {
         self.count += 1;
@@ -898,6 +1040,37 @@ fn relabel_graph(graph: &GraphName, reference: &str) -> GraphName {
         GraphName::BlankNode(b) => GraphName::BlankNode(special_label(b.as_str(), reference)),
         other => other.clone(),
     }
+}
+
+/// Rewrites every bnode of `quad` (recursing through triple terms) with `f`.
+fn map_bnodes_quad(quad: &Quad, f: &dyn Fn(&str) -> BlankNode) -> Quad {
+    fn subject(s: &NamedOrBlankNode, f: &dyn Fn(&str) -> BlankNode) -> NamedOrBlankNode {
+        match subject_bnode(s) {
+            Some(b) => NamedOrBlankNode::BlankNode(f(b.as_str())),
+            None => s.clone(),
+        }
+    }
+    fn term(t: &Term, f: &dyn Fn(&str) -> BlankNode) -> Term {
+        match t {
+            Term::BlankNode(b) => Term::BlankNode(f(b.as_str())),
+            Term::Triple(t) => Term::Triple(Box::new(Triple::new(
+                subject(&t.subject, f),
+                t.predicate.clone(),
+                term(&t.object, f),
+            ))),
+            other => other.clone(),
+        }
+    }
+    let graph = match &quad.graph_name {
+        GraphName::BlankNode(b) => GraphName::BlankNode(f(b.as_str())),
+        other => other.clone(),
+    };
+    Quad::new(
+        subject(&quad.subject, f),
+        quad.predicate.clone(),
+        term(&quad.object, f),
+        graph,
+    )
 }
 
 fn special_label(label: &str, reference: &str) -> BlankNode {
@@ -1044,23 +1217,40 @@ fn hash_hex<D: Digest>(data: &[u8]) -> String {
     s
 }
 
-/// All permutations of `items` (RDFC-1.0 §4.8 5.4). Lists here are the bnodes
-/// sharing one related hash; the spec's factorial blow-up is bounded by the
-/// HNDQ call limit applied in the recursion.
-fn permutations(items: &[String]) -> Vec<Vec<String>> {
-    if items.is_empty() {
-        return vec![vec![]];
-    }
-    let mut out = Vec::new();
-    for i in 0..items.len() {
-        let mut rest = items.to_vec();
-        let head = rest.remove(i);
-        for mut p in permutations(&rest) {
-            p.insert(0, head.clone());
-            out.push(p);
+/// Lazy enumeration of every ordering of the indices `0..n` (RDFC-1.0 §4.8
+/// 5.4), in lexicographic order — the same order the former eager recursive
+/// enumeration produced, so the first minimal path (and its issuer) chosen is
+/// unchanged. Holds one `n`-element index buffer; nothing is materialized up
+/// front, so the poison-graph guard is checked before each ordering is visited.
+struct Permutations {
+    indices: Vec<usize>,
+    started: bool,
+}
+
+impl Permutations {
+    fn new(n: usize) -> Self {
+        Self {
+            indices: (0..n).collect(),
+            started: false,
         }
     }
-    out
+
+    /// The next ordering, or `None` once all `n!` have been yielded. `n == 0`
+    /// yields exactly one empty ordering.
+    fn next_perm(&mut self) -> Option<&[usize]> {
+        if !self.started {
+            self.started = true;
+            return Some(&self.indices);
+        }
+        let v = &mut self.indices;
+        // Classic next-permutation: rightmost ascent, swap with the rightmost
+        // larger element, reverse the suffix.
+        let i = (1..v.len()).rev().find(|&i| v[i - 1] < v[i])?;
+        let j = (i..v.len()).rev().find(|&j| v[j] > v[i - 1])?;
+        v.swap(i - 1, j);
+        v[i..].reverse();
+        Some(&self.indices)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1324,44 +1514,79 @@ mod private_tests {
 
     // ---- permutations ----
 
-    /// `permutations` must return the complete factorial-sized set of orderings.
-    /// Kills `replace with vec![]` and `replace with vec![vec![...]]`.
+    /// Drain a lazy [`Permutations`] into owned index orderings.
+    fn permutations(n: usize) -> Vec<Vec<usize>> {
+        let mut out = Vec::new();
+        let mut perms = Permutations::new(n);
+        while let Some(p) = perms.next_perm() {
+            out.push(p.to_vec());
+        }
+        out
+    }
+
+    /// The pre-#5469 eager recursive enumeration, kept as the ordering oracle:
+    /// the lazy enumerator must visit orderings in exactly this order so the
+    /// first minimal path (and its issuer) chosen by HNDQ is unchanged.
+    fn eager_reference(items: &[usize]) -> Vec<Vec<usize>> {
+        if items.is_empty() {
+            return vec![vec![]];
+        }
+        let mut out = Vec::new();
+        for i in 0..items.len() {
+            let mut rest = items.to_vec();
+            let head = rest.remove(i);
+            for mut p in eager_reference(&rest) {
+                p.insert(0, head);
+                out.push(p);
+            }
+        }
+        out
+    }
+
     #[test]
     fn permutations_empty_gives_one_empty_perm() {
-        let result = permutations(&[]);
-        assert_eq!(result, vec![vec![] as Vec<String>]);
+        assert_eq!(permutations(0), vec![Vec::<usize>::new()]);
     }
 
     #[test]
     fn permutations_one_item() {
-        let result = permutations(&["a".to_string()]);
-        assert_eq!(result, vec![vec!["a".to_string()]]);
+        assert_eq!(permutations(1), vec![vec![0]]);
     }
 
     #[test]
     fn permutations_two_items_exact() {
-        let mut result = permutations(&["a".to_string(), "b".to_string()]);
-        result.sort();
-        // Both orderings must appear.
-        assert_eq!(
-            result,
-            vec![
-                vec!["a".to_string(), "b".to_string()],
-                vec!["b".to_string(), "a".to_string()],
-            ],
-            "two-item permutations must yield exactly [a,b] and [b,a]"
-        );
+        assert_eq!(permutations(2), vec![vec![0, 1], vec![1, 0]]);
     }
 
     #[test]
-    fn permutations_three_items_count() {
-        let result = permutations(&["a".to_string(), "b".to_string(), "c".to_string()]);
-        assert_eq!(result.len(), 6, "3! = 6 permutations");
-        // Every distinct item must appear as the first element in exactly 2 perms.
-        for head in &["a", "b", "c"] {
-            let count = result.iter().filter(|p| p[0].as_str() == *head).count();
-            assert_eq!(count, 2, "each item must head exactly 2 permutations");
+    fn permutations_match_eager_order() {
+        for n in 0..=6 {
+            let items: Vec<usize> = (0..n).collect();
+            assert_eq!(permutations(n), eager_reference(&items), "n = {n}");
         }
+    }
+
+    /// The enumerator is exhausted after n! orderings and stays exhausted.
+    #[test]
+    fn permutations_exhaust_and_stay_exhausted() {
+        let mut perms = Permutations::new(3);
+        let mut count = 0;
+        while perms.next_perm().is_some() {
+            count += 1;
+        }
+        assert_eq!(count, 6, "3! = 6 permutations");
+        assert!(perms.next_perm().is_none());
+    }
+
+    #[test]
+    fn hndq_counter_permutation_limit() {
+        let mut c = HndqCallCounter::with_permutation_limit(10, 2);
+        assert!(c.add_permutation().is_ok());
+        assert!(c.add_permutation().is_ok());
+        assert!(matches!(
+            c.add_permutation(),
+            Err(CanonError::Canonicalization(_))
+        ));
     }
 
     // ---- serialize_quad_line ----

@@ -12,7 +12,7 @@
 // panel can show "see step #n" instead of re-rendering (and so the expansion is linear, not
 // exponential, on heavily-shared proofs).
 
-import { COMMON_PREFIXES } from "@sparq/client";
+import { abbreviateIri } from "./iri-label.js";
 
 // ---------------------------------------------------------------------------
 // The wire schema + defensive parse (mirrors @sparq/client's parsePlanJson idiom).
@@ -189,18 +189,6 @@ export function proofSummary(tree: ProofTreeJson): ProofSummary {
 // Term display (proof conclusions are self-contained N-Triples/N3 term strings).
 // ---------------------------------------------------------------------------
 
-/** Abbreviate an IRI with a common prefix (`foaf:name`), else its last path segment —
- *  the same legibility rule the graph view applies to node captions. */
-function abbreviate(iri: string): string {
-  for (const { prefix, iri: ns } of COMMON_PREFIXES) {
-    if (iri.startsWith(ns)) return `${prefix}:${iri.slice(ns.length)}`;
-  }
-  const hash = iri.lastIndexOf("#");
-  const slash = iri.lastIndexOf("/");
-  const cut = Math.max(hash, slash);
-  return cut >= 0 && cut < iri.length - 1 ? iri.slice(cut + 1) : iri;
-}
-
 /**
  * A short, human caption for one proof-term string (`<iri>` → prefixed/last-segment form,
  * `"lit"^^<dt>` → the shortened quoted form, `_:b` verbatim). The FULL term string stays
@@ -208,7 +196,7 @@ function abbreviate(iri: string): string {
  */
 export function ntTermLabel(term: string): string {
   if (term.startsWith("<") && term.endsWith(">")) {
-    return abbreviate(term.slice(1, -1));
+    return abbreviateIri(term.slice(1, -1));
   }
   if (term.startsWith('"')) {
     // Find the closing quote of the lexical form (escape-aware), drop any @lang/^^dt tail.
