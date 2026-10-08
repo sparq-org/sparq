@@ -701,6 +701,16 @@ pub async fn handle<S: Store + 'static>(
                 if !state.cfg.open && (agent.subject.is_none() || (grants && !owner)) {
                     return state.deny(agent);
                 }
+                // A conditional create is evaluated against the listing.
+                if super::resources::is_conditional(req) {
+                    let current = listing(state, &super::resources::plain_get(req), grants);
+                    let (etag, modified) = super::resources::validators_of(&current);
+                    if let Some(refused) =
+                        super::resources::unless_preconditions(req, etag.as_deref(), modified)
+                    {
+                        return refused;
+                    }
+                }
                 create(state, req, agent, grants).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
@@ -742,6 +752,11 @@ pub async fn handle<S: Store + 'static>(
             resp
         }
         Method::DELETE => {
+            if let Some(refused) =
+                super::resources::unless_preconditions(req, Some(&record.etag), None)
+            {
+                return refused;
+            }
             // A revocation is durable before it is reported: a grant whose stored copy survives
             // would be reloaded, and so reinstated, at the next boot. Once the stored record is
             // gone the grant is revoked in memory too, whatever happens after (a cleanup that

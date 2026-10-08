@@ -281,6 +281,63 @@ fn evaluate(
     Precondition::Proceed
 }
 
+/// Whether the request carries a precondition a state-changing method evaluates.
+pub(crate) fn is_conditional(req: &LwsRequest) -> bool {
+    [
+        header::IF_MATCH,
+        header::IF_NONE_MATCH,
+        header::IF_UNMODIFIED_SINCE,
+    ]
+    .iter()
+    .any(|h| req.headers.contains_key(h))
+}
+
+/// The plain GET of the request's target a conditional state-changing request is evaluated
+/// against: the same target, page and `Accept`, no preconditions and no body.
+pub(crate) fn plain_get(req: &LwsRequest) -> LwsRequest {
+    let mut headers = HeaderMap::new();
+    if let Some(accept) = req.headers.get(header::ACCEPT) {
+        headers.insert(header::ACCEPT, accept.clone());
+    }
+    LwsRequest {
+        method: Method::GET,
+        path: req.path.clone(),
+        query: req.query.clone(),
+        headers,
+        body: Bytes::new(),
+        admission: None,
+    }
+}
+
+/// The validators (`ETag`, `Last-Modified`) a response carries.
+pub(crate) fn validators_of(resp: &Response) -> (Option<String>, Option<u64>) {
+    let h = |n: header::HeaderName| {
+        resp.headers()
+            .get(n)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string)
+    };
+    (
+        h(header::ETAG),
+        parse_http_date(h(header::LAST_MODIFIED).as_deref()),
+    )
+}
+
+/// The preconditions of a state-changing request against the target's validators: `None` when it
+/// may go on, else the 412 refusing it (RFC 9110 section 13.2.2).
+pub(crate) fn unless_preconditions(
+    req: &LwsRequest,
+    etag: Option<&str>,
+    modified_secs: Option<u64>,
+) -> Option<Response> {
+    match evaluate(&req.headers, etag, modified_secs, false) {
+        Precondition::Proceed => None,
+        Precondition::Failed | Precondition::NotModified => {
+            Some(problem(StatusCode::PRECONDITION_FAILED, None))
+        }
+    }
+}
+
 /// The container `uri` is in, or `None` for the storage root.
 pub fn parent_of(uri: &str, storage: &str) -> Option<String> {
     if uri == storage {
@@ -1085,7 +1142,30 @@ async fn create<S: Store + 'static>(
     //
     // Both are released before the container's own metadata is touched (which takes its lock
     // exclusively).
-    let parent_guard = state.locks.read(parent).await;
+    //
+    // A conditional create is evaluated against the container's listing, and takes the
+    // container's lock exclusively so no other create or delete changes the listing between the
+    // evaluation and the create.
+    let conditional = is_conditional(req);
+    let parent_guard = if conditional {
+        (None, Some(state.locks.lock(parent).await))
+    } else {
+        (Some(state.locks.read(parent).await), None)
+    };
+    if conditional {
+        let meta = match current(state, parent).await {
+            Ok(m) => m,
+            Err(r) => return r,
+        };
+        let listing = read_container(state, &plain_get(req), parent, &meta).await;
+        if !listing.status().is_success() {
+            return listing;
+        }
+        let (etag, modified) = validators_of(&listing);
+        if let Some(refused) = unless_preconditions(req, etag.as_deref(), modified) {
+            return refused;
+        }
+    }
     let (name, child_guards) = match free_name(state, parent, &base_name).await {
         Ok(found) => found,
         Err(r) => return r,
@@ -2237,54 +2317,22 @@ async fn delete<S: Store + 'static>(
     // The validators the preconditions are evaluated against (RFC 9110 section 13): a data
     // resource's own; a container's are its listing's, computed the way a read computes them,
     // under the subtree locks, whenever the request is conditional at all.
-    let conditional = [
-        header::IF_MATCH,
-        header::IF_NONE_MATCH,
-        header::IF_UNMODIFIED_SINCE,
-    ]
-    .iter()
-    .any(|h| req.headers.contains_key(h));
     let (etag, modified) = if !uri.ends_with('/') {
         (
             Some(quoted(&meta.etag)),
             meta.last_modified.map(|t| to_secs(epoch_ms(t))),
         )
-    } else if conditional {
-        let listing = read_container(
-            state,
-            &LwsRequest {
-                method: Method::GET,
-                path: String::new(),
-                query: None,
-                headers: HeaderMap::new(),
-                body: Bytes::new(),
-                admission: None,
-            },
-            uri,
-            &meta,
-        )
-        .await;
+    } else if is_conditional(req) {
+        let listing = read_container(state, &plain_get(req), uri, &meta).await;
         if !listing.status().is_success() {
             return listing;
         }
-        let h = |n: header::HeaderName| {
-            listing
-                .headers()
-                .get(n)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_string)
-        };
-        (
-            h(header::ETAG),
-            parse_http_date(h(header::LAST_MODIFIED).as_deref()),
-        )
+        validators_of(&listing)
     } else {
         (None, None)
     };
-    if let Precondition::Failed | Precondition::NotModified =
-        evaluate(&req.headers, etag.as_deref(), modified, false)
-    {
-        return problem(StatusCode::PRECONDITION_FAILED, None);
+    if let Some(refused) = unless_preconditions(req, etag.as_deref(), modified) {
+        return refused;
     }
     if uri.ends_with('/') && doomed.len() > 1 {
         let infinity = req
@@ -4672,6 +4720,68 @@ mod tests {
             handle(&st, &get(&secret), &stranger).await.status(),
             StatusCode::OK
         );
+    }
+
+    /// Review finding: a create, and a revocation of an access grant, ignored the request's
+    /// preconditions: a `POST` with `If-None-Match: *` to an existing container created a member,
+    /// and a grant was revoked under an `If-Match` naming another tag. Both are now evaluated
+    /// against the target's validators before anything changes.
+    #[tokio::test]
+    async fn creates_and_service_deletes_evaluate_preconditions() {
+        let st = state().await;
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let r = call(&st, "POST", "/", &[("slug", "c"), ("link", &container)], "").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = ("content-type", "text/plain");
+        let listing = call(&st, "GET", "/c/", &[], "").await;
+        let tag = hdr(&listing, "etag");
+        let count = || async {
+            json_of(call(&st, "GET", "/c/", &[], "").await).await["totalItems"].clone()
+        };
+        let before = count().await;
+        for refused in [("if-none-match", "*"), ("if-match", "\"other\"")] {
+            let r = call(&st, "POST", "/c/", &[text, refused], "x").await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{refused:?}");
+        }
+        assert_eq!(count().await, before);
+        let r = call(&st, "POST", "/c/", &[text, ("if-match", &tag)], "x").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // The listing changed: the old tag no longer matches.
+        let r = call(&st, "POST", "/c/", &[text, ("if-match", &tag)], "x").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // A grant is revoked only under a matching tag.
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        let r = call(&st, "POST", GRANTS_PATH, &[json], &grant).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let path = hdr(&r, "location")
+            .strip_prefix(&st.cfg.base_url)
+            .unwrap()
+            .to_string();
+        let tag = hdr(&call(&st, "GET", &path, &[], "").await, "etag");
+        let r = call(&st, "DELETE", &path, &[("if-match", "\"other\"")], "").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            call(&st, "GET", &path, &[], "").await.status(),
+            StatusCode::OK
+        );
+        let r = call(&st, "DELETE", &path, &[("if-match", &tag)], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
     }
 
     /// Review finding: a create whose store call reported a failure removed the new member's

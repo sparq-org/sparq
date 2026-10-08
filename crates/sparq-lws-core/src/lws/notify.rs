@@ -803,6 +803,16 @@ pub async fn handle<S: Store + 'static>(
                 if state.needs_auth(agent) {
                     return state.challenge(None);
                 }
+                // A conditional create is evaluated against the listing.
+                if super::resources::is_conditional(req) {
+                    let current = listing(state, &super::resources::plain_get(req), agent, owner);
+                    let (etag, modified) = super::resources::validators_of(&current);
+                    if let Some(refused) =
+                        super::resources::unless_preconditions(req, etag.as_deref(), modified)
+                    {
+                        return refused;
+                    }
+                }
                 subscribe(state, req, agent).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
@@ -844,13 +854,19 @@ pub async fn handle<S: Store + 'static>(
             );
             resp
         }
-        Method::DELETE => match state.notify.remove(state, id, req.admission.clone()).await {
-            Ok(()) => problem(StatusCode::NO_CONTENT, None),
-            Err(e) => problem(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Some(&format!("cannot cancel the subscription: {e}")),
-            ),
-        },
+        Method::DELETE => {
+            let etag = etag_of([document(state, &sub).to_string().as_str()]);
+            if let Some(refused) = super::resources::unless_preconditions(req, Some(&etag), None) {
+                return refused;
+            }
+            match state.notify.remove(state, id, req.admission.clone()).await {
+                Ok(()) => problem(StatusCode::NO_CONTENT, None),
+                Err(e) => problem(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Some(&format!("cannot cancel the subscription: {e}")),
+                ),
+            }
+        }
         _ => method_not_allowed("GET, HEAD, DELETE"),
     }
 }
@@ -1037,6 +1053,25 @@ mod tests {
     use p256::ecdsa::{Signature, VerifyingKey};
 
     use super::super::test_store;
+
+    /// Review finding: a subscription was cancelled whatever the request's `If-Match` named.
+    #[tokio::test]
+    async fn a_cancellation_evaluates_its_preconditions() {
+        let (state, _store) = test_store::state(100).await;
+        let path = subscribe_root(&state, "s1").await;
+        let get = test_store::request(Method::GET, &path, &[], "");
+        let r = handle(&state, &get, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let tag = r.headers()[header::ETAG].to_str().unwrap().to_string();
+        let delete =
+            |tag: &str| test_store::request(Method::DELETE, &path, &[("if-match", tag)], "");
+        let r = handle(&state, &delete("\"other\""), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert!(state.notify.get("s1").is_some());
+        let r = handle(&state, &delete(&tag), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(state.notify.get("s1").is_none());
+    }
 
     /// Review finding: a subscription's cancellation ran in a task of its own that held no
     /// admission permit, so once its request timed out a stalled removal no longer counted

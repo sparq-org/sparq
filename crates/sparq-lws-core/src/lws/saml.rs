@@ -742,17 +742,26 @@ fn start_element(
         scope.extend(declared);
         Arc::new(scope)
     };
+    // Each element and attribute keeps its own copy of its namespace URI, charged to the same
+    // budget before it is made: a long URI used by many elements costs what its copies do.
+    let mut owned = |uri: &str| -> Result<String, String> {
+        *copies = copies.saturating_add(uri.len());
+        if *copies > MAX_SCOPE_BYTES {
+            return Err("too many namespace declarations".into());
+        }
+        Ok(uri.to_string())
+    };
     let (prefix, local) = split_qname(&qname);
     let ns = if prefix == "xml" {
         XML_NS.to_string()
     } else if prefix.is_empty() {
-        scope.get("").cloned().unwrap_or_default()
+        owned(scope.get("").map(String::as_str).unwrap_or_default())?
     } else {
-        scope
+        let uri = scope
             .get(&prefix)
-            .cloned()
-            .filter(|u| !u.is_empty() || prefix.is_empty())
-            .ok_or_else(|| format!("unbound prefix {prefix}"))?
+            .filter(|u| !u.is_empty())
+            .ok_or_else(|| format!("unbound prefix {prefix}"))?;
+        owned(uri)?
     };
     let mut attrs = Vec::new();
     for (key, value) in raw_attrs {
@@ -762,11 +771,11 @@ fn start_element(
         } else if p == "xml" {
             XML_NS.to_string()
         } else {
-            scope
+            let uri = scope
                 .get(&p)
-                .cloned()
                 .filter(|u| !u.is_empty())
-                .ok_or_else(|| format!("unbound prefix {p}"))?
+                .ok_or_else(|| format!("unbound prefix {p}"))?;
+            owned(uri)?
         };
         if attrs.iter().any(|x: &Attr| x.ns == ans && x.local == l) {
             return Err("a repeated attribute".into());
@@ -1023,6 +1032,13 @@ mod tests {
             parse(&copied).unwrap_err(),
             "too many namespace declarations"
         );
+        // So does a long URI that undeclaring descendants resolve to.
+        let long = format!("<r xmlns=\"urn:{}\">", "x".repeat(128 * 1024));
+        let used = format!("{long}{}</r>", "<a/>".repeat(30_000));
+        assert_eq!(parse(&used).unwrap_err(), "too many namespace declarations");
+        let long = format!("<r xmlns:p=\"urn:{}\">", "x".repeat(128 * 1024));
+        let used = format!("{long}{}</r>", "<a p:x=\"1\"/>".repeat(30_000));
+        assert_eq!(parse(&used).unwrap_err(), "too many namespace declarations");
         // An ordinary assertion's declarations are far inside the budget.
         let some: String = (0..32)
             .map(|i| format!(" xmlns:p{i}=\"urn:{i}\""))
