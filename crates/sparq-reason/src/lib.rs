@@ -56,6 +56,9 @@ pub mod rif;
 // the `rif-xml` feature below). When off, zero rif_xml code is compiled.
 #[cfg(feature = "rif-xml")]
 pub mod rif_xml;
+// The derived-integer XSD facet table shared by `rif` and `dtype` (issue #5337).
+#[cfg(any(feature = "rif-core", feature = "d-entail"))]
+mod xsd_facets;
 #[cfg(feature = "d-entail")]
 pub use dtype::{d_value_eq, d_value_key, materialize_d, DValue, Recognized};
 #[cfg(feature = "explain")]

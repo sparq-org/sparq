@@ -1678,3 +1678,59 @@ fn depth_bound_precedes_ground_guard() {
         Err(sparq_canon::CanonError::NestedBlankNode)
     ));
 }
+
+// ---------------------------------------------------------------------------
+// Poison-graph guard (#5469 / #5358): the HNDQ permutation enumeration must be
+// lazy and budgeted, so the guard fails closed with `CanonError::Canonicalization`
+// instead of materializing k! permutations and aborting on allocation failure.
+// ---------------------------------------------------------------------------
+
+/// An `n`-node blank-node clique (every node linked to every node, self-loops
+/// included): every node shares one first-degree hash, and every HNDQ call sees
+/// one related-hash group of size `n - 1`.
+fn bnode_clique(n: usize) -> Vec<Quad> {
+    let p = iri("http://example.com/p");
+    let mut quads = Vec::with_capacity(n * n);
+    for i in 0..n {
+        for j in 0..n {
+            quads.push(Quad::new(
+                NamedOrBlankNode::BlankNode(bn(&format!("e{i}"))),
+                p.clone(),
+                Term::BlankNode(bn(&format!("e{j}"))),
+                GraphName::DefaultGraph,
+            ));
+        }
+    }
+    quads
+}
+
+fn assert_fails_closed(quads: &[Quad], what: &str) {
+    let start = std::time::Instant::now();
+    let res = sparq_canon::canonicalize_rdf12(quads);
+    assert!(
+        matches!(res, Err(sparq_canon::CanonError::Canonicalization(_))),
+        "{what}: expected a fail-closed Canonicalization error, got {res:?}"
+    );
+    // Generous wall-clock ceiling: the guard must trip in bounded work, not after
+    // walking a factorial-sized permutation space.
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(60),
+        "{what}: guard took {:?} to trip",
+        start.elapsed()
+    );
+}
+
+/// The W3C suite's own negative vector (10-node clique) — the one entry the
+/// agreement test above skips because the standard path rejects it.
+#[test]
+fn rdf12_fails_closed_on_suite_poison_graph_test074() {
+    let quads = load_quads(&testdata().join("rdfc10/test074-in.nq"));
+    assert_fails_closed(&quads, "test074");
+}
+
+/// A 13-node clique: 12! (~4.8e8) permutations per HNDQ call. Eager
+/// materialization needs tens of GiB before the guard is reachable.
+#[test]
+fn rdf12_fails_closed_on_13_node_clique() {
+    assert_fails_closed(&bnode_clique(13), "13-node clique");
+}
