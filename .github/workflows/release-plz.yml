@@ -188,7 +188,7 @@ jobs:
       # `release` job below still uses the pinned release-plz/action (no containment needed there).
       - name: Install release-plz + cargo-semver-checks (pinned)
         if: steps.bootstrap.outputs.ready == 'true'
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: release-plz@0.3.160,cargo-semver-checks@0.48
       - name: Run release-plz release-pr (output captured for failure classification)
