@@ -22,6 +22,7 @@
 //! 1.0 (without comments, with an optional `InclusiveNamespaces PrefixList`) is implemented here.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
@@ -45,6 +46,12 @@ const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 const MAX_ASSERTION: usize = 256 * 1024;
 /// Deepest element nesting accepted.
 const MAX_DEPTH: usize = 64;
+
+/// How many namespace bindings a document may copy, summed over the elements that declare one: an
+/// element that declares a namespace gets its own copy of every binding in scope, so without a
+/// bound a few thousand declarations repeated on many small elements would hold a quadratic number
+/// of them. Elements that declare none share their parent's bindings.
+const MAX_SCOPE_COPIES: usize = 1 << 16;
 
 /// Verify a base64url-encoded SAML 2.0 assertion for an exchange at this authorization server.
 pub fn verify(cfg: &LwsConfig, token: &str) -> Result<Verified, String> {
@@ -553,7 +560,7 @@ pub struct Element {
     ns: String,
     attrs: Vec<Attr>,
     /// Every namespace in scope here, prefix (`""` for the default) to URI; `""` URI undeclares.
-    scope: BTreeMap<String, String>,
+    scope: Arc<BTreeMap<String, String>>,
     children: Vec<Node>,
 }
 
@@ -691,12 +698,13 @@ fn split_qname(q: &str) -> (String, String) {
 
 fn start_element(
     e: &BytesStart<'_>,
-    parent_scope: &BTreeMap<String, String>,
+    parent_scope: &Arc<BTreeMap<String, String>>,
+    copies: &mut usize,
 ) -> Result<Element, String> {
     let qname = std::str::from_utf8(e.name().as_ref())
         .map_err(|_| "a non-UTF-8 name")?
         .to_string();
-    let mut scope = parent_scope.clone();
+    let mut declared = Vec::new();
     let mut raw_attrs = Vec::new();
     for a in e.attributes() {
         let a = a.map_err(|e| format!("malformed attribute: {e}"))?;
@@ -706,16 +714,27 @@ fn start_element(
         let raw = std::str::from_utf8(&a.value).map_err(|_| "a non-UTF-8 attribute value")?;
         let value = unescape(raw, true)?;
         if key == "xmlns" {
-            scope.insert(String::new(), value);
+            declared.push((String::new(), value));
         } else if let Some(p) = key.strip_prefix("xmlns:") {
             if value.is_empty() {
                 return Err("a prefixed namespace cannot be undeclared in XML 1.0".into());
             }
-            scope.insert(p.to_string(), value);
+            declared.push((p.to_string(), value));
         } else {
             raw_attrs.push((key, value));
         }
     }
+    let scope = if declared.is_empty() {
+        parent_scope.clone()
+    } else {
+        *copies = copies.saturating_add(parent_scope.len() + declared.len());
+        if *copies > MAX_SCOPE_COPIES {
+            return Err("too many namespace declarations".into());
+        }
+        let mut scope = BTreeMap::clone(parent_scope);
+        scope.extend(declared);
+        Arc::new(scope)
+    };
     let (prefix, local) = split_qname(&qname);
     let ns = if prefix == "xml" {
         XML_NS.to_string()
@@ -770,7 +789,8 @@ pub fn parse(xml: &str) -> Result<Element, String> {
     reader.config_mut().check_end_names = true;
     let mut stack: Vec<Element> = Vec::new();
     let mut root: Option<Element> = None;
-    let empty = BTreeMap::new();
+    let empty = Arc::new(BTreeMap::new());
+    let mut copies = 0;
     loop {
         let event = reader
             .read_event()
@@ -784,11 +804,19 @@ pub fn parse(xml: &str) -> Result<Element, String> {
                 if stack.len() >= MAX_DEPTH {
                     return Err("the XML nests too deeply".into());
                 }
-                let el = start_element(&e, stack.last().map(|p| &p.scope).unwrap_or(&empty))?;
+                let el = start_element(
+                    &e,
+                    stack.last().map(|p| &p.scope).unwrap_or(&empty),
+                    &mut copies,
+                )?;
                 stack.push(el);
             }
             Event::Empty(e) => {
-                let el = start_element(&e, stack.last().map(|p| &p.scope).unwrap_or(&empty))?;
+                let el = start_element(
+                    &e,
+                    stack.last().map(|p| &p.scope).unwrap_or(&empty),
+                    &mut copies,
+                )?;
                 match stack.last_mut() {
                     Some(p) => p.children.push(Node::Element(el)),
                     None => root = Some(el),
@@ -957,6 +985,30 @@ mod tests {
         let mut out = String::new();
         canonicalize(&root, None, &[], &BTreeMap::new(), &mut out).unwrap();
         out
+    }
+
+    /// Review finding: every element copied every namespace binding in scope. An unsigned
+    /// assertion with thousands of declarations on its root and tens of thousands of small
+    /// children, well inside the size limit, held over a hundred million bindings before any
+    /// signature check. Elements that declare nothing now share their parent's bindings, and the
+    /// copies the declaring ones make are bounded.
+    #[test]
+    fn namespace_scopes_are_shared_and_bounded() {
+        let decls: String = (0..4096)
+            .map(|i| format!(" xmlns:p{i}=\"urn:{i}\""))
+            .collect();
+        let shared = format!("<r{decls}>{}</r>", "<a/>".repeat(30_000));
+        let root = parse(&shared).unwrap();
+        assert_eq!(root.children.len(), 30_000);
+        assert!(root.children.iter().all(|c| match c {
+            Node::Element(e) => Arc::ptr_eq(&e.scope, &root.scope),
+            Node::Text(_) => false,
+        }));
+        let copied = format!("<r{decls}>{}</r>", "<a xmlns:q=\"urn:q\"/>".repeat(30_000));
+        assert_eq!(
+            parse(&copied).unwrap_err(),
+            "too many namespace declarations"
+        );
     }
 
     #[test]

@@ -841,13 +841,6 @@ async fn create<S: Store + 'static>(
     let mut document = body.clone();
     document["id"] = Value::String(iri.clone());
     let stored = json!({"document": document, "author": agent.subject});
-    if let Err(e) = state
-        .store
-        .create_in_container(&container, &iri, Bytes::from(stored.to_string()), LWS_JSON)
-        .await
-    {
-        return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
-    }
     let record = Record {
         id: id.clone(),
         document: document.clone(),
@@ -855,13 +848,29 @@ async fn create<S: Store + 'static>(
         author: agent.subject.clone(),
         etag: new_etag(),
     };
-    state
-        .access
-        .map(grants)
-        .write()
-        .expect("lock")
-        .insert(id, record);
-    state.access.bump(grants);
+    let register = {
+        let state = state.clone();
+        move || {
+            state
+                .access
+                .map(grants)
+                .write()
+                .expect("lock")
+                .insert(id, record);
+            state.access.bump(grants);
+        }
+    };
+    let created = super::create_record(
+        state,
+        &container,
+        &iri,
+        Bytes::from(stored.to_string()),
+        req.admission.clone(),
+        register,
+    );
+    if let Err(e) = created.await {
+        return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    }
     let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
     // "When an inbox property is present on an access request or access grant, the server SHOULD
     // deliver notifications to that endpoint" (section 11.6).
@@ -1288,6 +1297,75 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(state.access.grant_policies().is_empty());
         assert!(!state.store.exists(&location).await.unwrap());
+    }
+
+    /// Review finding: a grant whose create committed but reported a failure (a remote store's
+    /// lost reply), or whose client went away while it was pending, was stored but never put in
+    /// force in memory: it could be neither listed nor revoked, and came into force at the next
+    /// boot. Such a record is now removed, or registered when it cannot be, and a create that was
+    /// sent is registered whether or not its client is still there.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_created_grant_is_never_stored_unregistered() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        use std::time::Duration;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let post = || {
+            test_store::request(
+                Method::POST,
+                GRANTS_PATH,
+                &[],
+                &access_doc("AccessGrant", "https://a/", None),
+            )
+        };
+        let stored = || async { state.store.list_children(&container).await.unwrap().len() };
+        // The create lands, then reports a failure: the record is removed.
+        store.fail_after_create.store(true, Ordering::SeqCst);
+        let resp = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(stored().await, 0);
+        assert!(state.access.grant_policies().is_empty());
+        // And when it cannot be removed, it is in force, listed and revocable.
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let resp = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        store.fail_delete.store(false, Ordering::SeqCst);
+        assert_eq!(stored().await, 1);
+        assert_eq!(state.access.grant_policies().len(), 1);
+        let id = state
+            .access
+            .grants
+            .read()
+            .unwrap()
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        let delete = test_store::request(Method::DELETE, &format!("{GRANTS_PATH}{id}"), &[], "");
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(stored().await, 0);
+        assert!(state.access.grant_policies().is_empty());
+        // The client goes away while the create is pending: once it lands, the grant is in force.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(50),
+            handle(&state, &post(), &Agent::anonymous()),
+        )
+        .await;
+        assert!(cancelled.is_err());
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if !state.access.grant_policies().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(stored().await, 1);
+        assert_eq!(state.access.grant_policies().len(), 1);
     }
 
     /// Review finding: a revocation removed the stored grant, then waited on the cleanup of its

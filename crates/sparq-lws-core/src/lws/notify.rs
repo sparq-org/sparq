@@ -338,13 +338,18 @@ impl Notifier {
     /// Once the stored record is gone the subscription is cancelled in memory too, whatever
     /// happens after (a cleanup that fails, a caller that goes away): the removal and the
     /// cancellation run in a task of their own.
+    ///
+    /// `admission` is the request's share of its admission permit, when a request asked for the
+    /// removal: the task holds it until it ends.
     async fn remove<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
         id: &str,
+        admission: Option<crate::overload::AdmissionSlot>,
     ) -> Result<(), String> {
         let (state, id) = (state.clone(), id.to_string());
         let cancel = async move {
+            let _admission = admission;
             let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
             super::delete_record(&state, &format!("{container}{id}"), &container)
                 .await
@@ -537,7 +542,7 @@ impl Notifier {
             if status == Some(StatusCode::GONE) || failures >= MAX_DELIVERY_FAILURES {
                 // A store failure keeps the subscription (and its failure count), so the next
                 // failed delivery tries to deactivate it again.
-                let _ = notifier.remove(&state, &id).await;
+                let _ = notifier.remove(&state, &id, None).await;
             }
         });
     }
@@ -839,7 +844,7 @@ pub async fn handle<S: Store + 'static>(
             );
             resp
         }
-        Method::DELETE => match state.notify.remove(state, id).await {
+        Method::DELETE => match state.notify.remove(state, id, req.admission.clone()).await {
             Ok(()) => problem(StatusCode::NO_CONTENT, None),
             Err(e) => problem(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1000,16 +1005,25 @@ async fn subscribe<S: Store + 'static>(
         expires_at,
     };
     let stored = serde_json::to_vec(&sub).unwrap_or_default();
-    if let Err(e) = state
-        .store
-        .create_in_container(&container, &iri, Bytes::from(stored), LWS_JSON)
-        .await
-    {
+    let doc = document(state, &sub);
+    let register = {
+        let state = state.clone();
+        move || {
+            state.notify.subs.write().expect("lock").insert(id, sub);
+            *state.notify.etag.write().expect("lock") = new_etag();
+        }
+    };
+    let created = super::create_record(
+        state,
+        &container,
+        &iri,
+        Bytes::from(stored),
+        req.admission.clone(),
+        register,
+    );
+    if let Err(e) = created.await {
         return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
     }
-    let doc = document(state, &sub);
-    state.notify.subs.write().expect("lock").insert(id, sub);
-    *state.notify.etag.write().expect("lock") = new_etag();
     let mut resp = super::json_response(StatusCode::CREATED, LWS_JSON, &doc);
     set(resp.headers_mut(), header::LOCATION, &iri);
     service_links(&state.cfg, resp.headers_mut(), &iri, &container);
@@ -1023,6 +1037,76 @@ mod tests {
     use p256::ecdsa::{Signature, VerifyingKey};
 
     use super::super::test_store;
+
+    /// Review finding: a subscription's cancellation ran in a task of its own that held no
+    /// admission permit, so once its request timed out a stalled removal no longer counted
+    /// against the concurrency ceiling, and repeated cancellations could pile up past it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_cancellation_keeps_its_admission_slot() {
+        use crate::app::{with_overload_layers, OverloadConfig};
+        use axum::body::Body;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tower::ServiceExt;
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let store = test_store::FlakyStore::new();
+        let container = cfg.absolute(SUBSCRIPTIONS_PATH);
+        let iri = format!("{container}s1");
+        let sub = Subscription {
+            id: "s1".into(),
+            subscriber: None,
+            client: None,
+            topics: vec![cfg.storage()],
+            inbox: "https://inbox.example/".into(),
+            expires: None,
+            expires_at: None,
+        };
+        // A first boot makes the containers; the subscription is stored after it and before
+        // the boot under test, which loads it.
+        let boot = |cfg: LwsConfig| super::super::router(store.clone(), cfg);
+        let _ = boot(cfg.clone()).await.expect("router");
+        store
+            .create_in_container(
+                &container,
+                &iri,
+                Bytes::from(serde_json::to_vec(&sub).unwrap()),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        let app = boot(cfg).await.expect("router");
+        let app = with_overload_layers(
+            app,
+            OverloadConfig::new(1, Some(Duration::from_millis(100))),
+        );
+        let send = |method: &str, path: &str| {
+            let req = axum::http::Request::builder()
+                .method(method)
+                .uri(path)
+                .body(Body::empty())
+                .unwrap();
+            app.clone().oneshot(req)
+        };
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let path = format!("{SUBSCRIPTIONS_PATH}s1");
+        let r = send("DELETE", &path).await.unwrap();
+        assert_eq!(r.status(), StatusCode::GATEWAY_TIMEOUT);
+        // The removal still holds the only slot: the next request is shed.
+        let r = send("GET", "/").await.unwrap();
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        gate.add_permits(1);
+        let mut status = StatusCode::SERVICE_UNAVAILABLE;
+        for _ in 0..200 {
+            status = send("GET", "/").await.unwrap().status();
+            if status != StatusCode::SERVICE_UNAVAILABLE {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, StatusCode::OK);
+    }
 
     /// A subscription to the storage root, put straight into the state and the store.
     async fn subscribe_root(state: &LwsState<test_store::FlakyStore>, id: &str) -> String {

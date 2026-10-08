@@ -700,6 +700,56 @@ pub(crate) async fn delete_record<S: Store + 'static>(
     }
 }
 
+/// Store a new record (an access grant or request, a subscription) at `iri` in `container` and,
+/// once it is stored, put it in force in memory with `register`. Every record in the store is
+/// loaded, and so in force, at the next boot, so the two never part:
+///
+/// - The writes and the registration run in a task of their own, holding the request's share of
+///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
+///   being registered.
+/// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
+///   store's timeout or lost reply), so the record is removed; when that fails too, it is
+///   registered, so it can be listed and revoked like any other.
+pub(crate) async fn create_record<S, F>(
+    state: &LwsState<S>,
+    container: &str,
+    iri: &str,
+    body: Bytes,
+    admission: Option<crate::overload::AdmissionSlot>,
+    register: F,
+) -> Result<(), crate::error::ServerError>
+where
+    S: Store + 'static,
+    F: FnOnce() + Send + 'static,
+{
+    use crate::error::ServerError;
+    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let task = async move {
+        let _admission = admission;
+        match state
+            .store
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await
+        {
+            Ok(_) => {
+                register();
+                Ok(())
+            }
+            Err(e) => {
+                if matches!(e, ServerError::Storage(_))
+                    && delete_record(&state, &iri, &container).await.is_err()
+                {
+                    register();
+                }
+                Err(e)
+            }
+        }
+    };
+    tokio::spawn(task)
+        .await
+        .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
+}
+
 /// Stored metadata of `iri`, parsed; metadata that does not parse is an error.
 pub(crate) fn parse_meta(
     iri: &str,
@@ -1179,6 +1229,9 @@ pub(crate) mod test_store {
         /// `write` of this IRI commits, then reports a backend failure, as when a remote store's
         /// reply is lost after the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `create_in_container` commits, then reports a backend failure, as when a remote
+        /// store's reply is lost after the update landed.
+        pub fail_after_create: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
     }
@@ -1205,6 +1258,7 @@ pub(crate) mod test_store {
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
                 refuse_write_of: Default::default(),
+                fail_after_create: Default::default(),
             }
         }
     }
@@ -1297,9 +1351,15 @@ pub(crate) mod test_store {
                 });
                 return sent.await.expect("create");
             }
-            self.inner
+            let created = self
+                .inner
                 .create_in_container(container, child, body, ct)
-                .await
+                .await;
+            if self.fail_after_create.load(Ordering::SeqCst) {
+                created?;
+                return Err(ServerError::Storage("the reply was lost".into()));
+            }
+            created
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             if self.fail_delete.load(Ordering::SeqCst)
