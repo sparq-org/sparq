@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-vya1: sparq-policy STATEFUL `odrl:count` enforcement. The whole
+# sq-vya1: sparq-policy STATEFUL `odrl:count` enforcement. The whole
 # tests/odrl_count.rs file is `#![cfg(feature = "count-enforcement")]` and the
 # `count` module is feature-gated, so the default build (and ci.yml's
 # archive) compiled them EMPTY — the 10 odrl_count tests (lteq/lt/eq budgets,
@@ -31,14 +31,14 @@
   features: "count-enforcement"
   test: true
 
-# [GPT-5.6] sq-mu4au: the decision-report integration test is entirely gated by
+# sq-mu4au: the decision-report integration test is entirely gated by
 # this default-OFF feature, so execute it explicitly in the opt-in matrix.
 - name: "sparq-policy (decision-report)"
   crate: "sparq-policy"
   features: "decision-report"
   test: true
 
-# [OPUS-4.8] sq-uor3g (epic sq-0dksu, Phase 4): the sparq security-property
+# sq-uor3g (epic sq-0dksu, Phase 4): the sparq security-property
 # ODRL PROFILE in sparq-policy — the `secx:requires…` leftOperands made
 # first-class. The whole `secprop` module (Rust constants + leftOperand→
 # dimension map + recogniser) is `#[cfg(feature = "secprop-leftoperands")]`,
@@ -48,7 +48,7 @@
 # `nextest archive` compiles them EMPTY and runs ZERO of them — the silent-skip
 # gap (#1171) this leg closes. The feature adds only `const &str` data + a
 # published `.ttl` drift test (strictly additive — it does NOT touch the
-# stateless `evaluate` path); since [OPUS-5] sq-3705 it also turns on the
+# stateless `evaluate` path); since sq-3705 it also turns on the
 # `sparq-secprop-vocab` edge, a ZERO-dependency leaf the `DIM_*` constants are
 # now aliases of, so the crate's deliberately lean graph is unchanged and the
 # cross-package `include_str!` reads of sparq-trust/sparq-zk are gone. So this

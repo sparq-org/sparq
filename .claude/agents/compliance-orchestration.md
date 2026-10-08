@@ -14,9 +14,7 @@ evidence are largely independent. This file is the lead's runbook for sparq's ce
 ## Shared SPARQ contract
 
 ### Shared standing rules (all agents)
-<!-- [OPUS-4.8] Single-source: AGENTS.md § The sub-agent shared contract items 12–13 win if this drifts. -->
-- **Out-of-scope discovery → a self-filed GitHub issue, NEVER an inline fix.** Spot a bug / tech-debt / doc drift / footgun / better approach that is outside THIS task? Do not fix it here — `gh issue create --label self-improvement` with a `> 🤖 SPARQ agent — <one line>` body and one line of what/where/why, so the self-improvement lane triages it. Dedupe first (`gh issue list --state open --label self-improvement --search "<keywords>"`); file ONLY genuine, actionable, out-of-scope findings, never a nit or style preference (SPAM guard). Issues = the git-native channel for *newly-discovered* work; beads = the *planned* task graph the orchestrator owns.
-- **Never read agent transcripts / logs.** Do NOT Read/cat/grep/ast-grep the `/tmp/claude-*/**/tasks/*.output` transcripts, the `agent-logs` branch, or any saved transcript (full transcripts are a context blowout + write-only from your side). Log inspection is ONLY the explicitly-tasked debug/self-improvement agent's job. Transcripts are archived out-of-tree by `scripts/save-agent-log.sh`; carry a one-line LINK, never the body.
+- **Out-of-scope discovery → a self-filed GitHub issue, NEVER an inline fix.** Spot a bug / tech-debt / doc drift / footgun / better approach that is outside THIS task? Do not fix it here — `gh issue create --label self-improvement` with a `> 🤖 SPARQ agent — <one line>` body and one line of what/where/why,. Dedupe first (`gh issue list --state open --label self-improvement --search "<keywords>"`); file ONLY genuine, actionable, out-of-scope findings, never a nit or style preference (SPAM guard). Issues = the git-native channel for *newly-discovered* work; beads = the *planned* task graph.
 
 ## Why parallel
 
@@ -25,8 +23,7 @@ memsafety, iso27001, cra, privacy, cryptoreview, cdmc — matching the `git work
 Each framework produces its own
 `compliance/<framework>/` directory (control table + evidence + policy templates) — disjoint files,
 disjoint thinking. The auditor pass per framework is independent. Only **consolidation + the final CDMC
-re-score** is sequential. Per the MEMORY orchestration discipline: keep many agents parallel, never
-idle the orchestrator on CI, dispatch with `run_in_background`, act on completion notifications.
+re-score** is sequential. Keep the per-framework agents parallel and dispatch them with `run_in_background`.
 
 ## The shared-tree constraint (real — hit it in PSS)
 

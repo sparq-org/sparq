@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Change-based CI test-selection: the affected-set selector.
+# Change-based CI test-selection: the affected-set selector.
 # Bead sq-fmx4u.1 (epic sq-fmx4u). Design: research/change-based-test-selection.md
 # §3 (affected-set algorithm), §4 (fail-safe rules), §7 (positions P1-P4).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
 #
 # WHAT THIS IS (and is NOT):
 #   Given the set of paths changed in a PR (a git diff), compute the set of
@@ -13,7 +12,7 @@
 #   This is the SELECTOR LIBRARY (design §3). The CI WIRING — the `select`
 #   pre-job (.github/workflows/ci-select.yml), the job-level `if:` guards, the
 #   nextest filterset narrowing, ci-summary semantics — landed with bead
-#   sq-fmx4u.3 [FABLE-5]; the rollout backstops (nightly full, ci-full label,
+#   sq-fmx4u.3; the rollout backstops (nightly full, ci-full label,
 #   the enforcement flip) are bead sq-fmx4u.5. This file stays workflow-
 #   agnostic: it reads a diff + cargo metadata and emits {mode, reason,
 #   affected} plus the $GITHUB_OUTPUT lines (mode/affected/filterset) that the
@@ -84,7 +83,7 @@ _FULL_TRIGGERS: list[tuple[str, str]] = [
 
 
 # --- ORCHESTRATION-ONLY carve-out (change-class layer; sq path-aware CI) ------
-# [OPUS-4.8] The broad `.github/` and `scripts/` full-run triggers above are
+# The broad `.github/` and `scripts/` full-run triggers above are
 # CORRECT-BY-DEFAULT but OVER-BROAD: a PR that changes ONLY orchestration/workflow
 # tooling (PR/issue/bead automation, routing, the merge-queue batchers, agent
 # config) forces the FULL Rust matrix even though NOTHING it touches is read by any
@@ -111,50 +110,32 @@ _FULL_TRIGGERS: list[tuple[str, str]] = [
 # a directory prefix; otherwise an exact repo-relative path.
 #
 # NOT here (deliberately — these ARE read by the Rust matrix, so they must keep
-# triggering full): every Rust-CI script (ci_select.py, ci_summary_gate.py,
+# triggering full): every Rust-CI script (ci_select.py,
 # coverage*.py/sh, perf-gate.py, assemble-feature-matrix.py, feature-matrix-tiers.py,
 # check-*.py gates, fetch-*.sh conformance fetchers, ci-bench.sh, ci-free-disk.sh,
 # unsafe/mutants gates, sbom/vex tooling, docker-smoke.sh, wasm-deps-guard.sh, the
 # fv/formal lane scripts, and scripts/tests/* that gate the engine); the Rust-CI
 # workflow files themselves (ci.yml, feature-matrix.yml, codeql.yml, supply-chain.yml,
 # bench.yml, fuzz.yml, miri.yml, asan.yml, kani.yml, metamorph.yml,
-# vectorized-feature-off.yml, ci-select.yml, ci-summary.yml, conformance/coverage
+# vectorized-feature-off.yml, ci-fast.yml, conformance/coverage
 # lanes); `.github/feature-matrix.d/**`; `.github/codeql/**`; `.github/actions/**`.
 _ORCHESTRATION_SAFE: list[str] = [
     # Orchestration configuration + agent harness (never compiled/tested by cargo).
-    "orchestration/",       # routing.toml + orchestration policy (the #3416 class)
     ".claude/",             # agent definitions / skills / workflows / settings
     ".beads/",              # the bead task DB (never read by any build/test)
     # Orchestration-only workflow files (PR/issue/bead/merge automation — none run
     # cargo build/test/clippy/coverage/bench/fuzz/CodeQL).
-    ".github/workflows/triage-issue.yml",
-    ".github/workflows/retriage.yml",
-    ".github/workflows/pr-backlog.yml",
     ".github/workflows/pr-title.yml",
-    ".github/workflows/batch-merge.yml",
-    ".github/workflows/bead-autoclose.yml",
-    ".github/workflows/promote-on-approval.yml",
     ".github/workflows/differential-update.yml",
     ".github/workflows/kb-dump.yml",
     ".github/workflows/pkg-ingest.yml",
-    # NOTE deliberately NOT here: selection-alarm.yml / formal-alarm.yml — they are
-    # monitors for the Rust/formal lanes (borderline), so they keep triggering full
-    # (fail-closed; the value of skipping them is negligible and the audit is cleaner).
     # Orchestration-only scripts (PR/issue/bead/routing/dispatch automation). Each is
     # pinned inert by the OrchestrationSafeInertnessTests grep.
-    "scripts/triage.py",
-    "scripts/retriage.py",
-    "scripts/routing-validate.py",
-    "scripts/dispatch-plan.py",
-    "scripts/bd-to-issues.py",
-    "scripts/pr-backlog.py",
-    "scripts/batch-merge.py",
-    "scripts/save-agent-log.sh",
     "scripts/push-frontier.sh",
 ]
 
 
-# [OPUS-5] sq-g25hr: DEPLOYMENT-MANIFEST surfaces — the k8s/helm/terraform/bicep/
+# sq-g25hr: DEPLOYMENT-MANIFEST surfaces — the k8s/helm/terraform/bicep/
 # PaaS manifests under deploy/ plus the two lint workflows that are their ONLY CI
 # consumers. Same allowlist shape and same inertness obligation as
 # _ORCHESTRATION_SAFE above (a "/"-suffixed entry is a directory prefix, else an
@@ -197,7 +178,7 @@ def _allowlist_match(path: str, allowlist: list[str]) -> bool:
 
 
 def _orchestration_safe_match(path: str) -> bool:
-    """[OPUS-4.8] Is `path` on the audited orchestration-only inert allowlist?
+    """Is `path` on the audited orchestration-only inert allowlist?
     A "/"-suffixed entry is a directory prefix; else an exact path. Consulted
     BEFORE _trigger_match so it is the sole rescue from a .github/scripts trigger;
     it can only ever REMOVE a path from the full set for a proven-inert path (a
@@ -206,7 +187,7 @@ def _orchestration_safe_match(path: str) -> bool:
 
 
 def _deploy_only_match(path: str) -> bool:
-    """[OPUS-5] sq-g25hr: is `path` on the audited deployment-manifest allowlist?
+    """sq-g25hr: is `path` on the audited deployment-manifest allowlist?
     Same pre-trigger position and same fail-safe posture as
     _orchestration_safe_match — a non-matching path still hits the trigger => full."""
     return _allowlist_match(path, _DEPLOY_ONLY)
@@ -218,10 +199,10 @@ def _deploy_only_match(path: str) -> bool:
 _CLASS_ENGINE = "engine"
 _CLASS_ORCHESTRATION = "orchestration-only"
 _CLASS_DOCS = "docs-only"
-# [OPUS-5] sq-g25hr: deployment manifests only (deploy/** + the two deploy lint
+# sq-g25hr: deployment manifests only (deploy/** + the two deploy lint
 # workflows) — see _DEPLOY_ONLY.
 _CLASS_DEPLOY = "deploy-only"
-# [OPUS-5] #5249: the path resolves to an ownership-map `safe = true` verdict — the
+# #5249: the path resolves to an ownership-map `safe = true` verdict — the
 # SAME audit-proven inertness the closure layer already honours (a safe-listed path
 # contributes no crate, so its closure is empty). Before this class existed the two
 # layers disagreed about the same diff: `site/**` is `safe = true` in
@@ -233,7 +214,7 @@ _CLASS_DEPLOY = "deploy-only"
 # (research/docs are docs-only, .beads/ is orchestration, deploy/ is deploy-only,
 # each matched by an earlier arm).
 _CLASS_MAP_SAFE = "map-safe"
-# [OPUS-5] sq-g25hr: EVERY changed path is on a proven-inert surface, but they span
+# sq-g25hr: EVERY changed path is on a proven-inert surface, but they span
 # MORE THAN ONE of {orchestration, docs, deploy}. This used to collapse into
 # `mixed` — the same token an engine+docs diff produces — so the consumers' skip
 # case-arm could not distinguish "provably nothing for the Rust matrix" from
@@ -273,7 +254,7 @@ _DOCS_ONLY_PREFIXES: list[str] = [
 
 
 def _map_safe_match(path: str, map_entries: list[dict]) -> bool:
-    """[OPUS-5] #5249: does `path` resolve to an ownership-map `safe = true` verdict?
+    """#5249: does `path` resolve to an ownership-map `safe = true` verdict?
 
     (Calls `_trigger_match` / `apply_ownership_map`, defined further down — resolved
     at call time.) This is the CLASS layer reading the same map the closure layer
@@ -306,7 +287,7 @@ def _map_safe_match(path: str, map_entries: list[dict]) -> bool:
 
 
 def classify_change(changed_paths: list[str], map_entries: list[dict] | None = None) -> str:
-    """[OPUS-4.8] Pure change-class of a diff (WHAT surfaces changed), for the audit
+    """Pure change-class of a diff (WHAT surfaces changed), for the audit
     trail. Orthogonal to `mode` (HOW MUCH runs) — this only LABELS; the sound skip
     math is unchanged. Fail-closed: any path that is on NONE of the proven-inert
     allowlists (orchestration-safe / docs-only / deploy-only / ownership-map
@@ -314,11 +295,11 @@ def classify_change(changed_paths: list[str], map_entries: list[dict] | None = N
     paths), so a class is never MORE permissive than the mode. Empty diff => engine
     (a non-PR/full event carries no diff and runs everything anyway).
 
-    [OPUS-5] sq-g25hr: a diff confined to inert surfaces but SPANNING more than one
+    sq-g25hr: a diff confined to inert surfaces but SPANNING more than one
     of them is `inert-mixed`, not `mixed` — see _CLASS_INERT_MIXED. `mixed` now
     means exactly "at least one engine path plus something inert".
 
-    [OPUS-5] #5249: `map_entries` (the ci/path-ownership.toml `[[map]]` array) is
+    #5249: `map_entries` (the ci/path-ownership.toml `[[map]]` array) is
     OPTIONAL — omit it and the classifier behaves exactly as before, which is the
     conservative direction. Pass it and an audit-proven `safe = true` path is inert
     at the class layer too (see _map_safe_match / _CLASS_MAP_SAFE)."""
@@ -350,10 +331,10 @@ def classify_change(changed_paths: list[str], map_entries: list[dict] | None = N
 
 
 # --- phase-2 singleton-lane -> seed crates (design §5.2; beads sq-fmx4u.6, sq-mel85)
-# [OPUS-4.8] A "lane" is a SINGLETON CI job (not a per-crate matrix leg) that
+# A "lane" is a SINGLETON CI job (not a per-crate matrix leg) that
 # always exercises a FIXED set of crates: the fuzz smoke (fuzz.yml), the wasm
 # bundle build (ci.yml `wasm`), and the perf-gate benchmark (bench.yml `bench` —
-# added by sq-mel85 [SONNET-4.6]). Phase 1 left these always-run (design P7); phase 2
+# added by sq-mel85). Phase 1 left these always-run (design P7); phase 2
 # maps each to the crate closure it exercises and skips it when that closure is
 # provably unaffected. A lane is affected iff any SEED crate is in the affected
 # closure — and because `affected` is the REVERSE-dependency closure of the diff,
@@ -371,7 +352,7 @@ def classify_change(changed_paths: list[str], map_entries: list[dict] | None = N
 #     mmap loader), sparq-engine (SPARQL parse), sparq-shacl (SHACL validation).
 #   * wasm — the ci.yml `wasm` job builds every browser bundle it names; each seed
 #     pulls its own engine/core wasm32 graph, so the seed set is the bundle crates.
-#   * bench — [SONNET-4.6] sq-mel85: the perf-gate benchmark (bench.yml). Seeds are
+#   * bench — sq-mel85: the perf-gate benchmark (bench.yml). Seeds are
 #     the benchmarked-crate closure of the HARD-GATED (merge-blocking) metrics that
 #     scripts/perf-gate.py enforces on PRs: the store/dict byte-layout + parse
 #     metrics come from sparq-core (exercised via the release binaries the bench job
@@ -411,18 +392,18 @@ _LANE_SEEDS: dict[str, list[str]] = {
         "sparq-shacl-wasm",
         "sparq-introspect",
         "sparq-solid",
-        # [FABLE-5] sq-98c: not a bundle crate — the wasm job build+clippy-gates that
+        # sq-98c: not a bundle crate — the wasm job build+clippy-gates that
         # sparq-vectors keeps compiling on wasm32 with memmap2 target-gated out.
         "sparq-vectors",
     ],
-    # [SONNET-4.6] sq-mel85: perf-gate bench closure (see the `bench` bullet above).
+    # sq-mel85: perf-gate bench closure (see the `bench` bullet above).
     "bench": [
         "sparq-engine",
         "sparq-cli",
         "sparq-bench",
         "sparq-wasm",
     ],
-    # [FABLE-5] sq-0iqzw: fuzz.yml `differential-smoke` — the PR-level BLOCKING
+    # sq-0iqzw: fuzz.yml `differential-smoke` — the PR-level BLOCKING
     # sparq-vs-Oxigraph differential regression windows (the sparq-bench in-process
     # oracle). Seeds: the engine under test (sparq-core/sparq-engine) plus the
     # harness/oracle crate itself, so a generator or comparator change re-runs its
@@ -446,7 +427,7 @@ class Selection:
     changed_crates: list[str] = field(default_factory=list)
     file_owners: list[tuple[str, str]] = field(default_factory=list)  # (path, owner-label)
     all_members: list[str] = field(default_factory=list)
-    # [OPUS-4.8] change-class of the diff (see classify_change / _INERT_CLASSES):
+    # change-class of the diff (see classify_change / _INERT_CLASSES):
     # the audit-trail label for WHY the Rust lanes were (or were not) skipped. Part of
     # the JSON contract so the gate + tooling can render "skipped-by-class: <class>".
     change_class: str = "engine"
@@ -555,7 +536,7 @@ def reverse_closure(crate: str, reverse_adj: dict[str, set[str]]) -> set[str]:
 
 
 def lane_runs(sel: "Selection", seeds: list[str]) -> bool:
-    """[OPUS-4.8] sq-fmx4u.6 / sq-mel85: does a singleton lane (fuzz / wasm /
+    """sq-fmx4u.6 / sq-mel85: does a singleton lane (fuzz / wasm /
     bench) need to run for this Selection? This is the EXECUTABLE SPEC of the
     fuzz.yml + ci.yml `wasm` + bench.yml `bench` job `if:` guards — the YAML
     expresses the identical rule inline
@@ -634,7 +615,7 @@ def apply_ownership_map(path: str, map_entries: list[dict]) -> tuple[str, list[s
 
 
 def additional_readers(path: str, map_entries: list[dict]) -> list[str]:
-    """[FABLE-5] sq-m4bxc: extra reader crates declared for `path` by `[[map]]`
+    """sq-m4bxc: extra reader crates declared for `path` by `[[map]]`
     entries carrying a `readers` list — the additional-readers mechanism.
 
     These crates are UNIONED into the changed-crate set IN ADDITION to `path`'s
@@ -670,7 +651,7 @@ def select(
     map_entries = map_entries or []
     ws = parse_workspace(meta)
     all_members = sorted(ws.members)
-    # [OPUS-5] #5249: the class layer reads the SAME map as the closure layer below,
+    # #5249: the class layer reads the SAME map as the closure layer below,
     # so a `safe = true` path cannot be inert for the closure and `engine` for the class.
     change_class = classify_change(changed_paths, map_entries)
 
@@ -690,14 +671,14 @@ def select(
         path = path.strip()
         if not path:
             continue
-        # [OPUS-4.8] ORCHESTRATION-ONLY carve-out (BEFORE the trigger check — the sole
+        # ORCHESTRATION-ONLY carve-out (BEFORE the trigger check — the sole
         # rescue from a .github/scripts full-run trigger, and only for a PROVEN-inert
         # path). Treated exactly like a SAFE-listed path: contributes no crate, so a
         # pure-orchestration diff selects an empty closure and every Rust lane skips.
         if _orchestration_safe_match(path):
             file_owners.append((path, "ORCH-SAFE"))
             continue
-        # [OPUS-5] sq-g25hr: the DEPLOY-manifest carve-out, same position and same
+        # sq-g25hr: the DEPLOY-manifest carve-out, same position and same
         # rationale as the orchestration one above — it is the only rescue for the
         # two `.github/workflows/deploy-*.yml` files from the `.github/` full-run
         # trigger, and it contributes no crate, so a deploy-only diff selects an
@@ -712,7 +693,7 @@ def select(
             file_owners.append((path, "FULL-TRIGGER"))
             return full(trig)
 
-        # [FABLE-5] sq-m4bxc: additional-readers (monotone union). Extra reader
+        # sq-m4bxc: additional-readers (monotone union). Extra reader
         # crates declared for this path are added REGARDLESS of ownership — the
         # union can only ENLARGE the affected set (design §4.2, fail-safe §2). It
         # never rescues an unowned/unmapped path (that still forces full below),
@@ -871,7 +852,7 @@ def load_ownership_map(map_file: str | None) -> list[dict]:
 
 # --- shadow mode (design §6.4; wired by sq-fmx4u.3, flipped by sq-fmx4u.5) ---
 def shadow_wrap(sel: Selection) -> Selection:
-    """[FABLE-5] Report-only rollout mode: keep the computed selection for the
+    """Report-only rollout mode: keep the computed selection for the
     step summary but emit mode="shadow", which every downstream guard treats
     exactly like any non-"selected" mode — RUN EVERYTHING. The wrap is applied
     UNIFORMLY (even over a computed mode=full / the error path) so the emitted
@@ -889,7 +870,7 @@ def shadow_wrap(sel: Selection) -> Selection:
 
 
 def filterset(sel: Selection) -> str:
-    """[FABLE-5] The nextest filterset over the affected members, e.g.
+    """The nextest filterset over the affected members, e.g.
     "package(a) + package(b)". Consumed by the cross-crate bulk test shards to
     NARROW (never skip) their partition when mode == "selected" (design §5.2).
     nextest fails loud on a package() naming no package in the archive, so a
@@ -900,7 +881,7 @@ def filterset(sel: Selection) -> str:
 # --- step summary + outputs --------------------------------------------------
 def render_summary(sel: Selection) -> str:
     lines = ["### CI test-selection", "", f"**Mode:** `{sel.mode}` — {sel.reason}", ""]
-    # [OPUS-4.8] Explicit change-class attribution line so the audit trail shows WHY
+    # Explicit change-class attribution line so the audit trail shows WHY
     # the Rust lanes were skipped (or not). No silent skips.
     lines.append(f"**Change-class:** `{sel.change_class}`")
     if sel.change_class in _INERT_CLASSES and sel.mode == "selected":
@@ -938,7 +919,7 @@ def _write_outputs(sel: Selection, output_file: str | None, summary_file: str | 
             fh.write(f"mode={sel.mode}\n")
             fh.write("affected=" + json.dumps(sel.affected) + "\n")
             fh.write("filterset=" + filterset(sel) + "\n")
-            # [OPUS-4.8] change-class output for the audit trail (consumers may
+            # change-class output for the audit trail (consumers may
             # surface "skipped-by-class: <class>"); never a gating input.
             fh.write(f"change_class={sel.change_class}\n")
     if summary_file:
@@ -948,7 +929,7 @@ def _write_outputs(sel: Selection, output_file: str | None, summary_file: str | 
 
 # --- classify-only mode (merge-group change-class gating; #3420/#3421 follow-up)
 def _classify_map_entries(map_file: str | None, repo_root: str | None) -> list[dict]:
-    """[OPUS-5] #5249: BEST-EFFORT ownership-map load for --classify-only.
+    """#5249: BEST-EFFORT ownership-map load for --classify-only.
 
     Degrades to `[]` — i.e. the pre-#5249 classifier, in which no map path is inert
     and a `safe = true` path classifies `engine` (a full run) — whenever the map is
@@ -969,7 +950,7 @@ def _classify_map_entries(map_file: str | None, repo_root: str | None) -> list[d
 
 def _classify_only_main(args: argparse.Namespace, output_file: str | None,
                         summary_file: str | None) -> int:
-    """[FABLE-5] merge-group change-class: compute ONLY `classify_change` over the
+    """merge-group change-class: compute ONLY `classify_change` over the
     diff — no cargo metadata, no toolchain — so the cheap workflow `changes`
     pre-jobs (ci.yml / feature-matrix.yml / codeql.yml) can class-gate their
     `rust_changed` output on the MERGE-GROUP batch diff without duplicating the
@@ -987,7 +968,7 @@ def _classify_only_main(args: argparse.Namespace, output_file: str | None,
         internal error => class `engine`, exit 0 — the consumer then runs the
         full matrix (cost, never soundness).
 
-    [OPUS-5] #5249: the ownership map IS read here now (it was not before) so a
+    #5249: the ownership map IS read here now (it was not before) so a
     `safe = true` path classifies `map-safe` instead of `engine` — the class layer
     and the closure layer must not disagree about the same diff. The added cost is
     one small TOML parse (plus, on the hermetic --changed-file path only, the
@@ -1067,7 +1048,7 @@ def main(argv: list[str] | None = None) -> int:
     summary_file = args.summary_file or os.environ.get("GITHUB_STEP_SUMMARY")
     output_file = args.output_file or os.environ.get("GITHUB_OUTPUT")
 
-    # [FABLE-5] merge-group change-class gating: the cheap classify-only entry
+    # merge-group change-class gating: the cheap classify-only entry
     # point (no cargo metadata). Everything below is the full selector.
     if args.classify_only:
         return _classify_only_main(args, output_file, summary_file)
@@ -1076,7 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root = _resolve_repo_root(args.repo_root)
 
         # Events with no PR diff, or the explicit override => full (design §3.1, §6).
-        # [FABLE-5] sq-fmx4u.3: only pull_request and merge_group carry a sound
+        # sq-fmx4u.3: only pull_request and merge_group carry a sound
         # (base, head) revision pair; push/schedule/workflow_dispatch (and any
         # future event) get the full matrix by construction, not by error-trap.
         if args.full or args.event not in ("pull_request", "merge_group"):
@@ -1108,7 +1089,7 @@ def main(argv: list[str] | None = None) -> int:
         # affected is still "run everything" downstream (mode != 'selected').
         sel = Selection(mode="full", reason=f"selector error, failing to full run: {exc}", affected=[])
 
-    if args.shadow:  # [FABLE-5] report-only rollout (design §6.4; flip: sq-fmx4u.5)
+    if args.shadow:  # report-only rollout (design §6.4; flip: sq-fmx4u.5)
         sel = shadow_wrap(sel)
 
     print(json.dumps(sel.to_json_obj(), indent=2))

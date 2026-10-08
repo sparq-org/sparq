@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-# [GPT-5.6] sq-fvzi6: hermetic regression test for the sparq-server release image contract.
+# sq-fvzi6: hermetic regression test for the sparq-server release image contract.
 #
 # The workflow itself is the executable publication surface, so this test parses its docker
 # job and pins the load-bearing shape: QEMU before Buildx, a native load/smoke/Trivy gate,
 # semver/minor/latest tags, and one amd64+arm64 push with SBOM + provenance. The mutation test
 # proves the platform assertion is non-vacuous.
 #
-# [GPT-5] sq-fqrv4: the shared deployment substrate also publishes sparq-lws-core. Keep its
+# sq-fqrv4: the shared deployment substrate also publishes sparq-lws-core. Keep its
 # independent release workflow under the same multi-arch and pre-push assurance contract so
 # either server image regressing to a single architecture or an unscanned push fails this gate.
 #
-# [OPUS-5] sq-w1dxx: also pins the trigger-dependent TAG contract. `docker/metadata-action`
+# sq-w1dxx: also pins the trigger-dependent TAG contract. `docker/metadata-action`
 # derives `type=semver` from the git ref, which on a `workflow_dispatch` is the branch — so an
 # unguarded tag list makes a dispatch dev-build push only the moving `:latest` (the tag the
 # deploy configs pin) with no clean semver. The assertions below require every tag to be
 # version-threaded from the `setup` job and the canonical/dispatch tag sets to be disjoint;
 # `test_ungated_latest_tag_fails_contract` proves that assertion is non-vacuous.
 #
-# [OPUS-5] the structural assertions above are necessary but NOT sufficient: `inputs.tag` is a
+# the structural assertions above are necessary but NOT sufficient: `inputs.tag` is a
 # free-form required string, so gating the dispatch tag on the trigger still let `tag: latest`
 # (or `v1.2.3`, or a moving `1.2`) resolve onto the canonical tag it names and overwrite the
 # released image. `resolve_pushed_tags` therefore MODELS metadata-action's resolution and
@@ -33,7 +33,14 @@ import re
 import unittest
 from pathlib import Path
 
-import yaml
+import sys
+
+# #5820: local runs without PyYAML skip this module instead of erroring; CI still
+# hard-fails on a missing PyYAML (see scripts/tests/_yaml_seam.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _yaml_seam import yaml_or_local_skip  # noqa: E402
+
+yaml = yaml_or_local_skip()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
@@ -159,7 +166,7 @@ def assert_release_container_contract(workflow_text: str) -> None:
     docker_job = workflow["jobs"]["docker"]
     steps = docker_job["steps"]
 
-    # [OPUS-5] sq-w1dxx: the tags are threaded from the `setup` job's resolved version, so the
+    # sq-w1dxx: the tags are threaded from the `setup` job's resolved version, so the
     # dependency edge that makes `needs.setup.outputs.version` resolvable is load-bearing.
     needs = docker_job.get("needs")
     needs = [needs] if isinstance(needs, str) else (needs or [])
@@ -180,7 +187,7 @@ def assert_release_container_contract(workflow_text: str) -> None:
 
     _, metadata = _step_named(steps, METADATA_STEP)
     tags = set(filter(None, metadata["with"]["tags"].splitlines()))
-    # [OPUS-5] sq-w1dxx: every tag is threaded from the `setup` job's resolved version (`value=`)
+    # sq-w1dxx: every tag is threaded from the `setup` job's resolved version (`value=`)
     # and gated on the trigger (`enable=`), so the two paths emit disjoint tag sets: a `v*` tag
     # push publishes semver + major.minor + `latest`; a developer/test dispatch publishes ONLY its
     # own `dev-`-namespaced version tag — never `latest` (which `deploy/paas` + `deploy/aws` pin)
@@ -329,7 +336,7 @@ class ReleaseContainerMultiarch(unittest.TestCase):
             assert_lws_container_contract(yaml.safe_dump(workflow, sort_keys=False))
 
     def test_live_dispatch_tags_never_collide_with_canonical_tags(self):
-        """[OPUS-5] a hostile/careless `inputs.tag` must not reach a deployment-followed tag."""
+        """a hostile/careless `inputs.tag` must not reach a deployment-followed tag."""
         assert_dispatch_tags_never_canonical(WORKFLOW.read_text(encoding="utf-8"))
 
     def test_dispatch_still_publishes_a_pullable_namespaced_tag(self):
@@ -340,7 +347,7 @@ class ReleaseContainerMultiarch(unittest.TestCase):
         self.assertEqual(pushed, {"dev-v0.1.0-dev"})
 
     def test_unnamespaced_dispatch_tag_fails_contract(self):
-        """[OPUS-5] dropping the `dev-` namespace must go red — the pre-fix collision returns."""
+        """dropping the `dev-` namespace must go red — the pre-fix collision returns."""
         original = WORKFLOW.read_text(encoding="utf-8")
         mutated = original.replace(
             f"type=raw,value=dev-{VERSION_EXPR},", f"type=raw,value={VERSION_EXPR},", 1
@@ -362,7 +369,7 @@ class ReleaseContainerMultiarch(unittest.TestCase):
             assert_dispatch_tags_never_canonical(mutated)
 
     def test_ungated_latest_tag_fails_contract(self):
-        """[OPUS-5] sq-w1dxx: reinstating the pre-fix tag list must go red."""
+        """sq-w1dxx: reinstating the pre-fix tag list must go red."""
         original = WORKFLOW.read_text(encoding="utf-8")
         mutated = original.replace(
             "type=raw,value=latest,enable=${{ github.event_name != 'workflow_dispatch' }}",
@@ -374,7 +381,7 @@ class ReleaseContainerMultiarch(unittest.TestCase):
             assert_release_container_contract(mutated)
 
     def test_dropping_the_version_thread_fails_contract(self):
-        """[OPUS-5] sq-w1dxx: reverting the tags to git-ref-derived semver must go red."""
+        """sq-w1dxx: reverting the tags to git-ref-derived semver must go red."""
         original = WORKFLOW.read_text(encoding="utf-8")
         mutated = original.replace(",value=${{ needs.setup.outputs.version }},enable=", ",enable=")
         self.assertNotEqual(mutated, original, "mutation fixture did not alter the workflow")
@@ -382,7 +389,7 @@ class ReleaseContainerMultiarch(unittest.TestCase):
             assert_release_container_contract(mutated)
 
     def test_dropping_the_setup_dependency_fails_contract(self):
-        """[OPUS-5] sq-w1dxx: `needs.setup.outputs.version` is unresolvable without the edge."""
+        """sq-w1dxx: `needs.setup.outputs.version` is unresolvable without the edge."""
         original = WORKFLOW.read_text(encoding="utf-8")
         # Anchor on `packages: write`, which is unique to the docker job — four other jobs also
         # declare `needs: setup`, so a bare replace would mutate the wrong one.

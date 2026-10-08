@@ -55,6 +55,33 @@
 //!   engine's JSON-LD parser); doing it inside this crate would force a JSON-LD
 //!   context processor (and remote-context fetching) onto the lean build. See
 //!   [`ProofConfig`] for how the proof options are supplied.
+//! - **Proof-config RDF matches the W3C vectors.** [OPUS-5.5] `created` maps to
+//!   `dcterms:created` and `cryptosuite` is typed `sec:cryptosuiteString`, as in
+//!   the published [vc-di-eddsa test vectors]; the published `proofValue` is
+//!   regression-tested. Proofs from earlier releases (`sec:created`, plain
+//!   `cryptosuite` literal) no longer verify — no legacy fallback; re-sign them.
+//! - **Proof options are validated first.** zkp-14.3: [`sign`],
+//!   [`verify`] and the graph wrappers run [`ProofConfig::validate`] before any
+//!   graph materialization, canonicalization, signing or DID resolution, failing
+//!   with [`VcError::InvalidProofOption`]: `verificationMethod` must be an
+//!   absolute IRI, `proofPurpose` one of [`SUPPORTED_PURPOSE_TERMS`] (hashed as
+//!   the `@id` the VC v2 `@context` gives it) or an absolute IRI (hashed
+//!   verbatim), and `created` an XSD 1.1 `xsd:dateTime` (hashed exactly as
+//!   given). **Incompatibility:** earlier releases appended *any* purpose to
+//!   `sec:`. Only `assertionMethod` (the published vector's purpose) still hashes
+//!   the same, so its signature bytes are unchanged. Proofs they made with
+//!   `authentication`, `capabilityDelegation`, `capabilityInvocation` or
+//!   `keyAgreement` (which expand to `sec:…Method`) or with an absolute-IRI
+//!   purpose no longer verify and must be re-signed — there is no fallback.
+//!   Other bare purpose terms are now rejected. This is lexical validation only.
+//! - **Not checked by this signature-only API:** issuer/controller key
+//!   authorization, the expected purpose, `domain`, `challenge` or `created`
+//!   window, and credential status — enforce them on [`VerifiedProof::config`].
+//!   Only [`ProofConfig`]'s typed fields are representable; a caller mapping a
+//!   JSON-LD `proof` node must itself reject proof options and `@context`
+//!   mappings outside that subset.
+//!
+//! [vc-di-eddsa test vectors]: https://www.w3.org/TR/vc-di-eddsa/#test-vectors
 //! - **DID methods:** `did:key` (offline, self-certifying) by default; `did:web`
 //!   (document-fetched, host-rooted) behind the opt-in `did-web` feature, over a
 //!   pluggable `did::DidDocumentFetcher` (a `did-web`-feature item) so this crate
@@ -101,9 +128,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod did;
+mod proof_options;
 mod suite;
 
+pub use proof_options::{ProofOptionError, SUPPORTED_PURPOSE_TERMS};
 pub use suite::{
-    sign, sign_graph, verify, verify_graph, DataIntegrityProof, ProofConfig, SigningKey, VcError,
-    VerifiedProof, VerifyingKey, CRYPTOSUITE, PROOF_TYPE,
+    CRYPTOSUITE, DataIntegrityProof, PROOF_TYPE, ProofConfig, SigningKey, VcError, VerifiedProof,
+    VerifyingKey, sign, sign_graph, verify, verify_graph,
 };

@@ -2,10 +2,10 @@
 # `slsa-framework/slsa-github-generator`, called by the four isolated provenance lanes — its
 # GENERIC generator by `release.yml#provenance`, `release.yml#provenance-artifacts` and
 # `dist.yml#provenance`, and its CONTAINER generator by `release.yml#provenance-container`
-# ([OPUS-5] #4635). Two reusable workflows, one trust anchor: the step below matches on the repo
+# (#4635). Two reusable workflows, one trust anchor: the step below matches on the repo
 # path, so both flavours are swept and a lane on a second tag fails the job closed. See
 # compliance/slsa/trusted-builder-pin-policy.md for the decision this workflow mechanises.
-# [OPUS-5] #4572
+# #4572
 #
 # WHY THIS EXISTS. Every other third-party action in the repo is SHA-pinned and swept weekly by
 # Dependabot. This one deliberately is not — the builder identity baked into the provenance
@@ -22,8 +22,8 @@
 # retag or a deleted release is itself a trust event). If the pin is current it closes any
 # previously-opened issue, so a stale reminder cannot linger after the review has happened.
 #
-# NOT A GATE. Schedule + dispatch only, so it never produces a check-run on a PR and is invisible
-# to the `ci-summary / gate` aggregator (hence no `.github/advisory-registry.json` entry). The
+# NOT A GATE. Schedule + dispatch only, so it never produces a check-run on a PR (hence no
+# `.github/advisory-registry.json` entry). The
 # structural half of this policy — all four lanes on one tag, the Dependabot ignore intact, this
 # workflow still scheduled — IS enforced on every PR by
 # scripts/tests/test_release_slsa_l3_provenance.py.

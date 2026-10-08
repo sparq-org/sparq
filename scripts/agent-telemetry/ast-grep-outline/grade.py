@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Deterministic, arm-blinded quality grader for the ast-grep+outline A/B
-# (bead sq-lhwo.4, epic sq-lhwo). Authored by Opus 4.8 (Fable unavailable; flag for
-# re-review when Fable returns). 🤖 SPARQ agent.
+# Deterministic, arm-blinded quality grader for the ast-grep+outline A/B
+# (bead sq-lhwo.4, epic sq-lhwo). 🤖 SPARQ agent.
 #
 # WHAT IT GRADES — and what it HONESTLY cannot
 # --------------------------------------------------------------------------------

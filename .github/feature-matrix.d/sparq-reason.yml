@@ -4,16 +4,16 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
@@ -23,7 +23,7 @@
   features: "explain"
   test: true
 
-# [GPT-5.6] Exercise the standalone d-entail and rif-core feature-on states.
+# Exercise the standalone d-entail and rif-core feature-on states.
 - name: "sparq-reason (d-entail)"
   crate: "sparq-reason"
   features: "d-entail"
@@ -34,7 +34,7 @@
   features: "rif-core"
   test: true
 
-# [SONNET-4.6] sq-pbz04.5.3: RIF/XML presentation-syntax importer. rif-xml is opt-in
+# sq-pbz04.5.3: RIF/XML presentation-syntax importer. rif-xml is opt-in
 # (off by default); enables `sparq_reason::rif_xml::import` and pulls in quick-xml.
 # Wired here post-Opus adversarial-verify so CI covers capture-avoidance + fail-closed
 # + xsd:string whitespace tests in the feature-ON state.
@@ -43,7 +43,7 @@
   features: "rif-xml"
   test: true
 
-# [FABLE-5] sq-pbz04.1.1: the shared substrate-join sweep (the rdfs2/3/7 predicate join,
+# sq-pbz04.1.1: the shared substrate-join sweep (the rdfs2/3/7 predicate join,
 # sq-yk6or, + the rdfs9 type join). DISCOVERED GAP closed here: sq-yk6or (#1301) landed the
 # feature and its behaviour-neutrality equivalence tests but wired NO matrix leg, so
 # `substrate_join_emits_identical_plain_branch` ran in NO CI lane. This leg builds + tests +
@@ -54,7 +54,7 @@
   features: "substrate-join"
   test: true
 
-# [FABLE-5] sq-pbz04.1.2: the shared substrate-compare seam (substrate seam 3 — the
+# sq-pbz04.1.2: the shared substrate-compare seam (substrate seam 3 — the
 # reasoner-side CompareTerm adoption for dictionary ids). This leg builds + tests +
 # clippies the feature-ON state: the comparator unit tests AND tests/compare_parity.rs
 # (the REAL-engine `ORDER BY` byte-identity oracle — a `required-features` target that
@@ -64,7 +64,7 @@
   features: "substrate-compare"
   test: true
 
-# [FABLE-5] sq-zgbso.3 (epic sq-zgbso, issue #1582): the id-level COMPILED-rule
+# sq-zgbso.3 (epic sq-zgbso, issue #1582): the id-level COMPILED-rule
 # evaluator for the scoped access-control N3 subset (n3::compiled — rule IR with
 # pre-interned symbols over the shared sparq-substrate join kernels). This leg builds +
 # tests + clippies the feature-ON state: the compile/eval unit suite AND
@@ -76,7 +76,7 @@
   features: "compiled-rules"
   test: true
 
-# [GPT-5.6] The existing default-OFF `datalog` surface includes incremental
+# The existing default-OFF `datalog` surface includes incremental
 # maintenance plus the stratified NAF, comparison, and arithmetic extensions; exercise
 # their feature-gated implementations and tests.
 - name: "sparq-reason (datalog)"

@@ -235,13 +235,13 @@ export default function AssurancePage() {
           <h2 className="text-lg font-semibold">The 5-minute version</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          One check summarizes tree health:{" "}
-          <Code>ci-summary / gate</Code>. It is the single required branch-protection
-          status on <Code>main</Code> — it polls{" "}
-          <strong className="text-foreground">every other check-run on the same commit</strong>{" "}
-          (build + tests, <Code>clippy -D warnings</Code>, the conformance / coverage /
-          unsafe-count ratchets, the opt-in feature matrix, supply-chain and CodeQL, and
-          the docs-honesty gates) and passes only when none failed.
+          One check blocks a merge:{" "}
+          <Code>ci-fast</Code>. It is the single required branch-protection status on{" "}
+          <Code>main</Code> — <Code>clippy -D warnings</Code>, tests on the core crates and
+          the W3C SPARQL conformance ratchet. The{" "}
+          <strong className="text-foreground">heavy suites run nightly against main</strong>{" "}
+          (full workspace build + tests, the conformance / coverage / unsafe-count ratchets,
+          the opt-in feature matrix, fuzzing, formal verification and supply-chain).
         </p>
         <ol className="space-y-3 text-sm text-muted-foreground">
           <li className="flex gap-3">
@@ -251,8 +251,8 @@ export default function AssurancePage() {
             <span>
               Open any merged PR (or the latest commit on <Code>main</Code>) and look at
               its <strong className="text-foreground">checks list</strong> — a green{" "}
-              <Code>ci-summary / gate</Code> means every gating layer below was green on
-              that commit.
+              <Code>ci-fast</Code> means the fast core gate passed; the nightly runs on{" "}
+              <Code>main</Code> cover every other layer below.
             </span>
           </li>
           <li className="flex gap-3">

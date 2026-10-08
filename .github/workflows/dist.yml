@@ -1,7 +1,7 @@
 # Build hardware-tiered sparq-cli binaries on NATIVE runners (the launcher's fat package
 # selects the right tier per host).
 #
-# [OPUS-4.8] sq-v286.2: the per-tier build matrix + build steps + per-tier SLSA attestation
+# sq-v286.2: the per-tier build matrix + build steps + per-tier SLSA attestation
 # are no longer inlined here. They live ONCE in the reusable workflow `build-matrix.yml`,
 # which this workflow invokes with `mode: binary` (bare per-tier binaries uploaded as
 # sparq-cli-<tier>). release.yml calls the same reusable workflow with `mode: archive`.
@@ -20,7 +20,7 @@ name: dist
 on:
   workflow_dispatch:
 
-# [OPUS-4.8] Least-privilege default (Scorecard TokenPermissions). The called workflow's
+# Least-privilege default (Scorecard TokenPermissions). The called workflow's
 # matrix job needs the OIDC + attestation writes for SLSA provenance; the calling job below
 # grants them as the ceiling passed down to build-matrix.yml.
 permissions:
@@ -41,7 +41,7 @@ jobs:
       mode: binary
 
   # ---- ISOLATED trusted-builder SLSA provenance over the tiered binaries ----
-  # [OPUS-5] #4570 (GX-11 residual / SL-B3-b). sq-toze.25 routed only the release ARCHIVES
+  # #4570 (GX-11 residual / SL-B3-b). sq-toze.25 routed only the release ARCHIVES
   # through the isolated trusted builder; the dist binaries the launcher's fat package selects
   # from were left on in-band `actions/attest-build-provenance`, which runs in the SAME job as
   # `cargo auditable build` — the L2 ceiling. This is the same boundary, same shape:

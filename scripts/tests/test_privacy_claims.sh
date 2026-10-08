@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic both-direction self-tests for scripts/check-privacy-claims.sh
-# (bead sq-qhy4 — the ZK-soundness honesty gate). Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns).
+# Hermetic both-direction self-tests for scripts/check-privacy-claims.sh
+# (bead sq-qhy4 — the ZK-soundness honesty gate).
 #
 # WHY: the gate's `sound(ness)?-(verifier|proof)` pattern caught adjacency
 # ("sound verifier") but NOT predicate-form overclaims ("the verifier is SOUND",
@@ -33,7 +32,7 @@ GATE="${ROOT}/scripts/check-privacy-claims.sh"
 # variable-definition block (everything up to the `mapfile` that begins the scan).
 # This keeps the test reading the SAME patterns the gate ships — no duplication.
 #
-# [OPUS-4.8] sq-mraf: the gate now LOADS its forbidden-phrase list from the shared
+# sq-mraf: the gate now LOADS its forbidden-phrase list from the shared
 # scripts/honesty-phrases.json (via the _phrases_field/_phrases_array helpers defined
 # from `PHRASES_JSON=` onward), so we lift the block from that anchor — exercising the
 # real JSON-load path, not a hand-copied list. ROOT is set above; the helpers read the

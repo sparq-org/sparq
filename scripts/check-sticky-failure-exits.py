@@ -14,7 +14,7 @@ positive can be documented with ``sticky-failure-allow: <reason>`` on the handle
 ``except`` line.
 """
 
-# [GPT-5] Issue #3770 — scripts-tree backstop for exit-zero swallowing sticky failures.
+# Issue #3770 — scripts-tree backstop for exit-zero swallowing sticky failures.
 
 from __future__ import annotations
 

@@ -40,6 +40,11 @@ path = "src/bin/scoreboard.rs"
 name = "served-conformance-report"
 path = "src/bin/served-conformance-report.rs"
 
+# Issue #6467: the community notation3tests suite runner (suite fetched at run time).
+[[bin]]
+name = "sparq-notation3tests"
+path = "src/bin/notation3tests.rs"
+
 [features]
 # [OPUS-4.8] sq-oy1f.2 — the W3C JSON-LD 1.1 conformance lane (toRdf + fromRdf
 # ratchets, the crate-local `tests/jsonld_suite.rs` runner). OPT-IN and OFF by
@@ -309,7 +314,7 @@ sparq-reason = { path = "../sparq-reason" }
 # conclusion. OFF by default (optional, behind `rif-wg-core`) so the default harness build
 # links zero substrate code — the lean opt-in posture. `default-features = false` +
 # the `numeric` slice only (no rows/join/compare kernels).
-sparq-substrate = { path = "../sparq-substrate", version = "0.1.3", default-features = false, optional = true }
+sparq-substrate = { path = "../sparq-substrate", version = "0.1.4", default-features = false, optional = true }
 # [OPUS-4.8] sq-kuvu3 — the EXPERIMENTAL OWL 2 QL query-rewriting reasoner, used ONLY
 # by the `ql-experimental` arm to rewrite each QL-tagged entailment test's conjunctive
 # query into a certain-answer UCQ. OFF by default (optional, behind `ql-experimental`)

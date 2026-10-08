@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [SONNET-4.6] Hermetic self-test for scripts/check-release-aliases.sh (sq-vw3ax.11.3 — the
+# Hermetic self-test for scripts/check-release-aliases.sh (sq-vw3ax.11.3 — the
 # fail-closed release alias contract). PR #3528 review: a weak count FLOOR on the extracted
 # alias sets could approve a PARTIALLY extracted contract — a reformat/refactor of
 # download-client.tsx that made the regexes miss some (but not all) site-referenced aliases

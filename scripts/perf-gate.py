@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] HARD regression RATCHET on the DETERMINISTIC (runner-noise-immune) perf metrics; the TIMING
+# HARD regression RATCHET on the DETERMINISTIC (runner-noise-immune) perf metrics; the TIMING
 # (wall-clock) metric is ADVISORY/NON-BLOCKING — measured + reported + tracked, but never merge-blocking.
 #
 # WHY THIS EXISTS  (sq-i1d created the gate; sq-52e turned it into a true ratchet)
@@ -41,7 +41,7 @@
 # noise = the floor only ratchets DOWN on a SUSTAINED improvement (a supplied median/percentile of
 #         recent points is below the floor), so a single noise-low can never tighten it.
 #
-# DETERMINISTIC = HARD-GATED, TIMING = ADVISORY/NON-BLOCKING — the split that drives the exit code  [OPUS-4.8]
+# DETERMINISTIC = HARD-GATED, TIMING = ADVISORY/NON-BLOCKING — the split that drives the exit code  
 # -----------------------------------------------------------------------------------------------------------
 # The classification is DATA-DRIVEN from each metric's `mode` (it is NOT a hard-coded name list):
 #   * DETERMINISTIC (mode == "auto"): integer byte-count / memory-layout metrics. These are immune to
@@ -130,7 +130,7 @@ DEFAULT_METRICS = {
     "parse_ns_per_byte":            {"floor": None, "threshold": 0.12, "mode": "noise"},
 }
 
-# [OPUS-4.8] (sq-dzfu) DATA-DRIVEN metric classification — the single source of truth for the
+# (sq-dzfu) DATA-DRIVEN metric classification — the single source of truth for the
 # DETERMINISTIC-vs-TIMING split. It is derived from each metric's `mode`, NOT a hard-coded name list,
 # so a metric's classification follows its baseline config and never drifts out of sync:
 #   * mode "noise" => TIMING (wall-clock-derived; runner noise only ever INFLATES it). Robust handling:
@@ -218,7 +218,7 @@ def load_current(path, metric_names):
 
 
 def _parse_remeasure_stdout(stdout, metric_names):
-    """[OPUS-4.8] (sq-dzfu) Defensive parse of a re-measure command's stdout into {metric: float}.
+    """(sq-dzfu) Defensive parse of a re-measure command's stdout into {metric: float}.
 
     The expected shape is the github-action-benchmark customSmallerIsBetter JSON: a LIST of
     {name, unit, value} objects. This is hardened against *valid-but-unexpected* JSON so a re-measure
@@ -240,7 +240,7 @@ def _parse_remeasure_stdout(stdout, metric_names):
         except ValueError:
             sys.stderr.write("perf-gate: re-measure output was not valid JSON.\n")
             return {}
-    # [OPUS-4.8] guard: a valid-but-unexpected payload (a dict like `{}`, a scalar, a list of non-dicts,
+    # guard: a valid-but-unexpected payload (a dict like `{}`, a scalar, a list of non-dicts,
     # entries missing `value` or with a non-numeric `value`) must degrade to a safe no-op, never raise.
     if not isinstance(data, list):
         sys.stderr.write(
@@ -270,7 +270,7 @@ def _parse_remeasure_stdout(stdout, metric_names):
 
 
 def make_shell_remeasure(cmd, metric_names):
-    """[OPUS-4.8] (sq-dzfu) Build a remeasure callback that runs `cmd` (a shell command that re-emits the
+    """(sq-dzfu) Build a remeasure callback that runs `cmd` (a shell command that re-emits the
     customSmallerIsBetter JSON to stdout) and parses the metric values back out. Returns a 0-arg fn
     suitable for gate_with_remeasure; on a non-zero exit / unparseable / malformed-but-valid output it
     returns {} or skips the bad entries (treated as 'no improvement', so a broken re-measure can only
@@ -352,7 +352,7 @@ def evaluate(current, baseline, allow=frozenset()):
         if floor < 0:
             lines.append(f"  - {name}: SKIP (negative floor {floor:g})")
             continue
-        # [OPUS-4.8] (sq-tf8n) A floor of EXACTLY 0 is a LEGITIMATE best-ever for a DEFICIT / count
+        # (sq-tf8n) A floor of EXACTLY 0 is a LEGITIMATE best-ever for a DEFICIT / count
         # metric (geo_compliance_deficit = MAX - passed: zero deficit == perfect coverage, the
         # tightest possible ratchet). It must HARD-GATE — any positive value is a regression — not
         # be skipped. We special-case it because floor*(1+thr)=0 (so cur>0 already trips) but the
@@ -394,7 +394,7 @@ def evaluate(current, baseline, allow=frozenset()):
 
 
 def gate_with_remeasure(current, baseline, allow=frozenset(), remeasure_fn=None, k=DEFAULT_REMEASURE_K):
-    """[OPUS-4.8] (sq-dzfu) Best-of-N re-measure wrapper around `evaluate` for TIMING metrics.
+    """(sq-dzfu) Best-of-N re-measure wrapper around `evaluate` for TIMING metrics.
 
     Runs the gate. If the ONLY thing standing between PASS and FAIL is TIMING-metric regression(s) and a
     `remeasure_fn` is supplied, re-measure those timing metrics up to `k` times, keeping the BEST (min —
@@ -637,7 +637,7 @@ def self_test():
     assert evaluate({"parse_ns_per_byte": 5.0}, mk({"parse_ns_per_byte": 0.0}))[0] == []
     assert evaluate({"store_bytes_per_triple": 5.0}, mk({"store_bytes_per_triple": -1.0}))[0] == []
 
-    # 8b) [OPUS-4.8] (sq-tf8n) ZERO-FLOOR DETERMINISTIC HARD GATE — geo_compliance_deficit. A floor of
+    # 8b) (sq-tf8n) ZERO-FLOOR DETERMINISTIC HARD GATE — geo_compliance_deficit. A floor of
     #     EXACTLY 0 is the tightest best-ever for a DEFICIT metric (0 == perfect coverage): it must
     #     HARD-GATE, not be skipped. Any positive value is a regression; exactly 0 passes (at floor).
     baseZ = {"geo_compliance_deficit": {"floor": 0, "threshold": 0.02, "mode": "auto"}}
@@ -728,7 +728,7 @@ def self_test():
     assert [r[0] for r in regsE] == ["parse_ns_per_byte"], regsE
 
     # ============================================================================================
-    # 14) [OPUS-4.8] (sq-dzfu) DEFENSIVE re-measure PARSE — a re-measure command that emits *valid* JSON
+    # 14) (sq-dzfu) DEFENSIVE re-measure PARSE — a re-measure command that emits *valid* JSON
     #     of an UNEXPECTED shape must degrade to a safe no-op, NEVER raise a traceback that crashes the
     #     gate. (Copilot finding on PR #72.) `_parse_remeasure_stdout` is exactly what the shell
     #     re-measure callback uses, so testing it directly covers the production path without subprocess.
@@ -774,7 +774,7 @@ def self_test():
     assert effG["parse_ns_per_byte"] == 4.95, effG       # ...and improved the metric to the true value
 
     # ============================================================================================
-    # 15) [OPUS-4.8] (sq-perf) ADVISORY-DEMOTION EXIT-CODE CONTRACT — the load-bearing fix. The TIMING
+    # 15) (sq-perf) ADVISORY-DEMOTION EXIT-CODE CONTRACT — the load-bearing fix. The TIMING
     #     metric (mode=noise) is NON-BLOCKING: a timing-only regression exits 0 (advisory WARNING), a
     #     DETERMINISTIC regression still exits 2 (hard fail), and a MIXED run exits 2 (deterministic
     #     dominates) while STILL emitting the timing advisory. This exercises main()'s real exit path
@@ -790,7 +790,7 @@ def self_test():
         """Write a baseline + current-results JSON to temp files and run main() (no remeasure).
         Returns (exit_code, captured_stdout).
 
-        [OPUS-4.8] (Copilot #139) HERMETIC: main() reads PERF_GATE_ALLOW from the ambient env, which
+        (Copilot #139) HERMETIC: main() reads PERF_GATE_ALLOW from the ambient env, which
         would let a developer's shell `PERF_GATE_ALLOW=parse_ns_per_byte` mark this case's timing
         regression as an ALLOWED re-floor instead of the advisory WARNING the assertions expect (a
         false pass/fail). We temporarily clear PERF_GATE_ALLOW for the duration of the main() call —
@@ -896,7 +896,7 @@ def do_update(argv):
 
 
 def _split_remeasure_args(argv):
-    """[OPUS-4.8] (sq-dzfu) Pull optional `--remeasure-cmd <shell>` / `--remeasure-k N` out of argv so
+    """(sq-dzfu) Pull optional `--remeasure-cmd <shell>` / `--remeasure-k N` out of argv so
     the positional <current.json> [baseline.json] parsing is unaffected. Returns (cmd, k, rest)."""
     cmd = None
     k = DEFAULT_REMEASURE_K
@@ -940,7 +940,7 @@ def main(argv):
     if allow:
         print(f"perf-gate: PERF_GATE_ALLOW set — these metrics may regress this run (floor re-set): {sorted(allow)}")
 
-    # [OPUS-4.8] (sq-dzfu) Best-of-N re-measure for TIMING metrics: if a timing metric trips the band,
+    # (sq-dzfu) Best-of-N re-measure for TIMING metrics: if a timing metric trips the band,
     # re-run the (cheap) re-measure command up to K times and keep the BEST value — runner noise only
     # ever inflates a wall-clock reading, so a one-off spike is squeezed out while a real regression
     # (slow on every reading) still fails. DETERMINISTIC byte metrics are never re-measured.
@@ -958,7 +958,7 @@ def main(argv):
     for ln in lines:
         print(ln)
 
-    # [OPUS-4.8] (sq-perf) Split the regressions by classification: DETERMINISTIC ones HARD-FAIL the gate
+    # (sq-perf) Split the regressions by classification: DETERMINISTIC ones HARD-FAIL the gate
     # (exit 2); TIMING ones are ADVISORY — reported as a loud WARNING but contributing EXIT 0. The split is
     # the same data-driven `mode` classification used everywhere else (is_timing). A mixed run exits 2 (the
     # deterministic fail dominates) while STILL printing the timing advisory alongside it.

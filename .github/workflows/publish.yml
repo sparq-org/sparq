@@ -7,7 +7,7 @@
 #   - the `sparq-rdf` PyPI wheels (crates/sparq-py, maturin-built) — PEP-740 attestations
 #
 # HONEST SCOPE BOUNDARY (see compliance/slsa/):
-#   * npm     — native provenance via OIDC TRUSTED PUBLISHING. [OPUS-4.8] sq-v286.11: the npm
+#   * npm     — native provenance via OIDC TRUSTED PUBLISHING. sq-v286.11: the npm
 #               job authenticates with the GitHub Actions OIDC token (id-token: write) — NO
 #               long-lived NPM_TOKEN — exchanging it for a short-lived publish credential, and
 #               npm's registry records a Sigstore-signed in-toto SLSA provenance statement bound
@@ -24,7 +24,7 @@
 #               support) — it gives consumers an out-of-band attestation they can `gh attestation
 #               verify` against the downloaded `.crate`. The crates.io-native sub-gap stays OPEN
 #               and is tracked as an EXTERNAL sub-gap of GX-10 / sq-toze.24.
-#   * PyPI    — [OPUS-4.8] sq-toze.37. native PEP-740 attestations. `pypa/gh-action-pypi-publish`
+#   * PyPI    — sq-toze.37. native PEP-740 attestations. `pypa/gh-action-pypi-publish`
 #               runs in this GitHub Actions OIDC context (id-token: write) and — when uploading
 #               via PyPI Trusted Publishing — generates + uploads a PEP-740 digital attestation
 #               (an in-toto/Sigstore-signed statement bound to this workflow run) ALONGSIDE each
@@ -41,12 +41,12 @@
 #
 # TRIGGER: this is a MAINTAINER-DRIVEN publish. `release: published` covers Releases published
 # by a human or external token; GitHub does not emit a new workflow-triggering event when
-# `release.yml` creates its Release with `GITHUB_TOKEN`. [GPT-5.6] The normal release-plz path
+# `release.yml` creates its Release with `GITHUB_TOKEN`. The normal release-plz path
 # therefore uses `workflow_dispatch` after the GitHub Release is green. Dispatch uploads are
 # separately gated by explicit boolean inputs; a tag alone never force-publishes. A Release
 # published directly by a maintainer remains an explicit authorization for the primary npm and
 # PyPI jobs, while the optional npm packages still require their dispatch inputs.
-# [GPT-6] Dispatch at the immutable release tag, never a branch. setup verifies the
+# Dispatch at the immutable release tag, never a branch. setup verifies the
 # tag/checkout identity and the versions of every selected registry package first.
 name: publish
 
@@ -105,7 +105,7 @@ jobs:
         run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --publish
 
   # ---- npm: @sparq-org/sparq via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
-  # [OPUS-4.8] sq-v286.11 (maintainer #758): switched from a long-lived NPM_TOKEN to npm's
+  # sq-v286.11 (maintainer #758): switched from a long-lived NPM_TOKEN to npm's
   # OIDC Trusted Publishing (GA 2025-07-31, github.blog/changelog/2025-07-31). The npm CLI
   # detects the GitHub Actions OIDC environment (granted by `id-token: write` below), exchanges
   # the OIDC token with the registry for a short-lived publish credential, and records the
@@ -147,7 +147,7 @@ jobs:
           # for). Under trusted publishing no NODE_AUTH_TOKEN is read — the npm CLI mints a
           # short-lived credential from the OIDC token at publish time.
           registry-url: "https://registry.npmjs.org"
-      # [OPUS-4.8] sq-v286.11: OIDC trusted publishing requires npm CLI >= 11.5.1. Node 22's
+      # sq-v286.11: OIDC trusted publishing requires npm CLI >= 11.5.1. Node 22's
       # BUNDLED npm can be older (verified locally: Node 20/22 images have shipped npm 10.x),
       # so pin an npm that supports trusted publishing rather than relying on the bundled one.
       # `npm@^11.5.1` is the documented floor (docs.npmjs.com/trusted-publishers).
@@ -155,8 +155,12 @@ jobs:
         run: |
           npm install -g 'npm@^11.5.1'
           npm --version
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776): a
+      # `cargo install` recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       - name: Install npm dependencies
         run: npm ci
       # Publish guardrail (sq-bkag): refuse to publish a binding that would ship without its
@@ -199,7 +203,7 @@ jobs:
           echo "Provenance attestation present. Consumers verify with: npm audit signatures"
 
   # ---- npm: @sparq-org/eyereasoner-compat via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
-  # [FABLE-5] sq-ohnj1 (GH #1499). The eye-js migration package (packages/eyereasoner-compat) —
+  # sq-ohnj1 (GH #1499). The eye-js migration package (packages/eyereasoner-compat) —
   # the eye-js `n3reasoner` API backed by the sparq-reason wasm bundle, which ships INSIDE the
   # tarball (never the site-hosted wasm URL). Same tokenless OIDC trusted-publishing pattern as
   # the @sparq-org/sparq job above: `id-token: write` lets the npm CLI mint a short-lived publish
@@ -251,8 +255,12 @@ jobs:
         run: |
           npm install -g 'npm@^11.5.1'
           npm --version
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776): a
+      # `cargo install` recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       # Build tooling only (typescript, @rdfjs/types). --workspaces=false installs just this
       # package's devDeps without pulling the whole monorepo graph; the package has no lockfile.
       - name: Install build dependencies
@@ -285,7 +293,7 @@ jobs:
           echo "Provenance attestation present. Consumers verify with: npm audit signatures"
 
   # ---- npm: @sparq-org/solid-server via OIDC TRUSTED PUBLISHING (no NPM_TOKEN) ----
-  # [OPUS-4.8] sq-6xasp.11 (epic sq-6xasp). The WebAssembly Solid server package
+  # sq-6xasp.11 (epic sq-6xasp). The WebAssembly Solid server package
   # (packages/solid-server) — a local-dev Solid/LDP pod backed by the sparq-lws wasm handler,
   # which ships INSIDE the tarball (the `files` allowlist packs bin/ + src/ + the built wasm/ +
   # README). Same tokenless OIDC trusted-publishing pattern as the @sparq-org/sparq job above:
@@ -337,8 +345,12 @@ jobs:
         run: |
           npm install -g 'npm@^11.5.1'
           npm --version
+      # Prebuilt, SHA-pinned, exactly-versioned wasm-pack (sq-khm3f, #5776): a
+      # `cargo install` recompiles it from crates.io and flakes on a registry blip.
       - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
+        uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
+        with:
+          version: v0.15.0
       # Build the wasm bundle so the `files` allowlist packs a populated wasm/ tree. This package
       # has NO `prepack`/`build` script (unlike @sparq-org/sparq / eyereasoner-compat), so the wasm is
       # NOT rebuilt automatically on `npm publish` — build it explicitly here, before publish.
@@ -390,7 +402,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -398,19 +410,20 @@ jobs:
         run: |
           rustup default stable
           rustup show active-toolchain
-      # Package every publishable crate (publish = false crates are skipped by the loop).
-      # --no-verify avoids a full from-scratch compile of every crate on the runner; the bytes
-      # are identical to `cargo publish`'s upload (publish runs verify itself). We package each
-      # publishable crate individually so every failure is reported before the job fails closed.
+      # Package the crates.io publish set exactly as `cargo publish` would upload it:
+      # scripts/publish-strip.py first removes the research-only optional feature edges
+      # (and makes the vendored `sparq-spargebra` fork a member, so the set resolves before
+      # anything exists on crates.io); then one `cargo package --workspace` packages every
+      # publishable member in dependency order against a local overlay of the others.
+      # --no-verify skips the rebuild-from-tarball (publish runs verify itself); the bytes are
+      # identical to `cargo publish`'s upload. --allow-dirty because the strip edits manifests.
       - name: Package publishable crates
         run: |
           set -euo pipefail
-          mkdir -p crate-pkgs
-          packaged=0
-          failures=()
+          python3 -m pip install --quiet --require-hashes -r .github/requirements/publish-strip.txt
+          python3 scripts/publish-strip.py --with-vendored
           # Ask Cargo which workspace packages are publishable. In metadata,
-          # `publish = false` is represented as an empty registry list; parsing TOML
-          # with grep would drift on whitespace or alternate valid syntax. [GPT-5.6]
+          # `publish = false` is represented as an empty registry list.
           mapfile -t packages < <(
             cargo metadata --no-deps --format-version 1 |
               jq -r '.packages[] | select(.publish != []) | .name' |
@@ -421,25 +434,13 @@ jobs:
             echo "::error::Cargo metadata reported no publishable crates"
             exit 1
           fi
+          cargo package --workspace --no-verify --allow-dirty
+          mkdir -p crate-pkgs
           for pkg in "${packages[@]}"; do
-            echo "::group::cargo package -p $pkg"
-            # --no-verify: skip the rebuild-from-extracted-tarball check (CI already builds/tests
-            # the workspace); --allow-dirty is unnecessary on a clean checkout. [GPT-5.6]
-            # Continue through the set to expose every bad package, then fail if any is missing.
-            if cargo package -p "$pkg" --no-verify --locked 2>&1; then
-              find target/package -maxdepth 1 -name "${pkg}-*.crate" -exec cp {} crate-pkgs/ \;
-              packaged=$((packaged + 1))
-            else
-              echo "::error::cargo package failed for $pkg"
-              failures+=("$pkg")
-            fi
-            echo "::endgroup::"
+            find target/package -maxdepth 1 -name "${pkg}-[0-9]*.crate" -exec cp {} crate-pkgs/ \;
           done
-          echo "Packaged crates:"; ls -l crate-pkgs/ || true
-          if [ "${#failures[@]}" -ne 0 ]; then
-            echo "::error::${#failures[@]} of ${expected} publishable crates failed to package: ${failures[*]}"
-            exit 1
-          fi
+          echo "Packaged crates:"; ls -l crate-pkgs/
+          packaged=$(find crate-pkgs -name '*.crate' | wc -l)
           if [ "$packaged" -ne "$expected" ]; then
             echo "::error::packaged count ${packaged} does not match expected count ${expected}"
             exit 1
@@ -451,7 +452,7 @@ jobs:
       # Same SHA-pinned attest action + version as release.yml — one signed SLSA provenance
       # predicate per .crate, binding its digest to this workflow run.
       - name: Attest crate-package provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: crate-pkgs/*.crate
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -461,7 +462,7 @@ jobs:
           if-no-files-found: error
 
   # ---- PyPI: build the `sparq-rdf` wheels + publish with native PEP-740 attestations ----
-  # [OPUS-4.8] sq-toze.37 / GX-10. Two-stage: a build matrix produces the abi3 wheels + sdist
+  # sq-toze.37 / GX-10. Two-stage: a build matrix produces the abi3 wheels + sdist
   # with maturin (mirroring the docs/release.md "Python wheels" plan + python.yml's build args),
   # then a single publish job uploads them via PyPI Trusted Publishing. Trusted Publishing runs
   # in this workflow's GitHub OIDC context (id-token: write) so PyPI mints a short-lived token
@@ -492,7 +493,7 @@ jobs:
           - runner: macos-latest
             target: aarch64-apple-darwin
             manylinux: ""
-          # [OPUS-4.8] sq-v286.12: macos-13 was retired by GitHub. macos-15-intel is the
+          # sq-v286.12: macos-13 was retired by GitHub. macos-15-intel is the
           # supported Intel-Mac runner line (matches dist.yml + release.yml), so the
           # x86_64-apple-darwin wheel arch is preserved — NOT macos-14/macos-latest, which
           # are Apple silicon and would clash with the aarch64-apple-darwin line above.
@@ -582,7 +583,7 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
         run: python3 scripts/check-release-source.py --tag "$RELEASE_TAG" --remote-tag origin
       - name: Publish to PyPI with provenance attestations
-        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
           print-hash: true

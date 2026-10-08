@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-0z43i (gh #909): the `stdio` transport is the only feature-gated
+# sq-0z43i (gh #909): the `stdio` transport is the only feature-gated
 # surface — it adds the line-delimited JSON-RPC serve loop. This leg builds + tests
 # the feature-ON state, including tests/stdio.rs (`#![cfg(feature = "stdio")]`: the
 # real serve-loop round-trip), with `clippy --all-targets -D warnings`. The DEFAULT
@@ -28,7 +28,7 @@
   features: "stdio"
   test: true
 
-# [OPUS-4.8] sq-jxjgr (2026-06-23 design call): the opt-in server-side natural-language
+# sq-jxjgr (2026-06-23 design call): the opt-in server-side natural-language
 # `ask` tool wiring sparq-nlq's NL→SPARQL loop behind the `nlq` feature (OFF by default —
 # it pulls sparq-nlq + the configurable LLM backends, so it must not touch the lean
 # default build). This leg builds + tests the feature-ON state — the src/nlq.rs unit
@@ -44,7 +44,7 @@
   features: "nlq"
   test: true
 
-# [FABLE-5] sq-u16eq: the opt-in pod-backed MCP surface — LDP resource/container CRUD
+# sq-u16eq: the opt-in pod-backed MCP surface — LDP resource/container CRUD
 # tools over sparq-solid's `PodStore` per the MCP-Solid proposal draft
 # (site/specs/mcp-solid.typ §6.4/§7.3/§9.3). OFF by default — it pulls in `sparq-solid`
 # + `oxrdf`, so it must not touch the lean default build. This leg builds + tests the
@@ -58,14 +58,14 @@
   features: "solid"
   test: true
 
-# [GPT-5.6] sq-19f1i: compose `solid` with opt-in JSON-LD parsing so the
+# sq-19f1i: compose `solid` with opt-in JSON-LD parsing so the
 # Solid resource PUT path and its media-type mapping execute with JSON-LD enabled.
 - name: "sparq-mcp (solid, jsonld — pod-backed CRUD with JSON-LD ingest)"
   crate: "sparq-mcp"
   features: "solid,jsonld"
   test: true
 
-# [FABLE-5] sq-lsp7k.10: the template + full-text-search tool surfaces. `templates`
+# sq-lsp7k.10: the template + full-text-search tool surfaces. `templates`
 # (template_list / template_invoke over sparq-engine's `templates` module — typed
 # fail-closed JSON binding; UPDATE templates behind the same allow_update gate as the raw
 # update tool) and `text` (text_search over sparq-text's BM25 literal index,
@@ -80,7 +80,7 @@
   features: "templates,text"
   test: true
 
-# [GPT-5.6] sq-lsp7k.22: the opt-in read-only SHACL validation tool. Exercises real
+# sq-lsp7k.22: the opt-in read-only SHACL validation tool. Exercises real
 # JSON-RPC round trips for malformed, non-conforming, and conforming shapes graphs.
 - name: "sparq-mcp (shacl — caller-supplied shapes validation tool)"
   crate: "sparq-mcp"

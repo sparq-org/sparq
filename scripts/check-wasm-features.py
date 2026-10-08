@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-3ul2n.2 — assert a built .wasm artifact carries a required WASM feature.
+# sq-3ul2n.2 — assert a built .wasm artifact carries a required WASM feature.
 #
 # Parses the WebAssembly "target_features" custom section (emitted by LLVM/rustc) and checks
 # that a named feature (e.g. simd128) is present with a "used"/"required" (`+`) prefix. Used by

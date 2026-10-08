@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [SONNET-4.6] sq-hmd7l.9 (epic sq-hmd7l) — same-box OWL 2 QL REWRITING comparison:
+# sq-hmd7l.9 (epic sq-hmd7l) — same-box OWL 2 QL REWRITING comparison:
 # sparq-reason-ql's PerfectRef rewriter vs Ontop (the mainstream OBDA/QL system) on the
 # NPD benchmark + the Requiem test-suite ontologies/queries. Mirrors
 # scripts/bench/reason-el-same-box.sh (the sq-hmd7l.8 gather recipe) and the

@@ -84,7 +84,11 @@ impl Runner {
             Runner::CrateTest { krate, target } => {
                 format!("cargo test -p {krate} --test {target}")
             }
-            Runner::FeatureGatedCrateTest { krate, target, feature } => {
+            Runner::FeatureGatedCrateTest {
+                krate,
+                target,
+                feature,
+            } => {
                 format!("cargo test -p {krate} --features {feature} --test {target}")
             }
         }
@@ -1371,10 +1375,7 @@ pub fn render_scoreboard() -> String {
          consolidated total below counts ONLY the standards-conformance suites; the \
          extension rows are reported separately.\n"
     );
-    let _ = writeln!(
-        md,
-        "| suite | family | floor | basis | CI job | run |"
-    );
+    let _ = writeln!(md, "| suite | family | floor | basis | CI job | run |");
     let _ = writeln!(md, "|---|---|---:|---|---|---|");
     for s in SUITES {
         let _ = writeln!(
@@ -1469,7 +1470,11 @@ pub fn scoreboard_json() -> String {
                 "kind": "crate-test",
                 "target": target,
             }),
-            Runner::FeatureGatedCrateTest { krate, target, feature } => json!({
+            Runner::FeatureGatedCrateTest {
+                krate,
+                target,
+                feature,
+            } => json!({
                 "crate": krate,
                 "feature": feature,
                 "kind": "feature-gated-crate-test",
@@ -1496,11 +1501,17 @@ pub fn scoreboard_json() -> String {
         })
         .collect();
 
-    let conformance_floor_total: usize =
-        SUITES.iter().filter(|s| !is_extension(s)).map(|s| s.ratchet_floor).sum();
+    let conformance_floor_total: usize = SUITES
+        .iter()
+        .filter(|s| !is_extension(s))
+        .map(|s| s.ratchet_floor)
+        .sum();
     let conformance_suites = SUITES.iter().filter(|s| !is_extension(s)).count();
-    let extension_assertion_total: usize =
-        SUITES.iter().filter(|s| is_extension(s)).map(|s| s.ratchet_floor).sum();
+    let extension_assertion_total: usize = SUITES
+        .iter()
+        .filter(|s| is_extension(s))
+        .map(|s| s.ratchet_floor)
+        .sum();
     let extension_suites = SUITES.iter().filter(|s| is_extension(s)).count();
 
     let doc = json!({
@@ -1563,7 +1574,9 @@ mod tests {
                 s.ratchet_floor
             );
             assert_eq!(
-                row["is_extension"].as_bool().expect("is_extension is a bool"),
+                row["is_extension"]
+                    .as_bool()
+                    .expect("is_extension is a bool"),
                 s.family == "sparq extension"
             );
         }
@@ -1581,8 +1594,14 @@ mod tests {
             .map(|s| s.ratchet_floor)
             .sum();
         let totals = &doc["totals"];
-        assert_eq!(totals["conformance_floor_total"].as_u64().unwrap() as usize, conf);
-        assert_eq!(totals["extension_assertion_total"].as_u64().unwrap() as usize, ext);
+        assert_eq!(
+            totals["conformance_floor_total"].as_u64().unwrap() as usize,
+            conf
+        );
+        assert_eq!(
+            totals["extension_assertion_total"].as_u64().unwrap() as usize,
+            ext
+        );
         assert_eq!(
             totals["conformance_suites"].as_u64().unwrap() as usize
                 + totals["extension_suites"].as_u64().unwrap() as usize,

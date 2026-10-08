@@ -80,10 +80,7 @@ mod gated {
     #[test]
     fn service_evaluation_ratchet() {
         let root = rdf_tests_root();
-        if !root
-            .join("sparql/sparql11/service/manifest.ttl")
-            .exists()
-        {
+        if !root.join("sparql/sparql11/service/manifest.ttl").exists() {
             eprintln!(
                 "SKIP: rdf-tests `sparql11/service` not present under {} — run \
                  scripts/fetch-conformance.sh",

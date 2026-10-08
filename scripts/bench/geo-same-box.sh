@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.3 — same-box GeoSPARQL comparison harness: sparq-geo vs
+# sq-hmd7l.3 — same-box GeoSPARQL comparison harness: sparq-geo vs
 # jena-fuseki-geosparql (the registered like-for-like compliance peer: the only
 # triplestore with full GML+WKT, per bench/competitors.json `geosparql-jena`).
 # Built on the scripts/bench/shacl-same-box.sh template; emits one
@@ -26,7 +26,7 @@
 # is out of scope here; Jena is the like-for-like COVERAGE bar per the registry).
 #
 # METHODOLOGY / INVARIANT (counts-not-coordinates except nearest entity IDs):
-# [SONNET-4.6] sq-6jl8z
+# sq-6jl8z
 #   * sparq is timed IN-PROCESS via bench/geo/run.sh (examples/bench_geo: load +
 #     index once, best-of-N per workload), which HARD-asserts every count vs
 #     bench/geo/expected.tsv — the sparq-side oracle.
@@ -52,7 +52,7 @@
 #     script still exits 0 (a skip is a missing column + a re-run action, never
 #     a sparq win — design record §4 point 6).
 #
-# GEOGRAPHICA (opt-in second workload family, GEO_GEOGRAPHICA=1) [FABLE-5]
+# GEOGRAPHICA (opt-in second workload family, GEO_GEOGRAPHICA=1)
 # (sq-hmd7l.29): the reviewer-recognized real-world suite — the LGD/GeoNames
 # slices of Geographica (ISWC 2013) fetched+pinned+normalised by
 # bench/geo/geographica.sh (gather-only, /tmp), replayed from the pinned
@@ -120,11 +120,11 @@ BENCH_GEO="${BENCH_GEO:-$ROOT/target/release/examples/bench_geo}"
 ADAPTER="$ROOT/scripts/bench-adapters/http_sparql_adapter.py"
 QUERIES="$ROOT/bench/geo/queries-jena"
 # The fixed-corpus workloads plus a Jena-only indexed rendering whose oracle is
-# sparq's unchanged within10km row. [SONNET-4.6] (sq-enfy3)
+# sparq's unchanged within10km row. (sq-enfy3)
 BASE_WORKLOADS="within10km within50km nearest_k10 nearest_k100 geof_within"
 INDEX_WORKLOADS="within10km_indexed"
 WORKLOADS="$BASE_WORKLOADS $INDEX_WORKLOADS"
-# ---- the Geographica real-world family (OPT-IN) [FABLE-5] sq-hmd7l.29 ----
+# ---- the Geographica real-world family (OPT-IN) sq-hmd7l.29 ----
 GEO_GEOGRAPHICA="${GEO_GEOGRAPHICA:-0}"
 GG_TIMEOUT_S="${GG_TIMEOUT_S:-$TIMEOUT_S}"
 GG_FUSEKI_PORT="${GG_FUSEKI_PORT:-$((FUSEKI_PORT + 1))}"
@@ -141,7 +141,7 @@ q16_disjoint_geonames_poly q17_disjoint_lgd_poly q19_join_intersects_geonames_lg
 log() { printf '[geo-same-box] %s\n' "$*" >&2; }
 want() { [[ " $ONLY " == *" $1 "* ]]; }
 
-# Shared by the base and Geographica families [FABLE-5] (sq-hmd7l.29): resolve
+# Shared by the base and Geographica families (sq-hmd7l.29): resolve
 # java + the executable uber-jar. Prints a "skipped: ..." reason on stdout and
 # returns 1 when the engine cannot run (the graceful-skip contract).
 ensure_jena_jar() {
@@ -196,7 +196,7 @@ start_fuseki() { # <corpus.nt> <port> <logfile> [readiness-ask]
 
 # Poll an indexed property-function ASK after the server itself is ready.
 # Adapter stderr is retained so a permanent HTTP/query error is diagnosable.
-# [SONNET-4.6] sq-enfy3
+# sq-enfy3
 wait_index_probe() { # <port> <readiness-ask> <adapter-stderr>
   local t0 deadline ready
   t0="$(date +%s)"
@@ -375,7 +375,7 @@ PYEOF
       done
       # The fixed corpus deliberately remains unchanged. Restart Jena over the
       # feature-modelled variant so spatial:withinCircle exercises its spatial
-      # index, then append the Jena-only result to the same TSV. [SONNET-4.6]
+      # index, then append the Jena-only result to the same TSV.
       stop_fuseki
       INDEX_PORT="$INDEX_FUSEKI_PORT"
       INDEX_ENDPOINT="http://127.0.0.1:$INDEX_PORT/ds"
@@ -675,7 +675,7 @@ PYEOF
 log "envelope: $OUT"
 
 # ---- 4. Geographica real-world family (OPT-IN: GEO_GEOGRAPHICA=1) --------------
-# [FABLE-5] sq-hmd7l.29 — the LGD/GeoNames slices of the Geographica suite,
+# sq-hmd7l.29 — the LGD/GeoNames slices of the Geographica suite,
 # replayed from the pinned translations in bench/geo/queries-geographica/ under
 # the SAME counts-before-timing invariant, into a SECOND envelope. All failure
 # modes degrade gracefully (a skip/ERROR is a recorded result, never an abort):

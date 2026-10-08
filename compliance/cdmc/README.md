@@ -42,7 +42,7 @@ governed outcome. Inflating a score by crediting sparq for an operator decision 
 | Component | Maturity | Verdict |
 |---|---|---|
 | 1 Governance & Accountability | ~2.7 | Engine governance strong; data-ownership is operator-accountable. |
-| 2 Cataloguing & Classification | ~3.5 | VoID/SD catalogue + SHACL classification hooks are real; catalogue (2.1) is now **CI-gated** (`feature-matrix.yml` builds+tests+clippies `federation-descriptors`, #244 / bead `sq-kzfi`) → level 4, lifting the component to 3.5. |
+| 2 Cataloguing & Classification | ~3.0 | VoID/SD catalogue + SHACL classification hooks are real; catalogue (2.1) is regression-tested **nightly** (`feature-matrix.yml`, #244 / bead `sq-kzfi`) but no longer merge-gated → level 3. |
 | 3 Accessibility & Usage | ~2.5 | Access control real (WAC/ACP + token); access audit + ODRL are gaps. |
 | 4 Protection & Privacy | ~2.7 | Security **excellent (4)**; privacy/crypto deliberately **low (2)** — ZK/MPC remediated but NOT externally audited (no production guarantee). |
 | 5 Data Lifecycle | ~3.0 | Solid lifecycle mechanism (UPDATE/WAL/retention); policy operator-owned. |

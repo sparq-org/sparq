@@ -50,7 +50,14 @@ pub fn parse_file_quads(path: &Path) -> Result<Vec<Quad>, String> {
     if !matches!(ext, "trig" | "nq") {
         return Ok(parse_file(path)?
             .into_iter()
-            .map(|t| Quad::new(t.subject, t.predicate, t.object, oxrdf::GraphName::DefaultGraph))
+            .map(|t| {
+                Quad::new(
+                    t.subject,
+                    t.predicate,
+                    t.object,
+                    oxrdf::GraphName::DefaultGraph,
+                )
+            })
             .collect());
     }
     let text = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;

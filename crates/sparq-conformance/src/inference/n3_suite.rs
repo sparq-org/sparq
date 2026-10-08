@@ -141,10 +141,11 @@ fn run_manifest(
             name
         };
         let file = |pred: &str| {
-            g.object(&node, &format!("{MF}{pred}")).and_then(|t| match t {
-                oxrdf::Term::NamedNode(n) => iri_to_path(n.as_str()),
-                _ => None,
-            })
+            g.object(&node, &format!("{MF}{pred}"))
+                .and_then(|t| match t {
+                    oxrdf::Term::NamedNode(n) => iri_to_path(n.as_str()),
+                    _ => None,
+                })
         };
         let Some(action) = file("action") else {
             continue; // subjects without mf:action are manifest scaffolding
@@ -152,7 +153,9 @@ fn run_manifest(
         let result = file("result");
         let rejected = g
             .object(&node, "http://www.w3.org/ns/rdftest#approval")
-            .is_some_and(|t| matches!(t, oxrdf::Term::NamedNode(n) if n.as_str().ends_with("Rejected")));
+            .is_some_and(
+                |t| matches!(t, oxrdf::Term::NamedNode(n) if n.as_str().ends_with("Rejected")),
+            );
         let mut outcome = if rejected {
             // rdft:Rejected — upstream explicitly rejected the entry from the
             // suite (e.g. biR's bare '+' list element: "not allowed in
@@ -160,17 +163,17 @@ fn run_manifest(
             Outcome::OutOfScope("rdft:Rejected upstream".into())
         } else {
             match kind {
-            "TestN3PositiveSyntax" => syntax_test(&action, tests_root, true, false),
-            "TurtlePositiveSyntax" => syntax_test(&action, tests_root, true, true),
-            "TestN3NegativeSyntax" => syntax_test(&action, tests_root, false, false),
-            "TurtleNegativeSyntax" => syntax_test(&action, tests_root, false, true),
-            "TestN3Eval" => eval_test_n3(&action, result.as_deref(), tests_root),
-            "TurtleEval" => eval_test_turtle(&action, result.as_deref(), tests_root, true),
-            "TurtleNegativeEval" => {
-                eval_test_turtle(&action, result.as_deref(), tests_root, false)
-            }
-            "TestN3Reason" => reason_test(&g, &node, &action, result.as_deref(), tests_root),
-            other => Outcome::OutOfScope(format!("unhandled test type {other}")),
+                "TestN3PositiveSyntax" => syntax_test(&action, tests_root, true, false),
+                "TurtlePositiveSyntax" => syntax_test(&action, tests_root, true, true),
+                "TestN3NegativeSyntax" => syntax_test(&action, tests_root, false, false),
+                "TurtleNegativeSyntax" => syntax_test(&action, tests_root, false, true),
+                "TestN3Eval" => eval_test_n3(&action, result.as_deref(), tests_root),
+                "TurtleEval" => eval_test_turtle(&action, result.as_deref(), tests_root, true),
+                "TurtleNegativeEval" => {
+                    eval_test_turtle(&action, result.as_deref(), tests_root, false)
+                }
+                "TestN3Reason" => reason_test(&g, &node, &action, result.as_deref(), tests_root),
+                other => Outcome::OutOfScope(format!("unhandled test type {other}")),
             }
         };
         if let Outcome::Fail(e) = &outcome {
@@ -265,10 +268,18 @@ fn statements(p: &Parsed) -> Vec<[NTerm; 3]> {
     };
     let mut stmts = p.facts.clone();
     for r in &p.rules {
-        stmts.push([quote(&r.premise), NTerm::Iri(LOG_IMPLIES.into()), quote(&r.conclusion)]);
+        stmts.push([
+            quote(&r.premise),
+            NTerm::Iri(LOG_IMPLIES.into()),
+            quote(&r.conclusion),
+        ]);
     }
     for r in &p.backward_rules {
-        stmts.push([quote(&r.conclusion), NTerm::Iri(LOG_IMPLIED_BY.into()), quote(&r.premise)]);
+        stmts.push([
+            quote(&r.conclusion),
+            NTerm::Iri(LOG_IMPLIED_BY.into()),
+            quote(&r.premise),
+        ]);
     }
     stmts
 }
@@ -316,18 +327,17 @@ fn eval_test_turtle(
         Ok(s) => s,
         Err(o) => return o,
     };
-    let parsed =
-        match parse_with_watchdog_mode(src, canonical_iri(tests_root, action), true) {
-            Ok(Ok(p)) => p,
-            Ok(Err(e)) => {
-                return if positive {
-                    Outcome::Fail(format!("action parse error: {e}"))
-                } else {
-                    Outcome::Pass // rejecting the document certainly avoids the wrong graph
-                };
-            }
-            Err(e) => return Outcome::Fail(e),
-        };
+    let parsed = match parse_with_watchdog_mode(src, canonical_iri(tests_root, action), true) {
+        Ok(Ok(p)) => p,
+        Ok(Err(e)) => {
+            return if positive {
+                Outcome::Fail(format!("action parse error: {e}"))
+            } else {
+                Outcome::Pass // rejecting the document certainly avoids the wrong graph
+            };
+        }
+        Err(e) => return Outcome::Fail(e),
+    };
     let Some(result) = result else {
         // A NegativeEval without mf:result: the document must not evaluate —
         // accepting it (we parsed fine and there is nothing to compare
@@ -767,14 +777,16 @@ fn term_iso(a: &NTerm, b: &NTerm, bij: &mut Bij, steps: &mut usize) -> bool {
         // Quoted `<< s p o >>` triple terms: transparent structure, component
         // by component (so a blank inside one still joins the bijection —
         // GH #2012). [FABLE-5]
-        (NTerm::Triple(x), NTerm::Triple(y)) => {
-            x.iter().zip(y.iter()).all(|(p, q)| term_iso(p, q, bij, steps))
-        }
+        (NTerm::Triple(x), NTerm::Triple(y)) => x
+            .iter()
+            .zip(y.iter())
+            .all(|(p, q)| term_iso(p, q, bij, steps)),
         // Same-datatype numeric literals compare by VALUE (cwm's serializer
         // and the engine may format the same number differently: 0.0e0 = 0e0,
         // 4.0 = 4.00).
         (NTerm::Lit(x, dtx, None), NTerm::Lit(y, dty, None)) if dtx == dty => {
-            x == y || (is_numeric_dt(dtx) && num_lex(x).zip(num_lex(y)).is_some_and(|(a, b)| a == b))
+            x == y
+                || (is_numeric_dt(dtx) && num_lex(x).zip(num_lex(y)).is_some_and(|(a, b)| a == b))
         }
         _ => a == b,
     }

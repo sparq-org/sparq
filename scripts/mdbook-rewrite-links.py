@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] mdBook link-rewriting preprocessor (bead sq-g4h0c).
+# mdBook link-rewriting preprocessor (bead sq-g4h0c).
 #
 # WHY THIS EXISTS — the relative-vs-portable link conflict
 # --------------------------------------------------------

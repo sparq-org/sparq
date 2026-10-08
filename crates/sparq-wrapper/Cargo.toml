@@ -1,5 +1,9 @@
 [package]
 name = "sparq-wrapper"
+# Not in the crates.io publish set (release-plz.toml). Published crates reach this crate only
+# through optional features, which scripts/publish-strip.py removes from their packaged
+# manifests; see docs/release.md "crates.io publish set".
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,10 +22,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 # [GPT-5.6] sq-1rg2q: proposed rdfjs/wrapper parity remains explicitly opt-in.
 default = []
-# [SONNET-4.6] sq-1rg2q.1: reserved, empty until the async events proposal lands.
-proposed-async-events = []
-# [SONNET-4.6] sq-1rg2q.1: reserved, empty until the async node proposal lands.
-proposed-async-node = []
+# sq-1rg2q.10: awaited effective-change listeners (rdfjs/wrapper #99).
+proposed-async-events = ["proposed-async-store", "proposed-observe"]
+# sq-1rg2q.9: async mapped cardinality reads + live sets (rdfjs/wrapper #98).
+proposed-async-node = ["proposed-async-store", "proposed-cardinality"]
 # [SONNET-4.6] sq-1rg2q.8: streaming async store wrapper (rdfjs/wrapper #10, #97).
 proposed-async-store = []
 proposed-cardinality = []
@@ -29,8 +33,8 @@ proposed-codecs = []
 proposed-distinct = []
 # [GPT-5.6] sq-1rg2q.6: read-many/write-one named-graph views (rdfjs/wrapper #95).
 proposed-graph-scope = []
-# [SONNET-4.6] sq-1rg2q.1: reserved, empty until the graph-scope events proposal lands.
-proposed-graph-scope-events = []
+# sq-1rg2q.7: projected union-boundary change events (rdfjs/wrapper #96).
+proposed-graph-scope-events = ["proposed-graph-scope", "proposed-observe"]
 # [SONNET-4.6] sq-1rg2q.11: cycle-safe JSON projection (rdfjs/wrapper #23).
 proposed-json = []
 proposed-observe = []
@@ -38,5 +42,5 @@ proposed-observe = []
 proposed-typed-focus = []
 
 [dependencies]
-sparq-core = { path = "../sparq-core", version = "0.1.3", default-features = false }
+sparq-core = { path = "../sparq-core", version = "0.1.4", default-features = false }
 oxrdf.workspace = true

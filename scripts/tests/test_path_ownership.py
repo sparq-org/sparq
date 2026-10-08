@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Hermetic unit tests for the ci/path-ownership.toml map + the
-# out-of-crate-input audit (bead sq-fmx4u.2, epic sq-fmx4u). Authored by Opus
-# 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Hermetic unit tests for the ci/path-ownership.toml map + the
+# out-of-crate-input audit (bead sq-fmx4u.2, epic sq-fmx4u).
 #
 # Covers the design §4 acceptance criteria:
 #   * map-validity: every `crates` name is a live member, every pattern root
@@ -273,7 +272,7 @@ class AuditUnitTests(unittest.TestCase):
         self.assertEqual(r.acknowledged, [("crate-a", "crates/c/data/x")])
 
     def test_shipped_residual_list_is_empty(self):
-        # [SONNET-4.6] sq-z1xv8 — residual 3 (sparq-conformance's scoreboard_floors.rs
+        # sq-z1xv8 — residual 3 (sparq-conformance's scoreboard_floors.rs
         # reading sibling test sources at a runtime-built workspace path) was the last
         # acknowledged residual; the shared sparq-conformance-floors crate relocated the
         # input so the read is gone. Nothing is acknowledged any more, and this pins that
@@ -305,7 +304,7 @@ class AuditUnitTests(unittest.TestCase):
         self.assertTrue(any("NOT to 'crate-a'" in f for f in r.findings))
 
     def test_sibling_read_covered_by_additional_readers(self):
-        # [FABLE-5] sq-m4bxc: crate-a reads a file inside crate-c and is NOT in
+        # sq-m4bxc: crate-a reads a file inside crate-c and is NOT in
         # closure(c) — normally a finding — but a `readers` map entry declaring
         # crate-a covers it (the selector unions crate-a into the affected set).
         entries = [{"pattern": "crates/c/**", "readers": ["crate-a"]}]
@@ -322,13 +321,13 @@ class AuditUnitTests(unittest.TestCase):
 
 
 class AdditionalReadersMapTests(unittest.TestCase):
-    """[FABLE-5] sq-m4bxc: the shipped map's `readers` entries validate + resolve.
+    """sq-m4bxc: the shipped map's `readers` entries validate + resolve.
 
     The residual sibling-read (sparq-reason -> sparq-solid/rules) is closed by an
     additional-readers entry; assert it is present, valid, and MONOTONE (never a
     trigger-shadow, never an ownership verdict).
 
-    [OPUS-5] sq-3705: the secprop-vocabulary readers entries are GONE, and their
+    sq-3705: the secprop-vocabulary readers entries are GONE, and their
     absence is asserted below. They patched a real residual — sparq-zk and
     sparq-policy `include_str!`d sparq-trust's `secprop-ext.ttl` across package
     boundaries because a sparq-zk -> sparq-trust edge would be a cycle — but the
@@ -347,7 +346,7 @@ class AdditionalReadersMapTests(unittest.TestCase):
         )
 
     def test_secprop_readers_entries_are_retired(self):
-        # [OPUS-5] sq-3705. A `readers` entry for either path would mean a
+        # sq-3705. A `readers` entry for either path would mean a
         # cross-package `include_str!` of the secprop vocabulary / annotation
         # graph came back — the thing #3705 deleted (it also broke `cargo package`
         # file inclusion for sparq-zk). Real cargo edges attribute these now.

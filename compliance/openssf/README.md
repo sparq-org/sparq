@@ -31,7 +31,7 @@ Every row in [`controls.md`](./controls/openssf.md) is labelled one of:
   plan and the tracking `bd` bead (epic `sq-toze`).
 
 We do **not** re-claim the strong base posture as new work — Scorecard itself
-(`scorecard.yml`), SHA-pinned actions, the `ci-summary` branch-protection gate, CodeQL
+(`scorecard.yml`), SHA-pinned actions, the `ci-fast` required branch-protection check (core crates), CodeQL
 SAST, cargo-fuzz, cargo-deny, the CycloneDX SBOM, the SLSA build-provenance attestation,
 `SECURITY.md`, and `.well-known/security.txt` already exist. They are cited as **evidence**,
 not presented as additions.

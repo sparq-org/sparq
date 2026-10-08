@@ -80,10 +80,9 @@ CI wiring — `.github/workflows/ci.yml`, job `unsafe-register:`:
       - name: Ratchet first-party unsafe count against the snapshot
         run: python3 scripts/unsafe-gate.py --check
 ```
-No `continue-on-error`; the job name contains no "informational"/"advisory" token, so the
-`ci-summary / gate` aggregator (which polls sibling check-runs and treats any
-non-informational lane as required) blocks merge on a ratchet regression. A PR adding an
-`unsafe` site fails until: (1) a register row is added, (2) a `// SAFETY:` comment is
+No `continue-on-error`, so a ratchet regression reds the run. `ci.yml` now runs nightly +
+`workflow_dispatch` only and the `ci-summary` aggregator is deleted, so this is post-merge
+detection, not a merge block. An added `unsafe` site stays red until: (1) a register row is added, (2) a `// SAFETY:` comment is
 added in source, (3) `scripts/unsafe-gate.py --seed` re-seeds `bench/unsafe-snapshot.json`
 — all three land in the same reviewable diff.
 
