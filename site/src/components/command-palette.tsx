@@ -218,7 +218,7 @@ function PaletteItem({
     <Command.Item
       // cmdk fuzzy-scores the `value`. We keep the human title as the leading token (so the
       // scorer still matches on it) and append an invisible disambiguator for uniqueness.
-      value={valueKey ? `${title} ${valueKey}` : title}
+      value={valueKey ? `${title}\u0000${valueKey}` : title}
       keywords={keywords}
       disabled={disabled}
       onSelect={onSelect}
