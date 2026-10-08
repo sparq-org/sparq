@@ -1727,7 +1727,9 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
   adjacency is not exposed, so the HNSW graph cannot be walked with predicate-aware acceptance);
   use `DiskAnnIndex` for filtered traversal over a broad mask. Lean feature: no new dependency, no
   engine pull. NON-CANONICAL timing.
-- **Little-endian only.** `.spqv`/`.spqg` reject big-endian targets at create/open.
+- **Canonical little-endian files.** `.spqv` readers support big-endian hosts by validating the
+  complete LE container and swapping only its dense f32 region into aligned owned storage; `.spqv`
+  writers remain little-endian-host only. `.spqg` still rejects big-endian hosts at create/open.
 - **Determinism:** ties break on ascending id (searchers) or first appearance (fusion);
   HNSW/Vamana/PQ seeds are fixed by default so builds are reproducible.
 

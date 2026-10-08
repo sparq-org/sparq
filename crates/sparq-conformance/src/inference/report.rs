@@ -103,10 +103,16 @@ pub fn render(sections: &[Section], roots: &[(&str, &Path)]) -> String {
         let mut by_suite: BTreeMap<&str, Counts> = BTreeMap::new();
         let mut total = Counts::default();
         for r in &sec.results {
-            by_suite.entry(r.suite.as_str()).or_default().add(&r.outcome);
+            by_suite
+                .entry(r.suite.as_str())
+                .or_default()
+                .add(&r.outcome);
             total.add(&r.outcome);
         }
-        let _ = writeln!(md, "| suite | pass | fail | divergence | out-of-scope | pass-rate (of run) |");
+        let _ = writeln!(
+            md,
+            "| suite | pass | fail | divergence | out-of-scope | pass-rate (of run) |"
+        );
         let _ = writeln!(md, "|---|---:|---:|---:|---:|---:|");
         for (suite, c) in &by_suite {
             let _ = writeln!(
@@ -186,7 +192,11 @@ pub fn render(sections: &[Section], roots: &[(&str, &Path)]) -> String {
             .filter(|r| matches!(r.outcome, Outcome::Fail(_)))
             .collect();
         if !fails.is_empty() {
-            let _ = writeln!(md, "<details><summary>All failures ({})</summary>\n", fails.len());
+            let _ = writeln!(
+                md,
+                "<details><summary>All failures ({})</summary>\n",
+                fails.len()
+            );
             for r in fails {
                 if let Outcome::Fail(reason) = &r.outcome {
                     let _ = writeln!(md, "- `{}` — **{}**: {reason}", r.suite, r.name);

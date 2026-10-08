@@ -175,6 +175,13 @@
    "owner_bead": "sq-ymr2e.11",
    "promotion_criteria": "never promotable; nightly workflows never gate the merge queue by design (sq-ymr2e.11)",
    "registered": "2026-07-06"
+  },
+  "notation3tests (advisory)": {
+   "workflow": "notation3tests.yml",
+   "job_id": "notation3tests",
+   "owner_bead": "sparq-org/sparq#6467",
+   "promotion_criteria": "Promote (delete this entry) only after (1) NOTATION3TESTS_REF is pinned to a commit SHA, (2) a measured baseline pass count exists from a run at that SHA, and (3) the run step passes --min-pass <baseline> so a regression fails. Until then it measures an EXTERNALLY hosted suite (codeberg.org) whose availability must not gate merges.",
+   "registered": "2026-10-05"
   }
  }
 }

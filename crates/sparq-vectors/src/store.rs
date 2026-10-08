@@ -88,6 +88,11 @@
 //! memory is O(1) (finalize transiently holds the 8-byte-per-vector index to sort it —
 //! a `dim × 4 / 8` reduction, e.g. 192× for 384-d f32). Both writers produce
 //! byte-identical version-1 files.
+//!
+//! `.spqv` bytes are always little-endian. Readers on big-endian hosts validate the complete
+//! little-endian document first, then copy it into aligned owned storage and byte-swap only the
+//! dense f32 data region for native reads. Headers, provenance, metadata, and the trailing index
+//! remain in their canonical little-endian representation. Writers still reject big-endian hosts.
 
 use crate::fingerprint::{self, Fingerprint, FINGERPRINT_LEN};
 use crate::spqv_provenance::EmbeddingProvenance;
@@ -134,8 +139,70 @@ pub(crate) struct AlignedBytes {
     len: usize,
 }
 
+#[cfg(test)]
+mod big_endian_read_tests {
+    use super::{Backing, VectorStore, HEADER_LEN};
+
+    fn opposite_native(value: f32) -> [u8; 4] {
+        let mut bytes = value.to_ne_bytes();
+        bytes.reverse();
+        bytes
+    }
+
+    // (sq-i7w) Mutation witness: the fixture's dense words deliberately use the byte
+    // order opposite to this test host, while every structural field stays canonical LE. Removing
+    // or breaking the forced production swap makes both `get` and `iter` return the wrong floats.
+    #[test]
+    fn forced_big_endian_read_swaps_only_dense_f32_words() {
+        let mut fixture = Vec::new();
+        fixture.extend_from_slice(b"SPQV");
+        fixture.extend_from_slice(&2u32.to_le_bytes());
+        fixture.extend_from_slice(&2u32.to_le_bytes());
+        fixture.extend_from_slice(&2u64.to_le_bytes());
+        fixture.extend_from_slice(&[0; 12]);
+        fixture.extend_from_slice(&[0; 24]);
+        for value in [1.25f32, -2.5, 3.75, 0.125] {
+            fixture.extend_from_slice(&opposite_native(value));
+        }
+        // The index remains LE and sorted by id; insertion slot order is 42, then 7.
+        fixture.extend_from_slice(&7u32.to_le_bytes());
+        fixture.extend_from_slice(&1u32.to_le_bytes());
+        fixture.extend_from_slice(&42u32.to_le_bytes());
+        fixture.extend_from_slice(&0u32.to_le_bytes());
+
+        let data_end = HEADER_LEN + 4 * 4;
+        assert_ne!(
+            f32::from_ne_bytes(fixture[HEADER_LEN..HEADER_LEN + 4].try_into().unwrap()),
+            1.25,
+            "fixture must require a byte swap on the current host"
+        );
+        let header = fixture[..HEADER_LEN].to_vec();
+        let index = fixture[data_end..].to_vec();
+
+        let store = VectorStore::open_from_bytes_force_swap(fixture).unwrap();
+        assert_eq!(store.get(42), Some(&[1.25f32, -2.5][..]));
+        assert_eq!(store.get(7), Some(&[3.75f32, 0.125][..]));
+        assert_eq!(store.get(8), None);
+        let pairs: Vec<(u32, Vec<f32>)> = store
+            .iter()
+            .map(|(id, vector)| (id, vector.to_vec()))
+            .collect();
+        assert_eq!(pairs, [(42, vec![1.25, -2.5]), (7, vec![3.75, 0.125])]);
+
+        let Backing::Map(backing) = &store.backing else {
+            panic!("an opened store must use a read backing");
+        };
+        assert_eq!(&backing[..HEADER_LEN], header);
+        assert_eq!(&backing[data_end..], index);
+    }
+}
+
 impl AlignedBytes {
     fn from_vec(bytes: Vec<u8>) -> AlignedBytes {
+        AlignedBytes::from_slice(&bytes)
+    }
+
+    fn from_slice(bytes: &[u8]) -> AlignedBytes {
         let len = bytes.len();
         // ceil(len / 4) words; the final word is zero-padded.
         let words = vec![0u32; len.div_ceil(4)];
@@ -144,7 +211,7 @@ impl AlignedBytes {
         // (≥ align(u8)); the destination region is exclusively owned here.
         let dst =
             unsafe { std::slice::from_raw_parts_mut(ab.words.as_mut_ptr() as *mut u8, len) };
-        dst.copy_from_slice(&bytes);
+        dst.copy_from_slice(bytes);
         ab
     }
 
@@ -152,6 +219,17 @@ impl AlignedBytes {
         // SAFETY: `words` is u32-aligned and holds ≥ `len` initialized bytes (the copy above);
         // f32/u8 reads of this region are in bounds. The base is 4-byte aligned by construction.
         unsafe { std::slice::from_raw_parts(self.words.as_ptr() as *const u8, self.len) }
+    }
+
+    /// Reverses each complete 4-byte word in `start..end`. Both offsets are word-aligned; callers
+    /// use this only for a fully validated dense f32 region.
+    fn swap_words(&mut self, start: usize, end: usize) {
+        debug_assert_eq!(start % 4, 0);
+        debug_assert_eq!(end % 4, 0);
+        debug_assert!(end <= self.len);
+        for word in &mut self.words[start / 4..end / 4] {
+            *word = word.swap_bytes();
+        }
     }
 }
 
@@ -174,6 +252,18 @@ impl Bytes {
     /// entry points here and in [`crate::diskann`]. [FABLE-5]
     pub(crate) fn owned(bytes: Vec<u8>) -> Bytes {
         Bytes::Owned(AlignedBytes::from_vec(bytes))
+    }
+
+    /// Converts this backing to aligned owned bytes and swaps only the dense f32 word range.
+    /// The caller must first validate the entire container, including its trailing index.
+    fn into_owned_swapped(self, start: usize, end: usize) -> Bytes {
+        let mut owned = match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Bytes::Map(map) => AlignedBytes::from_slice(&map),
+            Bytes::Owned(owned) => owned,
+        };
+        owned.swap_words(start, end);
+        Bytes::Owned(owned)
     }
 }
 
@@ -332,10 +422,10 @@ impl VectorStore {
         self
     }
 
-    /// Memory-maps an existing `.spqv` file read-only. Cheap: only the header and the trailing
-    /// `count·8`-byte id→slot index are read eagerly (the index is validated so no later read can
-    /// panic on a corrupt file); the vector data — the overwhelming bulk of the file — is paged in
-    /// by the OS on access.
+    /// Opens an existing `.spqv` file read-only. On little-endian native hosts this is cheap: only
+    /// the header and trailing `count·8`-byte id→slot index are read eagerly (the index is validated
+    /// so no later read can panic on a corrupt file); the vector data — the overwhelming bulk of the
+    /// file — stays memory-mapped and is paged in by the OS on access.
     ///
     /// [OPUS-4.8] (sq-32i5) Back-compat: a current (version-2) file's graph fingerprint is read into
     /// [`fingerprint`](Self::fingerprint) for [`check_graph`](Self::check_graph). A legacy version-1
@@ -347,6 +437,10 @@ impl VectorStore {
     /// the same f32-aligned owned backing [`open_from_bytes`](Self::open_from_bytes) uses —
     /// identical validation, no map. `wasm32-unknown-unknown` has no filesystem, so there the
     /// read fails with a clean I/O error and `open_from_bytes` is the supported path.
+    ///
+    /// On a big-endian host, complete little-endian validation happens first; the file is then
+    /// copied into aligned owned storage and only the dense f32 words are byte-swapped for native
+    /// reads. The header, provenance/metadata blocks, and index remain canonical little-endian.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<VectorStore, String> {
         let path = path.as_ref();
         let backing = open_backing(path)?;
@@ -355,21 +449,36 @@ impl VectorStore {
 
     /// Opens a `.spqv` document held entirely in memory — for environments
     /// without a filesystem (the bytes were fetched, embedded, or decompressed
-    /// by the caller). Validation is identical to [`open`](Self::open); reads
-    /// borrow the owned buffer instead of a memory map. The handle is
-    /// read-only (`put`/`finalize` behave as on any opened store).
+    /// by the caller). Validation is identical to [`open`](Self::open); reads borrow the aligned
+    /// owned buffer instead of a memory map. On big-endian hosts, only the validated dense f32 words
+    /// are byte-swapped for native reads. The handle is read-only (`put`/`finalize` behave as on any
+    /// opened store).
     pub fn open_from_bytes(bytes: Vec<u8>) -> Result<VectorStore, String> {
         // [OPUS-4.8] Copy into a 4-byte-aligned backing so the read-phase f32 casts are aligned
         // (a plain Vec<u8> is alignment 1 — casting its slices to &[f32] is UB). Review 1874.
         Self::open_validated(Bytes::owned(bytes), PathBuf::new(), "<bytes>")
     }
 
+    /// Test-only seam that exercises the big-endian swap-on-read branch on any host. Its input's
+    /// dense f32 words must use the byte order opposite to the current target; all structural fields
+    /// remain canonical little-endian.
+    #[cfg(test)]
+    fn open_from_bytes_force_swap(bytes: Vec<u8>) -> Result<VectorStore, String> {
+        Self::open_validated_inner(Bytes::owned(bytes), PathBuf::new(), "<bytes-swapped>", true)
+    }
+
     /// Shared header/index validation behind [`open`](Self::open) and
     /// [`open_from_bytes`](Self::open_from_bytes).
     fn open_validated(map: Bytes, path: PathBuf, origin: &str) -> Result<VectorStore, String> {
-        if cfg!(target_endian = "big") {
-            return Err(".spqv is a little-endian format; big-endian targets are unsupported".into());
-        }
+        Self::open_validated_inner(map, path, origin, cfg!(target_endian = "big"))
+    }
+
+    fn open_validated_inner(
+        map: Bytes,
+        path: PathBuf,
+        origin: &str,
+        swap_dense_for_native: bool,
+    ) -> Result<VectorStore, String> {
         // The version-1 header is the smallest valid header; version 2 adds a fixed-size block.
         if map.len() < HEADER_LEN_V1 {
             return Err(format!("{origin}: truncated header"));
@@ -568,6 +677,17 @@ impl VectorStore {
                 ));
             }
         }
+        // (sq-i7w) Validation above deliberately reads the canonical LE header,
+        // provenance/metadata, and index before this conversion. A BE host cannot cast the LE f32
+        // payload directly, so copy the complete backing to aligned owned storage and reverse only
+        // the dense words. Structural bytes remain LE and all later explicit from_le_bytes reads are
+        // unchanged. The test-only forced branch provides a mutation witness on LE CI hosts.
+        let map = if swap_dense_for_native {
+            let data_end = data_offset + count * dim * 4;
+            map.into_owned_swapped(data_offset, data_end)
+        } else {
+            map
+        };
         Ok(VectorStore {
             dim,
             path,
@@ -646,8 +766,8 @@ impl VectorStore {
             index_bytes.extend_from_slice(&slot.to_le_bytes());
         }
 
-        // f32 → LE bytes: a plain cast on little-endian targets (`create`/`open` reject
-        // big-endian above).
+        // f32 → LE bytes: a plain cast on little-endian targets (`create` rejects big-endian
+        // above; the read path supports big-endian via swap-on-read).
         // SAFETY: f32 has no invalid bit patterns and align(f32) ≥ align(u8).
         let data_bytes =
             unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 4) };

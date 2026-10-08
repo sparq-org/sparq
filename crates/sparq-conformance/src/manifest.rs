@@ -19,10 +19,14 @@ pub enum EntryKind {
     UpdateEval,
     /// `mf:PositiveSyntaxTest*` / `mf:PositiveUpdateSyntaxTest*` — the document
     /// must parse. `update` selects `parse_update` over `parse_query`.
-    PositiveSyntax { update: bool },
+    PositiveSyntax {
+        update: bool,
+    },
     /// `mf:NegativeSyntaxTest*` / `mf:NegativeUpdateSyntaxTest*` — the document
     /// must be REJECTED by the parser.
-    NegativeSyntax { update: bool },
+    NegativeSyntax {
+        update: bool,
+    },
     /// Protocol / CSV-format / … tests — out of scope for this runner.
     Other(String),
 }

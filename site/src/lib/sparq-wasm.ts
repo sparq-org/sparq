@@ -17,6 +17,7 @@
 
 import {
   loadSparq,
+  termValue,
   type SparqlResults,
   type WasmModule,
   type WasmStore,
@@ -41,12 +42,16 @@ export {
   type SparqlBinding,
   type SparqlResults,
   type SparqlTerm,
+  type SparqlTripleTerm,
   type WasmModule,
   type WasmSolutionCursor,
   type WasmStore,
   type WasmStoreCtor,
   countQuads,
   formatTerm,
+  isTripleTerm,
+  termToNTriples,
+  termValue,
   loadSparq,
   matchQuads,
   prewarmSparq,
@@ -114,7 +119,7 @@ export function datasetSize(store: WasmStore): number {
   try {
     const json = store.query(`SELECT (COUNT(*) AS ?n) WHERE { ${ALL_QUADS_BODY} }`);
     const parsed = JSON.parse(json) as SparqlResults;
-    const n = parsed.results.bindings[0]?.n?.value;
+    const n = termValue(parsed.results.bindings[0]?.n);
     const parsedN = n != null ? Number.parseInt(n, 10) : NaN;
     return Number.isFinite(parsedN) ? parsedN : store.size;
   } catch {

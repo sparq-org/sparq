@@ -87,14 +87,25 @@ fn run_ratchet(suite: LineSuite, dir: &str, floor: usize) {
     lines.sort();
 
     println!("=== {} outcome set ===", suite.label());
-    println!("TOTAL run={} pass={} fail={} oos={}", out.len(), pass, fail, oos);
+    println!(
+        "TOTAL run={} pass={} fail={} oos={}",
+        out.len(),
+        pass,
+        fail,
+        oos
+    );
     for l in &lines {
         println!("{l}");
     }
 
     // The RATCHET: pass count may only rise (a fall is a parser regression — or, for a
     // future generated candidate wired into these paths, a disqualifying divergence).
-    assert!(out.len() >= floor, "{} suite shrank: ran {} < floor {floor}", suite.label(), out.len());
+    assert!(
+        out.len() >= floor,
+        "{} suite shrank: ran {} < floor {floor}",
+        suite.label(),
+        out.len()
+    );
     assert!(
         pass >= floor,
         "{} ratchet: pass {pass} fell below the recorded floor {floor} ({fail} FAIL, {oos} OOS)",

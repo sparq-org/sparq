@@ -210,19 +210,35 @@ def gh(*argv: str) -> str:
     ).stdout.strip()
 
 
+# #6173: the dedupe lookup must FAIL CLOSED. An unreadable response, or a result page
+# filled to the cap without the marker, cannot certify "no open issue" — treating either
+# as "none" filed a fresh duplicate on every red run.
+DEDUPE_LIMIT = 100
+
+
+class DedupeUnavailable(Exception):
+    """The open-issue lookup could not establish whether an issue already exists."""
+
+
 def find_open_issue(shard: str) -> str | None:
     """Number of an existing open differential-fuzz issue for this shard, if any."""
     try:
         out = gh(
             "issue", "list", "--state", "open",
             "--search", f'in:title "{MARKER} shard={shard}"',
-            "--json", "number,title", "--limit", "10",
+            "--json", "number,title", "--limit", str(DEDUPE_LIMIT),
         )
-        for item in json.loads(out or "[]"):
-            if MARKER in item.get("title", "") and f"shard={shard}" in item.get("title", ""):
-                return str(item["number"])
+        items = json.loads(out or "[]")
     except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
-        log(f"warning: issue dedupe search failed ({e}) — will attempt creation")
+        raise DedupeUnavailable(f"issue dedupe search failed ({e})") from e
+    for item in items:
+        if MARKER in item.get("title", "") and f"shard={shard}" in item.get("title", ""):
+            return str(item["number"])
+    if len(items) >= DEDUPE_LIMIT:
+        raise DedupeUnavailable(
+            f"issue dedupe search hit its {DEDUPE_LIMIT}-result cap without the marker "
+            f"— an existing issue may sit past the cut"
+        )
     return None
 
 
@@ -234,7 +250,12 @@ def file_github_issue(bead_id: str, shard: str, parsed: dict, args) -> None:
         f"{MARKER} shard={shard}: {n} differential mismatch(es) vs Oxigraph "
         f"(first seed={first}, mode={args.mode})"
     )
-    existing = find_open_issue(shard)
+    try:
+        existing = find_open_issue(shard)
+    except DedupeUnavailable as e:
+        log(f"::error::{e} — NOT filing, to avoid a duplicate issue; the lane is already "
+            f"red and its log/artifact carries the failure.")
+        return
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as tf:
         tf.write(body)
         body_file = tf.name
@@ -263,6 +284,56 @@ def write_repro_artifact(out_dir: Path, parsed: dict, log_text: str, args) -> No
         encoding="utf-8",
     )
     (out_dir / "fuzz-log.txt").write_text(log_text, encoding="utf-8")
+
+
+def _dedupe_fails_closed_self_test() -> None:
+    """#6173: the dedupe lookup never reports "none open" when it cannot tell."""
+    global gh, log
+    real_gh = gh
+    want = "shard=equality"
+
+    def fake(out=None, exc=None):
+        def _gh(*_argv: str) -> str:
+            if exc is not None:
+                raise exc
+            return out
+        return _gh
+
+    def unavailable(stub) -> bool:
+        global gh
+        gh = stub
+        try:
+            find_open_issue("equality")
+        except DedupeUnavailable:
+            return True
+        return False
+
+    try:
+        hit = [{"number": 7, "title": f"{MARKER} {want}: x"}]
+        gh = fake(json.dumps(hit))
+        assert find_open_issue("equality") == "7"
+        gh = fake("[]")
+        assert find_open_issue("equality") is None
+        assert unavailable(fake(exc=subprocess.CalledProcessError(1, "gh")))
+        assert unavailable(fake("not json"))
+        full = [{"number": i, "title": "unrelated"} for i in range(DEDUPE_LIMIT)]
+        assert unavailable(fake(json.dumps(full)))
+        # file_github_issue must NOT reach `gh issue create` when dedupe is unavailable.
+        calls: list[tuple[str, ...]] = []
+
+        def _rec(*argv: str) -> str:
+            calls.append(argv)
+            raise subprocess.CalledProcessError(1, "gh")
+        gh = _rec
+        real_log = log
+        log = lambda *_a, **_k: None  # noqa: E731 — keep the expected ::error:: out of CI logs
+        try:
+            file_github_issue("sq-aaaaa", "equality", {"seeds": [1], "summary": "s", "first_case": "c"}, argparse.Namespace(mode="baseline", category="equality", seed_start="1", count="1", run_url="https://example.invalid/run/1"))
+        finally:
+            log = real_log
+        assert not any(a[:2] == ("issue", "create") for a in calls), calls
+    finally:
+        gh = real_gh
 
 
 # ── self-test (hermetic: no gh, no repo writes) ──────────────────────────────────
@@ -325,6 +396,7 @@ def self_test() -> int:
             shard="equality", mode="baseline", seed_start="4695", count="2200",
             category="equality"))
         assert (out / "repro.md").exists() and (out / "fuzz-log.txt").exists()
+    _dedupe_fails_closed_self_test()
     log("self-test OK")
     return 0
 
