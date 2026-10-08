@@ -70,7 +70,7 @@
   ],
   "authority_status": "Not constructed or executed by native replay.",
   "build_contract": "Caller-accepted binary and build-record hashes are required. Each feature profile needs its own remotely built namespace; compiling a feature does not establish runtime branch firing.",
-  "original_generator_sha256": "077272fc8112b8ff85b789ef7cb64c93e8234aceb620a671830afb68e8cd0ed6",
+  "original_generator_sha256": "c65af5496e71bc5347b8ead7f2cbbc1113f9197a75ea62c3e95109f0ec72e330",
   "original_registry_sha256": "2b6821405a540221cadde3df8ca2468cf141d1a907c44d75e881f6feadbdedd2",
   "original_windows": {
     "source": ".github/workflows/fuzz.yml",
