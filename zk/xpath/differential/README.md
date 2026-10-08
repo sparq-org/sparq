@@ -53,20 +53,16 @@ checked against it (`fo_substring_agrees_with_cpython_slicing`). A disagreement 
 If `python3` is not installed the check reports loudly that it verified nothing and skips,
 rather than passing quietly.
 
-Where sparq's evaluator is itself wrong against the spec that `noir_XPath` implements, the
-case is **not** dropped or downgraded: it stays a **live assertion**, but against the **F&O
-spec value** rather than the oracle's, and is labelled **SPEC-REFERENCE** both at the row and
-in the generated file's header. Read such a row as `noir_XPath == XPath F&O`, not as
-`noir_XPath == sparq`. Keeping it live is the point: these are edges `noir_XPath` has already
-*fixed*, so a regression on one must fail the run — a commented-out assertion cannot fail
-and would verify nothing. Two divergences are recorded today — `SUBSTR` with `start < 1`
-(the engine shifts the window instead of keeping it) and `ROUND` losing the sign of a
-negative zero.
+Where sparq's evaluator disagrees with a cross-check, generation **aborts**: the engine's
+answer is never pinned into the circuit's tests. The harness found two such engine bugs,
+`SUBSTR` with `start < 1` (the engine shifted the window instead of keeping it) and `ROUND`
+losing the sign of a negative zero; both were fixed in sparq-engine (#4275, #4276), so every
+row is oracle-derived and also matches the F&O reference.
 
-Three unit tests hold that arrangement in place: one asserts no assertion is ever emitted
-commented out and that `substring("12345", 0, 3)` and `round_double(-0.5)` in particular
-reach the circuit live; two assert each divergence still reproduces, so the special-casing
-**expires** (goes red) the day the engine is fixed.
+Two unit tests keep those edges covered: one asserts no assertion is ever emitted commented
+out and that `substring("12345", 0, 3)` and `round_double(-0.5)` in particular reach the
+circuit live with their F&O values; the other asserts the oracle itself still agrees with
+F&O on both.
 
 ## Non-vacuity — proved per test function, not once per file
 
@@ -97,8 +93,8 @@ does not cover every test function in the oracle file.
 This is **VERIFICATION, not proof**. Three things are trusted and unproven:
 
 1. **The sparq Rust XSD evaluator.** It is the repo's reference semantics, *not* an audited
-   or proven-correct implementation. Two live divergences from XPath F&O are already
-   recorded above; there may be more that the corpus does not reach.
+   or proven-correct implementation. The harness has already found two divergences from
+   XPath F&O (fixed, above); there may be more that the corpus does not reach.
 2. **The SAMPLE.** Coverage is hand-picked edge cases, not exhaustive. A wrong answer on an
    unsampled input is not caught. (Exhaustive coverage is milestone **M2**, and only for
    unary binary32 ops.)

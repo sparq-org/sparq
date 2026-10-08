@@ -2506,6 +2506,48 @@ mod tests {
         assert_ne!(one("SELECT (STRUUID() AS ?s) {}").unwrap(), s);
     }
 
+    /// #4275: SUBSTR is F&O 3.1 §5.4.3 `fn:substring` — the window
+    /// `[round(start), round(start) + round(length))` is NOT shifted when start < 1.
+    #[test]
+    fn substr_window_is_not_shifted_below_one() {
+        let one = |q: &str| {
+            let r = query(&g(), &format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ({q} AS ?x) {{}}")).unwrap();
+            r.rows[0][0].as_ref().map(|t| t.to_string())
+        };
+        assert_eq!(one("SUBSTR(\"12345\", 0, 3)").unwrap(), "\"12\"");
+        assert_eq!(one("SUBSTR(\"hello\", -2, 4)").unwrap(), "\"h\"");
+        assert_eq!(one("SUBSTR(\"12345\", -3, 5)").unwrap(), "\"1\"");
+        assert_eq!(one("SUBSTR(\"hello\", -100, 3)").unwrap(), "\"\"");
+        assert_eq!(one("SUBSTR(\"hello\", 0)").unwrap(), "\"hello\"");
+        assert_eq!(one("SUBSTR(\"hello\", 2, 3)").unwrap(), "\"ell\"");
+        assert_eq!(one("SUBSTR(\"hello\", 4, 10)").unwrap(), "\"lo\"");
+        assert_eq!(one("SUBSTR(\"hello\", 2, -1)").unwrap(), "\"\"");
+        assert_eq!(one("SUBSTR(\"日本語\", 2, 1)").unwrap(), "\"本\"");
+        // Non-integer bounds round half toward +INF, as fn:substring's do.
+        assert_eq!(one("SUBSTR(\"12345\", 1.5, 2.6)").unwrap(), "\"234\"");
+        // NaN selects nothing; so does -INF + INF.
+        assert_eq!(one("SUBSTR(\"hello\", xsd:double(\"NaN\"))").unwrap(), "\"\"");
+        assert_eq!(
+            one("SUBSTR(\"hello\", xsd:double(\"-INF\"), xsd:double(\"INF\"))").unwrap(),
+            "\"\""
+        );
+    }
+
+    /// #4276: ROUND of a double in [-0.5, 0) is NEGATIVE zero (F&O 3.1 §4.4.4).
+    #[test]
+    fn round_keeps_the_sign_of_a_zero_result() {
+        let one = |q: &str| {
+            let r = query(&g(), &format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ({q} AS ?x) {{}}")).unwrap();
+            r.rows[0][0].as_ref().map(|t| t.to_string()).unwrap()
+        };
+        let v = one("ROUND(xsd:double(\"-0.5\"))");
+        assert!(v.starts_with("\"-0"), "{v}");
+        assert!(one("ROUND(xsd:double(\"-0.2\"))").starts_with("\"-0"));
+        assert!(one("ROUND(xsd:float(\"-0.5\"))").starts_with("\"-0"));
+        assert!(!one("ROUND(xsd:double(\"0.2\"))").starts_with("\"-"));
+        assert!(one("ROUND(xsd:double(\"-1.5\"))").starts_with("\"-1"));
+    }
+
     #[test]
     fn string_functions_preserve_language_tags() {
         let one = |q: &str| {

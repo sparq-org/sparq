@@ -4,8 +4,8 @@
 # Drives the XPath differential oracle harness:
 #   1. Run the Rust harness's own unit tests (the F&O references, the CPython
 #      codepoint-slicing cross-check of the fn:substring window, the codepoint->byte
-#      boundary-conversion property test (sq-hjvte), the self-expiring oracle-divergence
-#      guards, the per-test-function fault-injection coverage checks).
+#      boundary-conversion property test (sq-hjvte), the oracle-matches-F&O guards on
+#      the edges the engine once got wrong, the per-test-function fault-injection coverage checks).
 #   2. Build the harness (zk/xpath/differential/).
 #   3. Generate the oracle Noir test file — every expected value read back from sparq's
 #      own Rust SPARQL/XSD scalar evaluator, cross-checked bit-for-bit against native f64
@@ -77,8 +77,8 @@ if [ "${GENERATE_ONLY}" = "false" ] && ! command -v nargo &> /dev/null; then
 fi
 
 # The harness's OWN tests gate everything below: they pin the F&O reference
-# implementations, assert each recorded sparq-engine divergence still reproduces (so a
-# stale workaround cannot survive an engine fix), and prove --inject-fault corrupts
+# implementations, assert the oracle still agrees with them on the edges sparq-engine
+# once got wrong (#4275, #4276), and prove --inject-fault corrupts
 # exactly one LIVE assertion. Deliberately NOT --locked: the harness path-deps on
 # in-repo crates whose manifests bump on lanes that never run this script, so a pinned
 # lock drifts silently on main and would fail an innocent PR (the sq-q134e lesson).

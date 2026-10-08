@@ -14589,6 +14589,13 @@ fn as_numeric(v: &Value) -> Option<Num> {
     }
 }
 
+/// XPath `fn:round` on a double position (ties toward +INF), for `fn:substring`'s bounds.
+/// The sign of a zero result does not matter for a position.
+fn fo_round(x: f64) -> f64 {
+    let fl = x.floor();
+    if x - fl >= 0.5 { fl + 1.0 } else { fl }
+}
+
 fn as_num(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(n.f64()),
@@ -14865,21 +14872,31 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(x) => x,
                 None => return Ok(Value::Error),
             };
+            // F&O 3.1 §5.4.3 `fn:substring`: the codepoints at 1-based positions `p` with
+            // `round(start) <= p < round(start) + round(length)`. The window is NOT shifted
+            // when start < 1, so a start below 1 consumes part of the length (#4275); a NaN
+            // bound (or -INF + INF) selects nothing because every comparison is false.
             let start = match as_num(&ev(1)?) {
-                Some(n) => n as i64,
+                Some(n) => fo_round(n),
                 None => return Ok(Value::Error),
             };
-            let chars: Vec<char> = s.chars().collect();
-            let from = (start.max(1) - 1) as usize; // SPARQL SUBSTR is 1-indexed by codepoint
-            let out: String = if nargs >= 3 {
-                let len = match as_num(&ev(2)?) {
-                    Some(n) => n.max(0.0) as usize,
+            let end = if nargs >= 3 {
+                match as_num(&ev(2)?) {
+                    Some(n) => start + fo_round(n),
                     None => return Ok(Value::Error),
-                };
-                chars.iter().skip(from).take(len).collect()
+                }
             } else {
-                chars.iter().skip(from).collect()
+                f64::INFINITY
             };
+            let out: String = s
+                .chars()
+                .enumerate()
+                .filter(|&(i, _)| {
+                    let p = (i + 1) as f64;
+                    p >= start && p < end
+                })
+                .map(|(_, c)| c)
+                .collect();
             lit_with_lang(out, lang.as_deref())
         }
         // [OPUS-4.8] ENCODE_FOR_URI's operand is a STRING LITERAL, per SPARQL 1.1
