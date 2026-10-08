@@ -229,27 +229,31 @@ fn an_unrelated_cycle_does_not_unstratify_the_rest() {
 }
 
 #[test]
-fn aggregation_clause_supplied_through_a_variable_is_tracked() {
-    // The clause formula is a rule-produced value; its :prohibitedIn dependency must still
-    // order the permit after the prohibition.
-    let (c, w) = run(":r :target :g .\n\
+fn aggregation_clause_supplied_through_a_variable_fails_closed() {
+    // The clause formula is a rule-produced value the analysis cannot pin to predicates:
+    // it counts as negating every predicate, including the rule's own conclusion, so the
+    // document is rejected rather than risk a premature permit.
+    let body = ":r :target :g .\n\
          { :r :target :g } => { :policy :clause { :r :prohibitedIn :g } . :r :pending :g . } .\n\
          { ?r :pending ?g } => { ?r :prohibitedIn ?g } .\n\
          { :policy :clause ?C . ( true ?C ?L ) log:collectAllIn _:s . ?L list:length 0 . }\n\
-           => { :r :permittedBy :g } .");
-    assert!(c.contains(&t("r", "prohibitedIn", "g")), "{c:?}");
+           => { :r :permittedBy :g } .";
+    assert!(rejected(body).contains("cycle"));
+    let (c, w) = run_with(body, NegationCycles::FailClosed);
     assert!(
         !c.contains(&t("r", "permittedBy", "g")),
         "permit despite prohibition: {c:?}"
     );
-    assert!(w.is_empty(), "{w:?}");
+    assert_eq!(w.len(), 1, "{w:?}");
 }
 
 #[test]
-fn for_all_in_clause_supplied_through_a_variable_is_tracked() {
-    let (c, _) = run(":x :risk :high . :gate :when { ?i :flagged true } .\n\
+fn for_all_in_clause_supplied_through_a_variable_fails_closed() {
+    let body = ":x :risk :high . :gate :when { ?i :flagged true } .\n\
          { ?i :risk :high } => { ?i :flagged true } .\n\
-         { :gate :when ?A . ( ?A { ?i :approved true } ) log:forAllIn ?s } => { :batch :ok true } .");
+         { :gate :when ?A . ( ?A { ?i :approved true } ) log:forAllIn ?s } => { :batch :ok true } .";
+    assert!(rejected(body).contains("cycle"));
+    let (c, _) = run_with(body, NegationCycles::FailClosed);
     assert!(
         !c.iter().any(|f| f[0] == ex("batch")),
         "vacuous forAllIn: {c:?}"
@@ -270,20 +274,61 @@ fn list_builtin_over_a_derived_list_is_tracked() {
 }
 
 #[test]
-fn variable_predicate_conclusion_resolves_through_facts() {
-    // ?pred takes its values from :allowPred facts, so the grant rule produces :read
-    // only; negating :noneOf does not close a cycle and nothing is rejected.
-    let body = ":Read :allowPred :read . :pol :allow :Read . :pol :appliesTo :doc .\n\
-         :pol :agent :alice .\n\
-         { ?pol :allow ?m . ?m :allowPred ?pred . ?pol :appliesTo ?d . ?pol :agent ?a .\n\
-           ?s log:notIncludes { ?pol :noneOf ?x } } => { ?a ?pred ?d } .\n\
-         { ?a :read ?d } => { ?d :readBy ?a } .";
-    let (c, w) = run(body);
-    assert!(c.contains(&t("alice", "read", "doc")), "{c:?}");
+fn variable_predicate_bound_through_a_virtual_list_is_unknown() {
+    // ?p comes from first-class list access, not a stored triple: the conclusion's
+    // predicate is unknown, so it may be :blocked and the negating rule waits for it.
+    let (c, w) = run(":r :target :g .\n\
+         { :r :target :g . (:blocked) rdf:first ?p } => { :r ?p :g } .\n\
+         { :r :target :g . ?s log:notIncludes { :r :blocked :g } } => { :r :permittedBy :g } .");
+    assert!(c.contains(&t("r", "blocked", "g")), "{c:?}");
+    assert!(
+        !c.contains(&t("r", "permittedBy", "g")),
+        "permit despite :blocked: {c:?}"
+    );
     assert!(w.is_empty(), "{w:?}");
-    // Data that binds ?pred to the negated predicate makes it a real cycle.
-    let e = rejected(&format!("{body}\n:Read :allowPred :noneOf ."));
-    assert!(e.contains("cycle"), "{e}");
+}
+
+#[test]
+fn variable_predicate_conclusion_on_a_negation_cycle_is_rejected() {
+    // A conclusion with a variable predicate may derive anything, including the predicate
+    // its own premise negates.
+    let body = ":Read :allowPred :read . :pol :allow :Read . :pol :appliesTo :doc .\n\
+         { ?pol :allow ?m . ?m :allowPred ?pred . ?pol :appliesTo ?d .\n\
+           ?s log:notIncludes { ?pol :noneOf ?x } } => { :alice ?pred ?d } .";
+    let e = rejected(body);
+    assert!(
+        e.contains("cycle") && e.contains("variable predicate"),
+        "{e}"
+    );
+}
+
+#[test]
+fn swap_namespace_predicate_that_is_not_a_builtin_is_ordinary() {
+    // log:blocked is no builtin: it is a stored predicate like any other.
+    let (c, w) = run(":r :target :g .\n\
+         { :r :target :g } => { :r log:blocked :g } .\n\
+         { :r :target :g . ?s log:notIncludes { :r log:blocked :g } } => { :r :permittedBy :g } .");
+    assert!(
+        !c.contains(&t("r", "permittedBy", "g")),
+        "permit despite log:blocked: {c:?}"
+    );
+    assert!(w.is_empty(), "{w:?}");
+}
+
+#[test]
+fn negation_cycle_in_a_nested_closure_fails_the_run() {
+    // The nested document's rule negates its own conclusion. Suppressing it would leave
+    // ?C without the prohibition and the outer negation would grant; the run must fail.
+    let body = ":r :target :g .\n\
+         { { { ?s log:notIncludes { :r :blocked :g } } => { :r :blocked :g } . }\n\
+             log:conclusion ?C .\n\
+           ?C log:notIncludes { :r :blocked :g } } => { :r :permittedBy :g } .";
+    let e = rejected(body);
+    assert!(e.contains("nested closure") && e.contains("cycle"), "{e}");
+    // An explicit fail-closed run cannot fail closed through a nested closure: still an
+    // error.
+    let src = format!("{PRE}{body}");
+    assert!(reason_n3_terms_with_cycles(&src, None, None, NegationCycles::FailClosed).is_err());
 }
 
 #[test]

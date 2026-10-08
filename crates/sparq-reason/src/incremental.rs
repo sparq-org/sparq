@@ -1515,9 +1515,9 @@ struct N3Compiled {
 /// [`crate::reason_n3_terms`] run over the rules document plus the current base.
 ///
 /// A rules document that negates through a dependency cycle is refused by
-/// [`new`](Self::new). When a later mutation makes it cyclic (a base fact binding a rule's
-/// variable predicate to a negated predicate), the rules on the cycle and those depending
-/// on it are not evaluated ([`crate::NegationCycles::FailClosed`]) and
+/// [`new`](Self::new). When base data makes the batch engine refuse the document later
+/// (a negation cycle inside a nested `log:conclusion` / `log:supports` closure over base
+/// formulas), the closure fails closed to the base facts alone and
 /// [`stratification_warning`](Self::stratification_warning) says why.
 pub struct MaterializedN3Graph {
     rules_src: String,
@@ -2349,15 +2349,15 @@ impl MaterializedN3Graph {
         }
         self.mode = N3Mode::Fallback;
         let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
-        let closure = crate::n3::reason_n3_terms_with_cycles(
-            &src,
-            None,
-            None,
-            crate::NegationCycles::FailClosed,
-        )
-        .expect("re-serialized base must re-parse (serializer bug)");
-        self.strat_warning = closure.warnings.into_iter().next();
-        self.fallback_closure = closure.facts.into_iter().collect();
+        match crate::n3::reason_n3_terms(&src, None) {
+            Ok(closure) => self.fallback_closure = closure.facts.into_iter().collect(),
+            // The rules cannot be stratified (a negation cycle, possibly inside a nested
+            // closure over base data). Fail closed: no derivation at all.
+            Err(e) => {
+                self.strat_warning = Some(e);
+                self.fallback_closure = self.base.iter().cloned().collect();
+            }
+        }
     }
 
     fn in_any_layer(&self, f: &[N3Term; 3]) -> bool {
@@ -2685,8 +2685,8 @@ impl MaterializedN3Graph {
         self.mode
     }
 
-    /// Set while the current base makes the rules negate through a dependency cycle: the
-    /// rules on the cycle and those depending on it are not evaluated (fail closed).
+    /// Set while the batch engine refuses the rules over the current base (a negation
+    /// cycle): the closure is then the base facts alone (fail closed).
     pub fn stratification_warning(&self) -> Option<&str> {
         self.strat_warning.as_deref()
     }

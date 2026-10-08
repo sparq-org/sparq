@@ -49,9 +49,7 @@
 //!   store, with the engine's no-retraction semantics. [`compile`] stratifies the rule
 //!   set exactly as [`crate::reason_n3`] does (a rule negating a predicate the set
 //!   derives runs after the deriving rules' fixpoint, see [`CompiledRuleSet::n_strata`];
-//!   a rule set that negates through a dependency cycle is a [`compile`] error, and one
-//!   the INPUT facts make cyclic fails closed, see
-//!   [`BoundRuleSet::eval_with_diagnostics`]);
+//!   a rule set that negates through a dependency cycle is a [`compile`] error);
 //! * `log:uri` (both directions), `log:equalTo` / `log:notEqualTo`;
 //! * `string:concatenation` (with the engine's typed-literal value coercion),
 //!   `string:encodeForUri`, `string:scrape` (constant regex), `string:notGreaterThan`
@@ -213,13 +211,8 @@ pub struct CompiledRuleSet {
     regexes: Vec<Option<regex::Regex>>,
     facts: Vec<[u32; 3]>,
     rules: Vec<CompiledRule>,
-    /// The engine's automatic stratification (GH #6201) over the rule document's own
-    /// facts. Re-derived at evaluation when the input facts carry a predicate the
-    /// analysis read values of (`strata.consulted`).
+    /// The engine's automatic stratification (GH #6201).
     strata: super::strata::Strata,
-    /// The parsed rules and document facts that re-derivation needs.
-    strat_rules: Vec<super::model::Rule>,
-    doc_facts: Vec<[Term; 3]>,
 }
 
 impl CompiledRuleSet {
@@ -237,9 +230,6 @@ impl CompiledRuleSet {
     /// `log:notIncludes` negates a predicate another rule of the set derives, in which
     /// case the negating rule runs after the deriving rules reach their fixpoint — the
     /// same automatic stratification [`crate::reason_n3`] applies.
-    ///
-    /// Counted over the rule document's own facts; input facts that bind a variable
-    /// predicate can change it at evaluation (see [`BoundRuleSet::eval_with_diagnostics`]).
     pub fn n_strata(&self) -> usize {
         self.strata.n_strata
     }
@@ -256,16 +246,9 @@ impl CompiledRuleSet {
             .iter()
             .map(|t| intern_ground(dict, t))
             .collect();
-        let consulted = self
-            .strata
-            .consulted
-            .iter()
-            .map(|p| intern_ground(dict, &Term::Iri(p.clone())))
-            .collect();
         BoundRuleSet {
             compiled: self,
             syms,
-            consulted,
         }
     }
 }
@@ -275,8 +258,6 @@ impl CompiledRuleSet {
 pub struct BoundRuleSet<'a> {
     compiled: &'a CompiledRuleSet,
     syms: Vec<Id>,
-    /// Ids of the predicates whose stored values the stratification read.
-    consulted: FxHashSet<Id>,
 }
 
 /// Parse N3 rule text and lower it to an id-level [`CompiledRuleSet`].
@@ -301,6 +282,21 @@ pub struct BoundRuleSet<'a> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
+    compile_with_cycles(src, super::NegationCycles::Reject)
+}
+
+/// As [`compile`], choosing what happens to rules that negate through a dependency cycle
+/// ([`super::NegationCycles`]) instead of refusing the rule set — the compiled
+/// counterpart of [`crate::reason_n3_with_cycles`], with the same semantics.
+///
+/// # Errors
+///
+/// As [`compile`], except that a negation cycle is an error only under
+/// [`super::NegationCycles::Reject`].
+pub fn compile_with_cycles(
+    src: &str,
+    cycles: super::NegationCycles,
+) -> Result<CompiledRuleSet, String> {
     let parsed = parser::parse(src)?;
     if !parsed.backward_rules.is_empty() {
         return Err("compiled-rules: backward (`<=`) rules are not in the compiled subset (goal-directed resolution stays with the text engine)".into());
@@ -314,21 +310,14 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
     }
     // A rule set that negates through a dependency cycle is refused, as the text engine
     // refuses the document.
-    let strata = super::strata::stratify(
-        &parsed.rules,
-        &[],
-        &parsed.facts,
-        super::strata::NegationCycles::Reject,
-    )
-    .map_err(|e| format!("compiled-rules: {e}"))?;
+    let strata = super::strata::stratify(&parsed.rules, &[], cycles)
+        .map_err(|e| format!("compiled-rules: {e}"))?;
     Ok(CompiledRuleSet {
         symbols: c.symbols,
         regexes: c.regexes,
         facts: c.facts,
         rules: c.rules,
         strata,
-        strat_rules: parsed.rules,
-        doc_facts: parsed.facts,
     })
 }
 
@@ -931,20 +920,6 @@ fn intern_ground_checked(dict: &mut Dict, t: &Term) -> Result<Id, String> {
     }
 }
 
-/// A dictionary term as an N3 term, for the stratification analysis (which reads IRIs
-/// only: a quoted triple becomes an opaque blank).
-fn id_term(dict: &Dict, id: Id) -> Term {
-    match dict.term(id) {
-        oxrdf::Term::NamedNode(n) => Term::Iri(n.into_string()),
-        oxrdf::Term::BlankNode(b) => Term::Blank(b.into_string()),
-        oxrdf::Term::Literal(l) => {
-            let (value, datatype, lang, _) = l.destruct();
-            Term::Lit(value, datatype.map(|d| d.into_string()).unwrap_or_default(), lang)
-        }
-        _ => Term::Blank(format!("__triple{id}")),
-    }
-}
-
 /// The component ids of an RDF 1.2 quoted-triple id, or `None` for any other term kind.
 ///
 /// [`Dict`] stores a triple term STRUCTURALLY — as the ids of its three already-interned
@@ -996,23 +971,7 @@ impl BoundRuleSet<'_> {
     /// must be interned into the caller's id space; join atoms never touch the
     /// dictionary.
     pub fn eval(&self, dict: &mut Dict, facts: &[[Id; 3]]) -> Vec<[Id; 3]> {
-        self.eval_with_diagnostics(dict, facts).0
-    }
-
-    /// As [`eval`](Self::eval), also returning the stratification diagnostic.
-    ///
-    /// [`compile`] already refuses a rule set that negates through a dependency cycle. A
-    /// cycle can still arise from the INPUT facts, when they bind a rule's variable
-    /// predicate to a predicate the rule set negates over; the affected rules (those on
-    /// the cycle and those depending on it) are then NOT evaluated
-    /// ([`crate::NegationCycles::FailClosed`]) and the diagnostic says why.
-    pub fn eval_with_diagnostics(
-        &self,
-        dict: &mut Dict,
-        facts: &[[Id; 3]],
-    ) -> (Vec<[Id; 3]>, Option<String>) {
-        let rederived = self.restratify(dict, facts);
-        let strata = rederived.as_ref().unwrap_or(&self.compiled.strata);
+        let strata = &self.compiled.strata;
         let mut store = FactStore::default();
         for f in facts {
             store.insert(*f);
@@ -1068,29 +1027,7 @@ impl BoundRuleSet<'_> {
                 delta = new_delta;
             }
         }
-        (store.list, strata.warning.clone())
-    }
-
-    /// The stratification for these input facts: `None` when they carry no predicate the
-    /// compile-time analysis read values of (the compiled strata stand), else the analysis
-    /// re-run over the document facts plus those input facts.
-    fn restratify(&self, dict: &Dict, facts: &[[Id; 3]]) -> Option<super::strata::Strata> {
-        if self.consulted.is_empty() {
-            return None;
-        }
-        let extra: Vec<[Term; 3]> = facts
-            .iter()
-            .filter(|f| self.consulted.contains(&f[1]))
-            .map(|f| [id_term(dict, f[0]), id_term(dict, f[1]), id_term(dict, f[2])])
-            .collect();
-        if extra.is_empty() {
-            return None;
-        }
-        let cs = self.compiled;
-        let mut all = cs.doc_facts.clone();
-        all.extend(extra);
-        let cycles = super::strata::NegationCycles::FailClosed;
-        super::strata::stratify(&cs.strat_rules, &[], &all, cycles).ok()
+        store.list
     }
 
     fn resolve(&self, t: CTerm, row: &Row) -> Id {

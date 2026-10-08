@@ -220,6 +220,8 @@ struct BwCtx<'a> {
     visited: VisitedDocs,
     /// The run's [`NegationCycles`] policy, inherited by nested `log:conclusion` closures.
     cycles: NegationCycles,
+    /// The first error a nested closure met; it fails the enclosing run.
+    nested_error: std::cell::RefCell<Option<String>>,
 }
 
 impl<'a> BwCtx<'a> {
@@ -231,6 +233,7 @@ impl<'a> BwCtx<'a> {
             resolver: None,
             visited: VisitedDocs::default(),
             cycles: NegationCycles::Reject,
+            nested_error: std::cell::RefCell::new(None),
         }
     }
 }
@@ -250,21 +253,37 @@ pub struct ProofStep {
 /// Store-scoped negation-as-failure (`log:notIncludes`, `log:collectAllIn`, `log:forAllIn`
 /// over the current store) is STRATIFIED automatically: a rule that negates or aggregates
 /// over a predicate the same document derives runs only after every rule deriving it has
-/// reached its fixpoint. Clauses supplied through variables are resolved to the formulas
-/// the variable can take, list builtins depend on the stored `rdf:first`/`rdf:rest`
-/// triples they walk, and a variable conclusion predicate produces the predicates it can
-/// be bound to (from the facts and conclusions). A document whose negation sits on a
-/// dependency cycle through its own conclusions cannot be stratified and is REJECTED
-/// with an error naming the cycle; [`reason_n3_terms_with_cycles`] opts in to failing
-/// closed or to the legacy single-pass evaluation instead ([`NegationCycles`]).
+/// reached its fixpoint. Anything the analysis cannot pin to one predicate counts as
+/// EVERY predicate: a variable conclusion or premise predicate, a clause supplied through
+/// a variable, and a nested closure (`log:conclusion`, `log:supports`). List builtins
+/// depend on the `rdf:first`/`rdf:rest` triples they walk. A document whose negation
+/// sits on a dependency cycle (including one through such an unknown dependency) cannot
+/// be stratified and is REJECTED with an error naming the cycle, and so is a nested
+/// closure over such a formula; [`reason_n3_with_cycles`] and
+/// [`reason_n3_terms_with_cycles`] opt in to failing closed or to the legacy single-pass
+/// evaluation instead ([`NegationCycles`]).
 /// Dependencies are tracked per predicate, so negating one class of `rdf:type` from a
 /// rule that concludes another `rdf:type` is such a cycle; use distinct predicates, or
 /// [`reason_n3_stratified`] with explicit strata.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
+    reason_n3_with_cycles(dict, src, NegationCycles::Reject)
+}
+
+/// As [`reason_n3`], choosing what happens to rules that negate through a dependency
+/// cycle ([`NegationCycles`]) instead of rejecting the document. Opting in to
+/// [`NegationCycles::SinglePass`] is for rule sets whose caller already guarantees the
+/// negated predicates are complete (for example by running the rules as their own
+/// explicit stratum); the cycle diagnostic is available from
+/// [`reason_n3_terms_with_cycles`].
+pub fn reason_n3_with_cycles(
+    dict: &mut Dict,
+    src: &str,
+    cycles: NegationCycles,
+) -> Result<Vec<[Id; 3]>, String> {
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?;
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None, cycles)?;
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -425,6 +444,9 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
             }
         }
     }
+    if let Some(e) = bw.nested_error.take() {
+        return Err(e);
+    }
     Ok(out)
 }
 
@@ -504,8 +526,8 @@ pub struct StratifiedN3Closure {
 ///
 /// Each document is itself stratified automatically (see [`reason_n3`]); explicit
 /// strata are for programs the per-predicate analysis cannot separate (a negation
-/// cycle it rejects, e.g. one class of `rdf:type` negating another) and for pipelines that already ship their rules as separate
-/// documents. The engine's NON-MONOTONIC premise operators (store-scoped
+/// cycle it rejects, e.g. one class of `rdf:type` negating another) and for pipelines
+/// that already ship their rules as separate documents. The engine's NON-MONOTONIC premise operators (store-scoped
 /// `log:notIncludes`, `log:collectAllIn` / `log:forAllIn`) are reliable over
 /// predicates FULLY PRESENT before their stratum starts (derived facts are never
 /// retracted), which an earlier stratum here guarantees.
@@ -767,7 +789,7 @@ fn run_closure(
     // predicate this document derives runs in a later stratum than every rule deriving it.
     // A program with no such negation is ONE stratum and takes exactly the single-pass
     // loop below. Rules on a cycle through negation follow `cycles`.
-    let strata = strata::stratify(&rules, &backward_rules, &facts0, cycles)?;
+    let strata = strata::stratify(&rules, &backward_rules, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
     let mut bw = BwCtx::new(&backward_rules);
     bw.cycles = cycles;
@@ -1076,6 +1098,9 @@ fn run_closure(
             }
             delta = new_delta;
         }
+    }
+    if let Some(e) = bw.nested_error.take() {
+        return Err(e);
     }
     Ok((facts, steps, strata.warning))
 }
@@ -2202,16 +2227,27 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
     // `log:content` document active up the stack is still recognised when its own closure
     // re-imports it through this nested run.
-    // A nested document cannot report an error: a negation cycle there fails closed
-    // unless the top-level run opted in to the legacy single-pass behaviour.
+    // A negation cycle in a nested document is an error unless the top-level run opted in
+    // to the legacy single-pass behaviour: an incomplete nested closure would read as
+    // evidence of absence to a consumer that negates over it. The builtin cannot return
+    // the error, so it is recorded on the context and fails the enclosing run.
     let cycles = match bw.cycles {
         NegationCycles::SinglePass => NegationCycles::SinglePass,
-        _ => NegationCycles::FailClosed,
+        _ => NegationCycles::Reject,
     };
-    let Ok((closed, _steps, _)) =
-        run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None, cycles)
-    else {
-        unreachable!("only NegationCycles::Reject makes run_closure fail")
+    let closed = match run_closure(
+        parsed,
+        bw.resolver,
+        Some(bw.visited.clone()),
+        StepMode::None,
+        cycles,
+    ) {
+        Ok((closed, _steps, _)) => closed,
+        Err(e) => {
+            bw.nested_error.borrow_mut().get_or_insert(format!("in a nested closure: {e}"));
+            bw.visited.borrow_mut().remove(&key);
+            return ts.to_vec();
+        }
     };
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations.
