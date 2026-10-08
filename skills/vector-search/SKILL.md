@@ -114,7 +114,7 @@ EmbeddingProvenance { model_id, model_version, content_version, metric: Embeddin
 EmbeddingProvenance::new(model_id, EmbeddingMetric, Normalization)   // other axes empty; set fields directly (NOT Default — metric/norm load-bearing)
 EmbeddingMetric::{Cosine, Dot, Euclidean};  Normalization::{None, L2}   // typed axes; from_tag() fail-closed on an unknown tag
 prov.compatible_with(&query_prov) -> Result<(), String>   // compatible IFF every DEFINED axis equal; reserved area EXCLUDED (KERN boundary)
-prov.to_rdf(store: NamedNodeRef, dim) -> Vec<Triple> // sq-tb9p0 VG-PROV-5: the record as RDF in prov_vocab
+prov.to_rdf(store: NamedNodeRef, dim) -> Vec<Triple>   // sq-tb9p0 VG-PROV-5: the record as RDF in prov_vocab
 //   (spqvp:) terms — model/metric/normalization/dimension always; version/verbalization axes only when non-empty
 // KERN BOUNDARY: `reserved` is a versioned OPAQUE TLV — extension fields RESERVED pending the cross-implementation profile (#1746).
 //   NO encoder-version-hash / codebook-hash / D semantics defined; it round-trips byte-for-byte and does NOT gate compatibility.
@@ -152,7 +152,7 @@ VectorStore::sibling_delta_path(&Path) -> PathBuf;  VectorStore::has_persisted_d
 
 // --- search (src/ann.rs) --- all return cosine in [-1,1], best first; zero query -> empty
 nearest_exact(&VectorStore, query: &[f32], k) -> Vec<(Id, f32)>                 // ground-truth full scan; ascending-id ties
-nearest_exact_tiebreak(&VectorStore, &Graph, query: &[f32], k, exclude: Option<Id>) -> Result<Vec<(Id, f32)>, String> // sq-tb9p0
+nearest_exact_tiebreak(&VectorStore, &Graph, query: &[f32], k, exclude: Option<Id>) -> Result<Vec<(Id, f32)>, String>  // sq-tb9p0
 //   VG-TIE-1 (spec site/specs/sparql-vector-genai.typ): membership at a BOUNDARY score tie is decided by ascending
 //   Unicode-codepoint order of the candidates' canonical N-Triples serialisations (reproducible ACROSS implementations,
 //   unlike id order); keys computed only for the boundary tie group. FAIL-CLOSED domain guard: a candidate containing a
@@ -168,10 +168,10 @@ cosine(a: &[f32], b: &[f32]) -> f32
 // HNSW = the APPROXIMATE backend: feature = "approx-ann" ONLY sq-ip3a (the ONLY thing
 // pulling instant-distance; default build has NO third-party ANN dep). recall < 1.0 — NOT exact.
 VectorIndex::build(&store) / ::build_with(&store, HnswConfig{ef_search, ef_construction, seed})
-// sq-ose80: HnswConfig::fast_build (efc=40, ~3x faster build) / ::high_recall (efc=200) — pure config, default unchanged, recall floor-preserved
+// sq-ose80: HnswConfig::fast_build() (efc=40, ~3x faster build) / ::high_recall() (efc=200) — pure config, default unchanged, recall floor-preserved
 HnswConfig::default() / ::fast_build() / ::high_recall()
 impl VectorIndex { fn nearest(&self, query: &[f32], k) -> Vec<(Id, f32)>;
-                   fn nearest_with_ef(&self, query: &[f32], k, ef_search: usize) -> Vec<(Id, f32)>; // sq-jo6ty: per-query ef_search sweep (Pareto API)
+                   fn nearest_with_ef(&self, query: &[f32], k, ef_search: usize) -> Vec<(Id, f32)>;  // sq-jo6ty: per-query ef_search sweep (Pareto API)
                    // nearest_with_ef: when ef==build_ef_search uses the primary map (zero overhead); other ef values
                    // trigger a lazy one-time build of a secondary map (same ef_construction/seed/points, only ef_search
                    // differs) cached by ef level — amortised for sweeps. Monotone-recall: higher ef >= lower ef recall.
@@ -195,11 +195,11 @@ DedupReport { recall: f64, merges: Vec<(Id /*dup*/, Id /*canonical=smallest*/)>,
 // --- persistent on-disk ANN (src/diskann.rs) ---
 DiskAnnIndex::build(&VectorStore, path) / ::build_with(&store, path, VamanaConfig{degree, build_beam, search_beam, alpha, seed})
 DiskAnnIndex::build_for(&store, path, &Graph) / ::build_with_for(&store, path, cfg, &Graph)  // embeds the graph fingerprint
-DiskAnnIndex::build_with_pq(&store, path, cfg, PqConfig) -> Result<..> // sq-qamd: + a PQ candidate cache (search on codes, re-rank off mmap); persisted as a trailing .spqg section (encoding tag 1)
+DiskAnnIndex::build_with_pq(&store, path, cfg, PqConfig) -> Result<..>          // sq-qamd: + a PQ candidate cache (search on codes, re-rank off mmap); persisted as a trailing .spqg section (encoding tag 1)
 DiskAnnIndex::open(path) -> Result<DiskAnnIndex, String>                        // mmap + header check, NO rebuild (reloads any PQ section)
-DiskAnnIndex::open_from_bytes(bytes: Vec<u8>) -> Result<DiskAnnIndex, String> // sq-98c: filesystem-less/wasm — identical validation, result-identical search
+DiskAnnIndex::open_from_bytes(bytes: Vec<u8>) -> Result<DiskAnnIndex, String>   // sq-98c: filesystem-less/wasm — identical validation, result-identical search
 impl DiskAnnIndex { fn nearest(&self, &[f32], k) -> Vec<(Id, f32)>; fn nearest_term(..) -> Vec<(Term, f32)>; fn len()/dim();
-                    fn has_pq_cache -> bool; // sq-qamd: PQ-guided search when true
+                    fn has_pq_cache() -> bool;                                  // sq-qamd: PQ-guided search when true
                     fn fingerprint() -> Option<Fingerprint>; fn check_graph(&store, &Graph) -> Result<(), String>;
                     fn nearest_term_checked(&Term, &Graph, &store, k) -> Result<Vec<(Term, f32)>, String> }
 sibling_graph_path(&Path) -> PathBuf                                            // foo.spqv -> foo.spqg
@@ -223,7 +223,7 @@ CostEstimate { mask_len, store_len, k, prefilter_cost, postfilter_cost, strategy
 postfilter_exact(&VectorStore, query: &[f32], &IdMask, k) -> Vec<(Id, f32)>      // scan WHOLE store, drop non-masked -> IDENTICAL to nearest_exact_filtered (no over-fetch boundary: full ranking)
 nearest_filtered_costed(&VectorStore, &[f32], &IdMask, k, &CostModel) -> (Vec<(Id, f32)>, CostEstimate)   // decide + run chosen branch; ascending-id ties
 nearest_filtered_costed_tiebreak(&VectorStore, &Graph, &[f32], &IdMask, k, exclude: Option<Id>, &CostModel) -> Result<(Vec<(Id, f32)>, CostEstimate), String>
-// the same decide+run with VG-TIE-1 boundary-tie membership over the mask-ADMITTED pool, `exclude` (seed)
+//   the same decide+run with VG-TIE-1 boundary-tie membership over the mask-ADMITTED pool, `exclude` (seed)
 //   dropped BEFORE the boundary is determined — what the filtered `vec:` rewrite path calls (keeps VG-FILT-2 exact);
 //   Err = the same fail-closed blank-node domain guard as nearest_exact_tiebreak
 overfetch_target(k, mask_len, store_len) -> usize                               // ceil(k/selectivity) clamped; the FIRST fetch size for the iterative over-fetch path below (exact backend never under-fills, so it's a no-op there)
@@ -241,19 +241,19 @@ nearest_filtered_overfetch_default(&backend, query, &IdMask, k) -> Vec<(Id, f32)
 // --- quantization for large stores (src/quant.rs) ---
 ScalarQuantizer::fit(dim, vectors: impl IntoIterator<Item=&[f32]>) -> Result<ScalarQuantizer, String>   // f32->u8, 4x
 ProductQuantizer::fit(dim, vectors, PqConfig{m, k, iters, seed}) -> Result<ProductQuantizer, String>    // M bytes/vec, 8-32x
-ProductQuantizer::to_bytes -> Vec<u8> / ::from_bytes(&[u8]) -> Result<ProductQuantizer, String> // sq-qamd: persist/reload the codebook (e.g. in a .spqg PQ section)
+ProductQuantizer::to_bytes() -> Vec<u8> / ::from_bytes(&[u8]) -> Result<ProductQuantizer, String>       // sq-qamd: persist/reload the codebook (e.g. in a .spqg PQ section)
 impl {Scalar,Product}Quantizer { fn encode(&self, &[f32]) -> Vec<u8>; fn reconstruct(&self, &[u8]) -> Vec<f32>;
                                   fn encode_store(&self, &VectorStore) -> Result<EncodedStore, String> }
 DistanceTable::new(&ProductQuantizer, query: &[f32]);  fn distance(&self, code)->f32; fn cosine(&self, code)->f32  // ADC
 EncodedStore::rank_pq(&self, &DistanceTable, k) -> Vec<(Id, f32)>;  cosine_from_sq_dist(sq: f32) -> f32
-EncodedStore::from_parts(ids, codes, stride) -> Result<EncodedStore, String> / ::codes -> &[u8] // sq-qamd: reload a persisted candidate cache
+EncodedStore::from_parts(ids, codes, stride) -> Result<EncodedStore, String> / ::codes() -> &[u8]       // sq-qamd: reload a persisted candidate cache
 
 // --- hybrid fusion (src/fuse.rs) --- lists are (item, f64) best-first; deterministic ties
 fuse_rrf(lists: &[&[(T, f64)]], k: f64 /*RRF_K=60.0*/, top_k) -> Vec<(T, f64)>
 fuse_rrf_weighted(lists: &[(&[(T, f64)], f64)], k, top_k) -> Vec<(T, f64)>      // weight 0.0 mutes a list entirely
 fuse_scores(a: &[(T,f64)], b: &[(T,f64)], alpha /*1.0=a only*/, top_k) -> Vec<(T, f64)>
 // one-call hybrid: run N retriever closures on one query, fuse by item via RRF, dedup
-hybrid_search(query: &Q, top_k, k /*RRF_K*/, &mut [Retriever<'_, Q, T>]) -> Vec<(T, f64)> // lifetime on alias use
+hybrid_search(query: &Q, top_k, k /*RRF_K*/, &mut [Retriever<'_, Q, T>]) -> Vec<(T, f64)>   // lifetime on alias use
 //   Retriever<'r, Q, T> = &'r mut dyn FnMut(&Q) -> Vec<(T, f64)>  (e.g. nearest_term / most_similar closures)
 
 // --- `vec:` magic predicate (src/rewrite.rs) --- feature = "vec-predicate" ONLY; pulls sparq-engine sq-k6ex
@@ -503,7 +503,7 @@ use sparq_vectors::{hybrid_search, RRF_K};
 let fused = hybrid_search(&query, 10, RRF_K, &mut [
     &mut |t: &oxrdf::Term| index.nearest_term(t, &graph, &store, 50)
         .into_iter().map(|(t, s)| (t, s as f64)).collect(),   // ANN (cosine)
-    &mut |t: &oxrdf::Term| sparq_sim::Sim::new(&graph).most_similar(t, 50), // structural (Jaccard) FQ path: block has no `use Sim`
+    &mut |t: &oxrdf::Term| sparq_sim::Sim::new(&graph).most_similar(t, 50),  // structural (Jaccard) FQ path: block has no `use Sim`
 ]);
 ```
 

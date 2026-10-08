@@ -330,7 +330,7 @@ triple terms — **non-standard** (W3C RDFC-1.0 is RDF-1.1-only) — now with a
 `*_with::<D: Digest>` hash-profile sibling on every entry point for SHA-384
 parity (sq-5i1d) and a constrained ground-triple-term
 (error-on-nested-bnode) `*_ground_terms` wrapper family for the common
-credential/VC case (sq-iaxd ). The `canonicalize_nquads` / `parse_nquads` text seam
+credential/VC case (sq-iaxd). The `canonicalize_nquads` / `parse_nquads` text seam
 and the `sparq-wasm` opt-in `canon` feature (`canonicalizeNQuads` binding for the
 `@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t; that wasm consumer pulls
 `sparq-canon` with `default-features = false` (the crate now disables

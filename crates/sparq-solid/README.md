@@ -15,7 +15,7 @@ depended on by nothing else in the workspace).
 ## 🚀 Quickstart
 
 ```rust
-# // hidden main returns Result<, String>: engine API errors are `String` (no Error impl).
+# // hidden main returns Result<(), String>: engine API errors are `String` (no Error impl).
 # fn main() -> Result<(), String> {
 use sparq_core::Graph;
 use sparq_solid::{Mode, PodStore, Session};

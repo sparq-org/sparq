@@ -5,7 +5,7 @@ Headless **SHACL-to-form derivation** for sparq: a pure function from
 — DASH-compatible auto-generated data-entry/edit forms, with **no GUI
 dependencies** (wasm-able by construction).
 
-> `research/competitive-feature-analysis-2026-07.md` §3.
+> Design record: `research/competitive-feature-analysis-2026-07.md` §3.
 
 ## 🚀 Quickstart
 

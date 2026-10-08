@@ -500,7 +500,9 @@ let budget = QueryBudget {
 let r = sparq_engine::query_with_budget(&g, "SELECT * WHERE { ?s ?p ?o }", &budget);
 // Another thread may call cancel.store(true, std::sync::atomic::Ordering::Relaxed).
 // For existence checks prefer ask()/ASK — it streams under an implicit LIMIT 1 (cheapest early exit).
-``` A nested public query from an extension callback uses an independent child
+```
+
+A nested public query from an extension callback uses an independent child
 budget, including an unlimited budget when none is supplied; it temporarily shadows the outer
 budget rather than combining limits. After the child returns, returns an error, or unwinds,
 the outer scope resumes with its complete limits, cancellation handle, byte-accounting state,
@@ -633,7 +635,6 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   `sparq_engine_service::service` and are not re-exported through the `sparq-engine` facade (they
   are implementation-internal); test transports continue to implement `Transport` and are wrapped
   via `TransportAsReader` so the streaming path is exercised without rewriting every canned mock.
-
 - **`SERVICE` evaluation is W3C-conformance-tested end-to-end** (`sq-ddpgx`, epic sq-my8wd) — the
   W3C SPARQL 1.1 `sparql11/service` evaluation suite runs against the engine's REAL `ureq` transport
   through an in-process **loopback** harness: each `qt:serviceData` block is served by a real

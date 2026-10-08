@@ -292,7 +292,7 @@ stays opt-in. The crate is `forbid(unsafe_code)`.
 - `crates/sparq-engine` — the primary consumer: keeps its planner, `Bindings`, and `Value`
   private; calls the shared kernels through thin adapters.
 
-_Status: publishable (sq-qonbz.4 ). All four modules implemented and behaviour-
+_Status: publishable (sq-qonbz.4). All four modules implemented and behaviour-
 neutral vs the pre-move engine baseline (W3C SPARQL conformance floor bit-identical; join/
 numeric/compare micro-benches within noise). Phase-5 reasoner adoption (consuming `join` from
 `sparq-reason` / `sparq-reason-el`) is tracked separately._

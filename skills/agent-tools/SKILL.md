@@ -378,7 +378,7 @@ Opt-in crate (`publish = false` — not on crates.io; build it from the workspac
 default `void` tool 2026-07-12, sq-2kkym;
 default resources + prompts surfaces 2026-07-28, sq-sjey1;
 default-on `algebra-rewrite` + `dp-planner` 2026-07-30, sq-mc06h;
-pod mode 2026-07-11 ).
+pod mode 2026-07-11).
 Tested by a real in-memory MCP round-trip (default features), a real stdio serve-loop
 round-trip, and a spawned-process session against the shipped binary (feature `stdio`,
 2026-07-28, sq-5xgxe). Only the **stdio** transport plus the embeddable

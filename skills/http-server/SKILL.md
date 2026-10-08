@@ -519,7 +519,6 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > existing); this is a DOCUMENTED DIVERGENCE, reported separately and NOT summed into the floor. Run
 > it with `cargo test -p sparq-conformance --features federation-descriptors --test sd_gsp_suite`;
 > the row is in the central scoreboard (`SPARQL 1.1 Service Description + Graph Store Protocol`).
->
 
 <!-- sq-b3df9: comment separates the two adjacent blockquotes (markdownlint MD028). -->
 
@@ -689,16 +688,16 @@ gauge count SSE streams and WS subscriptions together.
 ```sh
 # READ (GET/HEAD): serialises the addressed graph in the Accept-negotiated RDF syntax
 # (default N-Triples; also text/turtle = prefix-compacting Turtle, application/rdf+xml = RDF/XML,
-# and application/ld+json = flattened JSON-LD with `--features jsonld` sq-oy1f.1)
+#  and application/ld+json = flattened JSON-LD with `--features jsonld` sq-oy1f.1)
 curl http://127.0.0.1:3030/sparql/graph?default                 # GSP indirect (default graph)
 curl 'http://127.0.0.1:3030/sparql/graph?graph=http://ex/g'     # GSP indirect (named graph)
 curl http://127.0.0.1:3030/graphs/whatever                      # GSP direct (request URI is the graph IRI)
-curl -H 'Accept: application/rdf+xml' http://127.0.0.1:3030/sparql/graph?default # RDF/XML read sq-rt6v
-curl -H 'Accept: application/ld+json' http://127.0.0.1:3030/sparql/graph?default # JSON-LD read (--features jsonld) sq-oy1f.1
+curl -H 'Accept: application/rdf+xml' http://127.0.0.1:3030/sparql/graph?default   # RDF/XML read sq-rt6v
+curl -H 'Accept: application/ld+json' http://127.0.0.1:3030/sparql/graph?default   # JSON-LD read (--features jsonld) sq-oy1f.1
 
 # WRITE (sq-gxsj): body is RDF, format by Content-Type
-# (turtle | n-triples | n-quads | trig | application/rdf+xml sq-rt6v
-# | application/ld+json with `--features jsonld` sq-oy1f.1)
+#   (turtle | n-triples | n-quads | trig | application/rdf+xml sq-rt6v
+#    | application/ld+json with `--features jsonld` sq-oy1f.1)
 # PUT = REPLACE graph contents (201 if created, 204 if replaced):
 curl -X PUT 'http://127.0.0.1:3030/sparql/graph?graph=http://ex/g' \
      -H 'content-type: text/turtle' --data '<http://ex/s> <http://ex/p> <http://ex/o> .'
@@ -941,7 +940,7 @@ currently executing SPARQL queries, providing GraphDB query-monitoring and kill 
   `404` if the id is not found (already finished or bad id).
 - **RAII lifetime**: each executing SELECT/ASK/CONSTRUCT/DESCRIBE/**EXPLAIN (plan + analyze)**
   registers on start and deregisters on completion, error, or panic — the entry is always cleaned
-  up. (EXPLAIN ANALYZE wiring added in sq-t1isr, .)
+  up. (EXPLAIN ANALYZE wiring added in sq-t1isr,.)
 - **SPARQL UPDATEs are registered too** (`kind: "update"`; sq-m9prn). An UPDATE
   registers when the sequenced writer thread STARTS applying it — not when it is queued — so a
   row names exactly what is consuming the writer, which is the operation whose cancellation

@@ -27,7 +27,7 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
    says which is which for every surface.
 
 > This document was verified against the source on branch `main` (2026-07-13,
-> ` `). Every function, flag, and conformance number below exists today; where a
+> ``). Every function, flag, and conformance number below exists today; where a
 > form is *not* exposed on a surface, it is called out as planned, not implied.
 
 ## Native pipeline — the `sparq-jsonld` crate
