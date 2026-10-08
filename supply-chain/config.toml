@@ -60,7 +60,7 @@ version = "3.0.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.anyhow]]
-version = "1.0.102"
+version = "1.0.104"
 criteria = "safe-to-deploy"
 
 [[exemptions.approx]]
@@ -163,9 +163,8 @@ version = "3.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-trait]]
-version = "0.1.89"
+version = "0.1.92"
 criteria = "safe-to-deploy"
-notes = "was safe-to-run (dev-only); promoted to safe-to-deploy for the solid-server-rs import pre-flight (sq-gg0qq.1) - solid-oidc-verifier + the lws Store/BlobStore seams use it in non-dev deps [FABLE-5]"
 
 [[exemptions.autocfg]]
 version = "1.5.1"
@@ -198,12 +197,16 @@ notes = "solid-server-rs import pre-flight (sq-gg0qq.1): TLS-serving path of the
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.base64]]
+version = "0.23.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.base64ct]]
 version = "1.8.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.bigdecimal]]
-version = "0.4.10"
+version = "0.4.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.bincode]]
@@ -227,7 +230,7 @@ version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.blake3]]
-version = "1.8.5"
+version = "1.8.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.block-buffer]]
@@ -239,7 +242,7 @@ version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytemuck]]
-version = "1.25.0"
+version = "1.25.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytemuck_derive]]
@@ -247,7 +250,7 @@ version = "1.10.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytes]]
-version = "1.11.1"
+version = "1.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bytesize]]
@@ -260,10 +263,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cc]]
 version = "1.2.63"
-criteria = "safe-to-deploy"
-
-[[exemptions.cesu8]]
-version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.chacha20]]
@@ -322,7 +321,7 @@ version = "1.0.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.combine]]
-version = "4.6.7"
+version = "4.6.8"
 criteria = "safe-to-deploy"
 
 [[exemptions.compression-codecs]]
@@ -334,10 +333,6 @@ notes = "async-compression codec layer in the all-features tower-http graph; fro
 version = "0.4.32"
 criteria = "safe-to-deploy"
 notes = "shared async-compression core in the all-features tower-http graph; frozen cargo-vet requires the deployment criterion explicitly [GPT-5.6]"
-
-[[exemptions.concurrent-queue]]
-version = "2.5.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.console_error_panic_hook]]
 version = "0.1.7"
@@ -407,10 +402,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-deque]]
 version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.crossbeam-epoch]]
-version = "0.9.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.crossbeam-epoch]]
@@ -534,7 +525,7 @@ version = "0.11.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener]]
-version = "5.4.1"
+version = "5.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
@@ -544,10 +535,6 @@ criteria = "safe-to-deploy"
 [[exemptions.fastrand]]
 version = "2.4.1"
 criteria = "safe-to-deploy"
-
-[[exemptions.fastrand]]
-version = "2.4.1"
-criteria = "safe-to-run"
 
 [[exemptions.ff]]
 version = "0.13.1"
@@ -564,7 +551,7 @@ criteria = "safe-to-deploy"
 notes = "Opt-in sparq-arrow Parquet dependency closure; explicit review backlog exemption for PR #2196 [GPT-5.6]"
 
 [[exemptions.flate2]]
-version = "1.1.9"
+version = "1.1.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.float_next_after]]
@@ -588,35 +575,35 @@ version = "0.3.32"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-channel]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-core]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-executor]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-io]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-macro]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-sink]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-task]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.futures-util]]
-version = "0.3.32"
+version = "0.3.34"
 criteria = "safe-to-deploy"
 
 [[exemptions.generic-array]]
@@ -636,7 +623,7 @@ version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.geo-types]]
-version = "0.7.19"
+version = "0.7.20"
 criteria = "safe-to-deploy"
 
 [[exemptions.geographiclib-rs]]
@@ -663,21 +650,13 @@ criteria = "safe-to-deploy"
 version = "0.6.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.gpu-descriptor]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.gpu-descriptor-types]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.group]]
 version = "0.13.0"
 criteria = "safe-to-deploy"
 notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge feature (p256 path); no upstream audit covers this exact version [OPUS-4.8]"
 
 [[exemptions.h2]]
-version = "0.4.16"
+version = "0.4.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.h3]]
@@ -712,10 +691,6 @@ criteria = "safe-to-deploy"
 version = "0.5.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.hexf-parse]]
-version = "0.2.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.hickory-net]]
 version = "0.26.1"
 criteria = "safe-to-deploy"
@@ -729,16 +704,16 @@ version = "0.26.1"
 criteria = "safe-to-deploy"
 notes = "solid-server-rs import pre-flight (sq-gg0qq.1): transitive of solid-oidc-verifier — its DNS-pinned SSRF-guarded async resolver (0.26.1 carries the GHSA-q2qq-hmj6-3wpp hickory-proto fix). [FABLE-5]"
 
-[[exemptions.hmac]]
-version = "0.12.1"
-criteria = "safe-to-run"
-
 [[exemptions.http]]
-version = "1.4.2"
+version = "1.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.http-body]]
+version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.http-body-util]]
-version = "0.1.3"
+version = "0.1.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.httparse]]
@@ -754,7 +729,7 @@ version = "0.4.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.hyper]]
-version = "1.10.1"
+version = "1.11.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hyper-rustls]]
@@ -762,7 +737,7 @@ version = "0.27.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.hyper-util]]
-version = "0.1.20"
+version = "0.1.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.i_float]]
@@ -924,7 +899,7 @@ version = "0.2.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.libc]]
-version = "0.2.186"
+version = "0.2.190"
 criteria = "safe-to-deploy"
 
 [[exemptions.libloading]]
@@ -988,7 +963,7 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.memchr]]
-version = "2.8.2"
+version = "2.8.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.memmap2]]
@@ -1013,6 +988,10 @@ criteria = "safe-to-run"
 
 [[exemptions.minimum_redundancy]]
 version = "0.3.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.miniz_oxide]]
+version = "0.9.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.mio]]
@@ -1051,10 +1030,6 @@ criteria = "safe-to-run"
 version = "0.1.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.num]]
-version = "0.4.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.num-bigint]]
 version = "0.4.6"
 criteria = "safe-to-deploy"
@@ -1088,9 +1063,8 @@ version = "0.3.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.object_store]]
-version = "0.13.2"
+version = "0.14.2"
 criteria = "safe-to-deploy"
-notes = "solid-server-rs import pre-flight (sq-gg0qq.1): Apache Arrow's blob-store trait (S3/GCS/Azure/local) — backup/bytes-only seam of the incoming server, never authoritative. [FABLE-5]"
 
 [[exemptions.oid-registry]]
 version = "0.8.1"
@@ -1301,23 +1275,23 @@ criteria = "safe-to-run"
 notes = "DEV/TEST-ONLY property-testing harness (sq-3dyje property-testing program: substrate/core/engine/canon). NOT in the shipped or wasm build — pulled in only under [dev-dependencies]. Trusted sets reach proptest via zcash's safe-to-deploy delta chain only up to 1.4.0 and google's ub-risk-3 audit of 0.10.1; neither covers the current 1.11.0, and no trusted set audits 1.4.0 -> 1.11.0. Scoped dev-only safe-to-run exemption at the exact in-tree version until an upstream trusted audit reaches 1.11.0. [OPUS-4.8]"
 
 [[exemptions.pyo3]]
-version = "0.29.0"
+version = "0.29.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pyo3-build-config]]
-version = "0.29.0"
+version = "0.29.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pyo3-ffi]]
-version = "0.29.0"
+version = "0.29.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pyo3-macros]]
-version = "0.29.0"
+version = "0.29.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.pyo3-macros-backend]]
-version = "0.29.0"
+version = "0.29.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.quick-xml]]
@@ -1329,19 +1303,11 @@ version = "0.41.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.quinn]]
-version = "0.11.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.quinn]]
-version = "0.11.11"
+version = "0.11.12"
 criteria = "safe-to-deploy"
 
 [[exemptions.quinn-proto]]
-version = "0.11.14"
-criteria = "safe-to-deploy"
-
-[[exemptions.quinn-proto]]
-version = "0.11.16"
+version = "0.11.19"
 criteria = "safe-to-deploy"
 
 [[exemptions.quote]]
@@ -1382,7 +1348,7 @@ version = "1.12.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rcgen]]
-version = "0.14.8"
+version = "0.14.10"
 criteria = "safe-to-run"
 
 [[exemptions.rdf-canon]]
@@ -1390,20 +1356,19 @@ version = "0.15.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.redis]]
-version = "1.3.0"
+version = "1.7.1"
 criteria = "safe-to-deploy"
-notes = "solid-server-rs import pre-flight (sq-gg0qq.1): SYNC-only client (default-features=false, features=[r2d2]) behind the incoming server's opt-in redis-replay feature; BSD-3-Clause. [FABLE-5]"
 
 [[exemptions.redox_syscall]]
 version = "0.5.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex]]
-version = "1.12.4"
+version = "1.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-automata]]
-version = "0.4.14"
+version = "0.4.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-syntax]]
@@ -1418,10 +1383,6 @@ criteria = "safe-to-deploy"
 version = "0.12.28"
 criteria = "safe-to-deploy"
 
-[[exemptions.resiter]]
-version = "0.5.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.resolv-conf]]
 version = "0.7.6"
 criteria = "safe-to-deploy"
@@ -1433,14 +1394,6 @@ notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge fe
 
 [[exemptions.ring]]
 version = "0.17.14"
-criteria = "safe-to-deploy"
-
-[[exemptions.rio_api]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.rio_turtle]]
-version = "0.8.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.robust]]
@@ -1481,11 +1434,11 @@ version = "1.14.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-platform-verifier]]
-version = "0.6.2"
+version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-platform-verifier-android]]
-version = "0.1.1"
+version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
@@ -1544,12 +1497,24 @@ version = "0.3.6"
 criteria = "safe-to-deploy"
 notes = "Opt-in sparq-arrow Parquet dependency closure; explicit review backlog exemption for PR #2196 [GPT-5.6]"
 
+[[exemptions.serde]]
+version = "1.0.229"
+criteria = "safe-to-deploy"
+
 [[exemptions.serde-big-array]]
 version = "0.5.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde_core]]
+version = "1.0.229"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_derive]]
+version = "1.0.229"
+criteria = "safe-to-deploy"
+
 [[exemptions.serde_json]]
-version = "1.0.150"
+version = "1.0.151"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_path_to_error]]
@@ -1613,48 +1578,12 @@ criteria = "safe-to-deploy"
 version = "1.1.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.smallvec]]
+version = "1.16.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.socket2]]
 version = "0.6.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_api]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_c14n]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_inmem]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_iri]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_isomorphism]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_resource]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_rio]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_term]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.sophia_turtle]]
-version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.spade]]
@@ -1693,12 +1622,12 @@ criteria = "safe-to-deploy"
 version = "0.11.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.sucds]]
-version = "0.8.3"
+[[exemptions.syn]]
+version = "2.0.117"
 criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
-version = "2.0.117"
+version = "3.0.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
@@ -1726,11 +1655,11 @@ version = "1.4.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror]]
-version = "2.0.18"
+version = "2.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.thiserror-impl]]
-version = "2.0.18"
+version = "2.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]
@@ -1758,7 +1687,7 @@ version = "1.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio]]
-version = "1.52.3"
+version = "1.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-macros]]
@@ -1766,7 +1695,7 @@ version = "2.7.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-rustls]]
-version = "0.26.4"
+version = "0.26.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-tungstenite]]
@@ -1786,7 +1715,7 @@ version = "0.6.11"
 criteria = "safe-to-deploy"
 
 [[exemptions.tower-http]]
-version = "0.7.0"
+version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tower-layer]]
@@ -1844,11 +1773,11 @@ version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ureq]]
-version = "3.3.0"
+version = "3.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.ureq-proto]]
-version = "0.6.0"
+version = "0.6.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.url]]
@@ -1864,7 +1793,7 @@ version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.uuid]]
-version = "1.23.4"
+version = "1.27.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.version_check]]
@@ -2022,10 +1951,6 @@ version = "0.5.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
-version = "0.45.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-sys]]
 version = "0.52.0"
 criteria = "safe-to-deploy"
 
@@ -2035,10 +1960,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.windows-sys]]
 version = "0.61.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows-targets]]
-version = "0.42.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows-targets]]
@@ -2054,10 +1975,6 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_aarch64_gnullvm]]
-version = "0.42.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_gnullvm]]
 version = "0.52.6"
 criteria = "safe-to-deploy"
 
@@ -2066,19 +1983,11 @@ version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_aarch64_msvc]]
-version = "0.42.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_aarch64_msvc]]
 version = "0.52.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_aarch64_msvc]]
 version = "0.53.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_gnu]]
-version = "0.42.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_gnu]]
@@ -2098,10 +2007,6 @@ version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_i686_msvc]]
-version = "0.42.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_i686_msvc]]
 version = "0.52.6"
 criteria = "safe-to-deploy"
 
@@ -2110,10 +2015,6 @@ version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnu]]
-version = "0.42.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnu]]
 version = "0.52.6"
 criteria = "safe-to-deploy"
 
@@ -2122,19 +2023,11 @@ version = "0.53.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnullvm]]
-version = "0.42.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_gnullvm]]
 version = "0.52.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_gnullvm]]
 version = "0.53.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.windows_x86_64_msvc]]
-version = "0.42.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.windows_x86_64_msvc]]

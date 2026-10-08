@@ -53,10 +53,11 @@
 //! `D_ENTAIL_FLOOR` ratchet are byte-identical before/after. Two pieces stay local
 //! by DESIGN, not omission (design record §4 keeps facet validation dtype-resident):
 //!
-//! - **`integer_subtype_ok` (bounded-range facets) stays local.** The substrate
+//! - **The bounded-range facet check stays in sparq-reason.** The substrate
 //!   `Num::of_literal` parses magnitude only; it does NOT reject `"200"^^xsd:byte`
 //!   (out of the `byte` value space). rdfD1 must not type an out-of-range literal, so
-//!   the `i128` parse + range-facet reject is applied HERE before the canonical key.
+//!   the `i128` parse + range-facet reject is applied HERE before the canonical key,
+//!   via the crate-internal `xsd_facets` table shared with the RIF front-end (#5337).
 //! - **`parse_xsd_double` (local double/float parser) MIGRATED in sq-s3b10 [SONNET-4.6].**
 //!   The local blocklist (`contains("inf")`, case-sensitive) was replaced by the shared
 //!   `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32`, so dtype.rs and the
@@ -81,7 +82,7 @@
 //!      aliasing this module is built to avoid.
 //!   3. **Range facets.** `as_numeric` parses magnitude only, so `cmp_relational`
 //!      equates `"200"^^xsd:byte` with `"200"^^xsd:integer` — but 200 is outside the
-//!      `byte` value space, so rdfD1 must not type it (see `integer_subtype_ok` below).
+//!      `byte` value space, so rdfD1 must not type it (see `xsd_facets::integer_in_bounds`).
 //!
 //!   There is also a structural blocker: `d_value_key` must return a standalone `Eq` KEY
 //!   (`DValue`), and a pairwise `Option<Ordering>` comparator cannot produce one — only
@@ -376,7 +377,7 @@ pub fn has_value_mapping(dt: &str) -> bool {
 /// [SONNET-4.6] sq-s3b10: the double/float lexical parser NOW DELEGATES to the shared
 /// `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32` — the local
 /// `parse_xsd_double` helper is removed; see the module doc's ledger for the tightening.
-/// `integer_subtype_ok` stays local (facet validation is dtype-resident by design).
+/// The integer range facets stay in-crate (`xsd_facets`; facet validation is not delegated).
 ///
 /// [SONNET-4.6] sq-pbz04.6.2: added anyURI, language/Name/NCName/NMTOKEN,
 /// hexBinary/base64Binary.
@@ -459,7 +460,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
     if is_integer_datatype(dt) {
         let v: i128 = lex.parse().ok()?;
         // Integer-subtype range facets (the value must be IN the datatype's space).
-        if !integer_subtype_ok(dt, v) {
+        if !crate::xsd_facets::integer_in_bounds(dt, v) {
             return None;
         }
         return Some(DValue::Decimal(canon_decimal(&v.to_string())?));
@@ -577,39 +578,6 @@ pub enum DValue {
     /// equal D-values across the two datatypes.
     /// [SONNET-4.6] sq-pbz04.6.2.
     Octets(Vec<u8>),
-}
-
-/// The integer-subtype range facet check: the value must be inside the bounded
-/// derived type's value space (e.g. `xsd:byte` is [-128, 127]). [SONNET-4.6]
-/// sq-pbz04.6.1: every derived integer type carries BOTH its sign facet AND its
-/// magnitude bounds. A value like `"200"^^xsd:byte` parses fine as `i128` but is
-/// outside the `byte` value space, so it is ill-formed and must NOT be typed by
-/// rdfD1; likewise `"4294967296"^^xsd:unsignedInt` exceeds the `unsignedInt` upper
-/// bound. Only genuinely-unbounded `xsd:integer` (and any unrecognized-shaped IRI)
-/// falls through to the permissive `_` arm. Ranges use `RangeInclusive::contains`
-/// so the two-sided bound stays `clippy::manual_range_contains`-clean.
-fn integer_subtype_ok(dt: &str, v: i128) -> bool {
-    let Some(local) = dt.strip_prefix(XSD) else {
-        return true;
-    };
-    match local {
-        // Sign-only facets (no magnitude bound in the value space). [SONNET-4.6]
-        "nonNegativeInteger" => v >= 0,
-        "positiveInteger" => v > 0,
-        "nonPositiveInteger" => v <= 0,
-        "negativeInteger" => v < 0,
-        // Bounded signed derived integers. [SONNET-4.6]
-        "long" => (i64::MIN as i128..=i64::MAX as i128).contains(&v),
-        "int" => (i32::MIN as i128..=i32::MAX as i128).contains(&v),
-        "short" => (-32768..=32767).contains(&v),
-        "byte" => (-128..=127).contains(&v),
-        // Bounded unsigned derived integers (lower bound 0 AND an upper bound). [SONNET-4.6]
-        "unsignedLong" => (0..=18446744073709551615_i128).contains(&v),
-        "unsignedInt" => (0..=4294967295).contains(&v),
-        "unsignedShort" => (0..=65535).contains(&v),
-        "unsignedByte" => (0..=255).contains(&v),
-        _ => true,
-    }
 }
 
 /// Canonicalize a decimal lexical form to (sign)(minimal-int).(minimal-frac);

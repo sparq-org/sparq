@@ -63,7 +63,12 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useEngine, type ImportKind, type ImportMode } from "@/lib/engine-context";
-import { runImportBatch, type BatchSummary } from "@/lib/import-batch";
+import {
+  runImportBatch,
+  summariseImportedBatch,
+  type BatchSummary,
+  type ImportedDocument,
+} from "@/lib/import-batch";
 import { useWorkspace } from "@/lib/workspace-context";
 import {
   FORMAT_OPTIONS,
@@ -291,12 +296,14 @@ function ImportDrawer({
       // Sequence the batch: the selected mode is applied to the FIRST file that imports
       // SUCCESSFULLY (not to array index 0), 'add' thereafter (sq-810a0). Update each row
       // incrementally so it lights up as it completes.
+      // The successfully imported documents, for the batch's workspace-history entry.
+      const imported: ImportedDocument[] = [];
       const { summary } = await runImportBatch(
         webFiles,
         mode,
         (file) => file.name,
-        (file, fileMode) =>
-          importRdf({
+        async (file, fileMode) => {
+          const result = await importRdf({
             kind: "paste",
             mode: fileMode,
             preserveGraphs,
@@ -305,20 +312,23 @@ function ImportDrawer({
             // so a compressed upload is parsed as its real serialisation, not as the fallback.
             format: guessFormat(file.effectiveName),
             text: file.text,
-          }),
+          });
+          imported.push({
+            label: fileLabel(file.name),
+            format: result.format,
+            bytes: result.bytes,
+          });
+          return result;
+        },
         (_key, _status, statuses) => setFileStatuses({ ...statuses }),
       );
 
       setFeedback(batchFeedback(summary));
 
-      // Record the batch in workspace history.
-      if (summary.okCount > 0) {
-        const label =
-          webFiles.length === 1 ? fileLabel(webFiles[0].name) : `${webFiles.length} files`;
-        await recordImport(
-          { kind: "local", label, format: "mixed", bytes: 0, importedAt: Date.now() },
-          snapshotStore(),
-        );
+      // Record the batch in workspace history with its real byte total and format (#6257).
+      const entry = summariseImportedBatch(imported);
+      if (entry) {
+        await recordImport({ kind: "local", ...entry, importedAt: Date.now() }, snapshotStore());
         refreshDiskUsage();
       }
     })().finally(() => setBusy(false));
