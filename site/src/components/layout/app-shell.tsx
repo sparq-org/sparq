@@ -31,7 +31,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Github, Menu } from "lucide-react";
+import { Menu } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { withBasePath } from "@/lib/base-path";
@@ -43,6 +43,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { Logo } from "@/components/logo";
+import { Github } from "@/components/github-icon";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   CommandPalette,

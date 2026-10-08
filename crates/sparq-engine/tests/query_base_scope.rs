@@ -84,3 +84,38 @@ fn base_does_not_persist_into_a_later_top_level_query() {
     assert_eq!(r.rows.len(), 1);
     assert_eq!(r.rows[0][0], None);
 }
+
+/// CONSTRUCT and DESCRIBE install the query's BASE too: `IRI("rel")` in their WHERE
+/// clause resolves against it (it was an error, so an unbound slot, before).
+#[test]
+fn construct_and_describe_resolve_relative_iris_against_the_query_base() {
+    let g = graph();
+    let q = r#"BASE <https://base.example/>
+               CONSTRUCT { ?s <http://ex/q> ?r } WHERE { ?s ?p ?o BIND(IRI("rel") AS ?r) }"#;
+    for triples in [
+        sparq_engine::construct(&g, q).expect("construct"),
+        sparq_engine::construct_or_describe(&g, q).expect("construct_or_describe"),
+    ] {
+        assert_eq!(triples.len(), 1);
+        assert_eq!(triples[0].object.to_string(), "<https://base.example/rel>");
+    }
+    let d = r#"BASE <http://ex/> DESCRIBE ?x WHERE { BIND(IRI("s") AS ?x) }"#;
+    assert_eq!(sparq_engine::describe(&g, d).expect("describe").len(), 1);
+}
+
+/// Above the parallel-evaluation threshold, BIND runs on rayon workers: each worker must
+/// see the query's BASE, or relative IRI() results go unbound and rows silently vanish.
+#[test]
+fn base_reaches_parallel_bind_workers() {
+    let n = 60_000;
+    let nt: String = (0..n).map(|i| format!("<http://ex/s{i}> <http://ex/p> \"{i}\" .\n")).collect();
+    let g = Graph::load_str(&nt, "ntriples").unwrap();
+    let sel = "BASE <https://base.example/> SELECT ?r WHERE { ?s ?p ?o BIND(IRI(\"rel\") AS ?r) }";
+    let r = query(&g, sel).unwrap();
+    assert_eq!(r.rows.len(), n);
+    assert!(r.rows.iter().all(|row| row[0].as_ref().map(|t| t.to_string()).as_deref()
+        == Some("<https://base.example/rel>")));
+    let c = "BASE <https://base.example/> CONSTRUCT { ?s <http://ex/q> ?r } \
+             WHERE { ?s ?p ?o BIND(IRI(\"rel\") AS ?r) }";
+    assert_eq!(sparq_engine::construct_or_describe(&g, c).unwrap().len(), n);
+}

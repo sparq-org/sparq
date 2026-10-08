@@ -1912,21 +1912,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rdf-canon"
-version = "0.15.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6783be73f4fa73010f249412ad8f0bb1ac9cdb22b2310bf20a967d80d5906dd0"
-dependencies = [
- "base16ct",
- "digest",
- "itertools 0.14.0",
- "oxrdf 0.2.4",
- "sha2",
- "thiserror 2.0.20",
- "tracing",
-]
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2357,13 +2342,16 @@ dependencies = [
 name = "sparq-canon"
 version = "0.1.4"
 dependencies = [
+ "base16ct",
  "digest",
+ "itertools 0.14.0",
  "oxrdf 0.2.4",
  "oxrdf 0.3.3",
  "oxttl 0.1.8",
  "oxttl 0.2.3",
- "rdf-canon",
+ "sha2",
  "sparq-core",
+ "thiserror 2.0.20",
 ]
 
 [[package]]

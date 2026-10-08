@@ -13,7 +13,7 @@ pub struct CanonicalizationLimits {
     pub max_quads: usize,
     pub max_input_bytes: usize,
     pub max_output_bytes: usize,
-    /// Passed explicitly to rdf-canon's total HNDQ-call counter.
+    /// Passed explicitly to the vendored RDFC total HNDQ-call counter.
     pub max_hndq_calls: usize,
     /// Maximum precomputed upper bound on all permutation-loop iterations.
     pub max_permutation_steps: usize,
@@ -28,9 +28,9 @@ pub fn canonicalize_quads_bounded_with<D: Digest>(
     limits: &CanonicalizationLimits,
 ) -> Result<String, CanonError> {
     let quads = prepare(dataset, limits)?;
-    let result = rdf_canon::canonicalize_quads_with::<D>(
+    let result = crate::rdfc::canonicalize_quads_with::<D>(
         &quads,
-        &rdf_canon::CanonicalizationOptions {
+        &crate::rdfc::CanonicalizationOptions {
             hndq_call_limit: Some(limits.max_hndq_calls),
         },
     )
@@ -50,9 +50,9 @@ pub fn issue_quads_bounded_with<D: Digest>(
     limits: &CanonicalizationLimits,
 ) -> Result<HashMap<String, String>, CanonError> {
     let quads = prepare(dataset, limits)?;
-    rdf_canon::issue_quads_with::<D>(
+    crate::rdfc::issue_quads_with::<D>(
         &quads,
-        &rdf_canon::CanonicalizationOptions {
+        &crate::rdfc::CanonicalizationOptions {
             hndq_call_limit: Some(limits.max_hndq_calls),
         },
     )
@@ -162,7 +162,7 @@ fn prepare(
             .filter(|bound| *bound <= limits.max_permutation_steps)
             .ok_or_else(|| capacity("canonical permutation capacity"))?;
     }
-    // In rdf-canon 0.15.3, canon.rs hash_n_degree_quads checks the global
+    // In the vendored rdf-canon 0.15.3 (src/rdfc/canon.rs), hash_n_degree_quads checks the global
     // call counter before its body. Hn has at most degree groups, each with
     // <= degree occurrences. Its sole permutation loop has <= degree! entries
     // per group, including entries skipped before recursive calls are counted.
