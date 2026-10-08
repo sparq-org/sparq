@@ -14589,6 +14589,34 @@ fn as_numeric(v: &Value) -> Option<Num> {
     }
 }
 
+/// The lexical of a well-formed `xsd:integer` / `xsd:decimal` literal too large for the
+/// i128 tower (`Num::of_literal` declines it). Such a value is still a number: the ORDER BY
+/// total order compares it exactly by its lexical instead of as an opaque string.
+fn beyond_tower_lexical(v: &Value) -> Option<&str> {
+    let Value::Term(Term::Literal(l)) = v else { return None };
+    if l.language().is_some() || Num::of_literal(l).is_some() {
+        return None;
+    }
+    let lex = l.value().trim();
+    let integer = l.datatype() == xsd::INTEGER;
+    if !integer && l.datatype() != xsd::DECIMAL {
+        return None;
+    }
+    split_decimal(lex)?;
+    (!integer || !lex.contains('.')).then_some(lex)
+}
+
+/// An exact decimal lexical for a numeric `Value`: an integer/decimal (in or beyond the
+/// tower). `None` for float/double, whose exact value is its `f64`.
+#[cold]
+fn exact_decimal_lexical(v: &Value) -> Option<String> {
+    match as_numeric(v) {
+        Some(n) if n.to_dec().is_some() => Some(n.lexical()),
+        Some(_) => None,
+        None => beyond_tower_lexical(v).map(str::to_string),
+    }
+}
+
 fn as_num(v: &Value) -> Option<f64> {
     match v {
         Value::Num(n) => Some(n.f64()),
@@ -14673,7 +14701,9 @@ impl CompareTerm for Value {
         // one kind with boolean LITERALS (both order `false < true` via `strict_cmp`).
         match lit_kind(self) {
             LitKind::Bool(_) => LiteralKind::Boolean,
-            LitKind::Num(_) if as_num(self).is_some() => LiteralKind::Numeric,
+            LitKind::Num(_) if as_num(self).is_some() || beyond_tower_lexical(self).is_some() => {
+                LiteralKind::Numeric
+            }
             LitKind::Str(_) => LiteralKind::String,
             LitKind::Lang(..) => LiteralKind::Lang,
             LitKind::DateTime(Some(_)) => LiteralKind::DateTime,
@@ -14689,7 +14719,10 @@ impl CompareTerm for Value {
     }
     #[inline]
     fn as_f64(&self) -> Option<f64> {
-        as_num(self)
+        // A well-formed integer/decimal beyond the i128 tower has no `Num`, but it is still a
+        // number: its correctly-rounded f64 (monotonic, possibly +-INF) orders it, and an f64
+        // tie is rechecked exactly in `exact_cmp`.
+        as_num(self).or_else(|| beyond_tower_lexical(self).and_then(parse_xsd_f64))
     }
     #[inline]
     fn exact_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -14705,7 +14738,14 @@ impl CompareTerm for Value {
         // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
             (Some(a), Some(b)) => Some(a.cmp_total(b)),
-            _ => None,
+            // At least one side is beyond the i128 tower: compare exact decimal lexicals
+            // (arbitrary precision), or an exact lexical against a float/double's value.
+            _ => match (exact_decimal_lexical(self), exact_decimal_lexical(other)) {
+                (Some(a), Some(b)) => cmp_decimal_str(&a, &b),
+                (Some(a), None) => Some(cmp_exact_lex_f64(&a, as_num(other)?)),
+                (None, Some(b)) => Some(cmp_exact_lex_f64(&b, as_num(self)?).reverse()),
+                (None, None) => None,
+            },
         }
     }
     #[inline]
