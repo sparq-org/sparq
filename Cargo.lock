@@ -4916,7 +4916,7 @@ version = "0.1.4"
 dependencies = [
  "base16ct",
  "digest 0.10.7",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "oxrdf 0.2.4",
  "oxrdf 0.3.3",
  "oxttl 0.1.8",
