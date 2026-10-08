@@ -196,7 +196,11 @@ ex:alice ex:name "Alice" .
     #[test]
     fn read_default_graph_returns_only_default_graph_triples() {
         let text = read(&dataset(), DEFAULT_GRAPH_URI, &QueryBudget::unlimited()).expect("read");
-        assert!(text.contains("Alice"), "default graph triple missing: {}", text);
+        assert!(
+            text.contains("Alice"),
+            "default graph triple missing: {}",
+            text
+        );
         assert!(!text.contains("Bob"), "named-graph triple leaked: {}", text);
     }
 
@@ -204,15 +208,27 @@ ex:alice ex:name "Alice" .
     fn read_named_graph_returns_only_that_graphs_triples() {
         let text = read(&dataset(), "http://ex/g1", &QueryBudget::unlimited()).expect("read");
         assert!(text.contains("Bob"), "named graph triple missing: {}", text);
-        assert!(!text.contains("Alice"), "default-graph triple leaked: {}", text);
-        assert!(!text.contains("Carol"), "sibling named-graph triple leaked: {}", text);
+        assert!(
+            !text.contains("Alice"),
+            "default-graph triple leaked: {}",
+            text
+        );
+        assert!(
+            !text.contains("Carol"),
+            "sibling named-graph triple leaked: {}",
+            text
+        );
     }
 
     #[test]
     fn read_dataset_returns_the_void_descriptor() {
         let text = read(&dataset(), DATASET_URI, &QueryBudget::unlimited()).expect("read");
         assert!(text.contains(DATASET_URI), "VoID subject missing: {}", text);
-        assert!(text.contains("rdfs.org/ns/void#"), "not a VoID descriptor: {}", text);
+        assert!(
+            text.contains("rdfs.org/ns/void#"),
+            "not a VoID descriptor: {}",
+            text
+        );
     }
 
     #[test]
@@ -220,7 +236,11 @@ ex:alice ex:name "Alice" .
         let err = read(&dataset(), "http://ex/nope", &QueryBudget::unlimited())
             .expect_err("unknown URI must not resolve");
         assert!(matches!(err, ReadError::NotFound(_)), "{:?}", err);
-        assert!(err.message().contains("http://ex/nope"), "{}", err.message());
+        assert!(
+            err.message().contains("http://ex/nope"),
+            "{}",
+            err.message()
+        );
     }
 
     /// A named graph carrying a RESERVED URI is shadowed by the dataset-level resource in
@@ -238,7 +258,11 @@ ex:alice ex:name "Alice" .
         );
         // And the reserved URI still resolves to the DEFAULT graph, not the shadowed one.
         let text = read(&graph, DEFAULT_GRAPH_URI, &QueryBudget::unlimited()).expect("read");
-        assert!(!text.contains("shadowed"), "reserved URI resolved to the named graph: {}", text);
+        assert!(
+            !text.contains("shadowed"),
+            "reserved URI resolved to the named graph: {}",
+            text
+        );
     }
 
     #[test]

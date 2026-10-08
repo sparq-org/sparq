@@ -10,14 +10,14 @@
 
 use std::time::Duration;
 
+use serde_json::{json, Value};
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
 use sparq_introspect::Introspection;
-use serde_json::{json, Value};
 
 use crate::jsonrpc::{
-    Request, Response, RpcError, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST,
-    METHOD_NOT_FOUND, RESOURCE_NOT_FOUND,
+    Request, Response, RpcError, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
+    RESOURCE_NOT_FOUND,
 };
 use crate::prompts;
 use crate::resources::{self, ReadError};
@@ -70,7 +70,8 @@ pub const DEFAULT_MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 /// The per-tool-call deadline duration from a config's seconds and milliseconds fields:
 /// the milliseconds field wins when set (gh #5696), else the seconds field, else none.
 pub(crate) fn timeout_duration(secs: Option<u64>, ms: Option<u64>) -> Option<Duration> {
-    ms.map(Duration::from_millis).or_else(|| secs.map(Duration::from_secs))
+    ms.map(Duration::from_millis)
+        .or_else(|| secs.map(Duration::from_secs))
 }
 
 /// Server configuration. The security-relevant field is [`Self::allow_update`]:
@@ -266,7 +267,10 @@ impl McpServer {
     /// The `tools/list` result: every advertised tool's `name`/`description`/
     /// `inputSchema`. `update` appears here only when update is enabled.
     fn tools_list_result(&self) -> Value {
-        let tools: Vec<Value> = tools::advertised(self).iter().map(|t| t.to_json()).collect();
+        let tools: Vec<Value> = tools::advertised(self)
+            .iter()
+            .map(|t| t.to_json())
+            .collect();
         json!({ "tools": tools })
     }
 
@@ -318,7 +322,10 @@ impl McpServer {
             .ok_or_else(|| RpcError::new(INVALID_PARAMS, "prompts/get requires a string `name`"))?;
         let spec = prompts::find(name)
             .ok_or_else(|| RpcError::new(INVALID_PARAMS, format!("unknown prompt: {}", name)))?;
-        let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        let args = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
         let text = (spec.render)(&args).map_err(|m| RpcError::new(INVALID_PARAMS, m))?;
         Ok(json!({
             "description": spec.description,
@@ -417,7 +424,10 @@ impl McpServer {
                     .unwrap_or(4000);
                 Ok(ix.to_text_summary(budget))
             }
-            other => Err(format!("unknown format `{}` (expected \"json\" or \"text\")", other)),
+            other => Err(format!(
+                "unknown format `{}` (expected \"json\" or \"text\")",
+                other
+            )),
         }
     }
 
@@ -889,9 +899,22 @@ mod tests {
     #[test]
     fn timeout_ms_overrides_secs() {
         assert_eq!(timeout_duration(None, None), None);
-        assert_eq!(timeout_duration(Some(30), None), Some(Duration::from_secs(30)));
-        assert_eq!(timeout_duration(Some(30), Some(250)), Some(Duration::from_millis(250)));
-        assert_eq!(timeout_duration(None, Some(250)), Some(Duration::from_millis(250)));
-        assert_eq!(ServerConfig::default().query_timeout_ms, None, "default unchanged");
+        assert_eq!(
+            timeout_duration(Some(30), None),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(
+            timeout_duration(Some(30), Some(250)),
+            Some(Duration::from_millis(250))
+        );
+        assert_eq!(
+            timeout_duration(None, Some(250)),
+            Some(Duration::from_millis(250))
+        );
+        assert_eq!(
+            ServerConfig::default().query_timeout_ms,
+            None,
+            "default unchanged"
+        );
     }
 }

@@ -60,7 +60,10 @@ fn with_no_backend(f: impl FnOnce()) {
 fn ask_is_not_advertised_when_no_backend_is_configured() {
     with_no_backend(|| {
         let mut server = McpServer::new(graph());
-        let resp = call(&mut server, r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
+        let resp = call(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+        );
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()

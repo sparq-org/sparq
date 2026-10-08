@@ -213,8 +213,12 @@ mod tests {
     #[test]
     fn bad_arguments_are_refused() {
         assert!(parse(&["--nope"]).unwrap_err().contains("unknown option"));
-        assert!(parse(&["--format"]).unwrap_err().contains("requires a value"));
-        assert!(parse(&["--max-rows"]).unwrap_err().contains("requires a value"));
+        assert!(parse(&["--format"])
+            .unwrap_err()
+            .contains("requires a value"));
+        assert!(parse(&["--max-rows"])
+            .unwrap_err()
+            .contains("requires a value"));
         assert!(parse(&["--query-timeout", "soon"])
             .unwrap_err()
             .contains("invalid number"));
@@ -253,7 +257,9 @@ mod tests {
     fn an_unreadable_data_file_is_an_error_not_an_empty_graph() {
         let missing = std::env::temp_dir().join("sparq-mcp-cli-does-not-exist.ttl");
         std::fs::remove_file(&missing).ok();
-        let err = load_graph(Some(&missing), None).err().expect("a missing file must error");
+        let err = load_graph(Some(&missing), None)
+            .err()
+            .expect("a missing file must error");
         assert!(err.contains("cannot read"), "{}", err);
     }
 

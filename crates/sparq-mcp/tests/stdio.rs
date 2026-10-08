@@ -32,7 +32,12 @@ fn serve_handles_a_line_delimited_session() {
 
     let text = String::from_utf8(out).unwrap();
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines.len(), 2, "two responses, the notification produced none: {:?}", lines);
+    assert_eq!(
+        lines.len(),
+        2,
+        "two responses, the notification produced none: {:?}",
+        lines
+    );
 
     let init: Value = serde_json::from_str(lines[0]).unwrap();
     assert_eq!(init["id"], 1);
@@ -77,12 +82,19 @@ fn serve_carries_a_batch_on_a_single_line_each_way() {
 
     let batch: Value = serde_json::from_str(lines[0]).unwrap();
     let batch = batch.as_array().expect("the batch line holds an array");
-    assert_eq!(batch.len(), 2, "the notification element contributes nothing");
+    assert_eq!(
+        batch.len(),
+        2,
+        "the notification element contributes nothing"
+    );
     assert_eq!(batch[0]["id"], 1);
     assert_eq!(batch[1]["id"], 2);
 
     let single: Value = serde_json::from_str(lines[1]).unwrap();
-    assert!(!single.is_array(), "a single request still gets a bare object");
+    assert!(
+        !single.is_array(),
+        "a single request still gets a bare object"
+    );
     assert_eq!(single["id"], 3);
 }
 
@@ -139,7 +151,10 @@ fn serve_rejects_an_oversized_request_line_and_keeps_serving() {
     use std::io::Read;
 
     let graph = Graph::load_str("<http://ex/a> <http://ex/p> <http://ex/b> .", "ntriples").unwrap();
-    let config = sparq_mcp::ServerConfig { max_request_bytes: Some(64), ..Default::default() };
+    let config = sparq_mcp::ServerConfig {
+        max_request_bytes: Some(64),
+        ..Default::default()
+    };
     let mut server = McpServer::with_config(graph, config);
 
     // 8 MiB with no newline, far beyond the 64-byte cap, then a normal request.
@@ -150,18 +165,30 @@ fn serve_rejects_an_oversized_request_line_and_keeps_serving() {
     sparq_mcp::serve(&mut server, reader, &mut out).expect("serve loop");
 
     let text = String::from_utf8(out).unwrap();
-    let lines: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+    let lines: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
     assert_eq!(lines.len(), 2, "{text}");
     assert_eq!(lines[0]["id"], Value::Null);
     assert_eq!(lines[0]["error"]["code"], -32600);
-    assert!(lines[0]["error"]["message"].as_str().unwrap().contains("64"), "{text}");
+    assert!(
+        lines[0]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("64"),
+        "{text}"
+    );
     assert_eq!(lines[1]["id"], 7);
     assert!(lines[1].get("error").is_none(), "{text}");
 
     // A line exactly at the cap is accepted (the bound is inclusive of the limit).
     let graph = Graph::load_str("", "ntriples").unwrap();
     let ping = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
-    let config = sparq_mcp::ServerConfig { max_request_bytes: Some(ping.len()), ..Default::default() };
+    let config = sparq_mcp::ServerConfig {
+        max_request_bytes: Some(ping.len()),
+        ..Default::default()
+    };
     let mut server = McpServer::with_config(graph, config);
     let mut out: Vec<u8> = Vec::new();
     sparq_mcp::serve(&mut server, format!("{ping}\n").as_bytes(), &mut out).expect("serve loop");
