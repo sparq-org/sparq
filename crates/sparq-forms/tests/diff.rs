@@ -181,3 +181,136 @@ fn valid_bnode_lang_and_triple_terms_still_render() {
     assert!(ok.contains("<<( <http://a> <http://b> \"c\" )>> ."), "{ok}");
     update(&graph(DATA), &ok).unwrap();
 }
+
+/// Codex review of #6707: `oxrdf::Term::from_str` rejected blank-node labels
+/// with internal dots, which RDF 1.2 allows, so a valid value suppressed the
+/// whole update.
+#[test]
+fn triple_terms_accept_full_rdf12_grammar() {
+    let ok = update_with_greeting(term("bnode", "a..b", None));
+    assert!(ok.contains("_:a..b ."), "{ok}");
+    update(&graph(DATA), &ok).unwrap();
+    for (text, expected) in [
+        (
+            "<<( <http://a> <http://b> _:a..b )>>",
+            "<<( <http://a> <http://b> _:a..b )>>",
+        ),
+        (
+            "<<(_:a.b <http://b> <<( <http://c> <http://d> \"e\\\"f\"@en-GB )>>)>>",
+            "<<( _:a.b <http://b> <<( <http://c> <http://d> \"e\\\"f\"@en-gb )>> )>>",
+        ),
+        (
+            "<<( <http://a> <http://b> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> )>>",
+            "<<( <http://a> <http://b> \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> )>>",
+        ),
+        (
+            "<<( <http://a> <http://b> \"x\"@ar--rtl )>>",
+            "<<( <http://a> <http://b> \"x\"@ar--rtl )>>",
+        ),
+    ] {
+        let ok = update_with_greeting(term("triple", text, None));
+        assert!(ok.contains(&format!("{expected} .")), "{text}: {ok}");
+        update(&graph(DATA), &ok).unwrap();
+    }
+}
+
+#[test]
+fn malformed_triple_terms_fail_closed() {
+    for bad in [
+        "<<( <http://a> <http://b> _:a. )>>",
+        "<<( <http://a> <http://b> _: )>>",
+        "<<( <http://a\\u003E . } ; DROP ALL ; INSERT { <x> <http://b> <http://c> )>>",
+        "<<( <http://a> <http://b> \"c\" )>> . } ; DROP ALL",
+        "<<( <http://a> <http://b> \"c\"@en . } ; DROP ALL )>>",
+        "<<( <http://a> <http://b> \"c\"@en--up )>>",
+        "<<( <http://a> <http://b> \"c\\q\" )>>",
+        "<<( <http://a> <http://b> \"c\"^^\"d\" )>>",
+        "<<( <http://a> <http://b> \"unterminated )>>",
+        "<<( \"c\" <http://b> <http://c> )>>",
+        "<<( <<( <http://a> <http://b> <http://c> )>> <http://b> <http://c> )>>",
+        "<<( <http://a> _:p <http://c> )>>",
+        "<<( <http://a> <http://b> <http://c>",
+    ] {
+        let update_text = update_with_greeting(term("triple", bad, None));
+        assert_eq!(update_text, "", "{bad} must not render: {update_text}");
+    }
+}
+
+/// SPARQL decodes `\uXXXX` escapes before parsing, so escaping an
+/// IRIREF-forbidden character (`>` as `\u003E`) still ends the IRI. IRIs must
+/// be validated, and an invalid one fails closed (empty update).
+#[test]
+fn invalid_iris_cannot_inject_update_syntax() {
+    let iri_payload =
+        "http://example.org/x> . } ; DROP ALL ; INSERT { <http://a> <http://b> <http://c";
+    let mut bad_datatype = term("literal", "1", None);
+    bad_datatype.datatype = Some(iri_payload.into());
+    for bad in [
+        term("iri", iri_payload, None),
+        term("iri", "http://example.org/a b", None),
+        term("iri", "http://example.org/\"{}|^`\\", None),
+        term("iri", "not an absolute iri", None),
+        bad_datatype,
+    ] {
+        let update_text = update_with_greeting(bad.clone());
+        assert_eq!(update_text, "", "{bad:?} must not render: {update_text}");
+    }
+
+    // A deserialized field path is spliced as `<...>` too: escapes in it must
+    // not survive into the request either.
+    let data = graph(DATA);
+    let shapes = graph(SHAPES);
+    let before = derive_form(&data, &shapes, &focus(), &FormOptions::default());
+    let mut after = before.clone();
+    let bad_path = concat!(
+        r"<http://example.org/greeting> . } ; DROP ALL",
+        r" ; INSERT { <http://a> <http://b>"
+    );
+    let field = after
+        .groups
+        .iter_mut()
+        .flat_map(|group| &mut group.fields)
+        .find(|field| field.path == "<http://example.org/greeting>")
+        .unwrap();
+    field.path = bad_path.into();
+    field.values = vec![FormValue {
+        term: term("literal", "hi", None),
+        nested: None,
+    }];
+    let update_text = to_sparql_update(&before, &after);
+    assert_eq!(
+        update_text, "",
+        "invalid path must not render: {update_text}"
+    );
+}
+
+#[test]
+fn valid_iri_terms_still_render() {
+    let ok = update_with_greeting(term("iri", "http://example.org/caf\u{e9}?q=1#f", None));
+    assert!(
+        ok.contains("<http://example.org/caf\u{e9}?q=1#f> ."),
+        "{ok}"
+    );
+    update(&graph(DATA), &ok).unwrap();
+
+    // A literal carrying escape-shaped text stays one literal end to end.
+    let tricky = r#"x\u0022 . } ; DROP ALL ; INSERT { <http://a> <http://b> \u0022c"#;
+    let ok = update_with_greeting(term("literal", tricky, None));
+    let updated = update(&graph(DATA), &ok).unwrap();
+    let derived = derive_form(&updated, &graph(SHAPES), &focus(), &FormOptions::default());
+    let greeting = derived
+        .groups
+        .iter()
+        .flat_map(|group| &group.fields)
+        .find(|field| field.path == "<http://example.org/greeting>")
+        .unwrap();
+    assert_eq!(greeting.values.len(), 1);
+    assert_eq!(greeting.values[0].term.value, tricky);
+    let name = derived
+        .groups
+        .iter()
+        .flat_map(|group| &group.fields)
+        .find(|field| field.path == "<http://example.org/name>")
+        .unwrap();
+    assert_eq!(name.values.len(), 1, "existing data must survive");
+}

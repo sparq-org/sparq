@@ -46,9 +46,12 @@ forward-predicate paths (`<p>`) participate; read-only/off-shape, inverse,
 computed, and complex property-path fields are excluded. A no-change or
 mismatched-focus input returns an empty update string. The build is
 all-or-nothing and fails closed: if any (possibly deserialized) `TermRef` has
-an invalid blank-node label or language tag, triple-term text that is not
-exactly one RDF 1.2 triple term, or an unknown `kind`, the result is also the
-empty string, so renderer-supplied terms cannot splice update syntax.
+an invalid IRI (term or datatype), blank-node label or language tag,
+triple-term text that is not exactly one RDF 1.2 triple term, or an unknown
+`kind`, or a field path is not a valid `<IRI>`, the result is also the empty
+string, so renderer-supplied terms cannot splice update syntax. IRIs are
+validated rather than escaped (SPARQL decodes `\uXXXX` before parsing), and
+triple terms accept the full RDF 1.2 grammar, including labels like `_:a..b`.
 
 What the description carries (all serde `Serialize + Deserialize`):
 

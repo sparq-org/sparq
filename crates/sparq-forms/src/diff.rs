@@ -2,9 +2,8 @@
 //! [GPT-5.6] sq-wn788
 
 use crate::{FormDescription, FormField, TermRef};
-use oxrdf::{BlankNode, Literal, Term};
+use oxrdf::{BaseDirection, BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 /// One value added to or removed from a bare forward-predicate field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,11 +73,11 @@ impl FormDiff {
 /// Returns an empty string when there is no writable change (including when
 /// the descriptions name different focus nodes). Callers may treat that as a no-op.
 ///
-/// The build is all-or-nothing: if any term cannot be rendered safely (an
-/// invalid blank-node label or language tag, triple-term text that does not
-/// parse as one RDF 1.2 triple term, or an unknown `kind`), no update is
-/// produced and the empty string is returned, so a deserialized [`TermRef`]
-/// can never splice update syntax into the request.
+/// The build is all-or-nothing: if any term or field path cannot be rendered
+/// safely (an invalid IRI, blank-node label or language tag, triple-term text
+/// that does not parse as one RDF 1.2 triple term, or an unknown `kind`), no
+/// update is produced and the empty string is returned, so a deserialized
+/// [`TermRef`] or field path can never splice update syntax into the request.
 pub fn to_sparql_update(before: &FormDescription, after: &FormDescription) -> String {
     render_update(before, after).unwrap_or_default()
 }
@@ -94,8 +93,9 @@ fn render_update(before: &FormDescription, after: &FormDescription) -> Option<St
         changes
             .iter()
             .map(|change| {
+                let predicate = iri(bare_predicate(&change.path)?)?;
                 let object = term_to_ntriples(&change.value)?;
-                Some(format!("  {subject} {} {object} .\n", change.path))
+                Some(format!("  {subject} {predicate} {object} .\n"))
             })
             .collect::<Option<String>>()
     };
@@ -124,7 +124,7 @@ fn bare_predicate(path: &str) -> Option<&str> {
 /// no escape form and fails validation.
 fn term_to_ntriples(term: &TermRef) -> Option<String> {
     Some(match term.kind.as_str() {
-        "iri" => format!("<{}>", escape_iri(&term.value)),
+        "iri" => iri(&term.value)?,
         // Blank-node labels have no escape form: validate against BLANK_NODE_LABEL.
         "bnode" => BlankNode::new(&term.value).ok()?.to_string(),
         "literal" => {
@@ -134,33 +134,180 @@ fn term_to_ntriples(term: &TermRef) -> Option<String> {
                 Literal::new_language_tagged_literal(&term.value, language).ok()?;
                 format!("{literal}@{language}")
             } else if let Some(datatype) = &term.datatype {
-                format!("{literal}^^<{}>", escape_iri(datatype))
+                format!("{literal}^^{}", iri(datatype)?)
             } else {
                 literal
             }
         }
         // RDF 1.2 triple terms are carried as N-Triples text: re-parse it and
         // emit the canonical serialization of exactly one triple term.
-        "triple" => match Term::from_str(&term.value).ok()? {
-            triple @ Term::Triple(_) => triple.to_string(),
-            _ => return None,
-        },
+        "triple" => Term::from(parse_triple_term(&term.value)?).to_string(),
         _ => return None,
     })
 }
 
-fn escape_iri(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| match c {
-            '\\' => "\\\\".to_string(),
-            '>' => "\\u003E".to_string(),
-            c if c <= '\u{20}' || matches!(c, '<' | '"' | '{' | '}' | '|' | '^' | '`') => {
-                unicode_escape(c)
-            }
-            c => c.to_string(),
+/// Renders an absolute IRI as `<...>`, or `None` when it is not a valid IRI.
+///
+/// IRIs are validated, never escaped: SPARQL decodes `\uXXXX` escapes before
+/// parsing, so an escaped `>` would still end the IRIREF.
+fn iri(value: &str) -> Option<String> {
+    Some(NamedNode::new(value).ok()?.to_string())
+}
+
+/// Parses N-Triples text holding exactly one RDF 1.2 triple term.
+///
+/// Hand-written rather than `oxrdf::Term::from_str`, which rejects valid
+/// blank-node labels with internal dots (`_:a..b`). Every component is still
+/// validated by the matching `oxrdf` constructor, so anything that is not one
+/// well-formed triple term (and nothing else) yields `None`.
+fn parse_triple_term(text: &str) -> Option<Triple> {
+    let mut parser = TermParser { rest: text };
+    let triple = parser.triple_term()?;
+    parser.rest.trim_start().is_empty().then_some(triple)
+}
+
+struct TermParser<'a> {
+    rest: &'a str,
+}
+
+impl TermParser<'_> {
+    fn eat(&mut self, token: &str) -> Option<()> {
+        self.rest = self.rest.trim_start().strip_prefix(token)?;
+        Some(())
+    }
+
+    fn triple_term(&mut self) -> Option<Triple> {
+        self.eat("<<(")?;
+        let subject: NamedOrBlankNode = match self.rest.trim_start().chars().next()? {
+            '<' => self.iri()?.into(),
+            '_' => self.blank_node()?.into(),
+            _ => return None,
+        };
+        let predicate = self.iri()?;
+        let object = self.object()?;
+        self.eat(")>>")?;
+        Some(Triple::new(subject, predicate, object))
+    }
+
+    fn object(&mut self) -> Option<Term> {
+        let rest = self.rest.trim_start();
+        Some(if rest.starts_with("<<(") {
+            self.triple_term()?.into()
+        } else if rest.starts_with('<') {
+            self.iri()?.into()
+        } else if rest.starts_with('_') {
+            self.blank_node()?.into()
+        } else if rest.starts_with('"') {
+            self.literal()?.into()
+        } else {
+            return None;
         })
-        .collect()
+    }
+
+    fn iri(&mut self) -> Option<NamedNode> {
+        self.eat("<")?;
+        let end = self.rest.find('>')?;
+        let raw = &self.rest[..end];
+        self.rest = &self.rest[end + 1..];
+        NamedNode::new(unescape(raw, false)?).ok()
+    }
+
+    fn blank_node(&mut self) -> Option<BlankNode> {
+        self.eat("_:")?;
+        let end = self
+            .rest
+            .find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '(' | ')'))
+            .unwrap_or(self.rest.len());
+        let label = &self.rest[..end];
+        self.rest = &self.rest[end..];
+        BlankNode::new(label).ok()
+    }
+
+    fn literal(&mut self) -> Option<Literal> {
+        self.eat("\"")?;
+        let mut end = None;
+        let mut escaped = false;
+        for (i, c) in self.rest.char_indices() {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => {
+                    end = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let end = end?;
+        let value = unescape(&self.rest[..end], true)?;
+        self.rest = &self.rest[end + 1..];
+        if let Some(tagged) = self.rest.strip_prefix('@') {
+            let end = tagged
+                .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+                .unwrap_or(tagged.len());
+            let tag = &tagged[..end];
+            self.rest = &tagged[end..];
+            match tag.split_once("--") {
+                Some((language, "ltr")) => Literal::new_directional_language_tagged_literal(
+                    value,
+                    language,
+                    BaseDirection::Ltr,
+                )
+                .ok(),
+                Some((language, "rtl")) => Literal::new_directional_language_tagged_literal(
+                    value,
+                    language,
+                    BaseDirection::Rtl,
+                )
+                .ok(),
+                Some(_) => None,
+                None => Literal::new_language_tagged_literal(value, tag).ok(),
+            }
+        } else if self.rest.starts_with("^^") {
+            self.rest = &self.rest[2..];
+            if !self.rest.starts_with('<') {
+                return None;
+            }
+            Some(Literal::new_typed_literal(value, self.iri()?))
+        } else {
+            Some(Literal::new_simple_literal(value))
+        }
+    }
+}
+
+/// Decodes `\uXXXX` / `\UXXXXXXXX` (and, in strings, ECHAR) escapes.
+fn unescape(raw: &str, string: bool) -> Option<String> {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let digits = match chars.next()? {
+            'u' => 4,
+            'U' => 8,
+            e if string => {
+                out.push(match e {
+                    't' => '\t',
+                    'b' => '\u{8}',
+                    'n' => '\n',
+                    'r' => '\r',
+                    'f' => '\u{c}',
+                    '"' | '\'' | '\\' => e,
+                    _ => return None,
+                });
+                continue;
+            }
+            _ => return None,
+        };
+        let hex: String = chars.by_ref().take(digits).collect();
+        if hex.len() != digits || !hex.chars().all(|h| h.is_ascii_hexdigit()) {
+            return None;
+        }
+        out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+    }
+    Some(out)
 }
 
 fn escape_literal(value: &str) -> String {
