@@ -337,9 +337,9 @@ and the Graph-Store-Protocol read path keeps its lenient default):
 | CONSTRUCT / DESCRIBE | `application/n-triples` (default) / `text/turtle` / `application/rdf+xml` / `application/ld+json` (the `jsonld` feature — **default-on**) | matching RDF media; N-Triples, prefix-compacting Turtle, RDF/XML, <!-- [OPUS-4.8] sq-rt6v --> or flattened JSON-LD <!-- [OPUS-4.8] sq-oy1f.1/.4 --> |
 
 **CSV / TSV / XML SELECT bodies stream too** (#5517), with the CONSTRUCT / DESCRIBE contract
-below: the engine materialises the `QueryResult`, then the document is rendered row by row
-into the chunked body, so the serialised bytes (which no row or byte cap prices) are never held
-whole. One-chunk results keep their `Content-Length`; `HEAD` stays buffered. The library writers
+below: the engine materialises the `QueryResult`, then the document is written straight into
+the chunked body with no row or term buffer, so the serialised bytes (which no row or byte cap
+prices) are never held whole, not even for one row with a very large literal. One-chunk results keep their `Content-Length`; `HEAD` stays buffered. The library writers
 `sparq_server::results::write_select_{csv,tsv,xml}` write to any `io::Write` and are
 byte-identical to `select_to_{csv,tsv,xml}`.
 

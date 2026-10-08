@@ -7830,8 +7830,9 @@ async fn stream_graph_result(
 
 /// #5517: the CSV / TSV / XML SELECT counterpart of [`stream_graph_result`]. The engine
 /// materialises the `QueryResult` (bounded by the row/byte budgets, which price it), and the
-/// rendered document — which those budgets do NOT price — is streamed row by row instead of
-/// being built in memory. Same status semantics as the graph stream: every evaluation
+/// rendered document — which those budgets do NOT price — is written straight into the
+/// chunk sink term piece by term piece (no row or term buffer, so one huge literal is not held
+/// either) instead of being built in memory. Same status semantics as the graph stream: every evaluation
 /// failure is known before the first byte, and a single-chunk answer keeps its
 /// `Content-Length`.
 async fn stream_select_rendered(

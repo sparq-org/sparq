@@ -559,9 +559,23 @@ fn select_formats(ttl: &str, query: &str) -> Vec<(&'static str, &'static str, St
 
 #[tokio::test]
 async fn streamed_select_csv_tsv_xml_large_multichunk_is_byte_identical() {
-    let ttl = big_graph_ttl();
-    let base = spawn_over(&ttl).await;
-    for (accept, ct, expect) in select_formats(&ttl, SELECT_ALL) {
+    assert_select_formats_stream(&big_graph_ttl()).await;
+}
+
+/// #6708 review: a single row whose one literal is many chunks long. The writers stream
+/// it term-piece by term-piece rather than rendering the row first, and the body must still
+/// be byte-identical and chunked. The literal is dense with characters each format escapes
+/// or quotes (XML entity expansion, CSV quote doubling, TSV backslash escapes).
+#[tokio::test]
+async fn streamed_select_single_huge_literal_is_byte_identical_and_chunked() {
+    let unit = "ab&c<d>e\\\"f,g\\th\\\\i "; // turtle-escaped: ab&c<d>e"f,g<TAB>h\i
+    let ttl = format!("<http://ex/s> <http://ex/p> \"{}\" .\n", unit.repeat(40_000));
+    assert_select_formats_stream(&ttl).await;
+}
+
+async fn assert_select_formats_stream(ttl: &str) {
+    let base = spawn_over(ttl).await;
+    for (accept, ct, expect) in select_formats(ttl, SELECT_ALL) {
         assert!(expect.len() > 64 * 1024, "{accept}: the fixture must exceed one chunk");
         let resp = client()
             .get(format!("{base}/sparql"))
