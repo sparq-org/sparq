@@ -22,17 +22,17 @@
 //!   parser's own rewrite and only that: a source variable spelled `?__bn0_x` is legal, is
 //!   NOT the rewrite, and stays a variable.
 //! * **`@forAll` universals.** The parser reads an `@forAll`-declared IRI as the variable
-//!   `?__ua.<iri>` ([`UNIVERSAL_VAR`], unforgeable for the same reason). [`write_rule`]
-//!   writes it under the declared IRI's local name (`@forAll :x` → `?x`, or `var:x` under
-//!   [`RuleVars::VarIris`]), suffixed `_2`, `_3`, … when that name is already taken by
-//!   another variable of the same output document, so renaming never merges two variables
-//!   (GH #5391). Every writer here names universals through one [`UniversalNames`] per
-//!   document — no path writes a universal without one (GH #6701 review).
+//!   `?__ua.<iri>` ([`UNIVERSAL_VAR`], unforgeable for the same reason). It is written BACK
+//!   as that IRI under an `@forAll <iri> .` declaration, so re-parsing yields the very same
+//!   `__ua.<iri>` term: identity is a function of the IRI alone, never of a per-document
+//!   renaming. See [`write_term`] for the scoping rules (GH #5391, GH #6701 review).
+//!   Only [`RuleVars::VarIris`], which grounds variables into `var:` IRIs and is not meant
+//!   to be re-reasoned, names a universal by its local name.
 //! * **Prefixes / layout.** Everything is written in full `<…>` IRI form, one statement per
 //!   line — no `@prefix` declarations are reconstructed. The document is semantically the
 //!   same N3, not byte-identical to the input.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use super::model::{Rule, Term};
 
@@ -59,11 +59,32 @@ pub(super) const PREMISE_BLANK_VAR: &str = "__bn.";
 /// IRI keeps `@forAll a:x, b:x` two variables.
 pub(super) const UNIVERSAL_VAR: &str = "__ua.";
 
-/// The name an `@forAll` universal is written under — its declared IRI's local name, with
-/// every character an N3 variable name cannot carry replaced by `_` — or `None` for any
-/// other variable.
-fn universal_name(v: &str) -> Option<String> {
-    let iri = v.strip_prefix(UNIVERSAL_VAR)?;
+/// The declared IRI behind an `@forAll` universal variable name, or `None` for any other
+/// variable.
+///
+/// Besides the parser's own `__ua.<iri>` this accepts the backward chainer's freshened
+/// copies (`rename_vars` prefixes `__bw<n>_`, possibly more than once): standardizing a
+/// rule apart must not strip a universal of its provenance, or a copy leaking into a
+/// result would be written as an ordinary — and, with its `.`, unparseable — variable.
+/// Exact, not heuristic: the `.` in `__ua.` cannot occur in a source variable name.
+pub(super) fn universal_iri(v: &str) -> Option<&str> {
+    let mut rest = v;
+    loop {
+        if let Some(iri) = rest.strip_prefix(UNIVERSAL_VAR) {
+            return Some(iri);
+        }
+        let r = rest.strip_prefix("__bw")?;
+        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        rest = r[digits..].strip_prefix('_')?;
+    }
+}
+
+/// The declared IRI's local name, with every character an N3 variable name cannot carry
+/// replaced by `_` (`u` when nothing is left).
+fn local_name(iri: &str) -> String {
     let local = iri.rsplit(['#', '/']).next().unwrap_or(iri);
     let name: String = local
         .chars()
@@ -73,7 +94,70 @@ fn universal_name(v: &str) -> Option<String> {
             _ => '_',
         })
         .collect();
-    Some(if name.is_empty() { "u".to_string() } else { name })
+    if name.is_empty() { "u".to_string() } else { name }
+}
+
+/// The variable name a universal is written under when NO `@forAll` declaration can scope
+/// it (see [`write_term`]): its local name plus a 64-bit FNV-1a hash of the full IRI. A
+/// deterministic function of the IRI — the same universal gets the same name in every
+/// document and every proof, and two universals sharing a local name stay apart.
+fn undeclarable_name(iri: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in iri.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{}_u{h:016x}", local_name(iri))
+}
+
+/// Does the IRI `iri` occur as an IRI term anywhere in `t` (any depth)? A declaration
+/// `@forAll <iri>` would capture every such occurrence in its scope.
+fn mentions_iri(t: &Term, iri: &str) -> bool {
+    match t {
+        Term::Iri(i) => i == iri,
+        Term::List(ms) => ms.iter().any(|m| mentions_iri(m, iri)),
+        Term::Triple(tr) => tr.iter().any(|m| mentions_iri(m, iri)),
+        Term::Formula(ts) => ts.iter().flatten().any(|m| mentions_iri(m, iri)),
+        _ => false,
+    }
+}
+
+/// The universals occurring in `t` at the CURRENT scope level: through lists and quoted
+/// triples (plain structure), but not into a nested `{ … }` formula, which scopes its own.
+fn level_universals<'a>(t: &'a Term, out: &mut BTreeSet<&'a str>) {
+    match t {
+        Term::Var(v) => {
+            if let Some(iri) = universal_iri(v) {
+                out.insert(iri);
+            }
+        }
+        Term::List(ms) => ms.iter().for_each(|m| level_universals(m, out)),
+        Term::Triple(tr) => tr.iter().for_each(|m| level_universals(m, out)),
+        _ => {}
+    }
+}
+
+/// The `@forAll` declarations one scope (a formula, or a whole document) carries: each
+/// universal occurring at its own level whose IRI the scope does not ALSO mention as an
+/// IRI, anywhere inside it (a declaration would capture that IRI, nested formulae
+/// included).
+fn scope_declarations<'a>(stmts: &[&'a [Term; 3]]) -> BTreeSet<&'a str> {
+    let mut level = BTreeSet::new();
+    for t in stmts.iter().copied().flatten() {
+        level_universals(t, &mut level);
+    }
+    level.retain(|iri| !stmts.iter().copied().flatten().any(|t| mentions_iri(t, iri)));
+    level
+}
+
+fn write_declarations(decls: &BTreeSet<&str>, out: &mut String) {
+    out.push_str("@forAll");
+    for (i, iri) in decls.iter().enumerate() {
+        out.push_str(if i == 0 { " <" } else { ", <" });
+        out.push_str(iri);
+        out.push('>');
+    }
+    out.push_str(" .");
 }
 
 fn quote_into(v: &str, out: &mut String) {
@@ -89,120 +173,30 @@ fn quote_into(v: &str, out: &mut String) {
     }
 }
 
-/// The output name of every `@forAll` universal in ONE output document — the only way this
-/// module writes a universal.
-///
-/// The parser reads `@forAll :x` as the internal variable `?__ua.<iri>` ([`UNIVERSAL_VAR`]),
-/// which has no surface spelling. Each universal is written under its [`universal_name`]
-/// (the declared IRI's local name), suffixed `_2`, `_3`, … until it differs from EVERY other
-/// variable name in the document — all source variables are reserved first, then universals
-/// are named in sorted internal-name order, so the result is deterministic whatever order
-/// the statements come in. A clash would merge two variables (`{ :x :q ?x }` written as
-/// `{ ?x :q ?x }`), which changes what the output matches.
-///
-/// Build ONE map over EVERYTHING written into the same document (facts, rules, every node
-/// of a proof) with [`UniversalNames::over`] and pass it to every `*_named` writer, so one
-/// universal also keeps one name everywhere it appears. The un-suffixed writers
-/// ([`write_term`], [`write_statement`], [`write_rule`], [`serialize_facts`]) build the map
-/// from exactly what they are given.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct UniversalNames(HashMap<String, String>);
-
-impl UniversalNames {
-    /// The names for a document made of `stmts` (walked at any depth: lists, quoted
-    /// triples and quoted `{ … }` formulae included).
-    pub fn over<'a>(stmts: impl IntoIterator<Item = &'a [Term; 3]>) -> Self {
-        Self::over_terms(stmts.into_iter().flatten())
-    }
-
-    fn over_terms<'a>(terms: impl IntoIterator<Item = &'a Term>) -> Self {
-        fn walk<'a>(t: &'a Term, seen: &mut HashSet<&'a str>) {
-            match t {
-                Term::Var(v) => {
-                    seen.insert(v);
-                }
-                Term::List(ms) => ms.iter().for_each(|m| walk(m, seen)),
-                Term::Triple(tr) => tr.iter().for_each(|m| walk(m, seen)),
-                Term::Formula(ts) => ts.iter().flatten().for_each(|m| walk(m, seen)),
-                _ => {}
-            }
-        }
-        let mut seen = HashSet::new();
-        for t in terms {
-            walk(t, &mut seen);
-        }
-        let (mut universals, rest): (Vec<&str>, Vec<&str>) =
-            seen.into_iter().partition(|v| v.starts_with(UNIVERSAL_VAR));
-        universals.sort_unstable();
-        let mut taken: HashSet<String> = rest.into_iter().map(str::to_string).collect();
-        let mut names = HashMap::new();
-        for v in universals {
-            let Some(base) = universal_name(v) else { continue };
-            let mut name = base.clone();
-            let mut n = 2;
-            while !taken.insert(name.clone()) {
-                name = format!("{base}_{n}");
-                n += 1;
-            }
-            names.insert(v.to_string(), name);
-        }
-        UniversalNames(names)
-    }
-
-    /// The output name of the internal variable `v`: its allocated name for a universal,
-    /// `v` itself for any other variable.
-    ///
-    /// # Panics
-    /// On a universal the map was not built over — the caller wrote something it left out
-    /// of [`UniversalNames::over`], and no name for it is known to be collision-free.
-    fn output_name<'a>(&'a self, v: &'a str) -> &'a str {
-        if !v.starts_with(UNIVERSAL_VAR) {
-            return v;
-        }
-        self.0.get(v).unwrap_or_else(|| {
-            panic!("@forAll universal `{v}` written with a name map not built over it")
-        })
-    }
-}
-
-/// `t` with every `@forAll` universal (at any depth) replaced by its output name.
-fn named(t: &Term, names: &UniversalNames) -> Term {
-    match t {
-        Term::Var(v) => Term::Var(names.output_name(v).to_string()),
-        Term::List(ms) => Term::List(ms.iter().map(|m| named(m, names)).collect()),
-        Term::Triple(tr) => {
-            Term::Triple(Box::new([named(&tr[0], names), named(&tr[1], names), named(&tr[2], names)]))
-        }
-        Term::Formula(ts) => Term::Formula(
-            ts.iter().map(|r| [named(&r[0], names), named(&r[1], names), named(&r[2], names)]).collect(),
-        ),
-        _ => t.clone(),
-    }
-}
-
 /// Write one N3 term in its surface syntax: IRIs `<…>`, literals `"lex"` (+ `@lang` /
 /// `^^<dt>`, `xsd:string` left implicit), blanks `_:l`, variables `?v`, lists `( … )`,
 /// formulae `{ … }`, RDF-star quoted triples `<< s p o >>`.
 ///
-/// The term is its own document: its `@forAll` universals are named collision-free
-/// against its other variables ([`UniversalNames`]). A term written as PART of a larger
-/// document uses [`write_term_named`] with that document's map.
-pub fn write_term(t: &Term, out: &mut String) {
-    write_term_named(t, &UniversalNames::over_terms([t]), out);
-}
-
-/// As [`write_term`], naming universals per `names` (built over the whole document).
+/// An `@forAll` universal (`__ua.<iri>`, see [`universal_iri`]) is written as its own IRI
+/// under an `@forAll <iri> .` declaration, so the text re-parses to the SAME term. The
+/// rendering is context-free — a deterministic function of the term — which is what lets a
+/// proof, a closure dump and a re-parse all agree on one fact's identity:
 ///
-/// # Panics
-/// If `t` carries a universal `names` was not built over.
-pub fn write_term_named(t: &Term, names: &UniversalNames, out: &mut String) {
-    write_plain(&named(t, names), out);
+/// * each `{ … }` formula declares, at its start, the universals occurring at its own
+///   level (`{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }`); a nested
+///   formula declares its own;
+/// * a universal is left undeclared when its scope ALSO mentions the same IRI as a plain
+///   IRI (the declaration would capture it), and one that sits outside every formula has
+///   no scope this writer can declare in; both are written as the plain variable
+///   [`undeclarable_name`] instead (local name + IRI hash). A document writer
+///   ([`serialize_facts`]) declares such top-level universals for the whole document when
+///   it can.
+pub fn write_term(t: &Term, out: &mut String) {
+    write_scoped(t, &BTreeSet::new(), out);
 }
 
-/// The surface-syntax writer behind every public one. Variables are written as named, so
-/// it is reached only with universals already renamed — an internal `?__ua.` name here is
-/// a writer bug (it would not re-parse, and its local-name spelling could merge variables).
-fn write_plain(t: &Term, out: &mut String) {
+/// [`write_term`] with `declared` the `@forAll` IRIs in scope at `t`'s level.
+fn write_scoped(t: &Term, declared: &BTreeSet<&str>, out: &mut String) {
     match t {
         Term::Iri(i) => {
             out.push('<');
@@ -230,28 +224,46 @@ fn write_plain(t: &Term, out: &mut String) {
             out.push_str("_:");
             out.push_str(l);
         }
-        Term::Var(v) => {
-            assert!(!v.starts_with(UNIVERSAL_VAR), "unrenamed @forAll universal `{v}`");
-            out.push('?');
-            out.push_str(v);
-        }
+        Term::Var(v) => match universal_iri(v) {
+            Some(iri) if declared.contains(iri) => {
+                out.push('<');
+                out.push_str(iri);
+                out.push('>');
+            }
+            Some(iri) => {
+                out.push('?');
+                out.push_str(&undeclarable_name(iri));
+            }
+            None => {
+                out.push('?');
+                out.push_str(v);
+            }
+        },
         Term::List(ms) => {
             out.push('(');
             for m in ms {
                 out.push(' ');
-                write_plain(m, out);
+                write_scoped(m, declared, out);
             }
             out.push_str(" )");
         }
         Term::Formula(ts) => {
+            // A formula is its own scope: its rendering ignores `declared` (an enclosing
+            // declaration of an IRI it ALSO mentions plainly is impossible by construction —
+            // that enclosing scope would mention the IRI too).
+            let decls = scope_declarations(&ts.iter().collect::<Vec<_>>());
             out.push('{');
+            if !decls.is_empty() {
+                out.push(' ');
+                write_declarations(&decls, out);
+            }
             for t in ts {
                 out.push(' ');
-                write_plain(&t[0], out);
+                write_scoped(&t[0], &decls, out);
                 out.push(' ');
-                write_plain(&t[1], out);
+                write_scoped(&t[1], &decls, out);
                 out.push(' ');
-                write_plain(&t[2], out);
+                write_scoped(&t[2], &decls, out);
                 out.push_str(" .");
             }
             out.push_str(" }");
@@ -260,50 +272,93 @@ fn write_plain(t: &Term, out: &mut String) {
         // `<< s p o >>` form (GH #2012). [FABLE-5]
         Term::Triple(tr) => {
             out.push_str("<< ");
-            write_plain(&tr[0], out);
+            write_scoped(&tr[0], declared, out);
             out.push(' ');
-            write_plain(&tr[1], out);
+            write_scoped(&tr[1], declared, out);
             out.push(' ');
-            write_plain(&tr[2], out);
+            write_scoped(&tr[2], declared, out);
             out.push_str(" >>");
         }
     }
 }
 
-/// Write one statement as `s p o .` plus a newline — its own document, like [`write_term`].
-pub fn write_statement(f: &[Term; 3], out: &mut String) {
-    write_statement_named(f, &UniversalNames::over([f]), out);
+/// A term as N3 text for a DIAGNOSTIC (an error or fallback reason a user reads) — the
+/// [`write_term`] rendering, so no message leaks an engine-internal spelling such as
+/// `__ua.<iri>`, and a term reads the same in a message as in any output.
+pub(crate) fn display(t: &Term) -> String {
+    let mut s = String::new();
+    write_term(t, &mut s);
+    s
 }
 
-/// As [`write_statement`], naming universals per `names` (built over the whole document).
-/// Nothing else is touched: a formula-valued fact's other variables stay `?v`.
-///
-/// # Panics
-/// If `f` carries a universal `names` was not built over.
-pub fn write_statement_named(f: &[Term; 3], names: &UniversalNames, out: &mut String) {
-    write_term_named(&f[0], names, out);
+/// Write one statement as `s p o .` plus a newline, each term per [`write_term`].
+pub fn write_statement(f: &[Term; 3], out: &mut String) {
+    write_statement_scoped(f, &BTreeSet::new(), out);
+}
+
+fn write_statement_scoped(f: &[Term; 3], declared: &BTreeSet<&str>, out: &mut String) {
+    write_scoped(&f[0], declared, out);
     out.push(' ');
-    write_term_named(&f[1], names, out);
+    write_scoped(&f[1], declared, out);
     out.push(' ');
-    write_term_named(&f[2], names, out);
+    write_scoped(&f[2], declared, out);
     out.push_str(" .\n");
 }
 
-/// Serialize facts back to N3 as one document, with one [`UniversalNames`] over all of
-/// them.
-///
-/// A universal has no surface spelling that re-parses to the SAME internal variable, so
-/// this is not an identity round trip for a fact carrying one: a caller that must reason
-/// over held terms again hands them over as terms instead (`reason_n3_terms_with_facts`,
-/// the incremental fallback).
+/// Serialize facts back to N3 as one document: a document-level `@forAll` line when a
+/// universal sitting outside every formula needs one (and the document never mentions its
+/// IRI plainly), then one statement per line in the given order ([`write_term`]).
+/// Re-parsing it yields the same terms, universals included.
 pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> String {
     let facts: Vec<&[Term; 3]> = facts.collect();
-    let names = UniversalNames::over(facts.iter().copied());
+    let decls = scope_declarations(&facts);
     let mut out = String::new();
+    if !decls.is_empty() {
+        write_declarations(&decls, &mut out);
+        out.push('\n');
+    }
     for f in facts {
-        write_statement_named(f, &names, &mut out);
+        write_statement_scoped(f, &decls, &mut out);
     }
     out
+}
+
+/// Write one output DOCUMENT: the document-level `@forAll` line its top-level universals
+/// need (computed over the facts AND the rules, since a document-wide declaration would
+/// capture the IRI in either), then `facts` one per line, SORTED (deterministic output),
+/// then `rules` in order — the `--pass-all` layout ([`crate::reason_n3_pass_all`]).
+pub(super) fn write_document(
+    facts: &[&[Term; 3]],
+    rules: &[(&Rule, RuleKind)],
+    vars: RuleVars,
+    out: &mut String,
+) {
+    let as_stmts: Vec<[Term; 3]> = rules
+        .iter()
+        .map(|(r, _)| {
+            [Term::Formula(r.premise.clone()), Term::Iri(String::new()), Term::Formula(r.conclusion.clone())]
+        })
+        .collect();
+    let mut scope: Vec<&[Term; 3]> = facts.to_vec();
+    scope.extend(as_stmts.iter());
+    let decls = scope_declarations(&scope);
+    if !decls.is_empty() {
+        write_declarations(&decls, out);
+        out.push('\n');
+    }
+    let mut lines: Vec<String> = facts
+        .iter()
+        .map(|f| {
+            let mut s = String::new();
+            write_statement_scoped(f, &decls, &mut s);
+            s
+        })
+        .collect();
+    lines.sort_unstable();
+    out.push_str(&lines.concat());
+    for (r, kind) in rules {
+        write_rule(r, *kind, vars, out);
+    }
 }
 
 /// How a rule's universal variables are written when the rule is echoed into an output
@@ -343,47 +398,60 @@ pub enum RuleKind {
 /// The premise-blank rewrite the parser applies is undone first — see the module docs — so
 /// a `RuleVars::N3` round trip yields an equivalent rule.
 ///
-/// The rule is its own document: universals are named collision-free within `r` alone. A
-/// caller writing several rules and facts into ONE document uses [`write_rule_named`] with
-/// a document-wide [`UniversalNames`] instead.
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) {
-    write_rule_named(r, kind, vars, &UniversalNames::over(r.premise.iter().chain(&r.conclusion)), out);
-}
-
-/// As [`write_rule`], naming each `@forAll` universal per `names` — built over EVERYTHING
-/// written into the same document, so one universal gets one name in every rule and fact
-/// that carries it.
-///
-/// # Panics
-/// If `r` carries a universal `names` was not built over.
-pub fn write_rule_named(
-    r: &Rule,
-    kind: RuleKind,
-    vars: RuleVars,
-    names: &UniversalNames,
-    out: &mut String,
-) {
     let (left, arrow, right) = match kind {
         RuleKind::Forward => (&r.premise, " => ", &r.conclusion),
         RuleKind::Backward => (&r.conclusion, " <= ", &r.premise),
     };
-    write_formula(left, vars, names, out);
+    let names = match vars {
+        RuleVars::VarIris => ground_names(r),
+        RuleVars::N3 => HashMap::new(),
+    };
+    // Each side is written as a formula TERM, so universals get `@forAll` declarations
+    // scoped exactly as for data ([`write_term`]).
+    let side = |stmts: &[[Term; 3]]| {
+        Term::Formula(stmts.iter().map(|row| row.clone().map(|t| rule_term(&t, vars, &names))).collect())
+    };
+    write_term(&side(left), out);
     out.push_str(arrow);
-    write_formula(right, vars, names, out);
+    write_term(&side(right), out);
     out.push_str(" .\n");
 }
 
-/// `{ s p o . … }` over rule-side statements, with each term put through [`rule_term`].
-fn write_formula(stmts: &[[Term; 3]], vars: RuleVars, names: &UniversalNames, out: &mut String) {
-    out.push('{');
-    for row in stmts {
-        for t in row {
-            out.push(' ');
-            write_plain(&rule_term(t, vars, names), out);
+/// [`RuleVars::VarIris`] only: the `var:` local name of each universal in `r` — its
+/// [`local_name`], suffixed `_2`, `_3`, … until it differs from every other variable name
+/// in the rule, so grounding never merges two variables.
+fn ground_names(r: &Rule) -> HashMap<String, String> {
+    fn walk<'a>(t: &'a Term, seen: &mut BTreeSet<&'a str>) {
+        match t {
+            Term::Var(v) => {
+                seen.insert(v);
+            }
+            Term::List(ms) => ms.iter().for_each(|m| walk(m, seen)),
+            Term::Triple(tr) => tr.iter().for_each(|m| walk(m, seen)),
+            Term::Formula(ts) => ts.iter().flatten().for_each(|m| walk(m, seen)),
+            _ => {}
         }
-        out.push_str(" .");
     }
-    out.push_str(" }");
+    let mut seen = BTreeSet::new();
+    for t in r.premise.iter().chain(&r.conclusion).flatten() {
+        walk(t, &mut seen);
+    }
+    let (universals, rest): (Vec<&str>, Vec<&str>) =
+        seen.into_iter().partition(|v| universal_iri(v).is_some());
+    let mut taken: HashSet<String> = rest.into_iter().map(str::to_string).collect();
+    let mut names = HashMap::new();
+    for v in universals {
+        let base = local_name(universal_iri(v).unwrap_or(v));
+        let mut name = base.clone();
+        let mut n = 2;
+        while !taken.insert(name.clone()) {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        names.insert(v.to_string(), name);
+    }
+    names
 }
 
 /// A rule-side term prepared for output: the parser's `?__bn.<i>.x` premise-blank variables
@@ -400,9 +468,9 @@ fn write_formula(stmts: &[[Term; 3]], vars: RuleVars, names: &UniversalNames, ou
 /// graph is the same rule variable (`apply_deep` substitutes bindings into formulae). Left
 /// alone it would leave a `?x` in a document whose whole point is to carry none — N3
 /// builtins routinely take formula arguments, so that is a common shape, not a corner.
-/// For the same reason an `@forAll` universal is renamed (per `names`, see
-/// [`UniversalNames`]) at every depth, in both styles.
-fn rule_term(t: &Term, vars: RuleVars, names: &UniversalNames) -> Term {
+/// Under [`RuleVars::VarIris`] an `@forAll` universal is grounded too, under its
+/// [`ground_names`] entry; under [`RuleVars::N3`] it is left for [`write_term`] to declare.
+fn rule_term(t: &Term, vars: RuleVars, names: &HashMap<String, String>) -> Term {
     let sub = |m: &Term| rule_term(m, vars, names);
     match t {
         Term::List(ms) => Term::List(ms.iter().map(sub).collect()),
@@ -414,10 +482,11 @@ fn rule_term(t: &Term, vars: RuleVars, names: &UniversalNames) -> Term {
             if let Some(label) = premise_blank_label(v) {
                 return Term::Blank(label.to_string());
             }
-            let v = names.output_name(v);
             match vars {
-                RuleVars::VarIris => Term::Iri(format!("{VAR_NS}{v}")),
-                RuleVars::N3 => Term::Var(v.to_string()),
+                RuleVars::VarIris => {
+                    Term::Iri(format!("{VAR_NS}{}", names.get(v).map_or(v.as_str(), String::as_str)))
+                }
+                RuleVars::N3 => t.clone(),
             }
         }
         _ => t.clone(),
@@ -491,18 +560,18 @@ mod tests {
             Term::Iri("http://ex/p".into()),
             Term::Var("y".into()),
         ]]);
-        let ground = rendered(&rule_term(&inner, RuleVars::VarIris, &UniversalNames::default()));
+        let ground = rendered(&rule_term(&inner, RuleVars::VarIris, &HashMap::new()));
         assert!(!ground.contains('?'), "{ground}");
         assert_eq!(ground, format!("{{ <{VAR_NS}y> <http://ex/p> <{VAR_NS}y> . }}"));
         // `RuleVars::N3` leaves the formula exactly as parsed.
-        assert_eq!(rendered(&rule_term(&inner, RuleVars::N3, &UniversalNames::default())), rendered(&inner));
+        assert_eq!(rendered(&rule_term(&inner, RuleVars::N3, &HashMap::new())), rendered(&inner));
         // A rewritten premise blank goes back to `_:x` in BOTH styles.
         for style in [RuleVars::N3, RuleVars::VarIris] {
-            let t = rule_term(&Term::Var("__bn.3.x".into()), style, &UniversalNames::default());
+            let t = rule_term(&Term::Var("__bn.3.x".into()), style, &HashMap::new());
             assert_eq!(rendered(&t), "_:x");
         }
         assert_eq!(
-            rendered(&rule_term(&Term::Var("z".into()), RuleVars::VarIris, &UniversalNames::default())),
+            rendered(&rule_term(&Term::Var("z".into()), RuleVars::VarIris, &HashMap::new())),
             "<http://www.w3.org/2000/10/swap/var#z>"
         );
     }
@@ -515,17 +584,34 @@ mod tests {
         ]])
     }
 
-    /// GH #6701 review round 3: even a lone term never writes a universal under a name
-    /// that merges it with another variable of the same term.
+    /// A universal is written as its own IRI under a formula-scoped `@forAll`, so it can
+    /// never merge with a source variable and re-parses to the same term (GH #6701).
     #[test]
-    fn a_lone_term_names_its_universals_collision_free() {
-        assert_eq!(rendered(&universal_formula()), "{ ?x_2 <http://ex/q> ?x . }");
+    fn a_universal_is_written_under_a_scoped_declaration() {
+        assert_eq!(
+            rendered(&universal_formula()),
+            "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }"
+        );
+        let back = super::super::parser::parse(&format!(":a :p {} .", rendered(&universal_formula())))
+            .expect("re-parses");
+        assert_eq!(back.facts[0][2], universal_formula());
     }
 
-    /// A map that does not cover a universal is a caller bug, not a cue to guess a name.
+    /// A formula that ALSO mentions the IRI plainly cannot declare it; nor can anything
+    /// outside a formula. Both fall back to the IRI-derived name, never to a bare local name.
     #[test]
-    #[should_panic(expected = "not built over it")]
-    fn a_map_that_misses_a_universal_is_refused() {
-        write_term_named(&universal_formula(), &UniversalNames::over(&[]), &mut String::new());
+    fn an_undeclarable_universal_gets_a_name_derived_from_its_iri() {
+        let x = Term::Var(format!("{UNIVERSAL_VAR}http://ex/x"));
+        let both = Term::Formula(vec![[x.clone(), Term::Iri("http://ex/x".into()), Term::Var("x".into())]]);
+        let r = rendered(&both);
+        assert!(!r.contains("@forAll"), "{r}");
+        let name = format!("?{}", undeclarable_name("http://ex/x"));
+        assert!(name.starts_with("?x_u"), "{name}");
+        assert_eq!(r, format!("{{ {name} <http://ex/x> ?x . }}"));
+        assert_eq!(rendered(&x), name);
+        // Freshened backward-rule copies keep their provenance.
+        assert_eq!(universal_iri("__bw3___bw0___ua.http://ex/x"), Some("http://ex/x"));
+        assert_eq!(universal_iri("__bw3_x"), None);
+        assert_eq!(rendered(&Term::Var("__bw0___ua.http://ex/x".into())), rendered(&x));
     }
 }

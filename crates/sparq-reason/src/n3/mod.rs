@@ -293,34 +293,17 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
     let (facts, _steps) = run_closure(parsed, None, None, StepMode::None);
-    // ONE renaming of the `@forAll` universals for the whole output document — closure
-    // facts and every echoed forward and backward rule — allocated against EVERY variable
-    // name in all of them. A declared `:x` then never merges with a source `?x` (GH #5391),
-    // and a universal shared between a fact and a rule keeps one name in both, so
-    // re-reasoning the output compares them as the same term (GH #6701 review round 2).
-    let names = serialize::UniversalNames::over(
-        facts
-            .all
-            .iter()
-            .chain(rules.iter().chain(&backward_rules).flat_map(|r| r.premise.iter().chain(&r.conclusion))),
-    );
-    let mut statements: Vec<String> = facts
-        .all
+    // Universals are written as their own IRIs under `@forAll` declarations, so the output
+    // re-parses to the very same `__ua.<iri>` terms — the identity a `log:parsedAsN3`
+    // literal or a second reasoning pass produces too (GH #5391, GH #6701 review).
+    let facts: Vec<&[Term; 3]> = facts.all.iter().collect();
+    let echoed: Vec<(&Rule, RuleKind)> = rules
         .iter()
-        .map(|f| {
-            let mut s = String::new();
-            serialize::write_statement_named(f, &names, &mut s);
-            s
-        })
+        .map(|r| (r, RuleKind::Forward))
+        .chain(backward_rules.iter().map(|r| (r, RuleKind::Backward)))
         .collect();
-    statements.sort_unstable();
-    let mut out = statements.concat();
-    for r in &rules {
-        serialize::write_rule_named(r, RuleKind::Forward, vars, &names, &mut out);
-    }
-    for r in &backward_rules {
-        serialize::write_rule_named(r, RuleKind::Backward, vars, &names, &mut out);
-    }
+    let mut out = String::new();
+    serialize::write_document(&facts, &echoed, vars, &mut out);
     Ok(out)
 }
 
@@ -3500,14 +3483,15 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
                 Term::Blank(b) => oxrdf::BlankNode::new_unchecked(b).into(),
                 other => {
                     return Err(format!(
-                        "quoted-triple subject {other:?} is not an IRI or blank node (RDF 1.2 triple terms admit no other subject kind)"
+                        "quoted-triple subject {} is not an IRI or blank node (RDF 1.2 triple terms admit no other subject kind)",
+                        serialize::display(other)
                     ))
                 }
             };
             let Term::Iri(p) = &tr[1] else {
                 return Err(format!(
-                    "quoted-triple predicate {:?} is not an IRI (RDF 1.2 triple terms admit no other predicate kind)",
-                    tr[1]
+                    "quoted-triple predicate {} is not an IRI (RDF 1.2 triple terms admit no other predicate kind)",
+                    serialize::display(&tr[1])
                 ));
             };
             let o = n3_term_to_oxrdf(&tr[2])?;
@@ -3518,7 +3502,7 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
             )))
         }
         Term::Var(_) | Term::Formula(_) | Term::List(_) => {
-            return Err(format!("term {t:?} inside a quoted triple has no dictionary representation"))
+            return Err(format!("term {} inside a quoted triple has no dictionary representation", serialize::display(t)))
         }
     })
 }

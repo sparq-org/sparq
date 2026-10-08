@@ -689,3 +689,31 @@ fn dog_setup_prov_graph_with_clock_and_agent_exact_count() {
         "dog_setup proof with clock + agent must emit 12 triples"
     );
 }
+
+/// GH #6701 review round 4: an N3 fact carrying an `@forAll` universal gets ONE entity
+/// across proofs. The entity IRI hashes the proof's conclusion strings, so the reasoner
+/// must render the fact the same way whether it is explained alone or as a premise.
+#[test]
+fn n3_fact_with_a_universal_keeps_one_entity_across_proofs() {
+    let src = "@prefix : <http://ex/>. @forAll :x.
+:a :p { :x :q :z }.
+:b :p { ?x :q :z }.
+{ :a ?p ?f. :b :p ?g } => { :c :r ?f }.
+";
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    let closure = g.closure();
+    let ex = |l: &str| N3Term::Iri(format!("http://ex/{l}"));
+    let a = closure.iter().find(|f| f[0] == ex("a")).expect(":a fact");
+    let c = closure.iter().find(|f| f[0] == ex("c")).expect(":c fact");
+    let entities = |prov: &[Triple]| -> HashSet<String> {
+        prov.iter()
+            .filter(|t| t.predicate.as_str() == RDF_TYPE && t.object.to_string() == format!("<{PROV}Entity>"))
+            .map(|t| t.subject.to_string())
+            .collect()
+    };
+    let cfg = ProvProofConfig::default();
+    let alone = entities(&prov_from_proof(&g.why(a).expect(":a explains"), &cfg));
+    assert_eq!(alone.len(), 1);
+    let within = entities(&prov_from_proof(&g.why(c).expect(":c explains"), &cfg));
+    assert!(alone.is_subset(&within), "{alone:?} not among {within:?}");
+}

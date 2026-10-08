@@ -1093,6 +1093,16 @@ impl OwlProver<'_> {
 // N3 — MaterializedN3Graph
 // ════════════════════════════════════════════════════════════════════════════════════════
 
+/// Render an N3 term as its serialized form (the engine's own writer). Context-free — an
+/// `@forAll` universal is written by its IRI, never under a per-proof name — so a fact's
+/// strings, which `sparq-prov` hashes into its identity, are the same in every proof it
+/// appears in (GH #6701 review round 4).
+fn n3_term_string(t: &N3Term) -> String {
+    let mut s = String::new();
+    crate::n3::serialize::write_term(t, &mut s);
+    s
+}
+
 impl MaterializedN3Graph {
     /// One derivation of `fact` from the current asserted base under the graph's rules, or
     /// `None` if `fact` is not in the closure (or cannot be matched to a derivation — e.g.
@@ -1113,32 +1123,33 @@ impl MaterializedN3Graph {
         if !self.contains(fact) {
             return None;
         }
-        let mut p = N3Prover {
-            base: &self.base,
-            step_map: FxHashMap::default(),
-            b: ProofBuilder::new(opts),
-            facts: Vec::new(),
-            memo: FxHashMap::default(),
-            stack: FxHashSet::default(),
-        };
+        let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
-            let root = p.push(fact, "asserted", vec![])?;
-            return Some(p.finish(root));
+            let root = b.push(fact.clone().map(|t| n3_term_string(&t)), "asserted", vec![])?;
+            return Some(b.finish(root));
         }
         // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
         // therefore the chosen witness) is stable across calls — as terms, not re-parsed
-        // text, so `@forAll` universals keep their identity (see `rematerialize`).
+        // text (see `rematerialize`).
         let mut keyed: Vec<(String, &[N3Term; 3])> =
             self.base.iter().map(|f| (crate::n3::serialize::serialize_facts(std::iter::once(f)), f)).collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let (_facts, steps) =
             crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone())).ok()?;
         // One step per derived fact (first derivation wins).
+        let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
         for (conclusion, rule, premises) in &steps {
-            p.step_map.entry(conclusion).or_insert((*rule, premises.as_slice()));
+            step_map.entry(conclusion).or_insert((*rule, premises.as_slice()));
         }
+        let mut p = N3Prover {
+            base: &self.base,
+            step_map,
+            b,
+            memo: FxHashMap::default(),
+            stack: FxHashSet::default(),
+        };
         let root = p.prove(fact, 0)?;
-        Some(p.finish(root))
+        Some(p.b.finish(root))
     }
 }
 
@@ -1146,36 +1157,11 @@ struct N3Prover<'a> {
     base: &'a FxHashSet<[N3Term; 3]>,
     step_map: FxHashMap<&'a [N3Term; 3], (usize, &'a [[N3Term; 3]])>,
     b: ProofBuilder,
-    /// Each node's fact, in node order. Conclusions are rendered only in [`Self::finish`],
-    /// once every node is known: the proof is ONE output document, so its `@forAll`
-    /// universals are named by one collision-free map over all its nodes (GH #6701 review
-    /// round 3) — per-term rendering wrote `{ :x :q ?x }` as `{ ?x :q ?x }`.
-    facts: Vec<[N3Term; 3]>,
     memo: FxHashMap<[N3Term; 3], u32>,
     stack: FxHashSet<[N3Term; 3]>,
 }
 
 impl N3Prover<'_> {
-    fn push(&mut self, f: &[N3Term; 3], rule: &str, premises: Vec<u32>) -> Option<u32> {
-        let ix = self.b.push(Default::default(), rule, premises)?;
-        debug_assert_eq!(ix as usize, self.facts.len());
-        self.facts.push(f.clone());
-        Some(ix)
-    }
-
-    fn finish(mut self, root: u32) -> ProofTree {
-        let names = crate::n3::serialize::UniversalNames::over(&self.facts);
-        let facts = &self.facts;
-        self.b.render_conclusions(|ix| {
-            facts[ix].clone().map(|t| {
-                let mut s = String::new();
-                crate::n3::serialize::write_term_named(&t, &names, &mut s);
-                s
-            })
-        });
-        self.b.finish(root)
-    }
-
     fn prove(&mut self, f: &[N3Term; 3], depth: usize) -> Option<u32> {
         if let Some(&ix) = self.memo.get(f) {
             return Some(ix);
@@ -1189,8 +1175,9 @@ impl N3Prover<'_> {
     }
 
     fn prove_inner(&mut self, f: &[N3Term; 3], depth: usize) -> Option<u32> {
+        let rendered = f.clone().map(|t| n3_term_string(&t));
         if self.base.contains(f) {
-            let ix = self.push(f, "asserted", vec![])?;
+            let ix = self.b.push(rendered, "asserted", vec![])?;
             self.memo.insert(f.clone(), ix);
             return Some(ix);
         }
@@ -1199,7 +1186,7 @@ impl N3Prover<'_> {
         for p in premises {
             prem_nodes.push(self.prove(p, depth + 1)?);
         }
-        let ix = self.push(f, &format!("n3-rule-{rule}"), prem_nodes)?;
+        let ix = self.b.push(rendered, &format!("n3-rule-{rule}"), prem_nodes)?;
         self.memo.insert(f.clone(), ix);
         Some(ix)
     }

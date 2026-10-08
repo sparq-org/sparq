@@ -208,9 +208,9 @@ fn id_level_bridge_from_reason_n3_proof() {
     assert!(n3_proof_tree(&dict, &steps, [a, par, b], ExplainOpts::default()).is_none());
 }
 
-/// GH #6701 review round 3: a proof is ONE output document, so its `@forAll` universals
-/// are named by one collision-free map over every node. Rendering each term on its own
-/// wrote `{ :x :q ?x }` as `{ ?x :q ?x }` — a formula requiring the two to be equal.
+/// GH #6701 review rounds 3–4: a proof renders an `@forAll` universal by its IRI under a
+/// formula-scoped declaration. Rendering it by its bare local name wrote `{ :x :q ?x }` as
+/// `{ ?x :q ?x }` — a formula requiring the two to be equal.
 #[test]
 fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
@@ -219,7 +219,7 @@ fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.
 { :a ?p ?f } => { :b :r ?f }.
 ";
-    let formula = "{ ?x_2 <http://ex/q> ?x . }";
+    let formula = "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }";
     let closure = reason_n3_terms(src, None).expect("oracle").facts;
     let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
     let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");
@@ -239,3 +239,29 @@ fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     assert_eq!(nodes[1].premises, vec![0]);
 }
 
+
+/// GH #6701 review round 4 (3): a fact renders the SAME in every proof it appears in.
+/// `sparq-prov` hashes these strings into the fact's identity, so per-proof naming (`?x` in
+/// one proof, `?x_2` in another) split one fact into two entities.
+#[test]
+fn a_fact_renders_the_same_in_every_proof() {
+    let src = "@prefix : <http://ex/>. @forAll :x.
+:a :p { :x :q :z }.
+:b :p { ?x :q :z }.
+{ :a ?p ?f. :b :p ?g } => { :c :r ?f }.
+";
+    let closure = reason_n3_terms(src, None).expect("oracle").facts;
+    let a = closure.iter().find(|f| f[0] == ex("a")).expect(":a fact");
+    let c = closure.iter().find(|f| f[0] == ex("c")).expect(":c fact");
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    let alone = g.why(a).expect(":a explains").conclusion().clone();
+    let proof = g.why(c).expect(":c explains");
+    let inside = proof
+        .nodes()
+        .iter()
+        .find(|n| n.conclusion[0] == "<http://ex/a>")
+        .expect("the :a premise")
+        .conclusion
+        .clone();
+    assert_eq!(alone, inside, "{}", proof.to_text());
+}

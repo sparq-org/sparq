@@ -7,8 +7,16 @@
 //! (whose output can derive nothing further) and it is what the eye-js `…_plus_rules`
 //! output modes buy.
 
-use sparq_reason::n3::Term;
-use sparq_reason::{reason_n3_pass_all, reason_n3_terms, RuleVars};
+use sparq_reason::n3::{parser, Term};
+use sparq_reason::{reason_n3_pass_all, reason_n3_query_terms, reason_n3_terms, RuleVars};
+
+type Stmts = Vec<[Term; 3]>;
+
+/// Each parsed rule as `(premise, conclusion)` — what "the same rule" means term-for-term.
+fn rule_terms(doc: &str) -> Vec<(Stmts, Stmts)> {
+    let p = parser::parse(doc).expect("re-parses");
+    p.rules.into_iter().map(|r| (r.premise, r.conclusion)).collect()
+}
 
 const S: &str = "http://example.org/socrates#";
 const TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
@@ -168,19 +176,22 @@ fn a_source_variable_spelled_like_the_rewrite_stays_a_variable() {
 }
 
 /// GH #5391: the parser rewrites an `@forAll :x` universal to an engine-internal rule
-/// variable. That name must never reach the output: `--pass-all` writes the declared
-/// quantifier's own local name (`?x`), `--pass-all-ground` its `var:x` IRI, and the
-/// emitted document still re-parses to the same rule.
+/// variable. That name must never reach the output. `--pass-all` writes the universal back
+/// as its own IRI under an `@forAll` declaration, so the document re-parses to the SAME
+/// rule; `--pass-all-ground` grounds it to its `var:x` IRI.
 #[test]
-fn a_for_all_universal_is_echoed_under_its_declared_name() {
+fn a_for_all_universal_is_echoed_under_its_declared_iri() {
     let src = "@prefix : <http://ex/>. @forAll :x.
 { :x a :Human } => { :x a :Mortal }. :a a :Human.
 ";
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert!(!doc.contains("__ua"), "no engine-internal variable name: {doc}");
-    let rule =
-        format!("{{ ?x <{TYPE}> <http://ex/Human> . }} => {{ ?x <{TYPE}> <http://ex/Mortal> . }} .");
+    let rule = format!(
+        "{{ @forAll <http://ex/x> . <http://ex/x> <{TYPE}> <http://ex/Human> . }} => \
+         {{ @forAll <http://ex/x> . <http://ex/x> <{TYPE}> <http://ex/Mortal> . }} ."
+    );
     assert!(doc.contains(&rule), "{doc}");
+    assert_eq!(rule_terms(&doc), rule_terms(src), "{doc}");
     assert!(doc.contains(&format!("<http://ex/a> <{TYPE}> <http://ex/Mortal> .")), "{doc}");
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
 
@@ -189,9 +200,10 @@ fn a_for_all_universal_is_echoed_under_its_declared_name() {
     assert!(ground.contains("<http://www.w3.org/2000/10/swap/var#x>"), "{ground}");
 }
 
-/// GH #5391: stripping the internal prefix must not capture a source variable of the same
-/// name, nor merge two universals that share a local name across namespaces — either would
-/// change which positions must bind equal terms.
+/// GH #5391: a universal must not be captured by a source variable of the same name, nor
+/// merge with another universal sharing its local name across namespaces — either would
+/// change which positions must bind equal terms. The echoed rule re-parses to the very
+/// same rule terms.
 #[test]
 fn a_for_all_universal_never_collides_with_another_variable() {
     let src = r#"@prefix : <http://ex/>. @prefix o: <http://other/>.
@@ -201,31 +213,30 @@ fn a_for_all_universal_never_collides_with_another_variable() {
 "#;
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert!(!doc.contains("__ua"), "{doc}");
-    // Three distinct variables survive as three distinct names.
-    let rule = doc.lines().find(|l| l.contains("=>")).expect("the rule line");
-    let mut names: Vec<&str> = rule.split_whitespace().filter(|w| w.starts_with('?')).collect();
-    names.sort_unstable();
-    names.dedup();
-    assert_eq!(names.len(), 3, "{rule}");
+    assert_eq!(rule_terms(&doc), rule_terms(src), "{doc}");
     assert!(doc.contains("<http://ex/a> <http://ex/r> <http://ex/b> ."), "{doc}");
     assert!(doc.contains("<http://ex/a> <http://ex/r> <http://ex/c> ."), "{doc}");
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
+    // Grounded: three distinct `var:` names.
+    let ground = reason_n3_pass_all(src, RuleVars::VarIris).expect("pass-all-ground");
+    let rule = ground.lines().find(|l| l.contains("=>")).expect("the rule line");
+    let mut names: Vec<&str> = rule.split_whitespace().filter(|w| w.contains("swap/var#")).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 3, "{rule}");
 }
 
 /// GH #5391 review: a universal inside a formula-valued FACT must not merge with a source
-/// variable of the same name either — `{ :x :q ?x }` holds two distinct variables.
+/// variable of the same name either — `{ :x :q ?x }` holds two distinct variables — and
+/// the fact must re-parse to the same term.
 #[test]
 fn a_for_all_universal_in_a_formula_fact_never_collides() {
     let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n";
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert!(!doc.contains("__ua"), "{doc}");
-    assert!(doc.contains("{ ?x_2 <http://ex/q> ?x . }"), "{doc}");
+    assert!(doc.contains("{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }"), "{doc}");
+    assert_eq!(parser::parse(&doc).expect("re-parses").facts, parser::parse(src).unwrap().facts);
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
-}
-
-#[test]
-fn a_parse_error_propagates() {
-    assert!(reason_n3_pass_all("{ ?x a :Human } =>", RuleVars::N3).is_err());
 }
 
 /// GH #6701 review round 2: facts and echoed rules must name one universal the SAME way.
@@ -249,4 +260,49 @@ fn a_for_all_universal_gets_one_name_across_facts_and_rules() {
     let again = reason_n3_pass_all(&first, RuleVars::N3).expect("round two");
     assert!(!derives_bad(&again), "re-reasoning the output changed its meaning: {again}");
     assert_eq!(first, again);
+}
+
+/// GH #6701 review round 4 (1): a formula re-created from TEXT by `log:parsedAsN3` holds
+/// the parser's own `__ua.<iri>` universal. The pass-all output must hold that same term,
+/// or re-reasoning flips `log:notEqualTo` and derives `:bad`.
+#[test]
+fn a_universal_compares_equal_to_one_parsed_from_a_literal_after_a_round_trip() {
+    let src = r#"@prefix : <http://ex/>.
+@prefix log: <http://www.w3.org/2000/10/swap/log#>.
+@forAll :x.
+:a :p { :x :q :z }.
+{
+  :a :p ?f.
+  "@prefix : <http://ex/>. @forAll :x. :x :q :z." log:parsedAsN3 ?g.
+  ?f log:notEqualTo ?g
+} => { :bad :is true }.
+"#;
+    let derives_bad = |doc: &str| doc.lines().any(|l| l.starts_with("<http://ex/bad> "));
+    let first = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
+    assert!(!derives_bad(&first), "the source does not derive :bad: {first}");
+    let again = reason_n3_pass_all(&first, RuleVars::N3).expect("round two");
+    assert!(!derives_bad(&again), "re-reasoning the output changed its meaning: {again}");
+    assert_eq!(first, again);
+}
+
+/// GH #6701 review round 4 (2): backward resolution standardizes a rule apart by
+/// prefixing its variables (`__bw0_…`). A universal copied that way must still be written
+/// as the universal — not as the unparseable variable `?__bw0___ua.http://ex/x`.
+#[test]
+fn a_freshened_backward_rule_universal_serializes_as_the_universal() {
+    let data = "@prefix : <http://ex/>. @forAll :x.\n{ :a :p { :x :q :z } } <= true.\n";
+    let query = "@prefix : <http://ex/>.\n{ :a :p ?f } => { :result :is ?f }.\n";
+    let answers = reason_n3_query_terms(data, query).expect("query");
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    let text = sparq_reason::n3::serialize::serialize_facts(answers.iter());
+    assert!(!text.contains("__bw") && !text.contains("__ua"), "{text}");
+    let back = parser::parse(&text).expect("the answer re-parses");
+    // The same formula a forward derivation would carry: the universal itself.
+    let want = parser::parse("@prefix : <http://ex/>. @forAll :x. :result :is { :x :q :z }.").unwrap();
+    assert_eq!(back.facts, want.facts, "{text}");
+}
+
+#[test]
+fn a_parse_error_propagates() {
+    assert!(reason_n3_pass_all("{ ?x a :Human } =>", RuleVars::N3).is_err());
 }
