@@ -14848,11 +14848,17 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
 
 /// The typed result of a relational operator (`<`, `<=`, `>`, `>=`) once both operands are
 /// evaluated. An incomparable pair is a type error, EXCEPT two numerics that are unordered
-/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there.
-/// That case is only applied when `arith` sent the comparison here (an arithmetic operand,
-/// which the f64 fast path used to decide, returning false for NaN); the NaN-free typed path
-/// is unchanged.
+/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there,
+/// whether the NaN is stored or computed. Other unordered numeric pairs are false only when
+/// `arith` sent the comparison here (an arithmetic operand the f64 fast path used to decide).
 fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
+    // A NaN operand (stored NaN misses the numeric cache and lands here) is false, never a
+    // type error, matching the strict-capacity path and XPath numeric comparisons.
+    if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+        if a.is_nan() || b.is_nan() {
+            return Value::Bool(false);
+        }
+    }
     match value_compare_strict(x, y) {
         Some(o) => Value::Bool(f(o)),
         None if arith && as_numeric(x).is_some() && as_numeric(y).is_some() => Value::Bool(false),
