@@ -664,3 +664,184 @@ fn flatten_survives_a_compaction_round_trip() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Generated round trips: nested lists, type maps and scoped contexts
+// ---------------------------------------------------------------------------
+
+/// A small deterministic generator (64-bit LCG), so failures reproduce from the case
+/// number alone.
+struct Gen(u64);
+
+impl Gen {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+    fn chance(&mut self, percent: u64) -> bool {
+        self.next() % 100 < percent
+    }
+    fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+        items[self.below(items.len())]
+    }
+}
+
+const PROPS: [&str; 3] = ["http://ex/p", "http://ex/q", "http://ex/r"];
+const TYPES: [&str; 3] = ["http://ex/T", "http://ex/U", "http://other/T"];
+
+/// One value of an expanded document: a literal, a reference, an embedded node or a
+/// list (which may hold nested lists).
+fn gen_value(g: &mut Gen, depth: usize, ids: &mut usize) -> String {
+    match g.below(if depth > 0 { 6 } else { 4 }) {
+        0 => format!(r#"{{"@value":"{}"}}"#, g.pick(&["a", "b", "T", "p"])),
+        1 => r#"{"@value":"x","@language":"en"}"#.to_string(),
+        2 => format!(r#"{{"@id":"{}"}}"#, g.pick(&["http://ex/T", "http://ex/b", "http://other/c"])),
+        3 => r#"{"@value":"1","@type":"http://ex/dt"}"#.to_string(),
+        4 => gen_node(g, depth - 1, ids),
+        _ => {
+            let items: Vec<String> = (0..g.below(3) + 1).map(|_| gen_value(g, depth - 1, ids)).collect();
+            format!(r#"{{"@list":[{}]}}"#, items.join(","))
+        }
+    }
+}
+
+fn gen_node(g: &mut Gen, depth: usize, ids: &mut usize) -> String {
+    *ids += 1;
+    let mut members = vec![format!(r#""@id":"http://ex/n{}""#, ids)];
+    if g.chance(70) {
+        let mut types: Vec<&str> = TYPES.iter().copied().filter(|_| g.chance(50)).collect();
+        if types.is_empty() {
+            types.push(g.pick(&TYPES));
+        }
+        let types: Vec<String> = types.iter().map(|t| format!(r#""{t}""#)).collect();
+        members.push(format!(r#""@type":[{}]"#, types.join(",")));
+    }
+    for p in PROPS {
+        if g.chance(50) {
+            let values: Vec<String> = (0..g.below(2) + 1).map(|_| gen_value(g, depth, ids)).collect();
+            members.push(format!(r#""{p}":[{}]"#, values.join(",")));
+        }
+    }
+    format!("{{{}}}", members.join(","))
+}
+
+/// A small context to scope under a term: it may move @vocab, take over or redefine
+/// keyword aliases, and respell types and properties.
+fn gen_scoped(g: &mut Gen) -> String {
+    let mut entries = Vec::new();
+    for entry in [
+        r#""@vocab":"http://other/""#,
+        r#""@vocab":"http://ex/""#,
+        r#""type":"http://ex/data""#,
+        r#""t":"@type""#,
+        r#""l":"http://ex/data""#,
+        r#""ls":"@list""#,
+        r#""id":"http://ex/data""#,
+        r#""T":"http://other/T""#,
+        r#""U":"http://ex/T""#,
+        r#""q":"http://ex/r""#,
+        r#""type":"@type""#,
+        r#""p":{"@id":"http://ex/p","@type":"@id"}"#,
+        r#""r":{"@id":"http://ex/r","@container":"@list"}"#,
+        r#""@propagate":false"#,
+        r#""ex":"http://other/""#,
+        r#""ex":"http://ex/""#,
+        r#""@language":"en""#,
+        r#""p":{"@id":"http://ex/p","@container":"@language"}"#,
+    ] {
+        if g.chance(20) {
+            entries.push(entry.to_string());
+        }
+    }
+    format!("{{{}}}", entries.join(","))
+}
+
+fn gen_context(g: &mut Gen) -> String {
+    let mut entries = Vec::new();
+    if g.chance(70) {
+        entries.push(format!(r#""@vocab":"{}""#, g.pick(&["http://ex/", "http://other/"])));
+    }
+    if g.chance(50) {
+        entries.push(format!(r#""ex":"{}""#, g.pick(&["http://ex/", "http://other/"])));
+    }
+    if g.chance(20) {
+        entries.push(r#""@language":"en""#.to_string());
+    }
+    for alias in [r#""type":"@type""#, r#""l":"@list""#, r#""id":"@id""#] {
+        if g.chance(40) {
+            entries.push(alias.to_string());
+        }
+    }
+    for (term, iri) in [("T", "http://ex/T"), ("U", "http://ex/U")] {
+        if g.chance(50) {
+            let scoped = if g.chance(50) { format!(r#","@context":{}"#, gen_scoped(g)) } else { String::new() };
+            entries.push(format!(r#""{term}":{{"@id":"{iri}"{scoped}}}"#));
+        }
+    }
+    for (term, iri) in [("p", PROPS[0]), ("q", PROPS[1]), ("r", PROPS[2])] {
+        if g.chance(70) {
+            let mut def = vec![format!(r#""@id":"{iri}""#)];
+            if g.chance(40) {
+                def.push(format!(
+                    r#""@container":"{}""#,
+                    g.pick(&["@type", "@list", "@set", "@id", "@language", "@graph"])
+                ));
+            }
+            if g.chance(20) {
+                def.push(format!(r#""@type":"{}""#, g.pick(&["@id", "@vocab"])));
+            }
+            if g.chance(50) {
+                def.push(format!(r#""@context":{}"#, gen_scoped(g)));
+            }
+            entries.push(format!(r#""{term}":{{{}}}"#, def.join(",")));
+        }
+    }
+    format!("{{{}}}", entries.join(","))
+}
+
+/// `expand(compact_expanded(D, C)) ≡ D` over generated expanded documents and contexts
+/// mixing nested lists, type maps, keyword aliases and property- and type-scoped
+/// contexts. A context or document the processor rejects is skipped; any document it
+/// accepts must read back unchanged.
+#[test]
+fn generated_documents_round_trip_under_scoped_contexts() {
+    let opts = JsonLdOptions::default();
+    let (mut checked, mut failures) = (0, Vec::new());
+    let cases: u64 = std::env::var("ROUND_TRIP_CASES").ok().and_then(|n| n.parse().ok()).unwrap_or(20_000);
+    let only: Option<u64> = std::env::var("ROUND_TRIP_CASE").ok().and_then(|n| n.parse().ok());
+    for case in 0..cases {
+        if only.is_some_and(|o| o != case) {
+            continue;
+        }
+        let mut g = Gen(case.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03);
+        let mut ids = 0;
+        let mut nodes = vec![gen_node(&mut g, 2, &mut ids)];
+        if g.chance(30) {
+            let inner = gen_node(&mut g, 1, &mut ids);
+            nodes.push(format!(r#"{{"@id":"http://ex/g","@graph":[{inner}]}}"#));
+        }
+        let doc = format!("[{}]", nodes.join(","));
+        let ctx = gen_context(&mut g);
+        let doc = Json::parse(&doc).expect("generated document parses");
+        let ctx_json = Json::parse(&ctx).expect("generated context parses");
+        let Ok(compacted) = sparq_jsonld::compact::compact_expanded(&doc, &ctx_json, &opts, &NoopLoader) else {
+            continue;
+        };
+        let Ok(expanded) = expand(&doc, &opts, &NoopLoader) else { continue };
+        checked += 1;
+        let back = expand(&compacted, &opts, &NoopLoader);
+        if !back.as_ref().is_ok_and(|b| json_ld_equal(b, &expanded)) {
+            failures.push(format!(
+                "case {case}\n  context:  {ctx}\n  input:    {}\n  output:   {}\n  read back:{}",
+                render(&expanded),
+                render(&compacted),
+                back.map(|b| render(&b)).unwrap_or_else(|e| format!("{e:?}"))
+            ));
+        }
+    }
+    assert!(only.is_some() || checked > 1000, "only {checked} cases were accepted");
+    assert!(failures.is_empty(), "{} of {checked} changed the data:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}

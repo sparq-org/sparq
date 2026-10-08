@@ -389,6 +389,7 @@ fn match_frame(
     property: Option<&str>,
     embedded: bool,
 ) -> Result<(), JsonLdError> {
+    let _nested = crate::context::budget::nest()?;
     let frame_obj = validate_frame(frame)?;
     let flags = Flags {
         embed: frame_flag_embed(&frame_obj, st.options)?,

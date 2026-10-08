@@ -110,6 +110,7 @@ fn expand_element(
     frame_expansion: bool,
     from_map: bool,
 ) -> Result<Option<Json>, JsonLdError> {
+    let _nested = crate::context::budget::nest()?;
     // step 1: null expands to null.
     if is_null(element) {
         return Ok(None);

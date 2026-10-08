@@ -43,7 +43,7 @@ use crate::context::{budget, ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::{expand, expand_value};
 use crate::fx::FxMap;
-use crate::json::Json;
+use crate::json::{Json, MAX_DEPTH};
 use crate::loader::DocumentLoader;
 use crate::options::{JsonLdOptions, ProcessingMode};
 use std::cell::{Cell, RefCell};
@@ -205,27 +205,28 @@ fn root_ctx(
 
 /// True iff processing `context` never consults the document loader: no remote context
 /// IRI (a string context, at the top level or under any nested `@context`) and no
-/// `@import`.
+/// `@import`. A context nested deeper than a parsed one can be is not checked (false).
 fn self_contained(context: &Json) -> bool {
-    fn local(ctx: &Json) -> bool {
+    fn local(ctx: &Json, depth: usize) -> bool {
         match ctx {
             Json::Str(_) => false,
-            Json::Arr(items) => items.iter().all(local),
-            other => nested_ok(other),
+            Json::Arr(items) => depth < MAX_DEPTH && items.iter().all(|c| local(c, depth + 1)),
+            other => nested_ok(other, depth),
         }
     }
-    fn nested_ok(j: &Json) -> bool {
+    fn nested_ok(j: &Json, depth: usize) -> bool {
         match j {
+            Json::Obj(_) | Json::Arr(_) if depth >= MAX_DEPTH => false,
             Json::Obj(m) => m.iter().all(|(k, v)| match k.as_str() {
                 "@import" => false,
-                "@context" => local(v),
-                _ => nested_ok(v),
+                "@context" => local(v, depth + 1),
+                _ => nested_ok(v, depth + 1),
             }),
-            Json::Arr(a) => a.iter().all(nested_ok),
+            Json::Arr(a) => a.iter().all(|v| nested_ok(v, depth + 1)),
             _ => true,
         }
     }
-    local(context)
+    local(context, 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +545,8 @@ fn compact_element(
     if let Json::Arr(items) = element {
         let mut result: Vec<Json> = Vec::new();
         for item in items {
+            // Recursion is counted per object; an array directly in an array counts too.
+            let _nested = if matches!(item, Json::Arr(_)) { Some(budget::nest()?) } else { None };
             let compacted = compact_element(ctx, active_property, item, env)?;
             if !is_null(&compacted) {
                 result.push(compacted);
@@ -583,14 +586,36 @@ fn compact_element(
         }
     }
 
+    // Everything below recurses into this object's members.
+    let _nested = budget::nest()?;
+
     // step 7: a list object under a @list-container term compacts to its bare items.
+    // A bare array reverts no context, so they are read (and compacted) under the
+    // incoming one.
     if is_list_object(element)
-        && term_container(&cur.active, active_property)
+        && term_container(&ctx.active, active_property)
             .iter()
             .any(|c| c == "@list")
     {
         let list = element.get("@list").expect("list object");
-        return compact_element(cur, active_property, list, env);
+        return compact_element(ctx, active_property, list, env);
+    }
+
+    // A list object outside a @list-container term (one nested in another list) is read
+    // with its items under the enclosing active property, not under @list, so they are
+    // compacted that way too (a type coercion on the property applies to them).
+    if is_list_object(element) {
+        let list = element.get("@list").expect("list object");
+        let items = match compact_element(cur, active_property, list, env)? {
+            items @ Json::Arr(_) => items,
+            other => Json::Arr(vec![other]),
+        };
+        let mut wrapper = Json::obj();
+        wrapper.set(&cur.ciri("@list", None, true, false), items);
+        if let Some(idx) = element.get("@index") {
+            wrapper.set(&cur.ciri("@index", None, true, false), idx.clone());
+        }
+        return Ok(wrapper);
     }
 
     // step 8: reverse-property scope.
@@ -756,7 +781,13 @@ fn compact_element(
             } else {
                 item
             };
-            let mut compacted_item = compact_element(cur, Some(&iap), inner, env)?;
+            // Expansion reads an explicit list or graph object's contents under the
+            // wrapper's own context (reverted, with the property's scoped context); a
+            // @list-container term's bare array is read under this context.
+            let wrapped = (item_is_list && !container.iter().any(|c| c == "@list")) || item_is_graph;
+            let wrapper_ctx = if wrapped { node_ctx(cur, Some(&iap), item, env)? } else { None };
+            let inner_ctx: &Ctx = wrapper_ctx.as_deref().unwrap_or(cur);
+            let mut compacted_item = compact_element(inner_ctx, Some(&iap), inner, env)?;
 
             // 12.8.6: list objects.
             if item_is_list {
@@ -764,13 +795,17 @@ fn compact_element(
                     compacted_item = Json::Arr(vec![compacted_item]);
                 }
                 // Re-wrap as a list object under the @list alias (+ verbatim @index).
-                let wrap = |items: Json| {
+                // Expansion reads the wrapper's keys under the context it gives the
+                // property's values (reverted, with the property's scoped context).
+                let wrap = |property: &str, items: Json| -> Result<Json, JsonLdError> {
+                    let wctx = node_ctx(cur, Some(property), item, env)?;
+                    let wctx: &Ctx = wctx.as_deref().unwrap_or(cur);
                     let mut wrapper = Json::obj();
-                    wrapper.set(&cur.ciri("@list", None, true, false), items);
+                    wrapper.set(&wctx.ciri("@list", None, true, false), items);
                     if let Some(idx) = item.get("@index") {
-                        wrapper.set(&cur.ciri("@index", None, true, false), idx.clone());
+                        wrapper.set(&wctx.ciri("@index", None, true, false), idx.clone());
                     }
-                    wrapper
+                    Ok(wrapper)
                 };
                 if container.iter().any(|c| c == "@list") {
                     // A @list-container term holds exactly one list — set directly.
@@ -792,22 +827,24 @@ fn compact_element(
                     }
                     // Compacted again under the absolute IRI, which carries no scoped
                     // context (the term's could change how its values read back).
-                    let plain = compact_element(cur, Some(key), inner, env)?;
+                    let wrapper_ctx = node_ctx(cur, Some(key), item, env)?;
+                    let plain = compact_element(wrapper_ctx.as_deref().unwrap_or(cur), Some(key), inner, env)?;
                     let plain = match plain {
                         Json::Arr(_) => plain,
                         other => Json::Arr(vec![other]),
                     };
-                    add_value(&mut result, key, wrap(plain), false);
+                    add_value(&mut result, key, wrap(key, plain)?, false);
                     continue;
                 }
+                let wrapper = wrap(&iap, compacted_item)?;
                 let nest = nest_target(&mut result, cur, &iap)?;
-                add_value(nest, &iap, wrap(compacted_item), as_array);
+                add_value(nest, &iap, wrapper, as_array);
                 continue;
             }
 
             // 12.8.7: graph objects — the four @graph container forms.
             if item_is_graph {
-                compact_graph_item(&mut result, cur, &iap, container, item, compacted_item, as_array)?;
+                compact_graph_item(&mut result, cur, &iap, container, item, compacted_item, as_array, env)?;
                 continue;
             }
 
@@ -842,6 +879,7 @@ fn compact_element(
 
 /// Step 12.8.7 — place one compacted **graph object** according to the `@graph`
 /// container forms of its term, adding into `result` (through the `@nest` target).
+#[allow(clippy::too_many_arguments)]
 fn compact_graph_item(
     result: &mut Json,
     cur: &Ctx,
@@ -850,6 +888,7 @@ fn compact_graph_item(
     item: &Json,
     mut compacted_item: Json,
     as_array: bool,
+    env: &Env,
 ) -> Result<(), JsonLdError> {
     let has_graph = container.iter().any(|c| c == "@graph");
     let has_id = container.iter().any(|c| c == "@id");
@@ -859,7 +898,7 @@ fn compact_graph_item(
     if has_graph && has_id {
         // 12.8.7.1: an @graph+@id map keyed by the (document-relative) graph name.
         let map_key = match item.get("@id").and_then(Json::as_str) {
-            Some(id) => cur.ciri(id, None, false, false),
+            Some(id) => id_key(cur, id),
             None => cur.ciri("@none", None, true, false),
         };
         let nest = nest_target(result, cur, iap)?;
@@ -882,12 +921,15 @@ fn compact_graph_item(
         add_value(map_obj, &map_key, compacted_item, as_array);
         return Ok(());
     }
+    // Expansion reads a wrapper's keys under the context it gives the property's values.
+    let wctx = node_ctx(cur, Some(iap), item, env)?;
+    let wctx: &Ctx = wctx.as_deref().unwrap_or(cur);
     if has_graph && simple {
         // 12.8.7.3: a bare @graph container; several nodes need an @included wrapper so
         // they are not read back as distinct named graphs.
         if matches!(&compacted_item, Json::Arr(a) if a.len() > 1) {
             let mut wrapper = Json::obj();
-            wrapper.set(&cur.ciri("@included", None, true, false), compacted_item);
+            wrapper.set(&wctx.ciri("@included", None, true, false), compacted_item);
             compacted_item = wrapper;
         }
         let nest = nest_target(result, cur, iap)?;
@@ -897,19 +939,64 @@ fn compact_graph_item(
 
     // 12.8.7.4: no matching @graph container — re-wrap as an explicit graph object.
     let mut wrapper = Json::obj();
-    wrapper.set(&cur.ciri("@graph", None, true, false), compacted_item);
+    wrapper.set(&wctx.ciri("@graph", None, true, false), compacted_item);
     if let Some(id) = item.get("@id").and_then(Json::as_str) {
-        wrapper.set(
-            &cur.ciri("@id", None, true, false),
-            Json::Str(cur.ciri(id, None, false, false)),
-        );
+        wrapper.set(&wctx.ciri("@id", None, true, false), Json::Str(id_key(wctx, id)));
     }
     if let Some(idx) = item.get("@index") {
-        wrapper.set(&cur.ciri("@index", None, true, false), idx.clone());
+        wrapper.set(&wctx.ciri("@index", None, true, false), idx.clone());
     }
     let nest = nest_target(result, cur, iap)?;
     add_value(nest, iap, wrapper, as_array);
     Ok(())
+}
+
+/// The (document-relative) spelling of `id` as a map key or graph name under `cur`: its
+/// compacted form when that expands back to it and does not read as an `@none` alias,
+/// else the full id.
+fn id_key(cur: &Ctx, id: &str) -> String {
+    let key = cur.ciri(id, None, false, false);
+    let round_trips = cur.active.expand_iri(&key, true, false).as_deref() == Some(id)
+        && cur.active.expand_iri(&key, false, true).as_deref() != Some("@none");
+    if round_trips {
+        key
+    } else {
+        id.to_string()
+    }
+}
+
+/// Whether the type-map key `key` brings the same scoped context into expansion as into
+/// compaction of `item`. Expansion looks the key up in `map_ctx` (the reverted context),
+/// compaction applied the item's type-scoped contexts in `node`, so both must agree.
+/// Expansion also applies a key's scoped context before the property's (`iap`) and lets
+/// it propagate into nested objects, unlike a node's own type-scoped contexts, and reads
+/// the item's other types under it, so with one the property must carry no scoped
+/// context and the item must hold only values and no other type.
+fn type_key_scoped_alike(cur: &Ctx, map_ctx: &Ctx, node: &Ctx, iap: &str, key: &str, item: &Json) -> bool {
+    let scoped = |c: &Ctx| c.active.term_definition(key).and_then(|d| d.context()).cloned();
+    let expanded = scoped(map_ctx);
+    if expanded != scoped(node) {
+        return false;
+    }
+    let lone_type = item.get("@type").is_some_and(|t| type_strings(t).len() == 1);
+    expanded.is_none()
+        || (cur.active.term_definition(iap).and_then(|d| d.context()).is_none()
+            && lone_type
+            && !embeds_nodes(item))
+}
+
+/// Whether a property value of the node object `node` is anything but a value object:
+/// a node object or reference, or a list or graph object, whose context reverts.
+fn embeds_nodes(node: &Json) -> bool {
+    let not_value = |v: &Json| matches!(v, Json::Obj(_)) && v.get("@value").is_none();
+    match node {
+        Json::Obj(members) => members.iter().any(|(k, v)| match (k.as_str(), v) {
+            ("@id" | "@type" | "@index", _) => false,
+            (_, Json::Arr(items)) => items.iter().any(not_value),
+            (_, v) => not_value(v),
+        }),
+        _ => false,
+    }
 }
 
 /// Steps 4–5: the context a node object `element` under `active_property` is compacted
@@ -1129,17 +1216,20 @@ fn add_to_container_map(
         // compacted under the term's scoped context, which may alias @id differently and
         // reuse this alias for data; so the item is compacted again without its @id.
         if let Some(Json::Str(id)) = item.get("@id") {
-            // The key must expand back to the id; a compacted form that reads as an
-            // alias (e.g. of @none) or another IRI keeps the full id instead.
-            let key = cur.ciri(id, None, false, false);
-            let round_trips = cur.active.expand_iri(&key, true, false).as_deref() == Some(id)
-                && cur.active.expand_iri(&key, false, true).as_deref() != Some("@none");
-            map_key = Some(if round_trips { key } else { id.clone() });
+            map_key = Some(id_key(cur, id));
             let mut rest = item.clone();
             take_entry(&mut rest, "@id");
             compacted_item = compact_element(cur, Some(iap), &rest, env)?;
         }
     } else if kind == "@type" {
+        // Expansion reads a type map's values under the reverted context, which a lone
+        // node reference (compacted without reverting) must be spelled for.
+        let reverted = node_ctx(cur, None, &Json::obj(), env)?;
+        let map_ctx: &Ctx = reverted.as_deref().unwrap_or(cur);
+        let lone_ref = |j: &Json| matches!(j, Json::Obj(m) if m.len() == 1 && m[0].0 == "@id");
+        if lone_ref(item) {
+            compacted_item = compact_element(map_ctx, Some(iap), item, env)?;
+        }
         // 12.8.9.8: type maps key on the first compacted type; remaining types stay. The
         // spec names the entry by this context's @type alias, but the item was compacted
         // under the term's scoped context, which may alias @type differently and reuse
@@ -1157,7 +1247,15 @@ fn add_to_container_map(
             };
             if !vals.is_empty() {
                 let first = vals.remove(0);
-                map_key = first.as_str().map(str::to_string);
+                // Expansion reads the key under this context, and applies a key's scoped
+                // context differently (see `type_key_scoped_alike`); a key read as
+                // another type, or a scoped context that would read the item
+                // differently, leaves the type on the item.
+                let ty = item.get("@type").and_then(|t| type_strings(t).first().copied());
+                map_key = first.as_str().map(str::to_string).filter(|k| {
+                    cur.active.expand_iri(k, false, true).as_deref() == ty
+                        && type_key_scoped_alike(cur, map_ctx, node, iap, k, item)
+                });
                 for v in vals {
                     add_value(&mut compacted_item, &container_key, v, false);
                 }
@@ -1168,8 +1266,13 @@ fn add_to_container_map(
         }
         // 12.8.9.8.4: a leftover lone node reference re-compacts (it may collapse to a
         // string under an @id/@vocab-typed term). Its key was written under the item's
-        // context, and only an item that has an @id is a reference.
-        let id = item.get("@id").filter(|id| matches!(id, Json::Str(_)));
+        // context, and only an item that has an @id is a reference. A key with a scoped
+        // context changes how expansion reads the property's values, so there the
+        // reference stays a node object.
+        let key_scoped = map_key.as_deref().is_some_and(|k| {
+            map_ctx.active.term_definition(k).is_some_and(|d| d.context().is_some())
+        });
+        let id = item.get("@id").filter(|id| !key_scoped && matches!(id, Json::Str(_)));
         let lone_id = match &compacted_item {
             Json::Obj(m) if m.len() == 1 && id.is_some() => {
                 item_ctx.active.expand_iri(&m[0].0, false, true).as_deref() == Some("@id")
@@ -1179,7 +1282,7 @@ fn add_to_container_map(
         if let (true, Some(id)) = (lone_id, id) {
             let mut single = Json::obj();
             single.set("@id", id.clone());
-            compacted_item = compact_element(cur, Some(iap), &single, env)?;
+            compacted_item = compact_element(map_ctx, Some(iap), &single, env)?;
         }
     }
 
@@ -1255,9 +1358,20 @@ fn value_compact(cur: &Ctx, active_property: Option<&str>, value: &Json) -> Opti
     }
     // step 9: non-string literals compact whenever the @index (if any) is re-expressed
     // by an @index container.
+    // A bare value would be read back under the property's type mapping, which here the
+    // value does not carry (term selection avoids such a term, but a list nested in a
+    // list keeps its property): a datatype coerces any value, @id/@vocab a string.
+    let coerces = |string: bool| match type_mapping {
+        Some("@id" | "@vocab") => string,
+        Some(_) => true,
+        None => false,
+    };
     if let Some(v) = value.get("@value") {
         if !matches!(v, Json::Str(_)) {
-            return if index_ok { Some(v.clone()) } else { None };
+            return if index_ok && !coerces(false) { Some(v.clone()) } else { None };
+        }
+        if coerces(true) {
+            return None;
         }
         // step 10: string literals compact when language AND direction match the
         // property's effective mappings (case-insensitively; absence matches null).
@@ -1721,6 +1835,97 @@ mod tests {
             r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b","@type":["http://ex/T"],
                 "http://ex/q":[{"@value":"v"}]}]}]"#,
         );
+    }
+
+    // List and graph wrappers are read under the property's scoped context, so their
+    // keyword aliases come from there, not from the enclosing context.
+    #[test]
+    fn wrappers_are_spelled_under_the_property_scoped_context() {
+        let opts = JsonLdOptions::default();
+        let round_trip = |ctx: &str, doc: &str| {
+            let ctx = Json::parse(ctx).unwrap();
+            let doc = Json::parse(doc).unwrap();
+            let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+            let back = expand(&out, &opts, &NoopLoader).unwrap();
+            assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+        };
+        round_trip(
+            r#"{"l":"@list","p":{"@id":"http://ex/p","@context":{"l":"http://ex/data"}}}"#,
+            r#"[{"@id":"http://ex/s","http://ex/p":[{"@list":[{"@value":"a"}]}]}]"#,
+        );
+        round_trip(
+            r#"{"g":"@graph","i":"@id",
+                "p":{"@id":"http://ex/p","@context":{"g":"http://ex/data","i":"http://ex/data2"}}}"#,
+            r#"[{"@id":"http://ex/s","http://ex/p":[{"@id":"http://ex/g1",
+                "@graph":[{"@id":"http://ex/x","http://ex/q":[{"@value":"v"}]}]}]}]"#,
+        );
+    }
+
+    // A type-map key is read under the enclosing context; one that reads as another
+    // type there leaves the type on the item.
+    #[test]
+    fn type_map_keys_read_back_under_the_enclosing_context() {
+        let ctx = Json::parse(
+            r#"{"@vocab":"http://ex/","T":"http://ex/T",
+                "p":{"@id":"http://ex/p","@container":"@type",
+                     "@context":{"T":"http://other/T","U":"http://ex/T"}}}"#,
+        )
+        .unwrap();
+        let doc =
+            Json::parse(r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b","@type":["http://ex/T"]}]}]"#)
+                .unwrap();
+        let opts = JsonLdOptions::default();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        let back = expand(&out, &opts, &NoopLoader).unwrap();
+        assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+    }
+
+    // Scoped contexts nested as deeply as a parsed context allows are processed (or
+    // refused) without overflowing the stack.
+    #[test]
+    fn deeply_scoped_contexts_stay_on_the_stack() {
+        let mut ctx = r#"{"q":"http://ex/q"}"#.to_string();
+        let mut levels = 0;
+        loop {
+            let next = format!(r#"{{"t":{{"@id":"http://ex/t","@context":{ctx}}}}}"#);
+            if Json::parse(&next).is_err() {
+                break;
+            }
+            ctx = next;
+            levels += 1;
+        }
+        assert!(levels > 100, "{levels}");
+        let local = Json::parse(&ctx).unwrap();
+        let _ = ActiveContext::new(None).process(&local, None, &NoopLoader, &JsonLdOptions::default());
+    }
+
+    // Recursive walks fail cleanly past their nesting bound instead of overflowing.
+    #[test]
+    fn deep_documents_fail_cleanly() {
+        let deep = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
+        assert!(Json::parse(&deep(crate::json::MAX_DEPTH)).is_ok());
+        assert!(Json::parse(&deep(crate::json::MAX_DEPTH + 1)).is_err());
+        assert!(Json::parse(&deep(1_000_000)).is_err());
+        // A value built in code is not bounded by the parser; the walks bound themselves.
+        let mut doc = Json::obj();
+        for _ in 0..4 * budget::MAX_NESTING {
+            let mut node = Json::obj();
+            node.set("http://ex/p", Json::Arr(vec![doc]));
+            doc = node;
+        }
+        let opts = JsonLdOptions::default();
+        let ctx = Json::parse(r#"{"@vocab":"http://ex/"}"#).unwrap();
+        let err = expand(&doc, &opts, &NoopLoader).unwrap_err();
+        assert_eq!(err.code(), E::ContextOverflow);
+        let err = compact_expanded(&Json::Arr(vec![doc.clone()]), &ctx, &opts, &NoopLoader).unwrap_err();
+        assert_eq!(err.code(), E::ContextOverflow);
+        // Dismantle iteratively: dropping a value this deep recurses too.
+        while let Json::Obj(mut m) = doc {
+            doc = match m.pop() {
+                Some((_, Json::Arr(mut a))) => a.pop().unwrap_or(Json::Raw("null".into())),
+                _ => Json::Raw("null".into()),
+            };
+        }
     }
 
     // Definitions a scoped context discards with a later null are charged too: once the

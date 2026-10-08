@@ -5,6 +5,9 @@
 //! including definitions loaded from remote contexts or later discarded by a `null`, and
 //! fails with `context overflow` once the call's budget is spent. Nested entry points
 //! share the outermost budget.
+//!
+//! It also bounds how deeply the recursive walks nest ([`nest`]), so a deeply nested
+//! document or context fails with `context overflow` instead of exhausting the stack.
 
 use std::cell::Cell;
 
@@ -49,4 +52,37 @@ pub(crate) fn with_budget<T>(f: impl FnOnce() -> T) -> T {
     LEFT.with(|left| left.set(Some(WORK_BUDGET)));
     let _disarm = Disarm;
     f()
+}
+
+/// How deeply the recursive document walks (expansion, compaction, frame matching) may
+/// nest on one thread before they fail with `context overflow` instead of exhausting the
+/// stack. Parsed documents nest at most [`MAX_DEPTH`](crate::json::MAX_DEPTH) deep.
+pub(crate) const MAX_NESTING: usize = 128;
+
+thread_local! {
+    static NESTING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One level of a recursive document walk; dropping it leaves the level.
+pub(crate) struct Nested(());
+
+impl Drop for Nested {
+    fn drop(&mut self) {
+        NESTING.with(|n| n.set(n.get() - 1));
+    }
+}
+
+/// Enters one more level of a recursive document walk.
+pub(crate) fn nest() -> Result<Nested, JsonLdError> {
+    NESTING.with(|n| {
+        let depth = n.get();
+        if depth >= MAX_NESTING {
+            return Err(JsonLdError::with_detail(
+                JsonLdErrorCode::ContextOverflow,
+                "the document nests too deeply",
+            ));
+        }
+        n.set(depth + 1);
+        Ok(Nested(()))
+    })
 }

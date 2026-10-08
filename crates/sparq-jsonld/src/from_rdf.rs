@@ -582,6 +582,8 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
         }
     }
 
+    limit_list_nesting(&mut chains, &mut consumed);
+
     // ── Phase 4 (spec steps 7–9): emit the expanded document from the default
     // graph, nesting each named graph under its name node's @graph. Emitted nodes are
     // moved out of the node maps; consumed list cells and compound literals stay put
@@ -617,6 +619,70 @@ pub fn from_rdf(dataset: &[RdfQuad], options: &FromRdfOptions) -> Result<Json, J
         }
     }
     Ok(Json::Arr(result))
+}
+
+/// How many `@list` objects fromRdf nests inside one another. Each level adds two JSON
+/// levels, so walks over the output stay well inside their nesting bound, and readers
+/// that recurse per nested list (sparq's own included) can read it back.
+const MAX_LIST_NESTING: usize = crate::context::budget::MAX_NESTING / 8;
+
+/// Keeps nested lists within [`MAX_LIST_NESTING`]: a chain that would nest deeper is not
+/// collapsed, so its cells are emitted as ordinary nodes (holding their `rdf:first` /
+/// `rdf:rest` values) and the lists inside them start a fresh nesting count.
+fn limit_list_nesting(chains: &mut FxMap<Slot, Vec<Slot>>, consumed: &mut FxSet<(String, String)>) {
+    // A list nests in another only through a cell's rdf:first.
+    if !chains.keys().any(|(_, _, property, _)| property == RDF_FIRST) {
+        return;
+    }
+    // The chain each consumed cell belongs to, by its head slot. A chain whose head slot
+    // sits in another chain's cell is nested in that chain.
+    let mut owner: FxMap<(&str, &str), &Slot> = FxMap::default();
+    for (head, items) in chains.iter() {
+        for (graph, cell, _, _) in items {
+            owner.insert((graph.as_str(), cell.as_str()), head);
+        }
+    }
+    let parent = |head: &Slot| owner.get(&(head.0.as_str(), head.1.as_str())).copied();
+    // Nesting depth of each chain; 0 marks a chain left uncollapsed.
+    let mut depth: FxMap<&Slot, usize> = FxMap::default();
+    for head in chains.keys() {
+        // Walk up to the nearest chain with a known depth (iteratively: nesting is
+        // data-controlled), then assign depths back down. Chains nested in one another
+        // in a cycle are unreachable from any emitted node, so the cycle is broken by
+        // leaving the chain where it closes uncollapsed.
+        let mut path = vec![head];
+        let mut on_path: FxSet<&Slot> = FxSet::default();
+        on_path.insert(head);
+        while let Some(p) = parent(path[path.len() - 1]) {
+            if depth.contains_key(p) {
+                break;
+            }
+            if !on_path.insert(p) {
+                depth.insert(p, 0);
+                break;
+            }
+            path.push(p);
+        }
+        while let Some(h) = path.pop() {
+            if depth.contains_key(h) {
+                continue;
+            }
+            let d = parent(h).and_then(|p| depth.get(p).copied()).unwrap_or(0) + 1;
+            depth.insert(h, if d > MAX_LIST_NESTING { 0 } else { d });
+        }
+    }
+    let dropped: Vec<Slot> = depth
+        .into_iter()
+        .filter(|(_, d)| *d == 0)
+        .map(|(h, _)| h.clone())
+        .collect();
+    for head in dropped {
+        if let Some(items) = chains.remove(&head) {
+            for (graph, cell, _, _) in items {
+                consumed.remove(&(graph, cell));
+            }
+        }
+    }
 }
 
 /// Removes and returns the emitted (non-consumed) nodes of `graph`, in code-point order

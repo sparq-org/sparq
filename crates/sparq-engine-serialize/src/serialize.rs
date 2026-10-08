@@ -4737,6 +4737,78 @@ ex:bob
         assert!(!exp.contains("http://other/T"), "{framed}\n{exp}");
     }
 
+    // A list wrapper is read under the property's scoped context, so its @list alias
+    // comes from there; the list survives as a list.
+    #[test]
+    fn list_wrapper_survives_a_scoped_alias() {
+        let g0 = Graph::load_str(r#"<http://ex/s> <http://ex/p> ("a") ."#, "turtle").unwrap();
+        let ctx = r#"{"l":"@list","p":{"@id":"http://ex/p","@context":{"l":"http://ex/data"}}}"#;
+        assert_compact_count_iso(&g0, ctx);
+        // Compacted, not the expanded fallback.
+        let doc = compact_doc(&g0, ctx);
+        assert!(doc.contains(r#""@context""#) && doc.contains(r#""@list""#), "{doc}");
+    }
+
+    // A type-map key that the enclosing context reads as another type stays on the node.
+    #[test]
+    fn framed_type_map_key_reads_back() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> a <http://ex/T> ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"@vocab":"http://ex/","T":"http://ex/T",
+                "p":{"@id":"http://ex/p","@container":"@type",
+                     "@context":{"T":"http://other/T","U":"http://ex/T"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let doc = sparq_jsonld::Json::parse(&framed).unwrap();
+        let opts = sparq_jsonld::JsonLdOptions::default();
+        let mut exp = String::new();
+        sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+        assert!(framed.contains(r#""@context""#), "{framed}");
+        assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{framed}\n{exp}");
+        assert!(!exp.contains("http://ex/U"), "{framed}\n{exp}");
+    }
+
+    // Lists nested far deeper than the walks allow are written without exhausting the
+    // stack, and re-read with every triple.
+    #[test]
+    fn deeply_nested_lists_are_written_losslessly() {
+        let n = 1000;
+        let mut nt = String::from("<http://ex/s> <http://ex/p> _:l0 .\n");
+        for i in 0..n {
+            let first = if i + 1 < n { format!("_:l{}", i + 1) } else { "\"x\"".to_string() };
+            nt.push_str(&format!(
+                "_:l{i} <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> {first} .\n\
+                 _:l{i} <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> \
+                 <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n"
+            ));
+        }
+        let g0 = Graph::load_str(&nt, "ntriples").unwrap();
+        assert_compact_count_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+    }
+
+    // A framed chain embedded deeper than the walks allow falls back to the expanded
+    // document instead of exhausting the stack.
+    #[test]
+    fn deeply_embedded_frames_fall_back() {
+        let n = 2000;
+        let nt: String = (0..n)
+            .map(|i| format!("<http://ex/a{i}> <http://ex/p> <http://ex/a{}> .\n", i + 1))
+            .collect();
+        let g0 = Graph::load_str(&nt, "ntriples").unwrap();
+        let frame =
+            parse_context_json(r#"{"@context":{"@vocab":"http://ex/"},"@id":"http://ex/a0"}"#).unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let g1 = Graph::load_dataset(&framed, "jsonld").unwrap();
+        assert_eq!(triple_count(&g0), triple_count(&g1));
+    }
+
     // Same-document references with a colon in the query or fragment stay relative to
     // the whole base (no "./" that would drop its last segment).
     #[test]
