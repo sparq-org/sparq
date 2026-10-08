@@ -92,7 +92,10 @@ fn initialize_answers_an_unsupported_proposed_version_with_the_latest() {
         &mut server,
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
     );
-    assert_eq!(resp["result"]["protocolVersion"], sparq_mcp::PROTOCOL_VERSION);
+    assert_eq!(
+        resp["result"]["protocolVersion"],
+        sparq_mcp::PROTOCOL_VERSION
+    );
 }
 
 #[test]
@@ -102,7 +105,10 @@ fn initialize_defaults_to_the_latest_when_no_version_is_proposed() {
         &mut server,
         r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#,
     );
-    assert_eq!(resp["result"]["protocolVersion"], sparq_mcp::PROTOCOL_VERSION);
+    assert_eq!(
+        resp["result"]["protocolVersion"],
+        sparq_mcp::PROTOCOL_VERSION
+    );
 }
 
 #[test]
@@ -124,7 +130,10 @@ fn notifications_get_no_response() {
 #[test]
 fn read_only_server_lists_read_tools_only() {
     let mut server = McpServer::new(graph());
-    let resp = call(&mut server, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+    let resp = call(
+        &mut server,
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+    );
     let names: Vec<&str> = resp["result"]["tools"]
         .as_array()
         .unwrap()
@@ -146,10 +155,16 @@ fn read_only_server_lists_read_tools_only() {
     // from the default (feature-off) tool surface.
     #[cfg(not(feature = "shacl"))]
     assert!(!names.contains(&"describe_form"));
-    assert!(!names.contains(&"update"), "update must NOT be advertised by default");
+    assert!(
+        !names.contains(&"update"),
+        "update must NOT be advertised by default"
+    );
     // The NL tools are feature-gated AND backend-gated: never advertised in the
     // default build (the `nlq` feature is off here).
-    assert!(!names.contains(&"ask"), "ask must NOT be advertised in the default build");
+    assert!(
+        !names.contains(&"ask"),
+        "ask must NOT be advertised in the default build"
+    );
     assert!(
         !names.contains(&"nl_query"),
         "nl_query must NOT be advertised in the default build"
@@ -172,7 +187,8 @@ fn shapes_tool_returns_data_grounded_constraints_for_a_class() {
     let resp = call(&mut server, req);
     let result = &resp["result"];
     assert_eq!(result["isError"], false, "{resp}");
-    let shape: Value = serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    let shape: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(shape["class"], "http://ex/Person");
     assert_eq!(shape["instances"], 2, "alice + bob");
 
@@ -388,24 +404,38 @@ fn update_refused_when_read_only() {
         r#"{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"update","arguments":{"sparql":"INSERT DATA { <http://ex/x> <http://ex/p> <http://ex/y> }"}}}"#,
     );
     // Fail-closed: a disabled mutation surface is a protocol METHOD_NOT_FOUND-class error.
-    assert!(resp["error"].is_object(), "update must be refused: {}", resp);
+    assert!(
+        resp["error"].is_object(),
+        "update must be refused: {}",
+        resp
+    );
     assert_eq!(resp["error"]["code"], -32601);
     // And the graph is UNCHANGED — proven by the count below.
     let stats = call(
         &mut server,
         r#"{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"stats","arguments":{}}}"#,
     );
-    let s: Value = serde_json::from_str(stats["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(s["triples"], 5, "read-only server must not have mutated the graph");
+    let s: Value =
+        serde_json::from_str(stats["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        s["triples"], 5,
+        "read-only server must not have mutated the graph"
+    );
 }
 
 #[test]
 fn update_applies_when_enabled_and_query_observes_it() {
-    let config = ServerConfig { allow_update: true, ..ServerConfig::default() };
+    let config = ServerConfig {
+        allow_update: true,
+        ..ServerConfig::default()
+    };
     let mut server = McpServer::with_config(graph(), config);
 
     // It is now advertised.
-    let list = call(&mut server, r#"{"jsonrpc":"2.0","id":9,"method":"tools/list"}"#);
+    let list = call(
+        &mut server,
+        r#"{"jsonrpc":"2.0","id":9,"method":"tools/list"}"#,
+    );
     let names: Vec<&str> = list["result"]["tools"]
         .as_array()
         .unwrap()
@@ -434,7 +464,10 @@ fn update_applies_when_enabled_and_query_observes_it() {
 #[test]
 fn unknown_method_is_method_not_found() {
     let mut server = McpServer::new(graph());
-    let resp = call(&mut server, r#"{"jsonrpc":"2.0","id":12,"method":"nope/nope"}"#);
+    let resp = call(
+        &mut server,
+        r#"{"jsonrpc":"2.0","id":12,"method":"nope/nope"}"#,
+    );
     assert_eq!(resp["error"]["code"], -32601);
 }
 
