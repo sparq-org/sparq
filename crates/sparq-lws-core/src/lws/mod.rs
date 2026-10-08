@@ -637,6 +637,9 @@ pub struct LwsRequest {
     pub query: Option<String>,
     pub headers: HeaderMap,
     pub body: Bytes,
+    /// The request's share of its admission permit, when the server runs admission control. A
+    /// write detached from the request holds it until the write ends.
+    pub admission: Option<crate::overload::AdmissionSlot>,
 }
 
 impl LwsRequest {
@@ -736,6 +739,10 @@ async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Req
         method: parts.method,
         path: parts.uri.path().to_string(),
         query: parts.uri.query().map(str::to_string),
+        admission: parts
+            .extensions
+            .get::<crate::overload::AdmissionSlot>()
+            .cloned(),
         headers: parts.headers,
         body,
     };
@@ -1169,6 +1176,11 @@ pub(crate) mod test_store {
         pub hold_next_delete_of: GateOf,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
+        /// `write` of this IRI commits, then reports a backend failure, as when a remote store's
+        /// reply is lost after the update landed.
+        pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `write` of this IRI is refused before anything is written, as by a full store.
+        pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl FlakyStore {
@@ -1191,6 +1203,8 @@ pub(crate) mod test_store {
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
                 hide: Default::default(),
+                fail_after_write_of: Default::default(),
+                refuse_write_of: Default::default(),
             }
         }
     }
@@ -1236,6 +1250,9 @@ pub(crate) mod test_store {
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
+            if self.refuse_write_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::InsufficientStorage);
+            }
             if let Some(left) = self.write_budget.lock().unwrap().as_mut() {
                 if *left == 0 {
                     return Err(ServerError::InsufficientStorage);
@@ -1250,7 +1267,12 @@ pub(crate) mod test_store {
                 });
                 return sent.await.expect("write");
             }
-            self.inner.write(iri, body, ct).await
+            let written = self.inner.write(iri, body, ct).await;
+            if self.fail_after_write_of.lock().unwrap().as_deref() == Some(iri) {
+                written?;
+                return Err(ServerError::Storage("the reply was lost".into()));
+            }
+            written
         }
         async fn create_in_container(
             &self,
@@ -1339,6 +1361,7 @@ pub(crate) mod test_store {
             query,
             headers: map,
             body: Bytes::from(body.to_string()),
+            admission: None,
         }
     }
 

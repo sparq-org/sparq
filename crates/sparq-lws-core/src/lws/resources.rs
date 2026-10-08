@@ -54,6 +54,9 @@ pub async fn handle<S: Store + 'static>(
     // call is still pending (see [`hold_locks`]). (A create spawns its writes itself, under the
     // container's shared lock.)
     if matches!(req.method, Method::PUT | Method::PATCH | Method::DELETE) {
+        // The task holds the request, and with it its share of the admission permit
+        // (`req.admission`): a write that outlives its request still counts against the
+        // concurrency ceiling until it ends.
         let (state, req, agent) = (state.clone(), req.clone(), agent.clone());
         return tokio::spawn(async move { handle_now(&state, &req, &agent).await })
             .await
@@ -95,25 +98,12 @@ async fn handle_now<S: Store + 'static>(
             Method::DELETE => Action::Delete,
             _ => Action::Modify,
         };
-        // A backend failure is a 500, never "absent": absence skips the permission check.
-        let exists = match state.store.exists(&uri).await {
-            Ok(e) => e,
-            Err(e) => return store_error(e),
-        };
-        if !exists {
-            if state.needs_auth(agent) {
-                return state.challenge(None);
-            }
-            // Nothing was authorized, so nothing is served or changed: every method on a missing
-            // target is a 404, and answering it here (rather than in the handler) means a resource
-            // that appears after this check is never read or written without its permission
-            // check.
-            return problem(StatusCode::NOT_FOUND, None);
-        }
-        match state.check(action, &uri, agent).await {
-            Ok(true) => {}
-            Ok(false) => return state.deny(agent),
-            Err(e) => return store_error(e),
+        // A backend failure is a 500, never "absent": absence skips the permission check. Nothing
+        // was authorized on a missing target, so nothing is served or changed: every method on it
+        // is a 404, and answering it here (rather than in the handler) means a resource that
+        // appears after this check is never read or written without its permission check.
+        if let Some(refused) = authorize_unlocked(state, action, &uri, agent).await {
+            return refused;
         }
     }
     match req.method {
@@ -142,6 +132,24 @@ async fn recheck<S: Store + 'static>(
         Ok(false) => Err(state.deny(agent)),
         Err(e) => Err(store_error(e)),
     }
+}
+
+/// The existence and permission check a request passes before it takes a lock: `None` when it may
+/// go on, else the response refusing it (a missing target is a challenge or a 404, as in
+/// [`handle_now`]). The check that counts is repeated under the lock.
+async fn authorize_unlocked<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Option<Response> {
+    match state.store.exists(uri).await {
+        Ok(true) => {}
+        Ok(false) if state.needs_auth(agent) => return Some(state.challenge(None)),
+        Ok(false) => return Some(problem(StatusCode::NOT_FOUND, None)),
+        Err(e) => return Some(store_error(e)),
+    }
+    recheck(state, action, uri, agent).await.err()
 }
 
 fn allow_for(uri: &str, is_root: bool) -> String {
@@ -1130,13 +1138,17 @@ async fn create<S: Store + 'static>(
     // taken, and no other create can put its metadata under this content. The container's lock is
     // shared, so the task's scheduling holds up no other create in the container.
     let created = {
-        let (state, parent, child, meta) = (
+        let (state, parent, child, meta, admission) = (
             state.clone(),
             parent.to_string(),
             child.clone(),
             meta.clone(),
+            req.admission.clone(),
         );
         tokio::spawn(async move {
+            // Held to the end, announcement included: this work still counts against the
+            // concurrency ceiling once the request has gone.
+            let _admission = admission;
             let locks = (child_guards, parent_guard);
             state.put_resource_meta(&child, &meta).await?;
             let created = match state
@@ -1351,7 +1363,8 @@ where
 /// - Metadata unchanged: one content write, which lands whole or not at all.
 /// - Metadata changed: three writes. The old metadata marked `pending` first (when that fails,
 ///   nothing changed); then the content; then the new metadata, which clears the mark. When the
-///   content write fails the old metadata is put back. Whenever a step after the first fails,
+///   content write is refused the old metadata is put back; a backend failure may follow a
+///   write that committed, so it leaves the mark. Whenever a step after the first fails,
 ///   rollback included, the `pending` mark stays and the resource fails closed: only its owner
 ///   and creator may act on it (see [`access::allowed`](super::access::allowed)) until a write
 ///   completes.
@@ -1391,11 +1404,16 @@ async fn write_with_meta<S: Store + 'static>(
         let written = match state.store.write(&uri, body, &content_type).await {
             Ok(m) => m,
             Err(e) => {
-                // A failed rollback leaves the mark: fail closed.
-                let _ = match &old {
-                    Some(old) => state.put_resource_meta(&uri, old).await,
-                    None => state.store.delete(&meta_key(&uri), None).await,
-                };
+                // The old metadata goes back only when the store refused the write outright. A
+                // backend failure (a remote store's timeout, a lost reply) may come after the
+                // write committed, and the new content must not be served under the old
+                // metadata: the mark stays, as it does when the rollback fails. Fail closed.
+                if !matches!(e, ServerError::Storage(_)) {
+                    let _ = match &old {
+                        Some(old) => state.put_resource_meta(&uri, old).await,
+                        None => state.store.delete(&meta_key(&uri), None).await,
+                    };
+                }
                 return Err(e);
             }
         };
@@ -1756,13 +1774,14 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 fits(v)?;
                 let minus = replaced(&doc);
                 let value = json_size(v);
-                charge(&mut work, 2 * value + minus)?;
+                charge(&mut work, 2 * value + minus + shift_cost(&doc, &path, true))?;
                 let by = value + member_overhead(&doc, &path, true);
                 grow(&mut size, by, minus)?;
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
             }
             "remove" => {
                 let overhead = member_overhead(&doc, &path, false);
+                charge(&mut work, shift_cost(&doc, &path, false))?;
                 let old = pointer_remove(&mut doc, &path).ok_or(Failed)?;
                 let gone = json_size(&old);
                 charge(&mut work, gone)?;
@@ -1774,7 +1793,9 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 let old = doc.pointer(&path).ok_or(Failed)?;
                 let minus = json_size(old);
                 let value = json_size(v);
-                charge(&mut work, 2 * value + minus)?;
+                // Taken out and put back: an array member shifts the rest of its array twice.
+                let shifts = 2 * shift_cost(&doc, &path, false);
+                charge(&mut work, 2 * value + minus + shifts)?;
                 grow(&mut size, value, minus)?;
                 pointer_remove(&mut doc, &path).ok_or(Failed)?;
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
@@ -1787,12 +1808,13 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 // The value moves; what changes is the member around it (its key, a separator), and
                 // what an add at `path` replaces.
                 let overhead = member_overhead(&doc, &from, false);
+                charge(&mut work, shift_cost(&doc, &from, false))?;
                 let v = pointer_remove(&mut doc, &from).ok_or(Failed)?;
                 fits(&v)?;
                 let moved = json_size(&v);
                 size = size.saturating_sub(moved + overhead);
                 let minus = replaced(&doc);
-                charge(&mut work, 2 * moved + minus)?;
+                charge(&mut work, 2 * moved + minus + shift_cost(&doc, &path, true))?;
                 let by = moved + member_overhead(&doc, &path, true);
                 grow(&mut size, by, minus)?;
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
@@ -1804,7 +1826,10 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 let copied = json_size(source);
                 let added = copied + member_overhead(&doc, &path, true);
                 let minus = replaced(&doc);
-                charge(&mut work, 2 * copied + minus)?;
+                charge(
+                    &mut work,
+                    2 * copied + minus + shift_cost(&doc, &path, true),
+                )?;
                 grow(&mut size, added, minus)?;
                 let v = doc.pointer(&from).ok_or(Failed)?.clone();
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
@@ -1855,6 +1880,27 @@ fn member_overhead(doc: &Value, path: &str, adding: bool) -> usize {
         }),
         _ => 0,
     }
+}
+
+/// The work of the shift an insertion (`adding`) or a removal at `path` makes in the array that
+/// holds it, if one does: every member after the index moves, each counted as the bytes a `Value`
+/// takes in memory. An append, or a member of an object, moves nothing.
+fn shift_cost(doc: &Value, path: &str, adding: bool) -> usize {
+    let Some((parent, key)) = split_pointer(path) else {
+        return 0;
+    };
+    if path.is_empty() {
+        return 0;
+    }
+    let (Some(Value::Array(a)), Ok(i)) = (doc.pointer(&parent), key.parse::<usize>()) else {
+        return 0;
+    };
+    let moved = if adding {
+        a.len().saturating_sub(i)
+    } else {
+        a.len().saturating_sub(i + 1)
+    };
+    moved.saturating_mul(std::mem::size_of::<Value>())
 }
 
 /// RFC 6902 section 4.6 equality: numbers are equal when their values are (`1` and `1.0`), strings
@@ -2204,6 +2250,7 @@ async fn delete<S: Store + 'static>(
                 query: None,
                 headers: HeaderMap::new(),
                 body: Bytes::new(),
+                admission: None,
             },
             uri,
             &meta,
@@ -2565,9 +2612,19 @@ async fn linkset<S: Store + 'static>(
     agent: &Agent,
     uri: &str,
 ) -> Response {
-    // The resource's lock is taken before the permission check, so the decision holds for what is
-    // served or changed: shared for a read, exclusive for a patch (from the precondition through
-    // the write).
+    let action = if matches!(req.method, Method::GET | Method::HEAD | Method::OPTIONS) {
+        Action::Read
+    } else {
+        Action::Modify
+    };
+    // A request is authorized once before it waits for the resource's lock, so one that may not
+    // touch the resource never queues behind a write (holding its admission slot while it waits).
+    if let Some(refused) = authorize_unlocked(state, action, uri, agent).await {
+        return refused;
+    }
+    // The resource's lock is taken before the permission check that counts, so the decision holds
+    // for what is served or changed: shared for a read, exclusive for a patch (from the
+    // precondition through the write).
     let (_shared, mut exclusive) = if req.method == Method::PATCH {
         (None, Some(state.locks.lock(uri).await))
     } else {
@@ -2584,11 +2641,6 @@ async fn linkset<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     }
-    let action = if matches!(req.method, Method::GET | Method::HEAD | Method::OPTIONS) {
-        Action::Read
-    } else {
-        Action::Modify
-    };
     if let Err(r) = recheck(state, action, uri, agent).await {
         return r;
     }
@@ -2982,6 +3034,7 @@ mod tests {
             query,
             headers: h,
             body: Bytes::from(body.to_string()),
+            admission: None,
         }
     }
 
@@ -3483,6 +3536,38 @@ mod tests {
             .unwrap();
         assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
         assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
+    }
+
+    /// Review finding: the work budget charged what an operation adds, not the array members an
+    /// insertion or a removal shifts. A thousand adds at the front of a long array passed both
+    /// budgets while moving the whole array each time.
+    #[test]
+    fn json_patch_charges_array_shifts() {
+        let long = Value::Array(vec![json!(0); 100_000]);
+        let budget = 8 << 20;
+        let at = |op: &str, path: &str| match op {
+            "remove" => json!({"op": "remove", "path": path}),
+            _ => json!({"op": op, "path": path, "value": 1}),
+        };
+        for (op, path) in [("add", "/0"), ("remove", "/0"), ("replace", "/0")] {
+            let few = Value::Array(vec![at(op, path); 3]);
+            assert!(json_patch(&long, &few, budget).is_ok(), "{op}");
+            let many = Value::Array(vec![at(op, path); MAX_PATCH_OPS]);
+            assert_eq!(
+                json_patch(&long, &many, budget),
+                Err(PatchError::TooLarge),
+                "{op}"
+            );
+        }
+        let moves = json!({"op": "move", "from": "/0", "path": "/1"});
+        let many = Value::Array(vec![moves; MAX_PATCH_OPS]);
+        assert_eq!(json_patch(&long, &many, budget), Err(PatchError::TooLarge));
+        // Appends and removals at the end move nothing.
+        let appends = Value::Array(vec![at("add", "/-"); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &appends, budget).is_ok());
+        let last = format!("/{}", 100_000 - 1);
+        let ops = Value::Array(vec![at("replace", &last); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &ops, budget).is_ok());
     }
 
     /// Review finding: a JSON Patch could repeat a costly operation without end within the size
@@ -4579,6 +4664,155 @@ mod tests {
             handle(&st, &get(&secret), &stranger).await.status(),
             StatusCode::OK
         );
+    }
+
+    /// Review finding: a write detached from its request held no admission permit. Once the
+    /// request timed out its slot was free again while the write still waited on the store, so
+    /// stalled writes could pile up past the concurrency ceiling. The write now holds the slot
+    /// until it ends.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn detached_writes_keep_their_admission_slot() {
+        use super::super::test_store::FlakyStore;
+        use crate::app::{with_overload_layers, OverloadConfig};
+        use axum::body::Body;
+        use std::time::Duration;
+        use tower::ServiceExt;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let store = FlakyStore::new();
+        let app = super::super::router(store.clone(), cfg)
+            .await
+            .expect("router");
+        let app = with_overload_layers(
+            app,
+            OverloadConfig::new(1, Some(Duration::from_millis(100))),
+        );
+        let send = |method: &str, body: &'static str| {
+            let req = axum::http::Request::builder()
+                .method(method)
+                .uri("/doc.txt")
+                .header("content-type", "text/plain")
+                .body(Body::from(body))
+                .unwrap();
+            app.clone().oneshot(req)
+        };
+        let post = axum::http::Request::builder()
+            .method("POST")
+            .uri("/")
+            .header("slug", "doc.txt")
+            .header("content-type", "text/plain")
+            .body(Body::from("first"))
+            .unwrap();
+        let r = app.clone().oneshot(post).await.unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // The PUT's write stalls on the store; the request times out.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let uri = "http://localhost:3000/doc.txt".to_string();
+        *store.hold_next_write_of.lock().unwrap() = Some((uri, gate.clone()));
+        let r = send("PUT", "second").await.unwrap();
+        assert_eq!(r.status(), StatusCode::GATEWAY_TIMEOUT);
+        // The write still holds the only slot: the next request is shed.
+        let r = send("GET", "").await.unwrap();
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // Once the write is over the slot is free again.
+        gate.add_permits(1);
+        let mut status = StatusCode::SERVICE_UNAVAILABLE;
+        for _ in 0..200 {
+            status = send("GET", "").await.unwrap().status();
+            if status != StatusCode::SERVICE_UNAVAILABLE {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    /// Review finding: a content write that failed was taken not to have landed, and the old
+    /// metadata put back. A remote store can report a failure (a timeout, a lost reply) for an
+    /// update it committed: a PUT that made a public resource private and dropped its public type
+    /// then left the new private content under the old public type. A write whose outcome is not
+    /// known now leaves the resource pending, so it fails closed.
+    #[tokio::test]
+    async fn a_write_whose_outcome_is_unknown_stays_pending() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use super::super::FOAF_AGENT;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let public = "https://e.example/Public";
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": FOAF_AGENT,
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": public}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let put = |ty: &str, body: &str| {
+            let link = format!("<{ty}>; rel=\"type\"");
+            req(
+                Method::PUT,
+                "/doc.txt",
+                &[("content-type", "text/plain"), ("link", &link)],
+                body,
+            )
+        };
+        let get = req(Method::GET, "/doc.txt", &[], "");
+        let uri = st.cfg.absolute("/doc.txt");
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, "x"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(hdr(&r, "location"), uri);
+        // Public to begin with.
+        let r = handle(&st, &put(public, "public"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert_eq!(handle(&st, &get, &stranger).await.status(), StatusCode::OK);
+        // Made private; the store commits the content and then reports a failure.
+        *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_after_write_of.lock().unwrap() = None;
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from("private")
+        );
+        // The new content is not served under the old public type.
+        assert!(st.resource_meta(&uri).await.unwrap().pending);
+        assert_eq!(
+            handle(&st, &get, &stranger).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(handle(&st, &get, &owner).await.status(), StatusCode::OK);
+        // A write that fails before it is sent still restores the old metadata.
+        let r = handle(&st, &put(public, "public again"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        *store.refuse_write_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        *store.refuse_write_of.lock().unwrap() = None;
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        assert!(!st.resource_meta(&uri).await.unwrap().pending);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public again"));
     }
 
     /// Review finding: a conditional DELETE of a container computed the listing's tag only for

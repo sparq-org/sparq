@@ -748,13 +748,15 @@ pub async fn handle<S: Store + 'static>(
             // fails, a client that goes away): the removal and the revocation run in a task of
             // their own.
             let revoke = {
-                let (state, iri, container, id) = (
+                let (state, iri, container, id, admission) = (
                     state.clone(),
                     iri.clone(),
                     container.clone(),
                     id.to_string(),
+                    req.admission.clone(),
                 );
                 async move {
+                    let _admission = admission;
                     super::delete_record(&state, &iri, &container).await?;
                     state.access.map(grants).write().expect("lock").remove(&id);
                     state.access.bump(grants);
