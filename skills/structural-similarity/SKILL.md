@@ -18,8 +18,8 @@ predicate-IDF-weighted Jaccard over two signatures. Because the indexes *are* th
 feature store, signatures stay correct under incremental graph updates for free.
 
 It consumes only sparq-core's **public read API** (dict lookups, range scans, the
-planner's per-predicate stats). Nothing in the workspace depends on it, and the default
-engine build does not compile it.
+planner's per-predicate stats). Only the opt-in `sparq-nlq` crate depends on it (plus a
+`sparq-vectors` dev-dependency), and the default engine build does not compile it.
 
 ## Quickstart
 
@@ -200,7 +200,7 @@ returned score equals `Sim::similarity` plus twin-recall and decline witnesses);
 `Sim::explain_similarity` + `SharedElement`/`Direction`, with a differential test that the
 returned weights reconstruct the exact similarity score and a multi-hop min-weight witness);
 previously 2026-07-12 [GPT-5.6] for sq-da2bz.
-Workspace v0.1.0, opt-in (GenAI phase 1, `research/genai-design.md`), zero `unsafe`
+Workspace-versioned, opt-in (GenAI phase 1, `research/genai-design.md`), zero `unsafe`
 (`#![forbid(unsafe_code)]`). Measured quality/latency gates (same-class precision@10;
 `Predicates`-mode class-separation AUC; `most_similar(k=10)` latency) are enforced by
 the `olympics_eval` example — run it for the (non-canonical) numbers rather than baking

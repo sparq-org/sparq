@@ -139,5 +139,5 @@ let order = topological_sort(&g)?;                         // canonical DAG orde
 - **In-memory.** The `NodeGraph` is built from one pass over `Graph::iter_ids` and held in
   RAM (CSR forward + reverse adjacency keyed by dense `u32` node indices); it does not
   reference the source graph after building, except `term()` which needs the dict.
-- Opt-in, workspace v0.1.0, `#![forbid(unsafe_code)]`. [OPUS-4.8] pending re-review.
+- Opt-in, workspace-versioned, `#![forbid(unsafe_code)]`. [OPUS-4.8] pending re-review.
   [GPT-5.6] `sq-awq7n` added the SCC count accessor.

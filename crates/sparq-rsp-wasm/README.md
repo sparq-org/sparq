@@ -11,7 +11,8 @@ RSTREAM / ISTREAM / DSTREAM output — which the lean default browser bundle del
 does not. The showcase site loads it ONLY on `/surface/streaming-rsp`
 (`next/dynamic`, client-only) so the landing page stays light.
 
-> Distributed via npm, not crates.io (`publish = false`). It is a wasm packaging
+> Not on crates.io (`publish = false`) and not a separate npm package: the site builds
+> it with `js/`'s `build:rsp-wasm` and serves it. It is a wasm packaging
 > layer over `sparq-rsp`, built via `wasm-pack`, not a Rust library dependency.
 
 ## 🚀 Quickstart

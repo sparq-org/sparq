@@ -91,7 +91,7 @@ cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT * WHERE { ?s ?
   printing the verifiable JSON `{ canonical_sparql, keywords, resolutions, warnings, legendVersion }`
   (the same contract the server's `POST /terse/transpile` returns). It never executes the query —
   pipe `canonical_sparql` into `query`. Loud-fails (exit 2) on an unknown keyword or a `V(...)`
-  construct rather than guessing. Lean build — depends only on `spargebra`. `--features terse`.
+  construct rather than guessing. Lean build — depends only on `spargebra`. `--features terse`. (`terse` and `el` reach unpublished crates, so the crates.io package omits both; build from git.)
 - **Engine features the default CLI build lights** — the CLI's `sparq-engine` dependency enables
   `dp-planner` (DPccp cost-optimal join ordering, sq-7d3dj.30.5) and `algebra-rewrite` (the
   result-equivalent pre-execution rewrite of #1735 — `FILTER(?v = <iri>)` constant folding +
@@ -108,7 +108,7 @@ cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT * WHERE { ?s ?
 
 - **How-to** — [`skills/cli/SKILL.md`](../../skills/cli/SKILL.md) (full subcommand reference)
   and [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (reasoning).
-- **API reference** — run `cargo run -p sparq-cli -- --help`; rustdoc at
+- **API reference** — run `cargo run -p sparq-cli` with no arguments for the usage block; rustdoc at
   [docs.rs/sparq-cli](https://docs.rs/sparq-cli).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
 - **Performance** — see the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench);

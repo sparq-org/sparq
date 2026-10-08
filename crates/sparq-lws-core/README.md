@@ -81,7 +81,8 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
   engine (compiled by default, but selected only by `PSS_SPARQ_BACKEND=embedded` — the
   boot default stays the in-memory double), opt-in live SPARQ HTTP client, `object_store`.
 - **Notification observability** — [GPT-5.6] process-wide backlog-overflow totals
-  are available through `notifications::ws::NotificationMetrics::snapshot()`.
+  are available through `notifications::ws::NotificationMetrics::snapshot()`. Subscribe and
+  receive are WAC-gated per resource (re-checked before every frame; see the SKILL).
 - **Transport hardening** — HTTP/2 rapid-reset and HTTP/1 slowloris guards (explicit
   header-count, aggregate-byte, and slow-header timeout bounds); request timeouts, body
   limits, per-connection max-requests, rate limiting, and overload shedding.

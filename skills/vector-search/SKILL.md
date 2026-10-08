@@ -1026,10 +1026,10 @@ assert!(cells.iter().all(|cell| cell.gufo_prior));
 # Ok::<(), String>(())
 ```
 
-The `structure` feature exposes the read-only `UfoPriors`, `UfoVocabulary`, `Rigidity`,
-`OntologicalNature`, and `GUFO_NS` API without the trainer. Use `UfoPriors::mine(graph)` for the
+The `structure` feature exposes the read-only `UfoPriors`, `MetaType`, `Rigidity`,
+`Nature`, and `GUFO_NS` API without the trainer. Use `UfoPriors::mine(graph)` for the
 canonical namespace or `mine_with_namespace(graph, ns)` when the dataset explicitly uses another
-namespace. `proven_disjoint_pairs()` and `proven_subsumptions()` return dictionary-id facts only;
+namespace. `provable_disjoint_pairs()` and `proven_subsumptions()` return dictionary-id facts only;
 `augment_oracle()` feeds the proven pairs into `DisjointnessOracle::absorb_proven_pairs`. These APIs
 do not mint terms or write inferred triples back into the graph.
 
@@ -1594,7 +1594,7 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
 
 ## Gotchas / feature flags / prerequisites
 
-- **Opt-in.** Nothing in the workspace depends on `sparq-vectors`; the default engine
+- **Opt-in.** Only `sparq-terse` depends on `sparq-vectors` (optionally); the default engine
   build does not compile it. The core Rust flow (store/ANN/embed) is a standalone library
   over sparq-core's public read API — you wire it into application code yourself. The **one**
   SPARQL-level integration is the optional `vec:` magic predicate (recipe 8 below), behind

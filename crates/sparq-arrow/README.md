@@ -39,7 +39,7 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`cargo add sparq-arrow --features arrow` (or, in this workspace,
+`cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features arrow` (or, in this workspace,
 `cargo build -p sparq-arrow --features arrow`).
 
 To serialize the same term-struct batch as an in-memory Parquet file, enable the
@@ -60,7 +60,7 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Use `cargo add sparq-arrow --features parquet` (or
+Use `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features parquet` (or
 `cargo build -p sparq-arrow --features parquet`); `parquet` implies `arrow`.
 
 For an Arrow IPC stream instead, enable the default-OFF `ipc` feature and call

@@ -101,9 +101,9 @@ is **not** independent of RDFC-1.0 itself.
 
 ### Opt-in, single-sourced
 
-`publish = false`, and nothing in sparq's default dependency graph or the wasm
-artifact depends on this crate, so both are byte-identical with or without it and
-`sparq-core` stays lean. The RDFC-1.0 **algorithm** is the maintained zkp-ld
+`publish = false`; no published sparq crate nor the default wasm artifact depends on it
+(it builds by default only as a `sparq-bench` dependency; `sparq-wasm` pulls it behind
+its opt-in `canon` feature), so `sparq-core` stays lean. The RDFC-1.0 **algorithm** is the maintained zkp-ld
 [`rdf-canon`](https://crates.io/crates/rdf-canon) crate (oxrdf 0.2); this crate
 owns the single canonical-N-Quads-text bridge from sparq's oxrdf 0.3, so the
 bridge lives in exactly one place. `sparq-zk` depends on it (its `canon` module

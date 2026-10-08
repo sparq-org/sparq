@@ -73,7 +73,7 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   *non*-conflicting writer is replayed, no lost update). Single-writer SI = serializability (see
   `research/concurrent-serving-litreview-A-mvcc-benchmarks.md` §A.1); built on the existing COW
   delta-overlay substrate. Off, zero code compiles, the default build is byte-identical, no new deps.
-- **DP join-order planner (DPccp)** *(opt-in `dp-planner` feature, OFF by default)* — the default greedy GOO planner gains an opt-in connected-subgraph-complement-pair DP (Moerkotte & Neumann, VLDB 2006) that finds a `Cout`-optimal *bushy* join order — seeded from the SAME cardinality estimator — via `with_dp_planner` / `with_dp_planner_budget` (per-thread, like `with_cs_table`), **falling back to greedy above a connected-subgraph budget** and on disconnected BGPs. ORDER-ONLY: identical answers to greedy, proven by the on-vs-off `tests/dp_planner_differential.rs`. Off, zero DP code compiles, the default build is byte-identical, no new deps.
+- **DP join-order planner (DPccp)** *(opt-in `dp-planner` feature, OFF by default)* — the default greedy GOO planner gains an opt-in connected-subgraph-complement-pair DP (Moerkotte & Neumann, VLDB 2006) that finds a `Cout`-optimal *bushy* join order — seeded from the SAME cardinality estimator; once compiled in it is the default planner (`without_dp_planner` scopes back to greedy, `with_dp_planner_budget` sets the budget — per-thread, like `with_cs_table`), **falling back to greedy above a connected-subgraph budget** and on disconnected BGPs. ORDER-ONLY: identical answers to greedy, proven by the on-vs-off `tests/query_features/dp_planner_differential.rs`. Off, zero DP code compiles, the default build is byte-identical, no new deps.
 - **RDF writer matrix** *(`serialize-rdf` feature — OFF for a library embedder, but the `sparq-cli`/`sparq-server`
   BINARIES enable it via their default-on `jsonld` feature, [OPUS-4.8] sq-oy1f.4)* — write a `Graph` (or
   `&[oxrdf::Triple]`) back out as Turtle / TriG / N-Quads / JSON-LD 1.1
@@ -81,11 +81,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
   variants + `prefixes_from_pairs` accept a caller's prefix policy), plus deterministic **pretty**
   (indented, sorted, round-trip-correct) variants and true **W3C JSON-LD 1.1 Compaction**
   (`graph_to_jsonld_compact`) and **Framing** (`graph_to_jsonld_framed`) — hand-rolled,
-  dependency-free, **pyld-faithful** (differentially verified; see the `serialize::compact` rustdoc).
+  dependency-free, **pyld-faithful** (differentially verified; see the `serialize::write_jsonld_compact` rustdoc).
   The N-Triples writer (`triples_to_ntriples`) is always on; off, zero serializer code compiles, **no
   new dependencies**. The opt-in `streaming-serialization` feature (implies `serialize-rdf`) adds
   `write_turtle_streaming`/`write_trig_streaming` (+ `graph_to_*_streaming`) — render Turtle/TriG into a
-  `std::io::Write` one subject-block at a time, **byte-identical** to the buffered writer (chunked CONSTRUCT). See [`skills/data-formats/SKILL.md`](../../skills/data-formats/SKILL.md) recipe 6.
+  `std::io::Write` one subject-block at a time, **byte-identical** to the buffered writer (used by `sparq-cli dump` under its `streaming-serialization` feature). See [`skills/data-formats/SKILL.md`](../../skills/data-formats/SKILL.md) recipe 6.
 - **Oxigraph-shaped per-solution accessor** *(opt-in `query-solution` feature, OFF by default)* —
   `QueryResult::solutions()` yields borrowed, zero-copy `QuerySolution` views (one per row) matching
   Oxigraph's `QuerySolution` API — `get` by name / `VariableRef` / position, `iter` over the bound

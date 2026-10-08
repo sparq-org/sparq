@@ -91,6 +91,8 @@ SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` varia
 - `query_json_stream_with_budget(&Graph, &str, &QueryBudget, sink)` (+ the
   `query_json_stream_prepared_with_budget` no-re-parse variant over a `PreparedQuery`) —
   emits each JSON chunk to `sink` AS produced (TTFB streaming; the HTTP server's read path).
+  A budget that trips mid-stream returns `Err` after some chunks may already have reached `sink`,
+  and the document is left unclosed (never a well-formed truncated result).
 - `ask(&Graph, &str) -> Result<bool, String>` — requires an ASK query.
 - `count(&Graph, &str) -> Result<usize, String>` — solution count without materialising terms.
 
@@ -558,8 +560,8 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   base dir with `with_load_base(path, || update(...))`.
 - **SPARQL `SERVICE` federation** is the non-default `service` cargo feature (pulls `ureq`; off on
   wasm). Internally the SERVICE client (HTTP transport, SPARQL-Results JSON/XML parse, bound-join
-  batching, SSRF egress policy) is housed in the `sparq-engine-service` sub-crate (`publish = false`,
-  [OPUS-4.8] sq-6vshe.4, seam A2 of the facade split) and re-exported through the facade — the
+  batching, SSRF egress policy) is housed in the `sparq-engine-service` sub-crate (published only to satisfy `sparq-engine`'s
+  crates.io dependency closure; not a supported front door; [OPUS-4.8] sq-6vshe.4, seam A2 of the facade split) and re-exported through the facade — the
   `service` feature name and the `sparq_engine::with_service_egress_allow` / `…egress_policy` /
   `…SERVICE_EGRESS_REFUSED_MARKER` / `…allowlist_entry_permits` paths below are unchanged and remain
   the supported surface.
@@ -710,7 +712,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   `zk` trace is armed** so the row path records the complete FILTER obligation set. The M4 wiring
   roadmap + coexistence model is `research/vector-at-a-time-m4.md` (epic `sq-pntvh`); its acceptance
   gate landed first (Phase 1, `sq-pntvh.1`): the differential BYTE-IDENTITY harness
-  `crates/sparq-engine/tests/vectorized_byte_identity.rs` (the columnar kernel's serialised survivors
+  `crates/sparq-engine/tests/differentials/vectorized_byte_identity.rs` (the columnar kernel's serialised survivors
   are byte-identical to the row `FILTER` operator over the *same batch*, order-exact — a Phase-1
   finding: cross-query byte-identity is unsound because a sargable filter re-plans the scan, so the
   invariant is operator-level not full-query), the seam-level differential in
@@ -916,7 +918,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   match **before** that row enters the join. This is a transparent PERFORMANCE optimisation: the
   filter is membership-exact, so it removes only rows the join would have dropped anyway and the
   RESULT is byte-identical to the feature-off path — `query`/`query_json`/etc. return the SAME answers
-  whether it is on or off (proven by the on-vs-off equivalence suite `tests/semijoin_differential.rs`);
+  whether it is on or off (proven by the on-vs-off equivalence suite `tests/differentials/semijoin_differential.rs`);
   only fewer rows are scanned. Its payoff on star/snowflake workloads is a measurable hypothesis for
   the canonical perf host, not a baked-in number. When off, zero of this code compiles and the default
   native + wasm builds are byte-identical (no new dependencies — sparq-core + rustc-hash are already
@@ -933,7 +935,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   semijoin-reduce then join; cyclic ⇒ existing LFTJ, unchanged**. A semijoin is a pure FILTER (removes
   only rows the final join would itself drop), so the RESULT is **identical** to the feature-off binary
   plan — `query`/`query_json`/etc. return the SAME answers (proven by the on-vs-off equivalence suite
-  `tests/yannakakis_differential.rs` over chain/star/snowflake/cyclic/empty/no-reduction shapes). The
+  `tests/differentials/yannakakis_differential.rs` over chain/star/snowflake/cyclic/empty/no-reduction shapes). The
   prepass is **cost-gated** — skipped when the intermediates are already tiny (a pure-overhead guard) —
   so a tiny BGP transparently uses the ordinary binary plan. Payoff on chain/snowflake workloads is a
   measurable hypothesis for the canonical perf host (bead `sq-0g6g`), not a baked-in number. When off,
@@ -959,7 +961,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   ```
   It is **ORDER-ONLY**: a BGP is a commutative/associative natural join, so every tree yields the SAME
   bindings — the DP changes join order, never the answer (proven by the on-vs-off differential suite
-  `tests/dp_planner_differential.rs`, which runs in BOTH feature states). DPccp is worst-case
+  `tests/query_features/dp_planner_differential.rs`, which runs in BOTH feature states). DPccp is worst-case
   exponential, so the enumerator counts connected subgraphs first and **falls back to greedy GOO** when
   the count exceeds `DpConfig::max_subgraphs`, on a **disconnected** BGP (a cross-product query or an
   all-constant pattern), and for BGPs with fewer than 3 patterns (for n≤2, greedy is already optimal

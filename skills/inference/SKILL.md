@@ -41,7 +41,7 @@ CLI equivalent (materialize and optionally dump the closure as N-Triples):
 ```bash
 cargo run --release -p sparq-cli -- reason ontology.ttl turtle rdfs            # rdfs | owl | n3
 cargo run --release -p sparq-cli -- reason ontology.ttl turtle owl out.nt      # write full closure
-cargo run --release -p sparq-cli -- query data.ttl 'SELECT ...' --reason rdfs  # reason then query
+cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT ...' --reason rdfs  # reason then query
 
 # OWL 2 EL classification — the class hierarchy RL cannot reach (opt-in `el` feature). Complete
 # for E1+E2 only: the CLI omits `cdomain`, so concrete-domain axioms land in `skipped_axioms`.
@@ -88,7 +88,7 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_proof(dict: &mut Dict, src: &str)
     -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String>; // term-level, no Dict
-pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>;
+pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>; // n3:: only
 // EYE --pass-all / --pass-all-ground: the closure PLUS the document's own rules, echoed
 // back as ONE N3 document (the chainer consumes rules, so --pass output alone can derive
 // nothing further). Closure statements are sorted (deterministic), then rules in document
@@ -145,7 +145,7 @@ pub struct ProofNode { pub conclusion: [String;3], pub rule: String, pub premise
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
-`Id` / `Dict` come from `sparq_core::dict`; `Term`, `Rule`, `N3Closure`, `ProofStep`, `Resolver` from `sparq_reason::n3` (re-exported at the crate root).
+`Id` / `Dict` come from `sparq_core::dict`; `N3Closure`, `ProofStep`, `RuleVars` from `sparq_reason::n3` (re-exported at the crate root); `Term`, `Rule`, `Resolver` and `reason_n3_terms_with_resolver` are reached through `sparq_reason::n3::…`.
 
 ```rust
 // `compiled-rules` feature only (`sparq_reason::n3::compiled`, sq-zgbso.3): id-level
@@ -363,7 +363,7 @@ The loaders desugar every RDF 1.2 quotation form (`<< :s :p :o >>`, `:s :p :o ~ 
 OWL 2 RL is **sound but silently incomplete for class classification**: it has no rule that reasons *through* an existential successor, so `--reason owl` over an EL ontology (GO/ChEBI/SNOMED-style) returns a `rdfs:subClassOf` hierarchy that **silently omits** subsumptions like `A ⊑ D` from `A ⊑ ∃r.B`, `B ⊑ C`, `∃r.C ⊑ D` (Krötzsch, ISWC 2012). **`sparq-reason-el`** closes that gap — a consequence-based classifier that normalizes the TBox (Baader–Brandt–Lutz forms) and saturates `S(C)`/`R(r)` under completion rules **CR1–CR5** to compute the **complete** subsumption lattice, then emits it into the **same** `(Dict, Vec<[Id;3]>)` seam as the RL `scm-*` rules (queryable by plain BGP eval).
 
 ```rust,ignore
-// Cargo.toml:  sparq-reason-el = "0.1"     // a SEPARATE crate; depending on it is the opt-in
+// Cargo.toml:  sparq-reason-el = { path = "../sparq-reason-el" }  // SEPARATE, publish = false; depending on it is the opt-in
 use sparq_core::Graph;
 use sparq_reason_el::{classify_graph, Classifier};
 
@@ -400,7 +400,7 @@ let _ = h.report().thing_unsatisfiable; // global owl:Thing ⊑ owl:Nothing clas
 OWL 2 QL (DL-Lite_R) is **FO-rewritable**: instead of materializing a closure, you **rewrite the query** into a **union of conjunctive queries** (UCQ) that, evaluated over the **unmodified data**, returns the **certain answers** under the schema (Calvanese et al., *PerfectRef*, JAR 2007). **`sparq-reason-ql`** is a query-rewriter (not a materializer): it reuses the engine's query path — it emits a rewritten `spargebra::Query` (a `Union`-folded UCQ) that the planner/executor run unchanged.
 
 ```rust,ignore
-// Cargo.toml:  sparq-reason-ql = { version = "0.1", features = ["experimental"] }
+// Cargo.toml:  sparq-reason-ql = { path = "../sparq-reason-ql", features = ["experimental"] }  // publish = false
 use sparq_reason_ql::{rewrite, rewrite_production, as_conjunctive_query, CqError};
 use spargebra::SparqlParser;
 
@@ -487,7 +487,8 @@ feature, bead sq-pbz04.4.4):** NOW BUILT. `check::DirectChecker` (constructed wi
 `with_budget(Budget)`) dispatches an extracted ontology IN ORDER — RL (via `sparq-reason`
 materialization + clash scan, Theorem-PR1-precondition-CHECKED, divergence-guarded), EL (via
 `sparq-reason-el`, triple-guarded: skipped-axioms / unapplied-axiom-kinds / ⊤-guard), QL
-(consistency wholly deferred to sq-pbz04.3.4 — always abstains), else the L3 ALCH tableau —
+(always abstains `QlConsistencyPending` unless the opt-in `dispatch_ql` feature routes it to
+`sparq-reason-ql`'s consistency checker, sq-fj8lj), else the L3 ALCH tableau —
 returning `ConsistencyOutcome` / `EntailmentOutcome`: a tri-state verdict PLUS the `Branch`
 that produced it (traceability). `entailment()` checks `O ⊨ α` per conclusion axiom by an
 argued refutation encoding onto the tableau (`SubClassOf`, `ClassAssertion`,
@@ -657,7 +658,7 @@ if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
 **6. `log:semantics` / `log:content` document access.** The engine does NO I/O of its own; supply a `Resolver` closure to decide what an IRI may dereference to (otherwise those builtins simply don't fire):
 
 ```rust
-use sparq_reason::reason_n3_terms_with_resolver;
+use sparq_reason::n3::reason_n3_terms_with_resolver;
 let resolver = |iri: &str| std::fs::read_to_string(iri.trim_start_matches("file://")).ok();
 let closure = reason_n3_terms_with_resolver(src, Some("http://ex/"), Some(&resolver))?;
 # Ok::<(), String>(())
@@ -736,5 +737,5 @@ full output-mode + builtins-coverage tables.
 - `hdt-format`, `fused-decompress-parse`, `rust-parallel-parsing` — sibling ingest/storage skills for getting triples into the graph you then reason over.
 - `research/owl2-el-ql-reasoning-spike.md` — the EL/QL feasibility spike: why EL first, the RL-incompleteness proof (the CR4 counterexample), and the phased plan (E1–E6) `sparq-reason-el` implements.
 - `research/reasoner-suite-on-substrate.md` §2.5 — the QL track design: the PerfectRef applicability trap, the strict CQ-shape gate, and why the production path (tree-witness + UCQ-containment minimisation) is sequenced late by soundness risk (the phased plan `sparq-reason-ql` implements through phases Q1–Q3, and the sparq-extension conformance floors — the DL-Lite_R certain-answer floor `QL_DLLITE_FLOOR` and the sound-subset entailment-arm floor `QL_ENTAILMENT_FLOOR` — have both graduated, sq-qo1a9 / sq-pbz04.3.4).
-- **N3 conformance — what is measured.** `sparq-inference-conformance` runs the w3c/N3 community-group manifests (reasoner / parser / extended / TurtleTests; results in `inference-conformance-report.md`). The community **notation3tests** suite (codeberg `phochste/notation3tests`, issue #6467) runs through `sparq-notation3tests` (`crates/sparq-conformance/src/notation3tests.rs`: cases are the `.n3` files under the checkout's `tests/`, scored by the suite's name-keyed expectation: `success-*` must derive `:result :has :<name>` or `:test :is true` (never `false`), negative `fail-*` must derive no verdict at all, `crash-*` input must be rejected (parse/reasoning error); buckets pass / nonconform / incomplete / crashed / timeout; one process per test, `--timeout`) in the ADVISORY weekly lane `.github/workflows/notation3tests.yml`. It has **no measured baseline yet** and no floor — do not cite an N3 pass rate from it until a run at a pinned suite SHA records one. Goal-directed `log:query` output is not implemented, so tests that only report through it fail.
+- **N3 conformance — what is measured.** `sparq-inference-conformance` runs the w3c/N3 community-group manifests (reasoner / parser / extended / TurtleTests; results in `inference-conformance-report.md`). The community **notation3tests** suite (codeberg `phochste/notation3tests`, issue #6467) runs through `sparq-notation3tests` (`crates/sparq-conformance/src/notation3tests.rs`: cases are the `.n3` files under the checkout's `tests/`, scored by the suite's name-keyed expectation: `success-*` must derive `:result :has :<name>` or `:test :is true` (never `false`), negative `fail-*` must derive no verdict at all, `crash-*` input must be rejected (parse/reasoning error); buckets pass / nonconform / incomplete / crashed / timeout, plus unavailable for a `log:content`/`log:semantics` resource the offline runner cannot serve; one process per test, `--timeout`) in the ADVISORY weekly lane `.github/workflows/notation3tests.yml`. It has **no measured baseline yet** and no floor — do not cite an N3 pass rate from it until a run at a pinned suite SHA records one. Goal-directed `log:query` output is not implemented, so tests that only report through it fail.
 - `crates/sparq-conformance/tests/ufo_sn3/` — **UFO-SN3**: a finite-world, function-free, range-restricted N3 projection of representative UFO (Unified Foundational Ontology) concepts — rigidity, identity criteria, relators, events/participation, dispositions, commitments/norms, situations/worlds/accessibility — run as committed vocab + rules + fixture cases through plain `reason_n3` (`tests/ufo_sn3_suite.rs`, `UFO_SN3_FLOOR`, an UNGATED sparq-EXTENSION row in the central scoreboard). Demonstrates the reification-node projection for statement-level (triple-term-shaped) claims, since the N3 `Term` model has no triple-term variant (a tracked gap). [FABLE-5]

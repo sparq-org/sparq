@@ -11,7 +11,8 @@ equality (simple-literal ≡ `xsd:string`, case-insensitive language tags);
 arbitrary-precision integer/decimal value equality and `xsd:double` `INF`/`NaN`;
 `dateTime`/`date`/`duration` comparison with timezone normalisation and the ±14h
 indeterminate window; a SPARQL-Results-JSON reader; the multiset + `ORDER BY`
-equivalence-class comparators; and RDFC-1.0 canonical labelling for blank-node results,
+equivalence-class comparators; an admission-decision (allow/deny set) comparator with a
+fail-closed-asymmetry check (`decision`); and RDFC-1.0 canonical labelling for blank-node results,
 which are comparable only up to a bijection. Full API detail is in the rustdoc.
 
 **Load-bearing constraint:** it depends on **no sparq crate** — only third-party exact

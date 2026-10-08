@@ -2,16 +2,14 @@
 # sparq-geo
 
 <p>
-  <a href="https://crates.io/crates/sparq-geo"><img src="https://img.shields.io/crates/v/sparq-geo.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-geo"><img src="https://docs.rs/sparq-geo/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 Opt-in GeoSPARQL 1.0/1.1 core for [sparq](https://github.com/sparq-org/sparq):
 geometry-literal parsing and serialisation, `geof:` functions, and an R-tree `GeoIndex`.
 
-A **separate crate** by design — no other sparq crate (nor the wasm build) depends on
-it, so spatial support is engaged only by adding `sparq-geo`. Geometry wraps the
+A **separate crate** by design (`publish = false`) — no other sparq crate (nor the wasm build)
+depends on it by default, so spatial support is engaged only by adding `sparq-geo`. Geometry wraps the
 pure-Rust [`wkt`](https://crates.io/crates/wkt) / [`geo`](https://crates.io/crates/geo)
 stack; the index wraps [`rstar`](https://crates.io/crates/rstar). GML has no maintained
 pure-Rust geometry parser, so this crate ships a focused GML-SF parser
@@ -49,7 +47,7 @@ The `geof::*` / `geof::lex::*` plain-Rust API and the R-tree `GeoIndex`
 
 ## ✨ Features
 
-- **OGC conformance scoreboard** — 40 `geof:` IRIs cover topology, measurements, centroid, simplification, geometry/set operations, and `getSRID`. A self-written executable probe
+- **OGC conformance scoreboard** — 45 `geof:` IRIs cover topology, measurements, centroid, simplification, geometry/set operations, and `getSRID`. A self-written executable probe
   per OGC requirement ([`tests/ogc_geosparql_requirements.rs`](tests/ogc_geosparql_requirements.rs))
   scores **30 / 30** of the standard's R1–R30 taxonomy — OGC never shipped an executable
   ETS, and the GPL academic compliance benchmark cannot be vendored into this MIT tree,
@@ -107,7 +105,7 @@ upstream to [georust/geo](https://github.com/georust/geo) (bead `sq-fxv3`).
 
 - **How-to** — [`skills/geosparql/SKILL.md`](../../skills/geosparql/SKILL.md) (the full
   `geof:` IRI list, the set-operation operand matrix, and the index design).
-- **API reference** — [docs.rs/sparq-geo](https://docs.rs/sparq-geo).
+- **API reference** — `cargo doc -p sparq-geo --open` (not on crates.io/docs.rs).
 - **Spec** — GeoSPARQL 1.0/1.1; the implemented requirement subset is pinned by
   [`tests/ogc_geosparql_requirements.rs`](tests/ogc_geosparql_requirements.rs).
 - **Benchmark** — `cargo run --release -p sparq-geo --example bench_geo` (no figures

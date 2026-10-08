@@ -24,7 +24,8 @@ Use `sparq-arrow` when a Rust application needs a faithful columnar representati
   (the RFC 4180 serializer and parser are hand-rolled over `std`).
 - Leave all features disabled to retain only the dependency-free field-name constants.
 
-All features are default-OFF. The crate is a leaf capability crate, so no Arrow
+All features are default-OFF. The crate is `publish = false` (take it from git, not
+crates.io) and a leaf capability crate, so no Arrow
 container dependency enters `sparq-core`, `sparq-engine`, or the WebAssembly bundle.
 
 ## Use a RecordBatch
@@ -39,7 +40,7 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Add the feature with `cargo add sparq-arrow --features arrow`.
+Add the feature with `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features arrow`.
 
 ## Use Parquet bytes
 
@@ -60,7 +61,7 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Add the feature with `cargo add sparq-arrow --features parquet`. Parquet is only a
+Add the feature with `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features parquet`. Parquet is only a
 serialization of the same RecordBatch projection; it does not use a second term
 encoding. `parquet_variables_from_bytes` validates and reads only the stored schema,
 while `parquet_row_count_from_bytes` reads the total row count from file metadata;
@@ -81,7 +82,7 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Add the feature with `cargo add sparq-arrow --features ipc`. The IPC stream carries the
+Add the feature with `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features ipc`. The IPC stream carries the
 same schema as the RecordBatch and preserves variable names for an empty result.
 `ipc_variables_from_bytes` validates and reads that schema without decoding batches.
 
@@ -99,7 +100,7 @@ assert_eq!(restored.rows, result.rows);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-Add the feature with `cargo add sparq-arrow --features csv`. CSV has no nested types,
+Add the feature with `cargo add sparq-arrow --git https://github.com/sparq-org/sparq --features csv`. CSV has no nested types,
 so each variable's five-field term struct is flattened to the five header columns
 `var.kind`, `var.value`, `var.datatype`, `var.language`, and `var.direction`; and CSV
 has no value-level null, so an unbound cell is five empty fields with boundness carried

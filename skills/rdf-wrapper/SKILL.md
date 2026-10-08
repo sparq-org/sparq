@@ -5,12 +5,13 @@ description: "Traverse sparq RDF graphs as native Rust objects with the opt-in s
 
 # Use sparq-wrapper
 
-Add the opt-in crate explicitly:
+Add the opt-in crate explicitly. It is `publish = false` (not on crates.io), so
+take it and `sparq-core` from the same git source to share one `Graph` type:
 
 ```toml
 [dependencies]
-sparq-core = "0.1"
-sparq-wrapper = "0.1"
+sparq-core = { git = "https://github.com/sparq-org/sparq" }
+sparq-wrapper = { git = "https://github.com/sparq-org/sparq" }
 oxrdf = "0.3"
 ```
 
@@ -48,7 +49,7 @@ Choose ownership deliberately:
   `insert`/`remove`. Nodes borrow the store, so stop using them before a write
   and reacquire them afterwards.
 - Traversal addresses the default graph in M1. Reach named graphs through the
-  raw graph until a scoped-dataset surface lands.
+  opt-in `proposed-graph-scope` `GraphScope` (below) or the raw graph.
 
 Typed accessors are strict:
 
@@ -66,7 +67,7 @@ Eleven explicitly experimental, default-off features track proposals that
 remain unlanded in rdfjs/wrapper:
 
 ```toml
-sparq-wrapper = { version = "0.1", features = [
+sparq-wrapper = { git = "https://github.com/sparq-org/sparq", features = [
   "proposed-async-events",
   "proposed-async-node",
   "proposed-async-store",

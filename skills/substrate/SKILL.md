@@ -82,22 +82,17 @@ promotes the pair to **`f32`** through `Num::f32`. [OPUS-5] #3796
 > `cmp_relational_integer_and_decimal_vs_float_compare_in_the_float_tier`. Do not
 > re-introduce the unconditional `f64` fallback.
 
-A second, unrelated `xsd:float` defect is still open in a different crate:
+A second, related `xsd:float` defect lived in a different crate and is now fixed:
 
-> **REMAINING BOUNDARY — the engine's `=`/`<` on an `xsd:float` still do not see the `f32`
-> value.** This is a DIFFERENT defect from the one above, in a different crate, and it is
-> still open. `sparq-engine` does not call `cmp_relational` at all; its `=`/`<` ride the
-> numeric-value CACHE — `sparq_core::cached_numeric_f64` and the engine's
-> `numeric_cache_f64`, which drive the sargable `=`/`<` fast path, `JKey::Num` value-joins
-> and the `ORDER BY` numeric rank — and that still values an `xsd:float` literal as
-> `parse_xsd_f64(lexical)`, i.e. the f64 nearest the LEXICAL rather than the f64 image of
-> its correctly-rounded `f32`. Measured through `sparq_engine::query`:
-> `"4611686293305294849"^^xsd:float = "4611686568183201792"^^xsd:double` is `false` (XPath
-> requires `true`) and the same `<` is `true`, yet `+ "0.0"^^xsd:float` yields
-> `4.6116866E18`. NOT a regression from #3796 — that path never consumed the `f32` value.
-> Not fixed here because the cache f64 is shared bit-identically with the spilled on-disk
-> dict cache and `LocalVocab::intern`, so correcting it must be validated against the W3C
-> conformance ratchet. Tracked as issue #3825; #3796 stays OPEN for it. [OPUS-5]
+> **Engine comparison paths value an `xsd:float` at its `f32` (#3825, fixed by #6671).**
+> `sparq-engine` does not call `cmp_relational`; its `=`/`<` ride the numeric-value CACHE
+> (the sargable `=`/`<` fast path, `JKey::Num` value-joins and the `ORDER BY` numeric rank),
+> which previously valued an `xsd:float` literal as the f64 nearest its LEXICAL. The cache
+> now values it as its correctly-rounded `f32`, widened exactly (`sparq_core::numeric_lexical_f64`),
+> so `"4611686293305294849"^^xsd:float = "4611686568183201792"^^xsd:double` is `true` on
+> every path, and a float against an integer/decimal compares in the float tier. A
+> `numerics.bin` cache saved before the change is recomputed on `Graph::open`. Regression
+> suite: `crates/sparq-engine/tests/float_value_tier.rs`.
 
 ```toml
 [dependencies]
@@ -273,8 +268,10 @@ The envelope's `canonical` flag is true ONLY for a `--canonical` run; a work-box
 | `compare` | `sparq_substrate::compare` | — |
 | `overhead` | `sparq_substrate::overhead` (implies `join`+`numeric`+`compare`) | — |
 
-All features are off by default. The default build compiles nothing from this crate (byte-
-identical wasm bundle). The crate is `forbid(unsafe_code)`.
+All features are off by default, so a bare dependency compiles nothing from this crate.
+`sparq-engine` depends on it unconditionally with `numeric` + `join` + `compare` (the
+code-moved kernels), so those modules are in every engine build, wasm included; `overhead`
+stays opt-in. The crate is `forbid(unsafe_code)`.
 
 ## When to use
 

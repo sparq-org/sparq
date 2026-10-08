@@ -117,7 +117,7 @@ if you want them without canonicalizing.
 ## Errors — fail closed
 
 `CanonError` is `#[non_exhaustive]` (variants have been added ungated as the
-crate grew — keep a wildcard arm) and has five variants:
+crate grew — keep a wildcard arm) and has six variants:
 
 - `TripleTerm` — the dataset contains an RDF 1.2 triple term as an object; these
   are outside W3C RDFC-1.0's data model, so the **standard** paths fail closed.
@@ -133,6 +133,11 @@ crate grew — keep a wildcard arm) and has five variants:
   descent (HNDQ gossip, relabelling, serialization — and oxrdf's own
   `Drop`/`Clone` recurse), so adversarially deep nesting fails closed instead
   of risking a stack overflow. Ungated, like `NestedBlankNode`.
+- `DirectionalLiteral` — an RDF 1.2 directional language-tagged literal
+  (`"…"@en--ltr` / `--rtl`) reached a **standard** entry point: RDFC-1.0 is
+  RDF-1.1-only and the oxrdf-0.2 bridge cannot carry a base direction, so the
+  standard paths fail closed. The opt-in `rdf12-triple-terms` profile
+  canonicalizes directional literals natively.
 - `Canonicalization(String)` — `rdf-canon` rejected the dataset. This includes
   the **HNDQ call-limit guard**: RDFC-1.0 has pathological-input blow-ups, so a
   poison graph trips the limit and fails closed rather than running unbounded.
@@ -335,6 +340,6 @@ The opt-in, off-by-default `concept` feature ([SONNET-4.6] issue #1746) adds the
 `urn:concept:` multibase/multihash envelope plus the recompute-and-byte-compare
 ingestion guard; it fixes no scope-extraction rule and makes no independence
 claim beyond producer-side re-derivation (see that section).
-`publish = false`, non-default workspace member — nothing in sparq's default graph
-depends on it, so the default build and lean wasm artifact are byte-identical with
-or without it.
+`publish = false`; none of sparq's published crates depends on it (it is in the default
+workspace build only as a dependency of the `sparq-bench` harness), so the default
+library build and lean wasm artifact are byte-identical with or without it.

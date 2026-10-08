@@ -2,8 +2,6 @@
 # sparq-rsp
 
 <p>
-  <a href="https://crates.io/crates/sparq-rsp"><img src="https://img.shields.io/crates/v/sparq-rsp.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-rsp"><img src="https://docs.rs/sparq-rsp/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -14,7 +12,7 @@ deterministic **library** — no async runtime, no wall clock, no service.
 The engine never reads a clock: timestamps are application-supplied `u64`s and time
 advances only through pushed values, so the whole pipeline is a pure function of the
 pushed `(triple, ts)` sequence — replayable, unit-testable, wasm-safe. Like
-`sparq-reason` / `sparq-shacl` it is **isolated**: nothing in the workspace depends on
+`sparq-reason` / `sparq-shacl` it is **isolated**: only its `sparq-rsp-wasm` bundle depends on
 it, so the core engine and the wasm build carry zero streaming code.
 
 ## 🚀 Quickstart
@@ -85,7 +83,7 @@ q.flush(|result| { /* end-of-stream: close everything up to max ts */ })?;
 
 - **How-to** — [`skills/streaming-rsp/SKILL.md`](../../skills/streaming-rsp/SKILL.md)
   (window semantics, R2S diffs, eval modes, RSP-QL syntax, the wasm tier).
-- **API reference** — [docs.rs/sparq-rsp](https://docs.rs/sparq-rsp).
+- **API reference** — `cargo doc -p sparq-rsp --open` (not on crates.io / docs.rs: `publish = false`).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
 - **Performance** — the `throughput` example
   (`cargo run --release -p sparq-rsp --example throughput`; append `-- --json <path>` to

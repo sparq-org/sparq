@@ -6,7 +6,8 @@ and the SSRF egress-policy allowlist.
 
 > **Internal, unstable crate.** This is seam A2 of the staged `sparq-engine` facade split
 > (RFC `research/engine-split-rfc.md` §4 Option A / §7 Phase A2, bead `sq-6vshe.4`). It is
-> `publish = false` and has **no stability guarantee of its own**. Depend on
+> published to crates.io only to satisfy `sparq-engine`'s dependency closure and has
+> **no stability guarantee of its own**. Depend on
 > **`sparq-engine`** — its `service` feature forwards here and its public
 > `with_service_egress_allow` / `SERVICE_EGRESS_REFUSED_MARKER` / `allowlist_entry_permits`
 > / … re-exports are unchanged by the split.
@@ -25,7 +26,7 @@ use sparq_core::Graph;
 
 let local = Graph::default();
 // SERVICE egress is deny-by-default: only the allow-listed host is dialled.
-let out = with_service_egress_allow(["sparql.example.org"], || {
+let out = with_service_egress_allow(["sparql.example.org".to_string()], || {
     query(&local, "SELECT * WHERE { SERVICE <https://sparql.example.org/> { ?s ?p ?o } }")
 });
 // (`out` is a transport error here — there is no live endpoint in the doctest.)

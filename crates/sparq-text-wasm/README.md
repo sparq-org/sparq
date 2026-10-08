@@ -11,7 +11,8 @@ showcase site's `/surface/full-text` page loads this bundle on demand
 (`next/dynamic`, client-only) so the landing page stays light. It mirrors the
 per-bundle-crate pattern of `sparq-wasm` / [`sparq-reason-wasm`](../sparq-reason-wasm/README.md).
 
-> Distributed via npm, not crates.io (`publish = false`). It is a wasm packaging
+> Not on crates.io (`publish = false`) and not a separate npm package: the site builds
+> it with `js/`'s `build:text-wasm` and serves it. It is a wasm packaging
 > layer over `sparq-text`, built via `wasm-pack`, not a Rust library dependency.
 
 ## 🚀 Quickstart
@@ -84,8 +85,8 @@ const { docs, tokens, heapBytes, hasPositions } =
 
 - **Status** — this crate delivers the wasm-compatibility changes, the `TextSearch`
   entry points (`query` + `indexStats`), and a headless `wasm-pack test --node` smoke
-  suite. The npm wrapper packaging and Pages deploy wiring are tracked separately
-  (the full-text page bead sq-xoxu and the Pages workflow).
+  suite. The Pages workflow builds it (`npm run build:text-wasm`) and the site's
+  `sync-wasm` script serves it on `/surface/full-text`; it has no npm package of its own.
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md).
 
 ## License

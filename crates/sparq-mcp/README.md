@@ -2,8 +2,6 @@
 # sparq-mcp
 
 <p>
-  <a href="https://crates.io/crates/sparq-mcp"><img src="https://img.shields.io/crates/v/sparq-mcp.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-mcp"><img src="https://docs.rs/sparq-mcp/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -108,7 +106,7 @@ No overclaim: it adds no isolation, sandboxing, or auth the host process does no
 ## 📚 Learn more
 
 - **How-to** — [`skills/agent-tools/SKILL.md`](../../skills/agent-tools/SKILL.md).
-- **API reference** — [docs.rs/sparq-mcp](https://docs.rs/sparq-mcp).
+- **API reference** — `cargo doc -p sparq-mcp --open` (not published to crates.io).
 - **MCP spec** — <https://modelcontextprotocol.io>.
 - **Underlying engine** — [`sparq-engine`](../sparq-engine) (query path) and
   [`sparq-introspect`](../sparq-introspect) (schema mining).

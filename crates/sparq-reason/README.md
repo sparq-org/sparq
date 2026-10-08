@@ -80,8 +80,8 @@ let g = Graph::from_parts(dict, triples);
   premises, recursively down to asserted facts (a flat, ZK-witness-friendly shape).
 - **RIF/XML importer** (opt-in `rif-xml`) — parse the W3C RIF-Core XML presentation
   syntax into a `rif::Document` with Or-split and Exists-flatten desugaring; fail-closed
-  taxonomy rejects `Import` directives, non-Core elements, unknown builtins, and
-  malformed XML with named error variants. See the `rif_xml` module docs.
+  taxonomy rejects `Import` directives, non-Core elements, unknown builtins, non-RIF
+  namespaces, over-deep nesting, and malformed XML with named error variants. See `rif_xml`.
 - **Shared join kernels** (opt-in `substrate-join`) — the RDFS predicate join (rdfs2/3/7)
   and the rdfs9 type join drive the *same* `sparq-substrate::join` hash-join body the SPARQL
   engine drives, supplying the reasoner's own key projection + budget monomorphically.

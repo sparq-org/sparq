@@ -13,7 +13,7 @@ description: "Full-text search and IRI/label prefix completion via sparq-text: b
 ```toml
 [dependencies]
 sparq-core = { path = "../sparq-core" }
-sparq-text = { path = "../sparq-text" }   # default features: ["engine", "parallel"]
+sparq-text = { path = "../sparq-text" }   # default features: ["engine", "parallel", "engine-builtins"]
 ```
 
 ```rust

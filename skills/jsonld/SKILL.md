@@ -33,7 +33,7 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
 ## Native pipeline — the `sparq-jsonld` crate
 
 `sparq-jsonld` is `#![forbid(unsafe_code)]`, has **zero mandatory dependencies**, and
-is `publish = false` (an internal crate, path-depended). It has **no cargo feature of
+is published to crates.io as part of `sparq-engine`'s dependency closure. It has **no cargo feature of
 its own** — it is always compiled when a crate depends on it, so there is no
 "jsonld-off" build of *this* crate; the opt-in gating lives in the consumers (below).
 
@@ -85,17 +85,11 @@ If you already hold the expanded form, skip re-expansion with the `_expanded` va
 &context, &options, &loader)`, and `frame::frame_expanded(&expanded_input,
 &expanded_frame, &options, &frame_options)`.
 
-### Runnable end-to-end example
+### End-to-end composition
 
-The canonical demo is `examples/jsonld_roundtrip.rs` — a full expand → flatten →
-compact → frame pipeline over an inline document that asserts the framed output
-round-trips. Run it:
-
-```sh
-cargo run -p sparq-jsonld --example jsonld_roundtrip
-```
-
-Its shape (mirroring the example verbatim):
+The four operations compose as a full expand → flatten → compact → frame pipeline over
+an inline document (the crate ships no stand-alone demo example; its only example,
+`jsonld_conformance`, is the W3C suite scoreboard runner):
 
 ```rust
 let input = Json::parse(DOCUMENT).expect("valid JSON");
@@ -239,9 +233,9 @@ failures plus intentional skips (negatives, JSON-LD-1.0-only, non-inline/remote 
 | ------- | -------------: | ------ |
 | toRdf   | 413 / 467      | oxjsonld RDF-dataset comparison |
 | fromRdf | 52 / 53        | native document comparison + RDF round-trip |
-| expand  | 276 / 385      | native document-level comparison |
+| expand  | 381 / 385      | native document-level comparison |
 | flatten | 53 / 58        | native document-level comparison |
-| compact | 228 / 246      | native normative document comparison |
+| compact | 243 / 246      | native normative document comparison |
 | frame   | 92 / 92        | native normative document comparison (incl. negatives) |
 
 The authoritative constants live in

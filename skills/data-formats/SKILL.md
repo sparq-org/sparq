@@ -60,7 +60,7 @@ Or from the CLI:
 
 ```bash
 sparq-cli query data.ttl turtle 'SELECT * WHERE { ?s ?p ?o } LIMIT 5'
-# HDT needs the opt-in feature (its MSRV is 1.87, above the 1.85 workspace floor):
+# HDT needs the opt-in `hdt` CLI feature:
 cargo build -p sparq-cli --features hdt
 ./target/.../sparq-cli query dataset.hdt hdt 'SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }'
 ```
@@ -326,7 +326,8 @@ LIBRARY embedder it is opt-in (the engine library default stays lean): enable wi
 `sparq-server` BINARIES pull it into their default build via the default-on `jsonld` feature
 ([OPUS-4.8] sq-oy1f.4), so `dump …` and the server's `application/ld+json` work out of the box.
 The N-Triples writer (`triples_to_ntriples`) is always on. Internally the writer matrix is
-housed in the `sparq-engine-serialize` sub-crate (`publish = false`, [FABLE-5] sq-6vshe.4) and
+housed in the `sparq-engine-serialize` sub-crate (published only to satisfy `sparq-engine`'s
+crates.io dependency closure, [FABLE-5] sq-6vshe.4) and
 re-exported verbatim — the `sparq_engine::serialize::*` paths and feature names above are
 unchanged and remain the supported surface.
 
@@ -652,8 +653,8 @@ cargo build -p sparq-cli --features serialize-rdf
   folds N-Quads/TriG named graphs into the default graph (only `load_dataset` preserves them).
   [GPT-6] All store writers emit `predstats.bin` in ascending predicate-ID order, so equal
   statistics serialize identically after reload. Older unordered files remain readable.
-- **HDT is opt-in and native-only.** `sparq-hdt` MSRV is **1.87** (the wrapped `hdt` crate),
-  above the workspace's 1.85 — in the CLI it is gated behind `--features hdt`. It carries
+- **HDT is opt-in and native-only.** `sparq-hdt` declares MSRV **1.87** (the wrapped `hdt` crate;
+  the workspace floor is now 1.88) — in the CLI it is gated behind `--features hdt`. It carries
   zero code into the wasm build. Compression containers are detected by **magic bytes, not
   file extension**, so a mislabeled `.hdt` still loads; all three (`gz`/`zst`/`bz2`) decode
   in a streaming fashion.

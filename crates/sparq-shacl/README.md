@@ -13,8 +13,8 @@ index-backed permutation scans (no SPARQL round-trip; terms materialise only at 
 report boundary); `sh:sparql` routes its `sh:select` through `sparq-engine`. Reports:
 `conforms` + per-result detail; `to_turtle()` / `to_ntriples()` (W3C report graph), `to_json()`, and `to_text()`.
 
-Like `sparq-reason`, this crate is **isolated**: no other sparq crate depends on it, so
-the core engine and the default wasm bundle carry zero SHACL code. The browser/JS
+Like `sparq-reason`, this crate is **isolated**: `sparq-core` / `sparq-engine` never depend on
+it, so the core engine and the default wasm bundle carry zero SHACL code. The browser/JS
 consumer opts in through `sparq-wasm`'s non-default `shacl` feature
 (`Store.validate(data, shapes, format)`, a drop-in for `rdf-validate-shacl`).
 

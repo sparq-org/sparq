@@ -2,8 +2,6 @@
 # sparq-vectors
 
 <p>
-  <a href="https://crates.io/crates/sparq-vectors"><img src="https://img.shields.io/crates/v/sparq-vectors.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-vectors"><img src="https://docs.rs/sparq-vectors/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -16,7 +14,7 @@ DiskANN/Vamana graph by default, or an in-RAM HNSW index behind the opt-in `appr
 feature (the only third-party ANN dependency; **recall < 1.0**). Embeddings are produced
 **outside** the engine; the crate verbalizes entities to text, embeds via a provider-agnostic
 trait, and fuses with another ranked signal for hybrid search. It is a **separate crate** —
-nothing in the workspace (or the wasm build) depends on it.
+only `sparq-terse` (optionally) depends on it; the wasm build does not.
 
 ## 🚀 Quickstart
 
@@ -105,7 +103,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
 
 - **How-to** — [`skills/vector-search/SKILL.md`](../../skills/vector-search/SKILL.md) (label /
   verbalized / hybrid pipelines, DiskANN, quantization, bulk import, API surface, `.spqv`/`.spqg`).
-- **API reference** — [docs.rs/sparq-vectors](https://docs.rs/sparq-vectors); **design** —
+- **API reference** — `cargo doc -p sparq-vectors --open` (not on crates.io / docs.rs: `publish = false`); **design** —
   [`research/genai-text-embedding-practices.md`](../../research/genai-text-embedding-practices.md).
 - **Accuracy & throughput** — not baked into docs; the recall / DiskANN / PQ / throughput gates are
   `cargo test`s, with live numbers on the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench).

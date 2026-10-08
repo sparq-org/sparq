@@ -290,7 +290,7 @@ let req = Request::new("http://www.w3.org/ns/odrl/2/read")
 let out = store.materialize_odrl_permission(&policy, &req);
 assert!(out.granted);
 // …now honoured by the unchanged enforcement path:
-assert!(!store.accessible(&Session { agent: Some("https://alice.ex/card#me"), client: None }, Mode::Read).is_empty());
+assert!(!store.accessible(&Session { agent: Some("https://alice.ex/card#me"), client: None, issuer: None, now: None }, Mode::Read).is_empty());
 ```
 
 **Action → mode** (the ODRL *request* action; conservative — narrowest mode only): `read`/`display`/`present`/`print`/`play` → `acl:Read`; `append` → `acl:Append`; `modify`/`delete`/`write` → `acl:Write`; **anything else (incl. the `odrl:use` umbrella) is unmapped → no grant**. `use` is left unmapped because it subsumes a whole subtree of actions (mapping it would have to pick the widest mode) — request `odrl:read` explicitly; a `use` permission still grants that concrete request (provided the request action is in the `use` subtree — not `sell`/`give`/`transfer`).

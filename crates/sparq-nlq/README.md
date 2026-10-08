@@ -2,14 +2,12 @@
 # sparq-nlq
 
 <p>
-  <a href="https://crates.io/crates/sparq-nlq"><img src="https://img.shields.io/crates/v/sparq-nlq.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-nlq"><img src="https://docs.rs/sparq-nlq/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 **Natural-language questions → SPARQL** over a sparq graph — an **opt-in** crate (GenAI
 phase 3) built as a deliberately **lean loop** (retrieve + repair beats sprawling agents).
-Nothing depends on it, the default build omits it, and the engine carries zero GenAI code.
+Only opt-in `sparq-mcp` / `sparq-terse` features depend on it, the default build omits it, and the engine carries zero GenAI code.
 
 The loop: **GROUND** (`sparq_introspect` schema summary + few-shot examples + question)
 → **GENERATE** (`Llm::complete`) → **VALIDATE** (extract the ` ```sparql ` block,
@@ -107,7 +105,7 @@ fixtures; `--features nlq-endpoint` points `EndpointLlm` at **your own** base UR
 ## 📚 Learn more
 
 - **How-to** — [`skills/genai-retrieval/SKILL.md`](../../skills/genai-retrieval/SKILL.md);
-  **API reference** — [docs.rs/sparq-nlq](https://docs.rs/sparq-nlq).
+  **API reference** — `cargo doc -p sparq-nlq --open` (not on crates.io / docs.rs: `publish = false`).
 - **Design** — [`research/genai-nl-to-sparql.md`](../../research/genai-nl-to-sparql.md)
   (§4.3), [`research/genai-design.md`](../../research/genai-design.md) (§4); grounding in
   [`sparq-introspect`](../sparq-introspect); **threat model** in

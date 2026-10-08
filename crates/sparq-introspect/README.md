@@ -95,8 +95,8 @@ let f = facets(&graph, &FacetRequest { class: Some("http://e/Person".into()),
 
   [named-graph]: https://docs.rs/sparq-core/latest/sparq_core/struct.Graph.html#method.named_graph
 - **Cost & zero impact** — `O(|G| + |dict|)` time, output-sized memory plus the subject→types
-  map. Separate opt-in crate: no core crate depends on it, the default build does not compile
-  it, and it is read-only over `sparq-core`'s public scan surface.
+  map. Separate opt-in crate: no core crate depends on it (the server reaches it only through
+  opt-in features), and it is read-only over `sparq-core`'s public scan surface.
 
 The `olympics_introspect` example reports load / build / `to_json` / `to_text_summary` time
 over the olympics (1.78M triples) and qlever-synthetic (10M) fixtures (paths via

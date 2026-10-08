@@ -478,7 +478,7 @@ from the authenticated request, (2) gate the request with `accessible(...)` /
 `query_as(...)`, (3) emit a [`WAC-Allow`](https://solidproject.org/TR/wac#wac-allow)
 response header advertising the modes the agent (and the public) hold on the target
 resource. Step (3) is the public helper
-[`PodStore::wac_allow(&Session, &NamedNode) -> String`](https://docs.rs/sparq-solid)
+`PodStore::wac_allow(&Session, &NamedNode) -> String`
 ([OPUS-4.8] sq-i7k08) — it builds the RFC-style `user="…",public="…"` value over the
 existing `accessible` API (the `user` list is the authenticated session's modes; the
 `public` list is an anonymous `Session::default()`'s), fail-closed and with only the

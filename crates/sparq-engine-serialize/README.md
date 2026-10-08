@@ -5,7 +5,8 @@ The RDF **writer matrix** for [`sparq-engine`] — Turtle, TriG, N-Quads, and JS
 
 > **Internal, unstable crate.** This is seam 1 of the staged `sparq-engine` facade split
 > (RFC `research/engine-split-rfc.md` §4 Option A / §7 Phase A1, bead `sq-6vshe.4`). It is
-> `publish = false` and has **no stability guarantee of its own**. Depend on the
+> published to crates.io only to satisfy `sparq-engine`'s dependency closure and has
+> **no stability guarantee of its own**. Depend on the
 > re-export **`sparq_engine::serialize`** — its public API and the `serialize-rdf` /
 > `streaming-serialization` feature names are unchanged by the split.
 >
@@ -48,8 +49,8 @@ assert!(jsonld.starts_with('['));
   builds of `sparq-engine` are byte-identical to before the split.
 - **`streaming-serialization`** *(feature, implies `serialize-rdf`)* — adds
   `write_turtle_streaming` / `write_trig_streaming` that render one subject block at a
-  time into a `std::io::Write`, for chunked CONSTRUCT/DESCRIBE responses without
-  materialising the whole rendered string. Byte-identical to the buffered output.
+  time into a `std::io::Write` without materialising the whole rendered string (what
+  `sparq-cli dump … turtle|trig` uses under its `streaming-serialization` feature). Byte-identical to the buffered output.
 
 ### Opt-in by construction
 

@@ -300,6 +300,7 @@ match some_result {
         eprintln!("deferred: {what} (gated on {gated_on})"),   // e.g. mentions M3/M4, Q1, ZK #3..#12
     Err(MpcError::Protocol(m)) => eprintln!("precondition: {m}"),
     Err(MpcError::LocalEval { holder, message }) => eprintln!("holder {holder} eval failed: {message}"),
+    Err(other) => eprintln!("{other}"),   // Tampered / MacCheckFailed / NoBackendSatisfies
     Ok(_partial) => { /* real result */ }
 }
 ```

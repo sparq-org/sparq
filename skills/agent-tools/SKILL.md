@@ -373,7 +373,7 @@ was configured with.
 
 ## Status / scope
 
-Opt-in crate at workspace v0.1.0; verified against branch `main` (default `classes` tool
+Opt-in crate (`publish = false` — not on crates.io; build it from the workspace); verified against branch `main` (default `classes` tool
 2026-07-13 [GPT-5.6], sq-cekgj; default `prefixes` tool 2026-07-13 [GPT-5.6], sq-kx5b0;
 default `void` tool 2026-07-12 [GPT-5.6], sq-2kkym;
 default resources + prompts surfaces 2026-07-28 [SONNET-4.6], sq-sjey1;

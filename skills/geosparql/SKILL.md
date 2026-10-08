@@ -257,5 +257,5 @@ Results are the lowest-dimension geometry capturing the answer and serialise bac
 
 ## See also
 
-- `serve` / `sparql-query` sibling skills for running the engine and writing SPARQL.
+- `http-server` / `sparql-query` sibling skills for running the engine and writing SPARQL.
 - `hdt-format` and `fused-decompress-parse` for getting RDF into the `Graph` that `GeoIndex::build` and `geof_registry()` operate on.

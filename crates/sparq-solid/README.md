@@ -2,8 +2,6 @@
 # sparq-solid
 
 <p>
-  <a href="https://crates.io/crates/sparq-solid"><img src="https://img.shields.io/crates/v/sparq-solid.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-solid"><img src="https://docs.rs/sparq-solid/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -109,7 +107,7 @@ smoke test (`tests/wasm_materialize.rs`, `wasm-pack test --node`) guards it. Den
 - **Design + threat model** —
   [`research/solid-access-control-design.md`](../../research/solid-access-control-design.md) (model,
   matrix, strata, boundaries) + [scope](../../research/sparq-solid-scope.md).
-- **API reference** — [docs.rs/sparq-solid](https://docs.rs/sparq-solid); walk-through `cargo run -p
+- **API reference** — `cargo doc -p sparq-solid --open` (not published to crates.io); walk-through `cargo run -p
   sparq-solid --example quickstart --release`. Migrating from Oxigraph?
   [`docs/migrating-from-oxigraph.md`](../../docs/migrating-from-oxigraph.md).
 - **Performance / Contribute** — [benchmarks dashboard](https://sparq.jeswr.org/dev/bench)
