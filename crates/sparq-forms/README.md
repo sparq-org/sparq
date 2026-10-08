@@ -77,7 +77,8 @@ assert_eq!(field.widget.editor.as_deref(),
   computed, and non-bare-property-path fields, and fails closed (empty
   update) on a term or field path it cannot render safely, such as an
   invalid IRI, blank-node label or language tag. IRIs are validated, never
-  escaped; triple terms accept the full RDF 1.2 grammar (e.g. `_:a..b`).
+  escaped; triple terms accept the full RDF 1.2 grammar (e.g. `_:a..b`),
+  nested up to 128 levels like sparq-core's N-Triples parser.
 - **Headless & opt-in** — consumes `sparq-shacl`'s shapes model; no GUI deps;
   builds for `wasm32-unknown-unknown`; nothing in the default workspace
   depends on it, so the engine core stays lean.

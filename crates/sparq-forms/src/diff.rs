@@ -126,7 +126,7 @@ fn term_to_ntriples(term: &TermRef) -> Option<String> {
     Some(match term.kind.as_str() {
         "iri" => iri(&term.value)?,
         // Blank-node labels have no escape form: validate against BLANK_NODE_LABEL.
-        "bnode" => BlankNode::new(&term.value).ok()?.to_string(),
+        "bnode" => blank_node(&term.value)?.to_string(),
         "literal" => {
             let literal = format!("\"{}\"", escape_literal(&term.value));
             if let Some(language) = &term.language {
@@ -161,13 +161,21 @@ fn iri(value: &str) -> Option<String> {
 /// validated by the matching `oxrdf` constructor, so anything that is not one
 /// well-formed triple term (and nothing else) yields `None`.
 fn parse_triple_term(text: &str) -> Option<Triple> {
-    let mut parser = TermParser { rest: text };
+    let mut parser = TermParser {
+        rest: text,
+        depth: 0,
+    };
     let triple = parser.triple_term()?;
     parser.rest.trim_start().is_empty().then_some(triple)
 }
 
+/// Maximum `<<(` nesting, matching `MAX_TRIPLE_TERM_DEPTH` in sparq-core's
+/// N-Triples parser, so deep input fails closed instead of overflowing the stack.
+const MAX_TRIPLE_TERM_DEPTH: usize = 128;
+
 struct TermParser<'a> {
     rest: &'a str,
+    depth: usize,
 }
 
 impl TermParser<'_> {
@@ -178,6 +186,10 @@ impl TermParser<'_> {
 
     fn triple_term(&mut self) -> Option<Triple> {
         self.eat("<<(")?;
+        self.depth += 1;
+        if self.depth > MAX_TRIPLE_TERM_DEPTH {
+            return None;
+        }
         let subject: NamedOrBlankNode = match self.rest.trim_start().chars().next()? {
             '<' => self.iri()?.into(),
             '_' => self.blank_node()?.into(),
@@ -186,6 +198,7 @@ impl TermParser<'_> {
         let predicate = self.iri()?;
         let object = self.object()?;
         self.eat(")>>")?;
+        self.depth -= 1;
         Some(Triple::new(subject, predicate, object))
     }
 
@@ -220,7 +233,7 @@ impl TermParser<'_> {
             .unwrap_or(self.rest.len());
         let label = &self.rest[..end];
         self.rest = &self.rest[end..];
-        BlankNode::new(label).ok()
+        blank_node(label)
     }
 
     fn literal(&mut self) -> Option<Literal> {
@@ -235,6 +248,8 @@ impl TermParser<'_> {
                     end = Some(i);
                     break;
                 }
+                // STRING_LITERAL_QUOTE forbids raw line breaks.
+                '\n' | '\r' => return None,
                 _ => {}
             }
         }
@@ -273,6 +288,44 @@ impl TermParser<'_> {
             Some(Literal::new_simple_literal(value))
         }
     }
+}
+
+/// Builds a blank node whose label matches the N-Triples / SPARQL
+/// `BLANK_NODE_LABEL` production. `oxrdf::BlankNode::new` is more lenient
+/// (it accepts `a:b`, which SPARQL rejects), so the grammar is checked here
+/// first, for direct and nested terms alike. Internal dots stay valid.
+fn blank_node(label: &str) -> Option<BlankNode> {
+    let mut chars = label.chars();
+    let first = chars.next()?;
+    let valid = (is_pn_chars_u(first) || first.is_ascii_digit())
+        && chars.all(|c| is_pn_chars(c) || c == '.')
+        && !label.ends_with('.');
+    valid.then(|| BlankNode::new(label).ok())?
+}
+
+fn is_pn_chars_u(c: char) -> bool {
+    c == '_'
+        || c.is_ascii_alphabetic()
+        || matches!(c,
+            '\u{C0}'..='\u{D6}'
+            | '\u{D8}'..='\u{F6}'
+            | '\u{F8}'..='\u{2FF}'
+            | '\u{370}'..='\u{37D}'
+            | '\u{37F}'..='\u{1FFF}'
+            | '\u{200C}'..='\u{200D}'
+            | '\u{2070}'..='\u{218F}'
+            | '\u{2C00}'..='\u{2FEF}'
+            | '\u{3001}'..='\u{D7FF}'
+            | '\u{F900}'..='\u{FDCF}'
+            | '\u{FDF0}'..='\u{FFFD}'
+            | '\u{10000}'..='\u{EFFFF}')
+}
+
+fn is_pn_chars(c: char) -> bool {
+    is_pn_chars_u(c)
+        || c == '-'
+        || c.is_ascii_digit()
+        || matches!(c, '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')
 }
 
 /// Decodes `\uXXXX` / `\UXXXXXXXX` (and, in strings, ECHAR) escapes.

@@ -214,6 +214,70 @@ fn triple_terms_accept_full_rdf12_grammar() {
     }
 }
 
+/// Codex round 2 on #6707: nesting is capped like sparq-core's N-Triples
+/// parser (128 levels), so deep or unfinished input fails closed instead of
+/// overflowing the stack.
+#[test]
+fn triple_term_nesting_is_capped() {
+    fn nested(depth: usize) -> String {
+        format!(
+            "{}<http://c>{}",
+            "<<( <http://a> <http://b> ".repeat(depth),
+            " )>>".repeat(depth)
+        )
+    }
+    assert_ne!(update_with_greeting(term("triple", &nested(128), None)), "");
+    assert_eq!(update_with_greeting(term("triple", &nested(129), None)), "");
+    assert_eq!(
+        update_with_greeting(term("triple", &nested(100_000), None)),
+        ""
+    );
+    let prefixes = "<<( <http://a> <http://b> ".repeat(1_000_000);
+    assert_eq!(update_with_greeting(term("triple", &prefixes, None)), "");
+}
+
+/// Codex round 2 on #6707: labels follow `BLANK_NODE_LABEL` (no `:`, which
+/// oxrdf accepts but SPARQL rejects) and short strings reject raw line breaks.
+#[test]
+fn nt_lexical_rules_are_enforced() {
+    for bad in ["a:b", "a.", ".a", "-a", "a b", "\u{B7}a"] {
+        let update_text = update_with_greeting(term("bnode", bad, None));
+        assert_eq!(update_text, "", "_:{bad} must not render: {update_text}");
+        let nested = format!("<<( <http://a> <http://b> _:{bad} )>>");
+        let update_text = update_with_greeting(term("triple", &nested, None));
+        assert_eq!(update_text, "", "{nested} must not render: {update_text}");
+    }
+    for good in ["a..b", "0a", "_x", "a-b\u{B7}c", "\u{e9}t\u{e9}"] {
+        let ok = update_with_greeting(term("bnode", good, None));
+        assert!(ok.contains(&format!("_:{good} .")), "{ok}");
+        update(&graph(DATA), &ok).unwrap();
+        let ok = update_with_greeting(term(
+            "triple",
+            &format!("<<( _:{good} <http://b> <http://c> )>>"),
+            None,
+        ));
+        assert_ne!(ok, "", "_:{good} in a triple term must render");
+        update(&graph(DATA), &ok).unwrap();
+    }
+    for bad in [
+        "<<( <http://a> <http://b> \"x\ny\" )>>",
+        "<<( <http://a> <http://b> \"x\ry\" )>>",
+    ] {
+        assert_eq!(
+            update_with_greeting(term("triple", bad, None)),
+            "",
+            "{bad:?}"
+        );
+    }
+    let ok = update_with_greeting(term(
+        "triple",
+        "<<( <http://a> <http://b> \"x\\ny\" )>>",
+        None,
+    ));
+    assert_ne!(ok, "", "escaped line break must still render");
+    update(&graph(DATA), &ok).unwrap();
+}
+
 #[test]
 fn malformed_triple_terms_fail_closed() {
     for bad in [

@@ -51,7 +51,9 @@ triple-term text that is not exactly one RDF 1.2 triple term, or an unknown
 `kind`, or a field path is not a valid `<IRI>`, the result is also the empty
 string, so renderer-supplied terms cannot splice update syntax. IRIs are
 validated rather than escaped (SPARQL decodes `\uXXXX` before parsing), and
-triple terms accept the full RDF 1.2 grammar, including labels like `_:a..b`.
+triple terms accept the full RDF 1.2 grammar, including labels like `_:a..b`,
+nested up to 128 levels (the sparq-core N-Triples cap); deeper input, a `:` in a
+blank-node label or a raw line break in a quoted string also fails closed.
 
 What the description carries (all serde `Serialize + Deserialize`):
 
