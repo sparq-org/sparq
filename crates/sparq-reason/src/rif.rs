@@ -124,6 +124,7 @@
 //! [`UNIMPLEMENTED`] list), never faked.
 
 use crate::n3::Term as N3Term;
+use crate::xsd_facets::integer_facet_bounds;
 use sparq_core::dict::{Dict, Id};
 // [SONNET-4.6] sq-anyad — the SHARED value-space numeric tower: the RIF Equal-atom
 // path decides distinct-ground NUMERIC equality with the substrate's own
@@ -980,43 +981,6 @@ fn resolve_body_equalities(rule: &Rule) -> Result<Resolved, RifError> {
         .map(|a| apply_subst_atom(a, &subst))
         .collect();
     Ok(Resolved { rule: Rule { head, body }, satisfiable })
-}
-
-/// The inclusive `(min, max)` VALUE-SPACE bounds of a **derived** XSD integer datatype,
-/// with `None` on a side that is unbounded. The outer `None` means `datatype` carries no
-/// bounding facet at all — `xsd:integer` itself (unbounded both ways), or an IRI that is
-/// not an integer datatype.
-///
-/// XSD derives each of these from `xsd:integer` by a `minInclusive`/`maxInclusive` facet
-/// pair, and a derived type's LEXICAL space is exactly the lexicals mapping into its
-/// value space — so `"-1"^^xsd:positiveInteger` and `"128"^^xsd:byte` are not well-formed
-/// literals of their declared datatype, however well-formed the digit string is.
-///
-/// This deliberately does NOT reuse `dtype::integer_subtype_ok`, which encodes the same
-/// XSD table for D-entailment: that module is behind the `d-entail` feature while this
-/// one is behind `rif-core` (reusing it would make `rif-core` drag in the whole
-/// D-entailment module), and its signature is `i128`-bounded whereas this path must also
-/// bound-check an out-of-tower lexical. The two tables are the same XSD §3.4 derivation
-/// and must stay in step — folding them into one crate-internal table is tracked as
-/// follow-up work rather than done here. [OPUS-5]
-fn integer_facet_bounds(datatype: &str) -> Option<(Option<i128>, Option<i128>)> {
-    let local = datatype.strip_prefix(XSD)?;
-    Some(match local {
-        "long" => (Some(i64::MIN as i128), Some(i64::MAX as i128)),
-        "int" => (Some(i32::MIN as i128), Some(i32::MAX as i128)),
-        "short" => (Some(i16::MIN as i128), Some(i16::MAX as i128)),
-        "byte" => (Some(i8::MIN as i128), Some(i8::MAX as i128)),
-        "unsignedLong" => (Some(0), Some(u64::MAX as i128)),
-        "unsignedInt" => (Some(0), Some(u32::MAX as i128)),
-        "unsignedShort" => (Some(0), Some(u16::MAX as i128)),
-        "unsignedByte" => (Some(0), Some(u8::MAX as i128)),
-        "nonNegativeInteger" => (Some(0), None),
-        "positiveInteger" => (Some(1), None),
-        "nonPositiveInteger" => (None, Some(0)),
-        "negativeInteger" => (None, Some(-1)),
-        // `xsd:integer` is unfaceted; anything else is not a derived integer datatype.
-        _ => return None,
-    })
 }
 
 /// Whether `lex` lies inside the value space of its DECLARED integer datatype — the

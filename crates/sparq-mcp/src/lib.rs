@@ -94,7 +94,10 @@ pub mod solid;
 #[cfg(feature = "solid")]
 pub(crate) mod notifications;
 
-pub use server::{McpServer, ServerConfig, PROTOCOL_VERSION, SUPPORTED_PROTOCOL_VERSIONS};
+pub use server::{
+    McpServer, ServerConfig, DEFAULT_MAX_REQUEST_BYTES, PROTOCOL_VERSION,
+    SUPPORTED_PROTOCOL_VERSIONS,
+};
 pub use tools::ToolSpec;
 
 /// The pod-backed MCP server + its configuration (feature `solid`). See `solid`.
