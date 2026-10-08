@@ -109,6 +109,16 @@ pub fn frame(
     frame_options: &FrameOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
+    crate::context::budget::with_budget(|| frame_inner(input, frame_doc, options, frame_options, loader))
+}
+
+fn frame_inner(
+    input: &Json,
+    frame_doc: &Json,
+    options: &JsonLdOptions,
+    frame_options: &FrameOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
     let framed = frame_match(input, frame_doc, options, frame_options, loader)?;
     let ctx_value = frame_doc.get("@context").cloned().unwrap_or_default();
     compact_framed(&framed, &ctx_value, options, frame_options, loader)
@@ -118,6 +128,16 @@ pub fn frame(
 /// returns the framed **expanded** output of [`frame_expanded`], `@preserve` fills
 /// included, ready for [`compact_framed`].
 pub fn frame_match(
+    input: &Json,
+    frame_doc: &Json,
+    options: &JsonLdOptions,
+    frame_options: &FrameOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
+    crate::context::budget::with_budget(|| frame_match_inner(input, frame_doc, options, frame_options, loader))
+}
+
+fn frame_match_inner(
     input: &Json,
     frame_doc: &Json,
     options: &JsonLdOptions,

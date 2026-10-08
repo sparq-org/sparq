@@ -52,6 +52,14 @@ pub fn expand(
     options: &JsonLdOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
+    crate::context::budget::with_budget(|| expand_inner(input, options, loader))
+}
+
+fn expand_inner(
+    input: &Json,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
     // §5.1: initialise the active context from options.base.
     let mut active_context = ActiveContext::new(options.base.as_deref());
 

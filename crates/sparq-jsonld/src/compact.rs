@@ -39,7 +39,7 @@
 //! (deny-by-default via [`NoopLoader`](crate::loader::NoopLoader)).
 
 use crate::context::inverse::{compact_iri, InverseContext};
-use crate::context::{ActiveContext, Direction, Override};
+use crate::context::{budget, ActiveContext, Direction, Override};
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::{expand, expand_value};
 use crate::fx::FxMap;
@@ -72,6 +72,15 @@ pub fn compact(
     options: &JsonLdOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
+    crate::context::budget::with_budget(|| compact_inner(input, context, options, loader))
+}
+
+fn compact_inner(
+    input: &Json,
+    context: &Json,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
     let expanded = expand(input, options, loader)?;
     compact_expanded(&expanded, context, options, loader)
 }
@@ -85,6 +94,15 @@ pub fn compact(
 ///
 /// [FABLE-5] (sq-oy1f.27)
 pub fn compact_expanded(
+    expanded: &Json,
+    context: &Json,
+    options: &JsonLdOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
+    crate::context::budget::with_budget(|| compact_expanded_inner(expanded, context, options, loader))
+}
+
+fn compact_expanded_inner(
     expanded: &Json,
     context: &Json,
     options: &JsonLdOptions,
@@ -250,32 +268,30 @@ impl DerivedKey {
 impl Env<'_> {
     /// The memoised context for `key`, building it with `build` on first use.
     ///
-    /// Every build, cached or not, is charged `cost` (the definitions it will process)
-    /// against one per-call budget before it runs; past the budget compaction fails with
-    /// `context overflow`. A built context is cached while the cache holds fewer than
-    /// [`DERIVED_CAP`] contexts and [`RETAIN_BUDGET`] definitions; from the first one that
-    /// does not fit until the call ends, contexts are used and dropped, as without the
-    /// cache.
+    /// Building runs context processing, which charges the call's work budget (see
+    /// `context::budget`); building the inverse context is charged here too. A built
+    /// context is cached while the cache holds fewer than [`DERIVED_CAP`] contexts and
+    /// [`RETAIN_BUDGET`] definitions (counting those its reversion target keeps alive);
+    /// from the first one that does not fit until the call ends, contexts are used and
+    /// dropped, as without the cache.
     fn derived(
         &self,
         key: DerivedKey,
-        cost: usize,
         build: impl FnOnce() -> Result<ActiveContext, JsonLdError>,
     ) -> Result<Rc<Ctx>, JsonLdError> {
         let root = self.root;
         if let Some((_, c)) = root.derived.borrow().iter().find(|(k, _)| k.same(&key)) {
             return Ok(Rc::clone(c));
         }
-        let work = root.work.get() + cost + 1;
-        if work > WORK_BUDGET {
-            return Err(JsonLdError::with_detail(
-                E::ContextOverflow,
-                "scoped contexts exceed the compaction work budget",
-            ));
-        }
-        root.work.set(work);
         let active = build()?;
-        let retained = root.retained.get() + active.term_count() + 1;
+        budget::charge(active.term_count() + 1)?;
+        let mut held = active.term_count() + 1;
+        let mut prev = active.previous_context.as_deref();
+        while let Some(p) = prev {
+            held += p.term_count() + 1;
+            prev = p.previous_context.as_deref();
+        }
+        let retained = root.retained.get() + held;
         let ctx = Rc::new(Ctx::with_budget(active, Rc::clone(&root.memo_used)));
         // Once a context has not fitted, the cache takes no more until the next call.
         let fits = !root.overflowed.get()
@@ -313,8 +329,6 @@ struct Ctx {
     id: u64,
     /// On the root context only: term definitions held by the cached derived contexts.
     retained: Cell<usize>,
-    /// On the root context only: the definitions charged this call (see [`Env::derived`]).
-    work: Cell<usize>,
     /// On the root context only: whether a context this call did not fit in the cache.
     overflowed: Cell<bool>,
 }
@@ -335,7 +349,6 @@ impl Ctx {
             memo_used,
             id: NEXT_CTX_ID.fetch_add(1, Ordering::Relaxed),
             retained: Cell::new(0),
-            work: Cell::new(0),
             overflowed: Cell::new(false),
         }
     }
@@ -346,9 +359,8 @@ impl Ctx {
     /// every IRI ever compacted on the thread. Within one call they hold up to
     /// [`MEMO_CALL_CAP`] IRIs, which keeps large documents fast, and each IRI holds at most
     /// [`MEMO_SHAPES`] value shapes. The derived contexts are dropped here once the cache
-    /// has run out of room, and the per-call work budget is reset.
+    /// has run out of room.
     fn trim_memos(&self) {
-        self.work.set(0);
         if self.overflowed.replace(false) || self.derived.borrow().len() >= DERIVED_CAP {
             self.derived.borrow_mut().clear();
             self.retained.set(0);
@@ -418,28 +430,8 @@ const RETAIN_BUDGET: usize = 1 << 18;
 #[cfg(test)]
 const RETAIN_BUDGET: usize = 1 << 16;
 
-/// Most definitions one call may charge building derived contexts; beyond it compaction
-/// fails with `context overflow`.
-#[cfg(not(test))]
-const WORK_BUDGET: usize = 1 << 22;
-#[cfg(test)]
-const WORK_BUDGET: usize = 1 << 18;
-
 /// The source of [`Ctx::id`]s.
 static NEXT_CTX_ID: AtomicU64 = AtomicU64::new(0);
-
-/// The definitions processing `local` onto `base` may touch: the base's term table, which
-/// is copied, and every member of `local`, including those a later `null` discards.
-fn scoped_cost(base: &ActiveContext, local: &Json) -> usize {
-    fn size(j: &Json) -> usize {
-        match j {
-            Json::Obj(m) => m.iter().map(|(_, v)| 1 + size(v)).sum(),
-            Json::Arr(a) => a.iter().map(|v| 1 + size(v)).sum(),
-            _ => 0,
-        }
-    }
-    base.term_count() + size(local)
-}
 
 /// One memoised IRI Compaction: (value shape, vocab, reverse, result).
 type MemoEntry = (OwnedShape, bool, bool, String);
@@ -937,7 +929,8 @@ fn node_ctx(
     if let Some(prev) = &ctx.active.previous_context {
         let single_id = matches!(element, Json::Obj(m) if m.len() == 1 && m[0].0 == "@id");
         if element.get("@value").is_none() && !single_id {
-            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), prev.term_count(), || {
+            owned = Some(env.derived(DerivedKey::Revert(Arc::clone(prev)), || {
+                budget::charge(prev.term_count() + 1)?;
                 Ok((**prev).clone())
             })?);
         }
@@ -958,7 +951,7 @@ fn node_ctx(
                     term: ap.to_string(),
                     type_scoped: false,
                 };
-                owned = Some(env.derived(key, scoped_cost(&base.active, local), || {
+                owned = Some(env.derived(key, || {
                     base.active.process_scoped(
                         local,
                         def.base_url.as_deref(),
@@ -1001,7 +994,7 @@ fn type_ctx(
                         term: term.clone(),
                         type_scoped: true,
                     };
-                    owned_t = Some(env.derived(key, scoped_cost(&base.active, local), || {
+                    owned_t = Some(env.derived(key, || {
                         base.active.process_scoped(
                             local,
                             def.base_url.as_deref(),
@@ -1067,8 +1060,17 @@ fn add_to_container_map(
         let index_iri = cur.active.expand_iri(&index_key, false, true).unwrap_or_default();
         let agrees = item_ctx.active.expand_iri(&index_key, false, true).as_deref()
             == Some(index_iri.as_str());
-        let container_key = cur.ciri(&index_key, None, true, false);
-        let taken = if agrees { take_entry(&mut compacted_item, &container_key) } else { None };
+        // The item's entries are named under the item's context, so the index property's
+        // entry is the one that expands to the index IRI there; another entry carrying the
+        // same name in the enclosing context is a different property.
+        let reads_as_index =
+            |k: &str| item_ctx.active.expand_iri(k, false, true).as_deref() == Some(index_iri.as_str());
+        let container_key = match &compacted_item {
+            Json::Obj(m) if agrees => m.iter().map(|(k, _)| k.clone()).find(|k| reads_as_index(k)),
+            _ => None,
+        };
+        let taken = container_key.as_deref().and_then(|k| take_entry(&mut compacted_item, k));
+        let container_key = container_key.unwrap_or_default();
         if let Some(taken) = taken {
             let mut vals = match taken {
                 Json::Arr(a) => a,
@@ -1551,6 +1553,59 @@ mod tests {
         assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
     }
 
+    // The index property's entry is looked up under the item's own context, so a term the
+    // item's scoped context gives another meaning is left alone.
+    #[test]
+    fn index_entry_is_named_under_the_item_context() {
+        let ctx = Json::parse(
+            r#"{"label":"http://ex/label",
+                "p":{"@id":"http://ex/p","@container":"@index","@index":"http://ex/label",
+                     "@context":{"label":"http://ex/data","key":"http://ex/label"}}}"#,
+        )
+        .unwrap();
+        let doc = Json::parse(
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/b",
+                "http://ex/label":[{"@value":"K"}],"http://ex/data":[{"@value":"K"}]}]}]"#,
+        )
+        .unwrap();
+        let opts = JsonLdOptions::default();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        let back = expand(&out, &opts, &NoopLoader).unwrap();
+        assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+    }
+
+    // Expansion's own scoped-context processing is charged to the same per-call budget.
+    #[test]
+    fn expansion_is_budgeted() {
+        let defs: Vec<String> = (0..1024).map(|i| format!(r#""u{i}":"http://ex/u{i}""#)).collect();
+        let nodes: Vec<String> = (0..2 * budget::WORK_BUDGET / 1024)
+            .map(|i| format!(r#"{{"@id":"http://ex/s{i}","p":{{"@id":"http://ex/o"}}}}"#))
+            .collect();
+        let doc = Json::parse(&format!(
+            r#"{{"@context":{{"p":{{"@id":"http://ex/p","@context":[{{{}}},null]}}}},"@graph":[{}]}}"#,
+            defs.join(","),
+            nodes.join(",")
+        ))
+        .unwrap();
+        let err = expand(&doc, &JsonLdOptions::default(), &NoopLoader).unwrap_err();
+        assert_eq!(err.code(), E::ContextOverflow);
+    }
+
+    // Retention counts the term table a null-reset context keeps for reversion.
+    #[test]
+    fn retention_counts_reversion_targets() {
+        let defs: Vec<String> = (0..4096).map(|i| format!(r#""u{i}":"http://ex/u{i}""#)).collect();
+        let ctx = Json::parse(&format!(
+            r#"{{"@vocab":"http://ex/","B":{{"@id":"http://ex/B","@context":[{{{}}},null]}}}}"#,
+            defs.join(",")
+        ))
+        .unwrap();
+        let doc = Json::parse(r#"[{"@id":"http://ex/s","@type":["http://ex/B"]}]"#).unwrap();
+        compact_expanded(&doc, &ctx, &JsonLdOptions::default(), &NoopLoader).unwrap();
+        let retained = LAST_ROOT.with(|last| last.borrow().as_ref().map(|(_, _, c)| c.retained.get()));
+        assert!(retained.is_some_and(|n| n > 4096), "retained {retained:?}");
+    }
+
     // A property-scoped context that redefines the outer @type alias hides it from
     // expansion, so the embedded node's types use @type itself.
     #[test]
@@ -1584,7 +1639,7 @@ mod tests {
         let ctx = Json::parse(&format!(r#"{{"@vocab":"http://ex/",{}}}"#, terms.join(","))).unwrap();
         let nodes: Vec<String> = (0..DERIVED_CAP)
             .map(|i| format!("T{i}"))
-            .chain(std::iter::repeat_n("B".to_string(), 2 * WORK_BUDGET / 1024))
+            .chain(std::iter::repeat_n("B".to_string(), 2 * budget::WORK_BUDGET / 1024))
             .enumerate()
             .map(|(n, t)| format!(r#"{{"@id":"http://ex/s{n}","@type":["http://ex/{t}"]}}"#))
             .collect();
@@ -1605,7 +1660,7 @@ mod tests {
         let ctx = Json::parse(&format!(r#"{{"@vocab":"http://ex/",{}}}"#, terms.join(","))).unwrap();
         // Fill the cache, then use the last type (never cached) until the budget runs out.
         let nodes: Vec<String> = (0..DERIVED_CAP)
-            .chain(std::iter::repeat_n(DERIVED_CAP, 2 * WORK_BUDGET / plain))
+            .chain(std::iter::repeat_n(DERIVED_CAP, 2 * budget::WORK_BUDGET / plain))
             .enumerate()
             .map(|(n, t)| format!(r#"{{"@id":"http://ex/s{n}","@type":["http://ex/T{t}"]}}"#))
             .collect();
