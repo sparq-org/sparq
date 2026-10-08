@@ -26,7 +26,6 @@ import { Command } from "cmdk";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Search,
-  Github,
   Sun,
   Moon,
   CornerDownLeft,
@@ -37,6 +36,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { withBasePath } from "@/lib/base-path";
 import { Badge } from "@/components/ui/badge";
+import { Github } from "@/components/github-icon";
 import {
   FLAGSHIPS,
   GROUPS,
