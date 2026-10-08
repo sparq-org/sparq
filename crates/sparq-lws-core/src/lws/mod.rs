@@ -14,8 +14,8 @@
 //!   and RFC 9457 problem details;
 //! - a **linkset** (RFC 9264) per resource, patchable;
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
-//!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key, controlled
-//!   identifier and OpenID Connect subject tokens; the storage accepts the RFC 9068 access tokens
+//!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
+//!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
 //!   it issues ([`tokens`]);
 //! - **access grants and access requests** ([`access`]): the LWS Access Profile;
 //! - **webhook notifications** ([`notify`]), signed per RFC 9421;
@@ -101,7 +101,7 @@ pub struct LwsConfig {
     /// Lifetime of issued access tokens, in seconds.
     pub token_ttl_secs: i64,
     /// Let the authorization server and the notification sender reach `http:` and loopback or
-    /// private addresses (identity documents, OpenID providers, webhook inboxes). Development and
+    /// private addresses (identity documents, webhook inboxes). Development and
     /// conformance testing only.
     pub allow_insecure_fetch: bool,
     /// Largest request body read, in bytes; a larger one is refused with 413 before it is
@@ -491,8 +491,6 @@ pub struct Inner<S: Store> {
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
     pub locks: resources::IriLocks,
-    /// DPoP proof ids seen at the token endpoint.
-    pub dpop_replay: subject_tokens::DpopReplay,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -528,7 +526,6 @@ impl<S: Store + 'static> LwsState<S> {
                 notify,
                 http,
                 locks: Default::default(),
-                dpop_replay: Default::default(),
             }),
         })
     }

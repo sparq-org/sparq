@@ -3,8 +3,8 @@
 //!
 //! LWS access tokens (RFC 9068) are signed ES256 by this server's authorization server. Subject
 //! tokens presented at the token endpoint are verified here too: did:key and controlled identifier
-//! credentials are ES256 (or EdDSA for an Ed25519 key), OpenID Connect ID Tokens are ES256 or
-//! RS256. `alg: none` and every other algorithm are refused.
+//! credentials are ES256 (or EdDSA for an Ed25519 key). `alg: none` and every other algorithm
+//! is refused.
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
