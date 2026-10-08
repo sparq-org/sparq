@@ -21,6 +21,7 @@ default at the dependency level** — the leanest gating, with zero core overhea
 ```toml
 [dependencies]
 sparq-prov = { path = "crates/sparq-prov" }   # or your workspace path
+sparq-core = { path = "crates/sparq-core" }   # same checkout, so `Graph` types match
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 
@@ -215,6 +216,8 @@ the vector is empty because that target would satisfy the BGP.
 ```toml
 [dependencies]
 sparq-prov = { path = "crates/sparq-prov", features = ["why-not"] }
+sparq-core = { path = "crates/sparq-core" }
+oxrdf = { version = "0.3", features = ["rdf-12"] }
 # Same checkout: sparq-prov uses the vendored fork, so take spargebra from it too.
 spargebra = { path = "vendor/spargebra", package = "sparq-spargebra", features = ["sparql-12", "sep-0006"] }
 ```
