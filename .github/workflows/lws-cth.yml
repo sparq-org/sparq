@@ -1,4 +1,4 @@
-# [SONNET-4.6] sq-gg0qq.7 — Solid Conformance Test Harness (CTH) lane for sparq-lws-core.
+# sq-gg0qq.7 — Solid Conformance Test Harness (CTH) lane for sparq-lws-core.
 #
 # OPT-IN BY CONSTRUCTION: `workflow_dispatch` ONLY. There is deliberately no `pull_request`, `push`,
 # `merge_group` or `schedule` trigger, for three reasons:
@@ -6,10 +6,9 @@
 #  1. The harness needs Docker, network egress, a live Keycloak realm at localhost:8080 with the
 #     conformance-alice/bob DPoP service-account clients, and an `ath`-patched CTH image. A
 #     GitHub-hosted runner has none of those, so a PR-triggered leg could only ever be red.
-#  2. `ci-summary` treats EVERY check-run on the head SHA as GATING unless it is declared in
-#     `.github/advisory-registry.json` — including a check-run left by a manual dispatch against a PR
-#     branch, and including a scheduled run whose check-run lands on the main head SHA that the
-#     push-triggered gate polls (the silent-gating trap documented in that registry). Both jobs here
+#  2. A check-run left on a PR branch (manual dispatch) or on the main head SHA (schedule) is
+#     visible next to the PR checks, so a job that cannot pass must say so in its name and be
+#     declared in `.github/advisory-registry.json`. Both jobs here
 #     are therefore DECLARED advisory as well as dispatch-only: belt and braces.
 #  3. CI congestion collapse — the harness is a long, Docker-heavy, network-bound run. Keeping it off
 #     the per-PR path is the whole point; `concurrency` below additionally caps it to ONE run at a

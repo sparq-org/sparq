@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Generate bench/dashboard/metric-labels.json — a map from raw benchmark metric
+# Generate bench/dashboard/metric-labels.json — a map from raw benchmark metric
 # STEM (the github-action-benchmark `name` minus its mode/unit suffix) to a readable
 # {label, suite, dataset, query, unit} record, so the dashboard can render
 # "WatDiv S1 — star query, count" instead of the cryptic stem "watdiv_S1_count_us".
 #
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns). Implements
+# Implements
 # bead sq-ocuf (parent design sq-i0nm, plan A): labels derived from the SAME ground truth the
 # CI harness uses — the per-suite *.rq files (filenames + header comments) and expected-rows
 # tables — NOT invented. The naming convention is fixed by scripts/ci-bench.sh:
@@ -75,7 +75,7 @@ FIXED = {
         "label": "WASM bundle size",
         "suite": "Memory / Size", "dataset": "n/a (build artifact)",
         "query": "compiled sparq-wasm browser bundle size", "unit": "bytes"},
-    # [OPUS-4.8] (sq-7d3dj.14) TREND-ONLY shipped size after wasm-opt -Oz. Emitted alongside
+    # (sq-7d3dj.14) TREND-ONLY shipped size after wasm-opt -Oz. Emitted alongside
     # wasm_bundle_bytes (the hard-gated raw ratchet) to make real shipped-size wins visible.
     # Not in scripts/perf-gate.py. The wasm-opt version is logged per CI run (see ci-bench.sh).
     "wasm_opt_bundle_bytes": {
@@ -226,7 +226,7 @@ LUBM_DESC = {
     "q13": ("entailed", "Alumni of University0 (owl:inverseOf)"),
 }
 
-# [OPUS-4.8] (sq-7iai) SHACL validation workloads -> per-shape-graph human descriptions. The
+# (sq-7iai) SHACL validation workloads -> per-shape-graph human descriptions. The
 # shape-file stems under bench/shacl/shapes/*.ttl drive the metric names shacl_<workload>_validate.
 SHACL_DESC = {
     "cardinality": "sh:minCount/sh:maxCount over ub:FullProfessor (focus enumeration + path counting)",
@@ -236,7 +236,7 @@ SHACL_DESC = {
     "sparql_constraint": "sh:sparql (SHACL §5.2) routed through sparq-engine",
 }
 
-# [OPUS-4.8] (sq-tf8n) GeoSPARQL workloads -> human descriptions. The ci-bench hook emits
+# (sq-tf8n) GeoSPARQL workloads -> human descriptions. The ci-bench hook emits
 # `geo_<name>_us` for each bench_geo workload (advisory) + the HARD-gated geo_compliance_deficit.
 GEO_DESC = {
     "within10km": "#entities within 10 km great-circle of (0, 51) (geof:within result-set size)",
@@ -247,7 +247,7 @@ GEO_DESC = {
     "geo_compliance_pass": "#OGC topology fixtures (sf/eh/rcc8) matching the spec truth value",
 }
 
-# [OPUS-4.8] (sq-ustq) Full-text-search workloads -> human descriptions. These are FIXED
+# (sq-ustq) Full-text-search workloads -> human descriptions. These are FIXED
 # workload names emitted by examples/bench_text (the FTS corpus is synthetic, generated
 # in-process — there are no *.rq / *.ttl input files to glob), driving the ADVISORY metric
 # names text_<workload>_us (per-query latency) + text_build_s (index build). The deterministic
@@ -264,7 +264,7 @@ FTS_DESC = {
 
 def stems(subdir, ext=".rq"):
     """Sorted file stems under bench/<subdir> with the given extension (default *.rq, matching
-    sparq-cli `bench` ordering). [OPUS-4.8] (sq-7iai, gap G2) `ext` is parameterised so non-query
+    sparq-cli `bench` ordering). (sq-7iai, gap G2) `ext` is parameterised so non-query
     suites can enumerate their inputs — SHACL's shape graphs are `*.ttl`, not `*.rq`."""
     d = os.path.join(BENCH, subdir)
     if not os.path.isdir(d):
@@ -349,7 +349,7 @@ def build():
                 "SP2Bench DBLP-in-RDF, 250k triples" + tag, desc))
 
     # 5) WatDiv (family from the leading letter L/S/F/C) -> "WatDiv S1 — star, <mode>".
-    # [OPUS-4.8] (sq-1wrw) The stem carries the scale factor as an `_sf<SF>` token, matching the
+    # (sq-1wrw) The stem carries the scale factor as an `_sf<SF>` token, matching the
     # ci-bench emitter (`watdiv_sf<SF>_<query>_<mode>_us`): SF=1 for the per-commit tier and the
     # documented SF=1000 full reference scale for the heavy nightly tier (bench/watdiv/README.md
     # Tiering table). Distinct tokens keep the two SF tiers as SEPARATE github-action-benchmark
@@ -519,7 +519,7 @@ def build():
     # self-assertion; the compliance ratchet is the HARD-gated DEFICIT geo_compliance_deficit
     # (= 25 - passed, mode:auto in bench/perf-baseline.json), labelled separately below.
     GEO_DATASET = "fixed CRS84 point corpus, ~100k seeded POINT literals (8°x8° window)"
-    # [OPUS-4.8] (sq-tf8n) These geo_<name> dashboard series are the ADVISORY per-workload QUERY
+    # (sq-tf8n) These geo_<name> dashboard series are the ADVISORY per-workload QUERY
     # TIMES (harvested from geo_<name>_us, stripped of the _us suffix), NOT counts — the result-set
     # SIZES are the deterministic gate in bench/geo/run.sh's self-assertion, never plotted here. So
     # the mode/unit/label must read as a TIME (mode "query", unit µs, ", query" suffix), exactly like
@@ -713,7 +713,7 @@ def serialize(labels):
     # Stable key order so `--check` is deterministic and diffs are minimal.
     ordered = {k: labels[k] for k in sorted(labels)}
     return json.dumps({
-        "_comment": ("[OPUS-4.8] GENERATED by scripts/gen-metric-labels.py from the per-suite "
+        "_comment": ("GENERATED by scripts/gen-metric-labels.py from the per-suite "
                      "*.rq files + ci-bench naming — DO NOT edit by hand; run the generator "
                      "(or `--check` in CI gates drift). Maps metric STEM (name minus _us) to a "
                      "readable record. bead sq-ocuf / design sq-i0nm."),

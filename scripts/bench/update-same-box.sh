@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [SONNET-4.6] sq-hmd7l.5 — SPARQL-UPDATE same-box competitor comparison harness:
+# sq-hmd7l.5 — SPARQL-UPDATE same-box competitor comparison harness:
 # sparq vs Fuseki/TDB2 + Oxigraph server on the PSS LDP-CRUD update set, emitting
 # one canonical-competitor-results ENVELOPE per run (the exact JSON shape expected by
 # the comparative-benchmarking program, research/comparative-benchmarking-everything.md
@@ -271,7 +271,7 @@ if [[ "${#COMPARE_ARGS[@]}" -gt 0 ]]; then
   set -e
   if [[ "${COMPARE_EXIT}" -ne 0 ]]; then
     log "compare.py exited non-zero or timed out (see ${COMPARE_LOG})"
-    # [SONNET-4.6] A parity-gate failure is measured output: compare.py writes its
+    # A parity-gate failure is measured output: compare.py writes its
     # complete JSON summary before exiting non-zero. Preserve that summary and use
     # the stub only for a crash/timeout that left no valid machine-readable result.
     if ! python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' \

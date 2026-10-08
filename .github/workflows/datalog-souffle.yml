@@ -1,4 +1,4 @@
-# [SONNET-4.6] sq-xzb9p — the OPTIONAL external-engine differential lane for the
+# sq-xzb9p — the OPTIONAL external-engine differential lane for the
 # stratified-Datalog module (design record research/stratified-datalog-rules.md §6.4).
 #
 # WHAT: runs the `datalog::tests::souffle_*` fixtures with a real
@@ -22,8 +22,7 @@
 #
 # TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
 # differential.yml and shacl-diff-fuzz.yml: this workflow never produces a check-run on
-# a PR head commit, so the `ci-summary / gate` aggregator never sees it and the per-PR
-# gate is unaffected. The per-PR arm for this module is the in-tree `oracle` differential
+# a PR head commit, so the required `ci-fast` check is unaffected. The per-PR arm for this module is the in-tree `oracle` differential
 # in the ordinary `cargo test --features datalog` run.
 #
 # Third-party actions are pinned by full commit SHA (supply-chain hardening); the

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-52fo — dedicated same-box QLever index->server->query->teardown recipe.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-52fo — dedicated same-box QLever index->server->query->teardown recipe.
 #
 # WHY THIS SCRIPT EXISTS
 #   QLever is NOT a simple file-in/answer-out CLI like Oxigraph or EYE. To benchmark a
@@ -72,7 +71,7 @@ QLEVER_MIN_FREE_GB="${QLEVER_MIN_FREE_GB:-10}"
 QLEVER_NAME="${QLEVER_NAME:-qlever-srv-$$}"
 HTTP_PROFILE="${HTTP_PROFILE:-0}"
 
-# [FABLE-5] sq-7d3dj.34: HTTP_PROFILE=1 routes the query loop through the SHARED
+# sq-7d3dj.34: HTTP_PROFILE=1 routes the query loop through the SHARED
 # scripts/bench-adapters/http_sparql_adapter.py in --profile mode (6-col rows: keep-alive
 # + fresh-connect full-request latency AND TTFB). The default 3-col inline loop below is
 # byte-for-byte unchanged.
@@ -89,7 +88,7 @@ case "$ITERS" in ''|*[!0-9]*) die "iters must be a positive integer (got '$ITERS
 [ -f "$CORPUS" ] || die "corpus file not found: $CORPUS"
 [ -d "$QUERIES_DIR" ] || die "queries dir not found: $QUERIES_DIR"
 have docker || die "docker not installed (required for the QLever image)"
-# [OPUS-4.8] sq-vw3ax.12.1 — DAEMON PREFLIGHT (fixes the Wave-0 fast-fail). Wave 0 apt-installed
+# sq-vw3ax.12.1 — DAEMON PREFLIGHT (fixes the Wave-0 fast-fail). Wave 0 apt-installed
 # docker.io but the daemon never came up (`systemctl start docker` swallowed by `|| true`), so
 # `have docker` PASSED, the bounded `docker pull` printed "pull failed/slow — continuing", and the
 # first `docker run` (index build) failed ~instantly with "Cannot connect to the Docker daemon" —
@@ -105,7 +104,7 @@ INDEX_BASE="$INDEX_DIR/idx"   # IndexBuilderMain -i base name (writes idx.* alon
 
 cleanup() {
   set +e
-  # [OPUS-4.8] sq-52fo: tear the server container down UNCONDITIONALLY (rm -f is idempotent —
+  # sq-52fo: tear the server container down UNCONDITIONALLY (rm -f is idempotent —
   # exits 0 even if the container was never created or already gone), then drop the temp
   # index. This is the fix for the leaked-server / leaked-disk bug: it fires on success,
   # on `die`, on a `timeout` SIGTERM bubbling up, and on Ctrl-C.
@@ -137,7 +136,7 @@ CORPUS_DIR="$(cd "$(dirname "$CORPUS")" && pwd)"
 CORPUS_FILE="$(basename "$CORPUS")"
 
 # ---- 1. INDEX BUILD (bounded) ----------------------------------------------------------
-# [OPUS-4.8] sq-vw3ax.12.1 — REWRITTEN for the modern QLever image (>= 0.5.x; tested against
+# sq-vw3ax.12.1 — REWRITTEN for the modern QLever image (>= 0.5.x; tested against
 # 0.5.48). TWO recipe bugs are fixed here (the real breakage under the Wave-0 daemon symptom):
 #   (a) BINARY RENAME: `IndexBuilderMain` -> `qlever-index`, `ServerMain` -> `qlever-server`.
 #       The old names are gone, so the old `docker run ... IndexBuilderMain` failed outright.

@@ -1,5 +1,4 @@
 # zk-toolchain — toolchain-gated lane for the ZK forge/anchor suite (sq-f9tl, re-audit NEW-1).
-# [OPUS-4.8] authored while Fable 5 unavailable — re-review when Fable returns.
 #
 # WHY: the repo's STRONGEST correctness claim is ZK *verifier soundness* — the
 # forge-and-verify negative suite (forge_pubinput_* in forge_gates.rs, the real
@@ -12,7 +11,7 @@
 # installs the PINNED Noir toolchain and runs those `#[ignore]`d tests, so a forge that
 # verifies (or a serialization drift that breaks an empirical bb anchor) fails visibly.
 #
-# [OPUS-4.8] sq-5reoy (#1599): the zk/ieee754 and zk/xpath in-tree Noir trees were
+# sq-5reoy (#1599): the zk/ieee754 and zk/xpath in-tree Noir trees were
 # externalized to the sparq-org/noir_IEEE754 (v0.10.0) and sparq-org/noir_XPath (v0.2.0)
 # face repos, which now own their own CI (nargo unit tests + the ieee754 differential
 # oracle). The two jobs that ran those suites here (`nargo-unit-tests`, `differential-ieee754`)
@@ -20,7 +19,7 @@
 # ONLY the sparq-specific `forge-suite` (the verifier-soundness estate over crates/sparq-zk*,
 # which compiles zk/compose — and now transitively fetches the released sparq_ieee754 git dep).
 #
-# [SONNET-4.6] sq-3x7dl.14.2: the PROOF-M1 xpath differential oracle lives in its OWN
+# sq-3x7dl.14.2: the PROOF-M1 xpath differential oracle lives in its OWN
 # workflow, `.github/workflows/xpath-differential.yml`, NOT here. Do not re-add an xpath job
 # to this file: this lane's paths filter drives the ~60-minute `forge-suite`, so adding
 # `zk/xpath/**` would run the whole forge suite on a PR that only touched that harness.
@@ -31,9 +30,8 @@
 #   • workflow_dispatch             — on demand.
 #   • pull_request / push to main RESTRICTED by a path filter to ZK-touching paths
 #     (crates/sparq-zk*/**, zk/compose/**, this workflow) — so a ZK change DOES get the forge
-#     suite run (and gates that PR via ci-summary, which is correct), while a non-ZK PR
-#     never triggers this workflow at all (no check-run created => ci-summary doesn't
-#     wait on it; it stays a nightly safety net, not a per-PR tax).
+#     suite run, while a non-ZK PR never triggers this workflow at all (it stays a nightly
+#     safety net, not a per-PR tax).
 #
 # TOOLCHAIN PINNING (supply-chain): the Noir/Barretenberg toolchain is version-managed
 # by `noirup` / `bbup` (there is no published GitHub Action for it). The bootstrappers
@@ -46,7 +44,7 @@
 # bump is therefore an explicit edit here (and re-captures the anchors), never a silent
 # floating "latest".
 #
-# [OPUS-4.8] sq-5reoy toolchain-drift note: sparq's pins (NARGO/BB below) and the two face
+# sq-5reoy toolchain-drift note: sparq's pins (NARGO/BB below) and the two face
 # repos' pins (nargo 1.0.0-beta.21) agree today but are now maintained independently — a face
 # bump that sparq does not follow (or vice versa) recompiles the released circuits differently.
 # When bumping NARGO_VERSION here, check the released sparq_ieee754 tag was cut on a compatible
@@ -60,24 +58,21 @@ on:
     - cron: "23 4 * * *"
   workflow_dispatch:
   pull_request:
-    # [FABLE-5] Draft-tier CI: + ready_for_review so the un-draft moment re-runs
-    # this gate-feeding lane (docs/branch-protection.md §Draft-tier CI).
+    # + ready_for_review so the un-draft moment re-runs this lane.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
-      # [OPUS-4.8] sq-5reoy: narrowed from zk/** to zk/compose/** — the zk/ieee754 and
+      # sq-5reoy: narrowed from zk/** to zk/compose/** — the zk/ieee754 and
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
       # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree left.
       - "zk/compose/**"
       - ".github/workflows/zk-toolchain.yml"
-  # [FABLE-5] (2026-07-18 maintainer directive, merge-queue subset) merge_group
+  # (2026-07-18 maintainer directive, merge-queue subset) merge_group
   # REMOVED: the forge suite already ran + gated on any zk-touching PR (paths filter
   # above), re-runs on zk-touching push-to-main below (post-merge detection), and
-  # the daily schedule is the standing backstop. The polling `ci-summary / gate`
-  # aggregates only siblings that DO run on the queue ref — it never waits on a
-  # check that was never scheduled (bench.yml sq-6vshe.6 rationale). The sq-9jnj
+  # the daily schedule is the standing backstop. The sq-9jnj
   # `detect zk changes` step in `forge-suite` stays — it short-circuits to zk=true
   # on every remaining event, so paths-filtered behaviour is unchanged and the
   # merge_group branch is dead code kept for a cheap revert.
@@ -86,7 +81,7 @@ on:
     paths:
       - "crates/sparq-zk/**"
       - "crates/sparq-zk-compose/**"
-      # [OPUS-4.8] sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
+      # sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
       - "zk/compose/**"
       - ".github/workflows/zk-toolchain.yml"
@@ -112,7 +107,7 @@ env:
   # branch). The noirup / bbup *bootstrappers* are version-managers, not the tools — they
   # then install the EXACT pinned NARGO_VERSION / BB_VERSION below.
   #
-  # [OPUS-4.8] sq-f9tl (Copilot review): we deliberately do NOT run the upstream `install`
+  # sq-f9tl (Copilot review): we deliberately do NOT run the upstream `install`
   # *helper* scripts, because each re-fetches the actual tool from a FLOATING source even
   # when the helper itself is pinned by SHA — silently defeating the pin:
   #   • noirup's `install` curls the `noirup` binary from `releases/latest/download/noirup`
@@ -140,7 +135,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # [OPUS-4.8] sq-9jnj — changed-files gate for the merge queue. The `merge_group`
+      # sq-9jnj — changed-files gate for the merge queue. The `merge_group`
       # event ignores `paths` filters, so without this the ~60min forge suite would run
       # on EVERY queue enqueue. This cheap step decides whether the queued batch touched
       # any ZK-relevant path; the heavy steps below are gated on its `zk` output.
@@ -160,9 +155,7 @@ jobs:
       #
       # NOTE: this step ALWAYS runs and the job ALWAYS runs, so the
       # `zk forge + anchor suite (nargo/bb)` check-run ALWAYS appears on the merge_group
-      # ref and goes green quickly on the skip path — ci-summary (which waits for the
-      # discovered, named check-set to stabilise + complete) sees it complete fast and
-      # never hangs on an absent sibling.
+      # ref and goes green quickly on the skip path.
       - name: Detect zk changes (merge_group changed-files gate)
         id: changes
         env:
@@ -189,7 +182,7 @@ jobs:
               echo "Changed files in queued batch (${MG_BASE_SHA}..${MG_HEAD_SHA}):"
               printf '%s\n' "${changed}"
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
-              # [OPUS-4.8] sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
+              # sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
                 '^(crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|\.github/workflows/zk-toolchain\.yml$)'; then
                 zk=true
@@ -211,7 +204,7 @@ jobs:
 
       - name: Rust (preinstalled stable)
         if: steps.changes.outputs.zk == 'true'
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -226,6 +219,9 @@ jobs:
         with:
           # Distinct cache key: this lane builds sparq-zk* with the toolchain present.
           key: zk-toolchain
+          # sq-3sbrr save-if discipline: SAVE only from main; a branch-scoped save is
+          # unreachable from main and only churns the shared 10 GB Actions-cache budget.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Install nargo via noirup, pinned to NARGO_VERSION. We fetch the `noirup` binary
       # DIRECTLY from a tagged release (NOIRUP_BIN_URL) rather than running upstream's
@@ -280,7 +276,7 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         run: cargo build -p sparq-zk -p sparq-zk-compose --all-targets
 
-      # [OPUS-4.8] sq-kep2 — recurrence guard for the STANDALONE family_curve harness.
+      # sq-kep2 — recurrence guard for the STANDALONE family_curve harness.
       # `bench/zk-compose/family_curve` is a detached cargo project (own `[workspace]`,
       # `lto = "fat"` release profile) deliberately kept OUT of the root workspace so it
       # never taxes the fast `cargo build --workspace`/clippy/wasm gate. That isolation
@@ -292,7 +288,7 @@ jobs:
       # makes that schema drift a visible RED check on the PR that introduces it. (Build
       # only — no `cargo run`: catching the compile/API break needs no real bb proving.)
       #
-      # [FABLE-5] sq-q134e — deliberately NOT `--locked`. The harness path-deps on
+      # sq-q134e — deliberately NOT `--locked`. The harness path-deps on
       # in-repo crates (sparq-zk → … → sparq-substrate) whose manifests bump
       # dependencies on lanes that do NOT trigger this zk lane, so the committed
       # harness Cargo.lock drifts SILENTLY on main and `--locked` then spuriously
@@ -302,7 +298,7 @@ jobs:
       # in-repo manifest bumps — so the guard still goes RED on a real schema/API
       # break in the harness, while pure lock drift becomes an advisory notice (with
       # the lock diff in the step summary) asking for a refresh commit instead of a
-      # spurious failure on an innocent PR. [FABLE-5] sq-q134e
+      # spurious failure on an innocent PR. sq-q134e
       - name: Build the standalone family_curve harness (schema-drift guard)
         if: steps.changes.outputs.zk == 'true'
         working-directory: bench/zk-compose/family_curve
@@ -319,7 +315,7 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # [FABLE-5] sq-7pifo — run the NON-`#[ignore]`d, toolchain-gated regression gates.
+      # sq-7pifo — run the NON-`#[ignore]`d, toolchain-gated regression gates.
       # The sq-c5f gate-count regression test (`gate_count::gate_count_regression`) is
       # deliberately NOT `#[ignore]`d — gate counts are cheap (compile + `bb gates`, no
       # proving) — so it can run in the normal suite WHEN the toolchain is present. But the
@@ -345,7 +341,7 @@ jobs:
       # serialized, toolchain-bound cases (the retry/process-isolation nextest buys us on
       # the fast lane is not what this lane needs).
       #
-      # [OPUS-4.8] sq-5reoy: compiling zk/compose here now transitively fetches the
+      # sq-5reoy: compiling zk/compose here now transitively fetches the
       # released sparq_ieee754 git dependency (sparq-org/noir_IEEE754 @ v0.10.0) from
       # GitHub, exactly as it already fetches the poseidon v0.3.0 git dep — so this lane
       # needs network access to github.com on a cold ~/.nargo cache (the rust-cache above

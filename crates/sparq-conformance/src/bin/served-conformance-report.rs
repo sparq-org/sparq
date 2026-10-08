@@ -50,10 +50,12 @@ fn main() -> ExitCode {
         let mut args = std::env::args().skip(1);
         while let Some(a) = args.next() {
             match a.as_str() {
-                "--out" => out = std::path::PathBuf::from(args.next().unwrap_or_else(|| {
-                    eprintln!("--out needs a path");
-                    std::process::exit(2);
-                })),
+                "--out" => {
+                    out = std::path::PathBuf::from(args.next().unwrap_or_else(|| {
+                        eprintln!("--out needs a path");
+                        std::process::exit(2);
+                    }))
+                }
                 other => {
                     eprintln!("unknown argument: {other}");
                     eprintln!(
@@ -67,7 +69,9 @@ fn main() -> ExitCode {
         match emit::run(&out) {
             Ok(()) => ExitCode::SUCCESS,
             Err(fatal) => {
-                eprintln!("\nserved-conformance-report: FAIL-CLOSED — the report is NOT publishable:");
+                eprintln!(
+                    "\nserved-conformance-report: FAIL-CLOSED — the report is NOT publishable:"
+                );
                 for line in fatal {
                     eprintln!("  - {line}");
                 }
@@ -90,10 +94,10 @@ fn main() -> ExitCode {
 
 #[cfg(all(feature = "http-protocol", feature = "federation-descriptors"))]
 mod emit {
+    use serde_json::{json, Value};
     use sparq_conformance::http_protocol::{self, Outcome, SuiteReport};
     use sparq_conformance::scoreboard::{Runner, Suite, SUITES};
     use sparq_conformance::sd_gsp;
-    use serde_json::{json, Value};
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -108,16 +112,22 @@ mod emit {
     }
 
     const LANES: &[Lane] = &[
-        Lane { id: "http-protocol", target: "http_protocol_suite" },
-        Lane { id: "sd-gsp", target: "sd_gsp_suite" },
+        Lane {
+            id: "http-protocol",
+            target: "http_protocol_suite",
+        },
+        Lane {
+            id: "sd-gsp",
+            target: "sd_gsp_suite",
+        },
     ];
 
     /// The `scoreboard::SUITES` row whose feature-gated runner targets `target` (or None on
     /// registry drift — a fail-closed condition, never silently ignored).
     fn suite_for(target: &str) -> Option<&'static Suite> {
-        SUITES.iter().find(|s| {
-            matches!(s.runner, Runner::FeatureGatedCrateTest { target: t, .. } if t == target)
-        })
+        SUITES.iter().find(
+            |s| matches!(s.runner, Runner::FeatureGatedCrateTest { target: t, .. } if t == target),
+        )
     }
 
     /// The cargo feature a feature-gated runner requires (for the report's provenance column).
@@ -156,30 +166,33 @@ mod emit {
         }
         // A genuine failure is never laundered into the artifact as a pass.
         for (label, why) in &fails {
-            fatal.push(format!("lane `{}` FAILED assertion: {} — {}", lane.id, label, why));
+            fatal.push(format!(
+                "lane `{}` FAILED assertion: {} — {}",
+                lane.id, label, why
+            ));
         }
 
         // Floor + registry metadata from the central scoreboard (single source of truth).
-        let (label, family, ci_job, floor, floor_basis, note, feature) = match suite_for(lane.target)
-        {
-            Some(s) => (
-                s.label,
-                s.family,
-                s.ci_job,
-                Some(s.ratchet_floor),
-                s.floor_basis,
-                s.note,
-                suite_feature(s),
-            ),
-            None => {
-                fatal.push(format!(
-                    "registry drift: no scoreboard::SUITES row with a feature-gated runner \
+        let (label, family, ci_job, floor, floor_basis, note, feature) =
+            match suite_for(lane.target) {
+                Some(s) => (
+                    s.label,
+                    s.family,
+                    s.ci_job,
+                    Some(s.ratchet_floor),
+                    s.floor_basis,
+                    s.note,
+                    suite_feature(s),
+                ),
+                None => {
+                    fatal.push(format!(
+                        "registry drift: no scoreboard::SUITES row with a feature-gated runner \
                      targeting `{}` — cannot bind lane `{}` to a ratchet floor",
-                    lane.target, lane.id
-                ));
-                ("", "", "", None, "", "", "")
-            }
-        };
+                        lane.target, lane.id
+                    ));
+                    ("", "", "", None, "", "", "")
+                }
+            };
         if let Some(f) = floor {
             if pass < f {
                 fatal.push(format!(
@@ -189,8 +202,11 @@ mod emit {
             }
         }
 
-        let tests: Vec<Value> =
-            report.outcomes.iter().map(|(l, o)| outcome_json(l, o)).collect();
+        let tests: Vec<Value> = report
+            .outcomes
+            .iter()
+            .map(|(l, o)| outcome_json(l, o))
+            .collect();
 
         json!({
             "id": lane.id,
@@ -241,9 +257,15 @@ mod emit {
             .unwrap_or(0);
 
         // Provenance — threaded from the caller (CI/release) with honest local fall-backs.
-        let commit = env_or("SPARQ_CONFORMANCE_COMMIT", "unknown (local build — set SPARQ_CONFORMANCE_COMMIT)");
+        let commit = env_or(
+            "SPARQ_CONFORMANCE_COMMIT",
+            "unknown (local build — set SPARQ_CONFORMANCE_COMMIT)",
+        );
         let version = env_or("SPARQ_CONFORMANCE_VERSION", "unreleased (local build)");
-        let run_source = env_or("SPARQ_CONFORMANCE_RUN_URL", "local build (no CI run source)");
+        let run_source = env_or(
+            "SPARQ_CONFORMANCE_RUN_URL",
+            "local build (no CI run source)",
+        );
         let generated_at = env_or("SPARQ_CONFORMANCE_DATE", &iso_utc(now_unix));
 
         // Re-run the two served-surface lanes in-process (hermetic; each stands up its own

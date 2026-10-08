@@ -40,3 +40,26 @@ test("declines literal-only aggregate-shaped SELECT results", () => {
   };
   assert.equal(deriveSelectResultGraph(results), null);
 });
+
+test("keeps literals that differ only by base direction as distinct nodes", () => {
+  const a = { type: "uri" as const, value: "http://example.com/a" };
+  const hi = (dir?: string) => ({
+    type: "literal" as const,
+    value: "hi",
+    "xml:lang": "en",
+    "its:dir": dir,
+  });
+  const results: SparqlResults = {
+    head: { vars: ["s", "v"] },
+    results: {
+      bindings: [
+        { s: a, v: hi("ltr") },
+        { s: a, v: hi("rtl") },
+        { s: a, v: hi() },
+      ],
+    },
+  };
+  const graph = deriveSelectResultGraph(results);
+  assert.ok(graph);
+  assert.equal(graph.nodes.length, 4);
+});

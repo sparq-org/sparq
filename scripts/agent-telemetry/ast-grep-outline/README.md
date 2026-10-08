@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-lhwo.4 (epic sq-lhwo). 🤖 SPARQ agent. -->
+<!-- sq-lhwo.4 (epic sq-lhwo). 🤖 SPARQ agent. -->
 # ast-grep + outline token A/B harness (sq-lhwo.4)
 
 > 🤖 **SPARQ agent — verdict already SETTLED; this is the runnable proxy harness, not the

@@ -9,8 +9,9 @@ use std::path::PathBuf;
 
 #[test]
 fn native_ttl_turtle_suite_matches_reference_set() {
-    let turtle_root =
-        PathBuf::from("tests/w3c/rdf-tests/rdf/rdf11/rdf-turtle").canonicalize().or_else(|_| {
+    let turtle_root = PathBuf::from("tests/w3c/rdf-tests/rdf/rdf11/rdf-turtle")
+        .canonicalize()
+        .or_else(|_| {
             // The `sparq-conformance` crate runs from its own dir; the data lives at repo root.
             PathBuf::from("../../tests/w3c/rdf-tests/rdf/rdf11/rdf-turtle").canonicalize()
         });
@@ -49,9 +50,19 @@ fn native_ttl_turtle_suite_matches_reference_set() {
     }
     lines.sort();
 
-    let feature = if cfg!(feature = "native-ttl-suite") { "native-ttl" } else { "oxttl" };
+    let feature = if cfg!(feature = "native-ttl-suite") {
+        "native-ttl"
+    } else {
+        "oxttl"
+    };
     println!("=== rdf-turtle outcome set ({feature}) ===");
-    println!("TOTAL run={} pass={} fail={} oos={}", out.len(), pass, fail, oos);
+    println!(
+        "TOTAL run={} pass={} fail={} oos={}",
+        out.len(),
+        pass,
+        fail,
+        oos
+    );
     for l in &lines {
         println!("{l}");
     }
@@ -61,6 +72,13 @@ fn native_ttl_turtle_suite_matches_reference_set() {
     // diffing the printed lines across the ON/OFF runs (see the module doc); here we pin that the
     // suite actually ran a non-trivial number of tests and reports zero unexpected failures beyond
     // the reference baseline, which the OFF run establishes.
-    assert!(out.len() > 100, "the rdf-turtle suite should have many tests, got {}", out.len());
-    assert_eq!(fail, 0, "native/oxttl Turtle parse produced {fail} unexpected conformance failures");
+    assert!(
+        out.len() > 100,
+        "the rdf-turtle suite should have many tests, got {}",
+        out.len()
+    );
+    assert_eq!(
+        fail, 0,
+        "native/oxttl Turtle parse produced {fail} unexpected conformance failures"
+    );
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-s1uy (epic sq-dnko / sq-3183) — sparq-fedclient dependency-boundary guard.
+# sq-s1uy (epic sq-dnko / sq-3183) — sparq-fedclient dependency-boundary guard.
 #
 # THE load-bearing Phase-0 deliverable. The lean core — `sparq-core` and `sparq-engine` —
 # must NEVER gain a dependency edge to the OPT-IN streaming federation client

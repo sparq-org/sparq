@@ -4,27 +4,27 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [OPUS-4.8] sq-h3uk: the ODRL->AUTH_GRAPH bridge (pulls the optional
+# sq-h3uk: the ODRL->AUTH_GRAPH bridge (pulls the optional
 # sparq-policy ODRL evaluator) — keeps the opt-in ON path from rotting.
 - name: "sparq-solid (odrl-bridge)"
   crate: "sparq-solid"
   features: "odrl-bridge"
   test: true
 
-# [OPUS-4.8] sq-58mh: sparq-solid STATEFUL `odrl:count` wired THROUGH the bridge
+# sq-58mh: sparq-solid STATEFUL `odrl:count` wired THROUGH the bridge
 # (a bridged grant self-retracts on exhaustion). The whole
 # tests/odrl_count_bridge.rs file is `#![cfg(feature = "count-enforcement")]`
 # and `materialize_odrl_permission_counted` + the `count` module are
@@ -36,7 +36,7 @@
   features: "count-enforcement"
   test: true
 
-# [OPUS-4.8] sq-gq28y (issue #1546): the `legacy-union-default-graph` escape hatch. The
+# sq-gq28y (issue #1546): the `legacy-union-default-graph` escape hatch. The
 # DEFAULT read path is now spec-conformant (empty standing default graph + explicit-union
 # opt-in), covered by the plain `sparq-solid` leg (tests/union_default_graph.rs runs by
 # default). This feature CHANGES a `not(feature=…)` code path back to union-always
@@ -46,7 +46,7 @@
 # odrl-bridge/trust-graph, whose probes now assume the empty-default and use explicit
 # `GRAPH ?g`). No new dependency (a pure query-rewrite change). Without this leg the
 # union-always escape-hatch behaviour is never exercised.
-# [SONNET-4.6] sq-s5tkx: "needs its OWN ISOLATED leg" still holds — the legacy-gated tests
+# sq-s5tkx: "needs its OWN ISOLATED leg" still holds — the legacy-gated tests
 # only compile here — but it does NOT mean this feature must appear in NO other leg. The
 # combined leg at the bottom of this file now ALSO enables it alongside the rest, which is
 # precisely the state that regressed unseen (see that leg's note).
@@ -55,7 +55,7 @@
   features: "legacy-union-default-graph"
   test: true
 
-# [FABLE-5] sq-lrtc3.3: pattern-scoped (sub-named-graph) result masking. The whole
+# sq-lrtc3.3: pattern-scoped (sub-named-graph) result masking. The whole
 # surface (src/pattern_scope.rs + tests/pattern_scope.rs, incl. the differential
 # battery vs a physically-reduced oracle store) is `#[cfg(feature = "pattern-scope")]`,
 # so without this leg the masking path NEVER runs in CI. No new dependency (public
@@ -65,7 +65,7 @@
   features: "pattern-scope"
   test: true
 
-# [SONNET-4.6] sq-ysv3u (issue #2935): the opt-in `acp-vc` trust-the-issuer backend for the
+# sq-ysv3u (issue #2935): the opt-in `acp-vc` trust-the-issuer backend for the
 # ACP `acp:vc` matcher. The whole of tests/acp_vc_backend.rs is `#![cfg(feature = "acp-vc")]`
 # (sign a credential with `sparq-vc`, verify its `eddsa-rdfc-2022` Data Integrity proof,
 # admit the resulting holding, then satisfy an `acp:vc` matcher end-to-end), and
@@ -78,7 +78,7 @@
   features: "acp-vc"
   test: true
 
-# [SONNET-4.6] sq-s5tkx (issue #2854): the COMBINED state — every opt-in feature at once,
+# sq-s5tkx (issue #2854): the COMBINED state — every opt-in feature at once,
 # i.e. what `cargo test -p sparq-solid --all-features` runs. This is the feature
 # INTERACTION none of the single-feature legs above can see. It was red on `main` and no
 # lane said so — it surfaced only from manual review, and the fix arrived incidentally in

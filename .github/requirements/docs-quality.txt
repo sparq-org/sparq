@@ -1,4 +1,4 @@
-# Hash-pinned dependencies for the docs-quality `skill-frontmatter` job. [OPUS-4.8]
+# Hash-pinned dependencies for the docs-quality `skill-frontmatter` job.
 #
 # Scorecard PinnedDependenciesID requires CI pip installs be pinned by HASH, not
 # just by `==` version (a `==` pin still trusts whatever PyPI serves for that

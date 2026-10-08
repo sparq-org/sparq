@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] Hermetic tests for scripts/preflight.py — the diff-scoped pre-submit
+# Hermetic tests for scripts/preflight.py — the diff-scoped pre-submit
 # gate runner.
 #
 # EVERY test here is NAMED for the guard it pins and is written to go RED when
@@ -743,6 +743,29 @@ class TheDelegateRegistryIsPinned(unittest.TestCase):
             self.assertIn("--enforce", self._by_script()[script].argv,
                           f"{script} is delegated WITHOUT --enforce, so it cannot fail")
 
+    def test_no_perf_numbers_honours_the_research_allowlist(self) -> None:
+        # #5396: the explicit-path delegation must keep the checker's own
+        # research/ + bench/ exemptions, or every diff touching a design record
+        # with a measured table gets a false FAIL the real CI gate never reports.
+        argv = self._by_script()["scripts/check-no-perf-numbers.py"].argv
+        self.assertIn("--honour-allowlist", argv)
+        checker = REPO_ROOT / "scripts" / "check-no-perf-numbers.py"
+        with tempfile.TemporaryDirectory() as td:
+            for rel in ("research/rec.md", "docs/page.md"):
+                f = Path(td) / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text("Parse runs at 12 ns/op on the reference box.\n")
+
+            def rc(paths: list[str]) -> int:
+                return subprocess.run([*argv, *paths], cwd=td,
+                                      capture_output=True, text=True).returncode
+
+            argv = ["python3", str(checker), *argv[2:]]
+            self.assertEqual(rc(["research/rec.md"]), 0)
+            # The flag must not blunt the gate on a user-facing doc.
+            self.assertEqual(rc(["docs/page.md"]), 1)
+            self.assertEqual(rc(["research/rec.md", "docs/page.md"]), 1)
+
     def test_the_diff_scoped_gates_receive_the_changed_file_list(self) -> None:
         # Kills: clearing pass_changed_files, which would run G1/G2/G6 over the
         # whole tree and drown the author in pre-existing findings.
@@ -923,7 +946,6 @@ class NonMechanicalObligationsAreStated(unittest.TestCase):
 
 
 WORKER_BRIEFS = (
-    "sparq-rust-impl.md",
     "sparq-rust-feature.md",
     "sparq-ci-infra.md",
     "sparq-docs.md",
@@ -1010,9 +1032,9 @@ class TheYamlSeamIsGating(unittest.TestCase):
             self.assertIsNotNone(jid, f"no step in {self.WORKFLOW} runs: {cmd}")
 
     def test_the_hosting_job_name_carries_no_advisory_token(self) -> None:
-        # ci-summary EXCLUDES any check-run whose name matches
-        # \b(advisory|informational|non-blocking)\b. Renaming the job to include one
-        # of those tokens silently un-gates every leg in it.
+        # A job name matching \b(advisory|informational|non-blocking)\b reads as
+        # non-blocking (and check-advisory-registry.py treats it so). Renaming the job
+        # to include one of those tokens silently un-gates every leg in it.
         import re as _re
 
         for cmd in self.STEP_RUNS:
@@ -1021,7 +1043,7 @@ class TheYamlSeamIsGating(unittest.TestCase):
             name = str(job.get("name") or jid)
             self.assertIsNone(
                 _re.search(r"\b(advisory|informational|non-blocking)\b", name, _re.I),
-                f"{cmd} is hosted by job {name!r}, which ci-summary would EXCLUDE",
+                f"{cmd} is hosted by job {name!r}, which reads as non-blocking",
             )
 
     def test_neither_leg_can_swallow_its_own_failure(self) -> None:

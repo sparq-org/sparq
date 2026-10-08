@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Safe worktree garbage-collection sweep (bead sq-6xdr).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Safe worktree garbage-collection sweep (bead sq-6xdr).
 #
 # worktree-gc.sh [--dry-run | --apply] [--root <dir>] [--main <path>] [--base <ref>]
 #                [--reclaim-completed]

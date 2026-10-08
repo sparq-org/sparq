@@ -13,7 +13,7 @@
 // literal columns) has no resource node, so it charts as bars and draws no graph — never both from
 // one honest reading of the same rows.
 
-import type { SparqlResults, SparqlTerm } from "./sparq-wasm";
+import { formatTerm, type SparqlResults, type SparqlTerm } from "@sparq/client";
 import { curie } from "./curie";
 import { isGraphShaped, termKey, MAX_GRAPH_NODES } from "./result-graph-shape";
 
@@ -21,7 +21,7 @@ import { isGraphShaped, termKey, MAX_GRAPH_NODES } from "./result-graph-shape";
 // module) because the eligibility predicate replays the same cap to stay exact.
 export { MAX_GRAPH_NODES };
 
-export type NodeKind = "uri" | "literal" | "bnode";
+export type NodeKind = "uri" | "literal" | "bnode" | "triple";
 
 export interface GraphNode {
   /** Stable identity key across rows/columns (type + lexical value + datatype/lang). */
@@ -59,6 +59,7 @@ export interface ResultGraph {
 function nodeLabel(t: SparqlTerm): string {
   if (t.type === "uri") return curie(t.value);
   if (t.type === "bnode") return `_:${t.value}`;
+  if (t.type === "triple") return formatTerm(t);
   return `"${t.value}"`;
 }
 

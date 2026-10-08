@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] bead sq-mkza — end-to-end negative-test proof that the two honesty gates
+# bead sq-mkza — end-to-end negative-test proof that the two honesty gates
 # actually scan the paper-factory `.typ` sources (`site/papers/**/*.typ`) and catch a
 # planted violation, while leaving the legitimate accessor / comment / negator paths
-# alone. Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# alone.
 #
 # WHY: the highest-stakes OUTWARD surface is a published paper. Before sq-mkza the
 # no-perf-numbers gate scanned only `*.md` and the privacy-claims gate scanned only
@@ -122,7 +122,7 @@ TYP
 code="$(run_priv)"
 expect_exit 0 "privacy: hedged + allow-marked claim in .typ => clean" "$code"
 
-# [OPUS-4.8] bead sq-4hga — the gates also scan the PROSE (note/free-text) fields of
+# bead sq-4hga — the gates also scan the PROSE (note/free-text) fields of
 # site/src/data/paper-evidence.json: a forbidden perf number or ZK/MPC claim hidden in a
 # record `note` (which surfaces in a paper via the provenance() helper) must be caught too.
 echo "== 3. honesty gates scan paper-evidence.json prose (note) fields =="
@@ -175,7 +175,7 @@ JSON
 code="$(run_priv)"
 expect_exit 0 "privacy: hedged + allow-marked claim in an evidence note => clean" "$code"
 
-# [OPUS-4.8] bead sq-rvgr2.5 — the /specs spec-factory sources (site/specs/**/*.typ) are the
+# bead sq-rvgr2.5 — the /specs spec-factory sources (site/specs/**/*.typ) are the
 # NEXT outward claim surface: the ZK/MPC spec CONTENT (zkSPARQL / MPC-SPARQL) lands there. Pin
 # that BOTH gates now cover it BEFORE that content arrives, so a spec draft cannot smuggle an
 # unqualified soundness/privacy claim or a hard-coded perf figure past CI.

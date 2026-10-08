@@ -5,7 +5,7 @@
 //! the example — the library carries no thread-pool dependency). They are
 //! deliberately the same tight scalar loops a sparq scan thread runs today.
 
-use crate::{hash32, EMPTY_KEY};
+use crate::{hash32, GroupKeyOutOfRange, EMPTY_KEY};
 
 /// Counts elements with `lo <= v < hi`.
 pub fn filter_count_u32(col: &[u32], lo: u32, hi: u32) -> u64 {
@@ -60,7 +60,8 @@ pub fn hash_probe(slots: &[[u32; 2]], probe: &[u32]) -> (u64, u64) {
     let mut sum = 0u64;
     for &k in probe {
         let mut slot = (hash32(k) & mask) as usize;
-        loop {
+        // Bounded at mask + 1 steps, mirroring the kernel (GitHub #4603).
+        for _ in 0..=mask {
             let [key, payload] = slots[slot];
             if key == EMPTY_KEY {
                 break;
@@ -75,16 +76,22 @@ pub fn hash_probe(slots: &[[u32; 2]], probe: &[u32]) -> (u64, u64) {
     (matches, sum)
 }
 
-/// COUNT + SUM GROUP BY; `keys[i] < groups`. Returns `(count, sum)` per group.
-pub fn group_aggregate(keys: &[u32], vals: &[u32], groups: u32) -> Vec<(u64, u64)> {
+/// COUNT + SUM GROUP BY. Returns `(count, sum)` per group, or
+/// [`GroupKeyOutOfRange`] if any `keys[i] >= groups` — the same contract as
+/// [`crate::Gpu::group_aggregate`] (GitHub #4603).
+pub fn group_aggregate(
+    keys: &[u32],
+    vals: &[u32],
+    groups: u32,
+) -> Result<Vec<(u64, u64)>, GroupKeyOutOfRange> {
     assert_eq!(keys.len(), vals.len());
     let mut out = vec![(0u64, 0u64); groups as usize];
     for (&k, &v) in keys.iter().zip(vals) {
-        let e = &mut out[k as usize];
+        let e = out.get_mut(k as usize).ok_or(GroupKeyOutOfRange)?;
         e.0 += 1;
         e.1 += u64::from(v);
     }
-    out
+    Ok(out)
 }
 
 // [OPUS-4.8] sq-goay: unit tests for the CPU reference itself.
@@ -284,7 +291,25 @@ mod tests {
         assert_eq!(s, 10 + 100 + 1);
     }
 
+    /// GitHub #4603: a table with no EMPTY_KEY slot must not spin forever; the
+    /// walk is bounded at one pass over the table.
+    #[test]
+    fn hash_probe_terminates_on_a_full_table() {
+        let slots = [[1u32, 10], [2, 20], [3, 30], [4, 40]];
+        assert_eq!(hash_probe(&slots, &[3, 9]), (1, 30));
+    }
+
     // ---- group_aggregate -------------------------------------------------
+
+    /// GitHub #4603: an out-of-range key is a typed error, not a panic.
+    #[test]
+    fn group_aggregate_rejects_out_of_range_key() {
+        assert_eq!(
+            group_aggregate(&[0, 3], &[1, 1], 3),
+            Err(GroupKeyOutOfRange)
+        );
+        assert_eq!(group_aggregate(&[600], &[1], 3), Err(GroupKeyOutOfRange));
+    }
 
     #[test]
     fn group_aggregate_brute_force_random() {
@@ -292,7 +317,7 @@ mod tests {
         let groups = 37u32;
         let keys: Vec<u32> = (0..6_000).map(|_| rng.u32() % groups).collect();
         let vals: Vec<u32> = (0..6_000).map(|_| rng.u32()).collect();
-        let got = group_aggregate(&keys, &vals, groups);
+        let got = group_aggregate(&keys, &vals, groups).unwrap();
 
         // Independent oracle, per group.
         for g in 0..groups {
@@ -317,7 +342,7 @@ mod tests {
         let n = 100usize;
         let keys = vec![0u32; n];
         let vals = vec![u32::MAX; n];
-        let got = group_aggregate(&keys, &vals, 1);
+        let got = group_aggregate(&keys, &vals, 1).unwrap();
         assert_eq!(got[0], (n as u64, n as u64 * u64::from(u32::MAX)));
         assert!(got[0].1 > u64::from(u32::MAX), "sum overflows u32");
     }

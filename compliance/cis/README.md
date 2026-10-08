@@ -56,7 +56,7 @@ Safeguard honestly into one of:
 The `Dockerfile` hardening is genuinely strong and *verified against the actual file* (distroless
 `cc-debian12:nonroot`, both stages SHA-pinned by digest, `cargo auditable build --locked`,
 no shell/package-manager in the runtime layer, minimal labels-only metadata, `.dockerignore`
-scoping the context). A `docker-smoke` job builds + runs the image and curls it on every PR. **But
+scoping the context). A `docker-smoke` job (`ci.yml`, nightly) builds + runs the image and curls it. **But
 there is no automated container-image vulnerability scan (Trivy/Grype) and no Dockerfile linter
 (Dockle/Hadolint) lane in CI** — verified by `grep -rIl -E 'trivy|grype|dockle|hadolint' .github/`
 returning only false-positive comment matches. That is gap **GX-12** (bead **sq-toze.31**); see

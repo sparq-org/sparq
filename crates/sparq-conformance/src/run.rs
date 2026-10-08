@@ -36,10 +36,9 @@ fn build_nquads(data: &[PathBuf], graph_data: &[(String, PathBuf)]) -> Result<St
         for q in parse_file_quads(d)? {
             let q = prefix_bnodes_quad(q, file_idx);
             match &q.graph_name {
-                GraphName::DefaultGraph => out.push_str(&format!(
-                    "{} {} {} .\n",
-                    q.subject, q.predicate, q.object
-                )),
+                GraphName::DefaultGraph => {
+                    out.push_str(&format!("{} {} {} .\n", q.subject, q.predicate, q.object))
+                }
                 g => out.push_str(&format!(
                     "{} {} {} {g} .\n",
                     q.subject, q.predicate, q.object
@@ -102,7 +101,10 @@ fn prefix_bnodes_quad(q: Quad, idx: usize) -> Quad {
 /// `ut:graphData` pointing at an empty document), and `GRAPH ?g {}` / `GRAPH <g> {}`
 /// must see it — but the N-Quads encoding cannot represent a graph with no triples,
 /// so the loader is told the graph names separately.
-fn load_dataset_with_graphs(nquads: &str, graph_names: &[String]) -> Result<sparq_core::Graph, String> {
+fn load_dataset_with_graphs(
+    nquads: &str,
+    graph_names: &[String],
+) -> Result<sparq_core::Graph, String> {
     let mut graph = sparq_core::Graph::load_dataset(nquads, "nquads")?;
     for name in graph_names {
         let Ok(nn) = oxrdf::NamedNode::new(name.clone()) else {
@@ -110,7 +112,10 @@ fn load_dataset_with_graphs(nquads: &str, graph_names: &[String]) -> Result<spar
         };
         let t = Term::NamedNode(nn);
         if !graph.named.iter().any(|(g, _)| *g == t) {
-            graph.named.push((t, sparq_core::Graph::from_parts(sparq_core::dict::Dict::new(), Vec::new())));
+            graph.named.push((
+                t,
+                sparq_core::Graph::from_parts(sparq_core::dict::Dict::new(), Vec::new()),
+            ));
         }
     }
     Ok(graph)
@@ -184,9 +189,15 @@ pub fn run_syntax_test(entry: &TestEntry, positive: bool, update: bool) -> Statu
                 .with_base_iri(&base)
                 .map_err(|e| format!("bad base IRI: {e}"))?;
             if update {
-                parser.parse_update(&text).map(|_| ()).map_err(|e| e.to_string())
+                parser
+                    .parse_update(&text)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
             } else {
-                parser.parse_query(&text).map(|_| ()).map_err(|e| e.to_string())
+                parser
+                    .parse_query(&text)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
             }
         })();
         let _ = tx.send(result);
@@ -291,7 +302,9 @@ pub fn run_query_test_filtered(
         Ok(Query::Describe { .. }) => {
             // The engine implements DESCRIBE (CBD), but the spec leaves the result
             // form to the implementation, so expected graphs are not comparable.
-            return Status::Skip("DESCRIBE result form is implementation-defined (engine returns CBD)".into());
+            return Status::Skip(
+                "DESCRIBE result form is implementation-defined (engine returns CBD)".into(),
+            );
         }
         Err(e) => return Status::Fail(format!("query parse error: {e}")),
     };
@@ -334,7 +347,9 @@ pub fn run_query_test_filtered(
         });
         return match rx.recv_timeout(TEST_TIMEOUT) {
             Ok(Ok(actual)) if actual == expected_bool => Status::Pass,
-            Ok(Ok(actual)) => Status::Fail(format!("ASK mismatch: expected {expected_bool}, got {actual}")),
+            Ok(Ok(actual)) => Status::Fail(format!(
+                "ASK mismatch: expected {expected_bool}, got {actual}"
+            )),
             Ok(Err(e)) => Status::Fail(format!("engine error: {e}")),
             Err(mpsc::RecvTimeoutError::Timeout) => Status::Fail("timeout (20s)".into()),
             Err(mpsc::RecvTimeoutError::Disconnected) => Status::Fail("engine panicked".into()),
@@ -625,16 +640,25 @@ pub fn run_update_test(entry: &TestEntry) -> Status {
     }
     dedup_rows(&mut expected);
 
-    let graph_names: Vec<String> = entry.update_pre.graph_data.iter().map(|(g, _)| g.clone()).collect();
+    let graph_names: Vec<String> = entry
+        .update_pre
+        .graph_data
+        .iter()
+        .map(|(g, _)| g.clone())
+        .collect();
     // [OPUS-4.8] roborev 1646: `LOAD <file://…>` is refused by default. The conformance suite
     // is a TRUSTED local run, so allowlist the request file's directory (where the W3C update
     // tests keep the data files they LOAD) as the LOAD base.
-    let load_base: PathBuf = request_path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let load_base: PathBuf = request_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let result = (|| {
             let graph = load_dataset_with_graphs(&nquads, &graph_names)?;
-            let updated = sparq_engine::with_load_base(load_base, || sparq_engine::update(&graph, &request))?;
+            let updated =
+                sparq_engine::with_load_base(load_base, || sparq_engine::update(&graph, &request))?;
             // Dump the resulting dataset: default graph + every named graph.
             let mut rows: Vec<Row> = Vec::new();
             let mut dump = |g: &sparq_core::Graph, name: Option<&Term>| {

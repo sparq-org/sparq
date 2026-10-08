@@ -101,6 +101,9 @@ function extractPrefixes(turtle: string): ScsPrefix[] {
 function toScsTerm(t: SparqlTerm): ScsTerm {
   if (t.type === "uri") return { termType: "NamedNode", value: t.value };
   if (t.type === "bnode") return { termType: "BlankNode", value: t.value };
+  if (t.type === "triple") {
+    throw new Error("SHACL Compact Syntax cannot express an RDF 1.2 triple term");
+  }
   return {
     termType: "Literal",
     value: t.value,

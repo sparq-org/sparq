@@ -230,7 +230,10 @@ pub fn run_fromrdf(root: &Path) -> Score {
             }
         };
         if !json_ld_equal(&got, &want) {
-            s.fail(&e.id, "document mismatch vs normative expected doc".to_string());
+            s.fail(
+                &e.id,
+                "document mismatch vs normative expected doc".to_string(),
+            );
             continue;
         }
         // 2. Round-trip isomorphism, where §8.1 is lossless (see module docs).

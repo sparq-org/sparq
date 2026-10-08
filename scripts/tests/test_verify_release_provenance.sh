@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-5] issue #4571 — hermetic self-test for scripts/verify-release-provenance.sh.
+# issue #4571 — hermetic self-test for scripts/verify-release-provenance.sh.
 #
 # WHY IT EXISTS. The script under test is the EVIDENCE ENGINE for SL-B3-b: its verdict is what
 # flips the control from AR to IV. It runs for the first time when a release is being cut, and

@@ -19,6 +19,7 @@ import {
   askValue,
   streamQueryRows,
   COMMON_PREFIXES,
+  termValue,
   type SparqlBinding,
   type SparqlResults,
   type WasmStore,
@@ -598,8 +599,8 @@ function summariseGraphs(store: WasmStore): { size: number; graphs: GraphSummary
     );
     const parsed = JSON.parse(json) as SparqlResults;
     for (const b of parsed.results?.bindings ?? []) {
-      const g = b["g"]?.value ?? null;
-      const c = Number.parseInt(b["c"]?.value ?? "0", 10) || 0;
+      const g = termValue(b["g"]) ?? null;
+      const c = Number.parseInt(termValue(b["c"]) ?? "0", 10) || 0;
       if (g) {
         graphs.push({ graph: g, count: c });
         size += c;

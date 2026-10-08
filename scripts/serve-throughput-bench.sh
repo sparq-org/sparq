@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-7d3dj.5 (epic sq-7d3dj) — canonical loopback HTTP-throughput harness runner.
+# sq-7d3dj.5 (epic sq-7d3dj) — canonical loopback HTTP-throughput harness runner.
 #
 # Sibling of scripts/ci-bench.sh / hw-bench.sh / ec2-bench.sh. Builds and runs the
 # bench/serve-throughput harness (a standalone cargo project outside the root workspace),
@@ -48,6 +48,6 @@ CLEAN=(); for a in "${ARGS[@]}"; do [ -n "$a" ] && CLEAN+=("$a"); done
 # binary. This tracks CARGO_TARGET_DIR / an explicit --target (common in CI/dev shells),
 # where the artifact is NOT under `$HARNESS_DIR/target/release/`. --quiet keeps STDOUT the
 # harness's own output only (cargo status goes to STDERR); after the build above it is a fast
-# freshness check, no rebuild. [OPUS-4.8]
+# freshness check, no rebuild.
 echo "# running: cargo run --release --bin serve_throughput -- ${CLEAN[*]}" >&2
 ( cd "$HARNESS_DIR" && cargo run --release --quiet --bin serve_throughput -- "${CLEAN[@]}" )
