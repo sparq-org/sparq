@@ -136,7 +136,10 @@ use sparq_policy::{
     conflict_admissibility, evaluate, matched_prohibition, parse_policy_str, prohibition_status,
     Operator, Policy, ProhibitionStatus, Request, Rule, Value,
 };
-use sparq_reason::n3::compiled::{compile, eval, intern_facts, CompiledRuleSet};
+use sparq_reason::n3::compiled::{
+    compile, compile_with_cycles, eval, intern_facts, CompiledRuleSet,
+};
+use sparq_reason::NegationCycles;
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
@@ -161,12 +164,17 @@ fn odrl_rules() -> Result<&'static [CompiledRuleSet; 5], String> {
     static RULES: OnceLock<Result<[CompiledRuleSet; 5], String>> = OnceLock::new();
     RULES
         .get_or_init(|| {
+            // odrl-b/c/d.n3 conclude a variable predicate next to store-scoped negation, so
+            // they cannot be stratified yet: keep single-pass semantics by explicit opt-in.
+            // Follow-up: rewrite them with one concrete conclusion per mode and drop the
+            // opt-in.
+            let legacy = |src| compile_with_cycles(src, NegationCycles::SinglePass);
             Ok([
                 compile(ODRL_A0)?,
                 compile(ODRL_A)?,
-                compile(ODRL_B)?,
-                compile(ODRL_C)?,
-                compile(ODRL_D)?,
+                legacy(ODRL_B)?,
+                legacy(ODRL_C)?,
+                legacy(ODRL_D)?,
             ])
         })
         .as_ref()

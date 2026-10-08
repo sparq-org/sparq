@@ -127,6 +127,8 @@ pub fn reason_n3_stratified(dict: &mut Dict, strata: &[&str])   // stratum-by-st
     -> Result<StratifiedN3Closure, String>;  // each closure in memory (no re-serialize); the sound
     // driver when the automatic stratification rejects a cycle (explicit strata instead);
     // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes).
+pub fn reason_n3_stratified_with_cycles(dict, strata, cycles: NegationCycles)
+    -> Result<StratifiedN3Closure, String>;  // same, with the per-stratum cycle opt-in
 
 // Incremental closure maintenance (closure stays == from-scratch materialize on the current base).
 pub struct MaterializedGraph;     // RDFS;     mutations are dictionary-free

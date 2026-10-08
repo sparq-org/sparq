@@ -543,6 +543,16 @@ pub fn reason_n3_stratified(
     dict: &mut Dict,
     strata: &[&str],
 ) -> Result<StratifiedN3Closure, String> {
+    reason_n3_stratified_with_cycles(dict, strata, NegationCycles::Reject)
+}
+
+/// As [`reason_n3_stratified`], choosing what happens to rules that negate through a
+/// dependency cycle inside one stratum ([`NegationCycles`]).
+pub fn reason_n3_stratified_with_cycles(
+    dict: &mut Dict,
+    strata: &[&str],
+    cycles: NegationCycles,
+) -> Result<StratifiedN3Closure, String> {
     let mut carried: Vec<[Term; 3]> = Vec::new();
     let mut facts = FactIndex::default();
     let mut strata_facts = Vec::with_capacity(strata.len());
@@ -563,8 +573,7 @@ pub fn reason_n3_stratified(
             }
         }
         parsed.facts.append(&mut carried);
-        let (f, _steps, _) =
-            run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?;
+        let (f, _steps, _) = run_closure(parsed, None, None, StepMode::None, cycles)?;
         strata_facts.push(f.all.len());
         if i + 1 < strata.len() {
             carried = f.all.iter().cloned().collect();

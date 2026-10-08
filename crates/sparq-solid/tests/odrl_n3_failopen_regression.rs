@@ -326,7 +326,7 @@ fn single_valued_rule_attributes_still_grant_on_n3() {
 // satisfaction would drop its deny and widen access).
 
 use sparq_core::dict::Dict;
-use sparq_reason::reason_n3;
+use sparq_reason::{reason_n3_with_cycles, NegationCycles};
 
 const ODRL_A0: &str = include_str!("../rules/odrl-a0.n3");
 const ODRL_A: &str = include_str!("../rules/odrl-a.n3");
@@ -339,9 +339,16 @@ const ODRL_D: &str = include_str!("../rules/odrl-d.n3");
 fn strata_auth_triples(facts: &str) -> Vec<String> {
     let mut src = facts.to_owned();
     let mut out = Vec::new();
-    for rules in [ODRL_A0, ODRL_A, ODRL_B, ODRL_C, ODRL_D] {
+    // odrl-b/c/d.n3 conclude a variable predicate next to store-scoped negation, so they
+    // cannot be stratified yet: they keep single-pass semantics by explicit opt-in, as in
+    // `odrl_bridge`. Follow-up: rewrite them with one concrete conclusion per mode and drop
+    // the opt-in.
+    let (strict, legacy) = (NegationCycles::Reject, NegationCycles::SinglePass);
+    for (rules, cycles) in
+        [(ODRL_A0, strict), (ODRL_A, strict), (ODRL_B, legacy), (ODRL_C, legacy), (ODRL_D, legacy)]
+    {
         let mut dict = Dict::new();
-        let closure = reason_n3(&mut dict, &format!("{}\n{}", src, rules))
+        let closure = reason_n3_with_cycles(&mut dict, &format!("{}\n{}", src, rules), cycles)
             .unwrap_or_else(|e| panic!("stratum must reason: {}", e));
         let mut next = String::new();
         out.clear();
