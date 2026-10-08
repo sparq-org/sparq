@@ -58,7 +58,7 @@ impl ActiveContext {
             remote_contexts: Vec::new(),
             validate_scoped: true,
         };
-        process_inner(self, local_context, false, true, &mut env)
+        super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))
     }
 
     /// Applies a **scoped** context (a property-scoped or type-scoped `@context`) during

@@ -1127,7 +1127,8 @@ fn add_to_container_map(
         let node = node_ctx(cur, Some(iap), item, env)?;
         let node: &Ctx = node.as_deref().unwrap_or(cur);
         let typed = type_ctx(cur, node, item, env)?;
-        let container_key = typed.as_deref().unwrap_or(node).ciri("@type", None, true, false);
+        let item_ctx: &Ctx = typed.as_deref().unwrap_or(node);
+        let container_key = item_ctx.ciri("@type", None, true, false);
         if let Some(taken) = take_entry(&mut compacted_item, &container_key) {
             let mut vals = match taken {
                 Json::Arr(a) => a,
@@ -1145,21 +1146,18 @@ fn add_to_container_map(
             }
         }
         // 12.8.9.8.4: a leftover lone node reference re-compacts (it may collapse to a
-        // string under an @id/@vocab-typed term).
+        // string under an @id/@vocab-typed term). Its key was written under the item's
+        // context, and only an item that has an @id is a reference.
+        let id = item.get("@id").filter(|id| matches!(id, Json::Str(_)));
         let lone_id = match &compacted_item {
-            Json::Obj(m) if m.len() == 1 => {
-                cur.active.expand_iri(&m[0].0, false, true).as_deref() == Some("@id")
+            Json::Obj(m) if m.len() == 1 && id.is_some() => {
+                item_ctx.active.expand_iri(&m[0].0, false, true).as_deref() == Some("@id")
             }
             _ => false,
         };
-        if lone_id {
+        if let (true, Some(id)) = (lone_id, id) {
             let mut single = Json::obj();
-            single.set(
-                "@id",
-                item.get("@id")
-                    .cloned()
-                    .unwrap_or(Json::Raw("null".to_string())),
-            );
+            single.set("@id", id.clone());
             compacted_item = compact_element(cur, Some(iap), &single, env)?;
         }
     }
@@ -1578,7 +1576,7 @@ mod tests {
     #[test]
     fn expansion_is_budgeted() {
         let defs: Vec<String> = (0..1024).map(|i| format!(r#""u{i}":"http://ex/u{i}""#)).collect();
-        let nodes: Vec<String> = (0..2 * budget::WORK_BUDGET / 1024)
+        let nodes: Vec<String> = (0..budget::WORK_BUDGET / 1024 + 2)
             .map(|i| format!(r#"{{"@id":"http://ex/s{i}","p":{{"@id":"http://ex/o"}}}}"#))
             .collect();
         let doc = Json::parse(&format!(
@@ -1588,6 +1586,38 @@ mod tests {
         ))
         .unwrap();
         let err = expand(&doc, &JsonLdOptions::default(), &NoopLoader).unwrap_err();
+        assert_eq!(err.code(), E::ContextOverflow);
+    }
+
+    // A type-map item's leftover entry is read under the item's own context: a scoped
+    // alias that reuses the outer @id alias for data is kept as data.
+    #[test]
+    fn type_map_leftover_is_read_under_the_item_context() {
+        let ctx = Json::parse(
+            r#"{"id":"@id","type":"@type","p":{"@id":"http://ex/p","@container":"@type",
+                "@context":{"id":"http://ex/data","i":"@id","type":"http://ex/unused","kind":"@type"}}}"#,
+        )
+        .unwrap();
+        let doc = Json::parse(
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@type":["http://ex/T"],"http://ex/data":[{"@value":"kept"}]}]}]"#,
+        )
+        .unwrap();
+        let opts = JsonLdOptions::default();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        let back = expand(&out, &opts, &NoopLoader).unwrap();
+        assert!(same_entries(&back, &doc), "round trip changed the data: {back:?}");
+    }
+
+    // Processing a context directly is budgeted too.
+    #[test]
+    fn direct_context_processing_is_budgeted() {
+        let defs: Vec<String> = (0..1024).map(|i| format!(r#""u{i}":"http://ex/u{i}""#)).collect();
+        let one = format!("{{{}}},null", defs.join(","));
+        let parts = vec![one; budget::WORK_BUDGET / 1024 + 2];
+        let local = Json::parse(&format!("[{}]", parts.join(","))).unwrap();
+        let err = ActiveContext::new(None)
+            .process(&local, None, &NoopLoader, &JsonLdOptions::default())
+            .unwrap_err();
         assert_eq!(err.code(), E::ContextOverflow);
     }
 

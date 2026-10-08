@@ -1,5 +1,6 @@
 //! A per-call bound on context-processing work. Each public entry point (`expand`,
-//! `compact`, `compact_expanded`, `frame`, `frame_match`) runs under [`with_budget`];
+//! `compact`, `compact_expanded`, `frame`, `frame_match`, `ActiveContext::process`) runs
+//! under [`with_budget`];
 //! context processing charges every term table it copies and every definition it creates,
 //! including definitions loaded from remote contexts or later discarded by a `null`, and
 //! fails with `context overflow` once the call's budget is spent. Nested entry points
