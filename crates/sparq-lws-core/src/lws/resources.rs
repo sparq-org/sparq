@@ -404,8 +404,13 @@ async fn listing_guard<S: Store + 'static>(
 /// behind it), which taking it exclusively would. What changes the container's metadata
 /// otherwise takes the lock exclusively, so it never interleaves with a touch; touches among
 /// themselves are ordered by a lock of their own (no lock is taken under it).
+///
+/// The container's own container lists its modification time, so the touch also holds that
+/// listing shared ([`listing_guard`]): a conditional create there sees no touch between its
+/// check and its create.
 async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
     let _guard = state.locks.read(container).await;
+    let _listing = listing_guard(state, container).await;
     let _touch = state.locks.lock(&format!("{container}\0touch")).await;
     // Metadata that cannot be read is left as it is, not replaced by a default.
     let Ok(mut meta) = state.resource_meta(container).await else {
@@ -1026,6 +1031,8 @@ fn rel_key(r: &str) -> String {
 fn link_declared(req: &LwsRequest, uri: &str) -> (Vec<String>, Links) {
     let mut types = Vec::new();
     let mut links = Links::new();
+    // Repeats are found with a set, as in [`content_types`].
+    let mut seen = std::collections::HashSet::new();
     for (target, params) in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = params.get("rel") else {
             continue;
@@ -1033,14 +1040,16 @@ fn link_declared(req: &LwsRequest, uri: &str) -> (Vec<String>, Links) {
         for r in rel.split_whitespace() {
             let key = rel_key(r);
             if key == "type" {
-                if !target.starts_with(LWS_NS) && is_uri(&target) && !types.contains(&target) {
+                if !target.starts_with(LWS_NS)
+                    && is_uri(&target)
+                    && seen.insert((key, target.clone()))
+                {
                     types.push(target.clone());
                 }
             } else if !STRUCTURAL_RELATIONS.contains(&key.as_str()) {
                 let resolved = resolve_against(uri, &target);
-                let entry = links.entry(key).or_default();
-                if !entry.contains(&resolved) {
-                    entry.push(resolved);
+                if seen.insert((key.clone(), resolved.clone())) {
+                    links.entry(key).or_default().push(resolved);
                 }
             }
         }
@@ -1063,6 +1072,8 @@ fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Vec<String> {
     if !content_type.starts_with("text/turtle") {
         return types;
     }
+    // Repeats are found with a set: a representation may state tens of thousands of types.
+    let mut seen = std::collections::HashSet::new();
     if let Ok(parser) = oxttl::TurtleParser::new().with_base_iri(uri) {
         for t in parser.for_slice(body).flatten() {
             if let (oxrdf::NamedOrBlankNode::NamedNode(s), oxrdf::Term::NamedNode(o)) =
@@ -1070,7 +1081,7 @@ fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Vec<String> {
             {
                 if s.as_str() == uri
                     && t.predicate.as_str() == RDF_TYPE
-                    && !types.contains(&o.as_str().to_string())
+                    && seen.insert(o.as_str().to_string())
                 {
                     types.push(o.as_str().to_string());
                 }
@@ -1082,12 +1093,9 @@ fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Vec<String> {
 
 /// The types a resource has: those declared by Link headers, then those its content states.
 fn all_types(declared: &[String], stated: Vec<String>) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = declared.iter().cloned().collect();
     let mut types = declared.to_vec();
-    for t in stated {
-        if !types.contains(&t) {
-            types.push(t);
-        }
-    }
+    types.extend(stated.into_iter().filter(|t| seen.insert(t.clone())));
     types
 }
 
@@ -1204,13 +1212,15 @@ async fn create<S: Store + 'static>(
     } else {
         req.body.clone()
     };
-    let (declared_types, types, links) = if is_container {
-        (Vec::new(), Vec::new(), Default::default())
+    // A container declares its types and links as a data resource does; only types its content
+    // states are a data resource's alone (a container has no content of its own).
+    let (declared_types, links) = link_declared(req, &child);
+    let stated = if is_container {
+        Vec::new()
     } else {
-        let (declared, links) = link_declared(req, &child);
-        let types = all_types(&declared, content_types(&child, &content_type, &body));
-        (declared, types, links)
+        content_types(&child, &content_type, &body)
     };
+    let types = all_types(&declared_types, stated);
     let meta = ResourceMeta {
         creator: agent.subject.clone(),
         linkset: initial_linkset(&child, &links),
@@ -2263,14 +2273,8 @@ async fn patch<S: Store + 'static>(
             .declared_types
             .clone()
             .unwrap_or_else(|| rmeta.types.clone());
-        for t in link_types {
-            if !rmeta.types.contains(&t) {
-                rmeta.types.push(t.clone());
-            }
-            if !declared.contains(&t) {
-                declared.push(t);
-            }
-        }
+        rmeta.types = all_types(&rmeta.types, link_types.clone());
+        declared = all_types(&declared, link_types);
         rmeta.declared_types = Some(declared);
         let mut user = rmeta
             .linkset
@@ -4816,6 +4820,79 @@ mod tests {
         );
         let r = call(&st, "DELETE", &path, &[("if-match", &tag)], "").await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    }
+
+    /// Review finding: the types a Turtle representation states were deduplicated by scanning
+    /// those already found, so a body stating a hundred thousand types cost billions of
+    /// comparisons. Repeats are found with a set, and the first statement of each type keeps its
+    /// place.
+    #[test]
+    fn stated_types_are_deduplicated_with_a_set() {
+        let uri = "http://h/r";
+        let list: Vec<String> = (0..100_000).map(|i| format!("<urn:t{i}>")).collect();
+        let body = format!("<> a {}, <urn:t1>, <urn:t0> .", list.join(", "));
+        let types = content_types(uri, "text/turtle", body.as_bytes());
+        assert_eq!(types.len(), 100_000);
+        assert_eq!(types[..2], ["urn:t0".to_string(), "urn:t1".to_string()]);
+        let all = all_types(&["urn:t5".into(), "urn:x".into()], types);
+        assert_eq!(all.len(), 100_001);
+        assert_eq!(all[..3], ["urn:t5", "urn:x", "urn:t0"].map(String::from));
+    }
+
+    /// Review finding: a container created with a custom `rel="type"` (and other links) lost
+    /// them: only data resources kept what their Link headers declared.
+    #[tokio::test]
+    async fn a_created_container_keeps_its_declared_types_and_links() {
+        let st = state().await;
+        let link = format!(
+            "<{LWS_NS}Container>; rel=\"type\", <https://e.example/Album>; rel=\"type\", <https://e.example/schema>; rel=\"describedby\""
+        );
+        let r = call(&st, "POST", "/", &[("slug", "album"), ("link", &link)], "").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let m = st.resource_meta(&st.cfg.absolute("/album/")).await.unwrap();
+        assert_eq!(m.types, vec!["https://e.example/Album".to_string()]);
+        assert_eq!(
+            m.links["describedby"],
+            vec!["https://e.example/schema".to_string()]
+        );
+        let r = call(&st, "GET", "/album/", &[], "").await;
+        assert!(
+            r.headers()
+                .get_all(header::LINK)
+                .iter()
+                .any(|v| v.to_str().unwrap().contains("https://e.example/Album")),
+            "{:?}",
+            r.headers()
+        );
+    }
+
+    /// Review finding: a change inside a container updated that container's modification time,
+    /// which its own container lists, without holding that listing: a conditional create there
+    /// could check one listing and commit under another. The touch now holds it shared.
+    #[tokio::test]
+    async fn a_touch_holds_the_listing_above_it() {
+        let st = state().await;
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        for (at, slug) in [("/", "c"), ("/c/", "d")] {
+            let r = call(&st, "POST", at, &[("slug", slug), ("link", &container)], "").await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let d = st.cfg.absolute("/c/d/");
+        let before = st.resource_meta(&d).await.unwrap().modified_ms;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let held = st.locks.lock(&st.cfg.absolute("/c/")).await;
+        let post = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let text = ("content-type", "text/plain");
+                call(&st, "POST", "/c/d/", &[text], "x").await.status()
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert_eq!(st.resource_meta(&d).await.unwrap().modified_ms, before);
+        drop(held);
+        assert_eq!(post.await.unwrap(), StatusCode::CREATED);
+        assert_ne!(st.resource_meta(&d).await.unwrap().modified_ms, before);
     }
 
     /// Review finding: a resource or linkset PATCH was held to the fixed [`PATCH_BUDGET`], so a

@@ -721,11 +721,17 @@ fn start_element(
         .to_string();
     let mut declared = Vec::new();
     let mut raw_attrs = Vec::new();
-    for a in e.attributes() {
+    // Repeated names are found with a set: quick-xml's own check compares each attribute with
+    // every one before it, which an element with tens of thousands of attributes makes quadratic.
+    let mut names = std::collections::HashSet::new();
+    for a in e.attributes().with_checks(false) {
         let a = a.map_err(|e| format!("malformed attribute: {e}"))?;
         let key = std::str::from_utf8(a.key.as_ref())
             .map_err(|_| "a non-UTF-8 attribute name")?
             .to_string();
+        if !names.insert(key.clone()) {
+            return Err("malformed attribute: a repeated attribute".into());
+        }
         let raw = std::str::from_utf8(&a.value).map_err(|_| "a non-UTF-8 attribute value")?;
         let value = unescape(raw, true)?;
         if key == "xmlns" {
@@ -775,6 +781,7 @@ fn start_element(
         owned(uri)?
     };
     let mut attrs = Vec::new();
+    let mut expanded = std::collections::HashSet::new();
     for (key, value) in raw_attrs {
         let (p, l) = split_qname(&key);
         let ans = if p.is_empty() {
@@ -788,7 +795,7 @@ fn start_element(
                 .ok_or_else(|| format!("unbound prefix {p}"))?;
             owned(uri)?
         };
-        if attrs.iter().any(|x: &Attr| x.ns == ans && x.local == l) {
+        if !expanded.insert((ans.clone(), l.clone())) {
             return Err("a repeated attribute".into());
         }
         attrs.push(Attr {
@@ -1167,6 +1174,20 @@ mod tests {
         );
         let out = c14n(&wide);
         assert_eq!(out.matches("xmlns:q=").count(), 20_000);
+    }
+
+    /// Review finding: repeated attributes were found by comparing each attribute with every one
+    /// before it, twice (quick-xml's check, then the expanded names), so one unsigned element
+    /// with tens of thousands of attributes cost hundreds of millions of comparisons. Both checks
+    /// are sets now, and still refuse a repeat.
+    #[test]
+    fn attribute_checks_are_linear() {
+        let attrs: String = (0..20_000).map(|i| format!(" a{i}=\"1\"")).collect();
+        assert_eq!(parse(&format!("<r{attrs}/>")).unwrap().attrs.len(), 20_000);
+        assert!(parse(r#"<r a="1" b="2" a="3"/>"#).is_err());
+        assert!(parse(r#"<r xmlns:p="urn:p" xmlns:p="urn:q"/>"#).is_err());
+        assert!(parse(r#"<r xmlns:p="urn:u" xmlns:q="urn:u" p:a="1" q:a="2"/>"#).is_err());
+        assert!(parse(r#"<r xmlns:p="urn:u" xmlns:q="urn:v" p:a="1" q:a="2"/>"#).is_ok());
     }
 
     #[test]
