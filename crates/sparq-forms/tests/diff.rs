@@ -115,3 +115,69 @@ fn diff_excludes_readonly_and_inverse_fields() {
 
     assert_eq!(to_sparql_update(&before, &after), "");
 }
+
+/// Replaces the `ex:greeting` values of a freshly derived form with `term`
+/// (a renderer round-trip can hand back any deserialized `TermRef`).
+fn update_with_greeting(term: TermRef) -> String {
+    let data = graph(DATA);
+    let shapes = graph(SHAPES);
+    let before = derive_form(&data, &shapes, &focus(), &FormOptions::default());
+    let mut after = before.clone();
+    let greeting = after
+        .groups
+        .iter_mut()
+        .flat_map(|group| &mut group.fields)
+        .find(|field| field.path == "<http://example.org/greeting>")
+        .unwrap();
+    greeting.values = vec![FormValue { term, nested: None }];
+    to_sparql_update(&before, &after)
+}
+
+fn term(kind: &str, value: &str, language: Option<&str>) -> TermRef {
+    TermRef {
+        kind: kind.into(),
+        value: value.into(),
+        datatype: None,
+        language: language.map(str::to_string),
+    }
+}
+
+const PAYLOAD: &str = "x . } ; DROP ALL ; INSERT { <a> <b> \"c\"";
+
+/// #5651: blank-node labels, language tags and triple-term text have no
+/// escape form in the update template, so an invalid one must fail closed
+/// (empty update) instead of being spliced in verbatim.
+#[test]
+fn deserialized_terms_cannot_inject_update_syntax() {
+    for bad in [
+        term("bnode", PAYLOAD, None),
+        term("bnode", "", None),
+        term(
+            "literal",
+            "hi",
+            Some("en . } ; DROP ALL ; INSERT { <a> <b> <c>"),
+        ),
+        term("triple", PAYLOAD, None),
+        term("triple", "<http://example.org/x>", None),
+        term(
+            "triple",
+            "<<( <http://a> <http://b> <http://c> )>> . } ; DROP ALL",
+            None,
+        ),
+        term("unknown-kind", "<http://example.org/x>", None),
+    ] {
+        let update_text = update_with_greeting(bad.clone());
+        assert_eq!(update_text, "", "{bad:?} must not render: {update_text}");
+    }
+}
+
+#[test]
+fn valid_bnode_lang_and_triple_terms_still_render() {
+    let ok = update_with_greeting(term("bnode", "b0", None));
+    assert!(ok.contains("_:b0 ."), "{ok}");
+    let ok = update_with_greeting(term("literal", "hi", Some("en-GB")));
+    assert!(ok.contains("\"hi\"@en-GB ."), "{ok}");
+    let ok = update_with_greeting(term("triple", "<<( <http://a> <http://b> \"c\" )>>", None));
+    assert!(ok.contains("<<( <http://a> <http://b> \"c\" )>> ."), "{ok}");
+    update(&graph(DATA), &ok).unwrap();
+}

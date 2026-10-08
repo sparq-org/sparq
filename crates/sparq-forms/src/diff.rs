@@ -2,7 +2,9 @@
 //! [GPT-5.6] sq-wn788
 
 use crate::{FormDescription, FormField, TermRef};
+use oxrdf::{BlankNode, Literal, Term};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// One value added to or removed from a bare forward-predicate field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,31 +73,38 @@ impl FormDiff {
 ///
 /// Returns an empty string when there is no writable change (including when
 /// the descriptions name different focus nodes). Callers may treat that as a no-op.
+///
+/// The build is all-or-nothing: if any term cannot be rendered safely (an
+/// invalid blank-node label or language tag, triple-term text that does not
+/// parse as one RDF 1.2 triple term, or an unknown `kind`), no update is
+/// produced and the empty string is returned, so a deserialized [`TermRef`]
+/// can never splice update syntax into the request.
 pub fn to_sparql_update(before: &FormDescription, after: &FormDescription) -> String {
+    render_update(before, after).unwrap_or_default()
+}
+
+fn render_update(before: &FormDescription, after: &FormDescription) -> Option<String> {
     let diff = FormDiff::between(before, after);
     if diff.added.is_empty() && diff.removed.is_empty() {
-        return String::new();
+        return None;
     }
 
-    let subject = term_to_ntriples(&after.focus);
+    let subject = term_to_ntriples(&after.focus)?;
     let triples = |changes: &[FieldValueDiff]| {
         changes
             .iter()
             .map(|change| {
-                format!(
-                    "  {subject} {} {} .\n",
-                    change.path,
-                    term_to_ntriples(&change.value)
-                )
+                let object = term_to_ntriples(&change.value)?;
+                Some(format!("  {subject} {} {object} .\n", change.path))
             })
-            .collect::<String>()
+            .collect::<Option<String>>()
     };
 
-    format!(
+    Some(format!(
         "DELETE {{\n{}}}\nINSERT {{\n{}}}\nWHERE {{}}",
-        triples(&diff.removed),
-        triples(&diff.added)
-    )
+        triples(&diff.removed)?,
+        triples(&diff.added)?
+    ))
 }
 
 fn fields(form: &FormDescription) -> impl Iterator<Item = &FormField> {
@@ -111,13 +120,18 @@ fn bare_predicate(path: &str) -> Option<&str> {
     (!iri.is_empty() && !iri.contains(['<', '>', ' ', '\t', '\r', '\n'])).then_some(iri)
 }
 
-fn term_to_ntriples(term: &TermRef) -> String {
-    match term.kind.as_str() {
+/// Renders one term for the update template, or `None` when a component has
+/// no escape form and fails validation.
+fn term_to_ntriples(term: &TermRef) -> Option<String> {
+    Some(match term.kind.as_str() {
         "iri" => format!("<{}>", escape_iri(&term.value)),
-        "bnode" => format!("_:{}", term.value),
+        // Blank-node labels have no escape form: validate against BLANK_NODE_LABEL.
+        "bnode" => BlankNode::new(&term.value).ok()?.to_string(),
         "literal" => {
             let literal = format!("\"{}\"", escape_literal(&term.value));
             if let Some(language) = &term.language {
+                // Language tags have no escape form either: require a valid BCP 47 tag.
+                Literal::new_language_tagged_literal(&term.value, language).ok()?;
                 format!("{literal}@{language}")
             } else if let Some(datatype) = &term.datatype {
                 format!("{literal}^^<{}>", escape_iri(datatype))
@@ -125,9 +139,14 @@ fn term_to_ntriples(term: &TermRef) -> String {
                 literal
             }
         }
-        // RDF 1.2 triple terms are already stored as N-Triples text.
-        _ => term.value.clone(),
-    }
+        // RDF 1.2 triple terms are carried as N-Triples text: re-parse it and
+        // emit the canonical serialization of exactly one triple term.
+        "triple" => match Term::from_str(&term.value).ok()? {
+            triple @ Term::Triple(_) => triple.to_string(),
+            _ => return None,
+        },
+        _ => return None,
+    })
 }
 
 fn escape_iri(value: &str) -> String {

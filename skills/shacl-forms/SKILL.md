@@ -44,7 +44,11 @@ if !update.is_empty() {
 The descriptions must name the same focus node. Only values on editable bare
 forward-predicate paths (`<p>`) participate; read-only/off-shape, inverse,
 computed, and complex property-path fields are excluded. A no-change or
-mismatched-focus input returns an empty update string.
+mismatched-focus input returns an empty update string. The build is
+all-or-nothing and fails closed: if any (possibly deserialized) `TermRef` has
+an invalid blank-node label or language tag, triple-term text that is not
+exactly one RDF 1.2 triple term, or an unknown `kind`, the result is also the
+empty string, so renderer-supplied terms cannot splice update syntax.
 
 What the description carries (all serde `Serialize + Deserialize`):
 
