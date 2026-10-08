@@ -1727,7 +1727,8 @@ fn mask_blank_nodes(rows: &[Solution], sort_vars: &[&str]) -> Vec<Solution> {
             let mut out: Solution = r.iter().map(|(v, t)| (v.clone(), mask(t))).collect();
             let first_blank = sort_vars.iter().position(|v| r.get(*v).is_some_and(has_blank));
             if let Some(i) = first_blank {
-                for v in &sort_vars[i + 1..] {
+                // A variable that is also an EARLIER key (`ORDER BY ?a ?s ?a`) keeps its value.
+                for v in sort_vars[i + 1..].iter().filter(|v| !sort_vars[..=i].contains(v)) {
                     out.insert((*v).to_string(), T::Blank("b".to_string()));
                 }
             }
@@ -3463,6 +3464,9 @@ ex:n2 ex:dbl "NaN"^^xsd:double . ex:n3 ex:dbl "1.5E3"^^xsd:double .
         // A key BEFORE the blank-node key is still checked.
         let by_a_s = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?a ?s";
         assert!(compare_answers(&sparq, &swapped, by_a_s).is_err());
+        // A repeated earlier key keeps its value after the blank-node key.
+        let by_a_s_a = "SELECT ?s ?a WHERE { ?s <http://ex/age> ?a } ORDER BY ?a ?s ?a";
+        assert!(compare_answers(&sparq, &swapped, by_a_s_a).is_err());
     }
 
     /// [SONNET-4.6] A HEADER-only disagreement is a MISMATCH, not a pass and not a skip.
