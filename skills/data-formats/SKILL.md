@@ -101,8 +101,10 @@ pub fn load_reader<R: std::io::Read>(reader: R, format: &str) -> Result<Graph, S
 // is a separate, opt-in mechanism that covers N-Triples AND N-Quads.)
 pub fn load_reader_parallel<R: std::io::Read + Send>(reader: R, format: &str) -> Result<Graph, String>
 
-// [OPUS-4.8] sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs
-// against RFC-3987 by default (it trusts input; the serial oxttl path DOES validate). The
+// sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs against
+// RFC-3987 by default (the serial oxttl path DOES). It does enforce the N-Triples grammar
+// (#2716): IRIREF characters, UCHAR-only IRI escapes, an absolute scheme, BLANK_NODE_LABEL
+// and LANGTAG shape (a label may abut the next term, `_:s<p>`). The
 // OPT-IN `iri-fast` feature on `sparq-core` (OFF by default) turns that validation on for the
 // byte parser via a prefix-memoized fast path IN FRONT of `oxiri` — a last-N validated
 // `scheme://authority/` memo + a one-pass ASCII `iunreserved`/sub-delims suffix scan, falling

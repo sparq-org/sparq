@@ -137,8 +137,11 @@ impl MaterializedGraph {
 
     /// Full re-materialization from the current base: recompute the TBox closures, re-sweep
     /// every base triple, and rebuild all derivation counts. Mirrors
-    /// `crate::rdfs::rdfs_closure(.., emit_dr_closure = false, MonoOwl::default())` exactly,
-    /// except emissions are *counted* instead of deduplicated away.
+    /// ONE round of `crate::rdfs::rdfs_closure(.., emit_dr_closure = false, MonoOwl::default())`,
+    /// except emissions are *counted* instead of deduplicated away. That equals the batch
+    /// closure unless the schema is meta (a sub-property of an RDFS schema property, or
+    /// `rdf:type` carrying schema), where the batch path iterates further rounds and this
+    /// graph does not.
     fn rematerialize(&mut self) {
         self.rebuilds += 1;
         let v = &self.v;

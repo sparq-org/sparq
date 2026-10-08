@@ -18,10 +18,12 @@
 //! they blow up the store by O(terms). This matches the "RDFS" rule set materialized by
 //! production engines (GraphDB/RDF4J `rdfs` minus the axiomatic closure).
 //!
-//! The fixpoint is **naive** (re-derive from the full set each round until stable) — chosen
-//! for obvious correctness; RDFS closures converge in a handful of rounds (≈ hierarchy
-//! depth + 1). Semi-naive (delta-only) evaluation is a future optimization; materialization
-//! is an opt-in build-time step, never on the query hot path.
+//! The six rules are computed to a true fixpoint. The schema (TBox) is saturated once and the
+//! assertions swept once against it, which is complete for ordinary schemas. When a rule can
+//! derive a schema triple (e.g. a sub-property of `rdfs:subClassOf`) or `rdf:type` itself
+//! carries schema (e.g. `rdf:type rdfs:domain ex:C`), that round repeats over the derived set
+//! until nothing new appears (#5090). Materialization is an opt-in build-time step, never on
+//! the query hot path.
 
 use crate::Vocab;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -244,16 +246,7 @@ pub(crate) fn emit_consequences(
         // match, so it cannot express this shape without rebuilding the rule structure
         // around it. Full rationale in `substrate_join.rs`; pinned by
         // `tests::prop_expand_inverse_types_through_oriented_domain`.
-        for &(r, swapped) in &px.map[&p] {
-            let (rs_, ro_) = if swapped { (o, s) } else { (s, o) };
-            out.push([rs_, r, ro_]); // rdfs7 / prp-inv / prp-symp / prp-eqp
-            if let Some(cs) = dom_full.get(&r) {
-                out.extend(cs.iter().map(|&c| [rs_, v.ty, c])); // rdfs2 (+rdfs9)
-            }
-            if let Some(cs) = rng_full.get(&r) {
-                out.extend(cs.iter().map(|&c| [ro_, v.ty, c])); // rdfs3 (+rdfs9)
-            }
-        }
+        emit_prop_expand([s, o], &px.map[&p], v, dom_full, rng_full, out);
     } else {
         // No PropExpand active, OR `p` never appears in the property-orientation TBox (no
         // subPropertyOf/inverseOf/symmetric/equivalent edge) — its expansion is the trivial
@@ -276,12 +269,36 @@ pub(crate) fn emit_consequences(
     }
 }
 
+/// The active-`PropExpand` emission for one asserted `(s, _, o)` whose predicate expands to
+/// `rewrites`: each `(r, swapped)` derives the (possibly transposed) `r` edge, typed through
+/// `r`'s domain/range.
+fn emit_prop_expand(
+    [s, o]: [Id; 2],
+    rewrites: &[(Id, bool)],
+    v: &Vocab,
+    dom_full: &FxHashMap<Id, Vec<Id>>,
+    rng_full: &FxHashMap<Id, Vec<Id>>,
+    out: &mut Vec<[Id; 3]>,
+) {
+    for &(r, swapped) in rewrites {
+        let (rs_, ro_) = if swapped { (o, s) } else { (s, o) };
+        out.push([rs_, r, ro_]); // rdfs7 / prp-inv / prp-symp / prp-eqp
+        if let Some(cs) = dom_full.get(&r) {
+            out.extend(cs.iter().map(|&c| [rs_, v.ty, c])); // rdfs2 (+rdfs9)
+        }
+        if let Some(cs) = rng_full.get(&r) {
+            out.extend(cs.iter().map(|&c| [ro_, v.ty, c])); // rdfs3 (+rdfs9)
+        }
+    }
+}
+
 /// The plain-RDFS predicate join for one asserted `(s, p, o)`: rdfs7 (subPropertyOf rewrite),
 /// rdfs2 (domain typing) and rdfs3 (range typing), keyed on the predicate `p`. Factored out of
 /// [`emit_consequences`] so the substrate-join path (`sweep` under the `substrate-join` feature)
 /// can compute the SAME emission in a batch through the shared [`sparq_substrate::join`] kernels
-/// ([OPUS-4.8] sq-yk6or). The two paths emit the identical multiset (asserted by a test).
-#[cfg(any(not(feature = "substrate-join"), test))]
+/// (sq-yk6or). The two paths emit the identical multiset (asserted by a test). Also used
+/// on every feature path for `rdf:type` assertions when `rdf:type` itself carries schema
+/// (see [`rdfs_closure`]).
 #[inline]
 fn emit_plain_rdfs(
     [s, p, o]: [Id; 3],
@@ -575,6 +592,12 @@ pub fn materialize_rdfs(dict: &mut Dict, triples: &mut Vec<[Id; 3]>) -> usize {
 /// are independent and need no fixpoint, so the sweep is embarrassingly parallel. Used directly
 /// for RDFS, and by the OWL-RL materializer when the ontology uses no OWL-specific features (the
 /// OWL closure is then exactly RDFS + scm-dom/rng).
+///
+/// One such round is a fixpoint only while no rule can DERIVE a schema triple and `rdf:type`
+/// carries no schema of its own (#5090). When the schema is "meta" in that sense (see
+/// [`ClosureRound::meta`]), rounds repeat over the asserted ∪ derived set until one adds
+/// nothing, so a derived `subClassOf` / `subPropertyOf` / `domain` / `range` / `rdf:type`
+/// triple feeds back into the schema closure. Ordinary schemas run exactly one round.
 pub(crate) fn rdfs_closure(
     dict: &mut Dict,
     triples: &mut Vec<[Id; 3]>,
@@ -584,12 +607,52 @@ pub(crate) fn rdfs_closure(
     let v = Vocab::intern(dict);
     let original: FxHashSet<[Id; 3]> = triples.iter().copied().collect();
 
+    let first = closure_round(&original, &v, emit_dr_closure, mono);
+    let derived = if !first.meta || first.derived.is_empty() {
+        first.derived
+    } else {
+        let mut current = original.clone();
+        let mut fresh = first.derived;
+        while !fresh.is_empty() {
+            current.extend(fresh);
+            fresh = closure_round(&current, &v, emit_dr_closure, mono).derived;
+        }
+        let mut d: Vec<[Id; 3]> = current.into_iter().filter(|t| !original.contains(t)).collect();
+        d.sort_unstable();
+        d
+    };
+
+    let added = derived.len();
+    triples.clear();
+    triples.extend(original_in_order(&original));
+    triples.extend(derived);
+    // NOT `triples.len() - before`: a caller may pass DUPLICATE input triples
+    // (e.g. RDF/XML loaders emit repeated declarations), which the rebuild
+    // dedups — the subtraction then underflows. The new-triple count is the
+    // derived set's size by construction.
+    added
+}
+
+/// One schema-saturate-then-sweep round of [`rdfs_closure`] over `current`.
+struct ClosureRound {
+    /// The sorted, de-duplicated consequences not already in `current`.
+    derived: Vec<[Id; 3]>,
+    /// Whether the schema lets a rule derive a schema triple or makes `rdf:type` a schema
+    /// subject: some RDFS schema property (`rdf:type`, `subClassOf`, `subPropertyOf`,
+    /// `domain`, `range`) appears in the subPropertyOf closure, has a domain/range, or takes
+    /// part in an `owl:inverseOf` / `owl:SymmetricProperty` axiom. Only then can the round's
+    /// output enable further consequences.
+    meta: bool,
+}
+
+fn closure_round(original: &FxHashSet<[Id; 3]>, v: &Vocab, emit_dr_closure: bool, mono: &MonoOwl) -> ClosureRound {
+
     // 1. Raw schema maps from the input.
     let mut sc: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
     let mut sp: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
     let mut dom: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
     let mut rng: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
-    for &[s, p, o] in &original {
+    for &[s, p, o] in original {
         if p == v.sub_class {
             sc.entry(s).or_default().push(o);
         } else if p == v.sub_prop {
@@ -626,17 +689,36 @@ pub(crate) fn rdfs_closure(
         None
     };
 
+    let schema_props = [v.ty, v.sub_class, v.sub_prop, v.domain, v.range];
+    let is_schema = |p: &Id| schema_props.contains(p);
+    let meta = sp_closure.iter().any(|(p, qs)| is_schema(p) || qs.iter().any(is_schema))
+        || dom.keys().chain(rng.keys()).any(is_schema)
+        || mono.inverse.iter().any(|(p, qs)| is_schema(p) || qs.iter().any(is_schema))
+        || mono.symmetric.iter().any(is_schema);
+
     // 3. Single parallel ABox sweep + the schema-closure triples (rdfs11 / rdfs5).
     let asserted: Vec<[Id; 3]> = original.iter().copied().collect();
     let mut emitted = sweep(
         &asserted,
-        &v,
+        v,
         &sc_closure,
         &sp_closure,
         &dom_full,
         &rng_full,
         prop_expand.as_ref(),
     );
+    // The sweep routes `rdf:type` assertions to rdfs9 only. When `rdf:type` is itself a
+    // sub-property or carries a domain/range, rdfs2/3/7 (and the OWL property rewrite) must
+    // also fire on them.
+    if meta {
+        let rewrites = prop_expand.as_ref().and_then(|px| px.map.get(&v.ty));
+        for &[s, p, o] in asserted.iter().filter(|t| t[1] == v.ty) {
+            match rewrites {
+                Some(rw) => emit_prop_expand([s, o], rw, v, &dom_full, &rng_full, &mut emitted),
+                None => emit_plain_rdfs([s, p, o], v, &sp_closure, &dom_full, &rng_full, &mut emitted),
+            }
+        }
+    }
     for (&c, ds) in &sc_closure {
         emitted.extend(ds.iter().map(|&d| [c, v.sub_class, d]));
     }
@@ -654,17 +736,7 @@ pub(crate) fn rdfs_closure(
     }
 
     // 4. De-duplicate the derived facts, drop those already asserted, sort for determinism.
-    let derived = dedup_derived(emitted, &original);
-
-    let added = derived.len();
-    triples.clear();
-    triples.extend(original_in_order(&original));
-    triples.extend(derived);
-    // NOT `triples.len() - before`: a caller may pass DUPLICATE input triples
-    // (e.g. RDF/XML loaders emit repeated declarations), which the rebuild
-    // dedups — the subtraction then underflows. The new-triple count is the
-    // derived set's size by construction.
-    added
+    ClosureRound { derived: dedup_derived(emitted, original), meta }
 }
 
 
@@ -693,6 +765,75 @@ mod tests {
         let g = |iri: &str| dict.lookup(&Term::NamedNode(NamedNode::new_unchecked(iri.to_string())));
         let (si, pi, oi) = (g(s), g(p), g(o));
         si != 0 && pi != 0 && oi != 0 && set.contains(&[si, pi, oi])
+    }
+
+    /// The rdfs2/3/5/7/9/11 fixpoint computed rule-by-rule through the semi-naive [`RdfsIndex`]
+    /// (every rule in both delta directions, no schema pre-saturation): the oracle the
+    /// schema-saturating `rdfs_closure` must agree with.
+    fn oracle_closure(dict: &mut Dict, triples: &[[Id; 3]]) -> FxHashSet<[Id; 3]> {
+        let v = Vocab::intern(dict);
+        let mut idx = RdfsIndex::default();
+        let mut seen: FxHashSet<[Id; 3]> = triples.iter().copied().collect();
+        let mut work: Vec<[Id; 3]> = seen.iter().copied().collect();
+        let mut out = Vec::new();
+        while let Some(t) = work.pop() {
+            idx.insert(t, &v);
+            out.clear();
+            idx.derive(t, &v, &mut out);
+            work.extend(out.drain(..).filter(|&d| seen.insert(d)));
+        }
+        seen
+    }
+
+    /// #5090: a rule that DERIVES a schema triple (a sub-property of an RDFS schema property),
+    /// or a schema property carrying a domain, must feed back into the schema closure. Each
+    /// case is one of the issue's four shapes; the materializer must reach the full fixpoint.
+    #[test]
+    fn derived_schema_triples_reach_the_fixpoint() {
+        let x = |l: &str| format!("http://ex/{l}");
+        let (ty, sc, sp, dom) = (
+            rdf::TYPE.as_str(),
+            rdfs::SUB_CLASS_OF.as_str(),
+            rdfs::SUB_PROPERTY_OF.as_str(),
+            rdfs::DOMAIN.as_str(),
+        );
+        // (asserted, must-be-entailed)
+        type Case = (Vec<[String; 3]>, Vec<[String; 3]>);
+        let cases: Vec<Case> = vec![
+            (
+                vec![
+                    [x("sub"), sp.into(), sc.into()],
+                    [x("A"), x("sub"), x("B")],
+                    [x("B"), sc.into(), x("C")],
+                    [x("x"), ty.into(), x("A")],
+                ],
+                vec![[x("A"), sc.into(), x("C")], [x("x"), ty.into(), x("B")], [x("x"), ty.into(), x("C")]],
+            ),
+            (
+                vec![[x("kind"), sp.into(), ty.into()], [x("x"), x("kind"), x("C")], [x("C"), sc.into(), x("D")]],
+                vec![[x("x"), ty.into(), x("D")]],
+            ),
+            (
+                vec![[ty.into(), dom.into(), x("Thing")], [x("x"), ty.into(), x("C")]],
+                vec![[x("x"), ty.into(), x("Thing")]],
+            ),
+            (
+                vec![[x("spo"), sp.into(), sp.into()], [x("p"), x("spo"), x("q")], [x("a"), x("p"), x("b")]],
+                vec![[x("a"), x("q"), x("b")]],
+            ),
+        ];
+        for (i, (input, expected)) in cases.into_iter().enumerate() {
+            let mut dict = Dict::new();
+            let mut triples: Vec<[Id; 3]> =
+                input.iter().map(|t| [0, 1, 2].map(|k| iri(&mut dict, &t[k]))).collect();
+            let oracle = oracle_closure(&mut dict, &triples);
+            materialize_rdfs(&mut dict, &mut triples);
+            let set: FxHashSet<[Id; 3]> = triples.iter().copied().collect();
+            for [s_, p_, o_] in &expected {
+                assert!(has(&dict, &set, s_, p_, o_), "case {}: missing ({s_} {p_} {o_})", i + 1);
+            }
+            assert_eq!(set, oracle, "case {}: closure differs from the rule-by-rule fixpoint", i + 1);
+        }
     }
 
     #[test]

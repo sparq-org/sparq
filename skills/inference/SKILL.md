@@ -335,7 +335,7 @@ The RDF 1.1 Semantics D-entailment regime materializes the **rdfD1 datatype-typi
 - Boolean: `xsd:boolean`.
 - Integer family (13 XSD types — `xsd:integer` + 12 derived): `xsd:long`/`xsd:int`/`xsd:short`/`xsd:byte` (signed); `xsd:unsignedLong`/`xsd:unsignedInt`/`xsd:unsignedShort`/`xsd:unsignedByte` (unsigned); `xsd:nonNegativeInteger`/`xsd:positiveInteger`/`xsd:nonPositiveInteger`/`xsd:negativeInteger` (restricted).
 - Numeric: `xsd:decimal` (exact, unbounded magnitude via canonical-decimal STRING comparison, never f64), `xsd:double`, `xsd:float` (IEEE 754, distinct value spaces).
-- Temporal: `xsd:dateTime`, `xsd:dateTimeStamp`, `xsd:date`.
+- Temporal: `xsd:dateTime`, `xsd:dateTimeStamp` (explicit timezone required: a timezone-free lexical is ill-formed), `xsd:date`.
 - URI: `xsd:anyURI`.
 - Binary: `xsd:hexBinary`, `xsd:base64Binary` (shared octet-sequence value space).
 

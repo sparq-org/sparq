@@ -139,8 +139,10 @@ pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Ve
             i += 1;
             None
         } else {
-            let g = graph_key(bytes, i)?;
+            // Span first: it rejects a `<<(` triple term in graph position with the precise
+            // object-only message before `graph_key`'s IRI scan sees the inner `<`.
             let jg = span_term(bytes, i)?;
+            let g = graph_key(bytes, i)?;
             i = skip_ws(bytes, jg);
             if i >= n || bytes[i] != b'.' {
                 return Err(format!("N-Quads: expected '.' at byte {i}"));
@@ -173,15 +175,17 @@ pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Ve
 fn graph_key(b: &[u8], i: usize) -> Result<GraphKey, String> {
     match b.get(i) {
         Some(b'<') => {
-            let (start, end, esc, _next) = scan_delim(b, i, b'>').map_err(as_nquads_err)?;
-            Ok(GraphKey::Iri(decode(&b[start..end], esc).map_err(as_nquads_err)?.into_owned()))
+            let (start, end, esc, _next) = scan_iri(b, i).map_err(as_nquads_err)?;
+            let s = decode(&b[start..end], esc).map_err(as_nquads_err)?;
+            check_absolute(&s, i).map_err(as_nquads_err)?;
+            Ok(GraphKey::Iri(s.into_owned()))
         }
         Some(b'_') => {
             if b.get(i + 1) != Some(&b':') {
                 return Err(format!("N-Quads: bad blank node graph at byte {i}"));
             }
             let start = i + 2;
-            let j = blank_label_end(b, start);
+            let j = blank_label(b, start).map_err(as_nquads_err)?;
             Ok(GraphKey::Blank(str_of(&b[start..j]).to_owned()))
         }
         _ => Err(format!("N-Quads: graph name must be an IRI or blank node at byte {i}")),
@@ -209,7 +213,7 @@ fn span_term(b: &[u8], i: usize) -> Result<usize, String> {
             if b.get(i + 1) != Some(&b':') {
                 return Err(format!("N-Quads: bad blank node at byte {i}"));
             }
-            Ok(blank_label_end(b, i + 2))
+            blank_label(b, i + 2).map_err(as_nquads_err)
         }
         Some(b'"') => span_literal(b, i),
         _ => Err(format!("N-Quads: unexpected term start at byte {i}")),
@@ -492,8 +496,9 @@ fn validate_chunk_utf8(bytes: &[u8], format: &str) -> Result<(), String> {
 ///   index where the scan found the ASCII closer (the only other loop exit runs off the end and
 ///   returns `Err` before any span is taken). The `\` escape skip can only ever step over bytes,
 ///   never change which byte the closer test matched.
-/// * `blank` and `graph_key` — `x = i + 2` past the ASCII `_:`; `y` from `blank_label_end`,
-///   which stops at an ASCII whitespace byte (or `b.len()`) and then backs over ASCII `.` bytes.
+/// * `blank` and `graph_key` — `x = i + 2` past the ASCII `_:`; `y` from `blank_label`,
+///   which stops at an ASCII non-label byte (or `b.len()`; non-ASCII bytes are consumed whole)
+///   and then backs over ASCII `.` bytes.
 /// * `literal`'s `@lang` tag — `x = after + 1` past the ASCII `@`; `y` is the first index whose
 ///   byte fails `is_ascii_alphanumeric() || == b'-'`, i.e. either `b.len()` or the index OF a
 ///   non-ASCII byte. A non-ASCII byte reached by scanning forward over ASCII bytes in a valid
@@ -613,6 +618,68 @@ fn scan_delim(b: &[u8], open: usize, close: u8) -> Result<(usize, usize, bool, u
     Ok((start, j, esc, j + 1))
 }
 
+/// Byte classes for [`scan_iri`]: `0` = ordinary IRIREF byte, `1` = the closing `>`, `2` = `\`
+/// (must start a `\u` / `\U` UCHAR), `3` = a byte the IRIREF production forbids
+/// (`` [#x00-#x20<>"{}|^`\] ``). Bytes `>= 0x80` are ordinary (UTF-8 already validated).
+const IRI_CLASS: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let mut c = 0;
+    while c <= 0x20 {
+        t[c] = 3;
+        c += 1;
+    }
+    t[b'<' as usize] = 3;
+    t[b'"' as usize] = 3;
+    t[b'{' as usize] = 3;
+    t[b'}' as usize] = 3;
+    t[b'|' as usize] = 3;
+    t[b'^' as usize] = 3;
+    t[b'`' as usize] = 3;
+    t[b'>' as usize] = 1;
+    t[b'\\' as usize] = 2;
+    t
+};
+
+/// [`scan_delim`] for an `IRIREF` (`` '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>' ``): the same
+/// `(start, end, escaped, next)` result, but a forbidden byte or a non-UCHAR `\` escape is an
+/// error (W3C `nt-syntax-bad-uri-01`/`-04`). One table lookup per byte.
+#[inline]
+fn scan_iri(b: &[u8], open: usize) -> Result<(usize, usize, bool, usize), String> {
+    let start = open + 1;
+    let mut j = start;
+    let mut esc = false;
+    while j < b.len() {
+        match IRI_CLASS[b[j] as usize] {
+            0 => j += 1,
+            1 => return Ok((start, j, esc, j + 1)),
+            2 if matches!(b.get(j + 1), Some(b'u' | b'U')) => {
+                esc = true;
+                j += 2;
+            }
+            _ => return Err(format!("N-Triples: invalid IRI character at byte {j}")),
+        }
+    }
+    Err(format!("N-Triples: unterminated delimiter from byte {open}"))
+}
+
+/// N-Triples / N-Quads IRIs must be absolute: the (decoded) IRI starts with a scheme
+/// `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":"` (W3C `nt-syntax-bad-uri-06..09`).
+#[inline]
+fn check_absolute(iri: &str, at: usize) -> Result<(), String> {
+    let b = iri.as_bytes();
+    if b.first().is_some_and(u8::is_ascii_alphabetic) {
+        for &c in &b[1..] {
+            if c == b':' {
+                return Ok(());
+            }
+            if !(c.is_ascii_alphanumeric() || matches!(c, b'+' | b'-' | b'.')) {
+                break;
+            }
+        }
+    }
+    Err(format!("N-Triples: relative IRI <{}> at byte {}", iri, at))
+}
+
 fn decode<'a>(raw: &'a [u8], esc: bool) -> Result<Cow<'a, str>, String> {
     let s = str_of(raw);
     if esc {
@@ -634,8 +701,9 @@ thread_local! {
 }
 
 fn iri(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
-    let (start, end, esc, next) = scan_delim(b, i, b'>')?;
+    let (start, end, esc, next) = scan_iri(b, i)?;
     let s = decode(&b[start..end], esc)?;
+    check_absolute(&s, i)?;
     // [OPUS-4.8] (sq-7d3dj.18) When the opt-in `iri-fast` feature is on, validate every IRIREF
     // against RFC-3987 (fast path in front of `oxiri`) so the byte-level loader rejects the
     // malformed IRIs the serial oxttl path already rejects — reaching conformance parity at
@@ -650,23 +718,29 @@ fn iri(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     Ok((dict.intern_iri(&s), next))
 }
 
-/// [OPUS-4.8] (sq-25r3) End index (exclusive) of a `BLANK_NODE_LABEL` body starting at `start`
-/// (the byte after `_:`). Per the N-Triples/N-Quads grammar a label may contain INTERIOR `.`
-/// (`(PN_CHARS | '.')* PN_CHARS`) but must not END in `.`, so the scan runs to the next
-/// whitespace and then backs the cursor over any trailing `.` bytes — which are the statement
-/// terminator, not part of the label. This matches the serial oxttl reference exactly
-/// (`_:a.b` → label `a.b`; `_:abc.` → label `abc`, `.` is the terminator) and is the SINGLE
-/// source of truth shared by [`blank`] (interning), [`span_term`] (no-intern span), and
-/// [`graph_key`] (graph field) so the three never diverge on dotted labels.
-fn blank_label_end(b: &[u8], start: usize) -> usize {
+/// End index (exclusive) of a `BLANK_NODE_LABEL` body starting at `start` (the byte after
+/// `_:`): `(PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?`. The scan runs over label bytes
+/// (ASCII `[A-Za-z0-9_.-]`, plus any non-ASCII byte: the Unicode PN_CHARS ranges are not
+/// checked) and then backs over trailing `.` bytes, which are the statement terminator, not
+/// part of the label (`_:a.b` → `a.b`; `_:abc.` → `abc`, matching oxttl). Stopping at the first
+/// non-label byte lets a label abut the next term (`_:s<http://p>`, W3C `minimal_whitespace`);
+/// an empty label or one starting with `-` / `.` is an error (`nt-syntax-bad-bnode-01`), and a
+/// stray `:` is left for the caller to reject as the next term (`nt-syntax-bad-bnode-02`).
+/// The single source of truth shared by [`blank`] (interning), [`span_term`] (no-intern span)
+/// and [`graph_key`] (graph field) so the three never diverge.
+fn blank_label(b: &[u8], start: usize) -> Result<usize, String> {
     let mut j = start;
-    while j < b.len() && !matches!(b[j], b' ' | b'\t' | b'\r' | b'\n') {
+    while j < b.len() && (b[j].is_ascii_alphanumeric() || matches!(b[j], b'_' | b'-' | b'.') || b[j] >= 0x80) {
         j += 1;
     }
     while j > start && b[j - 1] == b'.' {
         j -= 1;
     }
-    j
+    match b.get(start) {
+        Some(b'-' | b'.') => Err(format!("N-Triples: bad blank node label at byte {start}")),
+        _ if j == start => Err(format!("N-Triples: empty blank node label at byte {start}")),
+        _ => Ok(j),
+    }
 }
 
 fn blank(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
@@ -674,7 +748,7 @@ fn blank(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
         return Err(format!("N-Triples: bad blank node at byte {i}"));
     }
     let start = i + 2;
-    let j = blank_label_end(b, start);
+    let j = blank_label(b, start)?;
     Ok((dict.intern_blank(str_of(&b[start..j])), j))
 }
 
@@ -696,6 +770,20 @@ fn lowercase_lang(raw: &str) -> Cow<'_, str> {
     }
 }
 
+/// `[a-zA-Z]+ ('-' [a-zA-Z0-9]+)*` with an optional RDF 1.2 `'--' [a-zA-Z]+` direction suffix
+/// (W3C `nt-syntax-bad-lang-01`: `"string"@1`).
+fn valid_lang_tag(t: &[u8]) -> bool {
+    let (tag, dir) = match t.windows(2).position(|w| w == b"--") {
+        Some(k) => (&t[..k], Some(&t[k + 2..])),
+        None => (t, None),
+    };
+    let mut parts = tag.split(|&c| c == b'-');
+    let primary_ok = parts.next().is_some_and(|p| !p.is_empty() && p.iter().all(u8::is_ascii_alphabetic));
+    primary_ok
+        && parts.all(|p| !p.is_empty() && p.iter().all(u8::is_ascii_alphanumeric))
+        && dir.is_none_or(|d| !d.is_empty() && d.iter().all(u8::is_ascii_alphabetic))
+}
+
 fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     let (vstart, vend, vesc, after) = scan_delim(b, i, b'"')?;
     let value = decode(&b[vstart..vend], vesc)?;
@@ -706,8 +794,9 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
             if b.get(open) != Some(&b'<') {
                 return Err(format!("N-Triples: bad datatype at byte {open}"));
             }
-            let (dstart, dend, desc, next) = scan_delim(b, open, b'>')?;
+            let (dstart, dend, desc, next) = scan_iri(b, open)?;
             let dt = decode(&b[dstart..dend], desc)?;
+            check_absolute(&dt, open)?;
             Ok((dict.intern_lit(&value, &dt, None), next))
         }
         // @lang
@@ -720,6 +809,9 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
             // RDF 1.2 `@lang--dir` keeps the combined slot (the dict's stored encoding)
             // but is typed rdf:dirLangString.
             let raw = str_of(&b[lstart..j]);
+            if !valid_lang_tag(raw.as_bytes()) {
+                return Err(format!("N-Triples: invalid language tag at byte {lstart}"));
+            }
             let dt = if raw.contains("--") { RDF_DIR_LANG_STRING } else { RDF_LANG_STRING };
             // [OPUS-4.8] (sq-langcase / KamiQuasi #1119) NORMALISE the language tag to ASCII
             // lowercase, matching the oxttl/oxrdf paths (`Literal::new_language_tagged_literal`
@@ -786,6 +878,51 @@ mod tests {
 
     fn iri(s: &str) -> Term {
         Term::NamedNode(NamedNode::new_unchecked(s))
+    }
+
+    /// #2716: the W3C N-Triples syntax cases the byte parser used to accept (bad IRI chars,
+    /// relative IRIs, bad blank-node labels, bad language tags) are rejected on both entry points.
+    #[test]
+    fn w3c_negative_syntax_cases_rejected() {
+        let bad: &[&str] = &[
+            "<http://example/ space> <http://example/p> <http://example/o> .",
+            "<http://example/\\n> <http://example/p> <http://example/o> .",
+            "<http://example/{x}> <http://example/p> <http://example/o> .",
+            "<s> <http://example/p> <http://example/o> .",
+            "<http://example/s> <p> <http://example/o> .",
+            "<http://example/s> <http://example/p> <o> .",
+            "<http://example/s> <http://example/p> \"foo\"^^<dt> .",
+            "_::a  <http://example/p> <http://example/o> .",
+            "_:abc:def  <http://example/p> <http://example/o> .",
+            "_:-a <http://example/p> <http://example/o> .",
+            "<http://example/s> <http://example/p> \"string\"@1 .",
+            "<http://example/s> <http://example/p> \"string\"@en- .",
+        ];
+        for doc in bad {
+            assert!(parse_chunk(doc.as_bytes(), &mut Dict::new()).is_err(), "N-Triples accepted {doc}");
+            #[cfg(feature = "parallel")]
+            assert!(parse_quads_chunk(doc.as_bytes()).is_err(), "N-Quads accepted {doc}");
+        }
+        #[cfg(feature = "parallel")]
+        assert!(parse_quads_chunk(b"<http://example/s> <http://example/p> <http://example/o> <g>.").is_err());
+    }
+
+    /// #2716: a blank-node label ends at the first non-label byte, so it may abut the next term
+    /// (W3C `minimal_whitespace`); valid escapes, dotted labels and direction tags still parse.
+    #[test]
+    fn w3c_positive_syntax_cases_accepted() {
+        let doc = "_:s<http://example/p><http://example/o>.\n_:s<http://example/p>\"Alice\".\n\
+                   _:s<http://example/p>_:bnode1.\n<http://example/s><http://example/p>_:o.\n\
+                   _:a.b <http://example/\\u0041> \"x\"@en-US--ltr .\n\
+                   _:a.b <urn:x-y.z+w:p> \"x\"^^<http://example/dt> .\n";
+        let mut d = Dict::new();
+        let t = parse_chunk(doc.as_bytes(), &mut d).expect("valid N-Triples");
+        assert_eq!(t.len(), 6);
+        assert_eq!(t[0][0], t[1][0], "`_:s` abutting `<` is the same label each time");
+        assert!(d.lookup(&Term::BlankNode(BlankNode::new_unchecked("a.b"))) != 0);
+        assert!(d.lookup(&iri("http://example/A")) != 0);
+        #[cfg(feature = "parallel")]
+        assert_eq!(parse_quads_chunk(doc.as_bytes()).expect("valid N-Quads")[0].2.len(), 6);
     }
 
     #[test]
