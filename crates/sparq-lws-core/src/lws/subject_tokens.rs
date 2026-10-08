@@ -58,35 +58,84 @@ const MAX_DPOP_JTIS: usize = 65_536;
 /// How many of an OpenID Provider's keys an ID Token's signature is tried against.
 const MAX_UNNAMED_KEYS: usize = 8;
 
-/// How many live proof ids one key may hold in the replay cache: a client presents a proof per
-/// token request, so a key with more than this many in one window is refused rather than let it
-/// crowd out every other key.
+/// The replay cache is split so that no party can use up room another needs. Half of it is held
+/// for the providers named in `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`; every other provider
+/// shares the other half, each held to [`MAX_DPOP_JTIS_PER_OPEN_ISSUER`]. Within either pool each
+/// identity (issuer and subject) and each key is held to its own share, so an identity, however
+/// many keys it makes, crowds out only itself, and a provider that registers identities freely
+/// crowds out only providers outside the trusted list.
+const MAX_DPOP_JTIS_TRUSTED: usize = MAX_DPOP_JTIS / 2;
+const MAX_DPOP_JTIS_OPEN: usize = MAX_DPOP_JTIS - MAX_DPOP_JTIS_TRUSTED;
+/// How many live proof ids all the identities of one provider outside the trusted list may hold.
+const MAX_DPOP_JTIS_PER_OPEN_ISSUER: usize = 1024;
+/// How many live proof ids one identity may hold: a client presents a proof per token request,
+/// so an identity with more than this many in one window is refused.
+const MAX_DPOP_JTIS_PER_IDENTITY: usize = 32;
+/// How many live proof ids one key may hold.
 const MAX_DPOP_JTIS_PER_KEY: usize = 32;
 
+/// Whose proof a replay cache entry is: the verified ID Token's issuer and subject, and whether
+/// the issuer is trusted. Entries are still keyed by the proof key and `jti` alone, so a proof
+/// replayed under another identity is refused too.
+pub struct ProofOwner<'a> {
+    pub issuer: &'a str,
+    pub subject: &'a str,
+    pub trusted: bool,
+}
+
+/// One quota the replay cache keeps: a pool, an issuer, an identity or a key.
+#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Share {
+    Pool(bool),
+    Issuer(String),
+    Identity(String, String),
+    Key(String),
+}
+
+impl Share {
+    fn limit(&self) -> usize {
+        match self {
+            Share::Pool(true) => MAX_DPOP_JTIS_TRUSTED,
+            Share::Pool(false) => MAX_DPOP_JTIS_OPEN,
+            Share::Issuer(_) => MAX_DPOP_JTIS_PER_OPEN_ISSUER,
+            Share::Identity(..) => MAX_DPOP_JTIS_PER_IDENTITY,
+            Share::Key(_) => MAX_DPOP_JTIS_PER_KEY,
+        }
+    }
+}
+
 /// The DPoP proof ids (`jti`) seen at the token endpoint, by the key that signed them, until
-/// their proofs are too old to be accepted anyway. Expired entries leave in expiry order, a few at
-/// a time as new ones arrive, so no request scans the whole cache.
+/// their proofs are too old to be accepted anyway. Each entry counts against every share it
+/// belongs to (see [`MAX_DPOP_JTIS_TRUSTED`]). Expired entries leave in expiry order, a few at a
+/// time as new ones arrive, so no request scans the whole cache.
 #[derive(Default)]
 pub struct DpopReplay(std::sync::Mutex<Replay>);
 
+/// An entry's place in expiry order: when it expires, and its key and `jti`.
+type Expiry = std::cmp::Reverse<(i64, String, String)>;
+
 #[derive(Default)]
 struct Replay {
-    seen: std::collections::HashMap<(String, String), i64>,
-    by_key: std::collections::HashMap<String, usize>,
-    expiry: std::collections::BinaryHeap<std::cmp::Reverse<(i64, String, String)>>,
+    /// Each live entry, by key and `jti`, with the shares it counts against.
+    seen: std::collections::HashMap<(String, String), Vec<Share>>,
+    used: std::collections::HashMap<Share, usize>,
+    expiry: std::collections::BinaryHeap<Expiry>,
 }
 
 impl DpopReplay {
-    /// Remember `jti` from the key `jkt` until `until`; `false` when it was seen already (a
-    /// replay), or there is no room: for this key, or at all. Fails closed: an entry is never
+    /// Remember `jti` from the key `jkt`, presented by `owner`, until `until`; `false` when it was
+    /// seen already (a replay), or one of its shares is full. Fails closed: an entry is never
     /// evicted before it expires.
-    fn first_use(&self, jkt: &str, jti: &str, until: i64, now: i64) -> bool {
+    fn first_use(
+        &self,
+        owner: &ProofOwner<'_>,
+        jkt: &str,
+        jti: &str,
+        until: i64,
+        now: i64,
+    ) -> bool {
         let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        let Replay {
-            seen,
-            by_key,
-            expiry,
-        } = &mut *guard;
+        let Replay { seen, used, expiry } = &mut *guard;
         while let Some(std::cmp::Reverse((t, _, _))) = expiry.peek() {
             if *t > now {
                 break;
@@ -94,23 +143,37 @@ impl DpopReplay {
             let Some(std::cmp::Reverse((_, k, j))) = expiry.pop() else {
                 break;
             };
-            seen.remove(&(k.clone(), j));
-            if let Some(n) = by_key.get_mut(&k) {
-                *n -= 1;
-                if *n == 0 {
-                    by_key.remove(&k);
+            for share in seen.remove(&(k, j)).unwrap_or_default() {
+                if let Some(n) = used.get_mut(&share) {
+                    *n -= 1;
+                    if *n == 0 {
+                        used.remove(&share);
+                    }
                 }
             }
         }
         let entry = (jkt.to_string(), jti.to_string());
-        if seen.contains_key(&entry)
-            || seen.len() >= MAX_DPOP_JTIS
-            || by_key.get(jkt).is_some_and(|n| *n >= MAX_DPOP_JTIS_PER_KEY)
+        if seen.contains_key(&entry) {
+            return false;
+        }
+        let mut shares = vec![
+            Share::Pool(owner.trusted),
+            Share::Identity(owner.issuer.to_string(), owner.subject.to_string()),
+            Share::Key(jkt.to_string()),
+        ];
+        if !owner.trusted {
+            shares.push(Share::Issuer(owner.issuer.to_string()));
+        }
+        if shares
+            .iter()
+            .any(|s| used.get(s).is_some_and(|n| *n >= s.limit()))
         {
             return false;
         }
-        seen.insert(entry, until);
-        *by_key.entry(jkt.to_string()).or_default() += 1;
+        for share in &shares {
+            *used.entry(share.clone()).or_default() += 1;
+        }
+        seen.insert(entry, shares);
         expiry.push(std::cmp::Reverse((until, jkt.to_string(), jti.to_string())));
         true
     }
@@ -140,6 +203,7 @@ pub fn check_dpop(
     jkt: &str,
     now: i64,
     replay: &DpopReplay,
+    owner: &ProofOwner<'_>,
 ) -> Result<(), String> {
     let proof = proof.ok_or("a DPoP-bound ID Token needs a DPoP proof on the token request")?;
     let jws = Jws::parse(proof).ok_or("the DPoP proof is not a JWT")?;
@@ -190,7 +254,7 @@ pub fn check_dpop(
         .claim_str("jti")
         .filter(|j| !j.is_empty() && j.len() <= 256)
         .ok_or("the DPoP proof has no jti")?;
-    if !replay.first_use(jkt, jti, iat + DPOP_WINDOW_SECS + 1, now) {
+    if !replay.first_use(owner, jkt, jti, iat + DPOP_WINDOW_SECS + 1, now) {
         return Err("the DPoP proof was used before".into());
     }
     Ok(())
@@ -739,6 +803,14 @@ async fn oidc(
             jkt,
             jose::now_secs(),
             dpop.replay,
+            &ProofOwner {
+                trusted: cfg
+                    .trusted_oidc_issuers
+                    .iter()
+                    .any(|t| same_issuer(t, &issuer)),
+                issuer: &issuer,
+                subject: &subject,
+            },
         )?,
         None if solid => {
             return Err("a Solid-OIDC ID Token must be bound to a key (cnf.jkt)".into());
@@ -1084,6 +1156,12 @@ mod tests {
         )
     }
 
+    const OWNER: ProofOwner<'static> = ProofOwner {
+        issuer: "https://op.example",
+        subject: "https://op.example/alice",
+        trusted: false,
+    };
+
     /// Review finding: one key could fill the whole replay cache, refusing every other client's
     /// proofs until its entries expired, and each refusal scanned the cache. A key holds at most
     /// [`MAX_DPOP_JTIS_PER_KEY`] live entries, and entries leave in expiry order.
@@ -1091,17 +1169,81 @@ mod tests {
     fn one_key_cannot_fill_the_replay_cache() {
         let replay = DpopReplay::default();
         let now = 1_000;
+        let bob = ProofOwner {
+            subject: "https://op.example/bob",
+            ..OWNER
+        };
         for i in 0..MAX_DPOP_JTIS_PER_KEY {
-            assert!(replay.first_use("k", &format!("j{i}"), now + 60, now));
+            assert!(replay.first_use(&OWNER, "k", &format!("j{i}"), now + 60, now));
         }
-        assert!(!replay.first_use("k", "one more", now + 60, now));
-        assert!(replay.first_use("other", "j0", now + 60, now));
-        // A replay stays refused while it is live; once expired its room comes back.
-        assert!(!replay.first_use("k", "j0", now + 60, now + 30));
-        assert!(replay.first_use("k", "later", now + 200, now + 61));
-        assert!(replay.first_use("k", "j0", now + 200, now + 61));
-        // Everything from before expired; only the two new entries are held.
-        assert_eq!(replay.0.lock().unwrap().seen.len(), 2);
+        assert!(!replay.first_use(&OWNER, "k", "one more", now + 60, now));
+        assert!(replay.first_use(&bob, "other", "j0", now + 60, now));
+        // A replay stays refused while it is live, under any identity; once expired its room
+        // comes back.
+        assert!(!replay.first_use(&OWNER, "k", "j0", now + 60, now + 30));
+        assert!(!replay.first_use(&bob, "k", "j0", now + 60, now + 30));
+        assert!(replay.first_use(&OWNER, "k", "later", now + 200, now + 61));
+        assert!(replay.first_use(&OWNER, "k", "j0", now + 200, now + 61));
+        // Everything from before expired; only the two new entries are held, and so counted.
+        let r = replay.0.lock().unwrap();
+        assert_eq!(r.seen.len(), 2);
+        assert_eq!(r.used.get(&Share::Pool(false)), Some(&2));
+    }
+
+    /// Review finding: per-key limits do not bound an identity that makes keys, nor a provider
+    /// that registers identities. An identity is held to its share whatever keys it uses, a
+    /// provider outside the trusted list to its own, and the trusted pool stays open while the
+    /// rest is full.
+    #[test]
+    fn replay_cache_shares_hold_identities_and_providers() {
+        let replay = DpopReplay::default();
+        let now = 1_000;
+        for i in 0..MAX_DPOP_JTIS_PER_IDENTITY {
+            assert!(replay.first_use(&OWNER, &format!("k{i}"), "j", now + 60, now));
+        }
+        assert!(!replay.first_use(&OWNER, "fresh key", "j", now + 60, now));
+        let names: Vec<String> = (0..MAX_DPOP_JTIS_PER_OPEN_ISSUER / MAX_DPOP_JTIS_PER_IDENTITY)
+            .map(|i| format!("https://op.example/u{i}"))
+            .collect();
+        let mut held = MAX_DPOP_JTIS_PER_IDENTITY;
+        'fill: for name in &names {
+            let who = ProofOwner {
+                subject: name,
+                ..OWNER
+            };
+            for j in 0..MAX_DPOP_JTIS_PER_IDENTITY {
+                if held == MAX_DPOP_JTIS_PER_OPEN_ISSUER {
+                    break 'fill;
+                }
+                assert!(replay.first_use(&who, &format!("{name}#{j}"), "j", now + 60, now));
+                held += 1;
+            }
+        }
+        let newcomer = ProofOwner {
+            subject: "https://op.example/newcomer",
+            ..OWNER
+        };
+        assert!(!replay.first_use(&newcomer, "nk", "j", now + 60, now));
+        let elsewhere = ProofOwner {
+            issuer: "https://other.example",
+            ..newcomer
+        };
+        assert!(replay.first_use(&elsewhere, "nk", "j", now + 60, now));
+        // Fill the open pool; a trusted provider's identities still get in.
+        {
+            let mut r = replay.0.lock().unwrap();
+            r.used.insert(Share::Pool(false), MAX_DPOP_JTIS_OPEN);
+        }
+        let third = ProofOwner {
+            issuer: "https://third.example",
+            ..newcomer
+        };
+        assert!(!replay.first_use(&third, "tk", "j", now + 60, now));
+        let trusted = ProofOwner {
+            trusted: true,
+            ..third
+        };
+        assert!(replay.first_use(&trusted, "tk", "j", now + 60, now));
     }
 
     /// Review finding: the triple limit did not bound what the triples hold: a prefix of half a
@@ -1135,19 +1277,22 @@ mod tests {
         let now = jose::now_secs();
         let replay = DpopReplay::default();
         let ok = dpop_proof(&key, "POST", htu, now, "a");
-        assert_eq!(check_dpop(Some(&ok), htu, &jkt, now, &replay), Ok(()));
+        assert_eq!(
+            check_dpop(Some(&ok), htu, &jkt, now, &replay, &OWNER),
+            Ok(())
+        );
         // Replayed, missing, another key, another target or method, stale, a private jwk.
-        assert!(check_dpop(Some(&ok), htu, &jkt, now, &replay).is_err());
-        assert!(check_dpop(None, htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(Some(&ok), htu, &jkt, now, &replay, &OWNER).is_err());
+        assert!(check_dpop(None, htu, &jkt, now, &replay, &OWNER).is_err());
         let other = jose::EcKey::generate("o");
         let p = dpop_proof(&other, "POST", htu, now, "b");
-        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err());
         let p = dpop_proof(&key, "POST", "http://localhost:3000/elsewhere", now, "c");
-        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err());
         let p = dpop_proof(&key, "GET", htu, now, "d");
-        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err());
         let p = dpop_proof(&key, "POST", htu, now - 600, "e");
-        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err());
         let mut header = serde_json::Map::new();
         header.insert("typ".into(), json!("dpop+jwt"));
         header.insert("jwk".into(), key.private_jwk());
@@ -1155,10 +1300,13 @@ mod tests {
             header,
             &json!({"htm": "POST", "htu": htu, "iat": now, "jti": "f"}),
         );
-        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay).is_err());
+        assert!(check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err());
         // A query on htu is ignored, as RFC 9449 says.
         let p = dpop_proof(&key, "POST", &format!("{htu}?x=1"), now, "g");
-        assert_eq!(check_dpop(Some(&p), htu, &jkt, now, &replay), Ok(()));
+        assert_eq!(
+            check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER),
+            Ok(())
+        );
     }
 
     /// Review finding: a Solid-OIDC ID Token (aud `solid`, bound by `cnf.jkt`) was exchanged

@@ -243,6 +243,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
 | `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
+| `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS` | Comma-separated OpenID Provider issuers whose identities get the reserved half of the DPoP replay cache. Every other provider shares the other half, each provider and each identity held to its own share, so open registration elsewhere cannot lock out these providers' users. |
 
 What the server exposes, all discoverable from the storage description
 (`GET /` with `Accept: application/lws+cid`):

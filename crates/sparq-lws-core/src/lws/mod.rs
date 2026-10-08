@@ -104,6 +104,9 @@ pub struct LwsConfig {
     /// private addresses (identity documents, OpenID providers, webhook inboxes). Development and
     /// conformance testing only.
     pub allow_insecure_fetch: bool,
+    /// OpenID Providers whose identities get the reserved half of the DPoP replay cache (see
+    /// [`subject_tokens::DpopReplay`]). Every other provider shares the other half.
+    pub trusted_oidc_issuers: Vec<String>,
     /// Largest request body read, in bytes; a larger one is refused with 413 before it is
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
@@ -125,6 +128,7 @@ impl LwsConfig {
             notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
+            trusted_oidc_issuers: Vec::new(),
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
         }
@@ -148,6 +152,8 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
+    /// - `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`: comma-separated OpenID Provider issuers whose
+    ///   identities get the reserved half of the DPoP replay cache;
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
@@ -165,6 +171,15 @@ impl LwsConfig {
         cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
         // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
         cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
+        cfg.trusted_oidc_issuers = var("SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS")
+            .map(|v| {
+                v.split(',')
+                    .map(str::trim)
+                    .filter(|i| !i.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
                 .parse()
