@@ -741,7 +741,9 @@ DELEGATES = [
              pass_changed_files=True),
     Delegate("G6 new-config-to-docs", ["python3", "scripts/check-config-documented.py"],
              pass_changed_files=True),
-    Delegate("no-perf-numbers", ["python3", "scripts/check-no-perf-numbers.py", "--enforce"],
+    Delegate("no-perf-numbers", ["python3", "scripts/check-no-perf-numbers.py", "--enforce",
+                                 # #5396: same research/-bench/ exemptions as the CI gate
+                                 "--honour-allowlist"],
              path_filter=re.compile(r"\.(md|typ)$"), pass_changed_paths=True),
     Delegate("readme-template", ["python3", "scripts/check-readme-template.py", "--enforce"],
              path_filter=re.compile(r"^crates/[^/]+/README\.md$"), pass_changed_paths=True),

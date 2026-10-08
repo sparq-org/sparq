@@ -153,6 +153,10 @@ standard it implements.
   [RDFS](https://www.w3.org/TR/rdf-schema/),
   the [OWL 2 RL profile](https://www.w3.org/TR/owl2-profiles/#OWL_2_RL), and
   [Notation3](https://w3c.github.io/N3/spec/) ([guide](skills/inference/SKILL.md)).
+  N3 is measured against the w3c/N3 community-group suite
+  ([report](inference-conformance-report.md)); the community
+  [notation3tests](https://codeberg.org/phochste/notation3tests) suite runs in an
+  advisory lane with no published baseline yet.
 - **SHACL validation** — validate graphs against shapes with
   [SHACL](https://www.w3.org/TR/shacl/) ([guide](skills/shacl-validation/SKILL.md)).
 - **Full-text search** — index and search RDF literals from SPARQL
