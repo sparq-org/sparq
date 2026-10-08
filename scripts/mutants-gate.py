@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Per-crate MUTATION-TESTING RATCHET gate (sq-8kt3, epic sq-qcnn).
+# Per-crate MUTATION-TESTING RATCHET gate (sq-8kt3, epic sq-qcnn).
 #
 # The test-QUALITY companion to the line-coverage ratchet (scripts/coverage-gate.py +
 # bench/coverage-floor.json). Line coverage proves a line RAN; mutation testing proves a
@@ -50,7 +50,7 @@ import argparse, json, os, re, sys
 
 MARGIN = 2  # surviving-mutant slack above the measured value
 
-# [SONNET-4.6] sq-has2g: the `-shard-<k>-<n>` suffix the nightly lane appends to a sub-sharded
+# sq-has2g: the `-shard-<k>-<n>` suffix the nightly lane appends to a sub-sharded
 # crate's output dir AND to its artifact name (ci.yml maps `--shard k/n` -> "-shard-k-n"), i.e.
 # target/mutants/<crate>-shard-2-24/mutants.out/outcomes.json, and after `gh run download`
 # mutants-outcomes-nightly-<crate>-shard-2-24/outcomes.json. cargo-mutants does NOT record the
@@ -100,7 +100,7 @@ def crate_of(outcomes_path, doc):
     if os.path.basename(parent) == "mutants.out":
         parent = os.path.dirname(parent)
     name = os.path.basename(parent)
-    # [SONNET-4.6] sq-has2g: a SUB-SHARDED crate's dir carries the shard suffix the CI lane
+    # sq-has2g: a SUB-SHARDED crate's dir carries the shard suffix the CI lane
     # appends (target/mutants/sparq-engine-shard-2-6/...). Strip it so all of a crate's
     # shards fall under one key and measured_rows() can aggregate them. Only reached when
     # the outcomes doc has no Mutant scenario to read the package from.
@@ -108,7 +108,7 @@ def crate_of(outcomes_path, doc):
 
 
 def shard_of(outcomes_path):
-    """[SONNET-4.6] sq-has2g: (k, n) SHARD IDENTITY for an outcomes.json, or None when the
+    """sq-has2g: (k, n) SHARD IDENTITY for an outcomes.json, or None when the
     path carries none (an unsharded whole-crate run).
 
     Counting input FILES is not a shard set: n files tell you how many artifacts were passed,
@@ -127,7 +127,7 @@ def shard_of(outcomes_path):
 
 
 def run_label(outcomes_path, sid):
-    """[SONNET-4.6] sq-has2g: short label naming ONE contributing outcomes.json in a
+    """sq-has2g: short label naming ONE contributing outcomes.json in a
     diagnostic — "shard k/n" when the path carries an identity, else the run's output dir. The
     IMMEDIATE parent is always "mutants.out", so an unsharded run is named by the dir above
     it; with 24 engine shards, "mutants.out: only 4/400 completed" would not say which shard
@@ -164,7 +164,7 @@ def summarise(doc):
 
 
 def completeness(outcomes_path, completed):
-    """[SONNET-4.6] sq-has2g: TRUNCATION DETECTION -> (planned, completed, unverifiable_reason).
+    """sq-has2g: TRUNCATION DETECTION -> (planned, completed, unverifiable_reason).
     planned is None when completeness CANNOT be established, and the third element then says
     WHY (it is None whenever planned was determined).
 
@@ -180,7 +180,7 @@ def completeness(outcomes_path, completed):
     and shard-aware — it holds only this `--shard k/n` slice), so comparing its length to
     the number of finished outcomes detects the truncation.
 
-    [SONNET-4.6] sq-has2g review-2: when that list is missing, unreadable or the wrong shape
+    sq-has2g review-2: when that list is missing, unreadable or the wrong shape
     the answer is NOT "assume complete". A truncated run whose sidecar simply never reached the
     artifact is indistinguishable from a whole one, so planned=None means NO EVIDENCE EITHER
     WAY, and the reason is returned so seed() can fail CLOSED on it (see seed()); --check, which
@@ -206,7 +206,7 @@ def measured_rows(outcome_paths):
     """Build {crate: {surviving, caught, unviable, timeout, caught_pct, shards}} from
     outcomes files, skipping EXCLUDED crates.
 
-    [SONNET-4.6] sq-has2g: SHARD AGGREGATION. `cargo mutants --shard k/n` slices a crate's
+    sq-has2g: SHARD AGGREGATION. `cargo mutants --shard k/n` slices a crate's
     mutant list into n disjoint parts, and the nightly runs each slice as its OWN matrix
     job writing its OWN outcomes.json (sparq-reason is already 3-sharded; sparq-engine is
     sharded here because it is the largest crate). Those per-shard files all report the
@@ -281,7 +281,7 @@ def measured_rows(outcome_paths):
 
 def _comment_block():
     return [
-        "[OPUS-4.8] MUTATION-TESTING RATCHET (sq-8kt3, epic sq-qcnn) — committed per-crate "
+        "MUTATION-TESTING RATCHET (sq-8kt3, epic sq-qcnn) — committed per-crate "
         "SURVIVING-mutant CEILING, reviewed in diffs exactly like the line-coverage ratchet "
         "(bench/coverage-floor.json). scripts/mutants-gate.py --check FAILS CI when a crate "
         "has MORE surviving (test-undetected) mutants than its ceiling. This measures test "
@@ -305,7 +305,7 @@ def _comment_block():
         "absence of a crate is NOT a claim that it has zero surviving mutants.",
         "Regenerate after tests improve: cargo mutants -p <crate> -o target/mutants/<crate> "
         "&& scripts/mutants-gate.py --seed target/mutants/<crate>/outcomes.json",
-        "[SONNET-4.6] sq-has2g SHARDED CRATES (`shards: n` on the entry — sparq-reason, "
+        "sq-has2g SHARDED CRATES (`shards: n` on the entry — sparq-reason, "
         "sparq-engine): the nightly splits these across n `cargo mutants --shard k/n` matrix "
         "jobs, one outcomes.json artifact each. Pass ALL n files to a SINGLE --seed "
         "invocation (scripts/mutants-gate.py --seed target/mutants/<crate>-shard-*/…/"
@@ -316,7 +316,7 @@ def _comment_block():
         "mixed-denominator shard (as it refuses a truncated run) unless "
         "--allow-partial-shards is passed. --check on a partial shard set is tolerated (it "
         "can only under-report, never spuriously fail) and prints a PARTIAL marker.",
-        "[SONNET-4.6] sq-has2g COMPLETENESS FAILS CLOSED: --seed refuses any run that finished "
+        "sq-has2g COMPLETENESS FAILS CLOSED: --seed refuses any run that finished "
         "fewer mutants than its mutants.out/mutants.json planned (a job killed at its timeout "
         "leaves a well-formed but PARTIAL outcomes.json), AND refuses any run where that "
         "planned list is missing/unreadable/not a list — absent evidence is not evidence of a "
@@ -327,7 +327,7 @@ def _comment_block():
 
 
 def shard_denominator(row):
-    """[SONNET-4.6] sq-has2g: the `--shard k/n` denominator n for a sub-sharded crate (which a
+    """sq-has2g: the `--shard k/n` denominator n for a sub-sharded crate (which a
     complete set also has one artifact each of), else the number of contributing files. Read
     from the shard IDENTITY rather than the file count, so a deliberately partial
     (--allow-partial-shards) seed still records `shards: n` — recording `1` there would make
@@ -338,7 +338,7 @@ def shard_denominator(row):
 
 
 def shard_set_errors(row):
-    """[SONNET-4.6] sq-has2g: reasons this crate's outcomes files are NOT one whole-crate
+    """sq-has2g: reasons this crate's outcomes files are NOT one whole-crate
     measurement -> a list of human-readable problems (empty == safe to seed from).
 
     A sharded crate's whole-crate surviving count is the SUM over shards, so the sum is only
@@ -391,7 +391,7 @@ def shard_set_errors(row):
 def seed(outcome_paths, baseline_path, allow_higher, allow_truncated=False,
          allow_partial_shards=False, allow_unverified=False):
     measured = measured_rows(outcome_paths)
-    # [SONNET-4.6] sq-has2g: REFUSE to seed from a truncated run. cargo-mutants writes
+    # sq-has2g: REFUSE to seed from a truncated run. cargo-mutants writes
     # outcomes.json incrementally, so a job killed at its timeout yields a well-formed but
     # PARTIAL artifact; seeding from it commits a ceiling based only on the mutants that
     # happened to finish. That is the single most likely way this baseline acquires a
@@ -410,7 +410,7 @@ def seed(outcome_paths, baseline_path, allow_higher, allow_truncated=False,
               f"run(s): re-run to completion, or pass --allow-truncated if you have "
               f"independently established the numbers are whole")
         refused = True
-    # [SONNET-4.6] sq-has2g review-2: REFUSE a run whose completeness cannot be ESTABLISHED at
+    # sq-has2g review-2: REFUSE a run whose completeness cannot be ESTABLISHED at
     # all. `planned=None` (no mutants.json, unreadable, or not the planned LIST) is the ABSENCE
     # of evidence, not evidence of a whole run — a job killed at its timeout whose sidecar never
     # made it into the artifact produces exactly this, so accepting it would leave the
@@ -431,7 +431,7 @@ def seed(outcome_paths, baseline_path, allow_higher, allow_truncated=False,
               f"outcomes.json, or pass --allow-unverified-completeness if you have "
               f"independently established the numbers are whole")
         refused = True
-    # [SONNET-4.6] sq-has2g: REFUSE an INCOMPLETE / OVERLAPPING shard set, for the same reason
+    # sq-has2g: REFUSE an INCOMPLETE / OVERLAPPING shard set, for the same reason
     # a truncated run is refused — both commit a ceiling derived from a fraction of the crate's
     # mutants, and both look entirely plausible in the reviewed diff. Truncation detection
     # cannot catch this: each shard of a 23-of-24 subset is individually COMPLETE against its
@@ -462,7 +462,7 @@ def seed(outcome_paths, baseline_path, allow_higher, allow_truncated=False,
             "unviable": row["unviable"],
             "caught_pct": row["caught_pct"],
         }
-        # [SONNET-4.6] sq-has2g: record the shard count for a SUB-SHARDED crate so the
+        # sq-has2g: record the shard count for a SUB-SHARDED crate so the
         # committed entry states, in the reviewed diff, that it is the SUM of n disjoint
         # `--shard k/n` runs rather than one whole-crate run — and so --check can warn when
         # a later run supplies fewer shards than the entry was seeded from. Omitted for the
@@ -503,7 +503,7 @@ def check(outcome_paths, baseline_path, require_all):
         row = measured.get(crate)
         if row is None:
             missing.append(crate); continue
-        # [SONNET-4.6] sq-has2g: a SUB-SHARDED crate is checked per shard job, so this run
+        # sq-has2g: a SUB-SHARDED crate is checked per shard job, so this run
         # may hold only a SLICE of the crate's mutants. Its surviving count is then a lower
         # bound on the whole-crate figure and comparing it to the whole-crate ceiling is
         # unsound in the SAFE direction — it can say "ok" but never spuriously FAIL. Report
@@ -581,7 +581,7 @@ def main():
 
 
 def self_test():
-    """[OPUS-4.8] sq-8kt3: unit-test the PURE summary + ratchet logic on synthetic
+    """sq-8kt3: unit-test the PURE summary + ratchet logic on synthetic
     outcomes docs — no files, no cargo. Mirrors coverage-gate.py --self-test."""
     def doc(missed=0, caught=0, timeout=0, unviable=0):
         out = []
@@ -615,7 +615,7 @@ def self_test():
             d = os.path.join(td, f"run{_n[0]}", crate); os.makedirs(d, exist_ok=True)
             p = os.path.join(d, "outcomes.json")
             with open(p, "w") as f: json.dump(doc(**kw), f)
-            # [SONNET-4.6] sq-has2g review-2: --seed FAILS CLOSED without a readable
+            # sq-has2g review-2: --seed FAILS CLOSED without a readable
             # planned-mutant list, so every fixture expected to SEED ships one matching its
             # outcomes exactly (planned == completed => a COMPLETE run). The truncated and
             # unverifiable fixtures below write/omit their own deliberately.
@@ -657,7 +657,7 @@ def self_test():
         assert check([pa_better], base, require_all=True) == 1  # sparq-parse missing
         assert check([pa_better], base, require_all=False) == 0  # tolerated without flag
 
-    # --- [SONNET-4.6] sq-has2g: SHARD AGGREGATION -------------------------------------
+    # --- sq-has2g: SHARD AGGREGATION -------------------------------------
     # `cargo mutants --shard k/n` partitions a crate's mutant list across n jobs, each
     # writing its own outcomes.json for the SAME package. Those must SUM, not overwrite:
     # the old last-write-wins behaviour seeded a ceiling ~1/n of the true surviving count.
@@ -825,7 +825,7 @@ def self_test():
         assert load(base5)["crates"]["sparq-engine"]["measured_surviving"] == 3
 
         # --- UNVERIFIABLE COMPLETENESS: no usable mutants.json -> --seed FAILS CLOSED ----
-        # [SONNET-4.6] sq-has2g review-2: `planned=None` is the ABSENCE of evidence, not
+        # sq-has2g review-2: `planned=None` is the ABSENCE of evidence, not
         # evidence of a whole run — a job killed at its timeout whose sidecar never reached the
         # artifact produces exactly this shape. Seeding it would leave the dishonest-ceiling
         # hole the truncation check exists to close, so all three shapes REFUSE: the sidecar

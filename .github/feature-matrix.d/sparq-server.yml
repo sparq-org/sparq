@@ -4,16 +4,16 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
@@ -25,7 +25,7 @@
   features: "federation-descriptors,service,time-travel,geo,test-seams"
   test: true
 
-# [GPT-5.6] sq-lsp7k.5.2: the default-OFF grouped facet-count endpoint (`POST /facets`).
+# sq-lsp7k.5.2: the default-OFF grouped facet-count endpoint (`POST /facets`).
 # The route, `ServerConfig::facets` field, env arm, handler, `sparq-introspect` dependency, two
 # direct config tests, and `tests/facets.rs` end-to-end suite are all cfg-gated, so this dedicated
 # leg compiles, clippies, and executes the real double-opt-in/read-auth/snapshot-count surface.
@@ -34,7 +34,7 @@
   features: "facets"
   test: true
 
-# [GPT-5.6] sq-lsp7k.9.3: the default-OFF prefix-completion endpoint (`GET /complete`). The
+# sq-lsp7k.9.3: the default-OFF prefix-completion endpoint (`GET /complete`). The
 # route, config/env flag, AppState generation cache, pure-index sparq-text dependency, direct
 # config tests, and `tests/complete.rs` stale-generation end-to-end witness are all cfg-gated.
 - name: "sparq-server (complete — GET /complete prefix completion)"
@@ -42,13 +42,13 @@
   features: "complete"
   test: true
 
-# [OPUS-4.8] sq-21kp: the OPT-IN per-query access audit log (CDMC CD-2 /
+# sq-21kp: the OPT-IN per-query access audit log (CDMC CD-2 /
 # ISO 27001 A.8.15 / EU CRA logging) — exercises tests/audit_log.rs, which is
 # `#![cfg(feature = "audit-log")]` and so never ran under the default build.
 # `audit-log` pulls `server` (it operates on the async HTTP Response + tracing);
 # composed with the same server feature set as the leg above so it compiles + the
 # gated test is discovered and actually executes.
-# [OPUS-4.8] sq-vya1: `access-audit` ADDED here. tests/access_audit.rs is
+# sq-vya1: `access-audit` ADDED here. tests/access_audit.rs is
 # `#![cfg(feature = "access-audit")]` and the 7 in-src `access_audit::tests::*`
 # unit tests are `#[cfg(feature = "access-audit")]`, so the default build (and
 # EVERY prior leg) compiled them EMPTY and ran ZERO of them — the silent gap this
@@ -63,7 +63,7 @@
   features: "audit-log,access-audit,federation-descriptors,service,time-travel,geo,test-seams"
   test: true
 
-# [OPUS-4.8] sq-dxhb: the Triple Pattern Fragments / Linked Data Fragments READ-ONLY
+# sq-dxhb: the Triple Pattern Fragments / Linked Data Fragments READ-ONLY
 # source endpoint (`GET /tpf`). The handler + the Hydra paging vocabulary + the
 # `tpf::evaluate` pager + the in-module `tpf` unit tests are all `#[cfg(feature =
 # "tpf")]`, so the DEFAULT build never compiled, clippy'd or tested this code. This
@@ -75,7 +75,7 @@
   features: "tpf"
   test: true
 
-# [OPUS-4.8] sq-dxhb: bind-restricted Triple Pattern Fragments (brTPF). `brtpf` implies
+# sq-dxhb: bind-restricted Triple Pattern Fragments (brTPF). `brtpf` implies
 # `tpf` and additionally compiles `tpf::evaluate_brtpf`, the `values`/POST bindings
 # parser, the `merge_term`/`merge_predicate` semi-join pushdown and the extra
 # `hydra:mapping` control — all `#[cfg(feature = "brtpf")]`. The in-module `brtpf` test
@@ -87,7 +87,7 @@
   features: "brtpf"
   test: true
 
-# [OPUS-4.8] sq-vczh2 (epic sq-2m6zm): the OPT-IN verifiable terse-transpiler endpoint
+# sq-vczh2 (epic sq-2m6zm): the OPT-IN verifiable terse-transpiler endpoint
 # (`POST /terse/transpile`). The `terse_transpile_endpoint` handler, the `ServerConfig::terse`
 # field + its Default/from_env arms, the route mount and the `tests/terse_transpile.rs`
 # integration suite are ALL `#[cfg(feature = "terse")]`, so the DEFAULT build never compiled,
@@ -102,7 +102,7 @@
   features: "terse"
   test: true
 
-# [GPT-5.6] sq-abhuq: outbound gzip/zstd response negotiation is opt-in and its
+# sq-abhuq: outbound gzip/zstd response negotiation is opt-in and its
 # middleware + integration suite are cfg-gated, so compile and test the real
 # response-compression surface explicitly.
 - name: "sparq-server (response-compression)"
@@ -110,21 +110,21 @@
   features: "response-compression"
   test: true
 
-# [GPT-5.6] sq-oprna.6: the default-off h1+h2 auto-builder TCP path, including real TLS/ALPN
+# sq-oprna.6: the default-off h1+h2 auto-builder TCP path, including real TLS/ALPN
 # negotiation, HTTP/1.1 fallback, and the inherited slow-loris header deadline integration test.
 - name: "sparq-server (http2)"
   crate: "sparq-server"
   features: "http2"
   test: true
 
-# [GPT-5.6] sq-oprna.3: encrypted HTTP/3 over a second UDP listener, including the
+# sq-oprna.3: encrypted HTTP/3 over a second UDP listener, including the
 # real cross-protocol SPARQL serialization parity integration test.
 - name: "sparq-server (http3)"
   crate: "sparq-server"
   features: "http3"
   test: true
 
-# [OPUS-4.8] sq-2999l (gh-906): the OPT-IN CDC change-stream poll endpoint (`GET /streams`) in the
+# sq-2999l (gh-906): the OPT-IN CDC change-stream poll endpoint (`GET /streams`) in the
 # Amazon-Neptune-Streams `GetRecords` shape, over the merged durable change-stream (sq-b4fns /
 # #1223). The `streams_endpoint` handler, the `streams::*` pure builder (iterator-type resolution +
 # per-quad flattening + continuation maths) + its 9 in-module unit tests, the
@@ -148,7 +148,7 @@
   features: "change-stream"
   test: true
 
-# [FABLE-5] sq-snopa.6 (issue #992 FR-4): the OPT-IN Solid WAC/ACP HTTP authorization surface
+# sq-snopa.6 (issue #992 FR-4): the OPT-IN Solid WAC/ACP HTTP authorization surface
 # (`POST /authz/decide`+`/wac-allow`+`/query`), a fail-closed HTTP shell over the `sparq-solid`
 # library authoriser. The `crate::solid_authz` module (its handlers + the pure helpers + 12
 # in-module unit tests), the `ServerConfig::solid_authz` field + its Default/from_env arms, the
@@ -174,7 +174,7 @@
   features: "solid-authz"
   test: true
 
-# [FABLE-5] sq-lrtc3.1 + sq-3mu76 (epic sq-lrtc3): `odrl-authz` (default OFF) — the OPT-IN ODRL
+# sq-lrtc3.1 + sq-3mu76 (epic sq-lrtc3): `odrl-authz` (default OFF) — the OPT-IN ODRL
 # lane on `POST /authz/query` AND (sq-3mu76) the advisory `POST /authz/decide` /
 # `POST /authz/wac-allow` endpoints (ODRL as THE access-control language for SPARQL queries,
 # fail-closed; the advisory surfaces never report an allow the query lane refuses to honour —
@@ -201,7 +201,7 @@
   features: "odrl-authz"
   test: true
 
-# [SONNET-4.6] sq-pfae.17: `solid-authz-trust` (default OFF) — the DOUBLE-OPT-IN stateless
+# sq-pfae.17: `solid-authz-trust` (default OFF) — the DOUBLE-OPT-IN stateless
 # trust-graph extension to `POST /authz/decide`. The `solid_authz_trust` config field, the
 # `trust_authz_decide` handler, and the 11-test gated `tests/solid_authz_trust.rs` integration
 # suite are ALL `#[cfg(feature = "solid-authz-trust")]`, so the DEFAULT build never compiled,
@@ -217,7 +217,7 @@
   features: "solid-authz-trust"
   test: true
 
-# [FABLE-5] sq-lsp7k.10: the OPT-IN named-parameterized-template REST surface
+# sq-lsp7k.10: the OPT-IN named-parameterized-template REST surface
 # (`/templates` — CRUD + typed fail-closed invocation; UPDATE-template invocations
 # write-gated through the same sequenced-writer path as /sparql updates). The
 # `crate::templates` module, the routes, the config fields and tests/templates.rs are all
@@ -231,7 +231,7 @@
   features: "templates"
   test: true
 
-# [SONNET-4.6] sq-qsm5z: the OPT-IN running-query registry (`GET /queries` list +
+# sq-qsm5z: the OPT-IN running-query registry (`GET /queries` list +
 # `DELETE /queries/{id}` cooperative cancel). The `QueryRegistry` struct, `QueryGuard` RAII
 # type, `registry_fingerprint` helper, `list_queries_handler` + `cancel_query_handler` handlers,
 # the `AppState::running_queries` field, the route mounts, and the in-module
@@ -244,13 +244,13 @@
 # individually cancellable; plus sq-t1isr EXPLAIN-path tests: entry present while guard alive,
 # cancel flag flippable, guard cleans up on panic). `query-registry` pulls only `server` (no
 # new dependency). Zero cost when feature is OFF: no `AppState` fields, no routes, byte-identical
-# to before. sq-t1isr ([SONNET-4.6]) wires the SAME registration into the EXPLAIN ANALYZE path.
+# to before. sq-t1isr wires the SAME registration into the EXPLAIN ANALYZE path.
 - name: "sparq-server (query-registry — GET /queries list + DELETE /queries/{id} cancel)"
   crate: "sparq-server"
   features: "query-registry"
   test: true
 
-# [FABLE-5] sq-37f1a (issue #2718): the COMBINED `odrl-authz,solid-authz-trust` state — the
+# sq-37f1a (issue #2718): the COMBINED `odrl-authz,solid-authz-trust` state — the
 # feature INTERACTION the two single-feature legs above never exercise. Cargo feature
 # unification makes `odrl-authz` turn on `sparq-solid/odrl-bridge`, which changes the
 # `PodStore` post-materialize path (`reconcile_bridged_after_static` → `BridgeLedger::refresh`)

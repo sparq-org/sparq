@@ -1,0 +1,5 @@
+{
+  "pr": 6655,
+  "date": "2026-10-05",
+  "reason": "Engine correctness fixes (#4467, #4438, #4239, #4158, #4160) in always-compiled crates/sparq-engine/src/exec.rs and update.rs: the functions and spatial registry guards now restore the previous registry on drop, the Join arm evaluates a left SERVICE once, the single-pattern SELECT-JSON stream skips its terminator after a budget trip, the SIP theta anti-join breaks its outer loop on exhaustion, and LOAD freshens document blank nodes. These sites are outside every `#[cfg(feature = ...)]` block and compile into the feature-OFF sparq-wasm bundle, so its bytes move by design. No feature gate is added or widened, no dependency is added, and there is no `unsafe`. Bundle SIZE remains governed separately by the metrics.wasm_bundle_bytes floor ratchet in bench.yml."
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-piapk: cross-runner SPLIT of the sparq-engine per-commit coverage shard.
+# sq-piapk: cross-runner SPLIT of the sparq-engine per-commit coverage shard.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -68,9 +68,8 @@
 # same RUSTFLAGS) so the binaries stay bit-reproducible and the cross-runner profraw merge is
 # valid — the CI jobs use one pinned dtolnay/rust-toolchain and one IDENTICAL job-level
 # RUSTFLAGS across every run partition and the merge job.
-# [FABLE-5]
 #
-# [SONNET-4.6] sq-6vshe.11: that RUSTFLAGS is no longer empty. The coverage-engine-{run,merge}
+# sq-6vshe.11: that RUSTFLAGS is no longer empty. The coverage-engine-{run,merge}
 # jobs set `RUSTFLAGS: -C link-arg=-fuse-ld=lld` at JOB level, because cargo-llvm-cov's own
 # RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS shadows ci.yml's workflow-level
 # CARGO_TARGET_<triple>_RUSTFLAGS (cargo picks ONE rustflags source, first match wins — it
@@ -86,7 +85,7 @@ CRATE="sparq-engine"
 # without changing coverage.sh in lock-step (the floor gates the default-feature number).
 ENGINE_FEATURES="parallel,regex,digest"
 
-# [FABLE-5] sq-piapk: count every .profraw the native llvm-cov path emits. `cargo llvm-cov
+# sq-piapk: count every .profraw the native llvm-cov path emits. `cargo llvm-cov
 # nextest --no-report` (no archive) writes .profraw under CARGO_LLVM_COV_TARGET_DIR/llvm-cov-
 # target per LLVM_PROFILE_FILE, which `cargo llvm-cov report` reads natively. Search
 # recursively under target/ so the count is robust to the exact subdir.
@@ -171,7 +170,7 @@ PY
     ;;
 
   build-objects)
-    # [FABLE-5] sq-piapk: the merge job runs on a FRESH runner with no build. `cargo llvm-cov
+    # sq-piapk: the merge job runs on a FRESH runner with no build. `cargo llvm-cov
     # report` needs the instrumented object files (it maps counters -> source lines) in the SAME
     # llvm-cov target dir a `run` partition compiled into. Compile them here WITHOUT running any
     # test, producing the SAME bit-reproducible instrumented binaries the run partitions compiled
@@ -239,7 +238,7 @@ row={"lines_pct":round(t["percent"],2),"lines_covered":t["covered"],
      "skipped_tests":[],"measured":True}
 doc={"generated":datetime.datetime.now(datetime.timezone.utc).isoformat(),
      "tier":"per-commit","toolchain":toolchain,"total_seconds":int(secs),
-     "note":"[FABLE-5] sq-piapk: sparq-engine measured via cross-runner nextest-partition "
+     "note":"sq-piapk: sparq-engine measured via cross-runner nextest-partition "
             "split; this summary is the MERGED .profraw report over the full object set "
             "(coverage-identical to the un-split shard).",
      "crates":{"sparq-engine":row}}

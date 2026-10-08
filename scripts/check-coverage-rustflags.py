@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] CI lint (bead sq-6vshe.11): every cargo-llvm-cov COVERAGE job must set a
+# CI lint (bead sq-6vshe.11): every cargo-llvm-cov COVERAGE job must set a
 # job-level `RUSTFLAGS`, and every such job must set the SAME value.
 #
 # WHY THIS GATE EXISTS — the silently-shadowed link flag (measured 2026-07-30):

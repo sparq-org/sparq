@@ -126,7 +126,7 @@ walkthroughs) on one route MUST `next/dynamic`/`React.lazy` each demo so its chu
 **only on expand** — preserving the route-scoping `sidebar-nav.tsx` already enforces for the
 ZK prover. Otherwise the "lighter" gallery is heavier than the pages it replaced.
 
-**Optional code loads on invocation, never on initial load (standing policy).** [GPT-5.6]
+**Optional code loads on invocation, never on initial load (standing policy).**
 When a site/GUI capability is all three of (1) not already part of the product's core path,
 (2) uncertain-value or rarely used, and (3) bundle-size-increasing, its implementation MUST
 sit behind a literal ESM `import()` split point. Fetch it only from the user action that needs

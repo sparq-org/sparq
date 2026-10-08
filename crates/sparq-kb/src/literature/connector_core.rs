@@ -302,19 +302,17 @@ fn build_search_url(base: &str, query: &str, page_size: usize, offset: usize) ->
     )
 }
 
-/// Minimal percent-encoding for a query-string value (RFC 3986 unreserved set kept verbatim,
-/// everything else `%`-encoded). Dep-free so it stays available under `literature` alone.
-fn percent_encode_query(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char)
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
+/// Percent-encoding for a query-string value: the RFC 3986 unreserved set is kept verbatim,
+/// everything else is uppercase `%XX` per UTF-8 byte. The ONE encoder for the literature
+/// path (the `literature_pilot` bin reuses it) — `percent-encoding` keeps it sparq-core-free
+/// under `literature` alone (#3712).
+pub fn percent_encode_query(s: &str) -> String {
+    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+    percent_encoding::utf8_percent_encode(s, UNRESERVED).to_string()
 }
 
 // --------------------------------------------------------------------------------------
@@ -666,5 +664,19 @@ mod tests {
     fn percent_encode_query_keeps_unreserved_and_encodes_the_rest() {
         assert_eq!(percent_encode_query("a-b_c.d~e"), "a-b_c.d~e");
         assert_eq!(percent_encode_query("a b&c"), "a%20b%26c");
+    }
+
+    /// #3712 tripwire: every printable ASCII byte + a control + 2-/4-byte UTF-8 — exactly the
+    /// RFC 3986 unreserved set passes through; the rest is uppercase `%XX` per UTF-8 byte.
+    #[test]
+    fn percent_encode_query_pins_the_unreserved_set() {
+        let all: String = (0x20u8..0x7f)
+            .map(char::from)
+            .chain("\t\né😀".chars())
+            .collect();
+        assert_eq!(
+            percent_encode_query(&all),
+            "%20%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%09%0A%C3%A9%F0%9F%98%80"
+        );
     }
 }

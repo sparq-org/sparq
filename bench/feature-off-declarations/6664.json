@@ -1,0 +1,5 @@
+{
+  "pr": 6664,
+  "date": "2026-10-05",
+  "reason": "TripleStore::heap_bytes (always-compiled sparq-core) now also counts the pred_stats map (#3115)"
+}

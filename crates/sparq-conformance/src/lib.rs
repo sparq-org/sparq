@@ -99,3 +99,7 @@ pub mod quadset;
 // line shrinking — the epic's zero-regression gate for generated parsers. Non-vacuity is
 // proven by seeded mutants in `tests/parser_differential.rs`.
 pub mod differential;
+// Issue #6467: runner logic for the community notation3tests suite (codeberg
+// phochste/notation3tests, fetched at run time) — binary `sparq-notation3tests`,
+// advisory lane `.github/workflows/notation3tests.yml`.
+pub mod notation3tests;

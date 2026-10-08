@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-bqjv — Dependabot ecosystem-coverage guard.
+# sq-bqjv — Dependabot ecosystem-coverage guard.
 #
 # The production-readiness program (sq-bqjv) adopts prod-solid-server's supply-chain
 # practices, of which "Dependabot covers every ecosystem the repo actually ships" is

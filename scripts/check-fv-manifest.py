@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] Formal-verification manifest completeness + drift gate (bead sq-63ups).
+# Formal-verification manifest completeness + drift gate (bead sq-63ups).
 # 🤖 SPARQ agent.
 #
 # THE INVARIANT THIS GATE ENFORCES: a Kani proof cannot exist half-wired. Every
@@ -23,7 +23,7 @@
 #                      features, same harness sets.
 #   D4 honesty       — `pr_gate = false` requires `pr_gate_blocked_by` (enforced
 #                      by the shared manifest loader in scripts/fv_select.py).
-#   D5 budget        — [OPUS-5] sq-ko0jt. In BOTH proof workflows (kani.yml nightly,
+#   D5 budget        — sq-ko0jt. In BOTH proof workflows (kani.yml nightly,
 #                      formal-verification.yml PR-gating), the proof step's
 #                      `KANI_STEP_BUDGET` must leave room under the job's
 #                      `timeout-minutes` backstop, and must be at least one

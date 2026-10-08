@@ -11,6 +11,10 @@
 
 [package]
 name = "sparq-arrow"
+# Not in the crates.io publish set (release-plz.toml). Published crates reach this crate only
+# through optional features, which scripts/publish-strip.py removes from their packaged
+# manifests; see docs/release.md "crates.io publish set".
+publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -55,7 +59,7 @@ csv = ["arrow"]
 # The SELECT result we project (`QueryResult { vars, rows }`). Always present — the
 # crate's whole job is to read it. default-features=false keeps the edge lean (we need
 # only the result type + its `oxrdf::Term` rows, no engine features).
-sparq-engine = { path = "../sparq-engine", version = "0.1.3", default-features = false }
+sparq-engine = { path = "../sparq-engine", version = "0.1.4", default-features = false }
 # The RDF term model (`Term`, `Literal`, `NamedNode`, …). workspace-pinned so the term
 # type is byte-identical to sparq-engine's. Always present (used to classify each cell).
 oxrdf.workspace = true

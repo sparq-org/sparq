@@ -23,7 +23,7 @@ re-exported inline-integer id helpers `inline_id_of_int`, `is_inline`, and `NO_I
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["rows"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["rows"] }
 ```
 
 ```rust,ignore
@@ -101,7 +101,7 @@ A second, unrelated `xsd:float` defect is still open in a different crate:
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["numeric"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["numeric"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 
@@ -135,9 +135,13 @@ The four id-tuple join kernels over `&[Row]` slices. Requires `rows`; pulls `rus
 | `probe_emit` | per-row probe emit — single-hash (FxHash once for partition + `raw_entry().from_hash`), `reserve` before materialising (batch-emission contract) |
 | `probe_gather_indices` | M4 batch-emission primitive — collect build-row indices WITHOUT materialising `Row`s; morsel pipeline calls this, then materialises per output chunk (sq-pntvh.7) |
 | `hash_probe_serial` | probe loop: calls `probe_emit` per row with a `Budget` cooperative-cancel poll |
-| `bind_combine` | index-nested-loop combine step |
+| `bind_combine` | index-nested-loop combine step for indexed groups |
+| `bind_combine_rows` | contiguous row-slice combine; appends one row per input, preserving duplicates and existing output ([GPT-6-ASTRA]) |
 | `lftj_recurse` over `Trie`/`TrieIter` | leapfrog trie-join (WCOJ) |
 | `join::delta::DeltaTable` | persistent build-side table for semi-naive Δ-vs-full shapes (built for the OWL-RL fixpoint; drives `sparq-rsp`'s Delta/Snapshot window diff) |
+
+Pass `&rows[start..end]`, one match's `new_vals`, and `&mut out` to
+`bind_combine_rows`; scanning, filtering and budget checks remain with the caller.
 
 `JoinTable` is a public type alias for `hashbrown::HashMap<Key, Posting, FxBuildHasher>`.
 All kernels are generic over a `JoinKeys` column descriptor and a `Budget` cooperative-cancel
@@ -160,7 +164,7 @@ closes most of the `hash_probe` descriptor-projection overhead the #1810 delta m
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["join"] }  # implies "rows"
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["join"] }  # implies "rows"
 ```
 
 ```rust,ignore
@@ -205,7 +209,7 @@ ORDER BY total order refines promoted ties and positions NaN.
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["compare"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["compare"] }
 ```
 
 **Machine-checked order laws (Kani, sq-sqtk2.4 + sq-wjl8i).** `src/compare.rs` hosts a

@@ -77,6 +77,14 @@ pub enum ServerError {
     /// A write would exceed a configured in-memory storage limit.
     #[error("insufficient storage")]
     InsufficientStorage,
+
+    /// The version a read authorized is gone: a concurrent rewrite or delete committed and reclaimed
+    /// its bytes between the read's metadata round and its byte fetch, and a DIFFERENT version is now
+    /// current. The store never silently substitutes that version's bytes (it was never authorized —
+    /// its ACL may have changed with it), so the caller must restart the read, authorization
+    /// included. Maps to 503 + `Retry-After` if a bounded restart still loses the race.
+    #[error("resource changed during read")]
+    ResourceChanged,
 }
 
 impl ServerError {
@@ -98,6 +106,7 @@ impl ServerError {
             ServerError::UnsupportedMediaType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             ServerError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ServerError::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
+            ServerError::ResourceChanged => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 }
@@ -131,8 +140,17 @@ impl IntoResponse for ServerError {
             StatusCode::UNPROCESSABLE_ENTITY => "unprocessable entity",
             StatusCode::UNSUPPORTED_MEDIA_TYPE => "unsupported media type",
             StatusCode::INSUFFICIENT_STORAGE => "insufficient storage",
+            StatusCode::SERVICE_UNAVAILABLE => "service unavailable",
             _ => "bad request",
         };
-        (status, public_body).into_response()
+        let mut resp = (status, public_body).into_response();
+        if matches!(self, ServerError::ResourceChanged) {
+            // The resource is being rewritten right now; an immediate retry will normally succeed.
+            resp.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("1"),
+            );
+        }
+        resp
     }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-hmd7l.19: ANN Pareto gather script — SIFT1M + GloVe-100-angular
+# sq-hmd7l.19: ANN Pareto gather script — SIFT1M + GloVe-100-angular
 # Measures: recall-controlled QPS, tail latency (p99), build time, peak RSS, index bytes
 # Engines: hnswlib (primary HNSW peer), FAISS (IndexFlatL2 exact oracle + IVFFlat + IVFSq8)
 # This work-box run is NON-CANONICAL (aarch64 EC2, noisy) — flagged in the output.

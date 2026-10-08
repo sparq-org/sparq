@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6 Astra] Offline behavior, real producer and CI wiring for issue #6436."""
+"""Offline behavior, real producer and CI wiring for issue #6436."""
 
 from __future__ import annotations
 
@@ -18,7 +18,13 @@ import zipfile
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-import yaml
+
+# #5820: local runs without PyYAML skip this module instead of erroring; CI still
+# hard-fails on a missing PyYAML (see scripts/tests/_yaml_seam.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _yaml_seam import yaml_or_local_skip  # noqa: E402
+
+yaml = yaml_or_local_skip()
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location("freshness", ROOT / "scripts/ci_nightly_freshness.py")
@@ -30,7 +36,7 @@ CURRENT = 1000
 
 
 def workflow_job_bound(workflow, seen=()):
-    """[GPT-6 Astra] Conservative full inventory, including local reusable jobs.
+    """Conservative full inventory, including local reusable jobs.
 
     Ignore job conditions/excludes; count each include as an extra even when it
     merely enriches an existing leg. This overcounts rather than understating
@@ -507,7 +513,7 @@ class ProductionWiring(unittest.TestCase):
                             for s in docs["jobs"]["quick-gates"]["steps"]))
 
     def producer_result(self, cargo_exit=0, ratchet_exit=0, outcomes=True, planned=3):
-        # [GPT-6 Astra] Execute the actual YAML shell under GitHub's bash -e mode.
+        # Execute the actual YAML shell under GitHub's bash -e mode.
         # PATH contains only explicit stubs plus system utilities; no real cargo,
         # Python ratchet, network, build or GitHub request is reachable.
         with tempfile.TemporaryDirectory() as directory:

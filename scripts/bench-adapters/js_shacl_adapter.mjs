@@ -1,5 +1,4 @@
-// [OPUS-4.8] sq-eifd: JS-LIB (node-rdfjs) adapter KIND. Authored by Opus 4.8
-// (Fable unavailable; flag for re-review when Fable returns).
+// sq-eifd: JS-LIB (node-rdfjs) adapter KIND.
 //
 // In-process Node / RDF-JS SHACL harness. Covers the JS-ecosystem SHACL engines
 // (research/capability-benchmark-program.md §3.1c Tier-2 / WASM-peer):
@@ -212,7 +211,7 @@ async function main() {
   if (args.json) process.stderr.write(JSON.stringify(res) + '\n');
 }
 
-// [OPUS-4.8] Attach a rejection handler so an uncaught error inside the async
+// Attach a rejection handler so an uncaught error inside the async
 // main() reliably exits non-zero with a clear message, rather than relying on
 // Node's version-dependent unhandled-rejection exit behaviour.
 main().catch((e) => {

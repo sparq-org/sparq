@@ -72,11 +72,11 @@ for TIER in $TIERS; do
   CLOSURE="$CACHE/sameas-${TIER}-closure.nt"
 
   # ---- 2. materialise the OWL-RL closure; capture engine time + triple-count ------------
-  # `reason <f> ntriples owl <out.nt>`: stdout carries `<N> triples after owl reasoning` (the
-  # deduplicated closure size); stderr carries the engine-internal `... in <X>s` timer (robust to
-  # machine load). We read the triple-count from stdout and the closure seconds from the stderr timer.
+  # `reason <f> ntriples owl <out.nt>`: because an output file is given, stderr carries both
+  # `<N> triples after owl reasoning` (the deduplicated closure size, #6466) and the
+  # engine-internal `... in <X>s` timer (robust to machine load). We read both from stderr.
   "$CLI" reason "$CORPUS" ntriples owl "$CLOSURE" >"$TMP/r.out" 2>"$TMP/r.err"
-  triples="$(grep -oE '[0-9]+ triples after owl reasoning' "$TMP/r.out" | grep -oE '^[0-9]+' | head -1)"
+  triples="$(grep -oE '[0-9]+ triples after owl reasoning' "$TMP/r.err" | grep -oE '^[0-9]+' | head -1)"
   closure_s="$(grep -oE 'in [0-9.]+s' "$TMP/r.err" | head -1 | grep -oE '[0-9.]+' | head -1)"
 
   # ---- 3. run query.rq over the closure (count mode, min-of-ITERS) ----------------------

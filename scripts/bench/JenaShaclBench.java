@@ -1,4 +1,4 @@
-// [FABLE-5] sq-7d3dj.33 — in-process Apache Jena SHACL driver for the same-box
+// sq-7d3dj.33 — in-process Apache Jena SHACL driver for the same-box
 // SHACL comparison harness (scripts/bench/shacl-same-box.sh).
 //
 // WHY IN-PROCESS (not `bin/shacl validate` via report_cli_adapter.py): the CLI's

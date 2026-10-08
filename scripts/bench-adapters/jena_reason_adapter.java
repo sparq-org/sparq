@@ -1,4 +1,4 @@
-// [FABLE-5] sq-hmd7l.7 — in-process Apache Jena MATERIALIZATION driver for the
+// sq-hmd7l.7 — in-process Apache Jena MATERIALIZATION driver for the
 // same-box reasoning comparison harness (scripts/bench/materialize-same-box.sh).
 //
 // 🤖 SPARQ agent. Mirrors the shape of scripts/bench/JenaShaclBench.java: load the

@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] Governance: PR template (bead sq-rau7). Checklist tied to AGENTS.md's post-batch re-evaluation table. -->
+<!-- Governance: PR template (bead sq-rau7). Checklist tied to AGENTS.md's post-batch re-evaluation table. -->
 ## Summary
 
 <!-- What does this change do, and why? Link any related bead id(s), e.g. sq-xxxx. -->
@@ -14,7 +14,7 @@
 
 > See the **"Post-batch re-evaluation checklist"** in [`AGENTS.md`](../AGENTS.md) — re-run only the evaluations whose inputs your change touched.
 
-- [ ] **Parser** (turtle/nt/nq/trig, `sparq-core` parse, `spargebra`): re-ran W3C SPARQL + rdf-turtle conformance, the chunked-vs-serial parser oracle, and `sparq-bench fuzz` (fixed regression windows now also CI-enforced per-PR by fuzz.yml's `differential smoke` job — sq-0iqzw).
+- [ ] **Parser** (turtle/nt/nq/trig, `sparq-core` parse, `spargebra`): re-ran W3C SPARQL + rdf-turtle conformance, the chunked-vs-serial parser oracle, and `sparq-bench fuzz` (fixed regression windows are also replayed nightly by fuzz.yml's `differential smoke` job — sq-0iqzw).
 - [ ] **Query execution / operators** (`sparq-engine` exec/optimizer): re-ran the full conformance ratchet, the operator-coverage bench, and the per-builtin error table.
 - [ ] **Reasoner** (`sparq-reason`, rules, closure): re-ran the inference conformance ratchet, the incremental==batch property tests, and the LUBM entailed tier.
 - [ ] **Public API** (`pub` item / CLI flag / HTTP route / Py/JS binding): updated the matching `skills/<surface>/SKILL.md` in **this** change, and re-ran that surface's tests. (REQUIRED — see the MAINTENANCE RULE in AGENTS.md.)

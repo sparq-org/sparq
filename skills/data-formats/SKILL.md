@@ -354,7 +354,8 @@ Lower-level entry points take `&[oxrdf::Triple]` (e.g. CONSTRUCT output) directl
 ordered `(prefix, iri)` pair list (e.g. a query's parsed `PREFIX` lines or a `[[prefix, iri], …]`
 array). The `graph_to_*_with` convenience wrappers (`graph_to_turtle_with`, `graph_to_trig_with`,
 `graph_to_jsonld_with`, and the pretty `*_with`) take that same map, so the whole-graph path can
-also serialise under an explicit prefix policy. Only prefixes actually used are emitted (the
+also serialise under an explicit prefix policy. When several prefixes match an IRI, the longest
+namespace wins (equal lengths: first label in map order). Only prefixes actually used are emitted (the
 Turtle/TriG header, or the JSON-LD compacted `@context`). Round-trip (parse → serialize → re-parse) is isomorphic
 for every form. **JSON-LD specifics:** `xsd:string`/`rdf:langString` stay implicit
 (`@value` + optional `@language`); every other datatype is preserved as `@type`; canonical
@@ -366,7 +367,9 @@ a list cell referenced more than once, carrying an extra predicate, cyclic, or n
 by `rdf:nil` — is left as ordinary `rdf:first`/`rdf:rest` triples, so the round-trip stays
 lossless either way (the empty list `()` stays an `rdf:nil` reference, never `@list`).
 
-**Comparative throughput** for the writer matrix is measured by `bench/serialize/run.sh`
+A same-box Turtle-only comparison against oxttl's `TurtleSerializer` (Oxigraph 0.5's writer)
+on a document-shaped graph is `cargo run --release -p sparq-engine-serialize --features
+serialize-rdf --example turtle_vs_oxttl` (#4898). **Comparative throughput** for the writer matrix is measured by `bench/serialize/run.sh`
 (registered `serialize-bench`, [FABLE-5] sq-hmd7l.14): sparq's buffered/streaming/pretty
 regimes in-process, plus a cross-engine pipeline panel vs serd/rapper/Jena riot/oxrdfio —
 every emitted document round-trip-gated (re-parse == source store) before its timing row
@@ -408,8 +411,12 @@ opt-in `streaming-serialization` feature adds `write_turtle_streaming(triples, &
 and `write_trig_streaming(&named_graphs, &prefixes, &mut w)` (plus the whole-graph
 `graph_to_turtle_streaming(&g, &prefixes, &mut w)` / `graph_to_trig_streaming`) that render the body
 directly into any `W: std::io::Write`, buffering only **one subject block at a time** (emitting on
-subject change) — so the whole rendered output is never materialised, enabling HTTP chunked
-CONSTRUCT/DESCRIBE responses (first bytes flushed after the first subject, not the last). The
+subject change) — so the whole rendered output is never materialised. <!-- sq-0kq6k -->
+These are the writers behind `sparq-cli dump <file> <in> turtle|trig` under the CLI feature of the
+same name. They are **not** what serves an HTTP CONSTRUCT/DESCRIBE: `sparq-server` renders a graph
+response with `oxttl` / `oxrdfxml` (a different writer with a different output shape) and streams
+through *those* serialisers' `io::Write` seam, so its response bytes are unchanged — see
+`skills/http-server/SKILL.md`. The
 streamed bytes are **byte-identical** to the buffered `write_turtle` / `write_trig` for the same
 graph (same used-prefix header, same subject grouping, same ordering): both share the prefix-header
 and per-subject-block rendering, and graph-sourced triples are subject-contiguous (`iter_ids()` walks

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.5 (gap GX-4): GATE the machine-readable OpenSSF Best-Practices (CII)
-# badge self-certification. Authored by Opus 4.8 (Fable unavailable; flag for re-review when
-# Fable returns).
+# sq-toze.5 (gap GX-4): GATE the machine-readable OpenSSF Best-Practices (CII)
+# badge self-certification.
 #
 # WHY: compliance/openssf/best-practices-self-cert.json is the import-ready, structured form
 # of the drafted badge answers (one object per bestpractices.dev criterion: status +

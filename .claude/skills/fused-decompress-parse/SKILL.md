@@ -5,7 +5,7 @@ description: How to ingest compressed RDF (gzip / zstd / bzip2) fast in Rust by 
 
 # Fused decompress + parse for RDF ingest
 
-[OPUS-4.8] Authored from measured research. Source of truth:
+Authored from measured research. Source of truth:
 `research/custom-parsers-baseline.md` (the "Compressed ingest" section + the
 post-fix measurements) and `research/fast-ingestion.md`. Verify before quoting.
 

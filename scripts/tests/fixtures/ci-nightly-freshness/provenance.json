@@ -1,5 +1,5 @@
 {
-  "_provenance": "[GPT-6 Astra] Original GitHub Actions artifact ZIPs, downloaded read-only by root; not synthetic fixtures or new measurements. No logs used to infer an observed process exit.",
+  "_provenance": "Original GitHub Actions artifact ZIPs, downloaded read-only by root; not synthetic fixtures or new measurements. No logs used to infer an observed process exit.",
   "repository": "sparq-org/sparq",
   "run_id": 34099890455,
   "run_attempt": 1,

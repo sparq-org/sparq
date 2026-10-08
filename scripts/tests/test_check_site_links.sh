@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Hermetic both-direction self-test for scripts/check-site-links.sh (bead
-# sq-d8or — the built-docs-site link gate). Authored by Opus 4.8 (Fable unavailable;
-# flag for re-review when Fable returns).
+# Hermetic both-direction self-test for scripts/check-site-links.sh (bead
+# sq-d8or — the built-docs-site link gate).
 #
 # WHY: the gate's value rests on TWO load-bearing behaviours that are easy to break
 # silently when the export's basePath / link shape changes:
@@ -44,7 +43,7 @@ GOOD="${TMP}/good"
 mkdir -p "${GOOD}/about" "${GOOD}/surface/sparql"
 
 # Home page: links the bare root, a route, an anchor on this page, a relative sibling, AND a
-# CROSS-PAGE path+fragment link (/about/#section-b) — [OPUS-4.8] sq-bpoey: this is the
+# CROSS-PAGE path+fragment link (/about/#section-b) — sq-bpoey: this is the
 # shape the redesign's /capabilities/#<theme> anchors take, and the case the gate must resolve
 # to the target route's index.html (it reddened pages.yml after PR #1003 before rule 0 existed).
 cat > "${GOOD}/index.html" <<'HTML'
@@ -119,7 +118,7 @@ else
 fi
 
 # --------------------------------------------------------------------------- #
-# Case 4 (should-FAIL): a dangling CROSS-PAGE fragment must fail. [OPUS-4.8] sq-bpoey —
+# Case 4 (should-FAIL): a dangling CROSS-PAGE fragment must fail. sq-bpoey —
 # rule 0 resolves /<route>#<frag> to <route>/index.html for the fragment lookup; this
 # pins that the resolution still has TEETH (a fragment that does not exist on the *target*
 # page is caught), not just that valid cross-page fragments pass (Case 1).
@@ -139,7 +138,7 @@ else
 fi
 
 # --------------------------------------------------------------------------- #
-# Case 5 (should-FAIL): a dangling BARE-ROOT fragment must fail. [OPUS-4.8] sq-uj38w —
+# Case 5 (should-FAIL): a dangling BARE-ROOT fragment must fail. sq-uj38w —
 # the bare-root remap (/#frag -> root index.html) is what makes the /about RedirectStub's
 # /#how-it-runs link resolve at the custom-domain root; this pins that it still has TEETH
 # (a fragment that does NOT exist on the home page is caught). Case 1's about page already

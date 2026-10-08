@@ -40,35 +40,37 @@ const PAR_THRESHOLD: usize = 4096;
 const OWL: &str = "http://www.w3.org/2002/07/owl#";
 pub(crate) const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 
-struct Owl {
-    same_as: Id,
-    inverse_of: Id,
-    symmetric: Id,       // owl:SymmetricProperty
-    transitive: Id,      // owl:TransitiveProperty
-    equiv_prop: Id,      // owl:equivalentProperty
-    equiv_class: Id,     // owl:equivalentClass
-    functional: Id,      // owl:FunctionalProperty
-    inv_functional: Id,  // owl:InverseFunctionalProperty
-    property_chain: Id,  // owl:propertyChainAxiom
-    on_property: Id,     // owl:onProperty
-    some_values: Id,     // owl:someValuesFrom
-    all_values: Id,      // owl:allValuesFrom
-    has_value: Id,       // owl:hasValue
-    intersection: Id,    // owl:intersectionOf
-    union: Id,           // owl:unionOf
-    thing: Id,           // owl:Thing
-    has_key: Id,         // owl:hasKey
-    max_cardinality: Id, // owl:maxCardinality
-    max_qual_card: Id,   // owl:maxQualifiedCardinality
-    on_class: Id,        // owl:onClass
-    one_of: Id,          // owl:oneOf
-    rdf_first: Id,
-    rdf_rest: Id,
-    rdf_nil: Id,
+/// OWL (+ rdf list) vocabulary ids, interned once per materialization. Shared with the
+/// incremental OWL-RL graph (`incremental::OwlIds`).
+pub(crate) struct Owl {
+    pub(crate) same_as: Id,
+    pub(crate) inverse_of: Id,
+    pub(crate) symmetric: Id,       // owl:SymmetricProperty
+    pub(crate) transitive: Id,      // owl:TransitiveProperty
+    pub(crate) equiv_prop: Id,      // owl:equivalentProperty
+    pub(crate) equiv_class: Id,     // owl:equivalentClass
+    pub(crate) functional: Id,      // owl:FunctionalProperty
+    pub(crate) inv_functional: Id,  // owl:InverseFunctionalProperty
+    pub(crate) property_chain: Id,  // owl:propertyChainAxiom
+    pub(crate) on_property: Id,     // owl:onProperty
+    pub(crate) some_values: Id,     // owl:someValuesFrom
+    pub(crate) all_values: Id,      // owl:allValuesFrom
+    pub(crate) has_value: Id,       // owl:hasValue
+    pub(crate) intersection: Id,    // owl:intersectionOf
+    pub(crate) union: Id,           // owl:unionOf
+    pub(crate) thing: Id,           // owl:Thing
+    pub(crate) has_key: Id,         // owl:hasKey
+    pub(crate) max_cardinality: Id, // owl:maxCardinality
+    pub(crate) max_qual_card: Id,   // owl:maxQualifiedCardinality
+    pub(crate) on_class: Id,        // owl:onClass
+    pub(crate) one_of: Id,          // owl:oneOf
+    pub(crate) rdf_first: Id,
+    pub(crate) rdf_rest: Id,
+    pub(crate) rdf_nil: Id,
 }
 
 impl Owl {
-    fn intern(dict: &mut Dict) -> Owl {
+    pub(crate) fn intern(dict: &mut Dict) -> Owl {
         let mut i = |frag: &str| dict.intern_iri(&format!("{OWL}{frag}"));
         Owl {
             same_as: i("sameAs"),
@@ -808,7 +810,7 @@ fn reify_fixpoint(
 
 /// The XSD numeric-tower subsumptions (direct edges; rdfs11 closes them).
 /// OWL 2 RDF-based semantics gives every datatype map these inclusions.
-const XSD_HIERARCHY: &[(&str, &str)] = &[
+pub(crate) const XSD_HIERARCHY: &[(&str, &str)] = &[
     ("byte", "short"),
     ("short", "int"),
     ("int", "long"),

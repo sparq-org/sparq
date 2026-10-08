@@ -47,7 +47,7 @@ of the component, citing sparq's evidence (`controls.md` / `evidence.md`) as the
 
 | What to monitor | Method / source | Frequency | Evaluated by (org) | Acceptance criterion (org) |
 |---|---|---|---|---|
-| CI gate health (build/test/lint/conformance) | `ci-summary.yml` aggregate gate | Per push / continuous | `<FILL-IN>` | `<FILL-IN: green required to merge>` |
+| CI gate health (build/test/lint/conformance) | `ci-fast.yml` required check (+ nightly `ci.yml`) | Per push / continuous | `<FILL-IN>` | `<FILL-IN: green required to merge>` |
 | Dependency advisories | `dependency-monitoring.yml` (daily) + Dependabot | Daily | `<FILL-IN>` | `<FILL-IN: no critical > N days>` |
 | Supply-chain posture | OpenSSF `scorecard.yml` (published) | Per schedule | `<FILL-IN>` | `<FILL-IN: score floor>` |
 | Conformance level | W3C SPARQL/SHACL/inference ratchets | Per PR | `<FILL-IN>` | Never-lowered floor |

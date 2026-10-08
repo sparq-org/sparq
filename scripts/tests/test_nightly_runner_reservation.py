@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] 🤖 SPARQ agent — hosted-runner reservation for the scheduled safety lanes
+# 🤖 SPARQ agent — hosted-runner reservation for the scheduled safety lanes
 # (sparq-org/sparq#6349).
 #
 # THE DEFECT THIS PINS. `miri.yml` and `kani.yml` are informational NIGHTLY lanes, but each
@@ -54,7 +54,14 @@ import re
 import unittest
 from pathlib import Path
 
-import yaml
+import sys
+
+# #5820: local runs without PyYAML skip this module instead of erroring; CI still
+# hard-fails on a missing PyYAML (see scripts/tests/_yaml_seam.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _yaml_seam import yaml_or_local_skip  # noqa: E402
+
+yaml = yaml_or_local_skip()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"

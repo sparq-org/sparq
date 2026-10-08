@@ -7,7 +7,6 @@
 # harness's own task tracker and MEMORY.md auto-memory, and it duplicates the beads
 # guidance already in AGENTS.md. This hook ships only the useful, non-conflicting bit:
 # the unblocked-work list + an open count. See AGENTS.md "Beads session-context hook".
-# [OPUS-4.8]
 set -uo pipefail
 
 # Always operate from the repo root, regardless of the CWD the hook is invoked from

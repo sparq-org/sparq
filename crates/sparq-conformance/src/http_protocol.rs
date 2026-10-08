@@ -178,9 +178,7 @@ pub fn send(addr: SocketAddr, req: &HttpRequest) -> Result<HttpResponse, String>
 
     let mut raw = Vec::new();
     // Request line + the mandatory Host header (HTTP/1.1).
-    raw.extend_from_slice(
-        format!("{} {} HTTP/1.1\r\n", req.method, req.target).as_bytes(),
-    );
+    raw.extend_from_slice(format!("{} {} HTTP/1.1\r\n", req.method, req.target).as_bytes());
     raw.extend_from_slice(format!("Host: {addr}\r\n").as_bytes());
     raw.extend_from_slice(b"Connection: close\r\n");
     for (k, v) in &req.headers {
@@ -497,8 +495,7 @@ pub fn run_protocol_suite() -> SuiteReport {
         &mut report,
         "default-graph-uri=g1 re-scopes the default graph → 1 row (g1's triple)",
         addr,
-        &HttpRequest::new("GET", &select_g)
-            .header("Accept", "application/sparql-results+json"),
+        &HttpRequest::new("GET", &select_g).header("Accept", "application/sparql-results+json"),
         200,
         "application/sparql-results+json",
         Some(1),
@@ -512,8 +509,7 @@ pub fn run_protocol_suite() -> SuiteReport {
         &mut report,
         "named-graph-uri=g1 exposes exactly g1 as a named graph → 1 row",
         addr,
-        &HttpRequest::new("GET", &named_g)
-            .header("Accept", "application/sparql-results+json"),
+        &HttpRequest::new("GET", &named_g).header("Accept", "application/sparql-results+json"),
         200,
         "application/sparql-results+json",
         Some(1),
@@ -862,10 +858,7 @@ mod tests {
         let raw = b"HTTP/1.1 200 OK\r\nContent-Type: application/sparql-results+json\r\nContent-Length: 2\r\n\r\n{}";
         let resp = parse_response(raw).expect("parse");
         assert_eq!(resp.status, 200);
-        assert_eq!(
-            resp.content_type(),
-            Some("application/sparql-results+json")
-        );
+        assert_eq!(resp.content_type(), Some("application/sparql-results+json"));
         assert_eq!(resp.header("content-length"), Some("2"));
         assert_eq!(resp.body, "{}");
     }
@@ -888,7 +881,8 @@ mod tests {
 
     #[test]
     fn json_helpers_read_shape() {
-        let bindings = r#"{"head":{"vars":["s"]},"results":{"bindings":[{"s":{"type":"uri","value":"x"}}]}}"#;
+        let bindings =
+            r#"{"head":{"vars":["s"]},"results":{"bindings":[{"s":{"type":"uri","value":"x"}}]}}"#;
         assert_eq!(json_binding_count(bindings), 1);
         assert_eq!(json_binding_count("not json"), 0);
         let boolean = r#"{"head":{},"boolean":true}"#;

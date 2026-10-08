@@ -1,4 +1,4 @@
-# [OPUS-4.8] ast-grep rule: every `impl Iterator for $T` (any path qualification).
+# ast-grep rule: every `impl Iterator for $T` (any path qualification).
 # List-stratum A/B task. See ../../../../.claude/skills/ast-grep/SKILL.md §2.3.
 id: impl-iterator
 language: rust

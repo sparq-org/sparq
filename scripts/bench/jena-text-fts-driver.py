@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-hmd7l.2 — jena-text side of the FTS same-box comparison
+# sq-hmd7l.2 — jena-text side of the FTS same-box comparison
 # (scripts/bench/fts-same-box.sh). Runs the PINNED text:query translations
 # (bench/fts/queries-jena-text/*.rq.tmpl x pairs.tsv) against a Fuseki+jena-text
 # endpoint and emits the same 3-column `<workload>\t<count|ERROR>\t<us|reason>` TSV
