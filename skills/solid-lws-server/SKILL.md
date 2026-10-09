@@ -331,7 +331,8 @@ What the server exposes, all discoverable from the storage description
   A QUERY's filter is always its body; the `q` parameter only carries it on the `GET` page
   links. Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
   any listing, permission check or metadata read fails, the whole index fails with one
-  generic `500` that names no resource.
+  generic `500` that names no resource. Both carry an `ETag` of what they serve and
+  answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,

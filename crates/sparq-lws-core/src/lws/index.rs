@@ -17,7 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use axum::http::{header, Method, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use serde_json::{json, Map, Value};
 
@@ -322,6 +322,10 @@ pub async fn handle<S: Store + 'static>(
         return if search { with_accept_query(r) } else { r };
     }
     let is_get = req.method == Method::GET || req.method == Method::HEAD;
+    // A QUERY body with a content coding is refused before it is read, as any body is.
+    if let Some(refused) = super::resources::refuse_encoded(req) {
+        return refused;
+    }
     // A page link of a result set is the filter, base64url-encoded, and a page number: the server
     // keeps nothing, and the link is dereferenced with GET (section 7.1).
     // The query is held to its size before it is decoded at all: a page link's query is the
@@ -509,8 +513,21 @@ pub async fn handle<S: Store + 'static>(
             .collect();
         json!({"@context": LWS_CONTEXT, "type": "TypeIndex", "totalItems": total, "items": items})
     };
-    let mut resp = json_response(StatusCode::OK, media_type, &doc);
+    // The validator is of the representation served: its media type, its links and its body. A
+    // GET of a page and a QUERY evaluate preconditions against it, as a read does.
+    let body = serde_json::to_string(&doc).unwrap_or_default();
+    let etag = super::etag_of(
+        std::iter::once(media_type)
+            .chain(links.iter().map(String::as_str))
+            .chain(std::iter::once(body.as_str())),
+    );
+    let mut resp = match super::resources::read_refusal(req, &etag) {
+        Some(StatusCode::NOT_MODIFIED) => StatusCode::NOT_MODIFIED.into_response(),
+        Some(refused) => problem(refused, None),
+        None => json_response(StatusCode::OK, media_type, &doc),
+    };
     let h = resp.headers_mut();
+    set(h, header::ETAG, &etag);
     for l in links {
         if let Ok(v) = header::HeaderValue::from_str(&l) {
             h.append(header::LINK, v);
@@ -726,6 +743,55 @@ mod tests {
             bodies.push(body);
         }
         assert_eq!(bodies[0], bodies[1]);
+    }
+
+    /// Review findings: the index and search answered 200 whatever their preconditions, and a
+    /// QUERY body's content coding was ignored. Both carry an entity tag of what they serve and
+    /// evaluate preconditions against it, and a coded QUERY body is refused.
+    #[tokio::test]
+    async fn the_type_index_evaluates_preconditions_and_codings() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(100).await;
+        let anyone = Agent::anonymous();
+        let query = |headers: &[(&str, &str)]| {
+            let mut h = vec![("content-type", LWS_QUERY)];
+            h.extend_from_slice(headers);
+            let mut r = test_store::request(Method::GET, TYPE_SEARCH_PATH, &h, "{}");
+            r.method = Method::from_bytes(b"QUERY").unwrap();
+            r
+        };
+        let get = |headers: &[(&str, &str)]| {
+            test_store::request(Method::GET, TYPE_INDEX_PATH, headers, "")
+        };
+        for build in [&get as &dyn Fn(&[(&str, &str)]) -> LwsRequest, &query] {
+            let r = handle(&state, &build(&[]), &anyone).await;
+            assert_eq!(r.status(), StatusCode::OK);
+            let tag = r.headers()[header::ETAG].to_str().unwrap().to_string();
+            let status = |h: Vec<(&'static str, String)>| {
+                let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                let req = build(&h);
+                let state = state.clone();
+                async move { handle(&state, &req, &Agent::anonymous()).await.status() }
+            };
+            assert_eq!(
+                status(vec![("if-none-match", tag.clone())]).await,
+                StatusCode::NOT_MODIFIED
+            );
+            assert_eq!(
+                status(vec![("if-none-match", "*".into())]).await,
+                StatusCode::NOT_MODIFIED
+            );
+            assert_eq!(
+                status(vec![("if-match", "\"never-issued\"".into())]).await,
+                StatusCode::PRECONDITION_FAILED
+            );
+            assert_eq!(
+                status(vec![("if-match", tag.clone())]).await,
+                StatusCode::OK
+            );
+        }
+        let r = handle(&state, &query(&[("content-encoding", "gzip")]), &anyone).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
     }
 
     #[test]
