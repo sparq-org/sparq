@@ -946,18 +946,34 @@ fn lowercase_lang(raw: &str) -> Cow<'_, str> {
     }
 }
 
-/// `[a-zA-Z]+ ('-' [a-zA-Z0-9]+)*` with an optional RDF 1.2 `--ltr` / `--rtl` direction suffix
-/// (W3C `nt-syntax-bad-lang-01`: `"string"@1`; `@en--foo` is not a direction).
+/// RDF 1.2 `LANG_DIR`: a well-formed BCP47 language tag (RDF 1.2 Concepts requires one; the
+/// grammar's `[a-zA-Z]+ ('-' [a-zA-Z0-9]+)*` alone admits `en-123456789`), then an optional
+/// base direction that is exactly `--ltr` or `--rtl` (case-sensitive: W3C
+/// `ntriples-langdir-bad-2` rejects `--LTR`). The tag check is the serial parser's own
+/// (`oxrdf` → `oxilangtag`), behind an allocation-free fast path for the common
+/// `ll` / `lll` / `ll-RR` / `ll-999` shapes.
 fn valid_lang_tag(t: &[u8]) -> bool {
     let (tag, dir) = match t.windows(2).position(|w| w == b"--") {
         Some(k) => (&t[..k], Some(&t[k + 2..])),
         None => (t, None),
     };
-    let mut parts = tag.split(|&c| c == b'-');
-    let primary_ok = parts.next().is_some_and(|p| !p.is_empty() && p.iter().all(u8::is_ascii_alphabetic));
-    primary_ok
-        && parts.all(|p| !p.is_empty() && p.iter().all(u8::is_ascii_alphanumeric))
-        && dir.is_none_or(|d| d.eq_ignore_ascii_case(b"ltr") || d.eq_ignore_ascii_case(b"rtl"))
+    if !dir.is_none_or(|d| d == b"ltr" || d == b"rtl") {
+        return false;
+    }
+    let alpha = |p: &[u8]| p.iter().all(u8::is_ascii_alphabetic);
+    let common = match tag.iter().position(|&c| c == b'-') {
+        None => matches!(tag.len(), 2 | 3) && alpha(tag),
+        Some(k) => {
+            let (lang, region) = (&tag[..k], &tag[k + 1..]);
+            matches!(lang.len(), 2 | 3)
+                && alpha(lang)
+                && ((region.len() == 2 && alpha(region))
+                    || (region.len() == 3 && region.iter().all(u8::is_ascii_digit)))
+        }
+    };
+    common
+        || std::str::from_utf8(tag)
+            .is_ok_and(|tag| oxrdf::Literal::new_language_tagged_literal("", tag).is_ok())
 }
 
 fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
@@ -973,6 +989,12 @@ fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
             let (dstart, dend, desc, next) = scan_iri(b, open)?;
             let dt = decode(&b[dstart..dend], desc)?;
             check_absolute(&dt, open)?;
+            // A language-tagged string needs its tag (W3C `ntriples-langdir-bad-3` / `-5`).
+            if dt == RDF_LANG_STRING || dt == RDF_DIR_LANG_STRING {
+                return Err(format!(
+                    "N-Triples: {dt} literal without a language tag at byte {open}"
+                ));
+            }
             Ok((dict.intern_lit(&value, &dt, None), next))
         }
         // @lang
@@ -1098,6 +1120,12 @@ mod tests {
             "\"s\" <http://example/p> <http://example/o> .",
             "<http://example/s> <http://example/p> <<( <http://example/a> \"b\" <http://example/c> )>> .",
             "<http://example/s> <http://example/p> \"x\"@en--foo .",
+            "<http://example/s> <http://example/p> \"x\"@en--LTR .",
+            "<http://example/s> <http://example/p> \"x\"@en--Rtl .",
+            "<http://example/s> <http://example/p> \"x\"@en-123456789 .",
+            "<http://example/s> <http://example/p> \"x\"@abcdefghi .",
+            "<http://example/s> <http://example/p> \"x\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#langString> .",
+            "<http://example/s> <http://example/p> \"x\"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#dirLangString> .",
             "VERSION \"1.2\" <http://example/s> <http://example/p> <http://example/o> .",
             "VERSION 1.2\n",
             "VERSIONX \"1.2\"\n",
@@ -1254,6 +1282,57 @@ mod tests {
         check("VERSION\n\"1.2\"\n", false, true, None);
     }
 
+    /// Language tags are well-formed BCP47 and directions are exactly `ltr` / `rtl`, on both
+    /// entry points, agreeing with the serial parser tag by tag.
+    #[test]
+    fn language_tags_match_serial_bcp47() {
+        let tags: &[(&str, bool)] = &[
+            ("en", true),
+            ("EN", true),
+            ("deu", true),
+            ("en-US", true),
+            ("en-419", true),
+            ("abcd", true),
+            ("abcdefgh", true),
+            ("zh-Hant-TW", true),
+            ("en-12345678", true),
+            ("de-CH-1901", true),
+            ("en-US-u-ca-gregory", true),
+            ("x-private", true),
+            ("i-klingon", true),
+            ("en--ltr", true),
+            ("en-US--rtl", true),
+            ("en-123456789", false),
+            ("abcdefghi", false),
+            ("en-x-abcdefghi", false),
+            ("a", false),
+            ("en-a", false),
+            ("en-US-US", false),
+            ("en--LTR", false),
+            ("en--Ltr", false),
+            ("en--RTL", false),
+            ("en--up", false),
+        ];
+        for &(tag, ok) in tags {
+            let doc = format!("<urn:s> <urn:p> \"x\"@{tag} .\n");
+            assert_eq!(
+                parse_chunk(doc.as_bytes(), &mut Dict::new()).is_ok(),
+                ok,
+                "N-Triples @{tag}"
+            );
+            #[cfg(feature = "parallel")]
+            assert_eq!(
+                parse_quads_chunk(doc.as_bytes()).is_ok(),
+                ok,
+                "N-Quads @{tag}"
+            );
+            let serial = oxttl::NTriplesParser::new()
+                .for_slice(doc.as_bytes())
+                .all(|r| r.is_ok());
+            assert_eq!(serial, ok, "serial N-Triples @{tag}");
+        }
+    }
+
     /// The W3C grammar's character classes, transcribed independently of the parser
     /// (RDF 1.2 N-Triples `PN_CHARS_BASE`, `PN_CHARS_U`, `PN_CHARS`).
     const PN_CHARS_BASE_RANGES: &[(u32, u32)] = &[
@@ -1352,7 +1431,7 @@ mod tests {
     #[test]
     fn cr_comment_version_and_valid_unicode_accepted() {
         let doc = "VERSION \"1.2\"\r\nVERSION \"1.2-basic\" # c\n#comment\r<urn:s> <urn:p> <urn:o> .\n\
-                   _:a\u{B7}b <urn:p> \"x\"@ar--RTL .\n\
+                   _:a\u{B7}b <urn:p> \"x\"@ar--rtl .\n\
                    _:\u{E9}t\u{E9}\u{301}-\u{3042}.\u{10000}_9 <urn:p> _:\u{D8}\u{2C00}\u{203F}x .\n\
                    VERSION \"1.2\\u0041\"\n  \tVERSION \"1.2\"\n\
                    <urn:s> <urn:p> \"x\"^^ <urn:dt> .\n<urn:s> <urn:p> \"y\" \t^^\t<urn:dt> .\n\
@@ -2062,4 +2141,3 @@ mod tests {
         assert_eq!(buckets[1].1.term(buckets[1].2[0][0]), Term::BlankNode(BlankNode::new_unchecked("é")));
     }
 }
-

@@ -100,7 +100,7 @@ const DICT_FILES: &[&str] = &[
     "dict-hash.bin",
     "dict-hid.bin",
     "numerics-v3.bin",
-    "temporals-v3.bin",
+    "temporals-v4.bin",
     "predstats.bin",
 ];
 

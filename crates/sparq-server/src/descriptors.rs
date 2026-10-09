@@ -918,8 +918,8 @@ mod tests {
             r.expect("SD with sd:supportedVersion must be valid N-Triples");
         }
 
-        // Tripwires: once UPDATE accepts 1.2 and 1.2 dateTimes admit year 0000 (XSD 1.1),
-        // revisit CONFORMANCE_VERIFIED_VERSIONS.
+        // Tripwire: once UPDATE accepts 1.2, revisit CONFORMANCE_VERIFIED_VERSIONS. Year 0000
+        // (XSD 1.1) is already admitted, under every VERSION.
         assert!(sparq_engine::parse_update_rec2013(
             "VERSION \"1.2\" INSERT DATA { <urn:s> <urn:p> <urn:o> }"
         )
@@ -931,7 +931,10 @@ mod tests {
              SELECT (YEAR(\"0000-01-01T00:00:00Z\"^^xsd:dateTime) AS ?y) WHERE {}",
         )
         .unwrap();
-        assert_eq!(year_zero.rows[0][0], None);
+        let Some(oxrdf::Term::Literal(y)) = &year_zero.rows[0][0] else {
+            panic!("YEAR of a year-zero dateTime is bound: {:?}", year_zero.rows[0][0]);
+        };
+        assert_eq!(y.value(), "0");
     }
 
     #[test]
