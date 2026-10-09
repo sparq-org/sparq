@@ -264,7 +264,9 @@ What the server exposes, all discoverable from the storage description
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH`
   (`application/merge-patch+json` or `application/json-patch+json`), `DELETE` (with
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
-  Errors are `application/problem+json`. A `POST` whose name is taken (or is being created,
+  Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
+  `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
+  lines counts every line, and one that cannot be read gets `412`. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
   patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
@@ -281,9 +283,11 @@ What the server exposes, all discoverable from the storage description
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Authorization**: the owner may do anything, and the agent that created a resource may do
   anything with it.
-- A PUT or PATCH that changes a resource's metadata (its types, its linkset) and fails part way
-  leaves the resource **fail-closed**: only the owner and its creator may act on it until a write
-  completes.
+- Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
+  `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and
+  put it all back when a later step fails, so content, metadata and listings are as they were. A
+  delete too large to put back is refused with `409`. When putting back fails too, the resource
+  is left **fail-closed**: only the owner and its creator may act on it until a write completes.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
