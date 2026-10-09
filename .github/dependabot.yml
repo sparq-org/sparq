@@ -135,6 +135,34 @@ updates:
       - dependency-name: "eslint"
         update-types:
           - version-update:semver-major
+      # site/scripts/vr.sh runs the visual tests in a Playwright container pinned by
+      # version and digest, and refuses to run when the locked @playwright/test
+      # differs. Bump Playwright by hand together with that pin and regenerated
+      # baselines. Security updates still come through.
+      - dependency-name: "@playwright/test"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: "playwright"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: "playwright-core"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+      # The ZK verifier is pinned to Barretenberg 5.0.0-nightly.20260324 (see
+      # skills/zk-query-proofs/SKILL.md); other bb.js versions can change the proof
+      # and public-input layout the site's in-tab verify relies on. Bump it by hand
+      # with the Noir toolchain. Security updates still come through.
+      - dependency-name: "@aztec/bb.js"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
 
   # ---- pip (the `sparq` Python bindings build/test deps) ----
   - package-ecosystem: pip

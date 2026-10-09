@@ -582,8 +582,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality,
-            ow.o.max_qual_card,
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -667,8 +667,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality,
-            ow.o.max_qual_card,
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -1012,7 +1012,7 @@ impl MaterializedOwlGraph {
     #[cfg(feature = "parallel")]
     fn count_sweep(&self, triples: &[[Id; 3]]) -> Vec<[Id; 3]> {
         use rayon::prelude::*;
-        const PAR_THRESHOLD: usize = 4096;
+        const PAR_THRESHOLD: usize = 4096; // not-a-limit: parallelism (a threshold, no cut)
         if triples.len() < PAR_THRESHOLD {
             let mut out = Vec::new();
             for &t in triples {
@@ -1536,6 +1536,9 @@ pub struct MaterializedN3Graph {
     layer_derived: Vec<FxHashSet<[N3Term; 3]>>,
     fallback_closure: FxHashSet<[N3Term; 3]>,
     rebuilds: usize,
+    /// Where the counting evaluation records a cut ([`crate::n3::bounded`]). A cut changes
+    /// no result and is not yet reported.
+    cuts: crate::n3::bounded::Cuts,
 }
 
 /// Evaluation phase of a non-seed plain atom relative to the delta seed (the counting
@@ -1558,6 +1561,9 @@ struct N3Cx<'a> {
     delta: Option<(&'a FxHashSet<[N3Term; 3]>, bool)>,
     /// Set when evaluation meets data the parity whitelist does not cover.
     unsupported: &'a Cell<bool>,
+    /// The graph's cut record ([`crate::n3::bounded::Cuts`]). Kept apart from
+    /// `unsupported`: a cut changes no result, so it never switches the evaluation path.
+    cuts: &'a crate::n3::bounded::Cuts,
 }
 
 impl N3Cx<'_> {
@@ -1658,6 +1664,7 @@ fn eval_n3_builtin(
     o: &N3Term,
     b: &NB,
     unsupported: &Cell<bool>,
+    cuts: &crate::n3::bounded::Cuts,
 ) -> Option<NB> {
     let sv = n3_apply(s, b);
     match op {
@@ -1726,7 +1733,9 @@ fn eval_n3_builtin(
             let (N3Term::Lit(text, _, _), N3Term::Lit(pat, _, _)) = (&ms[0], &ms[1]) else {
                 return None;
             };
-            let re = regex::Regex::new(pat).ok()?;
+            // A pattern the regex engine refuses is no match, as on the checked engine; the
+            // cut is recorded on the graph's record and does not change the path.
+            let re = crate::n3::bounded::settle(cuts, crate::n3::bounded::regex(pat))?;
             let cap = re.captures(text)?.get(1)?.as_str().to_string();
             let lit = N3Term::Lit(cap, N3_XSD_STRING.into(), None);
             let mut nb = b.clone();
@@ -1849,7 +1858,7 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
             N3Atom::Builtin { op, s, o } => {
                 binds = binds
                     .into_iter()
-                    .filter_map(|b| eval_n3_builtin(*op, s, o, &b, cx.unsupported))
+                    .filter_map(|b| eval_n3_builtin(*op, s, o, &b, cx.unsupported, cx.cuts))
                     .collect();
                 n3_term_vars(s, &mut bound);
                 n3_term_vars(o, &mut bound);
@@ -2256,7 +2265,8 @@ impl MaterializedN3Graph {
     ///
     /// Errors only on rules-document parse failure.
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
-        let parsed = n3p::parse(rules_src)?;
+        let cuts = crate::n3::bounded::Cuts::top_level();
+        let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),
@@ -2277,6 +2287,7 @@ impl MaterializedN3Graph {
             layer_derived: vec![FxHashSet::default(); n_layers],
             fallback_closure: FxHashSet::default(),
             rebuilds: 0,
+            cuts,
         };
         g.rematerialize();
         g.rebuilds = 0;
@@ -2336,7 +2347,8 @@ impl MaterializedN3Graph {
         }
         self.mode = N3Mode::Fallback;
         let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
-        let closure = crate::n3::reason_n3_terms(&src, None)
+        // The graph's own run record: a cut in the fallback reaches it.
+        let closure = crate::n3::reason_n3_terms_in(&src, None, None, &self.cuts)
             .expect("re-serialized base must re-parse (serializer bug)");
         self.fallback_closure = closure.facts.into_iter().collect();
     }
@@ -2350,6 +2362,7 @@ impl MaterializedN3Graph {
     fn propagate(&mut self, mut pending: Vec<[N3Term; 3]>, inserting: bool) -> bool {
         let Some(compiled) = self.compiled.clone() else { return false };
         let unsupported = Cell::new(false);
+        let cuts = self.cuts.clone();
         while !pending.is_empty() {
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
@@ -2442,6 +2455,7 @@ impl MaterializedN3Graph {
                     guards: &self.index,
                     delta: Some((&pend_set, inserting)),
                     unsupported: &unsupported,
+                    cuts: &cuts,
                 };
                 for rule in &compiled.counted {
                     for atom in &rule.atoms {
@@ -2506,6 +2520,7 @@ impl MaterializedN3Graph {
         unsupported: &Cell<bool>,
     ) -> (Vec<[N3Term; 3]>, Vec<[N3Term; 3]>) {
         let def = &compiled.layers[li];
+        let cuts = self.cuts.clone();
         // Seed: relevant facts of the closure, minus the layer's own (possibly stale)
         // contribution — unless a fact is independently present (base / counted).
         let mut seed: Vec<[N3Term; 3]> = Vec::new();
@@ -2530,8 +2545,13 @@ impl MaterializedN3Graph {
         while !pending.is_empty() {
             let mut emissions = Vec::new();
             {
-                let cx =
-                    N3Cx { facts: &local, guards: &self.index, delta: None, unsupported };
+                let cx = N3Cx {
+                    facts: &local,
+                    guards: &self.index,
+                    delta: None,
+                    unsupported,
+                    cuts: &cuts,
+                };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
                         let N3Atom::Plain { pat, plain_ix } = atom else { continue };
@@ -2689,6 +2709,62 @@ impl MaterializedN3Graph {
 mod tests {
     use super::*;
     use crate::materialize_rdfs;
+
+    /// A limit met only on the batch fallback (here a regex the engine refuses, inside a
+    /// rule set the counting engine disqualifies) is recorded on the graph's own run
+    /// record, not a throwaway one.
+    #[test]
+    fn a_fallback_only_cut_reaches_the_graphs_record() {
+        let rules = "@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+                     @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+                     { ?s <http://ex/p> ?v . (1 2) math:sum ?o . \"a\" string:matches \"(\" }\n\
+                       => { ?s <http://ex/q> ?o } .";
+        let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+        let g = MaterializedN3Graph::new(rules, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        assert!(
+            g.cuts.first().is_some(),
+            "the fallback's cut must reach the graph's record"
+        );
+        let clean = "{ ?s <http://ex/p> ?v } => { ?s <http://ex/q> ?v } .";
+        let g = MaterializedN3Graph::new(clean, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
+        assert!(g.cuts.first().is_none());
+    }
+
+    /// `why` re-derives by reparsing the serialized base. A base fact built in code can
+    /// nest deeper than the parser accepts; the explanation is then `None`, and the
+    /// parser limit is a cut on the graph's record, not a dropped error string.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn an_explanation_reparse_past_the_nesting_limit_is_a_cut() {
+        let out = std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(|| {
+                let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+                let mut deep = iri("leaf");
+                for _ in 0..5000 {
+                    deep = N3Term::List(vec![deep]);
+                }
+                let rules = "{ ?s <http://ex/p> ?o } => { ?s <http://ex/q> ?o } .";
+                let g = MaterializedN3Graph::new(rules, &[[iri("b"), iri("p"), deep.clone()]])
+                    .expect("rules");
+                let derived = [iri("b"), iri("q"), deep];
+                (
+                    g.contains(&derived),
+                    g.cuts.first().is_none(),
+                    g.why(&derived).is_none(),
+                    g.cuts.first().is_some(),
+                )
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+        assert_eq!(
+            out,
+            (true, true, true, true),
+            "(derived, no cut before, no proof, cut after)"
+        );
+    }
     use oxrdf::vocab::{rdf, rdfs};
 
     struct V {
