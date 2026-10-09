@@ -11,9 +11,10 @@
 //! unless the line, or the line above, carries a `// not-a-limit: <category>` marker
 //! whose category is in [`ALLOWED`]. An unknown category fails, so a marker is never a
 //! free-text waiver. It also fails when a new `src/n3/*.rs` file is not on its list, and
-//! when a fresh cut record (`Cuts::top_level`) is made anywhere but an entry point (a
-//! `pub fn`, or a crate-internal `reason_n3*` one): a nested evaluation must record into
-//! its parent's.
+//! when a fresh cut record (`Cuts::top_level`) is made anywhere but a `pub fn` entry
+//! point: a nested evaluation must record into its parent's. A second test fails when a
+//! public `reason_n3*` entry point (which makes such a record) is called from inside the
+//! crate: an internal caller passes its own record to the `_in` variant.
 //!
 //! A text scan cannot see every implicit limit (recursion depth, a third-party crate's
 //! internal caps, a limit spelled some other way).
@@ -112,9 +113,7 @@ fn limits_live_in_the_bounded_module() {
             if t.starts_with("pub fn ") || t.starts_with("fn ") || t.starts_with("pub(crate) fn ") {
                 current_fn = t.to_string();
             }
-            let entry = current_fn.starts_with("pub fn ")
-                || current_fn.starts_with("pub(crate) fn reason_n3");
-            if code.contains("Cuts::top_level(") && !entry {
+            if code.contains("Cuts::top_level(") && !current_fn.starts_with("pub fn ") {
                 hits.push(format!(
                     "{rel}:{n}: a fresh cut record outside a public entry point ({}): {}",
                     current_fn.trim(),
@@ -133,6 +132,81 @@ fn limits_live_in_the_bounded_module() {
     assert!(
         hits.is_empty(),
         "limits outside src/n3/bounded.rs:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// `own-run` marker categories: a crate-internal call of a public N3 entry point (which
+/// starts a fresh run record) that legitimately is a run of its own.
+const OWN_RUN: &[&str] = &[
+    // Another surface's public entry point whose evaluation is one whole N3 run (RIF).
+    "separate-entry",
+];
+
+/// Every public N3 entry point starts a fresh run record (`Cuts::top_level`). A crate
+/// caller that is itself part of a run must use the internal `_in` variant that takes
+/// its record, or its cuts land in a throwaway one. So no source file may call a public
+/// `reason_n3*` entry point outside test modules, unless the call carries an
+/// `// own-run: <category>` marker from [`OWN_RUN`].
+#[test]
+fn public_entry_points_are_not_called_from_inside_the_crate() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let n3 = std::fs::read_to_string(format!("{root}/src/n3/mod.rs")).expect("n3/mod.rs");
+    let def = Regex::new(r"^pub fn (reason_n3\w*)\(").expect("def pattern");
+    let entries: Vec<String> = n3
+        .lines()
+        .filter_map(|l| def.captures(l).map(|c| c[1].to_string()))
+        .collect();
+    assert!(entries.len() >= 8, "found {entries:?}");
+    let call = Regex::new(&format!(r"\b({})\(", entries.join("|"))).expect("call pattern");
+    let marker = Regex::new(r"//\s*own-run:\s*([a-z-]*)").expect("marker pattern");
+    let mut files = Vec::new();
+    let mut dirs = vec![std::path::PathBuf::from(format!("{root}/src"))];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).expect("src dir") {
+            let p = e.expect("entry").path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                files.push(p);
+            }
+        }
+    }
+    let mut hits = Vec::new();
+    for path in files {
+        let src = std::fs::read_to_string(&path).expect("read");
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        for (n, line) in src.lines().enumerate() {
+            for m in marker.captures_iter(line) {
+                if !OWN_RUN.contains(&&m[1]) {
+                    hits.push(format!(
+                        "{rel}:{}: `own-run: {}` is not allowed",
+                        n + 1,
+                        &m[1]
+                    ));
+                }
+            }
+        }
+        for (n, code, comments) in code_lines(&src) {
+            let t = code.trim_start();
+            if t.starts_with("pub fn ") || t.starts_with("fn ") || t.starts_with("pub(crate) fn ") {
+                continue; // a definition, not a call
+            }
+            if call.is_match(&code) && !comments.contains("// own-run:") {
+                hits.push(format!(
+                    "{rel}:{n}: public entry point called internally: {}",
+                    code.trim()
+                ));
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "internal calls of public N3 entry points (use the `_in` variant):\n{}",
         hits.join("\n")
     );
 }

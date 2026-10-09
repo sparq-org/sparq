@@ -361,6 +361,11 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
 /// (a fact-only or backward-only query document has nothing to project — fail loudly rather
 /// than return an empty answer that reads like "the query matched nothing").
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, String> {
+    query_terms_in(data, query, bounded::Cuts::top_level())
+}
+
+/// [`reason_n3_query_terms`] recording into the caller's run record `cuts`.
+fn query_terms_in(data: &str, query: &str, cuts: bounded::Cuts) -> Result<Vec<[Term; 3]>, String> {
     let data_parsed = parser::parse(data)?;
     let query_parsed = parser::parse(query)?;
     if query_parsed.rules.is_empty() {
@@ -386,7 +391,6 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
         r.premise = order_premise(&r.premise);
     }
     // One run: the data closure and the query premises share one cut record.
-    let cuts = bounded::Cuts::top_level();
     let (facts, _steps) = run_closure(data_parsed, None, None, StepMode::None, &cuts);
     let mut bw = BwCtx::new(&backward, cuts);
     bw.base = base;
@@ -441,7 +445,7 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
 /// formula, which has no dictionary representation; use the term-level entry point for a query
 /// whose conclusion is formula-valued.
 pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[Id; 3]>, String> {
-    let answers = reason_n3_query_terms(data, query)?;
+    let answers = query_terms_in(data, query, bounded::Cuts::top_level())?;
     let mut exp = ListExpander::new(&answers);
     let (mut rows, mut structure) = exp.expand_rows(&answers);
     rows.append(&mut structure);
@@ -648,15 +652,10 @@ fn stratum_blanks(t: &[Term; 3], prefix: &str) -> [Term; 3] {
 #[allow(clippy::type_complexity)]
 pub(crate) fn reason_n3_terms_proof(
     src: &str,
+    cuts: &bounded::Cuts,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(
-        parsed,
-        None,
-        None,
-        StepMode::Full,
-        &bounded::Cuts::top_level(),
-    );
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full, cuts);
     Ok((facts.all, steps))
 }
 
@@ -677,7 +676,7 @@ pub struct N3Closure {
 /// and resolves relative IRIs against `base` when given — the entry point used
 /// by the W3C N3 conformance harness (cwm/EYE-style: `--think` then compare).
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String> {
-    reason_n3_terms_with_resolver(src, base, None)
+    reason_n3_terms_in(src, base, None, &bounded::Cuts::top_level())
 }
 
 /// As [`reason_n3_terms`], with an optional document [`Resolver`] enabling the
@@ -690,19 +689,24 @@ pub fn reason_n3_terms_with_resolver(
     base: Option<&str>,
     resolver: Option<&Resolver>,
 ) -> Result<N3Closure, String> {
+    reason_n3_terms_in(src, base, resolver, &bounded::Cuts::top_level())
+}
+
+/// [`reason_n3_terms_with_resolver`] for a crate-internal caller that already has a run:
+/// every cut is recorded on its record `cuts` (e.g. the incremental graph's fallback).
+pub(crate) fn reason_n3_terms_in(
+    src: &str,
+    base: Option<&str>,
+    resolver: Option<&Resolver>,
+    cuts: &bounded::Cuts,
+) -> Result<N3Closure, String> {
     let parsed = match base {
         Some(b) => parser::parse_with_base(src, b)?,
         None => parser::parse(src)?,
     };
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
-    let (facts, steps) = run_closure(
-        parsed,
-        resolver,
-        None,
-        StepMode::Conclusions,
-        &bounded::Cuts::top_level(),
-    );
+    let (facts, steps) = run_closure(parsed, resolver, None, StepMode::Conclusions, cuts);
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
