@@ -683,3 +683,22 @@ async fn collection_targets_match_their_members() {
     let ds = collection_dataset(&rule("prohibition", "pr", NOTES_COLL, BOB));
     assert_eq!(titles(query_as(&base, &ds, Some(ALICE), None, None).await).await, ["hello", "other"]);
 }
+
+/// The lane's evaluation bound: (rule targets + their stated members) x rules may be at
+/// most 10 000. One rule on a collection with 9 999 members (10 000 evaluated targets) is
+/// served and governs every member; one more member is refused before any evaluation.
+#[tokio::test]
+async fn collection_member_evaluations_are_bounded() {
+    let base = spawn().await;
+    let with_members = |n: usize| {
+        let edges: String = (0..n)
+            .map(|i| format!("<https://pod.ex/notes/m{i}> <{ODRL}partOf> <{NOTES_COLL}> .\n"))
+            .collect();
+        collection_dataset(&format!("{}{edges}", rule("prohibition", "pr", NOTES_COLL, ALICE)))
+    };
+    // n1 is one of the members, so the at-cap request still hides it.
+    let at_cap = with_members(9_998);
+    assert_eq!(titles(query_as(&base, &at_cap, Some(ALICE), None, None).await).await, ["other"]);
+    let over = with_members(9_999);
+    assert_eq!(query_as(&base, &over, Some(ALICE), None, None).await.status(), 400);
+}

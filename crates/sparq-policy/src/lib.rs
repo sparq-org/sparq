@@ -53,7 +53,9 @@ pub use model::{
     Action, ConflictStrategy, Constraint, ConstraintNode, Duty, LogicalConstraint, LogicalOperator,
     Operator, Policy, Rule, Value, ODRL_NS,
 };
-pub use parse::{parse_policy, parse_policy_str};
+pub use parse::{
+    parse_policy, parse_policy_str, parse_policy_str_with_memberships, target_memberships,
+};
 pub use validate::ValidatedPolicy;
 
 // [OPUS-4.8] sq-zi5w: re-export the count-enforcement surface at the crate root when the

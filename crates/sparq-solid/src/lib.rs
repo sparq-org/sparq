@@ -1469,6 +1469,37 @@ impl PodStore {
         outcome
     }
 
+    /// [`PodStore::materialize_odrl_policy`] for every request in `requests`, writing the
+    /// auth view and rebuilding the session index once for the whole batch instead of
+    /// once per request. Outcomes are parallel to `requests`.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn materialize_odrl_policy_for_each(
+        &mut self,
+        policy: &sparq_policy::ValidatedPolicy,
+        requests: &[sparq_policy::Request],
+    ) -> Vec<odrl_bridge::BridgeOutcome> {
+        let outcomes = odrl_bridge::materialize_policy_for_each(&mut self.graph, policy, requests);
+        let materialized: Vec<&sparq_policy::Request> = requests
+            .iter()
+            .zip(&outcomes)
+            .filter(|(_, o)| o.granted || o.prohibited)
+            .map(|(r, _)| r)
+            .collect();
+        if !materialized.is_empty() {
+            self.bridge_ledger
+                .record_each(policy, materialized, odrl_bridge::BridgeKind::Policy);
+            self.reindex_with(ReindexScope::Full);
+        }
+        outcomes
+    }
+
+    /// How many times the authorization index has been rebuilt since this store was
+    /// created. Every materialization or access-control change that alters the auth view
+    /// increments it.
+    pub fn auth_generation(&self) -> u64 {
+        self.epoch
+    }
+
     /// The same one-shot grant as [`PodStore::materialize_odrl_permission`], tracked as
     /// [`odrl_bridge::BridgeKind::PermissionConditional`]. It no longer persists
     /// recipient/assignee/dateTime constraints as re-checked condition heads; see

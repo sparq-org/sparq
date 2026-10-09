@@ -1799,32 +1799,11 @@ fn union_policy_graph(dataset: &str) -> Result<sparq_core::Graph, String> {
     sparq_core::Graph::load_str(&nt, "ntriples")
 }
 
-/// The `(member, collection)` asset-membership edges (`member odrl:partOf collection`)
-/// the dataset states, in any graph, for a `collection` among `targets`. Being a rule
-/// target makes it an asset collection here, even when the policy parser also reads
-/// the `odrl:partOf` edge as declaring a party collection. Sorted and deduplicated.
+/// The most (rule, evaluated target) pairs one ODRL lane request may evaluate, where the
+/// evaluated targets are the rule targets plus their stated collection members. A larger
+/// request is refused rather than evaluated in part.
 #[cfg(feature = "odrl-authz")]
-fn asset_members(
-    dataset: &str,
-    targets: &std::collections::BTreeSet<String>,
-) -> Result<std::collections::BTreeSet<(String, String)>, String> {
-    const PART_OF: &str = "http://www.w3.org/ns/odrl/2/partOf";
-    let mut out = std::collections::BTreeSet::new();
-    for quad in oxttl::NQuadsParser::new().for_slice(dataset.as_bytes()) {
-        let quad = quad.map_err(|e| e.to_string())?;
-        if quad.predicate.as_str() != PART_OF {
-            continue;
-        }
-        let (oxrdf::NamedOrBlankNode::NamedNode(m), oxrdf::Term::NamedNode(c)) = (&quad.subject, &quad.object)
-        else {
-            continue;
-        };
-        if targets.contains(c.as_str()) {
-            out.insert((m.as_str().to_owned(), c.as_str().to_owned()));
-        }
-    }
-    Ok(out)
-}
+pub(crate) const MAX_ODRL_EVALUATIONS: usize = 10_000;
 
 /// Run the ODRL lane over an already WAC/ACP-materialised `store`: parse the dataset's
 /// ODRL policy and materialise its bridged grants/denies (both sides, deny-overrides)
@@ -1905,40 +1884,60 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
         }
     }
     // 6. Materialise BOTH sides of the policy per target, and per member of a target
-    //    the dataset places in it (`member odrl:partOf target`): a rule on an asset
+    //    the dataset places in it (`member odrl:partOf target`, any graph): a rule on an asset
     //    collection matches each of its members, carrying that membership as the
     //    request's asset evidence. Each call is independently fail-closed (a
     //    non-matching / unevidenced rule materialises nothing) and idempotent; the deny
     //    side wins at enforcement (∪ allow ∖ ∪ deny).
-    let members = asset_members(&req.dataset, &targets)
-        .map_err(|_| json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads"))?;
-    let evaluated = targets
+    let members = sparq_policy::target_memberships(&policy, &policy_graph).map_err(|_| {
+        json_error(
+            StatusCode::BAD_REQUEST,
+            "the dataset's ODRL policy did not parse (fail-closed)",
+        )
+    })?;
+    // 7. Bound the work before doing it: every (rule, evaluated target) pair is one
+    //    evaluation. Over the cap the request is refused, never evaluated in part.
+    let rules = policy.permissions.len() + policy.prohibitions.len();
+    if (targets.len() + members.len()).saturating_mul(rules) > MAX_ODRL_EVALUATIONS {
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            "the ODRL policy and its collection memberships exceed this lane's evaluation \
+             bound (fail-closed)",
+        ));
+    }
+    let requests: Vec<sparq_policy::Request> = targets
         .iter()
-        .map(|t| (t.clone(), None))
-        .chain(members.into_iter().map(|(m, c)| (m, Some(c))));
-    for (target, collection) in evaluated {
-        let mut request = sparq_policy::Request::new(action)
-            .on(target.clone())
-            .by(agent)
-            // The requesting agent IS the delivery recipient of the query results.
-            .with(
-                sparq_policy::ODRL_RECIPIENT,
-                sparq_policy::Value::Iri(agent.to_owned()),
-            );
-        if let Some(now) = req.now.as_deref() {
-            request = request.at(now);
-        }
-        if let Some(collection) = collection {
-            request = request.with_asset_membership(target, collection);
-        }
-        let outcome = store.materialize_odrl_policy(&policy, &request);
-        if outcome.refused {
-            // Defence-in-depth: step 4 already refused inadmissible strategies.
-            return Err(json_error(
-                StatusCode::BAD_REQUEST,
-                "the ODRL policy was refused by the bridge (fail-closed)",
-            ));
-        }
+        .map(|t| (t.as_str(), None))
+        .chain(members.iter().map(|(m, c)| (m.as_str(), Some(c.as_str()))))
+        .map(|(target, collection)| {
+            let mut request = sparq_policy::Request::new(action)
+                .on(target)
+                .by(agent)
+                // The requesting agent IS the delivery recipient of the query results.
+                .with(
+                    sparq_policy::ODRL_RECIPIENT,
+                    sparq_policy::Value::Iri(agent.to_owned()),
+                );
+            if let Some(now) = req.now.as_deref() {
+                request = request.at(now);
+            }
+            if let Some(collection) = collection {
+                request = request.with_asset_membership(target, collection);
+            }
+            request
+        })
+        .collect();
+    // One index rebuild for the whole request, however many targets it evaluates.
+    if store
+        .materialize_odrl_policy_for_each(&policy, &requests)
+        .iter()
+        .any(|o| o.refused)
+    {
+        // Defence-in-depth: step 4 already refused inadmissible strategies.
+        return Err(json_error(
+            StatusCode::BAD_REQUEST,
+            "the ODRL policy was refused by the bridge (fail-closed)",
+        ));
     }
     Ok(())
 }

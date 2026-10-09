@@ -602,6 +602,31 @@ fn freeze_deny(graph: &mut Graph, party: Option<&str>, mode: Mode, target: &str)
     }
 }
 
+/// [`materialize_policy`] for every request in `requests`, appending everything they
+/// emit to `graph` in one rebuild of each auth graph instead of one per request. Each
+/// request is evaluated against a scratch graph: the bridge only appends, so the triples
+/// and outcomes are the ones the per-request calls would produce. Outcomes are parallel
+/// to `requests`.
+pub(crate) fn materialize_policy_for_each(
+    graph: &mut Graph,
+    policy: &ValidatedPolicy,
+    requests: &[Request],
+) -> Vec<BridgeOutcome> {
+    let mut emitted: Vec<[Term; 3]> = Vec::new();
+    let outcomes = requests
+        .iter()
+        .map(|request| {
+            let outcome = materialize_policy(&mut Graph::default(), policy, request);
+            emitted.extend(outcome.emitted.iter().cloned());
+            outcome
+        })
+        .collect();
+    if !emitted.is_empty() {
+        append_bridged_triples(graph, &emitted);
+    }
+    outcomes
+}
+
 /// Materialize **both** sides of `policy` for `request`: the Permit allow grant (via
 /// [`materialize_permission`]) AND the matched-Prohibition deny (via
 /// [`materialize_prohibition`]), composing them into one [`BridgeOutcome`].
@@ -688,8 +713,9 @@ fn extend_named_graph(graph: &mut Graph, name: &str, additions: &[[Term; 3]]) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
+    let mut seen: rustc_hash::FxHashSet<[Term; 3]> = terms.iter().cloned().collect();
     for t in additions {
-        if !terms.contains(t) {
+        if seen.insert(t.clone()) {
             terms.push(t.clone());
         }
     }
@@ -1123,7 +1149,7 @@ const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 /// Which bridge entry point produced a tracked grant — replayed verbatim on refresh so
 /// the SAME fail-closed evaluation re-runs (a withdrawn/lapsed/now-Denied policy emits
 /// nothing → the entry is retracted). [OPUS-4.8] sq-dpk4.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BridgeKind {
     /// [`materialize_permission`] — a definite-Permit allow grant.
     Permission,
@@ -1224,6 +1250,35 @@ impl BridgeLedger {
             return;
         }
         self.entries.push(BridgeEntry { policy: policy.clone(), request: request.clone(), kind });
+    }
+
+    /// [`BridgeLedger::record`] for each of `requests`, with the same per-slot
+    /// replacement, indexing the existing slots once instead of scanning them per request.
+    pub(crate) fn record_each<'r>(
+        &mut self,
+        policy: &ValidatedPolicy,
+        requests: impl IntoIterator<Item = &'r Request>,
+        kind: BridgeKind,
+    ) {
+        let mut slots: rustc_hash::FxHashMap<(BridgeKind, Option<String>, Option<String>), usize> = self
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| ((e.kind, e.request.target.clone(), e.request.party.clone()), i))
+            .collect();
+        for request in requests {
+            let slot = (kind, request.target.clone(), request.party.clone());
+            match slots.get(&slot) {
+                Some(&i) => {
+                    self.entries[i].policy = policy.clone();
+                    self.entries[i].request = request.clone();
+                }
+                None => {
+                    slots.insert(slot, self.entries.len());
+                    self.entries.push(BridgeEntry { policy: policy.clone(), request: request.clone(), kind });
+                }
+            }
+        }
     }
 
     /// Replace the tracked `(policy, request)` for the grant slot matching
