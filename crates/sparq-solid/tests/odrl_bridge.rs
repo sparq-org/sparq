@@ -1717,6 +1717,43 @@ fn conditional_deny_overrides_allow_for_carved_party() {
     assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 1);
 }
 
+// 25b. An `odrl:assignee` CONSTRAINT has no evidence in a request, so `decide` keeps the
+//      prohibition in force for every party. The conditional path must not narrow it to
+//      an alice-only head: bob, asking with no assignee context, loses his public WAC
+//      read, and keeps losing it after a ledger refresh.
+#[test]
+fn assignee_constrained_prohibition_denies_everyone_decide_denies() {
+    let mut store = PodStore::new(pod());
+    let permit = parse_policy_str(
+        r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+        <urn:pol/pub> a odrl:Set ; odrl:permission [
+            odrl:action odrl:read ; odrl:target <https://pod.ex/notes/n1> ] ."#,
+        "turtle",
+    )
+    .unwrap();
+    install_public_read(&mut store, &permit);
+    let prohib = parse_policy_str(
+        r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+        <urn:pol/pa> a odrl:Set ; odrl:prohibition [
+            odrl:action odrl:read ; odrl:target <https://pod.ex/notes/n1> ;
+            odrl:constraint [ odrl:leftOperand odrl:assignee ; odrl:operator odrl:eq ;
+                              odrl:rightOperand <https://alice.ex/card#me> ] ] ."#,
+        "turtle",
+    )
+    .unwrap();
+    let req = Request::new(odrl("read")).on(N1).by(BOB);
+    assert!(!sparq_policy::decide(&prohib, &req).allow);
+    assert!(sparq_policy::matched_prohibition(&prohib, &req).is_some());
+    assert!(reads(&mut store, BOB), "bob reads through the public grant first");
+
+    let out = store.materialize_odrl_prohibition_conditional(&prohib, &req);
+    assert!(out.prohibited, "{out:?}");
+    assert_eq!(cond_denies_for(&store.graph, Some(ALICE)), 0, "no alice-only head");
+    assert!(!reads(&mut store, BOB), "bob is denied, as decide denies him");
+    store.refresh_odrl_grants();
+    assert!(!reads(&mut store, BOB), "the deny survives a ledger refresh");
+}
+
 // 26. The deny APPEARS/RETRACTS as the condition flips: a recipient-neq prohibition maps
 //     to a deny on everyone EXCEPT bob; when the prohibition is WITHDRAWN, refresh
 //     retracts the deny and access is restored (composes with sq-2pcf deny-retraction).

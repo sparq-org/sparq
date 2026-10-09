@@ -781,6 +781,19 @@ impl TimeWindow {
     }
 }
 
+/// [`map_constraints_to_agents`] for a prohibition, kept only where a session check is
+/// exactly what `decide` would conclude. A `recipient` constraint is: with no recipient
+/// context `decide` reads the requesting party, which is the session agent. An
+/// `odrl:assignee` *constraint* is not: `decide` has no evidence for it, reads it as
+/// Unknown and keeps the prohibition in force for every party, while a head naming the
+/// assignee would deny that one identity only. Such a rule takes the reference path.
+fn deny_mapping(rule: &Rule) -> AgentMapping {
+    if rule.constraints.iter().any(|c| c.left == ODRL_ASSIGNEE) {
+        return AgentMapping::Unmappable;
+    }
+    map_constraints_to_agents(rule)
+}
+
 /// What [`map_constraints_to_agents`] concluded about a permission's constraints.
 enum AgentMapping {
     /// Every constraint maps faithfully to an agent-dimension matcher; persist a
@@ -1063,7 +1076,14 @@ pub fn materialize_prohibition_conditional(
         ]);
     };
 
-    // 2. Find a prohibition whose action/target match AND whose constraints map
+    // 2. The reference deny for THIS request, materialized first and kept whatever the
+    //    conditional heads below say. `decide` keeps a prohibition in force when a
+    //    constraint is Unknown (an `odrl:assignee` constraint with no assignee evidence,
+    //    say), and a conditional head re-checks only the identity the constraint names,
+    //    so the heads alone could leave the requesting party's existing grant standing.
+    let reference = materialize_prohibition(graph, policy, request);
+
+    // 3. Find a prohibition whose action/target match AND whose constraints map
     //    faithfully to agent conditions. The recipient/assignee constraint is NOT
     //    required to hold against the request party — the persisted condition re-checks
     //    it per session (the dual of the conditional allow path).
@@ -1072,7 +1092,7 @@ pub fn materialize_prohibition_conditional(
         if !rule_action_target_match(rule, request, mode, target) {
             continue;
         }
-        match map_constraints_to_agents(rule) {
+        match deny_mapping(rule) {
             AgentMapping::Faithful { agents: recipients, except, window } => {
                 // [OPUS-4.8] sq-0q7n: a time-windowed DENY is fail-OPEN — outside the
                 // window the deny would lapse and the carved-out party would regain
@@ -1120,9 +1140,10 @@ pub fn materialize_prohibition_conditional(
                     ));
                     continue;
                 }
-                let (first, emitted) = append_conditional_grants(
+                let (first, mut emitted) = append_conditional_grants(
                     graph, &agents, &excepts, &TimeWindow::default(), mode, target, GrantEffect::Deny,
                 );
+                emitted.extend(reference.emitted);
                 return BridgeOutcome {
                     prohibited: true,
                     mode: Some(mode),
@@ -1142,14 +1163,14 @@ pub fn materialize_prohibition_conditional(
         }
     }
 
-    // 3. No faithfully-conditional prohibition applied → fall back to the EXISTING
-    //    one-shot deny (which checks the unmappable constraints against the supplied
-    //    request context and emits a frozen `auth:deny*` iff the prohibition matches).
-    let out = materialize_prohibition(graph, policy, request);
-    if !out.prohibited && out.reasons.is_empty() {
+    // 4. No faithfully-conditional prohibition applied → the one-shot reference deny
+    //    from step 2 is the whole outcome (it checks the unmappable constraints against
+    //    the supplied request context and emits a frozen `auth:deny*` iff the
+    //    prohibition matches or cannot be ruled out).
+    if !reference.prohibited && reference.reasons.is_empty() {
         return BridgeOutcome::denied(fallback_reasons);
     }
-    out
+    reference
 }
 
 /// The principal-space `auth:agent` heads for a faithful recipient set, dropping any
@@ -1761,7 +1782,7 @@ fn prohibition_maps_faithfully(policy: &ValidatedPolicy, request: &Request) -> b
     let Some(target) = request.target.as_deref() else { return false };
     policy.prohibitions.iter().any(|rule| {
         rule_action_target_match(rule, request, mode, target)
-            && matches!(map_constraints_to_agents(rule), AgentMapping::Faithful { .. })
+            && matches!(deny_mapping(rule), AgentMapping::Faithful { .. })
     })
 }
 
