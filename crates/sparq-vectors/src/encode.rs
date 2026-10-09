@@ -185,7 +185,7 @@ pub fn numeric_value(lexical: &str) -> Option<f64> {
 pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
     match datatype {
         dt::DATE_TIME | dt::DATE_TIME_STAMP => {
-            sparq_core::temporal::Timeline::parse_datetime(lexical).map(|t| t.instant())
+            sparq_core::temporal::Timeline::parse_datetime_of(lexical, datatype).map(|t| t.instant())
         }
         dt::DATE => sparq_core::temporal::Timeline::parse_date(lexical).map(|t| t.instant()),
         dt::G_YEAR => {

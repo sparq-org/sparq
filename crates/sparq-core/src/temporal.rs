@@ -57,6 +57,19 @@ impl Timeline {
         })
     }
 
+    /// The value of an `xsd:dateTime` or `xsd:dateTimeStamp` lexical, `None` when ill-formed.
+    /// `xsd:dateTimeStamp` requires a timezone (XSD 1.1 §3.4.28, `explicitTimezone =
+    /// required`), so a timezone-free lexical of that datatype is ill-formed. Every
+    /// datatype-aware dateTime parse goes through here: the load-time cache
+    /// ([`Temporal::of_lit`]) and the engine's per-row comparison path must agree.
+    pub fn parse_datetime_of(s: &str, datatype: &str) -> Option<Timeline> {
+        let tl = Timeline::parse_datetime(s)?;
+        if datatype == XSD_DATE_TIME_STAMP && tl.tz.is_none() {
+            return None;
+        }
+        Some(tl)
+    }
+
     pub fn parse_date(s: &str) -> Option<Timeline> {
         // The timezone suffix starts after the day: "...-23Z" / "...-23+05:00". A bare
         // date's own hyphens must not be mistaken for an offset sign, so require the
@@ -210,7 +223,7 @@ impl Temporal {
     /// temporals stay on the slow path, which yields the type-error semantics).
     pub fn of_lit(value: &str, datatype: &str) -> Option<Temporal> {
         let (kind, tl) = match datatype {
-            XSD_DATE_TIME | XSD_DATE_TIME_STAMP => (TemporalKind::DateTime, Timeline::parse_datetime(value)?),
+            XSD_DATE_TIME | XSD_DATE_TIME_STAMP => (TemporalKind::DateTime, Timeline::parse_datetime_of(value, datatype)?),
             XSD_DATE => (TemporalKind::Date, Timeline::parse_date(value)?),
             _ => return None,
         };
@@ -507,6 +520,18 @@ mod tests {
         let date = Temporal::of_lit("2024-03-15", XSD_DATE).unwrap();
         assert_eq!(date.kind, TemporalKind::Date);
         assert_eq!(Temporal::cmp_t(stamp, date), None);
+    }
+
+    /// `xsd:dateTimeStamp` requires a timezone (#3902): a timezone-free lexical has no value
+    /// for it, while the same lexical stays a well-formed `xsd:dateTime`.
+    #[test]
+    fn datetimestamp_without_timezone_is_ill_formed() {
+        assert!(Temporal::of_lit("2020-01-01T00:00:00", XSD_DATE_TIME_STAMP).is_none());
+        assert!(Temporal::of_lit("2020-01-01T00:00:00", XSD_DATE_TIME).is_some());
+        assert!(Temporal::of_lit("2020-01-01T00:00:00Z", XSD_DATE_TIME_STAMP).is_some());
+        assert!(Temporal::of_lit("2020-01-01T00:00:00-05:00", XSD_DATE_TIME_STAMP).is_some());
+        assert!(Timeline::parse_datetime_of("2020-01-01T00:00:00", XSD_DATE_TIME_STAMP).is_none());
+        assert!(Timeline::parse_datetime_of("2020-01-01T00:00:00", XSD_DATE_TIME).is_some());
     }
 
     /// `Timeline::instant()` normalises a zoned time to UTC (subtracting the offset) and treats

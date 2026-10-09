@@ -14443,7 +14443,7 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
             } else if dt == xsd::BOOLEAN {
                 LitKind::Bool(as_bool_val(v))
             } else if dt == xsd::DATE_TIME || dt == xsd::DATE_TIME_STAMP {
-                LitKind::DateTime(Timeline::parse_datetime(l.value()))
+                LitKind::DateTime(Timeline::parse_datetime_of(l.value(), dt.as_str()))
             } else if dt == xsd::DATE {
                 LitKind::Date(Timeline::parse_date(l.value()))
             } else if dt.as_str().starts_with("http://www.w3.org/2001/XMLSchema#") {

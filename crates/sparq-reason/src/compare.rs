@@ -139,7 +139,7 @@ impl<'a> IdTerm<'a> {
                 } else if datatype == XSD_BOOLEAN {
                     Kind::Bool(parse_bool(value))
                 } else if datatype == XSD_DATE_TIME || datatype == XSD_DATE_TIME_STAMP {
-                    Kind::DateTime(Timeline::parse_datetime(value))
+                    Kind::DateTime(Timeline::parse_datetime_of(value, datatype))
                 } else if datatype == XSD_DATE {
                     Kind::Date(Timeline::parse_date(value))
                 } else if datatype.starts_with(XSD_PREFIX) {
