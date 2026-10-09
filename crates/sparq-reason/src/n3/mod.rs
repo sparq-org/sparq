@@ -232,10 +232,19 @@ impl<'a> BwCtx<'a> {
 /// One derivation step: a `conclusion` triple was produced by rule `rule` (its index in the
 /// document's rule order) from the ground `premises` (the supporting facts under the binding;
 /// premise atoms proven by backward rules are not themselves facts and are not listed).
+///
+/// `conclusion_key` / `premise_keys` are the same facts' N3 identity keys
+/// ([`serialize::statement_keys`]), taken from the N3 TERMS before list expansion and
+/// interning — the ids alone cannot recover them (`()` interns as `rdf:nil`, a list as a
+/// fresh blank chain, and the dictionary normalizes literal fields). Proof trees built
+/// from these steps (`explain::n3_proof_tree`) take their node keys from here, so they
+/// agree with `MaterializedN3Graph::why` on every fact.
 pub struct ProofStep {
     pub conclusion: [Id; 3],
     pub rule: usize,
     pub premises: Vec<[Id; 3]>,
+    pub conclusion_key: [String; 3],
+    pub premise_keys: Vec<[String; 3]>,
 }
 
 /// Parse N3 `src`, run the rule closure, and return the entailed GROUND triples interned into
@@ -1077,7 +1086,13 @@ fn intern_closure(
         let conclusion = it(g, dict, &mut exp)?;
         let premises =
             prem.iter().map(|p| it(p, dict, &mut exp)).collect::<Result<Vec<_>, _>>()?;
-        proof.push(ProofStep { conclusion, rule: *ri, premises });
+        proof.push(ProofStep {
+            conclusion,
+            rule: *ri,
+            premises,
+            conclusion_key: serialize::statement_keys(g),
+            premise_keys: prem.iter().map(serialize::statement_keys).collect(),
+        });
     }
     Ok((out, proof))
 }

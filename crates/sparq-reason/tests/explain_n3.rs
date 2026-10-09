@@ -208,10 +208,9 @@ fn id_level_bridge_from_reason_n3_proof() {
     assert!(n3_proof_tree(&dict, &steps, [a, par, b], ExplainOpts::default()).is_none());
 }
 
-/// GH #6701 review rounds 3, 4 and 9: a proof renders every variable by its raw internal
-/// name, so an `@forAll` universal (`?__ua.<iri>`) never reads like a source `?x`.
-/// Rendering it by its bare local name wrote `{ :x :q ?x }` as `{ ?x :q ?x }` — a formula
-/// requiring the two to be equal — and `sparq-prov` hashes these strings.
+/// GH #6701 review rounds 3–4: a proof renders an `@forAll` universal by its IRI under a
+/// formula-scoped declaration. Rendering it by its bare local name wrote `{ :x :q ?x }` as
+/// `{ ?x :q ?x }` — a formula requiring the two to be equal.
 #[test]
 fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
@@ -220,7 +219,7 @@ fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.
 { :a ?p ?f } => { :b :r ?f }.
 ";
-    let formula = "{ ?__ua.http://ex/x <http://ex/q> ?x . }";
+    let formula = "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }";
     let closure = reason_n3_terms(src, None).expect("oracle").facts;
     let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
     let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");

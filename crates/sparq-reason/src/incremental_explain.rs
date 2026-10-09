@@ -1115,14 +1115,19 @@ impl MaterializedN3Graph {
         }
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
-            let root = b.push(crate::n3::serialize::statement_internal(fact), "asserted", vec![])?;
+            let root = b.push_keyed(
+                crate::n3::serialize::statement_display_lossy(fact),
+                crate::n3::serialize::statement_keys(fact),
+                "asserted",
+                vec![],
+            )?;
             return Some(b.finish(root));
         }
         // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
         // therefore the chosen witness) is stable across calls — as terms, not re-parsed
         // text (see `rematerialize`).
         let mut keyed: Vec<([String; 3], &[N3Term; 3])> =
-            self.base.iter().map(|f| (crate::n3::serialize::statement_internal(f), f)).collect();
+            self.base.iter().map(|f| (crate::n3::serialize::statement_keys(f), f)).collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let (_facts, steps) =
             crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone())).ok()?;
@@ -1165,12 +1170,13 @@ impl N3Prover<'_> {
     }
 
     fn prove_inner(&mut self, f: &[N3Term; 3], depth: usize) -> Option<u32> {
-        // Every variable by its raw internal name: distinct variables (an `@forAll`
-        // universal and a source `?x`) never render alike, and `sparq-prov` content-addresses
-        // facts by these strings (GH #6701 review rounds 3 and 9).
-        let rendered = crate::n3::serialize::statement_internal(f);
+        // Display strings for reading, and a lossless key per fact for identity: two
+        // different facts can render alike, and `sparq-prov` addresses facts by `key`
+        // (GH #6701 review round 6).
+        let rendered = crate::n3::serialize::statement_display_lossy(f);
+        let key = crate::n3::serialize::statement_keys(f);
         if self.base.contains(f) {
-            let ix = self.b.push(rendered, "asserted", vec![])?;
+            let ix = self.b.push_keyed(rendered, key, "asserted", vec![])?;
             self.memo.insert(f.clone(), ix);
             return Some(ix);
         }
@@ -1179,7 +1185,7 @@ impl N3Prover<'_> {
         for p in premises {
             prem_nodes.push(self.prove(p, depth + 1)?);
         }
-        let ix = self.b.push(rendered, &format!("n3-rule-{rule}"), prem_nodes)?;
+        let ix = self.b.push_keyed(rendered, key, &format!("n3-rule-{rule}"), prem_nodes)?;
         self.memo.insert(f.clone(), ix);
         Some(ix)
     }

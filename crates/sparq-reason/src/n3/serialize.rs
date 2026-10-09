@@ -9,7 +9,7 @@
 //! to the same terms — blank labels verbatim, language tags already lowercase, plain strings
 //! re-acquiring `xsd:string`, IRIs `IRIREF`-escaped — or a [`NotRepresentable`] error, never
 //! a fallback spelling; the DISPLAY writers ([`display_lossy`], [`statement_display_lossy`])
-//! always produce text, for people to read only.
+//! always produce text, for people to read only. Identity comes from [`statement_keys`].
 //!
 //! # Echoing rules back out (EYE `--pass-all` / `--pass-all-ground`)
 //!
@@ -266,16 +266,14 @@ impl std::error::Error for NotRepresentable {}
 /// The display writers instead write such a universal, throughout the unit, as a plain
 /// variable named the IRI's local name, then `_2`, `_3`, … until it differs from every
 /// variable name in the unit (unspellable variables are renamed the same way). Within a
-/// unit that is a bijection, but two different facts can render alike, so never address
-/// a fact by its display strings.
+/// unit that is a bijection, but two different facts can render alike, so identity —
+/// provenance addressing — comes from [`statement_keys`], never from display strings.
 struct Unit {
     /// Universals written as a plain variable (display only) → that variable's name.
     names: BTreeMap<String, String>,
     /// Non-universal variables whose internal name is not a legal variable name (display
     /// only) → their written name.
     renamed: BTreeMap<String, String>,
-    /// [`statement_internal`] only: every variable by its raw internal name, no `@forAll`.
-    raw: bool,
 }
 
 impl Unit {
@@ -315,7 +313,7 @@ impl Unit {
         if let Some(v) = vars.iter().find(|v| universal_iri(v).is_none() && !spellable_var(v)) {
             return Err(NotRepresentable(format!("the variable `{v}` has no N3 spelling")));
         }
-        Ok(Unit { names: BTreeMap::new(), renamed: BTreeMap::new(), raw: false })
+        Ok(Unit { names: BTreeMap::new(), renamed: BTreeMap::new() })
     }
 
     /// Plan the unit made of `terms` for DISPLAY: always succeeds; what [`Unit::exact`]
@@ -347,7 +345,7 @@ impl Unit {
             .filter(|v| universal_iri(v).is_none() && !spellable_var(v))
             .map(|v| (v.to_string(), fresh(sanitize_name(v))))
             .collect();
-        Unit { names, renamed, raw: false }
+        Unit { names, renamed }
     }
 
     /// Write `t`, a term at the unit's top level.
@@ -379,10 +377,6 @@ impl Unit {
                 out.push_str("_:");
                 out.push_str(l);
             }
-            Term::Var(v) if self.raw => {
-                out.push('?');
-                out.push_str(v);
-            }
             Term::Var(v) => match universal_iri(v) {
                 Some(iri) if here.contains(iri) => write_iriref(iri, out),
                 Some(iri) => {
@@ -409,7 +403,7 @@ impl Unit {
                 let mut at: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
                 let mut declared = BTreeSet::new();
                 for (iri, i) in first_uses(ts) {
-                    if !self.raw && !self.names.contains_key(iri) {
+                    if !self.names.contains_key(iri) {
                         at.entry(i).or_default().push(iri);
                         declared.insert(iri);
                     }
@@ -472,6 +466,81 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
         write_iriref(iri, out);
     }
     out.push_str(" .");
+}
+
+/// A lossless, injective key for one term: two keys are equal exactly when the terms are.
+/// One tagged, structural encoding of EVERY field — `I` IRI, `L` literal (lexical form,
+/// datatype, then `@` + tag or `-` for none), `B` blank, `V` variable (full internal name),
+/// `(…)` list, `{…;}` formula, `<…>` quoted triple — with each string quoted and its `"`
+/// and `\` escaped. Never a rendering: the display writer drops fields (a language-tagged
+/// literal's datatype) and spells different variables alike.
+fn term_key(t: &Term) -> String {
+    fn quoted(s: &str, out: &mut String) {
+        out.push('"');
+        for c in s.chars() {
+            if matches!(c, '"' | '\\') {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('"');
+    }
+    fn enc(t: &Term, out: &mut String) {
+        match t {
+            Term::Iri(i) => {
+                out.push('I');
+                quoted(i, out);
+            }
+            Term::Lit(v, dt, lang) => {
+                out.push('L');
+                quoted(v, out);
+                quoted(dt, out);
+                match lang {
+                    Some(l) => {
+                        out.push('@');
+                        quoted(l, out);
+                    }
+                    None => out.push('-'),
+                }
+            }
+            Term::Blank(b) => {
+                out.push('B');
+                quoted(b, out);
+            }
+            Term::Var(v) => {
+                out.push('V');
+                quoted(v, out);
+            }
+            Term::List(ms) => {
+                out.push('(');
+                ms.iter().for_each(|m| enc(m, out));
+                out.push(')');
+            }
+            Term::Formula(ts) => {
+                out.push('{');
+                for row in ts {
+                    row.iter().for_each(|m| enc(m, out));
+                    out.push(';');
+                }
+                out.push('}');
+            }
+            Term::Triple(tr) => {
+                out.push('<');
+                tr.iter().for_each(|m| enc(m, out));
+                out.push('>');
+            }
+        }
+    }
+    let mut s = String::new();
+    enc(t, &mut s);
+    s
+}
+
+/// The identity keys of one statement's three terms ([`term_key`]): equal exactly when the
+/// statements are equal, whatever their renderings. What a proof carries for provenance
+/// addressing (`ProofNode::key`).
+pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
+    f.clone().map(|t| term_key(&t))
 }
 
 /// `t` as an exact rendering of it re-parses: a backward-chaining copy of a universal
@@ -606,7 +675,7 @@ pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
 /// A term as N3-like text for a person to READ — a diagnostic, a proof-node string. Never
 /// fails, and never exact: a universal no `@forAll` can scope is shown as a plain variable
 /// (see [`Unit`]). Not for anything a parser or the reasoner reads back; use
-/// [`write_term`] for that.
+/// [`write_term`] for that, and [`statement_keys`] for identity.
 pub fn display_lossy(t: &Term) -> String {
     let mut s = String::new();
     Unit::lossy(&[t]).term(t, &mut s);
@@ -625,26 +694,11 @@ pub fn write_statement(f: &[Term; 3], out: &mut String) -> Result<(), NotReprese
 }
 
 /// The three terms of one statement rendered as that ONE unit for a person to read — the
-/// strings a diagnostic shows ([`display_lossy`] semantics: never fails, not exact). Two
-/// different statements can display alike, so never address a fact by these.
+/// strings a proof node shows ([`display_lossy`] semantics: never fails, not exact). A
+/// function of the statement alone, so a fact reads the same in every proof; for identity
+/// use [`statement_keys`].
 pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3] {
     let unit = Unit::lossy(&[&f[0], &f[1], &f[2]]);
-    f.clone().map(|t| {
-        let mut s = String::new();
-        unit.term(&t, &mut s);
-        s
-    })
-}
-
-/// The three terms of one statement with every variable written by its RAW internal name
-/// (`?__ua.<iri>` for an `@forAll` universal, `?__bw0_x` for a backward-chaining copy) and
-/// no `@forAll` declarations — the strings `MaterializedN3Graph::why` puts in a proof
-/// node's `conclusion`. Not N3 to re-parse (a `.` is not a variable character), but
-/// injective over variables: distinct variables never render alike, so provenance that
-/// hashes these strings (`sparq-prov`) keeps distinct facts apart.
-#[cfg(feature = "explain")]
-pub(crate) fn statement_internal(f: &[Term; 3]) -> [String; 3] {
-    let unit = Unit { names: BTreeMap::new(), renamed: BTreeMap::new(), raw: true };
     f.clone().map(|t| {
         let mut s = String::new();
         unit.term(&t, &mut s);
