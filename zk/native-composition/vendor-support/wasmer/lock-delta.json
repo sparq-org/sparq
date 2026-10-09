@@ -1,7 +1,9 @@
 {
   "base_commit": "d34b709ea9c8140c66fd67305c02d79b4cc283a5",
   "base_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
-  "candidate_lock_sha256": "6a82bb21e540e1a1433584d0c548a865de4ae6bf9784276df65a468ea1f327a7",
+  "candidate_lock_sha256": "b91e4b1bfe1c690d9bc3373e9cf7104a4ca70ff58f65f59bd99f438d3dab9cc1",
+  "chain_root_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
+  "chain_root_note": "chain-root.Cargo.lock is the native lock as #6647 re-pinned it; earlier unrecorded re-pins after the Wasmer edit predate it. since_chain_root is the exact difference from it to the current lock, recomputed by verify.py.",
   "removed_registry_packages": [
     {
       "name": "proc-macro-error-attr2",
@@ -53,5 +55,125 @@
   ],
   "added_packages": [],
   "source_only": true,
-  "cargo_locked_validation": "pending remote"
+  "cargo_locked_validation": "pending remote",
+  "refresh_notes": [
+    {
+      "pr": 6711,
+      "reason": "sparq-canon bumps itertools 0.14 -> 0.15 (#6711); `cargo update -p sparq-canon` re-resolves the vendored sparq-spargebra path crate within its declared ranges."
+    },
+    {
+      "pr": 6712,
+      "reason": "sparq-canon bumps base16ct 0.2 -> 1.0 (#6712); the native lock swaps base16ct 0.2.0 for 1.0.0 with no other edges moved."
+    }
+  ],
+  "since_chain_root": {
+    "added_packages": [
+      {
+        "name": "base16ct",
+        "version": "1.0.0",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "checksum": "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
+      },
+      {
+        "name": "itertools",
+        "version": "0.15.0",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "checksum": "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc",
+        "dependencies": [
+          "either"
+        ]
+      }
+    ],
+    "removed_packages": [
+      {
+        "name": "base16ct",
+        "version": "0.2.0",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "checksum": "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
+      }
+    ],
+    "changed_packages": [
+      {
+        "name": "oxrdf",
+        "version": "0.3.3",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "before": {
+          "checksum": "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0",
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "rand 0.8.8",
+            "thiserror 2.0.20"
+          ]
+        },
+        "after": {
+          "checksum": "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0",
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "rand 0.9.5",
+            "thiserror 2.0.20"
+          ]
+        }
+      },
+      {
+        "name": "sparq-canon",
+        "version": "0.1.4",
+        "source": "path",
+        "before": {
+          "dependencies": [
+            "base16ct",
+            "digest",
+            "itertools 0.14.0",
+            "oxrdf 0.2.4",
+            "oxrdf 0.3.3",
+            "oxttl 0.1.8",
+            "oxttl 0.2.3",
+            "sha2",
+            "sparq-core",
+            "thiserror 2.0.20"
+          ]
+        },
+        "after": {
+          "dependencies": [
+            "base16ct",
+            "digest",
+            "itertools 0.15.0",
+            "oxrdf 0.2.4",
+            "oxrdf 0.3.3",
+            "oxttl 0.1.8",
+            "oxttl 0.2.3",
+            "sha2",
+            "sparq-core",
+            "thiserror 2.0.20"
+          ]
+        }
+      },
+      {
+        "name": "sparq-spargebra",
+        "version": "0.4.6",
+        "source": "path",
+        "before": {
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "oxrdf 0.3.3",
+            "peg",
+            "rand 0.9.5",
+            "thiserror 1.0.69"
+          ]
+        },
+        "after": {
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "oxrdf 0.3.3",
+            "peg",
+            "rand 0.9.5",
+            "thiserror 2.0.20"
+          ]
+        }
+      }
+    ]
+  }
 }

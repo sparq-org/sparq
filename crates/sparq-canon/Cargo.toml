@@ -49,7 +49,7 @@ oxttl = { workspace = true }
 # construction, and exercised end-to-end by the W3C suite). The four deps below are
 # exactly upstream rdf-canon 0.15.3's non-optional runtime deps (plus digest/sha2).
 base16ct = { version = "1.0", features = ["alloc"] }
-itertools = "0.14"
+itertools = "0.15"
 thiserror = "2.0"
 oxrdf02 = { package = "oxrdf", version = "0.2.4" }
 oxttl01 = { package = "oxttl", version = "0.1.8" }

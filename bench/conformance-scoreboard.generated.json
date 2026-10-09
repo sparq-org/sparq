@@ -519,8 +519,8 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C N-Triples syntax (rdf11 rdf-n-triples)",
-      "note": "positive+negative syntax through the REAL native chunk-parallel nt.rs path; the 10 recorded FAILs are the audited sq-w64x5 validation divergences, never summed in",
-      "ratchet_floor": 60,
+      "note": "positive+negative syntax through the REAL native chunk-parallel nt.rs path; every entry passes",
+      "ratchet_floor": 70,
       "runner": {
         "crate": "sparq-conformance",
         "kind": "crate-test",
@@ -534,8 +534,8 @@
       "floor_basis": "pass",
       "is_extension": false,
       "label": "W3C N-Quads syntax (rdf11 rdf-n-quads)",
-      "note": "positive+negative syntax through the REAL chunk-parallel N-Quads dataset loader (named graphs preserved); the 11 recorded FAILs are the shared nt.rs sq-w64x5 divergences plus the graph-position IRI case",
-      "ratchet_floor": 76,
+      "note": "positive+negative syntax through the REAL chunk-parallel N-Quads dataset loader (named graphs preserved); every entry passes",
+      "ratchet_floor": 87,
       "runner": {
         "crate": "sparq-conformance",
         "kind": "crate-test",
@@ -560,7 +560,7 @@
   ],
   "title": "sparq conformance scoreboard",
   "totals": {
-    "conformance_floor_total": 5435,
+    "conformance_floor_total": 5456,
     "conformance_suites": 25,
     "extension_assertion_total": 19706,
     "extension_suites": 11
