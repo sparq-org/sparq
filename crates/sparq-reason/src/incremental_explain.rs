@@ -1115,7 +1115,12 @@ impl MaterializedN3Graph {
         }
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
-            let root = b.push(crate::n3::serialize::statement_strings(fact), "asserted", vec![])?;
+            let root = b.push_keyed(
+                crate::n3::serialize::statement_strings(fact),
+                crate::n3::serialize::statement_keys(fact),
+                "asserted",
+                vec![],
+            )?;
             return Some(b.finish(root));
         }
         // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
@@ -1165,11 +1170,13 @@ impl N3Prover<'_> {
     }
 
     fn prove_inner(&mut self, f: &[N3Term; 3], depth: usize) -> Option<u32> {
-        // One unit per fact (`statement_strings`): the same strings in every proof, which
-        // `sparq-prov` hashes into the fact's identity (GH #6701 review rounds 4–5).
+        // Display strings for reading, and a lossless key per fact for identity: two
+        // different facts can render alike, and `sparq-prov` addresses facts by `key`
+        // (GH #6701 review round 6).
         let rendered = crate::n3::serialize::statement_strings(f);
+        let key = crate::n3::serialize::statement_keys(f);
         if self.base.contains(f) {
-            let ix = self.b.push(rendered, "asserted", vec![])?;
+            let ix = self.b.push_keyed(rendered, key, "asserted", vec![])?;
             self.memo.insert(f.clone(), ix);
             return Some(ix);
         }
@@ -1178,7 +1185,7 @@ impl N3Prover<'_> {
         for p in premises {
             prem_nodes.push(self.prove(p, depth + 1)?);
         }
-        let ix = self.b.push(rendered, &format!("n3-rule-{rule}"), prem_nodes)?;
+        let ix = self.b.push_keyed(rendered, key, &format!("n3-rule-{rule}"), prem_nodes)?;
         self.memo.insert(f.clone(), ix);
         Some(ix)
     }

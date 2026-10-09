@@ -141,7 +141,7 @@ pub enum N3Mode { Counting, Fallback }
 pub fn why(&self, dict: &Dict, t: [Id;3]) -> Option<ProofTree>;          // RDFS / OWL graphs
 pub fn why(&self, fact: &[Term;3])        -> Option<ProofTree>;          // N3 graph
 pub struct ProofTree;  // .nodes() -> &[ProofNode], .root(), .conclusion(), .to_json(), .to_text()
-pub struct ProofNode { pub conclusion: [String;3], pub rule: String, pub premises: Vec<u32> }
+pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule: String, pub premises: Vec<u32> }  // conclusion = display; key = lossless fact identity (N3: two facts can render alike) — address facts by key
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 

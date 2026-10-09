@@ -200,64 +200,76 @@ fn undeclarable_in<'a>(t: &'a Term, bad: &mut BTreeSet<&'a str>) {
     }
 }
 
-/// Every naming decision for ONE top-level unit of output — a term, a statement, a rule,
-/// or a whole document — made together, before anything is written, and applied to every
-/// scope inside the unit.
+/// Can the formula `ts` declare the universal `iri` itself — does no triple at or after the
+/// first one carrying it (at `ts`'s level) mention `iri` as a plain IRI, at any depth? A
+/// declaration placed before that triple would capture every such mention.
+fn declarable(ts: &[[Term; 3]], iri: &str, first: usize) -> bool {
+    !ts[first..].iter().flatten().any(|m| mentions_iri(m, iri))
+}
+
+/// Every naming decision for ONE top-level unit of output — a statement (fact), a rule, or
+/// a lone term — made before anything is written. A unit is planned from its own terms
+/// only, so it renders the same whatever else is in the document.
 ///
-/// The writer's contract: parsing what it writes yields the same terms, up to two
-/// documented normalisations (and nothing else):
+/// # The round-trip contract
+///
+/// Parsing what a writer here writes yields the same terms, with exactly these exceptions:
 ///
 /// * a backward-chaining copy of a universal (`__bw<n>_` prefixes, see [`universal_iri`])
 ///   is written as the universal itself;
-/// * a variable with no surface spelling of its own is renamed, collision-free and
-///   consistently across the unit (so the renaming is a bijection: distinct variables
-///   stay distinct, shared ones stay shared) — see [`Unit::plan`].
+/// * a variable whose internal name has no legal spelling is renamed (see below);
+/// * **the one lossy case** — a universal that no `@forAll` can scope is written as a plain
+///   variable (see below), so it re-parses as that variable, not as `__ua.<iri>`.
 ///
 /// A universal (`__ua.<iri>`) is written as its own IRI under an `@forAll <iri> .`
-/// declaration, placed right before the first triple of a formula that carries it at
-/// that formula's level (or, for a document, as a first line). Re-parsing yields the very
-/// same `__ua.<iri>` term, which is also what a `log:parsedAsN3` literal or another
-/// document produces, and the rendering does not depend on anything outside the unit.
+/// declaration placed right before the first triple of a formula that carries it at that
+/// formula's level — the parser's own "thereafter" scope — so it re-parses to the very same
+/// term, equal to what a `log:parsedAsN3` literal or any other document produces. The
+/// decision is taken at the SMALLEST scope where it can be: each formula declares for
+/// itself whenever nothing in it at or after that point mentions the IRI plainly. Only two
+/// shapes have no such placement, and they are the lossy case:
+///
+/// * a universal OUTSIDE every formula of a statement (a top-level fact term: N3 has no
+///   statement-local scope, and a document-wide declaration would make the rendering
+///   depend on the other statements);
+/// * in one formula, a plain mention of the same IRI at or after the universal's first
+///   use there — including in the same triple. Formula order is part of the term, so the
+///   triples cannot be reordered around a declaration.
+///
+/// In DATA (a fact), each formula decides on its own: a nested formula that can declare
+/// keeps the universal's identity even where an enclosing level falls back. In a RULE the
+/// universal is one rule variable at every depth (bindings reach into quoted formulae), so
+/// a conflict anywhere in the rule makes it fall back throughout the rule — premise and
+/// conclusion alike — and the shared binding survives.
+///
+/// A fallback is the plain variable named the IRI's local name, then `_2`, `_3`, … until
+/// it differs from EVERY variable name in the unit, assigned in IRI order: one name per
+/// universal per unit, never one a source variable of the unit carries. Unspellable
+/// variables are renamed the same way. Within a unit the renaming is therefore a
+/// bijection: distinct variables stay distinct, shared ones stay shared.
+///
+/// These strings are for reading and re-parsing. Two DIFFERENT facts can render alike
+/// (`?x :p :o` for a fallback universal and for a source `?x`), so identity — e.g.
+/// provenance addressing — comes from [`statement_keys`], never from these strings.
 struct Unit {
-    /// Universals (by IRI) that cannot be declared anywhere in the unit, and the plain
-    /// variable each is written as instead.
-    fallback: BTreeMap<String, String>,
+    /// Rule unit: universals fall back rule-wide, all at once.
+    rule: bool,
+    /// Universals that fall back somewhere in the unit → their plain-variable name.
+    names: BTreeMap<String, String>,
     /// Non-universal variables whose internal name is not a legal variable name.
     renamed: BTreeMap<String, String>,
-    /// Universals declared once for the whole document (document units only).
-    doc_decls: BTreeSet<String>,
 }
 
 impl Unit {
-    /// Plan the unit whose top level is `rows` (a document's statements, one statement,
-    /// one term). `document`: whether a document-level `@forAll` line may be written.
-    ///
-    /// A universal falls back to a plain variable for the WHOLE unit (every scope, both
-    /// sides of a rule) when any scope in the unit cannot declare it: a formula mentions
-    /// its IRI plainly at or after its first use, or it sits outside every formula where
-    /// no document line can declare it (not a document, or the document mentions the IRI
-    /// plainly). The fallback name is the IRI's local name, then `_2`, `_3`, … until it
-    /// differs from EVERY variable name in the unit — so it can never merge with a source
-    /// variable, whatever that variable is spelled. Deterministic: universals are named in
-    /// IRI order, after all spellable source names are reserved.
-    fn plan(rows: &[&[Term]], document: bool) -> Unit {
-        let terms = || rows.iter().flat_map(|r| r.iter());
+    /// Plan the unit made of `terms` (a statement's three, a rule's two sides, one term);
+    /// `rule`: whether the terms are the sides of one rule.
+    fn plan(terms: &[&Term], rule: bool) -> Unit {
         let mut bad = BTreeSet::new();
-        let mut top = BTreeSet::new();
-        terms().for_each(|t| level_universals(t, &mut top));
-        let mut doc_decls = BTreeSet::new();
-        for iri in top {
-            if document && !terms().any(|t| mentions_iri(t, iri)) {
-                doc_decls.insert(iri.to_string());
-            } else {
-                bad.insert(iri);
-            }
-        }
-        terms().for_each(|t| undeclarable_in(t, &mut bad));
-        bad.retain(|iri| !doc_decls.contains(*iri));
+        terms.iter().for_each(|t| level_universals(t, &mut bad)); // outside every formula
+        terms.iter().for_each(|t| undeclarable_in(t, &mut bad));
 
         let mut vars = BTreeSet::new();
-        terms().for_each(|t| all_vars(t, &mut vars));
+        terms.iter().for_each(|t| all_vars(t, &mut vars));
         let mut taken: BTreeSet<String> = vars
             .iter()
             .filter(|v| universal_iri(v).is_none() && spellable_var(v))
@@ -272,24 +284,22 @@ impl Unit {
             }
             name
         };
-        let fallback = bad.into_iter().map(|iri| (iri.to_string(), fresh(local_name(iri)))).collect();
+        let names = bad.into_iter().map(|iri| (iri.to_string(), fresh(local_name(iri)))).collect();
         let renamed = vars
             .iter()
             .filter(|v| universal_iri(v).is_none() && !spellable_var(v))
             .map(|v| (v.to_string(), fresh(sanitize_name(v))))
             .collect();
-        Unit { fallback, renamed, doc_decls }
+        Unit { rule, names, renamed }
     }
 
-    fn write_doc_decls(&self, out: &mut String) {
-        if !self.doc_decls.is_empty() {
-            write_declarations(self.doc_decls.iter().map(String::as_str), out);
-            out.push('\n');
-        }
-    }
-
-    /// Write `t` (one term of this unit) in N3 surface syntax.
+    /// Write `t`, a term at the unit's top level.
     fn term(&self, t: &Term, out: &mut String) {
+        self.scoped(t, &BTreeSet::new(), out);
+    }
+
+    /// Write `t`; `here` holds the universals declared for the scope level `t` sits at.
+    fn scoped(&self, t: &Term, here: &BTreeSet<&str>, out: &mut String) {
         match t {
             Term::Iri(i) => write_iriref(i, out),
             Term::Lit(v, _, Some(lang)) => {
@@ -313,13 +323,12 @@ impl Unit {
                 out.push_str(l);
             }
             Term::Var(v) => match universal_iri(v) {
-                Some(iri) => match self.fallback.get(iri) {
-                    Some(name) => {
-                        out.push('?');
-                        out.push_str(name);
-                    }
-                    None => write_iriref(iri, out),
-                },
+                Some(iri) if here.contains(iri) => write_iriref(iri, out),
+                Some(iri) => {
+                    let name = self.names.get(iri).expect("an undeclared universal was planned a fallback name");
+                    out.push('?');
+                    out.push_str(name);
+                }
                 None => {
                     out.push('?');
                     out.push_str(self.renamed.get(v.as_str()).map_or(v.as_str(), String::as_str));
@@ -329,15 +338,20 @@ impl Unit {
                 out.push('(');
                 for m in ms {
                     out.push(' ');
-                    self.term(m, out);
+                    self.scoped(m, here, out);
                 }
                 out.push_str(" )");
             }
             Term::Formula(ts) => {
+                // This formula's own declarations: each universal at its level that it can
+                // declare — in a rule, only if the rule as a whole never falls back on it.
                 let mut at: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
+                let mut declared = BTreeSet::new();
                 for (iri, i) in first_uses(ts) {
-                    if !self.fallback.contains_key(iri) {
+                    let ok = if self.rule { !self.names.contains_key(iri) } else { declarable(ts, iri, i) };
+                    if ok {
                         at.entry(i).or_default().push(iri);
+                        declared.insert(iri);
                     }
                 }
                 out.push('{');
@@ -348,7 +362,7 @@ impl Unit {
                     }
                     for t in row {
                         out.push(' ');
-                        self.term(t, out);
+                        self.scoped(t, &declared, out);
                     }
                     out.push_str(" .");
                 }
@@ -358,11 +372,11 @@ impl Unit {
             // `<< s p o >>` form (GH #2012). [FABLE-5]
             Term::Triple(tr) => {
                 out.push_str("<< ");
-                self.term(&tr[0], out);
+                self.scoped(&tr[0], here, out);
                 out.push(' ');
-                self.term(&tr[1], out);
+                self.scoped(&tr[1], here, out);
                 out.push(' ');
-                self.term(&tr[2], out);
+                self.scoped(&tr[2], here, out);
                 out.push_str(" >>");
             }
         }
@@ -378,15 +392,6 @@ impl Unit {
     }
 }
 
-fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String) {
-    out.push_str("@forAll");
-    for (i, iri) in iris.enumerate() {
-        out.push_str(if i == 0 { " " } else { ", " });
-        write_iriref(iri, out);
-    }
-    out.push_str(" .");
-}
-
 fn quote_into(v: &str, out: &mut String) {
     for c in v.chars() {
         match c {
@@ -400,37 +405,129 @@ fn quote_into(v: &str, out: &mut String) {
     }
 }
 
+fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String) {
+    out.push_str("@forAll");
+    for (i, iri) in iris.enumerate() {
+        out.push_str(if i == 0 { " " } else { ", " });
+        write_iriref(iri, out);
+    }
+    out.push_str(" .");
+}
+
+/// A lossless, injective key for one term: two keys are equal exactly when the terms are.
+/// A ground term's key is its [`write_term`] rendering (so ground facts keep the strings
+/// they always had); a term carrying a variable gets a tagged encoding (`~…`, a prefix no
+/// rendering starts with) that keeps every variable's full internal name — a universal's
+/// IRI and a source variable of the same local name stay apart.
+fn term_key(t: &Term) -> String {
+    fn has_var(t: &Term) -> bool {
+        match t {
+            Term::Var(_) => true,
+            Term::List(ms) => ms.iter().any(has_var),
+            Term::Triple(tr) => tr.iter().any(has_var),
+            Term::Formula(ts) => ts.iter().flatten().any(has_var),
+            _ => false,
+        }
+    }
+    fn quoted(s: &str, out: &mut String) {
+        out.push('"');
+        for c in s.chars() {
+            if matches!(c, '"' | '\\') {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('"');
+    }
+    fn enc(t: &Term, out: &mut String) {
+        match t {
+            Term::Iri(i) => {
+                out.push('I');
+                quoted(i, out);
+            }
+            Term::Lit(v, dt, lang) => {
+                out.push('L');
+                quoted(v, out);
+                quoted(dt, out);
+                if let Some(l) = lang {
+                    out.push('@');
+                    quoted(l, out);
+                }
+            }
+            Term::Blank(b) => {
+                out.push('B');
+                quoted(b, out);
+            }
+            Term::Var(v) => {
+                out.push('V');
+                quoted(v, out);
+            }
+            Term::List(ms) => {
+                out.push('(');
+                ms.iter().for_each(|m| enc(m, out));
+                out.push(')');
+            }
+            Term::Formula(ts) => {
+                out.push('{');
+                for row in ts {
+                    row.iter().for_each(|m| enc(m, out));
+                    out.push(';');
+                }
+                out.push('}');
+            }
+            Term::Triple(tr) => {
+                out.push('<');
+                tr.iter().for_each(|m| enc(m, out));
+                out.push('>');
+            }
+        }
+    }
+    if has_var(t) {
+        let mut s = String::from("~");
+        enc(t, &mut s);
+        s
+    } else {
+        let mut s = String::new();
+        write_term(t, &mut s);
+        s
+    }
+}
+
+/// The identity keys of one statement's three terms ([`term_key`]): equal exactly when the
+/// statements are equal, whatever their renderings. What a proof carries for provenance
+/// addressing (`ProofNode::key`).
+pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
+    f.clone().map(|t| term_key(&t))
+}
+
 /// Write one N3 term in its surface syntax: IRIs `<…>`, literals `"lex"` (+ `@lang` /
 /// `^^<dt>`, `xsd:string` left implicit), blanks `_:l`, variables `?v`, lists `( … )`,
 /// formulae `{ … }`, RDF-star quoted triples `<< s p o >>`.
 ///
-/// The term is its own unit ([`Unit`]): parsing the text (in a term position) yields the
-/// same term up to the documented normalisations. A universal sitting outside every
-/// formula has no scope to declare it in, so it is written as a collision-free plain
-/// variable.
+/// The term is its own unit; see [`Unit`] for the round-trip contract.
 pub fn write_term(t: &Term, out: &mut String) {
-    Unit::plan(&[std::slice::from_ref(t)], false).term(t, out);
+    Unit::plan(&[t], false).term(t, out);
 }
 
 /// A term as N3 text for a DIAGNOSTIC (an error or fallback reason a user reads) — the
 /// [`write_term`] rendering, so no message leaks an engine-internal spelling such as
-/// `__ua.<iri>`, and a term reads the same in a message as in any output.
+/// `__ua.<iri>`.
 pub(crate) fn display(t: &Term) -> String {
     let mut s = String::new();
     write_term(t, &mut s);
     s
 }
 
-/// Write one statement as `s p o .` plus a newline — one unit ([`Unit`]).
+/// Write one statement as `s p o .` plus a newline — its own unit ([`Unit`]).
 pub fn write_statement(f: &[Term; 3], out: &mut String) {
-    Unit::plan(&[&f[..]], false).statement(f, out);
+    Unit::plan(&[&f[0], &f[1], &f[2]], false).statement(f, out);
 }
 
-/// The three terms of one statement, each rendered as part of that ONE unit — the strings
-/// a proof node carries. A function of the statement alone, so a fact reads the same in
-/// every proof it appears in (`sparq-prov` hashes these strings into its identity).
+/// The three terms of one statement rendered as that ONE unit — the strings a proof node
+/// shows. A function of the statement alone, so a fact reads the same in every proof; for
+/// identity use [`statement_keys`].
 pub fn statement_strings(f: &[Term; 3]) -> [String; 3] {
-    let unit = Unit::plan(&[&f[..]], false);
+    let unit = Unit::plan(&[&f[0], &f[1], &f[2]], false);
     f.clone().map(|t| {
         let mut s = String::new();
         unit.term(&t, &mut s);
@@ -438,49 +535,37 @@ pub fn statement_strings(f: &[Term; 3]) -> [String; 3] {
     })
 }
 
-/// Serialize facts back to N3 as one document (one [`Unit`]): a document-level
-/// `@forAll` line when a universal outside every formula can be declared, then one
-/// statement per line in the given order. Re-parsing yields the same terms up to the
-/// documented normalisations.
+/// Serialize facts back to N3, one statement per line in the given order, each its own
+/// unit ([`Unit`]).
 pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> String {
-    let facts: Vec<&[Term; 3]> = facts.collect();
-    let rows: Vec<&[Term]> = facts.iter().map(|f| &f[..]).collect();
-    let unit = Unit::plan(&rows, true);
     let mut out = String::new();
-    unit.write_doc_decls(&mut out);
     for f in facts {
-        unit.statement(f, &mut out);
+        write_statement(f, &mut out);
     }
     out
 }
 
-/// Write one output DOCUMENT as one [`Unit`]: closure `facts` one per line, SORTED
-/// (deterministic output), then `rules` in order — the `--pass-all` layout
-/// ([`crate::reason_n3_pass_all`]). One plan covers facts and rules together, so a
-/// universal is written the same way in each.
+/// Write one output DOCUMENT: closure `facts` one per line, SORTED (deterministic output),
+/// then `rules` in order — the `--pass-all` layout ([`crate::reason_n3_pass_all`]). Every
+/// statement and rule is its own unit, so none renders differently for its neighbours.
 pub(super) fn write_document(
     facts: &[&[Term; 3]],
     rules: &[(&Rule, RuleKind)],
     vars: RuleVars,
     out: &mut String,
 ) {
-    let sides: Vec<[Term; 2]> = rules.iter().map(|(r, kind)| rule_sides(r, *kind, vars)).collect();
-    let mut rows: Vec<&[Term]> = facts.iter().map(|f| &f[..]).collect();
-    rows.extend(sides.iter().map(|s| &s[..]));
-    let unit = Unit::plan(&rows, true);
-    unit.write_doc_decls(out);
     let mut lines: Vec<String> = facts
         .iter()
         .map(|f| {
             let mut s = String::new();
-            unit.statement(f, &mut s);
+            write_statement(f, &mut s);
             s
         })
         .collect();
     lines.sort_unstable();
     out.push_str(&lines.concat());
-    for (side, (_, kind)) in sides.iter().zip(rules) {
-        write_rule_sides(&unit, side, *kind, out);
+    for (r, kind) in rules {
+        write_rule(r, *kind, vars, out);
     }
 }
 
@@ -523,7 +608,7 @@ pub enum RuleKind {
 ///
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) {
     let sides = rule_sides(r, kind, vars);
-    write_rule_sides(&Unit::plan(&[&sides[..]], false), &sides, kind, out);
+    write_rule_sides(&Unit::plan(&[&sides[0], &sides[1]], true), &sides, kind, out);
 }
 
 /// A rule's two sides as formula TERMS in written order (left of the arrow first), each

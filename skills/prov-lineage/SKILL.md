@@ -184,9 +184,10 @@ R  prov:wasAssociatedWith <agent> .          # iff ProvProofConfig.agent is set
 
 Asserted leaves and `axiom-*` tautologies are entities with **no** generating
 activity — they are the boundary the derivation rests on. Entity/activity IRIs
-are content-addressed (`urn:sparq:prov:fact:…` / `:rule:…`) from the proof's
-canonical term strings, so lineage from overlapping proofs **stitches** into one
-DAG (the same shared fact names the same entity).
+are content-addressed (`urn:sparq:prov:fact:…` / `:rule:…`) from each proof
+node's lossless identity key (`ProofNode::key`, not its display strings), so
+lineage from overlapping proofs **stitches** into one DAG (the same shared fact
+names the same entity) and two different facts never share an entity.
 
 ## Scope — covered vs deferred
 

@@ -717,3 +717,44 @@ fn n3_fact_with_a_universal_keeps_one_entity_across_proofs() {
     let within = entities(&prov_from_proof(&g.why(c).expect(":c explains"), &cfg));
     assert!(alone.is_subset(&within), "{alone:?} not among {within:?}");
 }
+
+/// GH #6701 review round 6: entities are addressed by the proof's identity KEY, not its
+/// display strings. `:x` under `@forAll`, `o:x` under `@forAll` (another namespace, same
+/// local name) and a source `?x` are three different facts that all DISPLAY as
+/// `?x <p> <o>`; they must get three entities.
+#[test]
+fn n3_facts_that_render_alike_keep_distinct_entities() {
+    let src = "@prefix : <http://ex/>. @prefix o: <http://other/>.
+@forAll :x, o:x.
+:x :p :o.
+o:x :p :o.
+?x :p :o.
+";
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    let ex = |l: &str| N3Term::Iri(format!("http://ex/{l}"));
+    let closure = g.closure();
+    let asserted: Vec<&[N3Term; 3]> =
+        closure.iter().filter(|f| f[1] == ex("p") && f[2] == ex("o")).collect();
+    assert_eq!(asserted.len(), 3, "{closure:?}");
+    let cfg = ProvProofConfig::default();
+    let entity = |f: &[N3Term; 3]| -> String {
+        let proof = g.why(f).expect("asserted fact explains");
+        assert_eq!(proof.conclusion()[0], "?x", "all three DISPLAY alike");
+        let prov = prov_from_proof(&proof, &cfg);
+        let ents: Vec<String> = prov
+            .iter()
+            .filter(|t| t.predicate.as_str() == RDF_TYPE && t.object.to_string() == format!("<{PROV}Entity>"))
+            .map(|t| t.subject.to_string())
+            .collect();
+        assert_eq!(ents.len(), 1);
+        ents[0].clone()
+    };
+    let alone: Vec<String> = asserted.iter().map(|f| entity(f)).collect();
+    let distinct: HashSet<&String> = alone.iter().collect();
+    assert_eq!(distinct.len(), 3, "different facts share an entity: {alone:?}");
+    // Deterministic: the same fact, explained again, names the same entity. (Keeping its
+    // entity as a PREMISE of another proof is pinned by
+    // `n3_fact_with_a_universal_keeps_one_entity_across_proofs`.)
+    let again: Vec<String> = asserted.iter().map(|f| entity(f)).collect();
+    assert_eq!(alone, again);
+}

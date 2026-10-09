@@ -31,8 +31,17 @@ use rustc_hash::FxHashMap;
 /// spec-table premise order (schema/TBox premises first, data premises after).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProofNode {
-    /// The derived (or asserted) fact, as self-contained N-Triples/N3-style term strings.
+    /// The derived (or asserted) fact, as self-contained N-Triples/N3-style term strings —
+    /// for READING. Two different N3 facts can render alike (a written-out `@forAll`
+    /// universal and a source variable of the same name), so do not address a fact by
+    /// these; use [`key`](Self::key).
     pub conclusion: [String; 3],
+    /// The fact's lossless identity, one key per term: equal exactly when the facts are
+    /// equal, across every proof. For an RDFS/OWL proof and for a ground N3 fact it is the
+    /// same as [`conclusion`](Self::conclusion); an N3 term carrying a variable gets a
+    /// tagged encoding that keeps every variable's full internal name. Content-address
+    /// facts (e.g. provenance entities) by this.
+    pub key: [String; 3],
     /// Rule identifier (see the module docs for the vocabulary).
     pub rule: String,
     /// Indices of the premise nodes — each strictly less than this node's own index.
@@ -182,11 +191,24 @@ impl ProofBuilder {
         rule: &str,
         premises: Vec<u32>,
     ) -> Option<u32> {
+        let key = conclusion.clone();
+        self.push_keyed(conclusion, key, rule, premises)
+    }
+
+    /// [`push`](Self::push) with an identity `key` that differs from the display strings
+    /// (see [`ProofNode::key`]).
+    pub(crate) fn push_keyed(
+        &mut self,
+        conclusion: [String; 3],
+        key: [String; 3],
+        rule: &str,
+        premises: Vec<u32>,
+    ) -> Option<u32> {
         if self.nodes.len() >= self.opts.max_nodes {
             return None;
         }
         debug_assert!(premises.iter().all(|&p| (p as usize) < self.nodes.len()));
-        self.nodes.push(ProofNode { conclusion, rule: rule.to_string(), premises });
+        self.nodes.push(ProofNode { conclusion, key, rule: rule.to_string(), premises });
         Some((self.nodes.len() - 1) as u32)
     }
 
