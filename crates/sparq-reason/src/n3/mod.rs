@@ -301,8 +301,11 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
 ///
 /// A parse error, or — the output must re-reason exactly as the input did — a closure fact
 /// or rule that has no lossless N3 form ([`serialize::NotRepresentable`]): an `@forAll`
-/// universal outside every formula of a statement, or one sharing a formula with a plain
-/// mention of its own IRI at or after its first use there. No fallback spelling is written.
+/// universal that no single scope owns (outside every formula, or across terms of a
+/// statement), a plain mention of its IRI that its one declaration would capture, or a
+/// universal and its backward-chaining copy in one document. No fallback spelling is
+/// written. Rules whose premise and conclusion share a universal are written last, after
+/// one document-level `@forAll` line.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     let parsed = parser::parse(src)?;
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
