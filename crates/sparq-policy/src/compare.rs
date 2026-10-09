@@ -40,6 +40,7 @@
 //!   is not).
 
 use crate::model::{Action, ConflictStrategy, Constraint, Operator, Policy, Rule, Value};
+use crate::eval::{ODRL_PURPOSE, ODRL_RECIPIENT, ODRL_SPATIAL};
 
 /// How strongly two rules overlap — the three-valued result of the conflict test.
 /// [OPUS-4.8] sq-zabv.
@@ -452,50 +453,51 @@ fn constraint_implies(ic: &Constraint, oc: &Constraint) -> bool {
     }
     // Same order operator, tighter inner bound implies looser outer bound.
     match (ic.operator, oc.operator) {
-        // inner lt/lteq B1 implies outer lt/lteq B2 when B1 <= B2.
-        (Operator::Lt | Operator::Lteq, Operator::Lt | Operator::Lteq) => {
-            le_bound(&ic.right, &oc.right)
-        }
-        // inner gt/gteq B1 implies outer gt/gteq B2 when B1 >= B2.
-        (Operator::Gt | Operator::Gteq, Operator::Gt | Operator::Gteq) => {
-            le_bound(&oc.right, &ic.right)
-        }
+        // inner lt/lteq B1 implies outer lt/lteq B2 when B1 <= B2, except that an
+        // inclusive inner bound under a strict outer one needs B1 < B2 (`lteq 5` admits 5,
+        // which `lt 5` does not).
+        (Operator::Lt | Operator::Lteq, Operator::Lt | Operator::Lteq) => bound_le(
+            &ic.right,
+            &oc.right,
+            ic.operator == Operator::Lteq && oc.operator == Operator::Lt,
+        ),
+        // inner gt/gteq B1 implies outer gt/gteq B2 when B1 >= B2 (strictly, for an
+        // inclusive inner bound under a strict outer one).
+        (Operator::Gt | Operator::Gteq, Operator::Gt | Operator::Gteq) => bound_le(
+            &oc.right,
+            &ic.right,
+            ic.operator == Operator::Gteq && oc.operator == Operator::Gt,
+        ),
         _ => false,
     }
 }
 
-/// Does the outer constraint `oc` admit the single value `v` (an inner `eq v`)?
+/// Does the outer constraint `oc` admit the single value `v` (an inner `eq v`)? Only
+/// when the evaluator's own comparison is definitely True for `v` ([`atomic_status`]),
+/// so an incomparable pair, a mixed-offset dateTime spelling, or any value the
+/// evaluator would read as Unknown is never claimed. A negative operator (`neq`,
+/// `isNoneOf`) on a dimension the evaluator widens by membership or subsumption
+/// (recipient, purpose, spatial) is not claimed either: the request's evidence could
+/// place `v` inside the excluded value.
+///
+/// [`atomic_status`]: crate::eval::atomic_status
 fn outer_admits_value(v: &Value, oc: &Constraint) -> bool {
-    // The evaluator reads an incomparable pair as Unknown, which never admits; so the
-    // static analysis claims admission only for a pair the evaluator can decide.
-    if !crate::eval::comparable(v, oc.operator, &oc.right) {
+    let negative = matches!(oc.operator, Operator::Neq | Operator::IsNoneOf);
+    let widened = [ODRL_RECIPIENT, ODRL_PURPOSE, ODRL_SPATIAL].contains(&oc.left.as_str());
+    if negative && widened {
         return false;
     }
-    match oc.operator {
-        Operator::Eq | Operator::IsA => value_eq(v, &oc.right),
-        Operator::Neq => !value_eq(v, &oc.right),
-        // `isAnyOf` is the same set-membership relation as `isPartOf` in the flat
-        // single-value case ([FABLE-5] sq-uaz85).
-        Operator::IsPartOf | Operator::IsAnyOf => is_part_of(v, &oc.right),
-        // An outer `isNoneOf S` provably admits `v` only when `v` is a string/IRI
-        // value demonstrably NOT in the set — a numeric/dateTime `v` (no faithful
-        // lexical set form) is never *claimed* admitted (sound: `false` here only
-        // means "not proven", degrading the verdict, never over-claiming).
-        Operator::IsNoneOf => {
-            matches!(v, Value::Iri(_) | Value::Str(_))
-                && matches!(&oc.right, Value::Iri(_) | Value::Str(_))
-                && !is_part_of(v, &oc.right)
-        }
-        Operator::Lt => order_lt(v, &oc.right),
-        Operator::Lteq => order_le(v, &oc.right),
-        Operator::Gt => order_lt(&oc.right, v),
-        Operator::Gteq => order_le(&oc.right, v),
-    }
+    crate::eval::atomic_status(v, oc.operator, &oc.right) == Some(true)
 }
 
-/// `a <= b` for two bound values (numeric / dateTime); `false` if incomparable.
-fn le_bound(a: &Value, b: &Value) -> bool {
-    order_le(a, b)
+/// `a <= b` (`strict`: `a < b`) for two bound values by the evaluator's order; `false`
+/// if incomparable.
+fn bound_le(a: &Value, b: &Value, strict: bool) -> bool {
+    match crate::eval::order(a, b) {
+        Some(std::cmp::Ordering::Less) => true,
+        Some(std::cmp::Ordering::Equal) => !strict,
+        _ => false,
+    }
 }
 
 /// Can prohibition `proh` carve out any request inner permission `ip` grants?
@@ -573,53 +575,4 @@ fn rule_overlap(perm: &Rule, proh: &Rule) -> Option<Overlap> {
     } else {
         Overlap::Possible
     })
-}
-
-// --- value comparison helpers (mirror eval.rs's semantics, kept module-local so
-// the comparison surface stays a sound subset; eval.rs's `compare`/`order` are
-// private). [OPUS-4.8] sq-zabv. ---
-
-fn value_eq(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Num(x), Value::Num(y)) => x == y,
-        _ => a.as_str() == b.as_str(),
-    }
-}
-
-fn is_part_of(actual: &Value, bound: &Value) -> bool {
-    let a = actual.as_str();
-    bound
-        .as_str()
-        .split(['|', ' ', ','])
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .any(|member| member == a)
-}
-
-/// Numeric / dateTime order, `None` if incomparable. Mirrors eval.rs but kept local.
-fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
-    match (a, b) {
-        (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
-        (Value::DateTime(x), Value::DateTime(y)) => crate::eval::cmp_datetime_pub(x, y),
-        _ => {
-            let (Ok(x), Ok(y)) = (
-                a.as_str().trim().parse::<f64>(),
-                b.as_str().trim().parse::<f64>(),
-            ) else {
-                return None;
-            };
-            x.partial_cmp(&y)
-        }
-    }
-}
-
-fn order_lt(a: &Value, b: &Value) -> bool {
-    order(a, b) == Some(std::cmp::Ordering::Less)
-}
-
-fn order_le(a: &Value, b: &Value) -> bool {
-    matches!(
-        order(a, b),
-        Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-    )
 }

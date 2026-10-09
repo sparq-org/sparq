@@ -279,13 +279,20 @@ fn containment_admits_inner_eq_under_outer_is_any_of() {
     );
 }
 
-/// An inner `purpose eq c` (outside the excluded set) is contained by an outer
-/// `purpose isNoneOf "a|b"` offer; an inner value INSIDE the excluded set is not.
+/// An outer `purpose isNoneOf "a|b"` never contains an inner `purpose eq c`, even with
+/// `c` outside the set: under a purpose taxonomy the request supplies, `c ⊑ a` puts `c`
+/// inside the exclusion, so the inner permission grants a request the outer denies.
 #[test]
-fn containment_admits_inner_eq_under_outer_is_none_of() {
+fn containment_does_not_admit_inner_eq_under_outer_is_none_of() {
     let outer = purpose_policy("isNoneOf", r#""urn:p/a|urn:p/b""#);
-    let inner_out = purpose_policy("eq", "<urn:p/c>");
-    assert_eq!(contains(&outer, &inner_out), Containment::Contains);
+    let inner = purpose_policy("eq", "<urn:p/c>");
+    assert_ne!(contains(&outer, &inner), Containment::Contains);
+    let req = Request::new(action("read"))
+        .on("urn:asset/x")
+        .for_purpose(Value::Iri("urn:p/c".into()))
+        .with_purpose_subsumption("urn:p/c", "urn:p/a");
+    assert!(evaluate(&inner, &req).allow);
+    assert!(!evaluate(&outer, &req).allow);
     let inner_in = purpose_policy("eq", "<urn:p/a>");
     assert_ne!(
         contains(&outer, &inner_in),

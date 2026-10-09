@@ -396,3 +396,60 @@ fn only_a_grant_carries_a_permit() {
     let d = decide(&p, &Request::new(format!("{ODRL}write")).on("urn:asset/x"));
     assert!(!d.allow && d.permit.is_none());
 }
+
+/// Containment uses the evaluator's own comparison: an inner `eq` instant spelled in
+/// another offset is the excluded instant of an outer `neq`, so it is not contained.
+#[test]
+fn containment_compares_instants_like_the_evaluator() {
+    let read = format!("{ODRL}read");
+    let dt = format!("{ODRL}dateTime");
+    let with = |c: Constraint| Policy {
+        permissions: vec![Rule {
+            constraints: vec![c],
+            ..rule("urn:r", &read)
+        }],
+        ..Policy::default()
+    };
+    let inner = with(atom(
+        &dt,
+        Operator::Eq,
+        Value::DateTime("2026-06-16T12:00:00Z".into()),
+    ));
+    let outer = with(atom(
+        &dt,
+        Operator::Neq,
+        Value::DateTime("2026-06-16T14:00:00+02:00".into()),
+    ));
+    assert_ne!(contains(&outer, &inner), Containment::Contains);
+    let req = Request::new(read.clone())
+        .on("urn:asset/x")
+        .at("2026-06-16T12:00:00Z");
+    assert!(decide(&inner.validate().unwrap(), &req).allow);
+    assert!(!decide(&outer.validate().unwrap(), &req).allow);
+}
+
+/// An inclusive inner bound does not imply a strict outer bound at the same value.
+#[test]
+fn containment_does_not_read_lteq_as_lt() {
+    let read = format!("{ODRL}read");
+    let n = "urn:dimension";
+    let with = |op: Operator| Policy {
+        permissions: vec![Rule {
+            constraints: vec![atom(n, op, Value::Num(5.0))],
+            ..rule("urn:r", &read)
+        }],
+        ..Policy::default()
+    };
+    assert_ne!(
+        contains(&with(Operator::Lt), &with(Operator::Lteq)),
+        Containment::Contains
+    );
+    assert_ne!(
+        contains(&with(Operator::Gt), &with(Operator::Gteq)),
+        Containment::Contains
+    );
+    assert_eq!(
+        contains(&with(Operator::Lteq), &with(Operator::Lt)),
+        Containment::Contains
+    );
+}
