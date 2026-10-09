@@ -10,7 +10,7 @@ use explain_common::{check_proof, proof_leaves};
 use rustc_hash::FxHashSet;
 use sparq_reason::n3::Term;
 use sparq_reason::{
-    explain::n3_proof_tree, reason_n3_proof, reason_n3_terms, ExplainOpts, MaterializedN3Graph,
+    explain::{n3_proof_tree, n3_proof_tree_for_key}, reason_n3_proof, reason_n3_terms, ExplainOpts, MaterializedN3Graph,
     N3Mode, ProofTree,
 };
 
@@ -191,6 +191,7 @@ fn id_level_bridge_from_reason_n3_proof() {
     let target = [a, anc, c];
     assert!(facts.contains(&target));
     let tree = n3_proof_tree(&dict, &steps, target, ExplainOpts::default())
+        .expect("one N3 fact interns to the target")
         .expect("derived triple bridges to a proof tree");
     let asserted: FxHashSet<[String; 3]> = facts
         .iter()
@@ -205,7 +206,7 @@ fn id_level_bridge_from_reason_n3_proof() {
     let b = dict.lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/b")));
     let par = dict
         .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/parent")));
-    assert!(n3_proof_tree(&dict, &steps, [a, par, b], ExplainOpts::default()).is_none());
+    assert!(n3_proof_tree(&dict, &steps, [a, par, b], ExplainOpts::default()).expect("unambiguous").is_none());
 }
 
 /// GH #6701 review rounds 3–4: a proof renders an `@forAll` universal by its IRI under a
@@ -264,4 +265,36 @@ fn a_fact_renders_the_same_in_every_proof() {
         .conclusion
         .clone();
     assert_eq!(alone, inside, "{}", proof.to_text());
+}
+
+/// #6735 review: two structurally distinct derived facts — `:a :value ()` and
+/// `:a :value <rdf:nil>` (an IRI from `log:uri`) — intern to ONE id triple. The id-level
+/// bridge must not pick one: it reports the ambiguity, and the structural selector
+/// explains each fact with its own key and its own derivation.
+#[test]
+fn colliding_id_triples_are_ambiguous_not_first_match() {
+    let src = r#"@prefix : <http://ex/> . @prefix log: <http://www.w3.org/2000/10/swap/log#> .
+:go :go :go .
+{ :go :go :go } => { :a :value () } .
+{ ?i log:uri "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil" } => { :a :value ?i } .
+"#;
+    let mut dict = sparq_core::dict::Dict::new();
+    let (_facts, steps) = reason_n3_proof(&mut dict, src).expect("reasoning succeeds");
+    let ex = |l: &str| Term::Iri(format!("http://ex/{l}"));
+    let list = [ex("a"), ex("value"), Term::List(vec![])];
+    let nil = [ex("a"), ex("value"), Term::Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil".into())];
+    let (kl, kn) = (sparq_reason::n3::serialize::statement_keys(&list), sparq_reason::n3::serialize::statement_keys(&nil));
+    assert_ne!(kl, kn);
+    let target = steps.iter().find(|s| s.conclusion_key == kl).expect("the () step").conclusion;
+    assert_eq!(steps.iter().find(|s| s.conclusion_key == kn).expect("the rdf:nil step").conclusion, target, "both intern alike");
+    let err = n3_proof_tree(&dict, &steps, target, ExplainOpts::default()).expect_err("ambiguous");
+    let mut want = vec![kl.clone(), kn.clone()];
+    want.sort();
+    assert_eq!(err.keys, want);
+    let tl = n3_proof_tree_for_key(&dict, &steps, &kl, ExplainOpts::default()).expect("() explains");
+    let tn = n3_proof_tree_for_key(&dict, &steps, &kn, ExplainOpts::default()).expect("rdf:nil explains");
+    assert_eq!(tl.nodes().last().unwrap().key, kl);
+    assert_eq!(tn.nodes().last().unwrap().key, kn);
+    assert_eq!(tl.nodes().last().unwrap().rule, "n3-rule-0");
+    assert_eq!(tn.nodes().last().unwrap().rule, "n3-rule-1");
 }

@@ -290,16 +290,65 @@ where
     None
 }
 
+/// The id triple handed to [`n3_proof_tree`] is the conclusion of derivation steps for MORE
+/// than one structurally distinct N3 fact — e.g. `:a :p ()` and `:a :p ?i` with
+/// `?i log:uri "…rdf-syntax-ns#nil"` both intern as `:a :p rdf:nil`. Ids cannot say which
+/// fact is meant, so no proof is chosen; pick one of `keys` and call
+/// [`n3_proof_tree_for_key`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AmbiguousN3Target {
+    /// The distinct N3 identity keys (`ProofStep::conclusion_key`) whose facts intern to the
+    /// target, sorted.
+    pub keys: Vec<[String; 3]>,
+}
+
+impl std::fmt::Display for AmbiguousN3Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the target id triple is the conclusion of {} structurally distinct N3 facts; \
+             select one by its key (n3_proof_tree_for_key)",
+            self.keys.len()
+        )
+    }
+}
+
+impl std::error::Error for AmbiguousN3Target {}
+
 /// Build a [`ProofTree`] for `target` from a [`reason_n3_proof`](crate::reason_n3_proof)
 /// run (the id-level batch N3 entry point): `steps` is that call's derivation record.
 /// A fact with no derivation step of its own is treated as an asserted input (`steps`
 /// covers every NEWLY-derived triple, so inputs are exactly the step-less facts).
-/// Returns `None` if `target` has no step and so is not derived (explain it as asserted
-/// yourself), or if a cap is exceeded.
+///
+/// `Ok(None)` if `target` has no step and so is not derived (explain it as asserted
+/// yourself), or if a cap is exceeded. Several distinct N3 facts can intern to one id
+/// triple; if `target` is the conclusion of more than one, this never picks one — it
+/// returns [`AmbiguousN3Target`] listing their keys, for [`n3_proof_tree_for_key`].
 pub fn n3_proof_tree(
     dict: &sparq_core::dict::Dict,
     steps: &[crate::n3::ProofStep],
     target: [sparq_core::dict::Id; 3],
+    opts: ExplainOpts,
+) -> Result<Option<ProofTree>, AmbiguousN3Target> {
+    let mut keys: Vec<&[String; 3]> =
+        steps.iter().filter(|s| s.conclusion == target).map(|s| &s.conclusion_key).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    match keys.as_slice() {
+        [] => Ok(None),
+        [key] => Ok(n3_proof_tree_for_key(dict, steps, key, opts)),
+        _ => Err(AmbiguousN3Target { keys: keys.into_iter().cloned().collect() }),
+    }
+}
+
+/// [`n3_proof_tree`] with the root chosen STRUCTURALLY: the derived fact whose N3 identity
+/// key ([`crate::n3::serialize::statement_keys`], `ProofStep::conclusion_key`) is `key`.
+/// `None` if no step concludes that fact (it is an input, or not in the closure) or a cap
+/// is exceeded.
+pub fn n3_proof_tree_for_key(
+    dict: &sparq_core::dict::Dict,
+    steps: &[crate::n3::ProofStep],
+    key: &[String; 3],
     opts: ExplainOpts,
 ) -> Option<ProofTree> {
     // Nodes are identified by the N3 identity KEY each step carries (taken from the N3
@@ -311,7 +360,10 @@ pub fn n3_proof_tree(
     for s in steps {
         step_map.entry(&s.conclusion_key).or_insert(s);
     }
-    let root_key = steps.iter().find(|s| s.conclusion == target)?.conclusion_key.clone();
+    let (target, root_key) = {
+        let root = step_map.get(key)?;
+        (root.conclusion, root.conclusion_key.clone())
+    };
     struct P<'a> {
         dict: &'a sparq_core::dict::Dict,
         step_map: FxHashMap<&'a [String; 3], &'a crate::n3::ProofStep>,

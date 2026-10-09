@@ -766,7 +766,8 @@ o:x :p :o.
 /// come from the N3 terms carried on each `ProofStep`, never from the dictionary, so the
 /// shapes interning would lose stay apart: directional language tags (`en--ltr` vs
 /// `en--rtl`), the empty list (which interns as `rdf:nil`), a non-empty list (which interns
-/// as a blank-node chain) and nested quoted triples.
+/// as a blank-node chain), nested quoted triples, and two facts that intern to ONE id
+/// triple (`()` and an `rdf:nil` IRI) — rooted structurally, never by the first id match.
 #[test]
 fn both_n3_proof_entry_points_key_a_fact_alike() {
     let src = r#"@prefix : <http://ex/> . @prefix log: <http://www.w3.org/2000/10/swap/log#> .
@@ -780,6 +781,8 @@ fn both_n3_proof_entry_points_key_a_fact_alike() {
 { :a :empty ?v } => { :a :copyEmpty ?v } .
 { :a :list ?v } => { :a :copyList ?v } .
 { :a :nest ?v } => { :a :copyNest ?v } .
+{ :a :empty ?v } => { :a :value () } .
+{ ?i log:uri "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil" } => { :a :value ?i } .
 "#;
     let ex = |l: &str| N3Term::Iri(format!("http://ex/{l}"));
     let lang = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
@@ -809,14 +812,16 @@ fn both_n3_proof_entry_points_key_a_fact_alike() {
         [ex("a"), ex("copyEmpty"), N3Term::List(vec![])],
         [ex("a"), ex("copyList"), N3Term::List(vec![int, ex("b"), plain])],
         [ex("a"), ex("copyNest"), nest],
+        // These two intern to ONE id triple (`()` is `rdf:nil` in the dictionary).
+        [ex("a"), ex("value"), N3Term::List(vec![])],
+        [ex("a"), ex("value"), N3Term::Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil".into())],
     ];
     let mut roots = HashSet::new();
     for fact in &facts {
         let key = sparq_reason::n3::serialize::statement_keys(fact);
         let term_level = g.why(fact).unwrap_or_else(|| panic!("term-level proof of {fact:?}"));
-        // The id-level target: the ids the closure gave THIS fact's derivation.
-        let target = steps.iter().find(|s| s.conclusion_key == key).unwrap_or_else(|| panic!("no step for {fact:?}")).conclusion;
-        let id_level = sparq_reason::explain::n3_proof_tree(&dict, &steps, target, Default::default())
+        // The id-level proof, rooted STRUCTURALLY at this fact's key.
+        let id_level = sparq_reason::explain::n3_proof_tree_for_key(&dict, &steps, &key, Default::default())
             .unwrap_or_else(|| panic!("id-level proof of {fact:?}"));
         let keys = |t: &sparq_reason::ProofTree| -> HashSet<[String; 3]> { t.nodes().iter().map(|n| n.key.clone()).collect() };
         assert_eq!(keys(&term_level), keys(&id_level), "{fact:?}");
@@ -825,7 +830,12 @@ fn both_n3_proof_entry_points_key_a_fact_alike() {
         assert_eq!(ids(&prov_from_proof(&term_level, &cfg)), ids(&prov_from_proof(&id_level, &cfg)), "{fact:?}");
         roots.insert(key);
     }
-    assert_eq!(roots.len(), facts.len(), "the ltr and rtl literals keep distinct keys");
+    assert_eq!(roots.len(), facts.len(), "the ltr/rtl literals and ()/rdf:nil keep distinct keys");
+    // By ids alone the colliding pair is ambiguous: the id-only bridge refuses to choose.
+    let key = |f: &[N3Term; 3]| sparq_reason::n3::serialize::statement_keys(f);
+    let target = steps.iter().find(|s| s.conclusion_key == key(&facts[7])).expect("() step").conclusion;
+    let err = sparq_reason::explain::n3_proof_tree(&dict, &steps, target, Default::default()).expect_err("ambiguous");
+    assert_eq!(err.keys.len(), 2);
 }
 
 /// GH #6701 review round 8: proof JSON carries each node's identity `key`, so facts that

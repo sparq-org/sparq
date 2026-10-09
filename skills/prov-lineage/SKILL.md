@@ -204,6 +204,9 @@ against the old IRIs.
 RDFS / OWL-RL IRIs are unchanged (their key is still the conclusion string).
 `sparq-prov` has no identity-scheme version marker; the IRI shape
 (`…fact:<hash>` / `…rule:<hash>`) is the same, only N3 hash inputs differ.
+The `<hash>` is a 64-bit FNV-1a fold of the key: stable and content-addressed, but
+**not collision-free and not a cryptographic commitment** — do not treat an entity
+IRI as proof of a fact's content; bind content with a real commitment if you need one.
 
 ## Scope — covered vs deferred
 

@@ -286,10 +286,10 @@ fn every_shape_round_trips() {
         let key = statement_keys(s);
         assert_eq!(key, statement_keys(&s.clone()));
         if let Some(prev) = by_key.insert(key, s) {
-            assert_eq!(prev, s, "two different facts share an identity key");
+            assert_eq!(prev.clone().map(|t| canon(&t)), s.clone().map(|t| canon(&t)), "two different facts share an identity key");
         }
     }
-    let distinct: BTreeSet<String> = all.iter().map(|s| format!("{s:?}")).collect();
+    let distinct: BTreeSet<String> = all.iter().map(|s| format!("{:?}", s.clone().map(|t| canon(&t)))).collect();
     assert_eq!(by_key.len(), distinct.len());
 }
 
@@ -520,11 +520,38 @@ fn identity_keys_are_injective_over_every_term_field() {
     for t in &all {
         let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
         if let Some(prev) = by_key.insert(key, t.clone()) {
-            assert_eq!(&prev, t, "two different terms share an identity key");
+            assert_eq!(canon(&prev), canon(t), "two different terms share an identity key");
         }
     }
-    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{t:?}")).collect();
+    // Equal keys exactly for equal terms — formulae compared as sets of triples.
+    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{:?}", canon(t))).collect();
     assert_eq!(by_key.len(), distinct.len());
+}
+
+/// #6735 review: a key is STABLE — a formula is a set, so its key does not depend on the
+/// row order (or duplicate rows) a builtin or a hash-set iteration produced, at any depth;
+/// while a formula with different triples, or a backward-chaining copy of a universal
+/// (a distinct variable), keeps a different key.
+#[test]
+fn identity_keys_do_not_depend_on_formula_row_order() {
+    let k = iri("http://ex/k");
+    let row = |a: &str, b: &str| [iri(a), k.clone(), iri(b)];
+    let (r1, r2, r3) = (row("http://ex/1", "http://ex/2"), row("http://ex/3", "http://ex/4"), row("http://ex/5", "http://ex/6"));
+    let key = |t: Term| statement_keys(&[k.clone(), k.clone(), t]);
+    let f = |rows: Vec<[Term; 3]>| formula(rows);
+    assert_eq!(key(f(vec![r1.clone(), r2.clone(), r3.clone()])), key(f(vec![r3.clone(), r1.clone(), r2.clone()])));
+    assert_eq!(key(f(vec![r1.clone(), r2.clone()])), key(f(vec![r2.clone(), r1.clone(), r2.clone()])));
+    let nested = |a: Term, b: Term| f(vec![[a, k.clone(), b]]);
+    assert_eq!(
+        key(nested(f(vec![r1.clone(), r2.clone()]), Term::List(vec![f(vec![r2.clone(), r3.clone()])]))),
+        key(nested(f(vec![r2.clone(), r1.clone()]), Term::List(vec![f(vec![r3.clone(), r2.clone()])])))
+    );
+    assert_ne!(key(f(vec![r1.clone(), r2.clone()])), key(f(vec![r1.clone(), r3.clone()])));
+    // List order IS significant.
+    assert_ne!(key(Term::List(vec![iri("http://ex/1"), iri("http://ex/2")])), key(Term::List(vec![iri("http://ex/2"), iri("http://ex/1")])));
+    let ua = f(vec![[var("__ua.http://ex/x"), k.clone(), k.clone()]]);
+    let copy = f(vec![[var("__bw0___ua.http://ex/x"), k.clone(), k.clone()]]);
+    assert_ne!(key(ua), key(copy));
 }
 
 /// Codex round 5 (3): an IRI holding a decoded backslash goes back out as `\`.

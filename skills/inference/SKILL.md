@@ -153,6 +153,10 @@ pub fn why(&self, dict: &Dict, t: [Id;3]) -> Option<ProofTree>;          // RDFS
 pub fn why(&self, fact: &[Term;3])        -> Option<ProofTree>;          // N3 graph
 pub struct ProofTree;  // .nodes() -> &[ProofNode], .root(), .conclusion(), .to_json(), .to_text()
 pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule: String, pub premises: Vec<u32> }  // conclusion = display; key = lossless fact identity (N3: two facts can render alike; the same key from why() and n3_proof_tree) — address facts by key
+// explain::n3_proof_tree(dict, steps, target_ids, opts) -> Result<Option<ProofTree>, AmbiguousN3Target>
+//   — Err when several structurally distinct N3 facts intern to target_ids (e.g. () and an rdf:nil IRI);
+//   explain::n3_proof_tree_for_key(dict, steps, &key, opts) -> Option<ProofTree> roots by ProofStep::conclusion_key.
+// statement_keys compares formulae as SETS (rows sorted + deduplicated); blank labels and __bw copies are not normalized.
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
