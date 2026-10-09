@@ -316,11 +316,14 @@ impl Jws {
         self.claims.get(name).and_then(Value::as_str)
     }
 
-    /// A NumericDate claim (seconds since the epoch).
+    /// A NumericDate claim (seconds since the epoch), between the epoch and the end of year 9999:
+    /// every time a token carries is read here, so a time outside that range is no time at all,
+    /// and arithmetic on a claim's time cannot overflow.
     pub fn claim_time(&self, name: &str) -> Option<i64> {
         self.claims
             .get(name)
             .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+            .filter(|t| (0..=MAX_TIME).contains(t))
     }
 
     /// The `aud` claim as a list (a single string is a one-element list).
@@ -405,6 +408,9 @@ impl Jws {
 }
 
 /// Seconds since the Unix epoch.
+/// The latest time [`Jws::claim_time`] reads: 9999-12-31T23:59:59Z.
+pub const MAX_TIME: i64 = 253_402_300_799;
+
 pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

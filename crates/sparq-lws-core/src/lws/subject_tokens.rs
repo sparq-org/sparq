@@ -247,14 +247,20 @@ pub fn check_dpop(
         return Err("the DPoP proof's htu is not the token endpoint".into());
     }
     let iat = jws.claim_time("iat").ok_or("the DPoP proof has no iat")?;
-    if (now - iat).abs() > DPOP_WINDOW_SECS {
+    if iat.abs_diff(now) > DPOP_WINDOW_SECS.unsigned_abs() {
         return Err("the DPoP proof is not fresh".into());
     }
     let jti = jws
         .claim_str("jti")
         .filter(|j| !j.is_empty() && j.len() <= 256)
         .ok_or("the DPoP proof has no jti")?;
-    if !replay.first_use(owner, jkt, jti, iat + DPOP_WINDOW_SECS + 1, now) {
+    if !replay.first_use(
+        owner,
+        jkt,
+        jti,
+        iat.saturating_add(DPOP_WINDOW_SECS + 1),
+        now,
+    ) {
         return Err("the DPoP proof was used before".into());
     }
     Ok(())
@@ -306,16 +312,16 @@ pub fn parse(token: &str) -> Result<Jws, String> {
 /// `exp` present and not past, `iat` present and not ahead of now, `nbf` (when present) reached.
 pub fn check_times(jws: &Jws, now: i64) -> Result<(), String> {
     let exp = jws.claim_time("exp").ok_or("exp is required")?;
-    if exp <= now - SKEW_SECS {
+    if exp <= now.saturating_sub(SKEW_SECS) {
         return Err("the credential has expired".into());
     }
     let iat = jws.claim_time("iat").ok_or("iat is required")?;
-    if iat > now + SKEW_SECS {
+    if iat > now.saturating_add(SKEW_SECS) {
         return Err("iat lies in the future".into());
     }
     if jws
         .claim_time("nbf")
-        .is_some_and(|nbf| nbf > now + SKEW_SECS)
+        .is_some_and(|nbf| nbf > now.saturating_add(SKEW_SECS))
     {
         return Err("the credential is not valid yet".into());
     }
@@ -701,10 +707,12 @@ async fn oidc(
         .claim_str("sub")
         .filter(|s| !s.is_empty())
         .ok_or("an ID Token needs iss and sub")?;
-    // Solid-OIDC ID Tokens name the agent in `webid` when `sub` is not a URL.
+    // A Solid-OIDC ID Token names its agent in `webid`, whatever shape `sub` has (Solid-OIDC
+    // section 8.1.1); one without it names its agent in `sub`.
     let subject = match jws.claim_str("webid") {
-        Some(w) if !is_http_url(sub) && is_http_url(w) => w.to_string(),
-        _ => sub.to_string(),
+        Some(w) if is_http_url(w) => w.to_string(),
+        Some(_) => return Err("the ID Token's webid is not an http(s) URL".into()),
+        None => sub.to_string(),
     };
     let azp = id_token_client(jws)?;
     check_times(jws, jose::now_secs())?;
@@ -742,8 +750,10 @@ async fn oidc(
     if !discovery
         .get("issuer")
         .and_then(Value::as_str)
-        .is_some_and(|i| same_issuer(i, &issuer))
+        .is_some_and(|i| i == issuer)
     {
+        // Exactly the issuer the token names (OpenID Connect Core 3.1.3.7): every spelling that
+        // reaches the same provider is not a provider of its own, to quotas or anything else.
         return Err("the OpenID Provider's discovery document names another issuer".into());
     }
     let jwks_uri = discovery
@@ -804,10 +814,7 @@ async fn oidc(
             jose::now_secs(),
             dpop.replay,
             &ProofOwner {
-                trusted: cfg
-                    .trusted_oidc_issuers
-                    .iter()
-                    .any(|t| same_issuer(t, &issuer)),
+                trusted: cfg.trusted_oidc_issuers.contains(&issuer),
                 issuer: &issuer,
                 subject: &subject,
             },
@@ -1301,6 +1308,16 @@ mod tests {
             &json!({"htm": "POST", "htu": htu, "iat": now, "jti": "f"}),
         );
         assert!(check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err());
+        // Review finding: an `iat` far enough from now overflowed the freshness check and passed
+        // it, with an expiry already past, so the proof could be replayed. Times outside the
+        // calendar are no times at all.
+        for iat in [i64::MIN + now, i64::MIN, i64::MAX, -1] {
+            let p = dpop_proof(&key, "POST", htu, iat, &format!("x{iat}"));
+            assert!(
+                check_dpop(Some(&p), htu, &jkt, now, &replay, &OWNER).is_err(),
+                "{iat}"
+            );
+        }
         // A query on htu is ignored, as RFC 9449 says.
         let p = dpop_proof(&key, "POST", &format!("{htu}?x=1"), now, "g");
         assert_eq!(
@@ -1390,6 +1407,27 @@ mod tests {
         let ok = exchange(id_token(true), Some(proof.clone())).await.unwrap();
         assert_eq!(ok.subject, alice);
         assert!(exchange(id_token(true), Some(proof)).await.is_err());
+        // Review finding: another spelling of the issuer reached the same provider and passed,
+        // a provider of its own to every quota. The discovery document's issuer must be the
+        // token's exactly.
+        let respelled = {
+            let claims = json!({"iss": format!("{base}/"), "sub": alice, "azp": "https://app.example/",
+                "aud": ["solid"], "iat": now, "exp": now + 300, "cnf": {"jkt": client.thumbprint()}});
+            op.sign_jws(serde_json::Map::new(), &claims)
+        };
+        let proof = dpop_proof(&client, "POST", &htu, now, "w");
+        let err = exchange(respelled, Some(proof)).await.unwrap_err();
+        assert!(err.contains("another issuer"), "{err}");
+        // Review finding: a URL-shaped `sub` displaced the token's `webid`. The agent is the
+        // `webid` whatever shape `sub` has.
+        let account = {
+            let claims = json!({"iss": base, "sub": format!("{base}/accounts/123"), "webid": alice,
+                "azp": "https://app.example/", "aud": ["solid"], "iat": now, "exp": now + 300,
+                "cnf": {"jkt": client.thumbprint()}});
+            op.sign_jws(serde_json::Map::new(), &claims)
+        };
+        let proof = dpop_proof(&client, "POST", &htu, now, "x");
+        assert_eq!(exchange(account, Some(proof)).await.unwrap().subject, alice);
     }
 
     #[test]
