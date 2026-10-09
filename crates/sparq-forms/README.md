@@ -5,8 +5,7 @@ Headless **SHACL-to-form derivation** for sparq: a pure function from
 — DASH-compatible auto-generated data-entry/edit forms, with **no GUI
 dependencies** (wasm-able by construction).
 
-> Model: Claude Fable 5 [FABLE-5] (sq-lsp7k.1.1). Design record
-> `research/competitive-feature-analysis-2026-07.md` §3.
+> Design record: `research/competitive-feature-analysis-2026-07.md` §3.
 
 ## 🚀 Quickstart
 
@@ -74,7 +73,13 @@ assert_eq!(field.widget.editor.as_deref(),
 - **Pure edit diff** — `FormDiff::between(&before, &after)` reports added and
   removed RDF terms, while `to_sparql_update` renders them as one SPARQL 1.1
   `DELETE`/`INSERT` request. It intentionally excludes read-only, inverse,
-  computed, and non-bare-property-path fields.
+  computed, and non-bare-property-path fields, and fails closed (empty
+  update) on a term or field path it cannot render safely, such as an
+  invalid IRI, blank-node label or language tag. IRIs are validated, never
+  escaped; triple terms accept the full RDF 1.2 grammar (e.g. `_:a..b`),
+  nested up to 128 levels like sparq-core's N-Triples parser.
+  An editable path that is not exactly a path derive renders (one valid
+  `<IRI>` or a recognised complex path) fails the whole update.
 - **Headless & opt-in** — consumes `sparq-shacl`'s shapes model; no GUI deps;
   builds for `wasm32-unknown-unknown`; nothing in the default workspace
   depends on it, so the engine core stays lean.

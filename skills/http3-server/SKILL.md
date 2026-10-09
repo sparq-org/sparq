@@ -77,7 +77,7 @@ sparq_http3::serve_h3_with_limits(endpoint, router.clone(), limits, shutdown_sig
 
 Set `max_connections_per_ip` to `None` only when the global cap is sufficient for the deployment.
 Zero numeric caps are clamped to one rather than disabling the listener.
-`max_requests_per_connection` is a stream-exhaustion bound ([FABLE-5] sq-4rkcc): each connection
+`max_requests_per_connection` is a stream-exhaustion bound (sq-4rkcc): each connection
 acquires a semaphore permit before accepting its next request stream, and the permit is held by
 the request task until it completes, so one connection cannot fan out unbounded concurrent
 request tasks. At the cap, acceptance of further request streams on that connection back-pressures
@@ -109,7 +109,7 @@ Feature-enabled but unconfigured servers must keep serving the original router w
 ## Solid/LDP server integration
 
 `sparq-lws-core` carries this bridge behind its default-off `http3` feature
-([GPT-5.6] sq-oprna.2):
+(sq-oprna.2):
 
 ```sh
 SOLID_SERVER_TLS_CERT=/path/to/cert.pem \

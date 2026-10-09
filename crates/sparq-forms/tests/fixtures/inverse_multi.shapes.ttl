@@ -1,3 +1,6 @@
+# SCOPE: two-file rule. A content change here moves fixtures/inverse_multi.golden.json;
+# regenerate it in the same change with
+# `UPDATE_GOLDENS=1 cargo test -p sparq-forms --test golden` and review the diff.
 # Multi-shape switcher + incoming references: two applicable node shapes
 # (sh:targetClass and dash:applicableToClass), an sh:inversePath field, and
 # off-shape data triples that must land read-only in "Other properties".

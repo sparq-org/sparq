@@ -156,12 +156,58 @@ export function termValue(t: SparqlTerm | undefined): string | undefined {
 
 const XSD_STRING_IRI = "http://www.w3.org/2001/XMLSchema#string";
 
+// A lone UTF-16 surrogate has no UTF-8 encoding and no UCHAR form, so it cannot be written.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+// Characters N-Triples IRIREF forbids unescaped: controls, space, and <>"{}|^`\.
+const IRI_FORBIDDEN = /[\u0000-\u0020<>"{}|^`\\]/;
+// N-Triples BLANK_NODE_LABEL (the part after `_:`). PN_CHARS_U includes ':' in N-Triples.
+const PN_CHARS_BASE =
+  "A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF" +
+  "\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD" +
+  "\\u{10000}-\\u{EFFFF}";
+const PN_CHARS = `${PN_CHARS_BASE}_:\\-0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040`;
+const BLANK_NODE_LABEL = new RegExp(
+  `^[${PN_CHARS_BASE}_:0-9](?:[${PN_CHARS}.]*[${PN_CHARS}])?$`,
+  "u",
+);
+// N-Triples LANGTAG without the leading '@'; the RDF 1.2 direction is checked separately.
+const LANGTAG = /^[a-zA-Z]+(?:-[a-zA-Z0-9]+)*$/;
+
+/** Throws when `value` cannot be written as an N-Triples IRIREF without changing it. */
+function checkIri(value: string, what: string): string {
+  const bad = IRI_FORBIDDEN.exec(value);
+  if (bad) {
+    const code = bad[0].charCodeAt(0).toString(16).toUpperCase().padStart(4, "0");
+    throw new Error(
+      `termToNTriples: ${what} ${JSON.stringify(value)} contains U+${code}, which an N-Triples IRI cannot hold`,
+    );
+  }
+  if (LONE_SURROGATE.test(value)) {
+    throw new Error(`termToNTriples: ${what} ${JSON.stringify(value)} contains a lone surrogate`);
+  }
+  return value;
+}
+
+// The canonical N-Triples literal escapes (the same set the engine's serialiser writes):
+// ECHAR for \b \t \n \f \r " \\, and \uXXXX for every other C0 control and DEL.
+const ECHAR: Record<string, string> = {
+  "\b": "\\b",
+  "\t": "\\t",
+  "\n": "\\n",
+  "\f": "\\f",
+  "\r": "\\r",
+  '"': '\\"',
+  "\\": "\\\\",
+};
+
 function escapeNTriplesString(value: string): string {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\r/g, "\\r");
+  if (LONE_SURROGATE.test(value)) {
+    throw new Error(`termToNTriples: literal ${JSON.stringify(value)} contains a lone surrogate`);
+  }
+  return value.replace(
+    /[\u0000-\u001F\u007F"\\]/g,
+    (c) => ECHAR[c] ?? `\\u${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
+  );
 }
 
 /**
@@ -169,14 +215,26 @@ function escapeNTriplesString(value: string): string {
  * triple term as `<<( s p o )>>`. The single shared term writer: every N-Triples/N-Quads
  * snapshot built from SPARQL-JSON bindings should route through this so a new term kind
  * cannot be silently dropped by one writer. A literal's lexical form is escaped the way the
- * engine's own serialiser does (backslash, double-quote, LF, CR); `xsd:string` is implicit;
- * an RDF 1.2 base direction (`its:dir`) is kept as `@lang--dir`.
+ * engine's own serialiser does (ECHAR for `\b \t \n \f \r " \\`, `\uXXXX` for any other
+ * control character); `xsd:string` is implicit; an RDF 1.2 base direction (`its:dir`) is
+ * kept as `@lang--dir`.
+ *
+ * Parts that have no escape form are validated, never rewritten, so a crafted value cannot
+ * end its token early and splice extra statements into a snapshot. Throws an `Error` when an
+ * IRI or datatype IRI holds a character IRIREF forbids (controls, space, `<>"{}|^`\`), a
+ * blank-node label is not a `BLANK_NODE_LABEL`, a language tag is not a `LANGTAG`, the
+ * direction is not `ltr`/`rtl`, or a string holds a lone UTF-16 surrogate.
  */
 export function termToNTriples(t: SparqlTerm): string {
   switch (t.type) {
     case "uri":
-      return `<${t.value}>`;
+      return `<${checkIri(t.value, "IRI")}>`;
     case "bnode":
+      if (!BLANK_NODE_LABEL.test(t.value)) {
+        throw new Error(
+          `termToNTriples: blank node label ${JSON.stringify(t.value)} is not an N-Triples BLANK_NODE_LABEL`,
+        );
+      }
       return `_:${t.value}`;
     case "triple": {
       const { subject, predicate, object } = t.value;
@@ -184,9 +242,24 @@ export function termToNTriples(t: SparqlTerm): string {
     }
     case "literal": {
       const quoted = `"${escapeNTriplesString(t.value)}"`;
-      const lang = langTag(t);
-      if (lang) return `${quoted}@${lang}`;
-      if (t.datatype && t.datatype !== XSD_STRING_IRI) return `${quoted}^^<${t.datatype}>`;
+      const lang = t["xml:lang"];
+      const dir = t["its:dir"];
+      if (lang) {
+        if (!LANGTAG.test(lang)) {
+          throw new Error(
+            `termToNTriples: language tag ${JSON.stringify(lang)} is not an N-Triples LANGTAG`,
+          );
+        }
+        if (dir && dir !== "ltr" && dir !== "rtl") {
+          throw new Error(
+            `termToNTriples: base direction ${JSON.stringify(dir)} must be "ltr" or "rtl"`,
+          );
+        }
+        return `${quoted}@${langTag(t)}`;
+      }
+      if (t.datatype && t.datatype !== XSD_STRING_IRI) {
+        return `${quoted}^^<${checkIri(t.datatype, "datatype IRI")}>`;
+      }
       return quoted;
     }
     default: {
@@ -509,14 +582,132 @@ export function prewarmSparqWhenIdle(
 // ---------------------------------------------------------------------------
 
 // The RDF/JS `match()` term shape: `null` (and the empty string in a UI) is a wildcard; a
-// non-empty string is an N-Triples term (`<iri>`, `"literal"`, `"v"^^<dt>` …) inlined
-// verbatim into the generated SELECT.
+// non-empty string is ONE N-Triples term (`<iri>`, `_:label`, `"literal"`, `"v"@lang`,
+// `"v"^^<dt>`). It is parsed by {@link parseMatchTerm} and re-serialised with
+// {@link termToNTriples} before it goes into the generated SELECT.
 export type MatchTerm = string | null;
+
+const MATCH_ECHAR: Record<string, string> = {
+  t: "\t",
+  b: "\b",
+  n: "\n",
+  r: "\r",
+  f: "\f",
+  '"': '"',
+  "'": "'",
+  "\\": "\\",
+};
+
+/** Thrown for a match constant that is not exactly one N-Triples term. */
+function badMatchTerm(term: string, why: string): Error {
+  return new Error(
+    `match term ${JSON.stringify(term)} is not a single N-Triples IRI, blank node or literal (${why})`,
+  );
+}
+
+/**
+ * Strictly parses `src` as exactly one N-Triples IRI, blank-node or literal term, decoding
+ * ECHAR and UCHAR escapes, and returns it as a SPARQL-JSON term. Throws on anything else
+ * (trailing text, a raw quote/backslash/LF/CR in a literal, an escape that decodes to a
+ * surrogate or past U+10FFFF, a triple term). The result is re-serialised by
+ * {@link termToNTriples}, which validates every part again, so a decoded `"`, `\`, `>` or
+ * newline can only come back out escaped or rejected, never as query syntax.
+ */
+function parseMatchTerm(src: string): SparqlAtomicTerm {
+  let i = 0;
+  const fail = (why: string): never => {
+    throw badMatchTerm(src, why);
+  };
+  const escape = (): string => {
+    // At a backslash: ECHAR (literals only, `allowEchar`) or UCHAR.
+    const c = src[i + 1];
+    if (c === "u" || c === "U") {
+      const len = c === "u" ? 4 : 8;
+      const hex = src.slice(i + 2, i + 2 + len);
+      if (!new RegExp(`^[0-9A-Fa-f]{${len}}$`).test(hex)) fail("bad \\u escape");
+      const cp = parseInt(hex, 16);
+      if (cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) fail("escape is not a Unicode scalar");
+      i += 2 + len;
+      return String.fromCodePoint(cp);
+    }
+    return fail("bad escape");
+  };
+  const iri = (): string => {
+    // At '<'. Raw IRIREF characters or UCHAR; termToNTriples re-checks the decoded value.
+    i++;
+    let out = "";
+    while (i < src.length && src[i] !== ">") {
+      if (src[i] === "\\") out += escape();
+      else if (IRI_FORBIDDEN.test(src[i])) fail("character not allowed in an IRI");
+      else out += src[i++];
+    }
+    if (src[i] !== ">") fail("unterminated IRI");
+    i++;
+    return out;
+  };
+  let term: SparqlAtomicTerm;
+  if (src[0] === "<") {
+    term = { type: "uri", value: iri() };
+  } else if (src.startsWith("_:")) {
+    term = { type: "bnode", value: src.slice(2) };
+    i = src.length;
+  } else if (src[0] === '"') {
+    i = 1;
+    let value = "";
+    while (i < src.length && src[i] !== '"') {
+      const c = src[i];
+      if (c === "\n" || c === "\r") fail("raw line break in a literal");
+      if (c === "\\") {
+        const e = MATCH_ECHAR[src[i + 1]];
+        if (e !== undefined) {
+          value += e;
+          i += 2;
+        } else {
+          value += escape();
+        }
+      } else {
+        value += c;
+        i++;
+      }
+    }
+    if (src[i] !== '"') fail("unterminated literal");
+    i++;
+    term = { type: "literal", value };
+    if (src[i] === "@") {
+      const m = /^@([a-zA-Z]+(?:-[a-zA-Z0-9]+)*)(?:--(ltr|rtl))?/.exec(src.slice(i));
+      if (!m) fail("bad language tag");
+      term["xml:lang"] = m![1];
+      if (m![2]) term["its:dir"] = m![2];
+      i += m![0].length;
+    } else if (src.startsWith("^^<", i)) {
+      i += 2;
+      term.datatype = iri();
+    }
+  } else {
+    return fail("not an IRI, blank node or literal");
+  }
+  if (i !== src.length) fail("trailing text");
+  return term;
+}
+
+/**
+ * Parses a caller-supplied match constant as one N-Triples term and re-serialises it, so it
+ * cannot add patterns or clauses to the generated query. The writer's own output (including
+ * `\uXXXX` escapes for control characters) always round-trips.
+ */
+function checkMatchTerm(term: string): string {
+  try {
+    return termToNTriples(parseMatchTerm(term));
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("match term")) throw e;
+    throw badMatchTerm(term, e instanceof Error ? e.message : String(e));
+  }
+}
 
 /** One position of a generated triple pattern: a constant term or a fresh variable. */
 function patternPosition(term: MatchTerm, variable: string): string {
   const t = term?.trim();
-  return t ? t : `?${variable}`;
+  return t ? checkMatchTerm(t) : `?${variable}`;
 }
 
 /** The generated SELECT a `match()`/`countQuads()` lookup runs (shared so both agree). */
@@ -530,7 +721,7 @@ function matchSelect(
   const p = patternPosition(predicate, "p");
   const o = patternPosition(object, "o");
   const triple = `${s} ${p} ${o}`;
-  const g = graph?.trim();
+  const g = graph?.trim() ? checkMatchTerm(graph.trim()) : undefined;
   const where = g
     ? `{ GRAPH ${g} { ${triple} } }`
     : `{ { ${triple} } UNION { GRAPH ?g { ${triple} } } }`;
@@ -542,7 +733,8 @@ function matchSelect(
  * strategy `@sparq-org/sparq`'s `SparqStore.match` uses: each of subject/predicate/object/graph
  * is either a wildcard (a fresh `?s`/`?p`/`?o`/`?g` variable) or an inlined constant
  * N-Triples term. The graph wildcard spans the default graph AND every named graph. Returns
- * the matching rows as SPARQL-JSON bindings.
+ * the matching rows as SPARQL-JSON bindings. Throws if a constant is not exactly one
+ * N-Triples IRI, blank-node or literal token (triple terms are not accepted).
  */
 export function matchQuads(
   store: WasmStore,

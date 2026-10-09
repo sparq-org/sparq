@@ -19,7 +19,9 @@ verify(&triples, &proof, &DidKeyResolver)?;
 
 - **Status:** research-grade, not externally audited; only a typed subset of proof options is supported.
 - A passing `verify` shows integrity under the resolved key — **not** issuer key authorization, freshness, credential status, confidentiality or selective disclosure. Those checks are the caller's.
+- **Proof options are validated first:** `sign`, `verify` and the graph wrappers reject a non-absolute `verificationMethod`, an unsupported `proofPurpose` or an invalid `xsd:dateTime` `created` with `VcError::InvalidProofOption` before canonicalizing, signing or resolving a DID (`ProofConfig::validate`).
 - **Breaking:** compact `proofPurpose` terms now hash as their VC v2 `@context` IRIs. Only `assertionMethod` proofs are unaffected; re-sign proofs made with the other four terms or an absolute-IRI purpose (no fallback).
+- **Breaking:** the proof configuration now hashes `created` as `dcterms:created` and `cryptosuite` as a `sec:cryptosuiteString` literal, matching the W3C test vectors. Re-sign proofs made with the earlier `sec:created` / plain-literal mapping (no fallback).
 
 ## 📚 Learn more
 

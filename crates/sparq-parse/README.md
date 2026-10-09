@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: internal-stub README for a publish=false crate. -->
+<!-- sq-inzv: internal-stub README for a publish=false crate. -->
 # sparq-parse
 
 **Compressed serialization of query results** for [sparq](../../README.md):
@@ -13,7 +13,7 @@ compression overlaps serialization instead of following it.
 Hard constraint: this crate must **not** enter `sparq-wasm`'s dependency graph
 (flate2 / zstd / rayon stay out of the browser bundle).
 
-<!-- [GPT-5.6] sq-98w7z.2; [OPUS-5] measured verdict + precedence live in rustdoc. -->
+<!-- sq-98w7z.2; measured verdict + precedence live in rustdoc. -->
 Gzip encoder backend is a build-time choice: `miniz_oxide` by default, opt-in
 `zlib-rs` (measured: much faster at `-6`, trades ratio at `-1`) or `zlib-ng`.
 

@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: internal-stub README for a publish=false crate; full posture lives in skills/mpc/SKILL.md + PLAN.md. -->
+<!-- sq-inzv: internal-stub README for a publish=false crate; full posture lives in skills/mpc/SKILL.md + PLAN.md. -->
 # sparq-mpc
 
 Honest-majority Shamir MPC over (federated) SPARQL (research question RQ2): the

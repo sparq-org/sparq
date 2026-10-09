@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (@sparq-org/solid-server):** the optional `fastify` peer dependency is now
+  `^5.12.5` (was `^4.28.0 || ^5.0.0`). Fastify 4.x is end of life and has no release that
+  fixes GHSA-p68q-wchp-6fh7 (authentication bypass via malformed URLs); fastify releases
+  before 5.12.5 carry further request-validation advisories.
+
 - **Breaking (sparq-vc):** `sign`, `sign_graph`, `verify` and `verify_graph` validate
   proof options before any signing or verification work: `verificationMethod` must be
   an absolute IRI, `proofPurpose` a supported VC v2 term or an absolute IRI, and

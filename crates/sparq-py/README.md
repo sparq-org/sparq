@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — the published sparq-rdf Python bindings. -->
+<!-- sq-inzv: full-template README — the published sparq-rdf Python bindings. -->
 # sparq (Python bindings)
 
 Python bindings for the [sparq](https://github.com/sparq-org/sparq) RDF + SPARQL engine:

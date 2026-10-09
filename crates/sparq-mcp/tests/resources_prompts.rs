@@ -44,7 +44,11 @@ fn initialize_declares_resources_and_prompts_without_overclaiming() {
     let mut s = server();
     let resp = call(&mut s, &request(1, "initialize", serde_json::json!({})));
     let caps = &resp["result"]["capabilities"];
-    assert!(caps.get("tools").is_some(), "tools capability lost: {}", caps);
+    assert!(
+        caps.get("tools").is_some(),
+        "tools capability lost: {}",
+        caps
+    );
     assert_eq!(caps["resources"]["subscribe"].as_bool(), Some(false));
     assert_eq!(caps["resources"]["listChanged"].as_bool(), Some(false));
     assert_eq!(caps["prompts"]["listChanged"].as_bool(), Some(false));
@@ -77,12 +81,20 @@ fn resources_read_returns_exactly_the_addressed_graph() {
 
     let default_graph = call(
         &mut s,
-        &request(3, "resources/read", serde_json::json!({"uri": "urn:sparq:graph:default"})),
+        &request(
+            3,
+            "resources/read",
+            serde_json::json!({"uri": "urn:sparq:graph:default"}),
+        ),
     );
     let text = default_graph["result"]["contents"][0]["text"]
         .as_str()
         .expect("contents text");
-    assert!(text.contains("Alice"), "default graph triple missing: {}", text);
+    assert!(
+        text.contains("Alice"),
+        "default graph triple missing: {}",
+        text
+    );
     assert!(!text.contains("Bob"), "named-graph triple leaked: {}", text);
     assert_eq!(
         default_graph["result"]["contents"][0]["mimeType"].as_str(),
@@ -91,11 +103,21 @@ fn resources_read_returns_exactly_the_addressed_graph() {
 
     let named = call(
         &mut s,
-        &request(4, "resources/read", serde_json::json!({"uri": "http://ex/g1"})),
+        &request(
+            4,
+            "resources/read",
+            serde_json::json!({"uri": "http://ex/g1"}),
+        ),
     );
-    let text = named["result"]["contents"][0]["text"].as_str().expect("contents text");
+    let text = named["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("contents text");
     assert!(text.contains("Bob"), "named graph triple missing: {}", text);
-    assert!(!text.contains("Carol"), "sibling named graph leaked: {}", text);
+    assert!(
+        !text.contains("Carol"),
+        "sibling named graph leaked: {}",
+        text
+    );
     assert!(!text.contains("Alice"), "default graph leaked: {}", text);
 }
 
@@ -104,10 +126,20 @@ fn resources_read_of_the_dataset_returns_the_void_descriptor() {
     let mut s = server();
     let resp = call(
         &mut s,
-        &request(5, "resources/read", serde_json::json!({"uri": "urn:sparq:dataset"})),
+        &request(
+            5,
+            "resources/read",
+            serde_json::json!({"uri": "urn:sparq:dataset"}),
+        ),
     );
-    let text = resp["result"]["contents"][0]["text"].as_str().expect("contents text");
-    assert!(text.contains("rdfs.org/ns/void#"), "not a VoID descriptor: {}", text);
+    let text = resp["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("contents text");
+    assert!(
+        text.contains("rdfs.org/ns/void#"),
+        "not a VoID descriptor: {}",
+        text
+    );
 }
 
 #[test]
@@ -115,7 +147,11 @@ fn resources_read_of_an_unserved_uri_is_resource_not_found() {
     let mut s = server();
     let resp = call(
         &mut s,
-        &request(6, "resources/read", serde_json::json!({"uri": "http://ex/nope"})),
+        &request(
+            6,
+            "resources/read",
+            serde_json::json!({"uri": "http://ex/nope"}),
+        ),
     );
     assert_eq!(resp["error"]["code"].as_i64(), Some(-32002), "{}", resp);
     assert!(resp.get("result").is_none(), "{}", resp);
@@ -139,7 +175,12 @@ fn prompts_list_advertises_the_catalog_with_its_arguments() {
         .collect();
     assert_eq!(
         names,
-        vec!["explore-dataset", "count-by-class", "class-overview", "predicate-usage"]
+        vec![
+            "explore-dataset",
+            "count-by-class",
+            "class-overview",
+            "predicate-usage"
+        ]
     );
     let overview = prompts
         .iter()
@@ -175,7 +216,11 @@ fn prompts_get_renders_an_argument_free_prompt() {
     let mut s = server();
     let resp = call(
         &mut s,
-        &request(10, "prompts/get", serde_json::json!({"name": "explore-dataset"})),
+        &request(
+            10,
+            "prompts/get",
+            serde_json::json!({"name": "explore-dataset"}),
+        ),
     );
     let text = resp["result"]["messages"][0]["content"]["text"]
         .as_str()
@@ -210,7 +255,11 @@ fn prompts_get_of_an_unknown_prompt_is_invalid_params() {
     let mut s = server();
     let resp = call(
         &mut s,
-        &request(12, "prompts/get", serde_json::json!({"name": "no-such-prompt"})),
+        &request(
+            12,
+            "prompts/get",
+            serde_json::json!({"name": "no-such-prompt"}),
+        ),
     );
     assert_eq!(resp["error"]["code"].as_i64(), Some(-32602), "{}", resp);
 }
@@ -221,15 +270,26 @@ fn prompts_get_of_an_unknown_prompt_is_invalid_params() {
 fn the_surfaces_never_mutate_the_graph() {
     let mut s = server();
     let before = s.graph().len();
-    call(&mut s, &request(13, "resources/list", serde_json::json!({})));
     call(
         &mut s,
-        &request(14, "resources/read", serde_json::json!({"uri": "urn:sparq:graph:default"})),
+        &request(13, "resources/list", serde_json::json!({})),
+    );
+    call(
+        &mut s,
+        &request(
+            14,
+            "resources/read",
+            serde_json::json!({"uri": "urn:sparq:graph:default"}),
+        ),
     );
     call(&mut s, &request(15, "prompts/list", serde_json::json!({})));
     call(
         &mut s,
-        &request(16, "prompts/get", serde_json::json!({"name": "count-by-class"})),
+        &request(
+            16,
+            "prompts/get",
+            serde_json::json!({"name": "count-by-class"}),
+        ),
     );
     assert_eq!(s.graph().len(), before);
 }
