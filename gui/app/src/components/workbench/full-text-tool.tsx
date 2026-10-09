@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEngine } from "@/lib/engine-context";
 import { loadTextSearch } from "@/lib/text-wasm";
+import { buildSearchQuery } from "@/lib/full-text-query";
 import { TIER_META, toolById } from "@/data/tools";
 
 // [FABLE-5] sq-qgkwy.2 — the override lives in the sibling `.meta.ts` (eagerly bundled for the
@@ -66,16 +67,6 @@ interface SparqlJsonResult {
   results: {
     bindings: Record<string, { type: string; value: string; datatype?: string }>[];
   };
-}
-
-/** Escape double quotes and backslashes in a term for SPARQL string literal safety. */
-function buildSearchQuery(term: string): string {
-  const escaped = term.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  return `PREFIX text: <http://sparq.dev/text#>
-SELECT ?s ?prop ?lit ?score WHERE {
-  ?s ?prop ?lit .
-  ?lit text:matches "${escaped}" ; text:score ?score .
-} ORDER BY DESC(?score) LIMIT 50`;
 }
 
 /** Compact a full IRI to a short form if it's long; strip angle brackets if present. */
