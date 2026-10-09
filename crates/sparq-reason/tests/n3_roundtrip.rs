@@ -119,19 +119,12 @@ fn normalise(t: &Term) -> Term {
     }
 }
 
-fn mentions(t: &Term, i: &str) -> bool {
-    match t {
-        Term::Iri(x) => x == i,
-        Term::List(ms) => ms.iter().any(|m| mentions(m, i)),
-        Term::Triple(tr) => tr.iter().any(|m| mentions(m, i)),
-        Term::Formula(ts) => ts.iter().flatten().any(|m| mentions(m, i)),
-        _ => false,
-    }
-}
-
 /// A position inside a statement: the index taken at each step down (term, list member,
 /// quoted-triple component, formula row then column).
 type Pos = Vec<usize>;
+
+/// A simulated declaration: the universal it binds, its formula (`None`: the document), row.
+type Decl = (String, Option<Pos>, usize);
 
 /// Every occurrence of every universal in `t` (at `pos`) → the formulae enclosing it,
 /// outermost first, as (the formula's position, the row the occurrence is in).
@@ -168,36 +161,6 @@ fn occurrences(t: &Term, pos: &mut Pos, up: &mut Vec<(Pos, usize)>, out: &mut BT
     }
 }
 
-/// The formula at `pos` under `terms`.
-fn at<'a>(terms: &'a [Term], pos: &[usize]) -> &'a [[Term; 3]] {
-    let mut t = &terms[pos[0]];
-    let mut rest = &pos[1..];
-    while !rest.is_empty() {
-        t = match t {
-            Term::List(ms) => {
-                let m = &ms[rest[0]];
-                rest = &rest[1..];
-                m
-            }
-            Term::Triple(tr) => {
-                let m = &tr[rest[0]];
-                rest = &rest[1..];
-                m
-            }
-            Term::Formula(ts) => {
-                let m = &ts[rest[0]][rest[1]];
-                rest = &rest[2..];
-                m
-            }
-            _ => unreachable!("a position runs through structure only"),
-        };
-    }
-    match t {
-        Term::Formula(ts) => ts,
-        _ => unreachable!("not a formula"),
-    }
-}
-
 /// The oracle for one unit (a statement's terms, or a rule's two sides, already
 /// normalised), simulating N3's quantifier scoping on its own: every universal is declared
 /// at its RECORDED binder — at document level (only when `document` allows one), or in the
@@ -211,7 +174,7 @@ fn unplaceable(terms: &[Term], document: bool) -> bool {
         occurrences(t, &mut vec![i], &mut Vec::new(), &mut occ);
     }
     // IRI → declarations: (binding universal, formula position or None for the document, row).
-    let mut decls: BTreeMap<String, Vec<(String, Option<Pos>, usize)>> = BTreeMap::new();
+    let mut decls: BTreeMap<String, Vec<Decl>> = BTreeMap::new();
     for (name, paths) in occ.iter().filter(|(n, _)| !n.starts_with("iri:")) {
         let (i, up) = binder_of(name).unwrap();
         let Some(up) = up else {
@@ -773,6 +736,10 @@ impl Rng {
     }
 }
 
+/// A mention of `:x` / `:y`: its binding declaration and whether that is document-level,
+/// or `None` for a plain IRI.
+type Mention = Option<(usize, bool)>;
+
 /// One generated N3 document with its INDEPENDENT binding oracle: for every statement, the
 /// mentions of `:x` / `:y` in text order, each with the declaration that binds it under
 /// N3's scoping (innermost `@forAll` in effect, "thereafter") — `Some((id, document?))` —
@@ -780,7 +747,7 @@ impl Rng {
 struct Generated {
     text: String,
     /// Per statement: is it a rule; its mentions in text order.
-    statements: Vec<(bool, Vec<Option<(usize, bool)>>)>,
+    statements: Vec<(bool, Vec<Mention>)>,
 }
 
 struct Gen<'r> {
@@ -789,7 +756,7 @@ struct Gen<'r> {
     /// Scope frames, document first: IRI local name → binding declaration id.
     frames: Vec<BTreeMap<&'static str, usize>>,
     next: usize,
-    mentions: Vec<Option<(usize, bool)>>,
+    mentions: Vec<Mention>,
 }
 
 impl Gen<'_> {
@@ -956,9 +923,6 @@ fn random_scopes_round_trip_with_their_binders_or_are_refused() {
             Err(e) => {
                 refused += 1;
                 caught += usize::from(e.contains("re-parses as") || e.contains("does not re-parse"));
-                if std::env::var("SHOW_REFUSED").is_ok() && refused < 6 {
-                    eprintln!("REFUSED {e}\n{}", g.text);
-                }
             }
         }
     }
