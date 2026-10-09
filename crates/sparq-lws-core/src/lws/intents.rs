@@ -262,8 +262,8 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
     }
     // Kept changes: their containers are touched and the intents go once they are. While a
     // change is still being put back in the background it could restore a container's metadata
-    // after a touch now, so then the touches wait: the containers' listings have no date, and
-    // the intents stay for the next touch of each (or the next start).
+    // after a touch now, so then the touches wait, owed: the containers' listings have no date
+    // until the set-aside changes are settled, then they are touched ([`LwsState::set_aside`]).
     for (record, containers) in touches {
         for c in containers {
             state.owe_touch(&c, record.clone());
@@ -618,6 +618,78 @@ mod tests {
         std::mem::forget(journal);
         let st = restart(&store).await;
         assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
+        assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Wait until `done` holds of `st`, or fail.
+    async fn until(
+        st: &LwsState<FlakyStore>,
+        what: &str,
+        done: impl Fn(&LwsState<FlakyStore>) -> bool,
+    ) {
+        let mut waited = 0;
+        while !done(st) {
+            assert!(waited < 100, "{what}");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            waited += 1;
+        }
+    }
+
+    /// Review finding: touches that waited at start on a change set aside were never made once
+    /// it was settled, so the container's listing stayed without a date and the intent stayed.
+    #[tokio::test]
+    async fn a_touch_that_waited_at_start_is_made_once_settled() {
+        let (st, store, d, before) = typed_doc().await;
+        let root = st.cfg.storage();
+        let dated = st.resource_meta(&root).await.unwrap().version;
+        store_intent(&st, std::slice::from_ref(&root)).await;
+        // A change cut short that cannot be put back yet.
+        let mut journal = st.journal();
+        journal.stage(&meta_key(&d)).await.unwrap();
+        journal.stage(&d).await.unwrap();
+        journal
+            .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
+            .await
+            .unwrap();
+        std::mem::forget(journal);
+        *store.fail_restore_of.lock().unwrap() = Some(d.clone());
+        let st = restart(&store).await;
+        assert!(st.is_untouched(&root), "the touch waits");
+        assert_eq!(st.resource_meta(&root).await.unwrap().version, dated);
+        *store.fail_restore_of.lock().unwrap() = None;
+        until(&st, "no touch owed", |st| {
+            !st.is_untouched(&root) && !st.owes_touch(&root)
+        })
+        .await;
+        assert_ne!(st.resource_meta(&root).await.unwrap().version, dated);
+        assert_eq!(
+            snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
+            before
+        );
+        assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Review finding: a change settled in the background as kept was never followed by its
+    /// container's touch. It is now, and the intent goes.
+    #[tokio::test]
+    async fn a_kept_change_settled_in_the_background_dates_its_container() {
+        let (st, store, c, m) = a_member().await;
+        let dated = st.resource_meta(&c).await.unwrap().version;
+        let journal = removing(&st, &c, &m).await;
+        let record = journal.intent.clone().unwrap();
+        *store.fail_after_write_of.lock().unwrap() = Some(record.clone());
+        *store.fail_read_of.lock().unwrap() = Some(record);
+        let (_, left) = journal.commit(Some(&c)).await.expect_err("unknown");
+        assert!(st.is_untouched(&c));
+        st.set_aside(left.expect("to settle"), ());
+        *store.fail_after_write_of.lock().unwrap() = None;
+        *store.fail_read_of.lock().unwrap() = None;
+        until(&st, "no touch owed", |st| {
+            !st.is_untouched(&c) && !st.owes_touch(&c)
+        })
+        .await;
+        assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
+        assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
         assert_eq!(intents_left(&st).await, 0);
     }
 

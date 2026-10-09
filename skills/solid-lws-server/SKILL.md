@@ -301,13 +301,14 @@ What the server exposes, all discoverable from the storage description
   container's date has been moved on (until then it names that container); one a process stop
   left is settled when the server next starts, before it serves anything: a change cut short is
   put back, and only then (once nothing is left set aside) is a kept change's container
-  touched, so no change put back can restore a container date from before it. Every intent is
+  touched, so no change put back can restore a container date from before it; a touch that
+  waited is made, retried until it lands, once the set-aside changes are settled. Every intent is
   read before any is settled, so one that cannot be read stops the start with nothing changed
   or left running; what cannot be put back then is set aside as above. When a kept change's
   intent cannot be recorded as kept, it is read back (the store may have done it, the reply
   lost): still holding its plan, the change is put back and the request fails; otherwise the
   change is kept. While it cannot be read, the request fails and the change is set aside, to be
-  settled the same way from its intent. A
+  settled the same way from its intent, and its container touched after. A
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in
   flight to a member: it reads each member under that member's lock, and is read again once the

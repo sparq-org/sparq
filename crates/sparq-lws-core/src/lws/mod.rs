@@ -592,7 +592,9 @@ impl<S: Store + 'static> LwsState<S> {
     /// them meanwhile; the change's listing locks among them) and no request's admission slot,
     /// keeps putting the change back, waiting longer between tries (up to [`UNDO_MAX_WAIT`]).
     /// Once it is back the locks go, and each resource is visible again once no other
-    /// set-aside change is to it.
+    /// set-aside change is to it. Then the containers whose touch waited on it are touched
+    /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
+    /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
@@ -611,6 +613,16 @@ impl<S: Store + 'static> LwsState<S> {
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
+                if let Undo::Resolve {
+                    record,
+                    touch: Some(container),
+                    ..
+                } = undo
+                {
+                    // Kept, the intent names the container until the touch lands; put back,
+                    // it is gone, and clearing it again does nothing.
+                    state.owe_touch(container, record.clone());
+                }
             }
             drop(left);
             state.locks.show(&iris);
@@ -618,7 +630,43 @@ impl<S: Store + 'static> LwsState<S> {
                 .set_aside_bytes
                 .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
             drop(locks);
+            state.touch_owed().await;
         });
+    }
+
+    /// Touch every container whose touch is owed ([`LwsState::owe_touch`]) and that is visible
+    /// (one still set aside is touched when its own change is settled), each until the touch
+    /// lands and clears the intents waiting on it, waiting longer between tries (up to
+    /// [`UNDO_MAX_WAIT`]).
+    pub(crate) async fn touch_owed(&self) {
+        let owed: Vec<String> = self
+            .owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        for container in owed {
+            let mut wait = std::time::Duration::from_millis(100);
+            while self.visible(&container) && self.owes_touch(&container) {
+                self.touching(&container);
+                resources::touch_container(self, &container).await;
+                if !self.owes_touch(&container) {
+                    break;
+                }
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(UNDO_MAX_WAIT);
+            }
+        }
+    }
+
+    /// Whether a touch of `uri` is owed.
+    fn owes_touch(&self, uri: &str) -> bool {
+        self.owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(uri)
+            .is_some_and(|r| !r.is_empty())
     }
 
     /// Whether `agent` may perform `action` on the resource at `uri` (see [`access::allowed`]).
@@ -831,11 +879,14 @@ pub(crate) enum Undo {
     /// container, or cleared): the store may have done it anyway, a lost reply. Settled from
     /// what the intent `record` holds now: cleared, or naming only a container, the change is
     /// kept; still holding its plan, the change is put back (`undo`, in order) and the intent
-    /// cleared. Until then its resources (`iris`) stay set aside, as for [`Undo::Forget`].
+    /// cleared. Until then its resources (`iris`) stay set aside, as for [`Undo::Forget`]. Once
+    /// it is settled, the container `touch` its change listed is touched, either way (see
+    /// [`LwsState::set_aside`]).
     Resolve {
         record: String,
         undo: Vec<Undo>,
         iris: Vec<String>,
+        touch: Option<String>,
     },
 }
 
@@ -1243,6 +1294,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             self.state.touched(container, false);
         }
         let resolve = Undo::Resolve {
+            touch: touch.map(str::to_string),
             record,
             iris: iris_of(&self.planned),
             undo: self.undo.into_iter().rev().collect(),
