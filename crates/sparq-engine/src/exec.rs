@@ -12108,25 +12108,34 @@ fn minmax_values(mut vals: Vec<Value>, keep: Ordering) -> Value {
     if vals.is_empty() {
         return Value::Unbound;
     }
-    let nums: Option<Vec<Num>> = vals.iter().map(as_numeric).collect();
-    match nums {
-        Some(nums) => {
-            let mut best = 0;
-            for (i, &n) in nums.iter().enumerate().skip(1) {
-                if num_extremum_compare(n, nums[best]) == Some(keep) {
-                    best = i;
-                }
+    // One order for MIN/MAX and ORDER BY: `compare_values(..).unwrap_or(Equal)`, with MIN
+    // keeping the FIRST of equal members and MAX the LAST (`Iterator::min_by`/`max_by`).
+    // Two in-tower int/decimal members with a decidable, unequal exact order are settled
+    // by that order first, which `compare_values` refines but never contradicts; every
+    // other pair (a tie, a float, a scale overflow, a strict-capacity pair) goes to it.
+    // Reading each member as a number also records a strict-budget capacity failure.
+    let nums: Vec<Option<Num>> = vals.iter().map(as_numeric).collect();
+    let decs: Vec<_> = if budget::strict_numeric() {
+        Vec::new()
+    } else {
+        nums.iter().map(|n| n.and_then(Num::to_dec)).collect()
+    };
+    let ord = |i: usize, j: usize| {
+        if let (Some(Some(x)), Some(Some(y))) = (decs.get(i), decs.get(j)) {
+            if let Some(o) = (*x).cmp(*y).filter(|o| *o != Ordering::Equal) {
+                return o;
             }
-            vals.swap_remove(best)
         }
-        None => {
-            let cmp = |a: &Value, c: &Value| compare_values(a, c).unwrap_or(Ordering::Equal);
-            match keep {
-                Ordering::Less => vals.into_iter().min_by(cmp).unwrap(),
-                _ => vals.into_iter().max_by(cmp).unwrap(),
-            }
+        compare_values(&vals[i], &vals[j]).unwrap_or(Ordering::Equal)
+    };
+    let mut best = 0;
+    for i in 1..vals.len() {
+        let o = ord(i, best);
+        if if keep == Ordering::Less { o == Ordering::Less } else { o != Ordering::Less } {
+            best = i;
         }
     }
+    vals.swap_remove(best)
 }
 
 /// MIN/MAX over a variable whose group members are ALL well-formed temporal
@@ -12203,24 +12212,6 @@ fn num_compare(a: Num, c: Num) -> Option<Ordering> {
         return numeric_capacity::comparable(a, c).then(|| a.cmp_relational(c)).flatten();
     }
     a.cmp_relational(c)
-}
-
-/// The order MIN/MAX fold numerics by: exact when both are int/decimal, `f64` otherwise.
-///
-/// Deliberately NOT [`num_compare`]: MAX is defined through `ORDER BY DESC`, so the float-tier
-/// promotion must not create a tie that lets a later member displace a strictly larger one
-/// (`MAX(0.1, "0.1"^^xsd:float, 0.1000000001e0)` is the float, whose value is
-/// 0.10000000149…). `f64` widening is exact for a float, so this keeps every strict order.
-fn num_extremum_compare(a: Num, c: Num) -> Option<Ordering> {
-    if budget::strict_numeric() && !numeric_capacity::comparable(a, c) {
-        return None;
-    }
-    if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
-        if let Some(o) = x.cmp(y) {
-            return Some(o);
-        }
-    }
-    a.f64().partial_cmp(&c.f64())
 }
 
 /// Whether two DISTINCT cached `f64` operand values could still compare EQUAL under XPath
@@ -15061,7 +15052,10 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
         (DateTime(_), DateTime(_)) | (Date(_), Date(_)) => None,
         // date and dateTime values are disjoint -> known different.
-        (DateTime(_), Date(_)) | (Date(_), DateTime(_)) => Some(false),
+        // An ill-formed operand (e.g. a timezone-free dateTimeStamp) is not a value: error.
+        (DateTime(Some(_)), Date(Some(_))) | (Date(Some(_)), DateTime(Some(_))) => Some(false),
+        // Nor is it known different from a language-tagged literal (#3902): still an error.
+        (DateTime(None) | Date(None), _) | (_, DateTime(None) | Date(None)) => None,
         // A language-tagged literal equals only a literal with the same (ci) tag.
         (Lang(t1, v1), Lang(t2, v2)) => Some(t1 == t2 && v1 == v2),
         (Lang(..), _) | (_, Lang(..)) => Some(false),
@@ -15188,6 +15182,40 @@ fn integer_argument(v: &Value) -> Option<i128> {
     }
 }
 
+/// The lexical of a well-formed `xsd:decimal`, `xsd:integer` or unbounded integer-subtype
+/// literal too large for the i128 tower (`Num::of_literal` declines it). Such a value is
+/// still a number: the ORDER BY total order compares it exactly by its lexical instead of
+/// as an opaque string. The raw lexical is validated as is by `numeric_literal_valid`
+/// (no trimming of any whitespace, ASCII or Unicode), which also checks a subtype's sign
+/// facet. The bounded subtypes (`xsd:long`, ...) cannot hold such a value, so they stay `None`.
+fn beyond_tower_lexical(v: &Value) -> Option<&str> {
+    let Value::Term(Term::Literal(l)) = v else { return None };
+    if l.language().is_some() || Num::of_literal(l).is_some() {
+        return None;
+    }
+    let dt = l.datatype();
+    let unbounded = dt == xsd::DECIMAL
+        || dt == xsd::INTEGER
+        || dt == xsd::NEGATIVE_INTEGER
+        || dt == xsd::NON_POSITIVE_INTEGER
+        || dt == xsd::POSITIVE_INTEGER
+        || dt == xsd::NON_NEGATIVE_INTEGER;
+    let lex = l.value();
+    (unbounded && sparq_core::numeric_literal_valid(lex, dt.as_str()) && split_decimal(lex).is_some())
+        .then_some(lex)
+}
+
+/// An exact decimal lexical for a numeric `Value`: an integer/decimal (in or beyond the
+/// tower). `None` for float/double, whose exact value is its `f64`.
+#[cold]
+fn exact_decimal_lexical(v: &Value) -> Option<String> {
+    match as_numeric(v) {
+        Some(n) if n.to_dec().is_some() => Some(n.lexical()),
+        Some(_) => None,
+        None => beyond_tower_lexical(v).map(str::to_string),
+    }
+}
+
 fn as_num(v: &Value) -> Option<f64> {
     if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
         return as_numeric(v).map(Num::f64);
@@ -15252,7 +15280,9 @@ impl CompareTerm for Value {
         // one kind with boolean LITERALS (both order `false < true` via `strict_cmp`).
         match lit_kind(self) {
             LitKind::Bool(_) => LiteralKind::Boolean,
-            LitKind::Num(_) if as_num(self).is_some() => LiteralKind::Numeric,
+            LitKind::Num(_) if as_num(self).is_some() || beyond_tower_lexical(self).is_some() => {
+                LiteralKind::Numeric
+            }
             LitKind::Str(_) => LiteralKind::String,
             LitKind::Lang(..) => LiteralKind::Lang,
             LitKind::DateTime(Some(_)) => LiteralKind::DateTime,
@@ -15268,7 +15298,10 @@ impl CompareTerm for Value {
     }
     #[inline]
     fn as_f64(&self) -> Option<f64> {
-        as_num(self)
+        // A well-formed integer/decimal beyond the i128 tower has no `Num`, but it is still a
+        // number: its correctly-rounded f64 (monotonic, possibly +-INF) orders it, and an f64
+        // tie is rechecked exactly in `exact_cmp`.
+        as_num(self).or_else(|| beyond_tower_lexical(self).and_then(parse_xsd_f64))
     }
     #[inline]
     fn exact_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -15279,12 +15312,34 @@ impl CompareTerm for Value {
         // expansion for the MIXED exact/inexact pair (the pre-fix `num_compare`
         // fallback kept the collapsed f64 verdict there, which made the order
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
-        // `<`/`=` (`cmp_expr`, via `num_compare`) and MIN/MAX (`minmax_values`, via
-        // `num_extremum_compare`) deliberately KEEP their own semantics; this total
+        // `<`/`=` (`cmp_expr`, via `num_compare`) deliberately KEEPS its own semantics; this total
         // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
-            (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
-            _ => None,
+            (Some(a), Some(b)) => {
+                if !numeric_capacity::comparable(a, b) {
+                    return None;
+                }
+                // Two in-tower decimals whose scale alignment overflows i128 would fall
+                // back to their (equal) f64 images; compare their exact lexicals instead,
+                // the same exact order a beyond-tower lexical gets below, so the total
+                // order stays transitive across the tower boundary.
+                if let (Some(x), Some(y)) = (a.to_dec(), b.to_dec()) {
+                    if x.cmp(y).is_none() {
+                        return cmp_decimal_str(&a.lexical(), &b.lexical());
+                    }
+                }
+                Some(a.cmp_total(b))
+            }
+            // A strict numeric budget has already failed capacity on a lexical beyond the tower.
+            _ if budget::strict_numeric() => None,
+            // At least one side is beyond the i128 tower: compare exact decimal lexicals
+            // (arbitrary precision), or an exact lexical against a float/double's value.
+            _ => match (exact_decimal_lexical(self), exact_decimal_lexical(other)) {
+                (Some(a), Some(b)) => cmp_decimal_str(&a, &b),
+                (Some(a), None) => Some(cmp_exact_lex_f64(&a, as_num(other)?)),
+                (None, Some(b)) => Some(cmp_exact_lex_f64(&b, as_num(self)?).reverse()),
+                (None, None) => None,
+            },
         }
     }
     #[inline]
@@ -16795,8 +16850,7 @@ fn parse_datetime(s: &str) -> Option<[f64; 6]> {
             month += 1;
             if month == 13 {
                 month = 1;
-                year += 1;
-                if year == 0 { year = 1; } // XSD 1.0 has no year zero.
+                year += 1; // XSD 1.1 counts through year zero.
             }
         }
     }

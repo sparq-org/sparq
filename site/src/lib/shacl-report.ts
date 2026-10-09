@@ -2,6 +2,8 @@
 // validation report in the live /surface/shacl playground. Kept separate from the
 // React component so they can be unit-tested under node:test without a DOM.
 
+import { termToNTriples } from "@sparq/client";
+
 import type { ShaclReport, ShaclResult } from "./sparq-wasm";
 
 const PREFIXES: [string, string][] = [
@@ -50,9 +52,14 @@ export function reportSummary(report: ShaclReport): string {
   return `Does not conform — ${n} ${n === 1 ? "violation" : "violations"}.`;
 }
 
-/** Escapes a string literal for inclusion in a Turtle document (`"` and `\`). */
+/** A message as a Turtle string literal, via the shared sparq-client writer (#6719). */
 function turtleString(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return termToNTriples({ type: "literal", value: s });
+}
+
+/** An engine-reported IRI as `<iri>`; the shared writer throws if it cannot be written as-is. */
+function turtleIri(iri: string): string {
+  return termToNTriples({ type: "uri", value: iri });
 }
 
 /**
@@ -83,12 +90,12 @@ export function reportToTurtle(report: ShaclReport): string {
     lines.push(`    sh:focusNode ${r.focusNode} ;`);
     if (r.path) lines.push(`    sh:resultPath ${r.path} ;`);
     if (r.value) lines.push(`    sh:value ${r.value} ;`);
-    lines.push(`    sh:resultSeverity <${r.severity}> ;`);
+    lines.push(`    sh:resultSeverity ${turtleIri(r.severity)} ;`);
     lines.push(
-      `    sh:sourceConstraintComponent <${r.sourceConstraintComponent}> ;`,
+      `    sh:sourceConstraintComponent ${turtleIri(r.sourceConstraintComponent)} ;`,
     );
     lines.push(`    sh:sourceShape ${r.sourceShape} ;`);
-    if (r.message) lines.push(`    sh:resultMessage "${turtleString(r.message)}" ;`);
+    if (r.message) lines.push(`    sh:resultMessage ${turtleString(r.message)} ;`);
     // Trim the trailing ` ;` of the last property inside the blank node.
     lines[lines.length - 1] = lines[lines.length - 1].replace(/ ;$/, "");
     lines.push(last ? "  ] ." : "  ] ;");

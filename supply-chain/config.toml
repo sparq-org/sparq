@@ -1026,15 +1026,15 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hickory-net]]
-version = "0.26.1"
+version = "0.26.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.hickory-proto]]
-version = "0.26.1"
+version = "0.26.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.hickory-resolver]]
-version = "0.26.1"
+version = "0.26.3"
 criteria = "safe-to-deploy"
 notes = "solid-server-rs import pre-flight (sq-gg0qq.1): transitive of solid-oidc-verifier — its DNS-pinned SSRF-guarded async resolver (0.26.1 carries the GHSA-q2qq-hmj6-3wpp hickory-proto fix). [FABLE-5]"
 
@@ -2369,7 +2369,7 @@ criteria = "safe-to-deploy"
 notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-6 task vc_suite_design under the existing policy; not a source audit. Proposal SHA256 46e24babc8f61ace9051068246e0fb1d513fd4ff63b32993f2ff3eb476301ea9; registry archive SHA256 4cf0ded5c4e56918d8f8a339e1bb67d038d3bc6d144ac407904015ba2e4cde9b. Small-vector allocation/index behavior supports encoding helpers. Upstream claims of safe source do not amount to independent source coverage for this exact version. Confirmed in exact all-target resolved graph and all recorded dependency paths; no claim of execution on every target. Matching accepted safe-to-deploy source evidence, reviewed compatible version with independently valid coverage, or demonstrated edge removal; renewed screening on every version change. Durable per-entry acceptance: research/zk-dependency-backlog/accepted-6f7/per-entry-dispositions.json. Existing registry audit obligations and separate vendor-patch reviews remain required."
 
 [[exemptions.tokio]]
-version = "1.53.1"
+version = "1.53.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.tokio-macros]]

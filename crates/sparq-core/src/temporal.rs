@@ -222,9 +222,8 @@ pub fn parse_civil_date(date: &str) -> Option<i64> {
         return None;
     }
     let y: i64 = year.parse().ok()?;
-    if y == 0 {
-        return None; // XSD 1.0 has no year zero.
-    }
+    // XSD 1.1 has a year zero (1 BCE) and numbers years astronomically, so `-0001`
+    // is 2 BCE, and `-0000` is another lexical for year zero.
     let y = if neg { -y } else { y };
     let m = two_digits(p.next()?)?;
     let d = two_digits(p.next()?)?;
