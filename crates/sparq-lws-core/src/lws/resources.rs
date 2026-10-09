@@ -1709,9 +1709,10 @@ where
 /// - Metadata changed: three writes, through a [`Journal`](super::Journal). The old metadata
 ///   marked `pending` first; then the content; then the new metadata, which clears the mark.
 ///   When any step fails, the journal puts back what the steps before it did, the last first, so
-///   the resource is as it was: its content and its metadata. When putting back fails too, the
-///   `pending` mark stays and the resource fails closed: only its owner and creator may act on it
-///   (see [`access::allowed`](super::access::allowed)) until a write completes.
+///   the resource is as it was: its content and its metadata. When putting back fails too, it is
+///   retried with the lock still held until it succeeds, so nobody sees the steps in between; the
+///   `pending` mark (failing closed: only its owner and creator may act on it, see
+///   [`access::allowed`](super::access::allowed)) covers only a process that stops mid-way.
 ///
 /// The writes, a lone content write included, run with the resource's lock (`guard`, handed back
 /// when they are done) held, in the request's own task (see [`hold_locks`]), so a client that goes
@@ -6158,39 +6159,42 @@ mod tests {
         let r = handle(&st, &get, &stranger).await;
         assert_eq!(r.status(), StatusCode::OK);
         assert_eq!(body_of(r).await, Bytes::from("public"));
-        // When the content cannot be put back either, the new content is not served under the
-        // old public type: the resource stays pending and the listing is not left unchanged.
-        // The steps: the pending mark, the content (its reply lost), then putting it back,
-        // which fails until the store lets it.
+        // When the content cannot be put back either, the PUT keeps the resource's lock and tries
+        // again until it can: the new content is never served under the old public type.
         *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
         *store.fail_restore_of.lock().unwrap() = Some(uri.clone());
-        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
-        assert!(r.status().is_server_error(), "{}", r.status());
-        *store.fail_after_write_of.lock().unwrap() = None;
-        assert_ne!(version().await, before);
-        assert_eq!(
-            st.store.read(&uri).await.unwrap().body,
-            Bytes::from("private")
+        let pending = tokio::spawn({
+            let (st, owner, req) = (
+                st.clone(),
+                owner.clone(),
+                put("https://e.example/Private", "private"),
+            );
+            async move { handle(&st, &req, &owner).await.status() }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !pending.is_finished(),
+            "the PUT gave up with its rollback undone"
         );
-        assert!(st.resource_meta(&uri).await.unwrap().pending);
-        assert_eq!(
-            handle(&st, &get, &stranger).await.status(),
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(handle(&st, &get, &owner).await.status(), StatusCode::OK);
-        // What could not be put back is not dropped: once the store lets it, the resource is
-        // back as it was, content first and then its metadata.
-        *store.fail_restore_of.lock().unwrap() = None;
-        for _ in 0..200 {
-            if !st.resource_meta(&uri).await.unwrap().pending {
-                break;
+        let waiting = tokio::spawn({
+            let (st, stranger, get) = (st.clone(), stranger.clone(), get.clone());
+            async move {
+                let r = handle(&st, &get, &stranger).await;
+                (r.status(), body_of(r).await)
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
+        });
+        *store.fail_after_write_of.lock().unwrap() = None;
+        *store.fail_restore_of.lock().unwrap() = None;
+        assert!(pending.await.unwrap().is_server_error());
+        // The stranger's GET is refused (the metadata is marked pending) or waits for the
+        // rollback; it is never served the new content.
+        let (status, body) = waiting.await.unwrap();
+        assert!(
+            status == StatusCode::FORBIDDEN || body == "public",
+            "{status} {body:?}"
+        );
+        assert_eq!(version().await, before);
         assert!(!st.resource_meta(&uri).await.unwrap().pending);
-        let r = handle(&st, &get, &stranger).await;
-        assert_eq!(r.status(), StatusCode::OK);
-        assert_eq!(body_of(r).await, Bytes::from("public"));
         // A write that fails before it is sent still restores the old metadata.
         let r = handle(&st, &put(public, "public again"), &owner).await;
         assert!(r.status().is_success(), "{}", r.status());

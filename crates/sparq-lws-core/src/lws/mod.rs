@@ -942,10 +942,8 @@ pub(crate) async fn delete_record<S: Store + 'static>(
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
 /// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
-///   store's timeout or lost reply), so the record is removed. When that fails too, the outcome
-///   is resolved in the background ([`resolve_record`]): the record is registered only once it is
-///   seen stored, and is never in force before. Until then `register` (and the quota place it
-///   holds) is kept.
+///   store's timeout or lost reply), so the record is removed, retried with the container held
+///   until it is gone; only then is `register` (and the quota place it holds) dropped.
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
     container: &str,
@@ -981,11 +979,12 @@ where
                 Ok(())
             }
             Err(e) => {
-                if matches!(e, ServerError::Storage(_))
-                    && delete_record(&state, &iri, &container).await.is_err()
-                {
-                    tokio::spawn(resolve_record(state.clone(), iri.clone(), register));
+                // The create may have committed: it is removed, retried until it is, with the
+                // container still held, so the record is never stored without being in force.
+                if matches!(e, ServerError::Storage(_)) {
+                    until_done(|| delete_record(&state, &iri, &container)).await;
                 }
+                drop(register);
                 Err(e)
             }
         }
@@ -993,31 +992,6 @@ where
     tokio::spawn(task)
         .await
         .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
-}
-
-/// How many times, and how far apart at most, an uncertain create is looked up again.
-const RESOLVE_ATTEMPTS: u32 = 12;
-const RESOLVE_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// Settle a create whose outcome is unknown (the store failed, and so did removing what it may
-/// have stored): look the record up again, with growing waits, until the store answers. A record
-/// that is there is registered (it would be loaded at the next boot anyway); one that is not is
-/// dropped with `register`, which gives back its quota place. If the store never answers, the
-/// next boot loads whatever is stored.
-async fn resolve_record<S, F>(state: LwsState<S>, iri: String, register: F)
-where
-    S: Store + 'static,
-    F: FnOnce() + Send + 'static,
-{
-    let mut wait = std::time::Duration::from_millis(100);
-    for _ in 0..RESOLVE_ATTEMPTS {
-        tokio::time::sleep(wait).await;
-        match state.store.exists(&iri).await {
-            Ok(true) => return register(),
-            Ok(false) => return,
-            Err(_) => wait = (wait * 2).min(RESOLVE_MAX_WAIT),
-        }
-    }
 }
 
 /// The preconditions of a create in a service container (grants, requests, subscriptions),
