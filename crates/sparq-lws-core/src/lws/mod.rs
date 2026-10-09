@@ -10,8 +10,9 @@
 //! - the **storage description** (`application/lws+cid`) at the storage URI, linked from every
 //!   response with `rel="https://www.w3.org/ns/lws#storage"`;
 //! - **containers** (`application/lws+json`, paginated) and **data resources**, with ETag and date
-//!   validators, single byte ranges, `Depth: infinity` deletes, and RFC 9457 problem details;
-//! - a **linkset** (RFC 9264) per resource, read-only;
+//!   validators, single byte ranges, JSON Merge Patch and JSON Patch, `Depth: infinity` deletes,
+//!   and RFC 9457 problem details;
+//! - a **linkset** (RFC 9264) per resource, patchable;
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
 //!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
 //!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
@@ -53,6 +54,8 @@ pub const LWS_CID: &str = "application/lws+cid";
 pub const LD_JSON: &str = "application/ld+json";
 pub const JSON: &str = "application/json";
 pub const LINKSET_JSON: &str = "application/linkset+json";
+pub const MERGE_PATCH: &str = "application/merge-patch+json";
+pub const JSON_PATCH: &str = "application/json-patch+json";
 pub const PROBLEM_JSON: &str = "application/problem+json";
 
 pub const AS_METADATA_PATH: &str = "/.well-known/lws-configuration";
@@ -392,7 +395,7 @@ pub struct ResourceMeta {
     /// Descriptive links the client sent as Link headers: relation to targets.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub links: BTreeMap<String, Vec<String>>,
-    /// The resource's linkset document, once one is stored.
+    /// The resource's linkset document, once patched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linkset: Option<Value>,
     /// The linkset's entity tag.
