@@ -1588,7 +1588,7 @@ mod tests {
         let r = handle(&state, &post, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let container = state.cfg.absolute(GRANTS_PATH);
-        assert!(state.is_set_aside(&container));
+        assert!(!state.visible(&container));
         let listing = test_store::request(Method::GET, GRANTS_PATH, &[], "");
         let r = super::super::route(&state, listing).await;
         assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
@@ -1597,12 +1597,12 @@ mod tests {
         store.fail_delete.store(false, Ordering::SeqCst);
         store.fail_exists.store(false, Ordering::SeqCst);
         for _ in 0..200 {
-            if !state.is_set_aside(&container) {
+            if state.visible(&container) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(!state.is_set_aside(&container));
+        assert!(state.visible(&container));
         assert!(state.access.grant_policies().is_empty());
         assert!(state
             .store
@@ -1645,17 +1645,17 @@ mod tests {
         store.fail_delete.store(true, Ordering::SeqCst);
         let resp = handle(&state, &post(), &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(state.is_set_aside(&container));
+        assert!(!state.visible(&container));
         assert!(state.access.grant_policies().is_empty());
         store.fail_after_create.store(false, Ordering::SeqCst);
         store.fail_delete.store(false, Ordering::SeqCst);
         for _ in 0..200 {
-            if !state.is_set_aside(&container) {
+            if state.visible(&container) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        assert!(!state.is_set_aside(&container));
+        assert!(state.visible(&container));
         assert_eq!(stored().await, 0);
         assert!(state.access.grant_policies().is_empty());
         // The client goes away while the create is pending: once it lands, the grant is in force.

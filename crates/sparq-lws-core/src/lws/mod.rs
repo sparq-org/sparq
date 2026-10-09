@@ -450,8 +450,11 @@ pub struct Inner<S: Store> {
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
     pub locks: resources::IriLocks,
-    /// The resources a failed change could not yet be put back on (see [`LwsState::set_aside`]).
-    set_aside: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The resources failed changes could not yet be put back on, each with how many such
+    /// changes are to it (see [`LwsState::set_aside`]).
+    set_aside: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
+    set_aside_bytes: std::sync::atomic::AtomicUsize,
     /// The containers whose own modification time could not be moved on after a change to them.
     untouched: std::sync::Mutex<std::collections::HashSet<String>>,
 }
@@ -500,6 +503,7 @@ impl<S: Store + 'static> LwsState<S> {
                 http,
                 locks: Default::default(),
                 set_aside: Default::default(),
+                set_aside_bytes: Default::default(),
                 untouched: Default::default(),
             }),
         })
@@ -523,36 +527,75 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// Whether `uri` is set aside: a change to it failed and could not yet be put back, so it is
-    /// answered `503` until it is.
-    pub(crate) fn is_set_aside(&self, uri: &str) -> bool {
-        self.set_aside
+    /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
+    /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). The
+    /// one check every route makes before it reads or waits on anything of `uri`; one that is
+    /// not visible is answered `503` at once, or skipped by a walk over many.
+    pub(crate) fn visible(&self, uri: &str) -> bool {
+        !self
+            .set_aside
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .contains(uri)
+            .contains_key(uri)
+    }
+
+    /// Whether a new change may start: not while set-aside changes hold [`MAX_SET_ASIDE_BYTES`]
+    /// or more to put back. What they hold is bounded so: by that, and by what the changes in
+    /// flight (each bounded by its [`Journal`], their number by admission) could add to it.
+    pub(crate) fn may_write(&self) -> bool {
+        self.set_aside_bytes
+            .load(std::sync::atomic::Ordering::Acquire)
+            < MAX_SET_ASIDE_BYTES
     }
 
     /// Set aside the resources of a change that could not be put back after a few tries
-    /// ([`settle`]): requests for them are answered `503` from now on, and a task of their own,
-    /// holding the change's `locks` (so nobody acts on them meanwhile) and no request's
-    /// admission slot, keeps putting the change back, waiting longer between tries (up to
-    /// [`UNDO_MAX_WAIT`]). Once it is back the resources are served again and the locks go.
+    /// ([`settle`]), with the containers listing them: they are not [visible](Self::visible)
+    /// from now on, and a task of their own, holding the change's `locks` (so nobody acts on
+    /// them meanwhile; the change's listing locks among them) and no request's admission slot,
+    /// keeps putting the change back, waiting longer between tries (up to [`UNDO_MAX_WAIT`]).
+    /// Once it is back the locks go, and each resource is visible again once no other
+    /// set-aside change is to it.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
-        let iris = left.iris();
-        self.set_aside
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .extend(iris.iter().cloned());
+        let storage = self.cfg.storage();
+        let mut iris = left.iris();
+        let parents: Vec<String> = iris
+            .iter()
+            .filter_map(|i| resources::parent_of(i, &storage))
+            .collect();
+        iris.extend(parents);
+        iris.sort();
+        iris.dedup();
+        let bytes = left.bytes();
+        self.set_aside_bytes
+            .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
+        {
+            let mut set = self.set_aside.lock().unwrap_or_else(|e| e.into_inner());
+            for iri in &iris {
+                *set.entry(iri.clone()).or_default() += 1;
+            }
+        }
         let state = self.clone();
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
             }
-            let mut set = state.set_aside.lock().unwrap_or_else(|e| e.into_inner());
-            for iri in &iris {
-                set.remove(iri);
+            drop(left);
+            {
+                let mut set = state.set_aside.lock().unwrap_or_else(|e| e.into_inner());
+                for iri in &iris {
+                    if let std::collections::hash_map::Entry::Occupied(mut e) =
+                        set.entry(iri.clone())
+                    {
+                        *e.get_mut() -= 1;
+                        if *e.get() == 0 {
+                            e.remove();
+                        }
+                    }
+                }
             }
-            drop(set);
+            state
+                .set_aside_bytes
+                .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
             drop(locks);
         });
     }
@@ -799,6 +842,21 @@ impl Undo {
 pub(crate) struct Unsettled(Vec<Undo>);
 
 impl Unsettled {
+    /// About how many bytes it holds to put back: each body, and each record at its limit.
+    fn bytes(&self) -> usize {
+        self.0
+            .iter()
+            .map(|u| match u {
+                Undo::Restore {
+                    prior: Some((body, _)),
+                    ..
+                }
+                | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
+                _ => MAX_META_BYTES,
+            })
+            .fold(0, usize::saturating_add)
+    }
+
     /// The resources it is to, each once.
     fn iris(&self) -> Vec<String> {
         let mut iris: Vec<String> = self
@@ -840,6 +898,10 @@ pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unset
     }
     None
 }
+
+/// How many bytes set-aside changes may hold to put back before new changes are refused (see
+/// [`LwsState::may_write`]).
+const MAX_SET_ASIDE_BYTES: usize = 256 << 20;
 
 /// How long, at most, a set-aside change waits between attempts to put it back.
 const UNDO_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -1388,7 +1450,7 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Err(error) => return state.challenge(Some(error)),
     };
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
-        if let Some(unavailable) = resources::set_aside(state, &req) {
+        if let Some(unavailable) = resources::unavailable(state, &req) {
             return unavailable;
         }
         return access::handle(state, &req, &agent).await;
