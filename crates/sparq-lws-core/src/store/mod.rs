@@ -152,6 +152,27 @@ pub trait Store: Send + Sync {
         content_type: &str,
     ) -> ServerResult<ResourceMeta>;
 
+    /// Put a record back as it was: `body` under `meta`'s content type, entity tag and
+    /// modification time (its blob key is minted afresh), as a member of `container` when one is
+    /// given (the [`create_in_container`](Store::create_in_container) path) and in place otherwise
+    /// (the [`write`](Store::write) path). This is how a mutation that fails partway is undone
+    /// without changing what it reports as unchanged: a restored resource keeps its validators.
+    ///
+    /// The default refuses: a store that cannot keep a record's validators cannot undo a change
+    /// faithfully, and says so rather than restoring something that looks newer.
+    async fn restore(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        body: Bytes,
+        meta: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        let _ = (iri, container, body, meta);
+        Err(ServerError::Storage(
+            "this store cannot restore a record as it was".into(),
+        ))
+    }
+
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -587,6 +608,44 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .await
         {
             Ok(()) => Ok(meta),
+            Err(SparqError::NotFound) => Err(ServerError::NotFound),
+            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
+            Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
+        }
+    }
+
+    async fn restore(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        body: Bytes,
+        meta: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        // As `write` and `create_in_container`, with the record's own validators kept.
+        let blob_key = Self::mint_blob_key(iri)?;
+        self.blob.put(&blob_key, body).await.map_err(|e| match e {
+            BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+            other => ServerError::Storage(format!("{other}")),
+        })?;
+        let meta = ResourceMeta {
+            blob_key,
+            ..meta.clone()
+        };
+        let committed = match container {
+            Some(c) => self
+                .sparq
+                .create_child(c, iri, meta.clone())
+                .await
+                .map(|()| None),
+            None => self.sparq.replace_meta(iri, meta.clone()).await,
+        };
+        match committed {
+            Ok(previous) => {
+                if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
+                    self.reclaim_blob(&old.blob_key).await;
+                }
+                Ok(meta)
+            }
             Err(SparqError::NotFound) => Err(ServerError::NotFound),
             Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
