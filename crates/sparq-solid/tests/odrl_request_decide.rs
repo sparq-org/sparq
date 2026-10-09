@@ -1,21 +1,28 @@
-//! Request-time ODRL decisions (issue #6743) agree with `decide` for every session.
+//! Request-time ODRL prohibitions (issue #6743) agree with `matched_prohibition` for
+//! every session, and only ever narrow the static decision.
 //!
 //! Permissions and prohibitions are generated over every constraint left operand the
 //! evaluator knows (and one it does not), compound constraints, assignees (a named
 //! agent, one no request names, a party collection, wildcard principals) and targets
 //! (an asset, an asset collection holding both assets, no target, an unrelated asset).
-//! Each policy is attached to a store where n1 is publicly readable and n2 has no
-//! grant. For every session (named parties, an unseen party, anonymous) and clock:
+//! Each policy is attached to a store where n1 is publicly readable and n2 is readable
+//! by alice alone. For every session (named parties, an unseen party, anonymous) and
+//! clock:
 //!
-//! - a graph is readable exactly when the static view or `decide` grants `odrl:read` and
-//!   no prohibition applies to any read-family action (`matched_prohibition`, True or
-//!   Unknown), through `accessible`, `query_as` and the point `decide`;
+//! - a graph is readable exactly when the static view grants it and no prohibition
+//!   applies to any read-family action (True or Unknown), through `accessible`,
+//!   `query_as` and the point `decide`; an attached permission never adds access;
 //! - the request-time layer never denies a session on n1 that the materialized
 //!   conditional deny for the same policy lets through.
+//!
+//! The remaining tests pin the mutation paths, the graphs the layer never touches, the
+//! `WAC-Allow` clock, and an enumeration of every entry point that takes a session.
 #![cfg(feature = "odrl-bridge")]
 
+use oxrdf::NamedNode;
 use sparq_core::Graph;
-use sparq_policy::{decide, matched_prohibition, parse_policy_str, Request, ValidatedPolicy};
+use sparq_engine::QueryBudget;
+use sparq_policy::{matched_prohibition, parse_policy_str, Request, ValidatedPolicy};
 use sparq_solid::{Mode, PodStore, Session};
 
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
@@ -100,9 +107,18 @@ fn policy(
     parse_policy_str(&ttl, "turtle").ok()
 }
 
-/// n1 is readable by every session through a static WAC rule; n2 has no grant.
+/// n1 is readable by every session through its own ACL; alice holds every mode on
+/// everything else (n2 and the notes container) through the root ACL.
 fn bare_store() -> PodStore {
     let nq = r#"
+<https://pod.ex/.acl#alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Append> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <https://pod.ex/.acl> .
 <https://pod.ex/notes/n1#it> <https://ex.dev/ns#title> "hello" <https://pod.ex/notes/n1> .
 <https://pod.ex/notes/n2#it> <https://ex.dev/ns#title> "private" <https://pod.ex/notes/n2> .
 <https://pod.ex/notes/n1.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/notes/n1.acl> .
@@ -153,18 +169,18 @@ fn request(action: &str, graph: &str, agent: Option<&str>, now: Option<&str>) ->
     req
 }
 
-/// What `decide` says about a read of `graph` by this session.
+/// The static read verdict, narrowed by every read-family prohibition that applies.
 fn expected(pol: &ValidatedPolicy, graph: &str, agent: Option<&str>, now: Option<&str>) -> bool {
     let prohibited = READ_ACTIONS
         .iter()
         .any(|a| matched_prohibition(pol, &request(a, graph, agent, now)).is_some());
-    let granted = decide(pol, &request("read", graph, agent, now)).allow;
-    (graph == N1 || granted) && !prohibited
+    let static_read = graph == N1 || agent == Some(ALICE);
+    static_read && !prohibited
 }
 
 #[test]
 fn request_time_decisions_match_decide_for_every_session() {
-    let (mut cases, mut narrowed, mut granted) = (0, 0, 0);
+    let (mut cases, mut narrowed, mut denied) = (0, 0, 0);
     for kind in ["permission", "prohibition"] {
         for action in ["read", "use", "modify"] {
             for constraint in CONSTRAINTS {
@@ -199,9 +215,8 @@ fn request_time_decisions_match_decide_for_every_session() {
                                     );
                                     let point = live.decide(&s, graph, Mode::Read);
                                     assert_eq!(point.allow, want, "point decide {graph}: {case}");
-                                    if graph == N2 && want {
-                                        granted += 1;
-                                    }
+                                    let static_read = graph == N1 || agent == Some(ALICE);
+                                    denied += usize::from(static_read && !want);
                                     cases += 1;
                                 }
                                 let q = "SELECT ?t WHERE { GRAPH <https://pod.ex/notes/n1> { ?s ?p ?t } }";
@@ -232,7 +247,7 @@ fn request_time_decisions_match_decide_for_every_session() {
         narrowed >= 500,
         "only {narrowed} sessions kept access the bridge over-denies"
     );
-    assert!(granted >= 100, "only {granted} request-time grants on n2");
+    assert!(denied >= 1_000, "only {denied} static grants were narrowed");
 }
 
 /// An asset that joins a prohibited collection is denied at once, with nothing
@@ -255,26 +270,21 @@ fn membership_and_clock_are_read_per_request() {
 
     let window = "odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lt ; \
                   odrl:rightOperand \"2030-01-01T00:00:00Z\"^^xsd:dateTime";
-    let permit = policy("permission", "read", window, Some(ALICE), Some(N2)).expect("policy");
+    let prohib = policy("prohibition", "read", window, Some(ALICE), Some(N2)).expect("policy");
     let mut s = store();
-    s.attach_odrl_policy(permit).expect("attach");
+    s.attach_odrl_policy(prohib).expect("attach");
     assert!(
-        reads(&s, &session(Some(ALICE), Some("2025-06-01T00:00:00Z")), N2),
+        !reads(&s, &session(Some(ALICE), Some("2025-06-01T00:00:00Z")), N2),
         "inside the window"
     );
     assert!(
-        !reads(&s, &session(Some(ALICE), Some("2035-06-01T00:00:00Z")), N2),
+        reads(&s, &session(Some(ALICE), Some("2035-06-01T00:00:00Z")), N2),
         "after it"
     );
     assert!(
         !reads(&s, &session(Some(ALICE), None), N2),
-        "no clock: fail closed"
+        "no clock: the constraint is Unknown, so the prohibition applies"
     );
-    assert!(!reads(
-        &s,
-        &session(Some("https://bob.ex/card#me"), Some("2025-06-01T00:00:00Z")),
-        N2
-    ));
 }
 
 /// A policy whose conflict strategy `decide` cannot honour is refused at attach time.
@@ -288,17 +298,246 @@ fn unhonourable_conflict_strategy_is_refused() {
     assert!(store().attach_odrl_policy(pol).is_err());
 }
 
-/// Before the first materialization the view stays empty, even under an attached grant.
+/// An attached permission grants nothing: not on a graph the static view refuses, not
+/// on an access-control document, not on a reserved graph, and not for a write.
 #[test]
-fn an_unmaterialized_store_stays_closed() {
-    let nq = "<https://pod.ex/notes/n2#it> <https://ex.dev/ns#title> \"x\" <https://pod.ex/notes/n2> .\n";
-    let mut s = PodStore::new(Graph::load_dataset(nq, "nquads").expect("loads"));
-    let permit = policy("permission", "read", "", None, Some(N2)).expect("policy");
-    s.attach_odrl_policy(permit).expect("attach");
+fn permissions_never_grant() {
+    let mut s = store();
+    let targets: [Option<&str>; 4] = [
+        None,
+        Some(N2),
+        Some("https://pod.ex/notes/n1.acl"),
+        Some("urn:sparq:auth"),
+    ];
+    for target in targets {
+        s.attach_odrl_policy(policy("permission", "use", "", None, target).expect("policy"))
+            .expect("attach");
+    }
+    let bob = session(Some("https://bob.ex/card#me"), None);
+    let before = bare_store();
+    for mode in [Mode::Read, Mode::Write, Mode::Append, Mode::Control] {
+        assert_eq!(
+            s.accessible(&bob, mode),
+            before.accessible(&bob, mode),
+            "{mode:?}"
+        );
+    }
+    for graph in [
+        N2,
+        "https://pod.ex/notes/n1.acl",
+        "https://pod.ex/.acl",
+        "urn:sparq:auth",
+    ] {
+        for mode in [Mode::Read, Mode::Write, Mode::Append, Mode::Control] {
+            assert!(!s.decide(&bob, graph, mode).allow, "{graph} {mode:?}");
+        }
+    }
+    let ins = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } }";
+    assert!(s.update_as(&bob, ins).is_err());
+    assert!(!s.decide_create(&bob, NOTES, "n3", Mode::Append).allow);
+}
+
+/// A prohibition never touches `Control`, access-control documents or reserved graphs,
+/// so even a targetless one cannot lock alice out of her own rules.
+#[test]
+fn control_and_rules_are_untouched() {
+    let mut s = store();
+    s.attach_odrl_policy(policy("prohibition", "use", "", Some(ALICE), None).expect("policy"))
+        .expect("attach");
     let alice = session(Some(ALICE), None);
-    assert!(!reads(&s, &alice, N2));
-    assert!(!s.decide(&alice, N2, Mode::Read).allow);
-    s.materialize_wac().expect("wac");
-    assert!(reads(&s, &alice, N2), "granted once materialized");
-    assert!(s.decide(&alice, N2, Mode::Read).allow);
+    assert!(!reads(&s, &alice, N2), "the asset itself is denied");
+    assert!(!s.decide(&alice, N2, Mode::Write).allow);
+    assert!(s.decide(&alice, N2, Mode::Control).allow, "Control stays");
+    for acl in ["https://pod.ex/.acl", "https://pod.ex/notes/n1.acl"] {
+        let read = s.decide(&alice, acl, Mode::Read).allow;
+        let write = s.decide(&alice, acl, Mode::Write).allow;
+        let before = bare_store();
+        assert_eq!(read, before.decide(&alice, acl, Mode::Read).allow, "{acl}");
+        assert_eq!(
+            write,
+            before.decide(&alice, acl, Mode::Write).allow,
+            "{acl}"
+        );
+    }
+    assert!(s.decide(&alice, "https://pod.ex/.acl", Mode::Write).allow);
+    let acl_write = "INSERT DATA { GRAPH <https://pod.ex/.acl> { <urn:x> <urn:y> 1 } }";
+    s.update_as(&alice, acl_write)
+        .expect("alice still edits her rules");
+}
+
+/// Every mutation path and the create decision consult the prohibitions.
+#[test]
+fn mutations_and_creates_are_gated() {
+    const CLEAR: &str = "CLEAR GRAPH <https://pod.ex/notes/n2>";
+    let ins = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } }";
+    let alice = session(Some(ALICE), None);
+    let budget = QueryBudget::unlimited();
+    let mut open = store();
+    open.update_as(&alice, ins).expect("static grant writes");
+    open.update_as(&alice, CLEAR).expect("static grant clears");
+    assert!(open.decide_create(&alice, NOTES, "n3", Mode::Append).allow);
+
+    for action in ["modify", "append", "use"] {
+        let mut s = store();
+        s.attach_odrl_policy(
+            policy("prohibition", action, "", Some(ALICE), Some(N2)).expect("policy"),
+        )
+        .expect("attach");
+        assert!(s.update_as(&alice, ins).is_err(), "update_as {action}");
+        assert!(
+            s.update_as_acp(&alice, ins).is_err(),
+            "update_as_acp {action}"
+        );
+        assert!(
+            s.update_as_with_budget(&alice, ins, &budget).is_err(),
+            "budget {action}"
+        );
+        assert!(
+            s.update_as_acp_with_budget(&alice, ins, &budget).is_err(),
+            "acp budget {action}"
+        );
+        assert!(s.update_as(&alice, CLEAR).is_err(), "clear {action}");
+        let d = s.decide_batch(
+            &alice,
+            &[(N2, Mode::Write), (N2, Mode::Append), (N2, Mode::Read)],
+        );
+        assert!(!d[0].allow && !d[1].allow, "decide_batch {action}");
+        assert_eq!(
+            d[2].allow,
+            action != "use",
+            "read is a different family for {action}"
+        );
+    }
+
+    for target in [NOTES, "https://pod.ex/notes/n3"] {
+        let mut s = store();
+        s.attach_odrl_policy(
+            policy("prohibition", "append", "", Some(ALICE), Some(target)).expect("policy"),
+        )
+        .expect("attach");
+        assert!(
+            !s.decide_create(&alice, NOTES, "n3", Mode::Append).allow,
+            "{target}"
+        );
+        assert!(s.decide_create(&alice, NOTES, "n4", Mode::Append).allow == (target != NOTES));
+    }
+}
+
+/// `WAC-Allow`'s public field is computed at the request clock, like its user field.
+#[test]
+fn wac_allow_keeps_the_request_clock() {
+    let window = "odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lt ; \
+                  odrl:rightOperand \"2030-01-01T00:00:00Z\"^^xsd:dateTime";
+    let mut s = store();
+    s.attach_odrl_policy(policy("prohibition", "read", window, None, Some(N1)).expect("policy"))
+        .expect("attach");
+    let n1 = NamedNode::new(N1).expect("iri");
+    assert_eq!(
+        s.wac_allow(&session(None, Some("2035-06-01T00:00:00Z")), &n1),
+        r#"user="read",public="read""#
+    );
+    assert_eq!(
+        s.wac_allow(&session(None, Some("2025-06-01T00:00:00Z")), &n1),
+        r#"user="",public="""#
+    );
+    assert_eq!(
+        s.wac_allow(&session(None, None), &n1),
+        r#"user="",public="""#
+    );
+    #[cfg(feature = "pattern-scope")]
+    {
+        let scoped = s.scoped_dataset(&session(None, None), Mode::Read, &Default::default());
+        assert!(
+            scoped.view().named.is_empty(),
+            "scoped_dataset reads the same set"
+        );
+    }
+}
+
+/// Every public `sparq-solid` function that takes a [`Session`] is either gated (and
+/// exercised above) or named here with the reason it is not an access decision. A new
+/// entry point fails this test until it is classified.
+#[test]
+fn every_session_entry_point_is_classified() {
+    const GATED: &[&str] = &[
+        "accessible",
+        "accessible_set",
+        "wac_allow",
+        "decide",
+        "decide_batch",
+        "decide_create",
+        "view_for",
+        "query_as",
+        "query_json_as",
+        "ask_as",
+        "query_as_rewrite",
+        "update_as",
+        "update_as_acp",
+        "update_as_with_budget",
+        "update_as_acp_with_budget",
+        "scoped_dataset",
+    ];
+    // `Session::at` builds a session; `AuthIndex::accessible` is the raw static index
+    // that `PodStore::accessible` narrows.
+    const NOT_DECISIONS: &[&str] = &["at", "accessible"];
+    let src = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(src).expect("src") {
+        let path = entry.expect("entry").path();
+        if path.extension().is_some_and(|e| e == "rs") {
+            let text = std::fs::read_to_string(&path).expect("read");
+            found.extend(session_fns(&text));
+        }
+    }
+    for name in &found {
+        assert!(
+            GATED.contains(&name.as_str()) || NOT_DECISIONS.contains(&name.as_str()),
+            "pub fn {name} takes a Session but is not classified"
+        );
+    }
+    for name in GATED {
+        assert!(
+            found.iter().any(|f| f == name),
+            "{name} is no longer an entry point"
+        );
+    }
+}
+
+/// Names of `pub fn`s whose parameter list mentions the `Session` type.
+fn session_fns(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (at, _) in text.match_indices("pub fn ") {
+        let rest = &text[at + 7..];
+        let name: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        let Some(open) = rest.find('(') else { continue };
+        let mut depth = 0;
+        let mut close = open;
+        for (i, c) in rest[open..].char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        close = open + i;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let params = &rest[open..close];
+        let mentions = params.match_indices("Session").any(|(i, _)| {
+            let before = params[..i].chars().next_back();
+            let after = params[i + 7..].chars().next();
+            !before.is_some_and(|c| c.is_alphanumeric() || c == '_')
+                && !after.is_some_and(|c| c.is_alphanumeric() || c == '_')
+        });
+        if mentions {
+            out.push(name);
+        }
+    }
+    out
 }

@@ -463,9 +463,12 @@ fn resolve_var_graphs(
     Ok(out)
 }
 
-/// Does the session have `need` on the concrete graph `g`?
-fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need) -> bool {
-    let has = |mode: Mode| auth.accessible(s, mode).iter().any(|x| x == g);
+/// Does the session have `need` on the concrete graph `g`? `veto` removes a mode the
+/// static view grants (the store's request-time ODRL prohibitions, issue #6743).
+fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need, veto: &Veto<'_>) -> bool {
+    let has = |mode: Mode| {
+        auth.accessible(s, mode).iter().any(|x| x == g) && !veto(mode, g.as_str())
+    };
     match need {
         Need::Write => has(Mode::Write),
         Need::WriteOrAppend => has(Mode::Write) || has(Mode::Append),
@@ -517,6 +520,9 @@ pub(crate) struct Permit {
     pub rematerialize: bool,
 }
 
+/// A per-graph veto over the static write view: `veto(mode, graph)` removes `mode`.
+pub(crate) type Veto<'a> = dyn Fn(Mode, &str) -> bool + 'a;
+
 /// Authorize an update string for `session` against `auth` over the dataset `graph`,
 /// WITHOUT mutating anything. `Ok(Permit)` means every target is writable; `Err(msg)`
 /// is a deny (fail-closed) and the caller must not apply the update.
@@ -532,6 +538,7 @@ pub(crate) fn check(
     sparql: &str,
     group_docs: &FxHashSet<String>,
     budget: &QueryBudget,
+    veto: &Veto<'_>,
 ) -> Result<Permit, String> {
     let upd = sparq_engine::parse_update_rec2013(sparql)?;
     let mut reqs = analyze(&upd);
@@ -582,7 +589,7 @@ pub(crate) fn check(
     // Static per-graph requirements (now including the precisely-resolved variable-graph
     // targets).
     for (g, need) in &reqs.graphs {
-        if !allowed(auth, session, g, *need) {
+        if !allowed(auth, session, g, *need, veto) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(*need),
@@ -598,7 +605,7 @@ pub(crate) fn check(
             // convention (writing an .acl under a CLEAR ALL needs the Write grant that
             // only Control-holders have).
             let g_need = strongest(need, need_for_graph(g.as_str(), need));
-            if !allowed(auth, session, &g, g_need) {
+            if !allowed(auth, session, &g, g_need, veto) {
                 return Err(format!(
                     "update denied: a graph-wildcard operation (variable GRAPH target or \
                      CLEAR/DROP ALL|NAMED) requires {} permission on every graph, but the \

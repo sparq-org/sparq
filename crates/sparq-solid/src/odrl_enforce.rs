@@ -1,32 +1,35 @@
-//! Request-time ODRL decisions (issue #6743).
+//! Request-time ODRL prohibitions (issue #6743).
 //!
 //! The materializing bridge ([`crate::odrl_bridge`]) stores a frozen projection of one
-//! decision, so it can only deny every session on a prohibited asset and can only grant
-//! what `decide` settled for good. Policies attached here are instead evaluated through
-//! [`sparq_policy::decide`] for the **accessing session** on every access decision: its
-//! agent is the party (and default recipient), its clock is the request time, and every
-//! named graph in the store is a candidate target.
+//! decision, so it can only deny every session on a prohibited asset, and only on assets
+//! someone materialized. Policies attached here are instead evaluated through
+//! [`matched_prohibition`] for the **accessing session** on every access decision: its
+//! agent is the party (and default recipient), its clock is the request time, and the
+//! recorded asset memberships are the collection evidence.
 //!
-//! For a session and mode, a graph is accessible when the static view or some attached
-//! policy grants it, and no attached policy prohibits it:
+//! The layer is **deny-only**. It can remove a mode the static WAC/ACP decision grants,
+//! and never adds one, so it composes with ACP denies, origin restrictions and `Control`
+//! as an intersection. Attached permissions have no effect here; a lasting grant still
+//! goes through the materializing bridge. A mode is removed when some attached
+//! prohibition applies (True or Unknown) to a request for any ODRL action that maps to
+//! it:
 //!
-//! - **Prohibit:** some policy's prohibition applies ([`matched_prohibition`], True or
-//!   Unknown) to a request for any ODRL action that maps to the mode. `odrl:read`,
-//!   `display`, `present`, `print` and `play` map to [`Mode::Read`]; `append`, `modify`,
-//!   `delete` and `write` map to both [`Mode::Append`] and [`Mode::Write`], since either
-//!   mode can change the resource.
-//! - **Grant:** some policy's [`decide`] allows the mode's canonical action (`read`,
-//!   `append`, `modify`) for the session.
+//! - `odrl:read`, `display`, `present`, `print` and `play` map to [`Mode::Read`];
+//! - `append`, `modify`, `delete` and `write` map to both [`Mode::Append`] and
+//!   [`Mode::Write`], since either mode can change the resource.
 //!
-//! [`Mode::Control`] has no ODRL action, so attached policies leave it unchanged.
-//! Policies whose `odrl:conflict` strategy the bridge cannot honour are refused at
-//! attach time.
+//! [`Mode::Control`], access-control documents (`.acl`/`.acr`) and the reserved
+//! `urn:sparq:` graphs are never touched, so an attached policy cannot lock an owner out
+//! of their own rules. Policies whose `odrl:conflict` strategy `decide` cannot honour are
+//! refused at attach time.
+//!
+//! Every [`crate::PodStore`] entry point that authorizes a session consults
+//! [`OdrlEnforcement::denies`]: the cached set behind `accessible`, the views, queries
+//! and `wac_allow`; point `decide`, `decide_batch` and `decide_create`; and every update.
 
 use crate::authindex::{Mode, Session};
-use oxrdf::{NamedNode, Term};
-use sparq_core::Graph;
-use sparq_policy::{conflict_admissibility, decide, matched_prohibition, Request, ValidatedPolicy};
-use std::collections::BTreeSet;
+use oxrdf::NamedNode;
+use sparq_policy::{conflict_admissibility, matched_prohibition, Request, ValidatedPolicy};
 use std::sync::Arc;
 
 const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
@@ -81,53 +84,39 @@ impl OdrlEnforcement {
         req
     }
 
-    /// Whether an attached prohibition applies to `session` acting on `target` in `mode`.
-    pub(crate) fn prohibits(&self, s: &Session, mode: Mode, target: &str) -> bool {
+    /// Whether `target` is a graph attached policies may restrict: not a reserved
+    /// `urn:sparq:` graph and not an access-control document.
+    pub(crate) fn governs(target: &str) -> bool {
+        !(target.starts_with(RESERVED_PREFIX)
+            || target.ends_with(".acl")
+            || target.ends_with(".acr"))
+    }
+
+    /// Whether an attached prohibition removes `mode` on `target` for `session`. The one
+    /// gate every authorizing entry point of [`crate::PodStore`] goes through.
+    pub(crate) fn denies(&self, s: &Session, mode: Mode, target: &str) -> bool {
         let actions = match mode {
             Mode::Read => READ_ACTIONS,
             Mode::Append | Mode::Write => CHANGE_ACTIONS,
             Mode::Control => return false,
         };
+        if self.is_empty() || !Self::governs(target) {
+            return false;
+        }
         actions.iter().any(|a| {
             let req = self.request(a, target, s);
-            self.policies.iter().any(|p| matched_prohibition(p, &req).is_some())
+            self.policies
+                .iter()
+                .any(|p| matched_prohibition(p, &req).is_some())
         })
     }
 
-    /// Whether an attached policy grants `session` the mode's canonical action on
-    /// `target`. A prohibition still overrides it (see [`OdrlEnforcement::allows`]).
-    pub(crate) fn grants(&self, s: &Session, mode: Mode, target: &str) -> bool {
-        let action = match mode {
-            Mode::Read => "read",
-            Mode::Append => "append",
-            Mode::Write => "modify",
-            Mode::Control => return false,
-        };
-        let req = self.request(action, target, s);
-        self.policies.iter().any(|p| decide(p, &req).allow)
-    }
-
-    /// The access verdict for `target` given the static verdict `static_allow`.
-    pub(crate) fn allows(&self, s: &Session, mode: Mode, target: &str, static_allow: bool) -> bool {
-        (static_allow || self.grants(s, mode, target)) && !self.prohibits(s, mode, target)
-    }
-
-    /// Apply the attached policies to the static accessible set `base` (sorted
-    /// ascending by IRI), over every named graph of `graph`. Returns the sorted result.
-    pub(crate) fn apply(&self, graph: &Graph, s: &Session, mode: Mode, base: &[NamedNode]) -> Vec<NamedNode> {
-        let allowed: BTreeSet<&str> = base.iter().map(NamedNode::as_str).collect();
-        let mut candidates: BTreeSet<&str> = allowed.clone();
-        for (name, _) in &graph.named {
-            if let Term::NamedNode(n) = name {
-                if !n.as_str().starts_with(RESERVED_PREFIX) {
-                    candidates.insert(n.as_str());
-                }
-            }
-        }
-        candidates
-            .into_iter()
-            .filter(|g| self.allows(s, mode, g, allowed.contains(g)))
-            .map(NamedNode::new_unchecked)
+    /// The static accessible set `base` minus the graphs [`OdrlEnforcement::denies`]
+    /// removes. Order is preserved.
+    pub(crate) fn filter(&self, s: &Session, mode: Mode, base: &[NamedNode]) -> Vec<NamedNode> {
+        base.iter()
+            .filter(|g| !self.denies(s, mode, g.as_str()))
+            .cloned()
             .collect()
     }
 }

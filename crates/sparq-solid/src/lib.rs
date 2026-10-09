@@ -812,7 +812,12 @@ impl PodStore {
         let user = self.modes_held(session, resource);
         // The `public` field is what an anonymous caller (no WebID) holds — `acl:Read`
         // granted to `foaf:Agent` etc. — independent of the authenticated session.
-        let public = self.modes_held(&Session::default(), resource);
+        // It keeps the request clock, so a time-bound rule reads the same for both fields.
+        let anon = Session {
+            now: session.now,
+            ..Session::default()
+        };
+        let public = self.modes_held(&anon, resource);
         format!(r#"user="{}",public="{}""#, user, public)
     }
 
@@ -902,38 +907,26 @@ impl PodStore {
         self.apply_odrl(d, session, resource, mode)
     }
 
-    /// Apply the attached ODRL policies (issue #6743) to a point decision: a prohibition
-    /// removes the mode, and a grant adds it to a resolved decision or settles one with
-    /// no ACL at all. A transient or unloaded decision is returned unchanged (it already
-    /// denies). The identity when no policy is attached.
-    #[cfg(not(feature = "odrl-bridge"))]
-    fn apply_odrl(&self, d: WacDecision, _: &Session, _: &str, _: Mode) -> WacDecision {
+    /// Remove the modes an attached ODRL prohibition denies (issue #6743) from a point
+    /// decision. Deny-only: it never grants, so the status and governing-ACL provenance
+    /// are unchanged. The identity when no policy is attached.
+    fn apply_odrl(&self, mut d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
+        d.granted_modes.retain(|m| !self.odrl_denies(session, *m, resource));
+        d.allow = d.allow && !self.odrl_denies(session, mode, resource);
         d
     }
 
-    /// Feature-on body of the point-decision filter above.
+    /// Whether an attached ODRL prohibition removes `mode` on `target` for `session`:
+    /// the one request-time gate every authorizing entry point goes through.
     #[cfg(feature = "odrl-bridge")]
-    fn apply_odrl(&self, mut d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
-        if !self.odrl.is_empty() {
-            // A grant can settle a resource with no ACL at all, as `accessible` does; a
-            // transient or unloaded ACL state, or a store never materialized, still fails
-            // closed.
-            let settled = matches!(d.status, AclStatus::Resolved | AclStatus::NoAcl)
-                && self.acl_index().materialized;
-            if !settled {
-                return d;
-            }
-            let modes = [Mode::Read, Mode::Write, Mode::Append, Mode::Control];
-            d.granted_modes = modes
-                .into_iter()
-                .filter(|m| self.odrl.allows(session, *m, resource, d.granted_modes.contains(m)))
-                .collect();
-            if d.status == AclStatus::NoAcl && !d.granted_modes.is_empty() {
-                d.status = AclStatus::Resolved;
-            }
-            d.allow = d.status == AclStatus::Resolved && d.granted_modes.contains(&mode);
-        }
-        d
+    fn odrl_denies(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        self.odrl.denies(session, mode, target)
+    }
+
+    /// Feature-off twin of the gate above: nothing is attached, nothing is denied.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn odrl_denies(&self, _: &Session, _: Mode, _: &str) -> bool {
+        false
     }
 
     /// [OPUS-4.8] issue #992 FR-1 (sq-snopa.1) — [`PodStore::decide`] for a BATCH of
@@ -1028,14 +1021,21 @@ impl PodStore {
         child_name: &str,
         mode: Mode,
     ) -> WacDecision {
-        decide::decide_create_one(
+        let d = decide::decide_create_one(
             self.acl_index(),
             &self.auth,
             session,
             container,
             child_name,
             mode,
-        )
+        );
+        // The child-name refusal above stays first; a prohibition on the container or on
+        // the child it would mint can only narrow what is left.
+        let mut d = self.apply_odrl(d, session, container, mode);
+        if d.allow && self.odrl_denies(session, mode, &format!("{container}{child_name}")) {
+            d.allow = false;
+        }
+        d
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
@@ -1105,11 +1105,10 @@ impl PodStore {
         );
         let auth = Arc::clone(&self.auth);
         let sets = self.cache.get_or_compute(&key, |entry| entry.fill(&auth, s, mode));
-        // Before the first materialization the view stays empty (fail-closed), so an
-        // attached grant cannot open it either.
+        // Attached ODRL prohibitions only narrow the cached static set (issue #6743).
         #[cfg(feature = "odrl-bridge")]
-        if !self.odrl.is_empty() && self.acl_index().materialized {
-            return SessionEntry::sets_from(self.odrl.apply(&self.graph, s, mode, &sets.sorted));
+        if !self.odrl.is_empty() {
+            return SessionEntry::sets_from(self.odrl.filter(s, mode, &sets.sorted));
         }
         sets
     }
@@ -1399,7 +1398,9 @@ impl PodStore {
     ) -> Result<(), String> {
         // Authorize against the CURRENT auth view before mutating anything (fail-closed).
         let auth = Arc::clone(&self.auth);
-        let permit = update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget)?;
+        let veto = |mode: Mode, g: &str| self.odrl_denies(s, mode, g);
+        let permit =
+            update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget, &veto)?;
         // Authorized: apply through the engine's in-place delta path, under the same budget.
         sparq_engine::update_in_place_with_budget(&mut self.graph, sparql, budget)?;
         // A change to the access-control rules invalidates the auth view.
@@ -1675,12 +1676,14 @@ impl PodStore {
         (matched, retracted)
     }
 
-    /// Attach an ODRL `policy` to be evaluated per request for the accessing session
-    /// (issue #6743). Every read-side entry point ([`PodStore::accessible`], the query
-    /// and view paths, [`PodStore::wac_allow`], [`PodStore::decide`]) then denies a graph
-    /// some attached prohibition applies to, and allows one an attached permission grants
-    /// that session, with the session's agent as party and its clock as request time.
-    /// See [`odrl_enforce`] for the action-to-mode mapping.
+    /// Attach an ODRL `policy` whose prohibitions are evaluated per request for the
+    /// accessing session (issue #6743), with the session's agent as party and its clock
+    /// as request time. Every authorizing entry point (the reads, views and queries,
+    /// [`PodStore::wac_allow`], [`PodStore::decide`], [`PodStore::decide_batch`],
+    /// [`PodStore::decide_create`] and every update) then refuses a mode some attached
+    /// prohibition applies to. Deny-only: the policy's permissions grant nothing here.
+    /// See [`odrl_enforce`] for the action-to-mode mapping and the graphs it never
+    /// touches.
     ///
     /// # Errors
     ///
