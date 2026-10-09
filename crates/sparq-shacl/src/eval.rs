@@ -2860,12 +2860,25 @@ fn cmp_temporal(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
     let time = xsd("time");
     if da == time && db == time {
         // An xsd:time is a dateTime on the XSD reference date (1972-12-31), where 24:00:00
-        // is the same time as 00:00:00.
-        let on_ref = |v: &str| {
-            let v = v.strip_prefix("24:00:00").map_or_else(|| v.to_owned(), |rest| format!("00:00:00{rest}"));
-            format!("1972-12-31T{v}")
+        // is the same time as 00:00:00. Hour 24 is lexically valid only with a zero
+        // fraction, so 24:00:00.5 is not a time and compares with nothing.
+        let on_ref = |v: &str| -> Option<String> {
+            let Some(rest) = v.strip_prefix("24:00:00") else {
+                return Some(format!("1972-12-31T{v}"));
+            };
+            let tz = match rest.strip_prefix('.') {
+                Some(frac) => {
+                    let digits = frac.len() - frac.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+                    if digits == 0 || !frac[..digits].bytes().all(|d| d == b'0') {
+                        return None;
+                    }
+                    &frac[digits..]
+                }
+                None => rest,
+            };
+            Some(format!("1972-12-31T00:00:00{tz}"))
         };
-        let (a, b) = (on_ref(a), on_ref(b));
+        let (a, b) = (on_ref(a)?, on_ref(b)?);
         let dt = xsd("dateTime");
         return ExactTemporal::of_lit(&a, &dt)?.compare(ExactTemporal::of_lit(&b, &dt)?);
     }

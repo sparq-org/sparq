@@ -1695,3 +1695,22 @@ fn every_comparison_orders_a_same_family_temporal_pair() {
         assert_eq!(got, want, "{c}: 00:30 vs 24:00 times");
     }
 }
+
+/// Hour 24 is a time only as 24:00:00 with a zero fraction: 24:00:00.000 is midnight,
+/// and 24:00:00.5 is not a time, so it compares with nothing.
+#[test]
+fn hour_24_is_midnight_only_with_a_zero_fraction() {
+    let later_than_earlier = [false, false, true, false, true, false];
+    let zero = comparisons("\"00:30:00Z\"^^xsd:time", "\"24:00:00.000Z\"^^xsd:time");
+    for ((c, got), want) in zero.into_iter().zip(later_than_earlier) {
+        assert_eq!(got, want, "{c}: 00:30 vs 24:00:00.000");
+    }
+    for (value, other) in [
+        ("\"00:30:00Z\"^^xsd:time", "\"24:00:00.5Z\"^^xsd:time"),
+        ("\"24:00:00.5Z\"^^xsd:time", "\"00:30:00Z\"^^xsd:time"),
+    ] {
+        for (c, conforms) in comparisons(value, other) {
+            assert!(!conforms, "{c}: {value} vs {other} must be incomparable");
+        }
+    }
+}
