@@ -1687,6 +1687,8 @@ pub(crate) mod test_store {
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone fails with a backend error.
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `list_children` of this container alone fails with a backend error.
+        pub fail_list_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// When set, how many more writes succeed; every write past them fails, as in a store
@@ -1748,6 +1750,7 @@ pub(crate) mod test_store {
                 fail_write_of: Default::default(),
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
+                fail_list_of: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
                 refuse_write_of: Default::default(),
@@ -1951,6 +1954,9 @@ pub(crate) mod test_store {
             Ok(outcome)
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            if self.fail_list_of.lock().unwrap().as_deref() == Some(container) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.list_children(container).await
         }
     }

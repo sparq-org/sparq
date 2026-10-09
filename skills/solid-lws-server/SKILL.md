@@ -328,6 +328,10 @@ What the server exposes, all discoverable from the storage description
   and `up`/`type`/`linkset` links. The linksets are read-only.
 - **Type index** (`GET /.lws/types/index`) and **type search** (`QUERY /.lws/types/search`
   with an `application/lws-query+json` filter), both scoped to what the caller may read.
+  A QUERY's filter is always its body; the `q` parameter only carries it on the `GET` page
+  links. Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
+  any listing, permission check or metadata read fails, the whole index fails with one
+  generic `500` that names no resource.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
