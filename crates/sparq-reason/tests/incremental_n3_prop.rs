@@ -312,6 +312,14 @@ fn sparq_solid_wac_and_acp_rules_qualification_matrix() {
         ("acp-c.n3", N3Mode::Fallback), // variable conclusion predicate (?p ?pred ?r)
     ] {
         let src = format!("{common}\n{}", read(stratum));
+        if stratum == "acp-c.n3" {
+            // acp-c.n3 concludes `{ ?p ?pred ?r }` next to store-scoped negation: the batch
+            // engine's automatic stratification must assume that conclusion can derive a
+            // negated predicate, so it refuses the document (GH #6201).
+            let e = MaterializedN3Graph::new(&src, &[]).err().expect("refused");
+            assert!(e.contains("cycle"), "{e}");
+            continue;
+        }
         let g = MaterializedN3Graph::new(&src, &[]).expect("parse");
         assert_eq!(
             g.mode(),

@@ -3742,7 +3742,6 @@ dependencies = [
  "rustc-hash",
  "sparq-core",
  "sparq-engine",
- "sparq-policy",
  "sparq-reason",
  "sparq-spargebra",
 ]

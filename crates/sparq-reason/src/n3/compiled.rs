@@ -46,10 +46,14 @@
 //!   pattern quoting a nested triple in SUBJECT position (which the term-level engine
 //!   does match) is a loud compile error here rather than a rule that never fires;
 //! * **store-scoped `log:notIncludes`** — negation as failure against the current fact
-//!   store, with the engine's no-retraction semantics. Set-equivalence with
-//!   [`crate::reason_n3`] therefore requires every negated predicate to be
-//!   **stratum-complete** (fully derived before the stratum that negates it runs) —
-//!   the same §3.5 stratification discipline the WAC/ACP pipeline already obeys;
+//!   store, with the engine's no-retraction semantics. [`compile`] stratifies the rule
+//!   set exactly as [`crate::reason_n3`] does (a rule negating a predicate the set
+//!   derives runs after the deriving rules' fixpoint, see [`CompiledRuleSet::n_strata`];
+//!   a rule set that negates through a dependency cycle is a [`compile`] error). The
+//!   subject must denote the store on every evaluation, as the text engine reads it: an
+//!   IRI, a literal other than `true`, or a variable / blank node the rule uses only as a
+//!   `log:notIncludes` subject. `{}` (the empty formula, which parses as `true`), a
+//!   formula, and a subject a premise atom can bind are [`compile`] errors;
 //! * `log:uri` (both directions), `log:equalTo` / `log:notEqualTo`;
 //! * `string:concatenation` (with the engine's typed-literal value coercion),
 //!   `string:encodeForUri`, `string:scrape` (constant regex), `string:notGreaterThan`
@@ -78,7 +82,7 @@
 use super::model::Term;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
-use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget};
+use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget}; // not-a-limit: unbounded-join
 use sparq_substrate::rows::{Row, NO_ID};
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
@@ -171,8 +175,8 @@ enum Step {
     },
     /// `string:scrape` — `( str regex )`: the first capture group of the first match.
     /// The regex is a compile-time constant, pre-compiled into
-    /// [`CompiledRuleSet::regexes`] (`None` = invalid pattern ⇒ the step fails every
-    /// row, exactly like the text engine's per-evaluation regex compile).
+    /// [`CompiledRuleSet::regexes`]; a pattern the regex engine refuses (syntax or a
+    /// resource limit) makes [`compile`] an error instead of a step that never matches.
     Scrape {
         arg: CTerm,
         regex: usize,
@@ -207,9 +211,11 @@ struct CompiledRule {
 #[derive(Debug)]
 pub struct CompiledRuleSet {
     symbols: Vec<Term>,
-    regexes: Vec<Option<regex::Regex>>,
+    regexes: Vec<regex::Regex>,
     facts: Vec<[u32; 3]>,
     rules: Vec<CompiledRule>,
+    /// The engine's automatic stratification (GH #6201).
+    strata: super::strata::Strata,
 }
 
 impl CompiledRuleSet {
@@ -221,6 +227,14 @@ impl CompiledRuleSet {
     /// Number of ground facts carried by the rule document itself.
     pub fn n_facts(&self) -> usize {
         self.facts.len()
+    }
+
+    /// Number of strata [`BoundRuleSet::eval`] runs: 1 unless a rule's store-scoped
+    /// `log:notIncludes` negates a predicate another rule of the set derives, in which
+    /// case the negating rule runs after the deriving rules reach their fixpoint — the
+    /// same automatic stratification [`crate::reason_n3`] applies.
+    pub fn n_strata(&self) -> usize {
+        self.strata.n_strata
     }
 
     /// Intern the rule vocabulary (the symbol table) into `dict`, producing a rule set
@@ -271,7 +285,22 @@ pub struct BoundRuleSet<'a> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
-    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Cuts::top_level())?;
+    compile_with_cycles(src, super::NegationCycles::Reject)
+}
+
+/// As [`compile`], choosing what happens to rules that negate through a dependency cycle
+/// ([`super::NegationCycles`]) instead of refusing the rule set — the compiled
+/// counterpart of [`crate::reason_n3_with_cycles`], with the same semantics.
+///
+/// # Errors
+///
+/// As [`compile`], except that a negation cycle is an error only under
+/// [`super::NegationCycles::Reject`].
+pub fn compile_with_cycles(
+    src: &str,
+    cycles: super::NegationCycles,
+) -> Result<CompiledRuleSet, String> {
+    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Truncation::top_level())?;
     if !parsed.backward_rules.is_empty() {
         return Err("compiled-rules: backward (`<=`) rules are not in the compiled subset (goal-directed resolution stays with the text engine)".into());
     }
@@ -282,12 +311,60 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
     for r in &parsed.rules {
         c.lower_rule(r)?;
     }
+    // A rule set that negates through a dependency cycle is refused, as the text engine
+    // refuses the document.
+    let strata = super::strata::stratify(&parsed.rules, &[], cycles)
+        .map_err(|e| format!("compiled-rules: {e}"))?;
     Ok(CompiledRuleSet {
         symbols: c.symbols,
         regexes: c.regexes,
         facts: c.facts,
         rules: c.rules,
+        strata,
     })
+}
+
+/// Whether a `log:notIncludes` subject denotes the current store on every evaluation, as
+/// the compiled anti-join assumes: an IRI, a literal other than `true` (which is how `{}`
+/// parses), or a variable / blank node that `rule` uses only as a `log:notIncludes`
+/// subject, so no premise atom can bind it to a formula or to `true`.
+fn store_scope_subject(subject: &Term, rule: &super::model::Rule) -> bool {
+    fn count(t: &Term, target: &Term) -> usize {
+        if t == target {
+            return 1;
+        }
+        match t {
+            Term::Formula(ts) => ts.iter().flatten().map(|x| count(x, target)).sum(),
+            Term::List(ms) => ms.iter().map(|x| count(x, target)).sum(),
+            Term::Triple(tr) => tr.iter().map(|x| count(x, target)).sum(),
+            _ => 0,
+        }
+    }
+    match subject {
+        Term::Iri(_) => true,
+        Term::Lit(v, _, _) => v != "true",
+        Term::Var(_) | Term::Blank(_) => {
+            // Every occurrence is as the subject of a top-level `log:notIncludes` (which
+            // binds nothing), e.g. one `?S` shared by several negations.
+            let as_scope = rule
+                .premise
+                .iter()
+                .filter(|a| {
+                    &a[0] == subject
+                        && matches!(super::scope_op(&a[1]), Some(super::ScopeOp::NotIncludes))
+                })
+                .count();
+            let uses: usize = rule
+                .premise
+                .iter()
+                .chain(&rule.conclusion)
+                .flatten()
+                .map(|t| count(t, subject))
+                .sum();
+            uses == as_scope
+        }
+        _ => false,
+    }
 }
 
 /// Parse an N3 **fact** document (no rules) and intern its ground triples into `dict` —
@@ -310,7 +387,7 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
-    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Cuts::top_level())?;
+    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Truncation::top_level())?;
     if !parsed.rules.is_empty() || !parsed.backward_rules.is_empty() {
         return Err("intern_facts: the document contains rules — compile() them instead".into());
     }
@@ -354,7 +431,7 @@ pub fn eval(dict: &mut Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> Vec<
 struct Compiler {
     sym_map: FxHashMap<Term, u32>,
     symbols: Vec<Term>,
-    regexes: Vec<Option<regex::Regex>>,
+    regexes: Vec<regex::Regex>,
     facts: Vec<[u32; 3]>,
     rules: Vec<CompiledRule>,
 }
@@ -638,6 +715,17 @@ impl Compiler {
                         "compiled-rules: a formula-scoped log:notIncludes subject is not in the compiled subset (formula values have no id representation)".into(),
                     );
                 }
+                // The anti-join always reads the STORE. The text engine reads the store only
+                // when the subject is not a formula and not the literal `true` (`{}`, the
+                // empty formula) at evaluation time. Admit exactly the subjects that are
+                // never either: an IRI, a literal other than `true`, or a variable / blank
+                // node the rule uses only in this position (so nothing can bind it).
+                if !store_scope_subject(&atom[0], rule) {
+                    return Err(format!(
+                        "compiled-rules: log:notIncludes subject {:?} is not in the compiled subset (only an IRI, a literal other than `true`, or a variable used only as a log:notIncludes subject always denotes the current store; `{{}}` is the empty formula)",
+                        atom[0]
+                    ));
+                }
                 let Term::Formula(inner) = &atom[2] else {
                     return Err(
                         "compiled-rules: the log:notIncludes object must be a quoted { … } formula"
@@ -725,12 +813,7 @@ impl Compiler {
                             );
                         };
                         let regex = self.regexes.len();
-                        // A compiled rule set has no run to report a cut to: a pattern
-                        // the regex engine refuses fails every row, as the text engine's
-                        // scrape does.
-                        let refused = std::cell::Cell::new(false);
-                        self.regexes
-                            .push(super::bounded::settle(&refused, super::bounded::regex(pat)));
+                        self.regexes.push(super::bounded::regex_or_refuse(pat)?);
                         let (out, out_bound) = self.output(&atom[2], &mut ctx)?;
                         steps.push(Step::Scrape {
                             arg,
@@ -954,6 +1037,7 @@ impl BoundRuleSet<'_> {
     /// must be interned into the caller's id space; join atoms never touch the
     /// dictionary.
     pub fn eval(&self, dict: &mut Dict, facts: &[[Id; 3]]) -> Vec<[Id; 3]> {
+        let strata = &self.compiled.strata;
         let mut store = FactStore::default();
         for f in facts {
             store.insert(*f);
@@ -969,33 +1053,49 @@ impl BoundRuleSet<'_> {
         // each round (needs_full); pure-constant rules fire in round 0 only — the text
         // engine's exact round discipline.
         let mut delta: Vec<[Id; 3]> = store.list.clone();
-        let mut first_round = true;
-        loop {
-            let mut produced: Vec<[Id; 3]> = Vec::new();
-            for rule in &self.compiled.rules {
-                if rule.needs_full || rule.join_steps.is_empty() {
-                    if rule.needs_full || first_round {
-                        self.run_rule(rule, &store, None, dict, &mut produced);
+        // One semi-naive fixpoint per stratum (the text engine's automatic stratification,
+        // GH #6201): a single-stratum set runs exactly one loop; at each later stratum
+        // boundary the whole store is the delta and round-0 handling restarts.
+        let cs = self.compiled;
+        for stratum in 0..strata.n_strata {
+            if stratum > 0 {
+                delta = store.list.clone();
+            }
+            let mut first_round = true;
+            loop {
+                let mut produced: Vec<[Id; 3]> = Vec::new();
+                for (ri, rule) in cs.rules.iter().enumerate() {
+                    if strata
+                        .rule_stratum
+                        .as_ref()
+                        .is_some_and(|rs| rs[ri] != stratum)
+                    {
+                        continue;
                     }
-                } else {
-                    // Semi-naive: once per join position, with that pattern restricted
-                    // to the delta (dedup happens at store insertion).
-                    for &k in &rule.join_steps {
-                        self.run_rule(rule, &store, Some((&delta, k)), dict, &mut produced);
+                    if rule.needs_full || rule.join_steps.is_empty() {
+                        if rule.needs_full || first_round {
+                            self.run_rule(rule, &store, None, dict, &mut produced);
+                        }
+                    } else {
+                        // Semi-naive: once per join position, with that pattern restricted
+                        // to the delta (dedup happens at store insertion).
+                        for &k in &rule.join_steps {
+                            self.run_rule(rule, &store, Some((&delta, k)), dict, &mut produced);
+                        }
                     }
                 }
-            }
-            let mut new_delta: Vec<[Id; 3]> = Vec::new();
-            for f in produced {
-                if store.insert(f) {
-                    new_delta.push(f);
+                let mut new_delta: Vec<[Id; 3]> = Vec::new();
+                for f in produced {
+                    if store.insert(f) {
+                        new_delta.push(f);
+                    }
                 }
+                first_round = false;
+                if new_delta.is_empty() {
+                    break;
+                }
+                delta = new_delta;
             }
-            first_round = false;
-            if new_delta.is_empty() {
-                break;
-            }
-            delta = new_delta;
         }
         store.list
     }
@@ -1195,10 +1295,9 @@ impl BoundRuleSet<'_> {
                     out: o,
                     out_bound,
                 } => {
-                    let re = self.compiled.regexes[*regex].as_ref();
+                    let re = &self.compiled.regexes[*regex];
                     let mut next = Vec::with_capacity(rows.len());
                     for mut row in rows {
-                        let Some(re) = re else { break }; // invalid regex: fails every row
                         let id = self.resolve(*arg, &row);
                         let oxrdf::Term::Literal(l) = dict.term(id) else {
                             continue;
@@ -1289,7 +1388,7 @@ fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> V
         rows,
         &tables,
         &probe_only,
-        &NoBudget,
+        &NoBudget, // not-a-limit: unbounded-join (the join runs to completion)
         &mut combined,
     );
     let mut out = Vec::with_capacity(combined.len());
@@ -1336,6 +1435,12 @@ fn concat_push(dict: &Dict, id: Id, s: &mut String) -> bool {
                 Some("integer" | "decimal" | "float" | "double") => {
                     let t = Term::Lit(v.to_string(), l.datatype().as_str().to_string(), None);
                     match super::numval(&t) {
+                        // A numeral past i128: its canonical value string, exactly.
+                        Some(super::NumVal::F64(_))
+                            if super::big_numeral_canonical(v).is_some() =>
+                        {
+                            s.push_str(&super::big_numeral_canonical(v).unwrap_or_default())
+                        }
                         Some(super::NumVal::Int(i)) => s.push_str(&i.to_string()),
                         Some(super::NumVal::Dec(m, sc)) => {
                             let (m, sc) = super::dec_norm(m, sc);
@@ -1349,6 +1454,7 @@ fn concat_push(dict: &Dict, id: Id, s: &mut String) -> bool {
                         }
                         Some(super::NumVal::F64(f)) => {
                             if f.fract() == 0.0 && f.abs() < 9.007e15 {
+                                // not-a-cut: exact-cast (whole, below 2^53)
                                 let _ = std::fmt::Write::write_fmt(s, format_args!("{}", f as i64));
                             } else {
                                 let _ = std::fmt::Write::write_fmt(s, format_args!("{f}"));
