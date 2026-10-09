@@ -679,6 +679,18 @@ impl LwsRequest {
     }
 }
 
+/// Remove the member `iri` of `parent` (if any): its record and its parent's membership edge in
+/// one store step, so no failure can leave a live record its container no longer lists. Every
+/// removal of a member goes through here: resources, service records, expired subscriptions.
+/// A container that is not empty is not removed ([`crate::store::DeleteOutcome::NotEmpty`]).
+pub(crate) async fn remove_member<S: Store>(
+    store: &S,
+    iri: &str,
+    parent: Option<&str>,
+) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
+    store.delete_container_if_empty(iri, parent).await
+}
+
 /// Delete the stored record `iri` of a service container (a grant, a request, a subscription).
 /// The index commit is the deletion point: when the store reports a failure but the record no
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
@@ -688,8 +700,8 @@ pub(crate) async fn delete_record<S: Store + 'static>(
     iri: &str,
     container: &str,
 ) -> Result<(), crate::error::ServerError> {
-    match state.store.delete(iri, Some(container)).await {
-        Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
+    match remove_member(&state.store, iri, Some(container)).await {
+        Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
         Err(e) => match state.store.exists(iri).await {
             Ok(false) => Ok(()),
             _ => Err(e),
@@ -949,9 +961,28 @@ pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Rout
         .layer(axum::middleware::from_fn(crate::ldp::cors::cors_middleware)))
 }
 
+/// The largest body a request to `path` may carry: the service routes that anyone may send to
+/// (access requests, subscriptions, type search) are held to their own limits while the body is
+/// read, so no more than that is ever buffered for them; everything else to `max_body`.
+fn body_limit(path: &str, max_body: usize) -> usize {
+    let limit = if path.starts_with(REQUESTS_PATH) {
+        access::MAX_REQUEST_BYTES
+    } else if path.starts_with(SUBSCRIPTIONS_PATH) {
+        notify::MAX_SUBSCRIPTION_BYTES
+    } else if path == TYPE_SEARCH_PATH {
+        index::MAX_FILTER_BYTES
+    } else if path.starts_with(GRANTS_PATH) {
+        access::MAX_GRANT_BYTES
+    } else {
+        max_body
+    };
+    limit.min(max_body)
+}
+
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
-    let body = match axum::body::to_bytes(body, state.cfg.max_body).await {
+    let limit = body_limit(parts.uri.path(), state.cfg.max_body);
+    let body = match axum::body::to_bytes(body, limit).await {
         Ok(b) => b,
         Err(_) => return problem(StatusCode::PAYLOAD_TOO_LARGE, None),
     };
@@ -1439,6 +1470,8 @@ pub(crate) mod test_store {
         /// `delete` of this IRI detaches it from its parent, then fails with the record still
         /// there, as a two-step delete does when its second step fails.
         pub partial_delete_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// How many `delete`s named a parent: removals of a member that are not one step.
+        pub two_step_deletes: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     impl FlakyStore {
@@ -1465,6 +1498,7 @@ pub(crate) mod test_store {
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
+                two_step_deletes: Default::default(),
             }
         }
     }
@@ -1568,6 +1602,9 @@ pub(crate) mod test_store {
             created
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+            if parent.is_some() {
+                self.two_step_deletes.fetch_add(1, Ordering::SeqCst);
+            }
             if self.partial_delete_of.lock().unwrap().as_deref() == Some(iri) {
                 let kept = self.inner.read(iri).await?;
                 self.inner.delete(iri, parent).await?;
@@ -1748,6 +1785,135 @@ mod tests {
             crate::store::InMemoryBlobStore::new(),
         );
         router(store, cfg).await.unwrap()
+    }
+
+    /// Review finding: every body was buffered up to the server-wide ceiling before any route
+    /// limit applied, so an anonymous request to a service route anyone may post to buffered
+    /// megabytes before its 16 KiB limit refused it. Each route's limit applies while the body
+    /// is read, and no route can raise the ceiling.
+    #[tokio::test]
+    async fn every_route_reads_no_more_than_its_limit() {
+        use tower::ServiceExt;
+        let max = 1 << 20;
+        let app = open_router(max).await;
+        let send = |method: &'static str, path: &'static str, len: usize| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("content-type", LWS_JSON)
+                    .body(Body::from(vec![b' '; len]))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        let routes = [
+            ("POST", REQUESTS_PATH, access::MAX_REQUEST_BYTES),
+            ("POST", SUBSCRIPTIONS_PATH, notify::MAX_SUBSCRIPTION_BYTES),
+            ("QUERY", TYPE_SEARCH_PATH, index::MAX_FILTER_BYTES),
+            ("POST", GRANTS_PATH, access::MAX_GRANT_BYTES),
+            ("POST", "/", max),
+            ("PUT", "/x", max),
+            ("PATCH", "/x", max),
+        ];
+        for (method, path, limit) in routes {
+            assert!(limit <= max);
+            assert_eq!(
+                send(method, path, limit + 1).await,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "{method} {path}"
+            );
+            assert_ne!(
+                send(method, path, limit).await,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "{method} {path}"
+            );
+        }
+        assert_eq!(body_limit("/", 10), 10);
+        assert_eq!(body_limit(REQUESTS_PATH, 10), 10);
+    }
+
+    /// Review finding: a member's record and its parent's membership edge were removed in two
+    /// steps on some paths (service records, expired subscriptions), so a failure in between left
+    /// a live record its container no longer listed. Every removal goes through
+    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
+    #[tokio::test]
+    async fn every_removal_takes_one_step() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let send = |method: Method, path: String, ct: &'static str, body: String| {
+            let state = state.clone();
+            async move {
+                let headers: Vec<(&str, &str)> = vec![("content-type", ct), ("slug", "m")];
+                route(&state, request(method, &path, &headers, &body)).await
+            }
+        };
+        let local = |iri: &str| {
+            iri.strip_prefix("http://localhost:3000")
+                .unwrap()
+                .to_string()
+        };
+        // A data resource, then a container with a member, recursively.
+        let r = send(Method::POST, "/".into(), "text/plain", "x".into()).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let at = local(r.headers()[header::LOCATION].to_str().unwrap());
+        let r = send(Method::DELETE, at, "text/plain", String::new()).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let container = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        let r = route(
+            &state,
+            request(Method::POST, "/", &[("slug", "c"), ("link", container)], ""),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = send(Method::POST, "/c/".into(), "text/plain", "x".into()).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let mut req = request(Method::DELETE, "/c/", &[("depth", "infinity")], "");
+        req.headers.insert("depth", "infinity".parse().unwrap());
+        assert_eq!(route(&state, req).await.status(), StatusCode::NO_CONTENT);
+        // A grant, an access request and a subscription, each created and removed.
+        let storage = state.cfg.storage();
+        let access = |kind: &str| {
+            json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": [kind],
+                "storage": storage,
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+            })
+            .to_string()
+        };
+        let sub =
+            json!({"type": notify::WEBHOOK, "topic": [storage], "inbox": "https://inbox.example/"})
+                .to_string();
+        for (path, body) in [
+            (GRANTS_PATH, access("AccessGrant")),
+            (REQUESTS_PATH, access("AccessRequest")),
+            (SUBSCRIPTIONS_PATH, sub.clone()),
+        ] {
+            let r = send(Method::POST, path.into(), LWS_JSON, body).await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{path}");
+            let at = local(r.headers()[header::LOCATION].to_str().unwrap());
+            let r = send(Method::DELETE, at, LWS_JSON, String::new()).await;
+            assert!(r.status().is_success(), "{path}: {}", r.status());
+        }
+        // A subscription that has expired by the next boot is removed then.
+        let r = send(Method::POST, SUBSCRIPTIONS_PATH.into(), LWS_JSON, sub).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let at = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let mut stored: notify::Subscription =
+            serde_json::from_slice(&state.store.read(&at).await.unwrap().body).unwrap();
+        stored.expires_at = Some(1);
+        state
+            .store
+            .write(&at, serde_json::to_vec(&stored).unwrap().into(), LWS_JSON)
+            .await
+            .unwrap();
+        notify::Notifier::load(&state.store, &state.cfg)
+            .await
+            .unwrap();
+        assert!(!state.store.exists(&at).await.unwrap());
+        assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

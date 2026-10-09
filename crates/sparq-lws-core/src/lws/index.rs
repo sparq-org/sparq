@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use axum::http::{header, Method, StatusCode};
 use axum::response::Response;
+use bytes::Bytes;
 use serde_json::{json, Map, Value};
 
 use super::access::Action;
@@ -322,12 +323,19 @@ pub async fn handle<S: Store + 'static>(
         let r = method_not_allowed(allow);
         return if search { with_accept_query(r) } else { r };
     }
-    let mut filter_bytes = Vec::new();
+    let mut filter_bytes = Bytes::new();
     let mut filter = Filter::default();
     if search {
         if let Some(q) = &q {
+            // Held to its size before it is decoded: base64url is four characters for three bytes.
+            if q.len() > MAX_FILTER_BYTES.div_ceil(3) * 4 {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+                );
+            }
             match jose::b64url_decode(q) {
-                Some(b) => filter_bytes = b,
+                Some(b) => filter_bytes = Bytes::from(b),
                 None => return problem(StatusCode::NOT_FOUND, None),
             }
         } else {
@@ -341,7 +349,7 @@ pub async fn handle<S: Store + 'static>(
                 Some(ct) if ct != LWS_QUERY => {
                     return with_accept_query(problem(StatusCode::UNSUPPORTED_MEDIA_TYPE, None))
                 }
-                Some(_) => filter_bytes = req.body.to_vec(),
+                Some(_) => filter_bytes = req.body.clone(),
             }
         }
         if filter_bytes.len() > MAX_FILTER_BYTES {

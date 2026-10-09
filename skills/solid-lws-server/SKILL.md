@@ -228,7 +228,9 @@ notifications and type index, over the same `Store` backend. It runs over the
 because a remote write reported as failed may still commit later and nothing fences it yet.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
-and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB.
+and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
+access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
+separate share of 512.
 
 ```bash
 SOLID_SERVER_PROTOCOL=lws \
