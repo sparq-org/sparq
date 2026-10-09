@@ -1263,13 +1263,9 @@ impl PodStore {
     /// the budgeted read entry points, for a caller that must bound *every* evaluation it
     /// issues (an agent tool surface, an HTTP handler). [FABLE-5] sq-yhlf0.
     ///
-    /// The budget covers BOTH evaluations an update can perform:
-    ///
-    /// - the authorization check's `GRAPH ?var` binding SELECT (see the precise-resolution
-    ///   note on [`PodStore::update_as`]) — an exhausted budget there is a **deny**, and
-    ///   nothing is mutated;
-    /// - the apply's `DELETE`/`INSERT … WHERE` evaluation, via
-    ///   [`sparq_engine::update_in_place_with_budget`].
+    /// The budget covers the one evaluation an update performs, its
+    /// `DELETE`/`INSERT … WHERE` (which also yields the `GRAPH ?var` write targets the
+    /// authorization checks); an exhausted budget is an error and nothing is mutated.
     ///
     /// The remaining operations never consult the budget, and — importantly — capping the
     /// accepted update text does **not** bound all of them, because their cost is set by the
@@ -1350,13 +1346,35 @@ impl PodStore {
         if let Some(reads) = &reads {
             update::scope_reads(&upd, reads)?;
         }
-        let permit =
-            update::check(&self.graph, &auth, s, &upd, self.group_docs(), reads.as_ref(), budget)?;
+        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs())?;
         // Authorized: apply the checked algebra through the engine's in-place delta path,
-        // under the same read view and budget.
-        sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, reads.as_ref(), budget)?;
+        // under the same read view and budget. A `GRAPH ?var` template's destinations are
+        // authorized as the engine instantiates them, from its one evaluation of the WHERE,
+        // before that operation changes anything. A denial aborts, so an update with more
+        // than one operation runs on a fork that replaces the store only on success.
+        let mut auth_input = false;
+        if permit.var_graphs {
+            // Borrow the (now initialized) field itself, disjoint from `self.graph`.
+            self.group_docs();
+            let group_docs = self.group_docs.get().expect("initialized above");
+            let mut authorize = |dels: &[Option<Term>], ins: &[Option<Term>]| {
+                update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input)
+            };
+            let apply = |g: &mut Graph, authorize: &mut sparq_engine::WriteAuthorizer<'_>| {
+                sparq_engine::update_in_place_algebra_with_budget(g, &upd, reads.as_ref(), Some(authorize), budget)
+            };
+            if upd.operations.len() > 1 {
+                let mut working = self.graph.fork();
+                apply(&mut working, &mut authorize)?;
+                self.graph = working;
+            } else {
+                apply(&mut self.graph, &mut authorize)?;
+            }
+        } else {
+            sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, reads.as_ref(), None, budget)?;
+        }
         // A change to the access-control rules invalidates the auth view.
-        if permit.rematerialize {
+        if permit.rematerialize || auth_input {
             if acp {
                 self.materialize_acp()?;
             } else {

@@ -580,20 +580,34 @@ pub(crate) fn update_prepared_impl(graph: &Graph, upd: &Update) -> Result<Graph,
 /// `reads`, when set, is the set of named graphs a `DELETE`/`INSERT … WHERE` may read: the
 /// WHERE (and any `USING`/`WITH` dataset it is evaluated over) runs under a
 /// [`DatasetView`](crate::DatasetView) of exactly those graphs with an empty default graph,
-/// so a graph outside the set is never evaluated, as on the query path. Writes are not
-/// restricted by it; the caller authorizes them.
+/// so a graph outside the set is never evaluated, as on the query path.
+///
+/// `authorize`, when set, is called once per `DELETE`/`INSERT … WHERE` with the graphs its
+/// instantiated templates are about to change, after the WHERE is evaluated and before
+/// anything is applied; an `Err` aborts the update with that error. The graphs it sees
+/// are exactly the graphs the operation then writes, from the same single evaluation.
+/// Operations applied before the failing one stay applied: apply to a
+/// [`fork`](Graph::fork) for all-or-nothing.
 pub fn update_in_place_algebra_with_budget(
     graph: &mut Graph,
     upd: &Update,
     reads: Option<&std::sync::Arc<rustc_hash::FxHashSet<Term>>>,
+    authorize: Option<&mut WriteAuthorizer<'_>>,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
     require_update_budget(budget)?;
     let _view = reads.map(crate::exec::view::install_reads);
     crate::exec::budget::with_budget(budget, || {
-        apply_update_in_place(graph, upd, None)
+        apply_update_in_place(graph, upd, None, authorize)
     })
 }
+
+/// The graphs one `DELETE`/`INSERT … WHERE` is about to change, handed to the authorizer of
+/// [`update_in_place_algebra_with_budget`]: the distinct graphs it deletes from, then the
+/// distinct graphs it inserts into (`None` is the default graph). Only graphs a
+/// template quad was instantiated for appear.
+pub type WriteAuthorizer<'a> =
+    dyn FnMut(&[Option<Term>], &[Option<Term>]) -> Result<(), String> + 'a;
 
 // --- the delta-overlay path ------------------------------------------------------------------
 
@@ -787,7 +801,7 @@ fn update_in_place_core(
     require_update_budget(budget)?;
     crate::exec::budget::with_budget(budget, || {
         let upd = parse_update_rec2013(sparql)?;
-        apply_update_in_place(graph, &upd, sink)
+        apply_update_in_place(graph, &upd, sink, None)
     })
 }
 
@@ -799,6 +813,7 @@ fn apply_update_in_place(
     graph: &mut Graph,
     upd: &Update,
     mut sink: EffectSink,
+    mut authorize: Option<&mut WriteAuthorizer<'_>>,
 ) -> Result<(), String> {
     for op in &upd.operations {
         match op {
@@ -905,12 +920,19 @@ fn apply_update_in_place(
                     }
                     None => instantiate_templates(graph, delete, insert, pattern)?,
                 };
+                let (dels, inss) = (group_by_slot(dels), group_by_slot(inss));
+                if let Some(authorize) = authorize.as_deref_mut() {
+                    let slots = |g: &[(GraphSlot, Vec<TripleTerms>)]| -> Vec<GraphSlot> {
+                        g.iter().map(|(slot, _)| slot.clone()).collect()
+                    };
+                    authorize(&slots(&dels), &slots(&inss))?;
+                }
                 // All deletes first, then all inserts (SPARQL semantics), per graph slot.
-                for (slot, del) in group_by_slot(dels) {
+                for (slot, del) in dels {
                     apply_slot_delta(graph, &slot, &[], &del)?;
                     record_delta(&mut sink, &slot, &[], &del);
                 }
-                for (slot, ins) in group_by_slot(inss) {
+                for (slot, ins) in inss {
                     apply_slot_delta(graph, &slot, &ins, &[])?;
                     record_delta(&mut sink, &slot, &ins, &[]);
                 }

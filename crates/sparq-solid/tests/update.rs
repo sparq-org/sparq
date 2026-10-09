@@ -341,11 +341,9 @@ fn var_graph_empty_binding_is_a_permitted_noop() {
 
 #[test]
 fn var_graph_with_clause_resolves_precisely() {
-    // [OPUS-4.8] sq-cnor: a `WITH`/`USING` re-scope on a variable-GRAPH op is now resolved
-    // PRECISELY (no longer the conservative all-graphs fallback). The binding SELECT is handed
-    // the same active dataset the apply's `build_using` builds — for `WITH` (which re-scopes
-    // only the DEFAULT graph), `named: None` keeps all store named graphs, re-expressed as an
-    // explicit `FROM NAMED` of every store named graph. Every quad here is `GRAPH ?g`-scoped,
+    // [OPUS-4.8] sq-cnor: a `WITH`/`USING` re-scope on a variable-GRAPH op is resolved
+    // PRECISELY (no conservative all-graphs fallback): the write targets are the graphs the
+    // apply instantiates under the re-scoped dataset. Every quad here is `GRAPH ?g`-scoped,
     // so the `WITH` default graph never participates; `?g` resolves to exactly the team2
     // content graphs CAROL owns — so she is now PERMITTED, just as without the WITH clause
     // (var_graph_precise_allows_authorized_subset).
@@ -558,9 +556,8 @@ fn positive_control_fully_authorized_multi_op_body_applies() {
 // agent tool surface, an HTTP handler) had no bounded way to apply an update. These tests
 // pin the two properties that variant must have:
 //
-//   1. an EXHAUSTED budget aborts the update as an error and mutates NOTHING, at BOTH
-//      evaluation sites — the authorization check's `GRAPH ?var` binding SELECT and the
-//      apply's `DELETE`/`INSERT … WHERE`;
+//   1. an EXHAUSTED budget aborts the update as an error and mutates NOTHING, including
+//      for a `GRAPH ?var` write target, whose graphs come from the same evaluation;
 //   2. an UNLIMITED budget is the unbudgeted path, byte for byte.
 //
 // The deadline is set to an ALREADY-PASSED `Instant` rather than racing a real
@@ -642,12 +639,9 @@ fn a_row_cap_aborts_the_apply_and_leaves_the_store_unchanged() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn an_exhausted_budget_also_bounds_the_authorization_checks_binding_select() {
-    // The check path evaluates a SELECT of its own to resolve a `GRAPH ?g` template slot
-    // precisely. That evaluation is on the write path too, so it must be bounded — and its
-    // exhaustion must surface as the budget error rather than silently degrading to the
-    // (cheaper) all-graphs wildcard, which could permit an update whose apply would then
-    // have to re-run the very WHERE that just ran out of budget.
+fn an_exhausted_budget_also_bounds_a_variable_target_update() {
+    // A `GRAPH ?g` template's targets come from the WHERE evaluation, so its exhaustion
+    // must surface as the budget error rather than degrade to an all-graphs wildcard.
     let mut s = wac_store();
     let before = store_snapshot(&s);
     let sparql = format!(
@@ -657,12 +651,12 @@ fn an_exhausted_budget_also_bounds_the_authorization_checks_binding_select() {
 
     let e = s
         .update_as_with_budget(&sess(Some(ALICE)), &sparql, &expired())
-        .expect_err("the binding SELECT must be bounded too");
+        .expect_err("a variable-target update must be bounded too");
     assert!(
         e.contains("query budget exceeded"),
         "an exhausted check must report the budget, not fall back silently: {e}"
     );
-    assert_eq!(store_snapshot(&s), before, "nothing is mutated on the check path");
+    assert_eq!(store_snapshot(&s), before, "nothing is mutated");
 }
 
 #[test]

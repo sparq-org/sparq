@@ -166,9 +166,12 @@ Update (data lives in the default + named graphs):
   delta-overlay: forks, applies, and commits back ONLY if every op succeeds (else `graph` is left at
   its pre-request state). Use this for SPARQL-1.1 all-or-nothing semantics from a direct library
   consumer without writing your own fork/seal recovery.
-- `update_in_place_algebra_with_budget(&mut Graph, &spargebra::Update, &QueryBudget)` — apply an
-  already-parsed (or rewritten) update without re-parsing text, so an authorizer applies exactly the
-  algebra it checked.
+- `update_in_place_algebra_with_budget(&mut Graph, &spargebra::Update, reads, authorize, &QueryBudget)`
+  — apply an already-parsed update without re-parsing text, so an authorizer applies exactly the
+  algebra it checked. `reads: Option<&Arc<FxHashSet<Term>>>` evaluates every WHERE under a read view
+  of those graphs (empty default graph). `authorize: Option<&mut WriteAuthorizer>` is called per
+  `DELETE`/`INSERT … WHERE` with the graphs its instantiated templates delete from and insert into,
+  before that operation is applied; an `Err` aborts (apply to a `Graph::fork` for all-or-nothing).
 - `update_in_place_capturing(&mut Graph, &str, &QueryBudget) -> Result<Vec<UpdateEffect>, String>`
   + `apply_effects(&mut Graph, &[UpdateEffect])` — apply once, capturing the RESOLVED delta, then
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when

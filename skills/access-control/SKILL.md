@@ -196,14 +196,15 @@ Materialize the authorization view from the access-control documents, then enfor
   sees only the session's read view: a `GRAPH <g>` (or a `USING`/`WITH` graph) the session
   cannot read refuses the update, `GRAPH ?var` ranges over readable graphs only, and a
   default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
-  access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none.
+  access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
+  evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
+  evaluation instantiates, before anything is written, and a refused update leaves the
+  store untouched.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
   agent tool surface, an HTTP handler). sq-yhlf0. The budget reaches both places an
-  update evaluates SPARQL — the authorization check's `GRAPH ?var` binding SELECT (an
-  exhausted budget there is a **deny**, nothing mutated) and the apply's
-  `DELETE`/`INSERT … WHERE`. It does **not** bound the remaining operations, and a
+  update evaluates SPARQL — the `DELETE`/`INSERT … WHERE`, evaluated once. It does **not** bound the remaining operations, and a
   request-size cap does not cover all of them: `INSERT`/`DELETE DATA` carry their triples
   inline (a text cap *does* bound those; `CREATE` adds one empty-graph entry), but
   `CLEAR`/`DROP` cost whatever

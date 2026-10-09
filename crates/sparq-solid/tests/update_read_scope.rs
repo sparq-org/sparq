@@ -221,3 +221,65 @@ fn unreadable_graphs_are_never_evaluated() {
         assert!(!out(&large).contains(SECRET), "{upd} leaked");
     }
 }
+
+/// Every named graph's contents, for comparing a store before and after an update.
+fn snapshot(s: &PodStore) -> std::collections::BTreeMap<String, String> {
+    s.graph
+        .named
+        .iter()
+        .filter(|(n, _)| !n.to_string().contains("urn:sparq:"))
+        .map(|(n, g)| {
+            let mut rows: Vec<String> = g
+                .store
+                .scan(&[None, None, None])
+                .rows
+                .iter()
+                .map(|r| format!("{r:?}"))
+                .collect();
+            rows.sort();
+            (n.to_string(), rows.join("\n"))
+        })
+        .collect()
+}
+
+const OUT: &[&str] = &["<https://pod.ex/out>"];
+
+/// `GRAPH ?var` write targets: (update, the graphs it changes, or `None` when refused).
+/// Bob reads `out` and `pub` and writes `out` and `wonly`, so a target that can bind
+/// `pub` must be refused, and one that binds only unreadable graphs binds nothing.
+const VARIABLE_TARGETS: &[(&str, Option<&[&str]>)] = &[
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }", Some(OUT)),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/private> USING NAMED <https://pod.ex/wonly> WHERE { GRAPH ?g { } }", Some(&[])),
+    ("WITH <https://pod.ex/out> INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } MINUS { GRAPH ?g { ?s ?p \"public\" } } }", Some(OUT)),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } FILTER NOT EXISTS { GRAPH ?g { ?s ?p \"out\" } } }", None),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> ?n } } WHERE { { SELECT ?g (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } GROUP BY ?g } }", None),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> ?n } } WHERE { { SELECT ?g (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } GROUP BY ?g HAVING (?g = <https://pod.ex/out>) } }", Some(OUT)),
+    ("DELETE { GRAPH ?g { ?s ?p ?o } } WHERE { GRAPH ?g { ?s ?p ?o } }", None),
+    ("DELETE { GRAPH ?g { ?s ?p ?o } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { ?s ?p ?o } }", Some(OUT)),
+    // A refused operation after a permitted one leaves the store untouched.
+    ("INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> 1 } } ; INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
+];
+
+/// The graphs a `GRAPH ?var` template writes are the graphs authorized: a permitted update
+/// changes exactly the graphs expected, all writable by bob, and a refused one changes
+/// nothing.
+#[test]
+fn variable_write_targets_are_authorized_as_written() {
+    for (upd, expected) in VARIABLE_TARGETS {
+        let mut s = store();
+        let before = snapshot(&s);
+        let r = s.update_as(&bob(), upd);
+        let after = snapshot(&s);
+        assert_eq!(r.is_ok(), expected.is_some(), "{upd}: {r:?}");
+        let mut changed: Vec<&str> = after
+            .iter()
+            .filter(|(g, rows)| before.get(*g) != Some(*rows))
+            .map(|(g, _)| g.as_str())
+            .chain(before.keys().filter(|g| !after.contains_key(*g)).map(String::as_str))
+            .collect();
+        changed.sort_unstable();
+        assert_eq!(changed, expected.unwrap_or(&[]), "{upd}");
+    }
+}
