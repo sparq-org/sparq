@@ -219,23 +219,30 @@ fn all_groups(groups: &Groups, have: impl Fn(&str) -> bool) -> bool {
     groups.iter().all(|g| g.iter().any(|v| have(v)))
 }
 
-/// What a search sees of one readable resource: its types (full IRIs) and the metadata its
-/// relations come from, both from the snapshot its permission check was made on.
-struct Seen {
-    types: Vec<String>,
-    meta: ResourceMeta,
+/// How much the index or a search keeps while it walks the storage: the URIs and types it
+/// collects. What is past it fails the request, explicitly, rather than growing with the storage.
+pub const MAX_INDEX_WORKING_SET: usize = 16 << 20;
+
+/// Why the index could not be built.
+enum Failed {
+    /// A listing, a permission check or the metadata of a resource could not be read.
+    Store,
+    /// What it would keep is past [`MAX_INDEX_WORKING_SET`].
+    TooLarge,
 }
 
-/// Every resource the agent may read now, with what a search sees of it, by URI; an error when a
-/// listing, a permission check or the metadata of one cannot be read. Each resource's
-/// shared lock is held from its permission check through the read of its metadata, so the types
-/// and relations collected are those of the state the check allowed (a delete and a re-create by
-/// someone else cannot slip in between); the lock is released before the next resource.
+/// Visit every resource the agent may read now, with its types (full IRIs) and its metadata;
+/// an error when a listing, a permission check or the metadata of one cannot be read, or when
+/// `visit` refuses. Each resource's shared lock is held from its permission check through the
+/// read of its metadata and its visit, so the types and relations seen are those of the state
+/// the check allowed (a delete and a re-create by someone else cannot slip in between); the lock
+/// is released, and the metadata dropped, before the next resource: only what `visit` keeps is
+/// held across the walk.
 async fn readable<S: Store + 'static>(
     state: &LwsState<S>,
     agent: &Agent,
-) -> Result<BTreeMap<String, Seen>, crate::error::ServerError> {
-    let mut out = BTreeMap::new();
+    mut visit: impl FnMut(&str, Vec<String>, &ResourceMeta) -> Result<(), Failed>,
+) -> Result<(), Failed> {
     let mut stack = vec![state.cfg.storage()];
     let mut seen = BTreeSet::new();
     while let Some(uri) = stack.pop() {
@@ -249,7 +256,7 @@ async fn readable<S: Store + 'static>(
             let children = match state.store.list_children(&uri).await {
                 Ok(c) => c,
                 Err(crate::error::ServerError::NotFound) => Vec::new(),
-                Err(e) => return Err(e),
+                Err(_) => return Err(Failed::Store),
             };
             for child in children {
                 let child = child.as_str();
@@ -263,12 +270,12 @@ async fn readable<S: Store + 'static>(
         match state.check(Action::Read, &uri, agent).await {
             Ok(true) => {}
             Ok(false) | Err(crate::error::ServerError::NotFound) => continue,
-            Err(e) => return Err(e),
+            Err(_) => return Err(Failed::Store),
         }
         let meta = match state.resource_meta(&uri).await {
             Ok(m) => m,
             Err(crate::error::ServerError::NotFound) => continue,
-            Err(e) => return Err(e),
+            Err(_) => return Err(Failed::Store),
         };
         let mut types = vec![format!(
             "{LWS_NS}{}",
@@ -288,15 +295,25 @@ async fn readable<S: Store + 'static>(
             .cloned()
             .collect();
         types.extend(more);
-        out.insert(uri, Seen { types, meta });
+        visit(&uri, types, &meta)?;
     }
-    Ok(out)
+    Ok(())
 }
 
 pub async fn handle<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     agent: &Agent,
+) -> Response {
+    handle_within(state, req, agent, MAX_INDEX_WORKING_SET).await
+}
+
+/// [`handle`], keeping at most `budget` bytes while the storage is walked.
+async fn handle_within<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    budget: usize,
 ) -> Response {
     if state.needs_auth(agent) {
         return state.challenge(None);
@@ -418,20 +435,21 @@ pub async fn handle<S: Store + 'static>(
     let media_type = media_type.as_str();
     // A failure says nothing of the resource it met: its URI, and so its existence, may be
     // something the agent may not read. Every failure gets the same response.
-    let resources = match readable(state, agent).await {
-        Ok(r) => r,
-        Err(_) => {
-            return problem(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Some("the index could not be built"),
-            );
+    // What is kept while the storage is walked is charged against one budget.
+    let mut kept = 0usize;
+    let mut charge = |bytes: usize| {
+        kept = kept.saturating_add(bytes);
+        if kept > budget {
+            Err(Failed::TooLarge)
+        } else {
+            Ok(())
         }
     };
-    let mut links = Vec::new();
-    let mut content_location = None;
-    let doc = if search {
-        let mut items = Vec::new();
-        for (uri, Seen { types, meta }) in &resources {
+    let mut items: Vec<(String, Vec<String>)> = Vec::new();
+    let mut all_types: BTreeSet<String> = BTreeSet::new();
+    let walked = if search {
+        // A search keeps only what it matched, with its types.
+        readable(state, agent, |uri, types, meta| {
             let have: std::collections::HashSet<&str> = types.iter().map(String::as_str).collect();
             let mut matched = all_groups(&filter.types, |v| have.contains(v));
             if matched && !filter.relations.is_empty() {
@@ -440,10 +458,49 @@ pub async fn handle<S: Store + 'static>(
                     all_groups(groups, |v| targets.contains(v))
                 });
             }
+            drop(have);
             if matched {
-                items.push((uri, types));
+                charge(uri.len() + types.iter().map(String::len).sum::<usize>())?;
+                items.push((uri.to_string(), types));
             }
+            Ok(())
+        })
+        .await
+    } else {
+        // The index keeps only the distinct types.
+        readable(state, agent, |_, types, _| {
+            for t in types {
+                if !all_types.contains(&t) {
+                    charge(t.len())?;
+                    all_types.insert(t);
+                }
+            }
+            Ok(())
+        })
+        .await
+    };
+    // A failure says nothing of the resource it met: its URI, and so its existence, may be
+    // something the agent may not read. Every failure of the store gets the same response.
+    match walked {
+        Ok(()) => {}
+        Err(Failed::Store) => {
+            return problem(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Some("the index could not be built"),
+            );
         }
+        Err(Failed::TooLarge) => {
+            return problem(
+                StatusCode::INSUFFICIENT_STORAGE,
+                Some("the index is larger than this server builds for one request"),
+            );
+        }
+    }
+    let mut links = Vec::new();
+    let mut content_location = None;
+    let doc = if search {
+        // Pages are in URI order.
+        items.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let size = state.cfg.page_size.max(1);
         let total = items.len();
         let pages = total.div_ceil(size).max(1);
@@ -496,7 +553,7 @@ pub async fn handle<S: Store + 'static>(
         // The TypeIndex is paged like a container (section 6.1): opaque `?page=N` links in Link
         // headers, first and last always, prev and next where there is one; a page that does not
         // exist (any more) is 404.
-        let types: BTreeSet<&String> = resources.values().flat_map(|s| &s.types).collect();
+        let types = all_types;
         let total = types.len();
         let size = state.cfg.page_size.max(1);
         let pages = total.div_ceil(size).max(1);
@@ -681,6 +738,50 @@ mod tests {
             .collect();
         assert!(!ids.contains(&"https://e.example/Secret"), "{ids:?}");
         assert!(!ids.contains(&"https://e.example/Public"), "{ids:?}");
+    }
+
+    /// Review finding: the index and searches kept every readable resource's whole metadata
+    /// while they walked the storage, however little they returned. A search keeps only what it
+    /// matched and the index only the distinct types, against one budget; past it, `507`.
+    #[tokio::test]
+    async fn the_walk_keeps_only_what_it_returns() {
+        use super::super::test_store;
+        let (state, _store) = test_store::state(4).await;
+        let root = state.cfg.storage();
+        for i in 0..20 {
+            state
+                .store
+                .create_in_container(&root, &format!("{root}r{i}"), "x".into(), "text/plain")
+                .await
+                .unwrap();
+        }
+        let anyone = Agent::anonymous();
+        let query = |body: &str| {
+            let mut r = test_store::request(
+                Method::GET,
+                TYPE_SEARCH_PATH,
+                &[("content-type", LWS_QUERY)],
+                body,
+            );
+            r.method = Method::from_bytes(b"QUERY").unwrap();
+            r
+        };
+        // Room for a few matches, not twenty.
+        let budget = 4 * format!("{root}r10{LWS_NS}DataResource").len();
+        let all = handle_within(&state, &query("{}"), &anyone, budget).await;
+        assert_eq!(all.status(), StatusCode::INSUFFICIENT_STORAGE);
+        // A search that matches nothing keeps nothing, and the index keeps two types.
+        let none = query(r#"{"type": ["https://e.example/Nothing"]}"#);
+        let r = handle_within(&state, &none, &anyone, budget).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let get = test_store::request(Method::GET, TYPE_INDEX_PATH, &[], "");
+        let r = handle_within(&state, &get, &anyone, budget).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        // Under the real budget, all twenty are found.
+        assert_eq!(
+            handle(&state, &query("{}"), &anyone).await.status(),
+            StatusCode::OK
+        );
     }
 
     /// Review findings: a `q` parameter replaced a QUERY's body, so the body was never checked;

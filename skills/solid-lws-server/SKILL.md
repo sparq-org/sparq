@@ -274,7 +274,7 @@ What the server exposes, all discoverable from the storage description
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
   `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
   lines counts every line; an entity-tag list that cannot be read by the RFC 9110 grammar gets
-  `412` (a comma inside a quoted tag is part of the tag), and a date that is not one valid
+  `412` (a comma inside a quoted tag is part of the tag; an empty list names no tag), and a date that is not one valid
   HTTP-date is ignored. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
@@ -331,7 +331,8 @@ What the server exposes, all discoverable from the storage description
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
   anything is removed. When putting back fails too, the resource is left **fail-closed**: only
   the owner and its creator may act on it until a write completes, and what could not be put
-  back is kept and retried in the background, unless a later write or create replaces it first.
+  back is kept and retried in the background, unless a later write or create (even of the same
+  bytes) replaces it first.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
@@ -352,6 +353,8 @@ What the server exposes, all discoverable from the storage description
   any listing, permission check or metadata read fails, the whole index fails with one
   generic `500` that names no resource. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
+  While walking the storage they keep only what they return (a search its matches, the index
+  its distinct types), at most 16 MiB of URIs and types; past that the request gets `507`.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
