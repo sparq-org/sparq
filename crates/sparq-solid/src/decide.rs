@@ -267,7 +267,7 @@ pub(crate) struct AclIndex {
     /// but we don't assume which, and an own-ACL lookup is just a set membership test).
     control: rustc_hash::FxHashSet<String>,
     /// Whether the materialized auth view (`<urn:sparq:auth>`) is present in the dataset.
-    materialized: bool,
+    pub(crate) materialized: bool,
 }
 
 impl AclIndex {

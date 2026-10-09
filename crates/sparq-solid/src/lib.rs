@@ -30,6 +30,10 @@ mod provenance;
 // default, so the core sparq-solid build carries zero ODRL/sparq-policy code.
 #[cfg(feature = "odrl-bridge")]
 pub mod odrl_bridge;
+// Request-time ODRL decisions (issue #6743): attached policies evaluated through
+// `sparq_policy::decide` for the accessing session.
+#[cfg(feature = "odrl-bridge")]
+pub mod odrl_enforce;
 // [OPUS-4.8] sq-pfae PoC (issue #940): trust-graph admission → AUTH_GRAPH wiring —
 // opt-in (`trust-graph` feature), OFF by default, so the core sparq-solid build carries
 // zero trust-graph/sparq-trust code and is byte-identical to WAC/ACP today (G6).
@@ -86,6 +90,8 @@ pub use odrl_bridge::{
 };
 #[cfg(feature = "odrl-bridge")]
 pub use odrl_bridge::{BridgeEntry, BridgeKind, BridgeLedger};
+#[cfg(feature = "odrl-bridge")]
+pub use odrl_enforce::OdrlEnforcement;
 // [OPUS-4.8] sq-pfae PoC: the trust-graph admission outcome types (feature-gated).
 // `TrustStaticOutcome` is the materialise-time (static/dynamic split, sq-xc4y) result.
 #[cfg(feature = "trust-graph")]
@@ -276,6 +282,10 @@ pub struct PodStore {
     /// carries zero ODRL state).
     #[cfg(feature = "odrl-bridge")]
     bridge_ledger: odrl_bridge::BridgeLedger,
+    /// The ODRL policies evaluated per request (issue #6743). Applied on top of the
+    /// cached static view, so attaching or detaching needs no cache invalidation.
+    #[cfg(feature = "odrl-bridge")]
+    odrl: odrl_enforce::OdrlEnforcement,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -438,6 +448,8 @@ impl PodStore {
             cache: session_cache::SessionCache::new(), // [FABLE-5] sq-cnuqd: bounded + sharded
             #[cfg(feature = "odrl-bridge")]
             bridge_ledger: odrl_bridge::BridgeLedger::new(),
+            #[cfg(feature = "odrl-bridge")]
+            odrl: odrl_enforce::OdrlEnforcement::default(),
         }
     }
 
@@ -886,7 +898,42 @@ impl PodStore {
     pub fn decide(&self, session: &Session, resource: &str, mode: Mode) -> WacDecision {
         // [OPUS-4.8] sq-j8qtt: reuse the persistent per-generation index (built once,
         // dropped on `reindex`) instead of rebuilding it on every call.
-        decide::decide_one(self.acl_index(), &self.auth, session, resource, mode)
+        let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, mode);
+        self.apply_odrl(d, session, resource, mode)
+    }
+
+    /// Apply the attached ODRL policies (issue #6743) to a point decision: a prohibition
+    /// removes the mode, and a grant adds it to a resolved decision or settles one with
+    /// no ACL at all. A transient or unloaded decision is returned unchanged (it already
+    /// denies). The identity when no policy is attached.
+    #[cfg(not(feature = "odrl-bridge"))]
+    fn apply_odrl(&self, d: WacDecision, _: &Session, _: &str, _: Mode) -> WacDecision {
+        d
+    }
+
+    /// Feature-on body of the point-decision filter above.
+    #[cfg(feature = "odrl-bridge")]
+    fn apply_odrl(&self, mut d: WacDecision, session: &Session, resource: &str, mode: Mode) -> WacDecision {
+        if !self.odrl.is_empty() {
+            // A grant can settle a resource with no ACL at all, as `accessible` does; a
+            // transient or unloaded ACL state, or a store never materialized, still fails
+            // closed.
+            let settled = matches!(d.status, AclStatus::Resolved | AclStatus::NoAcl)
+                && self.acl_index().materialized;
+            if !settled {
+                return d;
+            }
+            let modes = [Mode::Read, Mode::Write, Mode::Append, Mode::Control];
+            d.granted_modes = modes
+                .into_iter()
+                .filter(|m| self.odrl.allows(session, *m, resource, d.granted_modes.contains(m)))
+                .collect();
+            if d.status == AclStatus::NoAcl && !d.granted_modes.is_empty() {
+                d.status = AclStatus::Resolved;
+            }
+            d.allow = d.status == AclStatus::Resolved && d.granted_modes.contains(&mode);
+        }
+        d
     }
 
     /// [OPUS-4.8] issue #992 FR-1 (sq-snopa.1) — [`PodStore::decide`] for a BATCH of
@@ -902,7 +949,10 @@ impl PodStore {
         let index = self.acl_index();
         requests
             .iter()
-            .map(|(resource, mode)| decide::decide_one(index, &self.auth, session, resource, *mode))
+            .map(|(resource, mode)| {
+                let d = decide::decide_one(index, &self.auth, session, resource, *mode);
+                self.apply_odrl(d, session, resource, *mode)
+            })
             .collect()
     }
 
@@ -1054,7 +1104,14 @@ impl PodStore {
             mode,
         );
         let auth = Arc::clone(&self.auth);
-        self.cache.get_or_compute(&key, |entry| entry.fill(&auth, s, mode))
+        let sets = self.cache.get_or_compute(&key, |entry| entry.fill(&auth, s, mode));
+        // Before the first materialization the view stays empty (fail-closed), so an
+        // attached grant cannot open it either.
+        #[cfg(feature = "odrl-bridge")]
+        if !self.odrl.is_empty() && self.acl_index().materialized {
+            return SessionEntry::sets_from(self.odrl.apply(&self.graph, s, mode, &sets.sorted));
+        }
+        sets
     }
 
     /// The session's zero-copy [`DatasetView`] over this store (mode-checked graph
@@ -1618,7 +1675,35 @@ impl PodStore {
         (matched, retracted)
     }
 
-    /// [OPUS-4.8] sq-dpk4 — the bridge ledger (tracked bridged grants + static
+    /// Attach an ODRL `policy` to be evaluated per request for the accessing session
+    /// (issue #6743). Every read-side entry point ([`PodStore::accessible`], the query
+    /// and view paths, [`PodStore::wac_allow`], [`PodStore::decide`]) then denies a graph
+    /// some attached prohibition applies to, and allows one an attached permission grants
+    /// that session, with the session's agent as party and its clock as request time.
+    /// See [`odrl_enforce`] for the action-to-mode mapping.
+    ///
+    /// # Errors
+    ///
+    /// A policy whose `odrl:conflict` strategy `decide` cannot honour is refused.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn attach_odrl_policy(&mut self, policy: sparq_policy::ValidatedPolicy) -> Result<(), String> {
+        self.odrl.attach(policy)
+    }
+
+    /// Record `asset odrl:partOf collection` as evidence on every request the attached
+    /// policies evaluate, so a rule targeting the collection covers the asset.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn add_odrl_asset_membership(&mut self, asset: impl Into<String>, collection: impl Into<String>) {
+        self.odrl.add_asset_membership(asset.into(), collection.into());
+    }
+
+    /// Detach every attached ODRL policy and its membership evidence.
+    #[cfg(feature = "odrl-bridge")]
+    pub fn detach_odrl_policies(&mut self) {
+        self.odrl.clear();
+    }
+
+    /// The bridge ledger (tracked bridged grants + static
     /// baseline), for inspection/audit. Only present under the `odrl-bridge` feature.
     #[cfg(feature = "odrl-bridge")]
     pub fn bridge_ledger(&self) -> &odrl_bridge::BridgeLedger {
