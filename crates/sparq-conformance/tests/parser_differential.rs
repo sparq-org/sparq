@@ -5,11 +5,10 @@
 //! 1. **Green on incumbents** — the REAL sparq ingest paths (native `nt.rs`, the
 //!    chunk-parallel dataset loaders) differentially compared against serial oxttl over
 //!    (a) every `mf:action` of the W3C rdf-n-triples / rdf-n-quads / rdf-trig suites and
-//!    (b) the committed fuzz seed corpus (`fuzz/seeds/`). The known native-parser
-//!    divergences (bead sq-w64x5 — the same cases the `rdf_line_syntax_ratchet` floors
-//!    record) are pinned as an EXACT adjudicated set: a NEW divergence fails, and a
-//!    divergence that disappears fails too (fixing sq-w64x5 must prune the list AND
-//!    raise the ratchet floors — no silent drift in either direction).
+//!    (b) the committed fuzz seed corpus (`fuzz/seeds/`). Native-parser divergences are
+//!    pinned as an EXACT adjudicated set (empty since the #2716 fix of bead sq-w64x5): a
+//!    NEW divergence fails, and a divergence that disappears fails too (pruning the list
+//!    goes with raising the `rdf_line_syntax_ratchet` floors — no silent drift).
 //! 2. **Mutation non-vacuity** — deliberately seeded divergent parsers (a quad-dropping
 //!    mutant, a leniently-accepting mutant, a term-mangling mutant) MUST be detected by
 //!    the same harness entry points a real candidate will run through, and the reported
@@ -199,21 +198,9 @@ fn stems(names: &[&str]) -> BTreeSet<String> {
 // 1. Green on incumbents — W3C suite actions.
 // ---------------------------------------------------------------------------
 
-/// The adjudicated native-nt.rs divergence set on the rdf-n-triples actions (bead
-/// sq-w64x5; the SAME cases the `rdf_line_syntax_ratchet` NT floor records: 9 lenient
-/// accepts + 1 strict reject).
-const NT_ADJUDICATED: &[&str] = &[
-    "nt-syntax-bad-uri-01.nt",
-    "nt-syntax-bad-uri-04.nt",
-    "nt-syntax-bad-uri-06.nt",
-    "nt-syntax-bad-uri-07.nt",
-    "nt-syntax-bad-uri-08.nt",
-    "nt-syntax-bad-uri-09.nt",
-    "nt-syntax-bad-bnode-01.nt",
-    "nt-syntax-bad-bnode-02.nt",
-    "nt-syntax-bad-lang-01.nt",
-    "minimal_whitespace.nt",
-];
+/// The adjudicated native-nt.rs divergence set on the rdf-n-triples actions: EMPTY since
+/// the #2716 fix (bead sq-w64x5; it held 9 lenient accepts + 1 strict reject before).
+const NT_ADJUDICATED: &[&str] = &[];
 
 #[test]
 fn differential_nt_native_vs_oxttl_over_w3c_actions() {
@@ -260,22 +247,8 @@ fn differential_nq_native_vs_oxttl_over_w3c_actions() {
         "unverified inputs: {:?}",
         report.unverified
     );
-    // The N-Quads manifest embeds the N-Triples cases (N-Quads is a superset), so the
-    // adjudicated set is the NT set (as .nq copies where the manifest uses them) plus
-    // the graph-position IRI case.
-    let expected = stems(&[
-        "nt-syntax-bad-uri-01.nq",
-        "nt-syntax-bad-uri-04.nq",
-        "nt-syntax-bad-uri-06.nq",
-        "nt-syntax-bad-uri-07.nq",
-        "nt-syntax-bad-uri-08.nq",
-        "nt-syntax-bad-uri-09.nq",
-        "nt-syntax-bad-bnode-01.nq",
-        "nt-syntax-bad-bnode-02.nq",
-        "nt-syntax-bad-lang-01.nq",
-        "minimal_whitespace.nq",
-        "nq-syntax-bad-uri-01.nq",
-    ]);
+    // Empty since the #2716 fix (it held the NT cases plus `nq-syntax-bad-uri-01`).
+    let expected = stems(&[]);
     assert_eq!(
         divergent_stems(&report),
         expected,
@@ -363,17 +336,19 @@ fn differential_fuzz_seeds_format_prefixed() {
 }
 
 /// The larger committed N-Quads seed set (`fuzz/seeds/canonicalize_nquads`) — plain
-/// N-Quads documents, no format-selector byte. The fuzz-mangled seeds hit the SAME
-/// adjudicated native-parser leniency class the W3C suites record (bead sq-w64x5: no
-/// IRI character/scheme validation, so the native path ACCEPTS mangled IRIs oxttl
-/// rejects) — pinned by exact count and kind; any OTHER divergence kind (quad-set
-/// difference, native rejecting what oxttl accepts) fails immediately, and fixing
-/// sq-w64x5 must drop the count to 0.
+/// N-Quads documents, no format-selector byte. The default native path checks the
+/// N-Triples IRIREF grammar (character class, UCHAR-only escapes, a scheme), not full
+/// RFC 3987 (that is the opt-in `iri-fast` feature), so fuzz-mangled IRIs that are
+/// grammatical IRIREFs but not RFC 3987 IRIs (a non-`ucschar` code point such as U+FFFD,
+/// a malformed authority) are still ACCEPTED where oxttl rejects them — pinned by exact
+/// count and kind; any OTHER divergence kind (quad-set difference, native rejecting what
+/// oxttl accepts) fails immediately.
 #[test]
 fn differential_fuzz_seeds_nquads_corpus() {
     /// MEASURED adjudicated count at the committed seed corpus (all CandidateAccepts,
-    /// all "Invalid IRI code point / no scheme / invalid character" — sq-w64x5).
-    const NQ_SEED_ADJUDICATED_LENIENT_ACCEPTS: usize = 16;
+    /// all "Invalid IRI code point / invalid character"). It was 16 before #2716 added
+    /// IRIREF character + scheme validation.
+    const NQ_SEED_ADJUDICATED_LENIENT_ACCEPTS: usize = 6;
     let Some(dir) = fuzz_seeds_dir("canonicalize_nquads") else {
         panic!("committed fuzz seed dir fuzz/seeds/canonicalize_nquads missing");
     };
@@ -391,7 +366,7 @@ fn differential_fuzz_seeds_nquads_corpus() {
     for d in &report.divergences {
         assert!(
             matches!(d.kind, DivergenceKind::CandidateAccepts(_)),
-            "NON-adjudicated divergence kind on the seed corpus (only the sq-w64x5 \
+            "NON-adjudicated divergence kind on the seed corpus (only the RFC 3987 \
              lenient-accept class is adjudicated):\n{}",
             report.describe()
         );
@@ -399,8 +374,8 @@ fn differential_fuzz_seeds_nquads_corpus() {
     assert_eq!(
         report.divergences.len(),
         NQ_SEED_ADJUDICATED_LENIENT_ACCEPTS,
-        "adjudicated sq-w64x5 lenient-accept count drifted (rose = new leniency; fell = \
-         sq-w64x5 progress — re-pin and raise the syntax-ratchet floors):\n{}",
+        "adjudicated RFC 3987 lenient-accept count drifted (rose = new leniency; fell = \
+         progress — re-pin):\n{}",
         report.describe()
     );
 }
