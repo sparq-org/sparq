@@ -24,7 +24,9 @@ Three legs:
                            file the base-tree directory does NOT (set difference). Different
                            PRs add different files, so git NEVER textually conflicts (the
                            old scalar change_token put every declaring PR on the SAME line).
-  --leg3                   cfg-audit: every vectorized call site in lib.rs/exec.rs is gated
+  --leg3                   cfg-audit: every vectorized call site in lib.rs, exec.rs and
+                           every child module of exec is gated; fails if exec declares a
+                           child module the audit does not scan
   --self-test              run built-in tripwires that MUST fail (guard the guards)
 
 sq-v3nel (2026-07-07): leg 2 was RE-DESIGNED from a static exact-equality
@@ -77,6 +79,17 @@ import tempfile
 # Constants — the source files leg 3 audits.
 # ---------------------------------------------------------------------------
 _EXEC_RS = "crates/sparq-engine/src/exec.rs"
+# exec.rs is split into child modules under exec/. Leg 3 scans every .rs file there.
+_EXEC_DIR = "crates/sparq-engine/src/exec"
+# Child modules of `exec` that live OUTSIDE exec/ because they are declared with
+# `#[path = ...]`. A new out-of-tree child must be added here, or the
+# child-module tripwire in leg 3 fails.
+_EXEC_PATH_CHILDREN = (
+    "crates/sparq-engine/src/eqjoin.rs",
+    "crates/sparq-engine/src/exists_domain.rs",
+    "crates/sparq-engine/src/numeric_capacity.rs",
+    "crates/sparq-engine/src/nullable_path_tests.rs",
+)
 _LIB_RS = "crates/sparq-engine/src/lib.rs"
 _CHUNK_RS = "crates/sparq-engine/src/chunk.rs"
 
@@ -85,6 +98,28 @@ _CHUNK_RS = "crates/sparq-engine/src/chunk.rs"
 _CHUNK_IMPORT_PATTERN = re.compile(r'\bchunk::|DataChunk\b|SelVec\b|VecCmp\b|apply_filter_columnar\b')
 _MOD_CHUNK_PATTERN = re.compile(r'\b(?:mod|pub use)\s+chunk\b')
 _CFG_VECTORIZED = re.compile(r'#\[cfg\(feature\s*=\s*"vectorized"\)\]')
+# Out-of-line module declaration, after any same-line attributes are removed.
+_MOD_DECL = re.compile(
+    r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+((?:r#)?[A-Za-z_][A-Za-z0-9_]*)\s*;')
+# The `mod` keyword anywhere in a line's code (string literals removed first). Every
+# such line must be either an inline `mod name {` or a declaration `_MOD_DECL`
+# parses; anything else (`mod` and its name split across lines, an unusual
+# spelling) fails closed instead of being skipped.
+_MOD_KEYWORD = re.compile(r'(?<![A-Za-z0-9_#])mod\b')
+_MOD_INLINE = re.compile(
+    r'^(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?[A-Za-z_][A-Za-z0-9_]*\s*\{')
+_CHAR_LIT = re.compile(r"'(?:\\.|[^\\'])'")
+_STRING_LIT = re.compile(r'"(?:[^"\\]|\\.)*"')
+# Fail-closed `path` handling. The ONLY supported spelling is the simple form
+# `#[path = "<plain chars>"]`: a normal string with no backslash or quote, optional
+# whitespace. Any other attribute on a `mod` declaration whose text contains the
+# token `path` (outside a `doc = "..."` string) fails the audit as unsupported:
+# raw strings, escapes, byte strings, cfg_attr(..., path = ...), macros, and so on.
+_PATH_ATTR = re.compile(r'^#\s*\[\s*path\s*=\s*"([^"\\]+)"\s*\]$')
+_DOC_STRING = re.compile(r'\bdoc\s*=\s*"(?:[^"\\]|\\.)*"')
+_PATH_TOKEN = re.compile(r'\bpath\b')
+_CFG_ATTR = re.compile(r'^#\s*\[\s*cfg\s*\((.*)\)\s*\]$', re.S)
+_CFG_TOKEN = re.compile(r'\s*(?:([A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*")|([(),=]))')
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +383,260 @@ def _is_inside_cfg_vectorized_block(lines: list[str], target_lineno: int) -> boo
     return False
 
 
+def _exec_audit_files(repo_root: str) -> list[str]:
+    """exec.rs, every .rs file under exec/ (recursively), and the #[path] children.
+    Repo-relative paths with `/` separators, exec.rs first."""
+    files = [_EXEC_RS]
+    exec_dir = os.path.join(repo_root, _EXEC_DIR)
+    for dirpath, dirnames, names in os.walk(exec_dir):
+        dirnames.sort()
+        for n in sorted(names):
+            if n.endswith(".rs"):
+                rel = os.path.relpath(os.path.join(dirpath, n), repo_root)
+                files.append(rel.replace(os.sep, "/"))
+    for rel in _EXEC_PATH_CHILDREN:
+        if os.path.exists(os.path.join(repo_root, rel)) and rel not in files:
+            files.append(rel)
+    return files
+
+
+def _split_leading_attrs(text: str) -> tuple[list[str], str]:
+    """Split `#[..] #[..] rest` into (["#[..]", "#[..]"], "rest"). Brackets inside
+    string literals are skipped. An unterminated attribute returns ([], text)."""
+    attrs: list[str] = []
+    rest = text.lstrip()
+    while rest.startswith("#"):
+        j = 1
+        while j < len(rest) and rest[j].isspace():
+            j += 1
+        if j >= len(rest) or rest[j] != "[":
+            break
+        depth, k, in_str = 0, j, False
+        while k < len(rest):
+            ch = rest[k]
+            if in_str:
+                if ch == "\\":
+                    k += 1
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        if depth != 0:
+            return [], text
+        attrs.append(rest[:k + 1])
+        rest = rest[k + 1:].lstrip()
+    return attrs, rest
+
+
+def _parse_cfg(pred: str):
+    """Parse a cfg predicate into a tree: ("all"|"any", [..]), ("not", x),
+    ("kv", key, value) or ("flag", name). Returns None on a syntax error."""
+    toks: list[str] = []
+    pos = 0
+    pred = pred.strip()
+    while pos < len(pred):
+        m = _CFG_TOKEN.match(pred, pos)
+        if not m or m.end() == pos:
+            return None
+        toks.append(m.group(1) or m.group(2) or m.group(3))
+        pos = m.end()
+        while pos < len(pred) and pred[pos].isspace():
+            pos += 1
+    i = 0
+
+    def node():
+        nonlocal i
+        if i >= len(toks) or not re.match(r"[A-Za-z_]", toks[i]):
+            raise ValueError
+        name = toks[i]
+        i += 1
+        if i < len(toks) and toks[i] == "(":
+            if name not in ("all", "any", "not"):
+                raise ValueError
+            i += 1
+            kids = []
+            while i < len(toks) and toks[i] != ")":
+                kids.append(node())
+                if i < len(toks) and toks[i] == ",":
+                    i += 1
+                elif i < len(toks) and toks[i] != ")":
+                    raise ValueError
+            if i >= len(toks):
+                raise ValueError
+            i += 1
+            if name == "not":
+                if len(kids) != 1:
+                    raise ValueError
+                return ("not", kids[0])
+            return (name, kids)
+        if i < len(toks) and toks[i] == "=":
+            i += 1
+            if i >= len(toks) or not toks[i].startswith('"'):
+                raise ValueError
+            val = toks[i][1:-1]
+            i += 1
+            return ("kv", name, val)
+        return ("flag", name)
+
+    try:
+        tree = node()
+    except ValueError:
+        return None
+    return tree if i == len(toks) else None
+
+
+def _cfg_requires_vectorized(tree) -> bool:
+    """True only if every configuration satisfying `tree` has feature "vectorized".
+    Conservative: anything under `not(...)` counts as not requiring it."""
+    if tree is None:
+        return False
+    kind = tree[0]
+    if kind == "kv":
+        return tree[1] == "feature" and tree[2] == "vectorized"
+    if kind == "all":
+        return any(_cfg_requires_vectorized(t) for t in tree[1])
+    if kind == "any":
+        return bool(tree[1]) and all(_cfg_requires_vectorized(t) for t in tree[1])
+    return False
+
+
+def _attr_gates_vectorized(attr: str) -> bool:
+    """True if `attr` is a `#[cfg(...)]` whose predicate requires `vectorized`."""
+    m = _CFG_ATTR.match(attr.strip())
+    return bool(m) and _cfg_requires_vectorized(_parse_cfg(m.group(1)))
+
+
+def _strip_line_comment(line: str) -> str:
+    """`line` up to its `//` comment, if any; a `//` inside a string literal is kept."""
+    in_str = False
+    i = 0
+    while i < len(line):
+        c = line[i]
+        if in_str:
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif line.startswith("//", i):
+            return line[:i]
+        i += 1
+    return line
+
+
+def _child_module_decls(repo_root: str, rel: str, lines: list[str]):
+    """Yield (lineno, name, child_rel_or_None, gated_on_vectorized, problem) for every
+    out-of-line `mod name;` declaration in `rel`, resolved with rustc's rules:
+    `#[path]` is relative to the declaring file's directory; otherwise the child is
+    <dir>/<stem>/<name>.rs (or <dir>/<name>.rs from a mod.rs/lib.rs), falling back to
+    .../<name>/mod.rs. Attributes may sit on preceding lines or on the same line.
+    When the declaration cannot be resolved (it is indented inside an inline
+    `mod {}`, it does not parse, or the file does not exist) child is None and
+    `problem` says why, so the caller fails closed instead of guessing."""
+    d = os.path.dirname(rel)
+    stem = os.path.splitext(os.path.basename(rel))[0]
+    base = d if stem in ("mod", "lib", "main") else f"{d}/{stem}"
+    depth = 0  # `{` nesting at the start of the current line (strings/chars removed)
+    for lineno, line in enumerate(lines, start=1):
+        code = _strip_line_comment(line)
+        bare = _CHAR_LIT.sub("' '", _STRING_LIT.sub('""', code))
+        depth_here = depth
+        depth += bare.count("{") - bare.count("}")
+        n_mod = len(_MOD_KEYWORD.findall(bare))
+        if not n_mod:
+            continue
+        if depth_here > 0 and not _MOD_INLINE.match(_split_leading_attrs(code)[1].strip()):
+            # Inside an inline module (whose own `#[path]` would change where its
+            # children live) or any other block: not resolved line by line.
+            yield lineno, "?", None, False, (
+                "out-of-line `mod` declaration nested inside a block is unsupported: "
+                + line.strip())
+            continue
+        same_line_attrs, rest = _split_leading_attrs(code)
+        rest = rest.strip()
+        if n_mod > 1:
+            yield lineno, "?", None, False, (
+                "more than one `mod` on a line is unsupported: " + line.strip())
+            continue
+        if _MOD_INLINE.match(rest):
+            continue
+        m = _MOD_DECL.match(rest)
+        if m and rest[m.end():].strip():
+            yield lineno, "?", None, False, (
+                "trailing code after a `mod` declaration is unsupported: " + line.strip())
+            continue
+        if not m:
+            yield lineno, "?", None, False, (
+                "unparseable `mod` declaration (only `mod name;` / `mod name {` on one "
+                "line are understood): " + line.strip())
+            continue
+        name = m.group(1)[2:] if m.group(1).startswith("r#") else m.group(1)
+        attrs: list[str] = list(same_line_attrs)
+        problem = None
+        i = lineno - 2
+        while i >= 0:
+            prev = _strip_line_comment(lines[i]).strip()
+            if not prev:
+                i -= 1
+                continue
+            if "/*" in prev or "*/" in prev:
+                problem = ("block comment before the `mod` declaration is unsupported: "
+                           + prev)
+                break
+            more, tail = _split_leading_attrs(prev)
+            if prev.startswith("#") and more and not tail.strip():
+                attrs.extend(more)
+                i -= 1
+                continue
+            if prev.startswith("#"):
+                problem = ("unparseable attribute before the `mod` declaration: " + prev)
+                break
+            if prev.endswith("]"):
+                # The tail of an attribute that spans several lines: its content
+                # (cfg, path, cfg_attr) cannot be read line by line.
+                problem = ("multi-line attribute before the `mod` declaration is "
+                           "unsupported: " + prev)
+            break
+        is_gated = any(_attr_gates_vectorized(a) for a in attrs)
+        path_like = [a.strip() for a in attrs if _PATH_TOKEN.search(_DOC_STRING.sub("", a))]
+        if problem is None:
+            odd = [a for a in path_like if not _PATH_ATTR.match(a)]
+            if odd:
+                problem = ("unsupported `path` attribute on a `mod` declaration (only "
+                           '`#[path = "plain.rs"]` is understood): ' + odd[0])
+            elif len(path_like) > 1:
+                problem = "more than one `path` attribute on a `mod` declaration"
+        if problem is not None:
+            yield lineno, name, None, is_gated, problem
+            continue
+        if line[:len(line) - len(line.lstrip())]:
+            yield lineno, name, None, is_gated, (
+                "indented out-of-line `mod` declaration (inside an inline module)")
+            continue
+        path_attr = _PATH_ATTR.match(path_like[0]).group(1) if path_like else None
+        if path_attr is not None:
+            child = os.path.normpath(f"{d}/{path_attr}").replace(os.sep, "/")
+        else:
+            child = f"{base}/{name}.rs"
+            alt = f"{base}/{name}/mod.rs"
+            if (not os.path.exists(os.path.join(repo_root, child))
+                    and os.path.exists(os.path.join(repo_root, alt))):
+                child = alt
+        if not os.path.exists(os.path.join(repo_root, child)):
+            yield lineno, name, None, is_gated, f"resolved file {child} does not exist"
+            continue
+        yield lineno, name, child, is_gated, None
+
+
 def check_leg3(repo_root: str = ".") -> int:
     """
     Audit that every reference to `vectorized` constructs outside chunk.rs is
@@ -356,9 +645,17 @@ def check_leg3(repo_root: str = ".") -> int:
     Checks:
     1. In lib.rs: every `mod chunk` or `pub use chunk` line has the cfg guard
        within 3 preceding lines.
-    2. In exec.rs: every line referencing vectorized call sites (chunk::, DataChunk,
-       SelVec, VecCmp, apply_filter_columnar) is inside a #[cfg(feature="vectorized")]
-       block OR has the guard within 3 preceding lines.
+    2. In exec.rs, every .rs file under exec/ and each #[path] child in
+       _EXEC_PATH_CHILDREN: every line referencing vectorized call sites (chunk::,
+       DataChunk, SelVec, VecCmp, apply_filter_columnar) is inside a
+       #[cfg(feature="vectorized")] block, has the guard within 3 preceding lines, or
+       sits in a module whose every `mod` declaration (or a gated ancestor) is
+       gated on `vectorized`.
+    3. Tripwire: every `mod x;` declared by exec.rs (or by a scanned child) resolves
+       to a file in that scanned set; otherwise the audit fails. A declaration
+       carrying any `path` attribute other than `#[path = "plain.rs"]` (raw or
+       escaped strings, cfg_attr(..., path = ...), ...) or a multi-line attribute
+       is unsupported and also fails.
     """
     violations: list[str] = []
     findings: list[str] = []
@@ -389,36 +686,100 @@ def check_leg3(repo_root: str = ".") -> int:
                     f"       {line.rstrip()}"
                 )
 
-    # --- exec.rs: vectorized call sites ---
-    exec_rs_path = os.path.join(repo_root, _EXEC_RS)
-    try:
-        with open(exec_rs_path) as fh:
-            exec_lines = fh.readlines()
-    except FileNotFoundError:
-        print(f"[leg3] WARNING: {exec_rs_path!r} not found — skipping exec.rs check")
-        exec_lines = []
+    # --- exec.rs and every child module of `exec`: vectorized call sites ---
+    audited = _exec_audit_files(repo_root)
+    audited_set = set(audited)
+    texts: dict[str, list[str]] = {}
+    for rel in audited:
+        try:
+            with open(os.path.join(repo_root, rel)) as fh:
+                texts[rel] = fh.readlines()
+        except FileNotFoundError:
+            if rel == _EXEC_RS:
+                print(f"[leg3] WARNING: {rel!r} not found — skipping exec check")
+            texts[rel] = []
 
-    for lineno, line in enumerate(exec_lines, start=1):
-        stripped = line.lstrip()
-        # Skip comment lines (single-line)
-        if stripped.startswith("//"):
-            continue
-        # Skip the cfg attribute line itself
-        if _CFG_VECTORIZED.search(line):
-            continue
-        if _CHUNK_IMPORT_PATTERN.search(line):
-            # Accept if guarded by nearby preceding cfg OR inside a cfg block
-            if (_lines_have_cfg_guard(exec_lines, lineno, window=3) or
-                    _is_inside_cfg_vectorized_block(exec_lines, lineno)):
-                findings.append(
-                    f"[leg3] OK  {_EXEC_RS}:{lineno}: vectorized reference is cfg-guarded"
-                )
-            else:
+    # Tripwire: every `mod x;` that exec.rs (or a child) declares must resolve to a
+    # file this audit scans. Otherwise a vectorized reference could hide in an
+    # unscanned module.
+    #
+    # Gating: a file counts as gated only if EVERY declaration that reaches it is
+    # gated, either by its own cfg or because the declaring file is itself gated. All
+    # declarations are collected first, then the gated set is the greatest fixpoint
+    # of that rule (exec.rs is never gated), so two declarations of one file, one
+    # gated and one not, leave it ungated, and descendants inherit the result.
+    incoming: dict[str, list[tuple[str, bool, str]]] = {}
+    queue = [_EXEC_RS] if texts.get(_EXEC_RS) else []
+    seen: set[str] = set(queue)
+    decl_count = 0
+    while queue:
+        parent = queue.pop(0)
+        for lineno, name, child, is_gated, problem in _child_module_decls(
+                repo_root, parent, texts[parent]):
+            where = f"{parent}:{lineno}"
+            decl_count += 1
+            if child is None:
                 violations.append(
-                    f"[leg3] VIOLATION: {_EXEC_RS}:{lineno}: vectorized reference "
-                    f"lacks #[cfg(feature = \"vectorized\")] guard:\n"
-                    f"       {line.rstrip()}"
-                )
+                    f"[leg3] VIOLATION: {where}: cannot resolve the file of child module "
+                    f"`{name}` ({problem}), so leg 3 cannot scan it")
+                continue
+            if child not in audited_set:
+                violations.append(
+                    f"[leg3] VIOLATION: {where}: child module `{name}` resolves to "
+                    f"{child}, which leg 3 does not scan. Move it under {_EXEC_DIR}/ or "
+                    "add it to _EXEC_PATH_CHILDREN.")
+                continue
+            incoming.setdefault(child, []).append((parent, is_gated, where))
+            if child not in seen:
+                seen.add(child)
+                queue.append(child)
+
+    gated_set = {f for f in incoming if f != _EXEC_RS}
+    changed = True
+    while changed:
+        changed = False
+        for f in list(gated_set):
+            if not all(g or p in gated_set for p, g, _ in incoming[f]):
+                gated_set.discard(f)
+                changed = True
+    gated: dict[str, str] = {
+        f: ", ".join(w for _, _, w in incoming[f]) for f in sorted(gated_set)}
+
+    for rel in audited:
+        lines = texts[rel]
+        for lineno, line in enumerate(lines, start=1):
+            stripped = line.lstrip()
+            # Skip comment lines (single-line)
+            if stripped.startswith("//"):
+                continue
+            # Skip the cfg attribute line itself
+            if _CFG_VECTORIZED.search(line):
+                continue
+            if _CHUNK_IMPORT_PATTERN.search(line):
+                # Accept if guarded by nearby preceding cfg, inside a cfg block, or the
+                # whole file is a module gated on `vectorized`.
+                if rel in gated:
+                    findings.append(
+                        f"[leg3] OK  {rel}:{lineno}: vectorized reference is in a module "
+                        f"gated at {gated[rel]}"
+                    )
+                elif (_lines_have_cfg_guard(lines, lineno, window=3) or
+                        _is_inside_cfg_vectorized_block(lines, lineno)):
+                    findings.append(
+                        f"[leg3] OK  {rel}:{lineno}: vectorized reference is cfg-guarded"
+                    )
+                else:
+                    violations.append(
+                        f"[leg3] VIOLATION: {rel}:{lineno}: vectorized reference "
+                        f"lacks #[cfg(feature = \"vectorized\")] guard:\n"
+                        f"       {line.rstrip()}"
+                    )
+
+    print(f"[leg3] scanned {len(audited)} exec file(s): {_EXEC_RS}, "
+          f"{len(audited) - 1 - len([p for p in audited if p in _EXEC_PATH_CHILDREN])} "
+          f"under {_EXEC_DIR}/, and {', '.join(p for p in audited if p in _EXEC_PATH_CHILDREN) or 'no'} "
+          "#[path] child(ren)")
+    print(f"[leg3] checked {decl_count} child module declaration(s) against that set")
 
     for f in findings:
         print(f)
@@ -426,7 +787,8 @@ def check_leg3(repo_root: str = ".") -> int:
     if violations:
         for v in violations:
             print(v)
-        print(f"\n[leg3] FAIL — {len(violations)} ungated vectorized reference(s). "
+        print(f"\n[leg3] FAIL — {len(violations)} violation(s): ungated vectorized "
+              "reference(s) or child module(s) leg 3 does not scan. "
               "Every call site and registration of the `vectorized` feature must be "
               "inside #[cfg(feature = \"vectorized\")].")
         return 1
@@ -501,6 +863,159 @@ def _leg2_dynamic_on_bytes(base_bytes: bytes, head_bytes: bytes,
             for n in os.listdir(d):
                 os.unlink(os.path.join(d, n))
             os.rmdir(d)
+
+
+def _leg3_on_tree(files: dict[str, str]) -> int:
+    """Run check_leg3 on a synthetic repo tree of {repo-relative path: content}."""
+    root = tempfile.mkdtemp(prefix="leg3-")
+    try:
+        for rel, content in files.items():
+            full = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w") as fh:
+                fh.write(content)
+        return check_leg3(repo_root=root)
+    finally:
+        for dirpath, dirnames, names in os.walk(root, topdown=False):
+            for n in names:
+                os.unlink(os.path.join(dirpath, n))
+            os.rmdir(dirpath)
+
+
+# Synthetic leg-3 trees for the tripwires (also used by scripts/tests).
+_LEG3_TREE_OK = {
+    _EXEC_RS: "mod child;\n#[cfg(feature = \"vectorized\")]\nmod vec_only;\n",
+    f"{_EXEC_DIR}/child.rs": "#[cfg(feature = \"vectorized\")]\nuse crate::chunk::DataChunk;\n",
+    f"{_EXEC_DIR}/vec_only.rs": "use crate::chunk::DataChunk;\n",
+}
+_LEG3_TREE_UNGATED_CHILD = {
+    _EXEC_RS: "mod child;\n",
+    f"{_EXEC_DIR}/child.rs": "fn f(_c: &crate::chunk::DataChunk) {}\n",
+}
+_LEG3_TREE_UNSCANNED_CHILD = {
+    _EXEC_RS: "#[path = \"elsewhere.rs\"]\nmod hidden;\n",
+    "crates/sparq-engine/src/elsewhere.rs": "fn f(_c: &crate::chunk::DataChunk) {}\n",
+}
+_LEG3_UNGATED = "fn f(_c: &crate::chunk::DataChunk) {}\n"
+
+
+def _leg3_tree_outside(decl: str) -> dict[str, str]:
+    """exec.rs holds `decl`; an ungated reference sits in src/elsewhere.rs."""
+    return {_EXEC_RS: decl, "crates/sparq-engine/src/elsewhere.rs": _LEG3_UNGATED}
+
+
+def _leg3_tree_child(decl: str) -> dict[str, str]:
+    """exec.rs holds `decl`; an ungated reference sits in exec/child.rs."""
+    return {_EXEC_RS: decl, f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED}
+
+
+# `#[path]` on the SAME line as `mod`, in several spellings: each must be resolved
+# (and so rejected as an unscanned child), not skipped.
+_LEG3_TREES_SAME_LINE_ATTR = [
+    _leg3_tree_outside('#[path = "elsewhere.rs"] mod hidden;\n'),
+    _leg3_tree_outside('#[path="elsewhere.rs"]mod hidden;\n'),
+    _leg3_tree_outside('#[cfg(test)]  #[path = "elsewhere.rs"]   pub(crate) mod hidden ;\n'),
+    _leg3_tree_outside('#[allow(dead_code)] # [ path = "elsewhere.rs" ] pub mod hidden;\n'),
+    _leg3_tree_outside('#[cfg(test)]\n#[allow(unused)] #[path = "elsewhere.rs"] pub(super) mod hidden;\n'),
+]
+# cfg predicates that do NOT require `vectorized`: the module is not gated, so its
+# ungated reference must be rejected.
+_LEG3_TREES_NON_GATING_CFG = [
+    _leg3_tree_child('#[cfg(all(not (feature = "vectorized")))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(all(not(feature="vectorized")))] mod child;\n'),
+    _leg3_tree_child('#[cfg( not( feature = "vectorized" ) )]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(any(feature = "vectorized", test))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(all(test, not(all(feature = "vectorized"))))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg(feature = "vectorized-lite")]\nmod child;\n'),
+]
+# A `mod x;` whose file cannot be resolved must fail closed.
+_LEG3_TREE_UNRESOLVABLE = {_EXEC_RS: "mod nothere;\n"}
+
+
+def _leg3_tree_cfg_attr(decl: str) -> dict[str, str]:
+    """exec.rs holds `decl`; the default file exec/child.rs is clean and the
+    cfg_attr target src/elsewhere.rs holds an ungated reference."""
+    return {_EXEC_RS: decl, f"{_EXEC_DIR}/child.rs": "fn ok() {}\n",
+            "crates/sparq-engine/src/elsewhere.rs": _LEG3_UNGATED}
+
+
+# `cfg_attr(..., path = ...)` picks the module file per configuration; leg 3 must
+# fail on it as unsupported instead of auditing the default path.
+_LEG3_TREES_CFG_ATTR_PATH = [
+    _leg3_tree_cfg_attr('#[cfg_attr(feature = "vectorized", path = "elsewhere.rs")]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(test, path="elsewhere.rs")] pub(crate) mod child;\n'),
+    _leg3_tree_cfg_attr('# [ cfg_attr ( all(test), path = "elsewhere.rs" ) ]\n\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(test, cfg_attr(unix, path = "elsewhere.rs"))]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(\n    test,\n    path = "elsewhere.rs"\n)]\nmod child;\n'),
+]
+# `#[path]` spellings other than the simple form: raw, raw-hash, escaped and byte
+# strings, and a path built by a macro. All fail as unsupported (the old resolver
+# skipped them and audited the clean default exec/child.rs).
+_LEG3_TREES_PATH_UNSUPPORTED = [
+    _leg3_tree_cfg_attr('#[path = r"elsewhere.rs"] mod child;\n'),
+    _leg3_tree_cfg_attr('#[path = r#"elsewhere.rs"#]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "else\\x77here.rs"]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = b"elsewhere.rs"]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = concat!("else", "where.rs")]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"]\n#[path = "child.rs"]\nmod child;\n'),
+]
+# Raw-identifier names and `mod` split across lines: each must be resolved (and so
+# rejected as an unscanned child) or fail as unparseable, never skipped.
+_LEG3_TREES_ODD_MOD_SYNTAX = [
+    _leg3_tree_outside('#[path = "elsewhere.rs"] mod r#hidden;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"]\npub(crate) mod r#hidden ;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"]\nmod\nhidden;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"] pub mod\n    hidden;\n'),
+    _leg3_tree_outside('#[path = "elsewhere.rs"]\nmod /* c */ hidden;\n'),
+    {**_leg3_tree_outside('mod child; #[path = "elsewhere.rs"] mod hidden;\n'),
+     f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
+    _leg3_tree_outside('mod inner { #[path = "../elsewhere.rs"] mod hidden; }\n'),
+    {**_leg3_tree_outside('mod child; fn f() {}\n'), f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"] // rationale\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"]\n/* note */\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[path = "elsewhere.rs"] /* note */\nmod child;\n'),
+    _leg3_tree_outside('#[path = "x//../../elsewhere.rs"] mod hidden;\n'),
+    {_EXEC_RS: '#[path = "outside"]\nmod inner {\nmod child;\n}\n',
+     f"{_EXEC_DIR}/inner/child.rs": "fn ok() {}\n",
+     "crates/sparq-engine/src/outside/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: 'fn f() {\nmod child;\n}\n', f"{_EXEC_DIR}/child.rs": "fn ok() {}\n"},
+]
+# Inline modules and `mod` inside strings or identifiers are not declarations.
+_LEG3_TREES_INLINE_MOD_OK = [
+    {_EXEC_RS: 'mod inner {\n    fn f() {}\n}\npub(crate) mod r#other { }\n'},
+    {_EXEC_RS: 'const S: &str = "mod x;";\nfn mod_name() {}\n'},
+]
+# cfg_attr without `path` (a `path` inside a doc string does not count) is fine.
+_LEG3_TREES_CFG_ATTR_OK = [
+    _leg3_tree_cfg_attr('#[cfg_attr(test, allow(dead_code))]\nmod child;\n'),
+    _leg3_tree_cfg_attr('#[cfg_attr(test, doc = "see path = x")] mod child;\n'),
+    _leg3_tree_cfg_attr('#[doc = "path"]\nmod child;\n'),
+]
+
+_LEG3_GATED_DECL = '#[cfg(feature = "vectorized")]\n#[path = "exec/child.rs"]\nmod vec_child;\n'
+_LEG3_PLAIN_DECL = '#[path = "exec/child.rs"]\nmod plain_child;\n'
+# One file reached by a gated AND an ungated declaration is NOT gated, in either
+# order, and neither is anything it declares.
+_LEG3_TREES_MIXED_DECLS = [
+    {_EXEC_RS: _LEG3_GATED_DECL + _LEG3_PLAIN_DECL, f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: _LEG3_PLAIN_DECL + _LEG3_GATED_DECL, f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: _LEG3_GATED_DECL + _LEG3_PLAIN_DECL, f"{_EXEC_DIR}/child.rs": "mod grand;\n",
+     f"{_EXEC_DIR}/child/grand.rs": _LEG3_UNGATED},
+]
+# Every declaration gated (directly or through a gated parent): accepted.
+_LEG3_TREES_ALL_DECLS_GATED = [
+    {_EXEC_RS: _LEG3_GATED_DECL + '#[cfg(all(test, feature = "vectorized"))]\n'
+     '#[path = "exec/child.rs"]\nmod again;\n', f"{_EXEC_DIR}/child.rs": _LEG3_UNGATED},
+    {_EXEC_RS: _LEG3_GATED_DECL, f"{_EXEC_DIR}/child.rs": "mod grand;\n",
+     f"{_EXEC_DIR}/child/grand.rs": _LEG3_UNGATED},
+]
+# cfg predicates that DO require `vectorized`, in several spellings: accepted.
+_LEG3_TREES_GATING_CFG = [
+    _leg3_tree_child('#[cfg(all(test, feature = "vectorized"))]\nmod child;\n'),
+    _leg3_tree_child('#[cfg( feature  =  "vectorized" )] pub(crate) mod child;\n'),
+    _leg3_tree_child('#[cfg(any(feature="vectorized", all(feature="vectorized", test)))]\n'
+                     '#[allow(dead_code)]\nmod child;\n'),
+]
 
 
 def run_self_test() -> int:
@@ -582,6 +1097,107 @@ def run_self_test() -> int:
         print("TRIPWIRE 5 (leg2 V2): FAIL — undeclared change slipped through V2; the gate is disabled")
         all_passed = False
 
+    # ----- Tripwire 6: Leg 3 must reject an ungated reference in an exec child module -----
+    rc = _leg3_on_tree(_LEG3_TREE_UNGATED_CHILD)
+    if rc != 0:
+        print("TRIPWIRE 6 (leg3): PASS — ungated vectorized reference in exec/child.rs rejected")
+    else:
+        print("TRIPWIRE 6 (leg3): FAIL — exec child modules are not audited")
+        all_passed = False
+
+    # ----- Tripwire 7: Leg 3 must reject a child module it does not scan -----
+    rc = _leg3_on_tree(_LEG3_TREE_UNSCANNED_CHILD)
+    if rc != 0:
+        print("TRIPWIRE 7 (leg3): PASS — exec.rs child module outside the scanned set rejected")
+    else:
+        print("TRIPWIRE 7 (leg3): FAIL — an unscanned exec child module slipped through")
+        all_passed = False
+
+    # ----- Tripwire 8: Leg 3 must ACCEPT gated references and module-level gates -----
+    rc = _leg3_on_tree(_LEG3_TREE_OK)
+    if rc == 0:
+        print("TRIPWIRE 8 (leg3): PASS — item-level and module-level gates accepted")
+    else:
+        print("TRIPWIRE 8 (leg3): FAIL — gated references rejected; false positive")
+        all_passed = False
+
+    # ----- Tripwire 9: Leg 3 must resolve `#[path]` written on the same line as `mod` -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_SAME_LINE_ATTR) if _leg3_on_tree(t) == 0]
+    if not missed:
+        print("TRIPWIRE 9 (leg3): PASS — same-line #[path] declarations resolved and rejected "
+              f"({len(_LEG3_TREES_SAME_LINE_ATTR)} spellings)")
+    else:
+        print(f"TRIPWIRE 9 (leg3): FAIL — same-line #[path] declaration(s) {missed} skipped")
+        all_passed = False
+
+    # ----- Tripwire 10: a cfg that does not require `vectorized` must not gate a module -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_NON_GATING_CFG) if _leg3_on_tree(t) == 0]
+    if not missed:
+        print("TRIPWIRE 10 (leg3): PASS — not(...)/any(...)/other-feature cfgs do not gate "
+              f"({len(_LEG3_TREES_NON_GATING_CFG)} spellings)")
+    else:
+        print(f"TRIPWIRE 10 (leg3): FAIL — non-gating cfg(s) {missed} accepted as gates")
+        all_passed = False
+
+    # ----- Tripwire 11: an unresolvable `mod x;` must fail closed -----
+    rc = _leg3_on_tree(_LEG3_TREE_UNRESOLVABLE)
+    if rc != 0:
+        print("TRIPWIRE 11 (leg3): PASS — unresolvable child module rejected")
+    else:
+        print("TRIPWIRE 11 (leg3): FAIL — unresolvable child module accepted")
+        all_passed = False
+
+    # ----- Tripwire 12: cfgs that require `vectorized` are accepted in any spelling -----
+    wrong = [i for i, t in enumerate(_LEG3_TREES_GATING_CFG) if _leg3_on_tree(t) != 0]
+    if not wrong:
+        print("TRIPWIRE 12 (leg3): PASS — gating cfgs accepted "
+              f"({len(_LEG3_TREES_GATING_CFG)} spellings)")
+    else:
+        print(f"TRIPWIRE 12 (leg3): FAIL — gating cfg(s) {wrong} rejected; false positive")
+        all_passed = False
+
+    # ----- Tripwire 13: cfg_attr(..., path = ...) on a mod declaration is unsupported -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_CFG_ATTR_PATH) if _leg3_on_tree(t) == 0]
+    wrong = [i for i, t in enumerate(_LEG3_TREES_CFG_ATTR_OK) if _leg3_on_tree(t) != 0]
+    if not missed and not wrong:
+        print("TRIPWIRE 13 (leg3): PASS — cfg_attr(..., path) rejected as unsupported "
+              f"({len(_LEG3_TREES_CFG_ATTR_PATH)} spellings); path-free cfg_attr accepted")
+    else:
+        print(f"TRIPWIRE 13 (leg3): FAIL — cfg_attr path missed {missed}, "
+              f"path-free cfg_attr rejected {wrong}")
+        all_passed = False
+
+    # ----- Tripwire 15: only `#[path = "plain.rs"]` is understood; other spellings fail -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_PATH_UNSUPPORTED) if _leg3_on_tree(t) == 0]
+    if not missed:
+        print("TRIPWIRE 15 (leg3): PASS — raw/escaped/byte/macro/duplicate path attributes "
+              f"rejected as unsupported ({len(_LEG3_TREES_PATH_UNSUPPORTED)} spellings)")
+    else:
+        print(f"TRIPWIRE 15 (leg3): FAIL — unsupported path spellings {missed} accepted")
+        all_passed = False
+
+    # ----- Tripwire 16: raw identifiers and split `mod` declarations are not skipped -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_ODD_MOD_SYNTAX) if _leg3_on_tree(t) == 0]
+    wrong = [i for i, t in enumerate(_LEG3_TREES_INLINE_MOD_OK) if _leg3_on_tree(t) != 0]
+    if not missed and not wrong:
+        print("TRIPWIRE 16 (leg3): PASS — raw-identifier, multi-line and several-per-line `mod` "
+              "declarations rejected; inline modules and `mod` in strings accepted")
+    else:
+        print(f"TRIPWIRE 16 (leg3): FAIL — odd declarations accepted {missed}, "
+              f"inline/string cases rejected {wrong}")
+        all_passed = False
+
+    # ----- Tripwire 14: a file is gated only if EVERY declaration reaching it is -----
+    missed = [i for i, t in enumerate(_LEG3_TREES_MIXED_DECLS) if _leg3_on_tree(t) == 0]
+    wrong = [i for i, t in enumerate(_LEG3_TREES_ALL_DECLS_GATED) if _leg3_on_tree(t) != 0]
+    if not missed and not wrong:
+        print("TRIPWIRE 14 (leg3): PASS — gated+ungated declarations of one file leave it "
+              "(and its descendants) ungated; all-gated declarations accepted")
+    else:
+        print(f"TRIPWIRE 14 (leg3): FAIL — mixed declarations exempted {missed}, "
+              f"all-gated declarations rejected {wrong}")
+        all_passed = False
+
     if all_passed:
         print("\n[self-test] OK — all tripwires fired correctly. The guards can fail (and "
               "the dynamic leg2 accepts a declared change).")
@@ -608,7 +1224,8 @@ def main() -> int:
                            "+ base/head feature-off-declaration.json (legacy scalar). Add "
                            "--declarations-dirs for mechanism V2 (per-PR files).")
     mode.add_argument("--leg3", action="store_true",
-                      help="cfg-audit of vectorized call sites in lib.rs and exec.rs")
+                      help="cfg-audit of vectorized call sites in lib.rs, exec.rs and "
+                           "exec's child modules")
     mode.add_argument("--self-test", dest="self_test", action="store_true",
                       help="run built-in tripwires (both must exit non-zero to pass)")
     parser.add_argument("--declarations-dirs", dest="declarations_dirs", nargs=2,
