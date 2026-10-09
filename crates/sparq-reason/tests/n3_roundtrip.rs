@@ -114,9 +114,12 @@ fn unplaceable(terms: &[Term], document: bool) -> bool {
     !universals.is_empty() && (!document || universals.intersection(&plain).next().is_some())
 }
 
-/// Does the oracle say `s` has no lossless form?
+/// Does the oracle say `s` has no lossless form? A backward-chaining copy of a universal
+/// never has one: its only spelling reads back as the universal, a different term
+/// (round 13).
 fn lossy(s: &[Term; 3]) -> bool {
-    unplaceable(&s.clone().map(|t| normalise(&t)), true) || merges(s.iter())
+    let norm = s.clone().map(|t| normalise(&t));
+    unplaceable(&norm, true) || merges(s.iter()) || norm != *s
 }
 
 /// Would normalising `terms` merge two distinct variables (a universal and a copy of it)?
@@ -627,9 +630,10 @@ fn a_universal_and_its_copies_are_never_merged() {
         assert!(write_statement(&g, &mut out).is_err() && out.is_empty());
         assert!(check_statement(&f).is_none());
     }
-    // One copy on its own is fine: it reads back as the universal, merging nothing.
+    // One copy on its own is refused too (round 13): it would read back as the universal,
+    // which `log:equalTo` tells apart from the copy.
     let lone = [k.clone(), k.clone(), formula(vec![[c0.clone(), k.clone(), k.clone()]])];
-    assert!(check_statement(&lone).is_some());
+    assert!(check_statement(&lone).is_none());
 }
 
 /// `src`'s one rule, its written text, and that text re-parsed.
@@ -718,12 +722,14 @@ fn every_universal_gets_one_document_declaration_or_is_refused() {
         }
     }
 
-    // Two FACTS holding distinct backward-chaining copies: each is writable alone, but the
-    // document would spell both as <http://ex/x> — one bijection over the whole document
-    // refuses the merge (round 10, MEDIUM).
+    // Backward-chaining copies: refused alone (round 13: `Unspellable`), and two distinct
+    // ones in two FACTS would spell as one <http://ex/x> — the document-wide check refuses
+    // that merge first (round 10, MEDIUM).
     let fact = |v: &str| [k.clone(), k.clone(), formula(vec![[var(v), k.clone(), k.clone()]])];
     let (f0, f1) = (fact("__bw0___ua.http://ex/x"), fact("__bw1___ua.http://ex/x"));
-    assert!(serialize_facts([&f0].into_iter()).is_ok() && serialize_facts([&f1].into_iter()).is_ok());
+    for f in [&f0, &f1] {
+        assert!(matches!(serialize_facts([f].into_iter()), Err(NotRepresentable::Unspellable(_))));
+    }
     match serialize_facts([&f0, &f1].into_iter()) {
         Err(NotRepresentable::MergesVariables(_)) => {}
         other => panic!("expected MergesVariables, got {other:?}"),
@@ -731,6 +737,33 @@ fn every_universal_gets_one_document_declaration_or_is_refused() {
     assert!(matches!(serialize_facts([&fu, &f1].into_iter()), Err(NotRepresentable::MergesVariables(_))));
     // The same universal in two facts is one variable, and writes fine.
     assert!(serialize_facts([&fu, &fu.clone()].into_iter()).is_ok());
+}
+
+/// GH #6701 review round 13 (MEDIUM), Codex's example: sorting `:a` before `:z` would put
+/// the `@forAll :y` line before `:z`'s plain `:y`. The document is ordered so every plain
+/// mention precedes its universal's line; only a unit mixing the two, or a cycle, refuses.
+#[test]
+fn units_are_ordered_so_no_declaration_captures_a_plain_mention() {
+    let p = "@prefix : <http://ex/>.\n";
+    let src = format!("{p}@forAll :x.\n:z :p {{ :x :q :y }}.\n@forAll :y.\n:a :p {{ :y :q :o }}.\n");
+    let doc = reason_n3_pass_all(&src, RuleVars::N3).expect("representable");
+    assert_eq!(parser::parse(&doc).unwrap().facts.len(), 2, "{doc}");
+    let want: BTreeSet<_> = parser::parse(&src).unwrap().facts.into_iter().map(|f| format!("{f:?}")).collect();
+    let got: BTreeSet<_> = parser::parse(&doc).unwrap().facts.into_iter().map(|f| format!("{f:?}")).collect();
+    assert_eq!(got, want, "{doc}");
+    let (z, y) = (doc.find("<http://ex/z>").expect(":z"), doc.find("@forAll <http://ex/y>").expect(":y line"));
+    assert!(z < y, "the plain :y in :z's fact comes before the :y line:\n{doc}");
+    // A cycle: `:x` plain beside universal `:y`, `:y` plain beside universal `:x`.
+    let k = iri("http://ex/k");
+    let f = |u: &str, plain: &str| [iri(plain), k.clone(), formula(vec![[var(&format!("{UA}{u}")), k.clone(), k.clone()]])];
+    let (a, b) = (f("http://ex/y", "http://ex/x"), f("http://ex/x", "http://ex/y"));
+    match serialize_facts([&a, &b].into_iter()) {
+        Err(NotRepresentable::UnrepresentableScope(_)) => {}
+        other => panic!("{other:?}"),
+    }
+    let cyc = format!("{p}:x :k {{ @forAll :y. :y :k :k }}.\n:y :k {{ @forAll :x. :x :k :k }}.\n");
+    let e = reason_n3_pass_all(&cyc, RuleVars::N3).expect_err("no order exists");
+    assert!(e.contains("cycle"), "{e}");
 }
 
 /// GH #6701 review round 11 (HIGH), Codex's counterexample: a document-level universal
@@ -1040,8 +1073,9 @@ fn random_scopes_round_trip_or_are_refused() {
             Err(e) => {
                 refused += 1;
                 caught += usize::from(e.contains("re-parses as") || e.contains("does not re-parse"));
-                // The only refusal: a plain mention the one document line would capture.
-                assert!(e.contains("capture a plain mention"), "{e}\n{}", g.text);
+                // The only refusals: a unit mixing a plain mention and the universal (the one
+                // document line would capture it), or units that need each other first.
+                assert!(e.contains("capture a plain mention") || e.contains("form a cycle"), "{e}\n{}", g.text);
             }
         }
     }

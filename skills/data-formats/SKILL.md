@@ -41,7 +41,7 @@ Raw RDF temporal literals undergo no XML preprocessing; string casts are separat
 `Graph::open` ignores legacy `numerics.bin`/`temporals.bin` and both v2 caches,
 which could contain padded raw literals, and recomputes values from the dictionary.
 It does not rewrite old caches or drop ill-typed RDF terms. Current writers use
-`numerics-v3.bin` and `temporals-v3.bin` across ordinary, compressed and external
+`numerics-v3.bin` and `temporals-v4.bin` across ordinary, compressed and external
 builds; absent or wrong-sized current caches are rebuilt in memory. To persist a
 migrated archive, call `Graph::open(old)?.save(new)?` with a separate destination.
 Until saved, legacy opens repeat the dictionary scan and cache allocation.

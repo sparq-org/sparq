@@ -851,6 +851,7 @@ impl Document {
         // A lowering bug surfaces as a parse error from a valid document, which we
         // surface as a Nonmonotonic-flavoured internal error (should never happen
         // for a validated document — covered by the unit tests).
+        // own-run: separate-entry (a RIF closure is its own top-level N3 run)
         crate::reason_n3(dict, &src).map_err(|e| RifError::Nonmonotonic {
             what: format!("internal lowering error: {}", e),
         })
