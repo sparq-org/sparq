@@ -854,6 +854,10 @@ pub(crate) enum Undo {
     },
     /// A member that may have been created, removed from its container (see [`delete_record`]).
     Remove { iri: String, parent: String },
+    /// Nothing to put back: a resource the change holds the lock of without having changed it
+    /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
+    /// waits on that lock while the rest is put back.
+    Locked { iri: String },
 }
 
 impl Undo {
@@ -886,6 +890,7 @@ impl Undo {
                     .map(drop)
             }
             Undo::Remove { iri, parent } => delete_record(store, iri, parent).await,
+            Undo::Locked { .. } => Ok(()),
         }
     }
 
@@ -897,6 +902,7 @@ impl Undo {
                 .chain(parent.as_deref())
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
+            Undo::Locked { iri } => vec![iri],
         }
     }
 }
@@ -916,6 +922,7 @@ impl Unsettled {
                     ..
                 }
                 | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
+                Undo::Locked { .. } => 0,
                 _ => MAX_META_BYTES,
             })
             .fold(0, usize::saturating_add)
