@@ -613,10 +613,7 @@ async fn touch<S: Store + 'static>(state: &LwsState<S>, container: &str) -> bool
     };
     meta.modified_ms = Some(now_ms());
     meta.version = Some(jose::random_id());
-    state.meta_write(container, true);
-    let landed = state.put_resource_meta(container, &meta).await.is_ok();
-    state.meta_write(container, false);
-    landed
+    state.put_resource_meta(container, &meta).await.is_ok()
 }
 
 fn store_error(e: ServerError) -> Response {
@@ -1096,7 +1093,7 @@ async fn read_container<S: Store + 'static>(
     // count. And a listing made while a change to the container was published, or a touch of
     // it landed, is made again: it could pair members from before with a date from after.
     let generation = state.generation(uri);
-    let untouched = state.is_untouched(uri) || state.meta_in_flight(uri);
+    let untouched = state.is_untouched(uri) || state.in_flight(uri);
     let all = match members(state, uri, exclusive).await {
         Ok(m) => m,
         Err(Unlisted::Store(e)) => return Ok(store_error(e)),
@@ -4898,7 +4895,7 @@ mod tests {
     #[tokio::test]
     async fn a_member_containers_touch_moves_its_parents_snapshot() {
         use super::super::test_store::{request as req, state};
-        let (st, _store) = state(100).await;
+        let (st, store) = state(100).await;
         let anon = Agent::anonymous();
         for (parent, slug) in [("/", "c"), ("/c/", "a"), ("/c/", "b")] {
             let h = [("slug", slug), ("link", CONTAINER_LINK)];
@@ -4914,8 +4911,17 @@ mod tests {
             r.headers().contains_key(header::LAST_MODIFIED)
         };
         assert!(dated().await);
+        // While the member's date is being written, the parent's listing has no date.
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((meta_key(&a), gate.clone()));
         let before = st.generation(&c);
-        st.meta_write(&a, true);
+        let touching = {
+            let (st, a) = (st.clone(), a.clone());
+            tokio::spawn(async move { touch_container(&st, &a).await })
+        };
+        while !st.in_flight(&c) {
+            tokio::task::yield_now().await;
+        }
         assert_ne!(
             st.generation(&c),
             before,
@@ -4926,7 +4932,8 @@ mod tests {
             "no date while a member's date is being written"
         );
         let during = st.generation(&c);
-        st.meta_write(&a, false);
+        gate.add_permits(1);
+        touching.await.unwrap();
         assert_ne!(st.generation(&c), during);
         assert!(dated().await);
         // A real touch does the same.

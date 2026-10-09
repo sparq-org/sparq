@@ -300,7 +300,10 @@ What the server exposes, all discoverable from the storage description
   change is over (`503` if its members keep changing); removing a member holds its container
   exclusively. A container whose modification time has not yet been, or could not be, moved on
   after a change has no `Last-Modified` until it is, so `If-Modified-Since` never answers `304`
-  on a stale date. A PUT with `Content-Range`
+  on a stale date. Every change to the store (a request's own steps, a touch, a rollback or a
+  retried undo) goes through one tracked path, and a listing made while a change to the
+  container or a member is in flight has no `Last-Modified`; one that overlapped a change is
+  made again. A PUT with `Content-Range`
   (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
