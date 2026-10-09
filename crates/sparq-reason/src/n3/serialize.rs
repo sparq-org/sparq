@@ -142,6 +142,19 @@ fn write_iriref(iri: &str, out: &mut String) {
     out.push('>');
 }
 
+/// Every IRI `t` mentions plainly (as an IRI term, at any depth).
+fn plain_iris<'a>(t: &'a Term, out: &mut BTreeSet<&'a str>) {
+    match t {
+        Term::Iri(i) => {
+            out.insert(i);
+        }
+        Term::List(ms) => ms.iter().for_each(|m| plain_iris(m, out)),
+        Term::Triple(tr) => tr.iter().for_each(|m| plain_iris(m, out)),
+        Term::Formula(ts) => ts.iter().flatten().for_each(|m| plain_iris(m, out)),
+        _ => {}
+    }
+}
+
 /// Does the IRI `iri` occur as an IRI term anywhere in `t` (any depth)? An `@forAll <iri>`
 /// declaration captures every such occurrence after it in its scope, nested formulae
 /// included.
@@ -231,9 +244,8 @@ enum Unplaced {
 ///
 /// * The **re-reasonable** writers ([`write_term`], [`write_statement`],
 ///   [`serialize_facts`], [`write_rule`], `write_document`) plan with [`Unit::exact`]. Their
-///   output parses back to the very same terms (a lone backward-chaining copy
-///   `__bw<n>___ua.<iri>` of a universal reads back as the universal it copies, the one
-///   normalisation), or they return [`NotRepresentable`]. There is no fallback spelling.
+///   output parses back to the very same terms, variable names of universals included, or
+///   they return [`NotRepresentable`]. There is no fallback spelling.
 ///   Exactness is CHECKED, not predicted: after the static planning checks, every exact
 ///   writer re-parses its WHOLE output (the whole document for [`serialize_facts`] and
 ///   `write_document`) and compares it to its input up to one bijection over variables
@@ -250,14 +262,17 @@ enum Unplaced {
 /// scope declared it (a formula-level `@forAll` is treated as document-scoped: GH #6754).
 /// So the exact writers declare each universal ONCE, on a document `@forAll <iri> .` line
 /// right before the first unit (fact or rule) that uses it: `serialize_facts` keeps the
-/// facts' order; `write_document` writes the facts and rules that use none first. That
-/// re-parses to the same variable. [`write_term`] and [`write_rule`] write no document, so
+/// facts' order; `write_document` orders its units so that every plain mention of an IRI
+/// comes before its universal's line. That re-parses to the same variable. [`write_term`] and [`write_rule`] write no document, so
 /// they refuse a universal ([`NotRepresentable::UnrepresentableScope`]); so does a plain
 /// mention of a declared IRI in that unit or any later one, which the line would capture.
 ///
 /// The GATE is the re-parse: every exact writer re-parses its whole output and requires the
-/// same terms up to one variable bijection under which every universal keeps its IRI (and
-/// so its name). A placement that would change anything is a refusal.
+/// same terms up to one variable bijection under which every universal keeps its EXACT
+/// internal name (`log:equalTo` compares names). A placement that would change anything is
+/// a refusal. A backward-chaining copy of a universal (`__bw<n>___ua.<iri>`) can only be
+/// spelled as `<iri>`, which reads back as the universal itself — a different term — so it
+/// is refused ([`NotRepresentable::Unspellable`]).
 ///
 /// Also refused: two distinct variables for one universal anywhere in the output (a
 /// universal and its backward-chaining copy, or two copies:
@@ -304,6 +319,15 @@ impl Unit {
         check_no_merge(vars.iter().copied())?;
         if let Some(v) = vars.iter().find(|v| universal_iri(v).is_none() && !spellable_var(v)) {
             return Err(NotRepresentable::Unspellable(format!("the variable `{v}` has no N3 spelling")));
+        }
+        // A backward-chaining copy (`__bw<n>___ua.<iri>`) is a DIFFERENT term from the
+        // universal: N3 text can only spell it as `<iri>`, which reads back as `__ua.<iri>`
+        // and so compares differently under `log:equalTo` (GH #6701 review round 13).
+        if let Some((v, iri)) = vars.iter().find_map(|v| universal(v).filter(|u| u.1 != *v).map(|u| (v, u.0))) {
+            return Err(NotRepresentable::Unspellable(format!(
+                "the variable `{v}` is a backward-chaining copy of the @forAll universal <{iri}>; N3 text can only \
+                 spell it as <{iri}>, which reads back as the universal itself, a different term"
+            )));
         }
         if let Some((_, iri, why)) = Unit::unplaced(terms, outer).first() {
             return Err(NotRepresentable::UnrepresentableScope(match why {
@@ -481,9 +505,9 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
     out.push_str(" .");
 }
 
-/// `t` as an exact rendering of it re-parses: a backward-chaining copy of a universal
-/// (`__bw<n>___ua.<iri>`) reads back as the universal itself — the one normalisation the
-/// exact writers document.
+/// `t` as its written text re-parses: a backward-chaining copy of a universal
+/// (`__bw<n>___ua.<iri>`) reads back as the universal itself — a change, used only to name
+/// the refusal (the exact writers refuse copies before writing).
 fn as_reparsed(t: &Term) -> Term {
     match t {
         Term::Var(v) => match universal(v) {
@@ -525,19 +549,18 @@ impl<'a> Bijection<'a> {
 /// Is `g` (re-parsed) the term `w` (given), up to a BIJECTIVE renaming — never by name?
 ///
 /// * Variables pair one-to-one across the whole unit (an N3 variable is quantified in the
-///   outermost formula), and a universal must stay a universal OF THE SAME IRI (its identity
-///   is what other documents' formulae compare against); a non-universal stays a
-///   non-universal. A backward-chaining copy `__bw<n>___ua.<iri>` may therefore read back as
-///   `__ua.<iri>` — but only while no other variable does: a universal and its copy, or two
-///   copies, are distinct variables and must not merge.
+///   outermost formula), and a universal (or a backward-chaining copy of one) must read
+///   back under its EXACT internal name — that name is what `log:equalTo` and other
+///   documents' formulae compare against — while a non-universal stays a non-universal.
 /// * Blank nodes pair one-to-one within each formula, the scope a blank node has in N3 —
 ///   each `{ … }` starts a fresh pairing — and within the unit's top level.
 /// * Everything else must be equal.
 fn same<'a>(w: &'a Term, g: &'a Term, vars: &mut Bijection<'a>, blanks: &mut Bijection<'a>) -> bool {
     match (w, g) {
-        // A universal must come back the universal of the same IRI — so the same name, as
-        // `__ua.<iri>` is the only name an IRI's universal has; no renumbering exists.
-        (Term::Var(a), Term::Var(b)) => universal(a).map(|u| u.0) == universal(b).map(|u| u.0) && vars.pair(a, b),
+        // A universal must come back under its EXACT internal name (`log:equalTo` compares
+        // names): no renumbering, and no copy prefix stripped (GH #6701 review round 13).
+        (Term::Var(a), Term::Var(b)) if universal(a).is_some() || universal(b).is_some() => a == b && vars.pair(a, b),
+        (Term::Var(a), Term::Var(b)) => vars.pair(a, b),
         (Term::Blank(a), Term::Blank(b)) => blanks.pair(a, b),
         (Term::List(a), Term::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same(x, y, vars, blanks)),
         (Term::Triple(a), Term::Triple(b)) => a.iter().zip(b.iter()).all(|(x, y)| same(x, y, vars, blanks)),
@@ -813,14 +836,16 @@ fn in_statement(f: &[Term; 3], e: NotRepresentable) -> NotRepresentable {
     e.within(&format!("cannot write `{s} {p} {o} .` as N3 that re-parses to it"))
 }
 
-/// Write one output DOCUMENT: closure `facts` one per line, SORTED (deterministic output),
-/// then `rules` in order — the `--pass-all` layout ([`crate::reason_n3_pass_all`]). Every
-/// statement and rule is its own unit, so none renders differently for its neighbours.
-/// Universals (in facts and rules alike) get document `@forAll` lines: the
-/// facts and rules that use none come first, then the ones that use one (each half laid
-/// out as above), each universal declared right before the first unit that uses it. Exact: the whole document is re-parsed and
-/// compared under one variable bijection; any statement or rule with
-/// no lossless form fails the document.
+/// Write one output DOCUMENT: closure `facts` and `rules` — the `--pass-all` layout
+/// ([`crate::reason_n3_pass_all`]). Every statement and rule is its own unit, so none
+/// renders differently for its neighbours. Each universal gets a document `@forAll` line
+/// right before the first unit that uses it, so every unit that mentions its IRI PLAINLY
+/// must come before every unit that uses the universal: units are laid out in a stable
+/// topological order of those constraints, ties broken by the plain layout (facts sorted
+/// by their text — deterministic output — then rules in order). Refused only when no order
+/// exists: one unit mixing a plain mention and the universal, or a cycle. Exact: the whole
+/// document is re-parsed and compared; any statement or rule with no lossless form fails
+/// the document.
 pub(super) fn write_document(
     facts: &[&[Term; 3]],
     rules: &[(&Rule, RuleKind)],
@@ -829,25 +854,96 @@ pub(super) fn write_document(
 ) -> Result<(), NotRepresentable> {
     let sides: Vec<RuleOut> = rules.iter().map(|(r, kind)| (rule_sides(r, *kind, vars), *kind)).collect();
     check_no_merge(vars_of(facts.iter().flat_map(|f| f.iter()).chain(sides.iter().flat_map(|r| r.0.iter()))).into_iter())?;
+    // The units in their plain layout (sorted facts, then rules), each with its terms.
+    let mut lines = Vec::with_capacity(facts.len());
+    for f in facts {
+        lines.push((statement_text(f, &document_universals(f.iter()))?, *f));
+    }
+    lines.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let units: Vec<Vec<&Term>> =
+        lines.iter().map(|(_, f)| f.iter().collect()).chain(sides.iter().map(|r| r.0.iter().collect())).collect();
+    let refuse = |k: usize, e: NotRepresentable| match k.checked_sub(lines.len()) {
+        None => in_statement(lines[k].1, e),
+        Some(r) => in_rule(&sides[r].0, sides[r].1, e),
+    };
+    // Constraints: every unit mentioning an IRI plainly comes before every unit using its
+    // universal. One gate node per such IRI (plain units → gate → universal units) keeps the
+    // graph linear in the document's size.
+    let mut users: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+    for (j, u) in units.iter().enumerate() {
+        for v in vars_of(u.iter().copied()) {
+            if let Some((iri, _)) = universal(v) {
+                let js = users.entry(iri).or_default();
+                if js.last() != Some(&j) {
+                    js.push(j);
+                }
+            }
+        }
+    }
+    let gates: BTreeMap<&str, usize> = users.keys().enumerate().map(|(g, iri)| (*iri, units.len() + g)).collect();
+    let mut after: Vec<Vec<usize>> = vec![Vec::new(); units.len() + gates.len()];
+    let mut blockers = vec![0usize; after.len()];
+    for (iri, js) in &users {
+        for &j in js {
+            after[gates[iri]].push(j);
+            blockers[j] += 1;
+        }
+    }
+    for (k, u) in units.iter().enumerate() {
+        let mut plain = BTreeSet::new();
+        u.iter().for_each(|t| plain_iris(t, &mut plain));
+        for iri in plain.into_iter().filter(|i| gates.contains_key(i)) {
+            if users[iri].binary_search(&k).is_ok() {
+                return Err(refuse(k, NotRepresentable::UnrepresentableScope(format!(
+                    "the document-level @forAll <{iri}> declaration would also capture a plain mention of <{iri}>"
+                ))));
+            }
+            after[k].push(gates[iri]);
+            blockers[gates[iri]] += 1;
+        }
+    }
+    // Kahn's algorithm, always taking the earliest ready unit of the plain layout (a gate
+    // opens as soon as it is ready).
+    let mut ready: BTreeSet<usize> = (0..after.len()).filter(|&k| blockers[k] == 0).collect();
+    let mut order = Vec::with_capacity(units.len());
+    while let Some(k) = ready.range(units.len()..).next().copied().or_else(|| ready.first().copied()) {
+        ready.remove(&k);
+        if k < units.len() {
+            order.push(k);
+        }
+        for &j in &after[k] {
+            blockers[j] -= 1;
+            if blockers[j] == 0 {
+                ready.insert(j);
+            }
+        }
+    }
+    if order.len() < units.len() {
+        let k = (0..units.len()).find(|k| blockers[*k] > 0).unwrap_or(0);
+        return Err(refuse(k, NotRepresentable::UnrepresentableScope(
+            "its @forAll universals and plain mentions of their IRIs form a cycle across units: no order of the \
+             document puts every plain mention before the universal's declaration"
+                .into(),
+        )));
+    }
     let mut binders = DocumentBinders::default();
     let mut doc = String::new();
     let (mut fact_order, mut rule_order): (Vec<&[Term; 3]>, Vec<RuleOut>) = (Vec::new(), Vec::new());
-    for late in [false, true] {
-        let mut lines = Vec::new();
-        for f in facts.iter().filter(|f| document_universals(f.iter()).is_empty() != late) {
-            lines.push((statement_text(f, &document_universals(f.iter()))?, *f));
-        }
-        lines.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        for (text, f) in lines {
-            binders.before(f.iter(), &mut doc).map_err(|e| in_statement(f, e))?;
-            doc.push_str(&text);
-            fact_order.push(f);
-        }
-        for (s, kind) in sides.iter().filter(|r| document_universals(r.0.iter()).is_empty() != late) {
-            let outer = binders.before(s.iter(), &mut doc).map_err(|e| in_rule(s, *kind, e))?;
-            let unit = Unit::exact(&[&s[0], &s[1]], &outer).map_err(|e| in_rule(s, *kind, e))?;
-            write_rule_sides(&unit, s, *kind, &mut doc);
-            rule_order.push((s.clone(), *kind));
+    for k in order {
+        match k.checked_sub(lines.len()) {
+            None => {
+                let (text, f) = &lines[k];
+                binders.before(f.iter(), &mut doc).map_err(|e| in_statement(f, e))?;
+                doc.push_str(text);
+                fact_order.push(f);
+            }
+            Some(r) => {
+                let (s, kind) = &sides[r];
+                let outer = binders.before(s.iter(), &mut doc).map_err(|e| in_rule(s, *kind, e))?;
+                let unit = Unit::exact(&[&s[0], &s[1]], &outer).map_err(|e| in_rule(s, *kind, e))?;
+                write_rule_sides(&unit, s, *kind, &mut doc);
+                rule_order.push((s.clone(), *kind));
+            }
         }
     }
     verify_document(&doc, &fact_order, &rule_order)?;
@@ -1171,6 +1267,9 @@ mod tests {
         assert_eq!(universal_iri("__bw3___bw0___ua.http://ex/x"), Some("http://ex/x"));
         assert_eq!(universal_iri("__bw3_x"), None);
         assert_eq!(display_lossy(&Term::Var("__bw0___ua.http://ex/x".into())), display_lossy(&x));
+        // … but no exact writer writes a copy: its only spelling reads back as the universal.
+        let copy = [k.clone(), k.clone(), Term::Formula(vec![[Term::Var("__bw0___ua.http://ex/x".into()), k.clone(), k.clone()]])];
+        assert!(matches!(serialize_facts(std::iter::once(&copy)), Err(NotRepresentable::Unspellable(_))));
     }
 
     /// GH #6701 review round 9: the re-parse comparison is a BIJECTION, never by name —
@@ -1185,8 +1284,8 @@ mod tests {
         // A universal and its copy read back as ONE variable: a merge, refused.
         let e = same_terms(&[f(vec![[ua.clone(), k.clone(), c0.clone()]])], &[f(vec![[ua.clone(), k.clone(), ua.clone()]])]);
         assert!(matches!(e, Err(NotRepresentable::MergesVariables(_))));
-        // A lone copy reading back as the universal is a bijection.
-        assert!(same_terms(&[f(vec![[c0.clone(), k.clone(), k.clone()]])], &[f(vec![[ua.clone(), k.clone(), k.clone()]])]).is_ok());
+        // A lone copy reading back as the universal changes its name: refused too (round 13).
+        assert!(same_terms(&[f(vec![[c0.clone(), k.clone(), k.clone()]])], &[f(vec![[ua.clone(), k.clone(), k.clone()]])]).is_err());
         // A universal never becomes a plain variable, nor another IRI's universal.
         assert!(same_terms(std::slice::from_ref(&ua), &[v("x")]).is_err());
         assert!(same_terms(std::slice::from_ref(&ua), &[v("__ua.http://ex/y")]).is_err());

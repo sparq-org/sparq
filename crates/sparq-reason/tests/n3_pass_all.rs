@@ -290,21 +290,36 @@ fn a_universal_compares_equal_to_one_parsed_from_a_literal_after_a_round_trip() 
     assert_eq!(first, again);
 }
 
-/// GH #6701 review round 4 (2): backward resolution standardizes a rule apart by
-/// prefixing its variables (`__bw0_…`). A universal copied that way must still be written
-/// as the universal — not as the unparseable variable `?__bw0___ua.http://ex/x`.
+/// GH #6701 review round 13 (HIGH): a backward-chaining query answer carries a FRESHENED
+/// universal (`__bw<n>___ua.<iri>`). N3 text can only spell it as `<iri>`, which reads
+/// back as the universal itself — and `log:equalTo` tells the two apart, so writing it
+/// would change what a re-reasoned document derives. Every exact writer refuses it.
 #[test]
-fn a_freshened_backward_rule_universal_serializes_as_the_universal() {
+fn a_freshened_backward_rule_universal_is_refused() {
     let data = "@prefix : <http://ex/>. @forAll :x.\n{ :a :p { :x :q :z } } <= true.\n";
     let query = "@prefix : <http://ex/>.\n{ :a :p ?f } => { :result :is ?f }.\n";
     let answers = reason_n3_query_terms(data, query).expect("query");
     assert_eq!(answers.len(), 1, "{answers:?}");
-    let text = sparq_reason::n3::serialize::serialize_facts(answers.iter()).expect("exactly representable");
-    assert!(!text.contains("__bw") && !text.contains("__ua"), "{text}");
-    let back = parser::parse(&text).expect("the answer re-parses");
-    // The same formula a forward derivation would carry: the universal itself.
-    let want = parser::parse("@prefix : <http://ex/>. @forAll :x. :result :is { :x :q :z }.").unwrap();
-    assert_eq!(back.facts, want.facts, "{text}");
+    match sparq_reason::n3::serialize::serialize_facts(answers.iter()) {
+        Err(sparq_reason::n3::serialize::NotRepresentable::Unspellable(e)) => assert!(e.contains("backward-chaining copy"), "{e}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// Codex's equality example (round 13): `log:equalTo` compares exact terms, and the
+/// backward answer is NOT equal to `{ :x :q :z }` parsed under `@forAll :x` — while its
+/// only N3 spelling reads back as exactly that formula. So writing it would flip the
+/// comparison for any document that re-reads it; the writers refuse instead.
+#[test]
+fn a_freshened_universal_keeps_its_formula_inequality() {
+    let data = "@prefix : <http://ex/>. @forAll :x.\n{ :a :p { :x :q :z } } <= true.\n";
+    let query = "@prefix : <http://ex/>.\n{ :a :p ?f } => { :result :is ?f }.\n";
+    let answer = reason_n3_query_terms(data, query).expect("query").remove(0);
+    let parsed = parser::parse("@prefix : <http://ex/>. @forAll :x. :result :is { :x :q :z }.").unwrap().facts.remove(0);
+    assert_ne!(answer, parsed, "the copy is a different term to log:equalTo");
+    // What the only spelling would read back as: the universal, i.e. `parsed` — refused.
+    let mut out = String::new();
+    assert!(sparq_reason::n3::serialize::write_statement(&answer, &mut out).is_err() && out.is_empty());
 }
 
 #[test]
