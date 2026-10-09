@@ -26,7 +26,6 @@ implied by this entry; verify the tagged run and every registry and release arti
   constrained duties, other parties' prohibitions and later time windows are honoured. Some
   policies accepted by v0.1.4 are now rejected at parse time. (#6734, #6737)
 
-
 ### Added
 
 - `sparq-vectors` can open canonical little-endian `.spqv` stores on big-endian hosts by
