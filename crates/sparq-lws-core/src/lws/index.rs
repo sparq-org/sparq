@@ -312,6 +312,16 @@ pub async fn handle<S: Store + 'static>(
     let is_get = req.method == Method::GET || req.method == Method::HEAD;
     // A page link of a result set is the filter, base64url-encoded, and a page number: the server
     // keeps nothing, and the link is dereferenced with GET (section 7.1).
+    // The query is held to its size before it is decoded at all: a page link's query is the
+    // filter, base64url-encoded, and percent-encoding at most triples it.
+    if search
+        && req.query.as_deref().map_or(0, str::len) > MAX_FILTER_BYTES.div_ceil(3) * 4 * 3 + 64
+    {
+        return problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+        );
+    }
     let q = if search { req.query_param("q") } else { None };
     let page_link = q.is_some() && is_get;
     let method_ok = if search {

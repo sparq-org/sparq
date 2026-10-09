@@ -183,6 +183,10 @@ pub struct Subscription {
     pub expires: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
+    /// Consecutive failed deliveries, in memory only. Kept in the subscription itself, so it goes
+    /// when the subscription goes, and a delivery that finishes later finds nothing to count.
+    #[serde(skip)]
+    pub failures: u32,
 }
 
 impl Subscription {
@@ -211,8 +215,6 @@ pub fn covers(topic: &str, uri: &str) -> bool {
 /// The subscriptions of the storage and the notification sender.
 pub struct Notifier {
     subs: RwLock<BTreeMap<String, Subscription>>,
-    /// Consecutive failed deliveries per subscription.
-    failures: Mutex<HashMap<String, u32>>,
     /// Entity tag of the subscription listing; changes with its membership.
     etag: RwLock<String>,
     /// The delivery client: no redirects, no proxy, and (unless insecure fetches are allowed) a
@@ -249,6 +251,7 @@ impl Notifier {
             inbox: inbox.to_string(),
             expires: None,
             expires_at: None,
+            failures: 0,
         };
         self.subs.write().expect("lock").insert("test".into(), sub);
     }
@@ -309,7 +312,6 @@ impl Notifier {
         }
         Ok(Self {
             subs: RwLock::new(subs),
-            failures: Mutex::new(HashMap::new()),
             etag: RwLock::new(new_etag()),
             client,
             limits: cfg.delivery,
@@ -384,7 +386,6 @@ impl Notifier {
             if me.subs.write().expect("lock").remove(&id).is_some() {
                 *me.etag.write().expect("lock") = new_etag();
             }
-            me.failures.lock().expect("lock").remove(&id);
             Ok(())
         };
         tokio::spawn(cancel).await.map_err(|e| e.to_string())?
@@ -584,16 +585,23 @@ impl Notifier {
                 return;
             };
             let notifier = &state.notify;
-            if status.is_some_and(|s| s.is_success()) {
-                notifier.failures.lock().expect("lock").remove(&id);
+            // The count lives in the subscription: one cancelled while this delivery was out is
+            // gone, and nothing is counted for it.
+            let failures = {
+                let mut subs = notifier.subs.write().expect("lock");
+                let Some(sub) = subs.get_mut(&id) else {
+                    return;
+                };
+                sub.failures = if status.is_some_and(|s| s.is_success()) {
+                    0
+                } else {
+                    sub.failures + 1
+                };
+                sub.failures
+            };
+            if failures == 0 {
                 return;
             }
-            let failures = {
-                let mut f = notifier.failures.lock().expect("lock");
-                let n = f.entry(id.clone()).or_insert(0);
-                *n += 1;
-                *n
-            };
             if status == Some(StatusCode::GONE) || failures >= MAX_DELIVERY_FAILURES {
                 // A store failure keeps the subscription (and its failure count), so the next
                 // failed delivery tries to deactivate it again.
@@ -1138,6 +1146,7 @@ async fn subscribe<S: Store + 'static>(
         inbox: inbox.to_string(),
         expires,
         expires_at,
+        failures: 0,
     };
     let stored = serde_json::to_vec(&sub).unwrap_or_default();
     let doc = document(state, &sub);
@@ -1268,6 +1277,7 @@ mod tests {
                         inbox: "https://inbox.example/".into(),
                         expires: None,
                         expires_at: None,
+                        failures: 0,
                     },
                 );
             }
@@ -1341,6 +1351,7 @@ mod tests {
                 inbox: "https://inbox.example/".into(),
                 expires: None,
                 expires_at: None,
+                failures: 0,
             };
             state
                 .notify
@@ -1418,6 +1429,7 @@ mod tests {
             inbox: "https://inbox.example/".into(),
             expires: None,
             expires_at: None,
+            failures: 0,
         };
         // A first boot makes the containers; the subscription is stored after it and before
         // the boot under test, which loads it.
@@ -1476,6 +1488,7 @@ mod tests {
             inbox: "https://inbox.example/".into(),
             expires: None,
             expires_at: None,
+            failures: 0,
         };
         let iri = format!("{container}{id}");
         state
@@ -1649,6 +1662,60 @@ mod tests {
         assert_eq!(state.notify.dropped(), 16);
     }
 
+    /// Review finding: a delivery that failed without a retry after its subscription was
+    /// cancelled recreated the subscription's failure count, which nothing removed again. The
+    /// count lives in the subscription, so a late delivery finds nothing to count.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_late_failure_leaves_nothing_of_a_cancelled_subscription() {
+        use std::sync::atomic::Ordering;
+        let app = axum::Router::new().route(
+            "/inbox",
+            axum::routing::post(|| async {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                StatusCode::BAD_REQUEST
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        subscribe_root(&state, "gone").await;
+        subscribe_root(&state, "kept").await;
+        for id in ["gone", "kept"] {
+            let watch = Watch {
+                subscription: id.into(),
+                uri: state.cfg.storage(),
+                agent: Agent::anonymous(),
+                snapshot: None,
+            };
+            let inbox = format!("http://{addr}/inbox");
+            state
+                .notify
+                .deliver(&state, &inbox, json!({"type": ["Update"]}), Some(watch));
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let path = format!("{SUBSCRIPTIONS_PATH}gone");
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        for _ in 0..100 {
+            if state.notify.admitted.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(state.notify.admitted.load(Ordering::SeqCst), 0);
+        let subs = state.notify.subs.read().unwrap();
+        assert!(!subs.contains_key("gone"));
+        // The one still standing counted its failure.
+        assert_eq!(subs["kept"].failures, 1);
+    }
+
     /// Review finding: a delivery waiting for its inbox's turn or a worker, and a retry, never
     /// looked at the subscription again, so one cancelled (or expired) meanwhile still heard of
     /// the change.
@@ -1780,6 +1847,7 @@ mod tests {
             inbox: format!("http://{addr}/inbox"),
             expires: None,
             expires_at: None,
+            failures: 0,
         };
         state
             .store
