@@ -76,8 +76,19 @@ pub fn parse_turtle_with_base(src: &str, base: &str) -> Result<Parsed, String> {
 /// directives) against `base` — the document's own location, RFC 3986-style.
 /// An empty `base` keeps relative IRIs as written (the historical behavior).
 pub fn parse_with_base(src: &str, base: &str) -> Result<Parsed, String> {
+    parse_with_base_limited(src, base).0
+}
+
+/// As [`parse_with_base`], also reporting whether a failure was the nesting limit (a
+/// resource cut) rather than a syntax error; see [`super::bounded::parse_n3`].
+pub(crate) fn parse_with_base_limited(src: &str, base: &str) -> (Result<Parsed, String>, bool) {
     let mut p = Parser::new(src);
     p.base = base.to_string();
+    let r = parse_document(&mut p, base);
+    (r, p.limit_hit)
+}
+
+fn parse_document(p: &mut Parser<'_>, base: &str) -> Result<Parsed, String> {
     let stmts = p.document()?;
     let mut facts = Vec::new();
     let mut rules = Vec::new();
@@ -261,10 +272,10 @@ struct Parser<'a> {
     /// produce a parse ERROR instead of exhausting the stack (the recursive-
     /// descent parser recurses per nesting level).
     depth: usize,
+    /// Set when the parse stopped on the nesting limit ([`super::bounded::nesting_allowed`]),
+    /// so a caller can tell a resource cut from a syntax error.
+    limit_hit: bool,
 }
-
-/// Maximum bracket-nesting depth (see `Parser::depth`).
-const MAX_DEPTH: usize = 4096;
 
 impl<'a> Parser<'a> {
     fn new(src: &'a str) -> Parser<'a> {
@@ -279,6 +290,7 @@ impl<'a> Parser<'a> {
             bnode: 0,
             pathvar: 0,
             depth: 0,
+            limit_hit: false,
         }
     }
 
@@ -1093,8 +1105,9 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> Result<(), String> {
         self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            return Err(format!("nesting deeper than {MAX_DEPTH}"));
+        if !super::bounded::nesting_allowed(self.depth) {
+            self.limit_hit = true;
+            return Err("nesting deeper than the parser accepts".to_string());
         }
         Ok(())
     }

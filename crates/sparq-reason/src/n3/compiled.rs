@@ -83,7 +83,7 @@ use super::model::Term;
 use super::parser;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
-use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget};
+use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget}; // not-a-limit: unbounded join
 use sparq_substrate::rows::{Row, NO_ID};
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
@@ -1376,7 +1376,7 @@ fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> V
         rows,
         &tables,
         &probe_only,
-        &NoBudget,
+        &NoBudget, // not-a-limit: the join runs unbounded
         &mut combined,
     );
     let mut out = Vec::with_capacity(combined.len());

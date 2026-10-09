@@ -716,6 +716,7 @@ fn fresh_blank_prefix(seen: &FxHashSet<&str>, family: &str) -> String {
         if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
             continue;
         }
+        // not-a-cut: blank-label numbering, not evaluation; a label past usize is not ours.
         if let Ok(k) = digits.parse::<usize>() {
             taken.insert(k);
         }
@@ -914,8 +915,10 @@ fn run_closure(
     // closure every round (the naive blow-up on recursive rule chains). Rules with scoped
     // negation are non-monotonic, and rules whose join atoms may be proven by BACKWARD rules
     // have support outside the fact deltas — both re-evaluate against ALL facts each round
-    // (correct; the fixpoint still terminates because conclusions are deduped). Pure-builtin
-    // rules (no join atom) fire only in round 0.
+    // (correct; the fixpoint still terminates because conclusions are deduped). So do rules
+    // with a builtin that walks a data list in the store ([`reads_store_outside_joins`]): the
+    // list can be derived after round 0, and no join delta announces it. Pure-builtin rules
+    // over rule-local values (no join atom, no store read) fire only in round 0.
     let rule_meta: Vec<(Vec<usize>, bool)> = rules
         .iter()
         .map(|r| {
@@ -932,7 +935,7 @@ fn run_closure(
                 Term::Iri(i) => bw_any_var_pred || bw_concl_preds.contains(i.as_str()),
                 _ => !backward_rules.is_empty(),
             });
-            (joins, has_neg || needs_bw)
+            (joins, has_neg || needs_bw || reads_store_outside_joins(&r.premise))
         })
         .collect();
 
@@ -1030,6 +1033,8 @@ fn run_closure(
             delta = facts.all.clone();
         }
         let mut first_round = true;
+        // Debug builds only: the current round is the closing naive check.
+        let mut debug_check = false;
         loop {
             // A round with `first_round` set is NAIVE: every rule over the whole fact set.
             let naive_round = first_round;
@@ -1187,20 +1192,25 @@ fn run_closure(
             }
             first_round = false;
             if new_delta.is_empty() {
-                if naive_round {
-                    break;
+                // Debug builds close each stratum with a NAIVE round (every rule over the
+                // whole fact set, exactly round 0) and assert it derives nothing: a
+                // scheduling gap (a rule that reads the store outside its join atoms but is
+                // not re-evaluated) fails every test that reaches it instead of leaving the
+                // stratum silently incomplete.
+                if cfg!(debug_assertions) && !naive_round {
+                    debug_check = true;
+                    first_round = true;
+                    delta = facts.all.clone();
+                    continue;
                 }
-                // Completeness check pass: the stratum closes only after one NAIVE round
-                // (every rule of the stratum over the whole fact set, exactly round 0)
-                // derives nothing new. Semi-naive scheduling skips a rule whose join atoms
-                // saw no new fact, but a rule can read the store through other premises
-                // (list builtins walking derived rdf:first/rest, log:includes, aggregation),
-                // so only a naive round that derives nothing proves the fixpoint. Anything
-                // it derives resumes the semi-naive loop.
-                first_round = true;
-                delta = facts.all.clone();
-                continue;
+                break;
             }
+            debug_assert!(
+                !debug_check,
+                "n3 semi-naive scheduling gap: a naive round derived {} new fact(s), e.g. {:?}",
+                new_delta.len(),
+                new_delta.iter().next()
+            );
             delta = new_delta;
         }
     }
@@ -1507,7 +1517,7 @@ fn match_premise_seeded(
                 // variable (walked from the fact store).
                 let members: Option<Vec<Term>> = match &head {
                     Term::List(ms) => Some(ms.clone()),
-                    _ => fact_list(&head, facts, bw),
+                    _ => bw.settle(fact_list(&head, facts)),
                 };
                 if let Some(members) = members {
                     for (ix, m) in members.iter().enumerate() {
@@ -1531,12 +1541,15 @@ fn match_premise_seeded(
         } else if let Some(f) = functional_builtin(&pat[1]) {
             bindings = bindings
                 .into_iter()
-                .filter_map(|b| eval_functional(f, &pat[0], &pat[2], facts, bw, b))
+                .filter_map(|b| bw.settle(eval_functional(f, &pat[0], &pat[2], facts, bw, b)))
                 .collect();
         } else if let Some(op) = binder_builtin(&pat[1]) {
-            bindings = bindings.into_iter().filter_map(|b| eval_binder(op, &pat[0], &pat[2], b)).collect();
+            bindings = bindings
+                .into_iter()
+                .filter_map(|b| bw.settle(eval_binder(op, &pat[0], &pat[2], b)))
+                .collect();
         } else if let Some(op) = builtin(&pat[1]) {
-            bindings.retain(|b| eval_builtin(op, &pat[0], &pat[2], b, bw));
+            bindings.retain(|b| bw.settle(eval_builtin(op, &pat[0], &pat[2], b)));
         } else {
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
@@ -1584,6 +1597,28 @@ fn match_premise_seeded(
         }
     }
     bindings
+}
+
+/// Whether a premise reads the fact store outside its join atoms: a list builtin or
+/// generator whose list operand is not a rule-local `( … )` term walks a data list in the
+/// store ([`fact_list`]), and so does `list:append` over any members. Such a rule must
+/// re-evaluate every round, because the list can be derived after round 0 and no join
+/// delta announces it. (Scoped operators are already re-evaluated every round.)
+fn reads_store_outside_joins(premise: &[[Term; 3]]) -> bool {
+    premise.iter().any(|p| {
+        if let Some(gen) = list_generator(&p[1]) {
+            let list = match gen {
+                ListGen::In => &p[2],
+                ListGen::Member | ListGen::Iterate => &p[0],
+            };
+            return !matches!(list, Term::List(_));
+        }
+        match functional_builtin(&p[1]) {
+            Some(Func::Append) => true,
+            Some(_) => !matches!(p[0], Term::List(_)),
+            None => false,
+        }
+    })
 }
 
 /// Stable-reorder a premise so each builtin atom comes after the atoms that
@@ -1796,12 +1831,12 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
 /// asserted in the data, reached through a bound variable) — the complement of
 /// [`extract_lists`], which resolves rule-local structure. `rdf:nil` is the
 /// empty list.
-fn fact_list(head: &Term, facts: &FactIndex, bw: &BwCtx) -> Option<Vec<Term>> {
+fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
     let first = Term::Iri(parser::RDF_FIRST.into());
     let rest = Term::Iri(parser::RDF_REST.into());
     let nil = Term::Iri(parser::RDF_NIL.into());
     let empty = Term::List(Vec::new());
-    bw.settle(bounded::walk_list(
+    bounded::walk_list(
         head.clone(),
         |cur| *cur == nil || *cur == empty,
         |cur| {
@@ -1809,7 +1844,7 @@ fn fact_list(head: &Term, facts: &FactIndex, bw: &BwCtx) -> Option<Vec<Term>> {
             let r = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
             Some((f, r))
         },
-    ))
+    )
 }
 
 /// Rename blank labels per `map` in a conclusion triple (recursing into lists;
@@ -2023,7 +2058,15 @@ fn builtin(p: &Term) -> Option<Builtin> {
     None
 }
 
-fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding, bw: &BwCtx) -> bool {
+/// Evaluate a filter builtin. Every fallible step inside settles into a local
+/// [`bounded::Pending`], so the caller gets a [`Bounded`] it must settle on the run.
+fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> Bounded<bool> {
+    let pending = bounded::Pending::default();
+    let v = eval_builtin_inner(op, s, o, b, &pending);
+    pending.finish(v)
+}
+
+fn eval_builtin_inner(op: Builtin, s: &Term, o: &Term, b: &Binding, pending: &bounded::Pending) -> bool {
     let (s, o) = (apply(s, b), apply(o, b));
     match op {
         Builtin::LogEq => s == o,
@@ -2050,9 +2093,9 @@ fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding, bw: &BwCtx) -> boo
                 Builtin::StrLt => x < y,
                 Builtin::StrNotGt => x <= y,
                 Builtin::StrNotLt => x >= y,
-                Builtin::StrMatches => bw.settle(bounded::regex(y)).is_some_and(|re| re.is_match(x)),
+                Builtin::StrMatches => settle(pending, bounded::regex(y)).is_some_and(|re| re.is_match(x)),
                 Builtin::StrNotMatches => {
-                    bw.settle(bounded::regex(y)).is_some_and(|re| !re.is_match(x))
+                    settle(pending, bounded::regex(y)).is_some_and(|re| !re.is_match(x))
                 }
                 Builtin::StrContainsIgnCase => x.to_lowercase().contains(&y.to_lowercase()),
                 Builtin::StrContainsRoughly => {
@@ -2099,7 +2142,21 @@ fn binder_builtin(p: &Term) -> Option<Bidi> {
 
 /// Evaluate a bidirectional builtin: compute the bound side, unify with the other (binding
 /// a variable or filtering on equality). `None` ⇒ the premise fails for this binding.
-fn eval_binder(op: Bidi, s: &Term, o: &Term, b: Binding) -> Option<Binding> {
+/// Evaluate a bidirectional builtin. It has no fallible step today; it returns a
+/// [`Bounded`] like every builtin so that any future one must be settled.
+fn eval_binder(op: Bidi, s: &Term, o: &Term, b: Binding) -> Bounded<Option<Binding>> {
+    let pending = bounded::Pending::default();
+    let v = eval_binder_inner(op, s, o, b, &pending);
+    pending.finish(v)
+}
+
+fn eval_binder_inner(
+    op: Bidi,
+    s: &Term,
+    o: &Term,
+    b: Binding,
+    _pending: &bounded::Pending,
+) -> Option<Binding> {
     let (sv, ov) = (apply(s, &b), apply(o, &b));
     let mut nb = b;
     match op {
@@ -2228,9 +2285,9 @@ fn formula_containment(
         })
         .collect();
     let mut out = Vec::new();
-    let mut budget = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut budget);
-    bw.settle(budget.finish(out))
+    let mut steps = bounded::StepBudget::containment();
+    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut steps);
+    bw.settle(steps.finish(out))
 }
 
 fn containment_search(
@@ -2239,9 +2296,9 @@ fn containment_search(
     b: Binding,
     defers_left: usize,
     out: &mut Vec<Binding>,
-    budget: &mut bounded::StepBudget,
+    steps: &mut bounded::StepBudget,
 ) {
-    if !budget.take() {
+    if !steps.take() {
         return;
     }
     let Some((pat, rest)) = remaining.split_first() else {
@@ -2262,7 +2319,7 @@ fn containment_search(
                         };
                         let mut nb = b.clone();
                         if unify_term(&pat[2], &val, &mut nb) {
-                            containment_search(rest, scope, nb, rest.len(), out, budget);
+                            containment_search(rest, scope, nb, rest.len(), out, steps);
                         }
                     }
                     return;
@@ -2271,7 +2328,7 @@ fn containment_search(
                     // Subject not yet bound — try the other triples first.
                     let mut rotated: Vec<[Term; 3]> = rest.to_vec();
                     rotated.push(pat.clone());
-                    containment_search(&rotated, scope, b, defers_left - 1, out, budget);
+                    containment_search(&rotated, scope, b, defers_left - 1, out, steps);
                     return;
                 }
                 _ => {} // fall through to plain scope matching
@@ -2281,7 +2338,7 @@ fn containment_search(
     for st in scope {
         let mut nb = b.clone();
         if (0..3).all(|k| unify_term(&pat[k], &st[k], &mut nb)) {
-            containment_search(rest, scope, nb, rest.len(), out, budget);
+            containment_search(rest, scope, nb, rest.len(), out, steps);
         }
     }
 }
@@ -2427,7 +2484,7 @@ fn num(t: &Term) -> Option<f64> {
             "INF" | "+INF" => Some(f64::INFINITY),
             "-INF" => Some(f64::NEG_INFINITY),
             "NaN" => Some(f64::NAN),
-            _ => v.parse::<f64>().ok(),
+            _ => v.parse::<f64>().ok(), // no-match: not a numeric lexical form (ill-typed)
         },
         _ => None,
     }
@@ -2532,19 +2589,20 @@ fn numval(t: &Term) -> Option<NumVal> {
         _ => {}
     }
     if v.contains(['e', 'E']) {
-        return v.parse::<f64>().ok().map(NumVal::F64);
+        return v.parse::<f64>().ok().map(NumVal::F64); // no-match: not a double lexical form
     }
     if let Some((int, frac)) = v.split_once('.') {
         let digits = format!("{int}{frac}");
+        // not-a-cut: past i128 the decimal falls back to its f64 value just below.
         if let Ok(m) = digits.parse::<i128>() {
             return Some(NumVal::Dec(m, frac.len() as u32));
         }
-        return v.parse::<f64>().ok().map(NumVal::F64);
+        return v.parse::<f64>().ok().map(NumVal::F64); // no-match: not a decimal lexical form
     }
     v.parse::<i128>()
-        .ok()
+        .ok() // not-a-cut: past i128 the integer falls back to its f64 value
         .map(NumVal::Int)
-        .or_else(|| v.parse::<f64>().ok().map(NumVal::F64))
+        .or_else(|| v.parse::<f64>().ok().map(NumVal::F64)) // no-match: not numeric
 }
 
 impl NumVal {
@@ -2784,6 +2842,8 @@ fn functional_builtin(p: &Term) -> Option<Func> {
 
 /// Evaluate a functional builtin `(members) op object`: resolve the list members under `b`,
 /// compute, then either bind the object variable to the result or filter if it is ground.
+/// Evaluate a functional builtin. Every fallible step inside settles into a local
+/// [`bounded::Pending`], so the caller gets a [`Bounded`] it must settle on the run.
 fn eval_functional(
     f: Func,
     subj: &Term,
@@ -2791,6 +2851,20 @@ fn eval_functional(
     facts: &FactIndex,
     bw: &BwCtx,
     b: Binding,
+) -> Bounded<Option<Binding>> {
+    let pending = bounded::Pending::default();
+    let v = eval_functional_inner(f, subj, obj, facts, bw, b, &pending);
+    pending.finish(v)
+}
+
+fn eval_functional_inner(
+    f: Func,
+    subj: &Term,
+    obj: &Term,
+    facts: &FactIndex,
+    bw: &BwCtx,
+    b: Binding,
+    pending: &bounded::Pending,
 ) -> Option<Binding> {
     const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
     // log:dtlit needs the UNAPPLIED member terms: its reverse mode binds them by
@@ -2882,7 +2956,7 @@ fn eval_functional(
         // First-class list value (already substituted by `apply`).
         Term::List(ms) => Some(ms.clone()),
         // A data list written as rdf:first/rest triples, via a bound variable.
-        _ => fact_list(&subj_applied, facts, bw).map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
+        _ => settle(pending, fact_list(&subj_applied, facts)).map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
     };
     let was_list = resolved_list.is_some();
     // The list:-namespace ops are only defined ON lists.
@@ -2982,7 +3056,7 @@ fn eval_functional(
             if args.len() != 2 {
                 return None;
             }
-            let re = bw.settle(bounded::regex(lex(&args[1])?))?;
+            let re = settle(pending, bounded::regex(lex(&args[1])?))?;
             let cap = re.captures(lex(&args[0])?)?.get(1)?.as_str().to_string();
             Term::Lit(cap, XSD_STRING.into(), None)
         }
@@ -3063,7 +3137,9 @@ fn eval_functional(
         },
         Func::Semantics | Func::Content => match &args[..] {
             [Term::Iri(doc)] => {
-                let text = bw.resolver.and_then(|r| r(doc))?;
+                // No resolver (document access is off for this run) leaves the document's
+                // content as unknown as a resolver that cannot supply it: both are cuts.
+                let text = settle(pending, bounded::resolved(bw.resolver.and_then(|r| r(doc))))?;
                 if matches!(f, Func::Content) {
                     Term::Lit(text, XSD_STRING.into(), None)
                 } else {
@@ -3072,7 +3148,7 @@ fn eval_functional(
                     // taken later by `log:supports` / `log:conclusion`, which is where the
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
-                    let parsed = parser::parse_with_base(&text, doc).ok()?;
+                    let parsed = settle(pending, bounded::parse_n3(&text, doc))?;
                     Term::Formula(reencode_statements(parsed))
                 }
             }
@@ -3080,7 +3156,7 @@ fn eval_functional(
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                let parsed = parser::parse_with_base(src, &bw.base).ok()?;
+                let parsed = settle(pending, bounded::parse_n3(src, &bw.base))?;
                 Term::Formula(reencode_statements(parsed))
             }
             _ => return None,
@@ -3102,7 +3178,7 @@ fn eval_functional(
             for a in &args {
                 match a {
                     Term::List(ms) => merged.extend(ms.iter().cloned()),
-                    other => merged.extend(fact_list(other, facts, bw)?),
+                    other => merged.extend(settle(pending, fact_list(other, facts))?),
                 }
             }
             Term::List(merged)
@@ -3112,13 +3188,13 @@ fn eval_functional(
             if args.len() != 3 {
                 return None;
             }
-            let re = bw.settle(bounded::regex(lex(&args[1])?))?;
+            let re = settle(pending, bounded::regex(lex(&args[1])?))?;
             let out = re.replace_all(lex(&args[0])?, lex(&args[2])?).into_owned();
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
         Func::Year | Func::Month | Func::Day | Func::Hours | Func::Minutes | Func::Seconds
         | Func::DayOfWeek | Func::InSeconds => {
-            number_term(datetime_part(lex(&args[0])?, f)? as f64)
+            number_term(datetime_part(lex(&args[0])?, f, pending)? as f64)
         }
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
@@ -3476,14 +3552,16 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
 
 /// Extract a component of an `xsd:dateTime`/`xsd:date` lexical form for `time:` builtins.
 /// Lexical: `[-]YYYY-MM-DD[Thh:mm:ss[.sss]][Z|±hh:mm]`.
-fn datetime_part(s: &str, f: Func) -> Option<i64> {
+fn datetime_part(s: &str, f: Func, pending: &bounded::Pending) -> Option<i64> {
     let (date, time) = s.split_once('T').unwrap_or((s, ""));
     let neg = date.starts_with('-');
     let mut dparts = date.trim_start_matches('-').split('-');
     match f {
-        Func::Year => dparts.next()?.parse::<i64>().ok().map(|y| if neg { -y } else { y }),
-        Func::Month => dparts.nth(1)?.parse().ok(),
-        Func::Day => dparts.nth(2)?.parse().ok(),
+        Func::Year => {
+            settle(pending, bounded::digits_i64(dparts.next()?)).map(|y| if neg { -y } else { y })
+        }
+        Func::Month => settle(pending, bounded::digits_i64(dparts.nth(1)?)),
+        Func::Day => settle(pending, bounded::digits_i64(dparts.nth(2)?)),
         Func::Hours | Func::Minutes | Func::Seconds => {
             // strip any timezone (Z, +hh:mm, -hh:mm) — the time itself has no +/-/Z.
             let t = time.split(['+', '-', 'Z']).next().unwrap_or(time);
@@ -3494,10 +3572,10 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
                 _ => unreachable!(),
             };
             let part = t.split(':').nth(idx)?;
-            part.split('.').next().unwrap_or(part).parse().ok()
+            settle(pending, bounded::digits_i64(part.split('.').next().unwrap_or(part)))
         }
         Func::DayOfWeek | Func::InSeconds => {
-            let (days, secs) = epoch_parts(s)?;
+            let (days, secs) = epoch_parts(s, pending)?;
             if matches!(f, Func::DayOfWeek) {
                 return Some((days + 4).rem_euclid(7)); // 1970-01-01 = Thursday
             }
@@ -3515,14 +3593,11 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
 /// fall back to a default and so bind a different, valid instant. The timezone
 /// suffix is separated first (on a date as well as a dateTime) so it is never read
 /// as part of a calendar or clock field. #3804.
-fn epoch_parts(s: &str) -> Option<(i64, i64)> {
-    fn field(x: &str, range: std::ops::RangeInclusive<i64>) -> Option<i64> {
-        if x.is_empty() || !x.bytes().all(|b| b.is_ascii_digit()) {
-            return None;
-        }
-        let v: i64 = x.parse().ok()?;
+fn epoch_parts(s: &str, pending: &bounded::Pending) -> Option<(i64, i64)> {
+    let field = |x: &str, range: std::ops::RangeInclusive<i64>| -> Option<i64> {
+        let v = settle(pending, bounded::digits_i64(x))?;
         range.contains(&v).then_some(v)
-    }
+    };
     // Timezone suffix: `Z`, or `±hh:mm` at the very end (the `-` of a date body is
     // followed by more than `hh:mm`, so the fixed-width tail is unambiguous).
     let (body, offset) = if let Some(b) = s.strip_suffix('Z') {
@@ -3550,7 +3625,7 @@ fn epoch_parts(s: &str) -> Option<(i64, i64)> {
     };
     let mut dp = date.split('-');
     // Bound the year so the day/second arithmetic below cannot overflow i64.
-    let y = field(dp.next()?, 0..=999_999_999)?;
+    let y = settle(pending, bounded::epoch_year(field(dp.next()?, 0..=i64::MAX)?))?;
     let y = if neg { -y } else { y };
     let m = dp.next().map(|x| field(x, 1..=12)).unwrap_or(Some(1))?;
     let d = dp.next().map(|x| field(x, 1..=31)).unwrap_or(Some(1))?;

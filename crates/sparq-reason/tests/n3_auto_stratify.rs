@@ -485,6 +485,54 @@ fn truncated_backward_proof_cannot_authorize_through_negation() {
     assert!(c.contains(&t("r", "permittedBy", "g")));
 }
 
+/// A valid N3 document nested deeper (4100 lists) than the parser accepts.
+fn deep_document() -> String {
+    format!(
+        "<http://ex/a> <http://ex/b> {}{} .",
+        "(".repeat(4100),
+        ")".repeat(4100)
+    )
+}
+
+/// `log:semantics` over a resolved document the parser stops on, and over a document
+/// the resolver cannot supply: both cut the run, so the negation is refused.
+#[test]
+fn log_semantics_cuts_refuse_negation() {
+    with_big_stack(log_semantics_cuts_refuse_negation_body);
+}
+
+fn log_semantics_cuts_refuse_negation_body() {
+    let rules = "{ <http://ex/doc> log:semantics ?f . ?f log:includes { :a :b :c } } => { :a :proved :b } .\n\
+                 { ?s log:notIncludes { :a :proved :b } } => { :r :permittedBy :g } .";
+    let src = format!("{PRE}{rules}");
+    let deep = deep_document();
+    let deep_resolver = move |iri: &str| (iri == "http://ex/doc").then(|| deep.clone());
+    let none_resolver = |_: &str| None;
+    let resolvers: [(&str, &sparq_reason::n3::Resolver); 2] = [
+        ("deep document", &deep_resolver),
+        ("unresolvable document", &none_resolver),
+    ];
+    for (what, r) in resolvers {
+        for cycles in [NegationCycles::Reject, NegationCycles::FailClosed] {
+            match reason_n3_terms_with_cycles(&src, None, Some(r), cycles) {
+                Err(e) => assert!(e.contains("incomplete"), "{what}: {e}"),
+                Ok(c) => panic!("{what}: accepted: {:?}", c.facts),
+            }
+        }
+        assert!(
+            sparq_reason::n3::reason_n3_terms_with_resolver(&src, None, Some(r)).is_err(),
+            "{what}"
+        );
+    }
+    // A resolvable, parsable document is no cut.
+    let ok = |iri: &str| {
+        (iri == "http://ex/doc").then(|| "<http://ex/a> <http://ex/b> <http://ex/c> .".to_string())
+    };
+    let c =
+        sparq_reason::n3::reason_n3_terms_with_resolver(&src, None, Some(&ok)).expect("complete");
+    assert!(!c.facts.contains(&t("r", "permittedBy", "g")));
+}
+
 /// A regex the regex engine refuses: 251 nested capture groups, past its nesting limit.
 fn deep_regex() -> String {
     format!("{}a{}", "(".repeat(251), ")".repeat(251))
@@ -498,6 +546,19 @@ fn truncation_sources() -> Vec<(&'static str, String, String)> {
             "backward depth limit",
             deep_chain(),
             "{ :a :p0 :b } => { :a :proved :b } .\n".to_string(),
+        ),
+        (
+            "parser nesting limit in log:parsedAsN3",
+            String::new(),
+            format!(
+                "{{ \"{}\" log:parsedAsN3 ?f }} => {{ :a :proved :b }} .\n",
+                deep_document()
+            ),
+        ),
+        (
+            "log:semantics with no resolver",
+            String::new(),
+            "{ <http://ex/doc> log:semantics ?f } => { :a :proved :b } .\n".to_string(),
         ),
         (
             "regex limit in string:scrape",
@@ -529,8 +590,24 @@ fn truncation_sources() -> Vec<(&'static str, String, String)> {
 /// Every negation and aggregation builtin, through every entry point, over an input
 /// whose evaluation was cut short by every kind of cut: each is refused (an error,
 /// never an answer that read the cut as absence).
+/// Run `f` on a thread with a large stack: the parser recurses once per nesting level,
+/// and a document past its nesting limit needs more stack than a test thread has in a
+/// debug build.
+fn with_big_stack(f: impl FnOnce() + Send + 'static) {
+    std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(f)
+        .expect("spawn")
+        .join()
+        .unwrap_or_else(|e| std::panic::resume_unwind(e));
+}
+
 #[test]
 fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point() {
+    with_big_stack(every_negation_and_aggregation_refuses_a_truncated_input);
+}
+
+fn every_negation_and_aggregation_refuses_a_truncated_input() {
     let pre = format!("{PRE}@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n");
     let probes: [(&str, &str); 6] = [
         (

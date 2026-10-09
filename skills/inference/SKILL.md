@@ -99,9 +99,13 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // log:conclusion / log:supports closure) counts as EVERY predicate; list builtins depend on
 // rdf:first/rdf:rest. Every negation/aggregation evaluation also passes ONE gate that refuses
 // a store some search cut short (backward depth limit, containment budget, list-walk cap,
-// a regex the engine cannot compile, import-cycle-unclosed nested closure; the flag is shared
+// a regex the engine cannot compile, import-cycle-unclosed nested closure, a log:semantics /
+// log:parsedAsN3 document past the parser's nesting limit, a log:semantics / log:content IRI
+// with no resolver or one that returns nothing, a date field that overflows; the flag is shared
 // across nested closures, explicit strata and a query's data closure): the run errors unless
-// SinglePass. A stratum closes only after a naive round over every rule derives nothing. A cycle through
+// SinglePass. A syntax error in a parsed document is a plain no-match, not a cut. Rules whose
+// premise reads the store outside its joins (negation, aggregation, backward rules, list
+// builtins over a non-literal list) are re-run in full each round. A cycle through
 // negation (e.g. `a ?c` concluded beside a negated `a :Flagged`, or a variable-predicate
 // conclusion beside store-scoped negation) is an ERROR by
 // default at every entry point, nested closures included; only the rules on/after the cycle
@@ -687,7 +691,7 @@ if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
 }
 ```
 
-**6. `log:semantics` / `log:content` document access.** The engine does NO I/O of its own; supply a `Resolver` closure to decide what an IRI may dereference to (otherwise those builtins simply don't fire):
+**6. `log:semantics` / `log:content` document access.** The engine does NO I/O of its own; supply a `Resolver` closure to decide what an IRI may dereference to (without one, an evaluation of those builtins counts as a cut, so a later negation or aggregation is refused):
 
 ```rust
 use sparq_reason::reason_n3_terms_with_resolver;

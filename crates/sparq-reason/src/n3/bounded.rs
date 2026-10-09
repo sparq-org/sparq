@@ -177,3 +177,86 @@ pub(crate) fn regex_or_refuse(pattern: &str) -> Result<regex::Regex, String> {
         )
     })
 }
+
+/// A [`Sink`] local to one builtin evaluation: every fallible step inside the builtin
+/// settles into it, and [`Pending::finish`] hands the builtin's result back as a
+/// [`Bounded`] its caller must settle on the run.
+#[derive(Default)]
+pub(crate) struct Pending(Cell<Option<&'static str>>);
+
+impl Sink for Pending {
+    fn record(&self, why: &'static str) {
+        if self.0.get().is_none() {
+            self.0.set(Some(why));
+        }
+    }
+}
+
+impl Pending {
+    /// The builtin's result, cut if any step inside it was.
+    pub(crate) fn finish<T>(self, value: T) -> Bounded<T> {
+        Bounded {
+            value,
+            cut: self.0.get(),
+        }
+    }
+}
+
+/// Bracket nesting the N3 parser accepts (its recursive descent recurses per level).
+const PARSE_DEPTH: usize = 4096;
+
+/// Whether the parser may enter one more nesting level at `depth`.
+pub(crate) fn nesting_allowed(depth: usize) -> bool {
+    depth <= PARSE_DEPTH
+}
+
+/// Parse an N3 document a builtin reads at run time (`log:semantics`,
+/// `log:parsedAsN3`). A syntax error is the builtin's spec-defined failure (the text is
+/// not N3: no match); a document the parser stops on a resource limit (nesting depth)
+/// is a cut.
+pub(crate) fn parse_n3(src: &str, base: &str) -> Bounded<Option<super::parser::Parsed>> {
+    match super::parser::parse_with_base_limited(src, base) {
+        (Ok(p), _) => Bounded::complete(Some(p)),
+        (Err(_), true) => Bounded::cut(
+            None,
+            "an N3 document a builtin parsed passed the parser's nesting limit",
+        ),
+        (Err(_), false) => Bounded::complete(None),
+    }
+}
+
+/// A document a builtin asked the resolver for (`log:semantics`, `log:content`). No
+/// document (no resolver, or one that cannot supply it) is a cut: its content is
+/// unknown, not empty.
+pub(crate) fn resolved(text: Option<String>) -> Bounded<Option<String>> {
+    match text {
+        Some(t) => Bounded::complete(Some(t)),
+        None => Bounded::cut(None, "a document a builtin needed could not be resolved"),
+    }
+}
+
+/// An all-ASCII-digit field of a lexical form as an `i64`. A field that is not all
+/// digits is an ill-typed lexical form (spec-defined no-match); digits past the `i64`
+/// range are a cut, since the value exists but cannot be represented.
+pub(crate) fn digits_i64(x: &str) -> Bounded<Option<i64>> {
+    if x.is_empty() || !x.bytes().all(|b| b.is_ascii_digit()) {
+        return Bounded::complete(None);
+    }
+    match x.parse::<i64>() {
+        Ok(v) => Bounded::complete(Some(v)),
+        Err(_) => Bounded::cut(None, "a date/time field passed the i64 range"),
+    }
+}
+
+/// Years the epoch arithmetic of the `time:` builtins accepts (so day and second
+/// counts cannot overflow `i64`). A year past it is a cut.
+const EPOCH_YEAR_CAP: i64 = 999_999_999;
+
+/// `year` if the epoch arithmetic can represent it.
+pub(crate) fn epoch_year(year: i64) -> Bounded<Option<i64>> {
+    if year <= EPOCH_YEAR_CAP {
+        Bounded::complete(Some(year))
+    } else {
+        Bounded::cut(None, "a date/time year passed the epoch arithmetic's range")
+    }
+}
