@@ -271,7 +271,9 @@ What the server exposes, all discoverable from the storage description
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH`
   (`application/merge-patch+json` or `application/json-patch+json`), `DELETE` (with
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
-  Errors are `application/problem+json`. A `POST` whose name is taken (or is being created,
+  Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
+  `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
+  lines counts every line, and one that cannot be read gets `412`. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
   patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
@@ -280,7 +282,10 @@ What the server exposes, all discoverable from the storage description
   against a work budget of four times the body limit; past either it gets `413`. A `POST`
   whose request is cancelled after the member is written is still announced. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
-  `PATCH` whose result nests too deeply to store gets `422`. Stored metadata that cannot be read
+  `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
+  body limit as it will be served, with the server-managed links put back. JSON Patch paths are
+  RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
+  (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
   `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token`.
@@ -313,9 +318,11 @@ What the server exposes, all discoverable from the storage description
   Each delivery attempt, retries included, first checks that its subscription still exists and
   has not expired, and that the subscriber may still read the resource. A Delete is checked against
   the resource as it was before removal. A delivery that fails a check is dropped.
-- A PUT or PATCH that changes a resource's metadata (its types, its linkset) and fails part way
-  leaves the resource **fail-closed**: only the owner and its creator may act on it until a write
-  completes.
+- Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
+  `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and
+  put it all back when a later step fails, so content, metadata and listings are as they were. A
+  delete too large to put back is refused with `409`. When putting back fails too, the resource
+  is left **fail-closed**: only the owner and its creator may act on it until a write completes.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
@@ -331,6 +338,10 @@ What the server exposes, all discoverable from the storage description
   and `up`/`type`/`linkset` links. The linksets are read-only.
 - **Type index** (`GET /.lws/types/index`) and **type search** (`QUERY /.lws/types/search`
   with an `application/lws-query+json` filter), both scoped to what the caller may read.
+  A QUERY's filter is always its body; the `q` parameter only carries it on the `GET` page
+  links. Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
+  any listing, permission check or metadata read fails, the whole index fails with one
+  generic `500` that names no resource.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,

@@ -226,8 +226,8 @@ struct Seen {
     meta: ResourceMeta,
 }
 
-/// Every resource the agent may read now, with what a search sees of it, by URI; an error when the
-/// metadata of one cannot be read. Each resource's
+/// Every resource the agent may read now, with what a search sees of it, by URI; an error when a
+/// listing, a permission check or the metadata of one cannot be read. Each resource's
 /// shared lock is held from its permission check through the read of its metadata, so the types
 /// and relations collected are those of the state the check allowed (a delete and a re-create by
 /// someone else cannot slip in between); the lock is released before the next resource.
@@ -243,21 +243,33 @@ async fn readable<S: Store + 'static>(
             continue;
         }
         let is_container = uri.ends_with('/');
+        // A listing that cannot be read fails the index rather than leaving out what is under
+        // it; a container removed meanwhile has nothing to list.
         if is_container {
-            if let Ok(children) = state.store.list_children(&uri).await {
-                for child in children {
-                    let child = child.as_str();
-                    if !child.ends_with(META_SUFFIX) && child.starts_with(uri.as_str()) {
-                        stack.push(child.to_string());
-                    }
+            let children = match state.store.list_children(&uri).await {
+                Ok(c) => c,
+                Err(crate::error::ServerError::NotFound) => Vec::new(),
+                Err(e) => return Err(e),
+            };
+            for child in children {
+                let child = child.as_str();
+                if !child.ends_with(META_SUFFIX) && child.starts_with(uri.as_str()) {
+                    stack.push(child.to_string());
                 }
             }
         }
         let _guard = state.locks.read(&uri).await;
-        if !state.check(Action::Read, &uri, agent).await? {
-            continue;
+        // A resource removed since it was listed is not in the index.
+        match state.check(Action::Read, &uri, agent).await {
+            Ok(true) => {}
+            Ok(false) | Err(crate::error::ServerError::NotFound) => continue,
+            Err(e) => return Err(e),
         }
-        let meta = state.resource_meta(&uri).await?;
+        let meta = match state.resource_meta(&uri).await {
+            Ok(m) => m,
+            Err(crate::error::ServerError::NotFound) => continue,
+            Err(e) => return Err(e),
+        };
         let mut types = vec![format!(
             "{LWS_NS}{}",
             if is_container {
@@ -322,7 +334,13 @@ pub async fn handle<S: Store + 'static>(
             Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
         );
     }
-    let q = if search { req.query_param("q") } else { None };
+    // A `q` parameter is the filter of a GET (the page links of a search); a QUERY's filter is
+    // its body, always, parsed and checked as such.
+    let q = if search && is_get {
+        req.query_param("q")
+    } else {
+        None
+    };
     let page_link = q.is_some() && is_get;
     let method_ok = if search {
         method == "QUERY" || page_link
@@ -394,10 +412,15 @@ pub async fn handle<S: Store + 'static>(
         return problem(StatusCode::NOT_ACCEPTABLE, None);
     };
     let media_type = media_type.as_str();
+    // A failure says nothing of the resource it met: its URI, and so its existence, may be
+    // something the agent may not read. Every failure gets the same response.
     let resources = match readable(state, agent).await {
         Ok(r) => r,
-        Err(e) => {
-            return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+        Err(_) => {
+            return problem(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Some("the index could not be built"),
+            );
         }
     };
     let mut links = Vec::new();
@@ -641,6 +664,68 @@ mod tests {
             .collect();
         assert!(!ids.contains(&"https://e.example/Secret"), "{ids:?}");
         assert!(!ids.contains(&"https://e.example/Public"), "{ids:?}");
+    }
+
+    /// Review findings: a `q` parameter replaced a QUERY's body, so the body was never checked;
+    /// a failure named the resource it met, which may be one the agent cannot read; and a
+    /// container whose listing failed was left out silently. A QUERY's filter is its body, every
+    /// failure gets one response that names nothing, and a failed listing fails the index.
+    #[tokio::test]
+    async fn the_type_index_fails_whole_and_names_nothing() {
+        use super::super::test_store::{self, FlakyStore};
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let state = LwsState::new(FlakyStore::new(), cfg).await.unwrap();
+        let root = state.cfg.storage();
+        let (dir, secret) = (format!("{root}dir/"), format!("{root}dir/secret"));
+        state
+            .store
+            .create_in_container(&root, &dir, Bytes::new(), LWS_JSON)
+            .await
+            .unwrap();
+        state
+            .store
+            .create_in_container(&dir, &secret, "x".into(), "text/plain")
+            .await
+            .unwrap();
+        let bob = Agent {
+            subject: Some("https://bob.example/#me".into()),
+            client: None,
+        };
+        let query = |q: Option<&str>, body: &str| {
+            let path = match q {
+                Some(q) => format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(q.as_bytes())),
+                None => TYPE_SEARCH_PATH.to_string(),
+            };
+            let mut r =
+                test_store::request(Method::GET, &path, &[("content-type", LWS_QUERY)], body);
+            r.method = Method::from_bytes(b"QUERY").unwrap();
+            r
+        };
+        let r = handle(&state, &query(Some("{}"), "not a filter"), &bob).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        let r = handle(&state, &query(None, r#"{"type": ["https://e/%ZZ"]}"#), &bob).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            handle(&state, &query(None, "{}"), &bob).await.status(),
+            StatusCode::OK
+        );
+        let get = test_store::request(Method::GET, TYPE_INDEX_PATH, &[], "");
+        let failures = [
+            (&state.store.fail_read_of, super::super::meta_key(&secret)),
+            (&state.store.fail_list_of, dir.clone()),
+        ];
+        let mut bodies = Vec::new();
+        for (fail, of) in failures {
+            *fail.lock().unwrap() = Some(of);
+            let r = handle(&state, &get, &bob).await;
+            *fail.lock().unwrap() = None;
+            assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            let body = test_store::body_json(r).await.to_string();
+            assert!(!body.contains("secret") && !body.contains("dir/"), "{body}");
+            bodies.push(body);
+        }
+        assert_eq!(bodies[0], bodies[1]);
     }
 
     #[test]

@@ -5277,6 +5277,7 @@ dependencies = [
  "js-sys",
  "mimalloc",
  "object_store",
+ "oxiri",
  "oxjsonld",
  "oxrdf 0.3.3",
  "oxttl 0.2.3",

@@ -272,6 +272,9 @@ http-body-util = "0.1"
 sha2 = "0.10"
 base64 = "0.22"
 url = "2"
+# RFC 3987 IRI validation: every IRI a client sends (filters, grants, inboxes) is checked by
+# one parser. Already in the tree through oxttl.
+oxiri = "0.2"
 aws-lc-rs = "1"
 subtle = "2.6"
 redis = { version = "1", default-features = false, features = ["r2d2"], optional = true }
