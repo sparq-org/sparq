@@ -55,7 +55,11 @@ const lifecycleNodeScripts = () => {
 test('no `npm pack` lifecycle script writes to stdout', () => {
   const chain = lifecycleNodeScripts();
   // Pin the derivation itself: an empty/short list would make the assertion below vacuous.
-  assert.deepEqual(chain, ['guardrails/prepare-build.mjs', 'scripts/copy-wasm-node.mjs']);
+  assert.deepEqual(chain, [
+    'guardrails/prepare-build.mjs',
+    'scripts/copy-wasm-node.mjs',
+    'scripts/copy-wasm.mjs',
+  ]);
 
   for (const file of chain) {
     const source = readFileSync(resolve(pkgDir, file), 'utf8');
