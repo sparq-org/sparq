@@ -125,10 +125,12 @@ impl Constraint {
     }
 
     fn compare_now(&self) -> bool {
-        let Some(bound) = self.right.as_str().and_then(parse_rfc3339) else {
+        let Some(bound) = self.right.as_str().and_then(parse_rfc3339_nanos) else {
             return false;
         };
-        let now = jose::now_secs();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as i128);
         match self.operator.as_str() {
             "eq" => now == bound,
             "gt" => now > bound,
@@ -140,11 +142,18 @@ impl Constraint {
     }
 }
 
-/// An RFC 3339 / xsd:dateTime instant, as seconds since the epoch.
+/// An RFC 3339 / xsd:dateTime instant, as whole seconds since the epoch (any fraction dropped).
+pub fn parse_rfc3339(s: &str) -> Option<i64> {
+    parse_rfc3339_nanos(s).map(|n| n.div_euclid(1_000_000_000) as i64)
+}
+
+/// An RFC 3339 / xsd:dateTime instant, as nanoseconds since the epoch: exact, so a temporal
+/// constraint compares the instant it states, not one rounded to its second. A date the calendar
+/// does not have (February 31, a leap second) and a fraction finer than a nanosecond are refused.
 ///
 /// Parsed over bytes with every field checked to be ASCII digits before it is read, so malformed
 /// (including non-ASCII) input is `None`, never a slice-on-a-char-boundary panic.
-pub fn parse_rfc3339(s: &str) -> Option<i64> {
+pub fn parse_rfc3339_nanos(s: &str) -> Option<i128> {
     // YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)
     let b = s.trim().as_bytes();
     if b.len() < 20
@@ -165,11 +174,13 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
         ascii_num(b, 17, 2)?,
     );
     let mut rest = &b[19..];
+    let mut nanos: i128 = 0;
     if let Some(frac) = rest.strip_prefix(b".") {
         let digits = frac.iter().take_while(|c| c.is_ascii_digit()).count();
-        if digits == 0 {
+        if digits == 0 || digits > 9 {
             return None;
         }
+        nanos = i128::from(ascii_num(frac, 0, digits)?) * 10i128.pow(9 - digits as u32);
         rest = &frac[digits..];
     }
     let offset = match rest {
@@ -183,7 +194,14 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
         }
         _ => return None,
     };
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let month_days = match mo {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if !(1..=12).contains(&mo) || !(1..=month_days).contains(&d) || h > 23 || mi > 59 || sec > 59 {
         return None;
     }
     // Days from civil (Howard Hinnant).
@@ -197,7 +215,8 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let doy = (153 * m2 + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
+    let secs = days * 86_400 + h * 3600 + mi * 60 + sec - offset;
+    Some(i128::from(secs) * 1_000_000_000 + nanos)
 }
 
 /// The `len` bytes at `b[at..]` as a number, if they exist and are all ASCII digits.
@@ -294,18 +313,19 @@ impl Policy {
             && self.covers(uri)
     }
 
-    /// Whether the policy's target covers `uri`.
+    /// Whether the policy covers `uri`: always within the grant's storage, and then the resources
+    /// its target names, or the whole storage when it names none.
     pub fn covers(&self, uri: &str) -> bool {
-        match &self.target {
-            Some(t) => t.kind.matches(uri) && t.values.iter().any(|v| v == uri),
-            None => {
-                let scope = self.storage.trim_end_matches('/');
-                !scope.is_empty()
-                    && uri
-                        .strip_prefix(scope)
-                        .is_some_and(|rest| rest.starts_with('/'))
+        let scope = self.storage.trim_end_matches('/');
+        let in_storage = !scope.is_empty()
+            && uri
+                .strip_prefix(scope)
+                .is_some_and(|rest| rest.starts_with('/'));
+        in_storage
+            && match &self.target {
+                Some(t) => t.kind.matches(uri) && t.values.iter().any(|v| v == uri),
+                None => true,
             }
-        }
     }
 }
 
@@ -370,11 +390,25 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
-                let Ok(r) = store.read(child.as_str()).await else {
-                    continue;
+                // Every stored request counts against the request quota, so one that cannot be read
+                // stops the server rather than leaving a place uncounted; a grant that cannot be
+                // read grants nothing.
+                let stored = match store.read(child.as_str()).await {
+                    Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
+                    Err(e) if !grants => {
+                        return Err(format!("store: access request {}: {e}", child.as_str()))
+                    }
+                    Err(_) => None,
                 };
-                let Ok(stored) = serde_json::from_slice::<Value>(&r.body) else {
-                    continue;
+                let stored = match stored {
+                    Some(v) => v,
+                    None if !grants => {
+                        return Err(format!(
+                            "access request {} is not a stored record",
+                            child.as_str()
+                        ))
+                    }
+                    None => continue,
                 };
                 let id = child
                     .as_str()
@@ -532,6 +566,27 @@ async fn decide<S: Store + 'static>(
         .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx))))
 }
 
+/// Whether a constraint's right operand is one its operator can be evaluated against: `isAnyOf` a
+/// non-empty list of strings and every other operator one string; a `dateTime` an exact instant
+/// compared by order or equality; `client`, `format` and `type` compared by equality or
+/// membership. A constraint that fails this is malformed, and its grant with it, so none is ever
+/// enforced in part.
+fn operand_valid(left: &str, op: &str, right: &Value) -> bool {
+    let strings = |v: &Value| v.as_str().is_some_and(|s| !s.is_empty());
+    let shape = match op {
+        "isAnyOf" => right
+            .as_array()
+            .is_some_and(|a| !a.is_empty() && a.iter().all(strings)),
+        _ => strings(right),
+    };
+    shape
+        && match left {
+            "dateTime" => op != "isAnyOf" && right.as_str().and_then(parse_rfc3339_nanos).is_some(),
+            "client" | "format" | "type" => matches!(op, "eq" | "isAnyOf"),
+            _ => true,
+        }
+}
+
 /// The AccessPolicy entries of `access` in a document scoped to `storage`, or `None` when they are
 /// malformed.
 pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
@@ -581,6 +636,9 @@ pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
                         return None;
                     }
                     let right = c.get("rightOperand")?.clone();
+                    if !operand_valid(left, op, &right) {
+                        return None;
+                    }
                     let any_of = right
                         .as_array()
                         .into_iter()
@@ -820,6 +878,14 @@ async fn create<S: Store + 'static>(
         .get("storage")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // A grant or request is about this storage only: one scoped to another is refused, not
+    // stored inert.
+    if valid && storage.trim_end_matches('/') != state.cfg.storage().trim_end_matches('/') {
+        return problem(
+            StatusCode::BAD_REQUEST,
+            Some("an access document's storage must be this storage"),
+        );
+    }
     let Some(parsed) = valid
         .then(|| policies(body.get("access").unwrap_or(&Value::Null), storage))
         .flatten()
@@ -1021,6 +1087,137 @@ mod tests {
         // Values name resources, not their members: no recursion.
         assert!(!any.covers("https://s/c/e"));
         assert!(!any.covers("https://s/other"));
+    }
+
+    /// Review finding: a targeted policy was never held to its grant's storage, so a grant
+    /// scoped to another storage still authorized the resources its target named here. Every
+    /// policy covers its storage only, and a grant scoped to another is refused when posted.
+    #[tokio::test]
+    async fn grants_hold_to_their_storage() {
+        let target = json!({"type": "StorageResource", "value": ["https://s/x"]});
+        let elsewhere = policies(
+            &json!([{"type": "AccessPolicy", "action": "read", "assignee": "https://a/",
+                     "target": target}]),
+            "https://other.example/",
+        )
+        .unwrap()
+        .remove(0);
+        assert!(!elsewhere.covers("https://s/x"));
+        assert!(policy(Some(target)).covers("https://s/x"));
+        let (state, _) = test_store::state(100).await;
+        let mut doc: Value =
+            serde_json::from_str(&access_doc("AccessGrant", "https://a/", None)).unwrap();
+        doc["storage"] = json!("https://other.example/");
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &doc.to_string(),
+        );
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(state.access.grant_policies().is_empty());
+    }
+
+    /// Review finding: a temporal bound and the current time were both cut to the second, so a
+    /// bound's fraction was ignored either way, and dates the calendar does not have were read
+    /// as later ones. Instants are exact to the nanosecond, and impossible dates are refused.
+    #[test]
+    fn temporal_constraints_compare_exact_instants() {
+        let ns = |s: &str| parse_rfc3339_nanos(s);
+        assert_eq!(
+            ns("2026-10-09T12:00:00.9Z").unwrap() - ns("2026-10-09T12:00:00.1Z").unwrap(),
+            800_000_000
+        );
+        assert_eq!(ns("1970-01-01T00:00:00.000000001Z"), Some(1));
+        for bad in [
+            "2026-02-31T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2026-04-31T00:00:00Z",
+            "2026-10-09T23:59:60Z",
+            "2026-10-09T12:00:00.1234567891Z",
+        ] {
+            assert_eq!(ns(bad), None, "{bad}");
+        }
+        assert!(ns("2024-02-29T00:00:00Z").is_some());
+        // A bound a few milliseconds past is past, whatever second it falls in.
+        let past = std::time::SystemTime::now() - std::time::Duration::from_millis(5);
+        let d = past.duration_since(std::time::UNIX_EPOCH).unwrap();
+        let bound = format!(
+            "{}.{:09}Z",
+            format_rfc3339(d.as_secs() as i64).trim_end_matches('Z'),
+            d.subsec_nanos()
+        );
+        let constraint = |op: &str| Constraint {
+            left: "dateTime".into(),
+            operator: op.into(),
+            right: json!(bound),
+            any_of: Default::default(),
+        };
+        let ctx = ConstraintContext {
+            client: None,
+            format: None,
+            types: &[],
+        };
+        assert!(!constraint("lteq").satisfied(&ctx));
+        assert!(!constraint("eq").satisfied(&ctx));
+        assert!(constraint("gt").satisfied(&ctx));
+    }
+
+    /// Review finding: an `isAnyOf` operand's members that were not strings were dropped, so a
+    /// malformed constraint was enforced in part. A constraint whose operand its operator cannot
+    /// evaluate makes the whole grant malformed.
+    #[test]
+    fn malformed_operands_refuse_the_grant() {
+        let with = |left: &str, op: &str, right: Value| {
+            policies(
+                &json!([{"type": "AccessPolicy", "action": "read", "assignee": "https://a/",
+                         "constraint": [{"leftOperand": left, "operator": op, "rightOperand": right}]}]),
+                S,
+            )
+        };
+        assert!(with("format", "isAnyOf", json!(["text/plain"])).is_some());
+        assert!(with("dateTime", "lt", json!("2999-01-01T00:00:00Z")).is_some());
+        for (left, op, right) in [
+            ("format", "isAnyOf", json!(["text/plain", 42])),
+            ("format", "isAnyOf", json!([])),
+            ("format", "isAnyOf", json!("text/plain")),
+            ("format", "eq", json!(["text/plain"])),
+            ("format", "gt", json!("text/plain")),
+            ("client", "lteq", json!("https://app/")),
+            ("dateTime", "isAnyOf", json!(["2999-01-01T00:00:00Z"])),
+            ("dateTime", "lt", json!("2026-02-31T00:00:00Z")),
+            ("dateTime", "lt", json!("soon")),
+            ("type", "eq", json!("")),
+        ] {
+            assert!(
+                with(left, op, right.clone()).is_none(),
+                "{left} {op} {right}"
+            );
+        }
+    }
+
+    /// Review finding: a stored access request that could not be read at startup was skipped,
+    /// and so left out of the request quota while it stayed stored. A request that cannot be
+    /// accounted for stops the load.
+    #[tokio::test]
+    async fn requests_that_cannot_be_read_stop_the_load() {
+        let (state, store) = test_store::state(100).await;
+        let req = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let iri = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(AccessStore::load(&store, &state.cfg).await.is_ok());
+        *store.fail_read_of.lock().unwrap() = Some(iri);
+        assert!(AccessStore::load(&store, &state.cfg).await.is_err());
     }
 
     fn access_doc(kind: &str, assignee: &str, inbox: Option<&str>) -> String {
