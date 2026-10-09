@@ -25,8 +25,9 @@ derive selection and removal of its only diagnostic edges, `proc-macro-error2`
 2.0.1 and `proc-macro-error-attr2` 2.0.0. No other package version changes.
 Later dependency bumps that touch the native lock append a `later_refreshes`
 entry with explicit base and candidate hashes and the exact package and edge
-changes; `verify.py` checks that the entries chain from
-`chain_root_lock_sha256` (the lock as #6647 re-pinned it) to the current lock.
+changes; `verify.py` pins `chain_root_lock_sha256` to the lock as #6647
+re-pinned it, requires the history, and checks that the entries chain from that
+root to the current lock without repeating a lock.
 Earlier re-pins after the Wasmer edit were not recorded and predate the chain.
 Cached frozen metadata now selects the exact local path in the 300-node graph.
 No compiler or build script ran for that check.

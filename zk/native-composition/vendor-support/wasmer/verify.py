@@ -12,6 +12,9 @@ SUPPORT = Path(__file__).resolve().parent
 NATIVE = SUPPORT.parent.parent
 
 
+# Native lock as #6647 re-pinned it; later lock-delta refreshes must chain from here.
+CHAIN_ROOT_LOCK_SHA256 = "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22"
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -84,10 +87,15 @@ def verify(native=NATIVE, policy=None):
     require(not any(p["name"] in ("proc-macro-error2", "proc-macro-error-attr2") for p in lock["package"]), "diagnostic lock edge remains")
     delta = json.loads((support / "lock-delta.json").read_text())
     require(sha((native / "Cargo.lock").read_bytes()) == delta["candidate_lock_sha256"], "unreviewed native lock change")
-    chained = delta.get("chain_root_lock_sha256", delta["candidate_lock_sha256"])
-    for refresh in delta.get("later_refreshes", []):
+    require(delta.get("chain_root_lock_sha256") == CHAIN_ROOT_LOCK_SHA256, "lock chain root differs from the #6647 pin")
+    refreshes = delta.get("later_refreshes")
+    require(isinstance(refreshes, list), "lock refresh history missing")
+    chained, seen = CHAIN_ROOT_LOCK_SHA256, {CHAIN_ROOT_LOCK_SHA256}
+    for refresh in refreshes:
         require(refresh["base_lock_sha256"] == chained, "lock refresh does not chain")
         chained = refresh["candidate_lock_sha256"]
+        require(chained not in seen, "lock refresh repeats a lock")
+        seen.add(chained)
     require(chained == delta["candidate_lock_sha256"], "lock refresh chain does not reach the native lock")
     policy = policy or native.parents[1] / "supply-chain/config.toml"
     config = tomllib.loads(policy.read_text())

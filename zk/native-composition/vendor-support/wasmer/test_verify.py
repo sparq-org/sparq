@@ -43,6 +43,27 @@ class ProvenanceTests(unittest.TestCase):
                 else:
                     p.write_bytes(before)
 
+    def test_lock_refresh_chain_rejects(self):
+        p = self.native / "vendor-support/wasmer/lock-delta.json"
+        original = json.loads(p.read_text())
+        current = original["candidate_lock_sha256"]
+        loop = {"base_lock_sha256": current, "candidate_lock_sha256": current}
+        cases = {
+            "missing root": ({k: v for k, v in original.items() if k != "chain_root_lock_sha256"}, "chain root"),
+            "missing history": ({k: v for k, v in original.items() if k != "later_refreshes"}, "history missing"),
+            "substituted root": (
+                {**original, "chain_root_lock_sha256": "0" * 64,
+                 "later_refreshes": [{**original["later_refreshes"][0], "base_lock_sha256": "0" * 64},
+                                     *original["later_refreshes"][1:]]}, "chain root"),
+            "self loop": ({**original, "later_refreshes": [*original["later_refreshes"], loop]}, "repeats"),
+        }
+        for name, (delta, message) in cases.items():
+            with self.subTest(name=name):
+                p.write_text(json.dumps(delta))
+                with self.assertRaisesRegex(ValueError, message):
+                    self.check()
+        p.write_text(json.dumps(original))
+
     def test_symlink_rejects(self):
         p = self.native / "vendor/wasmer-derive-6.1.0/linked"
         p.symlink_to(self.policy)
