@@ -282,14 +282,25 @@ async fn readable<S: Store + 'static>(
     let mut stack = vec![root];
     while let Some(uri) = stack.pop() {
         kept.refund(uri.len());
-        // What a stuck change is to is skipped, with what is under it, rather than read or
-        // waited on until it is put back (see [`LwsState::read_visible`]).
-        if !state.visible(&uri) {
+        // Each resource is read under its shared lock, its listing included: a change to it in
+        // flight (a recursive delete part way, say) is waited for, never read half done. What a
+        // stuck change holds is skipped, with what is under it, rather than waited on until it
+        // is put back: the lock is given only while the resource is visible (see
+        // [`IriLocks::read`](super::resources::IriLocks::read)), and a stuck recursive delete
+        // sets aside everything it holds.
+        let Some(_guard) = state.locks.read(&uri).await else {
             continue;
+        };
+        // A resource removed since it was listed is not in the index: its existence is checked
+        // under its lock (its metadata alone does not say, being read as a default when absent).
+        match state.store.exists(&uri).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(_) => return Err(Failed::Store),
         }
         let is_container = uri.ends_with('/');
         // A listing that cannot be read fails the index rather than leaving out what is under
-        // it; a container removed meanwhile has nothing to list.
+        // it.
         if is_container {
             // The listing is read only while it fits what the budget has left, so one too large
             // to keep is refused before it is held whole.
@@ -317,16 +328,6 @@ async fn readable<S: Store + 'static>(
             drop(once);
             drop(children);
             kept.refund(listed);
-        }
-        let Some(_guard) = state.read_visible(&uri).await else {
-            continue;
-        };
-        // A resource removed since it was listed is not in the index: its existence is checked
-        // under its lock (its metadata alone does not say, being read as a default when absent).
-        match state.store.exists(&uri).await {
-            Ok(true) => {}
-            Ok(false) => continue,
-            Err(_) => return Err(Failed::Store),
         }
         match state.check(Action::Read, &uri, agent).await {
             Ok(true) => {}
@@ -768,7 +769,7 @@ mod tests {
                 .unwrap();
         }
         let b = format!("{root}b");
-        let held = state.locks.lock(&b).await;
+        let held = state.locks.lock(&b).await.unwrap();
         let task = {
             let state = state.clone();
             tokio::spawn(async move {
@@ -802,6 +803,106 @@ mod tests {
         assert!(ids.contains(&format!("{root}a").as_str()), "{ids:?}");
         assert!(!ids.contains(&b.as_str()), "{ids:?}");
         *store.fail_delete_of.lock().unwrap() = None;
+    }
+
+    /// Review finding: the walk listed a container before it took the container's lock, so it
+    /// could follow a listing a recursive delete was part way through; and when that delete's
+    /// rollback was set aside, the walk skipped the container but still visited (or waited on)
+    /// what it had queued under it. Each container is listed under its lock, and a stuck
+    /// recursive delete sets aside everything it holds: the walk waits out a delete that is put
+    /// back, and skips one that is stuck, at once.
+    #[tokio::test]
+    async fn the_walk_never_reads_a_recursive_delete_part_way() {
+        use super::super::test_store;
+        use std::sync::Arc;
+        use std::time::Duration;
+        let (state, store) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        let container = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        for (parent, slug, link) in [
+            ("/", "a", None),
+            ("/", "p", Some(container)),
+            ("/p/", "d", Some(container)),
+            ("/p/d/", "e", Some(container)),
+            ("/p/d/e/", "z", None),
+        ] {
+            let mut h = vec![("slug", slug), ("content-type", "text/plain")];
+            if let Some(l) = link {
+                h.push(("link", l));
+            }
+            let r = super::super::route(&state, test_store::request(Method::POST, parent, &h, "x"))
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let at = |p: &str| format!("{root}{p}");
+        let walk = || {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
+                let get = test_store::request(Method::GET, &path, &[], "");
+                let doc =
+                    test_store::body_json(handle(&state, &get, &Agent::anonymous()).await).await;
+                let mut ids: Vec<String> = doc["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter_map(|i| i["id"].as_str().map(str::to_string))
+                    .collect();
+                ids.sort();
+                ids
+            })
+        };
+        let delete = || {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let h = [("depth", "infinity")];
+                let r = test_store::request(Method::DELETE, "/p/d/", &h, "");
+                super::super::route(&state, r).await.status()
+            })
+        };
+        let everything = vec![
+            at(""),
+            at("a"),
+            at("p/"),
+            at("p/d/"),
+            at("p/d/e/"),
+            at("p/d/e/z"),
+        ];
+        // z and e go, then d cannot and they are put back: a walk meanwhile waits, and finds
+        // all of it.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_delete_of.lock().unwrap() = Some((at("p/d/e/z"), gate.clone()));
+        *store.fail_delete_of.lock().unwrap() = Some(at("p/d/"));
+        let removal = delete();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let during = walk();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!during.is_finished(), "walked during the delete");
+        gate.add_permits(1);
+        assert!(removal.await.unwrap().is_server_error());
+        let ids = tokio::time::timeout(Duration::from_secs(2), during)
+            .await
+            .expect("walked once the delete was over")
+            .unwrap();
+        assert_eq!(ids, everything);
+        // The same, with e not put back: the delete is set aside with everything it holds (p's
+        // listing included), and the walk skips all of it at once.
+        *store.fail_restore_of.lock().unwrap() = Some(at("p/d/e/"));
+        assert!(delete().await.unwrap().is_server_error());
+        let ids = tokio::time::timeout(Duration::from_secs(1), walk())
+            .await
+            .expect("skipped, not waited on")
+            .unwrap();
+        assert_eq!(ids, vec![at(""), at("a")]);
+        *store.fail_restore_of.lock().unwrap() = None;
+        *store.fail_delete_of.lock().unwrap() = None;
+        for _ in 0..250 {
+            if state.visible(&at("p/d/e/z")) && state.visible(&at("p/d/")) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(walk().await.unwrap(), everything);
     }
 
     #[tokio::test]
@@ -878,7 +979,7 @@ mod tests {
             subject: Some("https://bob.example/#me".into()),
             client: None,
         };
-        let held = state.locks.lock(&uri).await;
+        let held = state.locks.lock(&uri).await.unwrap();
         let task = {
             let (state, bob) = (state.clone(), bob.clone());
             tokio::spawn(async move {
