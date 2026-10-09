@@ -275,9 +275,10 @@ fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
 #[cfg(feature = "parallel")]
 fn span_literal(b: &[u8], i: usize) -> Result<usize, String> {
     let (_value, after) = lex_string(b, i)?;
+    let after = annotation_start(b, after);
     match b.get(after) {
         Some(b'^') if b.get(after + 1) == Some(&b'^') => {
-            let open = after + 2;
+            let open = skip_hws(b, after + 2);
             if b.get(open) != Some(&b'<') {
                 return Err(format!("N-Quads: bad datatype at byte {open}"));
             }
@@ -446,6 +447,27 @@ fn skip_ws(b: &[u8], mut i: usize) -> usize {
         i += 1;
     }
     i
+}
+
+/// Index of the first byte at or after `i` that is not a space or tab (`WS` inside a line).
+#[inline]
+fn skip_hws(b: &[u8], mut i: usize) -> usize {
+    while i < b.len() && matches!(b[i], b' ' | b'\t') {
+        i += 1;
+    }
+    i
+}
+
+/// After a string literal's closing quote: the index of its `^^` / `@` annotation when only
+/// spaces/tabs separate them (the grammar allows WS between terminals), else `after`.
+#[inline]
+fn annotation_start(b: &[u8], after: usize) -> usize {
+    let k = skip_hws(b, after);
+    match b.get(k) {
+        Some(b'@') => k,
+        Some(b'^') if b.get(k + 1) == Some(&b'^') => k,
+        _ => after,
+    }
 }
 
 #[inline]
@@ -636,6 +658,12 @@ fn check_position(b: &[u8], i: usize, predicate: bool) -> Result<(), String> {
 fn version_directive(b: &[u8], i: usize) -> Result<usize, String> {
     if !b[i..].starts_with(b"VERSION") {
         return Err(format!("N-Triples: unexpected term start at byte {i}"));
+    }
+    // Statements are separated by EOL: only spaces/tabs may precede VERSION on its line.
+    // (A chunk always starts at a line start: the splitter cuts after `\n`.)
+    let line_start = b[..i].iter().rev().find(|&&c| c != b' ' && c != b'\t');
+    if !matches!(line_start, None | Some(b'\n' | b'\r')) {
+        return Err(format!("N-Triples: VERSION directive must start its line, at byte {i}"));
     }
     let mut j = i + 7;
     while matches!(b.get(j), Some(b' ' | b'\t')) {
@@ -920,10 +948,11 @@ fn valid_lang_tag(t: &[u8]) -> bool {
 
 fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
     let (value, after) = lex_string(b, i)?;
+    let after = annotation_start(b, after);
     match b.get(after) {
         // ^^<datatype>
         Some(b'^') if b.get(after + 1) == Some(&b'^') => {
-            let open = after + 2;
+            let open = skip_hws(b, after + 2);
             if b.get(open) != Some(&b'<') {
                 return Err(format!("N-Triples: bad datatype at byte {open}"));
             }
@@ -1059,6 +1088,9 @@ mod tests {
             "VERSION 1.2\n",
             "VERSIONX \"1.2\"\n",
             "VERSION \"\\q\"\n",
+            "<http://example/s> <http://example/p> <http://example/o> . VERSION \"1.2\"\n",
+            "<http://example/s> <http://example/p> <http://example/o> .\t VERSION \"1.2\"\n",
+            "<http://example/s> <http://example/p> \"x\"^^ \n<http://example/dt> .",
             "VERSION \"\\uD800\"\n",
             "_:\u{D7} <http://example/p> <http://example/o> .",
             "_:a\u{D7} <http://example/p> <http://example/o> .",
@@ -1156,13 +1188,17 @@ mod tests {
         let doc = "VERSION \"1.2\"\r\nVERSION \"1.2-basic\" # c\n#comment\r<urn:s> <urn:p> <urn:o> .\n\
                    _:a\u{B7}b <urn:p> \"x\"@ar--RTL .\n\
                    _:\u{E9}t\u{E9}\u{301}-\u{3042}.\u{10000}_9 <urn:p> _:\u{D8}\u{2C00}\u{203F}x .\n\
-                   VERSION \"1.2\\u0041\"\n";
+                   VERSION \"1.2\\u0041\"\n  \tVERSION \"1.2\"\n\
+                   <urn:s> <urn:p> \"x\"^^ <urn:dt> .\n<urn:s> <urn:p> \"y\" \t^^\t<urn:dt> .\n\
+                   <urn:s> <urn:p> \"z\" @en .\n";
         let mut d = Dict::new();
         let t = parse_chunk(doc.as_bytes(), &mut d).expect("valid N-Triples 1.2");
-        assert_eq!(t.len(), 3, "the triple after a CR-terminated comment is kept");
+        assert_eq!(t.len(), 6, "the triple after a CR-terminated comment is kept");
+        let dt_lit = Term::Literal(Literal::new_typed_literal("x", NamedNode::new_unchecked("urn:dt")));
+        assert!(d.lookup(&dt_lit) != 0, "`^^ <dt>` with whitespace keeps its datatype");
         assert!(d.lookup(&Term::BlankNode(BlankNode::new_unchecked("\u{E9}t\u{E9}\u{301}-\u{3042}.\u{10000}_9"))) != 0);
         #[cfg(feature = "parallel")]
-        assert_eq!(parse_quads_chunk(doc.as_bytes()).expect("valid N-Quads 1.2")[0].2.len(), 3);
+        assert_eq!(parse_quads_chunk(doc.as_bytes()).expect("valid N-Quads 1.2")[0].2.len(), 6);
     }
 
     /// #2716: a blank-node label ends at the first non-label byte, so it may abut the next term
