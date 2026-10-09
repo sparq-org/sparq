@@ -1351,7 +1351,7 @@ impl PodStore {
         // under the same read view and budget. A `GRAPH ?var` template's destinations are
         // authorized as the engine instantiates them, from its one evaluation of the WHERE,
         // before that operation changes anything. A denial aborts, so an update with more
-        // than one operation runs on a fork that replaces the store only on success.
+        // than one operation runs on a fork whose effects are committed only on success.
         let mut auth_input = false;
         if permit.var_graphs {
             // Borrow the (now initialized) field itself, disjoint from `self.graph`.
@@ -1364,9 +1364,17 @@ impl PodStore {
                 sparq_engine::update_in_place_algebra_with_budget(g, &upd, reads.as_ref(), Some(authorize), budget)
             };
             if upd.operations.len() > 1 {
+                // Run it on a fork, then commit exactly its effects to the store through
+                // the durable transaction path (the fork itself has no WAL).
                 let mut working = self.graph.fork();
-                apply(&mut working, &mut authorize)?;
-                self.graph = working;
+                let effects = sparq_engine::update_in_place_algebra_capturing(
+                    &mut working,
+                    &upd,
+                    reads.as_ref(),
+                    Some(&mut authorize),
+                    budget,
+                )?;
+                sparq_engine::apply_effects(&mut self.graph, &effects)?;
             } else {
                 apply(&mut self.graph, &mut authorize)?;
             }

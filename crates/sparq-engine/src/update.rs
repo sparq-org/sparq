@@ -586,8 +586,9 @@ pub(crate) fn update_prepared_impl(graph: &Graph, upd: &Update) -> Result<Graph,
 /// instantiated templates are about to change, after the WHERE is evaluated and before
 /// anything is applied; an `Err` aborts the update with that error. The graphs it sees
 /// are exactly the graphs the operation then writes, from the same single evaluation.
-/// Operations applied before the failing one stay applied: apply to a
-/// [`fork`](Graph::fork) for all-or-nothing.
+/// Operations applied before the failing one stay applied: for all-or-nothing, run
+/// [`update_in_place_algebra_capturing`] on a [`fork`](Graph::fork) and commit its
+/// effects with [`apply_effects`].
 pub fn update_in_place_algebra_with_budget(
     graph: &mut Graph,
     upd: &Update,
@@ -595,10 +596,36 @@ pub fn update_in_place_algebra_with_budget(
     authorize: Option<&mut WriteAuthorizer<'_>>,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
+    algebra_core(graph, upd, reads, authorize, budget, None)
+}
+
+/// [`update_in_place_algebra_with_budget`] that also returns the resolved effects, so a
+/// caller can apply the update to a [`fork`](Graph::fork) and then commit exactly what it
+/// did to the original graph, durably and atomically, with [`apply_effects`].
+pub fn update_in_place_algebra_capturing(
+    graph: &mut Graph,
+    upd: &Update,
+    reads: Option<&std::sync::Arc<rustc_hash::FxHashSet<Term>>>,
+    authorize: Option<&mut WriteAuthorizer<'_>>,
+    budget: &crate::QueryBudget,
+) -> Result<Vec<UpdateEffect>, String> {
+    let mut effects = Vec::new();
+    algebra_core(graph, upd, reads, authorize, budget, Some(&mut effects))?;
+    Ok(effects)
+}
+
+fn algebra_core(
+    graph: &mut Graph,
+    upd: &Update,
+    reads: Option<&std::sync::Arc<rustc_hash::FxHashSet<Term>>>,
+    authorize: Option<&mut WriteAuthorizer<'_>>,
+    budget: &crate::QueryBudget,
+    sink: EffectSink,
+) -> Result<(), String> {
     require_update_budget(budget)?;
     let _view = reads.map(crate::exec::view::install_reads);
     crate::exec::budget::with_budget(budget, || {
-        apply_update_in_place(graph, upd, None, authorize)
+        apply_update_in_place(graph, upd, sink, authorize)
     })
 }
 

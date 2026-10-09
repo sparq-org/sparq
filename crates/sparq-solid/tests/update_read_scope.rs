@@ -283,3 +283,59 @@ fn variable_write_targets_are_authorized_as_written() {
         assert_eq!(changed, expected.unwrap_or(&[]), "{upd}");
     }
 }
+
+/// A directory-backed copy of [`store`], and the directory.
+fn durable_store(tag: &str) -> (PodStore, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("sparq_update_scope_{tag}_{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    Graph::load_dataset(&small_dataset(), "nquads")
+        .expect("loads")
+        .save(&dir)
+        .expect("saves");
+    (reopen(&dir), dir)
+}
+
+fn reopen(dir: &std::path::Path) -> PodStore {
+    let mut s = PodStore::new(Graph::open(dir).expect("opens"));
+    s.materialize_wac().expect("wac");
+    s
+}
+
+/// A multi-operation update with a variable write target commits through the store's
+/// durable path: it survives a reopen, and so do later writes. A refused one changes
+/// neither memory nor disk.
+#[test]
+fn multi_operation_updates_stay_durable() {
+    let (mut s, dir) = durable_store("ok");
+    s.update_as(
+        &bob(),
+        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+         INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
+    )
+    .expect("permitted");
+    s.update_as(
+        &bob(),
+        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:l> <urn:p> \"later\" } }",
+    )
+    .expect("a later write");
+    let live = out(&s);
+    drop(s);
+    let back = out(&reopen(&dir));
+    for v in ["multi", "var", "later"] {
+        assert!(live.contains(v) && back.contains(v), "{v} lost: {back}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+
+    let (mut s, dir) = durable_store("refused");
+    let before = out(&s);
+    s.update_as(
+        &bob(),
+        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+         INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } WHERE { GRAPH ?g { } }",
+    )
+    .expect_err("pub is not writable");
+    assert_eq!(out(&s), before, "memory changed");
+    drop(s);
+    assert_eq!(out(&reopen(&dir)), before, "disk changed");
+    std::fs::remove_dir_all(&dir).ok();
+}

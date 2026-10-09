@@ -30,8 +30,9 @@
 //!   under the read view, and hands the concrete destination graphs of each operation
 //!   to [`authorize_writes`] before applying that operation. There is no second
 //!   evaluation, so the graphs authorized are exactly the graphs written. A destination
-//!   that is not a writable named graph denies the update, and the store applies the
-//!   update to a fork so a denial leaves it untouched;
+//!   that is not a writable named graph denies the update before that operation
+//!   writes anything; an update with several operations runs on a fork whose effects
+//!   are committed to the store, through its durable transaction path, only on success;
 //! - a target whose graph name cannot be determined statically — a `CLEAR`/`DROP` of
 //!   `ALL`/`NAMED` graphs — is treated *conservatively*: the actor must be able to write
 //!   **every** named graph currently in the store, or the whole update is denied.
