@@ -584,66 +584,6 @@ fn recipient_policy() -> sparq_policy::ValidatedPolicy {
     .expect("policy parses")
 }
 
-// 14. A recipient constraint persists as a ConditionalGrant re-checked per session:
-//     carol (the recipient) is granted; everyone else is denied — through accessible/
-//     query_as — even though ALICE materialized it.
-#[test]
-fn recipient_constraint_persists_as_rechecked_condition() {
-    // Inspect the materialized triples via the free-function form (we own the Graph).
-    // Note: the materializing request party is ALICE, but the constraint names CAROL.
-    let mut g = pod();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let out = materialize_permission_conditional(&mut g, &recipient_policy(), &req);
-    assert!(out.granted, "faithful recipient maps to a condition: {out:?}");
-    // A real ConditionalGrant head naming carol now lives in the auth view.
-    assert_eq!(cond_grants_for(&g, Some(CAROL)), 1, "carol condition present");
-    assert_eq!(cond_grants_for(&g, Some(ALICE)), 0, "no condition for the materializer");
-
-    // RE-CHECK through the real enforcement path: rebuild a store over the SAME graph.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&recipient_policy(), &req).granted);
-    assert!(reads(&mut store, CAROL), "recipient carol granted");
-    assert!(!reads(&mut store, ALICE), "materializing party is NOT auto-granted");
-    assert!(!reads(&mut store, BOB), "unrelated agent denied");
-    assert!(!reads(&mut store, "https://x.ex/#m"), "stranger denied");
-    assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "anonymous denied");
-
-    // End-to-end through query_as: only carol sees the content.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
-    // for this single-triple probe as the old union-always bare pattern).
-    let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
-    let carol = Session { agent: Some(CAROL), client: None, issuer: None, now: None };
-    let alice = Session { agent: Some(ALICE), client: None, issuer: None, now: None };
-    assert_eq!(store.query_as(&carol, Mode::Read, sel).unwrap().rows.len(), 1);
-    assert_eq!(store.query_as(&alice, Mode::Read, sel).unwrap().rows.len(), 0);
-}
-
-// 15. A recipient `isPartOf` SET → one re-checked condition per member (OR).
-#[test]
-fn recipient_set_persists_as_multiple_conditions() {
-    let pol = parse_policy_str(
-        r#"
-@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-<urn:pol/set> a odrl:Set ; odrl:permission [
-    odrl:action odrl:read ;
-    odrl:target <https://pod.ex/notes/n1> ;
-    odrl:constraint [ odrl:leftOperand odrl:recipient ;
-                      odrl:operator odrl:isPartOf ;
-                      odrl:rightOperand "https://bob.ex/card#me|https://carol.ex/card#me" ] ] .
-"#,
-        "turtle",
-    )
-    .unwrap();
-    let mut store = PodStore::new(pod());
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-
-    assert!(reads(&mut store, BOB), "bob in set");
-    assert!(reads(&mut store, CAROL), "carol in set");
-    assert!(!reads(&mut store, ALICE), "alice not in set");
-    assert!(!reads(&mut store, "https://dave.ex/#m"), "dave not in set");
-}
-
 // 16. An UNmappable constraint (`odrl:purpose`) STAYS one-shot: the persisted view
 //     holds NO ConditionalGrant; access is the frozen check against the supplied
 //     request context (granted only if purpose matched at materialization), scoped
@@ -727,114 +667,6 @@ fn mixed_mappable_and_strict_datetime_stays_one_shot() {
     assert!(!reads(&mut store, CAROL), "no over-grant from dropping the strict time bound");
 }
 
-// 17b. [OPUS-4.8] sq-0q7n — recipient (mappable) + dateTime `lteq` (now ALSO mappable):
-//     the rule persists ONE recipient ConditionalGrant carrying an `auth:notAfter`
-//     window, re-checked against the LIVE clock per request — NOT frozen at
-//     materialization. carol inside the window reads; carol after it is denied WITHOUT
-//     a ledger refresh; the materializing request's `odrl:dateTime` is irrelevant.
-#[test]
-fn recipient_with_datetime_window_rechecks_live_clock() {
-    let pol = parse_policy_str(
-        r#"
-@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-<urn:pol/win> a odrl:Set ; odrl:permission [
-    odrl:action odrl:read ;
-    odrl:target <https://pod.ex/notes/n1> ;
-    odrl:constraint [ odrl:leftOperand odrl:recipient ;
-                      odrl:operator odrl:eq ;
-                      odrl:rightOperand <https://carol.ex/card#me> ] ;
-    odrl:constraint [ odrl:leftOperand odrl:dateTime ;
-                      odrl:operator odrl:lteq ;
-                      odrl:rightOperand "2026-12-31T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ] ] .
-"#,
-        "turtle",
-    )
-    .unwrap();
-
-    // Materialize WITHOUT any request dateTime — the window is persisted, not checked now.
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let mut g = pod();
-    let out = materialize_permission_conditional(&mut g, &pol, &req);
-    assert!(out.granted, "recipient+window maps to a re-checked condition: {out:?}");
-    // Exactly ONE ConditionalGrant for carol, carrying an auth:notAfter bound.
-    assert_eq!(cond_grants_for(&g, Some(CAROL)), 1, "one windowed condition for carol");
-    let na = sparq_engine::query(
-        &g,
-        "SELECT ?t WHERE { GRAPH <urn:sparq:auth> { \
-         ?g <https://sparq.dev/ns/auth#agent> <https://carol.ex/card#me> ; \
-            <https://sparq.dev/ns/auth#notAfter> ?t } }",
-    )
-    .expect("query")
-    .rows
-    .len();
-    assert_eq!(na, 1, "the grant carries an auth:notAfter window bound");
-
-    // RE-CHECK the LIVE clock through the real enforcement path.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-    let carol_in = Session { agent: Some(CAROL), client: None, issuer: None, now: None }
-        .at("2026-06-17T00:00:00Z"); // inside [.., 2026-12-31]
-    let carol_after = Session { agent: Some(CAROL), client: None, issuer: None, now: None }
-        .at("2027-01-01T00:00:00Z"); // AFTER the window closed
-    let carol_noclock = Session { agent: Some(CAROL), client: None, issuer: None, now: None };
-    assert!(
-        store.accessible(&carol_in, Mode::Read).iter().any(|x| x.as_str() == N1),
-        "carol inside the window reads"
-    );
-    assert!(
-        store.accessible(&carol_after, Mode::Read).iter().all(|x| x.as_str() != N1),
-        "carol AFTER the window is denied — live-clock re-check, no refresh needed"
-    );
-    assert!(
-        store.accessible(&carol_noclock, Mode::Read).iter().all(|x| x.as_str() != N1),
-        "a windowed grant with NO clock fails closed"
-    );
-    // The window is recipient-scoped: bob (wrong recipient) is denied even inside it.
-    let bob_in = Session { agent: Some(BOB), client: None, issuer: None, now: None }
-        .at("2026-06-17T00:00:00Z");
-    assert!(
-        store.accessible(&bob_in, Mode::Read).iter().all(|x| x.as_str() != N1),
-        "non-recipient denied even inside the window"
-    );
-}
-
-// 17c. [OPUS-4.8] sq-0q7n — a PUBLIC (no recipient) two-sided window: `gteq` lower +
-//     `lteq` upper map to auth:notBefore + auth:notAfter on a public ConditionalGrant.
-//     Any session inside the window reads; before/after — and a clockless session —
-//     are denied through the live re-check.
-#[test]
-fn public_two_sided_datetime_window_rechecks_live_clock() {
-    let pol = parse_policy_str(
-        r#"
-@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-<urn:pol/two> a odrl:Set ; odrl:permission [
-    odrl:action odrl:read ;
-    odrl:target <https://pod.ex/notes/n1> ;
-    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:gteq ;
-                      odrl:rightOperand "2026-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ] ;
-    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
-                      odrl:rightOperand "2026-12-31T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ] ] .
-"#,
-        "turtle",
-    )
-    .unwrap();
-    let mut store = PodStore::new(pod());
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-
-    let inside = Session { agent: Some(BOB), client: None, issuer: None, now: None }
-        .at("2026-06-17T00:00:00Z");
-    let before = Session { agent: Some(BOB), client: None, issuer: None, now: None }
-        .at("2025-06-01T00:00:00Z");
-    let after = Session { agent: Some(BOB), client: None, issuer: None, now: None }
-        .at("2027-06-01T00:00:00Z");
-    let no_clock = Session { agent: Some(BOB), client: None, issuer: None, now: None };
-    assert!(store.accessible(&inside, Mode::Read).iter().any(|x| x.as_str() == N1), "inside window");
-    assert!(store.accessible(&before, Mode::Read).iter().all(|x| x.as_str() != N1), "before window");
-    assert!(store.accessible(&after, Mode::Read).iter().all(|x| x.as_str() != N1), "after window");
-    assert!(store.accessible(&no_clock, Mode::Read).iter().all(|x| x.as_str() != N1), "no clock fails closed");
-}
-
 // 18. Compose-with-deny: a matching prohibition overrides the conditional path
 //     (deny-overrides) — nothing is materialized.
 #[test]
@@ -858,34 +690,6 @@ fn prohibition_overrides_conditional_path() {
     assert!(!reads(&mut store, CAROL), "deny-overrides: carol gets nothing");
 }
 
-// 19. A bare permission with NO constraints, via the conditional entry point, grants
-//     PUBLIC (any session) — only valid because action/target/duties already held.
-//     (Documents the no-constraint → auth:Public head behaviour.)
-#[test]
-fn no_constraint_conditional_grants_public() {
-    let pol = parse_policy_str(
-        r#"
-@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-<urn:pol/pub> a odrl:Set ; odrl:permission [
-    odrl:action odrl:read ; odrl:target <https://pod.ex/notes/n1> ] .
-"#,
-        "turtle",
-    )
-    .unwrap();
-    // Free-function form: a PUBLIC ConditionalGrant head is materialized.
-    let mut g = pod();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let out = materialize_permission_conditional(&mut g, &pol, &req);
-    assert!(out.granted, "bare permission grants: {out:?}");
-    assert_eq!(cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Public")), 1);
-
-    // Through the real enforcement path: public read = any agent AND anonymous.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-    assert!(reads(&mut store, BOB));
-    assert!(!store.accessible(&Session::default(), Mode::Read).is_empty(), "anon public read");
-}
-
 // ===========================================================================
 // [OPUS-4.8] sq-dpk4 — refresh / REVOCATION of bridged ODRL grants when the
 // underlying ODRL policy changes. SECURITY-SENSITIVE: a withdrawn permission, a
@@ -904,8 +708,8 @@ fn windowed_read_policy() -> sparq_policy::ValidatedPolicy {
     odrl:action odrl:read ;
     odrl:target <https://pod.ex/notes/n1> ;
     odrl:assignee <https://alice.ex/card#me> ;
-    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
-                      odrl:rightOperand "2026-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ] ] .
+    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:gteq ;
+                      odrl:rightOperand "2025-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ] ] .
 "#,
         "turtle",
     )
@@ -973,35 +777,33 @@ fn withdrawn_permission_loses_access_after_refresh() {
     assert!(store.accessible(&alice, Mode::Read).is_empty(), "stays revoked");
 }
 
-// 21. LAPSED TIME WINDOW: a windowed grant valid at materialization-time loses access
-//     once the window lapses (re-evaluate with a NOW past the bound) → refresh → gone.
+// 21. A CLOCK-BOUNDED GRANT IS NOT STORED: the permission holds until 2026, so a stored
+//     triple (never re-checked against the clock) would outlive it. decide() grants the
+//     in-window request, but the bridge stores nothing.
 #[test]
-fn lapsed_time_window_loses_access_after_refresh() {
-    let mut store = PodStore::new(pod());
-    let pol = windowed_read_policy();
-
-    // In-window request → granted.
+fn a_clock_bounded_grant_is_not_stored() {
+    let pol = parse_policy_str(
+        r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/win> a odrl:Set ; odrl:permission [
+    odrl:action odrl:read ;
+    odrl:target <https://pod.ex/notes/n1> ;
+    odrl:assignee <https://alice.ex/card#me> ;
+    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
+                      odrl:rightOperand "2026-01-01T00:00:00Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> ] ] .
+"#,
+        "turtle",
+    )
+    .expect("policy parses");
     let in_window = Request::new(odrl("read"))
         .on(N1)
         .by(ALICE)
         .with(odrl("dateTime"), Value::DateTime("2025-06-01T00:00:00Z".to_owned()));
-    assert!(store.materialize_odrl_permission(&pol, &in_window).granted);
-    let alice = Session { agent: Some(ALICE), client: None, issuer: None, now: None };
-    assert!(store.accessible(&alice, Mode::Read).iter().any(|g| g.as_str() == N1));
-
-    // The window LAPSES: re-evaluate with a NOW past the bound (same policy, new ctx).
-    let now_past = Request::new(odrl("read"))
-        .on(N1)
-        .by(ALICE)
-        .with(odrl("dateTime"), Value::DateTime("2026-06-16T00:00:00Z".to_owned()));
-    let (matched, retracted) =
-        store.refresh_odrl_grant(&pol, &now_past, BridgeKind::Permission);
-    assert!(matched);
-    assert_eq!(retracted, 1, "lapsed window retracts the grant");
-    assert!(
-        store.accessible(&alice, Mode::Read).is_empty(),
-        "lapsed time window: access gone",
-    );
+    assert!(sparq_policy::evaluate(&pol, &in_window).allow, "decide grants in the window");
+    let mut store = PodStore::new(pod());
+    assert!(!store.materialize_odrl_permission(&pol, &in_window).granted);
+    assert!(!store.materialize_odrl_policy(&pol, &in_window).granted);
+    assert!(!reads(&mut store, ALICE), "nothing stored for alice");
 }
 
 // 22. RE-EVAL NOW DENIES (a prohibition is added): a bridged write grant is revoked
@@ -1695,58 +1497,6 @@ fn except_matchers(graph: &Graph) -> Vec<(String, String)> {
         .collect()
 }
 
-// 18. The noneOf BRIDGE SHAPE: a recipient-neq permission materializes a public
-//     ConditionalGrant with an exceptMatcher accepting (agent = bob, client = any).
-#[test]
-fn recipient_neq_emits_noneof_exception_shape() {
-    let mut g = pod();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let out = materialize_permission_conditional(&mut g, &recipient_neq_policy(), &req);
-    assert!(out.granted, "recipient-neq maps to a noneOf condition: {out:?}");
-
-    // Exactly one public ConditionalGrant (the "everyone" head) — NOT one per agent.
-    assert_eq!(
-        cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Authenticated")),
-        1,
-        "everyone-except is a single authenticated head"
-    );
-    assert_eq!(cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Public")), 0, "an exclusion never grants anonymous");
-    // ... carrying an exception matcher that accepts bob (the carved-out party).
-    let ms = except_matchers(&g);
-    assert_eq!(ms.len(), 1, "one exceptMatcher: {ms:?}");
-    assert!(ms[0].1.contains("bob.ex"), "exception carves out bob: {ms:?}");
-}
-
-// 19. RE-CHECKED end-to-end through the enforcement path: everyone reads EXCEPT bob.
-//     Bob is denied; the materializing party (alice) reads. Anonymous is denied: an
-//     exclusion cannot be checked against a session with no identity.
-#[test]
-fn recipient_neq_grants_everyone_except_named_party() {
-    let pol = recipient_neq_policy();
-    let mut store = PodStore::new(pod());
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-
-    assert!(reads(&mut store, CAROL), "carol (not bob) granted");
-    assert!(reads(&mut store, DAVE), "dave (not bob) granted");
-    assert!(reads(&mut store, ALICE), "alice (not bob) granted");
-    assert!(!reads(&mut store, BOB), "bob is carved out by the noneOf exception");
-    // The head is auth:Authenticated, so an anonymous session (which might be bob) is denied.
-    assert!(
-        store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "anonymous is denied: it could be bob"
-    );
-
-    // End-to-end via query_as: bob sees nothing, carol sees the content.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
-    // for this single-triple probe as the old union-always bare pattern).
-    let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
-    let bob = Session { agent: Some(BOB), client: None, issuer: None, now: None };
-    let carol = Session { agent: Some(CAROL), client: None, issuer: None, now: None };
-    assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 0);
-    assert_eq!(store.query_as(&carol, Mode::Read, sel).unwrap().rows.len(), 1);
-}
-
 // 20. The PROHIBITION dual: a prohibition `recipient neq bob` carves out everyone
 //     EXCEPT bob (deny-overrides). Per the bridge's deny-overrides check, ANY matching
 //     prohibition blocks the grant; here the conditional path emits nothing because the
@@ -1845,107 +1595,6 @@ fn recipient_neq_policy_excluding(excluded: &str) -> sparq_policy::ValidatedPoli
     .expect("policy parses")
 }
 
-// 22. CHANGED EXCLUSION SET: an everyone-except-BOB noneOf grant is refreshed against an
-//     everyone-except-DAVE policy → the bob carve-out is retracted (bob regains access),
-//     the dave carve-out is replayed (dave loses access), and the OLD bob exceptMatcher
-//     leaves no residue. Verified through `accessible` AND the raw exceptMatcher shape.
-#[test]
-fn refresh_noneof_grant_replays_changed_exclusion_set() {
-    let mut store = PodStore::new(pod());
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-
-    // Bridge "everyone EXCEPT bob" → bob is the sole carved-out party.
-    assert!(store
-        .materialize_odrl_permission_conditional(&recipient_neq_policy_excluding(BOB), &req)
-        .granted);
-    assert!(!reads(&mut store, BOB), "bob excluded before refresh");
-    assert!(reads(&mut store, DAVE), "dave granted before refresh");
-    assert!(reads(&mut store, CAROL), "carol granted before refresh");
-    {
-        let ms = except_matchers(&store.graph);
-        assert_eq!(ms.len(), 1, "exactly one exceptMatcher before refresh: {ms:?}");
-        assert!(ms[0].1.contains("bob.ex"), "carve-out names bob: {ms:?}");
-    }
-
-    // The policy SWAPS the excluded party: now "everyone EXCEPT dave". refresh against the
-    // changed exclusion set re-evaluates the same tracked slot (kind/target/party match —
-    // the request party is the materializer, not the excluded recipient).
-    let (matched, retracted) = store.refresh_odrl_grant(
-        &recipient_neq_policy_excluding(DAVE),
-        &req,
-        BridgeKind::PermissionConditional,
-    );
-    assert!(matched, "the tracked conditional-grant slot matched");
-    // The entry still materializes a grant (everyone-except-dave), so it is NOT counted as
-    // retracted — but its exclusion CARVE-OUT was replayed, swapping bob for dave.
-    assert_eq!(retracted, 0, "the grant still holds (re-headed), so not retracted");
-
-    // ENFORCEMENT FLIP: bob regains access (the bob carve-out is gone); dave loses it.
-    assert!(reads(&mut store, BOB), "RETRACTED carve-out: bob regains read access");
-    assert!(!reads(&mut store, DAVE), "REPLAYED carve-out: dave is now excluded");
-    assert!(reads(&mut store, CAROL), "carol (never excluded) keeps access");
-    assert!(
-        store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "anonymous stays denied: it could be dave"
-    );
-
-    // The auth view holds exactly ONE exceptMatcher, and it carves out DAVE — the stale
-    // bob matcher left no residue (baseline reset + provenance clear before replay).
-    let ms = except_matchers(&store.graph);
-    assert_eq!(ms.len(), 1, "exactly one exceptMatcher after refresh (no stale bob): {ms:?}");
-    assert!(ms[0].1.contains("dave.ex"), "carve-out now names dave: {ms:?}");
-    assert!(!ms[0].1.contains("bob.ex"), "no residual bob carve-out: {ms:?}");
-
-    // End-to-end through query_as confirms the flip at the query layer.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
-    // for this single-triple probe as the old union-always bare pattern).
-    let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
-    let bob = Session { agent: Some(BOB), client: None, issuer: None, now: None };
-    let dave = Session { agent: Some(DAVE), client: None, issuer: None, now: None };
-    assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 1, "bob now reads");
-    assert_eq!(store.query_as(&dave, Mode::Read, sel).unwrap().rows.len(), 0, "dave now denied");
-}
-
-// 23. EXCLUSION SET GROWS then the WHOLE permission is WITHDRAWN: refreshing a noneOf
-//     grant against an empty policy retracts it entirely — the public head AND every
-//     carve-out are gone, and access is fully removed (fail-closed). This is the noneOf
-//     analogue of `withdrawn_permission_loses_access_after_refresh` (sq-dpk4).
-#[test]
-fn refresh_noneof_grant_withdrawn_retracts_public_head() {
-    let mut store = PodStore::new(pod());
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-
-    // Bridge "everyone EXCEPT bob" → carol/dave read, bob and anonymous do not.
-    assert!(store
-        .materialize_odrl_permission_conditional(&recipient_neq_policy_excluding(BOB), &req)
-        .granted);
-    assert!(reads(&mut store, CAROL), "carol reads before withdrawal");
-    assert!(
-        store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "anonymous is denied even before withdrawal"
-    );
-
-    // The permission is WITHDRAWN entirely → refresh against the empty policy.
-    let (matched, retracted) =
-        store.refresh_odrl_grant(&empty_policy(), &req, BridgeKind::PermissionConditional);
-    assert!(matched, "the tracked conditional-grant slot matched");
-    assert_eq!(retracted, 1, "the whole everyone-except grant was retracted");
-
-    // FAIL-CLOSED: the public head AND the carve-out are gone — nobody reads via the bridge.
-    assert!(!reads(&mut store, CAROL), "STALE noneOf GRANT MUST LOSE ACCESS: carol denied");
-    assert!(!reads(&mut store, DAVE), "dave denied after withdrawal");
-    assert!(
-        store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "anonymous (public) denied after withdrawal"
-    );
-    assert!(except_matchers(&store.graph).is_empty(), "no residual exceptMatcher");
-    assert_eq!(
-        cond_grants_for(&store.graph, Some("https://sparq.dev/ns/auth#Authenticated")),
-        0,
-        "no residual authenticated head after retraction"
-    );
-}
-
 // ===========================================================================
 // [OPUS-4.8] sq-5037 follow-up — COMBINED recipient `eq A AND neq B` in ONE rule
 // through the BRIDGE. The bridge emits `agents=[A]` (positive head) + `except=[B]`
@@ -1971,54 +1620,6 @@ fn recipient_eq_and_neq_policy() -> sparq_policy::ValidatedPolicy {
     .expect("policy parses")
 }
 
-// 22. The COMBINED bridge shape: a single ConditionalGrant whose positive head is carol
-//     AND which carries an exceptMatcher carving out bob (the per-head exception).
-#[test]
-fn recipient_eq_and_neq_emits_carol_head_with_bob_exception() {
-    let mut g = pod();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let out = materialize_permission_conditional(&mut g, &recipient_eq_and_neq_policy(), &req);
-    assert!(out.granted, "combined eq+neq maps to a faithful condition: {out:?}");
-
-    // Exactly one ConditionalGrant, headed by carol (the positive eq constraint) — NOT
-    // a public head (the eq narrows it to carol).
-    assert_eq!(cond_grants_for(&g, Some(CAROL)), 1, "carol positive head present");
-    assert_eq!(
-        cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Public")),
-        0,
-        "eq carol means the head is carol, not public"
-    );
-    // ... carrying an exception matcher that carves out bob (the neq constraint).
-    let ms = except_matchers(&g);
-    assert_eq!(ms.len(), 1, "one exceptMatcher (the neq bob carve-out): {ms:?}");
-    assert!(ms[0].1.contains("bob.ex"), "exception carves out bob: {ms:?}");
-}
-
-// 23. RE-CHECKED end-to-end: only carol reads. Bob is excluded by BOTH the eq head (he
-//     is not carol) AND the neq exception; everyone else is excluded by the eq head.
-#[test]
-fn recipient_eq_and_neq_grants_only_carol() {
-    let pol = recipient_eq_and_neq_policy();
-    let mut store = PodStore::new(pod());
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-
-    assert!(reads(&mut store, CAROL), "carol satisfies the eq head and is not excepted");
-    assert!(!reads(&mut store, BOB), "bob is not carol AND is excepted");
-    assert!(!reads(&mut store, DAVE), "dave is not carol → eq head excludes him");
-    assert!(!reads(&mut store, ALICE), "the materializer is not auto-granted");
-    assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "anonymous denied");
-
-    // End-to-end via query_as: only carol sees the content.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
-    // for this single-triple probe as the old union-always bare pattern).
-    let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
-    let carol = Session { agent: Some(CAROL), client: None, issuer: None, now: None };
-    let bob = Session { agent: Some(BOB), client: None, issuer: None, now: None };
-    assert_eq!(store.query_as(&carol, Mode::Read, sel).unwrap().rows.len(), 1);
-    assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 0);
-}
-
 // ===========================================================================
 // [OPUS-4.8] sq-4r70 — CONSTRAINT-CONDITIONAL DENY: an ACP-style deny that is
 // conditional on a recipient/assignee constraint (the dual of the conditional grant).
@@ -2026,6 +1627,25 @@ fn recipient_eq_and_neq_grants_only_carol() {
 // composing with deny-overrides. The deny appears/retracts as the condition flips.
 // ===========================================================================
 use sparq_solid::materialize_prohibition_conditional;
+
+/// Give every session read access to n1 through a static WAC rule, for the deny tests
+/// that layer a deny over a public allow. `permit` is the unconstrained ODRL permission
+/// the allow stands for; the bridge stores one-shot grants only, never a public one.
+fn install_public_read(store: &mut PodStore, permit: &sparq_policy::ValidatedPolicy) {
+    assert!(permit.prohibitions.is_empty());
+    assert!(permit.permissions.iter().all(|r| {
+        r.constraints.is_empty() && r.logical_constraints.is_empty() && r.assignee.is_none()
+    }));
+    let nq = r#"
+<https://pod.ex/notes/n1#it> <https://ex.dev/ns#title> "hello" <https://pod.ex/notes/n1> .
+<https://pod.ex/notes/n1.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/notes/n1.acl> .
+<https://pod.ex/notes/n1.acl#a> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/notes/n1> <https://pod.ex/notes/n1.acl> .
+<https://pod.ex/notes/n1.acl#a> <http://www.w3.org/ns/auth/acl#agentClass> <http://xmlns.com/foaf/0.1/Agent> <https://pod.ex/notes/n1.acl> .
+<https://pod.ex/notes/n1.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/notes/n1.acl> .
+"#;
+    *store = PodStore::new(Graph::load_dataset(nq, "nquads").expect("pod loads"));
+    store.materialize_wac().expect("wac");
+}
 
 /// Count `auth:ConditionalGrant` heads with `auth:effect auth:Deny` naming `agent`
 /// (or any) in `graph`'s auth view (the conditional-DENY dual of `cond_grants_for`).
@@ -2090,7 +1710,7 @@ fn conditional_deny_overrides_allow_for_carved_party() {
     )
     .unwrap();
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
     assert!(reads(&mut store, CAROL), "everyone reads before the deny");
     assert!(reads(&mut store, BOB), "bob reads before the deny");
 
@@ -2124,7 +1744,7 @@ fn conditional_deny_retracts_when_prohibition_withdrawn() {
     )
     .unwrap();
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
 
     // "everyone EXCEPT bob is prohibited" → a deny condition with a bob exception.
     let prohib = parse_policy_str(
@@ -2372,83 +1992,21 @@ fn recipient_set_policy(operator: &str, right_operand: &str) -> sparq_policy::Va
     parse_policy_str(&ttl, "turtle").expect("policy parses")
 }
 
-/// Bridge ↔ evaluator PARITY over identified recipients: after bridging (materialized
-/// by ALICE — the constraint need not hold against the materializing party), each
-/// candidate agent's per-session access equals `sparq_policy::evaluate`'s verdict for
-/// a request naming that party. Anonymous sessions are deliberately OUT of the panel:
-/// the evaluator is fail-closed on missing identity, while the bridged noneOf shape
-/// keeps the everyone-except public head — the accepted sq-5037 semantics (asserted
-/// separately below).
+/// Bridge ↔ evaluator PARITY over identified recipients: each agent's request,
+/// materialized on its own, grants that agent exactly when `sparq_policy::evaluate`
+/// does, and never any other agent or an anonymous session.
 fn assert_bridge_evaluator_parity(pol: &sparq_policy::ValidatedPolicy) {
-    let mut store = PodStore::new(pod());
-    let mat = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(pol, &mat).granted);
     for agent in [ALICE, BOB, CAROL, DAVE] {
-        let bridged = reads(&mut store, agent);
-        let evaluated =
-            sparq_policy::evaluate(pol, &Request::new(odrl("read")).on(N1).by(agent)).allow;
-        assert_eq!(bridged, evaluated, "bridge/evaluator parity for {agent}");
+        let req = Request::new(odrl("read")).on(N1).by(agent);
+        let mut store = PodStore::new(pod());
+        store.materialize_odrl_permission_conditional(pol, &req);
+        let evaluated = sparq_policy::evaluate(pol, &req).allow;
+        assert_eq!(reads(&mut store, agent), evaluated, "bridge/evaluator parity for {agent}");
+        for other in [ALICE, BOB, CAROL, DAVE].into_iter().filter(|o| *o != agent) {
+            assert!(!reads(&mut store, other), "{agent}'s grant reaches {other}");
+        }
+        assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "anonymous");
     }
-}
-
-// 30. `isAnyOf` BRIDGE SHAPE: one re-checked agent head per set member (NOT a public
-//     head), exactly as `isPartOf`.
-#[test]
-fn recipient_isanyof_persists_one_condition_per_member() {
-    let mut g = pod();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let out = materialize_permission_conditional(&mut g, &recipient_isanyof_policy(), &req);
-    assert!(out.granted, "isAnyOf maps faithfully to agent conditions: {out:?}");
-    assert_eq!(cond_grants_for(&g, Some(BOB)), 1, "bob head present");
-    assert_eq!(cond_grants_for(&g, Some(CAROL)), 1, "carol head present");
-    assert_eq!(
-        cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Public")),
-        0,
-        "a positive set is per-member heads, never a public head"
-    );
-    assert!(except_matchers(&g).is_empty(), "no exception on a positive set");
-
-    // RE-CHECKED end-to-end: members read, everyone else (incl. the materializer) not.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&recipient_isanyof_policy(), &req).granted);
-    assert!(reads(&mut store, BOB), "bob in set");
-    assert!(reads(&mut store, CAROL), "carol in set");
-    assert!(!reads(&mut store, ALICE), "alice (the materializer) not in set");
-    assert!(!reads(&mut store, DAVE), "dave not in set");
-    assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "anonymous denied");
-}
-
-// 31. `isNoneOf` BRIDGE SHAPE: a single public head carrying one exceptMatcher PER
-//     member of the exclusion set (the list-valued `neq` / ACP noneOf dual).
-#[test]
-fn recipient_isnoneof_emits_one_exception_per_member() {
-    let mut g = pod();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    let out = materialize_permission_conditional(&mut g, &recipient_isnoneof_policy(), &req);
-    assert!(out.granted, "isNoneOf maps faithfully to a noneOf condition: {out:?}");
-    assert_eq!(
-        cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Authenticated")),
-        1,
-        "everyone-except is a single authenticated head"
-    );
-    assert_eq!(cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Public")), 0, "an exclusion never grants anonymous");
-    let ms = except_matchers(&g);
-    assert_eq!(ms.len(), 2, "one exceptMatcher per excluded member: {ms:?}");
-    assert!(ms.iter().any(|m| m.1.contains("bob.ex")), "bob carved out: {ms:?}");
-    assert!(ms.iter().any(|m| m.1.contains("dave.ex")), "dave carved out: {ms:?}");
-
-    // RE-CHECKED end-to-end: every identified agent reads EXCEPT the set members.
-    // Anonymous is denied, since it could be a member.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&recipient_isnoneof_policy(), &req).granted);
-    assert!(reads(&mut store, ALICE), "alice (not excluded) granted");
-    assert!(reads(&mut store, CAROL), "carol (not excluded) granted");
-    assert!(!reads(&mut store, BOB), "bob carved out");
-    assert!(!reads(&mut store, DAVE), "dave carved out");
-    assert!(
-        store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "anonymous is denied: it could be a set member"
-    );
 }
 
 // 32. PARITY with the evaluator on both operators, over an identified-agent panel:
@@ -2464,6 +2022,18 @@ fn isanyof_bridge_matches_evaluator_verdicts() {
 #[test]
 fn isnoneof_bridge_matches_evaluator_verdicts() {
     assert_bridge_evaluator_parity(&recipient_isnoneof_policy());
+}
+
+#[test]
+fn identity_constrained_permissions_grant_exactly_the_deciding_party() {
+    for pol in [
+        recipient_policy(),
+        recipient_neq_policy(),
+        recipient_neq_policy_excluding(DAVE),
+        recipient_eq_and_neq_policy(),
+    ] {
+        assert_bridge_evaluator_parity(&pol);
+    }
 }
 
 // 33. MALFORMED right operands stay fail-closed (Unmappable → one-shot), mirroring the
@@ -2584,7 +2154,7 @@ fn isanyof_prohibition_persists_conditional_deny_per_member() {
     .unwrap();
     let mut store = PodStore::new(pod());
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
     let out = store.materialize_odrl_prohibition_conditional(&prohib, &req);
     assert!(out.prohibited, "isAnyOf prohibition maps to per-member deny conditions: {out:?}");
 
@@ -2606,51 +2176,6 @@ fn isanyof_prohibition_persists_conditional_deny_per_member() {
 // `rule.assignee` into the condition head when there is no recipient constraint.
 // ===========================================================================
 
-// 30. WIDENING CLOSED (permission): a bare-assignee permission (assignee=alice,
-//     ZERO constraints) via the CONDITIONAL entry point grants ONLY alice — bob
-//     AND an anonymous session are DENIED accessible()/query_as for the target.
-//     Before the fix this granted auth:Public (bob + anonymous read n1).
-#[test]
-fn bare_assignee_permission_conditional_scopes_to_assignee_not_public() {
-    // The rule carries `odrl:assignee alice` as a PROPERTY and no constraint block.
-    // (`read_policy()` in this file is exactly this shape.)
-    let pol = read_policy();
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
-
-    // Free-function form: the ConditionalGrant head is ALICE, NOT auth:Public.
-    let mut g = pod();
-    let out = materialize_permission_conditional(&mut g, &pol, &req);
-    assert!(out.granted, "bare-assignee permission still grants: {out:?}");
-    assert_eq!(
-        cond_grants_for(&g, Some("https://sparq.dev/ns/auth#Public")),
-        0,
-        "NO auth:Public head — the assignee restriction is honoured"
-    );
-    assert_eq!(cond_grants_for(&g, Some(ALICE)), 1, "the grant head is scoped to alice");
-
-    // Through the real enforcement path: only alice reads n1.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-    assert!(reads(&mut store, ALICE), "the assignee (alice) is granted");
-    assert!(!reads(&mut store, BOB), "bob (not the assignee) is DENIED — widening closed");
-    assert!(
-        store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "an anonymous session is DENIED — widening closed"
-    );
-
-    // End-to-end through query_as: only alice sees the content.
-    let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
-    let alice = Session { agent: Some(ALICE), client: None, issuer: None, now: None };
-    let bob = Session { agent: Some(BOB), client: None, issuer: None, now: None };
-    assert_eq!(store.query_as(&alice, Mode::Read, sel).unwrap().rows.len(), 1);
-    assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 0);
-    assert_eq!(
-        store.query_as(&Session::default(), Mode::Read, sel).unwrap().rows.len(),
-        0,
-        "anonymous query sees nothing"
-    );
-}
-
 // 31. WIDENING CLOSED (prohibition dual): a bare-assignee prohibition
 //     (assignee=alice, ZERO constraints) via the CONDITIONAL entry point denies
 //     ONLY alice — bob keeps a pre-existing public allow. Before the fix this
@@ -2667,7 +2192,7 @@ fn bare_assignee_prohibition_conditional_scopes_to_assignee_not_public() {
     )
     .unwrap();
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
     assert!(reads(&mut store, BOB), "bob reads via the public allow before the deny");
 
     // A bare-assignee prohibition: `odrl:assignee alice`, ZERO constraints.
@@ -2807,7 +2332,7 @@ fn compound_only_prohibition_conditional_scopes_not_public() {
     )
     .unwrap();
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
     assert!(reads(&mut store, BOB), "bob reads via the public allow before the deny");
 
     // A compound-only prohibition: `odrl:xone` of one `recipient eq alice`, ZERO atomic.
@@ -3041,30 +2566,6 @@ fn lab_members(req: Request) -> Request {
     req.with_party_memberships([(ALICE, LAB), (BOB, LAB)])
 }
 
-// 40. THE BUG: a collection-valued assignee emitted ONE head (the collection IRI), which
-//     no member session can ever match — the conditional grant was dead and every member
-//     was over-restricted. Now each KNOWN member gets a head and reads through the real
-//     enforcement path; a non-member still does not.
-#[test]
-fn collection_assignee_grants_one_head_per_known_member() {
-    let mut g = pod();
-    let req = lab_members(Request::new(odrl("read")).on(N1).by(ALICE));
-    let out = materialize_permission_conditional(&mut g, &lab_assignee_permit(), &req);
-    assert!(out.granted, "a collection assignee still maps to a condition: {out:?}");
-    assert_eq!(cond_grants_for(&g, Some(ALICE)), 1, "member alice gets a head");
-    assert_eq!(cond_grants_for(&g, Some(BOB)), 1, "member bob gets a head");
-    assert_eq!(cond_grants_for(&g, Some(LAB)), 1, "the collection IRI stays a head too");
-    assert_eq!(cond_grants_for(&g, Some(CAROL)), 0, "a non-member is NOT granted");
-
-    // RE-CHECK through the real enforcement path.
-    let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&lab_assignee_permit(), &req).granted);
-    assert!(reads(&mut store, ALICE), "member alice reads");
-    assert!(reads(&mut store, BOB), "member bob reads — even though ALICE materialized");
-    assert!(!reads(&mut store, CAROL), "non-member denied");
-    assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "anonymous denied");
-}
-
 // 41. SOUNDNESS FLOOR: the expansion draws ONLY on the caller-supplied membership
 //     evidence, so a ZERO-EDGE collection has nothing to expand to. The policy declares
 //     LAB a collection, so the head is recognised as one and the rule leaves the frozen
@@ -3110,7 +2611,7 @@ fn collection_prohibition_stays_one_shot() {
     // request materializes that member's frozen deny (the one-shot contract).
     let permit = public_read_permit();
     let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
     assert!(reads(&mut store, ALICE), "public allow in force before the deny");
     assert!(store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited);
     assert!(!reads(&mut store, ALICE), "DENY-OVERRIDES: the member loses access");
@@ -3169,7 +2670,7 @@ fn zero_edge_collection_prohibition_emits_no_conditional_deny() {
     // is bound by the one-shot deny the fallback materializes.
     let permit = public_read_permit();
     let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&permit, &req).granted);
+    install_public_read(&mut store, &permit);
     assert!(!store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited,
         "carol is not a member under any evidence, so no deny is materialized for her");
     assert!(reads(&mut store, CAROL), "the non-member keeps the public allow");
@@ -3281,16 +2782,36 @@ fn a_prohibition_on_another_party_blocks_the_conditional_grant() {
 
 #[test]
 fn a_future_time_prohibition_blocks_the_conditional_grant() {
-    // The prohibition opens in 2027: not live now, but a persisted head would outlive it.
+    // The prohibition opens in 2027: not live now, but any stored grant, conditional or
+    // the frozen fallback, would still be read after it opens.
     let c = r#"; odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:gteq ;
         odrl:rightOperand "2027-01-01T00:00:00Z"^^xsd:dateTime ]"#;
     let pol = cross_session_policy(c, "");
     let req = Request::new(odrl("read")).on(N1).by(ALICE).at("2026-06-01T00:00:00Z");
+    assert!(sparq_policy::evaluate(&pol, &req).allow, "decide grants alice now");
     let mut g = pod();
     let out = materialize_permission_conditional(&mut g, &pol, &req);
-    assert!(out.granted, "alice is granted now: {out:?}");
-    assert_eq!(cond_grants_for(&g, None), 0, "no head that outlives the window");
+    assert!(!out.granted, "nothing stored outlives the window: {out:?}");
+    assert_eq!(cond_grants_for(&g, None), 0, "no conditional head");
 
+    let mut store = PodStore::new(pod());
+    assert!(!store.materialize_odrl_permission_conditional(&pol, &req).granted);
+    let alice_2027 = Session {
+        agent: Some(ALICE),
+        client: None,
+        issuer: None,
+        now: Some("2027-06-01T00:00:00Z"),
+    };
+    assert!(store.accessible(&alice_2027, Mode::Read).is_empty(), "alice denied in 2027");
+}
+
+#[test]
+fn a_closed_time_prohibition_keeps_the_frozen_fallback() {
+    // The prohibition's window closed in 2025, so it never applies again.
+    let c = r#"; odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
+        odrl:rightOperand "2025-01-01T00:00:00Z"^^xsd:dateTime ]"#;
+    let pol = cross_session_policy(c, "");
+    let req = Request::new(odrl("read")).on(N1).by(ALICE).at("2026-06-01T00:00:00Z");
     let mut store = PodStore::new(pod());
     assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
     assert!(reads(&mut store, ALICE), "alice reads through the one-shot grant");
@@ -3298,27 +2819,66 @@ fn a_future_time_prohibition_blocks_the_conditional_grant() {
 }
 
 #[test]
-fn a_prohibition_that_cannot_apply_keeps_the_conditional_grant() {
-    // A prohibition on another action is withdrawn for every session.
+fn an_assignee_and_a_recipient_are_both_required() {
+    // Alice is the assignee and Bob the recipient: the evaluator needs both, so no head
+    // may admit Bob on the recipient alone.
+    let pol = parse_policy_str(
+        &format!(
+            r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/x> a odrl:Set ;
+  odrl:permission [ odrl:action odrl:read ; odrl:target <{N1}> ; odrl:assignee <{ALICE}> ;
+    odrl:constraint [ odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ;
+                      odrl:rightOperand <{BOB}> ] ] .
+"#
+        ),
+        "turtle",
+    )
+    .expect("policy parses");
+    for by in [ALICE, BOB] {
+        let req = Request::new(odrl("read")).on(N1).by(by);
+        let mut store = PodStore::new(pod());
+        store.materialize_odrl_permission_conditional(&pol, &req);
+        assert!(!reads(&mut store, BOB), "bob is not the assignee (decided for {by})");
+        assert_eq!(cond_grants_for(&store.graph, None), 0, "no conditional head");
+    }
+}
+
+#[test]
+fn two_recipient_constraints_are_a_conjunction() {
     let pol = parse_policy_str(
         &format!(
             r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 <urn:pol/x> a odrl:Set ;
   odrl:permission [ odrl:action odrl:read ; odrl:target <{N1}> ;
-    odrl:constraint [ odrl:leftOperand odrl:recipient ; odrl:operator odrl:neq ;
-                      odrl:rightOperand <{DAVE}> ] ] ;
-  odrl:prohibition [ odrl:action odrl:modify ; odrl:target <{N1}> ; odrl:assignee <{BOB}> ] .
+    odrl:constraint [ odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ;
+                      odrl:rightOperand <{BOB}> ] ,
+                    [ odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ;
+                      odrl:rightOperand <{CAROL}> ] ] .
 "#
         ),
         "turtle",
     )
     .expect("policy parses");
-    let req = Request::new(odrl("read")).on(N1).by(ALICE);
+    let req = Request::new(odrl("read")).on(N1).by(BOB);
     let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-    assert!(reads(&mut store, BOB), "bob may read");
-    assert!(reads(&mut store, CAROL), "carol may read");
-    assert!(!reads(&mut store, DAVE), "dave is excluded");
-    assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "anonymous denied");
+    store.materialize_odrl_permission_conditional(&pol, &req);
+    assert!(!reads(&mut store, BOB), "bob is not also carol");
+    assert!(!reads(&mut store, CAROL), "carol is not also bob");
+}
+
+#[test]
+fn a_wildcard_party_is_never_granted() {
+    // decide() grants the request (bob's prohibition does not name the party), but the
+    // party is a principal that many sessions match.
+    let pol = cross_session_policy("", &format!("; odrl:assignee <{BOB}>"));
+    for party in ["https://sparq.dev/ns/auth#Public", "https://sparq.dev/ns/auth#Authenticated"] {
+        let req = Request::new(odrl("read")).on(N1).by(party);
+        let mut store = PodStore::new(pod());
+        assert!(!store.materialize_odrl_permission(&pol, &req).granted, "{party}");
+        assert!(!store.materialize_odrl_permission_conditional(&pol, &req).granted, "{party}");
+        assert!(!reads(&mut store, BOB), "bob denied ({party})");
+        assert!(store.accessible(&Session::default(), Mode::Read).is_empty(), "{party}");
+    }
 }

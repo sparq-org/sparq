@@ -382,26 +382,11 @@ Materialize the authorization view from the access-control documents, then enfor
   following (the ODRL Formal Semantics CG report supplies no conflict default either — its
   conflict-resolution machinery is explicitly pending). See the `usage-control-policy` skill.
 - `store.materialize_odrl_permission_conditional(&Policy, &Request) -> BridgeOutcome` —
-  **opt-in** (`odrl-bridge`; sq-hiz4): persists a *faithfully-mappable* ODRL
-  constraint as a re-checked ACP `auth:ConditionalGrant` (agent matcher) instead of a
-  one-shot allow — so the granted agent is verified **per session**, not frozen to the
-  materializing party. `odrl:recipient`/`odrl:assignee`
-  (`eq`/`isA`/`isPartOf`/`isAnyOf`/`neq`/`isNoneOf` — the set operators one head /
-  exception per member, sq-5fkpp) maps
-  faithfully (recipient-of-data = session agent); an `odrl:dateTime` **inclusive** bound
-  (`lteq` → `auth:notAfter`, `gteq` → `auth:notBefore`) maps to a **live-clock window**
-  re-checked against `Session::now` per request (sq-0q7n — a lapsed window denies
-  immediately, no `refresh_odrl_grant` needed); `odrl:purpose`/`count`/a *strict* `dateTime`
-  bound, **and any compound `odrl:LogicalConstraint`** (`odrl:and`/`odrl:or`/`odrl:xone` —
-  no faithful single-head analogue; sq-izzak) have no faithful analogue and STAY
-  one-shot; a rule mixing mappable + unmappable
-  constraints falls back **entirely** to one-shot (fail-safe — never drops a bound). A
-  dateTime window is mapped only on an **allow** (a lapsed *deny* would fail open). A bare
-  `odrl:assignee` **rule PROPERTY** (with zero constraints) scopes the grant head to that ONE
-  assignee — **not** `auth:Public` (sq-9n1q4; the deny dual likewise scopes to the
-  assignee, never an over-broad public deny). Only a rule with **no** recipient constraint AND
-  **no** assignee grants `auth:Public`. Mapping
-  table in the [`usage-control-policy`](../usage-control-policy/SKILL.md) skill.
+  **opt-in** (`odrl-bridge`): the same one-shot grant as `materialize_odrl_permission`. It
+  no longer persists recipient/assignee/`dateTime` constraints as re-checked
+  `auth:ConditionalGrant` heads, which could grant a session `decide` denies; a
+  clock-bounded permission stores nothing (per-request evaluation: #6743). See the
+  `usage-control-policy` skill.
 - `odrl_bridge::materialize_odrl_n3(&mut Graph, policy_ttl: &str, &Request) -> Result<BridgeOutcome, String>`
   — **opt-in** (`odrl-bridge`; sq-zgbso.2, sq-zgbso.2): an alternative
   materialization path that runs the stateless ODRL core as **five stratified `reason_n3` calls**

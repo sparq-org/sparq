@@ -65,10 +65,7 @@ action, or partyless/targetless request materializes **nothing**.
 
 **SPARQL-query action contract (sq-lrtc3.2).** Represent a query request with standard `odrl:read`, which maps exactly to `Mode::Read`; sparq does not mint a profile-specific query action IRI. A request carrying only the `odrl:use` umbrella remains unmapped and grants no `query_as` visibility. Although ODRL defines `read` below `use`, hierarchy matching is the policy evaluator's concern: the bridge maps the concrete request action and will not guess that the broader `use` request meant read rather than one of the mutation actions it also covers.
 
-**Conditions, refresh & revocation.** A *faithfully-mappable* constraint (`materialize_odrl_permission_conditional`) persists as a per-session-rechecked ACP `auth:ConditionalGrant`
-(recipient/assignee matchers; an inclusive `odrl:dateTime` window vs `Session::now`, **fail-closed with no
-clock**); `purpose`/`count`/strict bounds have no stateless analogue and stay **one-shot** (any unmappable
-constraint falls the rule back to one-shot). Bridged grants are ledger-tracked; `refresh_odrl_grant(s)`
+**Conditions, refresh & revocation.** Allows are one-shot: the bridge stores the `party auth:<mode> target` triple from the `Permit` `decide` issued, only for a single-agent party and only when the permit holds at every later time (`Permit::lasting`). `materialize_odrl_permission_conditional` stores the same one-shot grant; recipient-scoped and time-windowed grants for other sessions are tracked in [#6743](https://github.com/sparq-org/sparq/issues/6743). Bridged grants are ledger-tracked; `refresh_odrl_grant(s)`
 rebuilds the view (static baseline + replay of valid entries), retracting lapsed ones. **Deny retraction is asymmetric (fail-OPEN risk):** an `auth:deny*` is retracted **only** on a *definite* `Withdrawn` verdict. Full detail in the SKILL.
 
 ## WASM support

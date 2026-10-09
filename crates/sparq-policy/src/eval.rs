@@ -418,6 +418,8 @@ pub struct Permit {
     action: String,
     target: Option<String>,
     party: Option<String>,
+    recipient: Option<String>,
+    lasting: bool,
 }
 
 impl Permit {
@@ -436,6 +438,19 @@ impl Permit {
     /// The requesting party the grant covers, if the request named one.
     pub fn party(&self) -> Option<&str> {
         self.party.as_deref()
+    }
+    /// The recipient the decision checked recipient constraints against: the explicit
+    /// `odrl:recipient` context value, else the party.
+    pub fn recipient(&self) -> Option<&str> {
+        self.recipient.as_deref()
+    }
+    /// Whether the grant holds for this party at every later time as well: the granting
+    /// permission's clock constraints are all lower bounds (`gt`/`gteq`), and every
+    /// prohibition is withdrawn for good (a structural mismatch, a definitely false
+    /// non-clock constraint, or a closed `lt`/`lteq` window). A grant that is stored
+    /// rather than re-checked per request is sound only when this holds.
+    pub fn lasting(&self) -> bool {
+        self.lasting
     }
 }
 
@@ -469,7 +484,7 @@ impl Decision {
         }
     }
 
-    fn grant(rule: &Rule, request: &Request) -> Decision {
+    fn grant(rule: &Rule, request: &Request, lasting: bool) -> Decision {
         Decision {
             allow: true,
             matched_rules: vec![rule.id.clone()],
@@ -479,6 +494,12 @@ impl Decision {
                 action: request.action.clone(),
                 target: request.target.clone(),
                 party: request.party.clone(),
+                recipient: request
+                    .context
+                    .get(ODRL_RECIPIENT)
+                    .or(request.recipient_party.as_ref())
+                    .map(|v| v.as_str().to_owned()),
+                lasting,
             }),
         }
     }
@@ -516,6 +537,18 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     // 0. A conflict strategy this engine cannot honour decides nothing (fail-closed).
     if let Err(why) = crate::compare::conflict_admissibility(policy) {
         return Decision::deny(Vec::new(), vec![why]);
+    }
+    // The default recipient is the party `Request::by` set. A party changed afterwards
+    // would be granted on another identity's recipient evidence.
+    if request
+        .recipient_party
+        .as_ref()
+        .is_some_and(|r| request.party.as_deref() != Some(r.as_str()))
+    {
+        return Decision::deny(
+            Vec::new(),
+            vec!["the request's party no longer matches its recipient evidence; build it with Request::by".to_owned()],
+        );
     }
 
     // 1. A prohibition overrides everything unless it DEFINITELY does not apply: one
@@ -555,7 +588,12 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
             .map(|d| d.action.0.as_str())
             .collect();
         if undischarged.is_empty() {
-            return Decision::grant(rule, request);
+            let lasting = holds_later(rule)
+                && policy
+                    .prohibitions
+                    .iter()
+                    .all(|p| withdrawn_later(p, request, &req_action));
+            return Decision::grant(rule, request, lasting);
         }
         for a in undischarged {
             caveats.push(format!(
@@ -572,141 +610,37 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
-/// Proof that [`decide_conditional`] admitted `rule` for a grant the caller re-checks per
-/// session. Everything except who the session is and when it runs is settled: the
-/// conflict strategy, the prohibitions, the rule's action and target, and its duties.
-/// Its fields are private and it has no public constructor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConditionalPermit<'p> {
-    rule: &'p Rule,
-    target: String,
-}
-
-impl<'p> ConditionalPermit<'p> {
-    /// The admitted permission. Its constraints are all [`DEFERRED_LEFT_OPERANDS`].
-    pub fn rule(&self) -> &'p Rule {
-        self.rule
-    }
-    /// The requested target the grant covers.
-    pub fn target(&self) -> &str {
-        &self.target
-    }
-    /// Whether a session with no identity is granted: only when the rule names no
-    /// assignee and constrains no recipient or assignee. An exclusion alone (`neq`,
-    /// `isNoneOf`) needs an identity to hold, so it does not admit an anonymous session.
-    pub fn admits_anonymous(&self) -> bool {
-        !names_identity(self.rule) && !excludes_identity(self.rule)
-    }
-}
-
-/// The left operands a conditional grant leaves to the per-session re-check: the
-/// recipient or assignee identity and the clock.
-pub const DEFERRED_LEFT_OPERANDS: [&str; 3] = [ODRL_RECIPIENT, ODRL_ASSIGNEE_LEFT, ODRL_DATETIME];
-
-/// The permissions `policy` admits for a grant re-checked per session, in policy order,
-/// or the reasons for denying when nothing can be granted at all.
-///
-/// A conditional grant stands for [`decide`] on the materialising request with only the
-/// session's identity and clock varied, so a candidate is issued only when everything
-/// else is settled for every such session:
-///
-/// - the conflict strategy is honourable, and no prohibition matches this request
-///   (Unknown included, as in [`decide`]);
-/// - every prohibition is withdrawn whoever the session is and whenever it runs: its
-///   action or target does not name the request, or a constraint on a dimension the
-///   session does not vary is definitely False. A prohibition that could apply to
-///   another identity or at another time (its assignee, or a recipient, assignee or
-///   dateTime constraint, left open) leaves no candidate: the caller decides this
-///   request once, through [`decide`];
-/// - the permission names the requested action and target, every duty is discharged
-///   ([`duty_discharged`]), and its constraints are all [`DEFERRED_LEFT_OPERANDS`];
-///
-/// [`ConditionalPermit::admits_anonymous`] says whether a session with no identity is
-/// granted too: only when the rule names no assignee and has no identity constraint. A
-/// bare exclusion ("everyone except Bob") needs an identity, since the evaluator reads
-/// a missing recipient as Unknown.
-///
-/// # Errors
-///
-/// Why every grant is ruled out for this request: the conflict strategy, a prohibition,
-/// or a missing target.
-pub fn decide_conditional<'p>(
-    policy: &'p ValidatedPolicy,
-    request: &Request,
-) -> Result<Vec<ConditionalPermit<'p>>, Vec<String>> {
-    if let Err(why) = crate::compare::conflict_admissibility(policy) {
-        return Err(vec![why]);
-    }
-    let req_action = Action(request.action.clone());
-    if let Some(p) = policy
-        .prohibitions
+/// Whether `rule`'s constraints, satisfied now, stay satisfied as the clock advances:
+/// its only clock constraints are atomic lower bounds.
+fn holds_later(rule: &Rule) -> bool {
+    rule.constraints
         .iter()
-        .find(|r| !matches!(classify_prohibition(r, request, &req_action), RuleClass::DefinitelyNo))
+        .all(|c| c.left != ODRL_DATETIME || matches!(c.operator, Operator::Gt | Operator::Gteq))
+        && rule
+            .logical_constraints
+            .iter()
+            .all(|lc| all_atoms(lc, &|c: &Constraint| c.left != ODRL_DATETIME))
+}
+
+/// Whether prohibition `r`, withdrawn for `request` now, stays withdrawn as the clock
+/// advances: a structural mismatch, a definitely false constraint off the clock, or a
+/// definitely false upper bound (`lt`/`lteq`) on it.
+fn withdrawn_later(r: &Rule, request: &Request, req_action: &Action) -> bool {
+    if !r.action.permits(req_action)
+        || r.target.as_deref().is_some_and(|t| !request.asset_matches(t))
+        || r.assignee.as_deref().is_some_and(|a| !request.party_matches(a))
     {
-        return Err(vec![format!("prohibition {} may match the request (deny-overrides)", p.id)]);
+        return true;
     }
-    let Some(target) = request.target.as_deref() else {
-        return Err(vec!["the request names no target".to_owned()]);
+    let off_clock = |c: &Constraint| c.left != ODRL_DATETIME;
+    let closes = |c: &Constraint| {
+        off_clock(c) || matches!(c.operator, Operator::Lt | Operator::Lteq)
     };
-    if !policy
-        .prohibitions
-        .iter()
-        .all(|r| withdrawn_for_every_session(r, request, &req_action))
-    {
-        return Ok(Vec::new());
-    }
-    Ok(policy
-        .permissions
-        .iter()
-        .filter(|r| {
-            r.action.permits(&req_action)
-                && r.target.as_deref().is_none_or(|t| t == target)
-                && r.duties.iter().all(|d| duty_discharged(d, request))
-                && r.logical_constraints.is_empty()
-                && r.constraints.iter().all(|c| DEFERRED_LEFT_OPERANDS.contains(&c.left.as_str()))
-        })
-        .map(|rule| ConditionalPermit { rule, target: target.to_owned() })
-        .collect())
-}
-
-const ODRL_ASSIGNEE_LEFT: &str = "http://www.w3.org/ns/odrl/2/assignee";
-
-fn is_identity_left(left: &str) -> bool {
-    left == ODRL_RECIPIENT || left == ODRL_ASSIGNEE_LEFT
-}
-
-/// The rule names who it applies to: an assignee, or a positive identity constraint.
-fn names_identity(r: &Rule) -> bool {
-    r.assignee.is_some()
-        || r.constraints.iter().any(|c| {
-            is_identity_left(&c.left)
-                && matches!(c.operator, Operator::Eq | Operator::IsA | Operator::IsPartOf | Operator::IsAnyOf)
-        })
-}
-
-/// The rule carves an identity out (`neq` / `isNoneOf` on a recipient or assignee).
-fn excludes_identity(r: &Rule) -> bool {
     r.constraints
         .iter()
-        .any(|c| is_identity_left(&c.left) && matches!(c.operator, Operator::Neq | Operator::IsNoneOf))
-}
-
-/// A prohibition that does not apply to `request` whoever the session is and whenever it
-/// runs: its action or target does not name the request, or a constraint on a dimension
-/// a session does not vary is definitely False.
-fn withdrawn_for_every_session(r: &Rule, request: &Request, req_action: &Action) -> bool {
-    if !r.action.permits(req_action) {
-        return true;
-    }
-    if r.target.as_deref().is_some_and(|t| !request.asset_matches(t)) {
-        return true;
-    }
-    let fixed = |c: &Constraint| !DEFERRED_LEFT_OPERANDS.contains(&c.left.as_str());
-    r.constraints
-        .iter()
-        .any(|c| fixed(c) && constraint_status(c, request) == ConstraintStatus::DefinitelyUnsatisfied)
+        .any(|c| closes(c) && constraint_status(c, request) == ConstraintStatus::DefinitelyUnsatisfied)
         || r.logical_constraints.iter().any(|lc| {
-            all_atoms(lc, &fixed)
+            all_atoms(lc, &off_clock)
                 && logical_constraint_status(lc, request) == ConstraintStatus::DefinitelyUnsatisfied
         })
 }

@@ -1444,18 +1444,10 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-hiz4 — like [`PodStore::materialize_odrl_permission`], but persists a
-    /// FAITHFULLY-mappable ODRL constraint (recipient/assignee) as a re-checked ACP
-    /// `auth:ConditionalGrant` rather than freezing it into a one-shot allow: the
-    /// granted agent is re-verified per session through the SAME enforcement path
-    /// ([`PodStore::accessible`] / [`PodStore::query_as`]), not re-running the ODRL
-    /// evaluator.
-    ///
-    /// A constraint with **no** faithful ACP-condition analogue (`odrl:purpose`,
-    /// `odrl:dateTime`/time windows, `odrl:count`, a `neq`/order recipient) keeps the
-    /// one-shot materialization-time behaviour (checked once, frozen) — see
-    /// [`odrl_bridge::materialize_permission_conditional`] for the full mapping table
-    /// and the fail-closed rationale.
+    /// The same one-shot grant as [`PodStore::materialize_odrl_permission`], tracked as
+    /// [`odrl_bridge::BridgeKind::PermissionConditional`]. It no longer persists
+    /// recipient/assignee/dateTime constraints as re-checked condition heads; see
+    /// [`odrl_bridge::materialize_permission_conditional`].
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission_conditional(
         &mut self,

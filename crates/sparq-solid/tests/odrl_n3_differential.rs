@@ -206,8 +206,9 @@ fn b2_unconstrained_permission_wrong_assignee_no_grant() {
 }
 
 #[test]
-fn a1_datetime_lteq_within_window_grant() {
-    assert_case("A1", POL_A1, "read", "urn:alice", Some("2026-07-18T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+fn a1_datetime_lteq_within_window_stores_nothing() {
+    // decide() grants inside the window, but a stored triple would outlive it.
+    assert_case("A1", POL_A1, "read", "urn:alice", Some("2026-07-18T00:00:00Z"), &[]);
 }
 
 #[test]
@@ -254,15 +255,17 @@ fn c2_deny_overrides_permission() {
 }
 
 #[test]
-fn d1_or_lc_first_sub_satisfied_grant() {
-    // c1 (lteq 2026-12-31) satisfied at 2026-07-18 → or satisfied → grant
-    assert_case("D1", POL_D1, "read", "urn:alice", Some("2026-07-18T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+fn d1_or_lc_first_sub_satisfied_stores_nothing() {
+    // c1 (lteq 2026-12-31) satisfied at 2026-07-18 → or satisfied, but a compound with
+    // a clock operand may stop holding, so nothing is stored.
+    assert_case("D1", POL_D1, "read", "urn:alice", Some("2026-07-18T00:00:00Z"), &[]);
 }
 
 #[test]
-fn d2_or_lc_second_sub_satisfied_grant() {
-    // c1 not satisfied (past deadline at 2027-01-01), c2 (recipient eq alice) satisfied → or satisfied → grant
-    assert_case("D2", POL_D1, "read", "urn:alice", Some("2027-01-01T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+fn d2_or_lc_second_sub_satisfied_stores_nothing() {
+    // c1 not satisfied (past deadline at 2027-01-01), c2 (recipient eq alice) satisfied →
+    // or satisfied; a compound with a clock operand is not treated as lasting.
+    assert_case("D2", POL_D1, "read", "urn:alice", Some("2027-01-01T00:00:00Z"), &[]);
 }
 
 #[test]
@@ -272,9 +275,10 @@ fn d3_or_lc_none_satisfied_no_grant() {
 }
 
 #[test]
-fn d4_and_lc_both_satisfied_grant() {
-    // c1 (gteq 2026-01-01) satisfied, c2 (lteq 2026-12-31) satisfied at 2026-07-18 → and satisfied → grant
-    assert_case("D4", POL_D4, "read", "urn:alice", Some("2026-07-18T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+fn d4_and_lc_both_satisfied_stores_nothing() {
+    // c1 (gteq 2026-01-01) satisfied, c2 (lteq 2026-12-31) satisfied at 2026-07-18 → and
+    // satisfied, but the upper bound closes, so nothing is stored.
+    assert_case("D4", POL_D4, "read", "urn:alice", Some("2026-07-18T00:00:00Z"), &[]);
 }
 
 #[test]
@@ -1023,10 +1027,11 @@ fn generated_n3_is_never_more_permissive_than_the_rust_reference() {
     // Pin that the sweep genuinely exercised the comparison — real grants and real
     // denies came out of BOTH paths, and the refusal path fired too.
     assert!(cov.total >= 500, "sweep must be broad, ran {}", cov.total);
-    assert!(cov.n3_granted >= 20, "N3 must actually grant somewhere, got {}", cov.n3_granted);
+    // Grants are rarer than the other outcomes: a clock-bounded shape stores nothing.
+    assert!(cov.n3_granted >= 10, "N3 must actually grant somewhere, got {}", cov.n3_granted);
     assert!(cov.n3_denied >= 20, "N3 must actually deny somewhere, got {}", cov.n3_denied);
     assert!(cov.n3_refused >= 20, "the refusal path must fire, got {}", cov.n3_refused);
-    assert!(cov.rust_granted >= 20, "Rust must actually grant somewhere, got {}", cov.rust_granted);
+    assert!(cov.rust_granted >= 10, "Rust must actually grant somewhere, got {}", cov.rust_granted);
     assert!(cov.rust_denied >= 20, "Rust must actually deny somewhere, got {}", cov.rust_denied);
     assert!(cov.rust_refused >= 20, "Rust must refuse somewhere, got {}", cov.rust_refused);
     // The EQUALITY assertion is likewise trivially satisfiable by an empty in-scope

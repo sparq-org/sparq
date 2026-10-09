@@ -230,12 +230,12 @@ fn no_entry_point_grants_past_a_prohibition_missing_its_evidence() {
 }
 
 /// The control: a decidable policy still grants on every path (a prohibition whose
-/// window definitely has not opened).
+/// window definitely closed before the request).
 #[test]
 fn a_decidable_grant_still_reaches_every_entry_point() {
     let ttl = prohibition(
-        r#"[ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:gteq ;
-             odrl:rightOperand "2027-01-01T00:00:00Z"^^xsd:dateTime ]"#,
+        r#"[ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
+             odrl:rightOperand "2026-01-01T00:00:00Z"^^xsd:dateTime ]"#,
     );
     let policy = parse_policy_str(&ttl, "turtle").unwrap();
     assert!(evaluate(&policy, &request()).allow);

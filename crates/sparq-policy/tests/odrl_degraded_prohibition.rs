@@ -453,3 +453,84 @@ fn containment_does_not_read_lteq_as_lt() {
         Containment::Contains
     );
 }
+
+/// A permit binds the recipient the decision checked; changing the party after
+/// `Request::by` would grant on another identity's recipient evidence, so it denies.
+#[test]
+fn a_permit_binds_the_checked_recipient() {
+    let ttl = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+         odrl:target <urn:asset/x> ; odrl:constraint [ odrl:leftOperand odrl:recipient ; \
+         odrl:operator odrl:neq ; odrl:rightOperand <urn:bob> ] ] ."
+    );
+    let p = parse_policy_str(&ttl, "turtle").unwrap();
+    let read = format!("{ODRL}read");
+    let alice = Request::new(read.clone()).on("urn:asset/x").by("urn:alice");
+    let permit = decide(&p, &alice).permit.expect("alice is not bob");
+    assert_eq!((permit.party(), permit.recipient()), (Some("urn:alice"), Some("urn:alice")));
+
+    let mut swapped = alice.clone();
+    swapped.party = Some("urn:bob".into());
+    assert!(decide(&p, &swapped).permit.is_none(), "party changed after by()");
+    let bob = Request::new(read).on("urn:asset/x").by("urn:bob");
+    assert!(decide(&p, &bob).permit.is_none());
+}
+
+/// A grant lasts only when nothing in the decision can turn false as the clock advances.
+#[test]
+fn a_permit_lasts_only_when_the_clock_cannot_end_it() {
+    let read = format!("{ODRL}read");
+    let req = Request::new(read).on("urn:asset/x").by("urn:alice").at("2026-06-01T00:00:00Z");
+    let lasting = |rules: &str| {
+        let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
+        let p = parse_policy_str(&ttl, "turtle").unwrap();
+        decide(&p, &req).permit.expect("granted").lasting()
+    };
+    let perm = |c: &str| {
+        format!("odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {c} ]")
+    };
+    let clock = |op: &str, t: &str| {
+        format!(
+            "; odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:{op} ; \
+             odrl:rightOperand \"{t}\"^^xsd:dateTime ]"
+        )
+    };
+    let prohib = |c: &str| {
+        format!("odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> {c} ]")
+    };
+    assert!(lasting(&perm("")));
+    assert!(lasting(&perm(&clock("gteq", "2026-01-01T00:00:00Z"))), "a lower bound stays true");
+    assert!(!lasting(&perm(&clock("lteq", "2026-12-31T00:00:00Z"))), "an upper bound ends");
+    let p = perm("");
+    assert!(
+        lasting(&format!("{p} ; {}", prohib(&clock("lteq", "2026-01-01T00:00:00Z")))),
+        "a prohibition whose window closed stays withdrawn"
+    );
+    assert!(
+        !lasting(&format!("{p} ; {}", prohib(&clock("gteq", "2027-01-01T00:00:00Z")))),
+        "a prohibition whose window has not opened can still apply"
+    );
+    assert!(
+        lasting(&format!("{p} ; {}", prohib("; odrl:assignee <urn:bob>"))),
+        "a prohibition on another party never applies to this one"
+    );
+}
+
+/// Containment claims nothing about a policy whose conflict strategy `decide` refuses:
+/// that policy grants nothing, which rule subsumption does not model.
+#[test]
+fn containment_respects_the_conflict_strategy() {
+    let read = format!("{ODRL}read");
+    let inner = Policy {
+        permissions: vec![rule("urn:r", &read)],
+        ..Policy::default()
+    };
+    let outer = Policy {
+        conflict: Some(sparq_policy::ConflictStrategy::Perm),
+        ..inner.clone()
+    };
+    assert_eq!(contains(&outer, &inner), Containment::Unknown);
+    let req = Request::new(read).on("urn:asset/x");
+    assert!(decide(&inner.clone().validate().unwrap(), &req).allow);
+    assert!(!decide(&outer.validate().unwrap(), &req).allow);
+}
