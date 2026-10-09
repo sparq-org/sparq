@@ -736,13 +736,10 @@ fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool 
 
 /// How to put back one change a [`Journal`] made.
 enum Undo {
-    /// `key`, held under the lock of `lock`, as it was (its bytes and record, or absent). `left`
-    /// is what the change may have put there instead.
+    /// `key` as it was: its bytes and record, or absent.
     Restore {
-        lock: String,
         key: String,
         prior: Option<(Bytes, StoredMeta)>,
-        left: Left,
     },
     /// A removed member, recreated in its container as it was.
     Recreate {
@@ -753,24 +750,7 @@ enum Undo {
     },
 }
 
-/// What a change may have left at a key: the record it wrote (known when the store confirmed
-/// the write: its blob key is minted for that write alone), bytes it may have written (when the
-/// store's reply was lost), or nothing (a removal).
-enum Left {
-    Written(StoredMeta),
-    Maybe(Bytes),
-    Removed,
-}
-
 impl Undo {
-    /// The resource whose lock covers this change.
-    fn lock(&self) -> &str {
-        match self {
-            Undo::Restore { lock, .. } => lock,
-            Undo::Recreate { iri, .. } => iri,
-        }
-    }
-
     /// Put this change back, with the mutation's locks still held.
     async fn apply<S: Store>(&self, store: &S) -> Result<(), crate::error::ServerError> {
         match self {
@@ -801,55 +781,27 @@ impl Undo {
             }
         }
     }
-
-    /// Put this change back after the mutation's locks were released, under the lock of what it
-    /// changed, and only if what is there is still what the mutation left: a later write or
-    /// create stands, even one with the same bytes. A record the store confirmed is recognized
-    /// by its blob key (minted per write); one whose reply was lost, by its bytes and a
-    /// modification time no later than `fence`, when the mutation still held its locks.
-    async fn recover<S: Store + 'static>(
-        &self,
-        state: &LwsState<S>,
-        fence: std::time::SystemTime,
-    ) -> Result<(), crate::error::ServerError> {
-        let _guard = state.locks.lock(self.lock()).await;
-        if let Undo::Restore {
-            key, prior, left, ..
-        } = self
-        {
-            let now = match state.store.read(key).await {
-                Ok(r) => Some(r),
-                Err(crate::error::ServerError::NotFound) => None,
-                Err(e) => return Err(e),
-            };
-            // Already as it was, validators included.
-            let as_was = match (&now, prior) {
-                (None, None) => true,
-                (Some(r), Some((body, meta))) => {
-                    r.body == body
-                        && r.meta.etag == meta.etag
-                        && r.meta.last_modified == meta.last_modified
-                }
-                _ => false,
-            };
-            let as_left = match (&now, left) {
-                (None, Left::Removed) => true,
-                (Some(r), Left::Written(m)) => r.meta.blob_key == m.blob_key,
-                (Some(r), Left::Maybe(body)) => {
-                    r.body == body && r.meta.last_modified.is_some_and(|t| t <= fence)
-                }
-                _ => false,
-            };
-            if as_was || !as_left {
-                return Ok(());
-            }
-        }
-        self.apply(&state.store).await
-    }
 }
 
-/// How long, at most, a change that could not be put back waits between attempts.
-const RECOVER_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long, at most, putting a change back waits between attempts.
+const UNDO_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Run `step` until it succeeds, waiting between attempts (growing to [`UNDO_MAX_WAIT`]): how a
+/// change is put back while the locks that keep anyone else from it are held.
+pub(crate) async fn until_done<T, E, F, Fut>(mut step: F) -> T
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let mut wait = std::time::Duration::from_millis(100);
+    loop {
+        if let Ok(done) = step().await {
+            return done;
+        }
+        tokio::time::sleep(wait).await;
+        wait = (wait * 2).min(UNDO_MAX_WAIT);
+    }
+}
 
 impl<'a, S: Store + 'static> Journal<'a, S> {
     pub(crate) fn new(state: &'a LwsState<S>, limit: usize) -> Self {
@@ -895,44 +847,24 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         Ok(self.staged.remove(key).flatten())
     }
 
-    /// Write `body` at `key`, a resource or a record under the lock of `lock`.
-    async fn write_under(
+    /// Write `body` at `key` (a resource, or a resource's metadata record).
+    pub(crate) async fn write(
         &mut self,
-        lock: &str,
         key: &str,
         body: Bytes,
         content_type: &str,
     ) -> Result<StoredMeta, crate::error::ServerError> {
         let prior = self.prior(key).await?;
-        let written = self
-            .state
-            .store
-            .write(key, body.clone(), content_type)
-            .await;
+        let written = self.state.store.write(key, body, content_type).await;
         // A backend failure may follow a write that landed (a lost reply): it is put back all the
         // same. A refusal wrote nothing, and there is nothing to put back.
         if may_have_happened(&written) {
             self.undo.push(Undo::Restore {
-                lock: lock.to_string(),
                 key: key.to_string(),
                 prior,
-                left: match &written {
-                    Ok(meta) => Left::Written(meta.clone()),
-                    Err(_) => Left::Maybe(body),
-                },
             });
         }
         written
-    }
-
-    /// Write `body` at the resource `iri`.
-    pub(crate) async fn write(
-        &mut self,
-        iri: &str,
-        body: Bytes,
-        content_type: &str,
-    ) -> Result<StoredMeta, crate::error::ServerError> {
-        self.write_under(iri, iri, body, content_type).await
     }
 
     /// Write the metadata of `iri`.
@@ -942,7 +874,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         meta: &ResourceMeta,
     ) -> Result<(), crate::error::ServerError> {
         let body = encode_meta(meta)?;
-        self.write_under(iri, &meta_key(iri), Bytes::from(body), JSON)
+        self.write(&meta_key(iri), Bytes::from(body), JSON)
             .await
             .map(|_| ())
     }
@@ -956,12 +888,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         }
         let deleted = self.state.store.delete(&key, None).await;
         if may_have_happened(&deleted) {
-            self.undo.push(Undo::Restore {
-                lock: iri.to_string(),
-                key,
-                prior,
-                left: Left::Removed,
-            });
+            self.undo.push(Undo::Restore { key, prior });
         }
         match deleted {
             Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
@@ -997,48 +924,17 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     /// Keep every change.
     pub(crate) fn commit(self) {}
 
-    /// Put back every change, the last first, with the mutation's locks still held. From the
-    /// first step that fails, what is left is not dropped: it is kept, in order and with what it
-    /// needs, and retried in the background (waits growing to [`RECOVER_MAX_WAIT`]) until each
-    /// change is put back or something later replaced it ([`Undo::recover`]). The error says the
-    /// mutation was not undone now.
-    pub(crate) async fn rollback(self) -> Result<(), crate::error::ServerError> {
-        let mut left = Vec::new();
-        let mut failure = None;
+    /// Put back every change, the last first, with the mutation's locks still held, and keep
+    /// them held until it is done: a step that fails is tried again (waits growing to
+    /// [`UNDO_MAX_WAIT`]) until the store takes it. Nothing can act on what the mutation
+    /// touched until it is back as it was, validators included, so no later write can be
+    /// overwritten by an old undo and no reader sees a state in between. The mutations run in
+    /// a task of their own (see [`resources::hold_locks`]), so a client that goes away does not
+    /// cut this short.
+    pub(crate) async fn rollback(self) {
         for undo in self.undo.into_iter().rev() {
-            // What follows a failure waits behind it: a member is not recreated before its
-            // container is.
-            if !left.is_empty() {
-                left.push(undo);
-                continue;
-            }
-            if let Err(e) = undo.apply(&self.state.store).await {
-                failure = Some(e);
-                left.push(undo);
-            }
+            until_done(|| undo.apply(&self.state.store)).await;
         }
-        let Some(failure) = failure else {
-            return Ok(());
-        };
-        let state = self.state.clone();
-        // Still under the mutation's locks: nothing written after this is the mutation's.
-        let fence = crate::clock::now();
-        tokio::spawn(async move {
-            let mut wait = std::time::Duration::from_millis(100);
-            let mut left = std::collections::VecDeque::from(left);
-            while let Some(undo) = left.front() {
-                match undo.recover(&state, fence).await {
-                    Ok(()) => {
-                        left.pop_front();
-                    }
-                    Err(_) => {
-                        tokio::time::sleep(wait).await;
-                        wait = (wait * 2).min(RECOVER_MAX_WAIT);
-                    }
-                }
-            }
-        });
-        Err(failure)
     }
 }
 
@@ -1068,10 +964,8 @@ pub(crate) async fn delete_record<S: Store + 'static>(
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
 /// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
-///   store's timeout or lost reply), so the record is removed. When that fails too, the outcome
-///   is resolved in the background ([`resolve_record`]): the record is registered only once it is
-///   seen stored, and is never in force before. Until then `register` (and the quota place it
-///   holds) is kept.
+///   store's timeout or lost reply), so the record is removed, retried with the container held
+///   until it is gone; only then is `register` (and the quota place it holds) dropped.
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
     container: &str,
@@ -1107,11 +1001,12 @@ where
                 Ok(())
             }
             Err(e) => {
-                if matches!(e, ServerError::Storage(_))
-                    && delete_record(&state, &iri, &container).await.is_err()
-                {
-                    tokio::spawn(resolve_record(state.clone(), iri.clone(), register));
+                // The create may have committed: it is removed, retried until it is, with the
+                // container still held, so the record is never stored without being in force.
+                if matches!(e, ServerError::Storage(_)) {
+                    until_done(|| delete_record(&state, &iri, &container)).await;
                 }
+                drop(register);
                 Err(e)
             }
         }
@@ -1119,31 +1014,6 @@ where
     tokio::spawn(task)
         .await
         .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
-}
-
-/// How many times, and how far apart at most, an uncertain create is looked up again.
-const RESOLVE_ATTEMPTS: u32 = 12;
-const RESOLVE_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
-
-/// Settle a create whose outcome is unknown (the store failed, and so did removing what it may
-/// have stored): look the record up again, with growing waits, until the store answers. A record
-/// that is there is registered (it would be loaded at the next boot anyway); one that is not is
-/// dropped with `register`, which gives back its quota place. If the store never answers, the
-/// next boot loads whatever is stored.
-async fn resolve_record<S, F>(state: LwsState<S>, iri: String, register: F)
-where
-    S: Store + 'static,
-    F: FnOnce() + Send + 'static,
-{
-    let mut wait = std::time::Duration::from_millis(100);
-    for _ in 0..RESOLVE_ATTEMPTS {
-        tokio::time::sleep(wait).await;
-        match state.store.exists(&iri).await {
-            Ok(true) => return register(),
-            Ok(false) => return,
-            Err(_) => wait = (wait * 2).min(RESOLVE_MAX_WAIT),
-        }
-    }
 }
 
 /// The preconditions of a create in a service container (grants, requests, subscriptions),
@@ -1934,6 +1804,10 @@ pub(crate) mod test_store {
         /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
         /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
         pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
+        /// Once [`FlakyStore::fail_step`] has failed a step, the step after the next `n` fails
+        /// too, once: the harness fails putting a mutation back as well as the mutation.
+        pub fail_then: Arc<std::sync::Mutex<Option<usize>>>,
+        fired: Arc<AtomicBool>,
     }
 
     impl FlakyStore {
@@ -1964,23 +1838,39 @@ pub(crate) mod test_store {
                 two_step_deletes: Default::default(),
                 fail_restore_of: Default::default(),
                 fail_step: Default::default(),
+                fail_then: Default::default(),
+                fired: Default::default(),
             }
         }
 
         /// Count a store step against [`FlakyStore::fail_step`].
         fn step(&self) -> ServerResult<()> {
-            let mut slot = self.fail_step.lock().unwrap();
-            match slot.as_mut() {
+            let countdown = |slot: &mut Option<usize>| match slot.as_mut() {
                 Some(0) => {
                     *slot = None;
-                    Err(ServerError::Storage("the injected failure".into()))
+                    true
                 }
                 Some(n) => {
                     *n -= 1;
-                    Ok(())
+                    false
                 }
-                None => Ok(()),
+                None => false,
+            };
+            let fail = if self.fired.load(Ordering::SeqCst) {
+                countdown(&mut self.fail_then.lock().unwrap())
+            } else {
+                let mut slot = self.fail_step.lock().unwrap();
+                let first = slot.is_some();
+                let fail = countdown(&mut slot);
+                if first && slot.is_none() {
+                    self.fired.store(true, Ordering::SeqCst);
+                }
+                fail
+            };
+            if fail {
+                return Err(ServerError::Storage("the injected failure".into()));
             }
+            Ok(())
         }
     }
 
@@ -2099,16 +1989,11 @@ pub(crate) mod test_store {
             body: Bytes,
             meta: &ResourceMeta,
         ) -> ServerResult<ResourceMeta> {
-            // The same failures as `write`: a record is put back by either.
+            // Counted as a step (so the harness fails it in turn); the write hooks are for the
+            // writes a mutation makes, not for putting them back.
             self.step()?;
             if self.fail_restore_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
-            }
-            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
-                return Err(ServerError::Storage("disk on fire".into()));
-            }
-            if self.refuse_write_of.lock().unwrap().as_deref() == Some(iri) {
-                return Err(ServerError::InsufficientStorage);
             }
             self.inner.restore(iri, container, body, meta).await
         }
@@ -2248,7 +2133,9 @@ pub(crate) mod test_store {
 
     /// Run a mutation over and over, failing its first store step, then its second, and so on,
     /// each time on a fresh state from `setup` (which names the resources and listings the
-    /// mutation may change). Every run that fails must leave them all exactly as they were: the
+    /// mutation may change); and for each, also failing one of the first steps after that
+    /// failure, so putting the mutation back fails too, and must be tried again. Every run that
+    /// fails must leave them all exactly as they were, validators and responses included: the
     /// mutation is whole or not at all. Ends at the first run that hits no injected failure, which
     /// must succeed; returns how many steps it took.
     pub async fn each_failure_changes_nothing<Setup, SetupFut, Op, OpFut>(
@@ -2269,25 +2156,28 @@ pub(crate) mod test_store {
         OpFut: std::future::Future<Output = axum::http::StatusCode>,
     {
         for n in 0..10_000 {
-            let (st, store, resources, listings) = setup().await;
-            let before = snapshot(&st, &store, &resources, &listings).await;
-            let after_st = st.clone();
-            *store.fail_step.lock().unwrap() = Some(n);
-            let status = op(st).await;
-            let fired = store.fail_step.lock().unwrap().take().is_none();
-            if !fired {
-                assert!(
-                    status.is_success(),
-                    "the mutation failed unprovoked: {status}"
-                );
-                return n;
-            }
-            if !status.is_success() {
-                assert_eq!(
-                    snapshot(&after_st, &store, &resources, &listings).await,
-                    before,
-                    "step {n} failed ({status}) and left a change behind"
-                );
+            for then in [None, Some(0), Some(1), Some(2)] {
+                let (st, store, resources, listings) = setup().await;
+                let before = snapshot(&st, &store, &resources, &listings).await;
+                let after_st = st.clone();
+                *store.fail_step.lock().unwrap() = Some(n);
+                *store.fail_then.lock().unwrap() = then;
+                let status = op(st).await;
+                let fired = store.fail_step.lock().unwrap().take().is_none();
+                if !fired {
+                    assert!(
+                        status.is_success(),
+                        "the mutation failed unprovoked: {status}"
+                    );
+                    return n;
+                }
+                if !status.is_success() {
+                    assert_eq!(
+                        snapshot(&after_st, &store, &resources, &listings).await,
+                        before,
+                        "step {n} (then {then:?}) failed ({status}) and left a change behind"
+                    );
+                }
             }
         }
         panic!("the mutation never finished");
@@ -2453,17 +2343,23 @@ mod tests {
             );
         }
         // Review finding: the bound weighed each target as sent, not as resolved and kept, so a
-        // target that grows when resolved (against a long resource URI, or here by
-        // percent-encoding) passed it. Targets are weighed as kept.
+        // target that grows when resolved (here a relative one, against the resource URI)
+        // passed it. Targets are weighed as kept: as sent this one fits, as kept it does not.
+        let target = "a".repeat(MAX_DECLARED_LINK_BYTES / MAX_DECLARED_LINKS);
+        assert!(target.len() * MAX_DECLARED_LINKS <= MAX_DECLARED_LINK_BYTES);
         let grows = format!(
-            "<https://e.example/{}>; rel=\"{}\"",
-            "{".repeat(400),
+            "<{target}>; rel=\"{}\"",
             rels[..MAX_DECLARED_LINKS].join(" ")
         );
         assert!(grows.len() < MAX_DECLARED_LINK_BYTES);
         assert_eq!(
             send("link", grows).await,
             StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+        );
+        // A target that is not a URI reference is refused, not kept.
+        assert_eq!(
+            send("link", "<http://[>; rel=\"license\"".into()).await,
+            StatusCode::BAD_REQUEST
         );
         let fine = format!("<https://e.example/t>; rel=\"{}\"", rels[..8].join(" "));
         assert_eq!(send("link", fine).await, StatusCode::CREATED);
@@ -2912,56 +2808,5 @@ mod tests {
             .await;
             assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "GET {path}");
         }
-    }
-
-    /// Review finding: recovery compared bytes only, so a later write of the same bytes (or
-    /// one that came back to them) could be overwritten by the old undo. A confirmed write is
-    /// recognized by its blob key, which no later write shares.
-    #[tokio::test]
-    async fn recovery_never_overwrites_a_later_write() {
-        let (st, _store) = test_store::state(4).await;
-        let key = format!("{}r", st.cfg.storage());
-        let old = st
-            .store
-            .write(&key, "old".into(), "text/plain")
-            .await
-            .unwrap();
-        let ours = st
-            .store
-            .write(&key, "new".into(), "text/plain")
-            .await
-            .unwrap();
-        let undo = |left| Undo::Restore {
-            lock: key.clone(),
-            key: key.clone(),
-            prior: Some((Bytes::from("old"), old.clone())),
-            left,
-        };
-        let fence = crate::clock::now();
-        // Someone else writes the same bytes afterwards: theirs stands.
-        st.store
-            .write(&key, "new".into(), "text/plain")
-            .await
-            .unwrap();
-        undo(Left::Written(ours.clone()))
-            .recover(&st, fence)
-            .await
-            .unwrap();
-        assert_eq!(st.store.read(&key).await.unwrap().body, Bytes::from("new"));
-        // A reply that was lost: bytes written after the fence are not the mutation's.
-        undo(Left::Maybe(Bytes::from("new")))
-            .recover(&st, old.last_modified.unwrap())
-            .await
-            .unwrap();
-        assert_eq!(st.store.read(&key).await.unwrap().body, Bytes::from("new"));
-        // What the mutation left is put back, validators and all.
-        let left = st.store.meta(&key).await.unwrap().unwrap();
-        undo(Left::Written(left)).recover(&st, fence).await.unwrap();
-        let back = st.store.read(&key).await.unwrap();
-        assert_eq!(back.body, Bytes::from("old"));
-        assert_eq!(
-            (back.meta.etag, back.meta.last_modified),
-            (old.etag, old.last_modified)
-        );
     }
 }

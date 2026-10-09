@@ -315,24 +315,29 @@ What the server exposes, all discoverable from the storage description
   `DataResource`, `Container` or `StorageResource`, and its values name single resources,
   not their members. A policy with no `target` covers every resource of the grant's
   `storage`. A `purpose` constraint never holds, because the draft does not say how a
-  request states its purpose. The owner and a resource's creator are always allowed. A
+  request states its purpose. A `format` constraint compares media types as RFC 9110 does
+  (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
+  order). The owner and a resource's creator are always allowed. A
   new request notifies the owner's inbox when the owner's JSON(-LD) identity document
-  names one. A new grant notifies the inboxes of the requests made by or for its
-  assignees, as well as its own `inbox`.
+  names one. A new grant notifies the inboxes of the requests its assignees made themselves,
+  as well as its own `inbox`.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
   key in the storage description's `verificationMethod`. Deliveries go through a bounded queue and worker pool (see the
   `SOLID_SERVER_LWS_DELIVERY_*` variables); a Delete is announced only once the removal happened.
   Each delivery attempt, retries included, first checks that its subscription still exists and
-  has not expired, and that the subscriber may still read the resource. A Delete is checked against
+  has not expired, and that the subscriber may still read the resource, reading the resource under
+  its shared lock, as a GET does. A Delete is checked against
   the resource as it was before removal. A delivery that fails a check is dropped.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
-  anything is removed. When putting back fails too, the resource is left **fail-closed**: only
-  the owner and its creator may act on it until a write completes, and what could not be put
-  back is kept and retried in the background, unless a later write or create (even of the same
-  bytes) replaces it first.
+  anything is removed. When putting back fails too, it is retried with the resource's locks still
+  held until it succeeds, so no other request sees the half-done state in between; a create
+  whose store reply was lost is removed whole the same way.
+- A `Link` target that is not a URI reference is refused with `400`; entity tags in
+  `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
+  nothing.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
