@@ -217,22 +217,29 @@ pub(crate) fn enter_nesting(depth: usize) -> Result<(), LimitError> {
         Ok(())
     } else {
         Err(LimitError {
-            why: "a document a builtin parsed passed the parser's nesting limit",
+            why: "an N3 document passed the parser's nesting limit",
             message: format!("nesting deeper than {PARSE_DEPTH}"),
         })
     }
 }
 
-/// Parse an N3 document a builtin reads at run time (`log:semantics`,
-/// `log:parsedAsN3`). A syntax error gives no document (the builtin fails, as before); a
-/// document that hits a parser limit ([`LimitError`]) gives none either, and is a cut.
-pub(crate) fn parse_n3(src: &str, base: &str) -> Bounded<Option<super::parser::Parsed>> {
+/// Parse an N3 document inside the crate: the ONE route every crate-internal parse takes
+/// (entry points, the incremental graph's rules, proof re-derivation, the fallback reparse,
+/// `log:semantics` / `log:parsedAsN3`). The result is the public parser's, unchanged: a
+/// syntax error and the nesting limit are both `Err` with the same text as before. A
+/// document that hits a parser limit ([`LimitError`]) is also a cut, recorded on `cuts`.
+pub(crate) fn parse_n3(
+    src: &str,
+    base: &str,
+    cuts: &impl Sink,
+) -> Result<super::parser::Parsed, String> {
     use super::parser::{parse_with_base_checked, ParseFailure};
-    match parse_with_base_checked(src, base) {
-        Ok(p) => Bounded::complete(Some(p)),
-        Err(ParseFailure::Syntax(_)) => Bounded::complete(None),
-        Err(ParseFailure::Resource(e)) => Bounded::cut(None, e.why),
-    }
+    let parsed = match parse_with_base_checked(src, base) {
+        Ok(p) => Bounded::complete(Ok(p)),
+        Err(ParseFailure::Syntax(m)) => Bounded::complete(Err(m)),
+        Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),
+    };
+    settle(cuts, parsed)
 }
 
 /// The (unsigned) year field of a date lexical form, for the epoch arithmetic of the
@@ -291,12 +298,10 @@ mod tests {
         assert!(enter_nesting(PARSE_DEPTH).is_ok());
         let e = enter_nesting(PARSE_DEPTH + 1).expect_err("past the limit");
         assert_eq!(e.message(), "nesting deeper than 4096");
-        assert!(cut_of(parse_n3(":a :b :c .", "")).0.is_some());
-        let (doc, cut) = cut_of(parse_n3(":a :b", ""));
-        assert!(
-            doc.is_none() && !cut,
-            "a syntax error is no document, not a cut"
-        );
+        let sink = Cell::new(false);
+        assert!(parse_n3(":a :b :c .", "", &sink).is_ok());
+        assert!(parse_n3(":a :b", "", &sink).is_err());
+        assert!(!sink.get(), "a syntax error is an error, not a cut");
         let deep = format!(
             ":a :b {}1{} .",
             "(".repeat(PARSE_DEPTH + 1),
@@ -306,12 +311,16 @@ mod tests {
             .stack_size(256 << 20)
             .spawn(move || {
                 let sink = Cell::new(false);
-                let doc = settle(&sink, parse_n3(&deep, ""));
-                (doc.is_none(), sink.get())
+                let doc = parse_n3(&deep, "", &sink);
+                (doc.err(), sink.get())
             })
             .expect("spawn")
             .join()
             .expect("join");
+        let deep = (
+            deep.0.as_deref() == Some("nesting deeper than 4096"),
+            deep.1,
+        );
         assert_eq!(deep, (true, true), "the nesting limit is a cut");
 
         assert_eq!(cut_of(epoch_year("2024")), (Some(2024), false));

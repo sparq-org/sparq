@@ -76,7 +76,6 @@
 //! set** over the same rules + facts.
 
 use super::model::Term;
-use super::parser;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
 use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget};
@@ -272,7 +271,7 @@ pub struct BoundRuleSet<'a> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
-    let parsed = parser::parse(src)?;
+    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Cuts::top_level())?;
     if !parsed.backward_rules.is_empty() {
         return Err("compiled-rules: backward (`<=`) rules are not in the compiled subset (goal-directed resolution stays with the text engine)".into());
     }
@@ -311,7 +310,7 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
-    let parsed = parser::parse(src)?;
+    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Cuts::top_level())?;
     if !parsed.rules.is_empty() || !parsed.backward_rules.is_empty() {
         return Err("intern_facts: the document contains rules — compile() them instead".into());
     }

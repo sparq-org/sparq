@@ -247,28 +247,18 @@ pub struct ProofStep {
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
-    let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(
-        parsed,
-        None,
-        None,
-        StepMode::None,
-        &bounded::Cuts::top_level(),
-    );
+    let cuts = bounded::Cuts::top_level();
+    let parsed = bounded::parse_n3(src, "", &cuts)?;
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::None, &cuts);
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
 /// As [`reason_n3`], but also return the derivation (a [`ProofStep`] for each NEWLY-derived
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
-    let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(
-        parsed,
-        None,
-        None,
-        StepMode::Full,
-        &bounded::Cuts::top_level(),
-    );
+    let cuts = bounded::Cuts::top_level();
+    let parsed = bounded::parse_n3(src, "", &cuts)?;
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full, &cuts);
     intern_closure(dict, &facts, &steps)
 }
 
@@ -304,17 +294,12 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
 /// closure half, so a document that ASSERTS a formula-valued fact carrying a variable
 /// (`:a :p { ?x :q :b }.` — data, not a rule) still echoes that `?x` verbatim.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
-    let parsed = parser::parse(src)?;
+    let cuts = bounded::Cuts::top_level();
+    let parsed = bounded::parse_n3(src, "", &cuts)?;
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
-    let (facts, _steps) = run_closure(
-        parsed,
-        None,
-        None,
-        StepMode::None,
-        &bounded::Cuts::top_level(),
-    );
+    let (facts, _steps) = run_closure(parsed, None, None, StepMode::None, &cuts);
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -366,8 +351,8 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
 
 /// [`reason_n3_query_terms`] recording into the caller's run record `cuts`.
 fn query_terms_in(data: &str, query: &str, cuts: bounded::Cuts) -> Result<Vec<[Term; 3]>, String> {
-    let data_parsed = parser::parse(data)?;
-    let query_parsed = parser::parse(query)?;
+    let data_parsed = bounded::parse_n3(data, "", &cuts)?;
+    let query_parsed = bounded::parse_n3(query, "", &cuts)?;
     if query_parsed.rules.is_empty() {
         return Err("n3 query filter: the query document contains no `{ … } => { … }` forward \
                     rule; only forward-rule (SELECT/CONSTRUCT-style) query documents project an \
@@ -532,7 +517,7 @@ pub fn reason_n3_stratified(
     // One run: every stratum records into the same cut record.
     let cuts = bounded::Cuts::top_level();
     for (i, src) in strata.iter().enumerate() {
-        let mut parsed = parser::parse(src)?;
+        let mut parsed = bounded::parse_n3(src, "", &cuts)?;
         if !carried.is_empty() {
             // Rename carried blanks (input blanks and minted `__sk…` rule
             // existentials) apart from this stratum's own labels. The prefix
@@ -654,7 +639,7 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
     cuts: &bounded::Cuts,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
-    let parsed = parser::parse(src)?;
+    let parsed = bounded::parse_n3(src, "", cuts)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::Full, cuts);
     Ok((facts.all, steps))
 }
@@ -700,10 +685,7 @@ pub(crate) fn reason_n3_terms_in(
     resolver: Option<&Resolver>,
     cuts: &bounded::Cuts,
 ) -> Result<N3Closure, String> {
-    let parsed = match base {
-        Some(b) => parser::parse_with_base(src, b)?,
-        None => parser::parse(src)?,
-    };
+    let parsed = bounded::parse_n3(src, base.unwrap_or(""), cuts)?;
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
     let (facts, steps) = run_closure(parsed, resolver, None, StepMode::Conclusions, cuts);
@@ -2918,7 +2900,7 @@ fn eval_functional(
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
                     // A syntax error is no document; the nesting limit is a cut.
-                    let parsed = settle(&bw.cuts, bounded::parse_n3(&text, doc))?;
+                    let parsed = bounded::parse_n3(&text, doc, &bw.cuts).ok()?;
                     Term::Formula(reencode_statements(parsed))
                 }
             }
@@ -2926,7 +2908,7 @@ fn eval_functional(
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                let parsed = settle(&bw.cuts, bounded::parse_n3(src, &bw.base))?;
+                let parsed = bounded::parse_n3(src, &bw.base, &bw.cuts).ok()?;
                 Term::Formula(reencode_statements(parsed))
             }
             _ => return None,
