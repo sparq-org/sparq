@@ -2732,17 +2732,20 @@ fn eval_builtin_inner(
             }
         }
         _ => {
-            // The math: comparisons are defined over f64 images (datatype-driven XPath
-            // promotion is GH #6745).
-            // not-a-cut: defined-float
-            let (Some(x), Some(y)) = (num(&s), num(&o)) else { return false };
+            // XPath numeric type promotion by datatype (GH #6745): exact for
+            // integer/decimal pairs, IEEE in the float or double tier.
+            let (Some(x), Some(y)) = (cmp_num(&s, false), cmp_num(&o, false)) else {
+                return false;
+            };
+            let ord = cmp_promoted(x, y);
+            use std::cmp::Ordering::{Equal, Greater, Less};
             match op {
-                Builtin::Gt => x > y,
-                Builtin::Lt => x < y,
-                Builtin::NotGt => x <= y,
-                Builtin::NotLt => x >= y,
-                Builtin::MathEq => x == y,
-                Builtin::MathNe => x != y,
+                Builtin::Gt => ord == Some(Greater),
+                Builtin::Lt => ord == Some(Less),
+                Builtin::NotGt => matches!(ord, Some(Less | Equal)),
+                Builtin::NotLt => matches!(ord, Some(Greater | Equal)),
+                Builtin::MathEq => ord == Some(Equal),
+                Builtin::MathNe => ord != Some(Equal),
                 _ => unreachable!(),
             }
         }
@@ -3112,16 +3115,116 @@ pub fn encode_for_uri(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, UNRESERVED).to_string()
 }
 
-/// The numeric value of a literal term (for `math:` builtins).
-fn num(t: &Term) -> Option<f64> {
-    match t {
-        Term::Lit(v, _, _) => match v.as_str() {
-            "INF" | "+INF" => Some(f64::INFINITY),
-            "-INF" => Some(f64::NEG_INFINITY),
-            "NaN" => Some(f64::NAN),
-            _ => v.parse::<f64>().ok(), // no-match: ill-typed (not a numeric lexical form)
-        },
-        _ => None,
+/// A `math:` comparison operand placed in the XPath numeric type-promotion tower
+/// (`op:numeric-equal` / `op:numeric-less-than` / `op:numeric-greater-than`, XPath
+/// F&O §4.2 and Appendix B.1): `xsd:integer` (and its derived types) and `xsd:decimal`
+/// keep their exact value, `xsd:float` and `xsd:double` their IEEE value (GH #6745).
+#[derive(Clone, Copy, Debug)]
+enum CmpNum<'a> {
+    /// An integer or decimal, held as its validated `[+-]digits[.digits]` lexical form,
+    /// so it compares exactly at any precision (no `i128` or `f64` bound).
+    Exact(&'a str),
+    /// An `xsd:float`.
+    Float(f32),
+    /// An `xsd:double` (or a double-shaped untyped lexical).
+    Double(f64),
+}
+
+impl CmpNum<'_> {
+    /// The value promoted to `xsd:double`: one correctly-rounded conversion of an exact
+    /// value, an exact widening of a float.
+    fn promote_double(self) -> Option<f64> {
+        match self {
+            CmpNum::Exact(lex) => lex.parse::<f64>().ok(), // no-match: ill-typed (validated in `cmp_num`)
+            CmpNum::Float(f) => Some(f64::from(f)),
+            CmpNum::Double(d) => Some(d),
+        }
+    }
+
+    /// The value promoted to `xsd:float` (never reached with a double operand).
+    fn promote_float(self) -> Option<f32> {
+        match self {
+            CmpNum::Exact(lex) => lex.parse::<f32>().ok(), // no-match: ill-typed (validated in `cmp_num`)
+            CmpNum::Float(f) => Some(f),
+            CmpNum::Double(_) => None,
+        }
+    }
+}
+
+/// The promoted value of a `math:` comparison operand, by its DATATYPE: an integer type
+/// or `xsd:decimal` is exact, `xsd:float` / `xsd:double` are IEEE (with the XSD `INF` /
+/// `-INF` / `NaN` spellings). A literal of any other datatype (a string) is coerced by its
+/// lexical shape, as EYE does: an exponent or `INF` / `NaN` reads as a double, a plain
+/// `[+-]digits[.digits]` numeral as an exact number. An ill-typed lexical form, or a
+/// non-literal, is not numeric (`None`: the builtin does not match).
+///
+/// The one exception is `xsd:decimal`'s `inf` / `-inf` / `NaN`: not valid decimals, but
+/// the forms `number_term` gives a non-finite f64 fallback result (`(0.5 -1024)
+/// math:exponentiation`), so they read as ±INF / NaN (doubles) and the result still
+/// matches a bound object or a later comparison.
+///
+/// Whitespace: the XSD numeric datatypes have `whiteSpace=collapse`, so leading and
+/// trailing XML whitespace (space, tab, CR, LF) of a TYPED numeric literal is collapsed
+/// before validation (`" 3"^^xsd:integer` is 3; an internal space stays ill-typed). A
+/// string operand is trimmed only when `trim_strings` is set — the bound-object value
+/// check of a functional builtin (`(1 2) math:sum " 3"` holds); the six comparisons
+/// leave it as written, so `" 3"` is not numeric there.
+fn cmp_num(t: &Term, trim_strings: bool) -> Option<CmpNum<'_>> {
+    use sparq_substrate::numeric::{parse_xsd_f32, parse_xsd_f64, split_decimal};
+    let Term::Lit(v, dt, _) = t else { return None };
+    // XSD whiteSpace=collapse for the numeric datatypes (leading/trailing XML whitespace).
+    let collapsed = v.trim_matches([' ', '\t', '\r', '\n']);
+    // An integer type (with its facets, e.g. `xsd:positiveInteger`) or `xsd:decimal`.
+    if dt == parser::XSD_DECIMAL {
+        // The non-finite forms `number_term` renders for an overflowing f64 fallback
+        // (`"inf"` / `"-inf"`, Rust's `NaN`), read as ±INF / NaN as `numval` reads them.
+        match collapsed {
+            "inf" => return Some(CmpNum::Double(f64::INFINITY)),
+            "-inf" => return Some(CmpNum::Double(f64::NEG_INFINITY)),
+            "NaN" => return Some(CmpNum::Double(f64::NAN)),
+            _ => {}
+        }
+    }
+    if sparq_core::is_integer_datatype(dt) || dt == parser::XSD_DECIMAL {
+        // no-match: ill-typed (not of its integer or decimal type)
+        return sparq_core::numeric_literal_valid(collapsed, dt)
+            .then_some(CmpNum::Exact(collapsed));
+    }
+    match dt.as_str() {
+        parser::XSD_DOUBLE => parse_xsd_f64(collapsed).map(CmpNum::Double), // no-match: ill-typed (not a double)
+        "http://www.w3.org/2001/XMLSchema#float" => parse_xsd_f32(collapsed).map(CmpNum::Float), // no-match: ill-typed (not a float)
+        _ => {
+            // A string is coerced as written, or trimmed as `numval` trims (bound object).
+            let v = if trim_strings { v.trim() } else { v.as_str() };
+            match v {
+                "INF" | "+INF" => Some(CmpNum::Double(f64::INFINITY)),
+                "-INF" => Some(CmpNum::Double(f64::NEG_INFINITY)),
+                "NaN" => Some(CmpNum::Double(f64::NAN)),
+                _ if !v.contains(['e', 'E']) && v.trim() == v && split_decimal(v).is_some() => {
+                    Some(CmpNum::Exact(v))
+                }
+                _ => v.parse::<f64>().ok().map(CmpNum::Double), // no-match: ill-typed (not numeric)
+            }
+        }
+    }
+}
+
+/// XPath `op:numeric-*` order of two promoted operands: integer/decimal pairs compare
+/// exactly on their digits (any precision); otherwise both are promoted to the least
+/// common type — `xsd:float` when neither is a double, else `xsd:double` — and compared
+/// as IEEE-754. `None` is unordered (a `NaN` operand), so every comparison but
+/// `math:notEqualTo` is false.
+fn cmp_promoted(a: CmpNum, b: CmpNum) -> Option<std::cmp::Ordering> {
+    use sparq_substrate::numeric::cmp_plain_decimal;
+    match (a, b) {
+        // not-a-cut: exact-on-digits
+        (CmpNum::Exact(x), CmpNum::Exact(y)) => cmp_plain_decimal(x, y),
+        // not-a-cut: defined-float (XPath promotes both operands to xsd:double)
+        (CmpNum::Double(_), _) | (_, CmpNum::Double(_)) => {
+            a.promote_double()?.partial_cmp(&b.promote_double()?)
+        }
+        // not-a-cut: defined-float (XPath promotes both operands to xsd:float)
+        _ => a.promote_float()?.partial_cmp(&b.promote_float()?),
     }
 }
 
@@ -3304,20 +3407,6 @@ fn fixed_digits(neg: bool, mag: u128, scale: u32) -> String {
     } else {
         format!("{sign}{int}.{frac}")
     }
-}
-
-/// Numeric order inside a builtin: exact when both values are in the exact tower (a
-/// scale alignment past `i128` is a cut, then the `f64` images decide), else by `f64`
-/// (`NaN` compares unordered, so as neither less, equal nor greater).
-fn numval_cmp_in(a: NumVal, b: NumVal, pending: &bounded::Pending) -> Option<std::cmp::Ordering> {
-    if let (Some(x), Some(y)) = (numval_to_subdec(a), numval_to_subdec(b)) {
-        if let Some(ord) = rep(pending, x.cmp(y)) {
-            return Some(ord);
-        }
-    }
-    // An f64 operand compares by f64; an alignment overflow was a cut above.
-    // not-a-cut: defined-float
-    a.to_f64().partial_cmp(&b.to_f64())
 }
 
 /// The canonical value string of an integer or decimal numeral (`[+-]digits[.digits]`),
@@ -4114,17 +4203,15 @@ fn eval_functional_inner(
         }
     };
     // Bind the object variable; if it is already GROUND, compare NUMERICALLY
-    // when both sides are numbers (so `15.5` matches a computed `15.5e0` and
+    // when both sides are numbers, under the same XPath type promotion as the
+    // `math:` comparisons (GH #6745: so `15.5` matches a computed `15.5e0` and
     // exact-decimal results match their reference lexical forms), else
     // structurally.
     let mut nb = b;
     let obj_applied = apply(obj, &nb);
     if obj_applied.is_ground() {
-        if let (Some(x), Some(y)) = (
-            numval_in(&obj_applied, pending),
-            numval_in(&result, pending),
-        ) {
-            return (numval_cmp_in(x, y, pending) == Some(std::cmp::Ordering::Equal)).then_some(nb);
+        if let (Some(x), Some(y)) = (cmp_num(&obj_applied, true), cmp_num(&result, true)) {
+            return (cmp_promoted(x, y) == Some(std::cmp::Ordering::Equal)).then_some(nb);
         }
     }
     if unify_term(obj, &result, &mut nb) {
@@ -4534,6 +4621,8 @@ fn count_term(n: usize) -> Term {
 }
 
 /// Render an `f64` result as an N3 numeric literal (integer when whole, else decimal).
+/// A non-finite value renders as `inf` / `-inf` / `NaN`^^xsd:decimal, which `cmp_num`
+/// reads back as ±INF / NaN.
 fn number_term(v: f64) -> Term {
     if v.fract() == 0.0 && v.abs() < 9.007e15 {
         // not-a-cut: exact-cast (whole, below 2^53)
@@ -5637,6 +5726,159 @@ mod tests {
         let ty = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
         assert!(has(&d, &s, "http://ex/b", ty, "http://ex/Second"), "list:iterate index/value");
         assert!(has(&d, &s, "http://ex/q", ty, "http://ex/GreatThing"), "virtual rdf:first over list");
+    }
+
+    /// GH #6745: the `math:` comparisons and the bound-object value check of a functional
+    /// `math:` builtin follow XPath numeric type promotion by DATATYPE — exact for
+    /// integer/decimal pairs (past 2^53 and past i128), `xsd:float` when the other side
+    /// is integer/decimal/float, `xsd:double` when either side is a double; `NaN` is
+    /// unordered; an ill-typed operand never matches.
+    #[test]
+    fn math_comparisons_follow_xpath_numeric_promotion() {
+        let cases: &[(&str, bool)] = &[
+            // integer vs integer: exact at arbitrary precision.
+            ("9007199254740993 math:equalTo 9007199254740992", false),
+            ("9007199254740993 math:greaterThan 9007199254740992", true),
+            ("9007199254740993 math:notEqualTo 9007199254740992", true),
+            ("170141183460469231731687303715884105728 math:greaterThan 170141183460469231731687303715884105727", true),
+            ("170141183460469231731687303715884105728 math:equalTo 170141183460469231731687303715884105727", false),
+            // derived integer types are integers.
+            ("\"5\"^^xsd:int math:greaterThan \"4\"^^xsd:byte", true),
+            ("\"5\"^^xsd:long math:equalTo 5.0", true),
+            // integer + decimal -> decimal: exact.
+            ("1 math:equalTo 1.0", true),
+            ("9007199254740993 math:greaterThan 9007199254740992.5", true),
+            ("0.30000000000000000001 math:greaterThan 0.3", true),
+            ("0.30000000000000000001 math:equalTo 0.3", false),
+            ("0.3 math:lessThan 0.30000000000000000001", true),
+            ("0.3 math:notLessThan 0.30000000000000000001", false),
+            ("0.30 math:notGreaterThan 0.3", true),
+            // decimal / integer + float -> float.
+            ("0.1 math:equalTo \"0.1\"^^xsd:float", true),
+            ("0.1 math:lessThan \"0.1\"^^xsd:float", false),
+            ("16777217 math:equalTo \"16777216\"^^xsd:float", true),
+            ("\"1.5\"^^xsd:float math:greaterThan 1.25", true),
+            // float + double -> double (the float widens exactly).
+            ("\"0.1\"^^xsd:float math:equalTo \"0.1\"^^xsd:double", false),
+            ("\"0.1\"^^xsd:float math:greaterThan \"0.1\"^^xsd:double", true),
+            ("\"0.5\"^^xsd:float math:equalTo 0.5e0", true),
+            // integer / decimal + double -> double.
+            ("9007199254740993 math:equalTo 9007199254740992e0", true),
+            ("\"1\"^^xsd:double math:equalTo 1.0", true),
+            ("0.30000000000000000001 math:equalTo 0.3e0", true),
+            // NaN is unordered: only notEqualTo holds.
+            ("\"NaN\"^^xsd:double math:equalTo \"NaN\"^^xsd:double", false),
+            ("\"NaN\"^^xsd:double math:notEqualTo \"NaN\"^^xsd:double", true),
+            ("\"NaN\"^^xsd:float math:notGreaterThan 1", false),
+            ("\"NaN\"^^xsd:double math:notLessThan 1", false),
+            ("\"INF\"^^xsd:double math:greaterThan 170141183460469231731687303715884105728", true),
+            // An ill-typed operand never matches (not even notEqualTo).
+            ("\"1.5\"^^xsd:integer math:notEqualTo 2", false),
+            ("\"-1\"^^xsd:positiveInteger math:lessThan 0", false),
+            ("\"1e0\"^^xsd:decimal math:equalTo 1", false),
+            // A plain string is still coerced by its lexical shape (EYE).
+            ("\"10\" math:greaterThan 9", true),
+            ("\"9007199254740993\" math:greaterThan 9007199254740992", true),
+            // The bound-object value check of a functional builtin promotes the same way.
+            ("(16777216 1) math:sum \"16777216\"^^xsd:float", true),
+            ("(16777216 1) math:sum 16777216", false),
+            ("(9007199254740992 1) math:sum \"9007199254740992\"^^xsd:double", true),
+            ("(1 2) math:sum \"3\"^^xsd:double", true),
+            ("(0.1 0.2) math:sum 0.3", true),
+            // XSD whiteSpace=collapse: a typed numeric literal's leading/trailing XML
+            // whitespace is collapsed; an internal space stays ill-typed.
+            ("(1 2) math:sum \" 3\"^^xsd:integer", true),
+            ("(1 2) math:sum \"3\\n\"^^xsd:decimal", true),
+            ("\" 3\"^^xsd:integer math:equalTo 3", true),
+            ("\"\\t3.0 \"^^xsd:double math:equalTo 3", true),
+            ("\" 3\"^^xsd:float math:lessThan 4", true),
+            ("\"3 4\"^^xsd:integer math:notEqualTo 3", false),
+            ("(1 2) math:sum \"3 4\"^^xsd:integer", false),
+            // A string bound object is trimmed as before (numval coercion)...
+            ("(1 2) math:sum \" 3\"", true),
+            ("(1 2) math:sum \"3 \"", true),
+            // ...but a string comparison operand is not: `\" 3\"` is not numeric there.
+            ("\" 3\" math:equalTo 3", false),
+            ("\" 3\" math:lessThan 4", false),
+            ("\" 3\" math:notEqualTo 4", false),
+        ];
+        let mut src = String::from(
+            "@prefix : <http://ex/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+             @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n",
+        );
+        for (i, (premise, _)) in cases.iter().enumerate() {
+            src += &format!("{{ {premise} }} => {{ :t :fired :c{i} }} .\n");
+        }
+        let (d, s) = closure(&src);
+        for (i, (premise, fires)) in cases.iter().enumerate() {
+            let got = has(
+                &d,
+                &s,
+                "http://ex/t",
+                "http://ex/fired",
+                &format!("http://ex/c{i}"),
+            );
+            assert_eq!(got, *fires, "{premise}");
+        }
+    }
+
+    /// GH #6745 follow-up: a functional `math:` builtin whose f64 fallback overflows renders
+    /// its non-finite result through `number_term` as `"inf"` / `"-inf"`^^xsd:decimal (the
+    /// lexical forms are unchanged). The bound-object check and the `math:` comparisons read
+    /// those exact rendered forms as ±INF / NaN, as the pre-promotion `numval` did, both
+    /// against a ground object and on a variable bound to the result.
+    #[test]
+    fn math_nonfinite_fallback_results_compare_numerically() {
+        // 0.5^-1024 = 2^1024 overflows; (-0.5)^-1025 = -(2^1025) overflows negative;
+        // 0^-1 is +INF; 10^400 overflows the exact tower (a cut) and then f64; nine
+        // factors of 10^38 overflow the exact product (a cut) and then f64.
+        let big = "100000000000000000000000000000000000000";
+        let product = format!("({})", [big; 9].join(" "));
+        let cases: Vec<(String, bool)> = vec![
+            // A ground object.
+            ("(0.5 -1024) math:exponentiation \"INF\"^^xsd:double".into(), true),
+            ("(0.5 -1024) math:exponentiation \"inf\"^^xsd:decimal".into(), true),
+            ("(0.5 -1024) math:exponentiation \"-INF\"^^xsd:double".into(), false),
+            ("(0.5 -1024) math:exponentiation 1".into(), false),
+            ("(-0.5 -1025) math:exponentiation \"-INF\"^^xsd:double".into(), true),
+            ("(-0.5 -1025) math:exponentiation \"INF\"^^xsd:double".into(), false),
+            ("(10 400) math:exponentiation \"INF\"^^xsd:double".into(), true),
+            ("(0 -1) math:exponentiation \"INF\"^^xsd:double".into(), true),
+            (format!("{product} math:product \"INF\"^^xsd:double"), true),
+            // A variable bound to the result, compared afterwards.
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:greaterThan 1".into(), true),
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:lessThan 1".into(), false),
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:equalTo \"INF\"^^xsd:double".into(), true),
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:notLessThan ?x".into(), true),
+            ("(-0.5 -1025) math:exponentiation ?x . ?x math:lessThan -1".into(), true),
+            ("(-0.5 -1025) math:exponentiation ?x . ?x math:equalTo \"-INF\"^^xsd:double".into(), true),
+            ("(10 400) math:exponentiation ?x . ?x math:greaterThan 1".into(), true),
+            ("(0 -1) math:exponentiation ?x . ?x math:greaterThan 1".into(), true),
+            (format!("{product} math:product ?x . ?x math:greaterThan 1"), true),
+            // INF - INF is NaN (a double, since an INF operand is a double): unordered.
+            ("(0.5 -1024) math:exponentiation ?x . (?x ?x) math:difference ?n . ?n math:notEqualTo ?n".into(), true),
+            ("(0.5 -1024) math:exponentiation ?x . (?x ?x) math:difference ?n . ?n math:equalTo ?n".into(), false),
+            // The exact rendered forms read the same as written literals.
+            ("\"inf\"^^xsd:decimal math:greaterThan 1".into(), true),
+            ("\"-inf\"^^xsd:decimal math:lessThan -1".into(), true),
+            ("\"NaN\"^^xsd:decimal math:notEqualTo 1".into(), true),
+            ("\"NaN\"^^xsd:decimal math:equalTo \"NaN\"^^xsd:decimal".into(), false),
+        ];
+        let mut src = String::from(
+            "@prefix : <http://ex/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+             @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n",
+        );
+        for (i, (premise, _)) in cases.iter().enumerate() {
+            src += &format!("{{ {premise} }} => {{ :t :fired :c{i} }} .\n");
+        }
+        let (d, s) = closure(&src);
+        let wrong: Vec<_> = (cases.iter().enumerate())
+            .filter(|(i, (_, fires))| {
+                has(&d, &s, "http://ex/t", "http://ex/fired", &format!("http://ex/c{i}")) != *fires
+            })
+            .map(|(_, (premise, fires))| format!("{premise} (expected {fires})"))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     #[test]
