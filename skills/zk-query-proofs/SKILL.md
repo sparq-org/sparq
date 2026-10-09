@@ -16,6 +16,76 @@ Zero-knowledge proofs that a SPARQL query result is correct over RDF held in nam
 > **Research-stage / experimental — NOT-yet-sound.** The composition verifier's soundness is the subject of an open audit (sq-qhy4 / sq-9hrn; remediation epic sq-1s2): a passing proof is NOT a guarantee the SPARQL statement holds under an adversarial prover. Read the "Honest scope" section before relying on a guarantee — only `Simple` entailment is proved; circuit members are fixed buckets. The query fragment covers BGP scans, integer FILTER (and the integer-valued `xsd:double` fragment), and a single-prover hidden cross-credential JOIN — the JOIN restricted to credentials sharing ONE issuer-signed revocation slot (sq-cuvmj; see "Honest scope").
 <!-- ANCHOR_END: scaffold-caveat -->
 
+For the isolated BBS+/BLS12-381 and Circom/LegoGroth16 composition experiment, see
+[`zk/native-composition/README.md`](../../zk/native-composition/README.md). Its dedicated
+CI runs real proof tests. The native-only [Ark tracing patch](../../zk/native-composition/vendor-support/README.md)
+has separate provenance and compatibility checks; it does not certify upstream
+constraint arithmetic. Its optional `native-rdf` feature adds a separately
+versioned [public RDF support API](references/native-rdf.md): `issue_rdf`,
+`prove_public_bgp`, and `verify_public_bgp` authenticate reconstructed public BGP
+triples against verifier-owned issuer/status policy. Public signed-slot indices
+and status references are disclosed. Support selection covers all accepted roles
+when a matching allocation exists. Signed epoch labels must match exactly;
+status bytes use the native least-significant-bit-first convention documented in
+the reference. It provides no hidden RDF predicate or Noir
+linkage and remains unaudited. The original tuple executable stays separate.
+
+`prepare_public_bgp` exposes the honest prover's support preparation
+without a proof or authentication verdict. The separate `native-binding` feature
+enables the [finite binding-job adapter](references/native-binding-tests.md),
+which reports native preparation, admission refusals and actual proof verification
+as distinct outcomes. Its `rdf::binding_tests` helper constructs genuine weaker
+statements for synthetic fixture controls; these must fail the required verifier.
+The mandatory malicious-proof library suite remains separate.
+The native CI lane also requires the complete shared finite binding replay;
+see the [native CI profile](../../bench/zk-bindings/README.md#native-finite-ci-replay)
+for its fixed domain, actual-verifier negative requirements and evidence limits.
+CI matches the retained Cargo package/target executable record to the supplied
+binary; manual calls without those records explicitly retain no build attestation.
+
+The native [dependency policy record](../../research/native-dependency-policy/README.md)
+separates inherited trust records, exact-version licenses and candidate-owned
+metadata checks. Native audit-coverage and maintenance failures remain open;
+passing the proof tests does not satisfy these dependency gates.
+
+The [VC query protocol draft](../../research/vc-query-protocol.md) and its
+[method registry](../../research/vc-query-methods.json) propose separating credential suites
+from pluggable query proof methods, and map the selected-result, exact-evaluator and native
+paths from source. They are design records: no JSON signature mode or cross-method linking
+exists, a registry label shows no support, and none is externally audited. Only
+`method:risc0-exact` version 3 has `adapter_available: true`, for exactly the six tuples of the
+exact V3 adapter below; every other entry and version stays `false`.
+
+The experimental, unpublished, dependency-free `sparq-query-protocol` crate adds a
+first executable layer of that draft. It provides typed descriptors, whole capability tuples,
+obligation enforcers, `admit` negotiation that rejects wildcards, fallbacks and downgrades, and
+a `QueryMethod` trait with opaque witnesses and typed claims. It also validates a stored request
+subset (`StoredRequest`: query text, original `Challenge32`, audience, validity window, form,
+shape-checked base IRI, DESCRIBE policy), encodes it and descriptors under the LOCAL structural
+profile `local-struct-v1`, and defines a shared `ChallengeStore` contract that consumes the
+original challenge once. It has no backend, interoperable wire encoding, transport, parser,
+hash or other cryptography, ships no production challenge store, proves no cryptographic claim,
+and registers no method. See [query-method contracts](references/query-method-contracts.md).
+
+The detached exact-evaluator host crate's optional `vcq` feature (off by default) adds
+the first `QueryMethod` adapter, `sparq_proved_evaluator::vcq::Risc0ExactV3`, over the V3 relation:
+bag SELECT, boolean ASK and CONSTRUCT graphs under holder-declared or verifier-agreed authority,
+with the fixed default V3 policy. It binds the stored request through a derived nonce and consumes
+the original challenge once, after every other check. It authenticates no credential and checks no
+status or holder key. The ignored `host/tests/vcq_genuine.rs` prove and verify-only row-bound modes
+take an explicit `SPARQ_VCQ_PROOF_JOB`. One run at source `872c219ca` was independently certified
+(seven genuine Succinct receipts, one rejected as `capacity`; public synthetic fixture, not a full
+gate, no benchmark). See [vcq exact adapter](references/vcq-exact-adapter.md) for tuples and caveats.
+
+For the opt-in synthetic selected-support measurement adapter, its strict
+experiment manifest, timing boundaries and unavailable stages, see
+[experiment instructions](../../bench/zk-compose/experiments/README.md). Driver
+measurements are explicitly enabled by `with_stage_metrics()` and drained by
+`take_stage_metrics()`; they remain local diagnostics outside presentations. Local
+measurements are NONcanonical and do not establish external security assurance.
+
+Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) to retain original goldens and separate native, actual constraint, and genuine proof coverage. Imported negative cases require their declared rejection category and phase; an ambiguous evaluation/budget error cannot certify capacity rejection. Explicit version-specific positive goldens preserve the original V1 rejections and unchanged inputs. The [existing engine/storage replay](../../bench/zk-bindings/engine-replay.md) preserves seed/query/dataset identity; normalized oracle agreement never authorizes proof reuse. The experimental [engine proof replay bridge](../../bench/zk-bindings/engine-proof-replay.md) (`sparq_proved_evaluator_model::replay` plus the `engine_replay_proof` host example) prepares one retained cell for exact V3 evaluation and can prove and independently verify it; it authenticates no source credential. The Turtle conversion and original-file hash checks are host checks, not proved by the guest. Only a verifier-agreed anchor that the verifier prepared from the originals binds the converted N-Quads to them. For synthetic experiments, `engine_replay_setup synthetic REPLAY_DIR PROFILE EXPECTED.json RUN_ID NEW_OUTPUT_DIR` writes `holder.json`, `holder-declared.json`, `verifier-agreed.json`, a byte-exact `expected.json` and `setup.json`. Before writing, it checks both authorities natively against the independently supplied expectation. It creates no proof. Its `RUN_ID`-derived nonces are test challenges, never a production challenge source. The host computes its agreed anchor from the original `data.ttl` while also acting as holder, so that anchor is test-setup trust input, not source authentication. The ignored `real_engine_replay_omission_is_an_observed_guest_abort` test (`SPARQ_ENGINE_REPLAY_OMISSION_JOB`) creates no proof. It requires the exact SDK guest-abort message for an omitted statement under the agreed anchor. That is an observed execution rejection, not a negative cryptographic proof.
+
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
@@ -81,10 +151,40 @@ Stage 2 (`sparq-zk-compose`):
 - Manifest model: `manifest::{ProofManifest, ProofInputs::{Scan, FilterInt, FilterF64, FilterSignedInt, FilterDecimal, JoinEq}, SubProof { inputs, proof_hex }, BindingEdge, BindingMode::Challenge { challenge }, CommitmentAttestation, AttestedStatusRef, RevocationStatus, StatusListSnapshot, EntailmentRegime::Simple, FilterOp, CircuitId::{Scan, FilterInt, FilterF64, FilterSignedInt{md}, FilterDecimal{id,fd}, …}, FieldHex}`. `ProofManifest::{to_json, from_json}` round-trip via serde.
 - Dual-leaf value lane (sq-xojl + sq-cfmv + sq-2ezsx, behind the OFF-by-default `dual-leaf` feature): `CircuitId::FilterValueDl` + `ProofInputs::FilterValueDl { operand_enc, op, bound, datatype_const, expected }` are the integer value-lane FILTER member — it binds the operand to the dual-leaf commitment via two Poseidon2 permutations over the witnessed `VALUE_HOOK` with **NO in-circuit blake3** (the measured gate win, `gate_count_snapshot.json`), and is DIGIT-COUNT-FREE (one member per datatype class; no `ceil(log10(value))` member-selection leak). **Sibling datatype-class members (sq-2ezsx):** `CircuitId::FilterValueDlF64` + `ProofInputs::FilterValueDlF64 { operand_enc, op, b_bits, datatype_const, expected }` (`xsd:double` — the value handle is the IEEE bits, and the member instantiates B4 IN-CIRCUIT by CANONICALISING `-0.0`/`+0.0` and NaN payloads before the bind, since the term is many-to-one on the value) and `CircuitId::FilterValueDlDecimal` + `ProofInputs::FilterValueDlDecimal { operand_enc, op, bound_neg, bound_scaled, datatype_const, expected }` (`xsd:decimal` — value handle = the SIGNED scaled magnitude; B4 is the canonical-SCALE bind, with the scale folded into the public `datatype_const`, so ONE compiled member serves every scale). **`xsd:boolean` lane (sq-5xdlk) — NO new circuit member:** `filter_value_dl_int` already takes `datatype_const` as a PUBLIC input and its `u64` comparison domain covers the boolean value hooks `{0 = false, 1 = true}`, so the boolean lane REUSES `CircuitId::FilterValueDl` + `ProofInputs::FilterValueDl` (same wire tag, same compiled artifact, so bb gate counts are unchanged) and is selected purely by that constant — `manifest::boolean_datatype_const() -> FieldHex` (= `blake3(xsd:boolean IRI)`, the constant the host encoder `sparq_zk::dual_leaf_boolean::encode_boolean` folds into the committed leaf, sq-hh7a4). `build::build_filter_value_dl_boolean(&Literal, FilterOp, bound: bool) -> Result<BuiltFilterValueDlBoolean, DualLeafError>` builds the public inputs + the two private field witnesses from a canonical `"true"`/`"false"` literal (fail-closed on the non-canonical XSD-legal `"1"`/`"0"` and on any non-boolean datatype), disclosing the HONEST verdict computed by `build::boolean_verdict(value, op, bound)` — `EQ`/`NE` plus the DEGENERATE XPath orderings `false < true`, which is exactly the integer relation over the hooks. Lane separation is that public `datatype_const` and only that: it is folded into `value_component`, so an `"1"^^xsd:integer` leaf's honest witness rebinds to a DIFFERENT leaf under the boolean constant and fails the member's `assert_eq(leaf, operand_enc)` (and symmetrically) — a BINDING argument resting on Poseidon2 preimage resistance, NOT an audited soundness claim. Same INV-VL downgrade + CR-G8 / sq-qhy4; NOT externally audited; no soundness/privacy claim. **`xsd:dateTime` / `xsd:date` lane (sq-wz99x) — ONE new member serving BOTH lanes:** `CircuitId::FilterValueDlDateTime` + `ProofInputs::FilterValueDlDateTime { operand_enc, op, bound_neg, bound_scaled_epoch, datatype_const, expected }` is the `filter_value_dl_datetime` member — structurally `filter_value_dl_decimal` with a SIGNED SCALED EPOCH value handle (milliseconds from `1970-01-01T00:00:00Z` on the XSD proleptic-Gregorian `timeOnTimeline`, lane-fixed `FS = 3`), reusing that member's UNCHANGED signed fixed-point verdict, so it adds no new comparison machinery. `xsd:date` needs NO second Noir function: its hook is the scaled epoch of the date's STARTING instant (midnight UTC) and the lane is selected purely by the PUBLIC constant — `manifest::datetime_datatype_const()` / `manifest::date_datatype_const()` (= `blake3(IRI ‖ "@epochscale=3")`, exactly what the host encoders `sparq_zk::dual_leaf_datetime::{encode_datetime, encode_date}` (sq-we9vs) fold into the committed leaf). That separation is load-bearing here in a way it is not for the boolean lane, because the two hooks COLLIDE numerically (`"1970-01-02Z"` and `"1970-01-02T00:00:00Z"` both hook `86_400_000`): only the constant, folded into `value_component`, makes the two leaves differ — again a BINDING argument under Poseidon2 preimage resistance, NOT an audited soundness claim. `build::{build_filter_value_dl_datetime, build_filter_value_dl_date}(&Literal, FilterOp, bound: &Literal) -> Result<BuiltFilterValueDlDateTime, DualLeafError>` build the public inputs + the three private witnesses (`value_neg` + `value_hook_scaled` + `lexical_component`), putting BOTH operands through the same encoder so the hookable domain — strict XSD-canonical `Z`-timezoned lexicals ONLY; bare / non-`Z`-offset / `24:00:00` / leap-second / non-canonical-year / over-`FS`-fraction / `u64`-overflowing forms are REJECTED fail-closed, a bare operand for the §13.2 order-INDETERMINACY reason rather than as merely unbuilt — is enforced on the FILTER's constant too, and a cross-lane `date`-vs-`dateTime` comparison is structurally inexpressible through the API. The disclosed verdict is COMPUTED by `build::signed_epoch_verdict(...)`, never taken from the caller. Same INV-VL downgrade, and the whole §13 rule set (`research/zk-field-native-encoding.md`) is itself an OPEN external-audit obligation under CR-G8 / sq-qhy4; NOT externally audited; no soundness/privacy claim. `toml::filter_value_dl_prover_toml(...)` / `filter_value_dl_f64_prover_toml(...)` / `filter_value_dl_decimal_prover_toml(...)` / `filter_value_dl_boolean_prover_toml(...)` / `filter_value_dl_datetime_prover_toml(...)` emit each member's `Prover.toml` (their private witnesses are field elements — `value_hook` (+ `value_neg` for decimal/dateTime) + `lexical_component`; the boolean renderer is the integer one with the lane constant PINNED and `bound: bool` mapped to its hook). **`dispatch::resolve_circuit(CommitmentMethod, &CircuitId) -> Result<CircuitId, DispatchError>`** and `dispatch::resolve_circuit_for_scheme(scheme_iri, &CircuitId)` are the **fail-closed `(commitment-method × circuit)` dispatch matrix** (sq-cfmv): they REJECT a value-lane member against a method with no value handle (`string-canonical`), a string-lane/identity member against `value-only`, an identity op routed at the value lane (reject-list (v)), and an unknown method IRI — `DispatchError::{IllegalPair, IdentityOpAtValueLane, UnknownMethod}`, never a silent mis-dispatch or default. **Wiring the resolver into `verify_manifest` (so the verifier reads the recorded `zk:scheme` and gates each sub-proof) is design bead 6 (depends on the host encoding sq-j506) — the resolver is the self-contained, tested component that bead consumes.** The member + matrix carry the #769-accepted INV-VL downgrade (CR-G8 / sq-qhy4); NOT externally audited; no soundness/privacy claim. <!-- privacy-claims-allow: opt-in dual-leaf value lane + fail-closed dispatch matrix; INV-VL downgrade framed as an OPEN audit obligation; resolver enforces structural legality only and asserts no soundness/privacy property; sq-qhy4 / CR-G8 -->
 - Privacy upgrades (opt-in): `issuer::{key_set_root, key_membership_witness, hidden_issuer_prover_toml, HiddenIssuerWitness}`, `holder::{holder_set_root, holder_set_membership_witness, holder_set_prover_toml, HolderSetWitness}` (hidden-holder-SET tier, sq-3c00), and `revocation::{merkle_root, merkle_witness, revoke_prover_toml, MerkleWitness, hidden_ref_witness, revoke_hidden_ref_prover_toml, HiddenRefWitness}`.
+- Status Merkle roots and witnesses require the entire byte-sized snapshot to fit `2^depth` bits; oversized snapshots return `None` before hashing. Nonempty snapshots therefore require depth at least three. Missing trailing status bits remain revoked padding. This admission also protects legacy accepted-policy anchors and successful-result policies; the successful-result verifier derives depth 10/17/20 from its complete accepted policy.
 - **Fully-hidden revocation — status-list IRI + version HIDDEN (sq-kndw, the deferred remainder of sq-6qe; `research/zk-statuslist-hide-iri-version.md` §3 sub-option A):** the THIRD revocation disclosure mode, usable end-to-end. **Issuer:** sign `sig::status_ref_fully_committed_digest(ref_commitment, index_commitment)` via the existing `SecretKey::sign_commitment_with_status`, where `ref_commitment = sig::status_ref_commitment(H(list), version, ref_blinding)` and `index_commitment = sig::status_index_commitment(index, blinding)`; attach `AttestedStatusRef::fully_hidden(&rc, &ic)`. **Holder:** disclose `RevocationStatus::fully_hidden(&rc, &ic)` (`status_list`/`index`/`version` all absent) and attach a `FullyHiddenRevocation` proof of the `revoke_hidden_ref_d10_a4` member — build it with `revocation::hidden_ref_witness(&policy.accepted_entries()?, set_depth, &snapshot, depth, index)` + `revocation::revoke_hidden_ref_prover_toml(..)`, id `build::derive_revoke_hidden_ref_id(depth, set_depth)` (EXACT-match; only `(10, 4)` is compiled). **Relying party:** opt in with `RevocationPolicy::{with_hidden_index_depth, with_accepted_set_depth}` (+ optional `with_min_version` to pin the public epoch floor as a policy constant rather than a rolling window); `verifier::bind_fully_hidden_revocation` derives the accepted-set root + floor from its OWN freshness-curated snapshots, rebuilds the public inputs from them, and `bb verify`s. **Disclosure floor:** nothing holder-identifying — the statement reduces to "some accepted `(list, version)` at or above the RP's public floor has my hidden index unset". Residual disclosures are policy-side: the accepted-set root (the RP's own policy fingerprint), the public `min_version`, and the member depths `(D, A)` via the vk. **⚠️ Re-blinding is mandatory:** `(ref_commitment, index_commitment)` is a stable per-issuance pair, so reusing it across presentations reinstates full linkability — the issuer must re-blind and RE-SIGN per presentation. The verifier enforces single-use of the pair through the same durable `SeenNonces` store as the nonce defence (`FullyHiddenRevocationLinkageReplay`), but that only helps against an HONEST relying party; the real fix is upstream and is the design's residual operational gap. Fail-closed throughout: a fully-hidden reference without its proof is `FullyHiddenRevocationRequired`, a proof without the reference `FullyHiddenRevocationUnbound`, an unenabled policy `FullyHiddenRevocationNotEnabled`, a prover-chosen anchor `FullyHiddenRevocationAnchorMismatch`. The clear-index and committed-index paths are UNCHANGED. Research-grade; NOT externally audited (sq-qhy4) — no soundness/privacy property is asserted as achieved. <!-- privacy-claims-allow: describes the mode's disclosure floor with the re-blinding requirement and the honest limit of its enforcement stated inline; asserts no soundness/privacy property as achieved; NOT externally audited, sq-qhy4 -->
 - Large-registry scaling (sq-8k3h, host-side only): `issuer::{key_set_root_sparse, key_membership_witness_sparse}` and `holder::{holder_set_root_sparse, holder_set_membership_witness_sparse}` build the BIT-IDENTICAL root + authentication path in `O(n·depth)` (no `2^depth` materialisation), so a very large issuer/holder registry commits at any depth. The in-circuit relation is depth-generic and UNCHANGED — these are a drop-in for the dense builders, asserting NO new soundness/privacy property.
 
+<!-- zkp-3: host planner, never a proof verification shortcut. -->
+The `sparq_zk_compose::planner` API admits strict SELECT DISTINCT / true ASK,
+selects successful per-result witnesses, and derives public disclosure versus
+remaining proof obligations. Its credential/leaf references and metrics are
+PRIVATE planning data; authentication remains required for public triples and
+FILTER operands. See [disclosure planning](references/disclosure-planner.md) for
+the API, bounds, result contract, and limitations. Host planning is not
+cryptographic verification; this surface is not externally audited.
+`planner::signed::SignedDisclosureQuery` and its signed planning/optimization
+functions separately admit canonical `i64` FILTERs. They preserve committed RDF
+terms and do not extend the existing unsigned proof verifier. See the signed
+admission section in the disclosure-planning reference.
+
 ## Common recipes
+
+<!-- zkp-10.1: separate exact-dataset contract, not a selected-result upgrade. -->
+The opt-in detached [exact evaluator](references/exact-evaluator.md) proves bounded default-graph evaluation with explicit verifier-agreed or holder-declared scope. It is experimental and not externally audited; its first adapter carries no issuer-signature or credential-status claim.
+The separately versioned [complete named-dataset API](references/exact-datasets-v2.md) adds a committed catalog including empty named graphs, GRAPH and local snapshot FROM/FROM NAMED selection. V1 requests and commitments retain their meaning.
+The opt-in [V3 graph-result API](references/graph-results-v3.md) adds blank-node identity, canonical tables and bounded graph forms through typed host/guest APIs; consult artifact-bound evidence for actual execution status.
+Issuer-authenticated RDF (V5): every feature is off by default and experimental, and each layer keeps its own evidence level (native model tests, native host tests, direct guest execution, adapter native tests, one genuine adapter case; the low-level driver has no receipt):
+
+- **Model** (model feature `authenticated-rdf`): the [native V5 model](references/authenticated-rdf-model.md) checks W3C `eddsa-rdfc-2022` credentials against a verifier-pinned key table, then reuses V3 evaluation.
+- **Guest** (host feature `authenticated-rdf`): a [separately pinned V5 guest and low-level host API](references/authenticated-rdf-guest.md) with a committed guest lock. An independently audited scoped gate at `42d13fed` passed its native tests and executed the guest directly, without proving. Its ignored genuine-proof driver proves only the one to six case IDs a v2 job declares; a subset run claims nothing about undeclared cases.
+- **Adapter** (host feature `vcq-authenticated` = `vcq` + `authenticated-rdf`): the generic [V5 vcq adapter](references/vcq-authenticated-rdf-adapter.md) `vcq_authenticated::Risc0AuthenticatedRdfV5` declares six tuples (bag SELECT, ASK, CONSTRUCT; `IssuerAuthenticated`; both authorities). An independently verified scoped native gate at `7fe88955` passed its tests and Clippy without proving. Separately, at that frozen source, one independently audited genuine receipt of the approved V5 guest proved one public synthetic case, `select-bag-verifier-agreed`, with 28 controls. The other five tuples and the row-bound case have not run, so the registry keeps its `adapter_available` false.
+
+None processes JSON-LD or full Data Integrity or checks status, holder binding, validity against a clock or wallet/world completeness. The campaign's V5 and vcq commands have not run as a full campaign. Not externally audited (`sq-qhy4`). <!-- privacy-claims-allow: native tests, direct execution and one synthetic adapter receipt; not audited -->
+The [campaign evidence guide](references/evaluator-evidence.md) explains exact artifact export, actual receipt evidence and source/HAL provenance.
+The [exact-evaluator experiment adapter](../../zk/sparql-evaluator/experiments/README.md) runs fixed synthetic V2 contracts against an independently accepted caller artifact and pin, with real local receipts, typed tamper controls and scoped measurement.
+
+The [query-coverage corpus](references/evaluator-conformance.md) separates executed host semantics, explicit unsupported features, and guest proof evidence. Its opt-in NPS comparison recipe records other engines' observations without installing dependencies or treating their output as a conformance oracle.
 
 ### 1. Commit a credential graph and attest it as an issuer
 ```rust
@@ -284,3 +384,211 @@ let art = prover.prove_in(&CircuitId::RevokeUnset { depth }, &toml, std::path::P
 - `noir-circuit-patterns` / `noir-optimisation` — writing/sizing the Noir circuits this crate drives (`zk/compose/`).
 - `sparql-formal-semantics` — the Pérez–Arenas–Gutiérrez fragment + blank-node scoping the Q6 guard and `verify::recheck` enforce.
 - `mpc-protocols` — the multi-party layer that composes with this single-prover ZK estate.
+
+## Private successful-result experiment
+
+With `sparq-zk-compose/successful-results`, use
+`result::prepare_result(query, credentials, rows, policy, nonce)`, then
+`PreparedResult::prove(driver, output_dir, unique_tag)`. The relying party calls
+`result::verify_result(expected_query, presentation, policy, nonce, seen, driver,
+work_dir)` with independently chosen request/trust/status/freshness inputs.
+Successful verification returns released mappings. The new contract is separate
+from `verify_manifest`: only nonempty positive `SELECT DISTINCT` answers, selected
+IRIs/literals, and private canonical nonnegative `xsd:integer` predicates through
+`u64::MAX` are admitted. `ResultOptions::integer_capacity` selects the default
+smallest range bucket or explicit `IntegerCapacityPolicy::HideInU64`; actual
+decimal length stays private. Status capacities are independently derived at
+depth 10/17/20 from all freshness-accepted snapshots.
+Public predicates run in the verifier and select the member without numeric
+circuitry. Roots/salts/status indices and intermediate encodings are private;
+issuer slots/capacities/result size remain public. See the [successful-result contract](references/successful-results.md)
+for exact scope. Before proving or verifying, it requires the exact
+pinned version field (`nargo version = 1.0.0-beta.21` as the first line; trimmed
+`bb` output `5.0.0-nightly.20260324`); substrings, diagnostics and non-UTF-8
+output are rejected. This is a pin guard, not binary attestation (no hash check).
+Research-stage, not externally
+audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
+
+`planner::plan_disclosure_admitted` additionally accepts a predicate
+`Fn(pattern_index, MembershipRef, &Triple) -> bool` that excludes ineligible
+backend candidates while retaining all query checks. It preserves original
+wallet/leaf indices and is private preparation, never a verifier trust decision.
+
+Result preparation filters issuer/status/backend eligibility before
+selecting witnesses. Each proof uses an internally unique private witness directory;
+canonical-key generation and verification also isolate concurrent scratch files.
+Caller tags are descriptive and cannot cause private-result input collisions.
+All witness/proving entry points validate tags before I/O: ASCII letters,
+digits, underscores, hyphens and dots are accepted; `.`/`..`, separators and other
+characters reject. Legacy untagged APIs retain the empty tag; successful-result
+proofs require a nonempty label. Dots are injectively encoded as `%2E` internally
+and every filename has a fixed prefix; literal percent signs reject. Input
+writes reject final-component symlinks on
+Unix. Workspaces and their parent directories must be controlled by the caller.
+
+Successful-result proofs now select a one- or two-credential circuit
+bucket, so removing a credential also removes its in-circuit signature check.
+The default `CredentialCapacity::Smallest` reveals the selected capacity; choose
+`prepare_result_with_options(..., ResultOptions { credential_capacity:
+CredentialCapacity::HideInTwo, ..ResultOptions::default() })` to keep the fixed two-slot policy. The verifier
+checks the bounded issuer-slot shape and derives the member independently.
+
+Explicit `planner::optimize_disclosure[_admitted]` jointly minimizes
+credential authentication count and then shared membership count for fixed
+released rows. Its bounded report distinguishes `Optimal`, `Infeasible`, and
+`BudgetExhausted`; an exhausted feasible plan never implies optimality. Backend
+admission and credential-capacity limits remain enforced. This is structural host
+selection, not a calibrated speed claim or cryptographic assurance; see
+[disclosure planning](references/disclosure-planner.md).
+
+`prepare_result` defaults to joint `WitnessSelection::Optimize` with the
+backend's credential bound. Set `ResultOptions.witness_selection` to `FirstSuccess`
+for the baseline, and `max_search_steps` to bound candidate attempts. Inspect
+`PreparedResult::work().optimization`: an exhausted feasible incumbent is usable
+but has no established optimum; exhaustion without a feasible plan returns
+`ResultError::SearchExhausted`. Neither diagnostics nor private attributions enter
+the public presentation, and the independent verifier is unchanged.
+
+`CircuitProver::compile` returns an immutable content-addressed snapshot
+under the ignored target cache. Driver compile/execute calls share a Unix advisory
+workspace lock, and proof/key jobs consume their own ACIR copies. Concurrent driver
+processes may share a local workspace; do not run external nargo writes or remove
+the cache during those jobs. Unique legacy prover tags remain required for legacy
+witness APIs. Lock failures reject; the existing Unix platform and Rust 1.88
+minimum are preserved.
+
+Both planner selection paths enforce `MAX_DISCLOSURE_CREDENTIALS` on the
+supplied slice before traversing credentials; empty and ineligible graphs count.
+This input bound is independent of candidate-triple search fuel.
+
+Successful-result preparation also checks `MAX_DISCLOSURE_CREDENTIALS`
+before its authentication prepass. Its graph contract is string-canonical only;
+the generated gate matrix records dual-leaf and value-only pairs as unsupported.
+
+[Exact temporal keys and enforced year capacity](references/exact-temporals.md)
+cover the shared evaluator and separate native/actual-guest regression evidence.
+
+The exact-dataset evaluator applies the [aggregate operand boundary](references/aggregate-profile.md) in both native admission and guest evaluation. Non-COUNT aggregate operands must be constants or variables proven bound by the inner algebra; expression operands and nullable bindings are outside this initial profile. This is a restriction, not complete aggregate conformance.
+
+## Exact-evaluator SDK dependencies
+
+The separate [exact evaluator](../../zk/sparql-evaluator/README.md) uses
+detached workspaces. Its [SDK patch record](../../vendor/zk-sdk/README.md) preserves
+upstream source/license identity and documents discovery-only dependency selection
+and derive-macro, server-profiler and kernel-binary feature boundaries, with
+executable patch reconstruction, explicit lockfile patch-selection corruption
+controls, and the native `edge_matrix.py` feature compiler. The kernel's default
+binary dependency activation and embedded ELF remain unchanged; the patch record
+separately documents an upstream real-target binary compilation limitation.
+Synthetic dependency checks remain separate from actual guest proof evidence.
+The exact evaluator enables the [numeric capacity guard](references/numeric-capacity.md). Valid values beyond the finite arithmetic lane can be returned directly; integer/decimal EBV uses exact zero classification. Unsupported arithmetic/comparison consumption fails the entire evaluation. Native default budgets leave this option off.
+
+The SDK provenance checks bind both workspace patch tables and resolved
+feature-matrix package manifests to the exact inventoried vendor directories.
+The [SDK reference](../../vendor/zk-sdk/README.md) distinguishes direct Cargo
+kernel defaults from the embedding helper's explicit feature requirement, and
+records library-only Clippy scope separately from kernel or guest execution.
+
+The exact evaluator admits the [bounded nullable alternative/inverse profile](references/nullable-paths.md). Bag duplicates and concrete absent endpoints are retained; nullable sequences, nested nullable quantifiers and residual paths in EXISTS remain excluded. Actual guest evidence must bind the updated admission artifact.
+
+The exact model's `evaluate_detailed`, `v2::evaluate_detailed` and
+`v3::evaluate_detailed` evaluate their same versioned requests and emit
+the same journal as `evaluate`, while returning `EvaluationError` with distinct
+`Budget`, `Capacity`, `Execution` and existing `Rejected` cases; their
+`BudgetExceeded` and `EvaluationCapacity` enums are re-exported by the model. Execution causes
+come from actual engine emitters; private engine diagnostics are discarded. The
+legacy `evaluate` APIs keep their original execution rejections, including V3's
+separate query and graph diagnostics. This error
+API is outside request/journal encoding and adds no receipt evidence by itself.
+
+The [shared original-corpus controller](../../bench/zk-bindings/README.md)
+retains native versus actual-proof counters and independently pinned goldens.
+Row-only goldens keep the caller's default `--variables`, except
+where a hash-pinned reviewed projection override matches the exact source file
+and fixture. Imported SELECT goldens whose row width differs from the
+projection width are rejected, not replayed.
+
+Original successful-result v1 circuit, ABI and verification-key bytes are
+preserved under the pinned toolchain and checked against independent baseline
+keys in the toolchain suite. Expanded v2 tiny and predicate-free profiles have
+representative genuine-proof checks in addition to wrapper execution coverage;
+see the successful-result reference for evidence and scope.
+
+Opt-in `result::prepare_result_public_pattern` (unchanged
+`ResultOptions`) emits version 4 (`PUBLIC_PATTERN_VERSION`): the first
+all-constant-or-projected pattern is checked against a verifier-derived public
+triple table instead of private typed openings. `verify_result` recognizes it;
+default dispatch is unchanged. The pattern moves to index zero identically in
+prover and verifier, and the `public_triples` table is appended last to the
+`result_v4_k{1,2}_n16_p3_r4_f0_d10` public ABI. Signatures, hidden roots, salts,
+status references, policy paths and leaf membership stay in-circuit. Remaining
+patterns keep the generic typed and shared-variable checks. The verifier
+rebuilds the pattern, table, package and byte order from its query, released rows,
+issuer-slot count and policy. Public subjects and predicates must be IRIs, and
+objects must be IRIs or literals. Dispatch never uses the witness choice or count.
+Only F0 (no FILTER on a hidden variable), status depth 10 and K1/K2 are
+supported; no public pattern or any other profile rejects without fallback. It
+proves support for the selected rows only, not completeness. Research-grade, not
+externally audited; no runtime saving is claimed.
+Checked-in static evidence for both members, from one independent
+non-canonical Linux x86_64 work-box run at source `14d426bd`: `bb gates` circuit
+sizes in the [gate snapshot](../../crates/sparq-zk-compose/tests/gate_count_snapshot.json),
+plus ACIR, ABI and source-bound tool provenance in
+[`result_public_gates.json`](../../bench/zk-compose/result_public_gates.json).
+`bench/zk-compose/scripts/verify_result_evidence.py` checks these records
+against the snapshots and the shared Noir source inventory. The refreshed legacy
+inventories stay value-identical, and legacy keys are compared byte-for-byte by
+test with no key files retained. Static counts are not a runtime or security
+audit. In that run the ignored toolchain tests
+`result_real_public_pattern_k1_k2_proofs_and_verifier_controls` (one genuine K1
+and one K2 proof, each with typed verifier-rejection controls) and
+`result_relation_public_pattern_rejects_tampered_retained_witnesses` passed. Their
+proof outputs are not retained in the repository (that run's evidence bundle has
+SHA-256 `a1944e1c49692b360155fc725ad8800b33ebe7a5ef09de8afdfd68ae63b81fbb`), so
+future CI replays are still required.
+The [binding corpus](../../bench/zk-bindings/README.md) registers an
+explicit `noir_public_pattern` backend over its existing finite domain; it never
+substitutes version 1 or signed members. A separate non-canonical EC2 run at
+corpus source `2e0f4a9dba47d537835b4745c66147f097c68e43` executed all 576 native cells (72 accepted, 468 support
+refusals, 36 empty-graph refusals) and all 46 real cells (4 genuine K1 proofs,
+32 absent-binding and 10 private-witness-attack constraint failures). That run is
+distinct from the `14d426bd` measurements above, is not a hosted CI run, and makes
+no gate, runtime or security claim; see the corpus README for its controls and hashes.
+
+The `result_experiment` example also accepts a separately versioned
+schema-3 manifest for a paired `baseline_v1` versus `public_pattern_v4` ablation
+over K1 and K2 synthetic wallets. Both arms use one eligible query, the same
+released rows, signed inputs, policy and realized issuer-slot count, and one
+acceptance digest per profile. Relation version, package and proof stay
+separately visible, and transcripts are not claimed byte-identical. The legacy
+selected-support query is not version-four eligible and stays unchanged. The
+adapter reports raw per-sample timings only. No schema-3 manifest file is
+committed; the
+[experiment instructions](../../bench/zk-compose/experiments/README.md) carry an
+inline sample to save outside the checkout, plus the round options, schedule,
+controls and limits. No measured outcome is recorded in this skill.
+
+`result::signed` exposes separately versioned canonical signed-integer
+preparation and verification, with a fixed capacity and no public sign/length
+selector. See the [signed result contract](references/signed-results.md) for its
+API, lexical limits and evidence boundary, and
+[signed admission](references/disclosure-planner.md#canonical-signed-integer-admission)
+for the independent planner. Native/core checks do not constitute genuine signed
+result-proof evidence.
+
+Default host checks validate the legacy compatibility evidence's source
+hashes and byte lengths. The ZK toolchain lane independently rebuilds the fixed
+foundation keys in addition to checking current keys. Only v1 byte stability is
+promised; unchanged v2 circuit sizes do not establish key compatibility.
+
+The selected-support and exact-evaluator examples also admit separately
+versioned materialized synthetic profiles: bounded wallet candidates and named
+organization counts. Each generated manifest runs one ordinary sample and preserves
+the existing authentication, authority, replay and typed rejection contracts.
+
+The [bounded workload campaign](../../bench/zk-compose/campaigns/README.md)
+materializes wallet candidate and named-organization fixtures before measurement,
+then interleaves real adapter subprocesses. It preserves per-sample failures,
+unsupported combinations, exact inputs, authority/authentication identities and
+raw reports. Paired planner acceptance contracts retain visibly different public
+capacities; exact authority modes and selected support are separate contracts.

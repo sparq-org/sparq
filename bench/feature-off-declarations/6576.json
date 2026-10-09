@@ -1,0 +1,5 @@
+{
+  "pr": 6576,
+  "date": "2026-09-25",
+  "reason": "Intentional shared RDF/SPARQL correctness changes include strict typed lexical validation and cache migration, exact temporal comparison, nullable paths and EXISTS substitution, preserved VERSION metadata, FROM blank-node standardization and explicit typed evaluation failures. These ordinary native/WASM engine/core/parser changes are always compiled; graph-result proof framing and strict proof capacities remain opt-in. Feature-OFF byte identity or performance neutrality is not claimed. Independent hosted WASM and feature-OFF floors remain required and unchanged."
+}

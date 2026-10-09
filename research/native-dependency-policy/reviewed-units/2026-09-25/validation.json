@@ -1,0 +1,1095 @@
+{
+  "schema": "sparq.native-two-source-audits.validation.v1",
+  "recorded_by": "GPT-6",
+  "date": "2026-09-25",
+  "base": "d34b709ea9c8140c66fd67305c02d79b4cc283a5",
+  "source_review_sha256": "485b5b2773a71b296d36d957406a3badaf38c44e7878ea9594141213d8c51e45",
+  "review_manifest_sha256": "28e5919afbbb50045227c07863c44a4212b096a962031ec0dfc748177c0a82fd",
+  "scope": "Two independently completed automated source reviews recorded locally; no human/upstream impersonation or transitive approval. Source-review and policy-insertion review are distinct.",
+  "all_prior_audit_records_preserved": 13,
+  "unchanged_inputs": {
+    "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+    "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+    "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+    "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+    "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+    "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+  },
+  "candidate_audits_sha256": "d1a97c2de8d83349c3f916367dfca6d7a5b42e2f34e2f7bb9561ca261fa09918",
+  "commands": [
+    {
+      "name": "native-vet",
+      "command": [
+        "cargo",
+        "vet",
+        "--manifest-path",
+        "zk/native-composition/Cargo.toml",
+        "--store-path",
+        "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/supply-chain",
+        "--locked",
+        "--frozen",
+        "--no-minimize-exemptions",
+        "--output-format",
+        "json"
+      ],
+      "environment_override": {
+        "CARGO_NET_OFFLINE": "true"
+      },
+      "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+      "started_at": "2026-09-25T15:02:08.229809+00:00",
+      "ended_at": "2026-09-25T15:02:08.496417+00:00",
+      "exit": 255,
+      "timed_out": false,
+      "inputs_before": {
+        "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+        "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+        "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+        "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+        "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+        "supply-chain/audits.toml": "d1a97c2de8d83349c3f916367dfca6d7a5b42e2f34e2f7bb9561ca261fa09918",
+        "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+      },
+      "inputs_after": {
+        "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+        "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+        "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+        "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+        "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+        "supply-chain/audits.toml": "d1a97c2de8d83349c3f916367dfca6d7a5b42e2f34e2f7bb9561ca261fa09918",
+        "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+      },
+      "stdout_sha256": "a6927a07f7cf723b9e7793799cfb8c8c2f00ec2aff40b411baa508598cb71c05",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scope": "Candidate-owned frozen cached metadata only; no fetch/install/compiler/build scripts/proofs."
+    },
+    {
+      "name": "native-vet-no-wrapper",
+      "command": [
+        "cargo",
+        "vet",
+        "--manifest-path",
+        "zk/native-composition/Cargo.toml",
+        "--store-path",
+        "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/supply-chain",
+        "--locked",
+        "--frozen",
+        "--no-minimize-exemptions",
+        "--output-format",
+        "json"
+      ],
+      "environment_override": {
+        "CARGO_NET_OFFLINE": "true",
+        "RUSTC_WRAPPER": "",
+        "RUSTC_WORKSPACE_WRAPPER": ""
+      },
+      "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+      "started_at": "2026-09-25T15:02:40.568341+00:00",
+      "ended_at": "2026-09-25T15:02:42.378993+00:00",
+      "exit": 255,
+      "timed_out": false,
+      "inputs_before": {
+        "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+        "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+        "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+        "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+        "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+        "supply-chain/audits.toml": "d1a97c2de8d83349c3f916367dfca6d7a5b42e2f34e2f7bb9561ca261fa09918",
+        "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+      },
+      "inputs_after": {
+        "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+        "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+        "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+        "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+        "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+        "supply-chain/audits.toml": "d1a97c2de8d83349c3f916367dfca6d7a5b42e2f34e2f7bb9561ca261fa09918",
+        "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+      },
+      "stdout_sha256": "cc9d4eacba2eb8b87a07c67d14f8f0487da91d0622e9f1e2ba2cd92e76f69e61",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scope": "Candidate-owned frozen cached metadata only. Empty wrapper avoids starting sccache for metadata rustc -vV; no compilation/fetch/install/build scripts/proofs."
+    },
+    {
+      "name": "root-vet",
+      "command": [
+        "cargo",
+        "vet",
+        "--manifest-path",
+        "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/Cargo.toml",
+        "--store-path",
+        "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/supply-chain",
+        "--locked",
+        "--frozen",
+        "--no-minimize-exemptions",
+        "--output-format",
+        "json"
+      ],
+      "environment_override": {
+        "CARGO_NET_OFFLINE": "true",
+        "RUSTC_WRAPPER": "",
+        "RUSTC_WORKSPACE_WRAPPER": ""
+      },
+      "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+      "started_at": "2026-09-25T15:03:16.543424+00:00",
+      "ended_at": "2026-09-25T15:03:24.930741+00:00",
+      "exit": 0,
+      "timed_out": false,
+      "stdout_sha256": "568be2a862d9e03d446dfcb07dfd40381c0155b7b0932e4b2a2e676cfbcb15ba",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "scope": "Candidate root metadata only, frozen/offline; compiler wrapper disabled only to avoid sccache version query service. No fetch/compiler/build scripts/proofs."
+    }
+  ],
+  "initial_failure": "Ambient sccache denied the metadata rustc -vV query in the sandbox; no vet coverage conclusion from that attempt. The subsequent frozen/offline metadata invocation disables the wrapper for this command only, with original policy/source bytes retained.",
+  "root_vet": "pass",
+  "native_vet": "fail",
+  "prior_missing_units": 134,
+  "remaining_missing_units": 132,
+  "removed_missing_units": [
+    {
+      "name": "cranelift-codegen-shared",
+      "version": "0.110.3",
+      "criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "num-iter",
+      "version": "0.1.46",
+      "criteria": [
+        "safe-to-deploy"
+      ]
+    }
+  ],
+  "remaining_missing_units_inventory": [
+    {
+      "name": "addr2line",
+      "version": "0.25.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "aes",
+      "version": "0.8.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "arbitrary",
+      "version": "1.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-bls12-381",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-crypto-primitives",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-ec",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-ff",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-ff-asm",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-ff-macros",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-groth16",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-poly",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-r1cs-std",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-relations",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-secp256r1",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-serialize",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-serialize-derive",
+      "version": "0.4.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-snark",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ark-std",
+      "version": "0.4.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "backtrace",
+      "version": "0.3.76",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bbs_plus",
+      "version": "0.25.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bindgen",
+      "version": "0.70.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bitflags",
+      "version": "2.13.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bulletproofs_plus_plus",
+      "version": "0.9.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bytecheck",
+      "version": "0.6.12",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bytecheck",
+      "version": "0.8.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bytecheck_derive",
+      "version": "0.6.12",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "bytecheck_derive",
+      "version": "0.8.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cexpr",
+      "version": "0.6.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "clang-sys",
+      "version": "1.9.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "coconut-crypto",
+      "version": "0.14.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "convert_case",
+      "version": "0.10.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "corosensei",
+      "version": "0.3.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-bforest",
+      "version": "0.110.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-bitset",
+      "version": "0.110.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-codegen",
+      "version": "0.110.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-codegen-meta",
+      "version": "0.110.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-control",
+      "version": "0.110.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-entity",
+      "version": "0.110.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-frontend",
+      "version": "0.110.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "cranelift-isle",
+      "version": "0.110.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "crc32fast",
+      "version": "1.5.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "crossbeam-deque",
+      "version": "0.8.8",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "crossbeam-epoch",
+      "version": "0.9.21",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "crossbeam-queue",
+      "version": "0.3.14",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "crossbeam-utils",
+      "version": "0.8.23",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "darling",
+      "version": "0.13.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "darling",
+      "version": "0.21.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "darling_core",
+      "version": "0.13.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "darling_core",
+      "version": "0.21.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "darling_macro",
+      "version": "0.13.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "darling_macro",
+      "version": "0.21.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "derivative",
+      "version": "2.2.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "derive_more",
+      "version": "0.99.20",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "dock_crypto_utils",
+      "version": "0.23.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "dock_merlin",
+      "version": "3.0.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "enum-iterator",
+      "version": "0.7.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "enum-iterator-derive",
+      "version": "0.7.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "enumset",
+      "version": "1.1.14",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "enumset_derive",
+      "version": "0.15.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "filetime",
+      "version": "0.2.29",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "flate2",
+      "version": "1.1.10",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "gimli",
+      "version": "0.28.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "glob",
+      "version": "0.3.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "hkdf",
+      "version": "0.12.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "itertools",
+      "version": "0.10.5",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "itertools",
+      "version": "0.12.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "kvac",
+      "version": "0.8.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "leb128",
+      "version": "0.2.7",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "legogroth16",
+      "version": "0.18.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "libunwind",
+      "version": "1.3.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "mach2",
+      "version": "0.4.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "macho-unwind-info",
+      "version": "0.5.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "memmap2",
+      "version": "0.6.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "memoffset",
+      "version": "0.9.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "minimal-lexical",
+      "version": "0.2.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "miniz_oxide",
+      "version": "0.9.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "more-asserts",
+      "version": "0.2.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "munge",
+      "version": "0.4.7",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "munge_macro",
+      "version": "0.4.7",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "object",
+      "version": "0.32.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "object",
+      "version": "0.37.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "oblivious_transfer_protocols",
+      "version": "0.12.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "proof_system",
+      "version": "0.34.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ptr_meta",
+      "version": "0.1.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ptr_meta",
+      "version": "0.3.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ptr_meta_derive",
+      "version": "0.1.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ptr_meta_derive",
+      "version": "0.3.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "rancor",
+      "version": "0.1.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "regalloc2",
+      "version": "0.9.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "region",
+      "version": "3.0.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "rend",
+      "version": "0.5.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "rkyv",
+      "version": "0.8.18",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "rkyv_derive",
+      "version": "0.8.18",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "rustc-demangle",
+      "version": "0.1.28",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "ruzstd",
+      "version": "0.5.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "saver",
+      "version": "0.21.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "schnorr_pok",
+      "version": "0.23.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "secret_sharing_and_dkg",
+      "version": "0.16.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "self_cell",
+      "version": "1.3.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "serde-wasm-bindgen",
+      "version": "0.6.5",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.149",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "serde_with",
+      "version": "1.14.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "serde_with_macros",
+      "version": "1.5.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "sha3",
+      "version": "0.10.9",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "shared-buffer",
+      "version": "0.1.4",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "short_group_sig",
+      "version": "0.7.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "simd-adler32",
+      "version": "0.3.10",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "slice-group-by",
+      "version": "0.3.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "smallvec",
+      "version": "1.16.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "smc_range_proof",
+      "version": "0.9.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "1.0.109",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "tar",
+      "version": "0.4.46",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "target-lexicon",
+      "version": "0.12.16",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "twox-hash",
+      "version": "1.6.3",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "unicode-width",
+      "version": "0.2.2",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "uuid",
+      "version": "1.26.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "vb_accumulator",
+      "version": "0.29.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "verifiable_encryption",
+      "version": "0.3.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasm-encoder",
+      "version": "0.258.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmer",
+      "version": "6.1.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmer-compiler",
+      "version": "6.1.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmer-compiler-cranelift",
+      "version": "6.1.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmer-derive",
+      "version": "6.1.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmer-types",
+      "version": "6.1.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmer-vm",
+      "version": "6.1.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmparser",
+      "version": "0.224.1",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wasmparser",
+      "version": "0.258.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wast",
+      "version": "258.0.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "wat",
+      "version": "1.258.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.59.0",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "xxhash-rust",
+      "version": "0.8.18",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    },
+    {
+      "name": "zlib-rs",
+      "version": "0.6.7",
+      "missing_criteria": [
+        "safe-to-deploy"
+      ]
+    }
+  ],
+  "new_exemptions": 0,
+  "new_trust_sources": 0,
+  "changed_criteria": 0,
+  "advisories": "Not rerun in this audit-only slice. Both previously recorded derivative2.2.0/RUSTSEC-2024-0388 and proc-macro-error2 2.0.1/RUSTSEC-2026-0173 remain unresolved; no ignore or graph change.",
+  "proofs_or_builds": 0,
+  "historical_records": "Original residual-134.json and validation.json are unchanged."
+}

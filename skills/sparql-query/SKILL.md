@@ -5,10 +5,26 @@ description: Run SPARQL 1.1/1.2 queries (SELECT/ASK/CONSTRUCT/DESCRIBE) and UPDA
 
 # sparq SPARQL query surface
 
+<!-- zkp-10.1: the separate proof guest is not the ordinary query API. -->
+For experimental exact-dataset proofs, use the detached
+[proved evaluator](../../zk/sparql-evaluator/README.md). Its `zkvm` target disables
+ambient clock/entropy functions and its wrapper applies a narrower admission
+profile. It does not change ordinary native or WASM query semantics and is not
+externally audited.
+
 `sparq-engine` is the SPARQL query/update engine over `sparq-core::Graph` (a dictionary-encoded,
 permutation-indexed in-memory RDF store). You load RDF into a `Graph`, then call free functions in
 `sparq_engine` to run SELECT/ASK/CONSTRUCT/DESCRIBE and SPARQL Update. Results come back either as a
 typed `QueryResult` (rows of `Option<oxrdf::Term>`) or directly as a SPARQL-1.1-JSON string.
+
+[Correlated EXISTS with MINUS](exists-minus.md) documents the bounded published-2013
+solution-domain correction and the remaining native practical fallbacks.
+
+Query options can pin [EBV rules](ebv-dialects.md) to REC 2013 or the
+12 September 2026 SPARQL 1.2 draft. VERSION announcements are retained and
+explicit contradictions reject evaluation; this is not full 1.2 conformance.
+With your own `SparqlParser`, keep them via
+`parse_versioned_query`/`parse_versioned_update` (stable upstream parser API).
 
 ## Quickstart
 
@@ -53,7 +69,7 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 
 ## Key APIs
 
-All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
+The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
@@ -70,7 +86,7 @@ All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + 
   unbound), `sol.iter()` over the bound `(VariableRef, &Term)` pairs (unbound cells skipped),
   `&sol[var]` (panicking `Index`), plus `variables()` / `values()` / `len()` / `is_empty()`. Use it
   for ergonomic Rust Oxigraph interop / migration; the underlying `{vars, rows}` layout is unchanged.
-- `pub struct QueryBudget { pub deadline: Option<Instant> /*native only*/, pub max_rows: Option<usize>, pub max_bytes: Option<usize>, pub cancel: Option<Arc<AtomicBool>> }`
+- `pub struct QueryBudget { pub deadline: Option<Instant> /*native only*/, pub max_rows: Option<usize>, pub max_bytes: Option<usize>, pub temporal_year_range: Option<(i64, i64)>, pub strict_numeric_capacity: bool, pub cancel: Option<Arc<AtomicBool>> }`
   — `QueryBudget::unlimited()` is the no-op default. `max_rows` caps the working-set ROW count;
   `max_bytes` (`sq-s5is`) is the byte-accounted companion — it prices row WIDTH
   (`rows × vars × size_of::<Id>()`) plus the bytes of query-computed (BIND/aggregate/CONSTRUCT)
@@ -80,6 +96,45 @@ All entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + 
   `query budget exceeded (max-rows|max-bytes)`. `with_cancel(Arc<AtomicBool>)` adds a cross-thread
   cancellation handle; a `Relaxed` store of `true` aborts cooperatively at the next coarse poll with
   `query budget exceeded (cancelled)`. `cancelled_by(flag)` creates an otherwise-unlimited budget.
+
+`temporal_year_range: Some((minimum, maximum))` imposes an explicit
+inclusive year capacity when date/dateTime values are evaluated or constructed.
+Out-of-range values trigger sticky `query evaluation capacity exceeded (temporal-year)`;
+FILTER/BIND/COALESCE and SERVICE byte rollback cannot absorb this query failure.
+Malformed values retain ordinary SPARQL expression errors. `None` keeps native
+checked-range behavior. Budgeted expression work stays on the calling thread so
+rayon cannot lose this state; nested calls restore their parent's budget. This
+is not a dataset validator: a proof profile must also validate input/query terms.
+
+Temporal comparisons, ORDER BY and MIN/MAX use exact integer-second/borrowed-fraction
+keys rather than the approximate epoch cache. Graph keys lazily memoize validated
+seconds/flags and borrow fraction slices; ORDER BY retains these keys without
+per-comparison reparsing. Forks start with an empty memo; dictionary appends extend
+initialized entries only for new temporal IDs. Cold mmap lookup still scans temporal
+flags and parses all cached temporal literals; selective cold-read performance remains
+unmeasured. See [cache work and benchmark scope](temporal-cache-work.md).
+SECONDS preserves all validated
+fractional digits as an xsd:decimal result; this does not expand finite decimal
+arithmetic. See [exact temporal scope](../zk-query-proofs/references/exact-temporals.md).
+
+`strict_numeric_capacity: true` rejects unsupported numeric consumers as
+a sticky whole-query capacity failure; it is `false` by default. It retains the
+`i64` integer and `i128` decimal lanes, including the existing bounded decimal
+division precision, while refusing overflow fallback to floating point.
+Direct RDF output, valid unary plus, `isNumeric` and `sameTerm` preserve large
+lexicals without asserting arithmetic support. Numeric EBV separately classifies
+validated integer/decimal digits exactly, without a floating-point conversion.
+Invalid numeric/boolean lexical EBV is false under SPARQL 1.1 §17.2.2;
+arithmetic on invalid numeric terms still errors. Constrained expression work
+stays on the calling thread. See the [numeric capacity contract](../zk-query-proofs/references/numeric-capacity.md).
+
+`query_prepared_with_budget_detailed`, `construct_prepared_with_budget_detailed`
+and `describe_prepared_with_budget_detailed` return `QueryFailure` with typed
+`Budget(BudgetExceeded::{Rows, Bytes, Deadline, Cancelled})`,
+`Capacity(EvaluationCapacity::{NumericRepresentation, TemporalYear})`, or
+`Evaluation(String)`. Causes are captured before the query budget scope is
+restored; never infer a category from the diagnostic. Ordinary expression errors
+retain SPARQL semantics. Existing String-returning entry points are unchanged.
 
 SELECT/ASK entry points (each has `_prepared`, `_with_budget`, and `_view` variants):
 
@@ -178,6 +233,22 @@ triple/predicate/bucket/byte counts for operational checks.
 
 ## Common recipes
 
+**Deterministic blank nodes** — opt in with the engine's
+`deterministic-blank-nodes` feature for environments without ambient entropy.
+Anonymous query, list and template labels use a reserved parser namespace.
+CONSTRUCT selects a namespace disjoint from every blank node in the active
+input dataset, including unselected named graphs, and creates distinct template
+nodes per solution occurrence. Repeated template labels within one occurrence
+still share a node; duplicate solutions keep their own fresh nodes. The option
+also applies the query row budget to constructed output triples, rejecting an
+excessive result without returning a partial graph.
+
+The output labels are deterministic and local to a result. Independently created
+results must be standardized apart before combining their blank-node namespaces;
+these labels are not persistent identifiers across query executions. This option
+does not canonicalize the result or enable a new SPARQL proof relation by itself.
+Native controls: `crates/sparq-engine/tests/deterministic_blank_nodes.rs`.
+
 **Aggregates, GROUP BY / HAVING, subqueries** — standard SPARQL 1.1; no special API:
 
 ```rust
@@ -200,12 +271,88 @@ sparq_engine::query(&g,
 - **With `GROUP BY`** ⇒ an empty input has **zero groups**, so you get **zero** rows (the
   single-implicit-group rule applies only when no `GROUP BY` is written).
 
+`MIN` and `MAX` return a selected input term: they preserve lexical forms
+such as `"01"^^xsd:integer` and the selected datatype. Arithmetic aggregates retain
+their existing promotion behavior.
+
+**Builtin value/error boundaries** — `isNumeric` checks lexical grammar and integer
+subtype facets, including `xsd:byte` range, separately from arithmetic capacity.
+A huge valid integer can be numeric while an operation exceeds the existing
+`i64`/`i128` value tower. Integer casts use the existing `i64` output range and
+truncate toward zero; out-of-range casts become expression errors (unbound BIND
+or projected cells, excluded FILTER rows). `SUBSTR` requires valid integer or derived
+integer start/length operands, rejecting decimal, float, double and invalid facets.
+This follows SPARQL's declared integer argument signature; the linked XPath
+`substring` function has a wider numeric signature, so this is an explicit
+SPARQL signature interpretation rather than a claim about all XPath calls.
+Its integer arguments clip
+its original one-based interval, so `SUBSTR("abcd", -1, 3)` yields `"a"`.
+Date accessors require typed dateTime operands, and calendar/timezone validation
+is shared with stored comparison caches. Valid `24:00:00` exposes next-day
+components and hour zero. Ill-typed or malformed Unicode literals
+fail soft. These controls target the published SPARQL 1.1 Recommendation and
+the current snapshot's datatype rules; they do not establish complete builtin conformance.
+Numeric integer facets retain XSD 1.1 sign handling (including `+1` and `-0` for
+unsigned types), consistent with RDF 1.1's datatype reference. Temporal parsing
+still uses its documented XSD 1.0 year-zero rule; this is not a uniform XSD version claim.
+
+Unary plus validates numeric lexical forms and facets before returning its
+operand unchanged, preserving valid derived datatypes and large numeric lexical
+forms. This follows the mapped [XPath unary-plus definition](https://www.w3.org/TR/2007/REC-xpath-functions-20070123/#func-numeric-unary-plus).
+Identity-comparison regressions distinguish this guard from tests that already
+validated operands in later arithmetic. PyOxigraph 0.5.11 also accepts the
+invalid-byte identity example; that interoperability difference does not change
+the numeric-operand golden. String casts collapse only XML whitespace, so NBSP
+does not disappear before integer, decimal, float, double or boolean validation.
+Raw typed literals are checked verbatim: `" true "^^xsd:boolean` and
+`" 1 "^^xsd:integer` are ill-typed. They retain their RDF identity, but have false
+EBV under the published 2013 Recommendation; numeric interpretation and typed
+casts reject them. String constructors still normalize XML boundary whitespace.
+See [raw literal semantics](raw-literal-whitespace.md) for the source definitions,
+old-test correction record and the separate SPARQL 1.2 EBV boundary.
+The shared matrix contains regression and positive controls as well as
+guard-discriminating cases; its size is not a count of independently fixed bugs.
+
 **Property paths** (all 8 operators: `/  | ^  *  +  ?` and `!(…)` negated sets) — write them inline:
 
 ```rust
 sparq_engine::query(&g,
     "PREFIX ex: <http://ex/> SELECT ?x WHERE { ex:alice ex:knows+ ?x }").unwrap();   // transitive
 ```
+
+<!-- Shared expression correlation and path bag semantics. -->
+Alternatives preserve duplicate solutions: `ex:p|ex:p` contributes each matching
+edge twice. Sequences multiply compatible occurrences; `DISTINCT` removes duplicates
+when requested. Reachability operators (`*`, `+`, `?`) retain endpoint set semantics.
+Nullable paths distinguish concrete RDF terms from variables under the published
+SPARQL 1.1 endpoint rules. For example, on an empty graph, `<urn:x> (ex:p*|ex:p*)
+?o` returns two bindings of `?o` to `<urn:x>`, whereas `?s ex:p* ?o` returns none.
+A sequence's fresh midpoint remains a variable even when the engine knows its
+value. Join and OPTIONAL substitution falls back to ordinary evaluation when
+substituting an endpoint could introduce an invalid zero-length solution; this
+can increase work for small-side joins involving nullable paths. Query row
+budgets also bound repeated constant-seed results.
+
+Join-driven IRI substitution is limited to positive BGP/path/join/UNION shapes.
+A FILTER admits substitution only when every pushed variable is guaranteed bound
+in its own input; EXISTS, volatile and custom expression calls decline this path.
+MINUS, OPTIONAL, VALUES/BIND, subquery projection, grouping, solution modifiers and
+graph/service boundaries also use ordinary evaluation. This preserves local
+variable scopes, MINUS domains and the complete right-side matching relation.
+Path endpoints with triple terms also decline substitution: variable decomposition
+inside triple terms belongs to BGP matching, and optimization must preserve a
+path evaluation error instead of grounding an unsupported endpoint.
+Both ordinary small-side joins and the theta anti-join seed path apply the same
+eligibility rules, and can consequently do more work for complex right operands.
+Eligible positive BGPs and non-nullable paths retain constant-seeded scans.
+Negated property sets use existential predicate matching: two allowed predicates
+connecting the same endpoints yield one mapping per direction. A forward/reverse
+alternative still combines its two directional result sets with bag semantics.
+
+`FILTER EXISTS` and `FILTER NOT EXISTS` evaluate inner expressions with bound outer
+terms, including variables that occur only inside an inner `FILTER`. This also preserves
+blank-node identity and computed literal values across the inner vocabulary boundary.
+These fixes do not establish complete conformance for every correlated algebra form.
 
 **Materialized full paths** (opt-in `paths` feature) — unlike standard SPARQL property paths,
 this programmatic API returns every intermediate node and edge. `Shortest` returns all tied
@@ -525,6 +672,22 @@ let v = DatasetView { base: &store, named: visible, default: DefaultGraphMode::S
 let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); // only g1 visible
 ```
 
+Nested `GRAPH` patterns preserve the query's active dataset catalog while
+switching the active graph. Constant and variable graph names can select another
+named graph from that catalog, including an empty graph. `FROM NAMED` restrictions
+continue to apply at every nesting level; graph-name bindings retain normal join
+compatibility and result multiplicity. The evaluator borrows this catalog in its
+per-query context rather than cloning graphs or using global dataset state.
+
+Read-query `FROM` builds an RDF merge: blank nodes are renamed consistently
+within each source graph and kept distinct between source graphs and preserved
+`FROM NAMED` graphs. `GRAPH` alone preserves source dataset identity. Repeated
+`FROM` IRIs use one stored snapshot per distinct IRI; this acquisition policy is
+explicit because [SPARQL 1.1 §13.2.3](https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#specifyingDataset)
+does not prescribe blank-node identity for repeated dataset-clause references.
+The merge applies to SELECT/ASK and graph-producing queries; it does not define
+SPARQL Update `USING` identity behavior.
+
 ## Gotchas / feature flags / prerequisites
 
 - **Errors are `String`** — both SPARQL parse errors and evaluation/type errors. SPARQL is parsed by
@@ -803,7 +966,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   each IRI/bnode one id); **(b)** EQUAL ids of ANY kind are the same term, so `=` short-circuits `true`
   and `!=` `false` (mirroring the `sameTerm` decision the exact path already takes — safe even for
   ill-typed literals, which return a boolean not a type error). UNEQUAL ids of possibly-LITERAL
-  operands (numeric promotion `"1"^^integer` = `"1.0"^^decimal`, whitespace-padded lexicals — the
+  operands (numeric promotion `"1"^^integer` = `"1.0"^^decimal`, valid integer spellings `"+01"` vs `"1"` — the
   `sq-lr2ii` class) and `=` cases that can be a TYPE ERROR fall through to the exact value path
   unchanged. Result-identical whether on or off — a differential test pairs every id kind (IRIs,
   bnodes, numeric-promotion pairs, language-tagged, ill-typed literals) and asserts the fast verdict
@@ -835,7 +998,7 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   generation), so the check is re-run against the LIVE graph every eval — an UPDATE inserting a
   literal object publishes a new snapshot the next query re-checks; the verdict never outlives its
   snapshot (there is no plan/inference cache across snapshots; the result cache is keyed by
-  `(query, version)`). The same snapshot-aware column set is now also installed at the FUSED
+  `(query, version, resolved EBV semantics)`). The same snapshot-aware column set is now also installed at the FUSED
   conjunctive residual-FILTER sites (`eval_flat_conjunctive`, `eval_bgp_binary_capped`), drain-safe
   via `with_idfast_nonlit_cols` (the set drains on the first consuming `apply_filter`, so a nested
   EXISTS on a different `Bindings` layout sees the empty default). A differential test witnesses the
@@ -1035,8 +1198,8 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   off, zero of this code compiles, the conjunctive path is byte-identical, no new dependencies.
 - **Materialised-view / query-result cache** is the non-default `result-cache` cargo feature (bead
   `sq-a9cn`): `ResultCache::new(capacity)` is a bounded, version-aware LRU that stores a SELECT/ASK
-  `QueryResult` keyed by `(parsed query algebra, caller graph-version)`; serve a query through
-  `cache.get_or_eval(&graph, &query, version, &budget)` (returns an `Arc<QueryResult>`). It re-serves
+  `QueryResult` keyed by `(parsed query algebra, caller graph-version, resolved EBV semantics)`;
+  serve a prepared query through `cache.get_or_eval_prepared(&graph, &query, version, &budget)` (returns an `Arc<QueryResult>`). It re-serves
   the same read query against a slowly-changing graph without re-executing. **Soundness contract**:
   the engine evaluates against a borrowed `&Graph` and can't see mutations, so the **caller bumps the
   `u64` version on every mutation** (`apply_delta`/`update`/reload) — a hit is only returned for the
@@ -1051,13 +1214,13 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
   // Cargo.toml: sparq-engine = { version = "0.1", features = ["result-cache"] }
   use sparq_engine::{PreparedQuery, QueryBudget, ResultCache};
   let cache = ResultCache::new(256);          // up to 256 distinct results, LRU
-  let q = PreparedQuery::parse("SELECT ?s WHERE { ?s ?p ?o }")?.into_query();
+  let q = PreparedQuery::parse("SELECT ?s WHERE { ?s ?p ?o }")?;
   let mut version = 0u64;
-  let r1 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss
-  let r2 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // hit (same Arc)
+  let r1 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // miss
+  let r2 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // hit (same Arc)
   // ... mutate the graph, then bump the epoch so the next read re-evaluates:
   version += 1;
-  let r3 = cache.get_or_eval(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
+  let r3 = cache.get_or_eval_prepared(&graph, &q, version, &QueryBudget::unlimited())?; // miss (fresh)
   # Ok::<(), String>(())
   ```
 - **Experimental deletion projection caching** — opt in only on the
@@ -1194,3 +1357,13 @@ let r = query_view(&v, "SELECT ?s WHERE { GRAPH ?g { ?s ?p ?o } }").unwrap(); //
 - `sparql-formal-semantics` — the algebra/semantics reference for the SPARQL fragment.
 - `noir-circuit-patterns` / `verifiable-credentials-zk` / `mpc-protocols` — the ZK/MPC estate built
   on the `zk` trace seam (non-default `zk` feature; consumed by `sparq-zk`).
+
+### Exact arithmetic operand validation (GPT-6)
+
+The exact-decimal shortcuts in interpreted and compiled comparisons validate
+integer/decimal lexical syntax and subtype facets before parsing an operand.
+The same gate covers literal constants, local `VALUES` bindings and graph IDs,
+including compressed graphs. `builtin_edges.json` records bounded REC error
+cases; an optional `dataset_ntriples` field supplies the authenticated data for
+stored-term cases. Invalid numeric RDF terms remain stored but produce arithmetic
+expression errors; their EBV is false. This does not extend finite arithmetic.

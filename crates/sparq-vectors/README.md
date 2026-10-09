@@ -102,7 +102,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
 ## 📚 Learn more
 
 - **How-to** — [`skills/vector-search/SKILL.md`](../../skills/vector-search/SKILL.md) (label /
-  verbalized / hybrid pipelines, DiskANN, quantization, bulk import, API surface, `.spqv`/`.spqg`).
+  verbalized / hybrid pipelines, DiskANN, quantization, bulk import, API surface, `.spqv`/`.spqg`). Vector-predicate rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — `cargo doc -p sparq-vectors --open` (not on crates.io / docs.rs: `publish = false`); **design** —
   [`research/genai-text-embedding-practices.md`](../../research/genai-text-embedding-practices.md).
 - **Accuracy & throughput** — not baked into docs; the recall / DiskANN / PQ / throughput gates are

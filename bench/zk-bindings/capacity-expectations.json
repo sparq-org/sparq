@@ -1,0 +1,436 @@
+{
+  "authored_by": "GPT-6",
+  "schema": "sparq.proof-bindings.capacity-expectations.v1",
+  "scope": "Explicit expected causes for unchanged capacity controls; source and original fixture hashes bind interpretation. Static temporal admission/dataset checks remain distinct from dynamically emitted temporal-year failures. No success golden is changed.",
+  "sources": [
+    {
+      "path": "crates/sparq-engine/tests/fixtures/builtin_edges.json",
+      "source_sha256": "b2a2983fc3cb5d808ca6c0f07719990d9351967487a410a0c026bffd7c7eb987",
+      "field": "cases",
+      "cases": [
+        {
+          "id": "integer-cast-outside-range",
+          "original_fixture_sha256": "30c828adad11804983064a9c6c2ede8b7a9f77000121f28d3c97283d4d1dc559",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "integer-cast-double-overflow",
+          "original_fixture_sha256": "7811eebe1c069cd7e6d1e44819edd223d7ac06922426453573ec55b8cf3404af",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        }
+      ]
+    },
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/numeric-capacity.json",
+      "source_sha256": "ce6057181771de5864f97cc8d0ddf6592e8b5f5954a2f771d3f5128726d48999",
+      "field": "cases",
+      "cases": [
+        {
+          "id": "integer-add-overflow",
+          "original_fixture_sha256": "f0cad73508d34e9bf12a1159416ee6ef6332deafb119a0bf7d4e490e0e45d74e",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "integer-multiply-overflow",
+          "original_fixture_sha256": "08f135dc30301c290f407bd46d69343037a9bd0730b83acc621a8f2c88c16c30",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "integer-negation-overflow",
+          "original_fixture_sha256": "f4aae68674c6df41b920995b6ac4e20e4e7289d0019d660eafe5761da884f3a3",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "integer-abs-overflow",
+          "original_fixture_sha256": "5f0faa15dfd61b2c8b2e30bbc90a751b039ad48c88481472457f083674991370",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "decimal-add-overflow",
+          "original_fixture_sha256": "f33ec227ff614cf5d65b18dc7feb235bd9f2f17e7771274ffdf2efec3f3147fd",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "decimal-multiply-overflow",
+          "original_fixture_sha256": "e485cf6b0fd0befb5826ba1fee028bcd46415e86b4993c565216f32a0fe4615c",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "integer-string-cast",
+          "original_fixture_sha256": "bbf4b821158347c82111a38a0bcdeebda3e4f2ae0114bfc6ce3feb5635dc195c",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "decimal-string-cast",
+          "original_fixture_sha256": "5e4ba8c11e11784b4e3cf31eebc76b73cd2c8d132b7eee0797f86a3fd6886eaf",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "decimal-alignment-overflow",
+          "original_fixture_sha256": "f71e8dedbe043b0ebebf8ebd7cd1af2178e85ef46f436459fe80e4b26bb9c890",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "seconds-numeric-consumer",
+          "original_fixture_sha256": "aa720835e07c1726d12210144682c752c9807bb0e4b5a9f683080dd460bf0681",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "substr-huge-length",
+          "original_fixture_sha256": "2dc1b14734c2b46152c1a1cd35c5f5e70d18b74b357d542f5b5e125e8d03e660",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "substr-huge-cancellation",
+          "original_fixture_sha256": "71d3c25ce42fcd6f58b93e139b7274a41fbbe91831b07b119564ec883fc8d72a",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-false-ask",
+          "original_fixture_sha256": "fd801b60b0d5ae8be09315e3c6317e31079f8b0505272bea824e63dba76e0f05",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-false-count",
+          "original_fixture_sha256": "7b1e0bfd0d506821f4c73690b6b22bd3b674f877461e8ac30ef46dd504895b98",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-order",
+          "original_fixture_sha256": "e1002ef08796f4a5d0787be3da6ce516c142b302076994103491a04ef6fd7325",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-topk",
+          "original_fixture_sha256": "3b4785cd6a4b0925227a0292373bc867d762f3675e669dc069623c59c5bb47e9",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-sum",
+          "original_fixture_sha256": "2a7a9a8ae4819b265fe81f1f55537bc7cf6ce618dfcf43748c14cbc2a6dfc514",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-avg",
+          "original_fixture_sha256": "acc400e0d00ea3f8da7628843840eb65dd026781ac65356f268b3a0610327e1a",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-min",
+          "original_fixture_sha256": "611b251ec0e99cf81166bc45d9e037a7e6c3eaf320317bc752f0100bb8ebd750",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-max",
+          "original_fixture_sha256": "7f8562c70862174086a0dbff0f77587f15790292909338a293832c3c2b9f8a5d",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "stored-identity-equality",
+          "original_fixture_sha256": "47f9911e6cc12dc66b798517afcead3f2a8990a9c9a5d42da55c96cb35b53f9a",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        }
+      ]
+    },
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/temporal-capacity.json",
+      "source_sha256": "0a0bea138d07480cd10c7c427ab5092b6562af0c70cf5b4e5ce15803f4e5fc7b",
+      "field": "cases",
+      "cases": [
+        {
+          "id": "static-year",
+          "original_fixture_sha256": "e8d738169505771b4132b70418161998cd6f22ab442cd696dab18d5873ca97d0",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "admission",
+            "diagnostic": "temporal year capacity"
+          }
+        },
+        {
+          "id": "bce-year",
+          "original_fixture_sha256": "b0e8ab4c8bdd8dcdbdb76ddb78284c56ab502fc3dc313a07505c873ec10162bf",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "admission",
+            "diagnostic": "temporal year capacity"
+          }
+        },
+        {
+          "id": "overflow-year",
+          "original_fixture_sha256": "1c7bf000f7a8707ac0050a638b260700602c6279940b5e03e019bf1fa76efbab",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "admission",
+            "diagnostic": "temporal year capacity"
+          }
+        },
+        {
+          "id": "dynamic-coalesce",
+          "original_fixture_sha256": "0ad6a3439992a35e3207628f7ac6244cb92d2bb2378b574d3b485a316346dcf1",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "dynamic-bind-false-ask",
+          "original_fixture_sha256": "5379212596822e4fa70002be8718ec47103506c0841c69ff401ae3e647878e7c",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "dynamic-filter-false-ask",
+          "original_fixture_sha256": "4d90b960d9e78737a4b7a222198ac2a162bcc57d122326d5610733c29be1c258",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "dynamic-cast",
+          "original_fixture_sha256": "60058cc93a86719249a3fee8154abd72ae41bd97482540520409c4b892389ac2",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "stored-year",
+          "original_fixture_sha256": "80adf0255b5f3aef07835c634c85a27d168804910963393c502fa02bf87f91a6",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "dataset",
+            "diagnostic": "temporal year capacity"
+          }
+        },
+        {
+          "id": "zero-year-literal",
+          "original_fixture_sha256": "9ed2cec8f0378494ade8830ad8be7fd211590f1424ccdfd6a526078dfa460624",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "admission",
+            "diagnostic": "temporal year capacity"
+          }
+        },
+        {
+          "id": "zero-year-strdt",
+          "original_fixture_sha256": "705981da80fc7dedb7bd5277878a0f86e9a687315322fe64ec54f821243d6358",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "zero-year-cast",
+          "original_fixture_sha256": "5d994deb21b3d3b5ac6ef99db83c632515c58dc97cd7dd00eb776822aefdddf5",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "zero-year-stored",
+          "original_fixture_sha256": "c31f21439606ba8cdacdd0138eba813786774dccca481951d49af834cfb08885",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "dataset",
+            "diagnostic": "temporal year capacity"
+          }
+        },
+        {
+          "id": "zero-year-stored-count",
+          "original_fixture_sha256": "7223e9066ce736922137001ffad25d5eaa6552b8b822b3d68933fe1c0a884962",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "dataset",
+            "diagnostic": "temporal year capacity"
+          }
+        }
+      ]
+    },
+    {
+      "path": "crates/sparq-engine/tests/fixtures/temporal_lexical.json",
+      "source_sha256": "f86e927682e189318a15876c46de6ec75c91a1fbd597057770d3ad79f1bde15b",
+      "field": "capacity_cases",
+      "cases": [
+        {
+          "id": "constructed-year-capacity-1",
+          "original_fixture_sha256": "f63dba0755222c240374d87f64ec50ae18d6a1f6583d8c8ec546e92996cdde6a",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "constructed-year-capacity-2",
+          "original_fixture_sha256": "5ca55b17072d7903a5678a220a9c0ef1172d7ea7bef4c0ffb3e444bf89c36256",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        },
+        {
+          "id": "constructed-year-capacity-3",
+          "original_fixture_sha256": "9f130afb7cb00fe5f70df49337034b89d7e3adf99725cbe7219d129a534facac",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "temporal_year"
+          }
+        }
+      ]
+    },
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/numeric-ebv.json",
+      "source_sha256": "49dd44539374fa4145d5f06b88d09e40e276c10de537a0b665b7df4036e56bf2",
+      "field": "cases",
+      "cases": [
+        {
+          "id": "arithmetic-filter",
+          "original_fixture_sha256": "501f6b4a94c7e1fd9fdc8b31ffedb55894df6e744fe778de940b01762555c4b2",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "arithmetic-coalesce",
+          "original_fixture_sha256": "60eef64a2afefec9dc93e8c63e86c2be0eb193e7170cdedaca9a6918c9b02e76",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        },
+        {
+          "id": "arithmetic-and",
+          "original_fixture_sha256": "e5f601f100a6610dfbb6c6ef784a23ec764397898415f97d2c795213f294506c",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "numeric_representation"
+          }
+        }
+      ]
+    },
+    {
+      "path": "zk/sparql-evaluator/fixtures/conformance/nullable-alternatives.json",
+      "source_sha256": "d097e7e8d2877bb8c3dc1db6e531f8acd1f40312c0794d3c5fee1b8c18c248a2",
+      "field": "cases",
+      "cases": [
+        {
+          "id": "row-budget-overflow",
+          "original_fixture_sha256": "29299887e437829e8e5a5982e25b1d53eb60b6ba29f1409f0e65a2453e998638",
+          "expected_rejection": {
+            "category": "capacity",
+            "phase": "evaluation",
+            "cause": "budget_rows"
+          }
+        }
+      ]
+    }
+  ]
+}
