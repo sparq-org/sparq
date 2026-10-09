@@ -1130,7 +1130,7 @@ impl MaterializedN3Graph {
         let mut lines: Vec<String> = self.base.iter().map(|f| n3_serialize(std::iter::once(f))).collect();
         lines.sort_unstable();
         let src = format!("{}\n{}", self.rules_src, lines.concat());
-        let (_facts, steps) = crate::n3::reason_n3_terms_proof(&src).ok()?;
+        let (_facts, steps) = crate::n3::reason_n3_terms_proof(&src, &self.cuts).ok()?;
         // One step per derived fact (first derivation wins).
         let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
         for (conclusion, rule, premises) in &steps {

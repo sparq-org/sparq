@@ -76,7 +76,6 @@
 //! set** over the same rules + facts.
 
 use super::model::Term;
-use super::parser;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
 use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget};
@@ -173,7 +172,7 @@ enum Step {
     /// `string:scrape` — `( str regex )`: the first capture group of the first match.
     /// The regex is a compile-time constant, pre-compiled into
     /// [`CompiledRuleSet::regexes`] (`None` = invalid pattern ⇒ the step fails every
-    /// row, exactly like the text engine's per-evaluation `Regex::new(..).ok()?`).
+    /// row, exactly like the text engine's per-evaluation regex compile).
     Scrape {
         arg: CTerm,
         regex: usize,
@@ -272,7 +271,7 @@ pub struct BoundRuleSet<'a> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
-    let parsed = parser::parse(src)?;
+    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Cuts::top_level())?;
     if !parsed.backward_rules.is_empty() {
         return Err("compiled-rules: backward (`<=`) rules are not in the compiled subset (goal-directed resolution stays with the text engine)".into());
     }
@@ -311,7 +310,7 @@ pub fn compile(src: &str) -> Result<CompiledRuleSet, String> {
 /// # Ok::<(), String>(())
 /// ```
 pub fn intern_facts(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
-    let parsed = parser::parse(src)?;
+    let parsed = super::bounded::parse_n3(src, "", &super::bounded::Cuts::top_level())?;
     if !parsed.rules.is_empty() || !parsed.backward_rules.is_empty() {
         return Err("intern_facts: the document contains rules — compile() them instead".into());
     }
@@ -720,7 +719,12 @@ impl Compiler {
                             );
                         };
                         let regex = self.regexes.len();
-                        self.regexes.push(regex::Regex::new(pat).ok());
+                        // A compiled rule set has no run to report a cut to: a pattern
+                        // the regex engine refuses fails every row, as the text engine's
+                        // scrape does.
+                        let refused = std::cell::Cell::new(false);
+                        self.regexes
+                            .push(super::bounded::settle(&refused, super::bounded::regex(pat)));
                         let (out, out_bound) = self.output(&atom[2], &mut ctx)?;
                         steps.push(Step::Scrape {
                             arg,

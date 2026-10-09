@@ -638,3 +638,30 @@ fn data_rule_fallback_reports_reason_and_clears() {
     assert_eq!(g.mode(), N3Mode::Counting, "removing the data rule resumes counting");
     assert!(g.fallback_reason().is_none(), "reason must clear when counting resumes");
 }
+
+/// A scrape regex the engine refuses is no match on the counting path, exactly as on
+/// main: recording its cut must not switch the graph to the serialize-and-reparse
+/// fallback (which re-reads base triples under the rules' `@forAll` and so would lose
+/// the asserted `<http://ex/a> <http://ex/p> <http://ex/v>`).
+#[test]
+fn a_refused_scrape_regex_keeps_the_counting_path_and_the_asserted_triple() {
+    let rules = "@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+                 @forAll <http://ex/a> .\n\
+                 { ?s <http://ex/p> ?v . (\"x\" \"(\") string:scrape ?o } => { ?s <http://ex/q> ?o } .";
+    let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+    let asserted = [iri("a"), iri("p"), iri("v")];
+    let mut g = MaterializedN3Graph::new(rules, std::slice::from_ref(&asserted)).expect("rules");
+    assert_eq!(g.mode(), N3Mode::Counting);
+    assert!(g.contains(&asserted), "the asserted base triple must stay");
+    g.insert(&[[iri("b"), iri("p"), iri("w")]]);
+    assert_eq!(
+        g.mode(),
+        N3Mode::Counting,
+        "a regex cut must not switch the path"
+    );
+    assert!(g.contains(&asserted), "the asserted base triple must stay");
+    assert!(
+        !g.closure().iter().any(|t| t[1] == iri("q")),
+        "a refused regex matches nothing"
+    );
+}
