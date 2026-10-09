@@ -713,7 +713,7 @@ fn verify_document(
     text: &str,
     facts: &[&[Term; 3]],
     rules: &[RuleOut],
-    cuts: &super::bounded::Cuts,
+    cuts: &super::bounded::Truncation,
 ) -> Result<(), NotRepresentable> {
     // Re-read under the caller's run record: a nesting cut while re-reading is a refusal
     // like any other.
@@ -761,7 +761,7 @@ pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
     let mut s = String::new();
     Unit::exact(&[t], &BTreeSet::new())?.term(t, &mut s);
     let k = Term::Iri(CHECK_IRI.into());
-    verify_document(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[&[k.clone(), k, t.clone()]], &[], &super::bounded::Cuts::top_level())?;
+    verify_document(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[&[k.clone(), k, t.clone()]], &[], &super::bounded::Truncation::top_level())?;
     out.push_str(&s);
     Ok(())
 }
@@ -862,7 +862,7 @@ pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result
         let outer = binders.before(f.iter(), &mut out).map_err(|e| in_statement(f, e))?;
         out.push_str(&statement_text(f, &outer)?);
     }
-    verify_document(&out, &facts, &[], &super::bounded::Cuts::top_level())?;
+    verify_document(&out, &facts, &[], &super::bounded::Truncation::top_level())?;
     Ok(out)
 }
 
@@ -886,7 +886,7 @@ pub(super) fn write_document(
     facts: &[&[Term; 3]],
     rules: &[(&Rule, RuleKind)],
     vars: RuleVars,
-    cuts: &super::bounded::Cuts,
+    cuts: &super::bounded::Truncation,
     out: &mut String,
 ) -> Result<(), NotRepresentable> {
     let sides: Vec<RuleOut> = rules.iter().map(|(r, kind)| (rule_sides(r, *kind, vars), *kind)).collect();
@@ -899,6 +899,7 @@ pub(super) fn write_document(
     lines.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     let units: Vec<Vec<&Term>> =
         lines.iter().map(|(_, f)| f.iter().collect()).chain(sides.iter().map(|r| r.0.iter().collect())).collect();
+    // not-a-cut: not-evaluation (unit index split: `None` is a statement, `Some` a rule)
     let refuse = |k: usize, e: NotRepresentable| match k.checked_sub(lines.len()) {
         None => in_statement(lines[k].1, e),
         Some(r) => in_rule(&sides[r].0, sides[r].1, e),
@@ -930,6 +931,7 @@ pub(super) fn write_document(
         let mut plain = BTreeSet::new();
         u.iter().for_each(|t| plain_iris(t, &mut plain));
         for iri in plain.into_iter().filter(|i| gates.contains_key(i)) {
+            // not-a-cut: not-evaluation (a sorted-membership test; `Err` means absent)
             if users[iri].binary_search(&k).is_ok() {
                 return Err(refuse(k, NotRepresentable::UnrepresentableScope(format!(
                     "the document-level @forAll <{iri}> declaration would also capture a plain mention of <{iri}>"
@@ -967,6 +969,7 @@ pub(super) fn write_document(
     let mut doc = String::new();
     let (mut fact_order, mut rule_order): (Vec<&[Term; 3]>, Vec<RuleOut>) = (Vec::new(), Vec::new());
     for k in order {
+        // not-a-cut: not-evaluation (unit index split: `None` is a statement, `Some` a rule)
         match k.checked_sub(lines.len()) {
             None => {
                 let (text, f) = &lines[k];
@@ -1036,7 +1039,7 @@ pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) ->
     let unit = Unit::exact(&[&sides[0], &sides[1]], &BTreeSet::new()).map_err(|e| in_rule(&sides, kind, e))?;
     let mut s = String::new();
     write_rule_sides(&unit, &sides, kind, &mut s);
-    verify_document(&s, &[], &[(sides.clone(), kind)], &super::bounded::Cuts::top_level()).map_err(|e| in_rule(&sides, kind, e))?;
+    verify_document(&s, &[], &[(sides.clone(), kind)], &super::bounded::Truncation::top_level()).map_err(|e| in_rule(&sides, kind, e))?;
     out.push_str(&s);
     Ok(())
 }

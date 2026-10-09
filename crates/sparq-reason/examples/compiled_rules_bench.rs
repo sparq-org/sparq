@@ -27,8 +27,8 @@ mod fixture;
 
 use fixture::{acp_facts, closure_to_n3, solid_rules, triples_as_strings, wac_facts, Scale};
 use sparq_core::dict::{Dict, Id};
-use sparq_reason::n3::compiled::{compile, intern_facts, CompiledRuleSet};
-use sparq_reason::reason_n3;
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, intern_facts, CompiledRuleSet};
+use sparq_reason::{reason_n3, reason_n3_with_cycles, NegationCycles};
 use std::time::Instant;
 
 const ITERS: usize = 5;
@@ -122,7 +122,9 @@ fn main() {
     );
     let ra = compile(&format!("{common_rules}\n{a}")).expect("compile acp-a");
     let rb = compile(&b).expect("compile acp-b");
-    let rc = compile(&c).expect("compile acp-c");
+    // acp-c.n3 concludes a variable predicate next to store-scoped negation, so it cannot be
+    // stratified yet; sparq-solid runs it single-pass by explicit opt-in, and so does this bench.
+    let rc = compile_with_cycles(&c, NegationCycles::SinglePass).expect("compile acp-c");
 
     let mut dict = Dict::new();
     let fact_ids = intern_facts(&mut dict, &facts).expect("intern ACP facts");
@@ -143,7 +145,8 @@ fn main() {
         let c2 = reason_n3(&mut d2, &format!("{f1}\n{b}")).expect("acp-b");
         let f2 = closure_to_n3(&d2, &c2);
         let mut d3 = Dict::new();
-        let c3 = reason_n3(&mut d3, &format!("{f2}\n{c}")).expect("acp-c");
+        let c3 = reason_n3_with_cycles(&mut d3, &format!("{f2}\n{c}"), NegationCycles::SinglePass)
+            .expect("acp-c");
         (d3, c3)
     };
     let id_path = |base: &Dict,
