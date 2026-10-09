@@ -25,7 +25,7 @@
 //! (the TurtleTests suite passes 297/297 in this mode).
 
 use super::model::{Rule, Term};
-use super::serialize::{FORMULA_UNIVERSAL_VAR, PREMISE_BLANK_VAR, UNIVERSAL_VAR};
+use super::serialize::{PREMISE_BLANK_VAR, UNIVERSAL_VAR};
 
 pub const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 pub const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
@@ -258,64 +258,6 @@ fn rewrite_term(t: &mut Term, into_formulae: bool, f: &impl Fn(&mut Term)) {
     }
 }
 
-/// How many formula levels below the formula holding `rows` the deepest formula enclosing
-/// EVERY occurrence of the variable `name` sits (0 when an occurrence is in `rows`
-/// themselves, or there is none).
-fn enclosing_formula_depth(rows: &[[Term; 3]], name: &str) -> usize {
-    /// Each occurrence's chain of enclosing formulae below `rows`, each formula named by
-    /// its position (row, column, then member indices).
-    fn walk(t: &Term, name: &str, pos: &mut Vec<usize>, up: &mut Vec<Vec<usize>>, out: &mut Vec<Vec<Vec<usize>>>) {
-        match t {
-            Term::Var(v) if v == name => out.push(up.clone()),
-            Term::List(ms) => {
-                for (i, m) in ms.iter().enumerate() {
-                    pos.push(i);
-                    walk(m, name, pos, up, out);
-                    pos.pop();
-                }
-            }
-            Term::Triple(tr) => {
-                for (i, m) in tr.iter().enumerate() {
-                    pos.push(i);
-                    walk(m, name, pos, up, out);
-                    pos.pop();
-                }
-            }
-            Term::Formula(ts) => {
-                up.push(pos.clone());
-                for (r, row) in ts.iter().enumerate() {
-                    for (c, m) in row.iter().enumerate() {
-                        pos.extend([r, c]);
-                        walk(m, name, pos, up, out);
-                        pos.truncate(pos.len() - 2);
-                    }
-                }
-                up.pop();
-            }
-            _ => {}
-        }
-    }
-    let mut out = Vec::new();
-    for (r, row) in rows.iter().enumerate() {
-        for (c, m) in row.iter().enumerate() {
-            walk(m, name, &mut vec![r, c], &mut Vec::new(), &mut out);
-        }
-    }
-    let Some(first) = out.first() else { return 0 };
-    (0..first.len()).take_while(|&d| out.iter().all(|p| p.get(d) == Some(&first[d]))).count()
-}
-
-/// Rename the variable `from` to `to` throughout `t`.
-fn rename_var(t: &mut Term, from: &str, to: &str) {
-    match t {
-        Term::Var(v) if v == from => *v = to.to_string(),
-        Term::List(ms) => ms.iter_mut().for_each(|m| rename_var(m, from, to)),
-        Term::Triple(tr) => tr.iter_mut().for_each(|m| rename_var(m, from, to)),
-        Term::Formula(ts) => ts.iter_mut().flatten().for_each(|m| rename_var(m, from, to)),
-        _ => {}
-    }
-}
-
 struct Parser<'a> {
     s: &'a [u8],
     i: usize,
@@ -333,13 +275,6 @@ struct Parser<'a> {
     keywords: Option<std::collections::HashSet<String>>,
     bnode: usize,
     pathvar: usize,
-    /// Formula-level `@forAll` declarations so far — each one's binder number `<n>` in
-    /// `__uf.<n>.<up>.<iri>` (see [`FORMULA_UNIVERSAL_VAR`]).
-    binders: usize,
-    /// Per open formula: the placeholder names of its own `@forAll` binders, finalized when
-    /// it closes (a re-declaration in the same formula replaces the IRI's entry in
-    /// `quants`, so the frame alone does not list them all).
-    pending: Vec<Vec<String>>,
     /// Current `{`/`(`/`[` nesting depth — bounded so pathological inputs
     /// produce a parse ERROR instead of exhausting the stack (the recursive-
     /// descent parser recurses per nesting level).
@@ -361,8 +296,6 @@ impl<'a> Parser<'a> {
             keywords: None,
             bnode: 0,
             pathvar: 0,
-            binders: 0,
-            pending: Vec::new(),
             depth: 0,
         }
     }
@@ -445,11 +378,10 @@ impl<'a> Parser<'a> {
     /// blank (forSome) within that scope. Names derive from the IRI so the
     /// same declaration in two documents (action vs reference) compares equal.
     ///
-    /// A universal keeps its BINDER: a document-level declaration reads as `__ua.<iri>`;
-    /// a FORMULA-level one is numbered, `__uf.<n>.<up>.<iri>`, so two declarations of one IRI
-    /// in different formulae (a rule's premise and its conclusion, sibling formulae, a
-    /// nested formula shadowing an outer one) are different variables, as N3's scoping
-    /// makes them. Re-declaring an IRI in the SAME scope keeps its one variable.
+    /// Every `@forAll` of one IRI — at document level or inside any formula — reads as the
+    /// SAME variable, `__ua.<iri>`: a formula-level declaration is treated as document-scoped
+    /// (which mentions become the variable is still lexical). This is a known limitation
+    /// (GH #6754), unchanged from before the name carried the full IRI.
     fn directive_quantifier(&mut self) -> Result<(), String> {
         let universal = self.starts_with("@forAll");
         self.i += if universal { 7 } else { 8 };
@@ -463,33 +395,14 @@ impl<'a> Parser<'a> {
                 },
             };
             // A universal is keyed by its FULL IRI under an unforgeable prefix (GH #5391):
-            // two `@forAll` IRIs sharing a local name stay two variables, no source `?…` can
-            // capture it, and the serializer recovers the declared name. It also keeps its
-            // BINDER (GH #6701 round 11): a document-level declaration is `__ua.<iri>`; a
-            // formula-level one is numbered, `__uf.<n>.<up>.<iri>`, so two declarations of
-            // one IRI in different formulae stay two variables. `<up>` is only known once
-            // the formula closes ([`Parser::read_formula`]); until then the name carries
-            // the placeholder `?`.
-            // Re-declaring an IRI in the SAME scope keeps its one variable (as a document-level
-            // re-declaration always did): one scope, one quantifier.
-            if universal {
-                if let Some(Term::Var(_)) = self.quants.last().and_then(|f| f.get(&iri)) {
-                    if !self.eat(b',') {
-                        break;
-                    }
-                    continue;
-                }
-            }
-            let term = if !universal {
-                let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri);
-                Term::Blank(format!("__ex_{local}"))
-            } else if self.quants.len() == 1 {
+            // two `@forAll` IRIs sharing a local name stay two variables, and no source
+            // quickvar can spell it (a `.` cannot occur in a VARNAME), so none can collide
+            // with or capture it. One IRI is one variable in every scope (GH #6754).
+            let term = if universal {
                 Term::Var(format!("{UNIVERSAL_VAR}{iri}"))
             } else {
-                self.binders += 1;
-                let name = format!("{FORMULA_UNIVERSAL_VAR}{}.?.{iri}", self.binders - 1);
-                self.pending.last_mut().expect("an open formula").push(name.clone());
-                Term::Var(name)
+                let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri);
+                Term::Blank(format!("__ex_{local}"))
             };
             self.quants.last_mut().expect("scope stack").insert(iri, term);
             if !self.eat(b',') {
@@ -1217,7 +1130,6 @@ impl<'a> Parser<'a> {
         self.enter()?;
         self.eat(b'{');
         self.quants.push(Default::default()); // formula-local quantifier scope
-        self.pending.push(Vec::new());
         let mut triples = Vec::new();
         loop {
             self.ws();
@@ -1237,14 +1149,7 @@ impl<'a> Parser<'a> {
                 self.statement(&mut triples)?;
             }
         }
-        // This formula's own `@forAll` binders: record WHERE each binds — `<up>` levels
-        // above the deepest formula enclosing every occurrence — in its final name.
         self.quants.pop();
-        for placeholder in self.pending.pop().expect("binder stack") {
-            let up = enclosing_formula_depth(&triples, &placeholder);
-            let name = placeholder.replacen(".?.", &format!(".{up}."), 1);
-            triples.iter_mut().flatten().for_each(|t| rename_var(t, &placeholder, &name));
-        }
         self.depth -= 1;
         if triples.is_empty() {
             // `{}` IS the literal true (N3 CG: the empty graph holds vacuously).
