@@ -66,7 +66,7 @@ pub const ODRL_SPATIAL: &str = "http://www.w3.org/ns/odrl/2/spatial";
 /// (fail-closed). [OPUS-4.8] sq-idnv.
 pub const ODRL_DATETIME: &str = "http://www.w3.org/ns/odrl/2/dateTime";
 
-/// An access request evaluated against a [`Policy`]: who wants to do what, to
+/// An access request evaluated against a [`Policy`](crate::Policy): who wants to do what, to
 /// what, in what context (the "evaluation request" + "state of the world" of the
 /// ODRL Formal Semantics, folded into one node-local view).
 #[derive(Debug, Clone, Default)]
@@ -445,10 +445,13 @@ impl Permit {
         self.recipient.as_deref()
     }
     /// Whether the grant holds for this party at every later time as well: the granting
-    /// permission's clock constraints are all lower bounds (`gt`/`gteq`), and every
-    /// prohibition is withdrawn for good (a structural mismatch, a definitely false
-    /// non-clock constraint, or a closed `lt`/`lteq` window). A grant that is stored
-    /// rather than re-checked per request is sound only when this holds.
+    /// permission constrains only the party's identity, the request's purpose and
+    /// place, or a lower bound (`gt`/`gteq`) on the clock; and every prohibition is
+    /// withdrawn for good (a structural mismatch, a definitely false constraint on one of
+    /// those operands, or a closed `lt`/`lteq` window). Elapsed time, counters and any
+    /// other operand may change while a stored grant stands, so they are never lasting.
+    /// A grant that is stored rather than re-checked per request is sound only when this
+    /// holds.
     pub fn lasting(&self) -> bool {
         self.lasting
     }
@@ -610,21 +613,31 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
-/// Whether `rule`'s constraints, satisfied now, stay satisfied as the clock advances:
-/// its only clock constraints are atomic lower bounds.
-fn holds_later(rule: &Rule) -> bool {
-    rule.constraints
-        .iter()
-        .all(|c| c.left != ODRL_DATETIME || matches!(c.operator, Operator::Gt | Operator::Gteq))
-        && rule
-            .logical_constraints
-            .iter()
-            .all(|lc| all_atoms(lc, &|c: &Constraint| c.left != ODRL_DATETIME))
+/// Left operands whose value a stored grant may treat as fixed: the identity it is
+/// bound to, and the request's declared purpose and place. Anything else (the clock,
+/// elapsed time, counters, an unknown operand) may change while the grant stands.
+const STABLE_LEFT_OPERANDS: [&str; 4] = [
+    ODRL_RECIPIENT,
+    "http://www.w3.org/ns/odrl/2/assignee",
+    ODRL_PURPOSE,
+    ODRL_SPATIAL,
+];
+
+fn stable(c: &Constraint) -> bool {
+    STABLE_LEFT_OPERANDS.contains(&c.left.as_str())
 }
 
-/// Whether prohibition `r`, withdrawn for `request` now, stays withdrawn as the clock
-/// advances: a structural mismatch, a definitely false constraint off the clock, or a
-/// definitely false upper bound (`lt`/`lteq`) on it.
+/// Whether `rule`'s constraints, satisfied now, stay satisfied later: each is on a
+/// stable operand, or is an atomic lower bound on the clock.
+fn holds_later(rule: &Rule) -> bool {
+    rule.constraints.iter().all(|c| {
+        stable(c) || (c.left == ODRL_DATETIME && matches!(c.operator, Operator::Gt | Operator::Gteq))
+    }) && rule.logical_constraints.iter().all(|lc| all_atoms(lc, &stable))
+}
+
+/// Whether prohibition `r`, withdrawn for `request` now, stays withdrawn later: a
+/// structural mismatch, a definitely false constraint on a stable operand, or a
+/// definitely false upper bound (`lt`/`lteq`) on the clock.
 fn withdrawn_later(r: &Rule, request: &Request, req_action: &Action) -> bool {
     if !r.action.permits(req_action)
         || r.target.as_deref().is_some_and(|t| !request.asset_matches(t))
@@ -632,15 +645,14 @@ fn withdrawn_later(r: &Rule, request: &Request, req_action: &Action) -> bool {
     {
         return true;
     }
-    let off_clock = |c: &Constraint| c.left != ODRL_DATETIME;
     let closes = |c: &Constraint| {
-        off_clock(c) || matches!(c.operator, Operator::Lt | Operator::Lteq)
+        stable(c) || (c.left == ODRL_DATETIME && matches!(c.operator, Operator::Lt | Operator::Lteq))
     };
     r.constraints
         .iter()
         .any(|c| closes(c) && constraint_status(c, request) == ConstraintStatus::DefinitelyUnsatisfied)
         || r.logical_constraints.iter().any(|lc| {
-            all_atoms(lc, &off_clock)
+            all_atoms(lc, &stable)
                 && logical_constraint_status(lc, request) == ConstraintStatus::DefinitelyUnsatisfied
         })
 }

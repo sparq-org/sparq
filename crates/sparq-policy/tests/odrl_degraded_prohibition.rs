@@ -516,6 +516,43 @@ fn a_permit_lasts_only_when_the_clock_cannot_end_it() {
     );
 }
 
+/// Only operands a stored grant may treat as fixed count as lasting; elapsed time (or
+/// any other operand) can change while the grant stands, on a permission or a
+/// prohibition alike.
+#[test]
+fn an_advancing_operand_is_never_lasting() {
+    let elapsed = format!("{ODRL}elapsedTime");
+    let req = Request::new(format!("{ODRL}read"))
+        .on("urn:asset/x")
+        .by("urn:alice")
+        .with(elapsed.clone(), Value::Num(1.0));
+    let c = |op: &str| {
+        format!(
+            "odrl:constraint [ odrl:leftOperand odrl:elapsedTime ; odrl:operator odrl:{op} ; \
+             odrl:rightOperand 10 ]"
+        )
+    };
+    let permit = |rules: String| {
+        let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
+        let p = parse_policy_str(&ttl, "turtle").unwrap();
+        decide(&p, &req).permit.expect("granted")
+    };
+    let perm = |extra: &str| {
+        format!("odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {extra} ]")
+    };
+    assert!(!permit(perm(&format!("; {}", c("lt")))).lasting(), "elapsedTime lt 10 ends");
+    assert!(
+        !permit(format!(
+            "{} ; odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; {} ]",
+            perm(""),
+            c("gteq")
+        ))
+        .lasting(),
+        "a prohibition from elapsedTime 10 can still start applying"
+    );
+    assert!(permit(perm("")).lasting());
+}
+
 /// Containment claims nothing about a policy whose conflict strategy `decide` refuses:
 /// that policy grants nothing, which rule subsumption does not model.
 #[test]

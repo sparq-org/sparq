@@ -249,3 +249,43 @@ fn uncounted_permission_through_counted_path() {
     }
     assert!(reads_n1(&mut pod, ALICE), "uncounted grant never exhausts");
 }
+
+// ---------------------------------------------------------------------------
+// A counted grant the bridge refuses to store spends no usage: the permission also
+// has a deadline, so its grant is not lasting, and the sole unit stays available.
+// ---------------------------------------------------------------------------
+#[test]
+fn a_refused_counted_grant_spends_no_budget() {
+    let store_counter: Arc<dyn sparq_policy::UsageCounterStore + Send + Sync> =
+        Arc::new(InMemoryCounterStore::new());
+    let pol = parse_policy_str(
+        r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<urn:pol/count> a odrl:Set ; odrl:permission <urn:rule/once> .
+<urn:rule/once> odrl:action odrl:read ;
+    odrl:target <https://pod.ex/notes/n1> ;
+    odrl:assignee <https://alice.ex/card#me> ;
+    odrl:constraint [ odrl:leftOperand odrl:count ; odrl:operator odrl:lteq ;
+                      odrl:rightOperand 1 ] ,
+                    [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
+                      odrl:rightOperand "2026-12-31T00:00:00Z"^^xsd:dateTime ] .
+"#,
+        "turtle",
+    )
+    .expect("policy parses");
+    let req = Request::new(odrl("read"))
+        .on(N1)
+        .by(ALICE)
+        .at("2026-06-01T00:00:00Z");
+    let mut pod = PodStore::new(pod());
+    let out = pod.materialize_odrl_permission_counted(&pol, &req, &store_counter);
+    assert!(!out.granted, "a deadline makes the grant not lasting: {out:?}");
+    assert_eq!(out.consumed, None);
+    assert!(!reads_n1(&mut pod, ALICE));
+
+    // The unit is still there: exercising directly consumes it as the first use.
+    let exercise = sparq_policy::evaluate_and_exercise(&pol, &req, store_counter.as_ref());
+    assert!(exercise.allow, "the budget is untouched: {exercise:?}");
+    assert_eq!(exercise.consumed, Some(1));
+}

@@ -397,46 +397,9 @@ pub fn materialize_permission(
 /// [`sparq_policy::decide`]. An unmapped action (incl. the `use` umbrella), or a permit
 /// with no concrete party or target, emits nothing: such a grant would widen access.
 fn emit_allow(graph: &mut Graph, permit: &Permit) -> BridgeOutcome {
-    let Some(mode) = action_to_mode(permit.action()) else {
-        return BridgeOutcome::denied(vec![format!(
-            "ODRL action <{}> has no WAC/ACP mode mapping; no grant materialized",
-            permit.action()
-        )]);
-    };
-    let Some(party) = permit.party() else {
-        return BridgeOutcome::denied(vec![
-            "ODRL Permit has no concrete party (assignee/WebID); no grant materialized".to_owned(),
-        ]);
-    };
-    // The triple binds one party, so the party must be one agent: not a principal the
-    // auth view matches for many sessions (auth:Public, auth:Authenticated) and not a
-    // reserved session encoding.
-    if party.starts_with(crate::AUTH_NS) || !recipient_principal_allowed(party) {
-        return BridgeOutcome::denied(vec![format!(
-            "ODRL Permit party <{party}> is not a single agent; no grant materialized"
-        )]);
-    }
-    // The triple grants the party, so the decision must have been about the party
-    // receiving the data.
-    if permit.recipient().is_some_and(|r| r != party) {
-        return BridgeOutcome::denied(vec![format!(
-            "ODRL Permit was decided for recipient <{}>, not the party <{party}>; no grant \
-             materialized",
-            permit.recipient().unwrap_or_default()
-        )]);
-    }
-    // The triple is never re-checked against the clock.
-    if !permit.lasting() {
-        return BridgeOutcome::denied(vec![format!(
-            "permission {} holds now but may not later (a clock-bounded permission, or a \
-             prohibition that can still start applying); a stored grant would outlive it",
-            permit.rule()
-        )]);
-    }
-    let Some(target) = permit.target() else {
-        return BridgeOutcome::denied(vec![
-            "ODRL Permit has no concrete target graph IRI; no grant materialized".to_owned(),
-        ]);
+    let (mode, party, target) = match allow_binding(permit) {
+        Ok(binding) => binding,
+        Err(why) => return BridgeOutcome::denied(why),
     };
     let pred = format!("{AUTH_NS}{}", mode_predicate(mode));
     let triple = triple_of(party, &pred, target);
@@ -448,6 +411,55 @@ fn emit_allow(graph: &mut Graph, permit: &Permit) -> BridgeOutcome {
         emitted: vec![triple],
         ..BridgeOutcome::default()
     }
+}
+
+/// The `(mode, party, target)` a stored allow for `permit` binds, or the reasons
+/// `permit` cannot be stored. [`emit_allow`] writes nothing else, and a caller that
+/// must spend something before writing (a usage unit) checks this first.
+fn allow_binding(permit: &Permit) -> Result<(Mode, &str, &str), Vec<String>> {
+    let Some(mode) = action_to_mode(permit.action()) else {
+        return Err(vec![format!(
+            "ODRL action <{}> has no WAC/ACP mode mapping; no grant materialized",
+            permit.action()
+        )]);
+    };
+    let Some(party) = permit.party() else {
+        return Err(vec![
+            "ODRL Permit has no concrete party (assignee/WebID); no grant materialized".to_owned(),
+        ]);
+    };
+    // The triple binds one party, so the party must be one agent: not a principal the
+    // auth view matches for many sessions (auth:Public, auth:Authenticated) and not a
+    // reserved session encoding.
+    if party.starts_with(crate::AUTH_NS) || !recipient_principal_allowed(party) {
+        return Err(vec![format!(
+            "ODRL Permit party <{party}> is not a single agent; no grant materialized"
+        )]);
+    }
+    // The triple grants the party, so the decision must have been about the party
+    // receiving the data.
+    if permit.recipient().is_some_and(|r| r != party) {
+        return Err(vec![format!(
+            "ODRL Permit was decided for recipient <{}>, not the party <{party}>; no grant \
+             materialized",
+            permit.recipient().unwrap_or_default()
+        )]);
+    }
+    // The triple is never re-checked against the clock.
+    if !permit.lasting() {
+        return Err(vec![format!(
+            "permission {} holds now but may not later (a constraint that can change while \
+             the grant stands, or a prohibition that can still start applying); a stored \
+             grant would outlive it",
+            permit.rule()
+        )]);
+    }
+    let Some(target) = permit.target() else {
+        return Err(vec![
+            "ODRL Permit has no concrete target graph IRI; no grant materialized".to_owned(),
+        ]);
+    };
+    Ok((mode, party, target))
 }
 
 /// Evaluate `policy`'s **prohibitions** against `request` and, **iff** a prohibition
@@ -1864,7 +1876,7 @@ fn reemit_deny(graph: &mut Graph, request: &Request) -> BridgeOutcome {
 // ============================================================================
 #[cfg(feature = "count-enforcement")]
 pub(crate) mod count {
-    use super::{emit_allow, refuse_unimplementable_conflict, BridgeOutcome};
+    use super::{allow_binding, emit_allow, refuse_unimplementable_conflict, BridgeOutcome};
     use sparq_core::Graph;
     use sparq_policy::{
         count_status, evaluate, evaluate_and_exercise, CountStatus, Policy, Request,
@@ -1916,6 +1928,15 @@ pub(crate) mod count {
         // 1. The atomic, count-aware decision — the single source of allow/deny AND the
         //    one place a unit is consumed. A base deny / exhausted / store-unavailable
         //    returns allow == false and consumes nothing.
+        //    A grant the bridge could not store must not spend a unit, so the same base
+        //    decision is checked for storability first, without consuming.
+        if let Ok(base) = strip_count_constraints(policy).validate() {
+            if let Some(permit) = evaluate(&base, request).permit {
+                if let Err(why) = allow_binding(&permit) {
+                    return BridgeOutcome::denied(why);
+                }
+            }
+        }
         let exercise = evaluate_and_exercise(policy, request, store);
         let Some(permit) = &exercise.permit else {
             return BridgeOutcome::denied(exercise.reasons);

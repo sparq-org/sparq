@@ -1031,7 +1031,7 @@ fn generated_n3_is_never_more_permissive_than_the_rust_reference() {
     assert!(cov.n3_granted >= 10, "N3 must actually grant somewhere, got {}", cov.n3_granted);
     assert!(cov.n3_denied >= 20, "N3 must actually deny somewhere, got {}", cov.n3_denied);
     assert!(cov.n3_refused >= 20, "the refusal path must fire, got {}", cov.n3_refused);
-    assert!(cov.rust_granted >= 10, "Rust must actually grant somewhere, got {}", cov.rust_granted);
+    assert!(cov.rust_granted >= 20, "Rust must actually grant somewhere, got {}", cov.rust_granted);
     assert!(cov.rust_denied >= 20, "Rust must actually deny somewhere, got {}", cov.rust_denied);
     assert!(cov.rust_refused >= 20, "Rust must refuse somewhere, got {}", cov.rust_refused);
     // The EQUALITY assertion is likewise trivially satisfiable by an empty in-scope
