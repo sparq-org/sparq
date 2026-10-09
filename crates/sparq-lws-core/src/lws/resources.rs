@@ -85,7 +85,7 @@ fn retry_later(why: &str) -> Response {
 
 /// The answer to a request whose resource was set aside while it waited for its lock (see
 /// [`IriLocks::lock`]).
-fn set_aside_meanwhile() -> Response {
+pub(crate) fn set_aside_meanwhile() -> Response {
     retry_later("a failed change to this resource is still being put back")
 }
 

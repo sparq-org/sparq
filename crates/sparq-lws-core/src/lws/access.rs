@@ -471,33 +471,26 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
-                // A record with its unsettled mark was being created or revoked when the server
-                // stopped, or its outcome was unknown (see [`super::UNSETTLED_SUFFIX`]): it is
-                // never put in force, and it is removed. A grant whose mark cannot be read
-                // grants nothing; a request (which counts against the quota) that cannot be
-                // settled stops the server.
-                let unsettled = match super::is_unsettled(store, child.as_str()).await {
-                    Ok(u) => u,
-                    Err(_) if grants => continue,
-                    Err(e) => return Err(format!("store: access request {}: {e}", child.as_str())),
-                };
-                if unsettled {
-                    let removed = super::delete_record(store, child.as_str(), &container).await;
-                    match removed {
-                        Ok(()) => {
-                            let _ = super::clear_unsettled(store, child.as_str()).await;
-                        }
-                        Err(e) if !grants => {
-                            return Err(format!("store: access request {}: {e}", child.as_str()))
-                        }
-                        Err(_) => {}
-                    }
-                    continue;
-                }
                 // Every stored request counts against the request quota, so one that cannot be read
                 // stops the server rather than leaving a place uncounted; a grant that cannot be
                 // read grants nothing.
                 let stored = match store.read(child.as_str()).await {
+                    // A record stored as unsettled was being created or revoked when the server
+                    // stopped, or its outcome was unknown (see [`super::UNSETTLED_TYPE`]): it is
+                    // never put in force, and it is removed. A request (which counts against the
+                    // quota) that cannot be removed stops the server.
+                    Ok(r) if r.meta.content_type == super::UNSETTLED_TYPE => {
+                        let removed = super::delete_record(store, child.as_str(), &container).await;
+                        if let Err(e) = removed {
+                            if !grants {
+                                return Err(format!(
+                                    "store: access request {}: {e}",
+                                    child.as_str()
+                                ));
+                            }
+                        }
+                        continue;
+                    }
                     Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
                     Err(e) if !grants => {
                         return Err(format!("store: access request {}: {e}", child.as_str()))
@@ -887,13 +880,15 @@ pub async fn handle<S: Store + 'static>(
             {
                 return refused;
             }
-            // A revocation is durable before anything else: the record's unsettled mark is
-            // stored first (see [`super::UNSETTLED_SUFFIX`]), so whatever happens next (a
-            // removal whose outcome is unknown, a crash) the record is out of force at the next
-            // boot. Then it is out of force in memory, and then it is removed: a removal that
-            // keeps failing is set aside and kept at ([`LwsState::set_aside`]), and the record
-            // is not put back in force meanwhile. The steps run in a task of their own, so a
-            // client that goes away cannot cut them short.
+            // The record's own lock is taken first (a create of it still settling holds it, see
+            // [`super::create_record`]), then the container's, shared. The record is stored as
+            // unsettled (see [`super::UNSETTLED_TYPE`]) when the store takes it, so whatever
+            // happens next (a removal whose outcome is unknown, a crash) it is out of force at
+            // the next boot; a store that cannot take that write (a full one) does not stop the
+            // revocation. Then it is out of force in memory, and then it is removed: a removal
+            // that keeps failing is set aside and kept at ([`LwsState::set_aside`]), and the
+            // record is not put back in force meanwhile. The steps run in a task of their own,
+            // so a client that goes away cannot cut them short.
             let revoke = {
                 let (state, iri, container, id, admission) = (
                     state.clone(),
@@ -904,9 +899,26 @@ pub async fn handle<S: Store + 'static>(
                 );
                 async move {
                     let _admission = admission;
-                    // Shared with other members' changes; a conditional create holds it alone.
-                    let listing = state.locks.read(&container).await;
-                    super::mark_unsettled(&state.store, &iri).await?;
+                    let Some(own) = state.locks.lock(&iri).await else {
+                        return Err(None);
+                    };
+                    let Some(listing) = state.locks.read(&container).await else {
+                        return Err(None);
+                    };
+                    if !state
+                        .access
+                        .map(grants)
+                        .read()
+                        .expect("lock")
+                        .contains_key(&id)
+                    {
+                        return Ok(false);
+                    }
+                    if let Ok(stored) = state.store.read(&iri).await {
+                        let _ =
+                            super::retype(&state.store, &iri, stored.body, super::UNSETTLED_TYPE)
+                                .await;
+                    }
                     state.access.map(grants).write().expect("lock").remove(&id);
                     state.access.bump(grants);
                     let undo = vec![super::Undo::Remove {
@@ -914,18 +926,20 @@ pub async fn handle<S: Store + 'static>(
                         parent: container.clone(),
                     }];
                     if let Some(left) = super::settle(&state.store, undo).await {
-                        state.set_aside(left, listing);
-                        return Err(ServerError::Storage(
+                        state.set_aside(left, (own, listing));
+                        return Err(Some(ServerError::Storage(
                             "the record could not be removed yet; it is out of force".into(),
-                        ));
+                        )));
                     }
-                    let _ = super::clear_unsettled(&state.store, &iri).await;
-                    Ok::<_, ServerError>(())
+                    Ok(true)
                 }
             };
             match tokio::spawn(revoke).await {
-                Ok(Ok(())) => problem(StatusCode::NO_CONTENT, None),
-                Ok(Err(e)) => problem(
+                Ok(Ok(true)) => problem(StatusCode::NO_CONTENT, None),
+                // Revoked by another request while this one waited.
+                Ok(Ok(false)) => problem(StatusCode::NOT_FOUND, None),
+                Ok(Err(None)) => super::resources::set_aside_meanwhile(),
+                Ok(Err(Some(e))) => problem(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Some(&format!("cannot delete {iri}: {e}")),
                 ),
@@ -1533,39 +1547,47 @@ mod tests {
         assert_eq!(bad.status(), StatusCode::NOT_ACCEPTABLE);
     }
 
-    /// A revocation that cannot even be recorded changes nothing; one whose removal fails, or
-    /// whose outcome is unknown, takes the grant out of force at once and for good: review
-    /// finding, the grant stayed in force while its stored record was gone.
+    /// A revocation whose removal fails, or whose outcome is unknown, takes the grant out of
+    /// force at once and, once the record is stored as unsettled, for good: review finding, the
+    /// grant stayed in force while its stored record was gone. One the store cannot record as
+    /// unsettled (a full store) still revokes.
     #[tokio::test]
     async fn a_revocation_that_does_not_land_takes_the_grant_out_of_force() {
         use std::sync::atomic::Ordering;
         let (state, store) = test_store::state(100).await;
-        let req = test_store::request(
+        let post = test_store::request(
             Method::POST,
             GRANTS_PATH,
             &[],
             &access_doc("AccessGrant", "https://a/", None),
         );
-        let resp = handle(&state, &req, &Agent::anonymous()).await;
-        let location = resp.headers()[header::LOCATION]
-            .to_str()
-            .unwrap()
-            .to_string();
-        let path = location
-            .strip_prefix(&state.cfg.base_url)
-            .unwrap()
-            .to_string();
-        let delete = test_store::request(Method::DELETE, &path, &[], "");
-        let mark = format!("{location}{}", super::super::UNSETTLED_SUFFIX);
-        *store.fail_write_of.lock().unwrap() = Some(mark);
+        let grant = || {
+            let (state, post) = (state.clone(), post.clone());
+            async move {
+                let resp = handle(&state, &post, &Agent::anonymous()).await;
+                assert_eq!(resp.status(), StatusCode::CREATED);
+                let location = resp.headers()[header::LOCATION]
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                let path = location
+                    .strip_prefix(&state.cfg.base_url)
+                    .unwrap()
+                    .to_string();
+                (
+                    location,
+                    test_store::request(Method::DELETE, &path, &[], ""),
+                )
+            }
+        };
+        let (location, delete) = grant().await;
+        *store.refuse_write_of.lock().unwrap() = Some(location.clone());
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
-        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        // Still enforced, still stored, still loaded at boot.
-        assert_eq!(state.access.grant_policies().len(), 1);
-        assert!(state.store.exists(&location).await.unwrap());
-        let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
-        assert_eq!(loaded.grant_policies().len(), 1);
-        *store.fail_write_of.lock().unwrap() = None;
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert!(state.access.grant_policies().is_empty());
+        assert!(!state.store.exists(&location).await.unwrap());
+        *store.refuse_write_of.lock().unwrap() = None;
+        let (location, delete) = grant().await;
         // The removal fails: out of force now, and at the next boot.
         store.fail_delete.store(true, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
@@ -1589,7 +1611,7 @@ mod tests {
     }
 
     /// Review finding: a grant whose create reported a failure (but may have committed), still
-    /// stored when the server restarted, was put in force at boot. Its unsettled mark keeps it
+    /// stored when the server restarted, was put in force at boot. Stored as unsettled, it is kept
     /// out, and the boot removes it.
     #[tokio::test]
     async fn a_grant_whose_create_did_not_settle_is_not_in_force_after_a_restart() {
@@ -1625,6 +1647,41 @@ mod tests {
         let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
         assert!(loaded.grant_policies().is_empty());
         assert!(!state.store.exists(&record).await.unwrap());
+    }
+
+    /// Review findings: a grant's unsettled mark was a record of its own, left behind (taking a
+    /// place in the store, out of any listing) by a create that failed; one whose removal
+    /// failed acknowledged the create, and the boot then removed the grant; and the create's
+    /// removal of it could race a revocation's. The record itself is stored as unsettled until
+    /// it is in force, under its own lock: a create whose second write is not known to land is
+    /// refused and leaves nothing behind.
+    #[tokio::test]
+    async fn a_grant_not_known_to_be_settled_is_refused_and_leaves_nothing() {
+        let (state, store) = test_store::state(100).await;
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        // The create lands; storing it under its own type fails.
+        *store.fail_step.lock().unwrap() = Some(1);
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(state.access.grant_policies().is_empty());
+        let container = state.cfg.absolute(GRANTS_PATH);
+        assert!(state
+            .store
+            .list_children(&container)
+            .await
+            .unwrap()
+            .is_empty());
+        // The next create is in force, stored under its own type.
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(state.access.grant_policies().len(), 1);
+        let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+        assert_eq!(loaded.grant_policies().len(), 1);
     }
 
     /// Review findings: a service linkset answered 200 whatever the request's preconditions, and
@@ -1680,8 +1737,7 @@ mod tests {
         );
         // The create fails before it lands; removing it and looking it up fail too, so the
         // container is set aside until the store answers.
-        // (Step 0 stores the grant's unsettled mark.)
-        *store.fail_step.lock().unwrap() = Some(1);
+        *store.fail_step.lock().unwrap() = Some(0);
         store.fail_delete.store(true, Ordering::SeqCst);
         store.fail_exists.store(true, Ordering::SeqCst);
         let r = handle(&state, &post, &Agent::anonymous()).await;
