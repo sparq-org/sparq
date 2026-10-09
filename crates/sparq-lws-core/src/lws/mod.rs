@@ -1486,18 +1486,11 @@ pub fn has_lws_context(v: Option<&Value>) -> bool {
     }
 }
 
-/// Whether `v` is an absolute URI: a scheme, a colon, and something after it.
+/// Whether `v` is an absolute IRI (RFC 3987): a scheme, a colon and something after it, with
+/// every character and percent-encoding the grammar allows. One parser checks every IRI a client
+/// sends, so `%ZZ`, a space or a bare fragment is refused everywhere alike.
 pub fn is_uri(v: &str) -> bool {
-    let Some((scheme, rest)) = v.split_once(':') else {
-        return false;
-    };
-    let mut chars = scheme.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic())
-        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-        && !rest.is_empty()
-        && !v.chars().any(|c| {
-            c.is_whitespace() || matches!(c, '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`')
-        })
+    v.split_once(':').is_some_and(|(_, rest)| !rest.is_empty()) && oxiri::Iri::parse(v).is_ok()
 }
 
 /// A JSON value that is a string holding an absolute URI.
@@ -2488,14 +2481,33 @@ mod tests {
         assert_eq!(l[2].0, "c");
     }
 
+    /// Review finding: the check took any scheme and a few excluded characters, so malformed
+    /// IRIs such as `https://e/%ZZ` passed. Every IRI goes through one RFC 3987 parser.
     #[test]
     fn uri_check() {
-        assert!(is_uri("https://example.org/x"));
-        assert!(is_uri("did:key:z6Mk"));
-        assert!(is_uri("urn:uuid:1"));
-        assert!(!is_uri("#frag"));
-        assert!(!is_uri("relative/path"));
-        assert!(!is_uri("http://a b"));
+        for good in [
+            "https://example.org/x",
+            "did:key:z6Mk",
+            "urn:uuid:1",
+            "https://e.example/caf%C3%A9",
+            "https://e.example/caf\u{e9}",
+            "https://[::1]:8080/a?b#c",
+        ] {
+            assert!(is_uri(good), "{good}");
+        }
+        for bad in [
+            "#frag",
+            "relative/path",
+            "http://a b",
+            "https://e.example/%ZZ",
+            "https://e.example/%4",
+            "https://[::1/",
+            "1http://e.example/",
+            "https:",
+            "https://e.example/\u{7f}",
+        ] {
+            assert!(!is_uri(bad), "{bad}");
+        }
     }
 
     #[test]
