@@ -60,6 +60,7 @@
       "reason": "sparq-canon bumps itertools 0.14 -> 0.15 (#6711); `cargo update -p sparq-canon` re-resolves the vendored sparq-spargebra path crate within its declared ranges.",
       "base_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
       "candidate_lock_sha256": "695b5b90dfc130a58cc034b69f0c632467c2dca0d062cb4cf11c91a14fa462bd",
+      "source_only": false,
       "added_packages": [
         {
           "name": "itertools",
