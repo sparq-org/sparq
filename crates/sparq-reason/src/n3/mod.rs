@@ -2210,16 +2210,13 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
         run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None);
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations.
-    // The derivations come out of a hash set, whose iteration order depends on insertion
-    // history and on the hasher's word size (native vs wasm32), so they are appended in
-    // ONE canonical order — their structural identity keys — and the formula this builds
-    // (an ordered vector, as `Term` equality sees it) is the same on every platform and
-    // for every equal input.
-    let seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
-    let mut derived: Vec<[Term; 3]> = closed.all.iter().filter(|f| !seen.contains(f)).cloned().collect();
-    derived.sort_by_cached_key(serialize::statement_keys);
+    let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
     let mut result: Vec<[Term; 3]> = ts.to_vec();
-    result.extend(derived);
+    for f in closed.all {
+        if seen.insert(f.clone()) {
+            result.push(f);
+        }
+    }
     bw.visited.borrow_mut().remove(&key);
     result
 }

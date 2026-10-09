@@ -218,7 +218,9 @@ fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
     // through the batch engine (the counting path does not currently derive through a
     // formula that carries a variable — a separate issue).
-    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.
+    // Declared IN the formula, so the display declares it there too (a DOCUMENT-level
+    // `@forAll :x.` has no binder inside a lone fact; see the end of this test).
+    let src = "@prefix : <http://ex/>. :a :p { @forAll :x. :x :q ?x }.
 { :a ?p ?f } => { :b :r ?f }.
 ";
     let formula = "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }";
@@ -239,6 +241,15 @@ fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
         assert_eq!(n.conclusion[2], formula, "{}", proof.to_text());
     }
     assert_eq!(nodes[1].premises, vec![0]);
+
+    // Document-level: a declaration inside the formula would rebind it, so the display spells
+    // it as a plain variable, still distinct from `?x`, and the keys keep the binder.
+    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n";
+    let closure = reason_n3_terms(src, None).expect("oracle").facts;
+    let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
+    let proof = MaterializedN3Graph::new(src, &[]).expect("rules parse").why(asserted).expect("explains");
+    assert_eq!(proof.conclusion()[2], "{ ?x_2 <http://ex/q> ?x . }", "{}", proof.to_text());
+    assert!(proof.nodes()[0].key[2].contains("__ua.http://ex/x"), "{:?}", proof.nodes()[0].key);
 }
 
 

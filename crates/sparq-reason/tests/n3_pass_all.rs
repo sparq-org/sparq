@@ -238,7 +238,8 @@ fn a_for_all_universal_in_a_formula_fact_never_collides() {
     let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n";
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert!(!doc.contains("__ua"), "{doc}");
-    assert!(doc.contains("{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }"), "{doc}");
+    // Declared where the source declared it — at document level (GH #6701 round 11).
+    assert!(doc.contains("@forAll <http://ex/x> .\n<http://ex/a> <http://ex/p> { <http://ex/x> <http://ex/q> ?x . }"), "{doc}");
     assert_eq!(parser::parse(&doc).expect("re-parses").facts, parser::parse(src).unwrap().facts);
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
 }
