@@ -260,7 +260,7 @@ fn negation_gate(bw: &BwCtx) -> bool {
 }
 
 impl<'a> BwCtx<'a> {
-    fn new(rules: &'a [Rule]) -> BwCtx<'a> {
+    fn new(rules: &'a [Rule], truncated: Truncation) -> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
@@ -269,7 +269,7 @@ impl<'a> BwCtx<'a> {
             visited: VisitedDocs::default(),
             cycles: NegationCycles::Reject,
             nested_error: std::cell::RefCell::new(None),
-            truncated: Truncation::default(),
+            truncated,
         }
     }
 }
@@ -325,7 +325,15 @@ pub fn reason_n3_with_cycles(
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None, cycles)?.top_level();
+    let (facts, steps, _) = run_closure(
+        parsed,
+        None,
+        None,
+        &Truncation::top_level(),
+        StepMode::None,
+        cycles,
+    )?
+    .top_level();
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -333,8 +341,15 @@ pub fn reason_n3_with_cycles(
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) =
-        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?.top_level();
+    let (facts, steps, _) = run_closure(
+        parsed,
+        None,
+        None,
+        &Truncation::top_level(),
+        StepMode::Full,
+        NegationCycles::Reject,
+    )?
+    .top_level();
     intern_closure(dict, &facts, &steps)
 }
 
@@ -374,8 +389,15 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
-    let (facts, _steps, _) =
-        run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?.top_level();
+    let (facts, _steps, _) = run_closure(
+        parsed,
+        None,
+        None,
+        &Truncation::top_level(),
+        StepMode::None,
+        NegationCycles::Reject,
+    )?
+    .top_level();
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -466,18 +488,19 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
         }))
         .collect();
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
-    let truncated = Truncation::default();
+    // One run: the data closure and the query premises share one cut record.
+    let truncated = Truncation::top_level();
     let facts = run_closure(
         data_parsed,
         None,
-        Some((VisitedDocs::default(), truncated.clone())),
+        Some(VisitedDocs::default()),
+        &truncated,
         StepMode::None,
         NegationCycles::Reject,
     )?
     .read_further(&truncated);
-    let mut bw = BwCtx::new(&backward);
+    let mut bw = BwCtx::new(&backward, truncated);
     bw.base = base;
-    bw.truncated = truncated;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -642,7 +665,7 @@ pub fn reason_n3_stratified_with_cycles(
     // One truncation flag for the whole pipeline: a cut search in an earlier stratum
     // leaves the facts it carries forward incomplete, so a later stratum's negation gate
     // must see it.
-    let truncated = Truncation::default();
+    let truncated = Truncation::top_level();
     for (i, src) in strata.iter().enumerate() {
         let mut parsed = parser::parse(src)?;
         if !carried.is_empty() {
@@ -665,7 +688,8 @@ pub fn reason_n3_stratified_with_cycles(
         let closure = run_closure(
             parsed,
             None,
-            Some((VisitedDocs::default(), truncated.clone())),
+            Some(VisitedDocs::default()),
+            &truncated,
             StepMode::None,
             cycles,
         )?;
@@ -781,8 +805,15 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) =
-        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?.top_level();
+    let (facts, steps, _) = run_closure(
+        parsed,
+        None,
+        None,
+        &Truncation::top_level(),
+        StepMode::Full,
+        NegationCycles::Reject,
+    )?
+    .top_level();
     Ok((facts.all, steps))
 }
 
@@ -841,8 +872,15 @@ pub fn reason_n3_terms_with_cycles(
     };
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
-    let (facts, steps, warning) =
-        run_closure(parsed, resolver, None, StepMode::Conclusions, cycles)?.top_level();
+    let (facts, steps, warning) = run_closure(
+        parsed,
+        resolver,
+        None,
+        &Truncation::top_level(),
+        StepMode::Conclusions,
+        cycles,
+    )?
+    .top_level();
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
@@ -909,9 +947,12 @@ fn run_closure(
     // The import-cycle guard ([`VisitedDocs`]). `None` for a TOP-LEVEL run (a fresh,
     // empty set); a nested run reached through `formula_closure` passes the PARENT's set so
     // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
-    // The run's [`Truncation`] flag: a nested run shares its parent's, and a caller that
-    // evaluates more over the closure (the query projection) passes its own.
-    inherit: Option<(VisitedDocs, Truncation)>,
+    // `Some` also means a caller reads this closure further (a query, the next document
+    // of an explicit pipeline, a nested closure's consumer).
+    inherit: Option<VisitedDocs>,
+    // The run's cut record ([`Truncation`]): a fresh one only from a top-level entry
+    // point; a nested run passes its parent's, so an inner cut reaches the parent.
+    truncated: &Truncation,
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
@@ -936,16 +977,15 @@ fn run_closure(
     // loop below. Rules on a cycle through negation follow `cycles`.
     let strata = strata::stratify(&rules, &backward_rules, cycles)?;
     let mut facts = FactIndex::from_iter(facts0);
-    let mut bw = BwCtx::new(&backward_rules);
+    let mut bw = BwCtx::new(&backward_rules, truncated.clone());
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
     // A caller reads this closure further (a query, the next document of an explicit
     // pipeline, a nested closure's consumer).
     let read_further = inherit.is_some();
-    if let Some((v, t)) = inherit {
+    if let Some(v) = inherit {
         bw.visited = v;
-        bw.truncated = t;
     }
     // Derivation steps at the term level (interned to ids once at the end).
     let mut steps: Vec<DerivationStep> = Vec::new();
@@ -2810,7 +2850,8 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     let closed = match run_closure(
         parsed,
         bw.resolver,
-        Some((bw.visited.clone(), bw.truncated.clone())),
+        Some(bw.visited.clone()),
+        &bw.truncated,
         StepMode::None,
         cycles,
     ) {
@@ -4465,6 +4506,125 @@ mod tests {
     fn has(dict: &Dict, set: &FxHashSet<[Id; 3]>, s: &str, p: &str, o: &str) -> bool {
         let (a, b, c) = (id(dict, s), id(dict, p), id(dict, o));
         a != 0 && b != 0 && c != 0 && set.contains(&[a, b, c])
+    }
+
+    /// The cut a run of `src` records, if any.
+    fn run_cut(src: &str, resolver: Option<&Resolver>) -> Option<&'static str> {
+        let truncated = Truncation::top_level();
+        let parsed = parser::parse(src).expect("parse");
+        let _ = run_closure(
+            parsed,
+            resolver,
+            None,
+            &truncated,
+            StepMode::None,
+            NegationCycles::Reject,
+        );
+        truncated.get()
+    }
+
+    /// Every limit kind records a cut on the run, at the top level and from inside a
+    /// nested `log:conclusion` / `log:supports` closure (whose run shares the parent's
+    /// record), and a document without a limit records none.
+    #[test]
+    fn every_limit_records_a_cut_on_the_run_including_nested_closures() {
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(every_limit_records_a_cut)
+            .expect("spawn")
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e));
+    }
+
+    fn every_limit_records_a_cut() {
+        let pre = "@prefix : <http://ex/> .\n\
+            @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+            @prefix list: <http://www.w3.org/2000/10/swap/list#> .\n\
+            @prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+            @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+            @prefix time: <http://www.w3.org/2000/10/swap/time#> .\n\
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
+        let deep = format!(
+            "<http://ex/a> <http://ex/b> {}1{} .",
+            "(".repeat(5000),
+            ")".repeat(5000)
+        );
+        let mut backward: String = (0..=64)
+            .map(|i| format!("{{ :a :p{i} :b }} <= {{ :a :p{} :b }} .\n", i + 1))
+            .collect();
+        backward.push_str(":a :p65 :b .\n");
+        let big: String = (0..8).map(|i| format!(":s{i} :p :o . ")).collect();
+        // (limit, facts and backward rules, trigger premise)
+        let cases: Vec<(&str, String, String)> = vec![
+            ("backward depth", backward, ":a :p0 :b".into()),
+            (
+                "containment budget",
+                String::new(),
+                format!(
+                    "{{ {big} }} log:includes {{ ?a :p ?c . ?d :p ?f . ?g :p ?i . ?j :p ?l . \
+                     ?m :p ?n . ?o :p ?q . ?r :p :never }}"
+                ),
+            ),
+            (
+                "list walk cap",
+                ":l rdf:first :x ; rdf:rest :l .\n".into(),
+                ":l list:member :never".into(),
+            ),
+            ("regex", String::new(), "\"a\" string:matches \"(\"".into()),
+            (
+                "parser nesting in log:parsedAsN3",
+                String::new(),
+                format!("\"{deep}\" log:parsedAsN3 ?f"),
+            ),
+            (
+                "parser nesting in log:semantics",
+                String::new(),
+                "<http://ex/deep> log:semantics ?f".into(),
+            ),
+            (
+                "unresolvable log:semantics",
+                String::new(),
+                "<http://ex/missing> log:semantics ?f".into(),
+            ),
+            (
+                "epoch year",
+                String::new(),
+                "\"1000000000-01-01T00:00:00Z\" time:inSeconds ?s".into(),
+            ),
+            (
+                "exact arithmetic past i128",
+                String::new(),
+                format!("({} 1) math:sum ?x", i128::MAX),
+            ),
+            (
+                "a fraction where only a whole number is exact",
+                String::new(),
+                "?d time:inSeconds 1.5".into(),
+            ),
+        ];
+        let resolve = move |iri: &str| (iri == "http://ex/deep").then(|| deep.clone());
+        let resolver: &Resolver = &resolve;
+        for (limit, facts, trigger) in &cases {
+            let rule = format!("{{ {trigger} }} => {{ :a :proved :b }} .");
+            let top = format!("{pre}{facts}{rule}");
+            let conclusion =
+                format!("{pre}{{ {{ {facts}{rule} }} log:conclusion ?c }} => {{ :x :y :z }} .");
+            let supports = format!(
+                "{pre}{{ {{ {facts}{rule} }} log:supports {{ :a :proved :b }} }} => {{ :x :y :z }} ."
+            );
+            for (shape, src) in [
+                ("top level", top),
+                ("log:conclusion", conclusion),
+                ("log:supports", supports),
+            ] {
+                assert!(
+                    run_cut(&src, Some(resolver)).is_some(),
+                    "{limit} / {shape}: no cut recorded"
+                );
+            }
+        }
+        let clean = format!("{pre}:a :p1 :b .\n{{ :a :p1 :b }} => {{ :a :proved :b }} .");
+        assert_eq!(run_cut(&clean, None), None);
     }
 
     #[test]

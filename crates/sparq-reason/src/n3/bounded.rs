@@ -53,15 +53,33 @@ pub(crate) trait Sink {
     fn record(&self, why: &'static str);
 }
 
-/// The first reason any search of a run was cut short. Shared by every part of one
-/// logical evaluation (nested closures, an explicit-strata pipeline, a query and the
-/// closure it projects over) and never reset.
-pub(crate) type Truncation = Rc<Cell<Option<&'static str>>>;
+/// A run's cut record: the first reason any search of the run was cut short. Every part
+/// of one logical evaluation (nested closures, an explicit-strata pipeline, a query and
+/// the closure it projects over) records into the SAME handle, and it is never reset.
+///
+/// The field is private and there is no `Default`: the only way to make a fresh record
+/// is [`Truncation::top_level`], which a top-level entry point calls once. Every nested
+/// evaluation takes its parent's handle (a `clone` shares the same record), so an inner
+/// cut always reaches the parent.
+#[derive(Clone)]
+pub(crate) struct Truncation(Rc<Cell<Option<&'static str>>>);
+
+impl Truncation {
+    /// The cut record of a new TOP-LEVEL run. A nested run must reuse its parent's.
+    pub(crate) fn top_level() -> Truncation {
+        Truncation(Rc::default())
+    }
+
+    /// The first cut the run recorded, if any.
+    pub(crate) fn get(&self) -> Option<&'static str> {
+        self.0.get()
+    }
+}
 
 impl Sink for Truncation {
     fn record(&self, why: &'static str) {
-        if self.get().is_none() {
-            self.set(Some(why));
+        if self.0.get().is_none() {
+            self.0.set(Some(why));
         }
     }
 }
@@ -206,23 +224,42 @@ impl Pending {
 /// Bracket nesting the N3 parser accepts (its recursive descent recurses per level).
 const PARSE_DEPTH: usize = 4096;
 
-/// Whether the parser may enter one more nesting level at `depth`.
-pub(crate) fn nesting_allowed(depth: usize) -> bool {
-    depth <= PARSE_DEPTH
+/// A limit was hit. Only this module can make one (its fields are private), and the
+/// only way to use it during evaluation is [`parse_n3`], which records it as a cut.
+#[derive(Debug)]
+pub(crate) struct LimitError {
+    why: &'static str,
+    message: String,
+}
+
+impl LimitError {
+    /// The error text a public entry point reports.
+    pub(crate) fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// The parser entering nesting level `depth`: an error past [`PARSE_DEPTH`].
+pub(crate) fn enter_nesting(depth: usize) -> Result<(), LimitError> {
+    if depth <= PARSE_DEPTH {
+        Ok(())
+    } else {
+        Err(LimitError {
+            why: "an N3 document a builtin parsed passed the parser's nesting limit",
+            message: format!("nesting deeper than {PARSE_DEPTH}"),
+        })
+    }
 }
 
 /// Parse an N3 document a builtin reads at run time (`log:semantics`,
 /// `log:parsedAsN3`). A syntax error is the builtin's spec-defined failure (the text is
-/// not N3: no match); a document the parser stops on a resource limit (nesting depth)
-/// is a cut.
+/// not N3: no match); a document that hits a parser limit ([`LimitError`]) is a cut.
 pub(crate) fn parse_n3(src: &str, base: &str) -> Bounded<Option<super::parser::Parsed>> {
-    match super::parser::parse_with_base_limited(src, base) {
-        (Ok(p), _) => Bounded::complete(Some(p)),
-        (Err(_), true) => Bounded::cut(
-            None,
-            "an N3 document a builtin parsed passed the parser's nesting limit",
-        ),
-        (Err(_), false) => Bounded::complete(None),
+    use super::parser::{parse_with_base_checked, ParseFailure};
+    match parse_with_base_checked(src, base) {
+        Ok(p) => Bounded::complete(Some(p)),
+        Err(ParseFailure::Syntax(_)) => Bounded::complete(None),
+        Err(ParseFailure::Resource(e)) => Bounded::cut(None, e.why),
     }
 }
 
@@ -372,7 +409,9 @@ mod tests {
         let (re, cut) = cut_of(regex("("));
         assert!(re.is_none() && cut);
 
-        assert!(nesting_allowed(PARSE_DEPTH) && !nesting_allowed(PARSE_DEPTH + 1));
+        assert!(enter_nesting(PARSE_DEPTH).is_ok());
+        let e = enter_nesting(PARSE_DEPTH + 1).expect_err("past the limit");
+        assert_eq!(e.message(), "nesting deeper than 4096");
         assert_eq!(cut_of(epoch_year(2024)), (Some(2024), false));
         assert_eq!(cut_of(epoch_year(EPOCH_YEAR_CAP + 1)), (None, true));
     }

@@ -20,6 +20,10 @@
 //!   `// not-a-cut:` marker (the value feeds comparisons, joins and negation, so a lost
 //!   digit must be a cut, or the conversion exact or the builtin defined over f64).
 //!
+//! It also fails when a fresh cut record (`Truncation::top_level`) is made anywhere but
+//! an entry point (a `pub fn`, or a crate-internal `reason_n3*` one): a nested
+//! evaluation must record into its parent's.
+//!
 //! Each marker must name a category from [`ALLOWED`] (`// no-match: ill-typed (…)`);
 //! an unknown category fails, so a marker cannot be an unreviewed free-text waiver.
 //!
@@ -135,7 +139,24 @@ fn errors_and_limits_go_through_the_bounded_module() {
                 }
             }
         }
+        // The function each code line sits in: a fresh cut record (`Truncation::top_level`)
+        // is made only by an entry point; every nested evaluation reuses its parent's.
+        let mut current_fn = String::new();
         for (n, code, comments) in code_lines(&src) {
+            if code.starts_with("pub fn ")
+                || code.starts_with("fn ")
+                || code.starts_with("pub(crate) fn ")
+            {
+                current_fn = code.trim().to_string();
+            }
+            let entry = current_fn.starts_with("pub fn ")
+                || current_fn.starts_with("pub(crate) fn reason_n3");
+            if code.contains("Truncation::top_level(") && !entry {
+                hits.push(format!(
+                    "{rel}:{n}: a fresh cut record outside an entry point ({current_fn}): {}",
+                    code.trim()
+                ));
+            }
             let marked = |m: &str| comments.contains(m);
             if discard.is_match(&code) && !marked("// no-match:") && !marked("// not-a-cut:") {
                 hits.push(format!("{rel}:{n}: discarded error: {}", code.trim()));
