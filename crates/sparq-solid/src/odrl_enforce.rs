@@ -36,6 +36,7 @@
 use crate::authindex::{Mode, Session};
 use oxrdf::NamedNode;
 use sparq_policy::{conflict_admissibility, matched_prohibition, Request, ValidatedPolicy};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 const ODRL_NS: &str = "http://www.w3.org/ns/odrl/2/";
@@ -55,6 +56,9 @@ const MAX_PARTY_COLLECTIONS: usize = 4;
 /// the agent could have (member of any subset of those collections). A policy naming
 /// more than [`MAX_PARTY_COLLECTIONS`] collections is treated as prohibiting.
 fn prohibited(policy: &ValidatedPolicy, req: &Request, agent: Option<&str>) -> bool {
+    if policy.prohibitions.is_empty() {
+        return false;
+    }
     if matched_prohibition(policy, req).is_some() {
         return true;
     }
@@ -64,7 +68,7 @@ fn prohibited(policy: &ValidatedPolicy, req: &Request, agent: Option<&str>) -> b
         return false;
     }
     if collections.len() > MAX_PARTY_COLLECTIONS {
-        return !policy.prohibitions.is_empty();
+        return true;
     }
     (1u32..1 << collections.len()).any(|mask| {
         let member_of = collections
@@ -81,7 +85,9 @@ fn prohibited(policy: &ValidatedPolicy, req: &Request, agent: Option<&str>) -> b
 #[derive(Debug, Clone, Default)]
 pub struct OdrlEnforcement {
     policies: Vec<Arc<ValidatedPolicy>>,
-    asset_memberships: Vec<(String, String)>,
+    /// `asset -> collections`. A rule's target test only consults the edges of the
+    /// request's own target, so a request carries exactly that asset's edges.
+    asset_memberships: HashMap<String, Vec<String>>,
 }
 
 impl OdrlEnforcement {
@@ -100,7 +106,10 @@ impl OdrlEnforcement {
     }
 
     pub(crate) fn add_asset_membership(&mut self, asset: String, collection: String) {
-        self.asset_memberships.push((asset, collection));
+        let of = self.asset_memberships.entry(asset).or_default();
+        if !of.contains(&collection) {
+            of.push(collection);
+        }
     }
 
     pub(crate) fn clear(&mut self) {
@@ -111,7 +120,13 @@ impl OdrlEnforcement {
     fn request(&self, action: &str, target: &str, s: &Session) -> Request {
         let mut req = Request::new(format!("{ODRL_NS}{action}"))
             .on(target)
-            .with_asset_memberships(self.asset_memberships.iter().cloned());
+            .with_asset_memberships(
+                self.asset_memberships
+                    .get(target)
+                    .into_iter()
+                    .flatten()
+                    .map(|c| (target, c.as_str())),
+            );
         if let Some(agent) = s.agent {
             req = req.by(agent);
         }
@@ -137,7 +152,8 @@ impl OdrlEnforcement {
             Mode::Append | Mode::Write => CHANGE_ACTIONS,
             Mode::Control => return false,
         };
-        if self.is_empty() || !Self::governs(target) {
+        // Permission-only policies cannot remove a mode, so they cost nothing here.
+        if !Self::governs(target) || self.policies.iter().all(|p| p.prohibitions.is_empty()) {
             return false;
         }
         actions.iter().any(|a| {
@@ -153,5 +169,31 @@ impl OdrlEnforcement {
             .filter(|g| !self.denies(s, mode, g.as_str()))
             .cloned()
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A request carries only its own target's membership edges, however many other
+    /// assets have recorded memberships, and repeated edges are stored once.
+    #[test]
+    fn requests_carry_only_their_targets_memberships() {
+        let mut odrl = OdrlEnforcement::default();
+        for i in 0..1000 {
+            odrl.add_asset_membership(format!("https://pod.ex/other/{i}"), "urn:c:other".into());
+        }
+        for _ in 0..3 {
+            odrl.add_asset_membership("https://pod.ex/n1".into(), "urn:c:notes".into());
+        }
+        let s = Session { agent: None, client: None, issuer: None, now: None };
+        let req = odrl.request("read", "https://pod.ex/n1", &s);
+        assert!(req.asset_matches("urn:c:notes"));
+        let shown = format!("{req:?}");
+        assert!(!shown.contains("urn:c:other"), "{shown}");
+        assert_eq!(shown.matches("urn:c:notes").count(), 1, "{shown}");
+        let other = odrl.request("read", "https://pod.ex/other/7", &s);
+        assert!(other.asset_matches("urn:c:other") && !other.asset_matches("urn:c:notes"));
     }
 }

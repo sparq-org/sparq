@@ -438,6 +438,15 @@ fn mutations_and_creates_are_gated() {
             "{target}"
         );
         assert!(s.decide_create(&alice, NOTES, "n4", Mode::Append).allow == (target != NOTES));
+        // The modes a create decision reports obey the same prohibitions as `allow`.
+        for child in ["n3", "n4"] {
+            let d = s.decide_create(&alice, NOTES, child, Mode::Append);
+            let barred = target == NOTES || child == "n3";
+            for m in [Mode::Append, Mode::Write] {
+                assert_eq!(d.granted_modes.contains(&m), !barred, "{target} {child} {m:?}");
+            }
+            assert!(d.granted_modes.contains(&Mode::Read), "{target} {child}");
+        }
     }
 }
 

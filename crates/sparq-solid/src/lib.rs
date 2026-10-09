@@ -1031,11 +1031,8 @@ impl PodStore {
         );
         // The child-name refusal above stays first; a prohibition on the container or on
         // the child it would mint can only narrow what is left.
-        let mut d = self.apply_odrl(d, session, container, mode);
-        if d.allow && self.odrl_denies(session, mode, &format!("{container}{child_name}")) {
-            d.allow = false;
-        }
-        d
+        let d = self.apply_odrl(d, session, container, mode);
+        self.apply_odrl(d, session, &format!("{container}{child_name}"), mode)
     }
 
     /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
