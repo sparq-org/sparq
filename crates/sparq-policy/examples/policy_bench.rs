@@ -4,7 +4,7 @@
 //! allow/deny shapes in ODRL so that all lanes exercise the same evaluator.
 //! This is not an external comparison or a security/soundness claim.
 
-use sparq_policy::{evaluate, parse_policy_str, Policy, Request, Value, ODRL_NS};
+use sparq_policy::{evaluate, parse_policy_str, Request, ValidatedPolicy, Value, ODRL_NS};
 use std::hint::black_box;
 use std::time::Instant;
 
@@ -17,7 +17,7 @@ struct Case {
 
 struct Mix {
     name: &'static str,
-    policy: Policy,
+    policy: ValidatedPolicy,
     cases: Vec<Case>,
 }
 
@@ -27,7 +27,7 @@ fn request(action: &str, target: &str, assignee: &str) -> Request {
         .by(assignee)
 }
 
-fn parse(ttl: &str) -> Policy {
+fn parse(ttl: &str) -> ValidatedPolicy {
     parse_policy_str(ttl, "turtle").expect("vendored policy fixture must parse")
 }
 

@@ -12,9 +12,11 @@ use sparq_policy::{evaluate, parse_policy_str, Request, Value};
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 
 /// A constraint the request below definitely satisfies.
-const TRUE_C: &str = "[ odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ; odrl:rightOperand <urn:p/a> ]";
+const TRUE_C: &str =
+    "[ odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ; odrl:rightOperand <urn:p/a> ]";
 /// A constraint the request below definitely fails.
-const FALSE_C: &str = "[ odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ; odrl:rightOperand <urn:p/z> ]";
+const FALSE_C: &str =
+    "[ odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ; odrl:rightOperand <urn:p/z> ]";
 
 /// Shapes the evaluator cannot decide for the request built by [`request`].
 const SHAPES: [(&str, &str); 10] = [
@@ -88,7 +90,9 @@ const PREFIXES: &str = "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
 
 /// Parse `ttl` and evaluate the request: `None` when the policy is refused.
 fn allows(ttl: &str) -> Option<bool> {
-    parse_policy_str(ttl, "turtle").ok().map(|p| evaluate(&p, &request()).allow)
+    parse_policy_str(ttl, "turtle")
+        .ok()
+        .map(|p| evaluate(&p, &request()).allow)
 }
 
 #[test]
@@ -99,14 +103,22 @@ fn every_undecidable_shape_fails_closed_on_both_rule_kinds() {
                 "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
                  odrl:target <urn:asset/x> ; odrl:constraint {c} ] ."
             );
-            assert_ne!(allows(&permission), Some(true), "permission, {wrapper}, {name}");
+            assert_ne!(
+                allows(&permission),
+                Some(true),
+                "permission, {wrapper}, {name}"
+            );
             let prohibition = format!(
                 "{PREFIXES}<urn:pol/p> a odrl:Set ; \
                  odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ; \
                  odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
                  odrl:constraint {c} ] ."
             );
-            assert_ne!(allows(&prohibition), Some(true), "prohibition, {wrapper}, {name}");
+            assert_ne!(
+                allows(&prohibition),
+                Some(true),
+                "prohibition, {wrapper}, {name}"
+            );
         }
         // An action refinement is not supported, so either rule kind refuses the policy.
         for rule in ["permission", "prohibition"] {
@@ -132,7 +144,11 @@ fn decidable_constraints_still_decide() {
              odrl:target <urn:asset/x> ; odrl:constraint {c} ] ."
         );
         // `or (true, false)` and `and (true, true)` hold; `xone (true, true)` does not.
-        assert_eq!(allows(&permission), Some(wrapper != "xone"), "permission, {wrapper}");
+        assert_eq!(
+            allows(&permission),
+            Some(wrapper != "xone"),
+            "permission, {wrapper}"
+        );
     }
     let prohibition = format!(
         "{PREFIXES}<urn:pol/p> a odrl:Set ; \
@@ -155,4 +171,228 @@ fn a_constrained_duty_is_not_discharged_by_its_action_alone() {
     let p = parse_policy_str(&ttl, "turtle").unwrap();
     let req = request().discharge(format!("{ODRL}compensate"));
     assert!(!evaluate(&p, &req).allow);
+}
+
+// --- The validation boundary: typed construction gets the same admission checks. ---
+
+use sparq_policy::{
+    contains, decide, Action, Constraint, ConstraintNode, Containment, LogicalConstraint,
+    LogicalOperator, Operator, Policy, Rule,
+};
+
+fn rule(id: &str, action: &str) -> Rule {
+    Rule {
+        id: id.into(),
+        action: Action(action.into()),
+        target: Some("urn:asset/x".into()),
+        assignee: None,
+        assigner: None,
+        constraints: Vec::new(),
+        logical_constraints: Vec::new(),
+        duties: Vec::new(),
+    }
+}
+
+fn atom(left: &str, operator: Operator, right: Value) -> Constraint {
+    Constraint {
+        left: left.into(),
+        operator,
+        right,
+    }
+}
+
+fn compound(operator: LogicalOperator, operands: Vec<Constraint>) -> LogicalConstraint {
+    LogicalConstraint {
+        id: "_:lc".into(),
+        operator,
+        operands: operands.into_iter().map(ConstraintNode::Atomic).collect(),
+    }
+}
+
+fn purpose(iri: &str) -> Constraint {
+    atom(
+        &format!("{ODRL}purpose"),
+        Operator::Eq,
+        Value::Iri(iri.into()),
+    )
+}
+
+#[test]
+fn validate_refuses_a_blank_prohibition_head_built_by_hand() {
+    let read = format!("{ODRL}read");
+    for (field, prohibition) in [
+        ("action", rule("urn:r/no", "_:refined")),
+        (
+            "target",
+            Rule {
+                target: Some("_:anon".into()),
+                ..rule("urn:r/no", &read)
+            },
+        ),
+        (
+            "assignee",
+            Rule {
+                assignee: Some("_:anon".into()),
+                ..rule("urn:r/no", &read)
+            },
+        ),
+    ] {
+        let policy = Policy {
+            permissions: vec![rule("urn:r/yes", &read)],
+            prohibitions: vec![prohibition],
+            ..Policy::default()
+        };
+        assert!(policy.validate().is_err(), "blank prohibition {field}");
+    }
+}
+
+#[test]
+fn validate_refuses_empty_compounds_on_either_rule_kind() {
+    let read = format!("{ODRL}read");
+    for op in [
+        LogicalOperator::And,
+        LogicalOperator::Or,
+        LogicalOperator::Xone,
+    ] {
+        let empty = Rule {
+            logical_constraints: vec![compound(op, Vec::new())],
+            ..rule("urn:r", &read)
+        };
+        let as_permission = Policy {
+            permissions: vec![empty.clone()],
+            ..Policy::default()
+        };
+        assert!(as_permission.validate().is_err(), "empty {op:?} permission");
+        let as_prohibition = Policy {
+            permissions: vec![rule("urn:r/yes", &read)],
+            prohibitions: vec![empty],
+            ..Policy::default()
+        };
+        assert!(
+            as_prohibition.validate().is_err(),
+            "empty {op:?} prohibition"
+        );
+    }
+}
+
+/// `xone` is "exactly one True": two definite Trues decide False whatever the rest.
+#[test]
+fn xone_with_two_trues_is_false_even_with_an_unknown_operand() {
+    let read = format!("{ODRL}read");
+    let unknown = atom(
+        &format!("{ODRL}spatial"),
+        Operator::Eq,
+        Value::Iri("urn:region/eu".into()),
+    );
+    let xone = compound(
+        LogicalOperator::Xone,
+        vec![purpose("urn:p/a"), purpose("urn:p/a"), unknown],
+    );
+    // As a prohibition it definitely does not apply, so the sibling permission grants.
+    let policy = Policy {
+        permissions: vec![rule("urn:r/yes", &read)],
+        prohibitions: vec![Rule {
+            logical_constraints: vec![xone.clone()],
+            ..rule("urn:r/no", &read)
+        }],
+        ..Policy::default()
+    }
+    .validate()
+    .unwrap();
+    assert!(decide(&policy, &request()).allow);
+    // As a permission it definitely does not hold.
+    let policy = Policy {
+        permissions: vec![Rule {
+            logical_constraints: vec![xone],
+            ..rule("urn:r/yes", &read)
+        }],
+        ..Policy::default()
+    }
+    .validate()
+    .unwrap();
+    assert!(!decide(&policy, &request()).allow);
+}
+
+/// A numeric set flattens to a string, so it degrades to Unknown: textual evidence that
+/// spells a member does not grant, and textual evidence outside it does not withdraw a
+/// prohibition.
+#[test]
+fn a_typed_set_never_matches_textual_evidence() {
+    let set =
+        "[ odrl:leftOperand odrl:count ; odrl:operator odrl:isAnyOf ; odrl:rightOperand ( 1 2 ) ]";
+    let textual = |v: &str| {
+        Request::new(format!("{ODRL}read"))
+            .on("urn:asset/x")
+            .with(format!("{ODRL}count"), Value::Str(v.into()))
+    };
+    let permission = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+         odrl:target <urn:asset/x> ; odrl:constraint {set} ] ."
+    );
+    let p = parse_policy_str(&permission, "turtle").unwrap();
+    assert!(!decide(&p, &textual("1")).allow);
+    let prohibition = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; \
+         odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ; \
+         odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
+         odrl:constraint {set} ] ."
+    );
+    assert!(parse_policy_str(&prohibition, "turtle").is_err());
+}
+
+/// Static containment claims an implication only where the evaluator decides: an outer
+/// `neq <urn:x>` does not admit an inner `eq 1`, because the evaluator reads the
+/// number-against-IRI pair as Unknown and the outer permission does not grant.
+#[test]
+fn containment_does_not_claim_an_incomparable_implication() {
+    let read = format!("{ODRL}read");
+    let with = |c: Constraint| Policy {
+        permissions: vec![Rule {
+            constraints: vec![c],
+            ..rule("urn:r", &read)
+        }],
+        ..Policy::default()
+    };
+    let inner = with(atom("urn:dimension", Operator::Eq, Value::Num(1.0)));
+    let outer = with(atom(
+        "urn:dimension",
+        Operator::Neq,
+        Value::Iri("urn:x".into()),
+    ));
+    assert_ne!(contains(&outer, &inner), Containment::Contains);
+    let req = Request::new(read.clone())
+        .on("urn:asset/x")
+        .with("urn:dimension", Value::Num(1.0));
+    assert!(decide(&inner.validate().unwrap(), &req).allow);
+    assert!(!decide(&outer.validate().unwrap(), &req).allow);
+}
+
+/// A declared conflict strategy the engine cannot honour denies at the decision point.
+#[test]
+fn decide_denies_under_an_unhonourable_conflict_strategy() {
+    let ttl = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:conflict odrl:perm ; \
+         odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ."
+    );
+    let p = parse_policy_str(&ttl, "turtle").unwrap();
+    let d = decide(&p, &request());
+    assert!(!d.allow && d.permit.is_none());
+}
+
+/// A grant carries a permit naming what it covers; a deny carries none.
+#[test]
+fn only_a_grant_carries_a_permit() {
+    let ttl = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission <urn:r/yes> . \
+         <urn:r/yes> odrl:action odrl:read ; odrl:target <urn:asset/x> ."
+    );
+    let p = parse_policy_str(&ttl, "turtle").unwrap();
+    let d = decide(&p, &request());
+    let permit = d.permit.expect("granted");
+    assert_eq!(
+        (permit.rule(), permit.target()),
+        ("urn:r/yes", Some("urn:asset/x"))
+    );
+    let d = decide(&p, &Request::new(format!("{ODRL}write")).on("urn:asset/x"));
+    assert!(!d.allow && d.permit.is_none());
 }

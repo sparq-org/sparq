@@ -24,7 +24,7 @@ fn action(local: &str) -> String {
 }
 
 /// A permission gated on `purpose <op> <right>` (TTL helper).
-fn purpose_policy(op: &str, right_ttl: &str) -> sparq_policy::Policy {
+fn purpose_policy(op: &str, right_ttl: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .

@@ -51,6 +51,7 @@
 
 use crate::eval::{evaluate, Decision, Request, ODRL_COUNT};
 use crate::model::{Operator, Policy, Rule, Value};
+use crate::validate::ValidatedPolicy;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -306,7 +307,7 @@ impl ExerciseDecision {
 /// per constraint), and there is **no** read-then-consume gap — the multi-limit case is as
 /// atomic as the single-limit case, closing the prior TOCTOU window (sq-ea27).
 pub fn evaluate_and_exercise(
-    policy: &Policy,
+    policy: &ValidatedPolicy,
     request: &Request,
     store: &dyn UsageCounterStore,
 ) -> ExerciseDecision {
@@ -317,7 +318,10 @@ pub fn evaluate_and_exercise(
     //    instead. Everything else (action/target/assignee, prohibitions, purpose,
     //    dateTime, recipient, duties) is checked by the unchanged evaluator on the real
     //    policy shape.
-    let stripped = strip_count_constraints(policy);
+    let stripped = match strip_count_constraints(policy).validate() {
+        Ok(p) => p,
+        Err(why) => return ExerciseDecision::deny(Vec::new(), vec![why]),
+    };
     let decision = evaluate(&stripped, request);
     if !decision.allow {
         return ExerciseDecision::deny(decision.matched_rules, decision.unmet_constraints);

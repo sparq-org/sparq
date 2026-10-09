@@ -466,6 +466,11 @@ fn constraint_implies(ic: &Constraint, oc: &Constraint) -> bool {
 
 /// Does the outer constraint `oc` admit the single value `v` (an inner `eq v`)?
 fn outer_admits_value(v: &Value, oc: &Constraint) -> bool {
+    // The evaluator reads an incomparable pair as Unknown, which never admits; so the
+    // static analysis claims admission only for a pair the evaluator can decide.
+    if !crate::eval::comparable(v, oc.operator, &oc.right) {
+        return false;
+    }
     match oc.operator {
         Operator::Eq | Operator::IsA => value_eq(v, &oc.right),
         Operator::Neq => !value_eq(v, &oc.right),

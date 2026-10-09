@@ -21,6 +21,7 @@ use crate::model::{
     Action, ConflictStrategy, Constraint, ConstraintNode, Duty, LogicalConstraint, LogicalOperator,
     Operator, Policy, Rule, Value, ODRL_NS,
 };
+use crate::validate::ValidatedPolicy;
 use oxrdf::{Literal, Term};
 use sparq_core::Graph;
 use std::collections::{BTreeMap, BTreeSet};
@@ -38,7 +39,7 @@ const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 /// malformed RDF-collection `odrl:rightOperand` — see [`parse_policy`]). A
 /// well-formed RDF document with no ODRL rules parses to an empty [`Policy`]
 /// (which then denies everything — fail-closed).
-pub fn parse_policy_str(rdf: &str, format: &str) -> Result<Policy, String> {
+pub fn parse_policy_str(rdf: &str, format: &str) -> Result<ValidatedPolicy, String> {
     let graph = Graph::load_str(rdf, format)?;
     parse_policy(&graph)
 }
@@ -57,8 +58,8 @@ pub fn parse_policy_str(rdf: &str, format: &str) -> Result<Policy, String> {
 /// member-less cell asserting `rdf:rest` with no `rdf:first`) collection
 /// (`fold_rights` — honouring its valid prefix, or reading a member-less head as
 /// an ordinary unmatchable value, would drop authored members from the set
-/// encoding, likewise widening).
-pub fn parse_policy(graph: &Graph) -> Result<Policy, String> {
+/// encoding, likewise widening). The result is validated ([`Policy::validate`]).
+pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
     let iri = policy_iri(graph)?;
     // Bulk-load the graph's RDF collection shapes ONCE (cons cells + the member-less
     // rest-only heads), so a multi-valued `odrl:rightOperand ( <a> <b> )` list can be
@@ -67,17 +68,17 @@ pub fn parse_policy(graph: &Graph) -> Result<Policy, String> {
     let lists = rdf_list_table(graph)?;
     let permissions = rules(graph, "permission", true, &lists)?;
     let prohibitions = rules(graph, "prohibition", false, &lists)?;
-    refuse_degraded_prohibitions(&prohibitions)?;
     refuse_unsupported_rule_heads(graph)?;
     let conflict = policy_conflict(graph)?;
     let party_collections = party_collections(graph)?;
-    Ok(Policy {
+    Policy {
         iri,
         permissions,
         prohibitions,
         conflict,
         party_collections,
-    })
+    }
+    .validate()
 }
 
 /// The IRIs this graph identifies as an `odrl:PartyCollection` — retained on the
@@ -462,7 +463,7 @@ fn is_set_operator(op: Option<&Term>) -> bool {
 ///   fail-OPEN hazard) — both degrade to `None` → the unsatisfiable guard
 ///   (fail-closed, consistent with every other malformed-constraint path). That guard
 ///   is fail-closed only on a permission; on a prohibition the whole policy is refused
-///   instead ([`refuse_degraded_prohibitions`]).
+///   instead ([`Policy::validate`]).
 ///
 /// Members are deduplicated by node key. An empty list (`rdf:nil` directly as the
 /// object) has no cons cell, so it falls through as the plain nil IRI — unmatchable
@@ -545,6 +546,12 @@ fn fold_rights(
         _ => {
             if !is_set_operator(op) {
                 return Ok(None); // ambiguous multi-value under a non-set operator
+            }
+            // The set encoding is textual: a typed member (a number, a dateTime) would
+            // lose its type and match a same-lexical string, so the set degrades to the
+            // guard (Unknown) instead.
+            if members.iter().any(typed_member) {
+                return Ok(None);
             }
             let strs: Vec<String> = members.iter().map(term_str).collect();
             if strs.iter().any(|s| {
@@ -1004,6 +1011,12 @@ fn assemble_logical(
     }
 }
 
+/// A literal set member that is not a plain, `xsd:string` or language-tagged string.
+fn typed_member(t: &Term) -> bool {
+    let Term::Literal(l) = t else { return false };
+    l.language().is_none() && l.datatype().as_str() != "http://www.w3.org/2001/XMLSchema#string"
+}
+
 /// The unsatisfiable-guard atomic constraint used for a malformed/unknown operand
 /// (a constraint that can never be satisfied — fail-closed). Shared by [`build_constraint`]
 /// and the compound-operand assembler. [OPUS-4.8] sq-a0zef.
@@ -1017,11 +1030,11 @@ fn unsatisfiable_constraint() -> Constraint {
 
 pub(crate) const MALFORMED: &str = "urn:sparq-policy:malformed";
 
-fn is_unsatisfiable_guard(c: &Constraint) -> bool {
+pub(crate) fn is_unsatisfiable_guard(c: &Constraint) -> bool {
     c.left == MALFORMED
 }
 
-fn node_has_guard(n: &ConstraintNode) -> bool {
+pub(crate) fn node_has_guard(n: &ConstraintNode) -> bool {
     match n {
         ConstraintNode::Atomic(c) => is_unsatisfiable_guard(c),
         ConstraintNode::Compound(lc) => lc.operands.iter().any(node_has_guard),
@@ -1063,31 +1076,6 @@ fn refuse_unsupported_rule_heads(graph: &Graph) -> Result<(), String> {
              match a request; the prohibition would never fire and a sibling permission \
              would grant, so the policy is refused (fail-closed)"
         ));
-    }
-    Ok(())
-}
-
-/// The unsatisfiable guard fails closed only on a permission. On a prohibition it fails
-/// OPEN: the prohibition can never fire, so a sibling permission grants what the author
-/// forbade. A prohibition carrying a degraded constraint (atomic, or any operand of a
-/// compound) therefore refuses the whole policy, like a malformed collection operand.
-fn refuse_degraded_prohibitions(prohibitions: &[Rule]) -> Result<(), String> {
-    for r in prohibitions {
-        let degraded = r.constraints.iter().any(is_unsatisfiable_guard)
-            || r.logical_constraints
-                .iter()
-                .any(|lc| lc.operands.iter().any(node_has_guard));
-        if degraded {
-            return Err(format!(
-                "prohibition {} has a constraint that cannot be represented (a missing or \
-                 unknown operand or operator, a multi-valued rightOperand under a non-set \
-                 operator, an unencodable set member, an odrl:unit, or a malformed compound \
-                 operand); \
-                 dropping it would disable the prohibition and let a sibling permission \
-                 grant, so the policy is refused (fail-closed)",
-                r.id
-            ));
-        }
     }
     Ok(())
 }

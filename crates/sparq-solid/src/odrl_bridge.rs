@@ -134,7 +134,7 @@ use sparq_core::dict::Dict;
 use sparq_core::Graph;
 use sparq_policy::{
     conflict_admissibility, evaluate, matched_prohibition, parse_policy_str, prohibition_status,
-    Operator, Policy, ProhibitionStatus, Request, Rule, Value,
+    Operator, ProhibitionStatus, ValidatedPolicy, Request, Rule, Value,
 };
 use sparq_reason::n3::compiled::{compile, eval, intern_facts, CompiledRuleSet};
 use std::fmt::Write as _;
@@ -303,7 +303,7 @@ impl BridgeOutcome {
 /// deny-overrides would mis-apply the policy author's intent — an authorization-
 /// correctness hazard — so the bridge refuses loudly instead. See
 /// [`sparq_policy::conflict_admissibility`] for the exact admissibility rules.
-fn refuse_unimplementable_conflict(policy: &Policy) -> Option<BridgeOutcome> {
+fn refuse_unimplementable_conflict(policy: &ValidatedPolicy) -> Option<BridgeOutcome> {
     conflict_admissibility(policy)
         .err()
         .map(|reason| BridgeOutcome::refused(format!("REFUSED (odrl:conflict): {}", reason)))
@@ -368,7 +368,7 @@ fn refuse_unimplementable_conflict(policy: &Policy) -> Option<BridgeOutcome> {
 /// ```
 pub fn materialize_permission(
     graph: &mut Graph,
-    policy: &Policy,
+    policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
     // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy BEFORE evaluating —
@@ -477,7 +477,7 @@ pub fn materialize_permission(
 /// ```
 pub fn materialize_prohibition(
     graph: &mut Graph,
-    policy: &Policy,
+    policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
     // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first — under an
@@ -551,7 +551,7 @@ pub fn materialize_prohibition(
 /// mode when a deny was materialized (the operative decision under deny-overrides),
 /// else the grant mode; `reasons` aggregates the caveats of whichever side(s) did not
 /// materialize.
-pub fn materialize_policy(graph: &mut Graph, policy: &Policy, request: &Request) -> BridgeOutcome {
+pub fn materialize_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request) -> BridgeOutcome {
     // Fail-closed FIRST on an unimplementable odrl:conflict strategy — materialise
     // nothing (neither side), rather than silently apply deny-overrides. [OPUS-4.8] sq-ihqbl.
     if let Some(refusal) = refuse_unimplementable_conflict(policy) {
@@ -1019,7 +1019,7 @@ fn recipient_principal_allowed(p: &str) -> bool {
 /// — use [`crate::PodStore::materialize_odrl_permission_conditional`].
 pub fn materialize_permission_conditional(
     graph: &mut Graph,
-    policy: &Policy,
+    policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
     // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first. [OPUS-4.8] sq-ihqbl.
@@ -1222,7 +1222,7 @@ pub fn materialize_permission_conditional(
 /// [`crate::PodStore`] — go through a `materialize_*` method for that.
 pub fn materialize_prohibition_conditional(
     graph: &mut Graph,
-    policy: &Policy,
+    policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
     // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first. [OPUS-4.8] sq-ihqbl.
@@ -1456,7 +1456,7 @@ fn expand_party_collection_heads(request: &Request, heads: &[String]) -> Vec<Str
 /// against each request (frozen, but sound). The one case that stays on the frozen path is
 /// a positive ALLOW head WITH evidenced members, where
 /// [`expand_party_collection_heads`] emits exactly the party set the evaluator would admit.
-fn heads_name_party_collection(policy: &Policy, request: &Request, heads: &[String]) -> bool {
+fn heads_name_party_collection(policy: &ValidatedPolicy, request: &Request, heads: &[String]) -> bool {
     heads.iter().any(|h| {
         policy.party_collections.contains(h) || !request.party_collection_members(h).is_empty()
     })
@@ -1725,7 +1725,7 @@ pub enum BridgeKind {
 #[derive(Debug, Clone)]
 pub struct BridgeEntry {
     /// The ODRL policy this grant was bridged from.
-    pub policy: Policy,
+    pub policy: ValidatedPolicy,
     /// The request `(action, target, party, context, duties)` it was evaluated against.
     pub request: Request,
     /// Which bridge entry point produced it (replayed verbatim).
@@ -1785,7 +1785,7 @@ impl BridgeLedger {
     /// the tracked `(policy, request)` rather than appending a duplicate, so a caller can
     /// re-bridge with an updated policy/request and the ledger tracks exactly one entry
     /// per logical grant.
-    pub fn record(&mut self, policy: &Policy, request: &Request, kind: BridgeKind) {
+    pub fn record(&mut self, policy: &ValidatedPolicy, request: &Request, kind: BridgeKind) {
         let slot = (kind, request.target.clone(), request.party.clone());
         if let Some(e) = self.entries.iter_mut().find(|e| {
             (e.kind, e.request.target.clone(), e.request.party.clone()) == slot
@@ -1803,7 +1803,7 @@ impl BridgeLedger {
     /// context (a withdrawn permission, a lapsed window, a now-Deny). Returns `true` if a
     /// tracked entry matched. A no-match returns `false` and changes nothing — there is
     /// no bridged grant to refresh for that slot. [OPUS-4.8] sq-dpk4.
-    pub fn update(&mut self, policy: &Policy, request: &Request, kind: BridgeKind) -> bool {
+    pub fn update(&mut self, policy: &ValidatedPolicy, request: &Request, kind: BridgeKind) -> bool {
         let slot = (kind, request.target.clone(), request.party.clone());
         match self.entries.iter_mut().find(|e| {
             (e.kind, e.request.target.clone(), e.request.party.clone()) == slot
@@ -1969,7 +1969,7 @@ fn replay(
 /// request's action/target.
 fn refresh_prohibition_conditional(
     graph: &mut Graph,
-    policy: &Policy,
+    policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
     if prohibition_maps_faithfully(policy, request) {
@@ -1987,7 +1987,7 @@ fn refresh_prohibition_conditional(
 /// Whether SOME prohibition in `policy` whose action/target structurally name `request`
 /// maps faithfully to agent conditions (so the conditional-deny path would emit a
 /// re-checked condition rather than fall back to one-shot). [OPUS-4.8] sq-4r70.
-fn prohibition_maps_faithfully(policy: &Policy, request: &Request) -> bool {
+fn prohibition_maps_faithfully(policy: &ValidatedPolicy, request: &Request) -> bool {
     let Some(mode) = action_to_mode(&request.action) else { return false };
     let Some(target) = request.target.as_deref() else { return false };
     policy.prohibitions.iter().any(|rule| {
@@ -2008,7 +2008,7 @@ fn prohibition_maps_faithfully(policy: &Policy, request: &Request) -> bool {
 /// - [`ProhibitionStatus::Withdrawn`] — no prohibition names the request, or every one
 ///   that does is *definitely* false given the evidence: emit nothing → the deny is
 ///   retracted and access is restored (subject to deny-overrides composition).
-fn refresh_prohibition(graph: &mut Graph, policy: &Policy, request: &Request) -> BridgeOutcome {
+fn refresh_prohibition(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request) -> BridgeOutcome {
     match prohibition_status(policy, request) {
         // Genuinely gone → behave exactly like the materialize path (which now also
         // finds no match), emitting nothing so the deny is dropped.
@@ -2024,7 +2024,7 @@ fn refresh_prohibition(graph: &mut Graph, policy: &Policy, request: &Request) ->
 /// fail-closed grant semantics ([`materialize_permission`]); the deny side uses the
 /// fail-closed deny-retraction rule ([`refresh_prohibition`]). Composed exactly as
 /// [`materialize_policy`] so deny-overrides still holds. [OPUS-4.8] sq-2pcf.
-fn refresh_policy(graph: &mut Graph, policy: &Policy, request: &Request) -> BridgeOutcome {
+fn refresh_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request) -> BridgeOutcome {
     let allow = materialize_permission(graph, policy, request);
     let deny = refresh_prohibition(graph, policy, request);
 
@@ -2113,7 +2113,7 @@ pub(crate) mod count {
     use sparq_core::Graph;
     use sparq_policy::{
         count_status, evaluate, evaluate_and_exercise, CountStatus, Policy, Request,
-        UsageCounterStore, ODRL_COUNT,
+        UsageCounterStore, ValidatedPolicy, ODRL_COUNT,
     };
     use std::sync::Arc;
 
@@ -2160,7 +2160,7 @@ pub(crate) mod count {
     /// (`None` for an uncounted permission or a deny).
     pub(crate) fn materialize_permission_counted(
         graph: &mut Graph,
-        policy: &Policy,
+        policy: &ValidatedPolicy,
         request: &Request,
         store: &dyn UsageCounterStore,
     ) -> BridgeOutcome {
@@ -2226,7 +2226,7 @@ pub(crate) mod count {
     /// makes a bridged grant self-retract on exhaustion.
     pub(crate) fn refresh_permission_counted(
         graph: &mut Graph,
-        policy: &Policy,
+        policy: &ValidatedPolicy,
         request: &Request,
         store: Option<&CounterHandle>,
     ) -> BridgeOutcome {
@@ -2244,7 +2244,10 @@ pub(crate) mod count {
         //     for a missing count value) — exactly the base shape `evaluate_and_exercise`
         //     uses. A withdrawn permission / now-matching prohibition denies here →
         //     retract. NOTE: this never consumes; consumption only happens at exercise.
-        let stripped = strip_count_constraints(policy);
+        let stripped = match strip_count_constraints(policy).validate() {
+            Ok(p) => p,
+            Err(why) => return BridgeOutcome::denied(vec![why]),
+        };
         let decision = evaluate(&stripped, request);
         if !decision.allow {
             return BridgeOutcome::denied(decision.unmet_constraints);
@@ -2313,8 +2316,8 @@ pub(crate) mod count {
     /// the store, not as a stateless numeric comparison). Mirrors sparq-policy's internal
     /// `strip_count_constraints` (kept here because that helper is crate-private).
     /// Prohibitions are untouched (a count on a prohibition keeps its stateless meaning).
-    fn strip_count_constraints(policy: &Policy) -> Policy {
-        let mut out = policy.clone();
+    fn strip_count_constraints(policy: &ValidatedPolicy) -> Policy {
+        let mut out = policy.policy().clone();
         for rule in &mut out.permissions {
             rule.constraints.retain(|c| c.left != ODRL_COUNT);
         }

@@ -21,9 +21,10 @@
 //! [OPUS-4.8]
 
 use crate::model::{
-    Action, Constraint, ConstraintNode, LogicalConstraint, LogicalOperator, Operator, Policy, Rule,
+    Action, Constraint, ConstraintNode, LogicalConstraint, LogicalOperator, Operator, Rule,
     Value,
 };
+use crate::validate::ValidatedPolicy;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The `odrl:purpose` left-operand IRI — the dimension a *purpose constraint*
@@ -408,8 +409,40 @@ impl Request {
     }
 }
 
-/// The result of evaluating a policy against a request.
+/// Proof that [`decide`] granted a request: the only value a grant materialiser can
+/// act on. Its fields are private and it has no public constructor, so nothing outside
+/// this crate can produce one without a granting decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Permit {
+    rule: String,
+    action: String,
+    target: Option<String>,
+    party: Option<String>,
+}
+
+impl Permit {
+    /// The id of the permission that granted.
+    pub fn rule(&self) -> &str {
+        &self.rule
+    }
+    /// The requested action the grant covers.
+    pub fn action(&self) -> &str {
+        &self.action
+    }
+    /// The requested target the grant covers, if the request named one.
+    pub fn target(&self) -> Option<&str> {
+        self.target.as_deref()
+    }
+    /// The requesting party the grant covers, if the request named one.
+    pub fn party(&self) -> Option<&str> {
+        self.party.as_deref()
+    }
+}
+
+/// The result of evaluating a policy against a request. Only [`decide`] builds one, so
+/// `allow` is true exactly when [`permit`](Decision::permit) carries a [`Permit`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Decision {
     /// `true` ⇒ ALLOW (a permission matched, was un-prohibited, and all its
     /// duties were discharged). `false` ⇒ DENY (fail-closed).
@@ -422,19 +455,47 @@ pub struct Decision {
     /// (unmet constraint, undischarged duty, overriding prohibition). Empty on a
     /// clean ALLOW with no caveats.
     pub unmet_constraints: Vec<String>,
+    /// The grant itself, present exactly when `allow` is true.
+    pub permit: Option<Permit>,
 }
 
 impl Decision {
-    fn deny(matched: Vec<String>, unmet: Vec<String>) -> Decision {
+    pub(crate) fn deny(matched: Vec<String>, unmet: Vec<String>) -> Decision {
         Decision {
             allow: false,
             matched_rules: matched,
             unmet_constraints: unmet,
+            permit: None,
+        }
+    }
+
+    fn grant(rule: &Rule, request: &Request) -> Decision {
+        Decision {
+            allow: true,
+            matched_rules: vec![rule.id.clone()],
+            unmet_constraints: Vec::new(),
+            permit: Some(Permit {
+                rule: rule.id.clone(),
+                action: request.action.clone(),
+                target: request.target.clone(),
+                party: request.party.clone(),
+            }),
         }
     }
 }
 
-/// Evaluate `policy` against `request`, returning a fail-closed [`Decision`].
+/// Evaluate `policy` against `request`; the same as [`decide`].
+pub fn evaluate(policy: &ValidatedPolicy, request: &Request) -> Decision {
+    decide(policy, request)
+}
+
+/// The one decision point: evaluate `policy` against `request`, returning a fail-closed
+/// [`Decision`] that carries a [`Permit`] on a grant.
+///
+/// It applies, in order: the declared `odrl:conflict` strategy (one this engine cannot
+/// honour denies, see [`crate::conflict_admissibility`]); the prohibitions, each firing
+/// unless it definitely does not apply; then the permissions, one granting only on a
+/// definite yes with every duty discharged (a constrained duty never is).
 ///
 /// See the module docs for the exact semantics. This is the single-node
 /// base case of ODRL — it reduces to the same allow/deny shape `sparq-solid`'s
@@ -444,13 +505,18 @@ impl Decision {
 /// # Examples
 ///
 /// ```
-/// use sparq_policy::{evaluate, Policy, Request};
+/// use sparq_policy::{decide, Policy, Request};
 /// // An empty policy denies everything (fail-closed).
-/// let d = evaluate(&Policy::default(), &Request::new("http://www.w3.org/ns/odrl/2/read"));
+/// let d = decide(&Policy::default().validate().unwrap(), &Request::new("http://www.w3.org/ns/odrl/2/read"));
 /// assert!(!d.allow);
 /// ```
-pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
+pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     let req_action = Action(request.action.clone());
+
+    // 0. A conflict strategy this engine cannot honour decides nothing (fail-closed).
+    if let Err(why) = crate::compare::conflict_admissibility(policy) {
+        return Decision::deny(Vec::new(), vec![why]);
+    }
 
     // 1. A prohibition overrides everything unless it DEFINITELY does not apply: one
     //    whose constraints are Unknown (no evidence, unsupported, incomparable) still
@@ -485,15 +551,11 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
         let undischarged: Vec<&str> = rule
             .duties
             .iter()
-            .filter(|d| !d.constraints.is_empty() || !request.discharged_duties.contains(&d.action.0))
+            .filter(|d| !duty_discharged(d, request))
             .map(|d| d.action.0.as_str())
             .collect();
         if undischarged.is_empty() {
-            return Decision {
-                allow: true,
-                matched_rules: vec![rule.id.clone()],
-                unmet_constraints: Vec::new(),
-            };
+            return Decision::grant(rule, request);
         }
         for a in undischarged {
             caveats.push(format!(
@@ -508,6 +570,12 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
         caveats.push("no permission matches the request".to_owned());
     }
     Decision::deny(Vec::new(), caveats)
+}
+
+/// Whether `request` reports `duty` discharged. A duty's own constraints are not
+/// evaluated, so a constrained duty is never provably discharged.
+pub fn duty_discharged(duty: &crate::model::Duty, request: &Request) -> bool {
+    duty.constraints.is_empty() && request.discharged_duties.contains(&duty.action.0)
 }
 
 /// The first [`Prohibition`](crate::model::Rule) in `policy` that **applies** to
@@ -541,7 +609,7 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
 ///     .on("https://pod.ex/n1").by("https://bob.ex/card#me");
 /// assert!(matched_prohibition(&pol, &other).is_none());
 /// ```
-pub fn matched_prohibition<'p>(policy: &'p Policy, request: &Request) -> Option<&'p Rule> {
+pub fn matched_prohibition<'p>(policy: &'p ValidatedPolicy, request: &Request) -> Option<&'p Rule> {
     let req_action = Action(request.action.clone());
     policy
         .prohibitions
@@ -605,7 +673,7 @@ pub fn matched_prohibition<'p>(policy: &'p Policy, request: &Request) -> Option<
 /// // NO evidence for the window → unprovable → ambiguous (keep the deny).
 /// assert_eq!(prohibition_status(&pol, &base), ProhibitionStatus::Ambiguous);
 /// ```
-pub fn prohibition_status(policy: &Policy, request: &Request) -> ProhibitionStatus {
+pub fn prohibition_status(policy: &ValidatedPolicy, request: &Request) -> ProhibitionStatus {
     let req_action = Action(request.action.clone());
     let mut any_ambiguous = false;
     for rule in &policy.prohibitions {
@@ -1060,16 +1128,22 @@ fn classify_prohibition(rule: &Rule, request: &Request, req_action: &Action) -> 
     // assignee use the SAME action-hierarchy + collection-membership matching as the
     // grant path (sq-euhr3 / sq-k7itg) so a deny carved by a collection/`use` rule is
     // classified consistently.
-    if !rule.action.permits(req_action) {
+    // A blank-node head (a refined action, an anonymous collection) names nothing the
+    // request can be matched against, so the structural answer is Unknown, not "no".
+    let opaque = |s: &str| s.starts_with("_:");
+    let mut any_ambiguous = opaque(&rule.action.0)
+        || rule.target.as_deref().is_some_and(opaque)
+        || rule.assignee.as_deref().is_some_and(opaque);
+    if !rule.action.permits(req_action) && !opaque(&rule.action.0) {
         return RuleClass::DefinitelyNo;
     }
     if let Some(t) = &rule.target {
-        if !request.asset_matches(t) {
+        if !request.asset_matches(t) && !opaque(t) {
             return RuleClass::DefinitelyNo;
         }
     }
     if let Some(a) = &rule.assignee {
-        if !request.party_matches(a) {
+        if !request.party_matches(a) && !opaque(a) {
             return RuleClass::DefinitelyNo;
         }
     }
@@ -1077,7 +1151,6 @@ fn classify_prohibition(rule: &Rule, request: &Request, req_action: &Action) -> 
     // *definitely* false (we have evidence and it fails) is a definite no; one that is
     // unprovable for lack of evidence is ambiguous (a deny must NOT be retracted on it).
     // Atomic and compound (logical) constraints fold in identically.
-    let mut any_ambiguous = false;
     for c in &rule.constraints {
         match constraint_status(c, request) {
             ConstraintStatus::Satisfied => {}
@@ -1158,12 +1231,12 @@ fn constraint_node_status(node: &ConstraintNode, request: &Request) -> Constrain
 ///   (a compound that asserts nothing is not a positive grant — fail-closed).
 /// - **`or`** — `Satisfied` iff ANY operand is `Satisfied`; `DefinitelyUnsatisfied` iff
 ///   EVERY operand is `DefinitelyUnsatisfied`; else `Unprovable`. An empty operand set is
-///   `DefinitelyUnsatisfied` (a disjunction with no operand can never hold).
+///   `Unprovable`, like every empty compound.
 /// - **`xone`** — exclusive-or, `Satisfied` iff EXACTLY ONE operand is `Satisfied` AND
 ///   no operand is `Unprovable` (an unprovable operand could be the disqualifying second
 ///   true, so the exact-one count is not provable → `Unprovable`, never silently
 ///   `Satisfied`). `DefinitelyUnsatisfied` iff the count of `Satisfied` is provably ≠ 1
-///   (0 with no unprovable operand, or ≥ 2). Otherwise `Unprovable`.
+///   (≥ 2 whatever the rest, or 0 with no unprovable operand). Otherwise `Unprovable`.
 fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> ConstraintStatus {
     use ConstraintStatus::*;
     let mut n_sat = 0usize;
@@ -1177,6 +1250,8 @@ fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> Const
         }
     }
     match lc.operator {
+        // An empty compound asserts nothing decidable: Unknown for every combinator.
+        _ if lc.operands.is_empty() => Unprovable,
         LogicalOperator::And => {
             if n_unsat > 0 {
                 DefinitelyUnsatisfied
@@ -1192,12 +1267,14 @@ fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> Const
             } else if n_unprov > 0 {
                 Unprovable
             } else {
-                // every operand definitely-unsatisfied (incl. the empty set)
                 DefinitelyUnsatisfied
             }
         }
         LogicalOperator::Xone => {
-            if n_unprov > 0 {
+            if n_sat >= 2 {
+                // Two definite trues already rule out "exactly one", whatever the rest.
+                DefinitelyUnsatisfied
+            } else if n_unprov > 0 {
                 // An unprovable operand could flip the satisfied-count → not provable.
                 Unprovable
             } else if n_sat == 1 {
@@ -1584,7 +1661,7 @@ fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
 /// kind (two numbers, two parseable dateTimes, or IRI/string values); an order
 /// operator needs [`order`] to succeed; set membership compares IRI/string values
 /// only. Anything else is Unknown to the evaluator, not false.
-fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
+pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
     let textual = |v: &Value| matches!(v, Value::Iri(_) | Value::Str(_));
     match op {
         Operator::Eq | Operator::IsA | Operator::Neq => match (actual, bound) {

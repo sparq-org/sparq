@@ -7,7 +7,7 @@ description: Evaluate W3C ODRL 2.2 usage-control policies over RDF with the opt-
 
 `sparq-policy` is the declarative **usage-control** layer above access control. Where `sparq-solid` answers "may this agent **read** graph G?", `sparq-policy` answers "may this party **use** this asset *for purpose P, with obligation O, until time T, disclosing only to recipient R*?" — by evaluating a [W3C ODRL 2.2](https://www.w3.org/TR/odrl-model/) policy.
 
-It parses an ODRL policy from RDF into a typed model (`Policy → {permissions, prohibitions}`, each `Rule` carrying an `Action`, `target`, `assignee`/`assigner`, `Constraint`s and `Duty`s) and evaluates an access `Request` to a **fail-closed** `Decision { allow, matched_rules, unmet_constraints }`. This is the **single-node base case**: ODRL over one node's data, reducing to the same allow/deny shape `sparq-solid` enforces.
+It parses an ODRL policy from RDF into a typed model (`Policy → {permissions, prohibitions}`, each `Rule` carrying an `Action`, `target`, `assignee`/`assigner`, `Constraint`s and `Duty`s) and evaluates an access `Request` to a **fail-closed** `Decision { allow, matched_rules, unmet_constraints, permit }` through the one decision point `decide` (`evaluate` is the same function). This is the **single-node base case**: ODRL over one node's data, reducing to the same allow/deny shape `sparq-solid` enforces.
 
 > **Scope.** Single-node only. The headline federated-disclosure / ODRL→MPC composition (per-node ODRL drives the `sparq-mpc` disclosed-vs-hidden split; ODRL `Duty` → ZK proof obligation) is **deferred** — it inherits the MPC honest-majority/LAN envelope and the open ZK-soundness remediation. See `research/feature-research-odrl-policy.md`.
 
@@ -55,6 +55,8 @@ assert_eq!(d.matched_rules.len(), 1);  // the granting permission, for audit
 
 ## The model
 
+- **`ValidatedPolicy`** — what every decision entry point takes (`decide`/`evaluate`, `matched_prohibition`, `prohibition_status`, `evaluate_and_exercise`). Only `Policy::validate` builds one; `parse_policy*` validate before returning, and a hand-built `Policy` calls `.validate()`. It refuses an empty `and`/`or`/`xone`, a prohibition carrying an unrepresentable constraint, and a prohibition with a blank-node action, target or assignee. It derefs to `Policy`.
+- **`Permit`** — carried by a granting `Decision` (`permit: Some(..)`, naming the rule, action, target and party). Its constructor is private and `Decision` is `non_exhaustive`, so only `decide` produces a grant.
 - **`Policy`** — `permissions: Vec<Rule>`, `prohibitions: Vec<Rule>`, optional `iri`, and `conflict: Option<ConflictStrategy>` (the parsed `odrl:conflict` strategy — see `conflict_admissibility` under static analysis). `Set`/`Offer`/`Agreement` parse identically (subtype affects contracting, not single-node eval).
 - **`Rule`** — `action: Action`, `target`/`assignee`/`assigner: Option<String>`, `constraints: Vec<Constraint>`, `logical_constraints: Vec<LogicalConstraint>`, `duties: Vec<Duty>` (duties on permissions only). The atomic `constraints` and the compound `logical_constraints` are **all** ANDed.
 - **`Action`** — full IRI. `odrl:use` is the ODRL **umbrella** action: a permission for `use` permits any requested action *in the `use` subtree of the [ODRL 2.2 action hierarchy](https://www.w3.org/TR/odrl-vocab/)* — i.e. everything **except** the disjoint ownership-`transfer` subtree (`odrl:sell`/`odrl:give`/`odrl:transfer`). So a `use` permission grants `read`/`write`/`modify`/… but **not** `sell`. All non-`use` actions match by exact IRI. sq-euhr3.
@@ -67,7 +69,8 @@ assert_eq!(d.matched_rules.len(), 1);  // the granting permission, for audit
 1. A `Rule` **matches** when its action permits the request action (per the ODRL action hierarchy — `use` subsumes its sub-actions but not the `transfer` subtree), its `target`/`assignee` (if set) agree (by IRI equality **or collection membership** — see below), and **every** atomic `Constraint` **and** compound `LogicalConstraint` is satisfied (all ANDed).
 2. A `Permission` grants iff it matches **and** all its `Duty`s are discharged.
 3. A matching `Prohibition` **overrides** any permission (carve-out — deny-overrides, the one conflict strategy implemented; NOT a spec default: the ODRL 2.2 IM default for an unset `odrl:conflict` is `invalid`, and the ODRL Formal Semantics CG report's conflict machinery is explicitly pending — see the crate README's ODRL conformance note).
-4. **DENY by default:** no matching+discharged permission, or any matching prohibition ⇒ DENY. An empty/malformed policy denies everything; a constraint with no request value, an unknown operator, or a structurally incomplete constraint all fail closed.
+4. **Three-valued constraints:** every constraint and compound is True, False or Unknown (missing evidence, an unsupported or malformed constraint, an incomparable pair). `and`/`or` are Kleene; `xone` is True only for exactly one True with no Unknown, and False once two operands are True. A permission grants only on True; a prohibition fires on True **or** Unknown. A constrained duty is never discharged. `decide` also denies under a declared `odrl:conflict` strategy `conflict_admissibility` refuses.
+5. **DENY by default:** no matching+discharged permission, or any matching prohibition ⇒ DENY. An empty/malformed policy denies everything; a constraint with no request value, an unknown operator, or a structurally incomplete constraint all fail closed.
 
 ## Constraint operators
 

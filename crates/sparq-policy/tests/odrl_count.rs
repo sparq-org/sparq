@@ -25,7 +25,7 @@ fn read() -> String {
 }
 
 /// "alice may read asset/x at most N times" under `operator`.
-fn policy_at_most(operator: &str, bound: &str) -> sparq_policy::Policy {
+fn policy_at_most(operator: &str, bound: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .
@@ -248,7 +248,7 @@ fn no_count_constraint_unbounded() {
 
 /// "alice may read asset/x" under TWO `odrl:count` constraints (a tighter and a looser
 /// limit on the same rule → same usage counter). [OPUS-4.8] sq-ea27.
-fn policy_two_counts(op_a: &str, bound_a: &str, op_b: &str, bound_b: &str) -> sparq_policy::Policy {
+fn policy_two_counts(op_a: &str, bound_a: &str, op_b: &str, bound_b: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .

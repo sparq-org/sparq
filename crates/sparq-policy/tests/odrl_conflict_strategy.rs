@@ -17,7 +17,7 @@ use sparq_policy::{conflict_admissibility, parse_policy_str, ConflictStrategy};
 /// A conflicting permission/prohibition pair (same action/target/assignee) — the shape
 /// `detect_conflicts` flags as a `Certain` conflict — with the given `odrl:conflict`
 /// clause spliced in (empty string = leave it unset).
-fn conflicting_policy(conflict_clause: &str) -> sparq_policy::Policy {
+fn conflicting_policy(conflict_clause: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .

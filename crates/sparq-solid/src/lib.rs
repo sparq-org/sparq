@@ -1381,7 +1381,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome = odrl_bridge::materialize_permission(&mut self.graph, policy, request);
@@ -1410,7 +1410,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_prohibition(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome = odrl_bridge::materialize_prohibition(&mut self.graph, policy, request);
@@ -1433,7 +1433,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_policy(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome = odrl_bridge::materialize_policy(&mut self.graph, policy, request);
@@ -1459,7 +1459,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission_conditional(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome =
@@ -1490,7 +1490,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_prohibition_conditional(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome =
@@ -1538,7 +1538,7 @@ impl PodStore {
     #[cfg(feature = "count-enforcement")]
     pub fn materialize_odrl_permission_counted(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
     ) -> odrl_bridge::BridgeOutcome {
@@ -1625,7 +1625,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn refresh_odrl_grant(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         kind: odrl_bridge::BridgeKind,
     ) -> (bool, usize) {

@@ -35,7 +35,7 @@ fn pod() -> Graph {
 }
 
 /// alice MAY read n1 (a bare matching permission, no constraints).
-fn read_policy() -> sparq_policy::Policy {
+fn read_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -326,7 +326,7 @@ fn bridge_preserves_existing_wac_grants() {
 // ===========================================================================
 
 /// alice is PROHIBITED from writing n1 (a bare matching prohibition, no constraints).
-fn write_prohibition() -> sparq_policy::Policy {
+fn write_prohibition() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -568,7 +568,7 @@ fn cond_grants_for(graph: &Graph, agent: Option<&str>) -> usize {
 }
 
 /// A permission whose RECIPIENT is constrained to carol (not whoever materialized it).
-fn recipient_policy() -> sparq_policy::Policy {
+fn recipient_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -896,7 +896,7 @@ fn no_constraint_conditional_grants_public() {
 use sparq_solid::BridgeKind;
 
 /// alice MAY read n1 ONLY until 2026-01-01 (a time-windowed permission).
-fn windowed_read_policy() -> sparq_policy::Policy {
+fn windowed_read_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -913,7 +913,7 @@ fn windowed_read_policy() -> sparq_policy::Policy {
 }
 
 /// A policy that grants NOTHING (the permission has been WITHDRAWN entirely).
-fn empty_policy() -> sparq_policy::Policy {
+fn empty_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> . <urn:pol/read> a odrl:Set ."#,
         "turtle",
@@ -1207,7 +1207,7 @@ fn ambiguous_reeval_retracts_fail_closed() {
 
 /// alice is prohibited from writing n1 ONLY while a window holds (dateTime < bound).
 /// Used to exercise definite-lapse vs ambiguous (no-evidence) deny retraction.
-fn windowed_write_prohibition() -> sparq_policy::Policy {
+fn windowed_write_prohibition() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -1224,7 +1224,7 @@ fn windowed_write_prohibition() -> sparq_policy::Policy {
 }
 
 /// A policy that prohibits NOTHING (the prohibition has been WITHDRAWN entirely).
-fn empty_prohibition_policy() -> sparq_policy::Policy {
+fn empty_prohibition_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> . <urn:pol/prohib> a odrl:Set ."#,
         "turtle",
@@ -1509,7 +1509,7 @@ const RESEARCH: &str = "urn:purpose/research";
 const MARKETING: &str = "urn:purpose/marketing";
 
 /// alice MAY read n1, gated on purpose = research (exact IRI).
-fn purpose_read_policy() -> sparq_policy::Policy {
+fn purpose_read_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -1665,7 +1665,7 @@ fn purpose_prohibition_dual_through_enforcement() {
 const DAVE: &str = "https://dave.ex/card#me";
 
 /// "everyone EXCEPT bob may read n1" — recipient neq bob.
-fn recipient_neq_policy() -> sparq_policy::Policy {
+fn recipient_neq_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -1825,7 +1825,7 @@ fn recipient_neq_reserved_encoded_does_not_widen_to_public() {
 /// "everyone EXCEPT `<excluded>` may read n1" — a `recipient neq <excluded>` permission
 /// (the noneOf "everyone-except-X" shape). Parameterised so the exclusion set can be
 /// swapped between refreshes. [OPUS-4.8] sq-gx2q.
-fn recipient_neq_policy_excluding(excluded: &str) -> sparq_policy::Policy {
+fn recipient_neq_policy_excluding(excluded: &str) -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         &format!(
             r#"
@@ -1952,7 +1952,7 @@ fn refresh_noneof_grant_withdrawn_retracts_public_head() {
 // ===========================================================================
 
 /// "carol (and only carol), but never bob, may read n1" — recipient eq carol AND neq bob.
-fn recipient_eq_and_neq_policy() -> sparq_policy::Policy {
+fn recipient_eq_and_neq_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2043,7 +2043,7 @@ fn cond_denies_for(graph: &Graph, agent: Option<&str>) -> usize {
 
 /// "carol (recipient) is PROHIBITED from reading n1" — a recipient-eq prohibition that
 /// the conditional path maps to a per-session deny carving out exactly carol.
-fn prohibit_recipient_carol_policy() -> sparq_policy::Policy {
+fn prohibit_recipient_carol_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2200,7 +2200,7 @@ fn conditional_deny_mixed_constraint_falls_back_one_shot() {
 
 /// A conflicting modify-permission + modify-prohibition on N1 for alice, with the given
 /// `odrl:conflict` clause spliced in (empty = leave unset).
-fn conflicting_write_policy(conflict_clause: &str) -> sparq_policy::Policy {
+fn conflicting_write_policy(conflict_clause: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2320,7 +2320,7 @@ fn unset_conflict_is_not_refused() {
 // ===========================================================================
 
 /// bob OR carol may read n1 — `recipient isAnyOf "bob|carol"`.
-fn recipient_isanyof_policy() -> sparq_policy::Policy {
+fn recipient_isanyof_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2337,7 +2337,7 @@ fn recipient_isanyof_policy() -> sparq_policy::Policy {
 }
 
 /// everyone EXCEPT bob and dave may read n1 — `recipient isNoneOf "bob|dave"`.
-fn recipient_isnoneof_policy() -> sparq_policy::Policy {
+fn recipient_isnoneof_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2355,7 +2355,7 @@ fn recipient_isnoneof_policy() -> sparq_policy::Policy {
 
 /// A recipient-`isNoneOf`-style permission with an arbitrary operator + right operand
 /// spliced in (for the malformed-operand fail-closed cases).
-fn recipient_set_policy(operator: &str, right_operand: &str) -> sparq_policy::Policy {
+fn recipient_set_policy(operator: &str, right_operand: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2377,7 +2377,7 @@ fn recipient_set_policy(operator: &str, right_operand: &str) -> sparq_policy::Po
 /// the evaluator is fail-closed on missing identity, while the bridged noneOf shape
 /// keeps the everyone-except public head — the accepted sq-5037 semantics (asserted
 /// separately below).
-fn assert_bridge_evaluator_parity(pol: &sparq_policy::Policy) {
+fn assert_bridge_evaluator_parity(pol: &sparq_policy::ValidatedPolicy) {
     let mut store = PodStore::new(pod());
     let mat = Request::new(odrl("read")).on(N1).by(ALICE);
     assert!(store.materialize_odrl_permission_conditional(pol, &mat).granted);
@@ -2720,7 +2720,7 @@ fn bare_assignee_prohibition_conditional_scopes_to_assignee_not_public() {
 /// `recipient eq alice` sub-constraint). ZERO atomic `rule.constraints`, NO bare
 /// `odrl:assignee` property → the pre-fix conditional path folded an empty
 /// recipient set to auth:Public, dropping the compound restriction.
-fn compound_recipient_permit_policy() -> sparq_policy::Policy {
+fn compound_recipient_permit_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -2964,7 +2964,7 @@ const LAB: &str = "https://pod.ex/groups/lab";
 const LAB_DECL: &str = "<https://pod.ex/groups/lab> a odrl:PartyCollection .";
 
 /// "the LAB collection MAY read n1" — a bare `odrl:assignee` naming a PartyCollection.
-fn lab_assignee_permit() -> sparq_policy::Policy {
+fn lab_assignee_permit() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         &format!(
             r#"
@@ -2983,7 +2983,7 @@ fn lab_assignee_permit() -> sparq_policy::Policy {
 }
 
 /// "the LAB collection MUST NOT read n1" — a prohibition whose head is the collection.
-fn lab_prohibition() -> sparq_policy::Policy {
+fn lab_prohibition() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         &format!(
             r#"
@@ -3003,7 +3003,7 @@ fn lab_prohibition() -> sparq_policy::Policy {
 
 /// "anyone EXCEPT the LAB collection MAY read n1" — an ALLOW `neq` carve-out whose
 /// excluded value is the collection.
-fn lab_carve_out_permit() -> sparq_policy::Policy {
+fn lab_carve_out_permit() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         &format!(
             r#"
@@ -3023,7 +3023,7 @@ fn lab_carve_out_permit() -> sparq_policy::Policy {
 }
 
 /// "everyone MAY read n1" — the public allow used to show a prohibition biting.
-fn public_read_permit() -> sparq_policy::Policy {
+fn public_read_permit() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
         <urn:pol/pub2> a odrl:Set ; odrl:permission [

@@ -36,7 +36,7 @@ fn pod() -> Graph {
 }
 
 /// alice MAY read n1 AT MOST twice (`odrl:count lteq 2`).
-fn count_read_policy() -> sparq_policy::Policy {
+fn count_read_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
