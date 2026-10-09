@@ -14501,7 +14501,8 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
         (DateTime(_), DateTime(_)) | (Date(_), Date(_)) => None,
         // date and dateTime values are disjoint -> known different.
-        (DateTime(_), Date(_)) | (Date(_), DateTime(_)) => Some(false),
+        // An ill-formed operand (e.g. a timezone-free dateTimeStamp) is not a value: error.
+        (DateTime(Some(_)), Date(Some(_))) | (Date(Some(_)), DateTime(Some(_))) => Some(false),
         // A language-tagged literal equals only a literal with the same (ci) tag.
         (Lang(t1, v1), Lang(t2, v2)) => Some(t1 == t2 && v1 == v2),
         (Lang(..), _) | (_, Lang(..)) => Some(false),
@@ -15595,13 +15596,18 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     }
     if target == xsd::DATE_TIME.as_str() {
         return Some(match v {
-            Value::Term(Term::Literal(l))
-                if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP =>
-            {
+            Value::Term(Term::Literal(l)) if l.datatype() == xsd::DATE_TIME => {
                 typed(l.value().to_string(), xsd::DATE_TIME)
             }
+            // A timezone-free dateTimeStamp is ill-formed (#3902): no value to cast.
+            Value::Term(Term::Literal(l)) if l.datatype() == xsd::DATE_TIME_STAMP => {
+                match datetime_fields(l.value(), xsd::DATE_TIME_STAMP.as_str()) {
+                    Some(_) => typed(l.value().to_string(), xsd::DATE_TIME),
+                    None => Value::Error,
+                }
+            }
             _ => match src_str() {
-                Some(s) if parse_datetime(&s).is_some() => typed(s, xsd::DATE_TIME),
+                Some(s) if datetime_fields(&s, xsd::DATE_TIME.as_str()).is_some() => typed(s, xsd::DATE_TIME),
                 _ => Value::Error,
             },
         });
@@ -15928,7 +15934,7 @@ fn datetime_arg_tz(v: &Value) -> Option<String> {
         _ => return None,
     };
     let s = l.value();
-    parse_datetime(s)?; // lexical shape check
+    datetime_fields(s, l.datatype().as_str())?; // lexical shape (and dateTimeStamp timezone) check
     let (_, time) = s.split_once('T')?;
     Some(match time.find(['Z', '+', '-']) {
         Some(i) => time[i..].to_string(),
@@ -16075,11 +16081,14 @@ fn encode_for_uri(s: &str) -> String {
 /// form. YEAR…MINUTES return xsd:integer; SECONDS returns xsd:decimal (per SPARQL),
 /// parsed from the lexical so fractional seconds stay exact.
 fn datetime_field(v: &Value, idx: usize) -> Value {
-    let s = match value_str(v) {
-        Some(s) => s,
-        None => return Value::Error,
+    let (s, datatype) = match v {
+        Value::Term(Term::Literal(l)) => (l.value().to_string(), l.datatype().as_str()),
+        _ => match value_str(v) {
+            Some(s) => (s, xsd::DATE_TIME.as_str()),
+            None => return Value::Error,
+        },
     };
-    let fields = match parse_datetime(&s) {
+    let fields = match datetime_fields(&s, datatype) {
         Some(f) => f,
         None => return Value::Error,
     };
@@ -16099,8 +16108,13 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 
 /// Parse an `xsd:dateTime` lexical (`[-]YYYY-MM-DDThh:mm:ss[.frac][TZ]`) into
 /// `[year, month, day, hours, minutes, seconds]`. Timezone is stripped (component accessors are on
-/// the local time per SPARQL); seconds keeps any fractional part.
-fn parse_datetime(s: &str) -> Option<[f64; 6]> {
+/// the local time per SPARQL); seconds keeps any fractional part. `datatype` is the literal's:
+/// an `xsd:dateTimeStamp` must carry a timezone (#3902), checked by the shared
+/// [`Timeline::parse_datetime_of`] so this path and the comparison paths agree.
+fn datetime_fields(s: &str, datatype: &str) -> Option<[f64; 6]> {
+    if datatype == xsd::DATE_TIME_STAMP.as_str() {
+        Timeline::parse_datetime_of(s, datatype)?;
+    }
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
     let mut d = date.strip_prefix('-').unwrap_or(date).split('-');

@@ -35,7 +35,9 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    pub fn parse_datetime(s: &str) -> Option<Timeline> {
+    /// The datatype-blind lexical parse. Private: callers go through
+    /// [`parse_datetime_of`](Self::parse_datetime_of), which enforces the datatype's facets.
+    fn parse_datetime(s: &str) -> Option<Timeline> {
         let (date, rest) = s.split_once('T')?;
         let (time, tz) = match rest.find(['Z', '+', '-']) {
             Some(i) => (&rest[..i], Some(parse_tz(&rest[i..])?)),

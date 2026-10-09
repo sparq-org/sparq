@@ -54,3 +54,51 @@ fn ordering_through_the_scan_and_the_expression_path_agree() {
         want
     );
 }
+
+fn eval(e: &str) -> Option<String> {
+    let g = Graph::load_str("", "turtle").unwrap();
+    let r = query(&g, &format!("{PREFIXES}SELECT ?x {{ BIND(({e}) AS ?x) }}")).unwrap();
+    r.rows[0][0].as_ref().map(|t| t.to_string())
+}
+
+#[test]
+fn accessors_and_casts_reject_a_timezone_free_datetimestamp() {
+    let bad = r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp"#;
+    for f in ["YEAR", "MONTH", "DAY", "HOURS", "MINUTES", "SECONDS", "TZ", "TIMEZONE", "xsd:dateTime"] {
+        assert_eq!(eval(&format!("{f}({bad})")), None, "{f} of a timezone-free dateTimeStamp");
+    }
+    let good = r#""2020-01-01T00:00:00Z"^^xsd:dateTimeStamp"#;
+    assert_eq!(eval(&format!("YEAR({good})")).as_deref(), Some("\"2020\"^^<http://www.w3.org/2001/XMLSchema#integer>"));
+    assert_eq!(eval(&format!("TZ({good})")).as_deref(), Some("\"Z\""));
+    assert_eq!(
+        eval(&format!("xsd:dateTime({good})")).as_deref(),
+        Some("\"2020-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>")
+    );
+    // A timezone-free xsd:dateTime is still fine.
+    assert_eq!(
+        eval(r#"YEAR("2020-01-01T00:00:00"^^xsd:dateTime)"#).as_deref(),
+        Some("\"2020\"^^<http://www.w3.org/2001/XMLSchema#integer>")
+    );
+    assert_eq!(eval(r#"TZ("2020-01-01T00:00:00"^^xsd:dateTime)"#).as_deref(), Some("\"\""));
+}
+
+#[test]
+fn cross_family_equality_with_a_timezone_free_datetimestamp_is_a_type_error() {
+    let f = Some("\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string());
+    let t = Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string());
+    assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp = "2020-01-01"^^xsd:date"#), None);
+    assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp != "2020-01-01"^^xsd:date"#), None);
+    // Well-formed dateTime vs date values stay known-different.
+    assert_eq!(eval(r#""2020-01-01T00:00:00Z"^^xsd:dateTimeStamp = "2020-01-01"^^xsd:date"#), f);
+    assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTime != "2020-01-01"^^xsd:date"#), t);
+    // Identical terms are still equal (sameTerm shortcut).
+    assert_eq!(
+        eval(r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp = "2020-01-01T00:00:00"^^xsd:dateTimeStamp"#),
+        t
+    );
+    // The FILTER form drops the row rather than keeping it.
+    assert!(subjects(r#"SELECT ?s { ?s :t ?d FILTER(?d != "2020-01-01"^^xsd:date) }"#)
+        .iter()
+        .all(|s| !s.contains("floatingStamp")));
+    assert!(subjects(r#"SELECT ?s { ?s :t ?d FILTER(YEAR(?d) = 2020) }"#).iter().all(|s| !s.contains("floatingStamp")));
+}
