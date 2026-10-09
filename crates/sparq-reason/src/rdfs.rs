@@ -606,21 +606,7 @@ pub(crate) fn rdfs_closure(
 ) -> usize {
     let v = Vocab::intern(dict);
     let original: FxHashSet<[Id; 3]> = triples.iter().copied().collect();
-
-    let first = closure_round(&original, &v, emit_dr_closure, mono);
-    let derived = if !first.meta || first.derived.is_empty() {
-        first.derived
-    } else {
-        let mut current = original.clone();
-        let mut fresh = first.derived;
-        while !fresh.is_empty() {
-            current.extend(fresh);
-            fresh = closure_round(&current, &v, emit_dr_closure, mono).derived;
-        }
-        let mut d: Vec<[Id; 3]> = current.into_iter().filter(|t| !original.contains(t)).collect();
-        d.sort_unstable();
-        d
-    };
+    let derived = closure_derived(&original, &v, emit_dr_closure, mono);
 
     let added = derived.len();
     triples.clear();
@@ -631,6 +617,49 @@ pub(crate) fn rdfs_closure(
     // dedups — the subtraction then underflows. The new-triple count is the
     // derived set's size by construction.
     added
+}
+
+/// The sorted triples [`rdfs_closure`] derives from `original` (excluding `original`).
+/// Shared with the incremental graph's meta-schema fallback so both compute one closure.
+pub(crate) fn closure_derived(
+    original: &FxHashSet<[Id; 3]>,
+    v: &Vocab,
+    emit_dr_closure: bool,
+    mono: &MonoOwl,
+) -> Vec<[Id; 3]> {
+    let first = closure_round(original, v, emit_dr_closure, mono);
+    if !first.meta || first.derived.is_empty() {
+        return first.derived;
+    }
+    let mut current = original.clone();
+    let mut fresh = first.derived;
+    while !fresh.is_empty() {
+        current.extend(fresh);
+        fresh = closure_round(&current, v, emit_dr_closure, mono).derived;
+    }
+    let mut d: Vec<[Id; 3]> = current.into_iter().filter(|t| !original.contains(t)).collect();
+    d.sort_unstable();
+    d
+}
+
+/// Whether the schema is "meta" (see [`ClosureRound::meta`]): some RDFS schema property is in
+/// the subPropertyOf closure `sp_closure`, has a raw domain/range (`dom` / `rng`), or takes
+/// part in a monotone-OWL inverse/symmetric axiom. Only then can one schema-saturate-then-sweep
+/// round miss consequences, so this is THE predicate deciding whether to iterate — used by
+/// [`closure_round`] and the incremental graph alike.
+pub(crate) fn schema_is_meta(
+    v: &Vocab,
+    sp_closure: &FxHashMap<Id, Vec<Id>>,
+    dom: &FxHashMap<Id, Vec<Id>>,
+    rng: &FxHashMap<Id, Vec<Id>>,
+    mono: &MonoOwl,
+) -> bool {
+    let schema_props = [v.ty, v.sub_class, v.sub_prop, v.domain, v.range];
+    let is_schema = |p: &Id| schema_props.contains(p);
+    sp_closure.iter().any(|(p, qs)| is_schema(p) || qs.iter().any(is_schema))
+        || dom.keys().chain(rng.keys()).any(is_schema)
+        || mono.inverse.iter().any(|(p, qs)| is_schema(p) || qs.iter().any(is_schema))
+        || mono.symmetric.iter().any(is_schema)
 }
 
 /// One schema-saturate-then-sweep round of [`rdfs_closure`] over `current`.
@@ -689,12 +718,7 @@ fn closure_round(original: &FxHashSet<[Id; 3]>, v: &Vocab, emit_dr_closure: bool
         None
     };
 
-    let schema_props = [v.ty, v.sub_class, v.sub_prop, v.domain, v.range];
-    let is_schema = |p: &Id| schema_props.contains(p);
-    let meta = sp_closure.iter().any(|(p, qs)| is_schema(p) || qs.iter().any(is_schema))
-        || dom.keys().chain(rng.keys()).any(is_schema)
-        || mono.inverse.iter().any(|(p, qs)| is_schema(p) || qs.iter().any(is_schema))
-        || mono.symmetric.iter().any(is_schema);
+    let meta = schema_is_meta(v, &sp_closure, &dom, &rng, mono);
 
     // 3. Single parallel ABox sweep + the schema-closure triples (rdfs11 / rdfs5).
     let asserted: Vec<[Id; 3]> = original.iter().copied().collect();

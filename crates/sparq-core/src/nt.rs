@@ -120,15 +120,21 @@ pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Ve
             i = next_line(bytes, i);
             continue;
         }
+        if bytes[i] == b'V' {
+            i = version_directive(bytes, i).map_err(as_nquads_err)?;
+            continue;
+        }
         // We must know the GRAPH (which bucket dict to intern into) before interning S/P/O, but the
         // graph is the LAST field. So first locate the optional graph term by SPAN-scanning S/P/O
         // (a no-intern walk, the same cost as a parse), resolve the bucket, THEN intern S/P/O into
         // that bucket's dict by re-scanning from their start offsets. The span walk avoids any
         // throwaway interning into a wrong dict.
         let s_start = i;
+        check_position(bytes, i, false).map_err(as_nquads_err)?;
         let j = span_term(bytes, i)?;
         i = skip_ws(bytes, j);
         let p_start = i;
+        check_position(bytes, i, true).map_err(as_nquads_err)?;
         let j = span_term(bytes, i)?;
         i = skip_ws(bytes, j);
         let o_start = i;
@@ -249,8 +255,10 @@ fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
         ));
     }
     let mut j = skip_ws(b, i + 3);
+    check_position(b, j, false).map_err(as_nquads_err)?;
     let k = span_term(b, j)?;
     j = skip_ws(b, k);
+    check_position(b, j, true).map_err(as_nquads_err)?;
     let k = span_term(b, j)?;
     j = skip_ws(b, k);
     let k = span_object_depth(b, j, depth + 1)?;
@@ -266,7 +274,7 @@ fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
 /// index just past it. Mirrors [`literal`]'s grammar without interning.
 #[cfg(feature = "parallel")]
 fn span_literal(b: &[u8], i: usize) -> Result<usize, String> {
-    let (_vs, _ve, _vesc, after) = scan_delim(b, i, b'"')?;
+    let (_vs, _ve, _vesc, after) = scan_string(b, i)?;
     match b.get(after) {
         Some(b'^') if b.get(after + 1) == Some(&b'^') => {
             let open = after + 2;
@@ -351,6 +359,10 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
             i = next_line(bytes, i);
             continue;
         }
+        if bytes[i] == b'V' {
+            i = version_directive(bytes, i)?;
+            continue;
+        }
         // Subject: consult the stack-buffer cache before interning.
         let s_start = i;
         let s = {
@@ -368,6 +380,7 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
                 cache_s_id
             } else {
                 // Cache miss: intern normally, update the stack buffer.
+                check_position(bytes, i, false)?;
                 let (sid, j) = term(bytes, i, dict)?;
                 let raw = &bytes[s_start..j];
                 if raw.len() <= SUBJ_PRED_CACHE_LEN {
@@ -397,6 +410,7 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
                 i = p_after;
                 cache_p_id
             } else {
+                check_position(bytes, i, true)?;
                 let (pid, j) = term(bytes, i, dict)?;
                 let raw = &bytes[p_start..j];
                 if raw.len() <= SUBJ_PRED_CACHE_LEN {
@@ -436,7 +450,8 @@ fn skip_ws(b: &[u8], mut i: usize) -> usize {
 
 #[inline]
 fn next_line(b: &[u8], mut i: usize) -> usize {
-    while i < b.len() && b[i] != b'\n' {
+    // EOL is `[#xD#xA]+`: a lone CR ends a comment too.
+    while i < b.len() && b[i] != b'\n' && b[i] != b'\r' {
         i += 1;
     }
     i
@@ -492,9 +507,9 @@ fn validate_chunk_utf8(bytes: &[u8], format: &str) -> Result<(), String> {
 /// continuation byte — so any position at or just past such a byte is a character boundary.
 /// Concretely, the four call sites, grouped by the scanner that produced the span:
 ///
-/// * `decode` via `scan_delim` — `x = open + 1` where `b[open]` is `<` or `"`; `y` is the
-///   index where the scan found the ASCII closer (the only other loop exit runs off the end and
-///   returns `Err` before any span is taken). The `\` escape skip can only ever step over bytes,
+/// * `decode` via `scan_iri` / `scan_string` (same shape as `scan_delim`) — `x = open + 1`
+///   where `b[open]` is `<` or `"`; `y` is the index where the scan found the ASCII closer
+///   (every other loop exit returns `Err` before any span is taken). The `\` escape skip can only ever step over bytes,
 ///   never change which byte the closer test matched.
 /// * `blank` and `graph_key` — `x = i + 2` past the ASCII `_:`; `y` from `blank_label`,
 ///   which stops at an ASCII non-label byte (or `b.len()`; non-ASCII bytes are consumed whole)
@@ -586,8 +601,10 @@ fn triple_term(b: &[u8], i: usize, dict: &mut Dict, depth: usize) -> Result<(Id,
     }
     // Skip the `<<(` opener.
     let mut j = skip_ws(b, i + 3);
+    check_position(b, j, false)?;
     let (s, k) = term(b, j, dict)?;
     j = skip_ws(b, k);
+    check_position(b, j, true)?;
     let (p, k) = term(b, j, dict)?;
     j = skip_ws(b, k);
     let (o, k) = object_term_depth(b, j, dict, depth + 1)?;
@@ -598,6 +615,74 @@ fn triple_term(b: &[u8], i: usize, dict: &mut Dict, depth: usize) -> Result<(Id,
     } else {
         Err(format!("N-Triples: expected ')>>' closing triple term at byte {j}"))
     }
+}
+
+/// Subject / predicate position check before the shared [`term`] parser: neither may be a
+/// literal, and a predicate may not be a blank node (`subject ::= IRIREF | BLANK_NODE_LABEL`,
+/// `predicate ::= IRIREF`). A triple term keeps `term`'s own object-only message.
+#[inline]
+fn check_position(b: &[u8], i: usize, predicate: bool) -> Result<(), String> {
+    match b.get(i) {
+        Some(b'"') => Err(format!("N-Triples: a literal cannot be a subject or predicate, at byte {i}")),
+        Some(b'_') if predicate => Err(format!("N-Triples: a blank node cannot be a predicate, at byte {i}")),
+        _ => Ok(()),
+    }
+}
+
+/// RDF 1.2 `versionDirective ::= 'VERSION' STRING_LITERAL_QUOTE` (any version string is
+/// accepted; `"1.2"` and `"1.2-basic"` are the defined ones). It must end its line. Returns
+/// the index just past the directive.
+fn version_directive(b: &[u8], i: usize) -> Result<usize, String> {
+    if !b[i..].starts_with(b"VERSION") {
+        return Err(format!("N-Triples: unexpected term start at byte {i}"));
+    }
+    let mut j = i + 7;
+    while matches!(b.get(j), Some(b' ' | b'\t')) {
+        j += 1;
+    }
+    if b.get(j) != Some(&b'"') {
+        return Err(format!("N-Triples: VERSION needs a quoted version string at byte {j}"));
+    }
+    let (_s, _e, _esc, mut j) = scan_string(b, j)?;
+    while matches!(b.get(j), Some(b' ' | b'\t')) {
+        j += 1;
+    }
+    match b.get(j) {
+        None | Some(b'\n' | b'\r' | b'#') => Ok(j),
+        _ => Err(format!("N-Triples: VERSION directive must end its line, at byte {j}")),
+    }
+}
+
+/// Byte classes for [`scan_string`]: `1` = closing `"`, `2` = `\`, `3` = raw LF / CR (not
+/// allowed in `STRING_LITERAL_QUOTE`), `0` = anything else.
+const STRING_CLASS: [u8; 256] = {
+    let mut t = [0u8; 256];
+    t[b'"' as usize] = 1;
+    t[b'\\' as usize] = 2;
+    t[b'\n' as usize] = 3;
+    t[b'\r' as usize] = 3;
+    t
+};
+
+/// [`scan_delim`] for a `STRING_LITERAL_QUOTE`: a raw newline or carriage return inside the
+/// quotes is an error. `\` skips the next byte (the escape is decoded and checked later).
+#[inline]
+fn scan_string(b: &[u8], open: usize) -> Result<(usize, usize, bool, usize), String> {
+    let start = open + 1;
+    let mut j = start;
+    let mut esc = false;
+    while j < b.len() {
+        match STRING_CLASS[b[j] as usize] {
+            0 => j += 1,
+            1 => return Ok((start, j, esc, j + 1)),
+            2 => {
+                esc = true;
+                j += 2;
+            }
+            _ => return Err(format!("N-Triples: raw line break inside a string literal at byte {j}")),
+        }
+    }
+    Err(format!("N-Triples: unterminated delimiter from byte {open}"))
 }
 
 /// Scans `<...>` returning the (escaped?) content range and the index past `>`.
@@ -720,11 +805,12 @@ fn iri(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
 
 /// End index (exclusive) of a `BLANK_NODE_LABEL` body starting at `start` (the byte after
 /// `_:`): `(PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?`. The scan runs over label bytes
-/// (ASCII `[A-Za-z0-9_.-]`, plus any non-ASCII byte: the Unicode PN_CHARS ranges are not
-/// checked) and then backs over trailing `.` bytes, which are the statement terminator, not
+/// (ASCII `[A-Za-z0-9_.-]`, plus any non-ASCII byte: the Unicode PN_CHARS ranges are only
+/// checked for the first character) and then backs over trailing `.` bytes, which are the statement terminator, not
 /// part of the label (`_:a.b` → `a.b`; `_:abc.` → `abc`, matching oxttl). Stopping at the first
 /// non-label byte lets a label abut the next term (`_:s<http://p>`, W3C `minimal_whitespace`);
-/// an empty label or one starting with `-` / `.` is an error (`nt-syntax-bad-bnode-01`), and a
+/// an empty label or one starting with `-` / `.` / a non-`PN_CHARS_U` combining character such
+/// as U+00B7 is an error (`nt-syntax-bad-bnode-01`), and a
 /// stray `:` is left for the caller to reject as the next term (`nt-syntax-bad-bnode-02`).
 /// The single source of truth shared by [`blank`] (interning), [`span_term`] (no-intern span)
 /// and [`graph_key`] (graph field) so the three never diverge.
@@ -736,10 +822,21 @@ fn blank_label(b: &[u8], start: usize) -> Result<usize, String> {
     while j > start && b[j - 1] == b'.' {
         j -= 1;
     }
-    match b.get(start) {
-        Some(b'-' | b'.') => Err(format!("N-Triples: bad blank node label at byte {start}")),
-        _ if j == start => Err(format!("N-Triples: empty blank node label at byte {start}")),
-        _ => Ok(j),
+    let bad_first = match b.get(start) {
+        Some(b'-' | b'.') => true,
+        // PN_CHARS but not PN_CHARS_U: U+00B7, U+0300-U+036F, U+203F-U+2040 cannot start a label.
+        Some(&c) if c >= 0x80 => str_of(&b[start..j])
+            .chars()
+            .next()
+            .is_some_and(|ch| matches!(ch, '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')),
+        _ => false,
+    };
+    if bad_first {
+        Err(format!("N-Triples: bad blank node label at byte {start}"))
+    } else if j == start {
+        Err(format!("N-Triples: empty blank node label at byte {start}"))
+    } else {
+        Ok(j)
     }
 }
 
@@ -770,8 +867,8 @@ fn lowercase_lang(raw: &str) -> Cow<'_, str> {
     }
 }
 
-/// `[a-zA-Z]+ ('-' [a-zA-Z0-9]+)*` with an optional RDF 1.2 `'--' [a-zA-Z]+` direction suffix
-/// (W3C `nt-syntax-bad-lang-01`: `"string"@1`).
+/// `[a-zA-Z]+ ('-' [a-zA-Z0-9]+)*` with an optional RDF 1.2 `--ltr` / `--rtl` direction suffix
+/// (W3C `nt-syntax-bad-lang-01`: `"string"@1`; `@en--foo` is not a direction).
 fn valid_lang_tag(t: &[u8]) -> bool {
     let (tag, dir) = match t.windows(2).position(|w| w == b"--") {
         Some(k) => (&t[..k], Some(&t[k + 2..])),
@@ -781,11 +878,11 @@ fn valid_lang_tag(t: &[u8]) -> bool {
     let primary_ok = parts.next().is_some_and(|p| !p.is_empty() && p.iter().all(u8::is_ascii_alphabetic));
     primary_ok
         && parts.all(|p| !p.is_empty() && p.iter().all(u8::is_ascii_alphanumeric))
-        && dir.is_none_or(|d| !d.is_empty() && d.iter().all(u8::is_ascii_alphabetic))
+        && dir.is_none_or(|d| d.eq_ignore_ascii_case(b"ltr") || d.eq_ignore_ascii_case(b"rtl"))
 }
 
 fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
-    let (vstart, vend, vesc, after) = scan_delim(b, i, b'"')?;
+    let (vstart, vend, vesc, after) = scan_string(b, i)?;
     let value = decode(&b[vstart..vend], vesc)?;
     match b.get(after) {
         // ^^<datatype>
@@ -905,6 +1002,44 @@ mod tests {
         }
         #[cfg(feature = "parallel")]
         assert!(parse_quads_chunk(b"<http://example/s> <http://example/p> <http://example/o> <g>.").is_err());
+    }
+
+    /// #2716 review round: further grammar gaps — a label starting with U+00B7, a raw line
+    /// break inside a string, literal / blank-node predicates, a literal subject, a direction
+    /// other than ltr/rtl, and a VERSION directive not ending its line — are rejected.
+    #[test]
+    fn grammar_gaps_rejected() {
+        let bad: &[&str] = &[
+            "_:\u{B7}a <http://example/p> <http://example/o> .",
+            "_:\u{301}a <http://example/p> <http://example/o> .",
+            "<http://example/s> <http://example/p> \"a\nb\" .",
+            "<http://example/s> <http://example/p> \"a\rb\" .",
+            "<http://example/s> \"p\" <http://example/o> .",
+            "<http://example/s> _:p <http://example/o> .",
+            "\"s\" <http://example/p> <http://example/o> .",
+            "<http://example/s> <http://example/p> <<( <http://example/a> \"b\" <http://example/c> )>> .",
+            "<http://example/s> <http://example/p> \"x\"@en--foo .",
+            "VERSION \"1.2\" <http://example/s> <http://example/p> <http://example/o> .",
+            "VERSION 1.2\n",
+            "VERSIONX \"1.2\"\n",
+        ];
+        for doc in bad {
+            assert!(parse_chunk(doc.as_bytes(), &mut Dict::new()).is_err(), "N-Triples accepted {doc:?}");
+            #[cfg(feature = "parallel")]
+            assert!(parse_quads_chunk(doc.as_bytes()).is_err(), "N-Quads accepted {doc:?}");
+        }
+    }
+
+    /// A lone CR ends a comment line (EOL is `[#xD#xA]+`), RDF 1.2 VERSION directives are
+    /// accepted, and a mid-label U+00B7 / `--rtl` direction still parse.
+    #[test]
+    fn cr_comment_version_and_valid_unicode_accepted() {
+        let doc = "VERSION \"1.2\"\r\nVERSION \"1.2-basic\" # c\n#comment\r<urn:s> <urn:p> <urn:o> .\n\
+                   _:a\u{B7}b <urn:p> \"x\"@ar--RTL .\n";
+        let t = parse_chunk(doc.as_bytes(), &mut Dict::new()).expect("valid N-Triples 1.2");
+        assert_eq!(t.len(), 2, "the triple after a CR-terminated comment is kept");
+        #[cfg(feature = "parallel")]
+        assert_eq!(parse_quads_chunk(doc.as_bytes()).expect("valid N-Quads 1.2")[0].2.len(), 2);
     }
 
     /// #2716: a blank-node label ends at the first non-label byte, so it may abut the next term

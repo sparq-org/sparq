@@ -41,6 +41,12 @@
 //! TBox closure + re-sweep of affected predicates/classes only) is a follow-up, as is wiring
 //! this into the T17 store overlay.
 //!
+//! **Meta schemas** (#5090) — an RDFS schema property that is a sub-property target/source or
+//! carries a domain/range, detected by the same `crate::rdfs::schema_is_meta` predicate the batch
+//! closure uses — break the one-step argument: derived facts feed back into the schema. Then the
+//! derived set is the batch fixpoint and EVERY mutation re-materializes (correct, not
+//! incremental). Ordinary schemas keep exact counting.
+//!
 //! # Semantics
 //!
 //! * `insert`/`delete` operate on the **base** (explicitly asserted) triples with set
@@ -52,7 +58,10 @@
 //!   their support exists (standard materialized-view semantics).
 
 use crate::owl::{Owl, XSD_HIERARCHY};
-use crate::rdfs::{close_dr, for_each_reachable, prop_orientation_closure, sweep, transitive_closure};
+use crate::rdfs::{
+    close_dr, closure_derived, for_each_reachable, prop_orientation_closure, schema_is_meta, sweep, transitive_closure,
+    MonoOwl,
+};
 use crate::Vocab;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
@@ -95,6 +104,10 @@ pub struct MaterializedGraph {
     sp_closure: FxHashMap<Id, Vec<Id>>,
     dom_full: FxHashMap<Id, Vec<Id>>,
     rng_full: FxHashMap<Id, Vec<Id>>,
+    /// The base's schema is meta (`crate::rdfs::schema_is_meta`): derived facts feed back into
+    /// the schema, so the one-step counting argument fails. The derived set is then the batch
+    /// fixpoint (each fact counted once) and every mutation re-materializes.
+    meta: bool,
     /// How many times the v1 full-rematerialization fallback ran (TBox mutations). The initial
     /// materialization in [`new`](Self::new) is not counted. Exposed for tests/telemetry.
     rebuilds: usize,
@@ -121,6 +134,7 @@ impl MaterializedGraph {
             sp_closure: FxHashMap::default(),
             dom_full: FxHashMap::default(),
             rng_full: FxHashMap::default(),
+            meta: false,
             rebuilds: 0,
             #[cfg(feature = "explain")]
             explain: RdfsExplain::default(),
@@ -137,11 +151,10 @@ impl MaterializedGraph {
 
     /// Full re-materialization from the current base: recompute the TBox closures, re-sweep
     /// every base triple, and rebuild all derivation counts. Mirrors
-    /// ONE round of `crate::rdfs::rdfs_closure(.., emit_dr_closure = false, MonoOwl::default())`,
-    /// except emissions are *counted* instead of deduplicated away. That equals the batch
-    /// closure unless the schema is meta (a sub-property of an RDFS schema property, or
-    /// `rdf:type` carrying schema), where the batch path iterates further rounds and this
-    /// graph does not.
+    /// `crate::rdfs::rdfs_closure(.., emit_dr_closure = false, MonoOwl::default())` exactly,
+    /// except emissions are *counted* instead of deduplicated away. For a meta schema (where
+    /// the batch closure iterates rounds, #5090) the derived set is taken from the shared
+    /// batch fixpoint instead, and `meta` makes every later mutation re-materialize.
     fn rematerialize(&mut self) {
         self.rebuilds += 1;
         let v = &self.v;
@@ -166,6 +179,17 @@ impl MaterializedGraph {
         self.sp_closure = transitive_closure(&sp);
         self.dom_full = close_dr(&dom, &self.sp_closure, &self.sc_closure);
         self.rng_full = close_dr(&rng, &self.sp_closure, &self.sc_closure);
+        self.meta = schema_is_meta(v, &self.sp_closure, &dom, &rng, &MonoOwl::default());
+        if self.meta {
+            self.counts = closure_derived(&self.base, v, false, &MonoOwl::default())
+                .into_iter()
+                .map(|t| (t, 1))
+                .collect();
+            self.schema_facts.clear();
+            #[cfg(feature = "explain")]
+            self.explain.rebuild(&self.base, sc, sp, dom, rng);
+            return;
+        }
         // 3. Sweep every base triple against the closed TBox, counting emissions.
         let asserted: Vec<[Id; 3]> = self.base.iter().copied().collect();
         let emitted = sweep(
@@ -225,7 +249,7 @@ impl MaterializedGraph {
         if added.is_empty() {
             return 0;
         }
-        if tbox {
+        if tbox || self.meta {
             self.rematerialize();
             return added.len();
         }
@@ -256,7 +280,7 @@ impl MaterializedGraph {
         if removed.is_empty() {
             return 0;
         }
-        if tbox {
+        if tbox || self.meta {
             self.rematerialize();
             return removed.len();
         }
@@ -2747,6 +2771,45 @@ mod tests {
             [a, hp, b],
         ];
         (v, base)
+    }
+
+    /// #5090 meta schemas (a schema property with a domain, or a sub-property of a schema
+    /// property): construction, every single-triple delete and re-insert, and an insert-only
+    /// build-up must all equal the batch closure, including across meta/non-meta transitions.
+    #[test]
+    fn meta_schema_insert_delete_match_batch() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let mut e = |l: &str| ex(&mut dict, l);
+        let (thing, x, c, d, a, b, cc) = (e("Thing"), e("x"), e("C"), e("D"), e("A"), e("B"), e("CC"));
+        let (sub, kind, spo, p, q, s_, o_) = (e("sub"), e("kind"), e("spo"), e("p"), e("q"), e("s"), e("o"));
+        let cases: Vec<Vec<[Id; 3]>> = vec![
+            vec![[v.ty, v.dom, thing], [x, v.ty, c]],
+            vec![[sub, v.sp, v.sc], [a, sub, b], [b, v.sc, cc], [x, v.ty, a]],
+            vec![[kind, v.sp, v.ty], [x, kind, c], [c, v.sc, d]],
+            vec![[v.ty, v.dom, thing], [x, v.ty, c], [c, v.sc, d]],
+            vec![[spo, v.sp, v.sp], [p, spo, q], [s_, p, o_]],
+        ];
+        for base in cases {
+            let full: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+            let mut g = MaterializedGraph::new(&mut dict, &base);
+            assert_matches_oracle(&g, &mut dict, &full);
+            for &t in &base {
+                let mut rest = full.clone();
+                rest.remove(&t);
+                assert_eq!(g.delete(&[t]), 1);
+                assert_matches_oracle(&g, &mut dict, &rest);
+                assert_eq!(g.insert(&[t]), 1);
+                assert_matches_oracle(&g, &mut dict, &full);
+            }
+            let mut g = MaterializedGraph::new(&mut dict, &[]);
+            let mut sofar: FxHashSet<[Id; 3]> = FxHashSet::default();
+            for &t in base.iter().rev() {
+                g.insert(&[t]);
+                sofar.insert(t);
+                assert_matches_oracle(&g, &mut dict, &sofar);
+            }
+        }
     }
 
     #[test]

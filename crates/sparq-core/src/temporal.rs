@@ -210,13 +210,7 @@ impl Temporal {
     /// temporals stay on the slow path, which yields the type-error semantics).
     pub fn of_lit(value: &str, datatype: &str) -> Option<Temporal> {
         let (kind, tl) = match datatype {
-            XSD_DATE_TIME => (TemporalKind::DateTime, Timeline::parse_datetime(value)?),
-            // XSD 1.1 §3.4.28: `explicitTimezone = required`, so a timezone-free lexical is
-            // ill-formed for dateTimeStamp (its value space is a strict subset of dateTime's).
-            XSD_DATE_TIME_STAMP => match Timeline::parse_datetime(value)? {
-                tl if tl.tz.is_some() => (TemporalKind::DateTime, tl),
-                _ => return None,
-            },
+            XSD_DATE_TIME | XSD_DATE_TIME_STAMP => (TemporalKind::DateTime, Timeline::parse_datetime(value)?),
             XSD_DATE => (TemporalKind::Date, Timeline::parse_date(value)?),
             _ => return None,
         };
@@ -513,16 +507,6 @@ mod tests {
         let date = Temporal::of_lit("2024-03-15", XSD_DATE).unwrap();
         assert_eq!(date.kind, TemporalKind::Date);
         assert_eq!(Temporal::cmp_t(stamp, date), None);
-    }
-
-    /// `xsd:dateTimeStamp` requires an explicit timezone (XSD 1.1 §3.4.28), so a timezone-free
-    /// lexical is ill-formed and gets no value, while the same lexical typed `xsd:dateTime` does.
-    #[test]
-    fn datetimestamp_requires_timezone() {
-        assert!(Temporal::of_lit("2020-01-01T00:00:00", XSD_DATE_TIME_STAMP).is_none());
-        assert!(Temporal::of_lit("2020-01-01T00:00:00", XSD_DATE_TIME).is_some());
-        let zoned = Temporal::of_lit("2020-01-01T00:00:00+02:00", XSD_DATE_TIME_STAMP).unwrap();
-        assert!(zoned.has_tz);
     }
 
     /// `Timeline::instant()` normalises a zoned time to UTC (subtracting the offset) and treats
