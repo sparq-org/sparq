@@ -296,9 +296,15 @@ What the server exposes, all discoverable from the storage description
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
-  anything is removed. When putting back fails too, it is retried with the resource's locks still
-  held until it succeeds, so no other request sees the half-done state in between; a create
-  whose store reply was lost is removed whole the same way.
+  anything is removed. When putting back fails too, it is tried a few more times with the
+  resource's locks held; if it still fails the request ends with `5xx` and the resources are
+  **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
+  locks and no request's admission slot, keeps putting the change back, so no other request sees
+  the half-done state in between. A create whose store reply was lost is removed whole the same
+  way. The set-aside state lives in the process (a crash mid-way is not covered). A container
+  whose modification time could not be moved on after a change has no `Last-Modified` until it
+  is, so `If-Modified-Since` never answers `304` on a stale date. A PUT with `Content-Range`
+  (a partial PUT) is refused with `400`.
 - A `Link` target that is not a URI reference is refused with `400`; entity tags in
   `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
   nothing.
