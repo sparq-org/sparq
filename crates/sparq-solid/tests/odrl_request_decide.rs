@@ -169,11 +169,23 @@ fn request(action: &str, graph: &str, agent: Option<&str>, now: Option<&str>) ->
     req
 }
 
+/// Whether a prohibition applies to `req` for an agent whose membership of the policy's
+/// party collections is unknown: as a non-member, or as a member of any of them.
+fn applies(pol: &ValidatedPolicy, req: Request, agent: Option<&str>) -> bool {
+    if matched_prohibition(pol, &req).is_some() {
+        return true;
+    }
+    let Some(agent) = agent else { return false };
+    pol.party_collections.iter().any(|c| {
+        matched_prohibition(pol, &req.clone().with_party_membership(agent, c.as_str())).is_some()
+    })
+}
+
 /// The static read verdict, narrowed by every read-family prohibition that applies.
 fn expected(pol: &ValidatedPolicy, graph: &str, agent: Option<&str>, now: Option<&str>) -> bool {
     let prohibited = READ_ACTIONS
         .iter()
-        .any(|a| matched_prohibition(pol, &request(a, graph, agent, now)).is_some());
+        .any(|a| applies(pol, request(a, graph, agent, now), agent));
     let static_read = graph == N1 || agent == Some(ALICE);
     static_read && !prohibited
 }
@@ -540,4 +552,29 @@ fn session_fns(text: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// A request carries no party-membership evidence, so a prohibition on a party
+/// collection applies to every authenticated agent (a member could be any of them), and
+/// one excluding the collection still applies to them (any of them could be outside it).
+#[test]
+fn party_collection_prohibitions_fail_closed() {
+    let alice = session(Some(ALICE), None);
+    let on_team = policy("prohibition", "read", "", Some(TEAM), Some(N2)).expect("policy");
+    let mut s = store();
+    s.attach_odrl_policy(on_team).expect("attach");
+    assert!(!reads(&s, &alice, N2), "a team prohibition must reach a possible member");
+    assert!(reads(&s, &session(None, None), N1), "anonymous is no member");
+
+    let off_team = policy(
+        "prohibition",
+        "read",
+        "odrl:leftOperand odrl:recipient ; odrl:operator odrl:neq ; odrl:rightOperand <https://pod.ex/team>",
+        None,
+        Some(N2),
+    )
+    .expect("policy");
+    let mut s = store();
+    s.attach_odrl_policy(off_team).expect("attach");
+    assert!(!reads(&s, &alice, N2), "an exclusion must reach a possible non-member");
 }

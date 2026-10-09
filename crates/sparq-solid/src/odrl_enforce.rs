@@ -18,6 +18,12 @@
 //! - `append`, `modify`, `delete` and `write` map to both [`Mode::Append`] and
 //!   [`Mode::Write`], since either mode can change the resource.
 //!
+//! A request carries no party-membership evidence, so when a policy names an
+//! `odrl:PartyCollection` a prohibition applies if it applies under any membership the
+//! agent could have: a prohibition on a collection applies to every authenticated agent,
+//! as the materializing bridge's denies do, and one excluding a collection still
+//! applies to non-members.
+//!
 //! [`Mode::Control`], access-control documents (`.acl`/`.acr`) and the reserved
 //! `urn:sparq:` graphs are never touched, so an attached policy cannot lock an owner out
 //! of their own rules. Policies whose `odrl:conflict` strategy `decide` cannot honour are
@@ -38,6 +44,37 @@ const RESERVED_PREFIX: &str = "urn:sparq:";
 
 const READ_ACTIONS: &[&str] = &["read", "display", "present", "print", "play"];
 const CHANGE_ACTIONS: &[&str] = &["append", "modify", "delete", "write"];
+
+/// The most party collections one policy may name before its prohibitions are applied
+/// without evaluating membership at all (every subset is evaluated below that).
+const MAX_PARTY_COLLECTIONS: usize = 4;
+
+/// Whether a prohibition of `policy` applies to `req`. No party-membership evidence
+/// reaches a request, so when the policy names party collections the agent's
+/// membership is unknown: the prohibition applies if it applies under any membership
+/// the agent could have (member of any subset of those collections). A policy naming
+/// more than [`MAX_PARTY_COLLECTIONS`] collections is treated as prohibiting.
+fn prohibited(policy: &ValidatedPolicy, req: &Request, agent: Option<&str>) -> bool {
+    if matched_prohibition(policy, req).is_some() {
+        return true;
+    }
+    let Some(agent) = agent else { return false };
+    let collections: Vec<&str> = policy.party_collections.iter().map(String::as_str).collect();
+    if collections.is_empty() {
+        return false;
+    }
+    if collections.len() > MAX_PARTY_COLLECTIONS {
+        return !policy.prohibitions.is_empty();
+    }
+    (1u32..1 << collections.len()).any(|mask| {
+        let member_of = collections
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, c)| (agent, *c));
+        matched_prohibition(policy, &req.clone().with_party_memberships(member_of)).is_some()
+    })
+}
 
 /// The ODRL policies a [`crate::PodStore`] evaluates per request, with the asset
 /// membership evidence (`asset odrl:partOf collection`) each request carries.
@@ -105,9 +142,7 @@ impl OdrlEnforcement {
         }
         actions.iter().any(|a| {
             let req = self.request(a, target, s);
-            self.policies
-                .iter()
-                .any(|p| matched_prohibition(p, &req).is_some())
+            self.policies.iter().any(|p| prohibited(p, &req, s.agent))
         })
     }
 
