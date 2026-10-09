@@ -26,8 +26,9 @@
 //!
 //! [`Mode::Control`], access-control documents (`.acl`/`.acr`) and the reserved
 //! `urn:sparq:` graphs are never touched, so an attached policy cannot lock an owner out
-//! of their own rules. Policies whose `odrl:conflict` strategy `decide` cannot honour are
-//! refused at attach time.
+//! of their own rules. Policies whose `odrl:conflict` strategy `decide` cannot honour, and
+//! policies with prohibitions naming more than four party collections, are refused at
+//! attach time.
 //!
 //! Every [`crate::PodStore`] entry point that authorizes a session consults one deny gate:
 //! the cached set behind `accessible`, the views, queries and `wac_allow`; point
@@ -46,15 +47,15 @@ const RESERVED_PREFIX: &str = "urn:sparq:";
 const READ_ACTIONS: &[&str] = &["read", "display", "present", "print", "play"];
 const CHANGE_ACTIONS: &[&str] = &["append", "modify", "delete", "write"];
 
-/// The most party collections one policy may name before its prohibitions are applied
-/// without evaluating membership at all (every subset is evaluated below that).
+/// The most party collections a policy with prohibitions may name: every subset of them
+/// is evaluated per request, so a larger policy is refused at attach time.
 const MAX_PARTY_COLLECTIONS: usize = 4;
 
 /// Whether a prohibition of `policy` applies to `req`. No party-membership evidence
 /// reaches a request, so when the policy names party collections the agent's
 /// membership is unknown: the prohibition applies if it applies under any membership
-/// the agent could have (member of any subset of those collections). A policy naming
-/// more than [`MAX_PARTY_COLLECTIONS`] collections is treated as prohibiting.
+/// the agent could have (member of any subset of those collections). `attach` keeps
+/// that at most [`MAX_PARTY_COLLECTIONS`] collections.
 fn prohibited(policy: &ValidatedPolicy, req: &Request, agent: Option<&str>) -> bool {
     if policy.prohibitions.is_empty() {
         return false;
@@ -66,9 +67,6 @@ fn prohibited(policy: &ValidatedPolicy, req: &Request, agent: Option<&str>) -> b
     let collections: Vec<&str> = policy.party_collections.iter().map(String::as_str).collect();
     if collections.is_empty() {
         return false;
-    }
-    if collections.len() > MAX_PARTY_COLLECTIONS {
-        return true;
     }
     (1u32..1 << collections.len()).any(|mask| {
         let member_of = collections
@@ -98,9 +96,18 @@ impl OdrlEnforcement {
     }
 
     /// Attach `policy`. Refused when its declared `odrl:conflict` strategy is one
-    /// `decide` cannot honour.
+    /// `decide` cannot honour, or when it has prohibitions and names more than
+    /// [`MAX_PARTY_COLLECTIONS`] party collections.
     pub(crate) fn attach(&mut self, policy: ValidatedPolicy) -> Result<(), String> {
         conflict_admissibility(&policy)?;
+        if !policy.prohibitions.is_empty() && policy.party_collections.len() > MAX_PARTY_COLLECTIONS
+        {
+            return Err(format!(
+                "a policy with prohibitions may name at most {MAX_PARTY_COLLECTIONS} party \
+                 collections; this one names {}",
+                policy.party_collections.len()
+            ));
+        }
         self.policies.push(Arc::new(policy));
         Ok(())
     }

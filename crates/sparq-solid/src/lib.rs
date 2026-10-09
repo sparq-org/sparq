@@ -1715,7 +1715,8 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// A policy whose `odrl:conflict` strategy `decide` cannot honour is refused.
+    /// A policy whose `odrl:conflict` strategy `decide` cannot honour is refused, as is
+    /// one with prohibitions that names more than four `odrl:PartyCollection`s.
     #[cfg(feature = "odrl-bridge")]
     pub fn attach_odrl_policy(&mut self, policy: sparq_policy::ValidatedPolicy) -> Result<(), String> {
         self.odrl.attach(policy)

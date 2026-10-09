@@ -316,6 +316,31 @@ fn unhonourable_conflict_strategy_is_refused() {
     assert!(store().attach_odrl_policy(pol).is_err());
 }
 
+/// Party-collection membership is enumerated per request, so a policy with
+/// prohibitions may name at most four collections; a larger one is refused rather than
+/// widened to deny outside its scope. Permission-only policies are unaffected.
+#[test]
+fn too_many_party_collections_are_refused() {
+    let with = |n: usize, kind: &str| {
+        let teams: String = (0..n)
+            .map(|i| format!("<https://pod.ex/team{i}> a odrl:PartyCollection .\n"))
+            .collect();
+        let ttl = format!(
+            "@prefix odrl: <{ODRL}> .\n<urn:pol/p> a odrl:Set ; odrl:{kind} \
+             [ odrl:action odrl:append ; odrl:target <{N2}> ] .\n{teams}"
+        );
+        parse_policy_str(&ttl, "turtle").expect("parses")
+    };
+    let mut s = store();
+    assert!(s.attach_odrl_policy(with(5, "prohibition")).is_err());
+    assert!(reads(&s, &session(Some(ALICE), None), N1), "nothing attached");
+    s.attach_odrl_policy(with(5, "permission")).expect("permission-only");
+    s.attach_odrl_policy(with(4, "prohibition")).expect("four collections");
+    let alice = session(Some(ALICE), None);
+    assert!(reads(&s, &alice, N1) && reads(&s, &alice, N2), "append-only prohibition");
+    assert!(!s.decide(&alice, N2, Mode::Append).allow);
+}
+
 /// An attached permission grants nothing: not on a graph the static view refuses, not
 /// on an access-control document, not on a reserved graph, and not for a write.
 #[test]
