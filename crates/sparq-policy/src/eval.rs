@@ -1733,6 +1733,13 @@ fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
     matches!(actual, Value::Iri(_) | Value::Str(_)) && matches!(bound, Value::Iri(_) | Value::Str(_))
 }
 
+/// `actual op bound` in three values: `None` (Unknown) for an incomparable pair, else
+/// the evaluator's own comparison. Static analysis ([`crate::contains`]) uses this so it
+/// can never prove what the evaluator would not decide.
+pub(crate) fn atomic_status(actual: &Value, op: Operator, bound: &Value) -> Option<bool> {
+    comparable(actual, op, bound).then(|| compare(actual, op, bound))
+}
+
 /// Whether `actual op bound` has a defined answer. Equality needs operands of one
 /// kind (two numbers, two parseable dateTimes, or IRI/string values); an order
 /// operator needs [`order`] to succeed; set membership compares IRI/string values
@@ -1756,7 +1763,7 @@ pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
 /// the **instant** the lexical form denotes (mixed timezone offsets are
 /// normalized to UTC before comparing — sq-qj2q). Returns `None` for
 /// incomparable pairs (e.g. an unparseable dateTime under an order operator).
-fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+pub(crate) fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
     match (a, b) {
         (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
         (Value::DateTime(x), Value::DateTime(y)) => cmp_datetime(x, y),
@@ -1791,14 +1798,6 @@ fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
 /// the evaluator's `odrl:dateTime` constraint was, rather than on `str::cmp`.
 pub fn cmp_datetime(x: &str, y: &str) -> Option<std::cmp::Ordering> {
     Some(parse_instant(x)?.cmp(&parse_instant(y)?))
-}
-
-/// Crate-internal accessor for [`cmp_datetime`] so [`crate::compare`]'s static
-/// containment analysis orders dateTime bounds by the **same** instant normalizer
-/// the evaluator uses (one source of truth — no duplicated xsd:dateTime parser).
-/// [OPUS-4.8] sq-zabv.
-pub(crate) fn cmp_datetime_pub(x: &str, y: &str) -> Option<std::cmp::Ordering> {
-    cmp_datetime(x, y)
 }
 
 /// A point on the UTC timeline, as `(days-since-epoch, nanoseconds-into-day)`

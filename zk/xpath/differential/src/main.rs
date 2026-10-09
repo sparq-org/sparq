@@ -23,22 +23,19 @@
 //! window — so the multibyte rows do not rest on two in-repo references agreeing with
 //! each other. See `tests::fo_substring_agrees_with_cpython_slicing`.
 //!
-//! Where a cross-check fires, the case is NOT silently dropped or downgraded: it is
-//! recorded in [`DIVERGENCES`] and emitted as a **LIVE** assertion carrying the
-//! SPEC-correct value, labelled a SPEC-REFERENCE row rather than a sparq-differential one.
-//! The spec value is precisely what `noir_XPath` implements, so asserting it exercises the
-//! circuit instead of enshrining the engine bug — and a `noir_XPath` regression on one of
-//! these edges reds the run. A unit test here pins each such row live, and a second pins
-//! that the divergence still reproduces, so the workaround expires the day sparq-engine is
-//! fixed.
+//! Where a cross-check fires, generation ABORTS: an engine answer that disagrees with the
+//! reference is never pinned into the circuit's tests. The two such divergences this
+//! harness found (the `fn:substring` window for `start < 1`, and the sign of a zero
+//! `fn:round` result) were fixed in sparq-engine (#4275, #4276), so every row is
+//! oracle-derived and also matches the reference.
 //!
 //! ## HONEST TCB STATEMENT
 //!
 //! This harness is **VERIFICATION, not proof**. Its trusted computing base is:
 //!
 //! 1. **sparq's Rust XSD evaluator** — itself UNAUDITED; it is the repo's reference
-//!    semantics, not a proven-correct implementation. One live divergence from XPath F&O
-//!    is recorded in [`DIVERGENCES`].
+//!    semantics, not a proven-correct implementation. The cross-checks above cover only
+//!    the doubles and `fn:substring`.
 //! 2. **The SAMPLE** — the corpus is hand-picked edge cases, not exhaustive. A wrong
 //!    answer on an unsampled input is not caught.
 //! 3. **The Noir → ACIR → Barretenberg lowering** — entirely untrusted-but-unchecked here.
@@ -127,8 +124,7 @@ fn oracle_plain_string(g: &Graph, expr: &str) -> String {
 ///
 /// CROSS-CHECK: `expect_ieee` is the same value recomputed with native Rust `f64`. A
 /// mismatch means either sparq's evaluator or its double serializer lost the value, so
-/// the case must NOT be pinned as-is — generation aborts and the caller is told to record
-/// the case in [`DIVERGENCES`] instead.
+/// the case must NOT be pinned as-is — generation aborts.
 fn oracle_double_bits(g: &Graph, expr: &str, expect_ieee: f64) -> u64 {
     let t = oracle_term(g, expr).unwrap_or_else(|| panic!("oracle `{expr}` errored, wanted a double"));
     let lex = lexical(&t, "double", expr);
@@ -138,7 +134,7 @@ fn oracle_double_bits(g: &Graph, expr: &str, expect_ieee: f64) -> u64 {
         expect_ieee.to_bits(),
         "IEEE CROSS-CHECK FAILED for `{expr}`: sparq-engine says {lex:?} \
          (bits 0x{:016x}), native Rust f64 says {expect_ieee:?} (bits 0x{:016x}). \
-         Do not pin this case — record it in DIVERGENCES with a filed follow-up.",
+         Do not pin this case — fix the engine or file a follow-up.",
         parsed.to_bits(),
         expect_ieee.to_bits()
     );
@@ -221,40 +217,6 @@ fn fo_round_double(v: f64) -> f64 {
         r
     }
 }
-
-// ---------------------------------------------------------------------------
-// Recorded oracle divergences (sparq-engine vs XPath F&O)
-// ---------------------------------------------------------------------------
-
-/// A case where sparq's evaluator — the ORACLE — is itself wrong against XPath F&O, which
-/// is what `noir_XPath` implements. Asserting the oracle's answer here would enshrine the
-/// engine bug and paint the (correct) circuit red, so these cases are emitted as LIVE
-/// assertions against the F&O value instead, labelled SPEC-REFERENCE (their expected value
-/// comes from the F&O reference in this file, not from the oracle), and the divergence is
-/// stated in the generated header. Keeping them live is what makes a `noir_XPath`
-/// regression on an edge it already fixed fail the run. Each is pinned by two unit tests
-/// below: one asserting the row is emitted live, one asserting the divergence still
-/// reproduces, so the entry expires when the engine is fixed.
-struct Divergence {
-    /// The SPARQL expression, as evaluated against the oracle.
-    expr: &'static str,
-    /// What sparq-engine returns today.
-    sparq: &'static str,
-    /// What XPath F&O requires (and `noir_XPath` implements).
-    spec: &'static str,
-    /// One line of why.
-    why: &'static str,
-}
-
-const DIVERGENCES: &[Divergence] = &[
-    Divergence {
-        expr: "ROUND(xsd:double(\"-0.5\"))",
-        sparq: "+0.0 (lexical \"0\")",
-        spec: "-0.0E0 — a negative argument in [-0.5, 0) rounds to NEGATIVE zero",
-        why: "sparq-engine's ROUND loses the sign of a zero result; the double serializer \
-              itself is fine (xsd:double(\"-0.0\") does render as \"-0E0\").",
-    },
-];
 
 // ---------------------------------------------------------------------------
 // Corpus
@@ -609,11 +571,8 @@ fn live_assertions_by_test(src: &str) -> Vec<(String, Vec<String>)> {
 /// accidentally-empty section cannot pass silently.
 #[derive(Default)]
 struct Counts {
-    /// Every LIVE assertion in the generated file, `spec_reference` rows included.
+    /// Every LIVE assertion in the generated file.
     assertions: usize,
-    /// The subset of `assertions` whose expected value came from the F&O reference in this
-    /// file rather than from the oracle, because the oracle diverges (see [`DIVERGENCES`]).
-    spec_reference: usize,
 }
 
 fn header(out: &mut String, mode: &FaultMode) {
@@ -622,12 +581,10 @@ fn header(out: &mut String, mode: &FaultMode) {
     writeln!(out, "//").unwrap();
     writeln!(out, "// PROOF M1 (sq-3x7dl.14.2): no expected value below is hand-written. Each was READ").unwrap();
     writeln!(out, "// BACK from sparq's own Rust SPARQL/XSD scalar evaluator (`sparq_engine::query`, a").unwrap();
-    writeln!(out, "// real BIND over a one-row graph), EXCEPT the rows explicitly labelled").unwrap();
-    writeln!(out, "// SPEC-REFERENCE, whose value comes from the generator's XPath F&O reference").unwrap();
-    writeln!(out, "// because the oracle itself diverges there (see RECORDED ORACLE DIVERGENCES).").unwrap();
+    writeln!(out, "// real BIND over a one-row graph).").unwrap();
     writeln!(out, "// Doubles are additionally cross-checked BIT-for-BIT against native Rust f64, and").unwrap();
     writeln!(out, "// fn:substring against an explicit XPath F&O 3.1 sec. 5.4.3 fn:substring window reference;").unwrap();
-    writeln!(out, "// an UNRECORDED cross-check mismatch ABORTS generation.").unwrap();
+    writeln!(out, "// a cross-check mismatch ABORTS generation.").unwrap();
     writeln!(out, "//").unwrap();
     writeln!(out, "// TCB, honestly: (1) the sparq Rust XSD evaluator is itself UNAUDITED — it is the").unwrap();
     writeln!(out, "// repo's reference semantics, not a proven implementation; (2) coverage is a").unwrap();
@@ -635,21 +592,6 @@ fn header(out: &mut String, mode: &FaultMode) {
     writeln!(out, "// lowering is NOT covered — `nargo test` exercises witness generation only.").unwrap();
     writeln!(out, "// This is VERIFICATION, not proof. No soundness or privacy claim is made or").unwrap();
     writeln!(out, "// implied; the ZK estate stays research-grade and NOT externally audited (sq-qhy4).").unwrap();
-    writeln!(out, "//").unwrap();
-    writeln!(out, "// RECORDED ORACLE DIVERGENCES (sparq-engine vs XPath F&O, which noir_XPath").unwrap();
-    writeln!(out, "// implements). These cases are still asserted LIVE, but against the SPEC value and").unwrap();
-    writeln!(out, "// labelled SPEC-REFERENCE at the row: asserting the ORACLE's answer would enshrine").unwrap();
-    writeln!(out, "// an engine bug and red a correct circuit, whereas asserting the F&O value keeps").unwrap();
-    writeln!(out, "// the edge EXECUTABLE, so a noir_XPath regression on it fails this file. Read a").unwrap();
-    writeln!(out, "// SPEC-REFERENCE row as `noir_XPath == XPath F&O`, not as `noir_XPath == sparq`.").unwrap();
-    writeln!(out, "// Each is pinned by unit tests in the generator so the entry expires when the").unwrap();
-    writeln!(out, "// engine is fixed:").unwrap();
-    for d in DIVERGENCES {
-        writeln!(out, "//   * {}", d.expr).unwrap();
-        writeln!(out, "//       sparq-engine: {}", d.sparq).unwrap();
-        writeln!(out, "//       XPath F&O:    {}", d.spec).unwrap();
-        writeln!(out, "//       {}", d.why).unwrap();
-    }
     writeln!(out, "//").unwrap();
     writeln!(out, "// KNOWN SCOPE LIMIT (sq-hjvte): noir_XPath's `substring` indexes BYTE positions in").unwrap();
     writeln!(out, "// the logical content (its own documented caveat), while SPARQL SUBSTR / fn:substring").unwrap();
@@ -764,7 +706,7 @@ enum Positions {
 fn gen_substring(out: &mut String, g: &Graph, c: &mut Counts, f: &mut Faults) {
     writeln!(out, "/// fn:substring — ASCII-only (see the byte-vs-codepoint scope limit above).").unwrap();
     writeln!(out, "/// Oracle: SPARQL `SUBSTR`, cross-checked against the F&O 3.1 sec. 5.4.3 fn:substring").unwrap();
-    writeln!(out, "/// window, including starts below one. Every row must agree with the reference.").unwrap();
+    writeln!(out, "/// window, including the `start < 1` rows whose window consumes part of the length.").unwrap();
     writeln!(out, "///").unwrap();
     writeln!(out, "/// Positions reach the circuit VERBATIM here, which is what holds noir_XPath to the F&O").unwrap();
     writeln!(out, "/// window arithmetic itself (sq-3x7dl.6). Multibyte content is covered separately, by").unwrap();
@@ -850,11 +792,10 @@ fn substring_section(
         let expr = format!("SUBSTR({}, {start}, {length})", sparql_str(value));
         let sparq_answer = oracle_plain_string(g, &expr);
         let spec_answer = fo_substring(value, start, length);
-        // The historical shifted-window exception is fixed. Any renewed
-        // mismatch must now abort generation, including starts below one.
         assert_eq!(
             sparq_answer, spec_answer,
-            "oracle/reference substring mismatch on `{expr}`"
+            "F&O CROSS-CHECK FAILED for `{expr}`: sparq-engine {sparq_answer:?} vs F&O \
+             {spec_answer:?}. Investigate before pinning — fix the engine or file a follow-up."
         );
         c.assertions += 1 + spec_answer.len();
         // An empty expected result leaves the byte buffer unread; bind it to `_out` so
@@ -941,9 +882,7 @@ fn gen_divide(out: &mut String, g: &Graph, c: &mut Counts, f: &mut Faults) {
 fn gen_round(out: &mut String, g: &Graph, c: &mut Counts, f: &mut Faults) {
     writeln!(out, "/// fn:round for xs:double — ties toward +INFINITY (F&O 3.1 sec. 4.4.4 fn:round), sign").unwrap();
     writeln!(out, "/// of zero preserved. Oracle: SPARQL `ROUND`, bit-cross-checked against the F&O").unwrap();
-    writeln!(out, "/// reference. The -0.5 row is SPEC-REFERENCE (see the header): sparq-engine loses the").unwrap();
-    writeln!(out, "/// sign of a zero result, so its expected value is F&O's and it asserts noir_XPath").unwrap();
-    writeln!(out, "/// against the SPEC.").unwrap();
+    writeln!(out, "/// reference, including the -0.5 row whose result is NEGATIVE zero.").unwrap();
     writeln!(out, "#[test]").unwrap();
     writeln!(out, "fn differential_oracle_round_double() {{").unwrap();
     for lex in ROUND_CORPUS {
@@ -954,21 +893,13 @@ fn gen_round(out: &mut String, g: &Graph, c: &mut Counts, f: &mut Faults) {
             let t = oracle_term(g, &expr).unwrap_or_else(|| panic!("oracle `{expr}` errored"));
             lexical(&t, "double", &expr).parse::<f64>().unwrap().to_bits()
         };
-        let diverges = sparq_bits != spec.to_bits();
-        // Only the recorded negative-zero case may diverge.
-        assert!(
-            !diverges || (spec == 0.0 && spec.is_sign_negative()),
-            "UNRECORDED oracle divergence on `{expr}`: sparq-engine bits 0x{sparq_bits:016x} vs \
+        assert_eq!(
+            sparq_bits,
+            spec.to_bits(),
+            "F&O CROSS-CHECK FAILED for `{expr}`: sparq-engine bits 0x{sparq_bits:016x} vs \
              F&O bits 0x{:016x}. Investigate before pinning.",
             spec.to_bits()
         );
-        if diverges {
-            writeln!(out, "    // SPEC-REFERENCE: sparq-engine returns +0.0 (bits 0x{sparq_bits:016x}); F&O 3.1").unwrap();
-            writeln!(out, "    // sec. 4.4.4 fn:round requires NEGATIVE zero for an argument in [-0.5, 0). The").unwrap();
-            writeln!(out, "    // row asserts the SPEC value LIVE — it holds noir_XPath to F&O, not to sparq.").unwrap();
-            writeln!(out, "    // Drop the special-casing (not the assertion) when the engine is fixed.").unwrap();
-            c.spec_reference += 1;
-        }
         c.assertions += 1;
         writeln!(out, "    // {expr} -> {spec:?}").unwrap();
         let line = format!(
@@ -1141,9 +1072,8 @@ fn generate_noir_file(mode: &FaultMode) -> (String, Counts) {
 
     writeln!(
         out,
-        "// Coverage: {} live assertions, {} of them SPEC-REFERENCE rows whose expected value is\n\
-         // XPath F&O's rather than the oracle's (recorded oracle divergences; 0 commented out).",
-        counts.assertions, counts.spec_reference
+        "// Coverage: {} live assertions (0 commented out).",
+        counts.assertions
     )
     .unwrap();
 
@@ -1269,8 +1199,8 @@ fn main() {
     }
     std::fs::write(&path, &content).unwrap_or_else(|e| panic!("write {path}: {e}"));
     eprintln!(
-        "wrote {path}: {} live assertions, {} of them SPEC-REFERENCE (recorded oracle divergences)",
-        counts.assertions, counts.spec_reference
+        "wrote {path}: {} live assertions",
+        counts.assertions
     );
 }
 
@@ -1440,13 +1370,12 @@ mod tests {
 
     /// The two circuit edges `noir_XPath` FIXED — the F&O window for `start < 1`
     /// (`sq-3x7dl.6`) and negative zero out of `fn:round` — must reach the circuit as LIVE
-    /// assertions. Substring now agrees with the oracle; ROUND still uses
-    /// the F&O reference. If either were emitted commented out, a `noir_XPath`
-    /// regression on an edge it advertises as fixed would go completely undetected while
-    /// every other check stayed green. This test is that guard.
+    /// assertions carrying the F&O value. If they were ever emitted commented out, or the
+    /// oracle regressed to its old answers (#4275, #4276), a `noir_XPath` regression on an
+    /// edge it advertises as fixed would go undetected. This test is that guard.
     #[test]
-    fn spec_reference_edges_reach_the_circuit_as_live_assertions() {
-        let (src, counts) = generate_noir_file(&FaultMode::None);
+    fn fixed_edges_reach_the_circuit_as_live_assertions() {
+        let (src, _) = generate_noir_file(&FaultMode::None);
 
         // No assertion may be emitted commented out, in any section.
         let smothered: Vec<&str> =
@@ -1456,7 +1385,6 @@ mod tests {
             "assertions emitted COMMENTED OUT (they cannot fail, so they verify nothing): {:#?}",
             smothered
         );
-        assert!(counts.spec_reference > 0, "no SPEC-REFERENCE row was emitted at all");
 
         let live: Vec<&str> =
             src.lines().map(str::trim).filter(|l| l.starts_with("assert(")).collect();
@@ -1464,7 +1392,7 @@ mod tests {
             assert!(live.contains(&want), "missing LIVE assertion `{}`", want);
         };
 
-        // substring("12345", 0, 3) == "12" — the oracle and F&O window agree.
+        // substring("12345", 0, 3) == "12" — the F&O window, NOT the old engine's "123".
         // Located by corpus content so a corpus edit cannot silently orphan this guard.
         let i = substring_corpus()
             .iter()
@@ -1474,7 +1402,7 @@ mod tests {
         require(&format!("assert(out{}[0] == 49);", i)); // b'1'
         require(&format!("assert(out{}[1] == 50);", i)); // b'2'
 
-        // round_double(-0.5) == -0.0 — the F&O sign of zero, NOT the oracle's +0.0. Built
+        // round_double(-0.5) == -0.0 — the F&O sign of zero, NOT the old engine's +0.0. Built
         // with the generator's own renderers so the two cannot drift apart.
         assert!(ROUND_CORPUS.contains(&"-0.5"), "the round corpus must keep the -0.5 case");
         require(&format!(
@@ -1484,39 +1412,16 @@ mod tests {
         ));
     }
 
-    /// Keep the former divergence cases as affirmative agreement controls.
+    /// The oracle itself agrees with F&O on the two edges it used to get wrong (#4275,
+    /// #4276), so neither can come back as a silent oracle/reference split.
     #[test]
-    fn substring_start_below_one_agrees_with_the_reference() {
+    fn oracle_matches_fo_on_the_formerly_divergent_edges() {
         let g = oracle_graph();
-        for (value, start, length, expected) in [("12345", 0, 3, "12"), ("hello", -2, 4, "h")] {
-            assert_eq!(fo_substring(value, start, length), expected);
-            let expr = format!("SUBSTR({}, {start}, {length})", sparql_str(value));
-            assert_eq!(oracle_plain_string(&g, &expr), expected);
-        }
-    }
-
-    /// SELF-EXPIRING GUARD. `DIVERGENCES[0]` claims sparq-engine's `ROUND` loses the
-    /// sign of a negative zero result. Goes RED when the engine is fixed, at which point
-    /// the row stops being SPEC-REFERENCE and becomes an ordinary oracle-derived one.
-    #[test]
-    fn recorded_divergence_round_negative_zero_still_reproduces() {
-        let g = oracle_graph();
+        assert_eq!(oracle_plain_string(&g, "SUBSTR(\"12345\", 0, 3)"), fo_substring("12345", 0, 3));
+        assert_eq!(oracle_plain_string(&g, "SUBSTR(\"hello\", -2, 4)"), fo_substring("hello", -2, 4));
         let t = oracle_term(&g, "ROUND(xsd:double(\"-0.5\"))").expect("ROUND must not error");
         let bits = lexical(&t, "double", "ROUND").parse::<f64>().unwrap().to_bits();
-        assert_eq!(bits, 0.0f64.to_bits(), "engine now returns something other than +0.0");
-        assert_eq!(fo_round_double(-0.5).to_bits(), (-0.0f64).to_bits());
-        // The serializer itself is NOT the culprit — it renders -0.0 correctly.
-        assert!(oracle_term(&g, "xsd:double(\"-0.0\")").unwrap().starts_with("\"-0E0\""));
-    }
-
-    /// Every recorded divergence must carry all four fields — an empty `why` would make
-    /// the generated header's honesty claim hollow.
-    #[test]
-    fn divergences_are_fully_documented() {
-        assert!(!DIVERGENCES.is_empty());
-        for d in DIVERGENCES {
-            assert!(!d.expr.is_empty() && !d.sparq.is_empty() && !d.spec.is_empty() && !d.why.is_empty());
-        }
+        assert_eq!(bits, fo_round_double(-0.5).to_bits());
     }
 
     /// The corpus must actually exercise the edges the bead names, otherwise a green run

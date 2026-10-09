@@ -15061,7 +15061,10 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
         (DateTime(_), DateTime(_)) | (Date(_), Date(_)) => None,
         // date and dateTime values are disjoint -> known different.
-        (DateTime(_), Date(_)) | (Date(_), DateTime(_)) => Some(false),
+        // An ill-formed operand (e.g. a timezone-free dateTimeStamp) is not a value: error.
+        (DateTime(Some(_)), Date(Some(_))) | (Date(Some(_)), DateTime(Some(_))) => Some(false),
+        // Nor is it known different from a language-tagged literal (#3902): still an error.
+        (DateTime(None) | Date(None), _) | (_, DateTime(None) | Date(None)) => None,
         // A language-tagged literal equals only a literal with the same (ci) tag.
         (Lang(t1, v1), Lang(t2, v2)) => Some(t1 == t2 && v1 == v2),
         (Lang(..), _) | (_, Lang(..)) => Some(false),
