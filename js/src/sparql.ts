@@ -186,20 +186,60 @@ function escapeIri(value: string): string {
 
 const XSD_STRING = 'http://www.w3.org/2001/XMLSchema#string';
 
-/** Serialises a term to its N-Triples (and SPARQL constant) form. */
+// Term parts with no escape form are validated, never rewritten: a crafted blank-node label,
+// language tag or direction would otherwise end its token and inject statements (N-Quads) or
+// query text (SPARQL). The rules are the N-Triples BLANK_NODE_LABEL and LANGTAG productions
+// plus the RDF 1.2 `ltr`/`rtl` direction. A lone UTF-16 surrogate has no UTF-8 or UCHAR form,
+// so it is rejected in IRIs and literals.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const PN_CHARS_BASE =
+  'A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF'
+  + '\\u200C-\\u200D\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD'
+  + '\\u{10000}-\\u{EFFFF}';
+const PN_CHARS = `${PN_CHARS_BASE}_:\\-0-9\\u00B7\\u0300-\\u036F\\u203F-\\u2040`;
+const BLANK_NODE_LABEL = new RegExp(`^[${PN_CHARS_BASE}_:0-9](?:[${PN_CHARS}.]*[${PN_CHARS}])?$`, 'u');
+const LANGTAG = /^[a-zA-Z]+(?:-[a-zA-Z0-9]+)*$/;
+
+function noLoneSurrogate(value: string, what: string): string {
+  if (LONE_SURROGATE.test(value)) {
+    throw new Error(`cannot serialise ${what} ${JSON.stringify(value)}: it contains a lone surrogate`);
+  }
+  return value;
+}
+
+/**
+ * Serialises a term to its N-Triples (and SPARQL constant) form. IRIs are percent-encoded
+ * (see {@link escapeIri}) and literal values escaped; a blank-node label that is not a
+ * `BLANK_NODE_LABEL`, a language tag that is not a `LANGTAG`, a direction other than
+ * `ltr`/`rtl`, or a lone surrogate throws an `Error` instead.
+ */
 export function termToNT(term: RDF.Term): string {
   switch (term.termType) {
     case 'NamedNode':
-      return `<${escapeIri(term.value)}>`;
+      return `<${escapeIri(noLoneSurrogate(term.value, 'IRI'))}>`;
     case 'BlankNode':
+      if (!BLANK_NODE_LABEL.test(term.value)) {
+        throw new Error(`cannot serialise blank node label ${JSON.stringify(term.value)}: not an N-Triples BLANK_NODE_LABEL`);
+      }
       return `_:${term.value}`;
     case 'Literal': {
-      const quoted = `"${escapeLiteral(term.value)}"`;
+      const quoted = `"${escapeLiteral(noLoneSurrogate(term.value, 'literal'))}"`;
       if (term.language !== '') {
-        const dir = term.direction != null && term.direction !== '' ? `--${term.direction}` : '';
+        if (!LANGTAG.test(term.language)) {
+          throw new Error(`cannot serialise language tag ${JSON.stringify(term.language)}: not an N-Triples LANGTAG`);
+        }
+        let dir = '';
+        if (term.direction != null && term.direction !== '') {
+          if (term.direction !== 'ltr' && term.direction !== 'rtl') {
+            throw new Error(`cannot serialise base direction ${JSON.stringify(term.direction)}: must be "ltr" or "rtl"`);
+          }
+          dir = `--${term.direction}`;
+        }
         return `${quoted}@${term.language}${dir}`;
       }
-      if (term.datatype.value !== XSD_STRING) return `${quoted}^^<${escapeIri(term.datatype.value)}>`;
+      if (term.datatype.value !== XSD_STRING) {
+        return `${quoted}^^<${escapeIri(noLoneSurrogate(term.datatype.value, 'datatype IRI'))}>`;
+      }
       return quoted;
     }
     case 'DefaultGraph':
