@@ -248,7 +248,7 @@ pub fn frame_expanded(
         unique_embeds: BTreeMap::new(),
         bnode_counts: BTreeMap::new(),
         last_ids: BTreeSet::new(),
-        output_left: output_bound(expanded_input, &frame_arr),
+        budget: Budget::new(output_bound(expanded_input, &frame_arr)),
         reverse: BTreeMap::new(),
     };
 
@@ -258,8 +258,9 @@ pub fn frame_expanded(
         .get(graph)
         .map(|g| g.keys().cloned().collect())
         .unwrap_or_default();
-    let mut framed = Json::Arr(Vec::new());
+    let mut framed = Out::array(&mut st.budget)?;
     match_frame(&maps, &mut st, &subjects, &frame_arr, &mut framed, None, false)?;
+    let mut framed = framed.into_json();
 
     // `@embed: @last`: every occurrence embedded above; keep only the LAST embed of
     // each such id per top-level match (earlier ones demote to node references) —
@@ -324,8 +325,8 @@ struct FState<'a> {
     last_ids: BTreeSet<String>,
     /// blank-node id → number of framed output objects/`@type` usages (for pruning).
     bnode_counts: BTreeMap<String, usize>,
-    /// Output values this call may still emit (see [`FState::emit`]).
-    output_left: usize,
+    /// What this call may still allocate for its output and bookkeeping ([`Budget`]).
+    budget: Budget,
     /// (graph, reverse property) → referenced id → referring subjects ([`FState::referrers`]).
     reverse: BTreeMap<(String, String), BTreeMap<String, Vec<String>>>,
 }
@@ -349,48 +350,11 @@ fn output_bound(input: &Json, frame: &Json) -> usize {
 }
 
 impl FState<'_> {
-    /// Copies `value` (from the input or the frame) for the output, charging its size
-    /// first. With the constructors below, this is the only way [`match_frame`] creates
-    /// an owned value (`match_frame_allocates_only_through_the_budget` enforces it).
-    fn copy(&mut self, value: &Json) -> Result<Json, JsonLdError> {
-        self.emit(json_bytes(value))?;
-        Ok(value.clone())
-    }
-
-    /// A new output node object `{"@id": id}`, to be added under `property`.
-    fn node(&mut self, id: &str, property: Option<&str>) -> Result<Json, JsonLdError> {
-        self.emit(NODE_BYTES + id.len() + property.map_or(0, str::len))?;
-        Ok(Json::Obj(vec![("@id".to_string(), Json::Str(id.to_string()))]))
-    }
-
-    /// A new, empty list object `{"@list": []}`, to be added under `property`.
-    fn list(&mut self, property: &str) -> Result<Json, JsonLdError> {
-        self.emit(2 * NODE_BYTES + property.len())?;
-        Ok(Json::Obj(vec![("@list".to_string(), Json::Arr(Vec::new()))]))
-    }
-
     /// The implicit sub-frame carrying `flags` forward ([`implicit_frame`]).
     fn implicit(&mut self, flags: &Flags) -> Result<Json, JsonLdError> {
         let frame = implicit_frame(flags);
         self.emit(json_bytes(&frame))?;
         Ok(frame)
-    }
-
-    /// The `@default` fill for `property`: the frame's `default` values (or `@null`),
-    /// wrapped in `@preserve` unless `property` is `@type`.
-    fn default_fill(&mut self, default: Option<&Json>, property: &str) -> Result<Json, JsonLdError> {
-        self.emit(default.map_or(16, json_bytes) + 3 * NODE_BYTES + property.len())?;
-        let values = match default {
-            Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
-            None => Json::Arr(vec![Json::Str("@null".to_string())]),
-        };
-        Ok(if property == "@type" {
-            // A `@type` default fills DIRECTLY (its values are IRIs that must go through
-            // IRI compaction; `@preserve` would shield them).
-            values
-        } else {
-            Json::Arr(vec![Json::Obj(vec![("@preserve".to_string(), values)])])
-        })
     }
 
     /// The subject ids of `graph`, in order.
@@ -426,20 +390,158 @@ impl FState<'_> {
         Ok(found)
     }
 
-    /// Charges `n` bytes to the call's output bound before they are allocated, failing
-    /// with `context overflow` once it is spent. Every node, reference, copied value,
-    /// wrapper, default and frame copy framing builds is charged here, so its output (and
-    /// the compaction and rendering that are linear in it) stays bounded by its input.
+    /// Charges `n` bytes of bookkeeping (frame copies, id lists) to the call's budget.
     fn emit(&mut self, n: usize) -> Result<(), JsonLdError> {
-        match self.output_left.checked_sub(n) {
-            Some(left) => {
-                self.output_left = left;
-                Ok(())
+        self.budget.charge(n)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Output
+// ---------------------------------------------------------------------------
+
+use output::{Budget, Out};
+
+/// Framing's output and the budget that pays for it. [`Out`]'s contents are private to
+/// this module, so [`match_frame`] and its helpers can build output only through the
+/// constructors and mutators here, and each one charges the [`Budget`] before it
+/// allocates: keys, copied values, nodes, lists, defaults and the arrays that hold them.
+mod output {
+    use super::{as_slice, json_bytes, output_member_mut, Json, JsonLdError, E, NODE_BYTES};
+
+    /// What a framing call may still allocate. Charges fail with `context overflow` once
+    /// it is spent, so the output (and the compaction and rendering that are linear in
+    /// it) stays bounded by the input.
+    pub(super) struct Budget {
+        left: usize,
+    }
+
+    impl Budget {
+        pub(super) fn new(left: usize) -> Self {
+            Budget { left }
+        }
+
+        /// Charges `n` bytes before they are allocated.
+        pub(super) fn charge(&mut self, n: usize) -> Result<(), JsonLdError> {
+            match self.left.checked_sub(n) {
+                Some(left) => {
+                    self.left = left;
+                    Ok(())
+                }
+                None => Err(JsonLdError::with_detail(
+                    E::ContextOverflow,
+                    "framing output exceeds its bound for this input",
+                )),
             }
-            None => Err(JsonLdError::with_detail(
-                E::ContextOverflow,
-                "framing output exceeds its bound for this input",
-            )),
+        }
+    }
+
+    /// A framed output value under construction.
+    pub(super) struct Out(Json);
+
+    impl Out {
+        /// A new, empty array.
+        pub(super) fn array(budget: &mut Budget) -> Result<Out, JsonLdError> {
+            budget.charge(NODE_BYTES)?;
+            Ok(Out(Json::Arr(Vec::new())))
+        }
+
+        /// A new node object `{"@id": id}`.
+        pub(super) fn node(budget: &mut Budget, id: &str) -> Result<Out, JsonLdError> {
+            budget.charge(NODE_BYTES + "@id".len() + id.len() + 16)?;
+            Ok(Out(Json::Obj(vec![("@id".to_string(), Json::Str(id.to_string()))])))
+        }
+
+        /// A new, empty list object `{"@list": []}`.
+        pub(super) fn list(budget: &mut Budget) -> Result<Out, JsonLdError> {
+            budget.charge(2 * NODE_BYTES + "@list".len() + 8)?;
+            Ok(Out(Json::Obj(vec![("@list".to_string(), Json::Arr(Vec::new()))])))
+        }
+
+        /// A copy of `value` (from the input or the frame).
+        pub(super) fn copy(budget: &mut Budget, value: &Json) -> Result<Out, JsonLdError> {
+            budget.charge(json_bytes(value))?;
+            Ok(Out(value.clone()))
+        }
+
+        /// A `@default` fill: the frame's `default` values (or `@null`), wrapped in
+        /// `@preserve` unless `direct` (a `@type` default, whose IRIs must still go through
+        /// IRI compaction).
+        pub(super) fn default_fill(budget: &mut Budget, default: Option<&Json>, direct: bool) -> Result<Out, JsonLdError> {
+            budget.charge(default.map_or(16, json_bytes) + 3 * NODE_BYTES + "@preserve".len() + 8)?;
+            let values = match default {
+                Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
+                None => Json::Arr(vec![Json::Str("@null".to_string())]),
+            };
+            Ok(Out(if direct {
+                values
+            } else {
+                Json::Arr(vec![Json::Obj(vec![("@preserve".to_string(), values)])])
+            }))
+        }
+
+        /// Whether this object has member `key`.
+        pub(super) fn has(&self, key: &str) -> bool {
+            self.0.get(key).is_some()
+        }
+
+        /// Sets member `key` of this object to `value`.
+        pub(super) fn set(&mut self, budget: &mut Budget, key: &str, value: Out) -> Result<(), JsonLdError> {
+            budget.charge(key.len() + 8)?;
+            self.0.set(key, value.0);
+            Ok(())
+        }
+
+        /// Adds `value` to this output (§4.2 "add output to parent"): pushed onto an
+        /// array, or appended to the `property` array of an object, retaining duplicates
+        /// (a `@list` legitimately repeats values).
+        pub(super) fn append(&mut self, budget: &mut Budget, property: Option<&str>, value: Out) -> Result<(), JsonLdError> {
+            match (&mut self.0, property) {
+                (Json::Arr(items), _) => {
+                    budget.charge(8)?;
+                    items.push(value.0);
+                }
+                (Json::Obj(_), Some(key)) => {
+                    if self.0.get(key).is_none() {
+                        budget.charge(key.len() + 8 + NODE_BYTES)?;
+                        self.0.set(key, Json::Arr(Vec::new()));
+                    }
+                    budget.charge(8)?;
+                    if let Some(Json::Arr(items)) = output_member_mut(&mut self.0, key) {
+                        items.push(value.0);
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+
+        /// Adds one framed referrer to this node's `@reverse` map under `property`.
+        pub(super) fn append_reverse(&mut self, budget: &mut Budget, property: &str, item: Out) -> Result<(), JsonLdError> {
+            if self.0.get("@reverse").is_none() {
+                budget.charge("@reverse".len() + 8 + NODE_BYTES)?;
+                self.0.set("@reverse", Json::obj());
+            }
+            if let Some(rev) = output_member_mut(&mut self.0, "@reverse") {
+                let mut map = Out(std::mem::take(rev));
+                let added = map.append(budget, Some(property), item);
+                *rev = map.0;
+                added?;
+            }
+            Ok(())
+        }
+
+        /// The items of this array.
+        pub(super) fn into_items(self) -> Vec<Out> {
+            match self.0 {
+                Json::Arr(items) => items.into_iter().map(Out).collect(),
+                _ => Vec::new(),
+            }
+        }
+
+        /// The finished output.
+        pub(super) fn into_json(self) -> Json {
+            self.0
         }
     }
 }
@@ -569,7 +671,7 @@ fn match_frame(
     st: &mut FState<'_>,
     subjects: &[String],
     frame: &Json,
-    parent: &mut Json,
+    parent: &mut Out,
     property: Option<&str>,
     embedded: bool,
 ) -> Result<(), JsonLdError> {
@@ -608,7 +710,7 @@ fn match_frame(
             continue;
         }
 
-        let mut output = st.node(&id, property)?;
+        let mut output = Out::node(&mut st.budget, &id)?;
         if id.starts_with("_:") {
             *st.bnode_counts.entry(id.clone()).or_insert(0) += 1;
         }
@@ -621,7 +723,7 @@ fn match_frame(
                 .iter()
                 .any(|(g, s)| *g == st.graph && *s == id);
             if flags.embed == Embed::Never || circular {
-                add_frame_output(parent, property, output);
+                parent.append(&mut st.budget, property, output)?;
                 continue;
             }
             if flags.embed == Embed::Once
@@ -631,7 +733,7 @@ fn match_frame(
                     .map(|e| e.contains(&id))
                     .unwrap_or(false)
             {
-                add_frame_output(parent, property, output);
+                parent.append(&mut st.budget, property, output)?;
                 continue;
             }
         }
@@ -701,8 +803,8 @@ fn match_frame(
             }
             if prop.starts_with('@') {
                 // Keywords copy verbatim; blank-node @type values count toward pruning.
-                let copied = st.copy(objects)?;
-                output.set(prop, copied);
+                let copied = Out::copy(&mut st.budget, objects)?;
+                output.set(&mut st.budget, prop, copied)?;
                 if prop == "@type" {
                     for t in as_slice(objects) {
                         if let Some(s) = t.as_str() {
@@ -731,7 +833,7 @@ fn match_frame(
                             &implicit
                         }
                     };
-                    let mut list = st.list(prop)?;
+                    let mut list = Out::list(&mut st.budget)?;
                     for oo in o.get("@list").map(as_slice).unwrap_or_default() {
                         if let Some(oid) = subject_reference_id(oo) {
                             match_frame(
@@ -744,11 +846,11 @@ fn match_frame(
                                 true,
                             )?;
                         } else {
-                            let copied = st.copy(oo)?;
-                            add_frame_output(&mut list, Some("@list"), copied);
+                            let copied = Out::copy(&mut st.budget, oo)?;
+                            list.append(&mut st.budget, Some("@list"), copied)?;
                         }
                     }
-                    add_frame_output(&mut output, Some(prop), list);
+                    output.append(&mut st.budget, Some(prop), list)?;
                 } else if let Some(oid) = subject_reference_id(o) {
                     // Node reference: recurse with the property sub-frame (or the
                     // implicit frame inheriting the current flags).
@@ -775,8 +877,8 @@ fn match_frame(
                     let empty = Json::obj();
                     let pattern = frame_prop.and_then(first_of).unwrap_or(&empty);
                     if value_match(pattern, o) {
-                        let copied = st.copy(o)?;
-                        add_frame_output(&mut output, Some(prop), copied);
+                        let copied = Out::copy(&mut st.budget, o)?;
+                        output.append(&mut st.budget, Some(prop), copied)?;
                     }
                 }
             }
@@ -802,9 +904,9 @@ fn match_frame(
                 continue;
             }
             let omit_default = frame_flag_bool(next, "@omitDefault", st.options.omit_default);
-            if !omit_default && output.get(prop).is_none() {
-                let fill = st.default_fill(next.get("@default"), prop)?;
-                output.set(prop, fill);
+            if !omit_default && !output.has(prop) {
+                let fill = Out::default_fill(&mut st.budget, next.get("@default"), prop == "@type")?;
+                output.set(&mut st.budget, prop, fill)?;
             }
         }
 
@@ -817,7 +919,7 @@ fn match_frame(
             for (reverse_prop, subframe) in rprops {
                 let referrers = st.referrers(maps, reverse_prop, &id)?;
                 for sid in referrers {
-                    let mut tmp = Json::Arr(Vec::new());
+                    let mut tmp = Out::array(&mut st.budget)?;
                     match_frame(
                         maps,
                         st,
@@ -827,16 +929,14 @@ fn match_frame(
                         Some(reverse_prop),
                         embedded,
                     )?;
-                    if let Json::Arr(items) = tmp {
-                        for item in items {
-                            add_reverse_output(&mut output, reverse_prop, item);
-                        }
+                    for item in tmp.into_items() {
+                        output.append_reverse(&mut st.budget, reverse_prop, item)?;
                     }
                 }
             }
         }
 
-        add_frame_output(parent, property, output);
+        parent.append(&mut st.budget, property, output)?;
         st.subject_stack.pop();
     }
     Ok(())
@@ -1253,32 +1353,6 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
 // Output assembly + post-processing
 // ---------------------------------------------------------------------------
 
-/// Add a framed `output` to `parent`: appended to an array parent, or merged into the
-/// `property` array of an object parent (§4.2 "add output to parent").
-fn add_frame_output(parent: &mut Json, property: Option<&str>, output: Json) {
-    match parent {
-        Json::Arr(items) => items.push(output),
-        Json::Obj(_) => {
-            if let Some(prop) = property {
-                // Duplicates are retained (the reference processors add with
-                // allowDuplicate — a @list legitimately repeats values).
-                append_value(parent, prop, output);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Merge one framed referrer into `output`'s `@reverse` map under `reverse_prop`.
-fn add_reverse_output(output: &mut Json, reverse_prop: &str, item: Json) {
-    if output.get("@reverse").is_none() {
-        output.set("@reverse", Json::obj());
-    }
-    if let Some(rev) = output_member_mut(output, "@reverse") {
-        append_value(rev, reverse_prop, item);
-    }
-}
-
 /// Mutable access to an object member (companion to [`Json::get`]).
 fn output_member_mut<'a>(obj: &'a mut Json, key: &str) -> Option<&'a mut Json> {
     match obj {
@@ -1287,17 +1361,6 @@ fn output_member_mut<'a>(obj: &'a mut Json, key: &str) -> Option<&'a mut Json> {
             .find(|(k, _)| k == key)
             .map(|(_, v)| v),
         _ => None,
-    }
-}
-
-/// Append `value` to the array member `prop` of `obj` (creating it), retaining
-/// duplicates (framing's add-output rule).
-fn append_value(obj: &mut Json, prop: &str, value: Json) {
-    if obj.get(prop).is_none() {
-        obj.set(prop, Json::Arr(Vec::new()));
-    }
-    if let Some(Json::Arr(items)) = output_member_mut(obj, prop) {
-        items.push(value);
     }
 }
 
@@ -1925,33 +1988,22 @@ mod tests {
         assert!(text.contains("http://ex/p") && !text.contains("http://ex/q"), "{text}");
     }
 
-    /// [`match_frame`] creates owned values only through the charging helpers on
-    /// [`FState`] ([`FState::copy`], [`FState::node`], [`FState::list`],
-    /// [`FState::implicit`], [`FState::default_fill`], [`FState::subject_ids`],
-    /// [`FState::referrers`]); the only other copies are the ids and graph names it
-    /// keeps for bookkeeping.
+    /// Member names count by their length: 2^9 embedded copies of a node whose predicate
+    /// is a 64 KiB IRI stop at the output bound, though each copied value is tiny.
     #[test]
-    fn match_frame_allocates_only_through_the_budget() {
-        let src = include_str!("frame.rs");
-        let start = src.find("\nfn match_frame(").expect("match_frame");
-        let body = &src[start..start + src[start..].find("\n}\n").expect("end of match_frame")];
-        for forbidden in ["vec![", ".cloned()", "Json::Str(", "Json::Raw(", "implicit_frame(", ".to_owned()", "format!("] {
-            assert!(!body.contains(forbidden), "match_frame uses `{forbidden}`");
+    fn copied_member_names_count_by_their_size() {
+        let mut input = layered(9);
+        let predicate = format!("http://ex/{}", "p".repeat(1 << 16));
+        let Json::Arr(nodes) = &mut input else { unreachable!() };
+        for node in nodes.iter_mut().filter(|n| n.get("http://ex/p").is_none()) {
+            node.set(&predicate, Json::Str("v".to_string()));
         }
-        let allowed_clones = ["id.clone()", "st.graph.clone()"];
-        for (at, _) in body.match_indices(".clone()") {
-            let head = &body[..at + ".clone()".len()];
-            assert!(allowed_clones.iter().any(|a| head.ends_with(a)), "match_frame clones: {}", &body[at.saturating_sub(40)..at + 8]);
-        }
-        let allowed_strings = ["oid.to_string()", "s.to_string()"];
-        for (at, _) in body.match_indices(".to_string()") {
-            let head = &body[..at + ".to_string()".len()];
-            assert!(allowed_strings.iter().any(|a| head.ends_with(a)), "match_frame converts: {}", &body[at.saturating_sub(40)..at + 12]);
-        }
-        for (at, _) in body.match_indices("collect()") {
-            let line_start = body[..at].rfind('\n').unwrap_or(0);
-            assert!(body[line_start..at].contains("Vec<&"), "match_frame collects owned values: {}", &body[line_start..at + 9]);
-        }
+        let frame = r#"{"@id":"http://ex/root","@embed":"@always"}"#;
+        assert!((1 << 9) * predicate.len() > bound(&input, frame));
+        assert_eq!(frame_with(&input, frame).unwrap_err(), E::ContextOverflow);
+        // One embed of the same node fits.
+        let out = frame_with(&input, r#"{"@id":"http://ex/n8a"}"#).expect("within the bound");
+        assert!(json_bytes(&out) <= bound(&input, r#"{"@id":"http://ex/n8a"}"#));
     }
 
     /// A large numeric `@default` is charged by its length: 1,000 fills of a 64 KiB
