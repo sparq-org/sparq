@@ -1,7 +1,7 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — tier-b W-shacl WASM showcase bundle. -->
+<!-- sq-inzv: full-template README — tier-b W-shacl WASM showcase bundle. -->
 # sparq-shacl-wasm
 
-**The tier-b "W-shacl" WebAssembly bundle** ([OPUS-4.8] sq-lfmf) for
+**The tier-b "W-shacl" WebAssembly bundle** (sq-lfmf) for
 [`sparq-shacl`](../sparq-shacl/README.md) — SHACL Core + SHACL-SPARQL (`sh:sparql`,
 W3C SHACL §5.2) **validation, live in the browser tab**.
 

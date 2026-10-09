@@ -974,5 +974,5 @@ canonical evidence pipeline.
     sub-vocabulary referenced by `TE-VOC-2` is vendored from it in the sparq repository
     (MIT). Prior work of this document's editor — declared for citation integrity.]),
   ("SPARQ", [The sparq project. #emph[sparq: an RDF + SPARQL engine with a zero-knowledge
-    query-proof estate (reference implementation)]. https://github.com/jeswr/sparq.]),
+    query-proof estate (reference implementation)]. https://github.com/sparq-org/sparq.]),
 ))

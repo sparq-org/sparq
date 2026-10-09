@@ -25,10 +25,6 @@
 // SPEC-REFERENCE row as `noir_XPath == XPath F&O`, not as `noir_XPath == sparq`.
 // Each is pinned by unit tests in the generator so the entry expires when the
 // engine is fixed:
-//   * SUBSTR(s, start, len) for start < 1
-//       sparq-engine: clamps start to 1 and then takes `len` characters
-//       XPath F&O:    the window [start, start+len) is NOT shifted, so a start below 1 consumes length
-//       sparq-engine exec.rs SubStr uses `start.max(1) - 1` then `.take(len)`; F&O 3.1 sec. 5.4.3 `fn:substring` keeps the window. e.g. SUBSTR("12345", 0, 3) is "12", not "123".
 //   * ROUND(xsd:double("-0.5"))
 //       sparq-engine: +0.0 (lexical "0")
 //       XPath F&O:    -0.0E0 -- a negative argument in [-0.5, 0) rounds to NEGATIVE zero
@@ -307,8 +303,7 @@ fn differential_oracle_contains() {
 
 /// fn:substring -- ASCII-only (see the byte-vs-codepoint scope limit above).
 /// Oracle: SPARQL `SUBSTR`, cross-checked against the F&O 3.1 sec. 5.4.3 fn:substring
-/// window. The `start < 1` rows are SPEC-REFERENCE (see the header): sparq-engine shifts
-/// the window, so their expected value is F&O's, and they assert noir_XPath against the SPEC.
+/// window, including starts below one. Every row must agree with the reference.
 ///
 /// Positions reach the circuit VERBATIM here, which is what holds noir_XPath to the F&O
 /// window arithmetic itself (sq-3x7dl.6). Multibyte content is covered separately, by
@@ -360,42 +355,22 @@ fn differential_oracle_substring() {
     assert(out6[0] == 101);
     assert(out6[1] == 108);
     assert(out6[2] == 108);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "123", F&O 3.1 sec. 5.4.3
-    // fn:substring says "12". noir_XPath is correct here (sq-3x7dl.6) and the
-    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
-    // F&O, not to sparq.
-    // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("12345", 0, 3) -> "12"
     let ss7: str<5> = "12345";
     let (out7, len7) = substring::<5, 5>(ss7, 0, 3);
     assert(len7 == 2);
     assert(out7[0] == 49);
     assert(out7[1] == 50);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "hell", F&O 3.1 sec. 5.4.3
-    // fn:substring says "h". noir_XPath is correct here (sq-3x7dl.6) and the
-    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
-    // F&O, not to sparq.
-    // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("hello", -2, 4) -> "h"
     let ss8: str<5> = "hello";
     let (out8, len8) = substring::<5, 5>(ss8, -2, 4);
     assert(len8 == 1);
     assert(out8[0] == 104);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "12345", F&O 3.1 sec. 5.4.3
-    // fn:substring says "1". noir_XPath is correct here (sq-3x7dl.6) and the
-    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
-    // F&O, not to sparq.
-    // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("12345", -3, 5) -> "1"
     let ss9: str<5> = "12345";
     let (out9, len9) = substring::<5, 5>(ss9, -3, 5);
     assert(len9 == 1);
     assert(out9[0] == 49);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "hel", F&O 3.1 sec. 5.4.3
-    // fn:substring says "". noir_XPath is correct here (sq-3x7dl.6) and the
-    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
-    // F&O, not to sparq.
-    // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("hello", -100, 3) -> ""
     let ss10: str<5> = "hello";
     let (_out10, len10) = substring::<5, 5>(ss10, -100, 3);
@@ -532,11 +507,6 @@ fn differential_oracle_substring_multibyte() {
     let mss13: str<9> = "日本語";
     let (_mout13, mlen13) = substring::<9, 9>(mss13, 1, 0);
     assert(mlen13 == 0);
-    // SPEC-REFERENCE (start < 1): sparq-engine says "\u{65e5}\u{672c}", F&O 3.1 sec. 5.4.3
-    // fn:substring says "\u{65e5}". noir_XPath is correct here (sq-3x7dl.6) and the
-    // oracle is not, so the row asserts the SPEC value LIVE -- it holds noir_XPath to
-    // F&O, not to sparq.
-    // Drop the special-casing (not the assertion) when the engine is fixed.
     // SUBSTR("\u{65e5}\u{672c}\u{8a9e}", 0, 2) -> "\u{65e5}"
     // codepoint window (0, 2) -> byte window (1, 3)
     let mss14: str<9> = "日本語";
@@ -884,5 +854,5 @@ fn differential_oracle_datetime_pre_1970() {
     assert(datetime_less_than(dt0, dt3) == true);
 }
 
-// Coverage: 312 live assertions, 13 of them SPEC-REFERENCE rows whose expected value is
+// Coverage: 312 live assertions, 1 of them SPEC-REFERENCE rows whose expected value is
 // XPath F&O's rather than the oracle's (recorded oracle divergences; 0 commented out).

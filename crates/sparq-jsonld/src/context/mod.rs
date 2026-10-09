@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use crate::json::Json;
 
+pub(crate) mod budget;
 pub mod inverse;
 pub mod iri;
 pub mod process;

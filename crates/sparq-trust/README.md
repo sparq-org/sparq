@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC. -->
+<!-- sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC. -->
 # sparq-trust
 
 <p>
@@ -17,10 +17,6 @@ the issuer-tagged fact so the existing N3 reasoner merges it with the `.acr` rul
 > `canAccess`. It does **not** provide privacy, unlinkability, or anonymity (see *Honest scope*).
 > The ZK estate it composes with is externally **unaudited** (`sq-qhy4`), pending
 > accredited-cryptographer sign-off.
-
-<!-- separate blockquote (MD028): the model-provenance note is a distinct callout. [OPUS-4.8] -->
-
-> Model: Opus 4.8 (Fable unavailable — flag for re-review when Fable returns).
 
 ## 🚀 Quickstart
 
