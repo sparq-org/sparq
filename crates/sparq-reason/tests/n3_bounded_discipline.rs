@@ -26,7 +26,9 @@
 //! when a fresh cut record (`Truncation::top_level`) is made anywhere but a `pub fn` entry
 //! point: a nested evaluation must record into its parent's. A second test fails when a
 //! public `reason_n3*` entry point (which makes such a record) is called from inside the
-//! crate: an internal caller passes its own record to the `_in` variant.
+//! crate: an internal caller passes its own record to the `_in` variant. A third fails
+//! when crate code parses N3 with the raw parser instead of `bounded::parse_n3`, which
+//! records a parser-limit failure on the caller's run.
 //!
 //! Each marker must name a category from [`ALLOWED`] (`// no-match: ill-typed (…)`);
 //! an unknown category fails, so a marker cannot be an unreviewed free-text waiver.
@@ -221,20 +223,8 @@ fn public_entry_points_are_not_called_from_inside_the_crate() {
     assert!(entries.len() >= 8, "found {entries:?}");
     let call = Regex::new(&format!(r"\b({})\(", entries.join("|"))).expect("call pattern");
     let marker = Regex::new(r"//\s*own-run:\s*([a-z-]*)").expect("marker pattern");
-    let mut files = Vec::new();
-    let mut dirs = vec![std::path::PathBuf::from(format!("{root}/src"))];
-    while let Some(d) = dirs.pop() {
-        for e in std::fs::read_dir(&d).expect("src dir") {
-            let p = e.expect("entry").path();
-            if p.is_dir() {
-                dirs.push(p);
-            } else if p.extension().is_some_and(|x| x == "rs") {
-                files.push(p);
-            }
-        }
-    }
     let mut hits = Vec::new();
-    for path in files {
+    for path in src_files(root) {
         let src = std::fs::read_to_string(&path).expect("read");
         let rel = path
             .strip_prefix(root)
@@ -268,6 +258,69 @@ fn public_entry_points_are_not_called_from_inside_the_crate() {
     assert!(
         hits.is_empty(),
         "internal calls of public N3 entry points (use the `_in` variant):\n{}",
+        hits.join("\n")
+    );
+}
+
+/// Every `.rs` file under `src/`.
+fn src_files(root: &str) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let mut dirs = vec![std::path::PathBuf::from(format!("{root}/src"))];
+    while let Some(d) = dirs.pop() {
+        for e in std::fs::read_dir(&d).expect("src dir") {
+            let p = e.expect("entry").path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                files.push(p);
+            }
+        }
+    }
+    files.sort();
+    files
+}
+
+/// Files that may call the raw N3 parser: the parser itself (its public API) and the
+/// bounded module (the one internal route, `bounded::parse_n3`).
+const RAW_PARSE_ALLOWED: &[&str] = &["src/n3/parser.rs", "src/n3/bounded.rs"];
+
+/// Files whose `parser` is another grammar's (not the N3 parser).
+const OTHER_GRAMMARS: &[&str] = &["src/datalog/mod.rs"];
+
+/// Every crate-internal N3 parse (an entry point, the incremental graph's rules, a proof
+/// re-derivation, the fallback reparse, a builtin) goes through `bounded::parse_n3`, so a
+/// parser limit is a cut on the caller's run and never only an error string that a caller
+/// may drop.
+#[test]
+fn n3_parses_go_through_the_bounded_helper() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let raw = Regex::new(
+        r"\b(parser|n3p)::(parse|parse_with_base|parse_with_base_checked|parse_turtle_with_base)\b|\bparse_with_base(_checked)?\(|\bparse_turtle_with_base\(",
+    )
+    .expect("raw-parse pattern");
+    let mut hits = Vec::new();
+    let mut scanned = 0;
+    for path in src_files(root) {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        if RAW_PARSE_ALLOWED.contains(&rel.as_str()) || OTHER_GRAMMARS.contains(&rel.as_str()) {
+            continue;
+        }
+        scanned += 1;
+        let src = std::fs::read_to_string(&path).expect("read");
+        for (n, code, _) in code_lines(&src) {
+            if raw.is_match(&code) {
+                hits.push(format!("{rel}:{n}: {}", code.trim()));
+            }
+        }
+    }
+    assert!(scanned > 10, "scanned only {scanned} files");
+    assert!(
+        hits.is_empty(),
+        "raw N3 parser calls inside the crate (use `bounded::parse_n3(src, base, &cuts)`):\n{}",
         hits.join("\n")
     );
 }

@@ -2280,7 +2280,8 @@ impl MaterializedN3Graph {
     ///
     /// Errors only on rules-document parse failure.
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
-        let parsed = n3p::parse(rules_src)?;
+        let cuts = crate::n3::bounded::Truncation::top_level();
+        let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
         let (compiled, disqualified) = match n3_compile(&parsed) {
             Ok(c) => (Some(Rc::new(c)), None),
             Err(reason) => (None, Some(reason)),
@@ -2302,7 +2303,7 @@ impl MaterializedN3Graph {
             fallback_closure: FxHashSet::default(),
             rebuilds: 0,
             strat_warning: None,
-            cuts: crate::n3::bounded::Truncation::top_level(),
+            cuts,
         };
         g.rematerialize();
         g.rebuilds = 0;
@@ -2766,6 +2767,41 @@ mod tests {
         let clean = "{ ?s <http://ex/p> ?v } => { ?s <http://ex/q> ?v } .";
         let g = MaterializedN3Graph::new(clean, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
         assert!(g.cuts.get().is_none());
+    }
+
+    /// `why` re-derives by reparsing the serialized base. A base fact built in code can
+    /// nest deeper than the parser accepts; the explanation is then `None`, and the
+    /// parser limit is a cut on the graph's record, not a dropped error string.
+    #[cfg(feature = "explain")]
+    #[test]
+    fn an_explanation_reparse_past_the_nesting_limit_is_a_cut() {
+        let out = std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(|| {
+                let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+                let mut deep = iri("leaf");
+                for _ in 0..5000 {
+                    deep = N3Term::List(vec![deep]);
+                }
+                let rules = "{ ?s <http://ex/p> ?o } => { ?s <http://ex/q> ?o } .";
+                let g = MaterializedN3Graph::new(rules, &[[iri("b"), iri("p"), deep.clone()]])
+                    .expect("rules");
+                let derived = [iri("b"), iri("q"), deep];
+                (
+                    g.contains(&derived),
+                    g.cuts.get().is_none(),
+                    g.why(&derived).is_none(),
+                    g.cuts.get().is_some(),
+                )
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+        assert_eq!(
+            out,
+            (true, true, true, true),
+            "(derived, no cut before, no proof, cut after)"
+        );
     }
     use oxrdf::vocab::{rdf, rdfs};
 
