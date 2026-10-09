@@ -301,7 +301,12 @@ What the server exposes, all discoverable from the storage description
   `storage`. A `purpose` constraint never holds, because the draft does not say how a
   request states its purpose. A `format` constraint compares media types as RFC 9110 does
   (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
-  order). The owner and a resource's creator are always allowed.
+  order). The owner and a resource's creator are always allowed. A grant is in force at
+  boot only when its create was known to land: a durable unsettled mark (`<grant>.unsettled`)
+  is stored before the create and removed after it, and before a revocation, so a crash or a
+  store failure with an unknown outcome leaves the grant out of force (and the boot removes
+  it). A revocation whose removal fails takes the grant out of force at once and keeps
+  removing it in the background.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

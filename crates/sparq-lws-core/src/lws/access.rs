@@ -471,6 +471,29 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
+                // A record with its unsettled mark was being created or revoked when the server
+                // stopped, or its outcome was unknown (see [`super::UNSETTLED_SUFFIX`]): it is
+                // never put in force, and it is removed. A grant whose mark cannot be read
+                // grants nothing; a request (which counts against the quota) that cannot be
+                // settled stops the server.
+                let unsettled = match super::is_unsettled(store, child.as_str()).await {
+                    Ok(u) => u,
+                    Err(_) if grants => continue,
+                    Err(e) => return Err(format!("store: access request {}: {e}", child.as_str())),
+                };
+                if unsettled {
+                    let removed = super::delete_record(store, child.as_str(), &container).await;
+                    match removed {
+                        Ok(()) => {
+                            let _ = super::clear_unsettled(store, child.as_str()).await;
+                        }
+                        Err(e) if !grants => {
+                            return Err(format!("store: access request {}: {e}", child.as_str()))
+                        }
+                        Err(_) => {}
+                    }
+                    continue;
+                }
                 // Every stored request counts against the request quota, so one that cannot be read
                 // stops the server rather than leaving a place uncounted; a grant that cannot be
                 // read grants nothing.
@@ -864,11 +887,13 @@ pub async fn handle<S: Store + 'static>(
             {
                 return refused;
             }
-            // A revocation is durable before it is reported: a grant whose stored copy survives
-            // would be reloaded, and so reinstated, at the next boot. Once the stored record is
-            // gone the grant is revoked in memory too, whatever happens after (a cleanup that
-            // fails, a client that goes away): the removal and the revocation run in a task of
-            // their own.
+            // A revocation is durable before anything else: the record's unsettled mark is
+            // stored first (see [`super::UNSETTLED_SUFFIX`]), so whatever happens next (a
+            // removal whose outcome is unknown, a crash) the record is out of force at the next
+            // boot. Then it is out of force in memory, and then it is removed: a removal that
+            // keeps failing is set aside and kept at ([`LwsState::set_aside`]), and the record
+            // is not put back in force meanwhile. The steps run in a task of their own, so a
+            // client that goes away cannot cut them short.
             let revoke = {
                 let (state, iri, container, id, admission) = (
                     state.clone(),
@@ -880,10 +905,21 @@ pub async fn handle<S: Store + 'static>(
                 async move {
                     let _admission = admission;
                     // Shared with other members' changes; a conditional create holds it alone.
-                    let _listing = state.locks.read(&container).await;
-                    super::delete_record(&state.store, &iri, &container).await?;
+                    let listing = state.locks.read(&container).await;
+                    super::mark_unsettled(&state.store, &iri).await?;
                     state.access.map(grants).write().expect("lock").remove(&id);
                     state.access.bump(grants);
+                    let undo = vec![super::Undo::Remove {
+                        iri: iri.clone(),
+                        parent: container.clone(),
+                    }];
+                    if let Some(left) = super::settle(&state.store, undo).await {
+                        state.set_aside(left, listing);
+                        return Err(ServerError::Storage(
+                            "the record could not be removed yet; it is out of force".into(),
+                        ));
+                    }
+                    let _ = super::clear_unsettled(&state.store, &iri).await;
                     Ok::<_, ServerError>(())
                 }
             };
@@ -1033,6 +1069,7 @@ async fn create<S: Store + 'static>(
         Bytes::from(stored.to_string()),
         req.admission.clone(),
         held,
+        grants,
         register,
     );
     if let Err(e) = created.await {
@@ -1496,8 +1533,11 @@ mod tests {
         assert_eq!(bad.status(), StatusCode::NOT_ACCEPTABLE);
     }
 
+    /// A revocation that cannot even be recorded changes nothing; one whose removal fails, or
+    /// whose outcome is unknown, takes the grant out of force at once and for good: review
+    /// finding, the grant stayed in force while its stored record was gone.
     #[tokio::test]
-    async fn a_failed_revocation_keeps_the_grant() {
+    async fn a_revocation_that_does_not_land_takes_the_grant_out_of_force() {
         use std::sync::atomic::Ordering;
         let (state, store) = test_store::state(100).await;
         let req = test_store::request(
@@ -1516,17 +1556,75 @@ mod tests {
             .unwrap()
             .to_string();
         let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let mark = format!("{location}{}", super::super::UNSETTLED_SUFFIX);
+        *store.fail_write_of.lock().unwrap() = Some(mark);
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Still enforced, still stored, still loaded at boot.
+        assert_eq!(state.access.grant_policies().len(), 1);
+        assert!(state.store.exists(&location).await.unwrap());
+        let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+        assert_eq!(loaded.grant_policies().len(), 1);
+        *store.fail_write_of.lock().unwrap() = None;
+        // The removal fails: out of force now, and at the next boot.
         store.fail_delete.store(true, Ordering::SeqCst);
         let resp = handle(&state, &delete, &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        // Still enforced, still stored.
-        assert_eq!(state.access.grant_policies().len(), 1);
-        assert!(state.store.exists(&location).await.unwrap());
-        store.fail_delete.store(false, Ordering::SeqCst);
-        let resp = handle(&state, &delete, &Agent::anonymous()).await;
-        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
         assert!(state.access.grant_policies().is_empty());
+        assert!(state.store.exists(&location).await.unwrap());
+        let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+        assert!(loaded.grant_policies().is_empty());
+        // The store recovers: the set-aside removal lands.
+        store.fail_delete.store(false, Ordering::SeqCst);
+        let container = state.cfg.absolute(GRANTS_PATH);
+        for _ in 0..250 {
+            if state.visible(&container) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(state.visible(&container));
         assert!(!state.store.exists(&location).await.unwrap());
+        assert!(state.access.grant_policies().is_empty());
+    }
+
+    /// Review finding: a grant whose create reported a failure (but may have committed), still
+    /// stored when the server restarted, was put in force at boot. Its unsettled mark keeps it
+    /// out, and the boot removes it.
+    #[tokio::test]
+    async fn a_grant_whose_create_did_not_settle_is_not_in_force_after_a_restart() {
+        let (state, store) = test_store::state(100).await;
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        // The create commits and reports a failure; its removal is never attempted, as when
+        // the process stops right then.
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        store
+            .fail_delete
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(state.access.grant_policies().is_empty());
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let stored = state.store.list_children(&container).await.unwrap();
+        assert_eq!(stored.len(), 1, "the record survives");
+        let record = stored[0].as_str().to_string();
+        // A restart loads the store: the record stays out of force.
+        let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+        assert!(loaded.grant_policies().is_empty());
+        // Once the store answers, the boot removes it.
+        store
+            .fail_delete
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+        assert!(loaded.grant_policies().is_empty());
+        assert!(!state.store.exists(&record).await.unwrap());
     }
 
     /// Review findings: a service linkset answered 200 whatever the request's preconditions, and
@@ -1582,7 +1680,8 @@ mod tests {
         );
         // The create fails before it lands; removing it and looking it up fail too, so the
         // container is set aside until the store answers.
-        *store.fail_step.lock().unwrap() = Some(0);
+        // (Step 0 stores the grant's unsettled mark.)
+        *store.fail_step.lock().unwrap() = Some(1);
         store.fail_delete.store(true, Ordering::SeqCst);
         store.fail_exists.store(true, Ordering::SeqCst);
         let r = handle(&state, &post, &Agent::anonymous()).await;
@@ -1724,7 +1823,8 @@ mod tests {
         )
         .await;
         assert!(cancelled.is_err());
-        assert_eq!(state.access.grant_policies().len(), 1);
+        // Out of force from the moment its removal starts.
+        assert!(state.access.grant_policies().is_empty());
         gate.add_permits(1);
         for _ in 0..200 {
             if state.access.grant_policies().is_empty() {

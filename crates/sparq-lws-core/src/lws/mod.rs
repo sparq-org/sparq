@@ -1074,6 +1074,50 @@ pub(crate) async fn delete_record<S: Store>(
     }
 }
 
+/// What is appended to a service record's IRI (a grant or a request) for the key of its
+/// unsettled mark: a record with the mark is never put in force at boot (see
+/// [`access::AccessStore::load`]). It is stored before a record is created or revoked and
+/// removed once that is known to have landed, so a crash, or a store failure whose outcome is
+/// unknown, leaves the record out of force rather than in.
+pub(crate) const UNSETTLED_SUFFIX: &str = ".unsettled";
+
+/// Store the unsettled mark of the record `iri` (see [`UNSETTLED_SUFFIX`]).
+pub(crate) async fn mark_unsettled<S: Store>(
+    store: &S,
+    iri: &str,
+) -> Result<(), crate::error::ServerError> {
+    store
+        .write(
+            &format!("{iri}{UNSETTLED_SUFFIX}"),
+            Bytes::new(),
+            "text/plain",
+        )
+        .await
+        .map(drop)
+}
+
+/// Remove the unsettled mark of the record `iri` (see [`UNSETTLED_SUFFIX`]).
+pub(crate) async fn clear_unsettled<S: Store>(
+    store: &S,
+    iri: &str,
+) -> Result<(), crate::error::ServerError> {
+    match store
+        .delete(&format!("{iri}{UNSETTLED_SUFFIX}"), None)
+        .await
+    {
+        Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether the record `iri` carries its unsettled mark (see [`UNSETTLED_SUFFIX`]).
+pub(crate) async fn is_unsettled<S: Store>(
+    store: &S,
+    iri: &str,
+) -> Result<bool, crate::error::ServerError> {
+    store.exists(&format!("{iri}{UNSETTLED_SUFFIX}")).await
+}
+
 /// Store a new record (an access grant or request) at `iri` in `container` and,
 /// once it is stored, put it in force in memory with `register`. Every record in the store is
 /// loaded, and so in force, at the next boot, so the two never part:
@@ -1081,10 +1125,15 @@ pub(crate) async fn delete_record<S: Store>(
 /// - The writes and the registration run in a task of their own, holding the request's share of
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
+/// - With `mark` (a grant: what puts it in force grants access), the record's unsettled mark
+///   ([`UNSETTLED_SUFFIX`]) is stored first, and removed only once the record is stored and in
+///   force: a crash or restart in between, or a mark that cannot be removed, leaves the record
+///   out of force at the next boot, never in.
 /// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
 ///   store's timeout or lost reply), so the record is removed with the container held, tried a
 ///   few times and then set aside with the locks ([`LwsState::set_aside`]); `register` (and the
 ///   quota place it holds) is dropped.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
     container: &str,
@@ -1092,6 +1141,7 @@ pub(crate) async fn create_record<S, F>(
     body: Bytes,
     admission: Option<crate::overload::AdmissionSlot>,
     held: Option<resources::IriGuard>,
+    mark: bool,
     register: F,
 ) -> Result<(), crate::error::ServerError>
 where
@@ -1110,6 +1160,12 @@ where
             Some(_) => None,
         };
         let _held = held;
+        if mark {
+            if let Err(e) = mark_unsettled(&state.store, &iri).await {
+                drop(register);
+                return Err(e);
+            }
+        }
         match state
             .store
             .create_in_container(&container, &iri, body, LWS_JSON)
@@ -1117,6 +1173,10 @@ where
         {
             Ok(_) => {
                 register();
+                // Out of force at the next boot if this fails (see above): never wrongly in.
+                if mark {
+                    let _ = clear_unsettled(&state.store, &iri).await;
+                }
                 Ok(())
             }
             Err(e) => {
