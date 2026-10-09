@@ -1220,6 +1220,79 @@ mod tests {
         assert!(AccessStore::load(&store, &state.cfg).await.is_err());
     }
 
+    /// Review finding (atomicity): a request's store record, its registration and its place in
+    /// the request quota must change together. Failing each store step of a create and of a
+    /// revoke in turn leaves the store as it was, and what is in force in memory (and counted)
+    /// always matches what a restart would load.
+    #[tokio::test]
+    async fn requests_are_stored_and_counted_together() {
+        use test_store::each_failure_changes_nothing;
+        let setup = |with_one: bool| async move {
+            let (state, store) = test_store::state(100).await;
+            let container = state.cfg.absolute(REQUESTS_PATH);
+            let mut iris = Vec::new();
+            if with_one {
+                let req = test_store::request(
+                    Method::POST,
+                    REQUESTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &access_doc("AccessRequest", "https://a/", None),
+                );
+                let resp = handle(&state, &req, &Agent::anonymous()).await;
+                assert_eq!(resp.status(), StatusCode::CREATED);
+                iris.push(
+                    resp.headers()[header::LOCATION]
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+            (state, store, iris, vec![container])
+        };
+        // In force and counted exactly when stored.
+        let agrees = |state: LwsState<test_store::FlakyStore>| async move {
+            let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+            let stored = loaded.requests.read().unwrap().len();
+            assert_eq!(state.access.requests.read().unwrap().len(), stored);
+        };
+        let steps = each_failure_changes_nothing(
+            || setup(false),
+            |state| async move {
+                let req = test_store::request(
+                    Method::POST,
+                    REQUESTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &access_doc("AccessRequest", "https://a/", None),
+                );
+                let status = handle(&state, &req, &Agent::anonymous()).await.status();
+                agrees(state).await;
+                status
+            },
+        )
+        .await;
+        assert!(steps >= 1, "a request took {steps} steps");
+        each_failure_changes_nothing(
+            || setup(true),
+            |state| async move {
+                let id = state
+                    .access
+                    .requests
+                    .read()
+                    .unwrap()
+                    .keys()
+                    .next()
+                    .cloned()
+                    .unwrap();
+                let path = format!("{REQUESTS_PATH}{id}");
+                let req = test_store::request(Method::DELETE, &path, &[], "");
+                let status = handle(&state, &req, &Agent::anonymous()).await.status();
+                agrees(state).await;
+                status
+            },
+        )
+        .await;
+    }
+
     fn access_doc(kind: &str, assignee: &str, inbox: Option<&str>) -> String {
         let mut d = json!({
             "@context": ["https://www.w3.org/ns/lws/v1"],
