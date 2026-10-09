@@ -255,13 +255,16 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::None);
-    Ok(intern_closure(dict, &facts, &steps)?.closure)
+    Ok(intern_closure::<NoKeys>(dict, &facts, &steps)?.closure)
 }
 
 /// As [`reason_n3`], but also return the derivation (a [`ProofStep`] for each NEWLY-derived
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
-    let run = reason_n3_proof_run(dict, src)?;
+    let parsed = parser::parse(src)?;
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
+    // The steps carry their facts' keys; the closure's own keys are not returned, so not built.
+    let run = intern_closure::<NoKeys>(dict, &facts, &steps)?;
     Ok((run.closure, run.steps))
 }
 
@@ -284,7 +287,7 @@ pub struct N3ProofRun {
 pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, String> {
     let parsed = parser::parse(src)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
-    intern_closure(dict, &facts, &steps)
+    intern_closure::<CollectKeys>(dict, &facts, &steps)
 }
 
 /// The EYE **`--pass-all`** / **`--pass-all-ground`** output document: the deductive
@@ -563,7 +566,7 @@ pub fn reason_n3_stratified(
         }
         facts = f;
     }
-    Ok(StratifiedN3Closure { facts: intern_closure(dict, &facts, &[])?.closure, strata_facts })
+    Ok(StratifiedN3Closure { facts: intern_closure::<NoKeys>(dict, &facts, &[])?.closure, strata_facts })
 }
 
 /// The smallest `__st{k}_` prefix that no blank label anywhere in `parsed`
@@ -1076,10 +1079,29 @@ fn run_closure(
     (facts, steps)
 }
 
+/// Whether [`intern_closure`] builds `N3ProofRun::closure_keys` — a TYPE-level choice, so
+/// the plain materialization paths ([`reason_n3`], the stratified closure) do no identity
+/// key encoding or allocation for closure rows at all; only [`reason_n3_proof_run`] pays.
+trait KeyMode {
+    const COLLECT: bool;
+}
+/// Leave `closure_keys` empty.
+enum NoKeys {}
+/// Key every closure row.
+enum CollectKeys {}
+impl KeyMode for NoKeys {
+    const COLLECT: bool = false;
+}
+impl KeyMode for CollectKeys {
+    const COLLECT: bool = true;
+}
+
 /// Intern a term-level closure + derivation into the dictionary ([`reason_n3`] /
 /// [`reason_n3_proof`] output form). Errors on formula-valued facts, which have
 /// no dictionary representation (use [`reason_n3_terms`] for those documents).
-fn intern_closure(
+/// `closure_keys` is filled only under [`CollectKeys`]; each [`ProofStep`] always carries
+/// its keys (there are no steps without derivation tracking).
+fn intern_closure<K: KeyMode>(
     dict: &mut Dict,
     facts: &FactIndex,
     steps: &[DerivationStep],
@@ -1093,9 +1115,14 @@ fn intern_closure(
     let step_rows = steps.iter().flat_map(|(g, _, prem)| std::iter::once(g).chain(prem));
     let mut exp = ListExpander::new(fact_rows.iter().chain(step_rows));
     // Identity keys from the N3 terms BEFORE list expansion and interning.
-    let mut closure_keys: Vec<[String; 3]> = fact_rows.iter().map(serialize::statement_keys).collect();
+    let mut closure_keys: Vec<[String; 3]> = Vec::new();
+    if K::COLLECT {
+        closure_keys = fact_rows.iter().map(serialize::statement_keys).collect();
+    }
     let (fact_rows, mut extra) = exp.expand_rows(&fact_rows);
-    closure_keys.extend(extra.iter().map(serialize::statement_keys));
+    if K::COLLECT {
+        closure_keys.extend(extra.iter().map(serialize::statement_keys));
+    }
     // Intern the ground closure into the dictionary.
     let mut out = Vec::with_capacity(fact_rows.len() + extra.len());
     let mut rows = fact_rows;
@@ -3563,6 +3590,25 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #6735 review round 4: plain materialization never pays for proof identity — no
+    /// statement is keyed on the `reason_n3` / stratified paths; the proof run keys every
+    /// closure row.
+    #[test]
+    fn the_unkeyed_paths_never_compute_identity_keys() {
+        let calls = || serialize::KEY_CALLS.with(|c| c.get());
+        let src = "@prefix : <http://ex/>. :a :p ( 1 2 ). :b :p :c. { ?x :p ?y } => { ?y :q ?x }.";
+        let before = calls();
+        let n = reason_n3(&mut Dict::new(), src).expect("reasons").len();
+        reason_n3_stratified(&mut Dict::new(), &[src, "@prefix : <http://ex/>. { ?x :q ?y } => { ?x :r ?y }."]).expect("reasons");
+        assert_eq!(calls(), before, "the unkeyed paths keyed a statement");
+        let (_, steps) = reason_n3_proof(&mut Dict::new(), src).expect("reasons");
+        assert_eq!(calls() - before, steps.iter().map(|s| 1 + s.premises.len()).sum::<usize>(), "only the steps are keyed");
+        let before = calls();
+        let run = reason_n3_proof_run(&mut Dict::new(), src).expect("reasons");
+        assert_eq!(run.closure_keys.len(), run.closure.len());
+        assert!(calls() - before >= n, "the proof run keys every closure row");
+    }
 
     fn closure(src: &str) -> (Dict, FxHashSet<[Id; 3]>) {
         let mut dict = Dict::new();

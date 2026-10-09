@@ -565,7 +565,16 @@ fn term_key(t: &Term) -> String {
 /// statements are equal, whatever their renderings. What a proof carries for provenance
 /// addressing (`ProofNode::key`).
 pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
-    f.clone().map(|t| term_key(&t))
+    #[cfg(test)]
+    KEY_CALLS.with(|c| c.set(c.get() + 1));
+    [term_key(&f[0]), term_key(&f[1]), term_key(&f[2])]
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many statements this thread has keyed — lets tests check that the plain
+    /// (unkeyed) reasoning paths never pay for proof identity.
+    pub(crate) static KEY_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// `t` as an exact rendering of it re-parses: a backward-chaining copy of a universal
