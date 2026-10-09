@@ -202,7 +202,10 @@ fn stratified_negation_sees_earlier_strata_complete() {
     // (GH #6201), so the negation waits for the complete :Member extent. Before
     // that, the early firing persisted (derived facts are never retracted).
     let single = closure(&format!("{}\n{}", s1, s2));
-    assert_eq!(single, strat, "auto-stratified single document = explicit strata");
+    assert_eq!(
+        single, strat,
+        "auto-stratified single document = explicit strata"
+    );
 }
 
 #[test]

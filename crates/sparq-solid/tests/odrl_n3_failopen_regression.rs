@@ -344,9 +344,13 @@ fn strata_auth_triples(facts: &str) -> Vec<String> {
     // `odrl_bridge`. Follow-up: rewrite them with one concrete conclusion per mode and drop
     // the opt-in.
     let (strict, legacy) = (NegationCycles::Reject, NegationCycles::SinglePass);
-    for (rules, cycles) in
-        [(ODRL_A0, strict), (ODRL_A, strict), (ODRL_B, legacy), (ODRL_C, legacy), (ODRL_D, legacy)]
-    {
+    for (rules, cycles) in [
+        (ODRL_A0, strict),
+        (ODRL_A, strict),
+        (ODRL_B, legacy),
+        (ODRL_C, legacy),
+        (ODRL_D, legacy),
+    ] {
         let mut dict = Dict::new();
         let closure = reason_n3_with_cycles(&mut dict, &format!("{}\n{}", src, rules), cycles)
             .unwrap_or_else(|e| panic!("stratum must reason: {}", e));

@@ -1057,7 +1057,11 @@ impl BoundRuleSet<'_> {
             loop {
                 let mut produced: Vec<[Id; 3]> = Vec::new();
                 for (ri, rule) in cs.rules.iter().enumerate() {
-                    if strata.rule_stratum.as_ref().is_some_and(|rs| rs[ri] != stratum) {
+                    if strata
+                        .rule_stratum
+                        .as_ref()
+                        .is_some_and(|rs| rs[ri] != stratum)
+                    {
                         continue;
                     }
                     if rule.needs_full || rule.join_steps.is_empty() {

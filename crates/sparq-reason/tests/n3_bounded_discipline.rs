@@ -91,7 +91,10 @@ fn errors_and_limits_go_through_the_bounded_module() {
             }
             let limit = limit_name.is_match(&code) || limit_literal.is_match(&code);
             if limit && !code.contains("bounded::") && !marked("// not-a-limit:") {
-                hits.push(format!("{rel}:{n}: limit outside bounded.rs: {}", code.trim()));
+                hits.push(format!(
+                    "{rel}:{n}: limit outside bounded.rs: {}",
+                    code.trim()
+                ));
             }
         }
     }
