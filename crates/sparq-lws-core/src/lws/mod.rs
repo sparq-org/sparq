@@ -596,6 +596,24 @@ impl<S: Store + 'static> LwsState<S> {
     /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
     /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let hidden = self.hide(&left);
+        self.settle_aside(left, hidden, locks);
+    }
+
+    /// Set aside each of `all` ([`LwsState::set_aside`]), every one's resources hidden before
+    /// any is put back: a change settled early touches the containers owed a touch that are
+    /// visible ([`LwsState::touch_owed`]), and must not touch one that a later change in `all`
+    /// would then restore to a date from before the touch.
+    pub(crate) fn set_aside_all(&self, all: Vec<Unsettled>) {
+        let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
+        for (left, hidden) in all.into_iter().zip(hidden) {
+            self.settle_aside(left, hidden, ());
+        }
+    }
+
+    /// Hide the resources of `left` and the containers listing them, and count what it holds to
+    /// put back: what [`LwsState::settle_aside`] undoes once it is back.
+    fn hide(&self, left: &Unsettled) -> (Vec<String>, usize) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
         let parents: Vec<String> = iris
@@ -609,6 +627,18 @@ impl<S: Store + 'static> LwsState<S> {
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
         self.locks.hide(&iris);
+        (iris, bytes)
+    }
+
+    /// Put `left` back in a task of its own, holding `locks`, then show what [`LwsState::hide`]
+    /// hid (`hidden`) and touch the containers owed a touch.
+    fn settle_aside<L: Send + 'static>(
+        &self,
+        left: Unsettled,
+        hidden: (Vec<String>, usize),
+        locks: L,
+    ) {
+        let (iris, bytes) = hidden;
         let state = self.clone();
         tokio::spawn(async move {
             for undo in &left.0 {

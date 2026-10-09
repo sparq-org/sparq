@@ -275,9 +275,7 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
             }
         }
     }
-    for left in set_aside {
-        state.set_aside(left, ());
-    }
+    state.set_aside_all(set_aside);
     Ok(())
 }
 
@@ -691,6 +689,63 @@ mod tests {
         assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
         assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
         assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Review finding: at start, each change set aside was hidden and put back in turn, so one
+    /// put back early could touch a container owed a touch before a later one, still to be
+    /// hidden, restored that container's metadata from before the touch: its date went back,
+    /// with no touch owed. Every change is now hidden before any is put back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn every_change_set_aside_at_start_is_hidden_before_any_is_put_back() {
+        // The interleaving it guards against depends on scheduling: try it a few times.
+        for _ in 0..5 {
+            let (st, _store) = state(100).await;
+            let container_link = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+            let h = [("slug", "c"), ("link", container_link)];
+            assert_eq!(
+                call(&st, Method::POST, "/", &h, "").await,
+                StatusCode::CREATED
+            );
+            let c = st.cfg.absolute("/c/");
+            let dated = st.resource_meta(&c).await.unwrap().version;
+            // A change to `/c/`'s metadata, whose undo puts back the metadata as it is now.
+            let mut journal = st.journal();
+            journal.stage(&meta_key(&c)).await.unwrap();
+            let mut meta = st.resource_meta(&c).await.unwrap();
+            meta.pending = true;
+            journal.write_meta(&c, &meta).await.unwrap();
+            clear(&st.store, journal.intent.as_ref().unwrap())
+                .await
+                .unwrap();
+            let restores = super::super::Unsettled(std::mem::take(&mut journal.undo));
+            std::mem::forget(journal);
+            // A kept change owing `/c/` a touch, as a start leaves it.
+            let record = mint(&st.cfg.storage());
+            store(&st, &record, false, &[], std::slice::from_ref(&c))
+                .await
+                .unwrap();
+            st.owe_touch(&c, record);
+            st.touching(&c);
+            st.touched(&c, false);
+            // Many changes quick to put back, each touching what is owed once it is, and last the
+            // one restoring `/c/`: a start that set each aside in turn would touch `/c/` first.
+            let quick = |i: usize| {
+                super::super::Unsettled(vec![Undo::Forget {
+                    record: format!("{}q{i}", container(&st.cfg.storage())),
+                    iris: vec![st.cfg.absolute(&format!("/q{i}"))],
+                }])
+            };
+            let mut all: Vec<_> = (0..5000).map(quick).collect();
+            all.push(restores);
+            st.set_aside_all(all);
+            until(&st, "settled and touched", |st| {
+                st.visible(&c) && !st.is_untouched(&c) && !st.owes_touch(&c)
+            })
+            .await;
+            let now = st.resource_meta(&c).await.unwrap();
+            assert!(!now.pending, "put back");
+            assert_ne!(now.version, dated, "touched after it was put back");
+        }
     }
 
     /// Store an intent naming only `touch`, as a kept change leaves it.

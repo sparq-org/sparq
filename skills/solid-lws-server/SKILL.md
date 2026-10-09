@@ -302,7 +302,8 @@ What the server exposes, all discoverable from the storage description
   left is settled when the server next starts, before it serves anything: a change cut short is
   put back, and only then (once nothing is left set aside) is a kept change's container
   touched, so no change put back can restore a container date from before it; a touch that
-  waited is made, retried until it lands, once the set-aside changes are settled. Every intent is
+  waited is made, retried until it lands, once the set-aside changes are settled (every one is
+  hidden before any is put back). Every intent is
   read before any is settled, so one that cannot be read stops the start with nothing changed
   or left running; what cannot be put back then is set aside as above. When a kept change's
   intent cannot be recorded as kept, it is read back (the store may have done it, the reply
