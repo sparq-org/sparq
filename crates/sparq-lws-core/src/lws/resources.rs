@@ -2800,12 +2800,42 @@ async fn remove_in<S: Store + 'static>(
 /// server restrict `up`; `self` carries the representation's format, size and modification time.
 const SERVER_MANAGED: &[&str] = &["up", "type", "self", "linkset"];
 
-/// Whether a linkset entry is about `uri` (its anchor, resolved against `uri`).
+/// Whether a linkset entry is about `uri`. Anchors are absolute: every document the server keeps
+/// was resolved by [`absolute_linkset`] (or built with absolute anchors).
 fn anchored_at(entry: &Value, uri: &str) -> bool {
-    entry
-        .get("anchor")
-        .and_then(Value::as_str)
-        .is_some_and(|a| a == uri || resolve_against(uri, a) == uri)
+    entry.get("anchor").and_then(Value::as_str) == Some(uri)
+}
+
+/// A linkset document with every `anchor` and `href` resolved against `base`, the linkset's own
+/// URI (RFC 9264 section 4: the context of relative references in a linkset is the resource that
+/// delivers it, not the resource it describes). `None` when one is not a URI reference
+/// (RFC 3986), which the document may not hold.
+fn absolute_linkset(doc: &Value, base: &str) -> Option<Value> {
+    let base = oxiri::Iri::parse(base).ok()?;
+    let resolve = |v: &Value| -> Option<Value> {
+        Some(Value::String(base.resolve(v.as_str()?).ok()?.into_inner()))
+    };
+    let mut entries = Vec::new();
+    for entry in doc.get("linkset")?.as_array()? {
+        let mut out = Map::new();
+        for (k, v) in entry.as_object()? {
+            let v = if k == "anchor" {
+                resolve(v)?
+            } else {
+                let mut targets = Vec::new();
+                for t in v.as_array()? {
+                    let mut t = t.as_object()?.clone();
+                    let href = resolve(t.get("href")?)?;
+                    t.insert("href".into(), href);
+                    targets.push(Value::Object(t));
+                }
+                Value::Array(targets)
+            };
+            out.insert(k.clone(), v);
+        }
+        entries.push(Value::Object(out));
+    }
+    Some(json!({"linkset": entries}))
 }
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
@@ -3059,6 +3089,14 @@ async fn linkset<S: Store + 'static>(
                     Some("the result is not a linkset document"),
                 );
             }
+            // Relative references are resolved once, here, against the linkset's own URI: what
+            // is stored, served and indexed is then the same absolute link.
+            let Some(patched) = absolute_linkset(&patched, &format!("{uri}{META_SUFFIX}")) else {
+                return problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("an anchor or href is not a URI reference"),
+                );
+            };
             // Only the user-managed part is kept; the links the type index matches are taken from
             // it, so the two never drift apart.
             let user = user_linkset(&patched, uri);
@@ -3688,21 +3726,78 @@ mod tests {
 
     #[test]
     fn user_linkset_strips_server_relations_of_the_anchor_only() {
-        let doc = json!({"linkset": [
-            {"anchor": "http://h/a", "up": [{"href": "x"}], "self": [{"href": "y"}], "license": [{"href": "l"}]},
-            {"anchor": "http://h/b", "up": [{"href": "z"}]},
-            {"anchor": "/a", "type": [{"href": "t"}]},
-        ]});
+        let doc = absolute_linkset(
+            &json!({"linkset": [
+                {"anchor": "http://h/a", "up": [{"href": "x"}], "self": [{"href": "y"}], "license": [{"href": "l"}]},
+                {"anchor": "http://h/b", "up": [{"href": "z"}]},
+                {"anchor": "/a", "type": [{"href": "t"}]},
+            ]}),
+            "http://h/a.meta",
+        )
+        .unwrap();
         assert_eq!(
             user_linkset(&doc, "http://h/a"),
             json!({"linkset": [
-                {"anchor": "http://h/a", "license": [{"href": "l"}]},
-                {"anchor": "http://h/b", "up": [{"href": "z"}]},
+                {"anchor": "http://h/a", "license": [{"href": "http://h/l"}]},
+                {"anchor": "http://h/b", "up": [{"href": "http://h/z"}]},
             ]})
         );
         let links = links_of(&doc, "http://h/a");
         assert_eq!(links.keys().collect::<Vec<_>>(), vec!["license"]);
         assert_eq!(links["license"], vec!["http://h/l".to_string()]);
+    }
+
+    /// Review finding: relative references in a patched linkset were resolved against the
+    /// resource, while clients resolve them against the linkset that delivers them (RFC 9264
+    /// section 4), and malformed references were kept and served.
+    #[tokio::test]
+    async fn linkset_references_resolve_against_the_linkset() {
+        let st = state().await;
+        let uri = post(&st, "doc", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let linkset = format!("{uri}{META_SUFFIX}");
+        let patch = json!({"linkset": [
+            {"anchor": uri, "license": [{"href": "#license"}]},
+            {"anchor": "", "author": [{"href": "https://ex.org/a"}]},
+        ]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", MERGE_PATCH)],
+            &patch.to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let entries = doc["linkset"].as_array().unwrap();
+        let about = |a: &str| entries.iter().find(|e| e["anchor"] == a).unwrap().clone();
+        // What is served and what the type index matches name the same link.
+        assert_eq!(
+            about(&uri)["license"][0]["href"],
+            format!("{linkset}#license")
+        );
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
+        // An empty anchor is the linkset itself, not the resource it describes.
+        assert_eq!(about(&linkset)["author"][0]["href"], "https://ex.org/a");
+        assert!(!m.links.contains_key("author"));
+        for bad in [
+            json!({"linkset": [{"anchor": "http://[", "license": [{"href": "https://ex.org/l"}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "%ZZ"}]}]}),
+        ] {
+            let r = call(
+                &st,
+                "PATCH",
+                &meta,
+                &[("content-type", MERGE_PATCH)],
+                &bad.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        }
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
     }
 
     /// Review finding: a PATCH with `Prefer: set-linkset` adds to a resource's links and types,

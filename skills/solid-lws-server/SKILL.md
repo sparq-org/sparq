@@ -277,7 +277,9 @@ What the server exposes, all discoverable from the storage description
   against a work budget of four times the body limit; past either it gets `413`. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
   `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
-  body limit as it will be served, with the server-managed links put back. JSON Patch paths are
+  body limit as it will be served, with the server-managed links put back. Its relative `anchor`
+  and `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
+  absolute, and one that is not a URI reference gets `422`. JSON Patch paths are
   RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
   (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
