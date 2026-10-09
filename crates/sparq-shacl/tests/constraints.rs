@@ -1728,3 +1728,21 @@ fn only_a_valid_time_lexical_compares() {
         }
     }
 }
+
+/// XSD 1.1 year zero is 1 BCE: `0000` (and its `-0000` spelling) sits after `-0001`
+/// and before `0001`, and the two spellings of one date are equal, never incomparable.
+#[test]
+fn year_zero_orders_between_2_bce_and_1_ce() {
+    let date = |y: &str| format!("\"{y}-06-01\"^^xsd:date");
+    let zero = date("0000");
+    for (value, other, expect) in [
+        (date("-0001"), zero.clone(), [true, true, false, true, false, true]),
+        (zero.clone(), date("0001"), [true, true, false, true, false, true]),
+        (date("-0000"), zero.clone(), [false, true, true, true, false, false]),
+    ] {
+        let got = comparisons(&value, &other);
+        for ((name, conforms), want) in got.iter().zip(expect) {
+            assert_eq!(*conforms, want, "{value} {name} {other}");
+        }
+    }
+}
