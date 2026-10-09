@@ -10,8 +10,8 @@
 use sparq_core::dict::Dict;
 use sparq_reason::n3::Term;
 use sparq_reason::{
-    reason_n3, reason_n3_query_terms, reason_n3_stratified, reason_n3_terms,
-    reason_n3_terms_with_cycles, MaterializedN3Graph, N3Mode, NegationCycles,
+    reason_n3, reason_n3_query_terms, reason_n3_stratified, reason_n3_stratified_with_cycles,
+    reason_n3_terms, reason_n3_terms_with_cycles, MaterializedN3Graph, N3Mode, NegationCycles,
 };
 
 const PRE: &str = "@prefix : <http://ex/> .\n\
@@ -569,6 +569,24 @@ fn truncation_sources() -> Vec<(&'static str, String, String)> {
             ),
         ),
         (
+            "a numeral past i128 in string:format %f",
+            String::new(),
+            format!(
+                "{{ (\"%f\" {}0) string:format ?v }} => {{ :a :proved :b }} .\n",
+                i128::MAX
+            ),
+        ),
+        (
+            "a fraction in reverse time:inSeconds",
+            String::new(),
+            "{ ?d time:inSeconds 1.5 } => { :a :proved :b } .\n".to_string(),
+        ),
+        (
+            "a fractional second dropped by time:inSeconds",
+            String::new(),
+            "{ \"1970-01-01T00:00:01.5Z\" time:inSeconds ?s } => { :a :proved :b } .\n".to_string(),
+        ),
+        (
             "regex limit in string:scrape",
             String::new(),
             format!(
@@ -618,7 +636,8 @@ fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point
 fn every_negation_and_aggregation_refuses_a_truncated_input() {
     let pre = format!(
         "{PRE}@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
-         @prefix math: <http://www.w3.org/2000/10/swap/math#> .\n"
+         @prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+         @prefix time: <http://www.w3.org/2000/10/swap/time#> .\n"
     );
     let probes: [(&str, &str); 6] = [
         (
@@ -746,6 +765,16 @@ fn completeness_cases() -> Vec<(&'static str, &'static str, String)> {
                 .to_string(),
         ),
         (
+            // An epoch second count past 2^53, both directions: exact, never an f64
+            // image (which would read 9467023432780801 as ...800).
+            "epoch seconds past 2^53",
+            "",
+            "{ \"300000000-01-01T00:00:01Z\" time:inSeconds 9467023432780801 .\n\
+               ?d time:inSeconds 9467023432780801 .\n\
+               ?d string:startsWith \"300000000-01-01T00:00:01\" } => { :r :blocked :g } .\n"
+                .to_string(),
+        ),
+        (
             // i128::MIN % -1 is exactly 0.
             "remainder of i128::MIN by -1",
             "",
@@ -761,7 +790,11 @@ fn completeness_cases() -> Vec<(&'static str, &'static str, String)> {
 /// permit is granted.
 #[test]
 fn derivable_prohibitions_are_seen_at_every_entry_point() {
-    let pre = format!("{PRE}@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n");
+    let pre = format!(
+        "{PRE}@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+         @prefix time: <http://www.w3.org/2000/10/swap/time#> .\n"
+    );
     let negation = "{ ?s log:notIncludes { :r :blocked :g } } => { :r :permittedBy :g } .";
     let permit = t("r", "permittedBy", "g");
     let permit_iri = |d: &Dict, id| d.term(id).to_string().contains("permittedBy");
@@ -825,4 +858,139 @@ fn derivable_prohibitions_are_seen_at_every_entry_point() {
             );
         }
     }
+}
+
+/// Codex round 9: under `NegationCycles::FailClosed` a document whose self-negating rule
+/// is skipped carries an incomplete closure. A later document's negation must not read
+/// the skipped prohibition as absent, at any entry point that runs more than one
+/// document.
+const SKIPPED_PROHIBITION: &str =
+    "{ ?s log:notIncludes { :r :blocked :g } } => { :r :blocked :g } .";
+
+#[test]
+fn a_fail_closed_skip_taints_every_later_document() {
+    let first = format!("{PRE}:r :target :g .\n{SKIPPED_PROHIBITION}");
+    let probes = [
+        "?s log:notIncludes { :r :blocked :g }",
+        "( ?x { :r :blocked ?x } () ) log:collectAllIn ?s",
+        "( { :r :target ?x } { :r :blocked ?x } ) log:forAllIn ?s",
+    ];
+    let incomplete = |r: Result<sparq_reason::StratifiedN3Closure, String>, what: &str| match r {
+        Err(e) => assert!(
+            e.contains("incomplete") && e.contains("FailClosed"),
+            "{what}: {e}"
+        ),
+        Ok(c) => panic!(
+            "{what}: a later negation read the skipped rules as absent: {:?}",
+            c.facts
+        ),
+    };
+    for probe in probes {
+        let second = format!("{PRE}{{ {probe} }} => {{ :r :allowed :g }} .");
+        // Explicit strata, fail closed: the second document's gate refuses.
+        incomplete(
+            reason_n3_stratified_with_cycles(
+                &mut Dict::new(),
+                &[&first, &second],
+                NegationCycles::FailClosed,
+            ),
+            probe,
+        );
+        // The taint survives a negation-free document in between.
+        let middle = format!("{PRE}{{ :r :target ?g }} => {{ :r :seen ?g }} .");
+        incomplete(
+            reason_n3_stratified_with_cycles(
+                &mut Dict::new(),
+                &[&first, &middle, &second],
+                NegationCycles::FailClosed,
+            ),
+            probe,
+        );
+        // The default pipeline rejects the first document outright.
+        let e = reason_n3_stratified(&mut Dict::new(), &[&first, &second])
+            .err()
+            .expect("stratified rejects the cycle");
+        assert!(e.contains("cycle"), "{e}");
+        // Query: the data closure and the query premise are the two documents.
+        let q = format!("{PRE}{{ {probe} }} => {{ :r :allowed :g }} .");
+        assert!(
+            reason_n3_query_terms(&first, &q).is_err(),
+            "query_terms: {probe}"
+        );
+        assert!(
+            sparq_reason::reason_n3_query(&mut Dict::new(), &first, &q).is_err(),
+            "query: {probe}"
+        );
+        // Nested closure: the first document inside log:conclusion, fail closed.
+        let nested = format!(
+            "{PRE}:r :target :g .\n\
+             {{ {{ {SKIPPED_PROHIBITION} }} log:conclusion ?c . ?c log:notIncludes {{ :r :blocked :g }} }}\n\
+               => {{ :r :allowed :g }} ."
+        );
+        assert!(
+            reason_n3_terms_with_cycles(&nested, None, None, NegationCycles::FailClosed).is_err(),
+            "nested"
+        );
+        // Rules plus base data (incremental), and the compiled engine: one rule set,
+        // which refuses the cycle.
+        let both = format!("{PRE}{SKIPPED_PROHIBITION}\n{{ {probe} }} => {{ :r :allowed :g }} .");
+        assert!(
+            MaterializedN3Graph::new(&both, &[t("r", "target", "g")]).is_err(),
+            "incremental: {probe}"
+        );
+        #[cfg(feature = "compiled-rules")]
+        assert!(
+            sparq_reason::n3::compiled::compile(&both).is_err(),
+            "compiled: {probe}"
+        );
+    }
+    // With no later negation the pipeline succeeds and reports the skip.
+    let plain = format!("{PRE}{{ :r :target ?g }} => {{ :r :seen ?g }} .");
+    let c = reason_n3_stratified_with_cycles(
+        &mut Dict::new(),
+        &[&first, &plain],
+        NegationCycles::FailClosed,
+    )
+    .expect("no later negation");
+    assert!(
+        c.warnings.len() == 1 && c.warnings[0].starts_with("stratum 0: "),
+        "{:?}",
+        c.warnings
+    );
+}
+
+/// The math: comparisons compare f64 images (GH #6745 tracks datatype-driven XPath
+/// promotion): integers past 2^53 that share an f64 image compare equal, as before.
+#[test]
+fn math_comparisons_compare_f64_images() {
+    let (c, _) = run("@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+         @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n\
+         { 9007199254740993 math:equalTo 9007199254740992 } => { :a :int :eq } .\n\
+         { \"9007199254740993\"^^xsd:double math:equalTo 9007199254740992 } => { :a :dbl :eq } .\n\
+         { 9007199254740993 math:greaterThan 9007199254740992 } => { :a :int :gt } .");
+    assert!(c.contains(&t("a", "int", "eq")), "{c:?}");
+    assert!(c.contains(&t("a", "dbl", "eq")), "{c:?}");
+    assert!(!c.contains(&t("a", "int", "gt")), "{c:?}");
+}
+
+/// `string:format`'s `%f` renders an integer or decimal exactly from its digits.
+#[test]
+fn format_f_is_exact_for_integers_and_decimals() {
+    let (c, _) = run(
+        "@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+         { (\"%f|%f|%f|%f|%f\" 9007199254740993 1.5 0.12345650 -0.0000001 1e0) string:format ?s }\n\
+           => { :a :fmt ?s } .",
+    );
+    let got = c
+        .iter()
+        .find(|f| f[1] == ex("fmt"))
+        .map(|f| f[2].clone())
+        .expect("formatted");
+    let Term::Lit(s, _, _) = got else {
+        panic!("{got:?}")
+    };
+    assert_eq!(
+        s,
+        "9007199254740993.000000|1.500000|0.123456|-0.000000|1.000000"
+    );
 }

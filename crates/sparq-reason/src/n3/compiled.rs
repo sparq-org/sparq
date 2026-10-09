@@ -1446,6 +1446,7 @@ fn concat_push(dict: &Dict, id: Id, s: &mut String) -> bool {
                         }
                         Some(super::NumVal::F64(f)) => {
                             if f.fract() == 0.0 && f.abs() < 9.007e15 {
+                                // not-a-cut: exact-cast (whole, below 2^53)
                                 let _ = std::fmt::Write::write_fmt(s, format_args!("{}", f as i64));
                             } else {
                                 let _ = std::fmt::Write::write_fmt(s, format_args!("{f}"));

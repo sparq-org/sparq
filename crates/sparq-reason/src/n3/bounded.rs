@@ -284,6 +284,48 @@ pub(crate) fn exact_numeral(lex: &str) -> Bounded<()> {
     }
 }
 
+/// A number used as a whole `i64` where only an exact value will do (a `time:inSeconds`
+/// epoch second count): `whole` is its exact integer value, or `None` when it has a
+/// fraction. A fraction, or a whole value past `i64`, cannot be used without losing
+/// precision: a cut.
+pub(crate) fn whole_i64(whole: Option<i128>) -> Bounded<Option<i64>> {
+    match whole.map(i64::try_from) {
+        Some(Ok(v)) => Bounded::complete(Some(v)),
+        Some(Err(_)) => Bounded::cut(None, "a number passed the i64 range"),
+        None => Bounded::cut(
+            None,
+            "a number with a fraction was used where only a whole number is exact",
+        ),
+    }
+}
+
+/// An `f64` used as a whole `i64` exactly ([`whole_i64`]). `NaN` is no number (no
+/// match); a fraction, an infinity or a value past `i64` is a cut.
+pub(crate) fn whole_i64_of_f64(n: f64) -> Bounded<Option<i64>> {
+    if n.is_nan() {
+        Bounded::complete(None)
+    } else if n.is_finite() && n.fract() != 0.0 {
+        whole_i64(None)
+    } else if n.is_finite() && n >= i64::MIN as f64 && n < i64::MAX as f64 {
+        Bounded::complete(Some(n as i64))
+    } else {
+        Bounded::cut(None, "a number passed the i64 range")
+    }
+}
+
+/// The fraction digits of a seconds field that a whole-second result drops
+/// (`time:inSeconds` over `…:01.5Z`): a nonzero fraction is lost precision, a cut.
+pub(crate) fn dropped_fraction(frac: &str) -> Bounded<()> {
+    if frac.bytes().all(|b| b == b'0') {
+        Bounded::complete(())
+    } else {
+        Bounded::cut(
+            (),
+            "a fractional second was dropped from a whole-second result",
+        )
+    }
+}
+
 /// The integer part of an `f64` as an `i64`. `NaN` has none (no match); an infinite or
 /// out-of-range value has one that `i64` cannot hold: a cut.
 pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
@@ -293,5 +335,66 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
         Bounded::complete(Some(n as i64))
     } else {
         Bounded::cut(None, "a number passed the i64 range")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cut_of<T>(b: Bounded<T>) -> (T, bool) {
+        let sink = Cell::new(false);
+        let v = settle(&sink, b);
+        (v, sink.get())
+    }
+
+    #[test]
+    fn each_limit_reports_a_cut_and_keeps_its_value() {
+        assert_eq!(cut_of(backward_step(3, true)), (Some(2), false));
+        assert_eq!(cut_of(backward_step(0, true)), (None, true));
+        assert_eq!(cut_of(backward_step(0, false)), (None, false));
+
+        let mut b = StepBudget::containment();
+        while b.take() {}
+        assert_eq!(cut_of(b.finish(7)), (7, true));
+        let mut b = StepBudget::containment();
+        assert!(b.take());
+        assert_eq!(cut_of(b.finish(7)), (7, false));
+
+        let short = walk_list(3usize, |c| *c == 0, |c| Some((*c, c - 1)));
+        assert_eq!(cut_of(short), (Some(vec![3, 2, 1]), false));
+        let endless = walk_list(0usize, |_| false, |c| Some((*c, c + 1)));
+        assert_eq!(cut_of(endless), (None, true));
+        let malformed = walk_list(1usize, |_| false, |_| None::<(usize, usize)>);
+        assert_eq!(cut_of(malformed), (None, false));
+
+        assert!(cut_of(regex("a+")).0.is_some());
+        let (re, cut) = cut_of(regex("("));
+        assert!(re.is_none() && cut);
+
+        assert!(nesting_allowed(PARSE_DEPTH) && !nesting_allowed(PARSE_DEPTH + 1));
+        assert_eq!(cut_of(epoch_year(2024)), (Some(2024), false));
+        assert_eq!(cut_of(epoch_year(EPOCH_YEAR_CAP + 1)), (None, true));
+    }
+
+    #[test]
+    fn a_lossy_whole_number_conversion_is_a_cut() {
+        // 2^53 + 1 is exact as an integer; its f64 image is not.
+        let big: i128 = 9_007_199_254_740_993;
+        assert_eq!(
+            cut_of(whole_i64(Some(big))),
+            (Some(9_007_199_254_740_993), false)
+        );
+        assert_eq!(
+            cut_of(whole_i64(Some(i128::from(i64::MAX) + 1))),
+            (None, true)
+        );
+        assert_eq!(cut_of(whole_i64(None)), (None, true));
+        assert_eq!(cut_of(whole_i64_of_f64(1e3)), (Some(1000), false));
+        assert_eq!(cut_of(whole_i64_of_f64(1.5)), (None, true));
+        assert_eq!(cut_of(whole_i64_of_f64(f64::INFINITY)), (None, true));
+        assert_eq!(cut_of(whole_i64_of_f64(f64::NAN)), (None, false));
+        assert_eq!(cut_of(dropped_fraction("000")), ((), false));
+        assert_eq!(cut_of(dropped_fraction("5")), ((), true));
     }
 }

@@ -14,7 +14,11 @@
 //! * calls a `checked_*` / `overflowing_*` arithmetic step that neither goes through
 //!   `rep(` / `bounded::` on that line nor carries a `// not-a-cut:` marker;
 //! * compares, ranges, takes or caps against a numeric literal of 1000 or more without
-//!   such a marker.
+//!   such a marker;
+//! * converts a number lossily: an `as f64` / `as i64` cast, the f64 image `num(…)` or
+//!   `.to_f64()`, without going through `bounded::` on that line or carrying a
+//!   `// not-a-cut:` marker (the value feeds comparisons, joins and negation, so a lost
+//!   digit must be a cut, or the conversion exact or the builtin defined over f64).
 //!
 //! Each marker must name a category from [`ALLOWED`] (`// no-match: ill-typed (…)`);
 //! an unknown category fails, so a marker cannot be an unreviewed free-text waiver.
@@ -66,6 +70,12 @@ const ALLOWED: &[(&str, &str)] = &[
     ("not-a-cut", "settled-by-caller"),
     // The value is computed exactly on the digits, so nothing is lost.
     ("not-a-cut", "exact-on-digits"),
+    // A numeric conversion that cannot lose precision (a count, or a value checked to be
+    // whole and below 2^53).
+    ("not-a-cut", "exact-cast"),
+    // The builtin is defined over f64 values (the trig/log family, double arithmetic,
+    // the math: comparisons until GH #6745), so the f64 image is its value.
+    ("not-a-cut", "defined-float"),
     // A data value that is named like a limit (an ontology cardinality).
     ("not-a-limit", "data-value"),
     // A switch between sequential and parallel evaluation of the same result.
@@ -104,6 +114,9 @@ fn errors_and_limits_go_through_the_bounded_module() {
     .expect("literal pattern");
     // A checked or overflowing step whose `None` is not settled as a cut.
     let checked = Regex::new(r"\.(checked|overflowing)_\w+\(").expect("checked pattern");
+    // A numeric conversion that can lose digits.
+    let lossy = Regex::new(r"\bas\s+(f64|i64)\b|(^|[^\w:])num\(|\.to_f64\(\)|NumVal::to_f64")
+        .expect("lossy pattern");
     // Every marker names one allowed category; an unknown one fails.
     let marker = Regex::new(r"//\s*(no-match|not-a-cut|not-a-limit):\s*([a-z-]*)").expect("marker");
     let mut hits = Vec::new();
@@ -134,6 +147,16 @@ fn errors_and_limits_go_through_the_bounded_module() {
             {
                 hits.push(format!(
                     "{rel}:{n}: unsettled checked arithmetic: {}",
+                    code.trim()
+                ));
+            }
+            if lossy.is_match(&code)
+                && !code.contains("bounded::")
+                && !code.contains("fn num(")
+                && !marked("// not-a-cut:")
+            {
+                hits.push(format!(
+                    "{rel}:{n}: unsettled lossy numeric conversion: {}",
                     code.trim()
                 ));
             }

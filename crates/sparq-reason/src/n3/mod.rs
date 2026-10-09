@@ -325,7 +325,7 @@ pub fn reason_n3_with_cycles(
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None, cycles)?;
+    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::None, cycles)?.top_level();
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -334,7 +334,7 @@ pub fn reason_n3_with_cycles(
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
     let parsed = parser::parse(src)?;
     let (facts, steps, _) =
-        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?;
+        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?.top_level();
     intern_closure(dict, &facts, &steps)
 }
 
@@ -375,7 +375,7 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
     let (facts, _steps, _) =
-        run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?;
+        run_closure(parsed, None, None, StepMode::None, NegationCycles::Reject)?.top_level();
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -467,13 +467,14 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
         .collect();
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     let truncated = Truncation::default();
-    let (facts, _steps, _) = run_closure(
+    let facts = run_closure(
         data_parsed,
         None,
         Some((VisitedDocs::default(), truncated.clone())),
         StepMode::None,
         NegationCycles::Reject,
-    )?;
+    )?
+    .read_further(&truncated);
     let mut bw = BwCtx::new(&backward);
     bw.base = base;
     bw.truncated = truncated;
@@ -586,6 +587,11 @@ pub struct StratifiedN3Closure {
     /// before rdf:first/rest list expansion and interning) — the per-stratum
     /// stats hook a stratified pipeline records.
     pub strata_facts: Vec<usize>,
+    /// Each document's stratification diagnostic under [`NegationCycles::FailClosed`] /
+    /// [`NegationCycles::SinglePass`] ([`reason_n3_stratified_with_cycles`]), in stratum
+    /// order. A FailClosed skip also makes every later document's negation or
+    /// aggregation refuse the carried closure (the run errors).
+    pub warnings: Vec<String>,
 }
 
 /// Run the rule closure STRATUM BY STRATUM: each `strata[i]` is a complete N3
@@ -619,7 +625,11 @@ pub fn reason_n3_stratified(
 }
 
 /// As [`reason_n3_stratified`], choosing what happens to rules that negate through a
-/// dependency cycle inside one stratum ([`NegationCycles`]).
+/// dependency cycle inside one stratum ([`NegationCycles`]). Under
+/// [`NegationCycles::FailClosed`] the closure a stratum carries forward lacks what its
+/// skipped rules would derive, so it is INCOMPLETE: every negation or aggregation in a
+/// later stratum refuses it and the run errors (the skipped facts would read as absent).
+/// The diagnostics are in [`StratifiedN3Closure::warnings`].
 pub fn reason_n3_stratified_with_cycles(
     dict: &mut Dict,
     strata: &[&str],
@@ -628,6 +638,7 @@ pub fn reason_n3_stratified_with_cycles(
     let mut carried: Vec<[Term; 3]> = Vec::new();
     let mut facts = FactIndex::default();
     let mut strata_facts = Vec::with_capacity(strata.len());
+    let mut warnings = Vec::new();
     // One truncation flag for the whole pipeline: a cut search in an earlier stratum
     // leaves the facts it carries forward incomplete, so a later stratum's negation gate
     // must see it.
@@ -649,20 +660,28 @@ pub fn reason_n3_stratified_with_cycles(
             }
         }
         parsed.facts.append(&mut carried);
-        let (f, _steps, _) = run_closure(
+        // An incomplete closure (rules FailClosed skipped) taints the whole rest of the
+        // pipeline: every later document's negation gate reads `truncated`.
+        let closure = run_closure(
             parsed,
             None,
             Some((VisitedDocs::default(), truncated.clone())),
             StepMode::None,
             cycles,
         )?;
+        warnings.extend(closure.warning.iter().map(|w| format!("stratum {i}: {w}")));
+        let f = closure.read_further(&truncated);
         strata_facts.push(f.all.len());
         if i + 1 < strata.len() {
             carried = f.all.iter().cloned().collect();
         }
         facts = f;
     }
-    Ok(StratifiedN3Closure { facts: intern_closure(dict, &facts, &[])?.0, strata_facts })
+    Ok(StratifiedN3Closure {
+        facts: intern_closure(dict, &facts, &[])?.0,
+        strata_facts,
+        warnings,
+    })
 }
 
 /// The smallest `__st{k}_` prefix that no blank label anywhere in `parsed`
@@ -763,7 +782,7 @@ pub(crate) fn reason_n3_terms_proof(
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
     let (facts, steps, _) =
-        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?;
+        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?.top_level();
     Ok((facts.all, steps))
 }
 
@@ -823,7 +842,7 @@ pub fn reason_n3_terms_with_cycles(
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
     let (facts, steps, warning) =
-        run_closure(parsed, resolver, None, StepMode::Conclusions, cycles)?;
+        run_closure(parsed, resolver, None, StepMode::Conclusions, cycles)?.top_level();
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
@@ -848,10 +867,42 @@ enum StepMode {
     Full,
 }
 
+/// One document's closure, as [`run_closure`] hands it to its caller.
+struct Closure {
+    /// The final fact set. It is a cut when [`NegationCycles::FailClosed`] skipped rules
+    /// on a negation cycle: the closure then lacks whatever those rules derive, so a
+    /// later reader that negates or aggregates over it would read missing facts as
+    /// absent. Whoever reads the closure further (the next document of an explicit
+    /// pipeline, a query, a nested closure's consumer) settles it on its own run's
+    /// [`Truncation`], which every later [`negation_gate`] checks.
+    facts: Bounded<FactIndex>,
+    /// The derivation steps `(conclusion, rule index, supporting premises)` in derivation
+    /// order (as much of them as the [`StepMode`] asks for).
+    steps: Vec<DerivationStep>,
+    /// The stratification diagnostic of a negation cycle evaluated under
+    /// [`NegationCycles::FailClosed`] or [`NegationCycles::SinglePass`].
+    warning: Option<String>,
+}
+
+impl Closure {
+    /// The closure a TOP-LEVEL entry point returns to its own caller: nothing inside the
+    /// engine reads it further, and the facts are exactly what [`NegationCycles::FailClosed`]
+    /// promises (the skipped rules derive nothing; [`N3Closure::warnings`] names them).
+    fn top_level(self) -> (FactIndex, Vec<DerivationStep>, Option<String>) {
+        let returned = std::cell::Cell::new(false);
+        (settle(&returned, self.facts), self.steps, self.warning)
+    }
+
+    /// The closure read further by the same logical run (the next document of an explicit
+    /// pipeline, a query's projection, a nested closure's consumer): an incomplete closure
+    /// is recorded on that run's `truncated` flag, which its later negation gates read.
+    fn read_further(self, truncated: &Truncation) -> FactIndex {
+        settle(truncated, self.facts)
+    }
+}
+
 /// The semi-naive forward-chaining fixpoint shared by the id-level and
-/// term-level entry points. Returns the final fact set plus the derivation
-/// steps `(conclusion, rule index, supporting premises)` in derivation order
-/// (as much of them as `mode` asks for).
+/// term-level entry points ([`Closure`]).
 fn run_closure(
     parsed: parser::Parsed,
     resolver: Option<&Resolver>,
@@ -864,7 +915,7 @@ fn run_closure(
     mode: StepMode,
     // What to do with rules on a cycle through negation ([`strata::stratify`]).
     cycles: NegationCycles,
-) -> Result<(FactIndex, Vec<DerivationStep>, Option<String>), String> {
+) -> Result<Closure, String> {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
     // from being captured by a minted conclusion blank. Labels ingested later
@@ -1256,7 +1307,24 @@ fn run_closure(
     if let Some(e) = bw.nested_error.take() {
         return Err(e);
     }
-    Ok((facts, steps, strata.warning))
+    let skipped = strata
+        .rule_stratum
+        .as_ref()
+        .is_some_and(|rs| rs.contains(&strata::DROPPED));
+    let facts = if skipped {
+        Bounded::cut(
+            facts,
+            "NegationCycles::FailClosed skipped rules on a negation cycle in an earlier \
+             document, so the closure it carries lacks what they derive",
+        )
+    } else {
+        Bounded::complete(facts)
+    };
+    Ok(Closure {
+        facts,
+        steps,
+        warning: strata.warning,
+    })
 }
 
 /// Intern a term-level closure + derivation into the dictionary ([`reason_n3`] /
@@ -2426,24 +2494,10 @@ fn eval_builtin_inner(
             }
         }
         _ => {
+            // The math: comparisons are defined over f64 images (datatype-driven XPath
+            // promotion is GH #6745).
+            // not-a-cut: defined-float
             let (Some(x), Some(y)) = (num(&s), num(&o)) else { return false };
-            // Both values in the exact tower: compare exactly (an f64 image would merge
-            // integers past 2^53); otherwise by f64, as before.
-            if let (Some(a), Some(b)) = (numval_in(&s, pending), numval_in(&o, pending)) {
-                if !matches!(a, NumVal::F64(_)) && !matches!(b, NumVal::F64(_)) {
-                    use std::cmp::Ordering::{Equal, Greater, Less};
-                    let ord = numval_cmp_in(a, b, pending);
-                    return match op {
-                        Builtin::Gt => ord == Some(Greater),
-                        Builtin::Lt => ord == Some(Less),
-                        Builtin::NotGt => matches!(ord, Some(Less | Equal)),
-                        Builtin::NotLt => matches!(ord, Some(Greater | Equal)),
-                        Builtin::MathEq => ord == Some(Equal),
-                        Builtin::MathNe => ord != Some(Equal),
-                        _ => unreachable!(),
-                    };
-                }
-            }
             match op {
                 Builtin::Gt => x > y,
                 Builtin::Lt => x < y,
@@ -2760,7 +2814,7 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
         StepMode::None,
         cycles,
     ) {
-        Ok((closed, _steps, _)) => closed,
+        Ok(closed) => closed.read_further(&bw.truncated),
         Err(e) => {
             bw.nested_error
                 .borrow_mut()
@@ -2958,6 +3012,61 @@ fn numval_in(t: &Term, pending: &bounded::Pending) -> Option<NumVal> {
     Some(v)
 }
 
+/// A number used as a whole `i64` exactly (`time:inSeconds` reverse mode): an integer,
+/// a decimal with a zero fraction, or a whole double. A fraction or a value past `i64`
+/// would lose precision, which is a cut ([`bounded::whole_i64`]).
+fn numval_whole_i64(v: NumVal, pending: &bounded::Pending) -> Option<i64> {
+    let whole = match v {
+        NumVal::Int(i) => Some(i),
+        NumVal::Dec(m, sc) => {
+            let p = rep(pending, 10i128.checked_pow(sc))?;
+            (m % p == 0).then(|| m / p)
+        }
+        NumVal::F64(f) => return settle(pending, bounded::whole_i64_of_f64(f)),
+    };
+    settle(pending, bounded::whole_i64(whole))
+}
+
+/// `string:format`'s `%f`: the value with 6 fraction digits, as C printf renders it.
+/// An integer or decimal is rendered exactly from its digits (a longer fraction rounds
+/// half to even); a double is the double's own value.
+fn fixed6(v: NumVal, pending: &bounded::Pending) -> Option<String> {
+    let (m, sc) = match v {
+        NumVal::Int(i) => (i, 0),
+        NumVal::Dec(m, sc) => (m, sc),
+        // The double's own value (a numeral past i128 was a cut in `numval_in`).
+        NumVal::F64(f) => return Some(format!("{f:.6}")),
+    };
+    if sc > 6 {
+        let p = rep(pending, 10i128.checked_pow(sc - 6))?;
+        let (q, r) = (m / p, m % p);
+        let twice = r.unsigned_abs() * 2;
+        let up = twice > p.unsigned_abs() || (twice == p.unsigned_abs() && q % 2 != 0);
+        let q = if up { q + m.signum() } else { q };
+        // The sign of a value that rounds to zero survives, as in printf (`-0.000000`).
+        return Some(fixed_digits(m < 0, q.unsigned_abs(), 6));
+    }
+    let digits = fixed_digits(m < 0, m.unsigned_abs(), sc);
+    Some(format!("{digits}{}", "0".repeat((6 - sc) as usize)))
+}
+
+/// `mag × 10^-scale` as `[-]int.frac` with exactly `scale` fraction digits (no point when
+/// `scale` is 0).
+fn fixed_digits(neg: bool, mag: u128, scale: u32) -> String {
+    let scale = scale as usize;
+    let mut d = mag.to_string();
+    if d.len() <= scale {
+        d = format!("{}{d}", "0".repeat(scale + 1 - d.len()));
+    }
+    let (int, frac) = d.split_at(d.len() - scale);
+    let sign = if neg { "-" } else { "" };
+    if scale == 0 {
+        format!("{sign}{int}.")
+    } else {
+        format!("{sign}{int}.{frac}")
+    }
+}
+
 /// Numeric order inside a builtin: exact when both values are in the exact tower (a
 /// scale alignment past `i128` is a cut, then the `f64` images decide), else by `f64`
 /// (`NaN` compares unordered, so as neither less, equal nor greater).
@@ -2967,6 +3076,8 @@ fn numval_cmp_in(a: NumVal, b: NumVal, pending: &bounded::Pending) -> Option<std
             return Some(ord);
         }
     }
+    // An f64 operand compares by f64; an alignment overflow was a cut above.
+    // not-a-cut: defined-float
     a.to_f64().partial_cmp(&b.to_f64())
 }
 
@@ -3003,7 +3114,10 @@ pub(crate) fn big_numeral_canonical(lex: &str) -> Option<String> {
 impl NumVal {
     fn to_f64(self) -> f64 {
         match self {
+            // The f64 image, for builtins defined over f64; exact callers use the tower.
+            // not-a-cut: defined-float
             NumVal::Int(i) => i as f64,
+            // not-a-cut: defined-float
             NumVal::Dec(m, s) => m as f64 / 10f64.powi(s as i32),
             NumVal::F64(f) => f,
         }
@@ -3313,11 +3427,13 @@ fn eval_functional_inner(
                 })
             };
             if let Func::InSeconds = f {
-                let secs = settle(pending, bounded::int_of_f64(num(&o_applied)?))?;
+                // Exact: an epoch second count is a whole number, never an f64 image.
+                let secs = numval_whole_i64(numval_in(&o_applied, pending)?, pending)?;
                 let mut nb = b;
                 let lit = Term::Lit(format_epoch(secs), XSD_STRING.into(), None);
                 return unify_term(subj, &lit, &mut nb).then_some(nb);
             }
+            // not-a-cut: defined-float (the inverse trig functions)
             if let Some(x) = numval_in(&o_applied, pending).map(NumVal::to_f64) {
                 if let Some(v) = inverse(x) {
                     if v.is_nan() {
@@ -3393,9 +3509,9 @@ fn eval_functional_inner(
             // a `( … )` list: its length; a quoted formula: its DISTINCT triple count
             [Term::Formula(ts)] => {
                 let distinct: FxHashSet<&[Term; 3]> = ts.iter().collect();
-                number_term(distinct.len() as f64)
+                count_term(distinct.len())
             }
-            _ if was_list => number_term(args.len() as f64),
+            _ if was_list => count_term(args.len()),
             _ => return None,
         },
         Func::Format => {
@@ -3427,8 +3543,9 @@ fn eval_functional_inner(
                         argi += 1;
                     }
                     'f' => {
-                        let n = num(args.get(argi)?)?;
-                        out.push_str(&format!("{n:.6}")); // C printf default precision
+                        // C printf's default precision, 6 digits: exact from the exact
+                        // tower, else from the f64 (a numeral past i128 is a cut).
+                        out.push_str(&fixed6(numval_in(args.get(argi)?, pending)?, pending)?);
                         argi += 1;
                     }
                     _ => return None, // unsupported directive: fail, don't mangle
@@ -3474,6 +3591,7 @@ fn eval_functional_inner(
                                 }
                                 Some(NumVal::F64(f)) => {
                                     if f.fract() == 0.0 && f.abs() < 9.007e15 {
+                                        // not-a-cut: exact-cast (whole, below 2^53)
                                         s.push_str(&(f as i64).to_string());
                                     } else {
                                         s.push_str(&format!("{f}"));
@@ -3491,8 +3609,8 @@ fn eval_functional_inner(
             }
             Term::Lit(s, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::Length => number_term(args.len() as f64),
-        Func::StrLength => number_term(lex(&args[0])?.chars().count() as f64),
+        Func::Length => count_term(args.len()),
+        Func::StrLength => count_term(lex(&args[0])?.chars().count()),
         Func::LowerCase => {
             Term::Lit(lex(&args[0])?.to_lowercase(), "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
@@ -3591,7 +3709,11 @@ fn eval_functional_inner(
         | Func::Minutes
         | Func::Seconds
         | Func::DayOfWeek
-        | Func::InSeconds => number_term(datetime_part(lex(&args[0])?, f, pending)? as f64),
+        | Func::InSeconds => numval_term(NumVal::Int(i128::from(datetime_part(
+            lex(&args[0])?,
+            f,
+            pending,
+        )?))),
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
             // yield nothing).
@@ -3638,6 +3760,9 @@ fn eval_functional_inner(
                     .iter()
                     .map(|a| numval_in(a, pending))
                     .collect::<Option<_>>()?;
+                // Doubles, the trig/log family or a non-terminating quotient; an exact
+                // step that overflowed was a cut above.
+                // not-a-cut: defined-float
                 let nums: Vec<f64> = nvals.iter().map(|v| v.to_f64()).collect();
                 // cwm/EYE type discipline: the real-valued (trig/log) family is
                 // ALWAYS double; arithmetic is double when any input is.
@@ -4004,10 +4129,12 @@ fn datetime_part(s: &str, f: Func, pending: &bounded::Pending) -> Option<i64> {
             )
         }
         Func::DayOfWeek | Func::InSeconds => {
-            let (days, secs) = epoch_parts(s, pending)?;
+            let (days, secs, fraction) = epoch_parts(s, pending)?;
             if matches!(f, Func::DayOfWeek) {
                 return Some((days + 4).rem_euclid(7)); // 1970-01-01 = Thursday
             }
+            // A whole second count: a nonzero fraction it drops is lost precision.
+            settle(pending, bounded::dropped_fraction(fraction));
             settle(
                 pending,
                 bounded::exact(days.checked_mul(86400).and_then(|d| d.checked_add(secs))),
@@ -4025,7 +4152,7 @@ fn datetime_part(s: &str, f: Func, pending: &bounded::Pending) -> Option<i64> {
 /// fall back to a default and so bind a different, valid instant. The timezone
 /// suffix is separated first (on a date as well as a dateTime) so it is never read
 /// as part of a calendar or clock field. #3804.
-fn epoch_parts(s: &str, pending: &bounded::Pending) -> Option<(i64, i64)> {
+fn epoch_parts<'s>(s: &'s str, pending: &bounded::Pending) -> Option<(i64, i64, &'s str)> {
     let field = |x: &str, range: std::ops::RangeInclusive<i64>| -> Option<i64> {
         let v = settle(pending, bounded::digits_i64(x))?;
         range.contains(&v).then_some(v)
@@ -4068,6 +4195,8 @@ fn epoch_parts(s: &str, pending: &bounded::Pending) -> Option<(i64, i64)> {
         return None;
     }
     let mut tod = 0i64;
+    // The seconds field's fraction, which whole-second results drop.
+    let mut dropped = "";
     if let Some(t) = time {
         let mut tp = t.split(':');
         let hh = field(tp.next()?, 0..=24)?;
@@ -4079,6 +4208,7 @@ fn epoch_parts(s: &str, pending: &bounded::Pending) -> Option<(i64, i64)> {
                 if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
                     return None;
                 }
+                dropped = frac;
                 field(whole, 0..=59)?
             }
         };
@@ -4087,7 +4217,7 @@ fn epoch_parts(s: &str, pending: &bounded::Pending) -> Option<(i64, i64)> {
         }
         tod = hh * 3600 + mi * 60 + ss;
     }
-    Some((days_from_civil(y, m, d), tod - offset))
+    Some((days_from_civil(y, m, d), tod - offset, dropped))
 }
 
 /// Number of days in month `m` (1-12) of proleptic-Gregorian year `y`; `None` for an
@@ -4159,9 +4289,15 @@ fn double_term(v: f64) -> Term {
     Term::Lit(lex, XSD_DOUBLE.into(), None)
 }
 
+/// A count (a list length, a string length) as an `xsd:integer` literal.
+fn count_term(n: usize) -> Term {
+    numval_term(NumVal::Int(n as i128))
+}
+
 /// Render an `f64` result as an N3 numeric literal (integer when whole, else decimal).
 fn number_term(v: f64) -> Term {
     if v.fract() == 0.0 && v.abs() < 9.007e15 {
+        // not-a-cut: exact-cast (whole, below 2^53)
         Term::Lit((v as i64).to_string(), "http://www.w3.org/2001/XMLSchema#integer".into(), None)
     } else {
         Term::Lit(format!("{v}"), "http://www.w3.org/2001/XMLSchema#decimal".into(), None)

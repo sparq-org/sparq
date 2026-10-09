@@ -105,7 +105,9 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
-// Integer/decimal math: comparisons are exact. Every builtin and virtual relation declares
+// time: builtins return exact integers (time:inSeconds both ways; a fraction or a
+// value past i64 it would drop is a cut), and string:format's %f renders exact numbers
+// from their digits. Every builtin and virtual relation declares
 // what it reads from the store (`StoreRead`, exhaustive per registry entry); rules whose
 // premise reads outside its joins (scopes, list walks over a stored list, virtual
 // rdf:first/rest over a variable subject, a variable predicate, backward rules) re-run in
@@ -145,9 +147,12 @@ pub fn reason_n3_stratified(dict: &mut Dict, strata: &[&str])   // stratum-by-st
     // driver for pipelines shipped as separate documents; each stratum is still checked on
     // its own, so a stratum that negates through its own conclusions needs
     // reason_n3_stratified_with_cycles(.., SinglePass) and caller-guaranteed completeness;
-    // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes).
+    // per-stratum blank scope. Fields: facts (final interned closure), strata_facts (sizes),
+    // warnings (each stratum's cycle diagnostic).
 pub fn reason_n3_stratified_with_cycles(dict, strata, cycles: NegationCycles)
-    -> Result<StratifiedN3Closure, String>;  // same, with the per-stratum cycle opt-in
+    -> Result<StratifiedN3Closure, String>;  // same, with the per-stratum cycle opt-in;
+    // under FailClosed a stratum that skipped rules carries an INCOMPLETE closure, so any
+    // negation/aggregation in a later stratum refuses it and the run errors.
 
 // Incremental closure maintenance (closure stays == from-scratch materialize on the current base).
 pub struct MaterializedGraph;     // RDFS;     mutations are dictionary-free
