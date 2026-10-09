@@ -260,17 +260,18 @@ fn subsumption_composes_with_is_any_of_and_is_none_of() {
 }
 
 // ===========================================================================
-// Static containment analysis admits the new operators (outer_admits_value).
+// Static containment analysis and the new operators.
 // ===========================================================================
 
-/// An inner `purpose eq a` is contained by an outer `purpose isAnyOf "a|b"` offer
-/// (the outer set admits the pinned inner value); an inner value OUTSIDE the outer
-/// set is not proven contained.
+/// Containment claims only identical constraints, so an inner `purpose eq a` under an
+/// outer `purpose isAnyOf "a|b"` offer is not claimed (purpose evidence widens both
+/// sides), and an inner value OUTSIDE the outer set is never claimed contained.
 #[test]
-fn containment_admits_inner_eq_under_outer_is_any_of() {
+fn containment_claims_only_identical_set_constraints() {
     let outer = purpose_policy("isAnyOf", r#""urn:p/a|urn:p/b""#);
     let inner_in = purpose_policy("eq", "<urn:p/a>");
-    assert_eq!(contains(&outer, &inner_in), Containment::Contains);
+    assert_eq!(contains(&outer, &inner_in), Containment::Unknown);
+    assert_eq!(contains(&outer, &outer), Containment::Contains);
     let inner_out = purpose_policy("eq", "<urn:p/c>");
     assert_ne!(
         contains(&outer, &inner_out),

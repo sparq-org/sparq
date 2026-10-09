@@ -95,6 +95,11 @@ fn allows(ttl: &str) -> Option<bool> {
         .map(|p| evaluate(&p, &request()).allow)
 }
 
+
+fn valid(policy: &Policy) -> sparq_policy::ValidatedPolicy {
+    policy.clone().validate().expect("policy validates")
+}
+
 #[test]
 fn every_undecidable_shape_fails_closed_on_both_rule_kinds() {
     for (name, shape) in SHAPES {
@@ -359,7 +364,7 @@ fn containment_does_not_claim_an_incomparable_implication() {
         Operator::Neq,
         Value::Iri("urn:x".into()),
     ));
-    assert_ne!(contains(&outer, &inner), Containment::Contains);
+    assert_ne!(contains(&valid(&outer), &valid(&inner)), Containment::Contains);
     let req = Request::new(read.clone())
         .on("urn:asset/x")
         .with("urn:dimension", Value::Num(1.0));
@@ -420,7 +425,7 @@ fn containment_compares_instants_like_the_evaluator() {
         Operator::Neq,
         Value::DateTime("2026-06-16T14:00:00+02:00".into()),
     ));
-    assert_ne!(contains(&outer, &inner), Containment::Contains);
+    assert_ne!(contains(&valid(&outer), &valid(&inner)), Containment::Contains);
     let req = Request::new(read.clone())
         .on("urn:asset/x")
         .at("2026-06-16T12:00:00Z");
@@ -441,15 +446,20 @@ fn containment_does_not_read_lteq_as_lt() {
         ..Policy::default()
     };
     assert_ne!(
-        contains(&with(Operator::Lt), &with(Operator::Lteq)),
+        contains(&valid(&with(Operator::Lt)), &valid(&with(Operator::Lteq))),
         Containment::Contains
     );
     assert_ne!(
-        contains(&with(Operator::Gt), &with(Operator::Gteq)),
+        contains(&valid(&with(Operator::Gt)), &valid(&with(Operator::Gteq))),
         Containment::Contains
     );
+    // A tighter bound is not claimed either: only identical constraints are.
     assert_eq!(
-        contains(&with(Operator::Lteq), &with(Operator::Lt)),
+        contains(&valid(&with(Operator::Lteq)), &valid(&with(Operator::Lt))),
+        Containment::Unknown
+    );
+    assert_eq!(
+        contains(&valid(&with(Operator::Lt)), &valid(&with(Operator::Lt))),
         Containment::Contains
     );
 }
@@ -601,7 +611,7 @@ fn containment_respects_the_conflict_strategy() {
         conflict: Some(sparq_policy::ConflictStrategy::Perm),
         ..inner.clone()
     };
-    assert_eq!(contains(&outer, &inner), Containment::Unknown);
+    assert_eq!(contains(&valid(&outer), &valid(&inner)), Containment::Unknown);
     let req = Request::new(read).on("urn:asset/x");
     assert!(decide(&inner.clone().validate().unwrap(), &req).allow);
     assert!(!decide(&outer.validate().unwrap(), &req).allow);

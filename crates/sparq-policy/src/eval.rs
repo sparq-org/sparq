@@ -1728,13 +1728,6 @@ fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
     matches!(actual, Value::Iri(_) | Value::Str(_)) && matches!(bound, Value::Iri(_) | Value::Str(_))
 }
 
-/// `actual op bound` in three values: `None` (Unknown) for an incomparable pair, else
-/// the evaluator's own comparison. Static analysis ([`crate::contains`]) uses this so it
-/// can never prove what the evaluator would not decide.
-pub(crate) fn atomic_status(actual: &Value, op: Operator, bound: &Value) -> Option<bool> {
-    comparable(actual, op, bound).then(|| compare(actual, op, bound))
-}
-
 /// Whether `actual op bound` has a defined answer. Equality needs operands of one
 /// kind (two numbers, two parseable dateTimes, or IRI/string values); an order
 /// operator needs [`order`] to succeed; set membership compares IRI/string values
