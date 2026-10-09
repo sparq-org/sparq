@@ -1277,6 +1277,9 @@ fn run_closure(
     }
 
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
+    // The closure's round and fact allowance: a rule set that never saturates (GH #6757)
+    // stops with a cut and an error instead of growing until memory runs out.
+    let mut allowance = bounded::ClosureRounds::forward();
     for (stratum, &close_naively) in close_naively.iter().enumerate() {
         if stratum > 0 {
             // Stratum boundary: everything closed so far is "new" to this stratum's rules.
@@ -1286,6 +1289,7 @@ fn run_closure(
         // The current round is the stratum's closing naive round.
         let mut closing_check = false;
         loop {
+            bounded::ClosureRounds::round(&mut allowance, facts.all.len(), truncated)?;
             // A round with `first_round` set is NAIVE: every rule over the whole fact set.
             let naive_round = first_round;
             let mut produced: Vec<DerivationStep> = Vec::new();
