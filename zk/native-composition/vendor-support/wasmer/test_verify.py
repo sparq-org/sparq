@@ -43,6 +43,42 @@ class ProvenanceTests(unittest.TestCase):
                 else:
                     p.write_bytes(before)
 
+    def test_lock_delta_rejects(self):
+        p = self.native / "vendor-support/wasmer/lock-delta.json"
+        root_file = self.native / "vendor-support/wasmer/chain-root.Cargo.lock"
+        lock_file = self.native / "Cargo.lock"
+        original, root, lock = json.loads(p.read_text()), root_file.read_bytes(), lock_file.read_bytes()
+        recorded = original["since_chain_root"]
+        edge = recorded["changed_packages"][0]
+        false_edge = {**edge, "after": {**edge["after"], "dependencies": edge["before"]["dependencies"]}}
+        cases = {
+            "missing root": ({k: v for k, v in original.items() if k != "chain_root_lock_sha256"}, None, "chain root"),
+            "substituted root": ({**original, "chain_root_lock_sha256": "0" * 64}, None, "chain root"),
+            "tampered root file": (original, root + b"\n", "chain root"),
+            "missing delta": ({k: v for k, v in original.items() if k != "since_chain_root"}, None, "delta differs"),
+            "false edge": ({**original, "since_chain_root": {**recorded, "changed_packages":
+                            [false_edge, *recorded["changed_packages"][1:]]}}, None, "delta differs"),
+            "omitted package": ({**original, "since_chain_root": {**recorded, "added_packages": []}}, None, "delta differs"),
+            "mistyped delta": ({**original, "since_chain_root": {**recorded, "added_packages": True}}, None, "delta differs"),
+        }
+        for name, (delta, root_bytes, message) in cases.items():
+            with self.subTest(name=name):
+                p.write_text(json.dumps(delta))
+                if root_bytes is not None:
+                    root_file.write_bytes(root_bytes)
+                with self.assertRaisesRegex(ValueError, message):
+                    self.check()
+                root_file.write_bytes(root)
+        # An unrecorded lock edit still fails even with its hash recorded.
+        changed = lock.replace(b'"rand 0.9.5",\n "thiserror 2.0.20",\n]', b'"rand 0.8.8",\n "thiserror 2.0.20",\n]', 1)
+        self.assertNotEqual(changed, lock)
+        lock_file.write_bytes(changed)
+        p.write_text(json.dumps({**original, "candidate_lock_sha256": verify.sha(changed)}))
+        with self.assertRaisesRegex(ValueError, "delta differs"):
+            self.check()
+        lock_file.write_bytes(lock)
+        p.write_text(json.dumps(original))
+
     def test_symlink_rejects(self):
         p = self.native / "vendor/wasmer-derive-6.1.0/linked"
         p.symlink_to(self.policy)

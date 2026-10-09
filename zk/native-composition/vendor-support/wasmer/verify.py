@@ -12,6 +12,9 @@ SUPPORT = Path(__file__).resolve().parent
 NATIVE = SUPPORT.parent.parent
 
 
+# Native lock as #6647 re-pinned it; later lock-delta refreshes must chain from here.
+CHAIN_ROOT_LOCK_SHA256 = "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22"
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -19,6 +22,23 @@ def require(condition, message):
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def lock_delta(base, candidate):
+    """Exact package and dependency-edge difference between two Cargo.lock byte strings."""
+    def packages(data):
+        return {(p["name"], p["version"], p.get("source", "path")): p for p in tomllib.loads(data.decode())["package"]}
+    before, after = packages(base), packages(candidate)
+    ident = lambda k: {"name": k[0], "version": k[1], "source": k[2]}
+    return {
+        "added_packages": [after[k] for k in sorted(after.keys() - before.keys())],
+        "removed_packages": [before[k] for k in sorted(before.keys() - after.keys())],
+        "changed_packages": [
+            {**ident(k), "before": {f: v for f, v in before[k].items() if f not in ("name", "version", "source")},
+             "after": {f: v for f, v in after[k].items() if f not in ("name", "version", "source")}}
+            for k in sorted(before.keys() & after.keys()) if before[k] != after[k]
+        ],
+    }
 
 
 def inventory(root):
@@ -84,6 +104,10 @@ def verify(native=NATIVE, policy=None):
     require(not any(p["name"] in ("proc-macro-error2", "proc-macro-error-attr2") for p in lock["package"]), "diagnostic lock edge remains")
     delta = json.loads((support / "lock-delta.json").read_text())
     require(sha((native / "Cargo.lock").read_bytes()) == delta["candidate_lock_sha256"], "unreviewed native lock change")
+    root = (support / "chain-root.Cargo.lock").read_bytes()
+    require(sha(root) == CHAIN_ROOT_LOCK_SHA256 == delta.get("chain_root_lock_sha256"), "lock chain root differs from the #6647 pin")
+    require(delta.get("since_chain_root") == lock_delta(root, (native / "Cargo.lock").read_bytes()),
+            "recorded lock delta differs from the native lock")
     policy = policy or native.parents[1] / "supply-chain/config.toml"
     config = tomllib.loads(policy.read_text())
     require(config["policy"]["wasmer-derive"]["audit-as-crates-io"] is True, "upstream vet obligation missing")
