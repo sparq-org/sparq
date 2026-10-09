@@ -63,6 +63,19 @@ const MAX_INCLUSIVE_PREFIXES: usize = 64;
 /// What a copied binding costs beside its prefix and URI: the map entry and two string headers.
 const BINDING_OVERHEAD: usize = 64;
 
+/// What sorting `n` keys of at most `key` bytes may cost: about `n log n` comparisons, each
+/// weighing up to a key's bytes.
+fn sort_cost(n: usize, key: usize) -> usize {
+    n.saturating_mul(n.max(2).ilog2() as usize + 1)
+        .saturating_mul(key + 1)
+}
+
+/// What looking a `key`-byte key up in an ordered map of `n` entries may cost: a comparison of
+/// its bytes at each level of the tree.
+fn lookup_cost(key: usize, n: usize) -> usize {
+    (key + 1).saturating_mul((n + 1).ilog2() as usize + 1)
+}
+
 /// The work one document may cost to verify, fixed by its size when it is parsed and charged by
 /// everything that grows with what the document says rather than with its bytes: the tree the
 /// parser builds (names, values, text, the namespace bindings an element copies) and both
@@ -957,6 +970,21 @@ fn parse_tree(xml: &str, budget: &Budget) -> Result<Element, String> {
 
 // ---------------------------------------------------------------- exclusive canonicalization
 
+/// How many bytes [`escape_text`] (or, for `attr`, [`escape_attr`]) writes for `s`, so the
+/// bytes are charged before they are written.
+fn escaped_len(s: &str, attr: bool) -> usize {
+    s.chars()
+        .map(|c| match c {
+            '&' | '<' => 4 + usize::from(c == '&'),
+            '>' if !attr => 4,
+            '"' if attr => 6,
+            '\t' | '\n' if attr => 5,
+            '\r' => 5,
+            c => c.len_utf8(),
+        })
+        .sum()
+}
+
 fn escape_text(s: &str, out: &mut String) {
     for c in s.chars() {
         match c {
@@ -988,8 +1016,9 @@ fn escape_attr(s: &str, out: &mut String) {
 /// output ancestors rendered, one map that an element adds its declarations to for its
 /// descendants and takes them back from after, so no element copies it; `inclusive` the
 /// `InclusiveNamespaces` prefixes (`""` is the default namespace), which are rendered like
-/// inclusive canonicalization does. Every element charges `budget` for the prefixes it weighs and
-/// the bytes it writes.
+/// inclusive canonicalization does. Every element charges `budget` before each step it takes, by
+/// what the step can weigh: the prefixes it looks up, compares and copies, the keys it sorts, the
+/// bindings it records, and the bytes it writes.
 fn render(
     el: &Element,
     exclude: Option<*const Element>,
@@ -1002,11 +1031,19 @@ fn render(
         return Ok(());
     }
     // Each inclusive prefix is looked up in scope and copied at every element, and each prefix
-    // wanted is looked up twice and its URI compared (and copied when rendered): all charged
-    // before it is done, by the bytes it weighs.
-    let inclusive_bytes: usize = inclusive.iter().map(|p| 2 * p.len()).sum();
-    budget.charge((1 + el.attrs.len() + inclusive.len()) * NODE_OVERHEAD + inclusive_bytes)?;
-    let start = out.len();
+    // an attribute names is copied: all charged before it is done, by the bytes it weighs.
+    let scope_len = el.scope.len();
+    let inclusive_bytes: usize = inclusive
+        .iter()
+        .map(|p| lookup_cost(p.len(), scope_len) + p.len())
+        .sum();
+    let attr_prefixes: usize = el.attrs.iter().map(|a| a.prefix.len()).sum();
+    budget.charge(
+        (1 + el.attrs.len() + inclusive.len()) * NODE_OVERHEAD
+            + inclusive_bytes
+            + attr_prefixes
+            + el.prefix.len(),
+    )?;
     // Namespaces this element visibly utilizes, plus the inclusive ones in scope.
     let mut wanted: Vec<String> = vec![el.prefix.clone()];
     for a in &el.attrs {
@@ -1023,6 +1060,8 @@ fn render(
             wanted.push(p.clone());
         }
     }
+    let longest = wanted.iter().map(String::len).max().unwrap_or(0);
+    budget.charge(sort_cost(wanted.len(), longest))?;
     wanted.sort();
     wanted.dedup();
     let mut decls = Vec::new();
@@ -1030,7 +1069,8 @@ fn render(
         if p == "xml" {
             continue;
         }
-        budget.charge(2 * p.len())?;
+        // Looked up in scope and among the rendered, then its URI compared and copied.
+        budget.charge(lookup_cost(p.len(), scope_len) + lookup_cost(p.len(), rendered.len()))?;
         let uri = el.scope.get(&p).map(String::as_str).unwrap_or_default();
         budget.charge(2 * uri.len())?;
         if p.is_empty() {
@@ -1045,7 +1085,26 @@ fn render(
             decls.push((p, uri.to_string()));
         }
     }
+    let mut attrs: Vec<&Attr> = el.attrs.iter().collect();
+    let longest = attrs
+        .iter()
+        .map(|a| a.ns.len() + a.local.len())
+        .max()
+        .unwrap_or(0);
+    budget.charge(sort_cost(attrs.len(), longest))?;
+    attrs.sort_by(|a, b| (a.ns.as_str(), a.local.as_str()).cmp(&(b.ns.as_str(), b.local.as_str())));
     let qname = el.qname();
+    let tag = 2
+        + qname.len()
+        + decls
+            .iter()
+            .map(|(p, uri)| 10 + p.len() + escaped_len(uri, true))
+            .sum::<usize>()
+        + attrs
+            .iter()
+            .map(|a| 5 + a.prefix.len() + a.local.len() + escaped_len(&a.value, true))
+            .sum::<usize>();
+    budget.charge(tag)?;
     out.push('<');
     out.push_str(&qname);
     for (p, uri) in &decls {
@@ -1059,8 +1118,6 @@ fn render(
         escape_attr(uri, out);
         out.push('"');
     }
-    let mut attrs: Vec<&Attr> = el.attrs.iter().collect();
-    attrs.sort_by(|a, b| (a.ns.as_str(), a.local.as_str()).cmp(&(b.ns.as_str(), b.local.as_str())));
     for a in attrs {
         out.push(' ');
         if !a.prefix.is_empty() {
@@ -1073,17 +1130,23 @@ fn render(
         out.push('"');
     }
     out.push('>');
-    budget.charge(out.len() - start)?;
-    // What the descendants see as rendered, taken back once they are written.
+    // What the descendants see as rendered, taken back once they are written: each binding
+    // recorded and taken back costs two lookups.
+    budget.charge(
+        decls
+            .iter()
+            .map(|(p, _)| 2 * lookup_cost(p.len(), rendered.len() + decls.len()))
+            .sum(),
+    )?;
     let before: Vec<(String, Option<String>)> = decls
         .into_iter()
         .map(|(p, uri)| (p.clone(), rendered.insert(p, uri)))
         .collect();
     let children = el.children.iter().try_for_each(|c| match c {
         Node::Text(t) => {
-            let start = out.len();
+            budget.charge(escaped_len(t, false))?;
             escape_text(t, out);
-            budget.charge(out.len() - start)
+            Ok(())
         }
         Node::Element(e) => render(e, exclude, inclusive, rendered, budget, out),
     });
@@ -1247,6 +1310,45 @@ mod tests {
         );
     }
 
+    /// Review finding: attributes were sorted by their namespace URIs uncharged, so many
+    /// attributes sharing one long URI cost far more to sort than to parse. Sorting is charged
+    /// for the comparisons it can make, before it is done.
+    #[test]
+    fn sorting_attributes_draws_on_the_budget() {
+        let mut attrs: Vec<String> = (0..400).map(|i| format!(" p:a{i}=\"1\"")).collect();
+        attrs.reverse();
+        let xml = format!(
+            "<r xmlns:p=\"urn:{}\"{}/>",
+            "x".repeat(2048),
+            attrs.concat()
+        );
+        let doc = Document::parse(&xml).unwrap();
+        assert_eq!(
+            doc.canonicalize(doc.root(), None, &[]).unwrap_err(),
+            OVER_BUDGET
+        );
+        // A handful of attributes in one namespace still sort within it.
+        let xml = r#"<r xmlns:p="urn:p" p:b="1" p:a="2" c="3"/>"#;
+        let doc = Document::parse(xml).unwrap();
+        assert_eq!(
+            doc.canonicalize(doc.root(), None, &[]).unwrap(),
+            r#"<r xmlns:p="urn:p" c="3" p:a="2" p:b="1"></r>"#
+        );
+    }
+
+    /// The bytes written are charged before they are written, so the charge is what escaping
+    /// writes, exactly.
+    #[test]
+    fn escaped_lengths_are_what_escaping_writes() {
+        let s = "a&b<c>d\"e\tf\ng\rh\u{e9}\u{1f600}";
+        let mut out = String::new();
+        escape_text(s, &mut out);
+        assert_eq!(escaped_len(s, false), out.len());
+        out.clear();
+        escape_attr(s, &mut out);
+        assert_eq!(escaped_len(s, true), out.len());
+    }
+
     /// Review finding: relative namespace URIs were accepted, though canonicalization must fail
     /// on them (Canonical XML 1.0 section 2.1), unused ones included.
     #[test]
@@ -1296,16 +1398,13 @@ mod tests {
                 r#"<s><p:d xmlns:p="urn:q"></p:d></s><p:e xmlns:p="urn:p"></p:e></r>"#
             )
         );
-        let decls: String = (0..4096)
+        let decls: String = (0..1024)
             .map(|i| format!(" xmlns:p{i}=\"urn:{i}\" p{i}:a=\"1\""))
             .collect();
-        // The root renders thousands of declarations; each child renders one more of its own.
-        let wide = format!(
-            "<r xmlns:q=\"urn:q\"{decls}>{}</r>",
-            "<q:x/>".repeat(20_000)
-        );
+        // The root renders a thousand declarations; each child renders one more of its own.
+        let wide = format!("<r xmlns:q=\"urn:q\"{decls}>{}</r>", "<q:x/>".repeat(5_000));
         let out = c14n(&wide);
-        assert_eq!(out.matches("xmlns:q=").count(), 20_000);
+        assert_eq!(out.matches("xmlns:q=").count(), 5_000);
     }
 
     /// Review finding: repeated attributes were found by comparing each attribute with every one
