@@ -115,7 +115,11 @@ impl PodStore {
         target: &NamedNode,
     ) -> Result<TrustAdmissionOutcome, String> {
         let admitted = admit(credential, rules, session, target);
-        let grants = derive_grants(&admitted, abac_rule_n3_for(self))?;
+        let mut grants = derive_grants(&admitted, abac_rule_n3_for(self))?;
+        // A dropped view is not rebuilt by trust grants (see `PodStore::may_install_grants`).
+        if !self.may_install_grants() {
+            grants.clear();
+        }
         if !grants.is_empty() {
             install_auth_grants(&mut self.graph, &grants);
             self.reindex_with(crate::ReindexScope::Full);
@@ -145,7 +149,11 @@ impl PodStore {
         abac_rule_n3: &str,
     ) -> Result<TrustAdmissionOutcome, String> {
         let admitted = admit(credential, rules, session, target);
-        let grants = derive_grants(&admitted, abac_rule_n3)?;
+        let mut grants = derive_grants(&admitted, abac_rule_n3)?;
+        // A dropped view is not rebuilt by trust grants (see `PodStore::may_install_grants`).
+        if !self.may_install_grants() {
+            grants.clear();
+        }
         if !grants.is_empty() {
             install_auth_grants(&mut self.graph, &grants);
             self.reindex_with(crate::ReindexScope::Full);
@@ -198,7 +206,13 @@ impl PodStore {
         let statics = admit_static(credential, rules, target);
         let conditional_grants = derive_conditional_grants(&statics, abac_rule_n3)?;
         let mut installed_count = 0usize;
-        for cg in &conditional_grants {
+        // A dropped view is not rebuilt by trust grants (see `PodStore::may_install_grants`).
+        let install = if self.may_install_grants() {
+            conditional_grants.as_slice()
+        } else {
+            &[]
+        };
+        for cg in install {
             install_conditional_grant(&mut self.graph, target, cg);
             installed_count += 1;
         }

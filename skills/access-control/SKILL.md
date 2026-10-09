@@ -192,13 +192,16 @@ Materialize the authorization view from the access-control documents, then enfor
   spec-conformant surface).
 - `store.update_as(&Session, sparql)` / `store.update_as_acp(...)` — **write-path
   gating**: check every graph an update could mutate *before* applying, and
-  auto-re-materialize on `.acl`/`.acr` writes. An update is applied whole or not at all.
-  One that changes the rules is applied to a fork and the view rebuilt there first: rules
-  that cannot be materialized **refuse the update**, which changes nothing. A
-  `put_acl`/`delete_acl` that cannot put its prior rules back in force **drops** the view:
-  every request is denied (retryably, as an un-materialized store), and no ODRL bridge
-  refresh or bridged grant rebuilds it, until a `materialize_*`, `put_acl` or `delete_acl`
-  succeeds; the error says so.
+  auto-re-materialize on `.acl`/`.acr` writes. Every update entry point takes one path: the
+  update runs on a fork, what it actually wrote is authorized against the view in force
+  (so a later operation cannot reach a graph an earlier one named), rules it leaves are
+  materialized on the fork first (rules that cannot be **refuse the update**, which changes
+  nothing), and only then is it committed to the store itself (journaled and durable for a
+  directory-backed graph) and the view rebuilt. A `put_acl`/`delete_acl` that cannot put
+  its prior rules back in force **drops** the view: every request is denied (retryably, as
+  an un-materialized store), and no ODRL bridge refresh, bridged grant or trust grant
+  rebuilds it, until a `materialize_*`, `put_acl` or `delete_acl` succeeds; the error says
+  so.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
