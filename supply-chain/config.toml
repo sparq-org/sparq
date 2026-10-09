@@ -313,6 +313,10 @@ notes = "solid-server-rs import pre-flight (sq-gg0qq.1): TLS-serving path of the
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.base16ct]]
+version = "1.0.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.base64]]
 version = "0.23.1"
 criteria = "safe-to-deploy"
@@ -1903,14 +1907,6 @@ notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge fe
 
 [[exemptions.ring]]
 version = "0.17.14"
-criteria = "safe-to-deploy"
-
-[[exemptions.rio_api]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.rio_turtle]]
-version = "0.8.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.risc0-binfmt]]

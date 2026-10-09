@@ -261,8 +261,19 @@ pub(crate) fn parse_n3(
     base: &str,
     cuts: &impl Sink,
 ) -> Result<super::parser::Parsed, String> {
-    use super::parser::{parse_with_base_checked, ParseFailure};
-    let parsed = match parse_with_base_checked(src, base) {
+    parse_n3_with_extra(src, base, std::iter::empty(), cuts)
+}
+
+/// [`parse_n3`], with `extra` statements appended AS TERMS
+/// ([`super::parser::parse_with_extra_checked`]).
+pub(crate) fn parse_n3_with_extra(
+    src: &str,
+    base: &str,
+    extra: impl IntoIterator<Item = [super::Term; 3]>,
+    cuts: &impl Sink,
+) -> Result<super::parser::Parsed, String> {
+    use super::parser::{parse_with_extra_checked, ParseFailure};
+    let parsed = match parse_with_extra_checked(src, base, extra) {
         Ok(p) => Bounded::complete(Ok(p)),
         Err(ParseFailure::Syntax(m)) => Bounded::complete(Err(m)),
         Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),

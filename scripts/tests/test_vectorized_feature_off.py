@@ -323,6 +323,163 @@ def test_leg2_no_dirs_falls_back_to_scalar() -> bool:
     return False
 
 
+def test_leg3_ungated_child_rejected() -> bool:
+    """An ungated vectorized reference in an exec/ child module must fail leg 3."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_UNGATED_CHILD) != 0:
+        print("  PASS — ungated reference in exec/child.rs rejected")
+        return True
+    print("  FAIL — exec child modules are not audited")
+    return False
+
+
+def test_leg3_unscanned_child_rejected() -> bool:
+    """exec.rs declaring a child module outside the scanned set must fail leg 3."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_UNSCANNED_CHILD) != 0:
+        print("  PASS — #[path] child outside the scanned set rejected")
+        return True
+    print("  FAIL — unscanned child module accepted")
+    return False
+
+
+def test_leg3_gated_tree_accepted() -> bool:
+    """Item-level and module-level `vectorized` gates both satisfy leg 3."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_OK) == 0:
+        print("  PASS — gated references accepted")
+        return True
+    print("  FAIL — gated references rejected")
+    return False
+
+
+def _all_rc(trees, want_fail: bool) -> list[int]:
+    """Indices of trees whose leg-3 result is NOT the wanted one."""
+    return [i for i, t in enumerate(trees)
+            if (_check._leg3_on_tree(t) != 0) != want_fail]
+
+
+def test_leg3_same_line_path_attr_resolved() -> bool:
+    """`#[path]` on the same line as `mod` (several spellings) is resolved, not skipped."""
+    bad = _all_rc(_check._LEG3_TREES_SAME_LINE_ATTR, want_fail=True)
+    if not bad:
+        print("  PASS — every same-line #[path] spelling rejected as an unscanned child")
+        return True
+    print(f"  FAIL — same-line #[path] spellings {bad} skipped")
+    return False
+
+
+def test_leg3_non_gating_cfg_rejected() -> bool:
+    """not(...), any(...) and other-feature cfgs never count as a vectorized gate."""
+    bad = _all_rc(_check._LEG3_TREES_NON_GATING_CFG, want_fail=True)
+    if not bad:
+        print("  PASS — non-gating cfgs do not gate the module")
+        return True
+    print(f"  FAIL — non-gating cfgs {bad} accepted as gates")
+    return False
+
+
+def test_leg3_unresolvable_mod_rejected() -> bool:
+    """A `mod x;` whose file does not exist fails closed."""
+    if _check._leg3_on_tree(_check._LEG3_TREE_UNRESOLVABLE) != 0:
+        print("  PASS — unresolvable child module rejected")
+        return True
+    print("  FAIL — unresolvable child module accepted")
+    return False
+
+
+def test_leg3_gating_cfg_spellings_accepted() -> bool:
+    """cfgs that require vectorized are accepted with any whitespace / nesting."""
+    bad = _all_rc(_check._LEG3_TREES_GATING_CFG, want_fail=False)
+    if not bad:
+        print("  PASS — gating cfg spellings accepted")
+        return True
+    print(f"  FAIL — gating cfg spellings {bad} rejected")
+    return False
+
+
+def test_leg3_cfg_parser() -> bool:
+    """Direct checks of the cfg predicate parser."""
+    req = _check._cfg_requires_vectorized
+    parse = _check._parse_cfg
+    cases = [
+        ('feature = "vectorized"', True),
+        ('all( test ,feature="vectorized" )', True),
+        ('any(feature = "vectorized", all(feature = "vectorized", test))', True),
+        ('not (feature = "vectorized")', False),
+        ('all(not (feature = "vectorized"))', False),
+        ('not(not(feature = "vectorized"))', False),
+        ('any(feature = "vectorized", test)', False),
+        ('any()', False),
+        ('feature = "vectorized-lite"', False),
+        ('all(feature = "vectorized"', False),
+        ('feature = vectorized', False),
+    ]
+    bad = [p for p, want in cases if req(parse(p)) != want]
+    if not bad:
+        print(f"  PASS — {len(cases)} cfg predicates classified correctly")
+        return True
+    print(f"  FAIL — misclassified: {bad}")
+    return False
+
+
+def test_leg3_cfg_attr_path_rejected() -> bool:
+    """cfg_attr(..., path = ...) on a mod declaration fails as unsupported."""
+    bad = _all_rc(_check._LEG3_TREES_CFG_ATTR_PATH, want_fail=True)
+    if not bad:
+        print("  PASS — every cfg_attr(path) spelling rejected")
+        return True
+    print(f"  FAIL — cfg_attr(path) spellings {bad} accepted")
+    return False
+
+
+def test_leg3_cfg_attr_without_path_accepted() -> bool:
+    """cfg_attr without a path argument does not trip the audit."""
+    bad = _all_rc(_check._LEG3_TREES_CFG_ATTR_OK, want_fail=False)
+    if not bad:
+        print("  PASS — path-free cfg_attr accepted")
+        return True
+    print(f"  FAIL — path-free cfg_attr {bad} rejected")
+    return False
+
+
+def test_leg3_mixed_declarations_not_gated() -> bool:
+    """A file declared both gated and ungated (and its descendants) is not gated."""
+    bad = _all_rc(_check._LEG3_TREES_MIXED_DECLS, want_fail=True)
+    if not bad:
+        print("  PASS — mixed declarations leave the file and its descendants ungated")
+        return True
+    print(f"  FAIL — mixed declarations {bad} exempted the file")
+    return False
+
+
+def test_leg3_all_declarations_gated_accepted() -> bool:
+    """A file whose every declaration is gated (directly or via its parent) is gated."""
+    bad = _all_rc(_check._LEG3_TREES_ALL_DECLS_GATED, want_fail=False)
+    if not bad:
+        print("  PASS — all-gated declarations accepted")
+        return True
+    print(f"  FAIL — all-gated declarations {bad} rejected")
+    return False
+
+
+def test_leg3_unsupported_path_spellings_rejected() -> bool:
+    """r"..", r#".."#, escaped, byte-string, macro and duplicate #[path] all fail."""
+    bad = _all_rc(_check._LEG3_TREES_PATH_UNSUPPORTED, want_fail=True)
+    if not bad:
+        print("  PASS — every non-simple #[path] spelling rejected as unsupported")
+        return True
+    print(f"  FAIL — non-simple #[path] spellings {bad} accepted")
+    return False
+
+
+def test_leg3_real_tree_passes() -> bool:
+    """The repo's own exec tree passes leg 3."""
+    root = os.path.dirname(_SCRIPT_DIR)
+    if _check.check_leg3(repo_root=root) == 0:
+        print("  PASS — repo exec tree is clean")
+        return True
+    print("  FAIL — repo exec tree has violations")
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -344,6 +501,20 @@ def main() -> int:
         ("leg2 V2 <PR>.md declaration accepted", test_leg2_v2_md_declaration_accepted),
         ("leg2 legacy scalar accepted in transition window", test_leg2_legacy_scalar_still_accepted_in_transition),
         ("leg2 no dirs falls back to scalar path", test_leg2_no_dirs_falls_back_to_scalar),
+        ("leg3 ungated reference in exec child rejected", test_leg3_ungated_child_rejected),
+        ("leg3 unscanned exec child module rejected", test_leg3_unscanned_child_rejected),
+        ("leg3 item- and module-level gates accepted", test_leg3_gated_tree_accepted),
+        ("leg3 same-line #[path] attributes resolved", test_leg3_same_line_path_attr_resolved),
+        ("leg3 not/any/other-feature cfgs do not gate", test_leg3_non_gating_cfg_rejected),
+        ("leg3 unresolvable mod fails closed", test_leg3_unresolvable_mod_rejected),
+        ("leg3 gating cfg spellings accepted", test_leg3_gating_cfg_spellings_accepted),
+        ("leg3 cfg predicate parser", test_leg3_cfg_parser),
+        ("leg3 cfg_attr(path) on mod rejected", test_leg3_cfg_attr_path_rejected),
+        ("leg3 cfg_attr without path accepted", test_leg3_cfg_attr_without_path_accepted),
+        ("leg3 gated+ungated declarations do not exempt a file", test_leg3_mixed_declarations_not_gated),
+        ("leg3 all-gated declarations accepted", test_leg3_all_declarations_gated_accepted),
+        ("leg3 raw/escaped/byte/macro #[path] rejected", test_leg3_unsupported_path_spellings_rejected),
+        ("leg3 repo exec tree passes", test_leg3_real_tree_passes),
     ]
 
     passed = 0

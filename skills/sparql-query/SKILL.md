@@ -878,7 +878,7 @@ SPARQL Update `USING` identity behavior.
   are byte-identical to the row `FILTER` operator over the *same batch*, order-exact — a Phase-1
   finding: cross-query byte-identity is unsound because a sargable filter re-plans the scan, so the
   invariant is operator-level not full-query), the seam-level differential in
-  `crates/sparq-engine/src/exec.rs` (`mod columnar_filter_seam`), plus the native FILTER/aggregate
+  `crates/sparq-engine/src/exec/columnar_filter_seam.rs`, plus the native FILTER/aggregate
   baseline bench `crates/sparq-engine/examples/bench_vectorized.rs` (`metric_us`, registered
   `vectorized-eval-micro`, `featured = false`) later phases measure their speedup against.
   **Phase 5 (`sq-pntvh.5`) adds the shared dispatcher seam** (`src/vec_dispatch.rs`): a single module
