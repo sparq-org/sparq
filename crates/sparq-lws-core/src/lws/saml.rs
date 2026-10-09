@@ -47,12 +47,14 @@ const MAX_ASSERTION: usize = 256 * 1024;
 /// Deepest element nesting accepted.
 const MAX_DEPTH: usize = 64;
 
-/// How many bytes of namespace bindings a document may copy, summed over the elements that declare
-/// one: an element that declares a namespace gets its own copy of every binding in scope, so
-/// without a bound a few long or numerous declarations repeated on many small elements would hold
-/// a quadratic amount of them. Each binding counts its prefix, its URI and [`BINDING_OVERHEAD`].
-/// Elements that declare none share their parent's bindings.
-const MAX_SCOPE_BYTES: usize = 4 << 20;
+/// Work a document may cost per byte of it, beside [`BUDGET_BASE`]: see [`Budget`].
+const BUDGET_PER_BYTE: usize = 16;
+/// Work any document may cost, beside [`BUDGET_PER_BYTE`] for each of its bytes.
+const BUDGET_BASE: usize = 1 << 20;
+/// The error of a document past its [`Budget`].
+const OVER_BUDGET: &str = "the assertion is too costly to verify";
+/// What an element, or an attribute, costs beside its bytes.
+const NODE_OVERHEAD: usize = 32;
 
 /// How many prefixes an exclusive canonicalization transform may render inclusively. Real
 /// assertions name a handful; canonicalization weighs each at every element it renders.
@@ -60,6 +62,75 @@ const MAX_INCLUSIVE_PREFIXES: usize = 64;
 
 /// What a copied binding costs beside its prefix and URI: the map entry and two string headers.
 const BINDING_OVERHEAD: usize = 64;
+
+/// The work one document may cost to verify, fixed by its size when it is parsed and charged by
+/// everything that grows with what the document says rather than with its bytes: the tree the
+/// parser builds (names, values, text, the namespace bindings an element copies) and both
+/// canonicalizations (the bytes rendered and the prefixes weighed at each element). A document
+/// past it is refused, whatever part of it is costly; no step has a bound of its own to miss.
+struct Budget(std::cell::Cell<usize>);
+
+impl Budget {
+    fn for_document(len: usize) -> Self {
+        Budget(std::cell::Cell::new(
+            len.saturating_mul(BUDGET_PER_BYTE)
+                .saturating_add(BUDGET_BASE),
+        ))
+    }
+
+    fn charge(&self, n: usize) -> Result<(), String> {
+        match self.0.get().checked_sub(n) {
+            Some(left) => {
+                self.0.set(left);
+                Ok(())
+            }
+            None => {
+                self.0.set(0);
+                Err(OVER_BUDGET.into())
+            }
+        }
+    }
+}
+
+/// A parsed document and what is left of its [`Budget`]: the only way to a tree, and the only way
+/// to canonicalize one, so every step of a verification draws on the same budget.
+pub struct Document {
+    root: Element,
+    budget: Budget,
+}
+
+impl Document {
+    /// Parse `xml` into its root element; see [`parse_tree`].
+    pub fn parse(xml: &str) -> Result<Self, String> {
+        let budget = Budget::for_document(xml.len());
+        let root = parse_tree(xml, &budget)?;
+        Ok(Document { root, budget })
+    }
+
+    pub fn root(&self) -> &Element {
+        &self.root
+    }
+
+    /// Exclusive XML Canonicalization 1.0 of the subtree at `el` (an element of this document);
+    /// see [`render`].
+    fn canonicalize(
+        &self,
+        el: &Element,
+        exclude: Option<*const Element>,
+        inclusive: &[String],
+    ) -> Result<String, String> {
+        let mut out = String::new();
+        render(
+            el,
+            exclude,
+            inclusive,
+            &mut BTreeMap::new(),
+            &self.budget,
+            &mut out,
+        )?;
+        Ok(out)
+    }
+}
 
 /// Verify a base64url-encoded SAML 2.0 assertion for an exchange at this authorization server.
 pub fn verify(cfg: &LwsConfig, token: &str) -> Result<Verified, String> {
@@ -76,7 +147,8 @@ pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, Str
         return Err("the assertion is too large".into());
     }
     let xml = std::str::from_utf8(&bytes).map_err(|_| "the assertion is not UTF-8")?;
-    let root = parse(xml)?;
+    let doc = Document::parse(xml)?;
+    let root = doc.root();
     if !root.is(SAML_NS, "Assertion") {
         return Err("the subject token is not a saml:Assertion".into());
     }
@@ -92,7 +164,7 @@ pub fn verify_at(cfg: &LwsConfig, token: &str, now: i64) -> Result<Verified, Str
     })?;
     let key = TrustKey::parse(trusted)
         .map_err(|e| format!("the configured key of {issuer} is unusable: {e}"))?;
-    verify_signature(&root, &key)?;
+    verify_signature(&doc, &key)?;
 
     let conditions = root
         .child(SAML_NS, "Conditions")
@@ -235,7 +307,8 @@ fn bearer_recipient(subject: &Element, now: i64) -> Result<String, String> {
 
 // ---------------------------------------------------------------- signature
 
-fn verify_signature(root: &Element, key: &TrustKey) -> Result<(), String> {
+fn verify_signature(doc: &Document, key: &TrustKey) -> Result<(), String> {
+    let root = doc.root();
     let signatures: Vec<&Element> = root
         .elements()
         .filter(|e| e.is(DS_NS, "Signature"))
@@ -302,14 +375,7 @@ fn verify_signature(root: &Element, key: &TrustKey) -> Result<(), String> {
         .map(|d| d.text())
         .ok_or("the reference has no DigestValue")?;
     let expected = b64_decode(&expected).ok_or("the DigestValue is not base64")?;
-    let mut canonical = String::new();
-    canonicalize(
-        root,
-        Some(signature as *const Element),
-        &prefixes,
-        &BTreeMap::new(),
-        &mut canonical,
-    )?;
+    let canonical = doc.canonicalize(root, Some(signature as *const Element), &prefixes)?;
     let actual: Vec<u8> = match digest_alg {
         "http://www.w3.org/2001/04/xmlenc#sha256" => {
             sha2::Sha256::digest(canonical.as_bytes()).to_vec()
@@ -325,14 +391,7 @@ fn verify_signature(root: &Element, key: &TrustKey) -> Result<(), String> {
     if actual != expected {
         return Err("the assertion's digest does not match: it was altered after signing".into());
     }
-    let mut signed = String::new();
-    canonicalize(
-        signed_info,
-        None,
-        &inclusive_prefixes(c14n)?,
-        &BTreeMap::new(),
-        &mut signed,
-    )?;
+    let signed = doc.canonicalize(signed_info, None, &inclusive_prefixes(c14n)?)?;
     let value = signature
         .child(DS_NS, "SignatureValue")
         .map(|v| v.text())
@@ -714,11 +773,12 @@ fn split_qname(q: &str) -> (String, String) {
 fn start_element(
     e: &BytesStart<'_>,
     parent_scope: &Arc<BTreeMap<String, String>>,
-    copies: &mut usize,
+    budget: &Budget,
 ) -> Result<Element, String> {
-    let qname = std::str::from_utf8(e.name().as_ref())
-        .map_err(|_| "a non-UTF-8 name")?
-        .to_string();
+    let name = e.name();
+    let qname = std::str::from_utf8(name.as_ref()).map_err(|_| "a non-UTF-8 name")?;
+    budget.charge(qname.len() + NODE_OVERHEAD)?;
+    let qname = qname.to_string();
     let mut declared = Vec::new();
     let mut raw_attrs = Vec::new();
     // Repeated names are found with a set: quick-xml's own check compares each attribute with
@@ -733,6 +793,7 @@ fn start_element(
             return Err("malformed attribute: a repeated attribute".into());
         }
         let raw = std::str::from_utf8(&a.value).map_err(|_| "a non-UTF-8 attribute value")?;
+        budget.charge(key.len() + raw.len() + NODE_OVERHEAD)?;
         let value = unescape(raw, true)?;
         if key == "xmlns" {
             declared.push((String::new(), value));
@@ -751,21 +812,15 @@ fn start_element(
         let bytes = |(k, v): (&String, &String)| k.len() + v.len() + BINDING_OVERHEAD;
         let copied = parent_scope.iter().map(bytes).sum::<usize>()
             + declared.iter().map(|(k, v)| bytes((k, v))).sum::<usize>();
-        *copies = copies.saturating_add(copied);
-        if *copies > MAX_SCOPE_BYTES {
-            return Err("too many namespace declarations".into());
-        }
+        budget.charge(copied)?;
         let mut scope = BTreeMap::clone(parent_scope);
         scope.extend(declared);
         Arc::new(scope)
     };
-    // Each element and attribute keeps its own copy of its namespace URI, charged to the same
-    // budget before it is made: a long URI used by many elements costs what its copies do.
-    let mut owned = |uri: &str| -> Result<String, String> {
-        *copies = copies.saturating_add(uri.len());
-        if *copies > MAX_SCOPE_BYTES {
-            return Err("too many namespace declarations".into());
-        }
+    // Each element and attribute keeps its own copy of its namespace URI, charged before it is
+    // made: a long URI used by many elements costs what its copies do.
+    let owned = |uri: &str| -> Result<String, String> {
+        budget.charge(uri.len())?;
         Ok(uri.to_string())
     };
     let (prefix, local) = split_qname(&qname);
@@ -815,16 +870,15 @@ fn start_element(
     })
 }
 
-/// Parse a document into its root element. Comments are dropped; a DOCTYPE, a processing
-/// instruction, or anything after the root is refused.
-pub fn parse(xml: &str) -> Result<Element, String> {
+/// Parse a document into its root element, charging `budget` for what the tree holds. Comments
+/// are dropped; a DOCTYPE, a processing instruction, or anything after the root is refused.
+fn parse_tree(xml: &str, budget: &Budget) -> Result<Element, String> {
     let mut reader = quick_xml::Reader::from_str(xml);
     reader.config_mut().trim_text(false);
     reader.config_mut().check_end_names = true;
     let mut stack: Vec<Element> = Vec::new();
     let mut root: Option<Element> = None;
     let empty = Arc::new(BTreeMap::new());
-    let mut copies = 0;
     loop {
         let event = reader
             .read_event()
@@ -838,19 +892,13 @@ pub fn parse(xml: &str) -> Result<Element, String> {
                 if stack.len() >= MAX_DEPTH {
                     return Err("the XML nests too deeply".into());
                 }
-                let el = start_element(
-                    &e,
-                    stack.last().map(|p| &p.scope).unwrap_or(&empty),
-                    &mut copies,
-                )?;
+                let el =
+                    start_element(&e, stack.last().map(|p| &p.scope).unwrap_or(&empty), budget)?;
                 stack.push(el);
             }
             Event::Empty(e) => {
-                let el = start_element(
-                    &e,
-                    stack.last().map(|p| &p.scope).unwrap_or(&empty),
-                    &mut copies,
-                )?;
+                let el =
+                    start_element(&e, stack.last().map(|p| &p.scope).unwrap_or(&empty), budget)?;
                 match stack.last_mut() {
                     Some(p) => p.children.push(Node::Element(el)),
                     None => root = Some(el),
@@ -865,6 +913,7 @@ pub fn parse(xml: &str) -> Result<Element, String> {
             }
             Event::Text(t) => {
                 let raw = std::str::from_utf8(t.as_ref()).map_err(|_| "non-UTF-8 text")?;
+                budget.charge(raw.len() + NODE_OVERHEAD)?;
                 match stack.last_mut() {
                     Some(p) => p.children.push(Node::Text(unescape(raw, false)?)),
                     None if raw.trim().is_empty() => {}
@@ -873,6 +922,7 @@ pub fn parse(xml: &str) -> Result<Element, String> {
             }
             Event::CData(t) => {
                 let raw = std::str::from_utf8(t.as_ref()).map_err(|_| "non-UTF-8 text")?;
+                budget.charge(raw.len() + NODE_OVERHEAD)?;
                 let p = stack.last_mut().ok_or("text outside the root element")?;
                 p.children
                     .push(Node::Text(raw.replace("\r\n", "\n").replace('\r', "\n")));
@@ -919,31 +969,24 @@ fn escape_attr(s: &str, out: &mut String) {
 
 /// Exclusive XML Canonicalization 1.0 (without comments) of the subtree at `el`, leaving out the
 /// element `exclude` (the enveloped signature). `rendered` holds the namespace declarations the
-/// output ancestors rendered; `inclusive` the `InclusiveNamespaces` prefixes (`""` is the default
-/// namespace), which are rendered like inclusive canonicalization does.
-pub fn canonicalize(
-    el: &Element,
-    exclude: Option<*const Element>,
-    inclusive: &[String],
-    rendered: &BTreeMap<String, String>,
-    out: &mut String,
-) -> Result<(), String> {
-    render(el, exclude, inclusive, &mut rendered.clone(), out)
-}
-
-/// [`canonicalize`] over one map of what the output ancestors rendered: an element adds its
-/// declarations for its descendants and takes them back after, so no element copies the map and
-/// the work stays proportional to the declarations rendered.
+/// output ancestors rendered, one map that an element adds its declarations to for its
+/// descendants and takes them back from after, so no element copies it; `inclusive` the
+/// `InclusiveNamespaces` prefixes (`""` is the default namespace), which are rendered like
+/// inclusive canonicalization does. Every element charges `budget` for the prefixes it weighs and
+/// the bytes it writes.
 fn render(
     el: &Element,
     exclude: Option<*const Element>,
     inclusive: &[String],
     rendered: &mut BTreeMap<String, String>,
+    budget: &Budget,
     out: &mut String,
 ) -> Result<(), String> {
     if exclude == Some(el as *const Element) {
         return Ok(());
     }
+    budget.charge((1 + el.attrs.len() + inclusive.len()) * NODE_OVERHEAD)?;
+    let start = out.len();
     // Namespaces this element visibly utilizes, plus the inclusive ones in scope.
     let mut wanted: Vec<String> = vec![el.prefix.clone()];
     for a in &el.attrs {
@@ -1008,6 +1051,7 @@ fn render(
         out.push('"');
     }
     out.push('>');
+    budget.charge(out.len() - start)?;
     // What the descendants see as rendered, taken back once they are written.
     let before: Vec<(String, Option<String>)> = decls
         .into_iter()
@@ -1015,10 +1059,11 @@ fn render(
         .collect();
     let children = el.children.iter().try_for_each(|c| match c {
         Node::Text(t) => {
+            let start = out.len();
             escape_text(t, out);
-            Ok(())
+            budget.charge(out.len() - start)
         }
-        Node::Element(e) => render(e, exclude, inclusive, rendered, out),
+        Node::Element(e) => render(e, exclude, inclusive, rendered, budget, out),
     });
     for (p, old) in before.into_iter().rev() {
         match old {
@@ -1027,6 +1072,7 @@ fn render(
         };
     }
     children?;
+    budget.charge(qname.len() + 3)?;
     out.push_str("</");
     out.push_str(&qname);
     out.push('>');
@@ -1037,11 +1083,13 @@ fn render(
 mod tests {
     use super::*;
 
+    fn parse(xml: &str) -> Result<Element, String> {
+        Document::parse(xml).map(|d| d.root)
+    }
+
     fn c14n(xml: &str) -> String {
-        let root = parse(xml).unwrap();
-        let mut out = String::new();
-        canonicalize(&root, None, &[], &BTreeMap::new(), &mut out).unwrap();
-        out
+        let doc = Document::parse(xml).unwrap();
+        doc.canonicalize(doc.root(), None, &[]).unwrap()
     }
 
     /// Review finding: every element copied every namespace binding in scope. An unsigned
@@ -1062,24 +1110,18 @@ mod tests {
             Node::Text(_) => false,
         }));
         let copied = format!("<r{decls}>{}</r>", "<a xmlns:q=\"urn:q\"/>".repeat(30_000));
-        assert_eq!(
-            parse(&copied).unwrap_err(),
-            "too many namespace declarations"
-        );
+        assert_eq!(parse(&copied).unwrap_err(), OVER_BUDGET);
         // A few bindings with long URIs cost what their bytes do.
         let long = format!("<r xmlns:p=\"urn:{}\">", "x".repeat(128 * 1024));
         let copied = format!("{long}{}</r>", "<a xmlns:q=\"urn:q\"/>".repeat(6_000));
-        assert_eq!(
-            parse(&copied).unwrap_err(),
-            "too many namespace declarations"
-        );
+        assert_eq!(parse(&copied).unwrap_err(), OVER_BUDGET);
         // So does a long URI that undeclaring descendants resolve to.
         let long = format!("<r xmlns=\"urn:{}\">", "x".repeat(128 * 1024));
         let used = format!("{long}{}</r>", "<a/>".repeat(30_000));
-        assert_eq!(parse(&used).unwrap_err(), "too many namespace declarations");
+        assert_eq!(parse(&used).unwrap_err(), OVER_BUDGET);
         let long = format!("<r xmlns:p=\"urn:{}\">", "x".repeat(128 * 1024));
         let used = format!("{long}{}</r>", "<a p:x=\"1\"/>".repeat(30_000));
-        assert_eq!(parse(&used).unwrap_err(), "too many namespace declarations");
+        assert_eq!(parse(&used).unwrap_err(), OVER_BUDGET);
         // An ordinary assertion's declarations are far inside the budget.
         let some: String = (0..32)
             .map(|i| format!(" xmlns:p{i}=\"urn:{i}\""))
@@ -1114,12 +1156,8 @@ mod tests {
     #[test]
     fn inclusive_default_namespace_keeps_its_undeclaration() {
         let xml = r#"<r xmlns="urn:x"><p:s xmlns:p="urn:p" xmlns=""><p:t/></p:s></r>"#;
-        let root = parse(xml).unwrap();
-        let render = |inclusive: &[String]| {
-            let mut out = String::new();
-            canonicalize(&root, None, inclusive, &BTreeMap::new(), &mut out).unwrap();
-            out
-        };
+        let doc = Document::parse(xml).unwrap();
+        let render = |inclusive: &[String]| doc.canonicalize(doc.root(), None, inclusive).unwrap();
         assert_eq!(
             render(&[String::new()]),
             r#"<r xmlns="urn:x"><p:s xmlns="" xmlns:p="urn:p"><p:t></p:t></p:s></r>"#
@@ -1130,10 +1168,35 @@ mod tests {
             r#"<r xmlns="urn:x"><p:s xmlns:p="urn:p"><p:t></p:t></p:s></r>"#
         );
         // Nothing to undeclare when no output ancestor rendered a default.
-        let root = parse(r#"<p:s xmlns:p="urn:p" xmlns=""/>"#).unwrap();
-        let mut out = String::new();
-        canonicalize(&root, None, &[String::new()], &BTreeMap::new(), &mut out).unwrap();
+        let doc = Document::parse(r#"<p:s xmlns:p="urn:p" xmlns=""/>"#).unwrap();
+        let out = doc
+            .canonicalize(doc.root(), None, &[String::new()])
+            .unwrap();
         assert_eq!(out, r#"<p:s xmlns:p="urn:p"></p:s>"#);
+    }
+
+    /// Review finding: each step of a verification had a bound of its own, and each round found
+    /// a step whose bound missed a case. Parsing and both canonicalizations now draw on one
+    /// budget fixed by the document's size: a document small enough to parse is still refused
+    /// when rendering it would weigh many inclusive prefixes at each of many elements.
+    #[test]
+    fn parsing_and_canonicalization_share_one_budget() {
+        let xml = format!("<r>{}</r>", "<a/>".repeat(60_000));
+        let doc = Document::parse(&xml).unwrap();
+        let prefixes: Vec<String> = (0..MAX_INCLUSIVE_PREFIXES)
+            .map(|i| format!("p{i}"))
+            .collect();
+        assert_eq!(
+            doc.canonicalize(doc.root(), None, &prefixes).unwrap_err(),
+            OVER_BUDGET
+        );
+        // What one canonicalization spends is gone for the next.
+        let doc = Document::parse(&xml).unwrap();
+        let mut rounds = 0;
+        while doc.canonicalize(doc.root(), None, &[]).is_ok() {
+            rounds += 1;
+            assert!(rounds < 100, "the budget was never spent");
+        }
     }
 
     /// Review finding: canonicalization copied the rendered namespaces at every element that
