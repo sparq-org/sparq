@@ -122,6 +122,10 @@ type DerivationStep = ([Term; 3], usize, Vec<[Term; 3]>);
 #[derive(Default)]
 struct FactIndex {
     all: FxHashSet<[Term; 3]>,
+    /// The [`alpha_key`] of every fact holding a non-ground quoted formula (GH #6757):
+    /// what [`FactIndex::insert_derived`] dedupes against. Empty for a closure with no
+    /// such fact.
+    alpha: FxHashSet<[Term; 3]>,
     ps: FxHashMap<(Term, Term), Vec<Term>>, // (pred, subj) -> objects
     po: FxHashMap<(Term, Term), Vec<Term>>, // (pred, obj) -> subjects
     p: FxHashMap<Term, Vec<[Term; 3]>>,     // pred -> facts (predicate-only-bound)
@@ -138,7 +142,35 @@ impl FactIndex {
     fn contains(&self, t: &[Term; 3]) -> bool {
         self.all.contains(t)
     }
+    /// Add a fact exactly as given (asserted facts: two alpha-equivalent asserted facts
+    /// both stay). Registers its [`alpha_key`] so a later derived copy dedupes against it.
     fn insert(&mut self, t: [Term; 3]) -> bool {
+        let key = alpha_key(&t);
+        let new = self.insert_exact(t);
+        if let (true, Some(k)) = (new, key) {
+            self.alpha.insert(k);
+        }
+        new
+    }
+    /// Add a DERIVED fact unless an equal fact, or one alpha-equivalent to it (it differs
+    /// only by a consistent renaming of the variables inside its quoted formulas, see
+    /// [`alpha_key`]), is already present, asserted or derived. Every forward-closure loop
+    /// adds its conclusions through this, so the closure saturates even though each
+    /// backward proof standardizes a projected formula's variables apart under fresh names
+    /// (GH #6757). A fact with no non-ground formula costs one cheap scan on top of the
+    /// exact insert. Returns whether the fact was added.
+    fn insert_derived(&mut self, t: [Term; 3]) -> bool {
+        match alpha_key(&t) {
+            None => self.insert_exact(t),
+            Some(k) => {
+                if self.all.contains(&t) || !self.alpha.insert(k) {
+                    return false;
+                }
+                self.insert_exact(t)
+            }
+        }
+    }
+    fn insert_exact(&mut self, t: [Term; 3]) -> bool {
         if !self.all.insert(t.clone()) {
             return false;
         }
@@ -167,6 +199,78 @@ impl FactIndex {
             self.all.iter().cloned().collect() // predicate unbound — rare; fall back to scan
         }
     }
+}
+
+/// Whether `t` holds a quoted formula with a variable in it, at any depth (inside lists
+/// and quoted triples too). Cheap for the common case: an IRI, literal or blank answers at
+/// once, and a formula stops at its first variable.
+fn has_open_formula(t: &Term) -> bool {
+    match t {
+        Term::Formula(_) => !t.is_ground(),
+        Term::List(ms) => ms.iter().any(has_open_formula),
+        Term::Triple(tr) => tr.iter().any(has_open_formula),
+        _ => false,
+    }
+}
+
+/// The alpha-equivalence key of a fact holding a non-ground quoted formula, or `None` for
+/// any other fact (GH #6757).
+///
+/// The variables inside the fact's formulas (nested formulas, lists and quoted triples
+/// included) are numbered by first occurrence across the WHOLE fact, so two facts get the
+/// same key exactly when one is the other under a consistent, injective renaming of those
+/// variables. The renaming is joint per fact, not per formula: a variable shared by two
+/// formulas of one fact is one variable, and `{ ?x :q :z } :pair { ?x :q :w }` must not
+/// collapse with `{ ?x :q :z } :pair { ?y :q :w }`. A variable that also occurs in the fact
+/// outside every formula keeps its name, as do IRIs, literals and blank nodes (a blank's
+/// identity is not a binding the closure renames; keeping it exact can only keep two facts
+/// apart, never merge distinct ones). A copy of an `@forAll` universal is keyed with the
+/// universal's IRI, so it never merges with a plain variable or another universal.
+///
+/// The key is only ever compared with other keys; it never becomes a fact, a binding or
+/// output, so reasoning sees every variable under its own name.
+fn alpha_key(t: &[Term; 3]) -> Option<[Term; 3]> {
+    if !t.iter().any(has_open_formula) {
+        return None;
+    }
+    fn outer_vars<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
+        match t {
+            Term::Var(v) => {
+                out.insert(v);
+            }
+            Term::List(ms) => ms.iter().for_each(|m| outer_vars(m, out)),
+            Term::Triple(tr) => tr.iter().for_each(|m| outer_vars(m, out)),
+            _ => {}
+        }
+    }
+    fn canon<'a>(t: &'a Term, inside: bool, outer: &FxHashSet<&str>, map: &mut FxHashMap<&'a str, usize>) -> Term {
+        match t {
+            Term::Var(v) if inside && !outer.contains(v.as_str()) => {
+                let next = map.len();
+                let i = *map.entry(v).or_insert(next);
+                Term::Var(match serialize::universal_iri(v) {
+                    Some(iri) => format!("\u{1}{i}\u{1}{iri}"),
+                    None => format!("\u{1}{i}"),
+                })
+            }
+            Term::Formula(ts) => Term::Formula(
+                ts.iter()
+                    .map(|tr| [canon(&tr[0], true, outer, map), canon(&tr[1], true, outer, map), canon(&tr[2], true, outer, map)])
+                    .collect(),
+            ),
+            Term::List(ms) => Term::List(ms.iter().map(|m| canon(m, inside, outer, map)).collect()),
+            Term::Triple(tr) => Term::Triple(Box::new([
+                canon(&tr[0], inside, outer, map),
+                canon(&tr[1], inside, outer, map),
+                canon(&tr[2], inside, outer, map),
+            ])),
+            _ => t.clone(),
+        }
+    }
+    let mut outer = FxHashSet::default();
+    t.iter().for_each(|x| outer_vars(x, &mut outer));
+    let mut map = FxHashMap::default();
+    Some([canon(&t[0], false, &outer, &mut map), canon(&t[1], false, &outer, &mut map), canon(&t[2], false, &outer, &mut map)])
 }
 
 const MATH: &str = "http://www.w3.org/2000/10/swap/math#";
@@ -1419,7 +1523,7 @@ fn run_closure(
             // generators (a fact may be produced by several rules in one round — OR the flags).
             let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
             for (g, ri, prem) in produced {
-                let is_new = facts.insert(g.clone());
+                let is_new = facts.insert_derived(g.clone());
                 if is_new {
                     new_delta.insert(g.clone());
                 }
@@ -2053,16 +2157,11 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
                 let mut ok = true;
-                // Built only when a projected value is a non-ground formula (GH #6757).
-                let mut canon: Option<CanonCopies> = None;
                 for g in pat {
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let mut val = apply(&walk(g, &sol), &sol);
-                        if !val.is_ground() && matches!(val, Term::Formula(_)) {
-                            val = canon.get_or_insert_with(|| CanonCopies::new(&goal)).formula(&val);
-                        }
+                        let val = apply(&walk(g, &sol), &sol);
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
                             && !unify_term(g, &val, &mut nb)
                         {
@@ -2078,96 +2177,6 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
         }
     }
     out
-}
-
-/// The canonical renaming of the backward-chaining copies inside the formula values one
-/// proof projects onto its goal (GH #6757).
-///
-/// [`backward_prove`] standardizes a rule apart under fresh names (`__bw<n>_…`, a new `n`
-/// per application), so a non-ground formula it projects — `{ ?__bw<n>_x :q :z }` — would
-/// differ on every re-application only by that renaming, and a forward rule copying it out
-/// would derive a "new" fact every round: the closure never saturated. The copies are local
-/// to the proof (nothing outside it can name them), so renaming them is an alpha-renaming
-/// of the value: each copy gets `__bwa<i>_<base>`, `i` counting the proof's copies in order
-/// of first occurrence across its projected values and `<base>` the variable it copies
-/// (prefixes stripped, so a copied `@forAll` universal stays a copy of that universal).
-/// Alpha-equivalent projections then become the same term and dedupe, while distinct
-/// copies stay distinct (`i` is injective) and shared copies stay shared (one map per
-/// proof). Variables the goal itself carries are the caller's and are never renamed, and a
-/// canonical name never takes one of theirs. `__bwa` cannot collide with a live rule
-/// application's `__bw<n>_` names.
-struct CanonCopies {
-    /// Variables of the goal (and of the values it was instantiated with), and the
-    /// non-copy variables of the projected values: kept as is.
-    kept: FxHashSet<String>,
-    /// The canonical names handed out so far.
-    taken: FxHashSet<String>,
-    /// Copy → its canonical name, in first-occurrence order.
-    map: FxHashMap<String, String>,
-}
-
-impl CanonCopies {
-    fn new(goal: &[Term; 3]) -> CanonCopies {
-        let mut kept = FxHashSet::default();
-        goal.iter().for_each(|t| collect_vars(t, &mut kept));
-        CanonCopies { kept, taken: FxHashSet::default(), map: FxHashMap::default() }
-    }
-
-    /// `t` with each backward-chaining copy that is not one of the goal's variables renamed
-    /// to its canonical name.
-    fn formula(&mut self, t: &Term) -> Term {
-        // A non-copy variable in the value keeps its name; no canonical name may take it.
-        let mut keep_here = FxHashSet::default();
-        collect_vars(t, &mut keep_here);
-        keep_here.retain(|v| serialize::copy_base(v).is_none() || self.kept.contains(v));
-        self.kept.extend(keep_here);
-        self.rename(t)
-    }
-
-    fn rename(&mut self, t: &Term) -> Term {
-        match t {
-            Term::Var(v) => match serialize::copy_base(v) {
-                Some(base) if !self.kept.contains(v) => {
-                    if let Some(c) = self.map.get(v) {
-                        return Term::Var(c.clone());
-                    }
-                    let mut i = self.map.len();
-                    let name = loop {
-                        let name = format!("__bwa{i}_{base}");
-                        if !self.kept.contains(&name) && !self.taken.contains(&name) {
-                            break name;
-                        }
-                        i += 1;
-                    };
-                    self.taken.insert(name.clone());
-                    self.map.insert(v.clone(), name.clone());
-                    Term::Var(name)
-                }
-                _ => t.clone(),
-            },
-            Term::Formula(ts) => Term::Formula(
-                ts.iter().map(|tr| [self.rename(&tr[0]), self.rename(&tr[1]), self.rename(&tr[2])]).collect(),
-            ),
-            Term::List(ms) => Term::List(ms.iter().map(|m| self.rename(m)).collect()),
-            Term::Triple(tr) => {
-                Term::Triple(Box::new([self.rename(&tr[0]), self.rename(&tr[1]), self.rename(&tr[2])]))
-            }
-            _ => t.clone(),
-        }
-    }
-}
-
-/// Every variable name in `t`, recursing into lists, quoted triples and formulae.
-fn collect_vars(t: &Term, out: &mut FxHashSet<String>) {
-    match t {
-        Term::Var(v) => {
-            out.insert(v.clone());
-        }
-        Term::List(ms) => ms.iter().for_each(|m| collect_vars(m, out)),
-        Term::Formula(ts) => ts.iter().flatten().for_each(|m| collect_vars(m, out)),
-        Term::Triple(tr) => tr.iter().for_each(|m| collect_vars(m, out)),
-        _ => {}
-    }
 }
 
 /// `t` with every variable renamed into the standardize-apart space of rule application `n`
@@ -4667,6 +4676,50 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 
 #[cfg(test)]
 mod tests {
+    /// GH #6757 guard: the forward closure adds every derived fact through
+    /// `FactIndex::insert_derived` (dedup up to alpha-equivalence of formula variables), and
+    /// nothing outside `FactIndex` adds a fact through the exact `insert`, which only seeds
+    /// the asserted facts. `run_closure` is the one fixpoint loop behind `reason_n3`,
+    /// `reason_n3_terms`, `reason_n3_stratified`, `reason_n3_proof_run`, the query path and
+    /// the incremental N3 fallback, so a second loop (or a regression to `insert`) fails
+    /// here instead of letting a backward-projected formula diverge the closure again.
+    #[test]
+    fn every_closure_loop_inserts_derived_facts_up_to_alpha() {
+        let src = include_str!("mod.rs");
+        let code = &src[..src.find("#[cfg(test)]\nmod tests {").expect("tests module")];
+        let start = code.find("\nfn run_closure(").expect("run_closure");
+        let end = start + 1 + code[start + 1..].find("\nfn ").expect("next fn");
+        let body = &code[start..end];
+        assert_eq!(body.matches(".insert_derived(").count(), 1, "run_closure adds its conclusions via insert_derived");
+        let fix_impl = code.find("impl FactIndex {").expect("impl FactIndex");
+        let fix_end = fix_impl + code[fix_impl..].find("\n}\n").expect("impl end");
+        let outside = format!("{}{}", &code[..fix_impl], &code[fix_end..]);
+        assert!(!outside.contains("facts.insert("), "a fact is added outside FactIndex without insert_derived");
+        assert_eq!(outside.matches(".insert_derived(").count(), 1, "one closure loop, one derived-fact insert");
+        assert_eq!(code.matches("\nfn run_closure(").count(), 1);
+    }
+
+    /// Alpha keys: renaming merges, sharing does not, top-level terms stay exact.
+    #[test]
+    fn alpha_key_is_joint_per_fact() {
+        use super::{alpha_key, Term};
+        let v = |n: &str| Term::Var(n.into());
+        let i = |n: &str| Term::Iri(n.into());
+        let f = |s: Term, o: &str| Term::Formula(vec![[s, i("q"), i(o)]]);
+        assert_eq!(alpha_key(&[i("a"), i("p"), i("b")]), None);
+        assert_eq!(alpha_key(&[i("a"), i("p"), Term::Formula(vec![[i("s"), i("q"), i("z")]])]), None);
+        let a = alpha_key(&[i("a"), i("p"), f(v("__bw1_x"), "z")]);
+        assert!(a.is_some());
+        assert_eq!(a, alpha_key(&[i("a"), i("p"), f(v("__bw9_x"), "z")]));
+        assert_ne!(a, alpha_key(&[i("b"), i("p"), f(v("__bw9_x"), "z")]));
+        let shared = alpha_key(&[f(v("x"), "z"), i("pair"), f(v("x"), "w")]);
+        let apart = alpha_key(&[f(v("x"), "z"), i("pair"), f(v("y"), "w")]);
+        assert_ne!(shared, apart);
+        assert_eq!(shared, alpha_key(&[f(v("u"), "z"), i("pair"), f(v("u"), "w")]));
+        // A variable also free outside every formula keeps its name.
+        assert_ne!(alpha_key(&[v("x"), i("p"), f(v("x"), "z")]), alpha_key(&[v("x"), i("p"), f(v("y"), "z")]));
+    }
+
     /// Every registry entry's declared store read, walked over the whole registry
     /// (`ALL` is generated with each enum, so a new variant joins this walk) and checked
     /// against the expected table below. A new builtin fails here until the table says

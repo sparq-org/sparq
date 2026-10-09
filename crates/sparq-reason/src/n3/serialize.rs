@@ -66,41 +66,28 @@ pub(super) const PREMISE_BLANK_VAR: &str = "__bn.";
 /// keeps `@forAll a:x, b:x` two variables.
 pub(super) const UNIVERSAL_VAR: &str = "__ua.";
 
-/// `v` with ONE backward-chaining copy prefix stripped: `__bw<n>_` (rule application
-/// `n`'s standardized-apart copy) or `__bwa<n>_` (the canonical copy a formula-valued
-/// projection is renamed to, see `canonical_formula` in the parent module).
-fn strip_copy_prefix(v: &str) -> Option<&str> {
-    let r = v.strip_prefix("__bw")?;
-    let r = r.strip_prefix('a').unwrap_or(r);
-    let digits = r.bytes().take_while(u8::is_ascii_digit).count();
-    if digits == 0 {
-        return None;
-    }
-    r[digits..].strip_prefix('_')
-}
-
-/// The variable a backward-chaining copy `v` was copied from: every copy prefix
-/// (`__bw<n>_` / `__bwa<n>_`, possibly repeated) stripped. `None` when `v` is not a copy.
-pub(super) fn copy_base(v: &str) -> Option<&str> {
-    let mut rest = strip_copy_prefix(v)?;
-    while let Some(r) = strip_copy_prefix(rest) {
-        rest = r;
-    }
-    Some(rest)
-}
-
-/// `v` with the backward chainer's copy prefixes (`__bw<n>_` / `__bwa<n>_`, possibly
+/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, possibly
 /// repeated) stripped, when what remains is an `@forAll` universal.
 fn universal_base(v: &str) -> Option<&str> {
-    let base = copy_base(v).unwrap_or(v);
-    base.starts_with(UNIVERSAL_VAR).then_some(base)
+    let mut rest = v;
+    loop {
+        if rest.starts_with(UNIVERSAL_VAR) {
+            return Some(rest);
+        }
+        let r = rest.strip_prefix("__bw")?;
+        let digits = r.bytes().take_while(u8::is_ascii_digit).count();
+        if digits == 0 {
+            return None;
+        }
+        rest = r[digits..].strip_prefix('_')?;
+    }
 }
 
 /// An `@forAll` universal variable name taken apart: its declared IRI and its base name
 /// (backward-chaining copy prefixes stripped). `None` for any other variable.
 ///
 /// Besides the parser's own names this accepts the backward chainer's freshened copies
-/// (`rename_vars` prefixes `__bw<n>_`, canonical copies `__bwa<n>_`): standardizing a rule apart must not strip a
+/// (`rename_vars` prefixes `__bw<n>_`): standardizing a rule apart must not strip a
 /// universal of its provenance. Exact, not heuristic: the `.` cannot occur in a source
 /// variable name.
 pub(super) fn universal(v: &str) -> Option<(&str, &str)> {

@@ -1,8 +1,9 @@
 //! GH #6757: a backward rule that concludes a quoted formula holding a variable (or an
 //! `@forAll` universal), copied out by a forward rule, must let the forward closure reach
 //! its fixpoint. Each backward application standardizes the rule apart under fresh names,
-//! so without a canonical naming every round derived a fact that differed from the last
-//! only by a renaming, and the closure never saturated.
+//! so every round derived a fact that differed from the last only by that renaming, and
+//! the closure never saturated. The closure now dedupes derived facts up to
+//! alpha-equivalence of the variables inside their formulas; no variable is ever renamed.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -108,7 +109,7 @@ fn backward_formula_to_another_subject_reaches_fixpoint() {
     assert_eq!(closure.facts.iter().filter(|t| t[0] == iri("b")).count(), 1, "{:?}", closure.facts);
 }
 
-/// Canonical naming must not merge formulas that are genuinely different: different
+/// Alpha-equivalent deduplication must not merge formulas that are genuinely different: different
 /// constants, and one variable versus two.
 #[test]
 fn distinct_backward_formulas_all_survive() {
@@ -127,4 +128,110 @@ fn distinct_backward_formulas_all_survive() {
     let two_vars = triples.iter().filter(|t| matches!((&t[0], &t[2]), (Term::Var(s), Term::Var(o)) if s != o)).count();
     let one_var = triples.iter().filter(|t| matches!((&t[0], &t[2]), (Term::Var(s), Term::Var(o)) if s == o)).count();
     assert_eq!((two_vars, one_var), (1, 1), "{objs:?}");
+}
+
+/// The closure of `doc` as facts, after checking `reason_n3_terms` terminates on it.
+fn closure_facts(doc: &'static str) -> Vec<[Term; 3]> {
+    terminates("reason_n3_terms", move || reason_n3_terms(doc, None)).expect("terms").facts
+}
+
+/// Independent copies that share a base name (`?x` of two different backward rules) stay
+/// independent variables: `?u` cannot be both of them, so `:bad :is true` is not derived.
+#[test]
+fn independent_backward_copies_are_not_identified() {
+    let facts = closure_facts(
+        "@prefix : <http://ex/>.\n\
+         @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+         { :a :p { ?x :q :z } } <= true.\n\
+         { :b :p { ?x :q :w } } <= true.\n\
+         { ?f :pair ?g } <= { :a :p ?f. :b :p ?g }.\n\
+         { ?f :pair ?g. ?f log:includes { ?u :q :z }. ?g log:includes { ?u :q :w } } => { :bad :is true }.\n",
+    );
+    assert!(!facts.iter().any(|t| t[0] == Term::Iri("http://ex/bad".into())), "{facts:?}");
+}
+
+/// A source variable is never renamed, whatever its spelling: the formula a backward rule
+/// projects from an asserted fact is that fact's formula.
+#[test]
+fn source_variable_spelled_like_a_copy_keeps_its_identity() {
+    let facts = closure_facts(
+        "@prefix : <http://ex/>.\n\
+         @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+         :a :seed { ?__bwa7_x :q :z }.\n\
+         { :a :p ?f } <= { :a :seed ?f }.\n\
+         { :a :seed ?s. :a :p ?f. ?s log:equalTo ?f } => { :result :same true }.\n",
+    );
+    assert!(
+        facts.iter().any(|t| t[0] == Term::Iri("http://ex/result".into()) && t[1] == Term::Iri("http://ex/same".into())),
+        "{facts:?}"
+    );
+}
+
+/// Alpha-equivalence is joint per fact: a fact whose two formulas share their variable and
+/// a fact whose formulas have independent variables are each alpha-equivalent formula by
+/// formula, but they are different facts and both survive (once each).
+#[test]
+fn shared_and_independent_formula_variables_are_not_merged() {
+    let facts = closure_facts(
+        "@prefix : <http://example.org/#>.\n\
+         { { ?x :q :z } :pair { ?x :q :w } } <= true .\n\
+         { { ?x :q :z } :pair { ?y :q :w } } <= true .\n\
+         { ?f :pair ?g } => { ?f :r ?g } .\n",
+    );
+    let pairs: Vec<&[Term; 3]> = facts.iter().filter(|t| t[1] == iri("r")).collect();
+    assert_eq!(pairs.len(), 2, "shared and independent variables are different facts: {pairs:?}");
+    let shares = |t: &[Term; 3]| var_name(&only_triple(&t[0])[0]) == var_name(&only_triple(&t[2])[0]);
+    assert_eq!(pairs.iter().filter(|t| shares(t)).count(), 1, "{pairs:?}");
+}
+
+/// Two ASSERTED alpha-equivalent facts both stay: only derived facts dedupe up to alpha.
+#[test]
+fn asserted_alpha_equivalent_facts_both_stay() {
+    let facts = closure_facts(
+        "@prefix : <http://example.org/#>.\n\
+         :a :r { ?x :q :z } .\n\
+         :a :r { ?y :q :z } .\n\
+         { :a :p { ?x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r ?f } .\n",
+    );
+    let objs: Vec<&Term> = facts.iter().filter(|t| t[0] == iri("a") && t[1] == iri("r")).map(|t| &t[2]).collect();
+    assert_eq!(objs.len(), 2, "{objs:?}");
+}
+
+/// Every closure entry point terminates on the GH #6757 repros (each one runs the same
+/// fixpoint loop; `every_closure_loop_inserts_derived_facts_up_to_alpha` guards that).
+/// Interning entry points may refuse a non-ground formula in the closure; they must not hang.
+#[test]
+fn every_entry_point_terminates() {
+    const DOCS: [&str; 2] = [
+        "@prefix : <http://example.org/#>.\n\
+         { :a :p { ?x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t ?f } } .\n",
+    ];
+    for doc in DOCS {
+        let _ = terminates("reason_n3", move || sparq_reason::n3::reason_n3(&mut sparq_core::dict::Dict::new(), doc));
+        let _ = terminates("reason_n3_proof_run", move || {
+            sparq_reason::n3::reason_n3_proof_run(&mut sparq_core::dict::Dict::new(), doc).map(|r| r.closure.len())
+        });
+        let _ = terminates("reason_n3_stratified", move || {
+            sparq_reason::n3::reason_n3_stratified(&mut sparq_core::dict::Dict::new(), &[doc, doc])
+                .map(|r| r.strata_facts)
+        });
+        let _ = terminates("reason_n3_query_terms", move || {
+            sparq_reason::n3::reason_n3_query_terms(
+                doc,
+                "@prefix : <http://example.org/#>. { :a :r ?f } => { :a :answer ?f } .",
+            )
+        });
+        let g = terminates("MaterializedN3Graph::new (fallback)", move || {
+            sparq_reason::MaterializedN3Graph::new(doc, &[]).map(|g| g.mode())
+        });
+        if let Ok(mode) = g {
+            assert_eq!(mode, sparq_reason::N3Mode::Fallback, "backward rules run in fallback mode");
+        }
+    }
 }
