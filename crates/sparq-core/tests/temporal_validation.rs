@@ -23,7 +23,7 @@ fn invalid_datetimes_do_not_enter_the_comparison_cache() {
         "2024-01-01T01:02:03+14:01",
         "2024-01-01T01:02:03+15:00",
         "2024-01-01T01:02:03+00:60",
-        "0000-01-01T01:02:03Z",
+        "-0000-01-01T01:02:03Z",
         "02024-01-01T01:02:03Z",
         "+2024-01-01T01:02:03Z",
         "9223372036854775807-01-01T01:02:03Z",
@@ -48,6 +48,7 @@ fn valid_boundaries_keep_their_timeline_values() {
         "2024-02-29T01:02:03-14:00",
         "2024-02-29T01:02:03",
         "-0001-01-01T00:00:00Z",
+        "0000-01-01T01:02:03Z",
     ] {
         assert!(Timeline::parse_datetime(text).is_some(), "{text}");
     }
@@ -96,7 +97,8 @@ fn public_calendar_parsers_reject_malformed_and_overflowing_inputs() {
         "2023-02-29",
         "1900-02-29",
         "2024-04-31",
-        "0000-01-01",
+        "-0000-01-01",
+        "0001-02-29",
         "9223372036854775807-01-01",
         "-9223372036854775807-01-01",
     ] {
@@ -123,4 +125,22 @@ fn civil_day_numbers_stay_contiguous_across_the_wide_arithmetic_boundary() {
         assert_eq!(date(y + 1, 1, 1) - date(y, 1, 1), if leap { 366 } else { 365 }, "year {y}");
         assert_eq!(date(y, 3, 1) - date(y, 2, 28), if leap { 2 } else { 1 }, "year {y}");
     }
+}
+
+/// XSD 1.1 has a year zero (1 BCE), a leap year, and numbers earlier years
+/// astronomically: `-0001-12-31` is the day before `0000-01-01`.
+#[test]
+fn year_zero_is_one_bce() {
+    let day = |text: &str| parse_civil_date(text).unwrap_or_else(|| panic!("{text}"));
+    assert_eq!(day("0000-01-01"), day("-0001-12-31") + 1);
+    assert_eq!(day("0001-01-01"), day("0000-12-31") + 1);
+    assert_eq!(day("0000-03-01"), day("0000-02-29") + 1);
+    assert_eq!(day("0001-01-01") - day("0000-01-01"), 366);
+    assert_eq!(
+        Timeline::parse_date("0000-01-01").unwrap().instant(),
+        Timeline::parse_datetime("0000-01-01T00:00:00Z").unwrap().instant()
+    );
+    let midnight = Timeline::parse_datetime("-0001-12-31T24:00:00Z").unwrap();
+    let new_year = Timeline::parse_datetime("0000-01-01T00:00:00Z").unwrap();
+    assert_eq!(midnight.instant(), new_year.instant());
 }
