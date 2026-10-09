@@ -234,7 +234,9 @@ fn arb_triples() -> impl Strategy<Value = Vec<[Term; 3]>> {
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 512,
+        // Miri interprets every instruction; a handful of cases still drives the unsafe
+        // paths, the full count would overrun the nightly lane's per-test cap (sq-0s15k).
+        cases: if cfg!(miri) { 8 } else { 512 },
         ..Default::default()
     })]
 
@@ -342,7 +344,7 @@ fn is_xsd_integer_inline(term: &Term) -> bool {
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 256,
+        cases: if cfg!(miri) { 8 } else { 256 },
         ..Default::default()
     })]
 

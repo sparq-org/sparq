@@ -822,7 +822,7 @@ MUTATIONS = {
     "archive digests use GNU-only sha256sum on the mac rows": _sub(
         "matrix",
         '          if command -v sha256sum >/dev/null 2>&1; then\n'
-        '            sha256sum -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"\n'
+        '            sha256sum --text -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"\n'
         '          else\n'
         '            shasum -a 256 -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"\n'
         '          fi',
@@ -860,7 +860,7 @@ MUTATIONS = {
     "GUI digests use GNU-only sha256sum on the mac rows": _sub(
         "release",
         '          if command -v sha256sum >/dev/null 2>&1; then\n'
-        '            sha256sum -- "${bundles[@]}" > "$OUT"\n'
+        '            sha256sum --text -- "${bundles[@]}" > "$OUT"\n'
         '          else\n'
         '            shasum -a 256 -- "${bundles[@]}" > "$OUT"\n'
         '          fi',
@@ -935,7 +935,7 @@ MUTATIONS = {
     "dist binary digests use GNU-only sha256sum on the mac rows": _sub(
         "matrix",
         '          if command -v sha256sum >/dev/null 2>&1; then\n'
-        '            sha256sum -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"\n'
+        '            sha256sum --text -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"\n'
         '          else\n'
         '            shasum -a 256 -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"\n'
         '          fi',

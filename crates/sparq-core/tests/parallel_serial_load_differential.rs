@@ -198,7 +198,10 @@ fn synthetic_nt() -> (String, Vec<[Term; 3]>) {
     let mut nt = String::new();
     let mut reference: Vec<[Term; 3]> = Vec::new();
     let xsd_int = "http://www.w3.org/2001/XMLSchema#integer";
-    for i in 0..3000u32 {
+    // A fiftieth of the corpus under Miri, which cannot finish the full one inside the nightly
+    // lane's per-test cap (sq-0s15k).
+    let rows: u32 = if cfg!(miri) { 60 } else { 3000 };
+    for i in 0..rows {
         // Clustered subjects/predicates so terms recur across many shard boundaries.
         let s = format!("http://ex/s{}", i % 211);
         let p = format!("http://ex/p{}", i % 13);
@@ -274,6 +277,10 @@ fn turtle_load_matches_reference() {
 /// present only with `parallel`) must agree with the same reference for N-Triples — the reader
 /// entry the CLI/Solid ingest actually drives.
 #[test]
+// The parallel reader's production 32 MiB block buffer is the cost under Miri, not the corpus:
+// this ran 71 minutes even at the Miri-sized corpus. The same pipeline runs under Miri at a
+// small block size in the crate's `load_reader_parallel_short_reads_match_sequential`.
+#[cfg_attr(miri, ignore = "32 MiB production block buffer (sq-0s15k)")]
 fn ntriples_load_reader_matches_reference() {
     let (nt, reference) = synthetic_nt();
     let g = Graph::load_reader(std::io::Cursor::new(nt.clone().into_bytes()), "ntriples").expect("reader loads");
