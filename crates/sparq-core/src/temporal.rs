@@ -104,7 +104,8 @@ impl Timeline {
 
     /// The absolute instant (treating an absent timezone as UTC) in seconds.
     pub fn instant(&self) -> f64 {
-        (self.secs - self.tz.unwrap_or(0)) as f64 + self.frac
+        // In i128: a local time near the i64 bound minus its offset must not overflow.
+        (i128::from(self.secs) - i128::from(self.tz.unwrap_or(0))) as f64 + self.frac
     }
 
     pub fn cmp_tl(a: Timeline, b: Timeline) -> Option<Ordering> {
@@ -204,7 +205,7 @@ pub fn parse_civil_date(date: &str) -> Option<i64> {
     }
     let y = if m <= 2 { y.checked_sub(1)? } else { y };
     let era = y.div_euclid(400);
-    let yoe = y - era * 400;
+    let yoe = y.rem_euclid(400);
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     // Checked: an out-of-range year has no representable day count (None, not overflow).
@@ -568,6 +569,15 @@ mod tests {
         assert!(parse_civil_date("9223372036854775807-01-01").is_none());
         assert_eq!(parse_tz("+9223372036854775807:00"), None);
         assert!(Timeline::parse_datetime_of("2020-01-01T9223372036854775807:00:00Z", XSD_DATE_TIME).is_none());
+        // The year remainder and the UTC normalisation at the i64 edges.
+        assert!(parse_civil_date("-9223372036854775807-03-01").is_none());
+        assert!(parse_civil_date("-9223372036854775808-03-01").is_none());
+        let edge = Timeline::parse_datetime_of("292277026596-12-04T15:30:07-14:00", XSD_DATE_TIME).unwrap();
+        assert!(edge.instant() > Timeline::parse_datetime_of("292277026596-12-04T15:30:07Z", XSD_DATE_TIME).unwrap().instant());
+        let low = Timeline::parse_datetime_of("-292277022657-01-27T08:29:52+14:00", XSD_DATE_TIME);
+        if let Some(low) = low {
+            assert!(low.instant().is_finite());
+        }
     }
 
     /// `Timeline::instant()` normalises a zoned time to UTC (subtracting the offset) and treats
