@@ -282,6 +282,11 @@ async fn readable<S: Store + 'static>(
     let mut stack = vec![root];
     while let Some(uri) = stack.pop() {
         kept.refund(uri.len());
+        // What a stuck change is to is skipped, with what is under it, rather than read or
+        // waited on until it is put back (see [`LwsState::read_visible`]).
+        if !state.visible(&uri) {
+            continue;
+        }
         let is_container = uri.ends_with('/');
         // A listing that cannot be read fails the index rather than leaving out what is under
         // it; a container removed meanwhile has nothing to list.
@@ -313,7 +318,9 @@ async fn readable<S: Store + 'static>(
             drop(children);
             kept.refund(listed);
         }
-        let _guard = state.locks.read(&uri).await;
+        let Some(_guard) = state.read_visible(&uri).await else {
+            continue;
+        };
         // A resource removed since it was listed is not in the index: its existence is checked
         // under its lock (its metadata alone does not say, being read as a default when absent).
         match state.store.exists(&uri).await {
@@ -745,6 +752,58 @@ mod tests {
     /// Review finding: a resource removed after its container was listed and before its lock
     /// was taken was still found (its metadata read as a default, its permission check passed),
     /// with a made-up type. Its existence is checked under its lock.
+    /// Review finding: the walk waited on the lock of a resource whose change was set aside
+    /// (its locks held until it is put back), holding the request. It is skipped, as soon as it
+    /// is set aside, wait or no wait.
+    #[tokio::test]
+    async fn a_set_aside_resource_is_skipped_not_waited_on() {
+        use super::super::test_store;
+        let (state, store) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        for name in ["a", "b"] {
+            state
+                .store
+                .create_in_container(&root, &format!("{root}{name}"), "x".into(), "text/plain")
+                .await
+                .unwrap();
+        }
+        let b = format!("{root}b");
+        let held = state.locks.lock(&b).await;
+        let task = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
+                let get = test_store::request(Method::GET, &path, &[], "");
+                test_store::body_json(handle(&state, &get, &Agent::anonymous()).await).await
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !task.is_finished(),
+            "the walk waits for a write in progress"
+        );
+        // The write's rollback keeps failing, and is set aside with the lock.
+        *store.fail_delete_of.lock().unwrap() = Some(b.clone());
+        let left = super::super::Unsettled(vec![super::super::Undo::Restore {
+            key: b.clone(),
+            prior: None,
+        }]);
+        state.set_aside(left, held);
+        let doc = tokio::time::timeout(std::time::Duration::from_secs(1), task)
+            .await
+            .expect("the walk skipped it rather than wait")
+            .unwrap();
+        let ids: Vec<&str> = doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|i| i["id"].as_str())
+            .collect();
+        assert!(ids.contains(&format!("{root}a").as_str()), "{ids:?}");
+        assert!(!ids.contains(&b.as_str()), "{ids:?}");
+        *store.fail_delete_of.lock().unwrap() = None;
+    }
+
     #[tokio::test]
     async fn a_removed_resource_is_not_found() {
         use super::super::test_store;

@@ -321,8 +321,13 @@ What the server exposes, all discoverable from the storage description
   `storage`. A `purpose` constraint never holds, because the draft does not say how a
   request states its purpose. A `format` constraint compares media types as RFC 9110 does
   (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
-  order). The owner and a resource's creator are always allowed. A
-  new request notifies the owner's inbox when the owner's JSON(-LD) identity document
+  order). The owner and a resource's creator are always allowed. A grant is in force at
+  boot only when its create was known to land: a durable unsettled mark (`<grant>.unsettled`)
+  is stored before the create and removed after it, and before a revocation, so a crash or a
+  store failure with an unknown outcome leaves the grant out of force (and the boot removes
+  it). A revocation whose removal fails takes the grant out of force at once and keeps
+  removing it in the background.
+  A new request notifies the owner's inbox when the owner's JSON(-LD) identity document
   names one. A new grant notifies the inboxes of the requests its assignees made themselves,
   as well as its own `inbox`.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
@@ -333,7 +338,10 @@ What the server exposes, all discoverable from the storage description
   its shared lock, as a GET does. A Delete is checked against
   the resource as it was before removal. A delivery that fails a check is dropped. A subscription
   to a resource's linkset (`{resource}.meta`) hears of each change to the resource as of the
-  linkset, checked as the resource.
+  linkset, and is authorized as the resource when it is created. A delivery never waits on a
+  resource that is set aside, even one set aside while it waits, and checks its subscription
+  again once it holds the lock. An Update is announced by the task that runs the write, so a
+  client that goes away mid-write does not keep subscribers from hearing of it.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
@@ -342,8 +350,12 @@ What the server exposes, all discoverable from the storage description
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
-  the half-done state in between. A create whose store reply was lost is removed whole the same
-  way. The set-aside state lives in the process (a crash mid-way is not covered). A container
+  the half-done state in between. A resource stays set aside until every stuck change to it is
+  put back. While set-aside changes hold 256 MiB or more to put back, new writes are answered
+  `503` too (reads go on). A write's container is touched by the task that runs its store
+  calls, so a client that goes away mid-write cannot leave the container's date behind. A
+  create whose store reply was lost is removed whole the same way. The set-aside state lives
+  in the process (a crash mid-way is not covered). A container
   whose modification time could not be moved on after a change has no `Last-Modified` until it
   is, so `If-Modified-Since` never answers `304` on a stale date. A PUT with `Content-Range`
   (a partial PUT) is refused with `400`.
@@ -373,7 +385,8 @@ What the server exposes, all discoverable from the storage description
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
   While walking the storage they keep only what they return (a search its matches, the index
   its distinct types) and the walk's own state (the listing in hand and the members still to
-  visit), at most 16 MiB in all; past that the request gets `507`.
+  visit), at most 16 MiB in all; past that the request gets `507`. A resource a stuck change
+  is to (set aside) is left out, with what is under it, rather than waited on.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
