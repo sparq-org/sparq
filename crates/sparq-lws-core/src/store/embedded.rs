@@ -442,8 +442,7 @@ impl SparqClient for EmbeddedSparqClient {
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
         self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u)
-                .map_err(|e| engine_err("delete_meta", e))
+            sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("delete_meta", e))
         })
         .await
     }
@@ -548,19 +547,59 @@ impl SparqClient for EmbeddedSparqClient {
         container: &str,
         max_bytes: usize,
     ) -> Result<Option<Vec<String>>, SparqError> {
-        let limit = super::sparq::row_limit(container, max_bytes);
-        self.children(
-            sparql::select_children_limited(container, limit)?,
-            max_bytes,
-        )
+        // Read from the container's own graph's index rather than through a query: the engine
+        // evaluates `GRAPH` whole before a LIMIT applies. The index counts the members exactly
+        // before any is read, so a listing with more than can fit is refused unread, and one
+        // that fits is read whole (nothing is left out).
+        let rows = super::sparq::max_rows(container, max_bytes);
+        let name = oxrdf::NamedNode::new(container)
+            .map_err(|e| SparqError::Backend(format!("container IRI: {e}")))?;
+        self.dispatch(move |graph| {
+            let Some(g) = graph.named_graph(&oxrdf::Term::NamedNode(name)) else {
+                return Ok(Some(Vec::new()));
+            };
+            let id = |iri: &str| {
+                let id = g
+                    .dict
+                    .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                        iri,
+                    )));
+                (id != sparq_core::dict::NO_ID).then_some(id)
+            };
+            let (Some(s), Some(p)) = (id(&sparql::s_record()), id(sparql::LDP_CONTAINS)) else {
+                return Ok(Some(Vec::new()));
+            };
+            let pattern = [Some(s), Some(p), None];
+            if g.store.estimate(&pattern) > rows {
+                return Ok(None);
+            }
+            let scan = g.store.scan(&pattern);
+            let mut children = Vec::with_capacity(scan.rows.len());
+            let mut bytes = 0usize;
+            for row in scan.rows.iter() {
+                let [_, _, o] = scan.to_spo(row);
+                // A member is an IRI; anything else is a malformed index (see `children`).
+                let oxrdf::Term::NamedNode(child) = g.dict.term(o) else {
+                    return Err(SparqError::Backend(
+                        "fatal: a containment member is not an IRI".into(),
+                    ));
+                };
+                bytes = bytes.saturating_add(child.as_str().len());
+                if bytes > max_bytes {
+                    return Ok(None);
+                }
+                children.push(child.into_string());
+            }
+            Ok(Some(children))
+        })
         .await
     }
 
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
         let q = sparql::select_referenced_blob_keys();
         self.dispatch(move |graph| {
-            let result = sparq_engine::query(graph, &q)
-                .map_err(|e| engine_err("referenced_blob_keys", e))?;
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("referenced_blob_keys", e))?;
             let bk_col = var_col(&result, "bk").ok_or_else(|| {
                 SparqError::Backend("fatal: referenced-blob-keys result missing ?bk column".into())
             })?;
@@ -826,7 +865,7 @@ mod tests {
     }
 
     /// Review finding: the index read a container's whole listing before charging it. A listing
-    /// read within a budget stops at it, and asks the engine for no more rows than can fit.
+    /// read within a budget is counted before it is read, and refused unread when it cannot fit.
     #[test]
     fn a_listing_read_within_a_budget_stops_at_it() {
         block_on(async {
@@ -864,10 +903,50 @@ mod tests {
                 None
             );
             assert_eq!(c.list_children_within(container, 0).await.unwrap(), None);
+            let mut read = c
+                .list_children_within(container, all)
+                .await
+                .unwrap()
+                .unwrap();
+            let mut listed = c.list_children(container).await.unwrap();
+            read.sort();
+            listed.sort();
+            assert_eq!(read, listed);
+            // Review finding: members shorter than their container (not below it) fit more of
+            // them in the bytes than the rows asked for, and the rest was silently left out. A
+            // listing with more members than can be below it is refused, never cut short.
+            let other = "http://pod/alice/d/";
+            c.put_meta(other, meta("text/turtle", "dbk", "\"de\""))
+                .await
+                .unwrap();
+            for (i, child) in ["urn:a", "urn:b", "urn:c", "urn:d", "http://pod/alice/d/x"]
+                .iter()
+                .enumerate()
+            {
+                c.create_child(other, child, meta("text/plain", &format!("d{i}"), "\"e\""))
+                    .await
+                    .unwrap();
+            }
+            let budget = 3 * (other.len() + 1);
+            assert_eq!(super::super::sparq::max_rows(other, budget), 3);
+            assert_eq!(c.list_children_within(other, budget).await.unwrap(), None);
+            let memory = super::super::sparq::InMemorySparqClient::new();
+            memory
+                .put_meta(other, meta("text/turtle", "dbk", "\"de\""))
+                .await
+                .unwrap();
+            for (i, child) in ["urn:a", "urn:b", "urn:c", "urn:d", "http://pod/alice/d/x"]
+                .iter()
+                .enumerate()
+            {
+                memory
+                    .create_child(other, child, meta("text/plain", &format!("d{i}"), "\"e\""))
+                    .await
+                    .unwrap();
+            }
             assert_eq!(
-                super::super::sparq::row_limit(container, 3 * (container.len() + 1)),
-                4,
-                "no more members than the budget can hold are asked for"
+                memory.list_children_within(other, budget).await.unwrap(),
+                None
             );
         });
     }

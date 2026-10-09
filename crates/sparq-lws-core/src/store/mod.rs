@@ -219,18 +219,17 @@ pub trait Store: Send + Sync {
     /// path.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
 
-    /// [`list_children`](Store::list_children) while the IRIs it holds come to at most
-    /// `max_bytes`; `None` past that, without the whole listing having been held.
+    /// [`list_children`](Store::list_children) while it fits (see
+    /// [`SparqClient::list_children_within`]): `None` when it does not, without the whole
+    /// listing having been held. A store that cannot bound its read refuses the call.
     async fn list_children_within(
         &self,
-        container: &str,
-        max_bytes: usize,
+        _container: &str,
+        _max_bytes: usize,
     ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
-        let children = self.list_children(container).await?;
-        let bytes = children.iter().try_fold(0usize, |n, c| {
-            n.checked_add(c.as_str().len()).filter(|n| *n <= max_bytes)
-        });
-        Ok(bytes.map(|_| children))
+        Err(ServerError::Storage(
+            "this store cannot read a listing within a bound".into(),
+        ))
     }
 
     /// ONE combined read-plan lookup for the read path (read-2 — `research/lws-design-records.md`

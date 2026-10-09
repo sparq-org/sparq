@@ -314,7 +314,13 @@ async fn readable<S: Store + 'static>(
             kept.refund(listed);
         }
         let _guard = state.locks.read(&uri).await;
-        // A resource removed since it was listed is not in the index.
+        // A resource removed since it was listed is not in the index: its existence is checked
+        // under its lock (its metadata alone does not say, being read as a default when absent).
+        match state.store.exists(&uri).await {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(_) => return Err(Failed::Store),
+        }
         match state.check(Action::Read, &uri, agent).await {
             Ok(true) => {}
             Ok(false) | Err(crate::error::ServerError::NotFound) => continue,
@@ -734,6 +740,51 @@ mod tests {
         assert_ne!(other["items"], doc["items"]);
         let gone = handle(&state, &get("?page=3"), &Agent::anonymous()).await;
         assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Review finding: a resource removed after its container was listed and before its lock
+    /// was taken was still found (its metadata read as a default, its permission check passed),
+    /// with a made-up type. Its existence is checked under its lock.
+    #[tokio::test]
+    async fn a_removed_resource_is_not_found() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        for name in ["a", "b"] {
+            state
+                .store
+                .create_in_container(&root, &format!("{root}{name}"), "x".into(), "text/plain")
+                .await
+                .unwrap();
+        }
+        // b goes, but stays in its container's listing, as when it is removed between the
+        // listing and its visit.
+        let b = format!("{root}b");
+        state.store.delete(&b, None).await.unwrap();
+        assert!(state
+            .store
+            .list_children(&root)
+            .await
+            .unwrap()
+            .iter()
+            .any(|c| c.as_str() == b));
+        let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
+        let r = handle(
+            &state,
+            &test_store::request(Method::GET, &path, &[], ""),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let doc = test_store::body_json(r).await;
+        let ids: Vec<&str> = doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|i| i["id"].as_str())
+            .collect();
+        assert!(ids.contains(&format!("{root}a").as_str()), "{ids:?}");
+        assert!(!ids.contains(&b.as_str()), "{ids:?}");
     }
 
     /// Review finding: the type search checked a resource's permission and then read its

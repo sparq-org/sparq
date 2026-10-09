@@ -303,7 +303,8 @@ pub fn select_children(container: &str) -> Result<String, BuildError> {
     ))
 }
 
-/// [`select_children`] cut to at most `limit` rows.
+/// [`select_children`] cut to at most `limit` rows (ask for one more than will be kept, so a cut
+/// shows itself).
 pub fn select_children_limited(container: &str, limit: usize) -> Result<String, BuildError> {
     Ok(format!("{} LIMIT {limit}", select_children(container)?))
 }
