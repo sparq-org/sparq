@@ -70,17 +70,33 @@ const MAX_DPOP_BYTES_TRUSTED: usize = MAX_DPOP_BYTES / 2;
 const MAX_DPOP_BYTES_OPEN: usize = MAX_DPOP_BYTES - MAX_DPOP_BYTES_TRUSTED;
 /// How many bytes of live entries all the identities of one provider outside the trusted list
 /// may hold.
-const MAX_DPOP_BYTES_PER_OPEN_ISSUER: usize = 512 << 10;
+const MAX_DPOP_BYTES_PER_OPEN_ISSUER: usize = 1 << 20;
 /// How many bytes of live entries one identity may hold: a client presents a proof per token
-/// request, and an ordinary one fits dozens of entries in one window.
-const MAX_DPOP_BYTES_PER_IDENTITY: usize = 32 << 10;
+/// request, and an ordinary one fits a couple of dozen entries in one window.
+const MAX_DPOP_BYTES_PER_IDENTITY: usize = 64 << 10;
 /// How many bytes of live entries one key may hold.
-const MAX_DPOP_BYTES_PER_KEY: usize = 32 << 10;
-/// What a replay cache entry costs beside its strings: its map and heap slots, and the string
-/// and share headers it holds.
-const DPOP_ENTRY_OVERHEAD: usize = 256;
+const MAX_DPOP_BYTES_PER_KEY: usize = 64 << 10;
+/// The most slots each of the replay cache's tables keeps per live entry it holds, beside
+/// [`DPOP_SPARE_SLOTS`]: a table grows to at most about twice what it holds, and one left more than
+/// this much larger as entries expire is shrunk (see [`settle`]).
+const DPOP_SLOTS_PER_ENTRY: usize = 4;
+/// The slots each table may keep beside those its live entries are charged for.
+const DPOP_SPARE_SLOTS: usize = 16;
+/// What one slot of each table costs: the entry by key and `jti` (with a hash table's control byte,
+/// and its unused eighth), a share count, and a place in expiry order.
+const SEEN_SLOT: usize =
+    (std::mem::size_of::<((String, String), (Vec<Share>, usize))>() + 1) * 8 / 7 + 1;
+const USED_SLOT: usize = (std::mem::size_of::<(Share, usize)>() + 1) * 8 / 7 + 1;
+const EXPIRY_SLOT: usize = std::mem::size_of::<Expiry>();
+/// The most shares an entry counts against (a pool, an identity, a key, an issuer).
+const MAX_SHARES: usize = 4;
+/// What a replay cache entry costs beside its strings: the table slots it may keep allocated,
+/// which outlast it until the tables settle, and the string headers it holds. Charging the
+/// tables' capacity to the entries keeps every byte the cache holds within its shares.
+const DPOP_ENTRY_OVERHEAD: usize =
+    DPOP_SLOTS_PER_ENTRY * (SEEN_SLOT + EXPIRY_SLOT + MAX_SHARES * USED_SLOT) + 64;
 /// What a share costs beside its strings.
-const DPOP_SHARE_OVERHEAD: usize = 64;
+const DPOP_SHARE_OVERHEAD: usize = std::mem::size_of::<Share>();
 
 /// Whose proof a replay cache entry is: the verified ID Token's issuer and subject, and whether
 /// the issuer is trusted. Entries are still keyed by the proof key and `jti` alone, so a proof
@@ -139,6 +155,14 @@ pub struct DpopReplay(std::sync::Mutex<Replay>);
 /// An entry's place in expiry order: when it expires, and its key and `jti`.
 type Expiry = std::cmp::Reverse<(i64, String, String)>;
 
+/// Shrink a table left much larger than what it holds, so the slots it keeps stay within what
+/// its live entries are charged for ([`DPOP_SLOTS_PER_ENTRY`]).
+fn settle<K: Eq + std::hash::Hash, V>(table: &mut std::collections::HashMap<K, V>) {
+    if table.capacity() > DPOP_SLOTS_PER_ENTRY * table.len() + DPOP_SPARE_SLOTS {
+        table.shrink_to(2 * table.len());
+    }
+}
+
 #[derive(Default)]
 struct Replay {
     /// Each live entry, by key and `jti`, with the shares it counts against and its bytes.
@@ -178,6 +202,11 @@ impl DpopReplay {
                     }
                 }
             }
+        }
+        settle(seen);
+        settle(used);
+        if expiry.capacity() > DPOP_SLOTS_PER_ENTRY * expiry.len() + DPOP_SPARE_SLOTS {
+            expiry.shrink_to(2 * expiry.len());
         }
         let entry = (jkt.to_string(), jti.to_string());
         if seen.contains_key(&entry) {
@@ -255,7 +284,9 @@ pub fn check_dpop(
     if !jws.verify_jwk(jwk) {
         return Err("the DPoP proof's signature does not verify".into());
     }
-    if jose::thumbprint(jwk) != jkt {
+    // The key's own thumbprint, not the JWK's spelling of it: the replay cache's quotas are
+    // keyed on it, so another spelling of one key is not another key.
+    if jose::key_thumbprint(jwk).as_deref() != Some(jkt) {
         return Err("the DPoP proof is not signed by the key the ID Token is bound to".into());
     }
     if jws.claim_str("htm") != Some("POST") {
@@ -736,26 +767,23 @@ async fn oidc(
         .claim_str("sub")
         .filter(|s| !s.is_empty())
         .ok_or("an ID Token needs iss and sub")?;
-    // Two suites, told apart by the token before anything is fetched. A Solid-OIDC ID Token
-    // (one carrying `webid`, or addressed to `solid`) names its agent in `webid`, which it must
-    // carry, whatever shape `sub` has (Solid-OIDC section 8.1.1), and its WebID's profile names
-    // its issuer as `solid:oidcIssuer`. Any other names its agent in `sub`, a controlled
-    // identifier whose document names its OpenID Provider as a service (LWS OpenID Connect).
-    let solid = jws.claims.get("webid").is_some() || jws.audiences().iter().any(|a| a == "solid");
-    let subject = if solid {
-        jws.claim_str("webid")
+    let suite = Suite::of(jws);
+    let subject = match suite {
+        // A Solid-OIDC ID Token names its agent in `webid`, which it must carry, whatever shape
+        // `sub` has (Solid-OIDC section 8.1.1).
+        Suite::SolidOidc => jws
+            .claim_str("webid")
             .filter(|w| is_http_url(w))
             .ok_or("a Solid-OIDC ID Token needs a webid that is an http(s) URL")?
-            .to_string()
-    } else {
-        sub.to_string()
+            .to_string(),
+        Suite::LwsOidc => sub.to_string(),
     };
     let azp = id_token_client(jws)?;
-    check_times(jws, jose::now_secs())?;
     if !is_http_url(&subject) || !is_http_url(&issuer) {
         return Err("the subject and issuer of an ID Token must be http(s) URLs".into());
     }
-    let audience_ok = addressed_to_us(cfg, jws);
+    // Every claim requirement, before anything is fetched.
+    let admitted = Admitted::claims(cfg, jws, suite, jose::now_secs())?;
     let (content_type, body) = fetch(
         cfg,
         http,
@@ -763,14 +791,8 @@ async fn oidc(
         "application/ld+json, application/cid+json, application/json;q=0.9, text/turtle;q=0.8",
     )
     .await?;
-    let named = names_issuer(&content_type, &body, &subject, &issuer);
-    match named {
-        Some(IssuerLink::OpenIdProvider) if !solid && audience_ok => {}
-        // Solid-OIDC ID Tokens are addressed to `solid` rather than to each authorization server.
-        Some(IssuerLink::SolidOidcIssuer) if solid => {}
-        Some(IssuerLink::OpenIdProvider) if !solid => {
-            return Err("aud does not include this authorization server".into())
-        }
+    match names_issuer(&content_type, &body, &subject, &issuer) {
+        Some(link) if link == suite.issuer_link() => {}
         Some(IssuerLink::OpenIdProvider) => {
             return Err(
                 "a Solid-OIDC ID Token's WebID profile must name its solid:oidcIssuer".into(),
@@ -849,30 +871,118 @@ async fn oidc(
     }) {
         return Err("the ID Token's signature does not verify".into());
     }
-    // A Solid-OIDC ID Token is DPoP-bound: whoever presents it must prove the key.
-    let solid = jws.audiences().iter().any(|a| a == "solid");
-    match bound_jkt(jws) {
-        Some(jkt) => check_dpop(
-            dpop.proof,
-            &cfg.absolute(super::AS_TOKEN_PATH),
-            jkt,
-            jose::now_secs(),
-            dpop.replay,
-            &ProofOwner {
-                trusted: cfg.trusted_oidc_issuers.contains(&issuer),
-                issuer: &issuer,
-                subject: &subject,
-            },
-        )?,
-        None if solid => {
-            return Err("a Solid-OIDC ID Token must be bound to a key (cnf.jkt)".into());
-        }
-        None => {}
-    }
+    let owner = ProofOwner {
+        trusted: cfg.trusted_oidc_issuers.contains(&issuer),
+        issuer: &issuer,
+        subject: &subject,
+    };
+    admitted.possession(cfg, jws, dpop, &owner, jose::now_secs())?;
     Ok(Verified {
         subject,
         client: azp,
     })
+}
+
+/// The two OpenID Connect suites an ID Token may come from, told apart by the token alone, before
+/// anything is fetched: a Solid-OIDC ID Token carries `webid` or is addressed to `solid`; any
+/// other is an LWS OpenID Connect one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Suite {
+    /// Solid-OIDC: the agent is the `webid`, whose profile names its issuer as
+    /// `solid:oidcIssuer`; the token is addressed to `solid` and bound to a key.
+    SolidOidc,
+    /// LWS OpenID Connect: the agent is the `sub`, a controlled identifier whose document names
+    /// its OpenID Provider as a service; the token is addressed to this authorization server.
+    LwsOidc,
+}
+
+impl Suite {
+    #[cfg(test)]
+    const ALL: [Suite; 2] = [Suite::SolidOidc, Suite::LwsOidc];
+
+    fn of(jws: &Jws) -> Suite {
+        if jws.claims.get("webid").is_some() || jws.audiences().iter().any(|a| a == "solid") {
+            Suite::SolidOidc
+        } else {
+            Suite::LwsOidc
+        }
+    }
+
+    /// Whether the token is addressed as the suite requires.
+    fn addressed(self, cfg: &LwsConfig, jws: &Jws) -> bool {
+        match self {
+            Suite::SolidOidc => jws.audiences().iter().any(|a| a == "solid"),
+            Suite::LwsOidc => addressed_to_us(cfg, jws),
+        }
+    }
+
+    /// Whether the suite's tokens must be bound to a key (`cnf.jkt`).
+    fn requires_binding(self) -> bool {
+        match self {
+            Suite::SolidOidc => true,
+            Suite::LwsOidc => false,
+        }
+    }
+
+    /// How the agent's identity document names the token's issuer.
+    fn issuer_link(self) -> IssuerLink {
+        match self {
+            Suite::SolidOidc => IssuerLink::SolidOidcIssuer,
+            Suite::LwsOidc => IssuerLink::OpenIdProvider,
+        }
+    }
+}
+
+/// An ID Token that has met every claim requirement of its suite. It is the only way to the proof
+/// of possession, so no suite reaches an exchange with a step skipped: a suite chooses what each
+/// step demands, never whether the step runs.
+struct Admitted {
+    suite: Suite,
+}
+
+impl Admitted {
+    /// Expiry and validity times, the audience, and the key binding, in that order, for every
+    /// suite.
+    fn claims(cfg: &LwsConfig, jws: &Jws, suite: Suite, now: i64) -> Result<Admitted, String> {
+        check_times(jws, now)?;
+        if !suite.addressed(cfg, jws) {
+            return Err(match suite {
+                Suite::SolidOidc => "a Solid-OIDC ID Token's aud must include solid",
+                Suite::LwsOidc => "aud does not include this authorization server",
+            }
+            .into());
+        }
+        if suite.requires_binding() && bound_jkt(jws).is_none() {
+            return Err("a Solid-OIDC ID Token must be bound to a key (cnf.jkt)".into());
+        }
+        Ok(Admitted { suite })
+    }
+
+    /// The proof of possession, once the signature verifies: a token bound to a key, in any
+    /// suite, is exchanged only with a DPoP proof by that key.
+    fn possession(
+        &self,
+        cfg: &LwsConfig,
+        jws: &Jws,
+        dpop: &DpopContext<'_>,
+        owner: &ProofOwner<'_>,
+        now: i64,
+    ) -> Result<(), String> {
+        match bound_jkt(jws) {
+            Some(jkt) => check_dpop(
+                dpop.proof,
+                &cfg.absolute(super::AS_TOKEN_PATH),
+                jkt,
+                now,
+                dpop.replay,
+                owner,
+            ),
+            None if self.suite.requires_binding() => {
+                Err("a Solid-OIDC ID Token must be bound to a key (cnf.jkt)".into())
+            }
+            None => Ok(()),
+        }
+    }
 }
 
 fn is_http_url(s: &str) -> bool {
@@ -1323,6 +1433,120 @@ mod tests {
         assert!(replay.first_use(&trusted, "tk", "j", now + 60, now));
     }
 
+    /// What the cache's tables and strings take up, slots kept for later included.
+    fn footprint(replay: &DpopReplay) -> usize {
+        let r = replay.0.lock().unwrap();
+        let strings: usize = r
+            .seen
+            .iter()
+            .map(|((k, j), (shares, _))| {
+                2 * (k.len() + j.len()) + 2 * shares.iter().map(Share::bytes).sum::<usize>()
+            })
+            .sum();
+        r.seen.capacity() * SEEN_SLOT
+            + r.used.capacity() * USED_SLOT
+            + r.expiry.capacity() * EXPIRY_SLOT
+            + strings
+    }
+
+    /// Review finding: the byte shares counted live entries only, while the tables kept the slots
+    /// of expired ones, so a cache filled once and drained held its peak memory under shares
+    /// that read empty. Each entry is charged for the slots it may keep, and a table left much
+    /// larger than what it holds is shrunk.
+    #[test]
+    fn replay_cache_charges_the_slots_it_keeps() {
+        let spare = DPOP_SPARE_SLOTS * (SEEN_SLOT + USED_SLOT + EXPIRY_SLOT);
+        let replay = DpopReplay::default();
+        let mut now = 1_000;
+        for round in 0..3 {
+            for i in 0..64 {
+                let name = format!("https://op.example/u{round}-{i}");
+                let who = ProofOwner {
+                    subject: &name,
+                    ..OWNER
+                };
+                fill(&replay, &who, &format!("{name}#k"), now);
+                assert!(footprint(&replay) <= held_bytes(&replay) + spare);
+            }
+            // Everything expires; the next proof finds the tables settled.
+            now += 120;
+            assert!(replay.first_use(&OWNER, "k", &format!("after{round}"), now + 60, now));
+            assert!(footprint(&replay) <= held_bytes(&replay) + spare);
+            assert!(replay.0.lock().unwrap().seen.capacity() <= DPOP_SPARE_SLOTS + 4);
+        }
+    }
+
+    /// Review finding: a DPoP proof's key was matched to the token's `cnf.jkt` by the thumbprint
+    /// of its JWK as spelled, so the per-key share went by spelling and one key in many spellings
+    /// had many shares. The thumbprint is the key's own; no other spelling of it matches.
+    #[test]
+    fn dpop_keys_are_known_by_their_own_thumbprint() {
+        let htu = "http://localhost:3000/.well-known/lws/token";
+        let key = jose::EcKey::generate("c");
+        let jkt = key.thumbprint();
+        let now = jose::now_secs();
+        let replay = DpopReplay::default();
+        let proof_with = |jwk: Value, jti: &str| {
+            let mut header = serde_json::Map::new();
+            header.insert("typ".into(), json!("dpop+jwt"));
+            header.insert("jwk".into(), jwk);
+            key.sign_jws(
+                header,
+                &json!({"htm": "POST", "htu": htu, "iat": now, "jti": jti}),
+            )
+        };
+        let jwk = key.public_jwk();
+        let padded = {
+            let mut j = jwk.clone();
+            j["x"] = json!(format!("{}=", jwk["x"].as_str().unwrap()));
+            j
+        };
+        assert_ne!(jose::thumbprint(&padded), jkt);
+        assert_eq!(jose::key_thumbprint(&padded).as_deref(), Some(jkt.as_str()));
+        assert_eq!(
+            check_dpop(Some(&proof_with(jwk, "a")), htu, &jkt, now, &replay, &OWNER),
+            Ok(())
+        );
+        // Another spelling is the same key: the same entries, the same share.
+        assert_eq!(
+            check_dpop(
+                Some(&proof_with(padded.clone(), "b")),
+                htu,
+                &jkt,
+                now,
+                &replay,
+                &OWNER
+            ),
+            Ok(())
+        );
+        assert!(check_dpop(
+            Some(&proof_with(padded, "a")),
+            htu,
+            &jkt,
+            now,
+            &replay,
+            &OWNER
+        )
+        .is_err());
+        let spelled = jose::thumbprint(&{
+            let mut j = key.public_jwk();
+            j["x"] = json!(format!("{}=", j["x"].as_str().unwrap()));
+            j
+        });
+        let other_spelling = proof_with(key.public_jwk(), "c");
+        assert!(check_dpop(Some(&other_spelling), htu, &spelled, now, &replay, &OWNER).is_err());
+        // RSA: leading zero bytes do not make another key.
+        let rsa = |n: &[u8]| json!({"kty": "RSA", "n": jose::b64url(n), "e": "AQAB"});
+        assert_eq!(
+            jose::key_thumbprint(&rsa(&[0, 0, 7, 8])),
+            jose::key_thumbprint(&rsa(&[7, 8]))
+        );
+        assert_eq!(
+            jose::key_thumbprint(&json!({"kty": "oct", "k": "AA"})),
+            None
+        );
+    }
+
     /// Review finding: the shares counted entries, not what they hold, so an identity with long
     /// names, or a provider spending them, held far more memory than its count suggested. Shares
     /// are in bytes: long names fill one sooner, and one too long for its share is refused.
@@ -1446,47 +1670,168 @@ mod tests {
 
     /// Review finding: a Solid-OIDC ID Token (aud `solid`, bound by `cnf.jkt`) was exchanged
     /// without any DPoP proof, so a copied ID Token was as good as the key.
-    #[tokio::test]
-    async fn solid_oidc_id_tokens_need_a_dpop_proof() {
+    /// An OpenID Provider at the returned base URL, signing with the returned key, and two agents
+    /// it serves: `/alice`, a WebID naming it as `solid:oidcIssuer`, and `/bob`, a controlled
+    /// identifier naming it as an `OpenIdProvider` service.
+    async fn provider() -> (String, jose::EcKey) {
         let op = jose::EcKey::generate("op-key");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let alice = format!("{base}/alice");
-        let app = {
-            let (base, alice, jwks) = (
-                base.clone(),
-                alice.clone(),
-                json!({"keys": [op.public_jwk()]}),
+        let bob = json!({"id": format!("{base}/bob"),
+            "service": [{"type": "OpenIdProvider", "serviceEndpoint": base}]});
+        let discovery = json!({"issuer": base, "jwks_uri": format!("{base}/jwks")});
+        let jwks = json!({"keys": [op.public_jwk()]});
+        let turtle = format!("<{alice}> <{SOLID_OIDC_ISSUER}> <{base}> .");
+        let app = axum::Router::new()
+            .route(
+                "/alice",
+                axum::routing::get(move || async move {
+                    ([(axum::http::header::CONTENT_TYPE, "text/turtle")], turtle)
+                }),
+            )
+            .route(
+                "/bob",
+                axum::routing::get(move || async move { axum::Json(bob) }),
+            )
+            .route(
+                "/.well-known/openid-configuration",
+                axum::routing::get(move || async move { axum::Json(discovery) }),
+            )
+            .route(
+                "/jwks",
+                axum::routing::get(move || async move { axum::Json(jwks) }),
             );
-            axum::Router::new()
-                .route(
-                    "/alice",
-                    axum::routing::get({
-                        let body = format!("<{alice}> <{SOLID_OIDC_ISSUER}> <{base}> .");
-                        move || {
-                        let body = body.clone();
-                        async move { ([(axum::http::header::CONTENT_TYPE, "text/turtle")], body) }
-                    }}),
-                )
-                .route(
-                    "/.well-known/openid-configuration",
-                    axum::routing::get({
-                        let base = base.clone();
-                        move || {
-                            let doc = json!({"issuer": base, "jwks_uri": format!("{base}/jwks")});
-                            async move { axum::Json(doc) }
-                        }
-                    }),
-                )
-                .route(
-                    "/jwks",
-                    axum::routing::get(move || {
-                        let jwks = jwks.clone();
-                        async move { axum::Json(jwks) }
-                    }),
-                )
-        };
         tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        (base, op)
+    }
+
+    /// Review finding: a token carrying `webid` without `solid` among its audiences was taken
+    /// for a Solid-OIDC one when its WebID was read, but not when its binding was checked, so it
+    /// was exchanged addressed to no one and bound to no key. Every ID Token goes through every
+    /// requirement of its suite, whichever way the suite was recognized.
+    #[tokio::test]
+    async fn every_id_token_meets_every_requirement_of_its_suite() {
+        let (base, op) = provider().await;
+        let mut cfg = cfg();
+        cfg.allow_insecure_fetch = true;
+        let http = super::super::fetch_client(&cfg).unwrap();
+        let client = jose::EcKey::generate("client");
+        let htu = cfg.absolute(super::super::AS_TOKEN_PATH);
+        let now = jose::now_secs();
+        let replay = DpopReplay::default();
+        let mut n = 0;
+        let mut exchange = |claims: Value, proof: bool| {
+            n += 1;
+            let token = op.sign_jws(serde_json::Map::new(), &claims);
+            let proof = proof.then(|| dpop_proof(&client, "POST", &htu, now, &format!("p{n}")));
+            let (cfg, http, replay) = (&cfg, &http, &replay);
+            async move {
+                let ctx = DpopContext {
+                    proof: proof.as_deref(),
+                    replay,
+                };
+                verify(cfg, http, &token, ID_TOKEN_TYPE, &ctx).await
+            }
+        };
+        let alice = format!("{base}/alice");
+        let bob = format!("{base}/bob");
+        // Each way a token is recognized as its suite, with the claims that meet every
+        // requirement.
+        let cases: Vec<(Suite, Value)> = vec![
+            (
+                Suite::SolidOidc,
+                json!({"sub": alice, "webid": alice, "aud": ["solid"]}),
+            ),
+            (
+                Suite::SolidOidc,
+                json!({"sub": "acct-1", "webid": alice, "aud": ["solid", cfg.issuer()]}),
+            ),
+            (Suite::LwsOidc, json!({"sub": bob, "aud": [cfg.issuer()]})),
+            (Suite::LwsOidc, json!({"sub": bob, "aud": cfg.issuer()})),
+        ];
+        for suite in Suite::ALL {
+            assert!(cases.iter().any(|(s, _)| *s == suite), "{suite:?} untested");
+        }
+        let full = |extra: &Value, bound: bool| {
+            let mut c = json!({"iss": base, "azp": "https://app.example/", "iat": now,
+                "exp": now + 300});
+            c.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            if bound {
+                c["cnf"] = json!({"jkt": client.thumbprint()});
+            }
+            c
+        };
+        for (suite, extra) in &cases {
+            assert_eq!(
+                Suite::of(
+                    &Jws::parse(&op.sign_jws(serde_json::Map::new(), &full(extra, true))).unwrap()
+                ),
+                *suite
+            );
+            // Bound and proven: exchanged.
+            let ok = exchange(full(extra, true), true).await;
+            assert!(ok.is_ok(), "{suite:?} {extra}: {ok:?}");
+            // Bound, without the proof: refused, in every suite.
+            assert!(
+                exchange(full(extra, true), false).await.is_err(),
+                "{suite:?} {extra}"
+            );
+            // Unbound: refused for Solid-OIDC, which requires a binding.
+            assert_eq!(
+                exchange(full(extra, false), false).await.is_ok(),
+                *suite == Suite::LwsOidc,
+                "{suite:?} {extra}"
+            );
+            // Expired, without exp, or not yet valid: refused.
+            for times in [
+                json!({"exp": now - 600}),
+                json!({"exp": null}),
+                json!({"nbf": now + 600}),
+                json!({"iat": now + 600}),
+            ] {
+                let mut c = full(extra, true);
+                for (k, v) in times.as_object().unwrap() {
+                    if v.is_null() {
+                        c.as_object_mut().unwrap().remove(k);
+                    } else {
+                        c[k] = v.clone();
+                    }
+                }
+                assert!(
+                    exchange(c, true).await.is_err(),
+                    "{suite:?} {extra} {times}"
+                );
+            }
+            // Addressed elsewhere, or to no one: refused.
+            for aud in [json!(["https://other.example/"]), json!(null)] {
+                let mut c = full(extra, true);
+                if aud.is_null() {
+                    c.as_object_mut().unwrap().remove("aud");
+                } else {
+                    c["aud"] = aud.clone();
+                }
+                if *suite == Suite::SolidOidc && c.get("webid").is_none() {
+                    continue;
+                }
+                assert!(exchange(c, true).await.is_err(), "{suite:?} {extra} {aud}");
+            }
+        }
+        // The finding: a webid without `solid` among the audiences is a Solid-OIDC token all
+        // the same, and is refused as one.
+        let addressed_to_us = json!({"sub": alice, "webid": alice, "aud": [cfg.issuer()]});
+        assert!(exchange(full(&addressed_to_us, false), false)
+            .await
+            .is_err());
+        assert!(exchange(full(&addressed_to_us, true), true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn solid_oidc_id_tokens_need_a_dpop_proof() {
+        let (base, op) = provider().await;
+        let alice = format!("{base}/alice");
         let mut cfg = cfg();
         cfg.allow_insecure_fetch = true;
         let http = super::super::fetch_client(&cfg).unwrap();
@@ -1586,6 +1931,10 @@ mod tests {
         assert_eq!(check_times(&at(json!({})), now), Ok(()));
         assert_eq!(check_times(&at(json!({"nbf": now})), now), Ok(()));
         for bad in [
+            json!({"nbf": 1.5}),
+            json!({"exp": (now + 300) as f64 + 0.5}),
+            json!({"exp": (jose::MAX_TIME as f64) + 0.5}),
+            json!({"iat": -0.5}),
             json!({"nbf": jose::MAX_TIME + 1}),
             json!({"nbf": -1}),
             json!({"nbf": 1e300}),

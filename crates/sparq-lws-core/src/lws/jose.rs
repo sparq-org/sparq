@@ -247,6 +247,31 @@ pub fn thumbprint(jwk: &Value) -> String {
     b64url(&sha2::Sha256::digest(canonical.as_bytes()))
 }
 
+/// The RFC 7638 thumbprint of the key a public JWK holds, from the key itself: an EC key from its
+/// point, an OKP key from its 32 bytes, an RSA key from its modulus and exponent without leading
+/// zero bytes. Every spelling of one key (padding, leading zeros) has the one thumbprint, and a JWK
+/// that holds no key of a supported type has none.
+pub fn key_thumbprint(jwk: &Value) -> Option<String> {
+    let get = |k: &str| jwk.get(k).and_then(Value::as_str);
+    let canonical = match get("kty")? {
+        "EC" => public_jwk_of(&ec_public_from_jwk(jwk)?),
+        "OKP" if get("crv")? == "Ed25519" => {
+            let x = b64url_decode(get("x")?).filter(|x| x.len() == 32)?;
+            json!({"kty": "OKP", "crv": "Ed25519", "x": b64url(&x)})
+        }
+        "RSA" => {
+            let unsigned = |k: &str| {
+                let bytes = b64url_decode(get(k)?)?;
+                let start = bytes.iter().position(|b| *b != 0)?;
+                Some(b64url(&bytes[start..]))
+            };
+            json!({"kty": "RSA", "n": unsigned("n")?, "e": unsigned("e")?})
+        }
+        _ => return None,
+    };
+    Some(thumbprint(&canonical))
+}
+
 /// A P-256 public key from a JWK, or `None` when it is not one.
 pub fn ec_public_from_jwk(jwk: &Value) -> Option<PublicKey> {
     if jwk.get("kty")?.as_str()? != "EC" || jwk.get("crv")?.as_str()? != "P-256" {
@@ -316,19 +341,19 @@ impl Jws {
         self.claims.get(name).and_then(Value::as_str)
     }
 
-    /// A NumericDate claim (seconds since the epoch), between the epoch and the end of year 9999:
-    /// `None` when the token does not carry it, and an error when it carries anything else. Every
-    /// time a token carries is read here, so a time outside that range is refused rather than
-    /// read as absent, and arithmetic on a claim's time cannot overflow.
+    /// A NumericDate claim: whole seconds since the epoch, between the epoch and the end of year
+    /// 9999. `None` when the token does not carry it, and an error when it carries anything else,
+    /// a fraction included. Every time a token carries is read here, so a time outside that range
+    /// is refused rather than read as absent or rounded into it, and arithmetic on a claim's time
+    /// cannot overflow.
     pub fn claim_time(&self, name: &str) -> Result<Option<i64>, String> {
         let Some(v) = self.claims.get(name) else {
             return Ok(None);
         };
         v.as_i64()
-            .or_else(|| v.as_f64().map(|f| f as i64))
             .filter(|t| (0..=MAX_TIME).contains(t))
             .map(Some)
-            .ok_or_else(|| format!("{name} is not a time between 1970 and 9999"))
+            .ok_or_else(|| format!("{name} is not a whole second between 1970 and 9999"))
     }
 
     /// The `aud` claim as a list (a single string is a one-element list).

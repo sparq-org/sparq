@@ -274,12 +274,15 @@ What the server exposes, all discoverable from the storage description
   makes a request fail with `500` rather than fall back to defaults.
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
   `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token`.
-  A Solid-OIDC ID Token (`aud` `solid`, or bound by `cnf.jkt`) is exchanged only with a
-  `DPoP` proof of the bound key on the token request (RFC 9449: `htm` POST, `htu` the token
-  endpoint, fresh `iat`, unused `jti`). A Solid-OIDC ID Token (one carrying `webid`, or
-  addressed to `solid`) must carry a `webid` that is an http(s) URL, and that WebID is the
-  agent; any other ID Token's agent is its `sub`, whose controlled identifier document names
-  its OpenID Provider. A token time (`exp`, `iat`, `nbf`) outside 1970 to 9999 is refused.
+  A Solid-OIDC ID Token is one carrying `webid` or addressed to `solid`. It must carry a
+  `webid` that is an http(s) URL (that WebID is the agent), include `solid` in `aud`, be
+  bound by `cnf.jkt`, and come with a `DPoP` proof of the bound key on the token request
+  (RFC 9449: `htm` POST, `htu` the token endpoint, fresh `iat`, unused `jti`). Any other ID
+  Token's agent is its `sub`, whose controlled identifier document names its OpenID
+  Provider; it must be addressed to this server, and when bound by `cnf.jkt` it needs the
+  same proof. The proof key is matched by the thumbprint of the key itself, whatever its JWK
+  spelling. A token time (`exp`, `iat`, `nbf`) that is not a whole second between 1970 and
+  9999 is refused.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and
