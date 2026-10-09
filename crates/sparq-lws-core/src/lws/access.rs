@@ -1662,6 +1662,77 @@ mod tests {
         assert!(!state.store.exists(&location).await.unwrap());
     }
 
+    /// Review findings: a service linkset answered 200 whatever the request's preconditions, and
+    /// access documents were parsed whatever their content coding.
+    #[tokio::test]
+    async fn service_linksets_evaluate_preconditions() {
+        let (state, _) = test_store::state(100).await;
+        let path = format!("{GRANTS_PATH}{META_SUFFIX}");
+        let get = |h: &[(&str, &str)]| test_store::request(Method::GET, &path, h, "");
+        let r = handle(&state, &get(&[]), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let tag = r.headers()[header::ETAG].to_str().unwrap().to_string();
+        let status = |h: &[(&str, &str)]| {
+            let req = get(h);
+            let state = state.clone();
+            async move { handle(&state, &req, &Agent::anonymous()).await.status() }
+        };
+        assert_eq!(
+            status(&[("if-none-match", &tag)]).await,
+            StatusCode::NOT_MODIFIED
+        );
+        assert_eq!(
+            status(&[("if-match", "\"never-issued\"")]).await,
+            StatusCode::PRECONDITION_FAILED
+        );
+        assert_eq!(status(&[("if-match", &tag)]).await, StatusCode::OK);
+        // A coded access document is refused before it is parsed, as any coded body is.
+        let coded = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON), ("content-encoding", "gzip")],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        let r = super::super::route(&state, coded).await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert!(state.access.grant_policies().is_empty());
+    }
+
+    /// Review finding: a create that failed before it committed, whose removal and lookup failed
+    /// too (a backend outage), was registered anyway: a grant in force with nothing stored. It
+    /// is put in force only once it is seen stored, and is dropped when it is seen absent.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_uncertain_create_is_in_force_only_once_seen_stored() {
+        use std::sync::atomic::Ordering;
+        use std::time::Duration;
+        let (state, store) = test_store::state(100).await;
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        // The create fails before it lands; removing it and looking it up fail too.
+        *store.fail_step.lock().unwrap() = Some(0);
+        store.fail_delete.store(true, Ordering::SeqCst);
+        store.fail_exists.store(true, Ordering::SeqCst);
+        let resp = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(state.access.grant_policies().is_empty(), "in force unseen");
+        // The store recovers: the record is not there, and never comes into force.
+        store.fail_delete.store(false, Ordering::SeqCst);
+        store.fail_exists.store(false, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert!(state.access.grant_policies().is_empty());
+        assert!(state
+            .store
+            .list_children(&state.cfg.absolute(GRANTS_PATH))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
     /// Review finding: a grant whose create committed but reported a failure (a remote store's
     /// lost reply), or whose client went away while it was pending, was stored but never put in
     /// force in memory: it could be neither listed nor revoked, and came into force at the next
@@ -1689,13 +1760,20 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(stored().await, 0);
         assert!(state.access.grant_policies().is_empty());
-        // And when it cannot be removed, it is in force, listed and revocable.
+        // And when it cannot be removed, it is put in force once it is seen stored: listed and
+        // revocable.
         store.fail_delete.store(true, Ordering::SeqCst);
         let resp = handle(&state, &post(), &Agent::anonymous()).await;
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         store.fail_after_create.store(false, Ordering::SeqCst);
         store.fail_delete.store(false, Ordering::SeqCst);
         assert_eq!(stored().await, 1);
+        for _ in 0..200 {
+            if !state.access.grant_policies().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         assert_eq!(state.access.grant_policies().len(), 1);
         let id = state
             .access
