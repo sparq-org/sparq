@@ -88,6 +88,74 @@ pub struct Constraint {
     any_of: std::sync::Arc<std::collections::HashSet<String>>,
 }
 
+/// A media type as compared (RFC 9110 section 8.3.1): type, subtype and parameter names are
+/// case-insensitive, as is a `charset` value; a value is the same quoted or not; parameters are
+/// unordered. `None` when it is not a media type, which matches nothing.
+pub(crate) fn media_key(s: &str) -> Option<String> {
+    fn token(t: &str) -> bool {
+        !t.is_empty()
+            && t.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+    }
+    let mut rest = s.trim();
+    let end = rest.find(';').unwrap_or(rest.len());
+    let (ty, sub) = rest[..end].trim().split_once('/')?;
+    if !token(ty) || !token(sub) {
+        return None;
+    }
+    let mut key = format!("{}/{}", ty.to_ascii_lowercase(), sub.to_ascii_lowercase());
+    rest = &rest[end..];
+    let mut params = Vec::new();
+    while let Some(after) = rest.strip_prefix(';') {
+        let after = after.trim_start();
+        // An empty segment (`;;` or a trailing `;`) says nothing.
+        if after.is_empty() || after.starts_with(';') {
+            rest = after;
+            continue;
+        }
+        let (name, tail) = after.split_once('=')?;
+        let name = name.trim_end();
+        if !token(name) {
+            return None;
+        }
+        let (mut value, tail) = if let Some(quoted) = tail.strip_prefix('"') {
+            let mut value = String::new();
+            let mut chars = quoted.char_indices();
+            let close = loop {
+                match chars.next()? {
+                    (i, '"') => break i,
+                    (_, '\\') => value.push(chars.next()?.1),
+                    (_, c) => value.push(c),
+                }
+            };
+            (value, &quoted[close + 1..])
+        } else {
+            let end = tail.find(';').unwrap_or(tail.len());
+            let value = tail[..end].trim_end();
+            if !token(value) {
+                return None;
+            }
+            (value.to_string(), &tail[end..])
+        };
+        let tail = tail.trim_start();
+        if !(tail.is_empty() || tail.starts_with(';')) {
+            return None;
+        }
+        let name = name.to_ascii_lowercase();
+        if name == "charset" {
+            value.make_ascii_lowercase();
+        }
+        params.push((name, value));
+        rest = tail;
+    }
+    params.sort();
+    for (name, value) in params {
+        let value = value.replace('\\', "\\\\").replace('"', "\\\"");
+        key.push_str(&format!(";{name}=\"{value}\""));
+    }
+    Some(key)
+}
+
 /// What a constraint is checked against.
 pub struct ConstraintContext<'a> {
     pub client: Option<&'a str>,
@@ -106,7 +174,10 @@ impl Constraint {
         match self.left.as_str() {
             "dateTime" => self.compare_now(),
             "client" => ctx.client.is_some_and(|c| self.matches(c)),
-            "format" => ctx.format.is_some_and(|f| self.matches(f)),
+            "format" => ctx
+                .format
+                .and_then(media_key)
+                .is_some_and(|f| self.matches_media(&f)),
             "type" => ctx.types.iter().any(|t| {
                 self.matches(t)
                     || t.strip_prefix(LWS_NS)
@@ -119,6 +190,16 @@ impl Constraint {
     fn matches(&self, actual: &str) -> bool {
         match self.operator.as_str() {
             "eq" => self.right.as_str() == Some(actual),
+            "isAnyOf" => self.any_of.contains(actual),
+            _ => false,
+        }
+    }
+
+    /// [`Self::matches`] for media types, compared as [`media_key`]s: an `isAnyOf` operand's
+    /// were keyed when the policy was read.
+    fn matches_media(&self, actual: &str) -> bool {
+        match self.operator.as_str() {
+            "eq" => self.right.as_str().and_then(media_key).as_deref() == Some(actual),
             "isAnyOf" => self.any_of.contains(actual),
             _ => false,
         }
@@ -644,7 +725,10 @@ pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
                         .into_iter()
                         .flatten()
                         .filter_map(Value::as_str)
-                        .map(str::to_string)
+                        .filter_map(|v| match left {
+                            "format" => media_key(v),
+                            _ => Some(v.to_string()),
+                        })
                         .collect();
                     out.push(Constraint {
                         left: left.into(),
@@ -1483,7 +1567,7 @@ mod tests {
 
     /// Review finding: a create that failed before it committed, whose removal and lookup failed
     /// too (a backend outage), was registered anyway: a grant in force with nothing stored. It
-    /// is put in force only once it is seen stored, and is dropped when it is seen absent.
+    /// is never put in force: its removal is retried until the store answers.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_uncertain_create_is_in_force_only_once_seen_stored() {
         use std::sync::atomic::Ordering;
@@ -1495,18 +1579,22 @@ mod tests {
             &[],
             &access_doc("AccessGrant", "https://a/", None),
         );
-        // The create fails before it lands; removing it and looking it up fail too.
+        // The create fails before it lands; removing it and looking it up fail too, so it is
+        // retried, with the container held, until the store answers.
         *store.fail_step.lock().unwrap() = Some(0);
         store.fail_delete.store(true, Ordering::SeqCst);
         store.fail_exists.store(true, Ordering::SeqCst);
-        let resp = handle(&state, &post, &Agent::anonymous()).await;
-        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let pending = tokio::spawn({
+            let state = state.clone();
+            async move { handle(&state, &post, &Agent::anonymous()).await.status() }
+        });
         tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!pending.is_finished());
         assert!(state.access.grant_policies().is_empty(), "in force unseen");
         // The store recovers: the record is not there, and never comes into force.
         store.fail_delete.store(false, Ordering::SeqCst);
         store.fail_exists.store(false, Ordering::SeqCst);
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(pending.await.unwrap(), StatusCode::INTERNAL_SERVER_ERROR);
         assert!(state.access.grant_policies().is_empty());
         assert!(state
             .store
@@ -1519,8 +1607,8 @@ mod tests {
     /// Review finding: a grant whose create committed but reported a failure (a remote store's
     /// lost reply), or whose client went away while it was pending, was stored but never put in
     /// force in memory: it could be neither listed nor revoked, and came into force at the next
-    /// boot. Such a record is now removed, or registered when it cannot be, and a create that was
-    /// sent is registered whether or not its client is still there.
+    /// boot. Such a record is now removed, retried until it is, and a create that was sent is
+    /// registered whether or not its client is still there.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_created_grant_is_never_stored_unregistered() {
         use std::sync::atomic::Ordering;
@@ -1543,33 +1631,22 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(stored().await, 0);
         assert!(state.access.grant_policies().is_empty());
-        // And when it cannot be removed, it is put in force once it is seen stored: listed and
-        // revocable.
+        // And when it cannot be removed yet, the create keeps the container and tries again until
+        // it can: the record is never stored out of force, nor in force once refused.
         store.fail_delete.store(true, Ordering::SeqCst);
-        let resp = handle(&state, &post(), &Agent::anonymous()).await;
-        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let pending = tokio::spawn({
+            let (state, req) = (state.clone(), post());
+            async move { handle(&state, &req, &Agent::anonymous()).await.status() }
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !pending.is_finished(),
+            "the create gave up with its record stored"
+        );
+        assert!(state.access.grant_policies().is_empty());
         store.fail_after_create.store(false, Ordering::SeqCst);
         store.fail_delete.store(false, Ordering::SeqCst);
-        assert_eq!(stored().await, 1);
-        for _ in 0..200 {
-            if !state.access.grant_policies().is_empty() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert_eq!(state.access.grant_policies().len(), 1);
-        let id = state
-            .access
-            .grants
-            .read()
-            .unwrap()
-            .keys()
-            .next()
-            .unwrap()
-            .clone();
-        let delete = test_store::request(Method::DELETE, &format!("{GRANTS_PATH}{id}"), &[], "");
-        let resp = handle(&state, &delete, &Agent::anonymous()).await;
-        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(pending.await.unwrap(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(stored().await, 0);
         assert!(state.access.grant_policies().is_empty());
         // The client goes away while the create is pending: once it lands, the grant is in force.
@@ -1799,5 +1876,58 @@ mod tests {
             format: None,
             types: &types
         }));
+    }
+
+    /// Review finding: a format constraint compared media types by spelling, so
+    /// `Text/Plain; Charset=UTF-8` did not meet `text/plain;charset=utf-8`. They are compared as
+    /// RFC 9110 media types.
+    #[test]
+    fn format_constraints_compare_media_types() {
+        let key = |s: &str| media_key(s);
+        assert_eq!(
+            key("Text/Plain; Charset=UTF-8"),
+            key("text/plain;charset=\"utf-8\"")
+        );
+        assert_eq!(key("a/b; y=1; x=2"), key("a/b;x=2;y=1;"));
+        assert_ne!(key("a/b; x=A"), key("a/b; x=a"));
+        assert_ne!(key("text/plain"), key("text/html"));
+        assert_eq!(key("a/b; x=\"q;r\""), Some("a/b;x=\"q;r\"".into()));
+        for bad in [
+            "text",
+            "/plain",
+            "text/plain; x",
+            "a/b; x=\"open",
+            "a b/c",
+            "a/b; x=1 2",
+        ] {
+            assert_eq!(key(bad), None, "{bad}");
+        }
+        let format = |op: &str, right: Value| {
+            let any_of = right
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter_map(media_key)
+                .collect();
+            Constraint {
+                left: "format".into(),
+                operator: op.into(),
+                right,
+                any_of: std::sync::Arc::new(any_of),
+            }
+        };
+        let ctx = ConstraintContext {
+            client: None,
+            format: Some("Text/Plain; Charset=UTF-8"),
+            types: &[],
+        };
+        assert!(format("eq", json!("text/plain;charset=utf-8")).satisfied(&ctx));
+        assert!(format(
+            "isAnyOf",
+            json!(["text/html", "TEXT/plain; charset=\"UTF-8\""])
+        )
+        .satisfied(&ctx));
+        assert!(!format("eq", json!("text/plain")).satisfied(&ctx));
     }
 }
