@@ -469,7 +469,7 @@ impl<S: Store + 'static> LwsState<S> {
                 .saturating_add(MAX_META_BYTES)
                 .saturating_mul(2),
         );
-        Journal::new(&self.store, limit)
+        Journal::new(self, limit)
     }
 
     /// Build the state: ensure the storage root and the service containers exist, and load the
@@ -653,14 +653,19 @@ pub(crate) async fn remove_member<S: Store>(
 /// One mutation's store changes, each recorded with what it replaced, so that a failure part way
 /// puts back everything done before it ([`Journal::rollback`]). Every mutation of more than one
 /// store step goes through one: a write or delete that fails leaves content, metadata and
-/// membership as they were. What a journal holds to put things back is bounded (`limit` bytes);
-/// a change that would need more is refused, and what was done before it is put back.
-pub(crate) struct Journal<'a, S: Store> {
-    store: &'a S,
+/// membership as they were, validators included (records are put back with
+/// [`Store::restore`]). What a journal holds to put things back is bounded (`limit` bytes); a
+/// change that would need more is refused, and one that knows its whole extent up front
+/// ([`Journal::stage`]) is refused before it changes anything.
+pub(crate) struct Journal<'a, S: Store + 'static> {
+    state: &'a LwsState<S>,
     undo: Vec<Undo>,
+    staged: std::collections::HashMap<String, Option<(Bytes, StoredMeta)>>,
     held: usize,
     limit: usize,
 }
+
+type StoredMeta = crate::store::ResourceMeta;
 
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
@@ -670,69 +675,172 @@ fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool 
 
 /// How to put back one change a [`Journal`] made.
 enum Undo {
-    /// `key` as it was: its bytes and content type, or absent.
+    /// `key`, held under the lock of `lock`, as it was (its bytes and record, or absent). `left`
+    /// is what the change may have put there instead: the bytes written, or `None` for a removal.
     Restore {
+        lock: String,
         key: String,
-        prior: Option<(Bytes, String)>,
+        prior: Option<(Bytes, StoredMeta)>,
+        left: Option<Bytes>,
     },
-    /// A removed member, recreated in its container.
+    /// A removed member, recreated in its container as it was.
     Recreate {
         iri: String,
         parent: Option<String>,
         body: Bytes,
-        content_type: String,
+        meta: StoredMeta,
     },
 }
 
-impl<'a, S: Store> Journal<'a, S> {
-    pub(crate) fn new(store: &'a S, limit: usize) -> Self {
+impl Undo {
+    /// The resource whose lock covers this change.
+    fn lock(&self) -> &str {
+        match self {
+            Undo::Restore { lock, .. } => lock,
+            Undo::Recreate { iri, .. } => iri,
+        }
+    }
+
+    /// Put this change back, with the mutation's locks still held.
+    async fn apply<S: Store>(&self, store: &S) -> Result<(), crate::error::ServerError> {
+        match self {
+            Undo::Restore {
+                key,
+                prior: Some((body, meta)),
+                ..
+            } => store.restore(key, None, body.clone(), meta).await.map(drop),
+            Undo::Restore {
+                key, prior: None, ..
+            } => match store.delete(key, None).await {
+                Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
+                Err(e) => Err(e),
+            },
+            Undo::Recreate {
+                iri,
+                parent,
+                body,
+                meta,
+            } => {
+                if store.exists(iri).await? {
+                    return Ok(());
+                }
+                store
+                    .restore(iri, parent.as_deref(), body.clone(), meta)
+                    .await
+                    .map(drop)
+            }
+        }
+    }
+
+    /// Put this change back after the mutation's locks were released, under the lock of what it
+    /// changed, and only if nothing since replaced what the mutation left: a later write or
+    /// create stands.
+    async fn recover<S: Store + 'static>(
+        &self,
+        state: &LwsState<S>,
+    ) -> Result<(), crate::error::ServerError> {
+        let _guard = state.locks.lock(self.lock()).await;
+        if let Undo::Restore {
+            key, prior, left, ..
+        } = self
+        {
+            let now = match state.store.read(key).await {
+                Ok(r) => Some(r.body),
+                Err(crate::error::ServerError::NotFound) => None,
+                Err(e) => return Err(e),
+            };
+            let as_was = now.as_ref() == prior.as_ref().map(|(b, _)| b);
+            let as_left = now.as_ref() == left.as_ref();
+            if as_was || !as_left {
+                return Ok(());
+            }
+        }
+        self.apply(&state.store).await
+    }
+}
+
+/// How long, at most, a change that could not be put back waits between attempts.
+const RECOVER_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl<'a, S: Store + 'static> Journal<'a, S> {
+    pub(crate) fn new(state: &'a LwsState<S>, limit: usize) -> Self {
         Self {
-            store,
+            state,
             undo: Vec::new(),
+            staged: std::collections::HashMap::new(),
             held: 0,
             limit,
         }
     }
 
-    /// What is stored at `key` now, to put back later; charged to the journal's bound.
-    async fn prior(
-        &mut self,
-        key: &str,
-    ) -> Result<Option<(Bytes, String)>, crate::error::ServerError> {
-        let prior = match self.store.read(key).await {
-            Ok(r) => Some((r.body, r.meta.content_type)),
+    /// Read what is stored at `key` now, to put back later, and charge it to the journal's
+    /// bound: a change staged whole before its first step is refused, if too large, before it
+    /// changes anything.
+    pub(crate) async fn stage(&mut self, key: &str) -> Result<(), crate::error::ServerError> {
+        if self.staged.contains_key(key) {
+            return Ok(());
+        }
+        let prior = match self.state.store.read(key).await {
+            Ok(r) => Some((r.body, r.meta)),
             Err(crate::error::ServerError::NotFound) => None,
             Err(e) => return Err(e),
         };
         self.held = self
             .held
-            .saturating_add(key.len() + prior.as_ref().map_or(0, |(b, ct)| b.len() + ct.len()));
+            .saturating_add(key.len() + prior.as_ref().map_or(0, |(b, _)| b.len()));
         if self.held > self.limit {
             return Err(crate::error::ServerError::Conflict(
                 "the change is too large to make atomically".into(),
             ));
         }
-        Ok(prior)
+        self.staged.insert(key.to_string(), prior);
+        Ok(())
     }
 
-    /// Write `body` at `key`.
-    pub(crate) async fn write(
+    /// What was stored at `key` before this step (staged now if it was not already).
+    async fn prior(
         &mut self,
+        key: &str,
+    ) -> Result<Option<(Bytes, StoredMeta)>, crate::error::ServerError> {
+        self.stage(key).await?;
+        Ok(self.staged.remove(key).flatten())
+    }
+
+    /// Write `body` at `key`, a resource or a record under the lock of `lock`.
+    async fn write_under(
+        &mut self,
+        lock: &str,
         key: &str,
         body: Bytes,
         content_type: &str,
-    ) -> Result<crate::store::ResourceMeta, crate::error::ServerError> {
+    ) -> Result<StoredMeta, crate::error::ServerError> {
         let prior = self.prior(key).await?;
-        let written = self.store.write(key, body, content_type).await;
+        let written = self
+            .state
+            .store
+            .write(key, body.clone(), content_type)
+            .await;
         // A backend failure may follow a write that landed (a lost reply): it is put back all the
         // same. A refusal wrote nothing, and there is nothing to put back.
         if may_have_happened(&written) {
             self.undo.push(Undo::Restore {
+                lock: lock.to_string(),
                 key: key.to_string(),
                 prior,
+                left: Some(body),
             });
         }
         written
+    }
+
+    /// Write `body` at the resource `iri`.
+    pub(crate) async fn write(
+        &mut self,
+        iri: &str,
+        body: Bytes,
+        content_type: &str,
+    ) -> Result<StoredMeta, crate::error::ServerError> {
+        self.write_under(iri, iri, body, content_type).await
     }
 
     /// Write the metadata of `iri`.
@@ -742,22 +850,25 @@ impl<'a, S: Store> Journal<'a, S> {
         meta: &ResourceMeta,
     ) -> Result<(), crate::error::ServerError> {
         let body = encode_meta(meta)?;
-        self.write(&meta_key(iri), Bytes::from(body), JSON)
+        self.write_under(iri, &meta_key(iri), Bytes::from(body), JSON)
             .await
             .map(|_| ())
     }
 
-    /// Remove `key` (metadata, not a member: see [`Journal::remove_member`]); absent is fine.
-    pub(crate) async fn delete(&mut self, key: &str) -> Result<(), crate::error::ServerError> {
-        let prior = self.prior(key).await?;
+    /// Remove the metadata of `iri`; absent is fine.
+    pub(crate) async fn delete_meta(&mut self, iri: &str) -> Result<(), crate::error::ServerError> {
+        let key = meta_key(iri);
+        let prior = self.prior(&key).await?;
         if prior.is_none() {
             return Ok(());
         }
-        let deleted = self.store.delete(key, None).await;
+        let deleted = self.state.store.delete(&key, None).await;
         if may_have_happened(&deleted) {
             self.undo.push(Undo::Restore {
-                key: key.to_string(),
+                lock: iri.to_string(),
+                key,
                 prior,
+                left: None,
             });
         }
         match deleted {
@@ -772,10 +883,10 @@ impl<'a, S: Store> Journal<'a, S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
-        let Some((body, content_type)) = self.prior(iri).await? else {
+        let Some((body, meta)) = self.prior(iri).await? else {
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
-        let outcome = remove_member(self.store, iri, parent).await;
+        let outcome = remove_member(&self.state.store, iri, parent).await;
         // Only a member that went, or may have, is recreated.
         if matches!(
             outcome,
@@ -785,7 +896,7 @@ impl<'a, S: Store> Journal<'a, S> {
                 iri: iri.to_string(),
                 parent: parent.map(str::to_string),
                 body,
-                content_type,
+                meta,
             });
         }
         outcome
@@ -794,43 +905,46 @@ impl<'a, S: Store> Journal<'a, S> {
     /// Keep every change.
     pub(crate) fn commit(self) {}
 
-    /// Put back every change, the last first. Stops at the first step that fails, so what is
-    /// left is a prefix of the mutation (with the metadata written first, a `pending` mark
-    /// stays: see the resources write path), never a mix.
+    /// Put back every change, the last first, with the mutation's locks still held. From the
+    /// first step that fails, what is left is not dropped: it is kept, in order and with what it
+    /// needs, and retried in the background (waits growing to [`RECOVER_MAX_WAIT`]) until each
+    /// change is put back or something later replaced it ([`Undo::recover`]). The error says the
+    /// mutation was not undone now.
     pub(crate) async fn rollback(self) -> Result<(), crate::error::ServerError> {
+        let mut left = Vec::new();
+        let mut failure = None;
         for undo in self.undo.into_iter().rev() {
-            match undo {
-                Undo::Restore {
-                    key,
-                    prior: Some((body, ct)),
-                } => {
-                    self.store.write(&key, body, &ct).await?;
-                }
-                Undo::Restore { key, prior: None } => match self.store.delete(&key, None).await {
-                    Ok(()) | Err(crate::error::ServerError::NotFound) => {}
-                    Err(e) => return Err(e),
-                },
-                Undo::Recreate {
-                    iri,
-                    parent,
-                    body,
-                    content_type,
-                } => {
-                    if self.store.exists(&iri).await? {
-                        continue;
-                    }
-                    match parent {
-                        Some(p) => {
-                            self.store
-                                .create_in_container(&p, &iri, body, &content_type)
-                                .await?
-                        }
-                        None => self.store.write(&iri, body, &content_type).await?,
-                    };
-                }
+            // What follows a failure waits behind it: a member is not recreated before its
+            // container is.
+            if !left.is_empty() {
+                left.push(undo);
+                continue;
+            }
+            if let Err(e) = undo.apply(&self.state.store).await {
+                failure = Some(e);
+                left.push(undo);
             }
         }
-        Ok(())
+        let Some(failure) = failure else {
+            return Ok(());
+        };
+        let state = self.state.clone();
+        tokio::spawn(async move {
+            let mut wait = std::time::Duration::from_millis(100);
+            let mut left = std::collections::VecDeque::from(left);
+            while let Some(undo) = left.front() {
+                match undo.recover(&state).await {
+                    Ok(()) => {
+                        left.pop_front();
+                    }
+                    Err(_) => {
+                        tokio::time::sleep(wait).await;
+                        wait = (wait * 2).min(RECOVER_MAX_WAIT);
+                    }
+                }
+            }
+        });
+        Err(failure)
     }
 }
 
@@ -1868,6 +1982,23 @@ pub(crate) mod test_store {
             }
             created
         }
+        async fn restore(
+            &self,
+            iri: &str,
+            container: Option<&str>,
+            body: Bytes,
+            meta: &ResourceMeta,
+        ) -> ServerResult<ResourceMeta> {
+            // The same failures as `write`: a record is put back by either.
+            self.step()?;
+            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            if self.refuse_write_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::InsufficientStorage);
+            }
+            self.inner.restore(iri, container, body, meta).await
+        }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;
             if parent.is_some() {
@@ -1943,6 +2074,7 @@ pub(crate) mod test_store {
     /// What can be seen of `resources` (each one's content, content type and stored metadata) and
     /// of `listings` (each container's members).
     pub async fn snapshot(
+        st: &super::LwsState<FlakyStore>,
         store: &FlakyStore,
         resources: &[String],
         listings: &[String],
@@ -1951,10 +2083,39 @@ pub(crate) mod test_store {
         for iri in resources {
             for key in [iri.clone(), super::meta_key(iri)] {
                 out.push(match store.inner.read(&key).await {
-                    Ok(r) => format!("{key}: {} {:?}", r.meta.content_type, r.body),
+                    Ok(r) => format!(
+                        "{key}: {} {:?} {} {:?}",
+                        r.meta.content_type, r.body, r.meta.etag, r.meta.last_modified
+                    ),
                     Err(e) => format!("{key}: {e}"),
                 });
             }
+            // And what a client is served: status, validators, links and representation.
+            let path = iri
+                .strip_prefix(st.cfg.storage().trim_end_matches('/'))
+                .unwrap_or(iri);
+            let resp = super::resources::handle(
+                st,
+                &request(
+                    axum::http::Method::GET,
+                    path,
+                    &[("accept", "text/turtle")],
+                    "",
+                ),
+                &crate::lws::Agent::anonymous(),
+            )
+            .await;
+            let mut seen = format!("GET {path}: {}", resp.status());
+            for h in ["etag", "last-modified", "link"] {
+                for v in resp.headers().get_all(h) {
+                    seen.push_str(&format!(" {h}={v:?}"));
+                }
+            }
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            seen.push_str(&format!(" {body:?}"));
+            out.push(seen);
         }
         for container in listings {
             let mut members: Vec<String> = store
@@ -1993,7 +2154,8 @@ pub(crate) mod test_store {
     {
         for n in 0..10_000 {
             let (st, store, resources, listings) = setup().await;
-            let before = snapshot(&store, &resources, &listings).await;
+            let before = snapshot(&st, &store, &resources, &listings).await;
+            let after_st = st.clone();
             *store.fail_step.lock().unwrap() = Some(n);
             let status = op(st).await;
             let fired = store.fail_step.lock().unwrap().take().is_none();
@@ -2006,7 +2168,7 @@ pub(crate) mod test_store {
             }
             if !status.is_success() {
                 assert_eq!(
-                    snapshot(&store, &resources, &listings).await,
+                    snapshot(&after_st, &store, &resources, &listings).await,
                     before,
                     "step {n} failed ({status}) and left a change behind"
                 );
