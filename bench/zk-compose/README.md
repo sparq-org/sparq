@@ -3,8 +3,8 @@
 Benchmarks for the ZK proof-composition layer (`crates/sparq-zk-compose` +
 the `zk/compose/` Noir circuit family).
 
-Model: Opus 4.8 (Fable 5 unavailable — flag for re-review/upgrade when Fable
-returns). Numbers below were measured by Opus 4.8.
+Historical measurements record Opus 4.8 (Fable 5 unavailable). Newer result
+records identify GPT-6 and their exact measurement provenance separately.
 
 ## What is measured
 
@@ -27,6 +27,9 @@ returns). Numbers below were measured by Opus 4.8.
 | file                              | contents |
 |-----------------------------------|----------|
 | `gate_counts_latest.json`         | per-member ultra_honk gate counts |
+| [result_capacity_gates.json](result_capacity_gates.json) | [GPT-6] exact measured result capacities, toolchain output and source hashes |
+| [result_v1_compatibility.json](result_v1_compatibility.json) | [GPT-6] baseline/current v1 ACIR, ABI and key comparisons, with baseline key bytes |
+| [result_public_gates.json](result_public_gates.json) | [OPUS-5.5] static evidence for the two version-4 public-pattern members (`result_v4_k{1,2}_n16_p3_r4_f0_d10`): `bb gates` circuit size, ACIR/ABI/artifact/gate-log hashes, Noir source hashes and tool provenance from one non-canonical work-box run. No runtime, proving-time, saving, soundness or external-audit claim; the artifacts are retained separately and only their hashes are committed |
 | `prove_verify_timing.json`        | bb prove/verify wall-clock + proof sizes (early, 2-member, darwin) |
 | `family_cost_curve.json`          | sq-pn2 full-family (k,n,r,d) prove/verify/size curve |
 | `family_curve/`                   | sq-pn2 standalone timing harness (own cargo project) |
@@ -39,6 +42,7 @@ returns). Numbers below were measured by Opus 4.8.
 | `scripts/sparql_catalog.py`       | regenerate the SPARQL feature catalog (joins the snapshot) |
 | `scripts/bb_gates_matrix.py`      | regenerate the per-config bb-gates matrix (joins the snapshot) |
 | `scripts/constraint_pack.py`      | regenerate + verify the constraint-count evaluation pack |
+| [verify_result_evidence.py](scripts/verify_result_evidence.py) | [GPT-6] default evidence consistency checks and independent fixed-foundation rebuild |
 
 > The gate-count JSON is also the source the in-crate **regression gate**
 > (`crates/sparq-zk-compose/tests/gate_count.rs`, sq-c5f) baselines against —
@@ -151,6 +155,9 @@ hand-typed that could drift:
   value handle (`dual-leaf` / the `value-only` research dial); string-lane members
   (scan, join, path, revoke, issuer, holder, the blake3-token `filter_*` lanes) are
   legal against `string-canonical` / `dual-leaf` but not `value-only`.
+  [OPUS-5.5] Successful-result members (`result_v1_*` through `result_v4_*`) are
+  legal against `string-canonical` only, because they authenticate whole
+  string-canonical graphs; the generator fails on any other `result_` version.
 
 **`legal: true` means DISPATCH-COMPATIBLE, not end-to-end provable today.** It says
 the `(method, circuit)` pair is *admitted* by the resolver rule — nothing more. It
@@ -205,7 +212,11 @@ The pack reorganises the regression-gated gate counts into:
 1. **Per-family member tables**, with each member's family parameters parsed out of its name
    (`scan(k, n, r)`, `join_eq(na, nb)`, `path_reach(d, k, n)`, the four FILTER lanes, and the
    credential-layer members), split into a **query layer** and a **credential layer** — the
-   two things the manifest unifies.
+   two things the manifest unifies. [OPUS-5.5] A separate **result layer** holds the
+   successful-result families (`result_v1` to `result_v4`). They support released SELECT
+   DISTINCT rows only, not complete SPARQL feature coverage or result completeness.
+   `result_v4` classifies only the measured version-4 profile, K1/K2 with N16, P3, R4, F0
+   and D10, so an unmeasured version-4 bucket fails the generator.
 2. **Single-parameter scaling pairs** — every pair inside a family differing in exactly one
    *numeric* parameter, with the gate delta and ratio. No curve is fitted and nothing is
    extrapolated: only the pairs the compiled family actually contains are reported. A

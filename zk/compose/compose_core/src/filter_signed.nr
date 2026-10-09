@@ -101,7 +101,8 @@ pub(crate) fn signed_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, o
 /// is the unconditional form the FILTER lane uses.
 // [OPUS-5] sq-rsd3v.3 (#2946): split out of `assert_literal_binding` -- the
 // hashing is unchanged, only the assert moved to the caller.
-fn literal_encoding<let LEN: u32, let SLEN: u32>(
+// [GPT-6] Crate visibility lets the separate full-i64 result gadget reuse this token binding.
+pub(crate) fn literal_encoding<let LEN: u32, let SLEN: u32>(
     lexical: [u8; LEN],
     suffix: [u8; SLEN],
 ) -> Field {
