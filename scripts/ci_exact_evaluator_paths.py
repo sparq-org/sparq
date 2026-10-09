@@ -6,9 +6,14 @@ import os
 import re
 import subprocess
 
+# Local crates must cover evaluator_path_closure() in
+# scripts/tests/test_ci_exact_evaluator_paths.py, which derives them from the manifests.
 EXACT_PREFIXES = (
     "zk/sparql-evaluator/", "bench/zk-bindings/", "crates/sparq-core/", "crates/sparq-engine/",
-    "crates/sparq-substrate/", "crates/sparq-canon/", "vendor/spargebra/", "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
+    "crates/sparq-substrate/", "crates/sparq-canon/", "crates/sparq-query-protocol/",
+    "crates/sparq-engine-serialize/", "crates/sparq-engine-service/", "crates/sparq-introspect/",
+    "crates/sparq-jsonld/",
+    "vendor/spargebra/", "vendor/spargebra-shim/", "vendor/zk-sdk/", ".cargo/", "rust-toolchain",
 )
 EXACT_FILES = {
     "Cargo.toml", "Cargo.lock", ".github/workflows/zk-exact-evaluator.yml",
@@ -17,6 +22,9 @@ EXACT_FILES = {
     "scripts/tests/test_ci_exact_evaluator_evidence.py",
     "scripts/tests/test_ci_exact_evaluator_paths.py",
     "crates/sparq-conformance/examples/proof_corpus.rs",
+    # Read by the job's bench/zk-bindings regression tests.
+    "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
+    ".github/workflows/zk-toolchain.yml",
 }
 SCOPES = ("exact-evaluator",)
 
