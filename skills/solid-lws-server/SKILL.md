@@ -274,7 +274,10 @@ What the server exposes, all discoverable from the storage description
   1,000 operations, and the bytes its operations copy, move, add, replace or test are charged
   against a work budget of four times the body limit; past either it gets `413`. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
-  `PATCH` whose result nests too deeply to store gets `422`. Stored metadata that cannot be read
+  `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
+  body limit as it will be served, with the server-managed links put back. JSON Patch paths are
+  RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
+  (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
   `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token` for

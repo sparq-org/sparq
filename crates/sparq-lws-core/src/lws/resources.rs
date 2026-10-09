@@ -1901,10 +1901,7 @@ pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
     let ops = ops.as_array().ok_or(PatchError::Malformed(
         "a JSON Patch is an array of operations",
     ))?;
-    let pointer = |v: Option<&Value>| {
-        v.and_then(Value::as_str)
-            .is_some_and(|p| p.is_empty() || p.starts_with('/'))
-    };
+    let pointer = |v: Option<&Value>| v.and_then(Value::as_str).and_then(Pointer::parse).is_some();
     for op in ops {
         let kind = op
             .get("op")
@@ -1984,25 +1981,28 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
         }
         Ok(())
     };
-    let str_of = |op: &Value, k: &str| op[k].as_str().unwrap_or_default().to_string();
+    // Every pointer was parsed when the patch was validated; it is parsed the same way here.
+    let pointer_of = |op: &Value, k: &str| {
+        op[k]
+            .as_str()
+            .and_then(Pointer::parse)
+            .ok_or(PatchError::Malformed("a JSON Pointer is malformed"))
+    };
     for op in ops {
-        let path = str_of(op, "path");
+        let path = pointer_of(op, "path")?;
         // What an add at `path` would overwrite: an existing object member is replaced.
         let replaced = |doc: &Value| -> usize {
-            let Some((parent, _)) = split_pointer(&path) else {
-                return 0;
-            };
-            if path.is_empty() {
+            let Some((parent, _)) = path.split() else {
                 return json_size(doc);
-            }
-            match (doc.pointer(&parent), doc.pointer(&path)) {
+            };
+            match (walk(doc, parent), path.get(doc)) {
                 (Some(Value::Object(_)), Some(old)) => json_size(old),
                 _ => 0,
             }
         };
         // A value placed at `path` sits under one container per pointer segment.
         let fits = |v: &Value| {
-            if path.matches('/').count() + json_depth(v) > MAX_JSON_DEPTH {
+            if path.0.len() + json_depth(v) > MAX_JSON_DEPTH {
                 return Err(PatchError::TooDeep);
             }
             Ok(())
@@ -2037,7 +2037,7 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
             "replace" => {
                 let v = &op["value"];
                 fits(v)?;
-                let old = doc.pointer(&path).ok_or(Failed)?;
+                let old = path.get(&doc).ok_or(Failed)?;
                 let minus = json_size(old);
                 let value = json_size(v);
                 // Taken out and put back: an array member shifts the rest of its array twice.
@@ -2048,8 +2048,9 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
             }
             "move" => {
-                let from = str_of(op, "from");
-                if path.starts_with(&format!("{from}/")) {
+                let from = pointer_of(op, "from")?;
+                // A value cannot move into itself (RFC 6902 section 4.4).
+                if from.0.len() < path.0.len() && path.0.starts_with(&from.0) {
                     return Err(Failed);
                 }
                 // The value moves; what changes is the member around it (its key, a separator), and
@@ -2067,8 +2068,8 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "copy" => {
-                let from = str_of(op, "from");
-                let source = doc.pointer(&from).ok_or(Failed)?;
+                let from = pointer_of(op, "from")?;
+                let source = from.get(&doc).ok_or(Failed)?;
                 fits(source)?;
                 let copied = json_size(source);
                 let added = copied + member_overhead(&doc, &path, true);
@@ -2078,13 +2079,13 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                     2 * copied + minus + shift_cost(&doc, &path, true),
                 )?;
                 grow(&mut size, added, minus)?;
-                let v = doc.pointer(&from).ok_or(Failed)?.clone();
+                let v = from.get(&doc).ok_or(Failed)?.clone();
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "test" => {
                 // A comparison walks no more of the document than the value it is given.
                 charge(&mut work, json_size(&op["value"]))?;
-                if !json_equal(doc.pointer(&path).ok_or(Failed)?, &op["value"]) {
+                if !json_equal(path.get(&doc).ok_or(Failed)?, &op["value"]) {
                     return Err(Failed);
                 }
             }
@@ -2103,22 +2104,19 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
 /// escaped) and colon, and in either container the comma between it and a sibling. `adding`: for a
 /// member about to be added (nothing for an object member that would be replaced); otherwise for
 /// the member there now.
-fn member_overhead(doc: &Value, path: &str, adding: bool) -> usize {
-    let Some((parent, key)) = split_pointer(path) else {
+fn member_overhead(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
         return 0;
     };
-    if path.is_empty() {
-        return 0;
-    }
     let comma = |others: usize| usize::from(others > 0);
-    match doc.pointer(&parent) {
+    match walk(doc, parent) {
         Some(Value::Object(m)) => {
-            let present = m.contains_key(&key);
+            let present = m.contains_key(key);
             if adding && present {
                 return 0;
             }
             let others = m.len() - usize::from(present);
-            json_size(&Value::String(key)) + 1 + comma(others)
+            json_size(&Value::String(key.to_string())) + 1 + comma(others)
         }
         Some(Value::Array(a)) => comma(if adding {
             a.len()
@@ -2132,14 +2130,14 @@ fn member_overhead(doc: &Value, path: &str, adding: bool) -> usize {
 /// The work of the shift an insertion (`adding`) or a removal at `path` makes in the array that
 /// holds it, if one does: every member after the index moves, each counted as the bytes a `Value`
 /// takes in memory. An append, or a member of an object, moves nothing.
-fn shift_cost(doc: &Value, path: &str, adding: bool) -> usize {
-    let Some((parent, key)) = split_pointer(path) else {
+fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
         return 0;
     };
-    if path.is_empty() {
+    let Some(Value::Array(a)) = walk(doc, parent) else {
         return 0;
-    }
-    let (Some(Value::Array(a)), Ok(i)) = (doc.pointer(&parent), key.parse::<usize>()) else {
+    };
+    let Some(i) = array_index(key, a.len(), adding) else {
         return 0;
     };
     let moved = if adding {
@@ -2186,51 +2184,108 @@ fn numbers_equal(x: &serde_json::Number, y: &serde_json::Number) -> bool {
     }
 }
 
-fn split_pointer(path: &str) -> Option<(String, String)> {
-    if path.is_empty() {
-        return Some((String::new(), String::new()));
+/// An RFC 6901 JSON Pointer, parsed once: its reference tokens, unescaped. Every JSON Patch
+/// operation reads its paths through this one parser, so no operation accepts a pointer (or an
+/// array index) that another refuses.
+struct Pointer(Vec<String>);
+
+impl Pointer {
+    /// `None` for anything RFC 6901 does not allow: a non-empty pointer not starting with `/`,
+    /// or a `~` not followed by `0` or `1`.
+    fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() {
+            return Some(Pointer(Vec::new()));
+        }
+        let tokens = s.strip_prefix('/')?.split('/').map(|t| {
+            let mut out = String::with_capacity(t.len());
+            let mut chars = t.chars();
+            while let Some(c) = chars.next() {
+                out.push(if c != '~' {
+                    c
+                } else {
+                    match chars.next()? {
+                        '0' => '~',
+                        '1' => '/',
+                        _ => return None,
+                    }
+                });
+            }
+            Some(out)
+        });
+        tokens.collect::<Option<Vec<_>>>().map(Pointer)
     }
-    let cut = path.rfind('/')?;
-    let last = path[cut + 1..].replace("~1", "/").replace("~0", "~");
-    Some((path[..cut].to_string(), last))
+
+    /// The tokens of the container and the last token; `None` for the whole document.
+    fn split(&self) -> Option<(&[String], &str)> {
+        let (last, parent) = self.0.split_last()?;
+        Some((parent, last))
+    }
+
+    fn get<'a>(&self, doc: &'a Value) -> Option<&'a Value> {
+        walk(doc, &self.0)
+    }
 }
 
-fn pointer_add(doc: &mut Value, path: &str, value: Value) -> Option<()> {
-    if path.is_empty() {
+/// The value `tokens` reference in `doc`.
+fn walk<'a>(doc: &'a Value, tokens: &[String]) -> Option<&'a Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get(t),
+        Value::Array(a) => a.get(array_index(t, a.len(), false)?),
+        _ => None,
+    })
+}
+
+fn walk_mut<'a>(doc: &'a mut Value, tokens: &[String]) -> Option<&'a mut Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get_mut(t),
+        Value::Array(a) => {
+            let i = array_index(t, a.len(), false)?;
+            a.get_mut(i)
+        }
+        _ => None,
+    })
+}
+
+/// An array index token (RFC 6901 section 4): `0`, or digits without a leading zero, below `len`;
+/// when `adding`, also `len` itself and `-` (the end). No sign, no leading zero, no overflow.
+fn array_index(token: &str, len: usize, adding: bool) -> Option<usize> {
+    if adding && token == "-" {
+        return Some(len);
+    }
+    let b = token.as_bytes();
+    let well_formed = token == "0"
+        || (matches!(b.first(), Some(b'1'..=b'9')) && b.iter().all(u8::is_ascii_digit));
+    let i: usize = token.parse().ok().filter(|_| well_formed)?;
+    (i < len || (adding && i == len)).then_some(i)
+}
+
+fn pointer_add(doc: &mut Value, path: &Pointer, value: Value) -> Option<()> {
+    let Some((parent, key)) = path.split() else {
         *doc = value;
         return Some(());
-    }
-    let (parent, key) = split_pointer(path)?;
-    match doc.pointer_mut(&parent)? {
+    };
+    match walk_mut(doc, parent)? {
         Value::Object(m) => {
-            m.insert(key, value);
+            m.insert(key.to_string(), value);
         }
         Value::Array(a) => {
-            if key == "-" {
-                a.push(value);
-            } else {
-                let i: usize = key.parse().ok()?;
-                if i > a.len() {
-                    return None;
-                }
-                a.insert(i, value);
-            }
+            let i = array_index(key, a.len(), true)?;
+            a.insert(i, value);
         }
         _ => return None,
     }
     Some(())
 }
 
-fn pointer_remove(doc: &mut Value, path: &str) -> Option<Value> {
-    if path.is_empty() {
+fn pointer_remove(doc: &mut Value, path: &Pointer) -> Option<Value> {
+    let Some((parent, key)) = path.split() else {
         return Some(std::mem::replace(doc, Value::Null));
-    }
-    let (parent, key) = split_pointer(path)?;
-    match doc.pointer_mut(&parent)? {
-        Value::Object(m) => m.remove(&key),
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => m.remove(key),
         Value::Array(a) => {
-            let i: usize = key.parse().ok()?;
-            (i < a.len()).then(|| a.remove(i))
+            let i = array_index(key, a.len(), false)?;
+            Some(a.remove(i))
         }
         _ => None,
     }
@@ -2418,7 +2473,7 @@ async fn patch<S: Store + 'static>(
     } else {
         None
     };
-    let (written, _guard) = write_with_meta(
+    let (written, _guard, undone) = write_with_meta(
         state,
         guard,
         uri,
@@ -2429,6 +2484,7 @@ async fn patch<S: Store + 'static>(
     .await;
     let written = match written {
         Ok(m) => m,
+        Err(e) if undone => return store_error(e),
         Err(e) => {
             drop(listing);
             return unsettled(state, uri, e).await;
@@ -2915,6 +2971,18 @@ async fn linkset<S: Store + 'static>(
             meta.links = links_of(&user, uri);
             meta.linkset = Some(user);
             meta.linkset_etag = None;
+            // The size is checked on the document as it will be served: the server-managed links
+            // (`up`, `type`, `self`) a patch may strip are put back, and they count too.
+            let rebuilt = match linkset_document(state, uri, &meta).await {
+                Ok(d) => d,
+                Err(e) => return store_error(e),
+            };
+            if serde_json::to_vec(&rebuilt).map_or(true, |b| b.len() > patch_budget(state)) {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some("the patched document would be too large"),
+                );
+            }
             // The linkset is checked whole, as it will be stored: inside the metadata it nests a
             // level deeper than in the patched document, and metadata that does not read back
             // would be lost.
@@ -3801,6 +3869,53 @@ mod tests {
             .unwrap();
         assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
         assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
+    }
+
+    /// Review finding: array indexes were parsed with `str::parse`, so `01` and `+1` named
+    /// member 1 in some operations, and escapes other than `~0` and `~1` passed. Every operation
+    /// now reads its pointers through one RFC 6901 parser.
+    #[test]
+    fn json_pointers_follow_rfc_6901() {
+        let doc = json!({"a": [10, 11, 12], "~/": 1});
+        let run = |ops: Value| json_patch(&doc, &ops, PATCH_BUDGET);
+        for index in [
+            "01",
+            "+1",
+            "1.0",
+            " 1",
+            "1 ",
+            "-1",
+            "3",
+            "18446744073709551616",
+            "-",
+        ] {
+            let path = format!("/a/{index}");
+            for op in [
+                json!({"op": "remove", "path": path}),
+                json!({"op": "replace", "path": path, "value": 0}),
+                json!({"op": "test", "path": path, "value": 11}),
+                json!({"op": "copy", "from": path, "path": "/b"}),
+                json!({"op": "move", "from": path, "path": "/b"}),
+            ] {
+                assert_eq!(run(json!([op])), Err(PatchError::Failed), "{op}");
+            }
+            if index != "3" && index != "-" {
+                let add = json!([{"op": "add", "path": path, "value": 0}]);
+                assert_eq!(run(add), Err(PatchError::Failed), "add at {index}");
+            }
+        }
+        for bad in ["a", "/~2", "/~", "/a~"] {
+            let op = json!([{"op": "test", "path": bad, "value": 1}]);
+            assert!(matches!(run(op), Err(PatchError::Malformed(_))), "{bad}");
+        }
+        let ops = json!([
+            {"op": "test", "path": "/a/0", "value": 10},
+            {"op": "test", "path": "/~0~1", "value": 1},
+            {"op": "add", "path": "/a/3", "value": 13},
+            {"op": "add", "path": "/a/-", "value": 14},
+            {"op": "move", "from": "/a/1", "path": "/a/1"},
+        ]);
+        assert_eq!(run(ops).unwrap()["a"], json!([10, 11, 12, 13, 14]));
     }
 
     /// Review finding: the work budget charged what an operation adds, not the array members an
@@ -4911,6 +5026,38 @@ mod tests {
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
+    /// Review finding: a linkset PATCH was held to the body limit on the document it produced,
+    /// but a patch that strips the server-managed links got them back afterwards, so the served
+    /// linkset could pass the limit. The rebuilt document is what is measured.
+    #[tokio::test]
+    async fn a_linkset_patch_is_measured_with_the_links_it_gets_back() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let types: String = (0..400)
+            .map(|i| format!("<> a <https://e.example/{}{i}> .\n", "t".repeat(80)))
+            .collect();
+        let turtle = ("content-type", "text/turtle");
+        let r = call(&st, "POST", "/", &[turtle, ("slug", "d")], &types).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let replace = |n: usize| {
+            json!([{"op": "replace", "path": "/linkset/0", "value": {
+                "anchor": format!("{BASE}/d"),
+                "https://e.example/rel": [{"href": format!("https://e.example/{}", "x".repeat(n))}],
+            }}])
+            .to_string()
+        };
+        let r = call(&st, "PATCH", "/d.meta", &[patch], &replace(1 << 10)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.meta", &[patch], &replace(30 << 10)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let served = body_of(call(&st, "GET", "/d.meta", &[], "").await).await;
+        assert!(served.len() <= 64 << 10, "{}", served.len());
+    }
+
     /// Review finding: a create whose store call reported a failure removed the new member's
     /// metadata, though a remote store may have committed the content before its reply was lost:
     /// the content stayed, without its creator, types and links. The metadata now goes only once
@@ -5213,9 +5360,12 @@ mod tests {
                     .await;
                     assert_eq!(r.status(), StatusCode::CREATED);
                 }
+                let h = [("slug", "j"), ("content-type", "application/json")];
+                let r = handle(&st, &req(Method::POST, "/c/", &h, r#"{"a":1}"#), &anyone).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
                 let root = st.cfg.storage();
                 // The storage root too: its validators must not move for a change that was undone.
-                let iris: Vec<String> = ["", "c/", "c/a", "c/d/", "c/d/b", "c/n"]
+                let iris: Vec<String> = ["", "c/", "c/a", "c/d/", "c/d/b", "c/n", "c/j"]
                     .iter()
                     .map(|p| format!("{root}{p}"))
                     .collect();
@@ -5266,6 +5416,26 @@ mod tests {
         })
         .await;
         assert!(steps >= 2, "a create took {steps} steps");
+        // A PATCH that changes the linkset too.
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let h = [
+                ("content-type", "application/merge-patch+json"),
+                ("prefer", "set-linkset"),
+                ("link", "<https://e.example/Other>; rel=\"type\""),
+            ];
+            let r = handle(
+                &st,
+                &req(Method::PATCH, "/c/j", &h, r#"{"b":2}"#),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(
+            steps >= 3,
+            "a PATCH that changes metadata took {steps} steps"
+        );
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
