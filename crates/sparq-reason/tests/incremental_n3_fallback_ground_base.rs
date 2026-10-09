@@ -138,10 +138,27 @@ fn fallback_base_blank_node_keeps_its_label() {
 //
 // The parser labels the document's anonymous `[]` nodes `_b1`, `_b2`, … and keeps a
 // written `_:x` as `x`. A caller's base `Term::Blank("_b1")` / `Term::Blank("x")` is a
-// different node: on both maintenance paths the two must never merge.
+// different node: on both maintenance paths the two must never merge, and the graph shows
+// its own blanks in the reserved `N3_GRAPH_BLANK` space so the output never conflates them.
+
+use sparq_reason::N3_GRAPH_BLANK;
 
 fn blank(l: &str) -> Term {
     Term::Blank(l.into())
+}
+
+/// A rules-document blank as the graph shows it.
+fn doc_blank(l: &str) -> Term {
+    Term::Blank(format!("{N3_GRAPH_BLANK}{l}"))
+}
+
+/// Every fact `closure()` returns is `contains`ed, and no two returned facts are equal.
+fn assert_closure_consistent(g: &MaterializedN3Graph) {
+    let closure = g.closure();
+    assert_eq!(set(closure.clone()).len(), closure.len(), "duplicate facts: {closure:?}");
+    for t in &closure {
+        assert!(g.contains(t), "closure() returned a fact contains() denies: {t:?}");
+    }
 }
 
 /// Rules with document blanks `_b1`, `_b2` (from `[]`) and `x` (from `_:x`) in facts.
@@ -167,9 +184,9 @@ fn blank_rules(fallback: bool) -> String {
 
 fn doc_facts() -> Vec<[Term; 3]> {
     vec![
-        [blank("_b1"), iri("p"), iri("o1")],
-        [blank("_b2"), iri("p"), iri("o2")],
-        [blank("x"), iri("p"), iri("o3")],
+        [doc_blank("_b1"), iri("p"), iri("o1")],
+        [doc_blank("_b2"), iri("p"), iri("o2")],
+        [doc_blank("x"), iri("p"), iri("o3")],
     ]
 }
 
@@ -204,10 +221,15 @@ fn assert_base_blanks_stay_apart(fallback: bool) {
     );
     assert_eq!(closure, expected_with(&base));
     assert_eq!(g.len(), closure.len());
+    assert_closure_consistent(&g);
     for t in &base {
         assert!(g.contains(t), "asserted base blank triple lost: {t:?}");
         assert!(g.contains(&[t[0].clone(), iri("seen"), t[2].clone()]));
     }
+    // The document's `_:x` and the caller's `x` are two terms in the output.
+    assert!(g.contains(&[doc_blank("x"), iri("p"), iri("o3")]));
+    assert!(!g.contains(&[blank("x"), iri("p"), iri("o3")]));
+    assert!(!g.contains(&[doc_blank("x"), iri("r"), iri("o3")]));
 }
 
 #[test]
@@ -225,10 +247,12 @@ fn assert_base_blank_mutations(fallback: bool) {
     let mut g = MaterializedN3Graph::new(&blank_rules(fallback), &[]).expect("parse");
     assert_eq!(g.mode(), mode, "{:?}", g.fallback_reason());
     assert_eq!(set(g.closure()), expected_with(&[]));
+    assert_closure_consistent(&g);
     let base = base_blank_facts();
     assert_eq!(g.insert(&base), base.len());
     assert_eq!(g.mode(), mode);
     assert_eq!(set(g.closure()), expected_with(&base));
+    assert_closure_consistent(&g);
     for t in &base {
         assert!(g.contains(t), "inserted base blank triple lost: {t:?}");
     }
@@ -237,11 +261,15 @@ fn assert_base_blank_mutations(fallback: bool) {
     assert_eq!(g.delete(&base[..1]), 1);
     assert!(!g.contains(&base[0]));
     assert_eq!(set(g.closure()), expected_with(&base[1..]));
-    // The document's own `_b1` fact is not the caller's: deleting by that label leaves it.
-    assert_eq!(g.delete(&doc_facts()[..1]), 0);
+    assert_closure_consistent(&g);
+    // The caller's `_b1` is not the document's: the document's `[]` fact stays.
+    assert_eq!(g.delete(&[[blank("_b1"), iri("p"), iri("o1")]]), 0);
     assert_eq!(set(g.closure()), expected_with(&base[1..]));
     assert_eq!(g.delete(&base[1..]), 2);
     assert_eq!(set(g.closure()), expected_with(&[]));
+    assert_closure_consistent(&g);
+    // A label in the reserved space names the graph's own node, as `closure()` shows it.
+    assert!(g.contains(&doc_facts()[0]));
 }
 
 #[test]
@@ -252,6 +280,45 @@ fn fallback_base_blank_insert_delete_round_trip() {
 #[test]
 fn counting_base_blank_insert_delete_round_trip() {
     assert_base_blank_mutations(false);
+}
+
+#[test]
+fn reserved_label_naming_no_node_is_refused() {
+    // `outward` never shows a caller's own node in the reserved space, so a base label
+    // that would name one there is an error, and is ignored by insert/contains.
+    let bad = [blank(&format!("{N3_GRAPH_BLANK}__bs0_x")), iri("r"), iri("o1")];
+    assert!(MaterializedN3Graph::new(&blank_rules(false), std::slice::from_ref(&bad)).is_err());
+    let mut g = MaterializedN3Graph::new(&blank_rules(false), &[]).expect("parse");
+    assert_eq!(g.insert(std::slice::from_ref(&bad)), 0);
+    assert!(!g.contains(&bad));
+}
+
+/// A document parsed at run time (`log:parsedAsN3`) has blanks of its own: a text that
+/// spells a caller's label, or the graph's internal namespace for it, never aliases the
+/// caller's node.
+#[test]
+fn runtime_parsed_blanks_do_not_alias_caller_blanks() {
+    for text in ["_:x", "_:__bs0_x"] {
+        let rules = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             {{ \"{text} <http://ex/r> <http://ex/o9> .\" log:parsedAsN3 ?f . \
+                ?f log:includes {{ ?s <http://ex/r> <http://ex/o9> }} }} \
+             => {{ ?s <http://ex/fromtext> <http://ex/o9> }} .\n\
+             {{ ?s <http://ex/fromtext> ?o . ?s <http://ex/r> ?o }} => {{ ?s <http://ex/both> ?o }} ."
+        );
+        let mine = [blank("x"), iri("r"), iri("o9")];
+        let g = MaterializedN3Graph::new(&rules, std::slice::from_ref(&mine)).expect("parse");
+        assert_eq!(g.mode(), N3Mode::Fallback, "{:?}", g.fallback_reason());
+        let closure = g.closure();
+        assert_closure_consistent(&g);
+        let from_text: Vec<_> = closure.iter().filter(|t| t[1] == iri("fromtext")).collect();
+        assert_eq!(from_text.len(), 1, "{text}: {closure:?}");
+        let Term::Blank(l) = &from_text[0][0] else { panic!("{text}: {closure:?}") };
+        assert!(l.starts_with(N3_GRAPH_BLANK), "{text}: runtime blank shown as {l:?}");
+        assert!(!g.contains(&[blank("x"), iri("fromtext"), iri("o9")]), "{text}: {closure:?}");
+        assert!(!closure.iter().any(|t| t[1] == iri("both")), "{text}: {closure:?}");
+        assert!(g.contains(&mine));
+    }
 }
 
 #[cfg(feature = "explain")]
@@ -270,7 +337,12 @@ fn why_shows_the_callers_blank_labels() {
         assert_eq!(leaf.conclusion[0], "_:_b1", "fallback={fallback}");
         let asserted = g.why(&base[0]).expect("asserted fact explains");
         assert_eq!(asserted.nodes()[0].conclusion[0], "_:_b1");
-        // The document's own `[]` fact is not the caller's `_b1`.
         assert!(g.why(&[blank("_b1"), iri("both"), iri("o1")]).is_none());
+        // The document's `_:x` and the caller's `x`: two facts, two identity keys.
+        let mine = g.why(&base[2]).expect("caller x explains");
+        let theirs = g.why(&doc_facts()[2]).expect("document x explains");
+        assert_ne!(mine.nodes()[0].key, theirs.nodes()[0].key, "fallback={fallback}");
+        assert_ne!(mine.nodes()[0].key[0], theirs.nodes()[0].key[0]);
+        assert_eq!(theirs.nodes()[0].rule, "asserted");
     }
 }

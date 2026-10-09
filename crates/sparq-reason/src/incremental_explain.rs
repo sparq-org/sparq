@@ -1115,7 +1115,7 @@ impl MaterializedN3Graph {
         }
         // The graph holds the caller's blank labels in its own namespace (GH #6775); the
         // proof shows them as the caller wrote them.
-        let inner = self.inward(fact);
+        let inner = self.inward(fact)?;
         let fact = inner.as_ref();
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {

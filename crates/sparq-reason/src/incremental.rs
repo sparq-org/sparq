@@ -1555,10 +1555,17 @@ pub struct MaterializedN3Graph {
     cuts: crate::n3::bounded::Truncation,
     /// The namespace of the caller's blank labels inside the graph (GH #6775): a caller
     /// label `l` is held as `{base_ns}{l}`, fresh against every blank label of the rules
-    /// document, so a caller's `_b1` never aliases the parser's `_b1` for a `[]`. Facts
-    /// cross the API boundary through [`Self::inward`] and [`Self::outward`] only.
+    /// document and never minted by the engine, so a caller's `_b1` never aliases the
+    /// parser's `_b1` for a `[]`. Every other blank (the document's, the engine's) is shown
+    /// to the caller as `{N3_GRAPH_BLANK}{label}`. Facts cross the API boundary through
+    /// [`Self::inward`] and [`Self::outward`] only.
     base_ns: String,
 }
+
+/// The reserved label space in which [`MaterializedN3Graph`] shows the blank nodes that
+/// are not the caller's (the rules document's, the engine's): `_:x` in the rules is
+/// `__d.x` to the caller, so it never reads as the caller's own `x`.
+pub const N3_GRAPH_BLANK: &str = "__d.";
 
 /// `t` with `f` applied to every blank label (recursing into lists, formulae and quoted
 /// triples), or `None` when `f` changes none: a term without blank nodes costs no
@@ -2411,7 +2418,16 @@ impl MaterializedN3Graph {
             cuts: cuts.clone(),
             base_ns,
         };
-        let caller: Vec<[N3Term; 3]> = base_facts.iter().map(|f| g.inward(f).into_owned()).collect();
+        let mut caller = Vec::with_capacity(base_facts.len());
+        for f in base_facts {
+            let Some(f) = g.inward(f) else {
+                return Err(format!(
+                    "base blank label in {N3_GRAPH_BLANK}{}… names no node of the graph",
+                    g.base_ns
+                ));
+            };
+            caller.push(f.into_owned());
+        }
         g.base.extend(caller);
         // The rules parse's record is the counting run's; the checked run re-parses.
         g.rematerialize(cuts, crate::n3::bounded::Truncation::top_level());
@@ -2422,29 +2438,48 @@ impl MaterializedN3Graph {
         Ok(g)
     }
 
-    /// A caller's fact as the graph holds it: its blank labels moved into [`Self::base_ns`].
-    /// Borrowed (no allocation) when the fact has no blank node.
-    fn inward<'a>(&self, t: &'a [N3Term; 3]) -> std::borrow::Cow<'a, [N3Term; 3]> {
+    /// A caller's fact as the graph holds it, the inverse of [`Self::outward`]: a label
+    /// `l` is the caller's node `{base_ns}{l}`, and `{N3_GRAPH_BLANK}{label}` names the
+    /// graph's own node `label`. `None` for `{N3_GRAPH_BLANK}{base_ns}…`, which
+    /// [`Self::outward`] never produces. Borrowed (no allocation) when the fact has no
+    /// blank node.
+    fn inward<'a>(&self, t: &'a [N3Term; 3]) -> Option<std::borrow::Cow<'a, [N3Term; 3]>> {
         let ns = self.base_ns.as_str();
-        let to_ns = |l: &str| Some(format!("{ns}{l}"));
+        let invalid = Cell::new(false);
+        let to_ns = |l: &str| match l.strip_prefix(N3_GRAPH_BLANK) {
+            Some(own) => {
+                invalid.set(invalid.get() || own.starts_with(ns));
+                Some(own.to_string())
+            }
+            None => Some(format!("{ns}{l}")),
+        };
         let m: [Option<N3Term>; 3] = [0, 1, 2].map(|i| map_blank_labels(&t[i], &to_ns));
+        if invalid.get() {
+            return None;
+        }
         if m.iter().all(Option::is_none) {
-            return std::borrow::Cow::Borrowed(t);
+            return Some(std::borrow::Cow::Borrowed(t));
         }
         let [a, b, c] = m;
-        std::borrow::Cow::Owned([
+        Some(std::borrow::Cow::Owned([
             a.unwrap_or_else(|| t[0].clone()),
             b.unwrap_or_else(|| t[1].clone()),
             c.unwrap_or_else(|| t[2].clone()),
-        ])
+        ]))
     }
 
     /// A closure fact as the caller sees it: labels in [`Self::base_ns`] get the caller's
-    /// own label back; the rules document's and the engine's labels never start with it
-    /// and pass through unchanged.
+    /// own label back, every other blank (the rules document's, the engine's: none starts
+    /// with `base_ns`) is shown as `{N3_GRAPH_BLANK}{label}`. Injective: a caller label is
+    /// never in the reserved space, since [`Self::inward`] reads that space as the graph's.
     fn outward(&self, t: &[N3Term; 3]) -> [N3Term; 3] {
         let ns = self.base_ns.as_str();
-        let from_ns = |l: &str| l.strip_prefix(ns).map(str::to_string);
+        let from_ns = |l: &str| {
+            Some(match l.strip_prefix(ns) {
+                Some(caller) => caller.to_string(),
+                None => format!("{N3_GRAPH_BLANK}{l}"),
+            })
+        };
         [0, 1, 2].map(|i| map_blank_labels(&t[i], &from_ns).unwrap_or_else(|| t[i].clone()))
     }
 
@@ -2828,7 +2863,9 @@ impl MaterializedN3Graph {
             if !f.iter().all(N3Term::is_ground) {
                 continue;
             }
-            let f = self.inward(f).into_owned();
+            // A label `outward` never produces names no node: ignored like a non-ground fact.
+            let Some(f) = self.inward(f) else { continue };
+            let f = f.into_owned();
             if self.base.insert(f.clone()) {
                 rebuild |= self.triggers_rebuild(&f);
                 added.push(f);
@@ -2867,7 +2904,7 @@ impl MaterializedN3Graph {
         let mut removed = Vec::new();
         let mut rebuild = false;
         for f in facts {
-            let f = self.inward(f);
+            let Some(f) = self.inward(f) else { continue };
             if self.base.remove(f.as_ref()) {
                 rebuild |= self.triggers_rebuild(&f);
                 removed.push(f.into_owned());
@@ -2902,7 +2939,7 @@ impl MaterializedN3Graph {
 
     /// Is `t` in the materialized closure (asserted or derived)?
     pub fn contains(&self, t: &[N3Term; 3]) -> bool {
-        let t = self.inward(t);
+        let Some(t) = self.inward(t) else { return false };
         match self.mode {
             N3Mode::Counting => self.index.contains(&t),
             N3Mode::Fallback => self.fallback_closure.contains(t.as_ref()),
