@@ -23,9 +23,9 @@
 //! of their own rules. Policies whose `odrl:conflict` strategy `decide` cannot honour are
 //! refused at attach time.
 //!
-//! Every [`crate::PodStore`] entry point that authorizes a session consults
-//! [`OdrlEnforcement::denies`]: the cached set behind `accessible`, the views, queries
-//! and `wac_allow`; point `decide`, `decide_batch` and `decide_create`; and every update.
+//! Every [`crate::PodStore`] entry point that authorizes a session consults one deny gate:
+//! the cached set behind `accessible`, the views, queries and `wac_allow`; point
+//! `decide`, `decide_batch` and `decide_create`; and every update.
 
 use crate::authindex::{Mode, Session};
 use oxrdf::NamedNode;
