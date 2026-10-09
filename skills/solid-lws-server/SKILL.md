@@ -303,15 +303,18 @@ What the server exposes, all discoverable from the storage description
   `DataResource`, `Container` or `StorageResource`, and its values name single resources,
   not their members. A policy with no `target` covers every resource of the grant's
   `storage`. A `purpose` constraint never holds, because the draft does not say how a
-  request states its purpose. The owner and a resource's creator are always allowed. A
+  request states its purpose. A `format` constraint compares media types as RFC 9110 does
+  (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
+  order). The owner and a resource's creator are always allowed. A
   new request notifies the owner's inbox when the owner's JSON(-LD) identity document
-  names one. A new grant notifies the inboxes of the requests made by or for its
-  assignees, as well as its own `inbox`.
+  names one. A new grant notifies the inboxes of the requests its assignees made themselves,
+  as well as its own `inbox`.
 - **Webhook notifications** under `/.lws/subscriptions/`, signed per RFC 9421 with the
   key in the storage description's `verificationMethod`. Deliveries go through a bounded queue and worker pool (see the
   `SOLID_SERVER_LWS_DELIVERY_*` variables); a Delete is announced only once the removal happened.
   Each delivery attempt, retries included, first checks that its subscription still exists and
-  has not expired, and that the subscriber may still read the resource. A Delete is checked against
+  has not expired, and that the subscriber may still read the resource, reading the resource under
+  its shared lock, as a GET does. A Delete is checked against
   the resource as it was before removal. A delivery that fails a check is dropped.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
