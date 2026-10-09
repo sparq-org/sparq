@@ -5283,6 +5283,7 @@ dependencies = [
  "oxttl 0.2.3",
  "p256",
  "pin-project-lite",
+ "quick-xml 0.37.5",
  "quinn",
  "r2d2",
  "rand_core 0.6.4",
