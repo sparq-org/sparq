@@ -171,10 +171,7 @@ Update (data lives in the default + named graphs):
   algebra it checked. `reads: Option<&Arc<FxHashSet<Term>>>` evaluates every WHERE under a read view
   of those graphs (empty default graph). `authorize: Option<&mut WriteAuthorizer>` is called per
   `DELETE`/`INSERT … WHERE` with the graphs its instantiated templates delete from and insert into,
-  before that operation is applied; an `Err` aborts. For all-or-nothing, run
-  `update_in_place_algebra_capturing` (same arguments, returns the `Vec<UpdateEffect>`) on a
-  `Graph::fork()` and commit the effects to the original with `apply_effects`, which keeps a
-  directory-backed graph durable (the fork itself has no WAL).
+  before that operation is applied; an `Err` aborts, leaving earlier operations applied.
 - `update_in_place_capturing(&mut Graph, &str, &QueryBudget) -> Result<Vec<UpdateEffect>, String>`
   + `apply_effects(&mut Graph, &[UpdateEffect])` — apply once, capturing the RESOLVED delta, then
   replay it onto a second (e.g. durable mirror) graph WITHOUT re-executing the text. Use this when

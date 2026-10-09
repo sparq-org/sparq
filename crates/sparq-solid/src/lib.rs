@@ -1350,8 +1350,8 @@ impl PodStore {
         // Authorized: apply the checked algebra through the engine's in-place delta path,
         // under the same read view and budget. A `GRAPH ?var` template's destinations are
         // authorized as the engine instantiates them, from its one evaluation of the WHERE,
-        // before that operation changes anything. A denial aborts, so an update with more
-        // than one operation runs on a fork whose effects are committed only on success.
+        // before the operation changes anything (`check` admits such an operation only on
+        // its own, so a denial leaves the store untouched).
         let mut auth_input = false;
         if permit.var_graphs {
             // Borrow the (now initialized) field itself, disjoint from `self.graph`.
@@ -1360,24 +1360,13 @@ impl PodStore {
             let mut authorize = |dels: &[Option<Term>], ins: &[Option<Term>]| {
                 update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input)
             };
-            let apply = |g: &mut Graph, authorize: &mut sparq_engine::WriteAuthorizer<'_>| {
-                sparq_engine::update_in_place_algebra_with_budget(g, &upd, reads.as_ref(), Some(authorize), budget)
-            };
-            if upd.operations.len() > 1 {
-                // Run it on a fork, then commit exactly its effects to the store through
-                // the durable transaction path (the fork itself has no WAL).
-                let mut working = self.graph.fork();
-                let effects = sparq_engine::update_in_place_algebra_capturing(
-                    &mut working,
-                    &upd,
-                    reads.as_ref(),
-                    Some(&mut authorize),
-                    budget,
-                )?;
-                sparq_engine::apply_effects(&mut self.graph, &effects)?;
-            } else {
-                apply(&mut self.graph, &mut authorize)?;
-            }
+            sparq_engine::update_in_place_algebra_with_budget(
+                &mut self.graph,
+                &upd,
+                reads.as_ref(),
+                Some(&mut authorize),
+                budget,
+            )?;
         } else {
             sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, reads.as_ref(), None, budget)?;
         }

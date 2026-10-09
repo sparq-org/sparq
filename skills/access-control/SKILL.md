@@ -199,7 +199,8 @@ Materialize the authorization view from the access-control documents, then enfor
   access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
   evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
   evaluation instantiates, before anything is written, and a refused update leaves the
-  store untouched.
+  store untouched. Such an operation must be sent on its own: a multi-operation request
+  that includes one is refused.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an

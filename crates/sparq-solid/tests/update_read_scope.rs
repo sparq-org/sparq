@@ -258,7 +258,7 @@ const VARIABLE_TARGETS: &[(&str, Option<&[&str]>)] = &[
     ("INSERT { GRAPH ?g { <urn:f> <urn:p> ?n } } WHERE { { SELECT ?g (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } GROUP BY ?g HAVING (?g = <https://pod.ex/out>) } }", Some(OUT)),
     ("DELETE { GRAPH ?g { ?s ?p ?o } } WHERE { GRAPH ?g { ?s ?p ?o } }", None),
     ("DELETE { GRAPH ?g { ?s ?p ?o } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { ?s ?p ?o } }", Some(OUT)),
-    // A refused operation after a permitted one leaves the store untouched.
+    // A variable target inside a multi-operation request is refused outright.
     ("INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> 1 } } ; INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
 ];
 
@@ -301,39 +301,42 @@ fn reopen(dir: &std::path::Path) -> PodStore {
     s
 }
 
-/// A multi-operation update with a variable write target commits through the store's
-/// durable path: it survives a reopen, and so do later writes. A refused one changes
-/// neither memory nor disk.
+/// A variable-target update is durable, and so are later writes. A multi-operation
+/// request that includes one is refused and changes neither memory nor disk, while a
+/// multi-operation request with static targets still runs.
 #[test]
-fn multi_operation_updates_stay_durable() {
+fn variable_target_updates_stay_durable() {
     let (mut s, dir) = durable_store("ok");
     s.update_as(
         &bob(),
-        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
-         INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
+        "INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
     )
     .expect("permitted");
     s.update_as(
         &bob(),
-        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:l> <urn:p> \"later\" } }",
+        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+         DELETE WHERE { GRAPH <https://pod.ex/out> { <urn:o> ?p ?o } }",
     )
-    .expect("a later write");
+    .expect("static targets in one request");
     let live = out(&s);
     drop(s);
     let back = out(&reopen(&dir));
-    for v in ["multi", "var", "later"] {
+    for v in ["var", "multi"] {
         assert!(live.contains(v) && back.contains(v), "{v} lost: {back}");
     }
+    assert!(!back.contains("\"out\""), "the delete was lost: {back}");
     std::fs::remove_dir_all(&dir).ok();
 
     let (mut s, dir) = durable_store("refused");
     let before = out(&s);
-    s.update_as(
-        &bob(),
-        "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
-         INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } WHERE { GRAPH ?g { } }",
-    )
-    .expect_err("pub is not writable");
+    let e = s
+        .update_as(
+            &bob(),
+            "INSERT DATA { GRAPH <https://pod.ex/out> { <urn:m> <urn:p> \"multi\" } } ; \
+             INSERT { GRAPH ?g { <urn:f> <urn:p> \"var\" } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }",
+        )
+        .expect_err("a variable target must be sent on its own");
+    assert!(e.contains("request of its own"), "{e}");
     assert_eq!(out(&s), before, "memory changed");
     drop(s);
     assert_eq!(out(&reopen(&dir)), before, "disk changed");
