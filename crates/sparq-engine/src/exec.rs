@@ -14503,6 +14503,8 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         // date and dateTime values are disjoint -> known different.
         // An ill-formed operand (e.g. a timezone-free dateTimeStamp) is not a value: error.
         (DateTime(Some(_)), Date(Some(_))) | (Date(Some(_)), DateTime(Some(_))) => Some(false),
+        // Nor is it known different from a language-tagged literal (#3902): still an error.
+        (DateTime(None) | Date(None), _) | (_, DateTime(None) | Date(None)) => None,
         // A language-tagged literal equals only a literal with the same (ci) tag.
         (Lang(t1, v1), Lang(t2, v2)) => Some(t1 == t2 && v1 == v2),
         (Lang(..), _) | (_, Lang(..)) => Some(false),
@@ -16109,11 +16111,12 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 /// Parse an `xsd:dateTime` lexical (`[-]YYYY-MM-DDThh:mm:ss[.frac][TZ]`) into
 /// `[year, month, day, hours, minutes, seconds]`. Timezone is stripped (component accessors are on
 /// the local time per SPARQL); seconds keeps any fractional part. `datatype` is the literal's:
-/// an `xsd:dateTimeStamp` must carry a timezone (#3902), checked by the shared
-/// [`Timeline::parse_datetime_of`] so this path and the comparison paths agree.
+/// an `xsd:dateTimeStamp` must carry a timezone (#3902), checked by the shared lexical
+/// [`Timeline::datetime_facets_ok`] (which `parse_datetime_of` also applies) so this path and
+/// the comparison paths agree, without needing a representable instant.
 fn datetime_fields(s: &str, datatype: &str) -> Option<[f64; 6]> {
-    if datatype == xsd::DATE_TIME_STAMP.as_str() {
-        Timeline::parse_datetime_of(s, datatype)?;
+    if !Timeline::datetime_facets_ok(s, datatype) {
+        return None;
     }
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');

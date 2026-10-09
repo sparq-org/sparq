@@ -450,10 +450,12 @@ impl TempData {
             TempData::Mapped(m, extra) => {
                 let n = Self::mapped_len(m);
                 if i < n {
-                    // SAFETY: the instant section is `n` little-endian f64 at offset 0
-                    // (page-aligned mmap base >= 8-byte alignment); flags follow at n*8.
-                    let instant = unsafe { *m.as_ptr().cast::<f64>().add(i) };
-                    temp_unflag(m[n * 8 + i], instant)
+                    // SAFETY: the instant section is `n` little-endian f64 right after the
+                    // 8-byte [`TEMPORALS_MAGIC`] header (page-aligned mmap base + 8 keeps
+                    // 8-byte alignment); `i < n` keeps the read in bounds, since `open` maps
+                    // only a file of exactly `8 + 9n` bytes. Flags follow the instants.
+                    let instant = unsafe { *m.as_ptr().add(TEMPORALS_MAGIC.len()).cast::<f64>().add(i) };
+                    temp_unflag(m[TEMPORALS_MAGIC.len() + n * 8 + i], instant)
                 } else {
                     extra.get(&id).copied() // appended after open
                 }
@@ -461,11 +463,11 @@ impl TempData {
         }
     }
 
-    /// Number of terms covered by a mapped `temporals.bin` (9 bytes per term).
+    /// Number of terms covered by a mapped `temporals.bin` (the header, then 9 bytes per term).
     #[cfg(feature = "mmap")]
     #[inline]
     fn mapped_len(m: &memmap2::Mmap) -> usize {
-        m.len() / 9
+        m.len().saturating_sub(TEMPORALS_MAGIC.len()) / 9
     }
 
     /// Appends cache entries for freshly interned dictionary ids `old_len+1 ..= dict.len()`
@@ -518,10 +520,12 @@ impl TempData {
             TempData::Mapped(m, extra) => {
                 // Materialise the mmap'd cells (an `Mmap` cannot be cloned).
                 let n = Self::mapped_len(m);
-                // SAFETY: instants are `n` little-endian f64 at offset 0 (page-aligned).
-                let instants = unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<f64>(), n) };
+                let body = &m[TEMPORALS_MAGIC.len()..];
+                // SAFETY: instants are `n` little-endian f64 right after the 8-byte header
+                // (page-aligned base + 8 stays 8-byte aligned); `open` mapped `8 + 9n` bytes.
+                let instants = unsafe { std::slice::from_raw_parts(body.as_ptr().cast::<f64>(), n) };
                 let cells: Vec<TempCell> = (0..n)
-                    .map(|i| TempCell { instant: instants[i], flag: m[n * 8 + i] })
+                    .map(|i| TempCell { instant: instants[i], flag: body[n * 8 + i] })
                     .collect();
                 TempData::Forked {
                     base: std::sync::Arc::new(TempData::Owned(cells)),
@@ -633,12 +637,13 @@ fn temporals_of(dict: &Dict) -> Vec<TempCell> {
     }
 }
 
-/// Writes the temporal-value cache to disk (`n` little-endian f64 instants, then `n`
-/// flag bytes) so it can be memory-mapped on open instead of recomputed.
+/// Writes the temporal-value cache to disk (the [`TEMPORALS_MAGIC`] header, `n` little-endian
+/// f64 instants, then `n` flag bytes) so it can be memory-mapped on open instead of recomputed.
 #[cfg(feature = "mmap")]
 fn write_temporals(path: &std::path::Path, flags: &[u8], instants: &[f64]) -> std::io::Result<()> {
     use std::io::Write;
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
+    f.write_all(&TEMPORALS_MAGIC)?;
     // SAFETY: reinterpret the contiguous f64 column as bytes for writing.
     let ibytes = unsafe { std::slice::from_raw_parts(instants.as_ptr().cast::<u8>(), std::mem::size_of_val(instants)) };
     f.write_all(ibytes)?;
@@ -1937,12 +1942,17 @@ impl Graph {
         };
         let tp = dir.join("temporals.bin");
         let temporals = match std::fs::File::open(&tp) {
-            Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
+            Ok(f) if f.metadata()?.len() as usize == TEMPORALS_MAGIC.len() + dict.len() * 9 => {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                TempData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                let m = unsafe { memmap2::Mmap::map(&f)? };
+                if m[..TEMPORALS_MAGIC.len()] == TEMPORALS_MAGIC {
+                    TempData::Mapped(m, rustc_hash::FxHashMap::default())
+                } else {
+                    TempData::Owned(temporals_of(&dict))
+                }
             }
-            // Absent or stale (a graph saved before this cache existed): recompute —
-            // backward compatible, like the numerics cache.
+            // Absent or stale (saved before this cache existed, or under older value
+            // semantics without the current header): recompute, like the numerics cache.
             _ => TempData::Owned(temporals_of(&dict)),
         };
         // [OPUS-4.8] (sq-3ui0, gh-45) Restore the named graphs (each opened memory-mapped
@@ -4348,6 +4358,14 @@ fn numerics_of(dict: &Dict) -> Vec<f64> {
 #[cfg_attr(not(feature = "mmap"), allow(dead_code))]
 pub(crate) const NUMERICS_MAGIC: [u8; 8] = *b"SPQNUM02";
 
+/// The 8-byte header of `temporals.bin`, naming the cache's VALUE semantics, exactly as
+/// [`NUMERICS_MAGIC`] does for `numerics.bin`: bump it whenever which lexicals cache, or to
+/// what, changes, so [`Graph::open`] recomputes an older cache. `SPQTMP02`: a timezone-free
+/// `xsd:dateTimeStamp` is ill-formed and not cached (#3902); the unversioned layout before it
+/// (no header) cached it like an `xsd:dateTime`.
+#[cfg_attr(not(feature = "mmap"), allow(dead_code))]
+pub(crate) const TEMPORALS_MAGIC: [u8; 8] = *b"SPQTMP02";
+
 /// Writes the numeric-value cache to disk (the [`NUMERICS_MAGIC`] header, then raw f64) so it
 /// can be memory-mapped on open instead of recomputed.
 #[cfg(feature = "mmap")]
@@ -4423,6 +4441,7 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
 fn stream_write_temporals(path: &std::path::Path, n: usize, temp: &TempData) -> std::io::Result<()> {
     use std::io::Write;
     let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    w.write_all(&TEMPORALS_MAGIC)?;
     const BLOCK: usize = 1 << 16;
     // Pass 1: the f64 instant column (NaN for non-temporal ids — temp_flag 0 carries the
     // "not temporal" decode, so the instant value of a flag-0 cell is irrelevant on read).
@@ -8333,6 +8352,57 @@ mod tests {
         std::fs::remove_dir_all(&dir2).ok();
     }
 
+    /// #3902 — a `temporals.bin` written before the [`TEMPORALS_MAGIC`] header existed (no
+    /// header, `9n` bytes) cached a timezone-free `xsd:dateTimeStamp` like an `xsd:dateTime`.
+    /// `open` must recompute such a cache, not map it, so the ill-formed stamp has no value
+    /// across the upgrade; a cache saved with the current header is still mapped.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn open_recomputes_an_unversioned_temporals_cache() {
+        let ttl = "<http://ex/a> <http://ex/s> \"2020-01-01T00:00:00\"^^<http://www.w3.org/2001/XMLSchema#dateTimeStamp> .\n\
+                   <http://ex/a> <http://ex/d> \"2020-01-01T00:00:00Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n";
+        let lit = |v: &str, dt: &str| {
+            Term::Literal(Literal::new_typed_literal(v, NamedNode::new_unchecked(format!("http://www.w3.org/2001/XMLSchema#{dt}"))))
+        };
+        let g = Graph::load_str(ttl, "turtle").unwrap();
+        let sid = g.id_of(&lit("2020-01-01T00:00:00", "dateTimeStamp")).unwrap();
+        let did = g.id_of(&lit("2020-01-01T00:00:00Z", "dateTime")).unwrap();
+        assert!(g.temporal_value(sid).is_none(), "a timezone-free dateTimeStamp has no value");
+        let want = g.temporal_value(did).unwrap();
+        let dir = std::env::temp_dir().join(format!("sparq_unversioned_temporals_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        g.save(&dir).unwrap();
+        assert!(matches!(Graph::open(&dir).unwrap().temporals, TempData::Mapped(..)), "a current cache is mapped");
+
+        // Rewrite temporals.bin exactly as the pre-header layout stored it: `n` native f64
+        // instants then `n` flags, with the stamp cached as a floating dateTime (flag 1).
+        let n = g.dict.len();
+        let mut old: Vec<u8> = Vec::with_capacity(n * 9);
+        for id in 1..=n as Id {
+            let inst = if id == sid { want.instant } else { g.temporal_value(id).map_or(f64::NAN, |t| t.instant) };
+            old.extend_from_slice(&inst.to_ne_bytes());
+        }
+        for id in 1..=n as Id {
+            old.push(if id == sid { 1 } else { g.temporal_value(id).map_or(0, temp_flag) });
+        }
+        std::fs::write(dir.join("temporals.bin"), old).unwrap();
+
+        let g2 = Graph::open(&dir).unwrap();
+        assert!(g2.temporal_value(sid).is_none(), "stale dateTimeStamp value mapped from an old cache");
+        assert_eq!(g2.temporal_value(did).map(|t| (t.instant, t.has_tz)), Some((want.instant, true)));
+        // Saving the reopened graph writes the current, mappable format.
+        let dir2 = dir.with_extension("resaved");
+        std::fs::remove_dir_all(&dir2).ok();
+        g2.save(&dir2).unwrap();
+        let g3 = Graph::open(&dir2).unwrap();
+        assert!(matches!(g3.temporals, TempData::Mapped(..)));
+        assert!(g3.temporal_value(sid).is_none());
+        assert_eq!(g3.temporal_value(did).map(|t| t.instant), Some(want.instant));
+        drop((g2, g3));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&dir2).ok();
+    }
+
     /// [OPUS-4.8] (gh-1122) `insert_triple` / `remove_triple` against a DIRECTORY-BACKED graph
     /// flow through the SAME durable `apply_delta` path as a batch: each is WAL-logged + fsync'd,
     /// so a crash-style reopen (no save/compact in between) recovers the insert and honours the
@@ -11037,8 +11107,10 @@ mod tests {
                     }
                 }
             }
-            inst.extend_from_slice(&flags); // temporals.bin = instants || flags
-            (num, inst)
+            inst.extend_from_slice(&flags); // temporals.bin = header || instants || flags
+            let mut temp = TEMPORALS_MAGIC.to_vec();
+            temp.extend_from_slice(&inst);
+            (num, temp)
         };
 
         for sparse in [false, true] {
@@ -11061,7 +11133,7 @@ mod tests {
                 let got_temp = std::fs::read(dir.join("temporals.bin")).unwrap();
                 let n = g.dict.len();
                 assert_eq!(got_num.len(), 8 + n * 8, "numerics.bin size (sparse={sparse} compressed={compressed})");
-                assert_eq!(got_temp.len(), n * 9, "temporals.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_temp.len(), TEMPORALS_MAGIC.len() + n * 9, "temporals.bin size (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_num, want_num, "streamed numerics != dense (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_temp, want_temp, "streamed temporals != dense (sparse={sparse} compressed={compressed})");
 

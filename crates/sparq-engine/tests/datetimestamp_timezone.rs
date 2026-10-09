@@ -88,6 +88,10 @@ fn cross_family_equality_with_a_timezone_free_datetimestamp_is_a_type_error() {
     let t = Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string());
     assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp = "2020-01-01"^^xsd:date"#), None);
     assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp != "2020-01-01"^^xsd:date"#), None);
+    // Nor is it known different from a language-tagged literal.
+    assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTimeStamp != "text"@en"#), None);
+    assert_eq!(eval(r#""text"@en = "2020-01-01T00:00:00"^^xsd:dateTimeStamp"#), None);
+    assert_eq!(eval(r#""2020-01-01T00:00:00Z"^^xsd:dateTimeStamp != "text"@en"#), t);
     // Well-formed dateTime vs date values stay known-different.
     assert_eq!(eval(r#""2020-01-01T00:00:00Z"^^xsd:dateTimeStamp = "2020-01-01"^^xsd:date"#), f);
     assert_eq!(eval(r#""2020-01-01T00:00:00"^^xsd:dateTime != "2020-01-01"^^xsd:date"#), t);
@@ -101,4 +105,20 @@ fn cross_family_equality_with_a_timezone_free_datetimestamp_is_a_type_error() {
         .iter()
         .all(|s| !s.contains("floatingStamp")));
     assert!(subjects(r#"SELECT ?s { ?s :t ?d FILTER(YEAR(?d) = 2020) }"#).iter().all(|s| !s.contains("floatingStamp")));
+}
+
+#[test]
+fn accessors_on_a_far_out_year_do_not_overflow() {
+    // The timezone check is lexical: a year past the i64-seconds range still has components.
+    assert_eq!(
+        eval(r#"YEAR("1000000000000-01-01T00:00:00Z"^^xsd:dateTimeStamp)"#).as_deref(),
+        Some("\"1000000000000\"^^<http://www.w3.org/2001/XMLSchema#integer>")
+    );
+    assert_eq!(eval(r#"TZ("1000000000000-01-01T00:00:00Z"^^xsd:dateTimeStamp)"#).as_deref(), Some("\"Z\""));
+    assert_eq!(eval(r#"YEAR("1000000000000-01-01T00:00:00"^^xsd:dateTimeStamp)"#), None);
+    // Comparing it is a type error (no representable instant), not a panic.
+    assert_eq!(
+        eval(r#""1000000000000-01-01T00:00:00Z"^^xsd:dateTimeStamp < "2021-01-01T00:00:00Z"^^xsd:dateTime"#),
+        None
+    );
 }

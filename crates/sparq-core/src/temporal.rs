@@ -52,24 +52,40 @@ impl Timeline {
             return None;
         }
         let sec: f64 = sec_lex.parse().ok()?;
-        Some(Timeline {
-            secs: days * 86_400 + h * 3600 + mi * 60 + sec.trunc() as i64,
-            frac: sec.fract(),
-            tz,
-        })
+        // Checked: a year far outside the i64-seconds range has no representable instant
+        // (None) rather than overflowing.
+        let secs = days
+            .checked_mul(86_400)?
+            .checked_add(h.checked_mul(3600)?)?
+            .checked_add(mi.checked_mul(60)?)?
+            .checked_add(sec.trunc() as i64)?;
+        Some(Timeline { secs, frac: sec.fract(), tz })
     }
 
-    /// The value of an `xsd:dateTime` or `xsd:dateTimeStamp` lexical, `None` when ill-formed.
-    /// `xsd:dateTimeStamp` requires a timezone (XSD 1.1 §3.4.28, `explicitTimezone =
-    /// required`), so a timezone-free lexical of that datatype is ill-formed. Every
+    /// Whether a dateTime lexical satisfies `datatype`'s facets beyond the shared lexical
+    /// shape: `xsd:dateTimeStamp` requires a timezone (XSD 1.1 §3.4.28, `explicitTimezone =
+    /// required`). Purely lexical (no epoch arithmetic), so the component accessors can check
+    /// it for a year whose instant is not representable. [`parse_datetime_of`](Self::parse_datetime_of)
+    /// applies it too.
+    pub fn datetime_facets_ok(s: &str, datatype: &str) -> bool {
+        if datatype != XSD_DATE_TIME_STAMP {
+            return true;
+        }
+        match s.split_once('T').and_then(|(_, rest)| rest.find(['Z', '+', '-']).map(|i| &rest[i..])) {
+            Some(tz) => parse_tz(tz).is_some(),
+            None => false,
+        }
+    }
+
+    /// The value of an `xsd:dateTime` or `xsd:dateTimeStamp` lexical, `None` when ill-formed
+    /// (see [`datetime_facets_ok`](Self::datetime_facets_ok)) or not representable. Every
     /// datatype-aware dateTime parse goes through here: the load-time cache
     /// ([`Temporal::of_lit`]) and the engine's per-row comparison path must agree.
     pub fn parse_datetime_of(s: &str, datatype: &str) -> Option<Timeline> {
-        let tl = Timeline::parse_datetime(s)?;
-        if datatype == XSD_DATE_TIME_STAMP && tl.tz.is_none() {
+        if !Timeline::datetime_facets_ok(s, datatype) {
             return None;
         }
-        Some(tl)
+        Timeline::parse_datetime(s)
     }
 
     pub fn parse_date(s: &str) -> Option<Timeline> {
@@ -83,7 +99,7 @@ impl Timeline {
         } else {
             (s, None)
         };
-        Some(Timeline { secs: parse_civil_date(date)? * 86_400, frac: 0.0, tz })
+        Some(Timeline { secs: parse_civil_date(date)?.checked_mul(86_400)?, frac: 0.0, tz })
     }
 
     /// The absolute instant (treating an absent timezone as UTC) in seconds.
@@ -171,7 +187,7 @@ pub fn parse_tz(tz: &str) -> Option<i64> {
     let (sign, hm) = tz.split_at(1);
     let (h, m) = hm.split_once(':')?;
     let (h, m): (i64, i64) = (h.parse().ok()?, m.parse().ok()?);
-    let off = h * 3600 + m * 60;
+    let off = h.checked_mul(3600)?.checked_add(m.checked_mul(60)?)?;
     Some(if sign == "-" { -off } else { off })
 }
 
@@ -186,12 +202,13 @@ pub fn parse_civil_date(date: &str) -> Option<i64> {
     if p.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
         return None;
     }
-    let y = if m <= 2 { y - 1 } else { y };
+    let y = if m <= 2 { y.checked_sub(1)? } else { y };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some(era * 146_097 + doe - 719_468)
+    // Checked: an out-of-range year has no representable day count (None, not overflow).
+    era.checked_mul(146_097)?.checked_add(doe - 719_468)
 }
 
 /// The datatype family of a cached temporal value. `xsd:dateTime` and
@@ -534,6 +551,23 @@ mod tests {
         assert!(Temporal::of_lit("2020-01-01T00:00:00-05:00", XSD_DATE_TIME_STAMP).is_some());
         assert!(Timeline::parse_datetime_of("2020-01-01T00:00:00", XSD_DATE_TIME_STAMP).is_none());
         assert!(Timeline::parse_datetime_of("2020-01-01T00:00:00", XSD_DATE_TIME).is_some());
+        // The facet check is lexical: it needs no representable instant.
+        assert!(Timeline::datetime_facets_ok("1000000000000-01-01T00:00:00Z", XSD_DATE_TIME_STAMP));
+        assert!(!Timeline::datetime_facets_ok("1000000000000-01-01T00:00:00", XSD_DATE_TIME_STAMP));
+        assert!(Timeline::datetime_facets_ok("1000000000000-01-01T00:00:00", XSD_DATE_TIME));
+    }
+
+    /// An instant outside the i64-seconds range is unrepresentable (`None`), not an overflow.
+    #[test]
+    fn out_of_range_years_do_not_overflow() {
+        for dt in [XSD_DATE_TIME, XSD_DATE_TIME_STAMP] {
+            assert!(Timeline::parse_datetime_of("1000000000000-01-01T00:00:00Z", dt).is_none());
+            assert!(Timeline::parse_datetime_of("-9223372036854775808-01-01T00:00:00Z", dt).is_none());
+        }
+        assert!(Timeline::parse_date("1000000000000000-01-01").is_none());
+        assert!(parse_civil_date("9223372036854775807-01-01").is_none());
+        assert_eq!(parse_tz("+9223372036854775807:00"), None);
+        assert!(Timeline::parse_datetime_of("2020-01-01T9223372036854775807:00:00Z", XSD_DATE_TIME).is_none());
     }
 
     /// `Timeline::instant()` normalises a zoned time to UTC (subtracting the offset) and treats

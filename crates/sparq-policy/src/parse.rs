@@ -22,6 +22,7 @@ use crate::model::{
     Operator, Policy, Rule, Value, ODRL_NS,
 };
 use oxrdf::{Literal, Term};
+use sparq_core::temporal::Timeline;
 use sparq_core::Graph;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -534,6 +535,19 @@ fn fold_rights(
                 members.push(m);
             }
         }
+    }
+    // An ill-typed temporal operand (a timezone-free `xsd:dateTimeStamp`, #3902) has no value.
+    // Classifying it by its lexical alone would compare a literal the datatype rejects; making
+    // the one constraint unsatisfiable would disable a prohibition it gates. So, like the
+    // malformed collections above, the policy is refused (fail-closed on both rule kinds).
+    if let Some(bad) = members.iter().find_map(|m| match m {
+        Term::Literal(l) if !Timeline::datetime_facets_ok(l.value(), l.datatype().as_str()) => Some(l),
+        _ => None,
+    }) {
+        return Err(format!(
+            "a constraint's rightOperand {bad} is not a valid value of its datatype \
+             (xsd:dateTimeStamp requires a timezone), so the policy is refused (fail-closed)"
+        ));
     }
     Ok(match members.len() {
         0 => None, // no rightOperand object at all → missing-right (unsatisfiable)

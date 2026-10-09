@@ -982,6 +982,7 @@ pub(crate) fn consolidate(mut st: SpillInterner, dir: &Path, tmp: &Path, cfg: &S
     let mut numer_w = BufWriter::new(std::fs::File::create(dir.join("numerics.bin")).map_err(io_err)?);
     numer_w.write_all(&crate::NUMERICS_MAGIC).map_err(io_err)?;
     let mut tempi_w = BufWriter::new(std::fs::File::create(dir.join("temporals.bin")).map_err(io_err)?);
+    tempi_w.write_all(&crate::TEMPORALS_MAGIC).map_err(io_err)?;
     let flags_path = tmp.join("dsp-tflags.bin");
     let mut flags_w = BufWriter::new(std::fs::File::create(&flags_path).map_err(io_err)?);
     // The hash-pair sorter is alive across the WHOLE shard loop, concurrently with each

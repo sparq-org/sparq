@@ -74,11 +74,11 @@ Recurring invariant shorthands used below:
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
 | `src/lib.rs:285` | slice reinterpret (read) | page-align; `numerics.bin` is whole f64 | mmap base ≥ 8-byte f64 align; `n = len/8`. Mapped-file open validates size == `dict.len()*8`. |
-| `src/lib.rs:389` | ptr read | page-align; instant section is `n` f64 at offset 0 | `i < n` checked at the call; f64 at `base+i`. |
-| `src/lib.rs:456` | slice reinterpret (read) | page-align; instants are `n` f64 at offset 0 | `n = mapped_len`; materialises the cells. |
+| `src/lib.rs:389` | ptr read | page-align + 8-byte header; instant section is `n` f64 at offset 8 | `i < n` checked at the call; f64 at `base+8+i*8`. |
+| `src/lib.rs:456` | slice reinterpret (read) | page-align + 8-byte header; instants are `n` f64 at offset 8 | `n = mapped_len`; materialises the cells. |
 | `src/lib.rs:577` | slice reinterpret (write) | POD-bytes | reinterpret the f64 column as bytes to write `temporals.bin`. |
 | `src/lib.rs:1584` | `Mmap::map` | own-for-lifetime | `numerics.bin` opened only if `size == dict.len()*8` (length pre-validated). |
-| `src/lib.rs:1592` | `Mmap::map` | own-for-lifetime | `temporals.bin` opened only if `size == dict.len()*9` (length pre-validated). |
+| `src/lib.rs:1592` | `Mmap::map` | own-for-lifetime | `temporals.bin` opened only if `size == 8 + dict.len()*9` (length pre-validated) and its 8-byte `TEMPORALS_MAGIC` header matches; the instant and flag reads skip that header (#3902). |
 | `src/lib.rs:1885` | slice reinterpret (read) | page-align; perm0 is whole `[u32;3]` rows | `n` from `map_perm`; map outlives the loop. Written by us above. |
 | `src/lib.rs:2303` | slice reinterpret (read) | page-align; perm0 is whole `[u32;3]` rows | same as 1885 (external-build path). |
 | `src/lib.rs:3728` | slice reinterpret (write) | POD-bytes | reinterpret the f64 numerics cache as bytes to write `numerics.bin`. |
