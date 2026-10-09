@@ -15,7 +15,7 @@
 //! withdraw what it asked. Both are stored through the [`Store`], so they survive a restart on a
 //! durable backend, and kept in memory for authorization.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::RwLock;
 
 use axum::http::{header, Method, StatusCode};
@@ -24,9 +24,10 @@ use bytes::Bytes;
 use serde_json::{json, Value};
 
 use super::{
-    has_lws_context, has_type, jose, json_is_uri, method_not_allowed, problem, service_links,
-    service_linkset, service_listing, set, Agent, LwsConfig, LwsRequest, LwsState, ResourceMeta,
-    FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX, REQUESTS_PATH,
+    has_lws_context, has_type, is_uri, jose, json_is_uri, method_not_allowed, problem,
+    service_links, service_linkset, service_listing, set, subject_tokens, Agent, LwsConfig,
+    LwsRequest, LwsState, ResourceMeta, FOAF_AGENT, GRANTS_PATH, LWS_JSON, LWS_NS, META_SUFFIX,
+    REQUESTS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -424,6 +425,8 @@ pub struct Record {
 pub struct AccessStore {
     grants: RwLock<BTreeMap<String, Record>>,
     requests: RwLock<BTreeMap<String, Record>>,
+    /// The owner's inbox as last looked up, and when (see [`owner_inbox_cached`]).
+    owner_inbox: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
     grants_etag: RwLock<String>,
     requests_etag: RwLock<String>,
     /// The share of the store access requests may take (see [`super::Quota`]).
@@ -459,6 +462,7 @@ impl AccessStore {
         let me = Self {
             grants: RwLock::new(BTreeMap::new()),
             requests: RwLock::new(BTreeMap::new()),
+            owner_inbox: Default::default(),
             grants_etag: RwLock::new(new_etag()),
             requests_etag: RwLock::new(new_etag()),
             request_quota: super::Quota::new(MAX_REQUESTS, MAX_REQUESTS_PER_AUTHOR),
@@ -595,7 +599,53 @@ pub async fn allowed<S: Store + 'static>(
     decide(state, action, uri, agent, &meta, None).await
 }
 
-fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
+/// What a decision about a resource rests on, taken while the resource is there: its metadata
+/// and its format. A Delete is announced once the resource is gone, so each delivery of it is
+/// authorized against this snapshot (and the grants as they stand then).
+#[derive(Debug, Clone, Default)]
+pub struct Snapshot {
+    meta: ResourceMeta,
+    format: Option<String>,
+}
+
+impl Snapshot {
+    /// The state of the resource at `uri` now.
+    pub async fn take<S: Store + 'static>(
+        state: &LwsState<S>,
+        uri: &str,
+    ) -> Result<Self, ServerError> {
+        Ok(Self {
+            meta: state.resource_meta(uri).await?,
+            format: format_of(state, uri).await?,
+        })
+    }
+}
+
+/// As [`allowed`], against `snapshot` rather than the resource as it is now; the grants are those
+/// in force now.
+pub async fn allowed_as<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+    snapshot: &Snapshot,
+) -> bool {
+    if state.cfg.open || is_owner(state, agent) {
+        return true;
+    }
+    decide(
+        state,
+        action,
+        uri,
+        agent,
+        &snapshot.meta,
+        Some(snapshot.format.clone()),
+    )
+    .await
+    .unwrap_or(false)
+}
+
+pub(crate) fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
     let subject = agent.subject.as_deref();
     subject.is_some() && subject == state.cfg.owner.as_deref()
 }
@@ -783,6 +833,20 @@ pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
         });
     }
     Some(out)
+}
+
+/// The assignees an access document's policies name.
+fn assignees(document: &Value) -> Vec<String> {
+    document
+        .get("access")
+        .and_then(Value::as_array)
+        .map(|ps| {
+            ps.iter()
+                .filter_map(|p| p.get("assignee").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The access grant service and the access request service.
@@ -1062,6 +1126,16 @@ async fn create<S: Store + 'static>(
         author: agent.subject.clone(),
         etag: new_etag(),
     };
+    // "When an inbox property is present on an access request or access grant, the server SHOULD
+    // deliver notifications to that endpoint" (section 11.6).
+    let own_inbox = body
+        .get("inbox")
+        .and_then(Value::as_str)
+        .filter(|i| is_uri(i))
+        .map(str::to_string);
+    let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
+    // The record is put in force, counted and announced in one step, once it is stored: a client
+    // that goes away after the store committed cannot keep it from being announced.
     let register = {
         let state = state.clone();
         move || {
@@ -1074,6 +1148,7 @@ async fn create<S: Store + 'static>(
             state.access.bump(grants);
             // Counted as registered from here on.
             drop(slot);
+            announce(&state, grants, &document, own_inbox, activity);
         }
     };
     let created = super::create_record(
@@ -1093,6 +1168,123 @@ async fn create<S: Store + 'static>(
     set(resp.headers_mut(), header::LOCATION, &iri);
     service_links(&state.cfg, resp.headers_mut(), &iri, &container);
     resp
+}
+
+/// Announce a new grant or request (`document`, by `activity`): at its own inbox, and
+/// - for a grant, "the requesting agent SHOULD be notified at the inbox specified in the
+///   associated access request." The draft gives a grant no link to its request, so the
+///   associated requests are those by or for an agent the grant names.
+/// - for a request, "the storage controller SHOULD be notified": at the inbox the owner's
+///   identity document names, looked up in the background. The lookup holds a place in the
+///   delivery queue (so lookups are as bounded as deliveries), and lookups share one fetch and
+///   its answer (see [`owner_inbox_cached`]).
+fn announce<S: Store + 'static>(
+    state: &LwsState<S>,
+    grants: bool,
+    document: &Value,
+    own_inbox: Option<String>,
+    activity: Value,
+) {
+    let mut inboxes: BTreeSet<String> = own_inbox.into_iter().collect();
+    if grants {
+        inboxes.extend(requester_inboxes(state, document));
+    } else {
+        let find = {
+            let state = state.clone();
+            async move { owner_inbox_cached(&state).await }
+        };
+        state.notify.deliver_found(state, activity.clone(), find);
+    }
+    for inbox in inboxes {
+        state.notify.deliver(state, &inbox, activity.clone(), None);
+    }
+}
+
+/// The inboxes of the access requests associated with `grant`: those an agent one of its policies
+/// is assigned to made itself. A request that only names an assignee is not that agent's word
+/// (anyone may make one, with any inbox), so its inbox is not told; public grants name no
+/// requester.
+fn requester_inboxes<S: Store + 'static>(state: &LwsState<S>, grant: &Value) -> BTreeSet<String> {
+    let grantees: BTreeSet<String> = assignees(grant)
+        .into_iter()
+        .filter(|a| a != FOAF_AGENT)
+        .collect();
+    state
+        .access
+        .requests
+        .read()
+        .expect("lock")
+        .values()
+        .filter(|r| r.author.as_ref().is_some_and(|a| grantees.contains(a)))
+        .filter_map(|r| r.document.get("inbox").and_then(Value::as_str))
+        .filter(|i| is_uri(i))
+        .map(str::to_string)
+        .collect()
+}
+
+/// How long a looked-up owner inbox (or its absence) is reused.
+const OWNER_INBOX_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// [`owner_inbox`], looked up once at a time and reused for [`OWNER_INBOX_TTL`]: a burst of
+/// access requests makes one fetch of the owner's identity document, not one each.
+async fn owner_inbox_cached<S: Store + 'static>(state: &LwsState<S>) -> Option<String> {
+    let mut cached = state.access.owner_inbox.lock().await;
+    if let Some((at, inbox)) = cached.as_ref() {
+        if at.elapsed() < OWNER_INBOX_TTL {
+            return inbox.clone();
+        }
+    }
+    let inbox = owner_inbox(state).await;
+    *cached = Some((std::time::Instant::now(), inbox.clone()));
+    inbox
+}
+
+/// The storage controller's inbox: the `inbox` (or `ldp:inbox`) its identity document names.
+/// Only an http(s) owner with a JSON(-LD) document has a discoverable one; a did:key owner, a
+/// Turtle-only profile or an unreachable document has none, and the notification is skipped.
+async fn owner_inbox<S: Store + 'static>(state: &LwsState<S>) -> Option<String> {
+    let owner = state.cfg.owner.as_deref()?;
+    if !(owner.starts_with("https://") || owner.starts_with("http://")) {
+        return None;
+    }
+    let (_, body) = subject_tokens::fetch(
+        &state.cfg,
+        &state.http,
+        owner,
+        "application/ld+json, application/json;q=0.9",
+    )
+    .await
+    .ok()?;
+    let doc: Value = serde_json::from_slice(&body).ok()?;
+    inbox_of(&doc, owner)
+}
+
+/// The inbox a JSON(-LD) identity document names for `subject`: on the top-level node, or on the
+/// `@graph` node whose id is the subject.
+pub fn inbox_of(doc: &Value, subject: &str) -> Option<String> {
+    let node_inbox = |n: &Value| {
+        ["inbox", "ldp:inbox", "http://www.w3.org/ns/ldp#inbox"]
+            .iter()
+            .find_map(|k| match n.get(*k)? {
+                Value::String(s) => Some(s.clone()),
+                Value::Object(o) => o
+                    .get("id")
+                    .or_else(|| o.get("@id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                _ => None,
+            })
+            .filter(|i| is_uri(i))
+    };
+    node_inbox(doc).or_else(|| {
+        doc.get("@graph")?
+            .as_array()?
+            .iter()
+            .filter(|n| {
+                n.get("id").or_else(|| n.get("@id")).and_then(Value::as_str) == Some(subject)
+            })
+            .find_map(node_inbox)
+    })
 }
 
 #[cfg(test)]
@@ -1222,6 +1414,30 @@ mod tests {
         // Values name resources, not their members: no recursion.
         assert!(!any.covers("https://s/c/e"));
         assert!(!any.covers("https://s/other"));
+    }
+
+    #[test]
+    fn identity_document_inboxes() {
+        let me = "https://alice.example/profile#me";
+        assert_eq!(
+            inbox_of(
+                &json!({"id": me, "inbox": "https://alice.example/inbox/"}),
+                me
+            )
+            .as_deref(),
+            Some("https://alice.example/inbox/")
+        );
+        assert_eq!(
+            inbox_of(&json!({"ldp:inbox": {"@id": "https://a/i/"}}), me).as_deref(),
+            Some("https://a/i/")
+        );
+        let graph = json!({"@graph": [
+            {"@id": "https://alice.example/profile", "inbox": "https://wrong/"},
+            {"@id": me, "http://www.w3.org/ns/ldp#inbox": {"@id": "https://a/i/"}}
+        ]});
+        assert_eq!(inbox_of(&graph, me).as_deref(), Some("https://a/i/"));
+        assert_eq!(inbox_of(&json!({"inbox": "relative/"}), me), None);
+        assert_eq!(inbox_of(&json!({"name": "Alice"}), me), None);
     }
 
     /// Review finding: a targeted policy was never held to its grant's storage, so a grant
@@ -1889,6 +2105,206 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(state.access.grant_policies().is_empty());
+    }
+
+    #[tokio::test]
+    async fn grants_reach_the_inboxes_of_their_requests() {
+        let (state, _) = test_store::state(100).await;
+        let alice = Agent {
+            subject: Some("https://alice.example/#me".into()),
+            client: None,
+        };
+        for (assignee, inbox) in [
+            ("https://alice.example/#me", "https://alice.example/inbox/"),
+            ("https://bob.example/#me", "https://bob.example/inbox/"),
+        ] {
+            let req = test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[],
+                &access_doc("AccessRequest", assignee, Some(inbox)),
+            );
+            assert_eq!(
+                handle(&state, &req, &alice).await.status(),
+                StatusCode::CREATED
+            );
+        }
+        let grant: Value =
+            serde_json::from_str(&access_doc("AccessGrant", "https://bob.example/#me", None))
+                .unwrap();
+        // Review finding: a request Alice made naming Bob, with an inbox of her choosing, was
+        // told of Bob's grant. Only the requests Bob made himself are.
+        assert!(requester_inboxes(&state, &grant).is_empty());
+        let bob = Agent {
+            subject: Some("https://bob.example/#me".into()),
+            client: None,
+        };
+        let req = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc(
+                "AccessRequest",
+                "https://bob.example/#me",
+                Some("https://bob.example/own-inbox/"),
+            ),
+        );
+        assert_eq!(
+            handle(&state, &req, &bob).await.status(),
+            StatusCode::CREATED
+        );
+        assert_eq!(
+            requester_inboxes(&state, &grant)
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec!["https://bob.example/own-inbox/".to_string()]
+        );
+        let alice_grant: Value = serde_json::from_str(&access_doc(
+            "AccessGrant",
+            "https://alice.example/#me",
+            None,
+        ))
+        .unwrap();
+        // Alice authored both requests, so both are hers to hear about.
+        assert_eq!(requester_inboxes(&state, &alice_grant).len(), 2);
+        // A public grant names no requester.
+        let public: Value =
+            serde_json::from_str(&access_doc("AccessGrant", FOAF_AGENT, None)).unwrap();
+        assert!(requester_inboxes(&state, &public).is_empty());
+    }
+
+    /// Review finding: a grant or request was announced by the handler after the store
+    /// committed it, so a client that went away (or a request timeout) in between left a stored,
+    /// in-force record nobody was told about. It is announced in the step that registers it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stored_records_are_announced_when_the_client_is_gone() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = {
+            let delivered = delivered.clone();
+            axum::Router::new().route(
+                "/inbox",
+                axum::routing::post(move || {
+                    let delivered = delivered.clone();
+                    async move {
+                        delivered.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let (state, store) = test_store::state(100).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let inbox = format!("http://{addr}/inbox");
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &access_doc("AccessGrant", "https://a/", Some(&inbox)),
+        );
+        let client = {
+            let state = state.clone();
+            tokio::spawn(async move { handle(&state, &req, &Agent::anonymous()).await.status() })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        client.abort();
+        assert!(client.await.is_err(), "the client went away mid-create");
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if delivered.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(state.access.grant_policies().len(), 1);
+        assert_eq!(delivered.load(Ordering::SeqCst), 1);
+    }
+
+    /// Review finding: every access request spawned its own fetch of the owner's identity
+    /// document, outside the bounded delivery queue. The lookup now takes a place in the queue
+    /// first, and lookups share one fetch.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn owner_lookups_are_bounded_and_shared() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        let (fetched, delivered) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = {
+            let (fetched, delivered) = (fetched.clone(), delivered.clone());
+            axum::Router::new()
+                .route(
+                    "/profile",
+                    axum::routing::get(move || {
+                        let fetched = fetched.clone();
+                        async move {
+                            fetched.fetch_add(1, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(300)).await;
+                            (
+                                [(header::CONTENT_TYPE, "application/json")],
+                                json!({"inbox": format!("http://{addr}/inbox")}).to_string(),
+                            )
+                        }
+                    }),
+                )
+                .route(
+                    "/inbox",
+                    axum::routing::post(move || {
+                        let delivered = delivered.clone();
+                        async move {
+                            delivered.fetch_add(1, Ordering::SeqCst);
+                            StatusCode::NO_CONTENT
+                        }
+                    }),
+                )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.owner = Some(format!("http://{addr}/profile#me"));
+        cfg.delivery = super::super::notify::DeliveryLimits {
+            queue: 3,
+            workers: 4,
+            per_inbox: 4,
+        };
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        for _ in 0..10 {
+            let req = test_store::request(
+                Method::POST,
+                REQUESTS_PATH,
+                &[],
+                &access_doc("AccessRequest", "https://bob.example/#me", None),
+            );
+            let resp = handle(&state, &req, &Agent::anonymous()).await;
+            assert_eq!(resp.status(), StatusCode::CREATED);
+        }
+        // Three admitted (the queue's limit), the rest dropped and counted.
+        assert_eq!(state.notify.dropped(), 7);
+        for _ in 0..200 {
+            if delivered.load(Ordering::SeqCst) >= 3 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(delivered.load(Ordering::SeqCst), 3);
+        // One fetch served them all.
+        assert_eq!(fetched.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_owner_without_an_identity_document_has_no_inbox() {
+        let (state, _) = test_store::state(100).await;
+        assert_eq!(owner_inbox(&state).await, None);
     }
 
     /// Sweep finding: an `isAnyOf` type constraint compared every type of the resource with

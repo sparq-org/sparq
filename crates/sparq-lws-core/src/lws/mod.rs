@@ -17,7 +17,8 @@
 //!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
 //!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
 //!   it issues ([`tokens`]);
-//! - **access grants and access requests** ([`access`]): the LWS Access Profile.
+//! - **access grants and access requests** ([`access`]): the LWS Access Profile;
+//! - **webhook notifications** ([`notify`]), signed per RFC 9421.
 //!
 //! Authorization: the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, the agent that
 //! created a resource may do anything with it, and anyone else what an access grant gives them.
@@ -26,6 +27,7 @@
 pub mod access;
 pub mod authz_server;
 pub mod jose;
+pub mod notify;
 pub mod resources;
 pub mod subject_tokens;
 pub mod tokens;
@@ -64,6 +66,7 @@ pub const PROBLEM_JSON: &str = "application/problem+json";
 /// slug never starts with a dot).
 pub const GRANTS_PATH: &str = "/.lws/grants/";
 pub const REQUESTS_PATH: &str = "/.lws/requests/";
+pub const SUBSCRIPTIONS_PATH: &str = "/.lws/subscriptions/";
 pub const AS_METADATA_PATH: &str = "/.well-known/lws-configuration";
 pub const AS_METADATA_OAUTH_PATH: &str = "/.well-known/oauth-authorization-server";
 pub const AS_JWKS_PATH: &str = "/.well-known/lws/jwks";
@@ -89,15 +92,20 @@ pub struct LwsConfig {
     /// The authorization server's previous signing key, after a rotation: published in the JWKS,
     /// and tokens it signed (named by its `kid`) still validate until they expire.
     pub as_previous_key: Option<jose::VerifyKey>,
+    /// Signs webhook notification deliveries; published in the storage description.
+    pub notify_key: jose::EcKey,
     /// Lifetime of issued access tokens, in seconds.
     pub token_ttl_secs: i64,
-    /// Let the authorization server reach `http:` and loopback or private addresses (identity
-    /// documents). Development and conformance testing only.
+    /// Let the authorization server and the notification sender reach `http:` and loopback or
+    /// private addresses (identity documents, webhook inboxes). Development and
+    /// conformance testing only.
     pub allow_insecure_fetch: bool,
     /// Largest request body read, in bytes; a larger one is refused with 413 before it is
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
     pub max_body: usize,
+    /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
+    pub delivery: notify::DeliveryLimits,
 }
 
 impl LwsConfig {
@@ -110,9 +118,11 @@ impl LwsConfig {
             page_size: 100,
             as_key: jose::EcKey::generate_thumbprinted(),
             as_previous_key: None,
+            notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
+            delivery: notify::DeliveryLimits::default(),
         }
     }
 
@@ -121,12 +131,16 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_OPEN=1` (or `SOLID_SERVER_OPEN_MODE=1`): no authentication (development
     ///   only);
     /// - `SOLID_SERVER_LWS_PAGE_SIZE`: members per container page (default 100);
+    /// - `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`,
+    ///   `SOLID_SERVER_LWS_DELIVERY_PER_INBOX`: webhook delivery bounds (see
+    ///   [`notify::DeliveryLimits`]);
     /// - `SOLID_SERVER_LWS_AS_KEY_FILE`: a private P-256 JWK that signs access tokens, created
     ///   with a fresh key when the file does not exist (default: a fresh key per boot, so tokens do
     ///   not survive a restart);
     /// - `SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE`: the signing key the AS key replaced (a public
     ///   or private P-256 JWK, with a `kid` that differs from the current key's), kept for
     ///   validation and the JWKS during a rotation;
+    /// - `SOLID_SERVER_LWS_NOTIFY_KEY_FILE`: the same for the key that signs notifications;
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
@@ -145,7 +159,7 @@ impl LwsConfig {
         cfg.owner = var("SOLID_SERVER_LWS_OWNER");
         // `SOLID_SERVER_OPEN_MODE` is the name the lws-contrib dagger-workspace sparq cell sets.
         cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
-        // Open mode is for local test harnesses, whose documents are on private hosts.
+        // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
         cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
@@ -154,6 +168,25 @@ impl LwsConfig {
                 .filter(|n| *n > 0)
                 .ok_or("SOLID_SERVER_LWS_PAGE_SIZE must be a positive integer")?;
         }
+        let positive = |k: &str, into: &mut usize| -> Result<(), String> {
+            if let Some(n) = var(k) {
+                *into = n
+                    .parse()
+                    .ok()
+                    .filter(|n| *n > 0)
+                    .ok_or(format!("{k} must be a positive integer"))?;
+            }
+            Ok(())
+        };
+        positive("SOLID_SERVER_LWS_DELIVERY_QUEUE", &mut cfg.delivery.queue)?;
+        positive(
+            "SOLID_SERVER_LWS_DELIVERY_WORKERS",
+            &mut cfg.delivery.workers,
+        )?;
+        positive(
+            "SOLID_SERVER_LWS_DELIVERY_PER_INBOX",
+            &mut cfg.delivery.per_inbox,
+        )?;
         if let Some(n) = var("SOLID_SERVER_LWS_TOKEN_TTL_SECS") {
             cfg.token_ttl_secs = n
                 .parse()
@@ -189,6 +222,9 @@ impl LwsConfig {
                 .map_err(|e| format!("SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE: {e}"))?;
             cfg.as_key = current;
             cfg.as_previous_key = Some(previous);
+        }
+        if let Some(k) = key("SOLID_SERVER_LWS_NOTIFY_KEY_FILE", Some("notify-key"))? {
+            cfg.notify_key = k;
         }
         Ok(cfg)
     }
@@ -241,7 +277,7 @@ pub fn fetch_client(cfg: &LwsConfig) -> Result<reqwest::Client, String> {
 }
 
 /// Resolves names to their public addresses only (see [`subject_tokens::is_forbidden_ip`]), so an
-/// outbound request (a fetch) cannot be pointed at the server's own
+/// outbound request (a fetch or a notification delivery) cannot be pointed at the server's own
 /// network by a name that resolves there.
 pub struct PublicOnlyResolver;
 
@@ -314,7 +350,7 @@ fn rotated_as_keys(
 
 /// Whether an address is one the server must not be made to reach: anything but a global unicast
 /// address. The one predicate every outbound request uses: identity documents, OpenID Providers,
-/// and JWKS alike.
+/// JWKS and webhook inboxes alike.
 pub fn is_forbidden_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
@@ -446,6 +482,7 @@ pub struct Inner<S: Store> {
     pub store: S,
     pub cfg: LwsConfig,
     pub access: access::AccessStore,
+    pub notify: notify::Notifier,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
@@ -478,7 +515,7 @@ impl<S: Store + 'static> LwsState<S> {
     }
 
     /// Build the state: ensure the storage root and the service containers exist, and load the
-    /// stored access grants and requests.
+    /// stored access grants, requests and subscriptions.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
@@ -493,11 +530,13 @@ impl<S: Store + 'static> LwsState<S> {
                 .map_err(|e| format!("store: {e}"))?;
         }
         let access = access::AccessStore::load(&store, &cfg).await?;
+        let notify = notify::Notifier::load(&store, &cfg).await?;
         Ok(Self {
             inner: Arc::new(Inner {
                 store,
                 cfg,
                 access,
+                notify,
                 http,
                 locks: Default::default(),
                 set_aside_bytes: Default::default(),
@@ -728,7 +767,7 @@ impl LwsRequest {
 
 /// Remove the member `iri` of `parent` (if any): its record and its parent's membership edge in
 /// one store step, so no failure can leave a live record its container no longer lists. Every
-/// removal of a member goes through here: resources and service records.
+/// removal of a member goes through here: resources, service records, expired subscriptions.
 /// A container that is not empty is not removed ([`crate::store::DeleteOutcome::NotEmpty`]).
 pub(crate) async fn remove_member<S: Store>(
     store: &S,
@@ -1050,7 +1089,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     }
 }
 
-/// Delete the stored record `iri` of a service container (a grant or a request).
+/// Delete the stored record `iri` of a service container (a grant, a request, a subscription).
 /// The index commit is the deletion point: when the store reports a failure but the record no
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
 /// record is gone.
@@ -1107,7 +1146,7 @@ pub(crate) async fn retype<S: Store>(
     Err(last)
 }
 
-/// Store a new record (an access grant or request) at `iri` in `container` and,
+/// Store a new record (an access grant or request, a subscription) at `iri` in `container` and,
 /// once it is stored, put it in force in memory with `register`. Every record in the store is
 /// loaded, and so in force, at the next boot, so the two never part:
 ///
@@ -1218,7 +1257,7 @@ where
         .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
 }
 
-/// The preconditions of a create in a service container (grants, requests),
+/// The preconditions of a create in a service container (grants, requests, subscriptions),
 /// evaluated against `listing` with the container held exclusively: `Ok(None)` when the create is
 /// unconditional, `Ok(Some(guard))` when its preconditions hold (the guard is passed on to
 /// [`create_record`], so no member arrives or leaves until the new one is registered), and the
@@ -1249,7 +1288,7 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
 }
 
 /// Parse a JSON body that anyone authenticated may send for a record of their own (an access
-/// request), refusing it with 413 before any parsing when it is over `limit`
+/// request, a subscription), refusing it with 413 before any parsing when it is over `limit`
 /// bytes: what such a record costs is bounded by its size, never by what parsing it builds.
 #[allow(clippy::result_large_err)]
 pub(crate) fn bounded_json(body: &[u8], limit: usize, what: &str) -> Result<Value, Response> {
@@ -1263,8 +1302,8 @@ pub(crate) fn bounded_json(body: &[u8], limit: usize, what: &str) -> Result<Valu
         .map_err(|_| problem(StatusCode::BAD_REQUEST, Some("the body is not JSON")))
 }
 
-/// The share of the store that records anyone authenticated may create (access requests) can
-/// take: at most `total` of them, and `per_author` by one agent. A create
+/// The share of the store that records anyone authenticated may create (access requests,
+/// subscriptions) can take: at most `total` of them, and `per_author` by one agent. A create
 /// [`Quota::reserve`]s its place before any storage work, under the same lock as every other
 /// reservation, and holds the [`QuotaSlot`] until its record is registered (or the create
 /// fails), so concurrent creates cannot both take the last place.
@@ -1419,11 +1458,13 @@ pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Rout
 }
 
 /// The largest body a request to `path` may carry: the service routes that anyone may send to
-/// (access requests) are held to their own limits while the body is
+/// (access requests, subscriptions) are held to their own limits while the body is
 /// read, so no more than that is ever buffered for them; everything else to `max_body`.
 fn body_limit(path: &str, max_body: usize) -> usize {
     let limit = if path.starts_with(REQUESTS_PATH) {
         access::MAX_REQUEST_BYTES
+    } else if path.starts_with(SUBSCRIPTIONS_PATH) {
+        notify::MAX_SUBSCRIPTION_BYTES
     } else if path.starts_with(GRANTS_PATH) {
         access::MAX_GRANT_BYTES
     } else {
@@ -1527,6 +1568,12 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    if path.starts_with(SUBSCRIPTIONS_PATH) {
+        if let Some(unavailable) = resources::unavailable(state, &req) {
+            return unavailable;
+        }
+        return notify::handle(state, &req, &agent).await;
+    }
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
         if let Some(unavailable) = resources::unavailable(state, &req) {
             return unavailable;
@@ -1593,8 +1640,8 @@ pub fn add_link(headers: &mut HeaderMap, target: &str, rel: &str, media_type: Op
 
 // ---- service containers ----
 //
-// The access grant and access request services are LWS containers (access requests section
-// 11.5), held in memory rather than in the store. These
+// The access grant, access request and subscription services are LWS containers (access requests
+// section 11.5, webhook "Subscription Management"), held in memory rather than in the store. These
 // helpers give their listings what [`resources`] gives a stored container: content negotiation,
 // paging, an entity tag and the container links.
 
@@ -2579,6 +2626,7 @@ mod tests {
         };
         let routes = [
             ("POST", REQUESTS_PATH, access::MAX_REQUEST_BYTES),
+            ("POST", SUBSCRIPTIONS_PATH, notify::MAX_SUBSCRIPTION_BYTES),
             ("POST", GRANTS_PATH, access::MAX_GRANT_BYTES),
             ("POST", "/", max),
             ("PUT", "/x", max),
@@ -2602,7 +2650,7 @@ mod tests {
     }
 
     /// Review finding: a member's record and its parent's membership edge were removed in two
-    /// steps on some paths (service records), so a failure in between left
+    /// steps on some paths (service records, expired subscriptions), so a failure in between left
     /// a live record its container no longer listed. Every removal goes through
     /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
     #[tokio::test]
@@ -2639,7 +2687,7 @@ mod tests {
         let mut req = request(Method::DELETE, "/c/", &[("depth", "infinity")], "");
         req.headers.insert("depth", "infinity".parse().unwrap());
         assert_eq!(route(&state, req).await.status(), StatusCode::NO_CONTENT);
-        // A grant and an access request, each created and removed.
+        // A grant, an access request and a subscription, each created and removed.
         let storage = state.cfg.storage();
         let access = |kind: &str| {
             json!({
@@ -2650,9 +2698,13 @@ mod tests {
             })
             .to_string()
         };
+        let sub =
+            json!({"type": notify::WEBHOOK, "topic": [storage], "inbox": "https://inbox.example/"})
+                .to_string();
         for (path, body) in [
             (GRANTS_PATH, access("AccessGrant")),
             (REQUESTS_PATH, access("AccessRequest")),
+            (SUBSCRIPTIONS_PATH, sub.clone()),
         ] {
             let r = send(Method::POST, path.into(), LWS_JSON, body).await;
             assert_eq!(r.status(), StatusCode::CREATED, "{path}");
@@ -2660,6 +2712,22 @@ mod tests {
             let r = send(Method::DELETE, at, LWS_JSON, String::new()).await;
             assert!(r.status().is_success(), "{path}: {}", r.status());
         }
+        // A subscription that has expired by the next boot is removed then.
+        let r = send(Method::POST, SUBSCRIPTIONS_PATH.into(), LWS_JSON, sub).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let at = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let mut stored: notify::Subscription =
+            serde_json::from_slice(&state.store.read(&at).await.unwrap().body).unwrap();
+        stored.expires_at = Some(1);
+        state
+            .store
+            .write(&at, serde_json::to_vec(&stored).unwrap().into(), LWS_JSON)
+            .await
+            .unwrap();
+        notify::Notifier::load(&state.store, &state.cfg)
+            .await
+            .unwrap();
+        assert!(!state.store.exists(&at).await.unwrap());
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }
 

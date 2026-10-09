@@ -41,7 +41,7 @@ pub fn random_id() -> String {
     b64url(&random_bytes(16))
 }
 
-/// A P-256 key pair with a key id: signs access tokens.
+/// A P-256 key pair with a key id: signs access tokens and notification deliveries.
 #[derive(Clone)]
 pub struct EcKey {
     secret: SecretKey,
