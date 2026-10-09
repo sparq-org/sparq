@@ -491,6 +491,11 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
+                // A grant a change put back at start is still settling is not read at all: what
+                // it holds may be from before that change.
+                if grants && !visible(child.as_str()) {
+                    continue;
+                }
                 // Every stored request counts against the request quota, so one that cannot be read
                 // stops the server rather than leaving a place uncounted; a grant that cannot be
                 // read grants nothing.
@@ -515,7 +520,6 @@ impl AccessStore {
                         }
                         continue;
                     }
-                    Ok(_) if grants && !visible(child.as_str()) => continue,
                     Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
                     Err(e) if !grants => {
                         return Err(format!("store: access request {}: {e}", child.as_str()))
@@ -2320,5 +2324,218 @@ mod tests {
         store.fail_delete.store(false, Ordering::SeqCst);
         eventually("removed", || state.visible(&record)).await;
         assert!(!state.store.exists(&record).await.unwrap());
+    }
+
+    /// What a request answered, whether the grant was in force in the process that answered it,
+    /// and whether it is after that process stopped (at the store step the request's store died
+    /// at) and the server started again.
+    struct Crashed {
+        status: StatusCode,
+        body: String,
+        in_force_before: bool,
+        in_force_after: bool,
+        grants_stored_after: usize,
+    }
+
+    /// Create a grant (or, with `delete`, revoke one) on a fresh server whose store dies from its
+    /// `n`th step on (a process stop there: the runtime it ran on is shut down, with every task
+    /// it started), then start the server again over the store, well again. `None` once the
+    /// request takes fewer steps than `n`.
+    fn crash_at(n: usize, delete: bool) -> Option<Crashed> {
+        use std::sync::atomic::Ordering;
+        let runtime = || {
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap()
+        };
+        let first = runtime();
+        let (store, fired, status, body, in_force_before) = first.block_on(async {
+            let (state, store) = test_store::state(100).await;
+            let req = match delete {
+                true => {
+                    let location = granted(&state).await;
+                    let path = location.strip_prefix(&state.cfg.base_url).unwrap();
+                    test_store::request(Method::DELETE, path, &[], "")
+                }
+                false => test_store::request(
+                    Method::POST,
+                    GRANTS_PATH,
+                    &[],
+                    &access_doc("AccessGrant", "https://a/", None),
+                ),
+            };
+            *store.fail_step.lock().unwrap() = Some(n);
+            store.dead_after.store(true, Ordering::SeqCst);
+            let resp = handle(&state, &req, &Agent::anonymous()).await;
+            let fired = store.fail_step.lock().unwrap().take().is_none();
+            let status = resp.status();
+            let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            let body = String::from_utf8_lossy(&body).to_string();
+            let in_force = !state.access.grant_policies().is_empty();
+            (store, fired, status, body, in_force)
+        });
+        first.shutdown_timeout(std::time::Duration::from_secs(5));
+        if !fired {
+            return None;
+        }
+        store.dead_after.store(false, Ordering::SeqCst);
+        let second = runtime();
+        let (in_force_after, grants_stored_after) = second.block_on(async {
+            let state = restart(&store).await;
+            let container = state.cfg.absolute(GRANTS_PATH);
+            let stored = state.store.list_children(&container).await.unwrap().len();
+            (!state.access.grant_policies().is_empty(), stored)
+        });
+        Some(Crashed {
+            status,
+            body,
+            in_force_before,
+            in_force_after,
+            grants_stored_after,
+        })
+    }
+
+    /// Review finding (twice): a grant's create or revocation cut short could leave a grant in
+    /// force after a restart that the request had refused or revoked. For every store step a
+    /// create or a revocation takes, a process stop there leaves the grant in force after the
+    /// restart exactly when it was in force when the process stopped and the client was told
+    /// so: a create answered `201`, a revocation answered that the grant is still in force.
+    #[test]
+    fn a_stop_at_any_step_never_leaves_a_refused_or_revoked_grant_in_force() {
+        for delete in [false, true] {
+            let what = if delete { "revocation" } else { "create" };
+            let mut n = 0;
+            while let Some(c) = crash_at(n, delete) {
+                let kept = if delete {
+                    c.status.is_server_error() && c.body.contains("still in force")
+                } else {
+                    c.status == StatusCode::CREATED
+                };
+                assert_eq!(
+                    c.in_force_before, kept,
+                    "{what} stopped at step {n}: {} {}",
+                    c.status, c.body
+                );
+                assert_eq!(
+                    c.in_force_after, kept,
+                    "{what} stopped at step {n}, after the restart: {} {}",
+                    c.status, c.body
+                );
+                if !kept && !delete {
+                    assert_eq!(c.grants_stored_after, 0, "{what} at step {n} left a record");
+                }
+                if !kept && delete {
+                    assert_eq!(
+                        c.grants_stored_after, 0,
+                        "{what} at step {n} left the record"
+                    );
+                }
+                n += 1;
+            }
+            assert!(n > 2, "{what} took {n} steps");
+        }
+    }
+
+    /// Review finding: a start that recovered a change it could not yet put back, then failed
+    /// loading the access requests, left the task putting it back running; a later start's
+    /// writes could then be overwritten by it. Nothing is put back in the background until
+    /// every step of the start that can fail has succeeded.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_start_that_fails_loading_requests_leaves_nothing_running() {
+        let (state, store) = test_store::state(100).await;
+        let turtle = ("content-type", "text/turtle");
+        let post = test_store::request(
+            Method::POST,
+            "/",
+            &[turtle, ("slug", "d")],
+            "<> a <urn:A> .",
+        );
+        let resp = super::super::route(&state, post).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let d = state.cfg.absolute("/d");
+        // A change cut short (its process stopped) that cannot be put back yet.
+        let mut journal = state.journal();
+        journal.stage(&super::super::meta_key(&d)).await.unwrap();
+        journal.stage(&d).await.unwrap();
+        journal
+            .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
+            .await
+            .unwrap();
+        std::mem::forget(journal);
+        *store.fail_restore_of.lock().unwrap() = Some(d.clone());
+        // And an access request that cannot be read.
+        let requests = state.cfg.absolute(REQUESTS_PATH);
+        let request = format!("{requests}unreadable");
+        state
+            .store
+            .create_in_container(&requests, &request, Bytes::from_static(b"{}"), LWS_JSON)
+            .await
+            .unwrap();
+        *store.fail_read_of.lock().unwrap() = Some(request.clone());
+        drop(state);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        assert!(LwsState::new(store.clone(), cfg).await.is_err());
+        // Nothing of the failed start keeps trying to put `/d` back.
+        let tried = store.restores.load(std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert_eq!(
+            store.restores.load(std::sync::atomic::Ordering::SeqCst),
+            tried,
+            "still putting it back"
+        );
+        // Repaired; the next start puts `/d` back, and a write after it stands, however long a
+        // task of the failed start might wait.
+        *store.fail_read_of.lock().unwrap() = None;
+        *store.fail_restore_of.lock().unwrap() = None;
+        let state = restart(&store).await;
+        let put = test_store::request(Method::PUT, "/d", &[turtle], "<> a <urn:C> .");
+        let resp = super::super::route(&state, put).await;
+        assert!(resp.status().is_success(), "{}", resp.status());
+        let after = state.store.read(&d).await.unwrap().body;
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        assert_eq!(state.store.read(&d).await.unwrap().body, after);
+    }
+
+    /// Review finding: a start read a grant, then a change put back in the background removed it
+    /// and showed it again, and the start put the grant it had read in force. A grant still being
+    /// settled is not read, and nothing is put back until the grants are loaded.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_start_never_loads_a_grant_still_being_removed() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let location = granted(&state).await;
+        // A revocation cut short: its intent stored, the record not yet removed.
+        let remove = super::super::Undo::Remove {
+            iri: location.clone(),
+            parent: state.cfg.absolute(GRANTS_PATH),
+        };
+        let record = super::super::intents::mint(&state.cfg.storage());
+        super::super::intents::store(&state, &record, false, &[&remove], &[])
+            .await
+            .unwrap();
+        drop(state);
+        // The start cannot remove it at first; reading it (were it read) answers only once the
+        // removal could have landed in the background, and shown it again.
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() = Some((location.clone(), gate.clone()));
+        let starting = {
+            let store = store.clone();
+            tokio::spawn(async move { restart(&store).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        store.fail_delete.store(false, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        gate.add_permits(1);
+        let state = starting.await.unwrap();
+        assert!(state.access.grant_policies().is_empty(), "in force");
+        eventually("removed", || state.visible(&location)).await;
+        assert!(!state.store.exists(&location).await.unwrap());
+        assert!(state.access.grant_policies().is_empty());
     }
 }

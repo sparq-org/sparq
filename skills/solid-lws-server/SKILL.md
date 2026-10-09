@@ -296,8 +296,9 @@ What the server exposes, all discoverable from the storage description
   while it cannot be read, the create fails and the grant is settled from it later); a
   revocation first stores a durable intent to remove the record and marks it unsettled. So a
   crash or a store failure with an unknown outcome leaves the grant out of force, and the next
-  start removes it (before loading grants; a removal that fails is kept at in the background,
-  the grant out of force meanwhile). A revocation that can record neither removes the record
+  start removes it (before loading grants; a grant whose removal fails then is not read at all,
+  and is removed in the background, out of force meanwhile). Nothing a start puts back in the
+  background begins until every step of the start that can fail has succeeded. A revocation that can record neither removes the record
   at once or, failing that, leaves the grant in force and fails. Each record's own lock is
   held across its create and its revocation. A revocation whose removal fails takes the grant
   out of force at once and keeps removing it in the background.

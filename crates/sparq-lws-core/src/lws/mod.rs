@@ -512,11 +512,15 @@ impl<S: Store + 'static> LwsState<S> {
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
-        intents::recover(&state).await?;
+        // Nothing put back in the background starts until every step that can fail has
+        // succeeded: a start that fails leaves nothing running to put an old state back over a
+        // later start's writes, and grants are loaded while what is hidden stays hidden.
+        let hidden = intents::recover(&state).await?;
         let (loaded, stuck) =
             access::AccessStore::load_with(&state.store, &state.cfg, |iri| state.visible(iri))
                 .await?;
         state.access.replace(loaded);
+        state.settle_hidden(hidden);
         if !stuck.is_empty() {
             state.set_aside(Unsettled(stuck), ());
         }
@@ -624,9 +628,21 @@ impl<S: Store + 'static> LwsState<S> {
     /// any is put back: a change settled early touches the containers owed a touch that are
     /// visible ([`LwsState::touch_owed`]), and must not touch one that a later change in `all`
     /// would then restore to a date from before the touch.
+    #[cfg(test)]
     pub(crate) fn set_aside_all(&self, all: Vec<Unsettled>) {
+        self.settle_hidden(self.hide_all(all));
+    }
+
+    /// Hide each of `all`, to be put back by [`LwsState::settle_hidden`]: until then nothing of
+    /// them is put back, so what is not visible stays so.
+    pub(crate) fn hide_all(&self, all: Vec<Unsettled>) -> Hidden {
         let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
-        for (left, hidden) in all.into_iter().zip(hidden) {
+        Hidden(all.into_iter().zip(hidden).collect())
+    }
+
+    /// Put back, each in a task of its own, the changes [`LwsState::hide_all`] hid.
+    pub(crate) fn settle_hidden(&self, hidden: Hidden) {
+        for (left, hidden) in hidden.0 {
             self.settle_aside(left, hidden, ());
         }
     }
@@ -1003,6 +1019,10 @@ impl Undo {
 /// What is left to put back of a change that could not be put back after a few tries, the next
 /// to apply first.
 pub(crate) struct Unsettled(Vec<Undo>);
+
+/// Changes set aside and hidden ([`LwsState::hide_all`]), not yet being put back.
+#[must_use = "hidden changes are put back only by LwsState::settle_hidden"]
+pub(crate) struct Hidden(Vec<(Unsettled, (Vec<String>, usize))>);
 
 impl Unsettled {
     /// About how many bytes it holds to put back: each body, and each record at its limit.
@@ -2393,6 +2413,8 @@ pub(crate) mod test_store {
         pub hold_next_create: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// As `hold_next_create`, for the next `write` of the IRI named.
         pub hold_next_write_of: GateOf,
+        /// The next `read` of the IRI named reads it, then waits on the gate before it answers.
+        pub hold_next_read_reply_of: GateOf,
         /// `delete` of this IRI removes it, then reports a failure, as when the cleanup of its
         /// bytes fails after the index commit.
         pub fail_after_delete_of: Arc<std::sync::Mutex<Option<String>>>,
@@ -2419,12 +2441,17 @@ pub(crate) mod test_store {
         pub two_step_deletes: Arc<std::sync::atomic::AtomicUsize>,
         /// Fail every [`Store::restore`] of this resource until cleared.
         pub fail_restore_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// How many times `restore` was called.
+        pub restores: Arc<std::sync::atomic::AtomicUsize>,
         /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
         /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
         pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
         /// Once [`FlakyStore::fail_step`] has failed a step, the step after the next `n` fails
         /// too, once: the harness fails putting a mutation back as well as the mutation.
         pub fail_then: Arc<std::sync::Mutex<Option<usize>>>,
+        /// Once [`FlakyStore::fail_step`] has failed a step, every later step fails too: the
+        /// store is gone from then on, as for a process that stops there.
+        pub dead_after: Arc<AtomicBool>,
         fired: Arc<AtomicBool>,
     }
 
@@ -2439,6 +2466,7 @@ pub(crate) mod test_store {
                 fail_exists: Arc::new(AtomicBool::new(false)),
                 hold_next_create: Default::default(),
                 hold_next_write_of: Default::default(),
+                hold_next_read_reply_of: Default::default(),
                 hold_next_delete_of: Default::default(),
                 fail_after_delete_of: Default::default(),
                 fail_exists_of: Default::default(),
@@ -2456,8 +2484,10 @@ pub(crate) mod test_store {
                 partial_delete_of: Default::default(),
                 two_step_deletes: Default::default(),
                 fail_restore_of: Default::default(),
+                restores: Default::default(),
                 fail_step: Default::default(),
                 fail_then: Default::default(),
+                dead_after: Default::default(),
                 fired: Default::default(),
             }
         }
@@ -2476,7 +2506,8 @@ pub(crate) mod test_store {
                 None => false,
             };
             let fail = if self.fired.load(Ordering::SeqCst) {
-                countdown(&mut self.fail_then.lock().unwrap())
+                self.dead_after.load(Ordering::SeqCst)
+                    || countdown(&mut self.fail_then.lock().unwrap())
             } else {
                 let mut slot = self.fail_step.lock().unwrap();
                 let first = slot.is_some();
@@ -2516,7 +2547,11 @@ pub(crate) mod test_store {
             if failing {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.read(iri).await
+            let read = self.inner.read(iri).await;
+            if let Some(gate) = held(&self.hold_next_read_reply_of, iri) {
+                gate.acquire().await.expect("gate").forget();
+            }
+            read
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
             if self.fail_meta.load(Ordering::SeqCst) {
@@ -2632,6 +2667,7 @@ pub(crate) mod test_store {
         ) -> ServerResult<ResourceMeta> {
             // Counted as a step (so the harness fails it in turn); the write hooks are for the
             // writes a mutation makes, not for putting them back.
+            self.restores.fetch_add(1, Ordering::SeqCst);
             self.step()?;
             if self.fail_restore_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
