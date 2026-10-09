@@ -12,6 +12,7 @@ use oxrdf::{Literal, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, is_literal_id, split_lang_dir, Id, TermParts};
 use sparq_core::Graph;
+use sparq_core::temporal::ExactTemporal;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -2867,6 +2868,15 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
         let pb = parse_bool(b.value())?;
         return Some(pa.cmp(&pb));
     }
+    if is_exact_temporal(da) && is_exact_temporal(db) {
+        // dateTime / dateTimeStamp / date go through the shared exact comparator, the
+        // one the engine uses (#3526): the ±14h mixed-timezone window is decided on
+        // exact instants, date and dateTime are disjoint (incomparable), and an
+        // ill-formed value (e.g. a timezone-free dateTimeStamp) compares as nothing.
+        let ta = ExactTemporal::of_lit(xsd_collapse(a.value()), da)?;
+        let tb = ExactTemporal::of_lit(xsd_collapse(b.value()), db)?;
+        return ta.compare(tb);
+    }
     if is_date_time(da) && is_date_time(db) {
         let (ta, tza) = timestamp(a.value(), da)?;
         let (tb, tzb) = timestamp(b.value(), db)?;
@@ -2919,6 +2929,19 @@ fn is_numeric(dt: &str) -> bool {
             | "unsignedShort"
             | "unsignedByte"
     )
+}
+
+fn is_exact_temporal(dt: &str) -> bool {
+    let Some(local) = dt.strip_prefix(XSD) else {
+        return false;
+    };
+    matches!(local, "dateTime" | "date" | "dateTimeStamp")
+}
+
+/// The XSD `whiteSpace="collapse"` facet for a single-token lexical: strip the
+/// leading and trailing XSD whitespace (space, tab, CR, LF) only.
+fn xsd_collapse(v: &str) -> &str {
+    v.trim_matches([' ', '\t', '\r', '\n'])
 }
 
 fn is_date_time(dt: &str) -> bool {
@@ -3351,6 +3374,38 @@ mod tests {
             cmp_literals(&lit("2000-01-01T00:00:00"), &lit("2000-01-01T14:00:01Z")),
             Some(Ordering::Less),
             "one second past the window edge -> determinate <"
+        );
+        // #3526: pairs exactly 14h apart whose f64 instants rounded across the window
+        // edge. The exact comparator keeps them indeterminate.
+        let pairs = [
+            ("1970-01-01T04:12:16.1", "1970-01-01T18:12:16.1Z"),
+            ("1969-12-31T14:16:40.1", "1970-01-01T04:16:40.1Z"),
+            ("1969-12-31T14:16:40.0000005", "1970-01-01T04:16:40.0000005Z"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(cmp_literals(&lit(a), &lit(b)), None, "{a} vs {b}");
+        }
+        assert_eq!(
+            cmp_literals(&lit("2000-01-01T00:00:00"), &lit("2000-01-01T14:00:00.0000004Z")),
+            Some(Ordering::Less),
+            "a fraction past the window edge is determinate"
+        );
+        // date and dateTime are disjoint XSD types: incomparable, as in SPARQL.
+        let typed = |v: &str, dt: &str| {
+            Literal::new_typed_literal(v, oxrdf::NamedNode::new(xsd(dt)).unwrap())
+        };
+        let date = typed("2000-01-01", "date");
+        assert_eq!(cmp_literals(&date, &lit("2000-01-05T00:00:00Z")), None);
+        // A timezone-free dateTimeStamp is ill-formed, so it compares as nothing.
+        let stamp = typed("2000-01-01T00:00:00", "dateTimeStamp");
+        assert_eq!(cmp_literals(&stamp, &lit("2000-01-01T00:00:00")), None);
+        assert_eq!(
+            cmp_literals(
+                &typed(" 2000-01-01T00:00:00Z\n", "dateTimeStamp"),
+                &lit("2000-01-01T00:00:00Z")
+            ),
+            Some(Ordering::Equal),
+            "XSD whitespace collapse applies before parsing"
         );
     }
 }
