@@ -4,7 +4,7 @@
 //! The term/statement writers moved here from `incremental` (which used them as the
 //! fallback / differential-oracle path) so the rule writer below shares ONE definition of
 //! how a term is rendered — a second copy is how a serializer and its parser drift apart.
-//! The writers are split by construction (see [`Unit`]): the EXACT writers ([`write_term`],
+//! The writers are split by construction (see `Unit`): the EXACT writers ([`write_term`],
 //! [`write_statement`], [`serialize_facts`], [`write_rule`]) return text that parses back
 //! to the same terms — blank labels verbatim, language tags already lowercase, plain strings
 //! re-acquiring `xsd:string`, IRIs `IRIREF`-escaped — or a [`NotRepresentable`] error, never
@@ -26,12 +26,12 @@
 //!   parser's own rewrite and only that: a source variable spelled `?__bn0_x` is legal, is
 //!   NOT the rewrite, and stays a variable.
 //! * **`@forAll` universals.** The parser reads an `@forAll`-declared IRI as a variable that
-//!   records its binder: `?__ua.<iri>` at document level ([`UNIVERSAL_VAR`]),
-//!   `?__uf.<n>.<up>.<iri>` in a formula ([`FORMULA_UNIVERSAL_VAR`]); both unforgeable for
+//!   records its binder: `?__ua.<iri>` at document level (`UNIVERSAL_VAR`),
+//!   `?__uf.<n>.<up>.<iri>` in a formula (`FORMULA_UNIVERSAL_VAR`); both unforgeable for
 //!   the same reason. It is written BACK as that IRI under an `@forAll <iri> .` declaration
 //!   at the recorded binder, so re-parsing yields the same term with the same binder
 //!   (GH #5391, GH #6701 review). Every writer here plans one whole
-//!   output unit at once — see [`Unit`] for the scoping rules and the shapes the exact
+//!   output unit at once — see `Unit` for the scoping rules and the shapes the exact
 //!   writers refuse. Only [`RuleVars::VarIris`], which grounds
 //!   variables into `var:` IRIs and is not meant to be re-reasoned, names a universal by
 //!   its local name.
@@ -237,7 +237,7 @@ fn universal_paths<'a>(
 pub enum NotRepresentable {
     /// A universal's recorded binder has no place in this output — a document-level one in
     /// a lone term or rule, a formula-level one whose binding formula the output does not
-    /// contain — or its declaration would capture a plain mention of its IRI. See [`Unit`].
+    /// contain — or its declaration would capture a plain mention of its IRI. See `Unit`.
     UnrepresentableScope(String),
     /// Two distinct variables would be written as one (a universal and its
     /// backward-chaining copy, or two copies, anywhere in the output).
@@ -692,7 +692,7 @@ fn term_key(t: &Term) -> String {
     s
 }
 
-/// The identity keys of one statement's three terms ([`term_key`]): equal exactly when the
+/// The identity keys of one statement's three terms (`term_key`): equal exactly when the
 /// statements are equal, whatever their renderings. What a proof carries for provenance
 /// addressing (`ProofNode::key`).
 pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
@@ -851,7 +851,7 @@ const CHECK_IRI: &str = "urn:sparq:serialize:check";
 ///
 /// The term is its own unit. Exact: the text parses back to `t` — the writer re-parses its
 /// own output to check — or this returns [`NotRepresentable`] and writes nothing (see
-/// [`Unit`]). The check costs one parse of the written text.
+/// `Unit`). The check costs one parse of the written text.
 pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
     let mut s = String::new();
     Unit::exact(&[t], &BTreeSet::new())?.term(t, &mut s);
@@ -863,7 +863,7 @@ pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
 
 /// A term as N3-like text for a person to READ — a diagnostic, a proof-node string. Never
 /// fails, and never exact: a universal no `@forAll` can scope is shown as a plain variable
-/// (see [`Unit`]). Not for anything a parser or the reasoner reads back; use
+/// (see `Unit`). Not for anything a parser or the reasoner reads back; use
 /// [`write_term`] for that, and [`statement_keys`] for identity.
 pub fn display_lossy(t: &Term) -> String {
     let mut s = String::new();
@@ -952,7 +952,7 @@ fn vars_of<'a>(terms: impl Iterator<Item = &'a Term>) -> BTreeSet<&'a str> {
 /// Serialize facts back to N3, one statement per line in the given order, each its own
 /// unit; a universal bound at document level gets its `@forAll` line right before the
 /// first fact that uses it. Exact: the WHOLE text is re-parsed and compared to the facts under
-/// one variable bijection spanning every statement and respecting binders ([`Unit`]); the
+/// one variable bijection spanning every statement and respecting binders (`Unit`); the
 /// first refusal fails the whole call.
 pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result<String, NotRepresentable> {
     let facts: Vec<&[Term; 3]> = facts.collect();
@@ -1056,7 +1056,7 @@ pub enum RuleKind {
 /// premise and conclusion share an `@forAll` universal
 /// ([`NotRepresentable::UnrepresentableScope`]): only a document-level declaration scopes
 /// both sides, and a lone rule has no document to put it in — `write_document` (used by
-/// [`crate::reason_n3_pass_all`]) writes that shape (see [`Unit`]).
+/// [`crate::reason_n3_pass_all`]) writes that shape (see `Unit`).
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) -> Result<(), NotRepresentable> {
     let sides = rule_sides(r, kind, vars);
     check_no_merge(vars_of(sides.iter()).into_iter()).map_err(|e| in_rule(&sides, kind, e))?;
