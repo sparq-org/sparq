@@ -51,28 +51,36 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 /// How long a DPoP proof's `iat` may lie from now, in seconds.
 pub const DPOP_WINDOW_SECS: i64 = 60;
 
-/// Most DPoP proof ids remembered at once; past it (after the expired ones are dropped) a new
-/// proof is refused rather than remembered, so replay protection never silently lapses.
-const MAX_DPOP_JTIS: usize = 65_536;
+/// Most bytes the DPoP replay cache holds at once, counted by [`entry_bytes`]; past it (after the
+/// expired entries are dropped) a new proof is refused rather than remembered, so replay
+/// protection never silently lapses.
+const MAX_DPOP_BYTES: usize = 16 << 20;
 
 /// How many of an OpenID Provider's keys an ID Token's signature is tried against.
 const MAX_UNNAMED_KEYS: usize = 8;
 
 /// The replay cache is split so that no party can use up room another needs. Half of it is held
 /// for the providers named in `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`; every other provider
-/// shares the other half, each held to [`MAX_DPOP_JTIS_PER_OPEN_ISSUER`]. Within either pool each
+/// shares the other half, each held to [`MAX_DPOP_BYTES_PER_OPEN_ISSUER`]. Within either pool each
 /// identity (issuer and subject) and each key is held to its own share, so an identity, however
 /// many keys it makes, crowds out only itself, and a provider that registers identities freely
-/// crowds out only providers outside the trusted list.
-const MAX_DPOP_JTIS_TRUSTED: usize = MAX_DPOP_JTIS / 2;
-const MAX_DPOP_JTIS_OPEN: usize = MAX_DPOP_JTIS - MAX_DPOP_JTIS_TRUSTED;
-/// How many live proof ids all the identities of one provider outside the trusted list may hold.
-const MAX_DPOP_JTIS_PER_OPEN_ISSUER: usize = 1024;
-/// How many live proof ids one identity may hold: a client presents a proof per token request,
-/// so an identity with more than this many in one window is refused.
-const MAX_DPOP_JTIS_PER_IDENTITY: usize = 32;
-/// How many live proof ids one key may hold.
-const MAX_DPOP_JTIS_PER_KEY: usize = 32;
+/// crowds out only providers outside the trusted list. Every share is in bytes, so long names
+/// fill a share sooner rather than holding more than it.
+const MAX_DPOP_BYTES_TRUSTED: usize = MAX_DPOP_BYTES / 2;
+const MAX_DPOP_BYTES_OPEN: usize = MAX_DPOP_BYTES - MAX_DPOP_BYTES_TRUSTED;
+/// How many bytes of live entries all the identities of one provider outside the trusted list
+/// may hold.
+const MAX_DPOP_BYTES_PER_OPEN_ISSUER: usize = 512 << 10;
+/// How many bytes of live entries one identity may hold: a client presents a proof per token
+/// request, and an ordinary one fits dozens of entries in one window.
+const MAX_DPOP_BYTES_PER_IDENTITY: usize = 32 << 10;
+/// How many bytes of live entries one key may hold.
+const MAX_DPOP_BYTES_PER_KEY: usize = 32 << 10;
+/// What a replay cache entry costs beside its strings: its map and heap slots, and the string
+/// and share headers it holds.
+const DPOP_ENTRY_OVERHEAD: usize = 256;
+/// What a share costs beside its strings.
+const DPOP_SHARE_OVERHEAD: usize = 64;
 
 /// Whose proof a replay cache entry is: the verified ID Token's issuer and subject, and whether
 /// the issuer is trusted. Entries are still keyed by the proof key and `jti` alone, so a proof
@@ -95,18 +103,35 @@ enum Share {
 impl Share {
     fn limit(&self) -> usize {
         match self {
-            Share::Pool(true) => MAX_DPOP_JTIS_TRUSTED,
-            Share::Pool(false) => MAX_DPOP_JTIS_OPEN,
-            Share::Issuer(_) => MAX_DPOP_JTIS_PER_OPEN_ISSUER,
-            Share::Identity(..) => MAX_DPOP_JTIS_PER_IDENTITY,
-            Share::Key(_) => MAX_DPOP_JTIS_PER_KEY,
+            Share::Pool(true) => MAX_DPOP_BYTES_TRUSTED,
+            Share::Pool(false) => MAX_DPOP_BYTES_OPEN,
+            Share::Issuer(_) => MAX_DPOP_BYTES_PER_OPEN_ISSUER,
+            Share::Identity(..) => MAX_DPOP_BYTES_PER_IDENTITY,
+            Share::Key(_) => MAX_DPOP_BYTES_PER_KEY,
         }
     }
+
+    fn bytes(&self) -> usize {
+        DPOP_SHARE_OVERHEAD
+            + match self {
+                Share::Pool(_) => 0,
+                Share::Issuer(s) | Share::Key(s) => s.len(),
+                Share::Identity(i, s) => i.len() + s.len(),
+            }
+    }
+}
+
+/// What an entry holds: its key and `jti` twice (its map key and its place in expiry order), and
+/// its shares twice (its own list, and at most once more as a key of the share counts).
+fn entry_bytes(shares: &[Share], jkt: &str, jti: &str) -> usize {
+    DPOP_ENTRY_OVERHEAD
+        + 2 * (jkt.len() + jti.len())
+        + 2 * shares.iter().map(Share::bytes).sum::<usize>()
 }
 
 /// The DPoP proof ids (`jti`) seen at the token endpoint, by the key that signed them, until
 /// their proofs are too old to be accepted anyway. Each entry counts against every share it
-/// belongs to (see [`MAX_DPOP_JTIS_TRUSTED`]). Expired entries leave in expiry order, a few at a
+/// belongs to, by the bytes it holds (see [`MAX_DPOP_BYTES_TRUSTED`]). Expired entries leave in expiry order, a few at a
 /// time as new ones arrive, so no request scans the whole cache.
 #[derive(Default)]
 pub struct DpopReplay(std::sync::Mutex<Replay>);
@@ -116,8 +141,9 @@ type Expiry = std::cmp::Reverse<(i64, String, String)>;
 
 #[derive(Default)]
 struct Replay {
-    /// Each live entry, by key and `jti`, with the shares it counts against.
-    seen: std::collections::HashMap<(String, String), Vec<Share>>,
+    /// Each live entry, by key and `jti`, with the shares it counts against and its bytes.
+    seen: std::collections::HashMap<(String, String), (Vec<Share>, usize)>,
+    /// The bytes each share's live entries hold.
     used: std::collections::HashMap<Share, usize>,
     expiry: std::collections::BinaryHeap<Expiry>,
 }
@@ -143,9 +169,10 @@ impl DpopReplay {
             let Some(std::cmp::Reverse((_, k, j))) = expiry.pop() else {
                 break;
             };
-            for share in seen.remove(&(k, j)).unwrap_or_default() {
+            let (shares, bytes) = seen.remove(&(k, j)).unwrap_or_default();
+            for share in shares {
                 if let Some(n) = used.get_mut(&share) {
-                    *n -= 1;
+                    *n -= bytes;
                     if *n == 0 {
                         used.remove(&share);
                     }
@@ -164,16 +191,17 @@ impl DpopReplay {
         if !owner.trusted {
             shares.push(Share::Issuer(owner.issuer.to_string()));
         }
+        let bytes = entry_bytes(&shares, jkt, jti);
         if shares
             .iter()
-            .any(|s| used.get(s).is_some_and(|n| *n >= s.limit()))
+            .any(|s| used.get(s).copied().unwrap_or(0) + bytes > s.limit())
         {
             return false;
         }
         for share in &shares {
-            *used.entry(share.clone()).or_default() += 1;
+            *used.entry(share.clone()).or_default() += bytes;
         }
-        seen.insert(entry, shares);
+        seen.insert(entry, (shares, bytes));
         expiry.push(std::cmp::Reverse((until, jkt.to_string(), jti.to_string())));
         true
     }
@@ -246,7 +274,7 @@ pub fn check_dpop(
     if !jws.claim_str("htu").is_some_and(|u| same_target(u, htu)) {
         return Err("the DPoP proof's htu is not the token endpoint".into());
     }
-    let iat = jws.claim_time("iat").ok_or("the DPoP proof has no iat")?;
+    let iat = jws.claim_time("iat")?.ok_or("the DPoP proof has no iat")?;
     if iat.abs_diff(now) > DPOP_WINDOW_SECS.unsigned_abs() {
         return Err("the DPoP proof is not fresh".into());
     }
@@ -309,18 +337,19 @@ pub fn parse(token: &str) -> Result<Jws, String> {
     }
 }
 
-/// `exp` present and not past, `iat` present and not ahead of now, `nbf` (when present) reached.
+/// `exp` present and not past, `iat` present and not ahead of now, `nbf` (when present) reached;
+/// each, when present, a time [`Jws::claim_time`] reads.
 pub fn check_times(jws: &Jws, now: i64) -> Result<(), String> {
-    let exp = jws.claim_time("exp").ok_or("exp is required")?;
+    let exp = jws.claim_time("exp")?.ok_or("exp is required")?;
     if exp <= now.saturating_sub(SKEW_SECS) {
         return Err("the credential has expired".into());
     }
-    let iat = jws.claim_time("iat").ok_or("iat is required")?;
+    let iat = jws.claim_time("iat")?.ok_or("iat is required")?;
     if iat > now.saturating_add(SKEW_SECS) {
         return Err("iat lies in the future".into());
     }
     if jws
-        .claim_time("nbf")
+        .claim_time("nbf")?
         .is_some_and(|nbf| nbf > now.saturating_add(SKEW_SECS))
     {
         return Err("the credential is not valid yet".into());
@@ -707,12 +736,19 @@ async fn oidc(
         .claim_str("sub")
         .filter(|s| !s.is_empty())
         .ok_or("an ID Token needs iss and sub")?;
-    // A Solid-OIDC ID Token names its agent in `webid`, whatever shape `sub` has (Solid-OIDC
-    // section 8.1.1); one without it names its agent in `sub`.
-    let subject = match jws.claim_str("webid") {
-        Some(w) if is_http_url(w) => w.to_string(),
-        Some(_) => return Err("the ID Token's webid is not an http(s) URL".into()),
-        None => sub.to_string(),
+    // Two suites, told apart by the token before anything is fetched. A Solid-OIDC ID Token
+    // (one carrying `webid`, or addressed to `solid`) names its agent in `webid`, which it must
+    // carry, whatever shape `sub` has (Solid-OIDC section 8.1.1), and its WebID's profile names
+    // its issuer as `solid:oidcIssuer`. Any other names its agent in `sub`, a controlled
+    // identifier whose document names its OpenID Provider as a service (LWS OpenID Connect).
+    let solid = jws.claims.get("webid").is_some() || jws.audiences().iter().any(|a| a == "solid");
+    let subject = if solid {
+        jws.claim_str("webid")
+            .filter(|w| is_http_url(w))
+            .ok_or("a Solid-OIDC ID Token needs a webid that is an http(s) URL")?
+            .to_string()
+    } else {
+        sub.to_string()
     };
     let azp = id_token_client(jws)?;
     check_times(jws, jose::now_secs())?;
@@ -729,11 +765,20 @@ async fn oidc(
     .await?;
     let named = names_issuer(&content_type, &body, &subject, &issuer);
     match named {
-        Some(IssuerLink::OpenIdProvider) if audience_ok => {}
+        Some(IssuerLink::OpenIdProvider) if !solid && audience_ok => {}
         // Solid-OIDC ID Tokens are addressed to `solid` rather than to each authorization server.
-        Some(IssuerLink::SolidOidcIssuer)
-            if audience_ok || jws.audiences().iter().any(|a| a == "solid") => {}
-        Some(_) => return Err("aud does not include this authorization server".into()),
+        Some(IssuerLink::SolidOidcIssuer) if solid => {}
+        Some(IssuerLink::OpenIdProvider) if !solid => {
+            return Err("aud does not include this authorization server".into())
+        }
+        Some(IssuerLink::OpenIdProvider) => {
+            return Err(
+                "a Solid-OIDC ID Token's WebID profile must name its solid:oidcIssuer".into(),
+            )
+        }
+        Some(IssuerLink::SolidOidcIssuer) => {
+            return Err("an ID Token whose subject names a solid:oidcIssuer needs a webid".into())
+        }
         None => {
             return Err(format!(
                 "the subject's identity document names no OpenID Provider {issuer}"
@@ -1169,9 +1214,31 @@ mod tests {
         trusted: false,
     };
 
+    /// How many entries of `owner` under `jkt` the cache takes before refusing one, each with a
+    /// fresh `jti` of the same length.
+    fn fill(replay: &DpopReplay, owner: &ProofOwner<'_>, jkt: &str, now: i64) -> usize {
+        let mut held = 0;
+        while replay.first_use(owner, jkt, &format!("j{held:06}"), now + 60, now) {
+            held += 1;
+            assert!(held < 1_000_000, "the share never filled");
+        }
+        held
+    }
+
+    /// The bytes the cache holds, by the reckoning of [`entry_bytes`], checked against what its
+    /// share counts say.
+    fn held_bytes(replay: &DpopReplay) -> usize {
+        let r = replay.0.lock().unwrap();
+        let held: usize = r.seen.values().map(|(_, b)| *b).sum();
+        let pools = r.used.get(&Share::Pool(false)).copied().unwrap_or(0)
+            + r.used.get(&Share::Pool(true)).copied().unwrap_or(0);
+        assert_eq!(held, pools);
+        held
+    }
+
     /// Review finding: one key could fill the whole replay cache, refusing every other client's
     /// proofs until its entries expired, and each refusal scanned the cache. A key holds at most
-    /// [`MAX_DPOP_JTIS_PER_KEY`] live entries, and entries leave in expiry order.
+    /// [`MAX_DPOP_BYTES_PER_KEY`] of live entries, and entries leave in expiry order.
     #[test]
     fn one_key_cannot_fill_the_replay_cache() {
         let replay = DpopReplay::default();
@@ -1180,21 +1247,24 @@ mod tests {
             subject: "https://op.example/bob",
             ..OWNER
         };
-        for i in 0..MAX_DPOP_JTIS_PER_KEY {
-            assert!(replay.first_use(&OWNER, "k", &format!("j{i}"), now + 60, now));
-        }
-        assert!(!replay.first_use(&OWNER, "k", "one more", now + 60, now));
+        let held = fill(&replay, &OWNER, "k", now);
+        assert!(
+            held >= 16,
+            "an ordinary client fits a few dozen proofs, not {held}"
+        );
+        assert!(held_bytes(&replay) <= MAX_DPOP_BYTES_PER_KEY);
         assert!(replay.first_use(&bob, "other", "j0", now + 60, now));
         // A replay stays refused while it is live, under any identity; once expired its room
         // comes back.
-        assert!(!replay.first_use(&OWNER, "k", "j0", now + 60, now + 30));
-        assert!(!replay.first_use(&bob, "k", "j0", now + 60, now + 30));
+        assert!(!replay.first_use(&OWNER, "k", "j000000", now + 60, now + 30));
+        assert!(!replay.first_use(&bob, "k", "j000000", now + 60, now + 30));
         assert!(replay.first_use(&OWNER, "k", "later", now + 200, now + 61));
-        assert!(replay.first_use(&OWNER, "k", "j0", now + 200, now + 61));
+        assert!(replay.first_use(&OWNER, "k", "j000000", now + 200, now + 61));
         // Everything from before expired; only the two new entries are held, and so counted.
         let r = replay.0.lock().unwrap();
         assert_eq!(r.seen.len(), 2);
-        assert_eq!(r.used.get(&Share::Pool(false)), Some(&2));
+        let two: usize = r.seen.values().map(|(_, b)| *b).sum();
+        assert_eq!(r.used.get(&Share::Pool(false)), Some(&two));
     }
 
     /// Review finding: per-key limits do not bound an identity that makes keys, nor a provider
@@ -1205,27 +1275,27 @@ mod tests {
     fn replay_cache_shares_hold_identities_and_providers() {
         let replay = DpopReplay::default();
         let now = 1_000;
-        for i in 0..MAX_DPOP_JTIS_PER_IDENTITY {
-            assert!(replay.first_use(&OWNER, &format!("k{i}"), "j", now + 60, now));
+        let mut held = 0;
+        while replay.first_use(&OWNER, &format!("k{held:06}"), "j", now + 60, now) {
+            held += 1;
         }
-        assert!(!replay.first_use(&OWNER, "fresh key", "j", now + 60, now));
-        let names: Vec<String> = (0..MAX_DPOP_JTIS_PER_OPEN_ISSUER / MAX_DPOP_JTIS_PER_IDENTITY)
-            .map(|i| format!("https://op.example/u{i}"))
-            .collect();
-        let mut held = MAX_DPOP_JTIS_PER_IDENTITY;
-        'fill: for name in &names {
+        assert!(
+            held >= 16,
+            "an identity fits a few dozen proofs, not {held}"
+        );
+        assert!(held_bytes(&replay) <= MAX_DPOP_BYTES_PER_IDENTITY);
+        // Its provider's other identities fill the provider's share, and no more.
+        for i in 0.. {
+            let name = format!("https://op.example/u{i:06}");
             let who = ProofOwner {
-                subject: name,
+                subject: &name,
                 ..OWNER
             };
-            for j in 0..MAX_DPOP_JTIS_PER_IDENTITY {
-                if held == MAX_DPOP_JTIS_PER_OPEN_ISSUER {
-                    break 'fill;
-                }
-                assert!(replay.first_use(&who, &format!("{name}#{j}"), "j", now + 60, now));
-                held += 1;
+            if fill(&replay, &who, &format!("{name}#k"), now) == 0 {
+                break;
             }
         }
+        assert!(held_bytes(&replay) <= MAX_DPOP_BYTES_PER_OPEN_ISSUER);
         let newcomer = ProofOwner {
             subject: "https://op.example/newcomer",
             ..OWNER
@@ -1239,7 +1309,7 @@ mod tests {
         // Fill the open pool; a trusted provider's identities still get in.
         {
             let mut r = replay.0.lock().unwrap();
-            r.used.insert(Share::Pool(false), MAX_DPOP_JTIS_OPEN);
+            r.used.insert(Share::Pool(false), MAX_DPOP_BYTES_OPEN);
         }
         let third = ProofOwner {
             issuer: "https://third.example",
@@ -1251,6 +1321,54 @@ mod tests {
             ..third
         };
         assert!(replay.first_use(&trusted, "tk", "j", now + 60, now));
+    }
+
+    /// Review finding: the shares counted entries, not what they hold, so an identity with long
+    /// names, or a provider spending them, held far more memory than its count suggested. Shares
+    /// are in bytes: long names fill one sooner, and one too long for its share is refused.
+    #[test]
+    fn replay_cache_shares_count_bytes() {
+        let replay = DpopReplay::default();
+        let now = 1_000;
+        let long = format!("https://op.example/{}", "x".repeat(8 << 10));
+        let who = ProofOwner {
+            subject: &long,
+            ..OWNER
+        };
+        let held = fill(&replay, &who, "k", now);
+        assert!(held < fill(&DpopReplay::default(), &OWNER, "k", now));
+        assert!(held_bytes(&replay) <= MAX_DPOP_BYTES_PER_IDENTITY);
+        let huge = format!(
+            "https://op.example/{}",
+            "x".repeat(MAX_DPOP_BYTES_PER_IDENTITY)
+        );
+        let who = ProofOwner {
+            subject: &huge,
+            ..OWNER
+        };
+        assert!(!replay.first_use(&who, "k2", "j", now + 60, now));
+        // The whole open pool, whoever fills it, holds no more than its bytes.
+        let replay = DpopReplay::default();
+        for p in 0.. {
+            let issuer = format!("https://op{p:04}.example/{}", "i".repeat(2048));
+            let mut any = false;
+            for i in 0..64 {
+                let name = format!("{issuer}/u{i}");
+                let who = ProofOwner {
+                    issuer: &issuer,
+                    subject: &name,
+                    trusted: false,
+                };
+                if fill(&replay, &who, &format!("{name}#k"), now) > 0 {
+                    any = true;
+                }
+            }
+            if !any {
+                break;
+            }
+        }
+        assert!(held_bytes(&replay) <= MAX_DPOP_BYTES_OPEN);
+        assert!(held_bytes(&replay) > MAX_DPOP_BYTES_OPEN / 2);
     }
 
     /// Review finding: the triple limit did not bound what the triples hold: a prefix of half a
@@ -1375,8 +1493,8 @@ mod tests {
         let client = jose::EcKey::generate("client");
         let now = jose::now_secs();
         let id_token = |cnf: bool| {
-            let mut claims = json!({"iss": base, "sub": alice, "azp": "https://app.example/",
-                "aud": ["solid"], "iat": now, "exp": now + 300});
+            let mut claims = json!({"iss": base, "sub": alice, "webid": alice,
+                "azp": "https://app.example/", "aud": ["solid"], "iat": now, "exp": now + 300});
             if cnf {
                 claims["cnf"] = json!({"jkt": client.thumbprint()});
             }
@@ -1411,7 +1529,8 @@ mod tests {
         // a provider of its own to every quota. The discovery document's issuer must be the
         // token's exactly.
         let respelled = {
-            let claims = json!({"iss": format!("{base}/"), "sub": alice, "azp": "https://app.example/",
+            let claims = json!({"iss": format!("{base}/"), "sub": alice, "webid": alice,
+                "azp": "https://app.example/",
                 "aud": ["solid"], "iat": now, "exp": now + 300, "cnf": {"jkt": client.thumbprint()}});
             op.sign_jws(serde_json::Map::new(), &claims)
         };
@@ -1428,6 +1547,54 @@ mod tests {
         };
         let proof = dpop_proof(&client, "POST", &htu, now, "x");
         assert_eq!(exchange(account, Some(proof)).await.unwrap().subject, alice);
+        // Review finding: a Solid-OIDC token without a `webid` authenticated its `sub`. A
+        // Solid-OIDC token must carry a `webid` that is an http(s) URL, and a subject whose
+        // profile names a `solid:oidcIssuer` is reached only through one.
+        for (aud, webid) in [
+            (json!(["solid"]), None),
+            (json!(["solid"]), Some(json!(42))),
+            (json!(["solid"]), Some(json!("urn:x:alice"))),
+            (json!([cfg.issuer()]), None),
+        ] {
+            let mut claims = json!({"iss": base, "sub": alice, "azp": "https://app.example/",
+                "aud": aud, "iat": now, "exp": now + 300, "cnf": {"jkt": client.thumbprint()}});
+            if let Some(w) = webid {
+                claims["webid"] = w;
+            }
+            let token = op.sign_jws(serde_json::Map::new(), &claims);
+            let proof = dpop_proof(&client, "POST", &htu, now, &format!("y{claims}"));
+            let err = exchange(token, Some(proof)).await.unwrap_err();
+            assert!(err.contains("webid"), "{claims}: {err}");
+        }
+    }
+
+    /// Review finding: a time past the range a claim may hold was read as no claim at all, so a
+    /// far-future `nbf` lifted the token's validity restriction. A claim present and out of
+    /// range is refused, wherever it is read.
+    #[test]
+    fn out_of_range_times_are_refused_not_ignored() {
+        let key = jose::EcKey::generate("x");
+        let now = 1_000;
+        let at = |extra: Value| {
+            let mut claims = json!({"iat": now, "exp": now + 300});
+            claims
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            Jws::parse(&key.sign_jws(serde_json::Map::new(), &claims)).unwrap()
+        };
+        assert_eq!(check_times(&at(json!({})), now), Ok(()));
+        assert_eq!(check_times(&at(json!({"nbf": now})), now), Ok(()));
+        for bad in [
+            json!({"nbf": jose::MAX_TIME + 1}),
+            json!({"nbf": -1}),
+            json!({"nbf": 1e300}),
+            json!({"nbf": "soon"}),
+            json!({"exp": jose::MAX_TIME + 1}),
+            json!({"iat": i64::MIN}),
+        ] {
+            assert!(check_times(&at(bad.clone()), now).is_err(), "{bad}");
+        }
     }
 
     #[test]

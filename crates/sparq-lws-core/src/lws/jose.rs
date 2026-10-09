@@ -317,13 +317,18 @@ impl Jws {
     }
 
     /// A NumericDate claim (seconds since the epoch), between the epoch and the end of year 9999:
-    /// every time a token carries is read here, so a time outside that range is no time at all,
-    /// and arithmetic on a claim's time cannot overflow.
-    pub fn claim_time(&self, name: &str) -> Option<i64> {
-        self.claims
-            .get(name)
-            .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+    /// `None` when the token does not carry it, and an error when it carries anything else. Every
+    /// time a token carries is read here, so a time outside that range is refused rather than
+    /// read as absent, and arithmetic on a claim's time cannot overflow.
+    pub fn claim_time(&self, name: &str) -> Result<Option<i64>, String> {
+        let Some(v) = self.claims.get(name) else {
+            return Ok(None);
+        };
+        v.as_i64()
+            .or_else(|| v.as_f64().map(|f| f as i64))
             .filter(|t| (0..=MAX_TIME).contains(t))
+            .map(Some)
+            .ok_or_else(|| format!("{name} is not a time between 1970 and 9999"))
     }
 
     /// The `aud` claim as a list (a single string is a one-element list).
