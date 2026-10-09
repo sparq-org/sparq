@@ -6,21 +6,22 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/) query engine over [`sparq-core`](../sparq-core) `Graph`s.
+The [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) / [1.2](https://www.w3.org/TR/sparql12-query/) engine over [`sparq-core`](../sparq-core) `Graph`s.
 
-Run conformant SPARQL over an in-memory or out-of-core graph, with `EXPLAIN` / `EXPLAIN ANALYZE`
-for plan introspection and a hook for registering your own functions. How it plans and executes
-queries is described in the design docs linked below.
+Query in-memory or out-of-core graphs, inspect plans with `EXPLAIN` / `EXPLAIN ANALYZE`, and register custom functions. [Exact temporal comparison and optional year budgets](../../skills/zk-query-proofs/references/exact-temporals.md) preserve fractional precision.
+
+<!-- The detached proof guest does not add an engine dependency. -->
+The opt-in [proved evaluator](../../zk/sparql-evaluator/README.md) restricts `target_os = "zkvm"`, rejecting ambient NOW/RAND/UUID in that target only. The experiment is not externally audited.
+
+Prepared query, construct and describe APIs have `_with_budget_detailed` variants preserving typed budget/domain causes; existing String APIs remain compatible. `QueryBudget.ebv_semantics` selects [version-pinned EBV rules](../../skills/sparql-query/ebv-dialects.md), with REC 2013 as the unannounced default; this does not claim full SPARQL 1.2 support.
 
 ## 🚀 Quickstart
 
 ```rust
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 use sparq_core::Graph;
-
 let g = Graph::load_str(
     r#"<http://example.org/alice> a <http://schema.org/Person> ."#, "turtle")?;
-
 let rows = sparq_engine::query(&g, "SELECT ?s WHERE { ?s a <http://schema.org/Person> }")?;
 let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }")?;
 # let _ = (rows, json);
@@ -32,39 +33,38 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **SPARQL query** — run [SPARQL 1.1](https://www.w3.org/TR/sparql11-query/) and
   [1.2](https://www.w3.org/TR/sparql12-query/) over your data (conformance tracked by the CI
   ratchets), plus the *non-standard* `MULTIPLICITY()` aggregate extension — see the SKILL.
+- **Path multiplicity and correlation** — alternatives/sequences preserve bag counts;
+  reachability retains endpoint sets. [Scoped EXISTS/MINUS substitution](../../skills/sparql-query/exists-minus.md) applies captured IRI/literal bindings before domain subtraction; unresolved shapes retain native practical behavior.
+  Nullable paths preserve constant seeds and variable node domains. Substitution admits
+  only positive shapes with locally bound FILTERs; scope-sensitive shapes and triple-term endpoints use potentially more expensive ordinary evaluation. [Boundaries and examples](../../skills/sparql-query/SKILL.md).
+- **Deterministic builtins** — `isNumeric` validates lexicals/facets independently of finite
+  arithmetic capacity; integer/decimal EBV classifies validated digits without floating underflow. Invalid numeric/boolean lexicals have false EBV per SPARQL 1.1 §17.2.2,
+  while invalid arithmetic operands error. Integer casts truncate within `i64`. `SUBSTR` clips the original
+  one-based interval. Date accessors validate calendars/offsets and normalize next-day midnight; `MIN`/`MAX` retain input terms. Raw numeric/boolean lexical
+  forms are checked verbatim; XML whitespace normalization applies to string casts only. [Bounded coverage and numeric limits](../../skills/sparql-query/SKILL.md)
+  remain explicit; these corrections do not establish complete builtin conformance.
 - **Named graphs** — query across an active dataset with `GRAPH` and `FROM` / `FROM NAMED`.
+  Read-query `FROM` standardizes source blank nodes apart; `GRAPH` preserves identity.
+  Nested `GRAPH` preserves the catalog, empty graphs, bindings and `FROM NAMED` restrictions.
+- **Deterministic blank nodes** *(opt-in `deterministic-blank-nodes`)* — entropy-free
+  parser/template labels, fresh per solution and disjoint from active input; see the SKILL.
 - **RDF 1.2 triple terms** — match [triple terms](https://www.w3.org/TR/rdf12-concepts/), including variables inside them.
 - **Materialized full paths** *(opt-in `paths` feature, OFF by default)* — `enumerate_paths` returns intermediate nodes and edges for tied shortest paths, bounded simple paths, or cycles back to their start. Each endpoint is unrestricted, one fixed node, or a graph pattern selecting a candidate set.
 - **Query plan introspection** — `EXPLAIN` and `EXPLAIN ANALYZE`.
-- **Custom functions** — register Rust closures under function IRIs (the
-  [SPARQL extension mechanism](https://www.w3.org/TR/sparql11-query/#extensionFunctions));
-  see [`docs/extension-functions.md`](../../docs/extension-functions.md).
-- **Custom aggregates + window functions** *(opt-in `window-functions` feature, OFF by default)* —
-  register a named user aggregate (`CustomAggregateRegistry`) callable from a real `GROUP BY`, plus a
-  window surface (`ROW_NUMBER`/`RANK`/`DENSE_RANK`, `LAG`/`LEAD`/`NTILE`, windowed
-  `COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, `PARTITION BY` + `ORDER BY`, optional `ROWS`/`RANGE` frame), both
-  programmatic (`window::apply_window`) and via inline `OVER(…)` syntax (`query_over` + reusable
-  `WINDOW w AS (…)`). **NON-STANDARD extension** (SPARQL has no W3C-REC `OVER`): the inline form is a
-  *source rewrite* recognised ONLY on `query_over`, so the standard `query`/`ask`/… surface stays
-  exactly SPARQL 1.1 (see the rustdoc for the inline-deferred cases). Off, build byte-identical, no new deps.
-- **Parameterized prepared queries** *(opt-in `params` feature, OFF by default)* — the canonical
-  mitigation for SPARQL injection (#901). `PreparedQuery::bind(name, oxrdf::Term)` and
-  `PreparedUpdate::bind` substitute a typed value into a free placeholder variable via a pure
-  **algebra rewrite** — *never* string concatenation — so a hostile bound IRI/literal (e.g. one
-  containing `> } INSERT … {` or a `"` break-out) is carried as opaque DATA and cannot alter the
-  query structure. Covers SELECT/ASK/CONSTRUCT/DESCRIBE + UPDATE; fail-closed (rejects an unknown
-  placeholder, a `BIND`/aggregate/`VALUES` output, or a blank node in a predicate/graph slot). Off,
-  zero code compiles, the default build is byte-identical, no new deps. The opt-in `templates` feature
-  layers **named parameterized templates** on top (parse-once, fail-closed typed-JSON binding — behind
-  the server's `/templates` REST + MCP `template_invoke`, sq-lsp7k.10; see [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md)).
-- **Materialised-view / query-result cache** *(opt-in `result-cache` feature, OFF by default)* —
-  a bounded, version-aware LRU (`cache::ResultCache`) that stores a SELECT/ASK `QueryResult` keyed
-  by `(parsed query algebra, caller graph-version)`, replaying it instead of re-executing the same
-  read query against a slowly-changing graph. **Sound only under a contract**: the caller bumps a
-  `u64` *version* on every mutation, and the cache **refuses non-deterministic queries**
-  (`NOW`/`RAND`/`UUID`/`STRUUID`/`BNODE`, remote `SERVICE`, any custom fn/aggregate — via
-  `is_cacheable`). When off, zero cache code compiles, the default build is byte-identical, no new
-  deps (std `HashMap`/`Mutex`/`Arc`).
+- **Custom functions** — register Rust closures under function IRIs; see [`docs/extension-functions.md`](../../docs/extension-functions.md).
+- **Custom aggregates + window functions** *(opt-in `window-functions`, OFF by default)* —
+  `CustomAggregateRegistry`, `window::apply_window` and `query_over` add named aggregates,
+  ranking/offset/aggregate windows and frames. Inline `OVER`/`WINDOW` is a **non-standard**
+  source rewrite confined to `query_over`; ordinary `query`/`ask` retain standard syntax.
+  See the [query guide](../../skills/sparql-query/SKILL.md) and rustdoc for supported forms.
+- **Parameterized prepared queries** *(opt-in `params`, OFF by default)* —
+  `PreparedQuery::bind(name, oxrdf::Term)` / `PreparedUpdate::bind` bind typed values through
+  algebra rewriting, preventing bound data from altering query syntax. Unknown placeholders,
+  binder outputs and invalid term positions fail closed. The opt-in `templates` feature
+  adds named typed-JSON templates. [Query/update examples and restrictions](../../skills/sparql-query/SKILL.md).
+- **Query-result cache** *(opt-in `result-cache`, OFF by default)* — bounded LRU
+  `cache::ResultCache` keys SELECT/ASK by query algebra, caller graph version and resolved EBV semantics. The caller must advance its `u64` version on every mutation; `is_cacheable` rejects volatile functions,
+  SERVICE and custom functions/aggregates. [Cache contract](../../skills/sparql-query/SKILL.md).
 - **MVCC / ACID transaction isolation** *(opt-in `txn` feature, OFF by default)* —
   a `txn::TransactionManager` over one logical `Graph`: **snapshot-isolation** reads (`begin_read` → a
   cheap point-in-time `GraphSnapshot`, immune to later commits) and serialized **write** transactions
@@ -106,11 +106,11 @@ let json = sparq_engine::query_json(&g, "SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?
 - **Lazy top-k string sort key** *(opt-in `topk-lazy-strkey` feature, OFF by default)* — an `ORDER BY` on a plain `xsd:string` column with a `LIMIT` builds a zero-allocation id-carrying sort key (compared via the literal's zero-copy value bytes) instead of reconstructing + re-allocating the literal value per input row, so a top-k over a large scan pays no key allocation for the rows it discards. Byte-identical output (a full-output differential + W3C ORDER BY conformance); off, zero code compiles, no new deps.
 - **Audited cancellation pointer boundary** — the executor keeps its thread-local/rayon budget snapshot `Copy` with a non-owning cancellation pointer; a lifetime-bound guard keeps the caller's `Arc<AtomicBool>` alive through scoped worker joins, restores the previous budget scope on return or unwind, and clears the pointer when the outermost scope exits. The four `unsafe` sites are listed in the workspace unsafe register.
 - **SELECT-JSON entry cancellation** — a budget already expired or cancelled at evaluator entry refuses before scanning, queuing Rayon work, or emitting a header. Budgets that trip during evaluation retain the cooperative checks and error behavior.
+- **VERSION-aware parsing with your own parser** — `parse_versioned_query(parser, text)` / `parse_versioned_update(parser, text)` parse the unchanged text with the caller's configured `spargebra::SparqlParser` (base IRI, prefixes, custom aggregates; it stays the syntax authority) and return the algebra plus the leading prologue's `VERSION` labels in source order. Pass query labels to `PreparedQuery::from_query_with_versions`; `parse_update_rec2013` applies UPDATE's REC 2013 restriction. Labels are not validated at parse time. `VersionedParseError::is_syntax` keeps the parser's diagnostic text unchanged; `is_prologue` marks a declaration that could not be accounted for, which is refused rather than guessed. Only the stable crates.io `spargebra` 0.4.6 API is used, including under its `standard-unicode-escaping` feature. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 
 ## 📚 Learn more
 
-- **How-to** — [`skills/sparql-query/SKILL.md`](../../skills/sparql-query/SKILL.md).
-- **API reference** — [docs.rs/sparq-engine](https://docs.rs/sparq-engine).
+- **How-to** — [query guide](../../skills/sparql-query/SKILL.md); **API** — [docs.rs](https://docs.rs/sparq-engine). Prepared-query rewrites use `with_query` to retain VERSION metadata. UPDATE and the PATHS extension are REC 2013 only and reject unsupported announcements; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md) and the planning / parallelism verdicts in [`research/`](../../research).
 - **Performance** — numbers live on the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench), not in docs.
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

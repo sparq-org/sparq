@@ -1,0 +1,10 @@
+{
+  "schema": "sparq.workload-campaign.v1",
+  "seed": "0123456789abcdef",
+  "wallet_scales": [3, 8, 32, 128],
+  "organization_scales": [2, 8, 32, 128],
+  "warmups": 1,
+  "repetitions": 3,
+  "timeout_seconds": 1800,
+  "include_unsupported": true
+}

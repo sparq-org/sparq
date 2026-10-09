@@ -8,7 +8,9 @@
 
 **Opt-in RDFS / OWL-RL / Notation3 reasoning** for the [sparq](../../README.md) RDF engine.
 
-It forward-chains the deductive closure (RDFS, the OWL 2 RL property/class axioms, or
+[Exact temporal ordering](../../skills/zk-query-proofs/references/exact-temporals.md) serves `substrate-compare`.
+
+The reasoner forward-chains the closure (RDFS, OWL 2 RL axioms, or
 user-supplied N3 rules — including RDF 1.2 `<< s p o >>` quoted-triple terms in rule
 bodies and heads) over dictionary-encoded triples and **materializes** the entailed
 facts, so querying stays exactly as fast as before. Reasoning runs over integer ids (joins
@@ -107,11 +109,9 @@ let g = Graph::from_parts(dict, triples);
 
 ## 📚 Learn more
 
-- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (profiles,
-  incremental maintenance, proof trees, CLI seam).
+- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (profiles, incremental maintenance, proof trees, CLI seam).
 - **API reference** — [docs.rs/sparq-reason](https://docs.rs/sparq-reason).
-- **Design** — the inference verdicts in [`research/`](../../research) and
-  [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
+- **Design** — [`research/`](../../research) and [`ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
 - **Performance** — see the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench).
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 

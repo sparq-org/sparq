@@ -1,0 +1,50 @@
+{
+  "bytecode-alliance": {
+    "configured_url": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/main/supply-chain/audits.toml",
+    "api_endpoint": "repos/bytecodealliance/wasmtime/contents/supply-chain/audits.toml?ref=main",
+    "git_blob_sha": "833114189cc6144431fe6d70011e9e273574d61c",
+    "sha256": "a74c807a5533991b59ed69a1d33407b44faf42cb3fd1671a343c00aba86e3351",
+    "bytes": 238589,
+    "fetched_utc": "2026-09-12T22:51:21.833669+00:00"
+  },
+  "embark-studios": {
+    "configured_url": "https://raw.githubusercontent.com/EmbarkStudios/rust-ecosystem/main/audits.toml",
+    "api_endpoint": "repos/EmbarkStudios/rust-ecosystem/contents/audits.toml?ref=main",
+    "git_blob_sha": "bbfef9f9fd75a9e1c0955863b4ba327468e28371",
+    "sha256": "c8d3cd352b3b8528e131054be3701357ec26495b1db7148896503a1c42ab9418",
+    "bytes": 51762,
+    "fetched_utc": "2026-09-12T22:51:21.704569+00:00"
+  },
+  "google": {
+    "configured_url": "https://raw.githubusercontent.com/google/supply-chain/main/audits.toml",
+    "api_endpoint": "repos/google/supply-chain/contents/audits.toml?ref=main",
+    "git_blob_sha": "2d7816d273bb4218987eefc38e35d3fa49360046",
+    "sha256": "cb3724bfa43bfce3caddfebac814d0d4ab3c8b0f3033d68864799bbb407cb528",
+    "bytes": 709034,
+    "fetched_utc": "2026-09-12T22:51:22.286753+00:00"
+  },
+  "isrg": {
+    "configured_url": "https://raw.githubusercontent.com/divviup/libprio-rs/main/supply-chain/audits.toml",
+    "api_endpoint": "repos/divviup/libprio-rs/contents/supply-chain/audits.toml?ref=main",
+    "git_blob_sha": "6bf08be3f87ed3a6c8342f0f0522a216341592f2",
+    "sha256": "c57a1843c5b22c0a1ab12eb25944e3c2a4b5f98beecb529ed3c6fd3f0bd40fc9",
+    "bytes": 38777,
+    "fetched_utc": "2026-09-12T22:51:21.733997+00:00"
+  },
+  "mozilla": {
+    "configured_url": "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml",
+    "api_endpoint": "repos/mozilla/supply-chain/contents/audits.toml?ref=main",
+    "git_blob_sha": "96c22faf32c48326a622e01f3f4f04710e9cb761",
+    "sha256": "729a8beaa64dbb4fe1682dcb802d198bb61be0e422586f9bc42151afb1e3876b",
+    "bytes": 482467,
+    "fetched_utc": "2026-09-12T22:51:22.163870+00:00"
+  },
+  "zcash": {
+    "configured_url": "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml",
+    "api_endpoint": "repos/zcash/rust-ecosystem/contents/supply-chain/audits.toml?ref=main",
+    "git_blob_sha": "d94538e9957149b53b261a0c62af4c607ef1b021",
+    "sha256": "f7e0db3983d4553588d1c96d95b59f4eb9acf04d076ceb1a31eaa543e3afa6c6",
+    "bytes": 311035,
+    "fetched_utc": "2026-09-12T22:51:21.942886+00:00"
+  }
+}

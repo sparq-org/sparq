@@ -1,0 +1,127 @@
+{
+  "schema": "sparq-named-dataset-integration-v1",
+  "base_sha": "6a017111dfe80360218a6dc1f2c852c820101516",
+  "integrated_v1_sha": "81d6c4ccaa2346dd4f99c765b2f084a3720bd5f4",
+  "publication_ready": false,
+  "native_model_test_functions": 60,
+  "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
+  "new_v2_case_inventories": {
+    "exists_bound_admitted": 8,
+    "exists_bound_rejected": 12,
+    "exists_minus_results": 8,
+    "false_ask_discriminator": 1,
+    "numeric_ebv_results": 17,
+    "numeric_ebv_arithmetic_capacity_rejections": 3,
+    "nullable_results": 15,
+    "nullable_original_core_result_in_actual_runner": 1,
+    "nullable_budget_rejections": 1,
+    "nullable_admission_rejections": 6,
+    "raw_literal_whitespace_results": 32,
+    "temporal_lexical_results": 37,
+    "temporal_extension_results_included": 7,
+    "temporal_constructor_capacity_rejections": 3
+  },
+  "guest_status": "V1 and V2 raw-literal and temporal runner definitions are present; this integrated guest has not been built or executed. Historical 048/d7 exports and receipts remain unchanged. Final source/artifact freeze also requires the explicit EBV dialect correction and reviewed stale-test/documentation follow-up.",
+  "merge_resolution": "Both numerics-v3.bin and temporals-v3.bin are current; legacy unversioned/v2 archive fixtures remain. Shared numeric and temporal runtime corrections coexist. V2 root graph catalog/EXISTS state and the cfg(test) lifetime repair are retained. The false-ASK keeps all prior branches and adds raw temporal padding.",
+  "source_sha256": {
+    "crates/sparq-core/src/lib.rs": "5e968d676636c4b1bd4b2723f1dfff766af9d8321facfcbcfda91b36134d592d",
+    "crates/sparq-core/src/temporal.rs": "a2ca58a79af0c1910b1f31b004ced1e0474a66fa1b71a281b5485c53ff971766",
+    "crates/sparq-core/src/temporal/exact.rs": "93fb075762af0053347aad2fe9f38eb57a00497077bb8a00c93221549c207901",
+    "crates/sparq-engine/src/exec.rs": "33c1ea6ebef990302ae6531ae1eddb4b66faa62e1742a0fecd4eb77380d01d4e",
+    "crates/sparq-engine/src/exists_domain.rs": "ae2c364e9b8f0a848912e4f36e6a8d61c29a992720aedd553a85079170c581bd",
+    "crates/sparq-engine/tests/fixtures/temporal_lexical.json": "f86e927682e189318a15876c46de6ec75c91a1fbd597057770d3ad79f1bde15b",
+    "crates/sparq-substrate/src/numeric.rs": "f76710ea860b5885fbfed7e1eefaf21f2aa4650adfd0a1b3b8aa603096c2de78",
+    "zk/sparql-evaluator/fixtures/conformance/nullable-alternatives.json": "d097e7e8d2877bb8c3dc1db6e531f8acd1f40312c0794d3c5fee1b8c18c248a2",
+    "zk/sparql-evaluator/fixtures/conformance/numeric-ebv.json": "49dd44539374fa4145d5f06b88d09e40e276c10de537a0b665b7df4036e56bf2",
+    "zk/sparql-evaluator/fixtures/conformance/raw-literal-whitespace.json": "eb532584714d4c24e2349096628e198f7d0bff629204d4afa372530f8ff23a97",
+    "zk/sparql-evaluator/fixtures/false-absence.rq": "a79da5af8272480f6251166576180b66495804ed116f2ce411c8411e86ccc76a",
+    "zk/sparql-evaluator/host/tests/actual_v2_exists.rs": "0efdeff5e6b15bc8c07347cf5783f1dfdbde0b0be904c08d355e55e6ea5d37ea",
+    "zk/sparql-evaluator/host/tests/actual_v2_nullable_alternatives.rs": "81da88518e2d7e2a0dc16c717b330dbb775ba7001c1e6100e83a29d8c6395634",
+    "zk/sparql-evaluator/host/tests/actual_v2_numeric_ebv.rs": "4a96dc2db480bfc34d046b4eaabbbb345e0dd060eb3aa3545a62e855e18c4378",
+    "zk/sparql-evaluator/host/tests/actual_v2_raw_literal_whitespace.rs": "4d0ddd93b5f4b5ec650277f81facbdbdd361467bb84586f45d3827ec25378f4c",
+    "zk/sparql-evaluator/host/tests/actual_v2_temporal_lexical.rs": "047a81b63994db74f86f6edd21b6f982893c32db93978eb5293c26bc4b8019f0",
+    "zk/sparql-evaluator/model/src/evaluate.rs": "1c47914d6d719b2b7b56d08983509a61fcfcf6847430812f7381b5127897386a",
+    "zk/sparql-evaluator/model/tests/v2_exists.rs": "a3c2660546ed8d2f81d854c55caadda4d3cfecda43f61d56a3768f745597d77d",
+    "zk/sparql-evaluator/model/tests/v2_nullable_alternatives.rs": "d875d2b127ee5d6504c8f09319df117ebd11e8a54dc247cdd015d30c704534a8",
+    "zk/sparql-evaluator/model/tests/v2_numeric_ebv.rs": "e569179c0cb6a825f6bf071ca20f9002172a0e4605553bb6268fc5b36c3f0ff0",
+    "zk/sparql-evaluator/model/tests/v2_raw_literal_whitespace.rs": "a89c8e44ad268f9e6ee461391e4246540b9843e86498fa649d58ee5f483f4165",
+    "zk/sparql-evaluator/model/tests/v2_temporal_lexical.rs": "1808c2902a260ce1687e2883ece5a410ba838e42ddffabe54a4668b9d902d677"
+  },
+  "logs": {
+    "/private/tmp/sparq-v2-raw-lexical-scoped-clean.log": "aba7a2e8d371f2458272280251f7b7266640d3363894efadea6550002f6c2f9d",
+    "/private/tmp/sparq-v2-raw-lexical-model.log": "fbb09cfd1388f25ecd8222e82adb9207bdc7f662712a61da661a64ddb6418d7d",
+    "/private/tmp/sparq-v2-raw-lexical-clippy.log": "595a059693cbda95b19dc568ff8ee5aeef722c4b37f6e04646a6e90acf733c4b",
+    "/private/tmp/sparq-v2-raw-lexical-preflight.log": "ca068eb6f64a3b3ddc31f740097dae5390e17c0f660bdea63a8088c39ebc3b76",
+    "/private/tmp/sparq-v2-raw-lexical-preflight-restored.log": "4510aa4e4612237f899665dd9c0393656e4a76cdae76699301de9329c349f8b1"
+  },
+  "remaining": [
+    "Integrate reviewed explicit SPARQL EBV dialect selection and stale raw-padding test/documentation corrections before final freeze",
+    "Compile and execute all actual guest fixtures and required receipts on the current image through the mandatory hosted lane",
+    "Required independent reviews and repository landing conditions"
+  ],
+  "historical_native_checkpoints": [
+    {
+      "base_sha": "6825d96df780a57772486f9c3bee697dac95cde5",
+      "integrated_v1_sha": "c65618e901311d9f765a459e29188b5ee7e72903",
+      "native_model_test_functions": 50,
+      "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
+      "logs": {
+        "/private/tmp/sparq-v2-c656-native.log": "369343eaf425588aeee568f379ce135746136d496fb349b6d0b94f0291f213d5",
+        "/private/tmp/sparq-v2-c656-model-clippy.log": "76e0bd20cad8ed486815aae8fbc29a64d8d17228e4e3b9f71d4229d05de50f78"
+      },
+      "source_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9"
+    },
+    {
+      "base_sha": "8e2fa4c58421727b897e0fa5a1e4533abd3773e9",
+      "integrated_v1_sha": "be1d6fd64c01947c3d6cad6eb3ff4396c06bd303",
+      "native_model_test_functions": 52,
+      "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
+      "logs": {
+        "/private/tmp/sparq-v2-be1-native.log": "21346d73081b808de44cc8a44c5cb9074ea8bbc198c23f654394d6174faa6d78",
+        "/private/tmp/sparq-v2-be1-clippy.log": "0ae6d8bd235a9d83b236884a1d949475edaf8acc0721b94ea4fce55b1ec8c0cf",
+        "/private/tmp/sparq-v2-be1-preflight.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080"
+      },
+      "source_sha": "3f50629d6a6722c8f7136e9f34e74fbf095484db"
+    },
+    {
+      "schema": "sparq-named-dataset-integration-v1",
+      "base_sha": "3f50629d6a6722c8f7136e9f34e74fbf095484db",
+      "integrated_v1_sha": "9c2cfa84f86c185488af16ea51b37f2574ec3bbe",
+      "native_model_test_functions": 54,
+      "native_model_clippy": "passed --all-targets --features evaluate -- -D warnings",
+      "new_v2_case_inventories": {
+        "exists_bound_admitted": 8,
+        "exists_bound_rejected": 12,
+        "exists_minus_results": 8,
+        "false_ask_discriminator": 1,
+        "numeric_ebv_results": 17,
+        "numeric_ebv_arithmetic_capacity_rejections": 3,
+        "nullable_results": 15,
+        "nullable_original_core_result_in_actual_runner": 1,
+        "nullable_budget_rejections": 1,
+        "nullable_admission_rejections": 6,
+        "raw_literal_whitespace_results": 32,
+        "temporal_lexical_results": 37,
+        "temporal_extension_results_included": 7,
+        "temporal_constructor_capacity_rejections": 3
+      },
+      "guest_status": "New V1/V2 correlation, numeric EBV and nullable-alternative runner definitions exist but this integrated artifact has not been built or executed. Historical048/d7 evidence remains immutable; the mandatory hosted V2 lane must execute the current program.",
+      "merge_resolution": "LocalVocab retains both borrowed root dataset catalog and the new per-EXISTS domain-substitution flag; the cfg(test) scalar-oracle lifetime repair remains.",
+      "logs": {
+        "/private/tmp/sparq-v2-nullable-rebuilt-native.log": "f7b2cb33156f48139941ce12ac60460e49f273bdbb40ebc22a7e80b786c7cc6d",
+        "/private/tmp/sparq-v2-nullable-rebuilt-clippy.log": "ff423dde7a32d0bdead8fb1e1fe83d298d5428c11f7f78ac3f2dd1372e5208a9",
+        "/private/tmp/sparq-v2-nullable-preflight.log": "ec7499eb7d18b61e2e363377efc3ad5196ff67c358407bba047b5bfcc66be080"
+      },
+      "build_provenance": "Final native/model Clippy gates followed successful explicit core/substrate/engine/model package invalidation with set -e. An earlier invalidation command incorrectly listed absent sparq-canon; its preliminary run is not used for this checkpoint.",
+      "source_sha": "6a017111dfe80360218a6dc1f2c852c820101516"
+    }
+  ],
+  "build_provenance": "Explicit core/substrate/engine/model native-dev package invalidation in the existing detached target removed 216 files/238.7 MiB, then one full model suite and all-target model Clippy passed. No engine/RISC0/toolchain cache or accepted artifact was changed.",
+  "integrated_temporal_sha": "b3a58aaa8ac4c155bf8a85fd599a12d4e0db97a9",
+  "reviewed_lexical_source": {
+    "numeric": "/private/tmp/sparq-raw-whitespace-gpt6-review-81d6c4c/review-final.md",
+    "temporal": "/private/tmp/sparq-temporal-raw-gpt6-review-b3a58aa/review-final.md",
+    "scope": "Independent source approval; later external 81d6 review requires stale test/docs corrections, separately owned."
+  },
+  "author_preflight": "passed after folding the merged engine README to its 120-line cap and running with existing Bash5.3; the initial Bash3.2 mapfile failure is preserved separately"
+}
