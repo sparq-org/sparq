@@ -2053,11 +2053,16 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
                 let mut ok = true;
+                // Built only when a projected value is a non-ground formula (GH #6757).
+                let mut canon: Option<CanonCopies> = None;
                 for g in pat {
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let val = apply(&walk(g, &sol), &sol);
+                        let mut val = apply(&walk(g, &sol), &sol);
+                        if !val.is_ground() && matches!(val, Term::Formula(_)) {
+                            val = canon.get_or_insert_with(|| CanonCopies::new(&goal)).formula(&val);
+                        }
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
                             && !unify_term(g, &val, &mut nb)
                         {
@@ -2073,6 +2078,96 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
         }
     }
     out
+}
+
+/// The canonical renaming of the backward-chaining copies inside the formula values one
+/// proof projects onto its goal (GH #6757).
+///
+/// [`backward_prove`] standardizes a rule apart under fresh names (`__bw<n>_…`, a new `n`
+/// per application), so a non-ground formula it projects — `{ ?__bw<n>_x :q :z }` — would
+/// differ on every re-application only by that renaming, and a forward rule copying it out
+/// would derive a "new" fact every round: the closure never saturated. The copies are local
+/// to the proof (nothing outside it can name them), so renaming them is an alpha-renaming
+/// of the value: each copy gets `__bwa<i>_<base>`, `i` counting the proof's copies in order
+/// of first occurrence across its projected values and `<base>` the variable it copies
+/// (prefixes stripped, so a copied `@forAll` universal stays a copy of that universal).
+/// Alpha-equivalent projections then become the same term and dedupe, while distinct
+/// copies stay distinct (`i` is injective) and shared copies stay shared (one map per
+/// proof). Variables the goal itself carries are the caller's and are never renamed, and a
+/// canonical name never takes one of theirs. `__bwa` cannot collide with a live rule
+/// application's `__bw<n>_` names.
+struct CanonCopies {
+    /// Variables of the goal (and of the values it was instantiated with), and the
+    /// non-copy variables of the projected values: kept as is.
+    kept: FxHashSet<String>,
+    /// The canonical names handed out so far.
+    taken: FxHashSet<String>,
+    /// Copy → its canonical name, in first-occurrence order.
+    map: FxHashMap<String, String>,
+}
+
+impl CanonCopies {
+    fn new(goal: &[Term; 3]) -> CanonCopies {
+        let mut kept = FxHashSet::default();
+        goal.iter().for_each(|t| collect_vars(t, &mut kept));
+        CanonCopies { kept, taken: FxHashSet::default(), map: FxHashMap::default() }
+    }
+
+    /// `t` with each backward-chaining copy that is not one of the goal's variables renamed
+    /// to its canonical name.
+    fn formula(&mut self, t: &Term) -> Term {
+        // A non-copy variable in the value keeps its name; no canonical name may take it.
+        let mut keep_here = FxHashSet::default();
+        collect_vars(t, &mut keep_here);
+        keep_here.retain(|v| serialize::copy_base(v).is_none() || self.kept.contains(v));
+        self.kept.extend(keep_here);
+        self.rename(t)
+    }
+
+    fn rename(&mut self, t: &Term) -> Term {
+        match t {
+            Term::Var(v) => match serialize::copy_base(v) {
+                Some(base) if !self.kept.contains(v) => {
+                    if let Some(c) = self.map.get(v) {
+                        return Term::Var(c.clone());
+                    }
+                    let mut i = self.map.len();
+                    let name = loop {
+                        let name = format!("__bwa{i}_{base}");
+                        if !self.kept.contains(&name) && !self.taken.contains(&name) {
+                            break name;
+                        }
+                        i += 1;
+                    };
+                    self.taken.insert(name.clone());
+                    self.map.insert(v.clone(), name.clone());
+                    Term::Var(name)
+                }
+                _ => t.clone(),
+            },
+            Term::Formula(ts) => Term::Formula(
+                ts.iter().map(|tr| [self.rename(&tr[0]), self.rename(&tr[1]), self.rename(&tr[2])]).collect(),
+            ),
+            Term::List(ms) => Term::List(ms.iter().map(|m| self.rename(m)).collect()),
+            Term::Triple(tr) => {
+                Term::Triple(Box::new([self.rename(&tr[0]), self.rename(&tr[1]), self.rename(&tr[2])]))
+            }
+            _ => t.clone(),
+        }
+    }
+}
+
+/// Every variable name in `t`, recursing into lists, quoted triples and formulae.
+fn collect_vars(t: &Term, out: &mut FxHashSet<String>) {
+    match t {
+        Term::Var(v) => {
+            out.insert(v.clone());
+        }
+        Term::List(ms) => ms.iter().for_each(|m| collect_vars(m, out)),
+        Term::Formula(ts) => ts.iter().flatten().for_each(|m| collect_vars(m, out)),
+        Term::Triple(tr) => tr.iter().for_each(|m| collect_vars(m, out)),
+        _ => {}
+    }
 }
 
 /// `t` with every variable renamed into the standardize-apart space of rule application `n`
