@@ -648,6 +648,12 @@ pub(crate) struct Journal<'a, S: Store> {
     limit: usize,
 }
 
+/// Whether a store step with this outcome may have changed something: it succeeded, or failed in
+/// the backend, where the change may have landed before the failure was reported.
+fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
+    matches!(outcome, Ok(_) | Err(crate::error::ServerError::Storage(_)))
+}
+
 /// How to put back one change a [`Journal`] made.
 enum Undo {
     /// `key` as it was: its bytes and content type, or absent.
@@ -704,12 +710,14 @@ impl<'a, S: Store> Journal<'a, S> {
     ) -> Result<crate::store::ResourceMeta, crate::error::ServerError> {
         let prior = self.prior(key).await?;
         let written = self.store.write(key, body, content_type).await;
-        // A write that reported failure may still have landed (a lost reply): it is put back
-        // all the same.
-        self.undo.push(Undo::Restore {
-            key: key.to_string(),
-            prior,
-        });
+        // A backend failure may follow a write that landed (a lost reply): it is put back all the
+        // same. A refusal wrote nothing, and there is nothing to put back.
+        if may_have_happened(&written) {
+            self.undo.push(Undo::Restore {
+                key: key.to_string(),
+                prior,
+            });
+        }
         written
     }
 
@@ -732,10 +740,12 @@ impl<'a, S: Store> Journal<'a, S> {
             return Ok(());
         }
         let deleted = self.store.delete(key, None).await;
-        self.undo.push(Undo::Restore {
-            key: key.to_string(),
-            prior,
-        });
+        if may_have_happened(&deleted) {
+            self.undo.push(Undo::Restore {
+                key: key.to_string(),
+                prior,
+            });
+        }
         match deleted {
             Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
             Err(e) => Err(e),
@@ -752,7 +762,11 @@ impl<'a, S: Store> Journal<'a, S> {
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
         let outcome = remove_member(self.store, iri, parent).await;
-        if !matches!(outcome, Ok(crate::store::DeleteOutcome::NotEmpty)) {
+        // Only a member that went, or may have, is recreated.
+        if matches!(
+            outcome,
+            Ok(crate::store::DeleteOutcome::Deleted) | Err(crate::error::ServerError::Storage(_))
+        ) {
             self.undo.push(Undo::Recreate {
                 iri: iri.to_string(),
                 parent: parent.map(str::to_string),
