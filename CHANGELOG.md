@@ -22,6 +22,12 @@ implied by this entry; verify the tagged run and every registry and release arti
 - **sparq-policy / sparq-solid (ODRL):** hardened ODRL policy evaluation and the ODRL
   authorization bridge. Some policies accepted by v0.1.4 are now rejected at parse time.
   (#6734, #6737)
+- **sparq-solid:** a SPARQL Update's WHERE clause is now evaluated against the session's read
+  view, the same as a query, and graphs named in `USING` / `USING NAMED` need Read access.
+  (#6763)
+- **sparq-solid:** a SPARQL Update request with more than one operation can no longer include a
+  `DELETE`/`INSERT … WHERE` with a variable `GRAPH` target; send that operation on its own.
+  (#6763)
 
 ### Added
 
