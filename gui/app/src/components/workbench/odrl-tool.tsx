@@ -452,10 +452,9 @@ function PreviewResult({ preview }: { preview: OdrlPreviewResult }) {
       )}
 
       <p className="text-xs text-muted-foreground" data-odrl-verdict-note="">
-        Each pane shows the policy's own verdict, decided per request for that requester.
-        Grants stored by sparq's ODRL bridge can be narrower: it stores a lasting grant only for
-        an unconstrained permission naming exactly one party, and a persisted conditional
-        prohibition denies every party on the asset it covers.
+        Each pane shows the policy's own verdict, decided per request for that requester. A
+        sparq v0.1.5 server enforces ODRL policies conservatively and may deny more than this
+        preview shows.
       </p>
 
       {/* The two gated panes, side by side. */}
