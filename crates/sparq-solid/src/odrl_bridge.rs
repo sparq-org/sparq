@@ -713,10 +713,20 @@ fn extend_named_graph(graph: &mut Graph, name: &str, additions: &[[Term; 3]]) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
-    let mut seen: rustc_hash::FxHashSet<[Term; 3]> = terms.iter().cloned().collect();
-    for t in additions {
-        if seen.insert(t.clone()) {
-            terms.push(t.clone());
+    // A one-shot materialization adds a triple or two: a linear scan beats hashing the
+    // whole view. A batch hashes it once instead of scanning it per addition.
+    if additions.len() <= 8 {
+        for t in additions {
+            if !terms.contains(t) {
+                terms.push(t.clone());
+            }
+        }
+    } else {
+        let mut seen: rustc_hash::FxHashSet<[Term; 3]> = terms.iter().cloned().collect();
+        for t in additions {
+            if seen.insert(t.clone()) {
+                terms.push(t.clone());
+            }
         }
     }
     install_triples(graph, name, terms);
