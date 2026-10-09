@@ -98,6 +98,10 @@ const REFUSED: &[&str] = &[
     // USING and WITH make the unreadable graph the default graph.
     "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } USING <https://pod.ex/private> WHERE { ?s ?p ?o }",
     "WITH <https://pod.ex/private> INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } WHERE { ?s ?p ?o }",
+    // USING and USING NAMED name an unreadable source, even where nothing reads it.
+    "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> 1 } } USING <https://pod.ex/private> WHERE { }",
+    "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } USING NAMED <https://pod.ex/private> WHERE { GRAPH ?g { ?s ?p ?o } }",
+    "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/private> WHERE { FILTER NOT EXISTS { GRAPH ?g { } } }",
     // A default-graph pattern with no USING reads the store's default graph.
     "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } WHERE { ?s ?p ?o }",
 ];
@@ -106,7 +110,6 @@ const REFUSED: &[&str] = &[
 /// reaches `out`.
 const CONFINED: &[&str] = &[
     "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } WHERE { GRAPH ?g { ?s ?p ?o } }",
-    "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } USING NAMED <https://pod.ex/private> WHERE { GRAPH ?g { ?s ?p ?o } }",
     "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> \"leak\" } } WHERE { FILTER EXISTS { GRAPH ?g { ?s ?p \"s3cret\" } } }",
     "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> \"leak\" } } WHERE { FILTER NOT EXISTS { GRAPH ?g { ?s ?p \"s3cret\" } } FILTER(false) }",
     "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> ?n } } WHERE { { SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p \"s3cret\" } } } }",
@@ -189,7 +192,7 @@ fn readable_conditions_still_work() {
 const VARIABLE: &[&str] = &[
     "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } WHERE { GRAPH ?g { ?s ?p ?o } }",
     "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> 1 } } WHERE { FILTER EXISTS { GRAPH ?g { ?s ?p ?o } } }",
-    "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } USING NAMED <https://pod.ex/private> USING NAMED <https://pod.ex/pub> WHERE { GRAPH ?g { ?s ?p ?o } }",
+    "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } USING NAMED <https://pod.ex/out> USING NAMED <https://pod.ex/pub> WHERE { GRAPH ?g { ?s ?p ?o } }",
     "WITH <https://pod.ex/out> INSERT { <urn:f> <urn:p> ?o } WHERE { GRAPH ?g { ?s ?p ?o } }",
     "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> ?n } } WHERE { { SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } } }",
     // A variable write target: the authorization check evaluates the condition as well.
@@ -246,11 +249,11 @@ const OUT: &[&str] = &["<https://pod.ex/out>"];
 
 /// `GRAPH ?var` write targets: (update, the graphs it changes, or `None` when refused).
 /// Bob reads `out` and `pub` and writes `out` and `wonly`, so a target that can bind
-/// `pub` must be refused, and one that binds only unreadable graphs binds nothing.
+/// `pub` must be refused, and so must one naming an unreadable `USING NAMED` source.
 const VARIABLE_TARGETS: &[(&str, Option<&[&str]>)] = &[
     ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
     ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/out> WHERE { GRAPH ?g { } }", Some(OUT)),
-    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/private> USING NAMED <https://pod.ex/wonly> WHERE { GRAPH ?g { } }", Some(&[])),
+    ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } USING NAMED <https://pod.ex/private> USING NAMED <https://pod.ex/wonly> WHERE { GRAPH ?g { } }", None),
     ("WITH <https://pod.ex/out> INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } }", None),
     ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } MINUS { GRAPH ?g { ?s ?p \"public\" } } }", Some(OUT)),
     ("INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { } FILTER NOT EXISTS { GRAPH ?g { ?s ?p \"out\" } } }", None),
@@ -341,4 +344,23 @@ fn variable_target_updates_stay_durable() {
     drop(s);
     assert_eq!(out(&reopen(&dir)), before, "disk changed");
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Naming an unreadable source is refused with the same error whether or not the graph
+/// exists, so the refusal does not reveal which graphs exist.
+#[test]
+fn unreadable_and_absent_sources_are_refused_alike() {
+    let refusal = |g: &str| {
+        let mut s = store();
+        let before = snapshot(&s);
+        let e = s
+            .update_as(
+                &bob(),
+                &format!("INSERT {{ GRAPH <https://pod.ex/out> {{ <urn:f> <urn:p> 1 }} }} USING NAMED <{g}> WHERE {{ }}"),
+            )
+            .expect_err("refused");
+        assert_eq!(snapshot(&s), before, "a refused update changed the store");
+        e.replace(g, "<graph>")
+    };
+    assert_eq!(refusal("https://pod.ex/private"), refusal("https://pod.ex/absent"));
 }

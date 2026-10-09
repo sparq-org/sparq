@@ -55,7 +55,7 @@ use crate::loader::{ACL_SUFFIX, ACR_SUFFIX};
 use crate::{AuthIndex, Mode, Session};
 use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
-use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, GraphTarget, OrderExpression};
+use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, GraphTarget, OrderExpression, QueryDataset};
 use spargebra::term::{GraphName, GraphNamePattern, NamedNodePattern};
 use spargebra::{GraphUpdateOperation, Update};
 
@@ -274,6 +274,7 @@ pub(crate) struct Permit {
 ///
 /// - `GRAPH <g>` in a WHERE (or inside its `EXISTS`) requires `g` to be readable, or the
 ///   update is denied.
+/// - Every graph an explicit `USING` or `USING NAMED` clause names must be readable.
 /// - A default-graph pattern reads the `USING`/`WITH` graphs, each of which must be
 ///   readable. Without `USING`/`WITH` it reads the store's default graph, which no session
 ///   may read (the read path's default graph is empty), so the update is denied.
@@ -282,6 +283,14 @@ pub(crate) fn scope_reads(upd: &Update, readable: &FxHashSet<Term>) -> Result<()
         if let GraphUpdateOperation::DeleteInsert { using, pattern, .. } = op {
             let mut scope = ReadScope { readable, default_read: false };
             scope.pattern(pattern, false)?;
+            // An explicit `USING`/`USING NAMED` clause (the parser leaves `named` unset only
+            // for `WITH`) names its sources, so each must be readable whether or not the
+            // WHERE reads it. The refusal is the same for a graph that does not exist.
+            if let Some(QueryDataset { default, named: Some(named) }) = using {
+                for g in default.iter().chain(named) {
+                    scope.require(g)?;
+                }
+            }
             if scope.default_read {
                 let Some(ds) = using else {
                     return Err("update denied: the WHERE reads the default graph, which is \
