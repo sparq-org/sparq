@@ -97,11 +97,63 @@ TOOL = "bb gates -s ultra_honk"
 # member none of them matches — so adding a circuit family to the estate without describing
 # it here is a hard error, never a silent omission from the evaluation.
 #
-# `layer` splits the two things the manifest unifies and that a reviewer will want separated:
+# `layer` separates the proof contracts represented by the compiled members:
 #   query      — the SPARQL-algebra members (section 7.3 of the spec draft)
 #   credential — the credential-layer members (possession, revocation, issuer attestation)
+#   result     — integrated support for released mappings, without result completeness
 # ---------------------------------------------------------------------------------------
 FAMILIES: list[dict] = [
+    # [OPUS-5.5] zkp-15.1: the regex pins the exact measured profile (K1/K2, N16, P3, R4,
+    # F0, D10) rather than a parameter shape, so an unmeasured version-4 bucket fails
+    # classify() instead of joining this family unreviewed.
+    {
+        "key": "result_v4",
+        "pattern": r"result_v4_k(?P<k>[12])_n(?P<n>16)_p(?P<p>3)_r(?P<r>4)_f(?P<f>0)_d(?P<d>10)",
+        "params": ["k", "n", "p", "r", "f", "d"],
+        "layer": "result",
+        "role": "Version 4 support for released SELECT DISTINCT mappings. The first BGP "
+        "pattern whose slots are all constants or projected variables is moved to index "
+        "zero and checked against a public triple table the verifier reconstructs from "
+        "its query and the released rows, instead of private typed openings. Issuer "
+        "authentication, credential status (tree depth d), leaf membership and the "
+        "remaining patterns' private typed and shared-variable joins stay in-circuit. "
+        "f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, "
+        "d=10. Does not establish result completeness or holder identity.",
+    },
+    # [GPT-6] Keep the selected-result contract separate from complete-scan members.
+    {
+        "key": "result_v3",
+        "pattern": r"result_v3_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)_s(?P<s>\d+)_d(?P<d>\d+)",
+        "params": ["k", "n", "p", "r", "f", "s", "d"],
+        "layer": "result",
+        "role": "Separately versioned support for released SELECT DISTINCT mappings "
+        "with canonical signed i64 predicates (s=64; s=0 has no private predicate) "
+        "and status tree depth d. Sign and exact lexical length have no public "
+        "selector. Preserves issuer authentication and original string-commitment "
+        "binding, without result completeness or holder identity.",
+    },
+    {
+        "key": "result_v2",
+        "pattern": r"result_v2_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)_i(?P<i>\d+)_d(?P<d>\d+)",
+        "params": ["k", "n", "p", "r", "f", "i", "d"],
+        "layer": "result",
+        "role": "Versioned support for released SELECT DISTINCT mappings with canonical "
+        "unsigned integer capacity i bits (0 means no private predicate) and status "
+        "tree depth d. Exact decimal length is private. The small i=8 lane admits "
+        "values through 99; i=64 covers u64. Preserves issuer authentication and "
+        "string-commitment binding, without result completeness or holder identity.",
+    },
+    {
+        "key": "result_v1",
+        "pattern": r"result_v1_k(?P<k>\d+)_n(?P<n>\d+)_p(?P<p>\d+)_r(?P<r>\d+)_f(?P<f>\d+)",
+        "params": ["k", "n", "p", "r", "f"],
+        "layer": "result",
+        "role": "Support for released SELECT DISTINCT mappings: issuer authentication, "
+        "credential status, selected triple membership, BGP joins and residual private "
+        "integer FILTERs. Capacity parameters: k credentials, n triples per credential, "
+        "p patterns, r released rows, f private FILTERs per row. Does not establish "
+        "result completeness or holder identity.",
+    },
     {
         "key": "scan",
         "pattern": r"scan_k(?P<k>\d+)_n(?P<n>\d+)_r(?P<r>\d+)",
@@ -566,7 +618,7 @@ def render_markdown(pack: dict) -> str:
     )
     add(
         "- **No third-party figure is reproduced.** See "
-        "[Related work](#related-work-cited-never-re-measured)."
+        "[Related work](#related-work--cited-never-re-measured)."
     )
     add("")
     tc = pack["toolchain"]
@@ -577,6 +629,7 @@ def render_markdown(pack: dict) -> str:
     add("")
 
     for layer_name, layer_title in (
+        ("result", "Successful-result circuits (released mapping support)"),
         ("query", "Query-layer circuits (SPARQL algebra fragment)"),
         ("credential", "Credential-layer circuits"),
     ):

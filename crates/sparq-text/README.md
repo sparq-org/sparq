@@ -1,9 +1,7 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-text
 
 <p>
-  <a href="https://crates.io/crates/sparq-text"><img src="https://img.shields.io/crates/v/sparq-text.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-text"><img src="https://docs.rs/sparq-text/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -12,8 +10,8 @@ Opt-in **full-text search over literals** for the
 over a `Graph`'s string literals, prefix completion over IRIs and common RDF labels,
 plus `text:` **magic predicates** that run text search inside plain SPARQL.
 
-A **separate crate** by design (the `sparq-geo` shape): no existing sparq crate — and
-in particular not the wasm build — depends on it. The index is in-house (tokenizer +
+A **separate crate** by design (the `sparq-geo` shape): the engine and the lean wasm
+build do not depend on it (`sparq-py`, `sparq-text-wasm`, and opt-in server/MCP features do). The index is in-house (tokenizer +
 posting lists, ~no dependencies — deliberately **not** a tantivy/lucene port): a string
 literal's dictionary term id **is** its document id, so search returns matching literal
 ids and joining them to subjects/predicates is the store's ordinary permutation-index
@@ -75,7 +73,7 @@ let r = query_text(&graph, r#"
 - **`text:` magic predicates** — `text:matches` (AND), `text:matchesAny` (OR), `text:phrase` (adjacency), `text:near` (proximity/slop, relevance-ranked) with the
   `text:slop N` and `text:score ?s` companions. The query string must be a **constant**
   literal, the match subject a variable, and an unknown `text:` IRI is a hard error.
-- **Opt-in fuzzy search** — the default-OFF `fuzzy` feature adds `TextIndex::fuzzy(term, max_distance)` and `text:fuzzy`, backed by bounded deletion-neighbour candidates and exact Levenshtein verification (default one, hard cap two). [GPT-5.6] sq-lsp7k.14
+- **Opt-in fuzzy search** — the default-OFF `fuzzy` feature adds `TextIndex::fuzzy(term, max_distance)` and `text:fuzzy`, backed by bounded deletion-neighbour candidates and exact Levenshtein verification (default one, hard cap two). sq-lsp7k.14
 - **BM25 ranking, exact-token semantics** — UAX #29 word segmentation + Unicode
   lowercasing; **no stemming, no stopword list, no diacritic folding** (`café` ≠ `cafe`)
   — language-neutral by design. Only plain / `xsd:string` / language-tagged literals are
@@ -107,8 +105,8 @@ let r = query_text(&graph, r#"
 ## 📚 Learn more
 
 - **How-to** — [`skills/full-text-search/SKILL.md`](../../skills/full-text-search/SKILL.md)
-  (the full predicate table, tokenizer/scoring semantics, and the durability contract).
-- **API reference** — [docs.rs/sparq-text](https://docs.rs/sparq-text).
+  (the full predicate table, tokenizer/scoring semantics, and the durability contract). Text rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
+- **API reference** — `cargo doc -p sparq-text --open` (not on crates.io / docs.rs: `publish = false`).
 - **Benchmark** — `cargo run --release -p sparq-text --example bench_text` (no figures
   baked in here; query cost is dominated by hits scored — a short prefix over the
   synthetic Zipf vocabulary is a worst case by construction). Tracked figures on the

@@ -1,0 +1,249 @@
+{
+  "author_model": "GPT-6",
+  "scope": "Source-only policy candidate based on cae927 with reviewed TLS lock delta. Checks used this candidate owned policy, not a private substitute store. No compile/proof/remote execution.",
+  "metadata_checks": {
+    "author_model": "GPT-6",
+    "scope": "Candidate-owned exact policy, cached frozen metadata only. No fetch, build scripts, compilation, proof, or benchmark; rustc version probing allowed. All-feature all-target resolved graph is not executed target coverage.",
+    "environment_overrides": {
+      "CARGO_NET_OFFLINE": "true",
+      "RUSTUP_TOOLCHAIN": "1.97.1",
+      "CARGO_BUILD_JOBS": "1",
+      "CARGO_INCREMENTAL": "0",
+      "RUSTC_WRAPPER": ""
+    },
+    "inputs_before": {
+      "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+      "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+      "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+      "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+      "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+      "supply-chain/audits.toml": "6ca257a1acb2313beb8706600bb82409cea84826c3390c9ade00800cb48275e6",
+      "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+    },
+    "inputs_after": {
+      "Cargo.lock": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+      "zk/native-composition/Cargo.toml": "808391a79fbac5556e56ad016700eb1cb6428b5709c1861d221d6800191c09f3",
+      "zk/native-composition/Cargo.lock": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
+      "deny.toml": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+      "supply-chain/config.toml": "f44faa6fcb54606bf4242d64a595c37958ab34033a3762e1b3fc91f5c9b2d5a0",
+      "supply-chain/audits.toml": "6ca257a1acb2313beb8706600bb82409cea84826c3390c9ade00800cb48275e6",
+      "supply-chain/imports.lock": "3bfb97a524d7ff005f50f5ab305e1a4654ddf7db5cd589eeeb5f90b354ac95e8"
+    },
+    "commands": [
+      {
+        "name": "native-metadata",
+        "command": [
+          "cargo",
+          "metadata",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--frozen",
+          "--all-features",
+          "--format-version",
+          "1"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+        "started_at": "2026-09-25T13:51:03.329814+00:00",
+        "ended_at": "2026-09-25T13:51:06.338976+00:00",
+        "exit": 0,
+        "timed_out": false,
+        "stdout_sha256": "f8416a17da1346fd9b990ab308354ade6a8dc1010ffce383c3e60a283a388c8d",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "native-vet",
+        "command": [
+          "cargo",
+          "vet",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--store-path",
+          "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/supply-chain",
+          "--locked",
+          "--frozen",
+          "--no-minimize-exemptions",
+          "--output-format",
+          "json"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+        "started_at": "2026-09-25T13:51:06.373429+00:00",
+        "ended_at": "2026-09-25T13:51:07.109784+00:00",
+        "exit": 255,
+        "timed_out": false,
+        "stdout_sha256": "ad9237db60f7a179aae02a257323b6e84e6a7fe87b5e1c88fc7b09b90fca18e2",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "native-integrity",
+        "command": [
+          "cargo",
+          "deny",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--config",
+          "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/deny.toml",
+          "--format",
+          "json",
+          "--frozen",
+          "check",
+          "bans",
+          "sources",
+          "licenses",
+          "--hide-inclusion-graph"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+        "started_at": "2026-09-25T13:51:07.114742+00:00",
+        "ended_at": "2026-09-25T13:51:08.500763+00:00",
+        "exit": 0,
+        "timed_out": false,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "d62730cd4ef92a52ef2f7c01ba521ef3124e9290ffff9e00fd0960115e6000a8"
+      },
+      {
+        "name": "native-advisories",
+        "command": [
+          "cargo",
+          "deny",
+          "--manifest-path",
+          "zk/native-composition/Cargo.toml",
+          "--config",
+          "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/deny.toml",
+          "--format",
+          "json",
+          "--frozen",
+          "check",
+          "advisories",
+          "--hide-inclusion-graph"
+        ],
+        "cwd": "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration",
+        "started_at": "2026-09-25T13:51:08.509440+00:00",
+        "ended_at": "2026-09-25T13:51:09.794324+00:00",
+        "exit": 1,
+        "timed_out": false,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "fbc1f707c5ce5ba4df3e72891241ee51ebd4b3e0cb0b848a57625015ff1ef0e1"
+      }
+    ],
+    "tools": {
+      "cargo-vet": "0.10.2",
+      "cargo-deny": "0.20.2"
+    },
+    "candidate_committed": false,
+    "inputs_unchanged": true
+  },
+  "root_vet": {
+    "name": "root-vet",
+    "command": [
+      "cargo",
+      "vet",
+      "--manifest-path",
+      "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/Cargo.toml",
+      "--store-path",
+      "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/supply-chain",
+      "--locked",
+      "--frozen",
+      "--no-minimize-exemptions",
+      "--output-format",
+      "json"
+    ],
+    "started_at": "2026-09-25T13:51:49.857804+00:00",
+    "ended_at": "2026-09-25T13:51:57.429799+00:00",
+    "exit": 0,
+    "timed_out": false,
+    "scope": "Frozen cached metadata only, candidate root graph and candidate store; no compilation/network/fetch.",
+    "stdout_sha256": "568be2a862d9e03d446dfcb07dfd40381c0155b7b0932e4b2a2e676cfbcb15ba",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "root_deny": {
+    "name": "root-deny",
+    "command": [
+      "cargo",
+      "deny",
+      "--manifest-path",
+      "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/Cargo.toml",
+      "--config",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/policy-integration-candidate/deny-cached-db.toml",
+      "--format",
+      "json",
+      "--frozen",
+      "check",
+      "bans",
+      "sources",
+      "licenses",
+      "advisories",
+      "--hide-inclusion-graph"
+    ],
+    "started_at": "2026-09-25T13:52:52.113654+00:00",
+    "ended_at": "2026-09-25T13:52:55.843566+00:00",
+    "exit": 0,
+    "timed_out": false,
+    "scope": "All-feature all-target resolved root graph, cached offline database only; no compile/fetch. Same exact candidate policy with db-path location override described in native advisory receipt.",
+    "root_lock_sha256": "e2cbc03292115d525bf3229eecef33ae2528542bd9fba371b861a12674754eb7",
+    "candidate_deny_sha256": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "5c32d09da76e8ca3bb69c605c7363c2bc15df963f33bd551ee672b904d9bdaa5"
+  },
+  "native_advisories_cached_db": {
+    "name": "native-advisories-cached-db",
+    "command": [
+      "cargo",
+      "deny",
+      "--manifest-path",
+      "/Users/jesght/Documents/ChatGPT/sparq/zk-native-policy-integration/zk/native-composition/Cargo.toml",
+      "--config",
+      "/Users/jesght/Documents/ChatGPT/sparq/study-artifacts/zk-resume-2026-09-25/native/policy-integration-candidate/deny-cached-db.toml",
+      "--format",
+      "json",
+      "--frozen",
+      "check",
+      "advisories",
+      "--hide-inclusion-graph"
+    ],
+    "started_at": "2026-09-25T13:52:14.766186+00:00",
+    "ended_at": "2026-09-25T13:52:16.589583+00:00",
+    "exit": 1,
+    "timed_out": false,
+    "candidate_deny_sha256": "06d409859028061cc42498e5d03774575ef40f13e6fffa88d5434e1f1789bfae",
+    "invoked_config_sha256": "8e395a540b5e85f773508de6b5becfe2ffce066fff7d178f68d23e065c5e14e2",
+    "only_config_difference": "advisories.db-path selects previously cached writable database; all policy values unchanged",
+    "db_commit": "593df8c1b5ed0bcde9dddadfeeead776fa514ff8",
+    "no_database_refresh": true,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "8536162c09aa64adb13712e1ba75e75df04c28ac235940f589cbf00f56e91073"
+  },
+  "native_failures": {
+    "vet_conclusion": "fail (vetting)",
+    "uncovered_safe_to_deploy_units": 134,
+    "inventory_exact_match": true,
+    "advisories": [
+      {
+        "advisory": "RUSTSEC-2024-0388",
+        "package": "derivative",
+        "kind": "unmaintained"
+      },
+      {
+        "advisory": "RUSTSEC-2026-0173",
+        "package": "proc-macro-error2",
+        "kind": "unmaintained"
+      }
+    ]
+  },
+  "root_outcomes": {
+    "vet": "success",
+    "bans_sources_licenses_advisories": "success with cached database, no refresh"
+  },
+  "native_outcomes": {
+    "bans_sources_licenses": "success",
+    "vet": "fail(vetting)",
+    "advisories": "fail; two maintenance notices"
+  },
+  "historical_proposal_correction": {
+    "initial_vet_sha256": "782e982a30cae0cc2eac62ace69c1bea51531d12bd28335a58688f546859c393",
+    "initial_status": "store-format consistency failure, not gap count",
+    "post_format_vet_sha256": "ad9237db60f7a179aae02a257323b6e84e6a7fe87b5e1c88fc7b09b90fca18e2",
+    "supplement_sha256": "cde8e8af9a2dfe7ee1dbd5bccca7cc8b2f5bb0553702c8c48f8b001049503e62",
+    "later_source_bound_private_cae_receipt_sha256": "6ea80f20baab5a566c444cf3abcf98c100692c7e55a34d4bf36567b2c7537a4f",
+    "scope": "Historical private-store evidence; candidate-owned checks above supersede only source attribution, retaining all failures."
+  },
+  "remaining_gate_failures_are_not_waived": true
+}

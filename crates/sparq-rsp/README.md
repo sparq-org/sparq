@@ -1,9 +1,7 @@
-<!-- [OPUS-4.8] sq-puyy: trimmed to the concise per-crate README template (sq-9jw5). -->
+<!-- sq-puyy: trimmed to the concise per-crate README template (sq-9jw5). -->
 # sparq-rsp
 
 <p>
-  <a href="https://crates.io/crates/sparq-rsp"><img src="https://img.shields.io/crates/v/sparq-rsp.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-rsp"><img src="https://docs.rs/sparq-rsp/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -14,7 +12,7 @@ deterministic **library** — no async runtime, no wall clock, no service.
 The engine never reads a clock: timestamps are application-supplied `u64`s and time
 advances only through pushed values, so the whole pipeline is a pure function of the
 pushed `(triple, ts)` sequence — replayable, unit-testable, wasm-safe. Like
-`sparq-reason` / `sparq-shacl` it is **isolated**: nothing in the workspace depends on
+`sparq-reason` / `sparq-shacl` it is **isolated**: only its `sparq-rsp-wasm` bundle depends on
 it, so the core engine and the wasm build carry zero streaming code.
 
 ## 🚀 Quickstart
@@ -58,7 +56,7 @@ q.flush(|result| { /* end-of-stream: close everything up to max ts */ })?;
 - **Closed-window aggregates** — the default-off `window-aggregate` feature adds
   `window_aggregate(&WindowResult, var, Agg)` for deterministic
   COUNT/SUM/AVG/MIN/MEDIAN/MAX scalar folds over emitted rows, without a clock read or
-  another query. <!-- [GPT-5.6] sq-sfle1 -->
+  another query. <!-- sq-sfle1 -->
 - **Relation-to-stream (R2S)** — `R2S::{RStream, IStream, DStream}`: full / added /
   removed rows per window, computed as exact term-level multiset differences.
 - **RSP-QL surface syntax + multi-window joins** — `RspqlQuery::parse` reads
@@ -73,7 +71,7 @@ q.flush(|result| { /* end-of-stream: close everything up to max ts */ })?;
   poll rather than instantly — a shape answered straight from the index, or one that
   finishes before the first poll, runs to completion unchecked. `max_bytes` caps the
   executor-accounted ESTIMATED working set of one evaluation, not total process memory nor
-  the memory of the materialised windows themselves. <!-- [SONNET-4.6] sq-xqu -->
+  the memory of the materialised windows themselves. <!-- sq-xqu -->
 - **Pluggable materialisation (`EvalMode`)** — `PersistentDict` (default, compacted
   dictionary), `Rebuild` (v1 baseline), `Delta` (one live graph, per-slide delta), and
   `Snapshot` (one live graph + a cheap O(overlay) immutable point-in-time snapshot per
@@ -85,7 +83,7 @@ q.flush(|result| { /* end-of-stream: close everything up to max ts */ })?;
 
 - **How-to** — [`skills/streaming-rsp/SKILL.md`](../../skills/streaming-rsp/SKILL.md)
   (window semantics, R2S diffs, eval modes, RSP-QL syntax, the wasm tier).
-- **API reference** — [docs.rs/sparq-rsp](https://docs.rs/sparq-rsp).
+- **API reference** — `cargo doc -p sparq-rsp --open` (not on crates.io / docs.rs: `publish = false`).
 - **Design** — [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
 - **Performance** — the `throughput` example
   (`cargo run --release -p sparq-rsp --example throughput`; append `-- --json <path>` to

@@ -58,7 +58,7 @@ impl ActiveContext {
             remote_contexts: Vec::new(),
             validate_scoped: true,
         };
-        process_inner(self, local_context, false, true, &mut env)
+        super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))
     }
 
     /// Applies a **scoped** context (a property-scoped or type-scoped `@context`) during
@@ -102,7 +102,10 @@ pub(crate) fn process_inner(
     mut propagate: bool,
     env: &mut Env,
 ) -> Result<ActiveContext, JsonLdError> {
+    // Recurses for remote contexts, @import and nested scoped contexts.
+    let _nested = super::budget::nest()?;
     // step 1: result is a copy of the input active context.
+    super::budget::charge(active.term_count() + 1)?;
     let mut result = active.clone();
 
     // step 2: a top-level @propagate overrides the inherited value.
@@ -114,6 +117,7 @@ pub(crate) fn process_inner(
 
     // step 3: when not propagating, remember the input context to revert to.
     if !propagate && result.previous_context.is_none() {
+        super::budget::charge(active.term_count() + 1)?;
         result.previous_context = Some(std::sync::Arc::new(active.clone()));
     }
 
@@ -132,6 +136,7 @@ pub(crate) fn process_inner(
             }
             let mut fresh = ActiveContext::new(active.original_base_url.as_deref());
             if !propagate {
+                super::budget::charge(result.term_count() + 1)?;
                 fresh.previous_context = Some(std::sync::Arc::new(result.clone()));
             }
             result = fresh;
@@ -374,6 +379,10 @@ pub(crate) fn create_term_definition(
     override_protected: bool,
     env: &mut Env,
 ) -> Result<(), JsonLdError> {
+    super::budget::charge(1)?;
+    // Recurses once per term this one depends on ("a": "b", "b": "c", ...), and per
+    // nested scoped context it validates.
+    let _nested = super::budget::nest()?;
     // step 1: already built, or a cycle.
     match defined.get(term) {
         Some(true) => return Ok(()),

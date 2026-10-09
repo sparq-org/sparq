@@ -6,8 +6,8 @@ Context Processing, Expansion, Flattening, Compaction, Framing, and RDF
 
 [JSON-LD 1.1]: https://www.w3.org/TR/json-ld11/
 
-> [GPT-5.6] Build-out status reconciled in `sq-ci15w`; implementation provenance remains
-> recorded on the individual algorithms. [OPUS-5] (`sq-ghdfw`) Re-verified against the
+> Build-out status reconciled in `sq-ci15w`; implementation provenance remains
+> recorded on the individual algorithms. (`sq-ghdfw`) Re-verified against the
 > tree: `to_rdf` and `api` are the only remaining stubs.
 > Epic `sq-oy1f` (design record `research/jsonld-1.1-design.md`).
 
@@ -52,9 +52,10 @@ assert_eq!(err.code(), JsonLdErrorCode::LoadingDocumentFailed);
 
 ### Opt-in by construction
 
-Nothing in sparq's default build or the wasm artifact depends on this crate —
-`sparq-core` and `sparq-engine` stay lean. `sparq-engine` pulls it in only behind
-its off-by-default `serialize-rdf` feature; the crate has **zero mandatory
+Nothing in the default library build of `sparq-core` / `sparq-engine` or the default
+wasm artifact depends on this crate. `sparq-engine` pulls it in only behind its
+off-by-default `serialize-rdf` feature (which the `sparq-cli` / `sparq-server`
+binaries enable through their default-on `jsonld` feature); the crate has **zero mandatory
 dependencies**, is `#![forbid(unsafe_code)]`, and adds no default dependency
 anywhere.
 
@@ -104,9 +105,8 @@ validation. Its pinned W3C framing lane passes all 92 cases against the normativ
 document oracle; that complete lane is not a blanket conformance claim for remote
 loading, HTML extraction, or other JSON-LD surfaces.
 
-Only `to_rdf` and `api` remain documented stubs. `publish = false` is the crate's
-current internal-release posture, not an indication that compaction or framing is
-unimplemented.
+Only `to_rdf` and `api` remain documented stubs. The crate is published to crates.io
+as part of `sparq-engine`'s dependency closure.
 
 ## 📚 Learn more
 

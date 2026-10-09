@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "base_checkpoint": "480f19e2d926a2e72cd8059cb6b698659c672c0f",
+  "scope": "Integrated native and actual guest execution checks before the final immutable eight-receipt campaign; no genuine V3 receipt claim",
+  "source_sha256": {
+    "model/src/evaluate.rs": "10b86aba1b63d211b7f4aaba07212828bb8fe3648234771a44b698946a38811a",
+    "model/src/v3/evaluate.rs": "bb1fc0d2d9a36382e8bcd412864902a3fc7cec8061eaf61ec7264a678ae64eaf",
+    "model/tests/graph_results.rs": "a3870936c959d856799138561e34a4c89c5008fe3b2622887ad8f5138e92d86f",
+    "host/tests/actual_exists_bound.rs": "224437d724ce36ff9033c56003ba895bb33cc6c1f6735768e97523dcb2ab3dd9",
+    "host/tests/actual_exists_bound_versions.rs": "3084e3710edaba884a4ebf64df713128f08497601622cb7ee2d0e9914aabeb47",
+    "host/tests/actual_graph_results.rs": "b230312529309a796c4a8351d75819172f2e3d92a3e777da47a5ce1aea26aea8",
+    "methods/guest/src/main.rs": "22d74f63b321dc41d5b74a295a225e67cba0f1ce44c8834f487132ad82317f85",
+    "methods/guest/Cargo.lock": "60cdd9f7f8b251bcc3f442ab13064358f2ed808a3e5e0355625872cfab218329"
+  },
+  "native_model_test_functions": 60,
+  "unchanged_positive_corpus_cases": 82,
+  "captured_bound_guest_versions": [
+    1,
+    2,
+    3
+  ],
+  "captured_bound_cases_per_version": {
+    "accepted": 8,
+    "rejected": 12
+  },
+  "graph_results_actual_test_functions": 4,
+  "graph_results_relation_rejections": 25,
+  "graph_results_transport_rejections": 4,
+  "all_host_tests_compile": true,
+  "clippy_all_targets_warnings_denied": "passed",
+  "three_graph_vet": "passed; inherited exemptions preserved",
+  "three_graph_deny_integrity": "passed",
+  "sdk_patch_provenance_and_policies": "passed",
+  "canon_path_selector_mutation": {
+    "mutated_source_sha256": "6a0026dc70ed031b494e73705e0723054e547a379fa20d0c45bbf998f8c88d82",
+    "restored_source_sha256": "ab1e0836a3b429a8186fe178714be92e39fefe07368bff64348d8411c38c7e6b",
+    "exit_code": 1,
+    "assertion_failed": true
+  },
+  "historical_integration": "graph-results-integration-checks.json",
+  "genuine_v3_receipts": "pending final frozen campaign",
+  "logs": [
+    "/private/tmp/sparq-v3-bound-integrated-model.log",
+    "/private/tmp/sparq-v3-bound-all-host-compile-restored.log",
+    "/private/tmp/sparq-v3-bound-actual-v1.log",
+    "/private/tmp/sparq-v3-bound-actual-v2-v3.log",
+    "/private/tmp/sparq-v3-bound-actual-graphs.log",
+    "/private/tmp/sparq-v3-bound-final-clippy.log",
+    "/private/tmp/sparq-v3-dependency-vet.log",
+    "/private/tmp/sparq-v3-deny-integrity.log",
+    "/private/tmp/sparq-v3-patch-policy.log",
+    "/private/tmp/sparq-v3-helper-final.log"
+  ]
+}

@@ -1,0 +1,1699 @@
+{
+  "schema": "sparq.workload-campaign.local-smoke.v1",
+  "canonical": false,
+  "execution": {
+    "author": "GPT-6",
+    "status": "completed_and_artifact_hashes_revalidated",
+    "source": "5512ee385c71ff508f223385dd647382b0675adc",
+    "tree": "ee6e3a55bd5c89887bd78052604d16db8c2a82bb",
+    "profile": "debug native adapter validation, NONcanonical",
+    "root_lock_sha256": "3101ccd01e345f39574130d711db2453732385420f474c4267a70784cee836a1",
+    "detached_lock_sha256": "cc8d1a8fbef372055bc3e5a65ec74f085021e940ff3c96e1ea03e4d39a38219f",
+    "accepted_guest_source": "048cb4324d06d9bbc24ed96203979b19cfc48838",
+    "accepted_guest_path": "/private/tmp/sparq-exact-v2-048cb4324-local-ipc/artifact/guest.bin",
+    "accepted_guest_sha256": "5f9995a5843917638a160b5bac11a8fb5ffab922d9537aa73e71b57f88e04fcf",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "native_tests": {
+      "selected_functions": 8,
+      "exact_functions": 6,
+      "python_functions": 9
+    },
+    "native_is_guest_proof_evidence": false,
+    "canonical_performance": false,
+    "guest_runtime_changed_by_adapter": false,
+    "exact_adapter_build": {
+      "command": "CARGO_TARGET_DIR=/private/tmp/sparq-risc0-smoke-target CARGO_BUILD_JOBS=1 CARGO_INCREMENTAL=0 RUSTC_WRAPPER= RISC0_HOME=/private/tmp/sparq-risc0-toolchain-3.0.6/home RISC0_SERVER_PATH=/private/tmp/sparq-risc0-toolchain-3.0.6/r0vm cargo build --locked --offline --manifest-path zk/sparql-evaluator/Cargo.toml -p sparq-proved-evaluator --example exact_experiment",
+      "exit_code": 0,
+      "path": "/private/tmp/sparq-workload-campaign-5512-minimal/exact_experiment-debug",
+      "sha256": "2e13df5f0d198c5e36ea0c464ef23dd32e4647d9d0cb8e97c835912627638dcf",
+      "profile": "debug",
+      "observed_clean_source": "5512ee385c71ff508f223385dd647382b0675adc",
+      "independent_build_attestation": false
+    },
+    "accepted_guest_limitations": [
+      "Independently accepted historical048 artifact, not latest engine/guest runtime.",
+      "Historical numeric EBV converts very small decimal values through f64; a later exact lexical EBV fix is pending integration. The fixed wallet/organization queries here do not exercise that decimal EBV case.",
+      "These synthetic benchmark receipts do not certify general SPARQL correctness, current runtime completeness or upstream cryptographic assurance."
+    ],
+    "accepted_pin_path": "/private/tmp/sparq-exact-v2-048cb4324-local-ipc/artifact/pin.json",
+    "accepted_pin_sha256": "6228b6d72edb24e67683230db8ccbfd40d239a6823d30c4fcfe1367397b998c7",
+    "selected_adapter_build": {
+      "command": [
+        "cargo",
+        "build",
+        "--locked",
+        "--offline",
+        "-p",
+        "sparq-zk-compose",
+        "--features",
+        "successful-results",
+        "--example",
+        "result_experiment"
+      ],
+      "environment": {
+        "CARGO_TARGET_DIR": "/Users/jesght/Documents/ChatGPT/sparq/zk-engine-semantics/target",
+        "CARGO_BUILD_JOBS": "1",
+        "CARGO_INCREMENTAL": "0",
+        "RUSTC_WRAPPER": ""
+      },
+      "exit_code": 0,
+      "path": "/private/tmp/sparq-workload-campaign-5512-minimal/result_experiment-debug",
+      "sha256": "597e4d2d21fa3b1ed4a8676dcd86f55087099fea379d6f2f9258e1d04398c8be",
+      "profile": "debug",
+      "observed_clean_source": "5512ee385c71ff508f223385dd647382b0675adc",
+      "independent_build_attestation": false
+    },
+    "runner_source": "f18d96c1074296bb01b13f5e460a81d2ebcc6d5e",
+    "runner_tree": "1ccabeb9f612e53dd6f88267451196ff7842a9d2",
+    "runner_sha256": "cbcfad5984170fe1fd52bcec7d355ca2f4ab37b774c6cc8a6c78cc8137c60d9e",
+    "rust_adapter_build_source": "5512ee385c71ff508f223385dd647382b0675adc",
+    "source_status": "Rust adapter code unchanged between5512 andf18; new runner accounting controls tested separately",
+    "prover_environment": {
+      "RISC0_DEV_MODE": "0",
+      "RISC0_PROVER": "local"
+    },
+    "campaign_exit_code": 0,
+    "report_sha256": "b9cd58e4ae2a43c6a2fba8cbb7274ccd04473aa4f92c69d64597e93bca7f593c",
+    "report_path": "/private/tmp/sparq-workload-campaign-5512-minimal/results/report.json",
+    "successful_samples": 4,
+    "unsupported_records": 2,
+    "warmups": 0,
+    "full_profile_executed": false,
+    "measurement_is_canonical": false,
+    "independent_review": {
+      "initial_source": "5512ee385c71ff508f223385dd647382b0675adc",
+      "initial_verdict": "REQUEST_CHANGES: two runner accounting findings",
+      "corrected_source": "f18d96c1074296bb01b13f5e460a81d2ebcc6d5e",
+      "corrected_verdict": "APPROVE",
+      "model": "GPT-6",
+      "review_path": "/private/tmp/sparq-workload-gpt6-review-f18d96c/review-final.md"
+    },
+    "summaries": [
+      {
+        "ordinal": 0,
+        "backend": "selected",
+        "mode": "first_success",
+        "family": "wallet",
+        "scale": 3,
+        "contract_digest": "a4f8253ef28039a539b4cc423159652d2d69ab8e324585c896365770ac5e24f4",
+        "typed_controls": 5,
+        "artifact_files": 4
+      },
+      {
+        "ordinal": 1,
+        "backend": "selected",
+        "mode": "optimize",
+        "family": "wallet",
+        "scale": 3,
+        "contract_digest": "a4f8253ef28039a539b4cc423159652d2d69ab8e324585c896365770ac5e24f4",
+        "typed_controls": 5,
+        "artifact_files": 4
+      },
+      {
+        "ordinal": 3,
+        "backend": "exact",
+        "mode": "verifier_agreed",
+        "family": "organization",
+        "scale": 2,
+        "contract_digest": "fa43b9471a303805331808a0fa5a9fef0997aff9303164f06cdb5b62c936d714",
+        "typed_controls": 8,
+        "artifact_files": 6,
+        "artifact_admission_controls": 3
+      },
+      {
+        "ordinal": 4,
+        "backend": "exact",
+        "mode": "holder_declared",
+        "family": "organization",
+        "scale": 2,
+        "contract_digest": "41e4f9eb33345b2ceb8478481f77740373cf121b8f559bf41c95a06d42f96a20",
+        "typed_controls": 8,
+        "artifact_files": 6,
+        "artifact_admission_controls": 3
+      }
+    ],
+    "guard_mutations": [
+      {
+        "record": "/private/tmp/sparq-campaign-python-guard-mutations.json",
+        "sha256": "a2f5d33baf83db4ed33124eb280f6a147e2f90b69747185cecb20a11d42020f9"
+      },
+      {
+        "record": "/private/tmp/sparq-campaign-exact-input-guard-mutation.json",
+        "sha256": "f3516f217e00eb9059ff0884f7808c91939ce032e4a92da2f595db0ba76e1cfd"
+      },
+      {
+        "record": "/private/tmp/sparq-campaign-wallet-input-guard-mutation.json",
+        "sha256": "9d0e605c6bcbe35702827b5ca11ae996838075d9a315ee17c9f3738e3284a8f2"
+      },
+      {
+        "record": "/private/tmp/sparq-campaign-outcome-guard-mutations.json",
+        "sha256": "bece35fd4eb047db89e55a13d6c1e7c3786ce3a36407f499b8d715fcf781dfae"
+      }
+    ],
+    "rust_adapter_and_dependency_source_unchanged_after_build": true
+  },
+  "report": {
+    "all_supported_samples_succeeded": true,
+    "canonical_performance": false,
+    "comparison_contract": "paired wallet planners share input/query/answer/issuer/status/capacity policy; realized K1/K2 public capacity differs. Exact organization authority modes are separate contracts. No cross-backend aggregate.",
+    "counts": {
+      "success": 4,
+      "unsupported": 2
+    },
+    "cross_backend_speedup": null,
+    "records": [
+      {
+        "adapter_contract_digest": "a4f8253ef28039a539b4cc423159652d2d69ab8e324585c896365770ac5e24f4",
+        "adapter_report_sha256": "f2523231b3085dbff0282d12fd9848fb63eebb87b366a22f0fb90570bd766d30",
+        "argv": [
+          "/private/tmp/sparq-workload-campaign-5512-minimal/result_experiment-debug",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0000/manifest.json",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0000/adapter"
+        ],
+        "artifacts": [
+          {
+            "bytes": 21458,
+            "path": "adapter/report.json",
+            "sha256": "f2523231b3085dbff0282d12fd9848fb63eebb87b366a22f0fb90570bd766d30"
+          },
+          {
+            "bytes": 43512,
+            "path": "adapter/run-1/presentation.json",
+            "sha256": "8e0893d587702c32cf6c278a7407a7c7781e5035af46828db1c6fed2c0758b87"
+          },
+          {
+            "bytes": 14656,
+            "path": "adapter/run-1/proof.bin",
+            "sha256": "fd2200842135dd209bba4a4f32f776eb58b62ce4f48c9439fb8ff1e8619193ca"
+          },
+          {
+            "bytes": 454,
+            "path": "adapter/run-1/public.json",
+            "sha256": "a7d01caf5e58eaebe8a555d671004649f4095fa3150d054228d06e9abc3a2f05"
+          }
+        ],
+        "backend": "selected",
+        "comparison_pair": "wallet-0003:round:0",
+        "completed_disk_backend_warmups": 0,
+        "family": "wallet",
+        "fixture": "wallet-0003",
+        "fixture_sha256": "8b5aa99f404393cce1c2b31370975dcf3755160513a3fe349eaeeea55c9538f0",
+        "in_process_warmup": false,
+        "manifest_sha256": "6065637e87a1461453ec4390a220b971abc09c67dba7616aaeb7f5b1881d1175",
+        "mode": "first_success",
+        "ordinal": 0,
+        "process": {
+          "exit_code": 0,
+          "inclusive_process_ns": 10304233917,
+          "status": "exited"
+        },
+        "process_tree_peak_rss_bytes": null,
+        "raw_process_outputs": [
+          {
+            "bytes": 0,
+            "path": "stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "bytes": 163,
+            "path": "stderr.txt",
+            "sha256": "721fb2a9ba819a2a8b755738f5b15261de3199f5faccc2d7e7e328ffe3b9a9f4"
+          }
+        ],
+        "role": "measurement",
+        "round": 0,
+        "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+        "sample": {
+          "acceptance_contract_blake3": "a4f8253ef28039a539b4cc423159652d2d69ab8e324585c896365770ac5e24f4",
+          "artifacts": {
+            "cryptographic_proof_bytes": 14656,
+            "presentation_blake3": "e6667837eac573616344ec1108aad77ee7aea3d89cd9a100b9abfb6ec289fbd2",
+            "presentation_json_bytes": 43512,
+            "proof_blake3": "0448ecc93896bb15e9e7ed986e87a18fbb80897209e351f1d270c7f27ec3fb5d",
+            "public_disclosure_blake3": "26b764045870ddc83fcbcc732f108ccb7256b921593d61a743e17d60ba5602ef",
+            "public_disclosure_json_bytes": 454,
+            "public_transcript": {
+              "challenge": "0x000000000000000000000000000000000000000000000000f2f3d49c9cec2cef",
+              "issuer_slots": [
+                "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984",
+                "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984"
+              ],
+              "query": "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }",
+              "rows": [
+                {
+                  "name": {
+                    "datatype": "http://www.w3.org/2001/XMLSchema#string",
+                    "kind": "literal",
+                    "value": "Alice"
+                  }
+                }
+              ],
+              "version": 1
+            },
+            "verification_key": {
+              "reason": "independently derived by verifier API; not exported",
+              "value": null
+            }
+          },
+          "completed_warmups": 0,
+          "ordinal": 1,
+          "planner": "first_success",
+          "prior_runs_in_process": 0,
+          "replay_control": {
+            "reason": "challenge already consumed",
+            "status": "rejected_as_expected"
+          },
+          "role": "measurement",
+          "stages": {
+            "prepare_api": {
+              "error": null,
+              "seconds": 0.076516917,
+              "status": "success"
+            },
+            "prove_api_inclusive": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": [
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001655625,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 1.235969292,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000912458,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000532833,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.543659709,
+                    "outcome": "success",
+                    "stage": "nargo_execute"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 1.479363833,
+                    "outcome": "success",
+                    "stage": "bb_prove_and_write_vk"
+                  }
+                ]
+              },
+              "error": null,
+              "seconds": 3.335128291,
+              "status": "success"
+            },
+            "replay_control_excluded_from_timings": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": []
+              },
+              "error": null,
+              "seconds": 0.03403825,
+              "status": "success"
+            },
+            "tamper_controls_excluded_from_timings": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": [
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000600917,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.368156083,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000656125,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.4834365,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.028577916,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001131459,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.35372075,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001539375,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.508409917,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.02237275,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000588167,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.331194208,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001700958,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.485569209,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.03087775,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000621709,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.351646667,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001787291,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.487169292,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.031354458,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  }
+                ]
+              },
+              "error": null,
+              "seconds": 3.885301042,
+              "status": "success"
+            },
+            "verify_api_inclusive": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": [
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001063708,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.355526,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001689291,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.497656375,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.036929667,
+                    "outcome": "success",
+                    "stage": "bb_verify"
+                  }
+                ]
+              },
+              "error": null,
+              "seconds": 0.956355292,
+              "status": "success"
+            }
+          },
+          "status": "success",
+          "tamper_controls": {
+            "accepted_status_snapshot": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "challenge_both_sides": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "proof_bytes": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "released_term": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "requested_query": {
+              "reason": "query differs from relying-party request",
+              "status": "rejected_as_expected"
+            }
+          },
+          "work": {
+            "optimization": null,
+            "private_predicates": 1,
+            "public_predicates": 0,
+            "selected_credentials": 2,
+            "shared_memberships": 2,
+            "signature_checks": 2,
+            "witness_uses": 2
+          }
+        },
+        "scale": 3,
+        "status": "success",
+        "subprocess_started": true,
+        "unsupported": false,
+        "unsupported_reason": null
+      },
+      {
+        "adapter_contract_digest": "a4f8253ef28039a539b4cc423159652d2d69ab8e324585c896365770ac5e24f4",
+        "adapter_report_sha256": "ddebe277148d9c9b6c4a8ed8caaace5204414e04315a172419beafbad0362171",
+        "argv": [
+          "/private/tmp/sparq-workload-campaign-5512-minimal/result_experiment-debug",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0001/manifest.json",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0001/adapter"
+        ],
+        "artifacts": [
+          {
+            "bytes": 21358,
+            "path": "adapter/report.json",
+            "sha256": "ddebe277148d9c9b6c4a8ed8caaace5204414e04315a172419beafbad0362171"
+          },
+          {
+            "bytes": 43350,
+            "path": "adapter/run-1/presentation.json",
+            "sha256": "87fd78368f2cfac113a2337cf1a79fda3efa50bbe193860510dfa046d0e53a26"
+          },
+          {
+            "bytes": 14656,
+            "path": "adapter/run-1/proof.bin",
+            "sha256": "3762b80472065b5e97a83e1519f93679eac03c6b567d917549aecd389b81c1f8"
+          },
+          {
+            "bytes": 387,
+            "path": "adapter/run-1/public.json",
+            "sha256": "ac6bbb60448a03da732eb96a6f901616e8cfb82a43f63729665096e848e85db6"
+          }
+        ],
+        "backend": "selected",
+        "comparison_pair": "wallet-0003:round:0",
+        "completed_disk_backend_warmups": 0,
+        "family": "wallet",
+        "fixture": "wallet-0003",
+        "fixture_sha256": "8b5aa99f404393cce1c2b31370975dcf3755160513a3fe349eaeeea55c9538f0",
+        "in_process_warmup": false,
+        "manifest_sha256": "ed2f1d487131ea47274f9b8cfeed1641c07d8d5b57afefbf534c83a41778f6e9",
+        "mode": "optimize",
+        "ordinal": 1,
+        "process": {
+          "exit_code": 0,
+          "inclusive_process_ns": 8022026792,
+          "status": "exited"
+        },
+        "process_tree_peak_rss_bytes": null,
+        "raw_process_outputs": [
+          {
+            "bytes": 0,
+            "path": "stdout.txt",
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          {
+            "bytes": 163,
+            "path": "stderr.txt",
+            "sha256": "721fb2a9ba819a2a8b755738f5b15261de3199f5faccc2d7e7e328ffe3b9a9f4"
+          }
+        ],
+        "role": "measurement",
+        "round": 0,
+        "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+        "sample": {
+          "acceptance_contract_blake3": "a4f8253ef28039a539b4cc423159652d2d69ab8e324585c896365770ac5e24f4",
+          "artifacts": {
+            "cryptographic_proof_bytes": 14656,
+            "presentation_blake3": "44d5974bd67a914f911fd83d940cf577e66b06259121697866cbc74a77d97736",
+            "presentation_json_bytes": 43350,
+            "proof_blake3": "892ceadabf9caaf65c4c7e86400e632d79f3252918befb792871685889ec4975",
+            "public_disclosure_blake3": "861febed0df0d56e5e0447f72775c8bef5eecd802083e221f5da6878ad7fe00d",
+            "public_disclosure_json_bytes": 387,
+            "public_transcript": {
+              "challenge": "0x000000000000000000000000000000000000000000000000cc5ecb109d2f2551",
+              "issuer_slots": [
+                "653512c1337e44f61829cba7aeb8fabda2f195186f331d9e668aed97dbaa4984"
+              ],
+              "query": "SELECT DISTINCT ?name WHERE { ?s <urn:name> ?name . ?s <urn:age> ?age . FILTER(?age >= 18) }",
+              "rows": [
+                {
+                  "name": {
+                    "datatype": "http://www.w3.org/2001/XMLSchema#string",
+                    "kind": "literal",
+                    "value": "Alice"
+                  }
+                }
+              ],
+              "version": 1
+            },
+            "verification_key": {
+              "reason": "independently derived by verifier API; not exported",
+              "value": null
+            }
+          },
+          "completed_warmups": 0,
+          "ordinal": 1,
+          "planner": "optimize",
+          "prior_runs_in_process": 0,
+          "replay_control": {
+            "reason": "challenge already consumed",
+            "status": "rejected_as_expected"
+          },
+          "role": "measurement",
+          "stages": {
+            "prepare_api": {
+              "error": null,
+              "seconds": 0.060999791,
+              "status": "success"
+            },
+            "prove_api_inclusive": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": [
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.00106,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.795234875,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001379958,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000779083,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.441424,
+                    "outcome": "success",
+                    "stage": "nargo_execute"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 1.253746708,
+                    "outcome": "success",
+                    "stage": "bb_prove_and_write_vk"
+                  }
+                ]
+              },
+              "error": null,
+              "seconds": 2.563085709,
+              "status": "success"
+            },
+            "replay_control_excluded_from_timings": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": []
+              },
+              "error": null,
+              "seconds": 0.030712,
+              "status": "success"
+            },
+            "tamper_controls_excluded_from_timings": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": [
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001099125,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.326213917,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.0023585,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.363598792,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.029948458,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.00106225,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.323123667,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.00187875,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.342389416,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.031345458,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001052375,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.33184525,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000888,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.362105458,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.031500875,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.0010675,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.331470834,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.000682542,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.372722792,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.031514334,
+                    "outcome": "rejected",
+                    "stage": "bb_verify"
+                  }
+                ]
+              },
+              "error": null,
+              "seconds": 3.264385792,
+              "status": "success"
+            },
+            "verify_api_inclusive": {
+              "driver": {
+                "complete": true,
+                "dropped_events": 0,
+                "events": [
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.00105,
+                    "outcome": "success",
+                    "stage": "nargo_cache_lock"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.332760708,
+                    "outcome": "success",
+                    "stage": "nargo_compile"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.001528167,
+                    "outcome": "success",
+                    "stage": "acir_private_copy"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.365791875,
+                    "outcome": "success",
+                    "stage": "bb_write_vk"
+                  },
+                  {
+                    "acir_cache": null,
+                    "elapsed_seconds": 0.035148583,
+                    "outcome": "success",
+                    "stage": "bb_verify"
+                  }
+                ]
+              },
+              "error": null,
+              "seconds": 0.785384125,
+              "status": "success"
+            }
+          },
+          "status": "success",
+          "tamper_controls": {
+            "accepted_status_snapshot": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "challenge_both_sides": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "proof_bytes": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "released_term": {
+              "reason": "cryptographic proof rejected",
+              "status": "rejected_as_expected"
+            },
+            "requested_query": {
+              "reason": "query differs from relying-party request",
+              "status": "rejected_as_expected"
+            }
+          },
+          "work": {
+            "optimization": "Optimal",
+            "private_predicates": 1,
+            "public_predicates": 0,
+            "selected_credentials": 1,
+            "shared_memberships": 2,
+            "signature_checks": 1,
+            "witness_uses": 2
+          }
+        },
+        "scale": 3,
+        "status": "success",
+        "subprocess_started": true,
+        "unsupported": false,
+        "unsupported_reason": null
+      },
+      {
+        "backend": "exact",
+        "comparison_pair": null,
+        "completed_disk_backend_warmups": 0,
+        "family": "wallet",
+        "fixture": "wallet-0003",
+        "fixture_sha256": "8b5aa99f404393cce1c2b31370975dcf3755160513a3fe349eaeeea55c9538f0",
+        "in_process_warmup": false,
+        "mode": "wallet",
+        "ordinal": 2,
+        "process_tree_peak_rss_bytes": null,
+        "role": "measurement",
+        "round": 0,
+        "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+        "scale": 3,
+        "status": "unsupported",
+        "subprocess_started": false,
+        "unsupported": true,
+        "unsupported_reason": "profile has no matched adapter statement; credential authentication and exact-dataset authority are different contracts"
+      },
+      {
+        "adapter_contract_digest": "fa43b9471a303805331808a0fa5a9fef0997aff9303164f06cdb5b62c936d714",
+        "adapter_report_sha256": "cd00910144c9d8d435eb65697e6dd6cce29ca9fb004aa33cf1e75315afa3cc62",
+        "argv": [
+          "/private/tmp/sparq-workload-campaign-5512-minimal/exact_experiment-debug",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0003/manifest.json",
+          "/private/tmp/sparq-exact-v2-048cb4324-local-ipc/artifact/guest.bin",
+          "/private/tmp/sparq-exact-v2-048cb4324-local-ipc/artifact/pin.json",
+          "/private/tmp/sparq-risc0-toolchain-3.0.6/r0vm",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0003/adapter"
+        ],
+        "artifacts": [
+          {
+            "bytes": 440,
+            "path": "adapter/accepted-pin.json",
+            "sha256": "6228b6d72edb24e67683230db8ccbfd40d239a6823d30c4fcfe1367397b998c7"
+          },
+          {
+            "bytes": 1281,
+            "path": "adapter/case-0-sample-0/expected-request.json",
+            "sha256": "f1ab4539228eff7ebe9eb8df5c9d3615a46c6d5d81538e7277e2706bec5f1861"
+          },
+          {
+            "bytes": 1240,
+            "path": "adapter/case-0-sample-0/journal.json",
+            "sha256": "42403dd5cb72be3ccf1afc2790c2fa7e8f2a15d788643a910a54c3d30c4f4698"
+          },
+          {
+            "bytes": 585938,
+            "path": "adapter/case-0-sample-0/presentation.json",
+            "sha256": "337076ff100d517e2a29df2ddbfc33127365300ddb1bfc4729c6ce8b2fcdd361"
+          },
+          {
+            "bytes": 2049,
+            "path": "adapter/manifest.json",
+            "sha256": "f593f70ccb7760a0bc6dad3ed8cf6e34f69d7ced15d510c82d74684337801677"
+          },
+          {
+            "bytes": 9623,
+            "path": "adapter/report.json",
+            "sha256": "cd00910144c9d8d435eb65697e6dd6cce29ca9fb004aa33cf1e75315afa3cc62"
+          }
+        ],
+        "backend": "exact",
+        "comparison_pair": null,
+        "completed_disk_backend_warmups": 0,
+        "family": "organization",
+        "fixture": "organization-0002",
+        "fixture_sha256": "0080e761e40163756a4b2499ea98d84b2362295931a5c8c7a2027c697097a332",
+        "in_process_warmup": false,
+        "manifest_sha256": "f593f70ccb7760a0bc6dad3ed8cf6e34f69d7ced15d510c82d74684337801677",
+        "mode": "verifier_agreed",
+        "ordinal": 3,
+        "process": {
+          "exit_code": 0,
+          "inclusive_process_ns": 205927886709,
+          "status": "exited"
+        },
+        "process_tree_peak_rss_bytes": null,
+        "raw_process_outputs": [
+          {
+            "bytes": 90,
+            "path": "stdout.txt",
+            "sha256": "2cecb46333680bb1b04ded03a64833810ff98fa6778986c996781cb58b0130ce"
+          },
+          {
+            "bytes": 125,
+            "path": "stderr.txt",
+            "sha256": "723a223d12315b2238c6214a1443309133ce22b543b0b75ed0d5b396b7d539a4"
+          }
+        ],
+        "role": "measurement",
+        "round": 0,
+        "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+        "sample": {
+          "artifact_directory": "case-0-sample-0",
+          "canonical_result_json_bytes": 367,
+          "dataset_commitment": [
+            46,
+            115,
+            8,
+            234,
+            10,
+            164,
+            135,
+            114,
+            123,
+            45,
+            78,
+            241,
+            229,
+            252,
+            99,
+            80,
+            252,
+            177,
+            185,
+            88,
+            173,
+            198,
+            199,
+            157,
+            160,
+            237,
+            47,
+            217,
+            127,
+            1,
+            38,
+            76
+          ],
+          "expected_request_json_bytes": 745,
+          "journal_bytes": 636,
+          "nonce": [
+            27,
+            24,
+            108,
+            207,
+            158,
+            94,
+            19,
+            228,
+            53,
+            84,
+            161,
+            241,
+            205,
+            113,
+            66,
+            249,
+            99,
+            82,
+            68,
+            88,
+            64,
+            198,
+            143,
+            143,
+            198,
+            105,
+            100,
+            105,
+            189,
+            201,
+            144,
+            219
+          ],
+          "ordinal": 0,
+          "outer_control_id": [
+            1108038452,
+            834047746,
+            638717641,
+            225775291,
+            945396555,
+            374527040,
+            1154113015,
+            880258205
+          ],
+          "peak_rss_bytes": null,
+          "peak_rss_reason": "not instrumented across local r0vm child processes",
+          "presentation_json_bytes": 585938,
+          "presentation_sha256": "337076ff100d517e2a29df2ddbfc33127365300ddb1bfc4729c6ce8b2fcdd361",
+          "private_witness_risc0_words": 338,
+          "provenance": "VerifierAcceptedCommitment",
+          "receipt_kind": "Succinct",
+          "request_digest": [
+            238,
+            202,
+            10,
+            46,
+            252,
+            151,
+            201,
+            113,
+            182,
+            89,
+            201,
+            13,
+            160,
+            3,
+            78,
+            141,
+            201,
+            124,
+            93,
+            163,
+            10,
+            238,
+            99,
+            251,
+            23,
+            10,
+            127,
+            135,
+            236,
+            175,
+            68,
+            106
+          ],
+          "result": {
+            "Select": {
+              "order": "Sequence",
+              "rows": [
+                [
+                  "<urn:sparq:bench:0123456789abcdef:department-a>",
+                  "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                ],
+                [
+                  "<urn:sparq:bench:0123456789abcdef:department-b>",
+                  "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                ],
+                [
+                  "<urn:sparq:bench:0123456789abcdef:empty>",
+                  "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                ]
+              ],
+              "variables": [
+                "g",
+                "n"
+              ]
+            }
+          },
+          "seal_bytes": 222668,
+          "semantic_contract": {
+            "authority_mode": "verifier_agreed",
+            "backend_contract": "exact_dataset_v2",
+            "contract": "ExactDataset",
+            "dataset_commitment": [
+              46,
+              115,
+              8,
+              234,
+              10,
+              164,
+              135,
+              114,
+              123,
+              45,
+              78,
+              241,
+              229,
+              252,
+              99,
+              80,
+              252,
+              177,
+              185,
+              88,
+              173,
+              198,
+              199,
+              157,
+              160,
+              237,
+              47,
+              217,
+              127,
+              1,
+              38,
+              76
+            ],
+            "dialect": "SparqSparql11DatasetV2",
+            "disclosure": "canonical complete SELECT result or exact ASK boolean, dataset commitment and request binding",
+            "expected_result": {
+              "Select": {
+                "order": "Sequence",
+                "rows": [
+                  [
+                    "<urn:sparq:bench:0123456789abcdef:department-a>",
+                    "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                  ],
+                  [
+                    "<urn:sparq:bench:0123456789abcdef:department-b>",
+                    "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                  ],
+                  [
+                    "<urn:sparq:bench:0123456789abcdef:empty>",
+                    "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                  ]
+                ],
+                "variables": [
+                  "g",
+                  "n"
+                ]
+              }
+            },
+            "fixture": "organization_named_count",
+            "issuer_authentication": "none",
+            "named_graph_catalog": [
+              "urn:sparq:bench:0123456789abcdef:department-a",
+              "urn:sparq:bench:0123456789abcdef:department-b",
+              "urn:sparq:bench:0123456789abcdef:empty"
+            ],
+            "nquads_sha256": "d0679cf0068f24a2da2b6a658d1fb40b50f322dc3fa6ca82f7fd23a4e649cf4e",
+            "policy": {
+              "max_dataset_bytes": 65536,
+              "max_named_graphs": 16,
+              "max_rows": 4096,
+              "max_triples": 256
+            },
+            "query": "SELECT ?g (COUNT(?s) AS ?n) FROM NAMED <urn:sparq:bench:0123456789abcdef:department-a> FROM NAMED <urn:sparq:bench:0123456789abcdef:department-b> FROM NAMED <urn:sparq:bench:0123456789abcdef:empty> WHERE { GRAPH ?g { OPTIONAL { ?s <urn:member> ?kind } } } GROUP BY ?g ORDER BY ?g",
+            "scope": "complete committed bounded dataset; local FROM/FROM NAMED snapshots",
+            "synthetic_salt": [
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47
+            ]
+          },
+          "semantic_contract_sha256": "fa43b9471a303805331808a0fa5a9fef0997aff9303164f06cdb5b62c936d714",
+          "stages_ns": {
+            "fixture_request_prepare": 50625,
+            "guest_compilation": null,
+            "independent_receipt_verify": 297644334,
+            "proof_generation_only": null,
+            "prove_api_including_internal_verification": 181673768166,
+            "receipt_compression_only": null,
+            "witness_execution_only": null
+          },
+          "status": "proved_and_independently_verified",
+          "typed_acceptance_controls_passed": [
+            "expected_query_bytes",
+            "expected_nonce",
+            "expected_authority",
+            "expected_dataset_root",
+            "consumed_nonce_replay",
+            "authenticated_returned_result",
+            "authenticated_dataset_root",
+            "succinct_seal_bytes"
+          ],
+          "unavailable_stage_reason": "host API exposes inclusive proof call only; build and artifact acceptance occur outside sample timers",
+          "warmup": false
+        },
+        "scale": 2,
+        "status": "success",
+        "subprocess_started": true,
+        "unsupported": false,
+        "unsupported_reason": null
+      },
+      {
+        "adapter_contract_digest": "41e4f9eb33345b2ceb8478481f77740373cf121b8f559bf41c95a06d42f96a20",
+        "adapter_report_sha256": "1d5c2d072081a0c0393a251213f8bf306fc6a71445ca6f15066161f6392058a2",
+        "argv": [
+          "/private/tmp/sparq-workload-campaign-5512-minimal/exact_experiment-debug",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0004/manifest.json",
+          "/private/tmp/sparq-exact-v2-048cb4324-local-ipc/artifact/guest.bin",
+          "/private/tmp/sparq-exact-v2-048cb4324-local-ipc/artifact/pin.json",
+          "/private/tmp/sparq-risc0-toolchain-3.0.6/r0vm",
+          "/private/tmp/sparq-workload-campaign-5512-minimal/results/sample-0004/adapter"
+        ],
+        "artifacts": [
+          {
+            "bytes": 440,
+            "path": "adapter/accepted-pin.json",
+            "sha256": "6228b6d72edb24e67683230db8ccbfd40d239a6823d30c4fcfe1367397b998c7"
+          },
+          {
+            "bytes": 828,
+            "path": "adapter/case-0-sample-0/expected-request.json",
+            "sha256": "f040efbf5d9d5c7cca2c38c05440598d3084f4a1d0d2cfa6b174279d2a104408"
+          },
+          {
+            "bytes": 1234,
+            "path": "adapter/case-0-sample-0/journal.json",
+            "sha256": "0c45c68b91497b1998701694603dd2a90da003be52a9698012624c16e8babb88"
+          },
+          {
+            "bytes": 586050,
+            "path": "adapter/case-0-sample-0/presentation.json",
+            "sha256": "f00dac7c5ab93b84aa7d49405624a33f4e2d406658178831485e6ab09849cde5"
+          },
+          {
+            "bytes": 2049,
+            "path": "adapter/manifest.json",
+            "sha256": "e985346c13b1c8a03c7d7ef82195c11fc8568b19fadaa87470ba47f6a63480c4"
+          },
+          {
+            "bytes": 9614,
+            "path": "adapter/report.json",
+            "sha256": "1d5c2d072081a0c0393a251213f8bf306fc6a71445ca6f15066161f6392058a2"
+          }
+        ],
+        "backend": "exact",
+        "comparison_pair": null,
+        "completed_disk_backend_warmups": 0,
+        "family": "organization",
+        "fixture": "organization-0002",
+        "fixture_sha256": "0080e761e40163756a4b2499ea98d84b2362295931a5c8c7a2027c697097a332",
+        "in_process_warmup": false,
+        "manifest_sha256": "e985346c13b1c8a03c7d7ef82195c11fc8568b19fadaa87470ba47f6a63480c4",
+        "mode": "holder_declared",
+        "ordinal": 4,
+        "process": {
+          "exit_code": 0,
+          "inclusive_process_ns": 208078143375,
+          "status": "exited"
+        },
+        "process_tree_peak_rss_bytes": null,
+        "raw_process_outputs": [
+          {
+            "bytes": 90,
+            "path": "stdout.txt",
+            "sha256": "747e3d118e7afdd3ca23402acf254c8e922da8a0ddf1d73bba7e500eb4e91865"
+          },
+          {
+            "bytes": 125,
+            "path": "stderr.txt",
+            "sha256": "723a223d12315b2238c6214a1443309133ce22b543b0b75ed0d5b396b7d539a4"
+          }
+        ],
+        "role": "measurement",
+        "round": 0,
+        "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+        "sample": {
+          "artifact_directory": "case-0-sample-0",
+          "canonical_result_json_bytes": 367,
+          "dataset_commitment": [
+            46,
+            115,
+            8,
+            234,
+            10,
+            164,
+            135,
+            114,
+            123,
+            45,
+            78,
+            241,
+            229,
+            252,
+            99,
+            80,
+            252,
+            177,
+            185,
+            88,
+            173,
+            198,
+            199,
+            157,
+            160,
+            237,
+            47,
+            217,
+            127,
+            1,
+            38,
+            76
+          ],
+          "expected_request_json_bytes": 609,
+          "journal_bytes": 636,
+          "nonce": [
+            1,
+            44,
+            111,
+            119,
+            0,
+            111,
+            141,
+            70,
+            113,
+            224,
+            150,
+            221,
+            101,
+            158,
+            190,
+            68,
+            160,
+            41,
+            64,
+            47,
+            209,
+            173,
+            87,
+            61,
+            23,
+            162,
+            56,
+            131,
+            229,
+            53,
+            212,
+            136
+          ],
+          "ordinal": 0,
+          "outer_control_id": [
+            1108038452,
+            834047746,
+            638717641,
+            225775291,
+            945396555,
+            374527040,
+            1154113015,
+            880258205
+          ],
+          "peak_rss_bytes": null,
+          "peak_rss_reason": "not instrumented across local r0vm child processes",
+          "presentation_json_bytes": 586050,
+          "presentation_sha256": "f00dac7c5ab93b84aa7d49405624a33f4e2d406658178831485e6ab09849cde5",
+          "private_witness_risc0_words": 306,
+          "provenance": "HolderDeclaredOnly",
+          "receipt_kind": "Succinct",
+          "request_digest": [
+            240,
+            147,
+            236,
+            186,
+            254,
+            214,
+            148,
+            21,
+            65,
+            60,
+            251,
+            162,
+            27,
+            40,
+            235,
+            246,
+            202,
+            128,
+            90,
+            112,
+            85,
+            113,
+            110,
+            109,
+            201,
+            73,
+            58,
+            56,
+            160,
+            141,
+            20,
+            130
+          ],
+          "result": {
+            "Select": {
+              "order": "Sequence",
+              "rows": [
+                [
+                  "<urn:sparq:bench:0123456789abcdef:department-a>",
+                  "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                ],
+                [
+                  "<urn:sparq:bench:0123456789abcdef:department-b>",
+                  "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                ],
+                [
+                  "<urn:sparq:bench:0123456789abcdef:empty>",
+                  "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                ]
+              ],
+              "variables": [
+                "g",
+                "n"
+              ]
+            }
+          },
+          "seal_bytes": 222668,
+          "semantic_contract": {
+            "authority_mode": "holder_declared",
+            "backend_contract": "exact_dataset_v2",
+            "contract": "ExactDataset",
+            "dataset_commitment": [
+              46,
+              115,
+              8,
+              234,
+              10,
+              164,
+              135,
+              114,
+              123,
+              45,
+              78,
+              241,
+              229,
+              252,
+              99,
+              80,
+              252,
+              177,
+              185,
+              88,
+              173,
+              198,
+              199,
+              157,
+              160,
+              237,
+              47,
+              217,
+              127,
+              1,
+              38,
+              76
+            ],
+            "dialect": "SparqSparql11DatasetV2",
+            "disclosure": "canonical complete SELECT result or exact ASK boolean, dataset commitment and request binding",
+            "expected_result": {
+              "Select": {
+                "order": "Sequence",
+                "rows": [
+                  [
+                    "<urn:sparq:bench:0123456789abcdef:department-a>",
+                    "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                  ],
+                  [
+                    "<urn:sparq:bench:0123456789abcdef:department-b>",
+                    "\"2\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                  ],
+                  [
+                    "<urn:sparq:bench:0123456789abcdef:empty>",
+                    "\"0\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+                  ]
+                ],
+                "variables": [
+                  "g",
+                  "n"
+                ]
+              }
+            },
+            "fixture": "organization_named_count",
+            "issuer_authentication": "none",
+            "named_graph_catalog": [
+              "urn:sparq:bench:0123456789abcdef:department-a",
+              "urn:sparq:bench:0123456789abcdef:department-b",
+              "urn:sparq:bench:0123456789abcdef:empty"
+            ],
+            "nquads_sha256": "d0679cf0068f24a2da2b6a658d1fb40b50f322dc3fa6ca82f7fd23a4e649cf4e",
+            "policy": {
+              "max_dataset_bytes": 65536,
+              "max_named_graphs": 16,
+              "max_rows": 4096,
+              "max_triples": 256
+            },
+            "query": "SELECT ?g (COUNT(?s) AS ?n) FROM NAMED <urn:sparq:bench:0123456789abcdef:department-a> FROM NAMED <urn:sparq:bench:0123456789abcdef:department-b> FROM NAMED <urn:sparq:bench:0123456789abcdef:empty> WHERE { GRAPH ?g { OPTIONAL { ?s <urn:member> ?kind } } } GROUP BY ?g ORDER BY ?g",
+            "scope": "complete committed bounded dataset; local FROM/FROM NAMED snapshots",
+            "synthetic_salt": [
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47,
+              47
+            ]
+          },
+          "semantic_contract_sha256": "41e4f9eb33345b2ceb8478481f77740373cf121b8f559bf41c95a06d42f96a20",
+          "stages_ns": {
+            "fixture_request_prepare": 16250,
+            "guest_compilation": null,
+            "independent_receipt_verify": 302470666,
+            "proof_generation_only": null,
+            "prove_api_including_internal_verification": 184243118458,
+            "receipt_compression_only": null,
+            "witness_execution_only": null
+          },
+          "status": "proved_and_independently_verified",
+          "typed_acceptance_controls_passed": [
+            "expected_query_bytes",
+            "expected_nonce",
+            "expected_authority",
+            "expected_dataset_root",
+            "consumed_nonce_replay",
+            "authenticated_returned_result",
+            "authenticated_dataset_root",
+            "succinct_seal_bytes"
+          ],
+          "unavailable_stage_reason": "host API exposes inclusive proof call only; build and artifact acceptance occur outside sample timers",
+          "warmup": false
+        },
+        "scale": 2,
+        "status": "success",
+        "subprocess_started": true,
+        "unsupported": false,
+        "unsupported_reason": null
+      },
+      {
+        "backend": "selected",
+        "comparison_pair": null,
+        "completed_disk_backend_warmups": 0,
+        "family": "organization",
+        "fixture": "organization-0002",
+        "fixture_sha256": "0080e761e40163756a4b2499ea98d84b2362295931a5c8c7a2027c697097a332",
+        "in_process_warmup": false,
+        "mode": "organization",
+        "ordinal": 5,
+        "process_tree_peak_rss_bytes": null,
+        "role": "measurement",
+        "round": 0,
+        "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+        "scale": 2,
+        "status": "unsupported",
+        "subprocess_started": false,
+        "unsupported": true,
+        "unsupported_reason": "profile has no matched adapter statement; credential authentication and exact-dataset authority are different contracts"
+      }
+    ],
+    "run_id": "de9272e9b2c104f384304d51b5e82b2c",
+    "schedule_complete": true,
+    "schema": "sparq.workload-campaign.v1",
+    "timing_contract": "per-sample child process is inclusive and not additive with adapter stages; warmups affect only retained disk/backend/OS caches, never a new process's in-memory state"
+  }
+}

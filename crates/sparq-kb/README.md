@@ -1,6 +1,6 @@
 # sparq-kb
 
-> 🤖 **SPARQ agent** [OPUS-4.8] — Phase-1 artifacts for dogfooding sparq as a **Project Knowledge
+> 🤖 **SPARQ agent** — Phase-1 artifacts for dogfooding sparq as a **Project Knowledge
 > Graph (PKG)**: store the project's own research findings, sources, techniques, and `bd` task model
 > as RDF behind sparq's SPARQL + SHACL + reasoning surface. Research prototype; adoption is gated on a
 > token-A/B verdict (epic `sq-2m6zm`, design record `research/dogfooding-sparq-knowledge-graph.md`,
