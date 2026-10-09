@@ -243,7 +243,9 @@ impl BwCtx<'_> {
 /// that happened before the negation, or during its inner search, is always seen here;
 /// a later cut cannot change a set a stratified negation already read.
 fn negation_gate(bw: &BwCtx) -> bool {
-    let Some(why) = bw.truncated.get() else { return true };
+    let Some(why) = bw.truncated.get() else {
+        return true;
+    };
     if bw.cycles == NegationCycles::SinglePass {
         return true;
     }
@@ -331,7 +333,8 @@ pub fn reason_n3_with_cycles(
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?;
+    let (facts, steps, _) =
+        run_closure(parsed, None, None, StepMode::Full, NegationCycles::Reject)?;
     intern_closure(dict, &facts, &steps)
 }
 
@@ -716,7 +719,7 @@ fn fresh_blank_prefix(seen: &FxHashSet<&str>, family: &str) -> String {
         if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
             continue;
         }
-        // not-a-cut: blank-label numbering, not evaluation; a label past usize is not ours.
+        // not-a-cut: not-evaluation (blank-label numbering; a label past usize is not ours)
         if let Ok(k) = digits.parse::<usize>() {
             taken.insert(k);
         }
@@ -886,6 +889,9 @@ fn run_closure(
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
+    // A caller reads this closure further (a query, the next document of an explicit
+    // pipeline, a nested closure's consumer).
+    let read_further = inherit.is_some();
     if let Some((v, t)) = inherit {
         bw.visited = v;
         bw.truncated = t;
@@ -915,27 +921,22 @@ fn run_closure(
     // closure every round (the naive blow-up on recursive rule chains). Rules with scoped
     // negation are non-monotonic, and rules whose join atoms may be proven by BACKWARD rules
     // have support outside the fact deltas — both re-evaluate against ALL facts each round
-    // (correct; the fixpoint still terminates because conclusions are deduped). So do rules
-    // with a builtin that walks a data list in the store ([`reads_store_outside_joins`]): the
-    // list can be derived after round 0, and no join delta announces it. Pure-builtin rules
-    // over rule-local values (no join atom, no store read) fire only in round 0.
+    // (correct; the fixpoint still terminates because conclusions are deduped). So does every
+    // rule whose premise reads the store outside its joins, by its relations' [`StoreRead`]
+    // declarations ([`reads_store_outside_joins`]): scoped operators, list walks over a
+    // stored list, and virtual list matches, none of which a join delta announces.
+    // Pure-builtin rules over rule-local values (no join atom, no store read) fire only in
+    // the naive rounds.
     let rule_meta: Vec<(Vec<usize>, bool)> = rules
         .iter()
         .map(|r| {
             let joins: Vec<usize> =
                 r.premise.iter().enumerate().filter(|(_, p)| is_join_atom(p)).map(|(i, _)| i).collect();
-            // Non-monotonic premise operators — scoped negation/containment
-            // AND the collectAllIn/forAllIn aggregations (their solution sets
-            // grow with the closure) — force full re-evaluation every round.
-            let has_neg = r
-                .premise
-                .iter()
-                .any(|p| scope_op(&p[1]).is_some() || collect_op(&p[1]).is_some());
             let needs_bw = joins.iter().any(|&k| match &r.premise[k][1] {
                 Term::Iri(i) => bw_any_var_pred || bw_concl_preds.contains(i.as_str()),
                 _ => !backward_rules.is_empty(),
             });
-            (joins, has_neg || needs_bw || reads_store_outside_joins(&r.premise))
+            (joins, needs_bw || reads_store_outside_joins(&r.premise))
         })
         .collect();
 
@@ -1026,21 +1027,55 @@ fn run_closure(
         }
     }
 
+    // Which strata close with a naive round in every build: those whose facts a later
+    // negation or aggregation reads, so that the gate's "complete store" premise does not
+    // rest on the scheduler's classification. A later rule that reads the store through a
+    // scope (`log:notIncludes`, `log:collectAllIn`, `log:forAllIn`, a store-scoped
+    // `log:includes`) marks every earlier stratum; a run whose closure a caller reads
+    // further (a query, the next document of an explicit pipeline, a nested closure)
+    // marks its last stratum. A positive program with no such reader keeps the
+    // semi-naive fast path.
+    let scoped = |ri: usize| {
+        rules[ri]
+            .premise
+            .iter()
+            .any(|p| matches!(relation(&p[1]).store_read(), StoreRead::Scoped))
+    };
+    let mut close_naively = vec![false; strata.n_strata];
+    for ri in (0..rules.len()).filter(|&ri| scoped(ri)) {
+        let st = strata.rule_stratum.as_ref().map_or(0, |rs| rs[ri]);
+        if st == strata::DROPPED {
+            continue;
+        }
+        for c in close_naively.iter_mut().take(st) {
+            *c = true;
+        }
+    }
+    if read_further {
+        if let Some(last) = close_naively.last_mut() {
+            *last = true;
+        }
+    }
+
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
-    for stratum in 0..strata.n_strata {
+    for (stratum, &close_naively) in close_naively.iter().enumerate() {
         if stratum > 0 {
             // Stratum boundary: everything closed so far is "new" to this stratum's rules.
             delta = facts.all.clone();
         }
         let mut first_round = true;
-        // Debug builds only: the current round is the closing naive check.
-        let mut debug_check = false;
+        // The current round is the stratum's closing naive round.
+        let mut closing_check = false;
         loop {
             // A round with `first_round` set is NAIVE: every rule over the whole fact set.
             let naive_round = first_round;
             let mut produced: Vec<DerivationStep> = Vec::new();
             for (ri, rule) in rules.iter().enumerate() {
-                if strata.rule_stratum.as_ref().is_some_and(|rs| rs[ri] != stratum) {
+                if strata
+                    .rule_stratum
+                    .as_ref()
+                    .is_some_and(|rs| rs[ri] != stratum)
+                {
                     continue;
                 }
                 if let Some(&si) = trans_rules.get(&ri) {
@@ -1089,10 +1124,11 @@ fn run_closure(
                     continue;
                 }
                 let (joins, needs_full) = &rule_meta[ri];
-                let bindings: Vec<Binding> = if *needs_full || joins.is_empty() {
-                    // non-monotonic / backward-supported / constant rule: full evaluation
-                    // (negation + backward) every round, or round-0 only (constant).
-                    if *needs_full || first_round {
+                let bindings: Vec<Binding> = if naive_round || *needs_full || joins.is_empty() {
+                    // A naive round, or a rule that reads the store outside its joins
+                    // (every round): full evaluation, with no delta seeding. A constant
+                    // rule (no join) fires only in naive rounds.
+                    if naive_round || *needs_full {
                         match_premise(&rule.premise, &facts, &bw)
                     } else {
                         Vec::new()
@@ -1130,9 +1166,7 @@ fn run_closure(
                         Some(
                             concl_blanks
                                 .iter()
-                                .map(|l| {
-                                    (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l))
-                                })
+                                .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l)))
                                 .collect(),
                         )
                     };
@@ -1186,19 +1220,23 @@ fn run_closure(
                 }
                 if let Some(st) = trans_states.iter_mut().find(|st| st.pred == g[1]) {
                     if st.gen_set.insert(g.clone()) {
-                        st.gen_out.entry(g[0].clone()).or_default().push(g[2].clone());
+                        st.gen_out
+                            .entry(g[0].clone())
+                            .or_default()
+                            .push(g[2].clone());
                     }
                 }
             }
             first_round = false;
             if new_delta.is_empty() {
-                // Debug builds close each stratum with a NAIVE round (every rule over the
-                // whole fact set, exactly round 0) and assert it derives nothing: a
-                // scheduling gap (a rule that reads the store outside its join atoms but is
-                // not re-evaluated) fails every test that reaches it instead of leaving the
-                // stratum silently incomplete.
-                if cfg!(debug_assertions) && !naive_round {
-                    debug_check = true;
+                // A stratum that a later negation or aggregation reads closes with a NAIVE
+                // round: every rule fully evaluated over the whole fact set, no delta
+                // seeding. Anything it derives resumes the loop, so the stratum ends at a
+                // true fixpoint whatever the scheduler's classification. Debug builds close
+                // EVERY stratum this way and assert the round derives nothing, so a
+                // classification gap fails the tests instead of costing a round.
+                if (cfg!(debug_assertions) || close_naively) && !naive_round {
+                    closing_check = true;
                     first_round = true;
                     delta = facts.all.clone();
                     continue;
@@ -1206,11 +1244,12 @@ fn run_closure(
                 break;
             }
             debug_assert!(
-                !debug_check,
+                !closing_check,
                 "n3 semi-naive scheduling gap: a naive round derived {} new fact(s), e.g. {:?}",
                 new_delta.len(),
                 new_delta.iter().next()
             );
+            closing_check = false;
             delta = new_delta;
         }
     }
@@ -1335,7 +1374,14 @@ type Binding = HashMap<String, Term>;
 /// rule-local list STRUCTURE (rdf:first/rest over fresh bnodes), not data to match — they are
 /// extracted up front and consumed by the functional builtins (e.g. `math:sum`).
 fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Binding> {
-    match_premise_seeded(premise, facts, &Binding::new(), None, bw, bounded::backward_depth())
+    match_premise_seeded(
+        premise,
+        facts,
+        &Binding::new(),
+        None,
+        bw,
+        bounded::backward_depth(),
+    )
 }
 
 /// Match `premise` starting from an existing partial binding `seed`. For SEMI-NAIVE
@@ -1582,9 +1628,10 @@ fn match_premise_seeded(
                     }
                 }
                 if !bw.rules.is_empty() {
-                    let could_match = bw.rules.iter().flat_map(|r| &r.conclusion).any(|c| {
-                        !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b)
-                    });
+                    let could_match =
+                        bw.rules.iter().flat_map(|r| &r.conclusion).any(
+                            |c| !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b),
+                        );
                     if let Some(d) = bw.settle(bounded::backward_step(depth, could_match)) {
                         next.extend(backward_prove(pat, b, facts, bw, d));
                     }
@@ -1599,26 +1646,24 @@ fn match_premise_seeded(
     bindings
 }
 
-/// Whether a premise reads the fact store outside its join atoms: a list builtin or
-/// generator whose list operand is not a rule-local `( … )` term walks a data list in the
-/// store ([`fact_list`]), and so does `list:append` over any members. Such a rule must
-/// re-evaluate every round, because the list can be derived after round 0 and no join
-/// delta announces it. (Scoped operators are already re-evaluated every round.)
+/// Whether a premise reads the fact store outside its join atoms, from each relation's
+/// [`StoreRead`] declaration. Such a rule re-evaluates every round: what it reads can be
+/// derived (or, for list terms, exist) without appearing in any round's delta.
 fn reads_store_outside_joins(premise: &[[Term; 3]]) -> bool {
-    premise.iter().any(|p| {
-        if let Some(gen) = list_generator(&p[1]) {
-            let list = match gen {
-                ListGen::In => &p[2],
-                ListGen::Member | ListGen::Iterate => &p[0],
-            };
-            return !matches!(list, Term::List(_));
-        }
-        match functional_builtin(&p[1]) {
-            Some(Func::Append) => true,
-            Some(_) => !matches!(p[0], Term::List(_)),
-            None => false,
-        }
-    })
+    premise.iter().any(reads_outside_joins)
+}
+
+/// [`reads_store_outside_joins`] for one premise atom.
+fn reads_outside_joins(p: &[Term; 3]) -> bool {
+    let not_a_list_term = |t: &Term| !matches!(t, Term::List(_));
+    match relation(&p[1]).store_read() {
+        StoreRead::Nothing | StoreRead::Joins => false,
+        StoreRead::ListCells(Operand::Subject) => not_a_list_term(&p[0]),
+        StoreRead::ListCells(Operand::Object) => not_a_list_term(&p[2]),
+        StoreRead::MemberListCells | StoreRead::Nested | StoreRead::Scoped => true,
+        // A constant subject that is not a list term matches stored triples only.
+        StoreRead::VirtualList => matches!(&p[0], Term::Var(_) | Term::Blank(_) | Term::List(_)),
+    }
 }
 
 /// Stable-reorder a premise so each builtin atom comes after the atoms that
@@ -1687,20 +1732,19 @@ fn order_premise(premise: &[[Term; 3]]) -> Vec<[Term; 3]> {
     out
 }
 
-/// Whether a premise pattern is a JOIN atom (matched against facts), as opposed to a builtin,
-/// list generator/structure, or scoped-negation atom.
+/// Whether a premise pattern is a JOIN atom (matched against stored facts), by its
+/// relation's [`StoreRead`] declaration. A virtual relation is a join unless its subject is
+/// written as a list term (then it only computes over that term).
 fn is_join_atom(pat: &[Term; 3]) -> bool {
-    // A literal-list subject under rdf:first/rest is the VIRTUAL list-access
-    // computation, not a store join.
-    let virtual_list = matches!(&pat[0], Term::List(_))
-        && matches!(&pat[1], Term::Iri(i) if i == parser::RDF_FIRST || i == parser::RDF_REST);
-    builtin(&pat[1]).is_none()
-        && functional_builtin(&pat[1]).is_none()
-        && binder_builtin(&pat[1]).is_none()
-        && list_generator(&pat[1]).is_none()
-        && scope_op(&pat[1]).is_none()
-        && collect_op(&pat[1]).is_none()
-        && !virtual_list
+    match relation(&pat[1]).store_read() {
+        StoreRead::Joins => true,
+        StoreRead::VirtualList => !matches!(&pat[0], Term::List(_)),
+        StoreRead::Nothing
+        | StoreRead::ListCells(_)
+        | StoreRead::MemberListCells
+        | StoreRead::Nested
+        | StoreRead::Scoped => false,
+    }
 }
 
 /// Goal-directed (`<=`) resolution of one premise atom: for each backward rule whose
@@ -1840,7 +1884,11 @@ fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
         head.clone(),
         |cur| *cur == nil || *cur == empty,
         |cur| {
-            let f = facts.ps.get(&(first.clone(), cur.clone()))?.first()?.clone();
+            let f = facts
+                .ps
+                .get(&(first.clone(), cur.clone()))?
+                .first()?
+                .clone();
             let r = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
             Some((f, r))
         },
@@ -1989,32 +2037,291 @@ fn ground_triple(t: &[Term; 3], b: &Binding) -> Option<[Term; 3]> {
     }
 }
 
-#[derive(Clone, Copy)]
-enum Builtin {
-    // numeric (math:)
-    Gt,
-    Lt,
-    NotGt,
-    NotLt,
-    MathEq,
-    MathNe,
-    // term (log:)
-    LogEq,
-    LogNe,
-    // string (string:)
-    StrContains,
-    StrStarts,
-    StrEnds,
-    StrGt,
-    StrLt,
-    StrMatches,        // string:matches (regex)
-    StrNotMatches,     // string:notMatches (regex, negated; invalid regex ⇒ premise fails)
-    StrContainsIgnCase, // string:containsIgnoringCase
-    StrNotGt,           // string:notGreaterThan
-    StrNotLt,           // string:notLessThan
-    StrEqIgnCase,       // string:equalIgnoringCase
-    StrNeIgnCase,       // string:notEqualIgnoringCase
-    StrContainsRoughly, // string:containsRoughly — case- and whitespace-insensitive
+/// What a premise relation reads from the fact store, declared once per registry entry
+/// (every builtin, the virtual list relations, and stored predicates). The semi-naive
+/// scheduler ([`reads_store_outside_joins`]) and the stratifier
+/// ([`strata::stratify`]) derive their store-read facts from this declaration only. Each
+/// registry enum declares it in an exhaustive `match` with no wildcard arm, so a new
+/// builtin or relation does not compile until it says what it reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StoreRead {
+    /// Reads only its operands' values.
+    Nothing,
+    /// Matched against the stored triples of its predicate, through the join (a new
+    /// triple is in some round's delta).
+    Joins,
+    /// Walks the `rdf:first`/`rdf:rest` cells of one operand in the store, unless that
+    /// operand is written as a `( … )` list term.
+    ListCells(Operand),
+    /// Walks the `rdf:first`/`rdf:rest` cells of every member of its subject list.
+    MemberListCells,
+    /// Matched against stored triples AND against list terms bound at its subject
+    /// (virtual `rdf:first`/`rdf:rest`); the list-term matches are in no delta.
+    VirtualList,
+    /// Runs a nested closure over its subject (a formula, or a stored list of formulae).
+    Nested,
+    /// A formula scope over the store (containment, negation, aggregation).
+    Scoped,
+}
+
+/// Which operand of a premise atom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Operand {
+    Subject,
+    Object,
+}
+
+/// The virtual relations: join atoms that can also match list terms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VirtualRel {
+    /// `rdf:first`.
+    First,
+    /// `rdf:rest`.
+    Rest,
+    /// A variable predicate, which may be bound to `rdf:first` or `rdf:rest`.
+    AnyPredicate,
+}
+
+/// The registry entry a premise predicate resolves to.
+#[derive(Clone, Copy, Debug)]
+enum Relation {
+    Builtin(Builtin),
+    Func(Func),
+    Binder(Bidi),
+    ListGen(ListGen),
+    Scope(ScopeOp),
+    Collect(CollectOp),
+    Virtual(VirtualRel),
+    /// Any other predicate: stored triples only.
+    Stored,
+}
+
+/// Resolve a premise predicate to its registry entry.
+fn relation(p: &Term) -> Relation {
+    if let Some(op) = scope_op(p) {
+        return Relation::Scope(op);
+    }
+    if let Some(op) = collect_op(p) {
+        return Relation::Collect(op);
+    }
+    if let Some(g) = list_generator(p) {
+        return Relation::ListGen(g);
+    }
+    if let Some(f) = functional_builtin(p) {
+        return Relation::Func(f);
+    }
+    if let Some(op) = binder_builtin(p) {
+        return Relation::Binder(op);
+    }
+    if let Some(op) = builtin(p) {
+        return Relation::Builtin(op);
+    }
+    match p {
+        Term::Iri(i) if i == parser::RDF_FIRST => Relation::Virtual(VirtualRel::First),
+        Term::Iri(i) if i == parser::RDF_REST => Relation::Virtual(VirtualRel::Rest),
+        Term::Var(_) | Term::Blank(_) => Relation::Virtual(VirtualRel::AnyPredicate),
+        _ => Relation::Stored,
+    }
+}
+
+impl Relation {
+    fn store_read(self) -> StoreRead {
+        match self {
+            Relation::Builtin(op) => op.store_read(),
+            Relation::Func(f) => f.store_read(),
+            Relation::Binder(op) => op.store_read(),
+            Relation::ListGen(g) => g.store_read(),
+            Relation::Scope(op) => op.store_read(),
+            Relation::Collect(op) => op.store_read(),
+            Relation::Virtual(v) => v.store_read(),
+            Relation::Stored => StoreRead::Joins,
+        }
+    }
+}
+
+impl VirtualRel {
+    fn store_read(self) -> StoreRead {
+        match self {
+            VirtualRel::First | VirtualRel::Rest | VirtualRel::AnyPredicate => {
+                StoreRead::VirtualList
+            }
+        }
+    }
+}
+
+impl Builtin {
+    fn store_read(self) -> StoreRead {
+        match self {
+            Builtin::Gt
+            | Builtin::Lt
+            | Builtin::NotGt
+            | Builtin::NotLt
+            | Builtin::MathEq
+            | Builtin::MathNe
+            | Builtin::LogEq
+            | Builtin::LogNe
+            | Builtin::StrContains
+            | Builtin::StrStarts
+            | Builtin::StrEnds
+            | Builtin::StrGt
+            | Builtin::StrLt
+            | Builtin::StrMatches
+            | Builtin::StrNotMatches
+            | Builtin::StrContainsIgnCase
+            | Builtin::StrNotGt
+            | Builtin::StrNotLt
+            | Builtin::StrEqIgnCase
+            | Builtin::StrNeIgnCase
+            | Builtin::StrContainsRoughly => StoreRead::Nothing,
+        }
+    }
+}
+
+impl Bidi {
+    fn store_read(self) -> StoreRead {
+        match self {
+            Bidi::LogUri => StoreRead::Nothing,
+        }
+    }
+}
+
+impl ListGen {
+    fn store_read(self) -> StoreRead {
+        match self {
+            ListGen::Member | ListGen::Iterate => StoreRead::ListCells(Operand::Subject),
+            ListGen::In => StoreRead::ListCells(Operand::Object),
+        }
+    }
+}
+
+impl ScopeOp {
+    fn store_read(self) -> StoreRead {
+        match self {
+            ScopeOp::Includes | ScopeOp::NotIncludes | ScopeOp::Supports => StoreRead::Scoped,
+        }
+    }
+}
+
+impl CollectOp {
+    fn store_read(self) -> StoreRead {
+        match self {
+            CollectOp::CollectAll | CollectOp::ForAll => StoreRead::Scoped,
+        }
+    }
+}
+
+impl Func {
+    fn store_read(self) -> StoreRead {
+        match self {
+            // Reads its two literal members before any list walk.
+            Func::Dtlit => StoreRead::Nothing,
+            Func::Append => StoreRead::MemberListCells,
+            Func::LogConclusion => StoreRead::Nested,
+            // Every other functional builtin resolves a subject that is not a `( … )`
+            // term as a stored data list (or a single value when it is not a list).
+            Func::Sum
+            | Func::Difference
+            | Func::Product
+            | Func::Quotient
+            | Func::Remainder
+            | Func::IntegerQuotient
+            | Func::Max
+            | Func::Min
+            | Func::Exponentiation
+            | Func::Logarithm
+            | Func::Atan2
+            | Func::MemberCount
+            | Func::Concat
+            | Func::Format
+            | Func::Scrape
+            | Func::Length
+            | Func::StrLength
+            | Func::Replace
+            | Func::First
+            | Func::Last
+            | Func::Conjunction
+            | Func::ParsedAsN3
+            | Func::Langlit
+            | Func::Semantics
+            | Func::Content
+            | Func::LowerCase
+            | Func::UpperCase
+            | Func::EncodeForUri
+            | Func::EncodeForUriCwm
+            | Func::EncodeForFragId
+            | Func::Negation
+            | Func::AbsoluteValue
+            | Func::Rounded
+            | Func::Floor
+            | Func::Ceiling
+            | Func::Sin
+            | Func::Cos
+            | Func::Tan
+            | Func::Asin
+            | Func::Acos
+            | Func::Atan
+            | Func::Sinh
+            | Func::Cosh
+            | Func::Tanh
+            | Func::Asinh
+            | Func::Acosh
+            | Func::Atanh
+            | Func::Degrees
+            | Func::Radians
+            | Func::Year
+            | Func::Month
+            | Func::Day
+            | Func::Hours
+            | Func::Minutes
+            | Func::Seconds
+            | Func::DayOfWeek
+            | Func::TimeZone
+            | Func::InSeconds => StoreRead::ListCells(Operand::Subject),
+        }
+    }
+}
+
+/// Declares a builtin registry enum and, for tests, `ALL` (every variant), so a test can
+/// walk the whole registry.
+macro_rules! registry_enum {
+    ($(#[$m:meta])* enum $name:ident { $($(#[$vm:meta])* $v:ident),* $(,)? }) => {
+        $(#[$m])*
+        enum $name { $($(#[$vm])* $v),* }
+        #[cfg(test)]
+        impl $name {
+            const ALL: &'static [$name] = &[$($name::$v),*];
+        }
+    };
+}
+
+registry_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Builtin {
+        // numeric (math:)
+        Gt,
+        Lt,
+        NotGt,
+        NotLt,
+        MathEq,
+        MathNe,
+        // term (log:)
+        LogEq,
+        LogNe,
+        // string (string:)
+        StrContains,
+        StrStarts,
+        StrEnds,
+        StrGt,
+        StrLt,
+        StrMatches,        // string:matches (regex)
+        StrNotMatches,     // string:notMatches (regex, negated; invalid regex ⇒ premise fails)
+        StrContainsIgnCase, // string:containsIgnoringCase
+        StrNotGt,           // string:notGreaterThan
+        StrNotLt,           // string:notLessThan
+        StrEqIgnCase,       // string:equalIgnoringCase
+        StrNeIgnCase,       // string:notEqualIgnoringCase
+        StrContainsRoughly, // string:containsRoughly — case- and whitespace-insensitive
+    }
 }
 
 fn builtin(p: &Term) -> Option<Builtin> {
@@ -2066,7 +2373,13 @@ fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> Bounded<bool> {
     pending.finish(v)
 }
 
-fn eval_builtin_inner(op: Builtin, s: &Term, o: &Term, b: &Binding, pending: &bounded::Pending) -> bool {
+fn eval_builtin_inner(
+    op: Builtin,
+    s: &Term,
+    o: &Term,
+    b: &Binding,
+    pending: &bounded::Pending,
+) -> bool {
     let (s, o) = (apply(s, b), apply(o, b));
     match op {
         Builtin::LogEq => s == o,
@@ -2093,7 +2406,9 @@ fn eval_builtin_inner(op: Builtin, s: &Term, o: &Term, b: &Binding, pending: &bo
                 Builtin::StrLt => x < y,
                 Builtin::StrNotGt => x <= y,
                 Builtin::StrNotLt => x >= y,
-                Builtin::StrMatches => settle(pending, bounded::regex(y)).is_some_and(|re| re.is_match(x)),
+                Builtin::StrMatches => {
+                    settle(pending, bounded::regex(y)).is_some_and(|re| re.is_match(x))
+                }
                 Builtin::StrNotMatches => {
                     settle(pending, bounded::regex(y)).is_some_and(|re| !re.is_match(x))
                 }
@@ -2112,6 +2427,23 @@ fn eval_builtin_inner(op: Builtin, s: &Term, o: &Term, b: &Binding, pending: &bo
         }
         _ => {
             let (Some(x), Some(y)) = (num(&s), num(&o)) else { return false };
+            // Both values in the exact tower: compare exactly (an f64 image would merge
+            // integers past 2^53); otherwise by f64, as before.
+            if let (Some(a), Some(b)) = (numval_in(&s, pending), numval_in(&o, pending)) {
+                if !matches!(a, NumVal::F64(_)) && !matches!(b, NumVal::F64(_)) {
+                    use std::cmp::Ordering::{Equal, Greater, Less};
+                    let ord = numval_cmp_in(a, b, pending);
+                    return match op {
+                        Builtin::Gt => ord == Some(Greater),
+                        Builtin::Lt => ord == Some(Less),
+                        Builtin::NotGt => matches!(ord, Some(Less | Equal)),
+                        Builtin::NotLt => matches!(ord, Some(Greater | Equal)),
+                        Builtin::MathEq => ord == Some(Equal),
+                        Builtin::MathNe => ord != Some(Equal),
+                        _ => unreachable!(),
+                    };
+                }
+            }
             match op {
                 Builtin::Gt => x > y,
                 Builtin::Lt => x < y,
@@ -2125,11 +2457,13 @@ fn eval_builtin_inner(op: Builtin, s: &Term, o: &Term, b: &Binding, pending: &bo
     }
 }
 
-/// Bidirectional binary builtins over a SINGLE subject term (not a `( … )` list): either
-/// side may be the unknown, and evaluating binds it.
-#[derive(Clone, Copy)]
-enum Bidi {
-    LogUri, // log:uri — IRI ↔ its text as an xsd:string (either direction)
+registry_enum! {
+    /// Bidirectional binary builtins over a SINGLE subject term (not a `( … )` list): either
+    /// side may be the unknown, and evaluating binds it.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Bidi {
+        LogUri, // log:uri — IRI ↔ its text as an xsd:string (either direction)
+    }
 }
 
 fn binder_builtin(p: &Term) -> Option<Bidi> {
@@ -2183,11 +2517,13 @@ fn eval_binder_inner(
     }
 }
 
-#[derive(Clone, Copy)]
-enum ListGen {
-    Member,  // ?list list:member ?x
-    In,      // ?x list:in ?list
-    Iterate, // ?list list:iterate (?index ?value) — 0-based, one binding per member
+registry_enum! {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ListGen {
+        Member,  // ?list list:member ?x
+        In,      // ?x list:in ?list
+        Iterate, // ?list list:iterate (?index ?value) — 0-based, one binding per member
+    }
 }
 
 fn list_generator(p: &Term) -> Option<ListGen> {
@@ -2200,12 +2536,14 @@ fn list_generator(p: &Term) -> Option<ListGen> {
     }
 }
 
-/// The formula-scope operators.
-#[derive(Clone, Copy)]
-enum ScopeOp {
-    Includes,
-    NotIncludes,
-    Supports, // includes after closing the scope under its own rules
+registry_enum! {
+    /// The formula-scope operators.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum ScopeOp {
+        Includes,
+        NotIncludes,
+        Supports, // includes after closing the scope under its own rules
+    }
 }
 
 fn scope_op(p: &Term) -> Option<ScopeOp> {
@@ -2218,15 +2556,17 @@ fn scope_op(p: &Term) -> Option<ScopeOp> {
     }
 }
 
-/// The scoped AGGREGATION / universal-quantification operators (EYE and the
-/// N3 builtins spec; they share the scope convention of the [`ScopeOp`]s).
-#[derive(Clone, Copy)]
-enum CollectOp {
-    /// `( ?template { clause } ?list ) log:collectAllIn ?scope` — findall.
-    CollectAll,
-    /// `( { clause-a } { clause-b } ) log:forAllIn ?scope` — every solution
-    /// of clause-a extends to one of clause-b.
-    ForAll,
+registry_enum! {
+    /// The scoped AGGREGATION / universal-quantification operators (EYE and the
+    /// N3 builtins spec; they share the scope convention of the [`ScopeOp`]s).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum CollectOp {
+        /// `( ?template { clause } ?list ) log:collectAllIn ?scope` — findall.
+        CollectAll,
+        /// `( { clause-a } { clause-b } ) log:forAllIn ?scope` — every solution
+        /// of clause-a extends to one of clause-b.
+        ForAll,
+    }
 }
 
 fn collect_op(p: &Term) -> Option<CollectOp> {
@@ -2422,7 +2762,9 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     ) {
         Ok((closed, _steps, _)) => closed,
         Err(e) => {
-            bw.nested_error.borrow_mut().get_or_insert(format!("in a nested closure: {e}"));
+            bw.nested_error
+                .borrow_mut()
+                .get_or_insert(format!("in a nested closure: {e}"));
             bw.visited.borrow_mut().remove(&key);
             return ts.to_vec();
         }
@@ -2484,7 +2826,7 @@ fn num(t: &Term) -> Option<f64> {
             "INF" | "+INF" => Some(f64::INFINITY),
             "-INF" => Some(f64::NEG_INFINITY),
             "NaN" => Some(f64::NAN),
-            _ => v.parse::<f64>().ok(), // no-match: not a numeric lexical form (ill-typed)
+            _ => v.parse::<f64>().ok(), // no-match: ill-typed (not a numeric lexical form)
         },
         _ => None,
     }
@@ -2562,8 +2904,8 @@ fn numval_to_subdec(v: NumVal) -> Option<sparq_substrate::numeric::Dec> {
 #[inline]
 fn numval_negate(v: NumVal) -> Option<NumVal> {
     match v {
-        NumVal::Int(i) => Some(NumVal::Int(i.checked_neg()?)),
-        NumVal::Dec(m, s) => Some(NumVal::Dec(m.checked_neg()?, s)),
+        NumVal::Int(i) => Some(NumVal::Int(i.checked_neg()?)), // not-a-cut: settled-by-caller
+        NumVal::Dec(m, s) => Some(NumVal::Dec(m.checked_neg()?, s)), // not-a-cut: settled-by-caller
         NumVal::F64(x) => Some(NumVal::F64(-x)),
     }
 }
@@ -2573,8 +2915,8 @@ fn numval_negate(v: NumVal) -> Option<NumVal> {
 #[inline]
 fn numval_abs(v: NumVal) -> Option<NumVal> {
     match v {
-        NumVal::Int(i) => Some(NumVal::Int(i.checked_abs()?)),
-        NumVal::Dec(m, s) => Some(NumVal::Dec(m.checked_abs()?, s)),
+        NumVal::Int(i) => Some(NumVal::Int(i.checked_abs()?)), // not-a-cut: settled-by-caller
+        NumVal::Dec(m, s) => Some(NumVal::Dec(m.checked_abs()?, s)), // not-a-cut: settled-by-caller
         NumVal::F64(x) => Some(NumVal::F64(x.abs())),
     }
 }
@@ -2589,20 +2931,73 @@ fn numval(t: &Term) -> Option<NumVal> {
         _ => {}
     }
     if v.contains(['e', 'E']) {
-        return v.parse::<f64>().ok().map(NumVal::F64); // no-match: not a double lexical form
+        return v.parse::<f64>().ok().map(NumVal::F64); // no-match: ill-typed (not a double lexical form)
     }
     if let Some((int, frac)) = v.split_once('.') {
         let digits = format!("{int}{frac}");
-        // not-a-cut: past i128 the decimal falls back to its f64 value just below.
+        // not-a-cut: settled-by-caller (past i128: f64 image; `numval_in` records the cut)
         if let Ok(m) = digits.parse::<i128>() {
             return Some(NumVal::Dec(m, frac.len() as u32));
         }
-        return v.parse::<f64>().ok().map(NumVal::F64); // no-match: not a decimal lexical form
+        return v.parse::<f64>().ok().map(NumVal::F64); // no-match: ill-typed (not a decimal lexical form)
     }
     v.parse::<i128>()
-        .ok() // not-a-cut: past i128 the integer falls back to its f64 value
+        .ok() // not-a-cut: settled-by-caller (`numval_in` records the cut)
         .map(NumVal::Int)
-        .or_else(|| v.parse::<f64>().ok().map(NumVal::F64)) // no-match: not numeric
+        .or_else(|| v.parse::<f64>().ok().map(NumVal::F64)) // no-match: ill-typed (not numeric)
+}
+
+/// [`numval`] inside a builtin: an integer or decimal numeral whose exact value is past
+/// the `i128` tower is read as its `f64` image, which is a cut (the exact value exists
+/// but cannot be represented).
+fn numval_in(t: &Term, pending: &bounded::Pending) -> Option<NumVal> {
+    let v = numval(t)?;
+    if let (NumVal::F64(_), Term::Lit(lex, _, _)) = (v, t) {
+        settle(pending, bounded::exact_numeral(lex.trim()));
+    }
+    Some(v)
+}
+
+/// Numeric order inside a builtin: exact when both values are in the exact tower (a
+/// scale alignment past `i128` is a cut, then the `f64` images decide), else by `f64`
+/// (`NaN` compares unordered, so as neither less, equal nor greater).
+fn numval_cmp_in(a: NumVal, b: NumVal, pending: &bounded::Pending) -> Option<std::cmp::Ordering> {
+    if let (Some(x), Some(y)) = (numval_to_subdec(a), numval_to_subdec(b)) {
+        if let Some(ord) = rep(pending, x.cmp(y)) {
+            return Some(ord);
+        }
+    }
+    a.to_f64().partial_cmp(&b.to_f64())
+}
+
+/// The canonical value string of an integer or decimal numeral (`[+-]digits[.digits]`),
+/// computed on the digits, so it is exact past `i128` too: leading zeros and a `+` sign
+/// dropped, trailing fraction zeros dropped, a whole value written as an integer — the
+/// same string the exact tower renders for a value it can hold. `None` for any other
+/// lexical form.
+pub(crate) fn big_numeral_canonical(lex: &str) -> Option<String> {
+    let lex = lex.trim();
+    let (neg, body) = match lex.as_bytes().first()? {
+        b'-' => (true, &lex[1..]),
+        b'+' => (false, &lex[1..]),
+        _ => (false, lex),
+    };
+    let (int, frac) = body.split_once('.').unwrap_or((body, ""));
+    if int.is_empty() && frac.is_empty()
+        || !int.bytes().chain(frac.bytes()).all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    let int = int.trim_start_matches('0');
+    let frac = frac.trim_end_matches('0');
+    let int = if int.is_empty() { "0" } else { int };
+    let zero = int == "0" && frac.is_empty();
+    let sign = if neg && !zero { "-" } else { "" };
+    Some(if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    })
 }
 
 impl NumVal {
@@ -2623,24 +3018,9 @@ impl NumVal {
         let ((ma, sa), (mb, sb)) = (part(a)?, part(b)?);
         let s = sa.max(sb);
         let up = |m: i128, from: u32| -> Option<i128> {
-            m.checked_mul(10i128.checked_pow(s - from)?)
+            m.checked_mul(10i128.checked_pow(s - from)?) // not-a-cut: settled-by-caller
         };
         Some((up(ma, sa)?, up(mb, sb)?, s))
-    }
-    /// Value equality. The exact tiers delegate to the SHARED substrate
-    /// [`sparq_substrate::numeric::Dec::cmp`] (the same scale-alignment the private
-    /// tower's `aligned` did — `Dec::cmp` returns `None` on an alignment overflow,
-    /// which falls back to the `f64` image exactly as before); any `f64` operand or
-    /// an alignment overflow compares by `f64`. Byte-identical to the pre-adoption
-    /// `aligned`-then-`==` path. [OPUS-4.8] sq-pbz04.5.1
-    fn eq(a: NumVal, b: NumVal) -> bool {
-        match (numval_to_subdec(a), numval_to_subdec(b)) {
-            (Some(x), Some(y)) => match x.cmp(y) {
-                Some(ord) => ord == std::cmp::Ordering::Equal,
-                None => a.to_f64() == b.to_f64(), // scale-alignment overflow → f64 image
-            },
-            _ => a.to_f64() == b.to_f64(),
-        }
     }
 }
 
@@ -2684,76 +3064,78 @@ fn numval_term(v: NumVal) -> Term {
     }
 }
 
-/// Functional `math:`/`string:`/`list:`/`time:` builtins: the subject is a `( … )` list (or a
-/// single value for the unary ops), and the object is computed.
-#[derive(Clone, Copy)]
-enum Func {
-    // list-arg
-    Sum,
-    Difference,
-    Product,
-    Quotient,
-    Remainder,       // math:remainder (a mod b)
-    IntegerQuotient, // math:integerQuotient (floor(a/b))
-    Max,
-    Min,
-    Exponentiation,
-    Logarithm,   // (x base) math:logarithm log_base(x) — EYE: log(U)/log(V)
-    Atan2,       // (x y) math:atan2 — EYE's eye.pl computes atan(x/y), NOT C atan2; we match
-    MemberCount, // math:memberCount — list length, or distinct triple count of a formula
-    Concat,      // string:concatenation
-    Format,      // string:format — ( fmt args… ); %s/%d/%f/%% subset, else premise fails
-    Scrape,      // string:scrape — ( str regex ); the FIRST capture group of the first match
-    Length,      // list:length
-    StrLength,   // string:length (Unicode scalar count)
-    Replace,     // string:replace (regex): ( str pattern replacement ) string:replace ?out
-    First,       // list:first
-    Last,        // list:last
-    Append,      // list:append — ( list… ) list:append ?out (first-class list result)
-    Conjunction, // log:conjunction — merge a list of formulae into one formula
-    Dtlit,       // log:dtlit — ( "lex" xsd:dt ) ↔ "lex"^^xsd:dt (both directions)
-    LogConclusion, // log:conclusion — a formula's forward closure, as a formula
-    ParsedAsN3,    // log:parsedAsN3 — an N3 source string, parsed to a formula
-    Langlit,       // log:langlit — ( "lex" "lang" ) → "lex"@lang
-    Semantics,     // log:semantics — a document IRI's parsed formula (needs a Resolver)
-    Content,       // log:content — a document IRI's source text (needs a Resolver)
-    // single-value-arg (string case mapping, Unicode-aware)
-    LowerCase,    // string:lowerCase
-    UpperCase,    // string:upperCase
-    EncodeForUri, // string:encodeForUri — RFC 3986 percent-encoding (see [`encode_for_uri`])
-    EncodeForUriCwm, // string:encodeForURI — cwm's URI quoting (keeps #'()~, encodes /)
-    EncodeForFragId, // string:encodeForFragID — cwm's fragment quoting (keeps /, encodes #'()~)
-    // single-value-arg (unary math)
-    Negation,
-    AbsoluteValue,
-    Rounded,
-    Floor,
-    Ceiling,
-    // single-value-arg trig/hyperbolic (forward direction only; see module doc)
-    Sin,
-    Cos,
-    Tan,
-    Asin,
-    Acos,
-    Atan,
-    Sinh,
-    Cosh,
-    Tanh,
-    Asinh,
-    Acosh,
-    Atanh,
-    Degrees, // radians → degrees (x·180/π), matching eye.pl
-    Radians, // degrees → radians (x·π/180)
-    // single-value-arg (time: components of an xsd:dateTime)
-    Year,
-    Month,
-    Day,
-    Hours,
-    Minutes,
-    Seconds,
-    DayOfWeek, // time:dayOfWeek — 0=Sunday … 6=Saturday (cwm)
-    TimeZone,  // time:timeZone — the explicit ±hh:mm offset (absent for Z/none)
-    InSeconds, // time:inSeconds — epoch seconds (bidirectional, cwm t1)
+registry_enum! {
+    /// Functional `math:`/`string:`/`list:`/`time:` builtins: the subject is a `( … )` list (or a
+    /// single value for the unary ops), and the object is computed.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Func {
+        // list-arg
+        Sum,
+        Difference,
+        Product,
+        Quotient,
+        Remainder,       // math:remainder (a mod b)
+        IntegerQuotient, // math:integerQuotient (floor(a/b))
+        Max,
+        Min,
+        Exponentiation,
+        Logarithm,   // (x base) math:logarithm log_base(x) — EYE: log(U)/log(V)
+        Atan2,       // (x y) math:atan2 — EYE's eye.pl computes atan(x/y), NOT C atan2; we match
+        MemberCount, // math:memberCount — list length, or distinct triple count of a formula
+        Concat,      // string:concatenation
+        Format,      // string:format — ( fmt args… ); %s/%d/%f/%% subset, else premise fails
+        Scrape,      // string:scrape — ( str regex ); the FIRST capture group of the first match
+        Length,      // list:length
+        StrLength,   // string:length (Unicode scalar count)
+        Replace,     // string:replace (regex): ( str pattern replacement ) string:replace ?out
+        First,       // list:first
+        Last,        // list:last
+        Append,      // list:append — ( list… ) list:append ?out (first-class list result)
+        Conjunction, // log:conjunction — merge a list of formulae into one formula
+        Dtlit,       // log:dtlit — ( "lex" xsd:dt ) ↔ "lex"^^xsd:dt (both directions)
+        LogConclusion, // log:conclusion — a formula's forward closure, as a formula
+        ParsedAsN3,    // log:parsedAsN3 — an N3 source string, parsed to a formula
+        Langlit,       // log:langlit — ( "lex" "lang" ) → "lex"@lang
+        Semantics,     // log:semantics — a document IRI's parsed formula (needs a Resolver)
+        Content,       // log:content — a document IRI's source text (needs a Resolver)
+        // single-value-arg (string case mapping, Unicode-aware)
+        LowerCase,    // string:lowerCase
+        UpperCase,    // string:upperCase
+        EncodeForUri, // string:encodeForUri — RFC 3986 percent-encoding (see [`encode_for_uri`])
+        EncodeForUriCwm, // string:encodeForURI — cwm's URI quoting (keeps #'()~, encodes /)
+        EncodeForFragId, // string:encodeForFragID — cwm's fragment quoting (keeps /, encodes #'()~)
+        // single-value-arg (unary math)
+        Negation,
+        AbsoluteValue,
+        Rounded,
+        Floor,
+        Ceiling,
+        // single-value-arg trig/hyperbolic (forward direction only; see module doc)
+        Sin,
+        Cos,
+        Tan,
+        Asin,
+        Acos,
+        Atan,
+        Sinh,
+        Cosh,
+        Tanh,
+        Asinh,
+        Acosh,
+        Atanh,
+        Degrees, // radians → degrees (x·180/π), matching eye.pl
+        Radians, // degrees → radians (x·π/180)
+        // single-value-arg (time: components of an xsd:dateTime)
+        Year,
+        Month,
+        Day,
+        Hours,
+        Minutes,
+        Seconds,
+        DayOfWeek, // time:dayOfWeek — 0=Sunday … 6=Saturday (cwm)
+        TimeZone,  // time:timeZone — the explicit ±hh:mm offset (absent for Z/none)
+        InSeconds, // time:inSeconds — epoch seconds (bidirectional, cwm t1)
+    }
 }
 
 fn functional_builtin(p: &Term) -> Option<Func> {
@@ -2897,8 +3279,8 @@ fn eval_functional_inner(
         let s_applied = apply(subj, &b);
         if !s_applied.is_ground() {
             let o_applied = apply(obj, &b);
-            if let Some(v) = numval(&o_applied) {
-                let negated = numval_negate(v)?;
+            if let Some(v) = numval_in(&o_applied, pending) {
+                let negated = rep(pending, numval_negate(v))?;
                 let mut nb = b;
                 return unify_term(subj, &numval_term(negated), &mut nb).then_some(nb);
             }
@@ -2931,12 +3313,12 @@ fn eval_functional_inner(
                 })
             };
             if let Func::InSeconds = f {
-                let secs = num(&o_applied)? as i64;
+                let secs = settle(pending, bounded::int_of_f64(num(&o_applied)?))?;
                 let mut nb = b;
                 let lit = Term::Lit(format_epoch(secs), XSD_STRING.into(), None);
                 return unify_term(subj, &lit, &mut nb).then_some(nb);
             }
-            if let Some(x) = numval(&o_applied).map(NumVal::to_f64) {
+            if let Some(x) = numval_in(&o_applied, pending).map(NumVal::to_f64) {
                 if let Some(v) = inverse(x) {
                     if v.is_nan() {
                         return None;
@@ -2956,7 +3338,8 @@ fn eval_functional_inner(
         // First-class list value (already substituted by `apply`).
         Term::List(ms) => Some(ms.clone()),
         // A data list written as rdf:first/rest triples, via a bound variable.
-        _ => settle(pending, fact_list(&subj_applied, facts)).map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
+        _ => settle(pending, fact_list(&subj_applied, facts))
+            .map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
     };
     let was_list = resolved_list.is_some();
     // The list:-namespace ops are only defined ON lists.
@@ -3034,8 +3417,13 @@ fn eval_functional_inner(
                         argi += 1;
                     }
                     'd' => {
-                        let n = num(args.get(argi)?)?;
-                        out.push_str(&(n as i64).to_string());
+                        // The integer part: exact in the exact tower, else from the f64.
+                        let n = match numval_in(args.get(argi)?, pending)? {
+                            NumVal::Int(i) => i,
+                            NumVal::Dec(m, sc) => m / rep(pending, 10i128.checked_pow(sc))?,
+                            NumVal::F64(f) => i128::from(settle(pending, bounded::int_of_f64(f))?),
+                        };
+                        out.push_str(&n.to_string());
                         argi += 1;
                     }
                     'f' => {
@@ -3070,6 +3458,10 @@ fn eval_functional_inner(
                         Some("boolean") => s.push_str(if v == "0" || v == "false" { "false" } else { "true" }),
                         Some("integer" | "decimal" | "float" | "double") => {
                             match numval(a) {
+                                // A numeral past i128: its canonical value string, exactly.
+                                Some(NumVal::F64(_)) if big_numeral_canonical(v).is_some() => {
+                                    s.push_str(&big_numeral_canonical(v)?)
+                                }
                                 Some(NumVal::Int(i)) => s.push_str(&i.to_string()),
                                 Some(NumVal::Dec(m, sc)) => {
                                     let (m, sc) = dec_norm(m, sc);
@@ -3192,10 +3584,14 @@ fn eval_functional_inner(
             let out = re.replace_all(lex(&args[0])?, lex(&args[2])?).into_owned();
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::Year | Func::Month | Func::Day | Func::Hours | Func::Minutes | Func::Seconds
-        | Func::DayOfWeek | Func::InSeconds => {
-            number_term(datetime_part(lex(&args[0])?, f, pending)? as f64)
-        }
+        Func::Year
+        | Func::Month
+        | Func::Day
+        | Func::Hours
+        | Func::Minutes
+        | Func::Seconds
+        | Func::DayOfWeek
+        | Func::InSeconds => number_term(datetime_part(lex(&args[0])?, f, pending)? as f64),
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
             // yield nothing).
@@ -3233,10 +3629,15 @@ fn eval_functional_inner(
             if unary && was_list {
                 return None;
             }
-            if let Some(exact) = eval_exact(f, &args) {
+            // An exact step that overflows is a cut (settled here); the f64 path below
+            // still gives the approximate value, as before.
+            if let Some(exact) = settle(pending, eval_exact(f, &args)) {
                 exact
             } else {
-                let nvals: Vec<NumVal> = args.iter().map(numval).collect::<Option<_>>()?;
+                let nvals: Vec<NumVal> = args
+                    .iter()
+                    .map(|a| numval_in(a, pending))
+                    .collect::<Option<_>>()?;
                 let nums: Vec<f64> = nvals.iter().map(|v| v.to_f64()).collect();
                 // cwm/EYE type discipline: the real-valued (trig/log) family is
                 // ALWAYS double; arithmetic is double when any input is.
@@ -3353,8 +3754,11 @@ fn eval_functional_inner(
     let mut nb = b;
     let obj_applied = apply(obj, &nb);
     if obj_applied.is_ground() {
-        if let (Some(x), Some(y)) = (numval(&obj_applied), numval(&result)) {
-            return NumVal::eq(x, y).then_some(nb);
+        if let (Some(x), Some(y)) = (
+            numval_in(&obj_applied, pending),
+            numval_in(&result, pending),
+        ) {
+            return (numval_cmp_in(x, y, pending) == Some(std::cmp::Ordering::Equal)).then_some(nb);
         }
     }
     if unify_term(obj, &result, &mut nb) {
@@ -3369,15 +3773,30 @@ fn eval_functional_inner(
 /// (doubles involved, overflow, or a non-exact quotient). The RESULT TYPE
 /// follows EYE: all-integer in → integer out; any decimal in → decimal out
 /// (with at least one fraction digit in the lexical form).
-fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
-    let vals: Vec<NumVal> = args.iter().map(numval).collect::<Option<_>>()?;
+fn eval_exact(f: Func, args: &[Term]) -> Bounded<Option<Term>> {
+    let pending = bounded::Pending::default();
+    let v = eval_exact_inner(f, args, &pending);
+    pending.finish(v)
+}
+
+/// One step of exact arithmetic: `None` from a checked operation means the exact value
+/// exists but `i128` cannot hold it, which is a cut (see [`bounded::exact`]).
+fn rep<T>(pending: &bounded::Pending, step: Option<T>) -> Option<T> {
+    settle(pending, bounded::exact(step))
+}
+
+fn eval_exact_inner(f: Func, args: &[Term], pending: &bounded::Pending) -> Option<Term> {
+    let vals: Vec<NumVal> = args
+        .iter()
+        .map(|a| numval_in(a, pending))
+        .collect::<Option<_>>()?;
     if vals.iter().any(|v| matches!(v, NumVal::F64(_))) {
         return None;
     }
     let any_dec = vals.iter().any(|v| matches!(v, NumVal::Dec(_, _)));
     let pair = || -> Option<(i128, i128, u32)> {
         if vals.len() == 2 {
-            NumVal::aligned(vals[0], vals[1])
+            rep(pending, NumVal::aligned(vals[0], vals[1]))
         } else {
             None
         }
@@ -3391,34 +3810,34 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
     };
     // Unary ops: value = m / 10^s; integer-valued results keep the input's
     // numeric type (decimal in → `x.0` out, matching the cwm references).
-    let unary_int = |round: fn(i128, i128) -> i128| -> Option<NumVal> {
+    let unary_int = |round: fn(i128, i128) -> Option<i128>| -> Option<NumVal> {
         let (m, s) = match vals[0] {
             NumVal::Int(i) => (i, 0u32),
             NumVal::Dec(m, s) => (m, s),
             NumVal::F64(_) => return None,
         };
-        let pow = 10i128.checked_pow(s)?;
-        let v = round(m, pow);
+        let pow = rep(pending, 10i128.checked_pow(s))?;
+        let v = rep(pending, round(m, pow))?;
         Some(if s == 0 { NumVal::Int(v) } else { NumVal::Dec(v, 0) })
     };
     // The exact add / subtract / multiply DELEGATE to the shared substrate
     // `Dec` (byte-identical `(mant, scale)`: `+`/`-` keep the max scale, `*` sums
     // the scales — the SAME i128 mantissa ops the private tower did). `renorm`
     // keeps EYE's result-type rule (all-integer in → integer out; any decimal in
-    // → decimal out). [OPUS-4.8] sq-pbz04.5.1
+    // → decimal out). Every checked step goes through `rep`, so an overflow is a cut.
     use sparq_substrate::numeric::Dec as SubDec;
     let out = match f {
         Func::Sum => {
             let mut acc = SubDec { mant: 0, scale: 0 };
             for &v in &vals {
-                acc = acc.checked_add(numval_to_subdec(v)?)?;
+                acc = rep(pending, acc.checked_add(numval_to_subdec(v)?))?;
             }
             renorm(acc.mant, acc.scale)
         }
         Func::Product => {
             let mut acc = SubDec { mant: 1, scale: 0 };
             for &v in &vals {
-                acc = acc.checked_mul(numval_to_subdec(v)?)?;
+                acc = rep(pending, acc.checked_mul(numval_to_subdec(v)?))?;
             }
             renorm(acc.mant, acc.scale)
         }
@@ -3426,18 +3845,16 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
             if vals.len() != 2 {
                 return None;
             }
-            let d = numval_to_subdec(vals[0])?.checked_sub(numval_to_subdec(vals[1])?)?;
+            let (x, y) = (numval_to_subdec(vals[0])?, numval_to_subdec(vals[1])?);
+            let d = rep(pending, x.checked_sub(y))?;
             renorm(d.mant, d.scale)
         }
         Func::Max | Func::Min => {
-            // Compare via the shared substrate `Dec::cmp` (the same scale-aligned
-            // i128 order as the private tower's `aligned`-then-`>`); an alignment
-            // overflow (`cmp` → `None`) falls through to the f64 path, matching the
-            // pre-adoption `aligned(..)?` behaviour. The WINNING ORIGINAL operand is
-            // returned unchanged (its own scale preserved). [OPUS-4.8] sq-pbz04.5.1
+            // Compare via the shared substrate `Dec::cmp` (scale-aligned i128 order).
+            // The WINNING ORIGINAL operand is returned unchanged (its own scale kept).
             let mut best = vals[0];
             for &v in &vals[1..] {
-                let ord = numval_to_subdec(best)?.cmp(numval_to_subdec(v)?)?;
+                let ord = rep(pending, numval_to_subdec(best)?.cmp(numval_to_subdec(v)?))?;
                 let take = if matches!(f, Func::Max) {
                     ord == std::cmp::Ordering::Less
                 } else {
@@ -3453,20 +3870,23 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
             // Long-divide to an exact decimal if one exists within i128 range.
             let (mut a, b, _) = pair()?;
             if b == 0 {
-                return None;
+                return None; // division by zero: the builtin is undefined (no-match)
             }
             let mut scale = 0u32;
-            while a % b != 0 && scale < 34 {
-                a = a.checked_mul(10)?;
+            // `wrapping_rem` is the exact remainder for every non-zero divisor
+            // (`i128::MIN % -1` is 0; only the quotient overflows there).
+            while a.wrapping_rem(b) != 0 && scale < 34 {
+                a = rep(pending, a.checked_mul(10))?;
                 scale += 1;
             }
-            if a % b != 0 {
-                return None; // not exact — f64 fallback
+            if a.wrapping_rem(b) != 0 {
+                return None; // a non-terminating decimal: EYE's double result (f64 path)
             }
+            let q = rep(pending, a.checked_div(b))?;
             if any_dec || scale > 0 {
-                NumVal::Dec(a / b, scale)
+                NumVal::Dec(q, scale)
             } else {
-                NumVal::Int(a / b)
+                NumVal::Int(q)
             }
         }
         Func::Remainder => {
@@ -3478,8 +3898,13 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
             }
             match (vals[0], vals[1]) {
                 (NumVal::Int(a), NumVal::Int(b)) if b != 0 => {
-                    let r = a.checked_rem(b)?;
-                    NumVal::Int(if r != 0 && (r < 0) != (b < 0) { r.checked_add(b)? } else { r })
+                    // Exact for every non-zero divisor, `i128::MIN % -1` (= 0) included.
+                    let r = a.wrapping_rem(b);
+                    if r != 0 && (r < 0) != (b < 0) {
+                        NumVal::Int(rep(pending, r.checked_add(b))?)
+                    } else {
+                        NumVal::Int(r)
+                    }
                 }
                 _ => return None,
             }
@@ -3489,56 +3914,57 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
             if b == 0 {
                 return None;
             }
-            NumVal::Int(a.div_euclid(b))
+            NumVal::Int(rep(pending, a.checked_div_euclid(b))?)
         }
-        // Tier-preserving unary sign ops via the shared adapter helpers (i128
-        // `checked_neg`/`checked_abs` on the substrate `Dec` mantissa — `None` on
-        // `i128::MIN` overflow, exactly as before). `vals[0]` is never `F64` here
-        // (the leading guard returns early on any `F64`), so the helper's `F64` arm
-        // is unreachable in this path. [OPUS-4.8] sq-pbz04.5.1
+        // Tier-preserving unary sign ops (i128 `checked_neg`/`checked_abs`; `i128::MIN`
+        // has no i128 negation, which is a cut).
         Func::Negation => match vals[0] {
             NumVal::F64(_) => return None,
-            v => numval_negate(v)?,
+            v => rep(pending, numval_negate(v))?,
         },
         Func::AbsoluteValue => match vals[0] {
             NumVal::F64(_) => return None,
-            v => numval_abs(v)?,
+            v => rep(pending, numval_abs(v))?,
         },
         // round-half-UP: floor(x + 1/2) — what the suite references encode
         // (-2.5 → -2, 0.5 → 1, 2.5 → 3). rounded keeps the decimal TYPE
         // (`-3.0`), while floor/ceiling return integers — both per the cwm
         // reference outputs.
-        Func::Rounded => unary_int(|m, pow| (m + pow / 2).div_euclid(pow))?,
-        Func::Floor => match unary_int(|m, pow| m.div_euclid(pow))? {
+        // not-a-cut: settled-by-caller (`unary_int` settles each rounding step)
+        Func::Rounded => unary_int(|m, pow| Some(m.checked_add(pow / 2)?.div_euclid(pow)))?,
+        Func::Floor => match unary_int(|m, pow| Some(m.div_euclid(pow)))? {
             NumVal::Dec(m, _) => NumVal::Int(m),
             v => v,
         },
-        Func::Ceiling => match unary_int(|m, pow| -((-m).div_euclid(pow)))? {
-            NumVal::Dec(m, _) => NumVal::Int(m),
-            v => v,
-        },
+        Func::Ceiling => {
+            // not-a-cut: settled-by-caller (`unary_int` settles each rounding step)
+            match unary_int(|m, pow| m.checked_neg()?.div_euclid(pow).checked_neg())? {
+                NumVal::Dec(m, _) => NumVal::Int(m),
+                v => v,
+            }
+        }
         Func::Exponentiation => {
             // base^exp exactly for an integer exponent ≥ 0 (cwm: 2.7² = 7.29).
             if vals.len() != 2 {
                 return None;
             }
             let (NumVal::Int(e), base) = (vals[1], vals[0]) else { return None };
-            if !(0..=64).contains(&e) {
-                return None;
+            if e < 0 {
+                return None; // a negative exponent: EYE's double result (f64 path)
             }
             let (m, sc) = match base {
                 NumVal::Int(i) => (i, 0u32),
                 NumVal::Dec(m, sc) => (m, sc),
                 NumVal::F64(_) => return None,
             };
-            let mut acc: i128 = 1;
-            for _ in 0..e {
-                acc = acc.checked_mul(m)?;
+            if e > i128::from(u32::MAX) {
+                rep::<()>(pending, None)?;
             }
-            let scale = sc.checked_mul(e as u32)?;
-            if scale > 34 {
-                return None;
-            }
+            let e = e as u32;
+            let acc = rep(pending, m.checked_pow(e))?;
+            let scale = rep(pending, sc.checked_mul(e))?;
+            // A decimal result past 34 fraction digits is past the tower's scale: a cut.
+            rep(pending, (scale <= 34).then_some(()))?;
             if any_dec {
                 NumVal::Dec(acc, scale)
             } else {
@@ -3572,14 +3998,20 @@ fn datetime_part(s: &str, f: Func, pending: &bounded::Pending) -> Option<i64> {
                 _ => unreachable!(),
             };
             let part = t.split(':').nth(idx)?;
-            settle(pending, bounded::digits_i64(part.split('.').next().unwrap_or(part)))
+            settle(
+                pending,
+                bounded::digits_i64(part.split('.').next().unwrap_or(part)),
+            )
         }
         Func::DayOfWeek | Func::InSeconds => {
             let (days, secs) = epoch_parts(s, pending)?;
             if matches!(f, Func::DayOfWeek) {
                 return Some((days + 4).rem_euclid(7)); // 1970-01-01 = Thursday
             }
-            days.checked_mul(86400)?.checked_add(secs)
+            settle(
+                pending,
+                bounded::exact(days.checked_mul(86400).and_then(|d| d.checked_add(secs))),
+            )
         }
         _ => None,
     }
@@ -3625,7 +4057,10 @@ fn epoch_parts(s: &str, pending: &bounded::Pending) -> Option<(i64, i64)> {
     };
     let mut dp = date.split('-');
     // Bound the year so the day/second arithmetic below cannot overflow i64.
-    let y = settle(pending, bounded::epoch_year(field(dp.next()?, 0..=i64::MAX)?))?;
+    let y = settle(
+        pending,
+        bounded::epoch_year(field(dp.next()?, 0..=i64::MAX)?),
+    )?;
     let y = if neg { -y } else { y };
     let m = dp.next().map(|x| field(x, 1..=12)).unwrap_or(Some(1))?;
     let d = dp.next().map(|x| field(x, 1..=31)).unwrap_or(Some(1))?;
@@ -3798,6 +4233,87 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 
 #[cfg(test)]
 mod tests {
+    /// Every registry entry's declared store read, walked over the whole registry
+    /// (`ALL` is generated with each enum, so a new variant joins this walk) and checked
+    /// against the expected table below. A new builtin fails here until the table says
+    /// what it reads.
+    #[test]
+    fn every_registry_entry_declares_its_store_read() {
+        let expected: &[(&str, &str)] = &[
+            ("Builtin", "Nothing"),
+            ("Bidi::LogUri", "Nothing"),
+            ("ListGen::Member", "ListCells(Subject)"),
+            ("ListGen::Iterate", "ListCells(Subject)"),
+            ("ListGen::In", "ListCells(Object)"),
+            ("ScopeOp", "Scoped"),
+            ("CollectOp", "Scoped"),
+            ("Func::Dtlit", "Nothing"),
+            ("Func::Append", "MemberListCells"),
+            ("Func::LogConclusion", "Nested"),
+            ("Func", "ListCells(Subject)"),
+            ("VirtualRel", "VirtualList"),
+        ];
+        let want = |enum_name: &str, variant: &str| -> String {
+            let full = format!("{enum_name}::{variant}");
+            expected
+                .iter()
+                .find(|(k, _)| *k == full)
+                .or_else(|| expected.iter().find(|(k, _)| *k == enum_name))
+                .map(|(_, v)| v.to_string())
+                .unwrap_or_else(|| panic!("no expected store read for {full}"))
+        };
+        let mut seen = 0;
+        let mut check = |enum_name: &str, variant: String, got: StoreRead| {
+            assert_eq!(
+                format!("{got:?}"),
+                want(enum_name, &variant),
+                "{enum_name}::{variant}"
+            );
+            seen += 1;
+        };
+        for &v in Builtin::ALL {
+            check("Builtin", format!("{v:?}"), v.store_read());
+        }
+        for &v in Bidi::ALL {
+            check("Bidi", format!("{v:?}"), v.store_read());
+        }
+        for &v in ListGen::ALL {
+            check("ListGen", format!("{v:?}"), v.store_read());
+        }
+        for &v in ScopeOp::ALL {
+            check("ScopeOp", format!("{v:?}"), v.store_read());
+        }
+        for &v in CollectOp::ALL {
+            check("CollectOp", format!("{v:?}"), v.store_read());
+        }
+        for &v in Func::ALL {
+            check("Func", format!("{v:?}"), v.store_read());
+        }
+        for v in [
+            VirtualRel::First,
+            VirtualRel::Rest,
+            VirtualRel::AnyPredicate,
+        ] {
+            check("VirtualRel", format!("{v:?}"), v.store_read());
+        }
+        assert!(seen > 90, "the registry walk covered {seen} entries");
+        // Predicates resolve to the virtual relations and to stored joins.
+        let iri = |i: &str| Term::Iri(i.into());
+        assert!(matches!(
+            relation(&iri(parser::RDF_FIRST)),
+            Relation::Virtual(VirtualRel::First)
+        ));
+        assert!(matches!(
+            relation(&iri(parser::RDF_REST)),
+            Relation::Virtual(VirtualRel::Rest)
+        ));
+        assert!(matches!(
+            relation(&Term::Var("p".into())),
+            Relation::Virtual(VirtualRel::AnyPredicate)
+        ));
+        assert_eq!(relation(&iri("http://ex/p")).store_read(), StoreRead::Joins);
+    }
+
     use super::*;
 
     fn closure(src: &str) -> (Dict, FxHashSet<[Id; 3]>) {
@@ -5094,6 +5610,46 @@ mod tests {
 /// branch logic goes red.
 #[cfg(test)]
 mod substrate_seam_differential {
+    /// The value of [`eval_exact`], settled into a throwaway sink.
+    fn exact_value(f: Func, args: &[Term]) -> Option<Term> {
+        super::bounded::settle(&std::cell::Cell::new(false), eval_exact(f, args))
+    }
+
+    /// Whether [`eval_exact`] marks a cut.
+    fn exact_cut(f: Func, args: &[Term]) -> bool {
+        let sink = std::cell::Cell::new(false);
+        let _ = super::bounded::settle(&sink, eval_exact(f, args));
+        sink.get()
+    }
+
+    #[test]
+    fn overflow_is_a_cut_and_a_representable_result_is_not() {
+        let min = i128::MIN.to_string();
+        let max = i128::MAX.to_string();
+        // i128::MIN % -1 is exactly 0: computed, no cut.
+        assert_eq!(
+            exact_value(Func::Remainder, &[plain(&min), plain("-1")]),
+            Some(lit("0", XSD_INT))
+        );
+        assert!(!exact_cut(Func::Remainder, &[plain(&min), plain("-1")]));
+        // Results past i128 are cuts.
+        for (f, args) in [
+            (Func::Sum, vec![plain(&max), plain("1")]),
+            (Func::Difference, vec![plain(&min), plain("1")]),
+            (Func::Product, vec![plain(&max), plain("2")]),
+            (Func::Quotient, vec![plain(&min), plain("-1")]),
+            (Func::IntegerQuotient, vec![plain(&min), plain("-1")]),
+            (Func::Negation, vec![plain(&min)]),
+            (Func::AbsoluteValue, vec![plain(&min)]),
+            (Func::Exponentiation, vec![plain("2"), plain("200")]),
+            (Func::Sum, vec![plain("1"), plain(&format!("{max}0"))]),
+        ] {
+            assert!(exact_cut(f, &args), "{:?} {:?} must be a cut", f, args);
+        }
+        // A non-terminating quotient is EYE's double result, not a cut.
+        assert!(!exact_cut(Func::Quotient, &[plain("1"), plain("3")]));
+    }
+
     use super::*;
 
     const XSD_INT: &str = "http://www.w3.org/2001/XMLSchema#integer";
@@ -5217,7 +5773,7 @@ mod substrate_seam_differential {
     /// equals the old-semantics oracle byte-for-byte.
     fn assert_diff(f: Func, args: &[Term]) {
         assert_eq!(
-            eval_exact(f, args),
+            exact_value(f, args),
             old_eval_exact(f, args),
             "substrate-backed eval_exact diverged from the old NumVal semantics for {:?} on {:?}",
             f as u8,
@@ -5252,22 +5808,22 @@ mod substrate_seam_differential {
     fn diff_exact_decimal_add_sub_mul_pinned() {
         // 0.1 + 0.2 is EXACTLY 0.3 (the f64 path gets 0.30000000000000004).
         assert_eq!(
-            eval_exact(Func::Sum, &[lit("0.1", XSD_DEC), lit("0.2", XSD_DEC)]),
+            exact_value(Func::Sum, &[lit("0.1", XSD_DEC), lit("0.2", XSD_DEC)]),
             Some(lit("0.3", XSD_DEC))
         );
         // ('2.7' '2') math:difference = 0.7 EXACTLY (f64 gives 0.7000000000000002).
         assert_eq!(
-            eval_exact(Func::Difference, &[lit("2.7", XSD_DEC), plain("2")]),
+            exact_value(Func::Difference, &[lit("2.7", XSD_DEC), plain("2")]),
             Some(lit("0.7", XSD_DEC))
         );
         // 2.7 * 2.7 = 7.29 exactly (scale 1 * scale 1 → scale 2).
         assert_eq!(
-            eval_exact(Func::Product, &[lit("2.7", XSD_DEC), lit("2.7", XSD_DEC)]),
+            exact_value(Func::Product, &[lit("2.7", XSD_DEC), lit("2.7", XSD_DEC)]),
             Some(lit("7.29", XSD_DEC))
         );
         // A trailing-zero scale is normalised by numval_term/dec_norm: 1 + 0.20 → "1.2".
         assert_eq!(
-            eval_exact(Func::Sum, &[plain("1"), lit("0.20", XSD_DEC)]),
+            exact_value(Func::Sum, &[plain("1"), lit("0.20", XSD_DEC)]),
             Some(lit("1.2", XSD_DEC))
         );
     }
@@ -5281,7 +5837,7 @@ mod substrate_seam_differential {
         let b: i128 = 1000;
         let sum = a + b;
         assert_eq!(
-            eval_exact(Func::Sum, &[plain(&a.to_string()), plain(&b.to_string())]),
+            exact_value(Func::Sum, &[plain(&a.to_string()), plain(&b.to_string())]),
             Some(lit(&sum.to_string(), XSD_INT)),
             "sum of a > i64::MAX integer stays an exact xsd:integer via the substrate Dec carrier"
         );
@@ -5289,13 +5845,16 @@ mod substrate_seam_differential {
         let big = 3_037_000_500i128; // ~sqrt(i128::MAX)/... well within i128 when squared? no — pick safe
         let sq = big.checked_mul(big).unwrap();
         assert_eq!(
-            eval_exact(Func::Product, &[plain(&big.to_string()), plain(&big.to_string())]),
+            exact_value(
+                Func::Product,
+                &[plain(&big.to_string()), plain(&big.to_string())]
+            ),
             Some(lit(&sq.to_string(), XSD_INT))
         );
         // Difference crossing the i64 boundary.
         let hi = (i64::MAX as i128) + 500;
         assert_eq!(
-            eval_exact(Func::Difference, &[plain(&hi.to_string()), plain("500")]),
+            exact_value(Func::Difference, &[plain(&hi.to_string()), plain("500")]),
             Some(lit(&(i64::MAX).to_string(), XSD_INT))
         );
         // All three delegated ops match the old oracle on the >i64 matrix.
@@ -5310,7 +5869,12 @@ mod substrate_seam_differential {
         // identically in both the substrate-backed and old cores.
         for special in ["INF", "-INF", "NaN"] {
             let args = [lit(special, XSD_DBL), plain("2")];
-            assert_eq!(eval_exact(Func::Sum, &args), None, "{} has no exact tier", special);
+            assert_eq!(
+                exact_value(Func::Sum, &args),
+                None,
+                "{} has no exact tier",
+                special
+            );
             assert_eq!(old_eval_exact(Func::Sum, &args), None);
         }
         // numval classifies the specials as F64 (the lexical-shape coercion edge).
@@ -5326,32 +5890,65 @@ mod substrate_seam_differential {
         // so the refactor cannot have perturbed them.
         // integer / integer exact → xsd:integer (NOT a "N.0" decimal — the seam declines
         // substrate Dec::checked_div here, which would always yield a decimal).
-        assert_eq!(eval_exact(Func::Quotient, &[plain("6"), plain("2")]), Some(lit("3", XSD_INT)));
+        assert_eq!(
+            exact_value(Func::Quotient, &[plain("6"), plain("2")]),
+            Some(lit("3", XSD_INT))
+        );
         // exact terminating quotient → decimal.
-        assert_eq!(eval_exact(Func::Quotient, &[plain("1"), plain("4")]), Some(lit("0.25", XSD_DEC)));
+        assert_eq!(
+            exact_value(Func::Quotient, &[plain("1"), plain("4")]),
+            Some(lit("0.25", XSD_DEC))
+        );
         // non-terminating → None (f64 fallback), NOT a rounded decimal.
-        assert_eq!(eval_exact(Func::Quotient, &[plain("1"), plain("3")]), None);
+        assert_eq!(exact_value(Func::Quotient, &[plain("1"), plain("3")]), None);
         // remainder: divisor-sign (Python %): -2 mod 4 = 2, 2 mod -4 = -2.
-        assert_eq!(eval_exact(Func::Remainder, &[plain("-2"), plain("4")]), Some(lit("2", XSD_INT)));
-        assert_eq!(eval_exact(Func::Remainder, &[plain("2"), plain("-4")]), Some(lit("-2", XSD_INT)));
+        assert_eq!(
+            exact_value(Func::Remainder, &[plain("-2"), plain("4")]),
+            Some(lit("2", XSD_INT))
+        );
+        assert_eq!(
+            exact_value(Func::Remainder, &[plain("2"), plain("-4")]),
+            Some(lit("-2", XSD_INT))
+        );
         // integerQuotient: floor division.
-        assert_eq!(eval_exact(Func::IntegerQuotient, &[plain("-7"), plain("2")]), Some(lit("-4", XSD_INT)));
+        assert_eq!(
+            exact_value(Func::IntegerQuotient, &[plain("-7"), plain("2")]),
+            Some(lit("-4", XSD_INT))
+        );
         // floor/ceiling collapse a decimal to an xsd:integer; rounded keeps the "N.0" decimal.
-        assert_eq!(eval_exact(Func::Floor, &[lit("2.7", XSD_DEC)]), Some(lit("2", XSD_INT)));
-        assert_eq!(eval_exact(Func::Ceiling, &[lit("2.1", XSD_DEC)]), Some(lit("3", XSD_INT)));
-        assert_eq!(eval_exact(Func::Rounded, &[lit("2.5", XSD_DEC)]), Some(lit("3.0", XSD_DEC)));
+        assert_eq!(
+            exact_value(Func::Floor, &[lit("2.7", XSD_DEC)]),
+            Some(lit("2", XSD_INT))
+        );
+        assert_eq!(
+            exact_value(Func::Ceiling, &[lit("2.1", XSD_DEC)]),
+            Some(lit("3", XSD_INT))
+        );
+        assert_eq!(
+            exact_value(Func::Rounded, &[lit("2.5", XSD_DEC)]),
+            Some(lit("3.0", XSD_DEC))
+        );
     }
 
     #[test]
     fn diff_negation_abs_tier_preserving() {
         // Negation / abs preserve the tier and scale (Dec stays Dec with its scale).
-        assert_eq!(eval_exact(Func::Negation, &[plain("5")]), Some(lit("-5", XSD_INT)));
-        assert_eq!(eval_exact(Func::Negation, &[lit("3.50", XSD_DEC)]), Some(lit("-3.5", XSD_DEC)));
-        assert_eq!(eval_exact(Func::AbsoluteValue, &[lit("-3.50", XSD_DEC)]), Some(lit("3.5", XSD_DEC)));
+        assert_eq!(
+            exact_value(Func::Negation, &[plain("5")]),
+            Some(lit("-5", XSD_INT))
+        );
+        assert_eq!(
+            exact_value(Func::Negation, &[lit("3.50", XSD_DEC)]),
+            Some(lit("-3.5", XSD_DEC))
+        );
+        assert_eq!(
+            exact_value(Func::AbsoluteValue, &[lit("-3.50", XSD_DEC)]),
+            Some(lit("3.5", XSD_DEC))
+        );
         // A > i64 integer negates exactly (i128 checked_neg on the substrate Dec carrier).
         let big = (i64::MAX as i128) + 7;
         assert_eq!(
-            eval_exact(Func::Negation, &[plain(&big.to_string())]),
+            exact_value(Func::Negation, &[plain(&big.to_string())]),
             Some(lit(&(-big).to_string(), XSD_INT))
         );
     }

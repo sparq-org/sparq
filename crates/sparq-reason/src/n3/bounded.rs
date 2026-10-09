@@ -2,7 +2,8 @@
 //!
 //! A search that stops early (a depth limit, a step budget, a length cap, a regex that
 //! cannot be compiled, a nested closure left unclosed) under-approximates what it
-//! reports. Any negation or aggregation that later reads the store would then read
+//! reports, and so does a builtin whose exact value its number tower cannot represent
+//! (an `i128` overflow). Any negation or aggregation that later reads the store would then read
 //! missing facts as absent. So every such step returns a [`Bounded`] value, which is
 //! `#[must_use]` and whose contents are private to this module: the only way to get the
 //! value out is [`settle`], which records a cut on the run's sticky [`Sink`] on the way.
@@ -258,5 +259,39 @@ pub(crate) fn epoch_year(year: i64) -> Bounded<Option<i64>> {
         Bounded::complete(Some(year))
     } else {
         Bounded::cut(None, "a date/time year passed the epoch arithmetic's range")
+    }
+}
+
+/// One checked step of exact arithmetic. `None` means the exact value exists but the
+/// `i128` tower cannot hold it (an overflow, an unrepresentable result): a cut.
+pub(crate) fn exact<T>(step: Option<T>) -> Bounded<Option<T>> {
+    match step {
+        Some(v) => Bounded::complete(Some(v)),
+        None => Bounded::cut(None, "exact arithmetic passed the i128 range"),
+    }
+}
+
+/// A numeral the exact tower read as its `f64` image. An integer or decimal numeral
+/// (no exponent, not `INF`/`NaN`) only lands there when its value is past `i128`: a cut.
+pub(crate) fn exact_numeral(lex: &str) -> Bounded<()> {
+    let body = lex.strip_prefix(['+', '-']).unwrap_or(lex);
+    let digits = body.bytes().filter(u8::is_ascii_digit).count();
+    let dots = body.bytes().filter(|&b| b == b'.').count();
+    if digits > 0 && dots <= 1 && digits + dots == body.len() {
+        Bounded::cut((), "an exact numeral passed the i128 range")
+    } else {
+        Bounded::complete(())
+    }
+}
+
+/// The integer part of an `f64` as an `i64`. `NaN` has none (no match); an infinite or
+/// out-of-range value has one that `i64` cannot hold: a cut.
+pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
+    if n.is_nan() {
+        Bounded::complete(None)
+    } else if n.is_finite() && n >= i64::MIN as f64 && n < i64::MAX as f64 {
+        Bounded::complete(Some(n as i64))
+    } else {
+        Bounded::cut(None, "a number passed the i64 range")
     }
 }

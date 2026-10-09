@@ -83,7 +83,7 @@ use super::model::Term;
 use super::parser;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts};
-use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget}; // not-a-limit: unbounded join
+use sparq_substrate::join::{self as sjoin, JoinKeys, NoBudget}; // not-a-limit: unbounded-join
 use sparq_substrate::rows::{Row, NO_ID};
 
 const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
@@ -1380,7 +1380,7 @@ fn join_pattern(rows: &[Row], p: &PatternStep, cands: &[Row], width: usize) -> V
         rows,
         &tables,
         &probe_only,
-        &NoBudget, // not-a-limit: the join runs unbounded
+        &NoBudget, // not-a-limit: unbounded-join (the join runs to completion)
         &mut combined,
     );
     let mut out = Vec::with_capacity(combined.len());
@@ -1427,6 +1427,12 @@ fn concat_push(dict: &Dict, id: Id, s: &mut String) -> bool {
                 Some("integer" | "decimal" | "float" | "double") => {
                     let t = Term::Lit(v.to_string(), l.datatype().as_str().to_string(), None);
                     match super::numval(&t) {
+                        // A numeral past i128: its canonical value string, exactly.
+                        Some(super::NumVal::F64(_))
+                            if super::big_numeral_canonical(v).is_some() =>
+                        {
+                            s.push_str(&super::big_numeral_canonical(v).unwrap_or_default())
+                        }
                         Some(super::NumVal::Int(i)) => s.push_str(&i.to_string()),
                         Some(super::NumVal::Dec(m, sc)) => {
                             let (m, sc) = super::dec_norm(m, sc);

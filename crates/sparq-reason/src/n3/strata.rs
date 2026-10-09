@@ -25,9 +25,11 @@
 //!   store, even when a variable may turn out to hold a formula;
 //! * a store-scoped `log:collectAllIn` / `log:forAllIn` reads its literal clause formulas
 //!   NEGATIVELY; a clause or subject given through a variable is UNKNOWN and negative;
-//! * the list generators (`list:member` / `list:in` / `list:iterate`) and the functional
-//!   builtins may walk a stored `rdf:first`/`rdf:rest` list, so they read both, with the
-//!   surrounding polarity;
+//! * every other premise relation reads what its registry entry declares
+//!   ([`super::StoreRead`]): a stored predicate and a virtual list relation read their
+//!   predicate; a list generator or functional builtin may walk a stored
+//!   `rdf:first`/`rdf:rest` list, so it reads both, with the surrounding polarity; a
+//!   builtin over its operands' values reads nothing;
 //! * `log:conclusion` and `log:supports` close a formula under its own rules (a nested
 //!   run): UNKNOWN, with the surrounding polarity. A nested run that is not stratifiable
 //!   makes the whole run fail (see [`super::run_closure`]);
@@ -38,16 +40,12 @@
 //! [`NegationCycles`] says what happens to them (an error by default).
 
 use super::model::{Rule, Term};
-use super::{
-    binder_builtin, builtin, collect_op, functional_builtin, list_generator, scope_op, CollectOp,
-    ScopeOp,
-};
+use super::{collect_op, relation, scope_op, CollectOp, Relation, ScopeOp, StoreRead};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
 const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-const LOG_CONCLUSION: &str = "http://www.w3.org/2000/10/swap/log#conclusion";
 
 /// What the N3 engines do with rules that negate through a dependency cycle: store-scoped
 /// `log:notIncludes` / `log:collectAllIn` / `log:forAllIn` over a predicate that depends on
@@ -163,8 +161,8 @@ fn has_store_negation(atoms: &[[Term; 3]]) -> bool {
 /// The `(predicate, negative)` dependencies of premise `atoms`.
 fn premise_deps<'a>(atoms: &'a [[Term; 3]], neg: bool, out: &mut Vec<Dep<'a>>) {
     for atom in atoms {
-        let p = &atom[1];
-        if let Some(op) = scope_op(p) {
+        let rel = relation(&atom[1]);
+        if let Relation::Scope(op) = rel {
             if matches!(op, ScopeOp::Supports) {
                 out.push((Pred::Unknown, neg));
             }
@@ -175,7 +173,7 @@ fn premise_deps<'a>(atoms: &'a [[Term; 3]], neg: bool, out: &mut Vec<Dep<'a>>) {
             }
             continue;
         }
-        if let Some(op) = collect_op(p) {
+        if let Relation::Collect(op) = rel {
             if local_scope(&atom[2]) {
                 continue;
             }
@@ -201,18 +199,23 @@ fn premise_deps<'a>(atoms: &'a [[Term; 3]], neg: bool, out: &mut Vec<Dep<'a>>) {
             }
             continue;
         }
-        if list_generator(p).is_some() || functional_builtin(p).is_some() {
-            out.push((Pred::Iri(RDF_FIRST), neg));
-            out.push((Pred::Iri(RDF_REST), neg));
-            if matches!(p, Term::Iri(i) if i == LOG_CONCLUSION) {
+        // Everything else: what the relation's registry entry declares it reads.
+        match rel.store_read() {
+            StoreRead::Nothing => {}
+            StoreRead::Joins | StoreRead::VirtualList => out.push((atom_pred(atom), neg)),
+            StoreRead::ListCells(_) | StoreRead::MemberListCells => {
+                out.push((Pred::Iri(RDF_FIRST), neg));
+                out.push((Pred::Iri(RDF_REST), neg));
+            }
+            StoreRead::Nested => {
+                out.push((Pred::Iri(RDF_FIRST), neg));
+                out.push((Pred::Iri(RDF_REST), neg));
                 out.push((Pred::Unknown, neg));
             }
-            continue;
+            // Scope and aggregation relations are handled above; a future one that is
+            // not reads everything, negatively.
+            StoreRead::Scoped => out.push((Pred::Unknown, true)),
         }
-        if builtin(p).is_some() || binder_builtin(p).is_some() {
-            continue;
-        }
-        out.push((atom_pred(atom), neg));
     }
 }
 

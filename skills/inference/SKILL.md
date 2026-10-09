@@ -101,11 +101,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // a store some search cut short (backward depth limit, containment budget, list-walk cap,
 // a regex the engine cannot compile, import-cycle-unclosed nested closure, a log:semantics /
 // log:parsedAsN3 document past the parser's nesting limit, a log:semantics / log:content IRI
-// with no resolver or one that returns nothing, a date field that overflows; the flag is shared
-// across nested closures, explicit strata and a query's data closure): the run errors unless
-// SinglePass. A syntax error in a parsed document is a plain no-match, not a cut. Rules whose
-// premise reads the store outside its joins (negation, aggregation, backward rules, list
-// builtins over a non-literal list) are re-run in full each round. A cycle through
+// with no resolver or one that returns nothing, a date field that overflows, exact math:
+// arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
+// shared across nested closures, explicit strata and a query's data closure): the run errors
+// unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
+// Integer/decimal math: comparisons are exact. Every builtin and virtual relation declares
+// what it reads from the store (`StoreRead`, exhaustive per registry entry); rules whose
+// premise reads outside its joins (scopes, list walks over a stored list, virtual
+// rdf:first/rest over a variable subject, a variable predicate, backward rules) re-run in
+// full each round, and a stratum that a later negation/aggregation (or a caller: query,
+// next explicit stratum) reads closes with a full naive round. A cycle through
 // negation (e.g. `a ?c` concluded beside a negated `a :Flagged`, or a variable-predicate
 // conclusion beside store-scoped negation) is an ERROR by
 // default at every entry point, nested closures included; only the rules on/after the cycle

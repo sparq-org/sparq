@@ -582,8 +582,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality, // not-a-limit: an owl:maxCardinality value
-            ow.o.max_qual_card, // not-a-limit: an owl:maxCardinality value
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -667,8 +667,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality, // not-a-limit: an owl:maxCardinality value
-            ow.o.max_qual_card, // not-a-limit: an owl:maxCardinality value
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -1012,7 +1012,7 @@ impl MaterializedOwlGraph {
     #[cfg(feature = "parallel")]
     fn count_sweep(&self, triples: &[[Id; 3]]) -> Vec<[Id; 3]> {
         use rayon::prelude::*;
-        const PAR_THRESHOLD: usize = 4096; // not-a-limit: parallelism threshold, no cut
+        const PAR_THRESHOLD: usize = 4096; // not-a-limit: parallelism (a threshold, no cut)
         if triples.len() < PAR_THRESHOLD {
             let mut out = Vec::new();
             for &t in triples {
@@ -1702,9 +1702,14 @@ fn eval_n3_builtin(
                                 .push_str(if v == "0" || v == "false" { "false" } else { "true" }),
                             Some("integer") => match v.trim().parse::<i128>() {
                                 Ok(i) => out.push_str(&i.to_string()),
-                                // An unparsable integer keeps its lexical form, as the
-                                // engine's concatenation does.
-                                Err(_) => out.push_str(v), // not-a-cut: value kept as written
+                                // Past i128: the canonical value string, computed on the
+                                // digits (exact); an unparsable integer keeps its lexical
+                                // form, as the engine's concatenation does.
+                                // not-a-cut: exact-on-digits
+                                Err(_) => out.push_str(
+                                    &crate::n3::big_numeral_canonical(v)
+                                        .unwrap_or_else(|| v.clone()),
+                                ),
                             },
                             Some("decimal" | "float" | "double") => {
                                 // Engine: canonical numeric value string (scaled-decimal

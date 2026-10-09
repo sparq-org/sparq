@@ -5,14 +5,19 @@
 //! an N3 evaluator source (outside its test modules)
 //!
 //! * discards an error (`.ok()`, `if let Ok(`, `.err()`, `Err(_)`, `.is_ok()`,
-//!   `.is_err()`) without a `// no-match: <reason>` (a spec-defined no-match, such as
-//!   an ill-typed lexical form) or `// not-a-cut: <reason>` marker on that line or the
+//!   `.is_err()`) without a `// no-match: <category>` (a spec-defined no-match, such as
+//!   an ill-typed lexical form) or `// not-a-cut: <category>` marker on that line or the
 //!   line above;
 //! * names a limit (a limit constant, a `max_*` / `*_limit` / `*_budget` / `*_cap` /
 //!   `*_threshold` field or config, `Regex::new`, `RegexBuilder`) without a
-//!   `// not-a-limit: <reason>` marker, unless the line goes through `bounded::`;
+//!   `// not-a-limit: <category>` marker, unless the line goes through `bounded::`;
+//! * calls a `checked_*` / `overflowing_*` arithmetic step that neither goes through
+//!   `rep(` / `bounded::` on that line nor carries a `// not-a-cut:` marker;
 //! * compares, ranges, takes or caps against a numeric literal of 1000 or more without
 //!   such a marker.
+//!
+//! Each marker must name a category from [`ALLOWED`] (`// no-match: ill-typed (…)`);
+//! an unknown category fails, so a marker cannot be an unreviewed free-text waiver.
 //!
 //! It cannot see every implicit limit (recursion depth, a third-party crate's internal
 //! caps, a limit spelled some other way); those still have to surface as a `Bounded`.
@@ -51,6 +56,24 @@ fn code_lines(src: &str) -> Vec<(usize, String, String)> {
     out
 }
 
+/// The marker categories, each with the reason it is not a cut:
+const ALLOWED: &[(&str, &str)] = &[
+    // The lexical form is not of the type: the builtin is false by definition.
+    ("no-match", "ill-typed"),
+    // Not part of evaluating a premise (e.g. serializer labels).
+    ("not-a-cut", "not-evaluation"),
+    // The caller records the cut (e.g. `numval_in` over `numval`).
+    ("not-a-cut", "settled-by-caller"),
+    // The value is computed exactly on the digits, so nothing is lost.
+    ("not-a-cut", "exact-on-digits"),
+    // A data value that is named like a limit (an ontology cardinality).
+    ("not-a-limit", "data-value"),
+    // A switch between sequential and parallel evaluation of the same result.
+    ("not-a-limit", "parallelism"),
+    // A join budget type that never stops the join.
+    ("not-a-limit", "unbounded-join"),
+];
+
 #[test]
 fn errors_and_limits_go_through_the_bounded_module() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -79,15 +102,40 @@ fn errors_and_limits_go_through_the_bounded_module() {
         r"(<=?|>=?|==|!=|\.\.=?|\.take\(|\.min\(|\.max\(|=)\s*\d[\d_]{3,}\b|\b\d[\d_]{3,}\s*(<=?|>=?|==|!=|\.\.)",
     )
     .expect("literal pattern");
+    // A checked or overflowing step whose `None` is not settled as a cut.
+    let checked = Regex::new(r"\.(checked|overflowing)_\w+\(").expect("checked pattern");
+    // Every marker names one allowed category; an unknown one fails.
+    let marker = Regex::new(r"//\s*(no-match|not-a-cut|not-a-limit):\s*([a-z-]*)").expect("marker");
     let mut hits = Vec::new();
     for rel in EVALUATORS {
         let Ok(src) = std::fs::read_to_string(format!("{root}/{rel}")) else {
             continue; // an optional module absent from this checkout
         };
+        for (n, line) in src.lines().enumerate() {
+            for m in marker.captures_iter(line) {
+                let (kind, cat) = (&m[1], &m[2]);
+                if !ALLOWED.contains(&(kind, cat)) {
+                    hits.push(format!(
+                        "{rel}:{}: marker `{kind}: {cat}` is not an allowed category",
+                        n + 1
+                    ));
+                }
+            }
+        }
         for (n, code, comments) in code_lines(&src) {
             let marked = |m: &str| comments.contains(m);
             if discard.is_match(&code) && !marked("// no-match:") && !marked("// not-a-cut:") {
                 hits.push(format!("{rel}:{n}: discarded error: {}", code.trim()));
+            }
+            if checked.is_match(&code)
+                && !code.contains("rep(")
+                && !code.contains("bounded::")
+                && !marked("// not-a-cut:")
+            {
+                hits.push(format!(
+                    "{rel}:{n}: unsettled checked arithmetic: {}",
+                    code.trim()
+                ));
             }
             let limit = limit_name.is_match(&code) || limit_literal.is_match(&code);
             if limit && !code.contains("bounded::") && !marked("// not-a-limit:") {

@@ -561,6 +561,14 @@ fn truncation_sources() -> Vec<(&'static str, String, String)> {
             "{ <http://ex/doc> log:semantics ?f } => { :a :proved :b } .\n".to_string(),
         ),
         (
+            "exact arithmetic past i128",
+            String::new(),
+            format!(
+                "{{ ({} 1) math:sum ?x }} => {{ :a :proved :b }} .\n",
+                i128::MAX
+            ),
+        ),
+        (
             "regex limit in string:scrape",
             String::new(),
             format!(
@@ -608,7 +616,10 @@ fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point
 }
 
 fn every_negation_and_aggregation_refuses_a_truncated_input() {
-    let pre = format!("{PRE}@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n");
+    let pre = format!(
+        "{PRE}@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+         @prefix math: <http://www.w3.org/2000/10/swap/math#> .\n"
+    );
     let probes: [(&str, &str); 6] = [
         (
             "notIncludes, store scope",
@@ -713,46 +724,105 @@ fn every_negation_and_aggregation_refuses_a_truncated_input() {
     }
 }
 
-/// A rule whose only premise reads the store through a list builtin (no join atom) must
-/// see a list another rule of its stratum derives later; the next stratum's negation then
-/// sees the prohibition. Through every entry point.
+/// Programs whose prohibition is derivable only through a store read the semi-naive
+/// schedule could miss, or through arithmetic at the edge of the exact tower. Each derives
+/// `:r :blocked :g`, so the next stratum's negation must grant no permit. `(name, data,
+/// rule deriving the prohibition)`.
+fn completeness_cases() -> Vec<(&'static str, &'static str, String)> {
+    vec![
+        (
+            // A list consumer with no join atom must see a list derived later in its
+            // stratum.
+            "list derived later in the stratum",
+            ":seed :p :v .\n{ :seed :p :v } => { :h rdf:first :blocked ; rdf:rest rdf:nil } .\n",
+            "{ :h list:member :blocked } => { :r :blocked :g } .\n".to_string(),
+        ),
+        (
+            // A virtual list join: the first atom computes over a list term, and the
+            // variable-subject second atom matches that list term, not a stored triple.
+            "virtual list join",
+            "",
+            "{ ((:blocked)) rdf:first ?l . ?l rdf:first :blocked } => { :r :blocked :g } .\n"
+                .to_string(),
+        ),
+        (
+            // i128::MIN % -1 is exactly 0.
+            "remainder of i128::MIN by -1",
+            "",
+            format!(
+                "{{ ({} -1) math:remainder 0 }} => {{ :r :blocked :g }} .\n",
+                i128::MIN
+            ),
+        ),
+    ]
+}
+
+/// Every completeness case, through every entry point: the prohibition is derived and no
+/// permit is granted.
 #[test]
-fn list_consumer_sees_a_list_derived_later_in_its_stratum() {
-    let body = ":seed :p :v .\n\
-        { :seed :p :v } => { :h rdf:first :blocked ; rdf:rest rdf:nil } .\n\
-        { :h list:member :blocked } => { :r :blocked :g } .\n\
-        { ?s log:notIncludes { :r :blocked :g } } => { :r :permittedBy :g } .";
-    let src = format!("{PRE}{body}");
+fn derivable_prohibitions_are_seen_at_every_entry_point() {
+    let pre = format!("{PRE}@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n");
+    let negation = "{ ?s log:notIncludes { :r :blocked :g } } => { :r :permittedBy :g } .";
     let permit = t("r", "permittedBy", "g");
-    let (c, _) = run(body);
-    assert!(c.contains(&t("r", "blocked", "g")), "{c:?}");
-    assert!(
-        !c.contains(&permit),
-        "list consumer missed the derived list: {c:?}"
-    );
-    let mut d = Dict::new();
-    let ids = reason_n3(&mut d, &src).expect("reason_n3");
     let permit_iri = |d: &Dict, id| d.term(id).to_string().contains("permittedBy");
-    assert!(!ids.iter().any(|t| permit_iri(&d, t[1])));
-    let mut d = Dict::new();
-    let ids = sparq_reason::reason_n3_proof(&mut d, &src)
-        .expect("proof")
-        .0;
-    assert!(!ids.iter().any(|t| permit_iri(&d, t[1])));
-    let pass = sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).expect("pass");
-    // The closure statements (the echoed rules mention the permit in their conclusion).
-    let permit_line = "<http://ex/r> <http://ex/permittedBy> <http://ex/g> .";
-    assert!(!pass.lines().any(|l| l.trim() == permit_line), "{pass}");
-    let mut d = Dict::new();
-    let st = reason_n3_stratified(&mut d, &[&src]).expect("stratified");
-    assert!(!st.facts.iter().any(|t| permit_iri(&d, t[1])));
-    let q = format!("{PRE}{{ ?s log:notIncludes {{ :r :blocked :g }} }} => {{ :r :ok :g }} .");
-    let data = format!(
-        "{PRE}:seed :p :v .\n\
-        {{ :seed :p :v }} => {{ :h rdf:first :blocked ; rdf:rest rdf:nil }} .\n\
-        {{ :h list:member :blocked }} => {{ :r :blocked :g }} ."
-    );
-    assert!(reason_n3_query_terms(&data, &q).expect("query").is_empty());
-    let g = MaterializedN3Graph::new(&src, &[]).expect("incremental");
-    assert!(!g.closure().contains(&permit));
+    for (name, data, rule) in completeness_cases() {
+        let src = format!("{pre}{data}{rule}{negation}");
+        let c = reason_n3_terms(&src, None).expect(name);
+        assert!(
+            c.facts.contains(&t("r", "blocked", "g")),
+            "{name}: {:?}",
+            c.facts
+        );
+        assert!(!c.facts.contains(&permit), "{name}: permit granted");
+        let mut d = Dict::new();
+        let ids = reason_n3(&mut d, &src).expect(name);
+        assert!(
+            !ids.iter().any(|t| permit_iri(&d, t[1])),
+            "{name}: reason_n3"
+        );
+        let mut d = Dict::new();
+        let ids = sparq_reason::reason_n3_proof(&mut d, &src).expect(name).0;
+        assert!(!ids.iter().any(|t| permit_iri(&d, t[1])), "{name}: proof");
+        let pass = sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).expect(name);
+        // The closure statements (the echoed rules mention the permit in their conclusion).
+        let permit_line = "<http://ex/r> <http://ex/permittedBy> <http://ex/g> .";
+        assert!(
+            !pass.lines().any(|l| l.trim() == permit_line),
+            "{name}: {pass}"
+        );
+        let mut d = Dict::new();
+        let st = reason_n3_stratified(&mut d, &[&src]).expect(name);
+        assert!(
+            !st.facts.iter().any(|t| permit_iri(&d, t[1])),
+            "{name}: stratified"
+        );
+        // Explicit strata: the prohibition in the first document, the negation in the
+        // second.
+        let first = format!("{pre}{data}{rule}");
+        let second = format!("{pre}{negation}");
+        let mut d = Dict::new();
+        let st = reason_n3_stratified(&mut d, &[&first, &second]).expect(name);
+        assert!(
+            !st.facts.iter().any(|t| permit_iri(&d, t[1])),
+            "{name}: across documents"
+        );
+        let q = format!("{pre}{{ ?s log:notIncludes {{ :r :blocked :g }} }} => {{ :r :ok :g }} .");
+        assert!(
+            reason_n3_query_terms(&first, &q).expect(name).is_empty(),
+            "{name}: query"
+        );
+        let g = MaterializedN3Graph::new(&src, &[]).expect(name);
+        assert!(!g.closure().contains(&permit), "{name}: incremental");
+        // Compiled: either outside its subset (refused) or the same answer.
+        #[cfg(feature = "compiled-rules")]
+        if let Ok(rs) = sparq_reason::n3::compiled::compile(&src) {
+            let mut d = Dict::new();
+            let facts = sparq_reason::n3::compiled::intern_facts(&mut d, &src).expect(name);
+            let out = sparq_reason::n3::compiled::eval(&mut d, &facts, &rs);
+            assert!(
+                !out.iter().any(|t| permit_iri(&d, t[1])),
+                "{name}: compiled"
+            );
+        }
+    }
 }
