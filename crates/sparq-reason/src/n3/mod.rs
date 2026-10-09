@@ -805,6 +805,15 @@ fn fresh_carry_prefix(parsed: &parser::Parsed) -> String {
     fresh_blank_prefix(&seen, "__st")
 }
 
+/// The namespace [`MaterializedN3Graph`](crate::MaterializedN3Graph) gives its caller's
+/// blank labels (GH #6775): the smallest `__bs{k}_` prefix no blank label of the rules
+/// document starts with. The parser's own labels (`_b<n>` for `[]`, `_:x` as written,
+/// `__path<n>`, `__ex_<local>`) are all in `parsed`, so none starts with it, and the
+/// `__sk…`/`__st…` labels the engine mints are a different family.
+pub(crate) fn fresh_base_blank_prefix(parsed: &parser::Parsed) -> String {
+    fresh_blank_prefix(&document_blank_labels(parsed), "__bs")
+}
+
 /// Every blank label reachable in `t`, including nested list members, formula
 /// rows and quoted-triple components.
 fn term_blank_labels<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
