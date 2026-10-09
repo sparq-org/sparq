@@ -287,6 +287,13 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
 /// the rules at every depth, quoted `{ … }` formulae included; it does NOT rewrite the
 /// closure half, so a document that ASSERTS a formula-valued fact carrying a variable
 /// (`:a :p { ?x :q :b }.` — data, not a rule) still echoes that `?x` verbatim.
+///
+/// # Errors
+///
+/// A parse error, or — the output must re-reason exactly as the input did — a closure fact
+/// or rule that has no lossless N3 form ([`serialize::NotRepresentable`]): an `@forAll`
+/// universal outside every formula of a statement, or one sharing a formula with a plain
+/// mention of its own IRI at or after its first use there. No fallback spelling is written.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     let parsed = parser::parse(src)?;
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
@@ -302,8 +309,11 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
         .map(|r| (r, RuleKind::Forward))
         .chain(backward_rules.iter().map(|r| (r, RuleKind::Backward)))
         .collect();
+    // Exact or refused: a closure fact or rule with no lossless N3 form (see
+    // `serialize::Unit`) fails the call rather than writing a document that re-reasons
+    // differently (GH #6701 review round 7).
     let mut out = String::new();
-    serialize::write_document(&facts, &echoed, vars, &mut out);
+    serialize::write_document(&facts, &echoed, vars, &mut out).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -3484,14 +3494,14 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
                 other => {
                     return Err(format!(
                         "quoted-triple subject {} is not an IRI or blank node (RDF 1.2 triple terms admit no other subject kind)",
-                        serialize::display(other)
+                        serialize::display_lossy(other)
                     ))
                 }
             };
             let Term::Iri(p) = &tr[1] else {
                 return Err(format!(
                     "quoted-triple predicate {} is not an IRI (RDF 1.2 triple terms admit no other predicate kind)",
-                    serialize::display(&tr[1])
+                    serialize::display_lossy(&tr[1])
                 ));
             };
             let o = n3_term_to_oxrdf(&tr[2])?;
@@ -3502,7 +3512,7 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
             )))
         }
         Term::Var(_) | Term::Formula(_) | Term::List(_) => {
-            return Err(format!("term {} inside a quoted triple has no dictionary representation", serialize::display(t)))
+            return Err(format!("term {} inside a quoted triple has no dictionary representation", serialize::display_lossy(t)))
         }
     })
 }

@@ -239,10 +239,10 @@ fn a_for_all_universal_in_a_formula_fact_never_collides() {
     assert_eq!(doc, reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"));
 }
 
-/// GH #6701 review round 2: facts and echoed rules must name one universal the SAME way.
-/// Here the closure holds both a source `?x` and the universal `:x`, so the universal
-/// becomes `?x_2` in the fact; if the rule kept its own per-rule `?x`, the two formulae
-/// the rule compares would stop being equal and re-reasoning would derive `:bad :is true`.
+/// GH #6701 review round 2: facts and echoed rules must write one universal the SAME way —
+/// here both declare it by its IRI. Were the fact and the rule to spell it differently,
+/// the two formulae the rule compares would stop being equal and re-reasoning would derive
+/// `:bad :is true`.
 #[test]
 fn a_for_all_universal_gets_one_name_across_facts_and_rules() {
     let src = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.
@@ -294,7 +294,7 @@ fn a_freshened_backward_rule_universal_serializes_as_the_universal() {
     let query = "@prefix : <http://ex/>.\n{ :a :p ?f } => { :result :is ?f }.\n";
     let answers = reason_n3_query_terms(data, query).expect("query");
     assert_eq!(answers.len(), 1, "{answers:?}");
-    let text = sparq_reason::n3::serialize::serialize_facts(answers.iter());
+    let text = sparq_reason::n3::serialize::serialize_facts(answers.iter()).expect("exactly representable");
     assert!(!text.contains("__bw") && !text.contains("__ua"), "{text}");
     let back = parser::parse(&text).expect("the answer re-parses");
     // The same formula a forward derivation would carry: the universal itself.

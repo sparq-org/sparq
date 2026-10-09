@@ -1,29 +1,31 @@
-//! GH #6701 review rounds 1–6: the N3 writer's round-trip contract, checked over an
-//! enumeration of term shapes rather than one example per review round.
+//! GH #6701 review rounds 1–7: the N3 writer's contract, checked over an enumeration of
+//! term shapes and a corpus of documents rather than one example per review round.
 //!
-//! The contract (`n3::serialize`, the `Unit` docs), checked here per OCCURRENCE by an
-//! independent oracle: `parse(write(x))` is `x` exactly, except that
+//! The contract (`n3::serialize`, the `Unit` docs): every RE-REASONABLE writer is exact or
+//! refuses. `parse(write(x))` is `x` exactly — a backward-chaining copy
+//! `__bw<n>___ua.<iri>` reading back as the universal it copies is the one normalisation —
+//! or the write returns `NotRepresentable`, which it does exactly for the two shapes with no
+//! lossless N3 form (checked against an independent oracle): a universal outside every
+//! formula of a statement, or one at a formula level that mentions its IRI plainly at or
+//! after its first use there. There is no fallback spelling.
 //!
-//! * a backward-chaining copy `__bw<n>___ua.<iri>` reads back as the universal;
-//! * a universal no `@forAll` can scope — outside every formula of a statement, or at a
-//!   formula level that mentions its IRI plainly at or after its first use there — reads
-//!   back as a plain variable: one name per universal per statement, never the name of a
-//!   source variable of that statement (the one lossy case).
-//!
-//! Every other formula therefore re-parses to a term EQUAL to the original — the same
-//! term a `log:parsedAsN3` literal of that text yields. On top of that: a statement renders
-//! the same whatever surrounds it, identity keys (`statement_keys`, which provenance
-//! addresses facts by) are injective, and reasoning over a written document derives what
-//! the source derives.
+//! Semantics, not just syntax: for every document in a corpus (Codex's examples among it),
+//! `reason_n3_pass_all` either refuses or writes a document whose closure — read directly,
+//! through `log:conclusion` of each formula-valued fact, and through `log:semantics` +
+//! `log:conclusion` of the whole document — equals the source's. On top of that: a
+//! statement renders the same whatever surrounds it, and identity keys (`statement_keys`,
+//! which provenance addresses facts by) are injective over every `Term` field.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use sparq_reason::n3::serialize::{serialize_facts, statement_keys, write_statement};
+use sparq_reason::n3::Resolver;
 use sparq_reason::n3::{parser, Term};
-use sparq_reason::{reason_n3_pass_all, reason_n3_terms, RuleVars};
+use sparq_reason::n3::reason_n3_terms_with_resolver;
+use sparq_reason::{reason_n3_pass_all, RuleVars};
 
 const UA: &str = "__ua.";
-/// Oracle placeholder for "this occurrence falls back to a plain variable".
+/// Oracle placeholder for "no `@forAll` can scope this occurrence".
 const FB: &str = "#fallback:";
 
 fn iri(s: &str) -> Term {
@@ -97,7 +99,7 @@ fn level_universals(t: &Term, out: &mut BTreeSet<String>) {
     }
 }
 
-/// The oracle: `t` (already normalised) with every occurrence that MUST fall back
+/// The oracle: `t` (already normalised) with every occurrence no `@forAll` can scope
 /// replaced by a placeholder. `scoped`: the universals declarable at this level.
 fn expect(t: &Term, scoped: &BTreeSet<String>) -> Term {
     match t {
@@ -126,59 +128,6 @@ fn expect(t: &Term, scoped: &BTreeSet<String>) -> Term {
     }
 }
 
-fn source_vars(t: &Term, out: &mut BTreeSet<String>) {
-    match t {
-        Term::Var(v) if !v.starts_with(UA) && !v.starts_with(FB) => {
-            out.insert(v.clone());
-        }
-        Term::List(ms) => ms.iter().for_each(|m| source_vars(m, out)),
-        Term::Triple(tr) => tr.iter().for_each(|m| source_vars(m, out)),
-        Term::Formula(ts) => ts.iter().flatten().for_each(|m| source_vars(m, out)),
-        _ => {}
-    }
-}
-
-/// `got` (read back) matches `want` (oracle): identical, except each placeholder is one
-/// plain variable per universal, distinct per universal, and not a source variable.
-fn matches(want: &Term, got: &Term, names: &mut HashMap<String, String>, sources: &BTreeSet<String>) -> bool {
-    match (want, got) {
-        (Term::Var(w), Term::Var(g)) if w.starts_with(FB) => {
-            if sources.contains(g) || g.starts_with(UA) {
-                return false;
-            }
-            match names.get(w) {
-                Some(n) => n == g,
-                None => {
-                    if names.values().any(|n| n == g) {
-                        return false;
-                    }
-                    names.insert(w.clone(), g.clone());
-                    true
-                }
-            }
-        }
-        (Term::List(a), Term::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| matches(x, y, names, sources)),
-        (Term::Triple(a), Term::Triple(b)) => a.iter().zip(b.iter()).all(|(x, y)| matches(x, y, names, sources)),
-        (Term::Formula(a), Term::Formula(b)) => {
-            a.len() == b.len() && a.iter().zip(b).all(|(r, s)| r.iter().zip(s).all(|(x, y)| matches(x, y, names, sources)))
-        }
-        _ => want == got,
-    }
-}
-
-/// Every formula term in `t` (any depth).
-fn formulas<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
-    match t {
-        Term::Formula(ts) => {
-            out.push(t);
-            ts.iter().flatten().for_each(|m| formulas(m, out));
-        }
-        Term::List(ms) => ms.iter().for_each(|m| formulas(m, out)),
-        Term::Triple(tr) => tr.iter().for_each(|m| formulas(m, out)),
-        _ => {}
-    }
-}
-
 fn has_placeholder(t: &Term) -> bool {
     match t {
         Term::Var(x) => x.starts_with(FB),
@@ -189,41 +138,36 @@ fn has_placeholder(t: &Term) -> bool {
     }
 }
 
-/// Check one statement: written alone and inside a document between noise statements.
-fn check_statement(s: &[Term; 3]) -> String {
+/// Does the oracle say `s` has no lossless form?
+fn lossy(s: &[Term; 3]) -> bool {
+    s.iter().any(|t| has_placeholder(&expect(&normalise(t), &BTreeSet::new())))
+}
+
+/// Check one statement: exact or refused (exactly when the oracle says lossy), and the same
+/// outcome inside a document between unrelated statements. The written text, if any.
+fn check_statement(s: &[Term; 3]) -> Option<String> {
     let mut text = String::new();
-    write_statement(s, &mut text);
-    let back = parser::parse(&text).unwrap_or_else(|e| panic!("does not re-parse ({e}):\n{text}"));
-    assert!(back.rules.is_empty() && back.facts.len() == 1, "{text}");
-    let norm = s.clone().map(|t| normalise(&t));
-    // Top level: no formula scope, so no universal is declared there.
-    let want = norm.clone().map(|t| expect(&t, &BTreeSet::new()));
-    let mut sources = BTreeSet::new();
-    norm.iter().for_each(|t| source_vars(t, &mut sources));
-    let mut names = HashMap::new();
-    assert!(
-        want.iter().zip(&back.facts[0]).all(|(w, g)| matches(w, g, &mut names, &sources)),
-        "not the contract:\n  wrote {s:?}\n  want  {want:?}\n  read  {:?}\n  text  {text}",
-        back.facts[0]
-    );
-    // (a) formula identity: a formula with no fallback inside re-parses EQUAL.
-    let (mut wf, mut gf) = (Vec::new(), Vec::new());
-    want.iter().for_each(|t| formulas(t, &mut wf));
-    back.facts[0].iter().for_each(|t| formulas(t, &mut gf));
-    assert_eq!(wf.len(), gf.len(), "{text}");
-    for (w, g) in wf.iter().zip(&gf) {
-        if !has_placeholder(w) {
-            assert_eq!(w, g, "a formula changed identity:\n{text}");
-        }
-    }
-    // (c) render independence: same line inside a document of unrelated statements.
+    let wrote = write_statement(s, &mut text);
     let noise = [
-        [iri("http://ex/x"), iri("http://ex/k"), var("__ua.http://ex/x")],
+        [iri("http://ex/x"), iri("http://ex/k"), formula(vec![[var("__ua.http://ex/x"), iri("http://ex/k"), var("x")]])],
         [var("x"), iri("http://ex/k"), formula(vec![[iri("http://ex/x"), iri("http://ex/k"), var("x_2")]])],
     ];
     let doc = serialize_facts([&noise[0], s, &noise[1]].into_iter());
+    if lossy(s) {
+        assert!(wrote.is_err(), "a lossy shape was written instead of refused:\n  {s:?}\n  {text}");
+        assert_eq!(text, "", "a refused write wrote something");
+        assert!(doc.is_err(), "a document holding a lossy statement was written");
+        return None;
+    }
+    wrote.unwrap_or_else(|e| panic!("refused a representable statement ({e}):\n  {s:?}"));
+    let back = parser::parse(&text).unwrap_or_else(|e| panic!("does not re-parse ({e}):\n{text}"));
+    assert!(back.rules.is_empty() && back.facts.len() == 1, "{text}");
+    let norm = s.clone().map(|t| normalise(&t));
+    assert_eq!(back.facts[0], norm, "not exact:\n  wrote {s:?}\n  text  {text}");
+    // Render independence: the same line inside a document of unrelated statements.
+    let doc = doc.expect("noise and statement are representable");
     assert_eq!(doc.lines().nth(1).map(|l| format!("{l}\n")), Some(text.clone()), "rendering depends on neighbours:\n{doc}");
-    text
+    Some(text)
 }
 
 /// N3 string-literal body for `text`.
@@ -231,20 +175,24 @@ fn n3_string(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
-/// (a) against the reasoner: `log:parsedAsN3` of the written text yields the same formula
-/// the writer started from (for a statement with no fallback).
-fn check_parsed_as_n3(s: &[Term; 3], text: &str) {
+/// Against the reasoner: `log:parsedAsN3` of the written text, and `log:semantics` of it
+/// as a resolved document, both yield the very formula the writer started from.
+fn check_through_the_reasoner(s: &[Term; 3], text: &str) {
     let norm = s.clone().map(|t| normalise(&t));
-    if norm.iter().any(|t| has_placeholder(&expect(t, &BTreeSet::new()))) {
-        return;
-    }
     let src = format!(
-        "{{ \"{}\" <http://www.w3.org/2000/10/swap/log#parsedAsN3> ?g }} => {{ <http://ex/got> <http://ex/is> ?g }}.\n",
+        "{{ \"{}\" <http://www.w3.org/2000/10/swap/log#parsedAsN3> ?g }} => {{ <http://ex/got> <http://ex/is> ?g }}.\n\
+         {{ <http://ex/doc> <http://www.w3.org/2000/10/swap/log#semantics> ?g }} => {{ <http://ex/sem> <http://ex/is> ?g }}.\n",
         n3_string(text)
     );
-    let closure = reason_n3_terms(&src, None).unwrap_or_else(|e| panic!("{e}\n{src}")).facts;
-    let got = closure.iter().find(|f| f[0] == iri("http://ex/got")).unwrap_or_else(|| panic!("no parse:\n{src}"));
-    assert_eq!(got[2], formula(vec![norm]), "log:parsedAsN3 disagrees:\n{text}");
+    let doc = text.to_string();
+    let resolve = move |u: &str| (u == "http://ex/doc").then(|| doc.clone());
+    let closure = reason_n3_terms_with_resolver(&src, None, Some(&resolve as &Resolver))
+        .unwrap_or_else(|e| panic!("{e}\n{src}"))
+        .facts;
+    for who in ["http://ex/got", "http://ex/sem"] {
+        let got = closure.iter().find(|f| f[0] == iri(who)).unwrap_or_else(|| panic!("no {who}:\n{src}"));
+        assert_eq!(got[2], formula(vec![norm.clone()]), "{who} disagrees:\n{text}");
+    }
 }
 
 #[test]
@@ -299,12 +247,19 @@ fn every_shape_round_trips() {
         }
     }
     assert!(all.len() > 2200, "{} shapes", all.len());
+    let (mut written, mut refused) = (0, 0);
     for (n, s) in all.iter().enumerate() {
-        let text = check_statement(s);
-        if n % 23 == 0 {
-            check_parsed_as_n3(s, &text);
+        match check_statement(s) {
+            Some(text) => {
+                written += 1;
+                if n % 23 == 0 {
+                    check_through_the_reasoner(s, &text);
+                }
+            }
+            None => refused += 1,
         }
     }
+    assert!(written > 1000 && refused > 200, "{written} written, {refused} refused");
     // (b) identity keys: distinct statements ↔ distinct keys; the same statement, the same key.
     let mut by_key: BTreeMap<[String; 3], &[Term; 3]> = BTreeMap::new();
     for s in &all {
@@ -318,88 +273,215 @@ fn every_shape_round_trips() {
     assert_eq!(by_key.len(), distinct.len());
 }
 
-/// Reasoning over a written document derives what the source derives: the pass-all output
-/// is a fixpoint, and adding the same new facts to the source and to the written document
-/// yields the same pass-all output.
+const PRE: &str = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n";
+
+/// Rules that CONSUME formula-valued data: `log:conclusion` of every formula-valued fact
+/// (which runs any quoted `log:implies` statement inside it), and `log:semantics` +
+/// `log:conclusion` of the document itself, resolved as `<http://ex/doc>`.
+const CONSUMERS: &str = "{ ?a ?b ?f. ?f log:conclusion ?c } => { ?a :concl ?c }.\n\
+                         { <http://ex/doc> log:semantics ?f. ?f log:conclusion ?c } => { :doc :closure ?c }.\n";
+
+/// `t` with every formula's rows sorted, recursively: a closure is a set, so a formula
+/// built from it (`log:conclusion`) may list the same triples in another order.
+fn canon(t: &Term) -> Term {
+    match t {
+        Term::List(ms) => Term::List(ms.iter().map(canon).collect()),
+        Term::Triple(tr) => Term::Triple(Box::new(tr.clone().map(|m| canon(&m)))),
+        Term::Formula(ts) => {
+            let mut rows: Vec<[Term; 3]> = ts.iter().map(|r| r.clone().map(|m| canon(&m))).collect();
+            rows.sort_by_key(|r| format!("{r:?}"));
+            rows.dedup();
+            Term::Formula(rows)
+        }
+        _ => t.clone(),
+    }
+}
+
+/// The closure of `doc` plus [`CONSUMERS`], with `<http://ex/doc>` resolving to `doc`
+/// itself — canonicalised, as a set.
+fn closure(doc: &str) -> BTreeSet<String> {
+    let text = doc.to_string();
+    let resolve = move |u: &str| (u == "http://ex/doc").then(|| text.clone());
+    let src = format!("{PRE}{doc}{CONSUMERS}");
+    reason_n3_terms_with_resolver(&src, None, Some(&resolve as &Resolver))
+        .unwrap_or_else(|e| panic!("{e}\n{src}"))
+        .facts
+        .iter()
+        .map(|f| format!("{:?}", f.clone().map(|t| canon(&t))))
+        .collect()
+}
+
+/// Semantic preservation of `reason_n3_pass_all`: refused (`want_refusal`), or a document
+/// whose closure — directly, via `log:conclusion`, and via `log:semantics` — is the
+/// source's, and which is itself a fixpoint. The `:bad :is true` marker is never derived.
+fn check_document(body: &str, want_refusal: bool) {
+    let src = format!("{PRE}{body}");
+    let derives_bad = |c: &BTreeSet<String>| c.iter().any(|f| f.starts_with("[Iri(\"http://ex/bad\")"));
+    let original = closure(&src);
+    assert!(!derives_bad(&original), "the source itself derives :bad:\n{src}");
+    assert!(original.iter().any(|f| f.starts_with("[Iri(\"http://ex/doc\"), Iri(\"http://ex/closure\")")), "log:semantics did not run:\n{src}");
+    let consumed = format!("{src}{CONSUMERS}");
+    for doc_src in [&src, &consumed] {
+        match reason_n3_pass_all(doc_src, RuleVars::N3) {
+            Err(e) => assert!(want_refusal, "refused a representable document ({e}):\n{doc_src}"),
+            Ok(doc) => {
+                assert!(!want_refusal, "a lossy document was written instead of refused:\n{doc}");
+                assert!(!doc.contains("__ua") && !doc.contains("__bw"), "{doc}");
+                if doc_src == &src {
+                    assert_eq!(closure(&doc), original, "re-reasoning the output changed its meaning:\n{src}\n---\n{doc}");
+                }
+                assert_eq!(reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"), doc, "not a fixpoint:\n{doc}");
+            }
+        }
+    }
+}
+
+/// A corpus of documents — Codex's examples among them — through [`check_document`].
 #[test]
-fn derivations_survive_the_round_trip() {
-    let cases: [(&str, &str); 5] = [
+fn every_re_reasonable_write_preserves_semantics_or_refuses() {
+    let representable = [
         // Codex round 5 (1): body and head share a universal; the body also mentions the
         // IRI plainly, before its declaration.
-        (
-            "@prefix : <http://ex/>.\n{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
-            "<http://ex/d> <http://ex/p> <http://ex/b> .\n",
-        ),
+        "{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
         // Codex round 2: a formula fact compared with the rule's own formula.
-        (
-            "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n@forAll :x.\n:a :p { :x :q :z }.\n:b :p { ?x :q :z }.\n{ :a :p ?f. ?f log:notEqualTo { :x :q :z } } => { :bad :is true }.\n",
-            "<http://ex/e> <http://ex/p> <http://ex/z> .\n",
-        ),
+        "@forAll :x.\n:a :p { :x :q :z }.\n:b :p { ?x :q :z }.\n{ :a :p ?f. ?f log:notEqualTo { :x :q :z } } => { :bad :is true }.\n",
         // Codex round 4 (1): against a formula parsed from a literal.
-        (
-            "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n@forAll :x.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
-            "<http://ex/e> <http://ex/p> <http://ex/z> .\n",
-        ),
-        // Codex round 6 (1): the same, with the universal's IRI ALSO used plainly and
-        // bare at the top level — the formula must still declare for itself.
-        (
-            "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n:x :marker :z.\n@forAll :x.\n:x :other :z.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
-            "<http://ex/e> <http://ex/p> <http://ex/z> .\n",
-        ),
+        "@forAll :x.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
+        // Codex round 6 (1): the IRI also used plainly at the top level, before the
+        // declaration — the formula declares for itself.
+        ":x :marker :z.\n@forAll :x.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
         // A universal in the body and in a nested head formula, beside a source `?x`.
-        (
-            "@prefix : <http://ex/>. @forAll :x.\n{ :x :p ?x } => { :x :q { :x :r ?x } }.\n:a :p :b.\n",
-            "<http://ex/c> <http://ex/p> <http://ex/d> .\n",
-        ),
+        "@forAll :x.\n{ :x :p ?x } => { :x :q { :x :r ?x } }.\n:a :p :b.\n",
+        // A mid-formula declaration after a plain mention.
+        ":a :p { :m :r :x. @forAll :x. :x :p :b }.\n",
+        // A quoted rule in data: its body and head share the universal, and
+        // `log:conclusion` runs it — one shared variable after the round trip too.
+        "@forAll :x.\n:a :p { :m :q :o. { :x :q ?o } => { :x :r ?o } }.\n",
+        // The same quoted rule, DERIVED (its universal reaches the data through a rule).
+        "@forAll :x.\n{ :go :go :go } => { :out :has { :m :q :o. { :x :q :o } => { :x :r :o } } }.\n:go :go :go.\n",
+        // A derived formula holding the universal in a nested formula and the plain IRI
+        // after it, outside that formula's scope: each level is scoped on its own.
+        ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { { :x :link :k } :k ?s } }.\n",
     ];
-    let derives_bad = |doc: &str| doc.lines().any(|l| l.starts_with("<http://ex/bad> "));
-    for (src, extra) in cases {
-        let doc = reason_n3_pass_all(src, RuleVars::N3).unwrap_or_else(|e| panic!("{e}\n{src}"));
-        assert!(!doc.contains("__ua") && !doc.contains("__bw"), "{doc}");
-        assert!(!derives_bad(&doc), "{doc}");
-        assert_eq!(reason_n3_pass_all(&doc, RuleVars::N3).expect("round two"), doc, "not a fixpoint:\n{doc}");
-        let grown_src = reason_n3_pass_all(&format!("{src}{extra}"), RuleVars::N3).expect("source + extra");
-        let grown_doc = reason_n3_pass_all(&format!("{doc}{extra}"), RuleVars::N3).expect("written + extra");
-        assert_eq!(grown_src, grown_doc, "the written rules derive differently:\n{src}");
+    for body in representable {
+        check_document(body, false);
     }
-    // Codex round 5 (1): the echoed rule still fires on new matching facts.
-    let doc = reason_n3_pass_all(cases[0].0, RuleVars::N3).unwrap();
-    let grown = reason_n3_pass_all(&format!("{doc}{}", cases[0].1), RuleVars::N3).unwrap();
-    assert!(grown.contains("<http://ex/d> <http://ex/q> <http://ex/b> ."), "{grown}");
+    // `log:conclusion` really ran the quoted rule, binding its universal on both sides.
+    let c = closure(&format!("{PRE}{}", representable[6]));
+    assert!(c.iter().any(|f| f.starts_with("[Iri(\"http://ex/a\"), Iri(\"http://ex/concl\")") && f.contains("Iri(\"http://ex/m\"), Iri(\"http://ex/r\"), Iri(\"http://ex/o\")")), "{c:#?}");
+    let lossy = [
+        // Codex round 7: a derived formula carries the plain IRI and the universal in ONE
+        // triple. Any written spelling re-parses as a second, different formula, and
+        // re-reasoning then derives `:bad`.
+        ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { ?s :link :x } }.\n{ :out :has ?f. :out :has ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
+        // A bare top-level universal fact: no statement-local scope exists.
+        "@forAll :x.\n:x :p :o.\n",
+        // A quoted rule in derived data whose BODY mentions the plain IRI after the
+        // universal: no placement scopes one and not the other, and declaring only the head
+        // would split the variable `log:conclusion` binds across both sides.
+        ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :rule { { :x :q ?o. ?s :q ?o } => { :x :r :k } } }.\n",
+        // The same with the plain mention in the quoted rule's HEAD, in the universal's triple.
+        ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :rule { { :x :q ?o } => { :x :r ?s } } }.\n",
+    ];
+    for body in lossy {
+        check_document(body, true);
+    }
 }
 
-/// The lossy case, pinned: a derivation that puts the plain IRI and the universal in ONE
-/// triple. The derived fact falls back to a plain variable (distinct from the rule's source
-/// `?x`), while the rule — which can declare — keeps the universal; so re-reasoning derives
-/// the universal form again beside the written fallback form. Nothing merges.
+/// Codex round 7, verbatim: the first pass does not derive `:bad`; a written fallback
+/// would have made the second pass derive it. The writer refuses instead, and says why.
 #[test]
-fn the_documented_lossy_case() {
-    let src = "@prefix : <http://ex/>.\n:x :p :o.\n@forAll :x.\n{ ?s :p ?o. ?x :w ?y } => { :out :has { ?s :link :x } }.\n:k :w :v.\n";
-    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
-    assert!(doc.contains("<http://ex/out> <http://ex/has> { <http://ex/x> <http://ex/link> ?x . } ."), "{doc}");
-    assert!(doc.contains("{ @forAll <http://ex/x> . ?s <http://ex/link> <http://ex/x> . }"), "{doc}");
-    let rules = |d: &str| {
-        parser::parse(d).unwrap().rules.into_iter().map(|r| (r.premise, r.conclusion)).collect::<Vec<_>>()
-    };
-    assert_eq!(rules(&doc), rules(src), "the rule itself round-trips exactly");
+fn a_lossy_closure_is_refused_not_written() {
+    let src = "@prefix : <http://ex/>.\n:x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { ?s :link :x } }.\n\
+               { :out :has ?f. :out :has ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n";
+    let src = format!("@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{src}");
+    let e = reason_n3_pass_all(&src, RuleVars::N3).expect_err("no lossless form exists");
+    assert!(e.contains("<http://ex/x>") && e.contains("plain mention"), "{e}");
+    let e = reason_n3_pass_all("@prefix : <http://ex/>. @forAll :x. :x :p :o.\n", RuleVars::N3).expect_err("bare");
+    assert!(e.contains("outside every formula"), "{e}");
+    // The display writer still shows such a statement, as the one function allowed to.
+    let x = var("__ua.http://ex/x");
+    let f = [iri("http://ex/out"), iri("http://ex/has"), formula(vec![[iri("http://ex/x"), iri("http://ex/link"), x]])];
+    let mut out = String::new();
+    assert!(write_statement(&f, &mut out).is_err() && out.is_empty());
+    assert_eq!(
+        sparq_reason::n3::serialize::statement_display_lossy(&f)[2],
+        "{ <http://ex/x> <http://ex/link> ?x . }"
+    );
 }
 
-/// Codex round 5 (2): a source variable spelled like a fallback name stays distinct.
+/// Codex round 5 (2): a source variable spelled like a display name stays distinct — and
+/// where no declaration fits, the exact writer refuses rather than renaming.
 #[test]
-fn a_source_variable_spelled_like_the_fallback_stays_distinct() {
+fn a_source_variable_spelled_like_the_display_name_stays_distinct() {
     let src = "@prefix : <http://ex/>.\n:a :p { :x :q :z. @forAll :x. :x :r ?x. ?x_2 :s :x }.\n";
     let back = |doc: &str| parser::parse(doc).expect("re-parses").facts;
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert_eq!(back(&doc), back(src), "{doc}");
-    // And where no declaration fits (one triple mixes the plain IRI and the universal):
     let x = var("__ua.http://ex/x");
     let f = [iri("http://ex/a"), iri("http://ex/p"), formula(vec![
         [x.clone(), iri("http://ex/x"), var("x")],
         [var("x_2"), iri("http://ex/q"), x],
     ])];
-    let text = check_statement(&f);
-    let vars: Vec<&str> = text.split_whitespace().filter(|w| w.starts_with('?')).collect();
-    assert_eq!(vars, ["?x_3", "?x", "?x_2", "?x_3"], "{text}");
+    assert_eq!(check_statement(&f), None);
+    let shown = sparq_reason::n3::serialize::statement_display_lossy(&f)[2].clone();
+    let vars: Vec<&str> = shown.split_whitespace().filter(|w| w.starts_with('?')).collect();
+    assert_eq!(vars, ["?x_3", "?x", "?x_2", "?x_3"], "{shown}");
+}
+
+/// Codex round 7 (MEDIUM): identity keys are structural over EVERY field of a term — a
+/// language-tagged literal's datatype included, noncanonical combinations included — so
+/// two terms share a key exactly when they are equal.
+#[test]
+fn identity_keys_are_injective_over_every_term_field() {
+    const LANG: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+    const XS: &str = "http://www.w3.org/2001/XMLSchema#string";
+    let strs = ["", "hi", "a\"b", "a\\", "\"", "x"];
+    let dts = [XS, LANG, "http://ex/a", "http://ex/b", ""];
+    let langs = [None, Some("en"), Some(""), Some("EN")];
+    let mut atoms: Vec<Term> = Vec::new();
+    for s in strs {
+        atoms.push(iri(s));
+        atoms.push(Term::Blank(s.into()));
+        atoms.push(var(s));
+        for dt in dts {
+            for l in langs {
+                atoms.push(Term::Lit(s.into(), dt.into(), l.map(str::to_string)));
+            }
+        }
+    }
+    atoms.push(var("__ua.http://ex/x"));
+    atoms.push(var("__bw0___ua.http://ex/x"));
+    let few = [&atoms[0], &atoms[1], &atoms[2], &atoms[7], &atoms[8]];
+    let mut all = atoms.clone();
+    all.push(Term::List(vec![]));
+    all.push(formula(vec![]));
+    all.push(Term::List(vec![Term::List(vec![])]));
+    all.push(Term::List(vec![formula(vec![])]));
+    for a in few {
+        all.push(Term::List(vec![a.clone()]));
+        all.push(Term::Triple(Box::new([a.clone(), a.clone(), a.clone()])));
+        for b in few {
+            all.push(Term::List(vec![a.clone(), b.clone()]));
+            all.push(formula(vec![[a.clone(), b.clone(), a.clone()]]));
+            all.push(formula(vec![[a.clone(), a.clone(), a.clone()], [b.clone(), b.clone(), b.clone()]]));
+            all.push(Term::Triple(Box::new([a.clone(), b.clone(), Term::List(vec![a.clone()])])));
+        }
+    }
+    // The case Codex named: same lexical form and tag, different datatypes.
+    let ha = Term::Lit("hi".into(), "http://ex/a".into(), Some("en".into()));
+    let hb = Term::Lit("hi".into(), "http://ex/b".into(), Some("en".into()));
+    assert!(all.contains(&ha) && all.contains(&hb));
+    let k = iri("http://ex/k");
+    let mut by_key: BTreeMap<[String; 3], Term> = BTreeMap::new();
+    for t in &all {
+        let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
+        if let Some(prev) = by_key.insert(key, t.clone()) {
+            assert_eq!(&prev, t, "two different terms share an identity key");
+        }
+    }
+    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{t:?}")).collect();
+    assert_eq!(by_key.len(), distinct.len());
 }
 
 /// Codex round 5 (3): an IRI holding a decoded backslash goes back out as `\`.

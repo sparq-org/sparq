@@ -2075,7 +2075,7 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
             if occurrences > 1 {
                 return Err(format!(
                     "rule {rix}: notIncludes subject {} is used elsewhere",
-                    crate::n3::serialize::display(&N3Term::Var(sv.clone()))
+                    crate::n3::serialize::display_lossy(&N3Term::Var(sv.clone()))
                 ));
             }
         }

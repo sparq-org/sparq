@@ -1116,7 +1116,7 @@ impl MaterializedN3Graph {
         let mut b = ProofBuilder::new(opts);
         if self.base.contains(fact) {
             let root = b.push_keyed(
-                crate::n3::serialize::statement_strings(fact),
+                crate::n3::serialize::statement_display_lossy(fact),
                 crate::n3::serialize::statement_keys(fact),
                 "asserted",
                 vec![],
@@ -1126,8 +1126,8 @@ impl MaterializedN3Graph {
         // Deterministic re-derivation: hand the base over SORTED so rule-firing order (and
         // therefore the chosen witness) is stable across calls — as terms, not re-parsed
         // text (see `rematerialize`).
-        let mut keyed: Vec<(String, &[N3Term; 3])> =
-            self.base.iter().map(|f| (crate::n3::serialize::serialize_facts(std::iter::once(f)), f)).collect();
+        let mut keyed: Vec<([String; 3], &[N3Term; 3])> =
+            self.base.iter().map(|f| (crate::n3::serialize::statement_keys(f), f)).collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let (_facts, steps) =
             crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone())).ok()?;
@@ -1173,7 +1173,7 @@ impl N3Prover<'_> {
         // Display strings for reading, and a lossless key per fact for identity: two
         // different facts can render alike, and `sparq-prov` addresses facts by `key`
         // (GH #6701 review round 6).
-        let rendered = crate::n3::serialize::statement_strings(f);
+        let rendered = crate::n3::serialize::statement_display_lossy(f);
         let key = crate::n3::serialize::statement_keys(f);
         if self.base.contains(f) {
             let ix = self.b.push_keyed(rendered, key, "asserted", vec![])?;

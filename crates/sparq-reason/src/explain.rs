@@ -37,10 +37,11 @@ pub struct ProofNode {
     /// these; use [`key`](Self::key).
     pub conclusion: [String; 3],
     /// The fact's lossless identity, one key per term: equal exactly when the facts are
-    /// equal, across every proof. For an RDFS/OWL proof and for a ground N3 fact it is the
-    /// same as [`conclusion`](Self::conclusion); an N3 term carrying a variable gets a
-    /// tagged encoding that keeps every variable's full internal name. Content-address
-    /// facts (e.g. provenance entities) by this.
+    /// equal, across every proof. For an RDFS/OWL proof it is the same as
+    /// [`conclusion`](Self::conclusion); an N3 proof's key is a structural, tagged encoding
+    /// of every field of the term (`n3::serialize::statement_keys`), never its rendering —
+    /// a rendering drops a language-tagged literal's datatype and spells different variables
+    /// alike. Content-address facts (e.g. provenance entities) by this.
     pub key: [String; 3],
     /// Rule identifier (see the module docs for the vocabulary).
     pub rule: String,
