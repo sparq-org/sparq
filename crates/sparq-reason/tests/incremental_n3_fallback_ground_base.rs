@@ -253,3 +253,24 @@ fn fallback_base_blank_insert_delete_round_trip() {
 fn counting_base_blank_insert_delete_round_trip() {
     assert_base_blank_mutations(false);
 }
+
+#[cfg(feature = "explain")]
+#[test]
+fn why_shows_the_callers_blank_labels() {
+    for fallback in [false, true] {
+        let base = base_blank_facts();
+        let g = MaterializedN3Graph::new(&blank_rules(fallback), &base).expect("parse");
+        let seen = [blank("_b1"), iri("seen"), iri("o1")];
+        let tree = g.why(&seen).expect("derived fact explains");
+        let root = &tree.nodes()[tree.root() as usize];
+        assert_eq!(root.conclusion[0], "_:_b1", "fallback={fallback}");
+        assert_eq!(root.premises.len(), 1);
+        let leaf = &tree.nodes()[root.premises[0] as usize];
+        assert_eq!(leaf.rule, "asserted");
+        assert_eq!(leaf.conclusion[0], "_:_b1", "fallback={fallback}");
+        let asserted = g.why(&base[0]).expect("asserted fact explains");
+        assert_eq!(asserted.nodes()[0].conclusion[0], "_:_b1");
+        // The document's own `[]` fact is not the caller's `_b1`.
+        assert!(g.why(&[blank("_b1"), iri("both"), iri("o1")]).is_none());
+    }
+}
