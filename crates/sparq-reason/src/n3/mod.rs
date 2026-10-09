@@ -4224,11 +4224,9 @@ fn epoch_parts<'s>(s: &'s str, pending: &bounded::Pending) -> Option<(i64, i64, 
         None => (false, date),
     };
     let mut dp = date.split('-');
-    // Bound the year so the day/second arithmetic below cannot overflow i64.
-    let y = settle(
-        pending,
-        bounded::epoch_year(field(dp.next()?, 0..=i64::MAX)?),
-    )?;
+    // The year is checked on its digits in bounded.rs (a year past the range, even past
+    // i64, is a cut; malformed text is not).
+    let y = settle(pending, bounded::epoch_year(dp.next()?))?;
     let y = if neg { -y } else { y };
     let m = dp.next().map(|x| field(x, 1..=12)).unwrap_or(Some(1))?;
     let d = dp.next().map(|x| field(x, 1..=31)).unwrap_or(Some(1))?;
@@ -4600,6 +4598,11 @@ mod tests {
                 "a fraction where only a whole number is exact",
                 String::new(),
                 "?d time:inSeconds 1.5".into(),
+            ),
+            (
+                "epoch year past i64",
+                String::new(),
+                "\"9223372036854775808-01-01T00:00:00Z\" time:inSeconds ?s".into(),
             ),
         ];
         let resolve = move |iri: &str| (iri == "http://ex/deep").then(|| deep.clone());

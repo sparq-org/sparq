@@ -143,11 +143,9 @@ fn errors_and_limits_go_through_the_bounded_module() {
         // is made only by an entry point; every nested evaluation reuses its parent's.
         let mut current_fn = String::new();
         for (n, code, comments) in code_lines(&src) {
-            if code.starts_with("pub fn ")
-                || code.starts_with("fn ")
-                || code.starts_with("pub(crate) fn ")
-            {
-                current_fn = code.trim().to_string();
+            let t = code.trim_start();
+            if t.starts_with("pub fn ") || t.starts_with("fn ") || t.starts_with("pub(crate) fn ") {
+                current_fn = t.to_string();
             }
             let entry = current_fn.starts_with("pub fn ")
                 || current_fn.starts_with("pub(crate) fn reason_n3");

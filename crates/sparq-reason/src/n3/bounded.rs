@@ -290,12 +290,22 @@ pub(crate) fn digits_i64(x: &str) -> Bounded<Option<i64>> {
 /// counts cannot overflow `i64`). A year past it is a cut.
 const EPOCH_YEAR_CAP: i64 = 999_999_999;
 
-/// `year` if the epoch arithmetic can represent it.
-pub(crate) fn epoch_year(year: i64) -> Bounded<Option<i64>> {
-    if year <= EPOCH_YEAR_CAP {
-        Bounded::complete(Some(year))
-    } else {
-        Bounded::cut(None, "a date/time year passed the epoch arithmetic's range")
+/// The (unsigned) year field of a date lexical form, for the epoch arithmetic of the
+/// `time:` builtins. Text that is not all ASCII digits is malformed: no value, and no
+/// cut (the builtin is false by definition). A digit-only year past the range the
+/// arithmetic accepts, however many digits, gives no value and is a cut: checked on the
+/// digits, before any integer conversion, so even a year past `i64` is a cut.
+pub(crate) fn epoch_year(field: &str) -> Bounded<Option<i64>> {
+    if field.is_empty() || !field.bytes().all(|b| b.is_ascii_digit()) {
+        return Bounded::complete(None);
+    }
+    let digits = field.trim_start_matches('0');
+    let cap = EPOCH_YEAR_CAP.to_string();
+    let within = digits.len() < cap.len() || (digits.len() == cap.len() && digits <= cap.as_str());
+    match digits.parse::<i64>() {
+        Ok(year) if within => Bounded::complete(Some(year)),
+        _ if digits.is_empty() => Bounded::complete(Some(0)),
+        _ => Bounded::cut(None, "a date/time year passed the epoch arithmetic's range"),
     }
 }
 
@@ -412,8 +422,43 @@ mod tests {
         assert!(enter_nesting(PARSE_DEPTH).is_ok());
         let e = enter_nesting(PARSE_DEPTH + 1).expect_err("past the limit");
         assert_eq!(e.message(), "nesting deeper than 4096");
-        assert_eq!(cut_of(epoch_year(2024)), (Some(2024), false));
-        assert_eq!(cut_of(epoch_year(EPOCH_YEAR_CAP + 1)), (None, true));
+        assert!(cut_of(parse_n3(":a :b :c .", "")).0.is_some());
+        let (doc, cut) = cut_of(parse_n3(":a :b", ""));
+        assert!(
+            doc.is_none() && !cut,
+            "a syntax error is no document, not a cut"
+        );
+        let deep = format!(
+            ":a :b {}1{} .",
+            "(".repeat(PARSE_DEPTH + 1),
+            ")".repeat(PARSE_DEPTH + 1)
+        );
+        let deep = std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(move || {
+                let sink = Cell::new(false);
+                let doc = settle(&sink, parse_n3(&deep, ""));
+                (doc.is_none(), sink.get())
+            })
+            .expect("spawn")
+            .join()
+            .expect("join");
+        assert_eq!(deep, (true, true), "the nesting limit is a cut");
+
+        assert_eq!(cut_of(epoch_year("2024")), (Some(2024), false));
+        assert_eq!(cut_of(epoch_year("0000")), (Some(0), false));
+        assert_eq!(
+            cut_of(epoch_year("0999999999")),
+            (Some(EPOCH_YEAR_CAP), false)
+        );
+        assert_eq!(cut_of(epoch_year("1000000000")), (None, true));
+        assert_eq!(
+            cut_of(epoch_year("9223372036854775808")),
+            (None, true),
+            "past i64"
+        );
+        assert_eq!(cut_of(epoch_year("20x4")), (None, false), "malformed");
+        assert_eq!(cut_of(epoch_year("")), (None, false), "malformed");
     }
 
     #[test]
