@@ -1,6 +1,6 @@
 # sparq-jsonld-registry
 
-<!-- [GPT-5.6] Keep this crate README aligned with the repository template. -->
+<!-- Keep this crate README aligned with the repository template. -->
 
 `sparq-jsonld-registry` provides a small, bundled registry of well-known JSON-LD 1.1
 contexts. It implements `sparq_jsonld::DocumentLoader` without filesystem or network

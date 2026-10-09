@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4lvq: README brought to template (deferred from sq-inzv). -->
+<!-- sq-4lvq: README brought to template (deferred from sq-inzv). -->
 # sparq-hdt
 
 Opt-in [HDT](https://www.rdfhdt.org/) (Header Dictionary Triples) reader (and,
@@ -11,7 +11,7 @@ or dependencies. Native-only by design.
 
 ```rust,no_run
 # fn main() -> Result<(), sparq_hdt::Error> {
-let graph = sparq_hdt::load("dataset.hdt")?;   // .hdt.gz sniffed + decompressed too
+let graph = sparq_hdt::load("dataset.hdt")?;   // .hdt.gz/.zst/.bz2 sniffed + decompressed too
 let meta  = sparq_hdt::header("dataset.hdt")?; // the HDT header (VoID stats, provenance) as a Graph
 // query them like any other sparq graph
 
@@ -55,8 +55,8 @@ export direction over `save` (sq-8ju74).
   both subject and object) — the term set is never materialized twice.
 - HDT term shapes covered: IRIs, blank nodes, plain / language-tagged / datatyped
   literals (lang tags normalized to lowercase, matching sparq's other loaders).
-- **GZipped containers** (`.hdt.gz`): detected by magic bytes — not file names —
-  in every entry point and decompressed on the fly (streaming flate2). The default
+- **Compressed containers** (`.hdt.gz` / `.hdt.zst` / `.hdt.bz2`): detected by magic bytes —
+  not file names — in every entry point and stream-decompressed on the fly. The default
   flate2 backend is pure-Rust `miniz_oxide`; the opt-in, native-only `zlib-ng` cargo
   feature (`cargo build -p sparq-hdt --features zlib-ng`) swaps in the faster zlib-ng
   C backend for gzip inflate at zero code change. Off by default and never reaches the
@@ -64,7 +64,7 @@ export direction over `save` (sq-8ju74).
 - **Header access**: `header()` / `header_reader()` decode just the dataset
   metadata triples (the "H" in HDT) into a queryable `Graph` without touching
   the dictionary/triples sections.
-- **Filtered loading and stats** (opt-in `load-filter` feature, [GPT-5.6]
+- **Filtered loading and stats** (opt-in `load-filter` feature,
   sq-lsp7k.24 / sq-obhf1): `load_reader_filtered(reader, &pattern)` loads matches;
   `stats_reader_filtered(reader, &pattern)` counts them without constructing a
   result graph. Both filter during the one-shot SPO walk; an all-wildcard pattern
@@ -109,7 +109,7 @@ cargo run --release -p sparq-hdt --example bench_load -- --json /tmp/hdt.json
 
 ## 📚 Learn more
 
-- Skill: `skills/hdt-format/SKILL.md`
+- Skill: `.claude/skills/hdt-format/SKILL.md`
 - Perf dashboard: <https://sparq.jeswr.org/dev/bench>
 - Not yet supported / open work: `bd list -l area:sparq-hdt`. (The decode-only ingest fast
   path itself already ships as the default `load` path; what remains open is upstream
@@ -117,4 +117,4 @@ cargo run --release -p sparq-hdt --example bench_load -- --json /tmp/hdt.json
 
 ## License
 
-MIT. [OPUS-4.8] sq-4lvq
+MIT. sq-4lvq

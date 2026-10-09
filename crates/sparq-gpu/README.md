@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: internal-stub README for a publish=false crate; full surface lives in skills/gpu-kernels/SKILL.md + research/gpu-verdict.md. -->
+<!-- sq-inzv: internal-stub README for a publish=false crate; full surface lives in skills/gpu-kernels/SKILL.md + research/gpu-verdict.md. -->
 # sparq-gpu
 
 Opt-in, **experimental** [wgpu](https://wgpu.rs) compute kernels for sparq's
