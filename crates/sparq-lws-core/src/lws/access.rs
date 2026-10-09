@@ -992,6 +992,16 @@ async fn create<S: Store + 'static>(
         author: agent.subject.clone(),
         etag: new_etag(),
     };
+    // "When an inbox property is present on an access request or access grant, the server SHOULD
+    // deliver notifications to that endpoint" (section 11.6).
+    let own_inbox = body
+        .get("inbox")
+        .and_then(Value::as_str)
+        .filter(|i| is_uri(i))
+        .map(str::to_string);
+    let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
+    // The record is put in force, counted and announced in one step, once it is stored: a client
+    // that goes away after the store committed cannot keep it from being announced.
     let register = {
         let state = state.clone();
         move || {
@@ -1004,6 +1014,7 @@ async fn create<S: Store + 'static>(
             state.access.bump(grants);
             // Counted as registered from here on.
             drop(slot);
+            announce(&state, grants, &document, own_inbox, activity);
         }
     };
     let created = super::create_record(
@@ -1018,26 +1029,31 @@ async fn create<S: Store + 'static>(
     if let Err(e) = created.await {
         return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
     }
-    let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
-    // "When an inbox property is present on an access request or access grant, the server SHOULD
-    // deliver notifications to that endpoint" (section 11.6).
-    let mut inboxes: BTreeSet<String> = body
-        .get("inbox")
-        .and_then(Value::as_str)
-        .filter(|i| is_uri(i))
-        .map(str::to_string)
-        .into_iter()
-        .collect();
+    let mut resp = problem(StatusCode::CREATED, None);
+    set(resp.headers_mut(), header::LOCATION, &iri);
+    service_links(&state.cfg, resp.headers_mut(), &iri, &container);
+    resp
+}
+
+/// Announce a new grant or request (`document`, by `activity`): at its own inbox, and
+/// - for a grant, "the requesting agent SHOULD be notified at the inbox specified in the
+///   associated access request." The draft gives a grant no link to its request, so the
+///   associated requests are those by or for an agent the grant names.
+/// - for a request, "the storage controller SHOULD be notified": at the inbox the owner's
+///   identity document names, looked up in the background. The lookup holds a place in the
+///   delivery queue (so lookups are as bounded as deliveries), and lookups share one fetch and
+///   its answer (see [`owner_inbox_cached`]).
+fn announce<S: Store + 'static>(
+    state: &LwsState<S>,
+    grants: bool,
+    document: &Value,
+    own_inbox: Option<String>,
+    activity: Value,
+) {
+    let mut inboxes: BTreeSet<String> = own_inbox.into_iter().collect();
     if grants {
-        // "When a new access grant is created, the requesting agent SHOULD be notified at the inbox
-        // specified in the associated access request." The draft gives a grant no link to its
-        // request, so the associated requests are those by or for an agent the grant names.
-        inboxes.extend(requester_inboxes(state, &document));
+        inboxes.extend(requester_inboxes(state, document));
     } else {
-        // "When a new access request is submitted, the storage controller SHOULD be notified": at
-        // the inbox the owner's identity document names, looked up in the background.
-        // The lookup holds a place in the delivery queue (so lookups are as bounded as
-        // deliveries), and lookups share one fetch and its answer (see [`owner_inbox_cached`]).
         let find = {
             let state = state.clone();
             async move { owner_inbox_cached(&state).await }
@@ -1047,10 +1063,6 @@ async fn create<S: Store + 'static>(
     for inbox in inboxes {
         state.notify.deliver(state, &inbox, activity.clone(), None);
     }
-    let mut resp = problem(StatusCode::CREATED, None);
-    set(resp.headers_mut(), header::LOCATION, &iri);
-    service_links(&state.cfg, resp.headers_mut(), &iri, &container);
-    resp
 }
 
 /// The inboxes of the access requests associated with `grant`: those made by, or asking for, an
@@ -1820,6 +1832,59 @@ mod tests {
         let public: Value =
             serde_json::from_str(&access_doc("AccessGrant", FOAF_AGENT, None)).unwrap();
         assert!(requester_inboxes(&state, &public).is_empty());
+    }
+
+    /// Review finding: a grant or request was announced by the handler after the store
+    /// committed it, so a client that went away (or a request timeout) in between left a stored,
+    /// in-force record nobody was told about. It is announced in the step that registers it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stored_records_are_announced_when_the_client_is_gone() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = {
+            let delivered = delivered.clone();
+            axum::Router::new().route(
+                "/inbox",
+                axum::routing::post(move || {
+                    let delivered = delivered.clone();
+                    async move {
+                        delivered.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let (state, store) = test_store::state(100).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let inbox = format!("http://{addr}/inbox");
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &access_doc("AccessGrant", "https://a/", Some(&inbox)),
+        );
+        let client = {
+            let state = state.clone();
+            tokio::spawn(async move { handle(&state, &req, &Agent::anonymous()).await.status() })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        client.abort();
+        assert!(client.await.is_err(), "the client went away mid-create");
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if delivered.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(state.access.grant_policies().len(), 1);
+        assert_eq!(delivered.load(Ordering::SeqCst), 1);
     }
 
     /// Review finding: every access request spawned its own fetch of the owner's identity

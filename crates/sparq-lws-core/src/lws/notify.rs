@@ -289,12 +289,14 @@ impl Notifier {
             .await
             .map_err(|e| format!("store: {e}"))?
         {
-            let Ok(r) = store.read(child.as_str()).await else {
-                continue;
-            };
-            let Ok(mut sub) = serde_json::from_slice::<Subscription>(&r.body) else {
-                continue;
-            };
+            // Every stored subscription counts against the quota, so one that cannot be read
+            // stops the load rather than being left stored and uncounted.
+            let r = store
+                .read(child.as_str())
+                .await
+                .map_err(|e| format!("subscription {}: {e}", child.as_str()))?;
+            let mut sub = serde_json::from_slice::<Subscription>(&r.body)
+                .map_err(|e| format!("subscription {}: {e}", child.as_str()))?;
             sub.id = child
                 .as_str()
                 .rsplit('/')
@@ -304,8 +306,15 @@ impl Notifier {
             if sub.id.is_empty() {
                 continue;
             }
-            if sub.expired(now) {
-                let _ = super::remove_member(store, child.as_str(), Some(&container)).await;
+            // An expired subscription is purged; one that cannot be removed stays loaded and
+            // counted (no delivery goes to it: every attempt checks expiry) until it can be.
+            if sub.expired(now)
+                && matches!(
+                    super::remove_member(store, child.as_str(), Some(&container)).await,
+                    Ok(crate::store::DeleteOutcome::Deleted
+                        | crate::store::DeleteOutcome::NotFound)
+                )
+            {
                 continue;
             }
             subs.insert(sub.id.clone(), sub);
@@ -1194,6 +1203,47 @@ mod tests {
     use p256::ecdsa::{Signature, VerifyingKey};
 
     use super::super::test_store;
+
+    /// Review finding: at startup an expired subscription whose removal failed was dropped from
+    /// memory though it stayed stored, and one that could not be read was skipped: both escaped
+    /// the subscription quota. The first stays loaded (and counted) until it can be removed; the
+    /// second stops the load.
+    #[tokio::test]
+    async fn stored_subscriptions_are_all_accounted_for_at_startup() {
+        let store = test_store::FlakyStore::new();
+        let cfg = LwsConfig::new("http://localhost:3000");
+        let container = cfg.absolute(SUBSCRIPTIONS_PATH);
+        Notifier::load(&store, &cfg).await.unwrap();
+        let sub = Subscription {
+            id: String::new(),
+            subscriber: None,
+            client: None,
+            topics: vec![cfg.storage()],
+            inbox: "https://a/inbox".into(),
+            expires: None,
+            expires_at: Some(1),
+            failures: 0,
+        };
+        let iri = format!("{container}old");
+        let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
+        store
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await
+            .unwrap();
+        *store.fail_delete_of.lock().unwrap() = Some(iri.clone());
+        let loaded = Notifier::load(&store, &cfg).await.unwrap();
+        assert_eq!(loaded.subs.read().unwrap().len(), 1, "kept while stored");
+        *store.fail_delete_of.lock().unwrap() = None;
+        let loaded = Notifier::load(&store, &cfg).await.unwrap();
+        assert!(loaded.subs.read().unwrap().is_empty(), "purged");
+        assert!(!store.exists(&iri).await.unwrap());
+        let unreadable = format!("{container}unreadable");
+        store
+            .create_in_container(&container, &unreadable, Bytes::from("{}"), LWS_JSON)
+            .await
+            .unwrap();
+        assert!(Notifier::load(&store, &cfg).await.is_err());
+    }
 
     /// Review finding: anyone who could read a resource could store subscriptions without limit,
     /// filling the store resources need, and a large one was parsed before any limit applied.
