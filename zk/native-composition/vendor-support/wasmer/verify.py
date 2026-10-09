@@ -24,6 +24,23 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def lock_delta(base, candidate):
+    """Exact package and dependency-edge difference between two Cargo.lock byte strings."""
+    def packages(data):
+        return {(p["name"], p["version"], p.get("source", "path")): p for p in tomllib.loads(data.decode())["package"]}
+    before, after = packages(base), packages(candidate)
+    ident = lambda k: {"name": k[0], "version": k[1], "source": k[2]}
+    return {
+        "added_packages": [after[k] for k in sorted(after.keys() - before.keys())],
+        "removed_packages": [before[k] for k in sorted(before.keys() - after.keys())],
+        "changed_packages": [
+            {**ident(k), "before": {f: v for f, v in before[k].items() if f not in ("name", "version", "source")},
+             "after": {f: v for f, v in after[k].items() if f not in ("name", "version", "source")}}
+            for k in sorted(before.keys() & after.keys()) if before[k] != after[k]
+        ],
+    }
+
+
 def inventory(root):
     paths = list(root.rglob("*"))
     require(not root.is_symlink() and not any(p.is_symlink() for p in paths), "vendor symlink")
@@ -87,19 +104,10 @@ def verify(native=NATIVE, policy=None):
     require(not any(p["name"] in ("proc-macro-error2", "proc-macro-error-attr2") for p in lock["package"]), "diagnostic lock edge remains")
     delta = json.loads((support / "lock-delta.json").read_text())
     require(sha((native / "Cargo.lock").read_bytes()) == delta["candidate_lock_sha256"], "unreviewed native lock change")
-    require(delta.get("chain_root_lock_sha256") == CHAIN_ROOT_LOCK_SHA256, "lock chain root differs from the #6647 pin")
-    refreshes = delta.get("later_refreshes")
-    require(isinstance(refreshes, list), "lock refresh history missing")
-    chained, seen = CHAIN_ROOT_LOCK_SHA256, {CHAIN_ROOT_LOCK_SHA256}
-    for refresh in refreshes:
-        require(refresh["base_lock_sha256"] == chained, "lock refresh does not chain")
-        require(refresh["candidate_lock_sha256"] != refresh["base_lock_sha256"]
-                and any(refresh.get(k) for k in ("added_packages", "removed_packages", "changed_dependency_edges")),
-                "degenerate lock refresh")
-        chained = refresh["candidate_lock_sha256"]
-        require(chained not in seen, "lock refresh repeats a lock")
-        seen.add(chained)
-    require(chained == delta["candidate_lock_sha256"], "lock refresh chain does not reach the native lock")
+    root = (support / "chain-root.Cargo.lock").read_bytes()
+    require(sha(root) == CHAIN_ROOT_LOCK_SHA256 == delta.get("chain_root_lock_sha256"), "lock chain root differs from the #6647 pin")
+    require(delta.get("since_chain_root") == lock_delta(root, (native / "Cargo.lock").read_bytes()),
+            "recorded lock delta differs from the native lock")
     policy = policy or native.parents[1] / "supply-chain/config.toml"
     config = tomllib.loads(policy.read_text())
     require(config["policy"]["wasmer-derive"]["audit-as-crates-io"] is True, "upstream vet obligation missing")

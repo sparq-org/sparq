@@ -23,12 +23,12 @@ and compiletest sources are preserved as provenance, not current test evidence.
 `lock-delta.json` records the source-only native lock edit: same-version local
 derive selection and removal of its only diagnostic edges, `proc-macro-error2`
 2.0.1 and `proc-macro-error-attr2` 2.0.0. No other package version changes.
-Later dependency bumps that touch the native lock append a `later_refreshes`
-entry with explicit base and candidate hashes and the exact package and edge
-changes; `verify.py` pins `chain_root_lock_sha256` to the lock as #6647
-re-pinned it, requires the history, and checks that the entries chain from that
-root to the current lock without repeating a lock.
-Earlier re-pins after the Wasmer edit were not recorded and predate the chain.
+`chain-root.Cargo.lock` keeps the native lock as #6647 re-pinned it (earlier
+unrecorded re-pins after the Wasmer edit predate it). `lock-delta.json` records
+`since_chain_root`, the exact package and dependency-edge difference from that
+root to the current lock, plus one `refresh_notes` line per dependency bump.
+`verify.py` pins the root's hash, recomputes the difference from the two lock
+files and requires the recorded one to match exactly.
 Cached frozen metadata now selects the exact local path in the 300-node graph.
 No compiler or build script ran for that check.
 

@@ -3,7 +3,7 @@
   "base_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
   "candidate_lock_sha256": "695b5b90dfc130a58cc034b69f0c632467c2dca0d062cb4cf11c91a14fa462bd",
   "chain_root_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
-  "chain_root_note": "Lock as re-pinned by #6647; earlier unrecorded re-pins after the Wasmer edit predate the later_refreshes chain.",
+  "chain_root_note": "chain-root.Cargo.lock is the native lock as #6647 re-pinned it; earlier unrecorded re-pins after the Wasmer edit predate it. since_chain_root is the exact difference from it to the current lock, recomputed by verify.py.",
   "removed_registry_packages": [
     {
       "name": "proc-macro-error-attr2",
@@ -56,59 +56,107 @@
   "added_packages": [],
   "source_only": true,
   "cargo_locked_validation": "pending remote",
-  "later_refreshes": [
+  "refresh_notes": [
     {
-      "reason": "sparq-canon bumps itertools 0.14 -> 0.15 (#6711); `cargo update -p sparq-canon` re-resolves the vendored sparq-spargebra path crate within its declared ranges.",
-      "base_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
-      "candidate_lock_sha256": "695b5b90dfc130a58cc034b69f0c632467c2dca0d062cb4cf11c91a14fa462bd",
-      "source_only": false,
-      "added_packages": [
-        {
-          "name": "itertools",
-          "version": "0.15.0",
-          "source": "registry+https://github.com/rust-lang/crates.io-index",
-          "checksum": "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc",
+      "pr": 6711,
+      "reason": "sparq-canon bumps itertools 0.14 -> 0.15 (#6711); `cargo update -p sparq-canon` re-resolves the vendored sparq-spargebra path crate within its declared ranges."
+    }
+  ],
+  "since_chain_root": {
+    "added_packages": [
+      {
+        "name": "itertools",
+        "version": "0.15.0",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "checksum": "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc",
+        "dependencies": [
+          "either"
+        ]
+      }
+    ],
+    "removed_packages": [],
+    "changed_packages": [
+      {
+        "name": "oxrdf",
+        "version": "0.3.3",
+        "source": "registry+https://github.com/rust-lang/crates.io-index",
+        "before": {
+          "checksum": "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0",
           "dependencies": [
-            "either"
-          ]
-        }
-      ],
-      "removed_packages": [],
-      "changed_dependency_edges": [
-        {
-          "name": "oxrdf",
-          "version": "0.3.3",
-          "source": "registry+https://github.com/rust-lang/crates.io-index",
-          "removed": [
-            "rand 0.8.8"
-          ],
-          "added": [
-            "rand 0.9.5"
+            "oxilangtag",
+            "oxiri",
+            "rand 0.8.8",
+            "thiserror 2.0.20"
           ]
         },
-        {
-          "name": "sparq-canon",
-          "version": "0.1.4",
-          "source": "path",
-          "removed": [
-            "itertools 0.14.0"
-          ],
-          "added": [
-            "itertools 0.15.0"
-          ]
-        },
-        {
-          "name": "sparq-spargebra",
-          "version": "0.4.6",
-          "source": "path",
-          "removed": [
-            "thiserror 1.0.69"
-          ],
-          "added": [
+        "after": {
+          "checksum": "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0",
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "rand 0.9.5",
             "thiserror 2.0.20"
           ]
         }
-      ]
-    }
-  ]
+      },
+      {
+        "name": "sparq-canon",
+        "version": "0.1.4",
+        "source": "path",
+        "before": {
+          "dependencies": [
+            "base16ct",
+            "digest",
+            "itertools 0.14.0",
+            "oxrdf 0.2.4",
+            "oxrdf 0.3.3",
+            "oxttl 0.1.8",
+            "oxttl 0.2.3",
+            "sha2",
+            "sparq-core",
+            "thiserror 2.0.20"
+          ]
+        },
+        "after": {
+          "dependencies": [
+            "base16ct",
+            "digest",
+            "itertools 0.15.0",
+            "oxrdf 0.2.4",
+            "oxrdf 0.3.3",
+            "oxttl 0.1.8",
+            "oxttl 0.2.3",
+            "sha2",
+            "sparq-core",
+            "thiserror 2.0.20"
+          ]
+        }
+      },
+      {
+        "name": "sparq-spargebra",
+        "version": "0.4.6",
+        "source": "path",
+        "before": {
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "oxrdf 0.3.3",
+            "peg",
+            "rand 0.9.5",
+            "thiserror 1.0.69"
+          ]
+        },
+        "after": {
+          "dependencies": [
+            "oxilangtag",
+            "oxiri",
+            "oxrdf 0.3.3",
+            "peg",
+            "rand 0.9.5",
+            "thiserror 2.0.20"
+          ]
+        }
+      }
+    ]
+  }
 }
