@@ -2082,7 +2082,10 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
                 })
                 .sum();
             if occurrences > 1 {
-                return Err(format!("rule {rix}: notIncludes subject ?{sv} is used elsewhere"));
+                return Err(format!(
+                    "rule {rix}: notIncludes subject {} is used elsewhere",
+                    crate::n3::serialize::display_lossy(&N3Term::Var(sv.clone()))
+                ));
             }
         }
         // Conclusions: simple ground-predicate atoms, no blanks (existentials).
@@ -2247,13 +2250,6 @@ fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> Vec<Vec<usiz
     out
 }
 
-// ---- serialization (the fallback / oracle path) --------------------------------------------
-//
-// [OPUS-5] sq-xqchl.2 — the writer itself now lives in `n3::serialize`, shared with the
-// rule writer that echoes rules back into an EYE `--pass-all` document. One definition, so
-// a serializer and its parser cannot drift apart.
-pub(crate) use crate::n3::serialize::serialize_facts as n3_serialize;
-
 // ---- the graph -----------------------------------------------------------------------------
 
 impl MaterializedN3Graph {
@@ -2346,10 +2342,12 @@ impl MaterializedN3Graph {
             }
         }
         self.mode = N3Mode::Fallback;
-        let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
+        // The base goes in AS TERMS, not re-serialized text: an `@forAll` universal has no
+        // surface spelling that re-parses to the same variable, and a rename could merge it
+        // with another variable of the same formula (GH #6701 review round 2).
         // The graph's own run record: a cut in the fallback reaches it.
-        let closure = crate::n3::reason_n3_terms_in(&src, None, None, &self.cuts)
-            .expect("re-serialized base must re-parse (serializer bug)");
+        let closure = crate::n3::reason_n3_terms_with_facts(&self.rules_src, self.base.iter().cloned(), &self.cuts)
+            .expect("the rules document parsed when the graph was built");
         self.fallback_closure = closure.facts.into_iter().collect();
     }
 
@@ -2731,12 +2729,12 @@ mod tests {
         assert!(g.cuts.first().is_none());
     }
 
-    /// `why` re-derives by reparsing the serialized base. A base fact built in code can
-    /// nest deeper than the parser accepts; the explanation is then `None`, and the
-    /// parser limit is a cut on the graph's record, not a dropped error string.
+    /// `why` re-derives with the base handed over as TERMS, never re-parsed from text. A
+    /// base fact built in code can nest deeper than the parser accepts; it still gets its
+    /// explanation, and no parser limit is hit, so the graph's record shows no cut.
     #[cfg(feature = "explain")]
     #[test]
-    fn an_explanation_reparse_past_the_nesting_limit_is_a_cut() {
+    fn an_explanation_of_a_base_fact_past_the_parse_nesting_limit_is_not_cut() {
         let out = std::thread::Builder::new()
             .stack_size(256 << 20)
             .spawn(|| {
@@ -2752,8 +2750,8 @@ mod tests {
                 (
                     g.contains(&derived),
                     g.cuts.first().is_none(),
-                    g.why(&derived).is_none(),
-                    g.cuts.first().is_some(),
+                    g.why(&derived).is_some(),
+                    g.cuts.first().is_none(),
                 )
             })
             .expect("spawn")
@@ -2762,7 +2760,7 @@ mod tests {
         assert_eq!(
             out,
             (true, true, true, true),
-            "(derived, no cut before, no proof, cut after)"
+            "(derived, no cut before, a proof, no cut after)"
         );
     }
     use oxrdf::vocab::{rdf, rdfs};

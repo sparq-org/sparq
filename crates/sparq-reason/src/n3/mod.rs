@@ -236,10 +236,20 @@ impl<'a> BwCtx<'a> {
 /// One derivation step: a `conclusion` triple was produced by rule `rule` (its index in the
 /// document's rule order) from the ground `premises` (the supporting facts under the binding;
 /// premise atoms proven by backward rules are not themselves facts and are not listed).
+///
+/// `conclusion_key` / `premise_keys` are the same facts' N3 identity keys
+/// ([`serialize::statement_keys`]), taken from the N3 TERMS before list expansion and
+/// interning — the ids alone cannot recover them (`()` interns as `rdf:nil`, a list as a
+/// fresh blank chain, and the dictionary normalizes literal fields). Proof trees built
+/// from these steps (`explain::n3_proof_tree`) take their node keys from here, so they
+/// agree with `MaterializedN3Graph::why` on every fact.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProofStep {
     pub conclusion: [Id; 3],
     pub rule: usize,
     pub premises: Vec<[Id; 3]>,
+    pub conclusion_key: [String; 3],
+    pub premise_keys: Vec<[String; 3]>,
 }
 
 /// Parse N3 `src`, run the rule closure, and return the entailed GROUND triples interned into
@@ -250,7 +260,7 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     let cuts = bounded::Cuts::top_level();
     let parsed = bounded::parse_n3(src, "", &cuts)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::None, &cuts);
-    Ok(intern_closure(dict, &facts, &steps)?.0)
+    Ok(intern_closure::<NoKeys>(dict, &facts, &steps)?.closure)
 }
 
 /// As [`reason_n3`], but also return the derivation (a [`ProofStep`] for each NEWLY-derived
@@ -259,7 +269,32 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
     let cuts = bounded::Cuts::top_level();
     let parsed = bounded::parse_n3(src, "", &cuts)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::Full, &cuts);
-    intern_closure(dict, &facts, &steps)
+    // The steps carry their facts' keys; the closure's own keys are not returned, so not built.
+    let run = intern_closure::<NoKeys>(dict, &facts, &steps)?;
+    Ok((run.closure, run.steps))
+}
+
+/// One [`reason_n3_proof_run`]: the closure as id triples, each closure fact's N3 identity
+/// key, and the derivation steps — what `explain::n3_proof_tree` needs to tell apart
+/// distinct N3 facts that intern to one id triple.
+#[derive(Clone, Debug)]
+pub struct N3ProofRun {
+    /// The closure as interned triples (as [`reason_n3_proof`] returns it).
+    pub closure: Vec<[Id; 3]>,
+    /// Parallel to `closure`: each fact's identity key ([`serialize::statement_keys`] of
+    /// the N3 statement it was interned from — asserted and derived facts alike; a list
+    /// chain's rdf:first/rest rows are keyed as those rows).
+    pub closure_keys: Vec<[String; 3]>,
+    /// A [`ProofStep`] per newly-derived fact, in derivation order.
+    pub steps: Vec<ProofStep>,
+}
+
+/// As [`reason_n3_proof`], keeping every closure fact's N3 identity key ([`N3ProofRun`]).
+pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, String> {
+    let cuts = bounded::Cuts::top_level();
+    let parsed = bounded::parse_n3(src, "", &cuts)?;
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full, &cuts);
+    intern_closure::<CollectKeys>(dict, &facts, &steps)
 }
 
 /// The EYE **`--pass-all`** / **`--pass-all-ground`** output document: the deductive
@@ -293,6 +328,14 @@ pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<
 /// the rules at every depth, quoted `{ … }` formulae included; it does NOT rewrite the
 /// closure half, so a document that ASSERTS a formula-valued fact carrying a variable
 /// (`:a :p { ?x :q :b }.` — data, not a rule) still echoes that `?x` verbatim.
+///
+/// # Errors
+///
+/// A parse error, or — the output must re-reason exactly as the input did — a closure fact
+/// or rule that has no lossless N3 form ([`serialize::NotRepresentable`]): a unit mixing a
+/// plain mention of an `@forAll` IRI with its universal (the one document-level declaration
+/// would capture it), units whose plain mentions and universals need each other first (a
+/// cycle), or a backward-chaining copy of a universal. No fallback spelling is written.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     let cuts = bounded::Cuts::top_level();
     let parsed = bounded::parse_n3(src, "", &cuts)?;
@@ -300,23 +343,20 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
     let (facts, _steps) = run_closure(parsed, None, None, StepMode::None, &cuts);
-    let mut statements: Vec<String> = facts
-        .all
+    // Universals are written as their own IRIs under `@forAll` declarations, so the output
+    // re-parses to the very same `__ua.<iri>` terms — the identity a `log:parsedAsN3`
+    // literal or a second reasoning pass produces too (GH #5391, GH #6701 review).
+    let facts: Vec<&[Term; 3]> = facts.all.iter().collect();
+    let echoed: Vec<(&Rule, RuleKind)> = rules
         .iter()
-        .map(|f| {
-            let mut s = String::new();
-            serialize::write_statement(f, &mut s);
-            s
-        })
+        .map(|r| (r, RuleKind::Forward))
+        .chain(backward_rules.iter().map(|r| (r, RuleKind::Backward)))
         .collect();
-    statements.sort_unstable();
-    let mut out = statements.concat();
-    for r in &rules {
-        serialize::write_rule(r, RuleKind::Forward, vars, &mut out);
-    }
-    for r in &backward_rules {
-        serialize::write_rule(r, RuleKind::Backward, vars, &mut out);
-    }
+    // Exact or refused: a closure fact or rule with no lossless N3 form (see
+    // `serialize::Unit`) fails the call rather than writing a document that re-reasons
+    // differently (GH #6701 review round 7).
+    let mut out = String::new();
+    serialize::write_document(&facts, &echoed, vars, &cuts, &mut out).map_err(|e| e.to_string())?;
     Ok(out)
 }
 
@@ -540,7 +580,7 @@ pub fn reason_n3_stratified(
         }
         facts = f;
     }
-    Ok(StratifiedN3Closure { facts: intern_closure(dict, &facts, &[])?.0, strata_facts })
+    Ok(StratifiedN3Closure { facts: intern_closure::<NoKeys>(dict, &facts, &[])?.closure, strata_facts })
 }
 
 /// The smallest `__st{k}_` prefix that no blank label anywhere in `parsed`
@@ -637,9 +677,10 @@ fn stratum_blanks(t: &[Term; 3], prefix: &str) -> [Term; 3] {
 #[allow(clippy::type_complexity)]
 pub(crate) fn reason_n3_terms_proof(
     src: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
     cuts: &bounded::Cuts,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
-    let parsed = bounded::parse_n3(src, "", cuts)?;
+    let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::Full, cuts);
     Ok((facts.all, steps))
 }
@@ -689,6 +730,27 @@ pub(crate) fn reason_n3_terms_in(
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
     let (facts, steps) = run_closure(parsed, resolver, None, StepMode::Conclusions, cuts);
+    Ok(N3Closure {
+        facts: facts.all.into_iter().collect(),
+        derived: steps.into_iter().map(|(g, _, _)| g).collect(),
+        n_rules,
+        n_backward_rules,
+    })
+}
+
+/// The term-level closure of the rules document `src` plus `extra` statements handed over
+/// AS TERMS ([`bounded::parse_n3_with_extra`]) — the lossless re-reasoning entry point of the
+/// incremental N3 fallback. `extra` is classified exactly as statements written at the end
+/// of `src` would be (so `log:implies`-family triples still become rules), but no term is
+/// serialized, so `@forAll` universals keep their identity.
+pub(crate) fn reason_n3_terms_with_facts(
+    src: &str,
+    extra: impl IntoIterator<Item = [Term; 3]>,
+    cuts: &bounded::Cuts,
+) -> Result<N3Closure, String> {
+    let parsed = bounded::parse_n3_with_extra(src, "", extra, cuts)?;
+    let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
+    let (facts, steps) = run_closure(parsed, None, None, StepMode::Conclusions, cuts);
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
@@ -1044,14 +1106,33 @@ fn run_closure(
     (facts, steps)
 }
 
+/// Whether [`intern_closure`] builds `N3ProofRun::closure_keys` — a TYPE-level choice, so
+/// the plain materialization paths ([`reason_n3`], the stratified closure) do no identity
+/// key encoding or allocation for closure rows at all; only [`reason_n3_proof_run`] pays.
+trait KeyMode {
+    const COLLECT: bool;
+}
+/// Leave `closure_keys` empty.
+enum NoKeys {}
+/// Key every closure row.
+enum CollectKeys {}
+impl KeyMode for NoKeys {
+    const COLLECT: bool = false;
+}
+impl KeyMode for CollectKeys {
+    const COLLECT: bool = true;
+}
+
 /// Intern a term-level closure + derivation into the dictionary ([`reason_n3`] /
 /// [`reason_n3_proof`] output form). Errors on formula-valued facts, which have
 /// no dictionary representation (use [`reason_n3_terms`] for those documents).
-fn intern_closure(
+/// `closure_keys` is filled only under [`CollectKeys`]; each [`ProofStep`] always carries
+/// its keys (there are no steps without derivation tracking).
+fn intern_closure<K: KeyMode>(
     dict: &mut Dict,
     facts: &FactIndex,
     steps: &[DerivationStep],
-) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
+) -> Result<N3ProofRun, String> {
     // First-class list values have no dictionary representation — expand them
     // into rdf:first/rest blank-node chains (one chain per list VALUE, shared
     // across the facts that mention it).
@@ -1060,7 +1141,15 @@ fn intern_closure(
     // fresh against THOSE blanks too — seed it from both.
     let step_rows = steps.iter().flat_map(|(g, _, prem)| std::iter::once(g).chain(prem));
     let mut exp = ListExpander::new(fact_rows.iter().chain(step_rows));
+    // Identity keys from the N3 terms BEFORE list expansion and interning.
+    let mut closure_keys: Vec<[String; 3]> = Vec::new();
+    if K::COLLECT {
+        closure_keys = fact_rows.iter().map(serialize::statement_keys).collect();
+    }
     let (fact_rows, mut extra) = exp.expand_rows(&fact_rows);
+    if K::COLLECT {
+        closure_keys.extend(extra.iter().map(serialize::statement_keys));
+    }
     // Intern the ground closure into the dictionary.
     let mut out = Vec::with_capacity(fact_rows.len() + extra.len());
     let mut rows = fact_rows;
@@ -1079,9 +1168,15 @@ fn intern_closure(
         let conclusion = it(g, dict, &mut exp)?;
         let premises =
             prem.iter().map(|p| it(p, dict, &mut exp)).collect::<Result<Vec<_>, _>>()?;
-        proof.push(ProofStep { conclusion, rule: *ri, premises });
+        proof.push(ProofStep {
+            conclusion,
+            rule: *ri,
+            premises,
+            conclusion_key: serialize::statement_keys(g),
+            premise_keys: prem.iter().map(serialize::statement_keys).collect(),
+        });
     }
-    Ok((out, proof))
+    Ok(N3ProofRun { closure: out, closure_keys, steps: proof })
 }
 
 /// Expands first-class `Term::List` values into rdf:first/rest blank-node
@@ -3531,14 +3626,15 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
                 Term::Blank(b) => oxrdf::BlankNode::new_unchecked(b).into(),
                 other => {
                     return Err(format!(
-                        "quoted-triple subject {other:?} is not an IRI or blank node (RDF 1.2 triple terms admit no other subject kind)"
+                        "quoted-triple subject {} is not an IRI or blank node (RDF 1.2 triple terms admit no other subject kind)",
+                        serialize::display_lossy(other)
                     ))
                 }
             };
             let Term::Iri(p) = &tr[1] else {
                 return Err(format!(
-                    "quoted-triple predicate {:?} is not an IRI (RDF 1.2 triple terms admit no other predicate kind)",
-                    tr[1]
+                    "quoted-triple predicate {} is not an IRI (RDF 1.2 triple terms admit no other predicate kind)",
+                    serialize::display_lossy(&tr[1])
                 ));
             };
             let o = n3_term_to_oxrdf(&tr[2])?;
@@ -3549,7 +3645,7 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
             )))
         }
         Term::Var(_) | Term::Formula(_) | Term::List(_) => {
-            return Err(format!("term {t:?} inside a quoted triple has no dictionary representation"))
+            return Err(format!("term {} inside a quoted triple has no dictionary representation", serialize::display_lossy(t)))
         }
     })
 }
@@ -3557,6 +3653,25 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #6735 review round 4: plain materialization never pays for proof identity — no
+    /// statement is keyed on the `reason_n3` / stratified paths; the proof run keys every
+    /// closure row.
+    #[test]
+    fn the_unkeyed_paths_never_compute_identity_keys() {
+        let calls = || serialize::KEY_CALLS.with(|c| c.get());
+        let src = "@prefix : <http://ex/>. :a :p ( 1 2 ). :b :p :c. { ?x :p ?y } => { ?y :q ?x }.";
+        let before = calls();
+        let n = reason_n3(&mut Dict::new(), src).expect("reasons").len();
+        reason_n3_stratified(&mut Dict::new(), &[src, "@prefix : <http://ex/>. { ?x :q ?y } => { ?x :r ?y }."]).expect("reasons");
+        assert_eq!(calls(), before, "the unkeyed paths keyed a statement");
+        let (_, steps) = reason_n3_proof(&mut Dict::new(), src).expect("reasons");
+        assert_eq!(calls() - before, steps.iter().map(|s| 1 + s.premises.len()).sum::<usize>(), "only the steps are keyed");
+        let before = calls();
+        let run = reason_n3_proof_run(&mut Dict::new(), src).expect("reasons");
+        assert_eq!(run.closure_keys.len(), run.closure.len());
+        assert!(calls() - before >= n, "the proof run keys every closure row");
+    }
 
     fn closure(src: &str) -> (Dict, FxHashSet<[Id; 3]>) {
         let mut dict = Dict::new();

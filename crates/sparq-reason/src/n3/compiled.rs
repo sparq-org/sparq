@@ -398,7 +398,8 @@ impl Compiler {
             }
             other => {
                 return Err(format!(
-                    "compiled-rules: term {other:?} is not a compilable constant (quoted formulae / lists / variables — and a quoted triple that still contains variables — are outside the compiled subset here; the text engine handles them)"
+                    "compiled-rules: term {} is not a compilable constant (quoted formulae / lists / variables — and a quoted triple that still contains variables — are outside the compiled subset here; the text engine handles them)",
+                    super::serialize::display_lossy(other)
                 ))
             }
         }
@@ -425,7 +426,8 @@ impl Compiler {
             Term::Var(v) => match ctx.slots.get(v) {
                 Some(&s) if ctx.bound.contains(&s) => Ok(CTerm::Var(s)),
                 _ => Err(format!(
-                    "compiled-rules: {what} input ?{v} is not bound by any preceding pattern (the rule could never fire)"
+                    "compiled-rules: {what} input {} is not bound by any preceding pattern (the rule could never fire)",
+                    super::serialize::display_lossy(&Term::Var(v.clone()))
                 )),
             },
             other => Ok(CTerm::Const(self.sym(other)?)),
@@ -512,7 +514,8 @@ impl Compiler {
                 Term::Triple(tr) => {
                     if naf.is_some() {
                         return Err(format!(
-                            "compiled-rules: quoted triple {t:?} with variables inside a log:notIncludes body is not in the compiled subset (the anti-join runs a flat list of plain patterns, with no place for a component-unpack step)"
+                            "compiled-rules: quoted triple {} with variables inside a log:notIncludes body is not in the compiled subset (the anti-join runs a flat list of plain patterns, with no place for a component-unpack step)",
+                            super::serialize::display_lossy(t)
                         ));
                     }
                     // Bind the candidate's TERM id into a fresh anonymous slot; the
@@ -523,7 +526,8 @@ impl Compiler {
                 }
                 other => {
                     return Err(format!(
-                        "compiled-rules: {other:?} in a triple pattern is not in the compiled subset (quoted formulae / lists are matched by the text engine only)"
+                        "compiled-rules: {} in a triple pattern is not in the compiled subset (quoted formulae / lists are matched by the text engine only)",
+                        super::serialize::display_lossy(other)
                     ))
                 }
             }
@@ -570,12 +574,14 @@ impl Compiler {
             match (i, t) {
                 (0, Term::Lit(..) | Term::Triple(_)) => {
                     return Err(format!(
-                        "compiled-rules: quoted-triple subject {t:?} is not an IRI, a blank node or a variable (RDF 1.2 triple terms admit no other subject kind, so no dictionary triple term can match)"
+                        "compiled-rules: quoted-triple subject {} is not an IRI, a blank node or a variable (RDF 1.2 triple terms admit no other subject kind, so no dictionary triple term can match)",
+                        super::serialize::display_lossy(t)
                     ))
                 }
                 (1, Term::Lit(..) | Term::Blank(_) | Term::Triple(_)) => {
                     return Err(format!(
-                        "compiled-rules: quoted-triple predicate {t:?} is not an IRI or a variable (RDF 1.2 triple terms admit no other predicate kind, so no dictionary triple term can match)"
+                        "compiled-rules: quoted-triple predicate {} is not an IRI or a variable (RDF 1.2 triple terms admit no other predicate kind, so no dictionary triple term can match)",
+                        super::serialize::display_lossy(t)
                     ))
                 }
                 _ => {}
@@ -830,7 +836,8 @@ impl Compiler {
                         Some(&s) if ctx.bound.contains(&s) => CTerm::Var(s),
                         _ => {
                             return Err(format!(
-                                "compiled-rules: conclusion variable ?{v} is not bound by the premise"
+                                "compiled-rules: conclusion variable {} is not bound by the premise",
+                                super::serialize::display_lossy(&Term::Var(v.clone()))
                             ))
                         }
                     },
@@ -841,7 +848,8 @@ impl Compiler {
                     }
                     Term::Triple(_) if !term.is_ground() => {
                         return Err(format!(
-                            "compiled-rules: quoted triple {term:?} with variables in a conclusion is not in the compiled subset (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which eval() has no channel to report — the text engine derives it)"
+                            "compiled-rules: quoted triple {} with variables in a conclusion is not in the compiled subset (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which eval() has no channel to report — the text engine derives it)",
+                            super::serialize::display_lossy(term)
                         ))
                     }
                     other => CTerm::Const(self.sym(other)?),
@@ -889,7 +897,8 @@ fn intern_ground_checked(dict: &mut Dict, t: &Term) -> Result<Id, String> {
             Ok(dict.intern(&ox))
         }
         other => Err(format!(
-            "intern_facts: term {other:?} has no dictionary representation"
+            "intern_facts: term {} has no dictionary representation",
+            super::serialize::display_lossy(other)
         )),
     }
 }
