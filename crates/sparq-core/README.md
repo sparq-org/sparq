@@ -40,7 +40,7 @@ Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed i
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
 `numerics.bin`/`temporals.bin` and both v2 caches, rebuilding in memory while
-preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v3.bin`; missing or
+preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bin`; missing or
 wrong-sized current files also trigger rebuilds.
 
 Legacy opens cost a dictionary scan and cache allocation until migrated with

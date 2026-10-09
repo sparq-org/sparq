@@ -86,7 +86,7 @@ fn stale_temporal_v2_cells_never_override_strict_lexical_validity() {
                 graph.save(&archive).unwrap();
             }
             // Build the exact former n*f64 + n*flag layout, including stale valid cells.
-            let current = std::fs::read(archive.join("temporals-v3.bin"))
+            let current = std::fs::read(archive.join("temporals-v4.bin"))
                 .or_else(|_| std::fs::read(archive.join("temporals-v2.bin")))
                 .unwrap();
             let mut stale = current.clone();
@@ -104,9 +104,9 @@ fn stale_temporal_v2_cells_never_override_strict_lexical_validity() {
             std::fs::write(archive.join("temporals-v2.bin"), &stale).unwrap();
             std::fs::write(archive.join("temporals.bin"), &stale).unwrap();
             if current_present {
-                std::fs::write(archive.join("temporals-v3.bin"), &current).unwrap();
+                std::fs::write(archive.join("temporals-v4.bin"), &current).unwrap();
             } else {
-                let _ = std::fs::remove_file(archive.join("temporals-v3.bin"));
+                let _ = std::fs::remove_file(archive.join("temporals-v4.bin"));
             }
             let before = files(&archive);
             let opened = Graph::open(&archive).unwrap();
@@ -135,7 +135,7 @@ fn stale_temporal_v2_cells_never_override_strict_lexical_validity() {
             }
             let saved = scratch.0.join("new");
             opened.save(&saved).unwrap();
-            assert!(saved.join("temporals-v3.bin").is_file());
+            assert!(saved.join("temporals-v4.bin").is_file());
             assert!(!saved.join("temporals-v2.bin").exists());
             assert!(!saved.join("temporals.bin").exists());
             let reopened = Graph::open(&saved).unwrap();
