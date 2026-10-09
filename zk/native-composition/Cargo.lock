@@ -301,9 +301,9 @@ dependencies = [
 
 [[package]]
 name = "base16ct"
-version = "0.2.0"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
+checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
 
 [[package]]
 name = "bbs_plus"
@@ -1611,7 +1611,7 @@ checksum = "0afd5c28e4a399c57ee2bc3accd40c7b671fdc7b6537499f14e95b265af7d7e0"
 dependencies = [
  "oxilangtag",
  "oxiri",
- "rand 0.8.8",
+ "rand 0.9.5",
  "thiserror 2.0.20",
 ]
 
@@ -2392,7 +2392,7 @@ dependencies = [
  "oxrdf 0.3.3",
  "peg",
  "rand 0.9.5",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
