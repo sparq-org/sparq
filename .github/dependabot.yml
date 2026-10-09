@@ -135,6 +135,13 @@ updates:
       - dependency-name: "eslint"
         update-types:
           - version-update:semver-major
+      # site/scripts/vr.sh runs the visual tests in a Playwright container pinned by
+      # version and digest, and refuses to run when the locked @playwright/test
+      # differs. Bump Playwright by hand together with that pin and regenerated
+      # baselines. Security updates still come through.
+      - dependency-name: "@playwright/test"
+      - dependency-name: "playwright"
+      - dependency-name: "playwright-core"
 
   # ---- pip (the `sparq` Python bindings build/test deps) ----
   - package-ecosystem: pip
