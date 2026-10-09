@@ -10,7 +10,6 @@ and the lineage edges `prov:wasGeneratedBy`, `prov:used`, `prov:wasDerivedFrom`.
 
 [PROV-O]: https://www.w3.org/TR/prov-o/
 
-> Model: Opus 4.8 (Fable unavailable — flag for re-review when Fable returns).
 > Bead sq-ntcg · CDMC capability gap **CD-1** (first-class data lineage).
 
 ## 🚀 Quickstart
@@ -83,7 +82,7 @@ let nt      = d.prov_ntriples();    // …or canonical N-Triples
   `prov:Entity` per missing conjunct carrying its exact grounded triple term and
   an `urn:sparq:prov:absent true` marker. `OPTIONAL`, `UNION`, `FILTER`, property
   paths, named graphs, and all other algebra fail closed as unsupported.
-  <!-- [GPT-5.6] sq-lsp7k -->
+  <!-- sq-lsp7k -->
 - **Dependency-light** — `xsd:dateTime` is formatted in-crate (no `chrono`/
   `time` dep); the formatter is the inverse of `sparq-core`'s dateTime parser,
   so a recorded timestamp parses back to the same instant (tested).
@@ -101,7 +100,7 @@ let nt      = d.prov_ntriples();    // …or canonical N-Triples
 The CONSTRUCT path is the cleanest, best-tested derivation in the engine and the
 natural first PROV-O target; reasoner materialization reuses the existing proof
 trees; UPDATE lineage reads the engine's resolved effect log so capture is exact
-even for non-deterministic update text. [OPUS-4.8] sq-m3i0, sq-xwdd
+even for non-deterministic update text. sq-m3i0, sq-xwdd
 
 ## 📚 Learn more
 
@@ -112,4 +111,4 @@ even for non-deterministic update text. [OPUS-4.8] sq-m3i0, sq-xwdd
 
 ## License
 
-MIT — `publish = false` workspace member. [OPUS-4.8]
+MIT — `publish = false` workspace member.

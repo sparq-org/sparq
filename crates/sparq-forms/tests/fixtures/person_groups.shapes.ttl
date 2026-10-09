@@ -1,3 +1,6 @@
+# SCOPE: two-file rule. A content change here moves fixtures/person_groups.golden.json;
+# regenerate it in the same change with
+# `UPDATE_GOLDENS=1 cargo test -p sparq-forms --test golden` and review the diff.
 # EDG-style "employee record" shapes: property groups, fractional sh:order,
 # names/descriptions, cardinalities, boolean/date/lang widgets, dash:singleLine.
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .

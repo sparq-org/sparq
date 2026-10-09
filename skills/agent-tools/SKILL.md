@@ -34,7 +34,7 @@ heavy MCP-SDK dependency.
 | `validate` *(feature `shacl`, OFF by default)* | `sparq_shacl::validate` | `{conforms, results}` JSON |
 | `describe_form` *(feature `shacl`, OFF by default)* | `sparq_forms::derive_form` | `FormDescription` JSON, verbatim |
 
-### SHACL validation (feature `shacl`, OFF by default) — [GPT-5.6] sq-lsp7k.22
+### SHACL validation (feature `shacl`, OFF by default) — sq-lsp7k.22
 
 Call `validate` with `{"shapes": "...Turtle..."}` and optionally `format` (defaults to
 `turtle`). The tool parses the shapes as a separate graph, validates the server's data
@@ -42,7 +42,7 @@ graph, and returns `conforms` plus disallowed-severity results containing `focus
 `path`, `severity`, and `message`. It never mutates the served graph. A malformed shapes
 string returns an MCP tool result with `isError: true`, not a JSON-RPC protocol error.
 
-### Shape-aware forms (feature `shacl`, OFF by default) — [FABLE-5] sq-lsp7k.1.6
+### Shape-aware forms (feature `shacl`, OFF by default) — sq-lsp7k.1.6
 
 Call `describe_form` with `{"focus": "<IRI or _:label>", "shapes": "...Turtle..."}`,
 optionally `format` (defaults to `turtle`), `mode` (`"edit"`, the default, or `"view"`),
@@ -55,7 +55,7 @@ predicates. Read-only: neither graph is mutated (form *editing* — applying a d
 is a separate gated surface, sq-lsp7k.1.4/F6b, not shipped here). Bad focus IRIs,
 malformed shapes, and unknown modes are tool errors (`isError: true`), fail-closed.
 
-### Named templates + full-text search (features `templates` / `text`, OFF by default) — [FABLE-5] sq-lsp7k.10
+### Named templates + full-text search (features `templates` / `text`, OFF by default) — sq-lsp7k.10
 
 Register validated `sparq_engine::templates::Template`s on `ServerConfig::templates`; the
 server then advertises `template_list` (definitions: name/kind/text/typed parameters) and
@@ -70,7 +70,7 @@ autocomplete-style discovery. The HTTP server exposes the same template layer at
 `/templates` (see the `http-server` skill §5g). Facet-count and richer IRI-autocomplete
 tools are deliberately deferred to their own beads (the facet/autocomplete engine features).
 
-### Resources + prompts (default build, read-only) — [SONNET-4.6] sq-sjey1
+### Resources + prompts (default build, read-only) — sq-sjey1
 
 Beyond `tools`, `initialize` declares the MCP **`resources`** and **`prompts`**
 capabilities. Both sub-capability flags are `false` and mean it: this server implements no
@@ -108,7 +108,7 @@ argument provably cannot close the `IRIREF` and append clauses of its own. A hos
 missing argument, and an unknown prompt name, are all `-32602` (`INVALID_PARAMS`) — the
 prompt is refused, never rendered around unvalidated text.
 
-### Pod mode (feature `solid`, OFF by default) — [FABLE-5] sq-u16eq
+### Pod mode (feature `solid`, OFF by default) — sq-u16eq
 
 `SolidMcpServer` serves a **`sparq_solid::PodStore`** (one named graph per pod document
 + a materialized WAC/ACP authorization view), bound to ONE authenticated session fixed
@@ -136,7 +136,7 @@ fail-closed rollback**; creation is authorized at the closest existing parent co
 tool call sees it. RDF sources only (Turtle / N-Triples, plus JSON-LD under the `jsonld`
 feature) — see the content-negotiation and non-RDF notes below.
 
-**Session-scoped aggregates — [SONNET-4.6] sq-8n6iv.** The base server's `introspect` /
+**Session-scoped aggregates — sq-8n6iv.** The base server's `introspect` /
 `shapes` / `stats` mine the WHOLE served graph. In a multi-principal deployment that is
 an **aggregate leak**: it discloses the classes, predicates, vocabularies and volume of
 documents the caller cannot open, and no per-resource check catches it because no
@@ -152,7 +152,7 @@ projection *does* legitimately include is data in readable documents that happen
 an unreadable one — e.g. a readable container's `ldp:contains` link to a container the
 session cannot read (the raw document says so; `container_list` itself omits such a member).
 
-**Content negotiation + the non-RDF story — [SONNET-4.6] sq-wbsf5.** `resource_get`
+**Content negotiation + the non-RDF story — sq-wbsf5.** `resource_get`
 takes an optional `accept` and serves either `application/n-triples` (the default when
 `accept` is absent, so existing callers are unchanged) or `text/turtle` — the SAME
 triples from the SAME read gate, written by `oxttl`'s `TurtleSerializer` with the pod
@@ -173,7 +173,7 @@ the scope-out, and no non-RDF resource can exist to be read. Adding one is a
 tool-surface change; if it lands, the MCP shape is already known — `resources/read`
 carries a base64 `blob` field alongside `text`.
 
-#### The `resources` surface + notifications (draft §8/§10) — [SONNET-4.6] sq-cmjmr
+#### The `resources` surface + notifications (draft §8/§10) — sq-cmjmr
 
 Pod mode declares the MCP **`resources`** capability with **`subscribe: true`** and
 binds it to Solid Notifications Protocol semantics:
@@ -301,7 +301,7 @@ Batches are accepted whatever revision was negotiated — an array is only ever 
 reply to an array, so a client on a batch-free revision is never handed one it did not
 ask for.
 
-### Which engine plans a tool call runs (default-on, [SONNET-4.6] sq-mc06h)
+### Which engine plans a tool call runs (default-on, sq-mc06h)
 
 `sparq-mcp` is a **native** engine-embedding surface with no bundle-size floor, so — like
 `sparq-cli`, `sparq-server` and the `sparq-rdf` Python wheel — its **default** feature set
@@ -356,7 +356,7 @@ cargo run -p sparq-mcp --features stdio -- [--allow-update] [--format FMT] \
 
 `sparq_mcp::cli` (`parse_args` / `load_graph` / `format_for` / `USAGE`) is the same
 library code the binary runs, for a host that wants the flags but its own transport.
-[SONNET-4.6] sq-5xgxe
+sq-5xgxe
 
 ## Trust model (read this — no overclaim)
 
@@ -378,15 +378,15 @@ was configured with.
 
 ## Status / scope
 
-Opt-in crate at workspace v0.1.0; verified against branch `main` (default `classes` tool
-2026-07-13 [GPT-5.6], sq-cekgj; default `prefixes` tool 2026-07-13 [GPT-5.6], sq-kx5b0;
-default `void` tool 2026-07-12 [GPT-5.6], sq-2kkym;
-default resources + prompts surfaces 2026-07-28 [SONNET-4.6], sq-sjey1;
-default-on `algebra-rewrite` + `dp-planner` 2026-07-30 [SONNET-4.6], sq-mc06h;
-pod mode 2026-07-11 [FABLE-5]).
+Opt-in crate (`publish = false` — not on crates.io; build it from the workspace); verified against branch `main` (default `classes` tool
+2026-07-13, sq-cekgj; default `prefixes` tool 2026-07-13, sq-kx5b0;
+default `void` tool 2026-07-12, sq-2kkym;
+default resources + prompts surfaces 2026-07-28, sq-sjey1;
+default-on `algebra-rewrite` + `dp-planner` 2026-07-30, sq-mc06h;
+pod mode 2026-07-11).
 Tested by a real in-memory MCP round-trip (default features), a real stdio serve-loop
 round-trip, and a spawned-process session against the shipped binary (feature `stdio`,
-2026-07-28 [SONNET-4.6], sq-5xgxe). Only the **stdio** transport plus the embeddable
+2026-07-28, sq-5xgxe). Only the **stdio** transport plus the embeddable
 `handle_message` ship today; SSE/HTTP transports are **not implemented** (follow-up beads).
 The read-only default is proven fail-closed (a disabled `update` returns `-32601` and does
 not mutate the graph).

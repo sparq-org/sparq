@@ -1,8 +1,6 @@
 # sparq-reason-ql
 
 <p>
-  <a href="https://crates.io/crates/sparq-reason-ql"><img src="https://img.shields.io/crates/v/sparq-reason-ql.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-reason-ql"><img src="https://docs.rs/sparq-reason-ql/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -103,12 +101,12 @@ The rewriter is oracle-tested two independent ways — syntactically against han
   computed-DIVERGENT gap), **never a graduated conformance pass**, and its rows are **never summed
   into any floor**.
 
-Enable the crate with `sparq-reason-ql = { version = "0.1", features = ["experimental"] }`.
+Enable the crate (a `publish = false` workspace crate) with `sparq-reason-ql = { path = "../sparq-reason-ql", features = ["experimental"] }`.
 
 ## 📚 Learn more
 
 - **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (QL section).
-- **API reference** — [docs.rs/sparq-reason-ql](https://docs.rs/sparq-reason-ql).
+- **API reference** — `cargo doc -p sparq-reason-ql --features experimental --open` (`publish = false`: not on crates.io/docs.rs).
 - **Design** — [`research/owl2-el-ql-reasoning-spike.md`](../../research/owl2-el-ql-reasoning-spike.md)
   (the QL track) and [`research/reasoner-suite-on-substrate.md`](../../research/reasoner-suite-on-substrate.md)
   §2.5 (the PerfectRef trap + the phased plan; this crate implements phases Q1–Q3, and the formal

@@ -119,7 +119,10 @@ fn snapshot_mutation_invisible_to_base() {
 fn snapshot_shares_base_indexes_no_duplication() {
     // A base large enough that an O(triples) deep clone would be obvious.
     let mut dict = sparq_core::dict::Dict::new();
-    let ids: Vec<[Id; 3]> = (0..50_000u32)
+    // Smaller under Miri, which cannot build 50K triples inside the nightly lane's per-test
+    // cap (sq-0s15k); the Arc-sharing assertions do not depend on the size.
+    let n: u32 = if cfg!(miri) { 2_000 } else { 50_000 };
+    let ids: Vec<[Id; 3]> = (0..n)
         .map(|i| {
             [
                 dict.intern_iri(&format!("http://ex/s{}", i % 5000)),
