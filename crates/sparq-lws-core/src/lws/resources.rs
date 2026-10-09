@@ -72,9 +72,20 @@ pub(crate) fn set_aside<S: Store + 'static>(
     } else {
         return None;
     };
+    Some(retry_later(why))
+}
+
+/// `503` with a `Retry-After`, for `why`.
+fn retry_later(why: &str) -> Response {
     let mut resp = problem(StatusCode::SERVICE_UNAVAILABLE, Some(why));
     set(resp.headers_mut(), header::RETRY_AFTER, "5");
-    Some(resp)
+    resp
+}
+
+/// The answer to a request whose resource was set aside while it waited for its lock (see
+/// [`IriLocks::lock`]).
+fn set_aside_meanwhile() -> Response {
+    retry_later("a failed change to this resource is still being put back")
 }
 
 async fn handle_now<S: Store + 'static>(
@@ -526,12 +537,34 @@ fn resource_links<S: Store>(
 /// for, and holds off, a create evaluating its preconditions against that listing (which takes
 /// the container's lock exclusively). Released before the container is touched, which takes the
 /// lock again.
+///
+/// `Err` when the container was set aside meanwhile (answered `503`).
 async fn listing_guard<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
-) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-    let parent = parent_of(uri, &state.cfg.storage())?;
-    Some(state.locks.read(&parent).await)
+) -> Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>, Response> {
+    let Some(parent) = parent_of(uri, &state.cfg.storage()) else {
+        return Ok(None);
+    };
+    match state.locks.read(&parent).await {
+        Some(guard) => Ok(Some(guard)),
+        None => Err(set_aside_meanwhile()),
+    }
+}
+
+/// [`listing_guard`], exclusive: what removes a member holds its container so, so that no
+/// listing is read while the member is gone and the removal may yet be put back.
+async fn listing_lock<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+) -> Result<Option<IriGuard>, Response> {
+    let Some(parent) = parent_of(uri, &state.cfg.storage()) else {
+        return Ok(None);
+    };
+    match state.locks.lock(&parent).await {
+        Some(guard) => Ok(Some(guard)),
+        None => Err(set_aside_meanwhile()),
+    }
 }
 
 /// Record that a container's membership or a member changed.
@@ -546,21 +579,41 @@ async fn listing_guard<S: Store + 'static>(
 /// listing shared ([`listing_guard`]): a conditional create there sees no touch between its
 /// check and its create.
 async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
-    let _guard = state.locks.read(container).await;
-    let _listing = listing_guard(state, container).await;
-    let _touch = state.locks.lock(&format!("{container}\0touch")).await;
-    // Metadata that cannot be read is left as it is, not replaced by a default. Until a touch
-    // lands, the container's listing has no Last-Modified (see [`read_container`]): its own
-    // time, and its members', may all be from before the change, and an If-Modified-Since
-    // would pass on a listing that changed.
+    // Until a touch lands, the container's listing has no Last-Modified (see
+    // [`read_container`]): its own time, and its members', may all be from before the change,
+    // and an If-Modified-Since would pass on a listing that changed.
+    let landed = touch(state, container).await;
+    state.touched(container, landed);
+}
+
+/// Release `locks`, held through a change to the container's listing, and touch the container
+/// ([`touch_container`]). Its date counts as behind from before the locks go until the touch
+/// lands, so no request sees the changed listing under a date from before the change.
+async fn touch_after<S: Store + 'static, L>(state: &LwsState<S>, locks: L, container: &str) {
+    state.touching(container);
+    drop(locks);
+    touch_container(state, container).await;
+}
+
+/// Move the container's modification time and version on: whether that landed. Metadata that
+/// cannot be read is left as it is, not replaced by a default; a container set aside meanwhile
+/// is not waited on.
+async fn touch<S: Store + 'static>(state: &LwsState<S>, container: &str) -> bool {
+    let Some(_guard) = state.locks.read(container).await else {
+        return false;
+    };
+    let Ok(_listing) = listing_guard(state, container).await else {
+        return false;
+    };
+    let Some(_touch) = state.locks.lock(&format!("{container}\0touch")).await else {
+        return false;
+    };
     let Ok(mut meta) = state.resource_meta(container).await else {
-        state.untouched(container, true);
-        return;
+        return false;
     };
     meta.modified_ms = Some(now_ms());
     meta.version = Some(jose::random_id());
-    let touched = state.put_resource_meta(container, &meta).await.is_ok();
-    state.untouched(container, !touched);
+    state.put_resource_meta(container, &meta).await.is_ok()
 }
 
 fn store_error(e: ServerError) -> Response {
@@ -731,17 +784,37 @@ async fn read<S: Store + 'static>(
     }
     // The shared lock is held from the permission check through the bytes served, so what is
     // served is the state the decision was made on: every write holds the exclusive lock.
-    let _guard = state.locks.read(uri).await;
-    let meta = match current(state, uri).await {
-        Ok(m) => m,
-        Err(r) => return r,
+    let mut tries = 0;
+    let (_guard, meta) = loop {
+        let Some(guard) = state.locks.read(uri).await else {
+            return set_aside_meanwhile();
+        };
+        let meta = match current(state, uri).await {
+            Ok(m) => m,
+            Err(r) => return r,
+        };
+        if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+            return r;
+        }
+        if !uri.ends_with('/') {
+            break (guard, meta);
+        }
+        let Busy(member) = match read_container(state, req, uri, &meta, false).await {
+            Ok(listing) => return listing,
+            Err(busy) => busy,
+        };
+        // A change to a member is in flight: the listing is read again once it is over, so
+        // nothing it may yet put back is shown. Waited for without the container's lock, which
+        // the change may take after the member's.
+        drop(guard);
+        tries += 1;
+        if tries == LISTING_TRIES {
+            return retry_later("the container's members kept changing while it was listed");
+        }
+        if state.locks.read(&member).await.is_none() {
+            return set_aside_meanwhile();
+        }
     };
-    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
-        return r;
-    }
-    if uri.ends_with('/') {
-        return read_container(state, req, uri, &meta).await;
-    }
     let types = match state.resource_meta(uri).await {
         Ok(m) => m.types,
         Err(e) => return store_error(e),
@@ -923,13 +996,38 @@ async fn with_sizes<S: Store + 'static>(
     }
 }
 
+/// How many times a listing is read again when changes to its members are in flight, before it
+/// is answered `503`.
+const LISTING_TRIES: usize = 8;
+
+/// Why a container could not be listed: a change to this member is in flight.
+struct Busy(String);
+
+/// Why [`members`] could not list a container.
+enum Unlisted {
+    Store(ServerError),
+    Busy(Busy),
+}
+
+impl From<ServerError> for Unlisted {
+    fn from(e: ServerError) -> Self {
+        Unlisted::Store(e)
+    }
+}
+
 /// A container's members, sorted, with what a listing shows about each but a data resource's
 /// size (which [`with_sizes`] adds for the members shown). Each member's own entity tag stands
 /// for its content.
+///
+/// Each member is read under its shared lock, so what is listed of it is what it was before or
+/// after a change to it, never in between: a change in flight to one (its lock busy) makes the
+/// listing [`Busy`] instead, unless the caller holds the container `exclusive`ly (then no change
+/// to a member is in flight: each holds the container's lock, shared, while it runs).
 async fn members<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
-) -> Result<Vec<(Value, crate::store::sparq::ResourceMeta)>, ServerError> {
+    exclusive: bool,
+) -> Result<Vec<(Value, crate::store::sparq::ResourceMeta)>, Unlisted> {
     let mut children: Vec<String> = state
         .store
         .list_children(uri)
@@ -941,6 +1039,13 @@ async fn members<S: Store + 'static>(
     children.dedup();
     let mut out = Vec::with_capacity(children.len());
     for child in children {
+        let _member = match exclusive {
+            true => None,
+            false => match state.locks.try_read(&child) {
+                Some(guard) => Some(guard),
+                None => return Err(Unlisted::Busy(Busy(child))),
+            },
+        };
         let Some(meta) = state.store.meta(&child).await? else {
             continue;
         };
@@ -976,19 +1081,33 @@ async fn members<S: Store + 'static>(
     Ok(out)
 }
 
+/// The listing of the container `uri` ([`members`], `exclusive` as there).
 async fn read_container<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     uri: &str,
     meta: &crate::store::sparq::ResourceMeta,
-) -> Response {
+    exclusive: bool,
+) -> Result<Response, Busy> {
     let Some(media_type) = negotiate_container(req.header(header::ACCEPT)) else {
-        return problem(StatusCode::NOT_ACCEPTABLE, None);
+        return Ok(problem(StatusCode::NOT_ACCEPTABLE, None));
     };
-    let all = match members(state, uri).await {
+    let all = match members(state, uri, exclusive).await {
         Ok(m) => m,
-        Err(e) => return store_error(e),
+        Err(Unlisted::Store(e)) => return Ok(store_error(e)),
+        Err(Unlisted::Busy(busy)) => return Err(busy),
     };
+    Ok(listing(state, req, uri, meta, media_type, all).await)
+}
+
+async fn listing<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    uri: &str,
+    meta: &crate::store::sparq::ResourceMeta,
+    media_type: String,
+    all: Vec<(Value, crate::store::sparq::ResourceMeta)>,
+) -> Response {
     let cmeta = match state.resource_meta(uri).await {
         Ok(m) => m,
         Err(e) => return store_error(e),
@@ -1356,16 +1475,25 @@ async fn create<S: Store + 'static>(
     // evaluation and the create.
     let conditional = is_conditional(req);
     let parent_guard = if conditional {
-        (None, Some(state.locks.lock(parent).await))
+        match state.locks.lock(parent).await {
+            Some(guard) => (None, Some(guard)),
+            None => return set_aside_meanwhile(),
+        }
     } else {
-        (Some(state.locks.read(parent).await), None)
+        match state.locks.read(parent).await {
+            Some(guard) => (Some(guard), None),
+            None => return set_aside_meanwhile(),
+        }
     };
     if conditional {
         let meta = match current(state, parent).await {
             Ok(m) => m,
             Err(r) => return r,
         };
-        let listing = read_container(state, &plain_get(req), parent, &meta).await;
+        // Held exclusively: no change to a member is in flight.
+        let listing = read_container(state, &plain_get(req), parent, &meta, true)
+            .await
+            .unwrap_or_else(|_| set_aside_meanwhile());
         if !listing.status().is_success() {
             return listing;
         }
@@ -1481,8 +1609,7 @@ async fn create<S: Store + 'static>(
             // What follows a commit follows it whether or not the client is still there: the
             // container's bookkeeping. The locks go first (the touch takes the container's lock
             // again).
-            drop(locks);
-            touch_container(&state, &parent).await;
+            touch_after(&state, locks, &parent).await;
             Ok(created)
         })
         .await
@@ -1588,7 +1715,14 @@ async fn current<S: Store + 'static>(
 /// Limit: the locks live in this process. Several server processes over one store do not see each
 /// other's locks; that deployment needs a conditional write in the store itself.
 #[derive(Default)]
-pub struct IriLocks(std::sync::Mutex<LockMap>);
+pub struct IriLocks {
+    map: std::sync::Mutex<LockMap>,
+    /// The IRIs set aside ([`LwsState::set_aside`](super::LwsState::set_aside)), each with how
+    /// many set-aside changes are to it.
+    hidden: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
+    hid: tokio::sync::Notify,
+}
 
 /// The locks by IRI, held weakly, and how many entries the map may reach before the dropped ones
 /// are swept out.
@@ -1605,25 +1739,94 @@ impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
     /// IRI first, ties in byte order ([`lock_order`]), so a child always before its container and
     /// never the other way, and two writers cannot deadlock.
-    pub async fn lock(&self, iri: &str) -> IriGuard {
-        self.mutex(iri).write_owned().await
+    ///
+    /// Every lock is taken only while `iri` is [visible](Self::visible): `None` at once when it
+    /// is not, or as soon as it stops being while the lock is waited for (a change holding it was
+    /// set aside with its locks), so nobody waits on a lock a recovery holds; and `None` when it
+    /// was set aside by the time the lock is had.
+    pub async fn lock(&self, iri: &str) -> Option<IriGuard> {
+        self.visibly(iri, self.mutex(iri).write_owned()).await
     }
 
-    /// Wait for and take the shared lock of `iri`: a read holds it from its permission check
-    /// through the representation it serves, so no write lands in between. Readers share it; a
-    /// reader holds no other lock, so it cannot take part in a deadlock.
-    pub async fn read(&self, iri: &str) -> tokio::sync::OwnedRwLockReadGuard<()> {
-        self.mutex(iri).read_owned().await
+    /// Wait for and take the shared lock of `iri` (while it is visible, as [`IriLocks::lock`]): a
+    /// read holds it from its permission check through the representation it serves, so no
+    /// write lands in between. Readers share it; a reader holds no other lock, so it cannot take
+    /// part in a deadlock.
+    pub async fn read(&self, iri: &str) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        self.visibly(iri, self.mutex(iri).read_owned()).await
     }
 
-    /// Take the lock of `iri` if it is free, without waiting: the one way to take a lock out of
-    /// [`lock_order`], since it cannot deadlock.
+    /// Take the lock of `iri` if it is free and visible, without waiting: the one way to take a
+    /// lock out of [`lock_order`], since it cannot deadlock.
     pub fn try_lock(&self, iri: &str) -> Option<IriGuard> {
-        self.mutex(iri).try_write_owned().ok()
+        let guard = self.mutex(iri).try_write_owned().ok()?;
+        self.visible(iri).then_some(guard)
+    }
+
+    /// Take the shared lock of `iri` if no change to it is in flight and it is visible, without
+    /// waiting.
+    pub fn try_read(&self, iri: &str) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        let guard = self.mutex(iri).try_read_owned().ok()?;
+        self.visible(iri).then_some(guard)
+    }
+
+    /// Whether `iri` is not set aside.
+    pub fn visible(&self, iri: &str) -> bool {
+        !self
+            .hidden
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(iri)
+    }
+
+    /// Set `iris` aside (once more each), and wake every wait for a lock so it checks again.
+    pub(crate) fn hide(&self, iris: &[String]) {
+        {
+            let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+            for iri in iris {
+                *hidden.entry(iri.clone()).or_default() += 1;
+            }
+        }
+        self.hid.notify_waiters();
+    }
+
+    /// Undo one [`IriLocks::hide`] of `iris`: each is visible again once nothing else set it
+    /// aside.
+    pub(crate) fn show(&self, iris: &[String]) {
+        let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
+        for iri in iris {
+            if let std::collections::hash_map::Entry::Occupied(mut e) = hidden.entry(iri.clone()) {
+                *e.get_mut() -= 1;
+                if *e.get() == 0 {
+                    e.remove();
+                }
+            }
+        }
+    }
+
+    async fn visibly<G>(
+        &self,
+        iri: &str,
+        acquire: impl std::future::Future<Output = G>,
+    ) -> Option<G> {
+        tokio::pin!(acquire);
+        loop {
+            // Registered before the check, so a hide between the two still wakes it.
+            let hid = self.hid.notified();
+            tokio::pin!(hid);
+            hid.as_mut().enable();
+            if !self.visible(iri) {
+                return None;
+            }
+            tokio::select! {
+                guard = &mut acquire => return self.visible(iri).then_some(guard),
+                _ = &mut hid => {}
+            }
+        }
     }
 
     fn mutex(&self, iri: &str) -> std::sync::Arc<tokio::sync::RwLock<()>> {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self.map.lock().unwrap_or_else(|e| e.into_inner());
         let LockMap {
             locks: map,
             sweep_at,
@@ -1699,8 +1902,7 @@ where
         match writes.await {
             (out, None) => match touch(&out) {
                 Some(container) => {
-                    drop(locks);
-                    touch_container(&state, &container).await;
+                    touch_after(&state, locks, &container).await;
                     (out, None)
                 }
                 None => (out, Some(locks)),
@@ -1816,8 +2018,13 @@ async fn update<S: Store + 'static>(
     agent: &Agent,
     uri: &str,
 ) -> Response {
-    let guard = state.locks.lock(uri).await;
-    let listing = listing_guard(state, uri).await;
+    let Some(guard) = state.locks.lock(uri).await else {
+        return set_aside_meanwhile();
+    };
+    let listing = match listing_guard(state, uri).await {
+        Ok(listing) => listing,
+        Err(r) => return r,
+    };
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -1945,9 +2152,14 @@ async fn delete<S: Store + 'static>(
     // member can be created in, written to, or deleted from the subtree in between.
     let (guards, doomed) = match lock_subtree(state, uri, parent.clone()).await {
         Ok(locked) => locked,
-        Err(e) => return store_error(e),
+        Err(r) => return r,
     };
-    let listing = listing_guard(state, uri).await;
+    // The container's lock is exclusive: no listing of it is read while the members are gone
+    // and their removal may yet be put back.
+    let listing = match listing_lock(state, uri).await {
+        Ok(listing) => listing,
+        Err(r) => return r,
+    };
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -1961,7 +2173,10 @@ async fn delete<S: Store + 'static>(
             meta.last_modified.map(|t| to_secs(epoch_ms(t))),
         )
     } else if is_conditional(req) {
-        let listing = read_container(state, &plain_get(req), uri, &meta).await;
+        // The whole subtree is held: no change to a member is in flight.
+        let listing = read_container(state, &plain_get(req), uri, &meta, true)
+            .await
+            .unwrap_or_else(|_| set_aside_meanwhile());
         if !listing.status().is_success() {
             return listing;
         }
@@ -2048,7 +2263,7 @@ async fn lock_subtree<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
     parent: Option<String>,
-) -> Result<(Vec<IriGuard>, Vec<(String, Option<String>)>), ServerError> {
+) -> Result<(Vec<IriGuard>, Vec<(String, Option<String>)>), Response> {
     let sorted = |tree: &[(String, Option<String>)]| {
         let mut iris: Vec<String> = tree.iter().map(|(n, _)| n.clone()).collect();
         iris.sort_by(|a, b| lock_order(a, b));
@@ -2056,19 +2271,28 @@ async fn lock_subtree<S: Store + 'static>(
         iris
     };
     for _ in 0..8 {
-        let before = sorted(&subtree(state, uri, parent.clone()).await?);
+        let listed = subtree(state, uri, parent.clone()).await;
+        let before = sorted(&listed.map_err(store_error)?);
         let mut guards = Vec::with_capacity(before.len());
         for iri in &before {
-            guards.push(state.locks.lock(iri).await);
+            guards.push(
+                state
+                    .locks
+                    .lock(iri)
+                    .await
+                    .ok_or_else(set_aside_meanwhile)?,
+            );
         }
-        let after = subtree(state, uri, parent.clone()).await?;
+        let after = subtree(state, uri, parent.clone())
+            .await
+            .map_err(store_error)?;
         if sorted(&after) == before {
             return Ok((guards, after));
         }
     }
-    Err(ServerError::Conflict(
+    Err(store_error(ServerError::Conflict(
         "the container kept changing while it was being deleted".into(),
-    ))
+    )))
 }
 
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
@@ -2266,7 +2490,9 @@ async fn linkset<S: Store + 'static>(
     }
     // The resource's lock is taken before the permission check that counts, so the decision holds
     // for what is served.
-    let _shared = state.locks.read(uri).await;
+    let Some(_shared) = state.locks.read(uri).await else {
+        return set_aside_meanwhile();
+    };
     let exists = match state.store.exists(uri).await {
         Ok(e) => e,
         Err(e) => return store_error(e),
@@ -3600,7 +3826,9 @@ mod tests {
         let text = [("content-type", "text/plain"), ("slug", "m.txt")];
         let r = call(&st, "POST", "/", &text, "four").await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        let all = members(&st, &st.cfg.storage()).await.unwrap();
+        let Ok(all) = members(&st, &st.cfg.storage(), false).await else {
+            panic!("listed");
+        };
         let r = call(
             &st,
             "PUT",
@@ -3831,16 +4059,16 @@ mod tests {
         for i in 0..5000 {
             held.push(locks.lock(&format!("http://h/{i}")).await);
         }
-        let sweeps = locks.0.lock().unwrap().sweep_at;
+        let sweeps = locks.map.lock().unwrap().sweep_at;
         assert!(sweeps >= 2 * LOCK_SWEEP_FLOOR, "{sweeps}");
         // Between sweeps the map grows to twice what the last one left.
         for i in 5000..5100 {
             held.push(locks.lock(&format!("http://h/{i}")).await);
         }
-        assert_eq!(locks.0.lock().unwrap().sweep_at, sweeps);
+        assert_eq!(locks.map.lock().unwrap().sweep_at, sweeps);
         drop(held);
         let _ = locks.lock("http://h/x").await;
-        assert!(locks.0.lock().unwrap().locks.len() <= 5101);
+        assert!(locks.map.lock().unwrap().locks.len() <= 5101);
     }
 
     /// Review finding: a write detached from its request held no admission permit. Once the
@@ -4396,9 +4624,9 @@ mod tests {
             (at("d/e/"), Some(at("d/"))),
             (at("d/"), Some(root.clone())),
         ];
-        let (guards, _) = lock_subtree(&st, &at("d/"), Some(root.clone()))
-            .await
-            .unwrap();
+        let Ok((guards, _)) = lock_subtree(&st, &at("d/"), Some(root.clone())).await else {
+            panic!("locked");
+        };
         *store.fail_delete_of.lock().unwrap() = Some(at("d/e/z"));
         *store.fail_restore_of.lock().unwrap() = Some(at("d/x"));
         let (_, outcome, left) = remove(&st, &doomed).await;
@@ -4431,6 +4659,162 @@ mod tests {
             let r = handle(&st, &req(Method::GET, p, &[], ""), &anon).await;
             assert_eq!(r.status(), StatusCode::OK, "{p}");
         }
+    }
+
+    /// Review finding: a listing read its members without their locks, so a change in flight
+    /// (content written, its metadata not yet) showed in it, though the change might yet be put
+    /// back; and a member's removal, which held its container only shared, could be listed
+    /// as gone before it was put back. A listing reads each member under its shared lock, and
+    /// is read again once a change in flight to one is over; a removal holds its container
+    /// exclusively.
+    #[tokio::test]
+    async fn a_listing_waits_out_changes_in_flight_to_its_members() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let anon = Agent::anonymous();
+        let h = [("slug", "x"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &anon).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = format!("{}x", st.cfg.storage());
+        let list = || {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let r = req(Method::GET, "/", &[("accept", "application/lws+json")], "");
+                handle(&st, &r, &Agent::anonymous()).await
+            })
+        };
+        let held = st.locks.lock(&x).await.expect("visible");
+        let listing = list();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!listing.is_finished(), "listed during a change to a member");
+        drop(held);
+        let r = tokio::time::timeout(Duration::from_secs(1), listing)
+            .await
+            .expect("listed once the change is over")
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        // A removal in flight holds the container: the listing waits for it.
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_delete_of.lock().unwrap() = Some((x.clone(), gate.clone()));
+        let removal = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                handle(
+                    &st,
+                    &req(Method::DELETE, "/x", &[], ""),
+                    &Agent::anonymous(),
+                )
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let listing = list();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!listing.is_finished(), "listed during a removal");
+        gate.add_permits(1);
+        let r = removal.await.unwrap();
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = tokio::time::timeout(Duration::from_secs(1), listing)
+            .await
+            .expect("listed once the removal is over")
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!String::from_utf8_lossy(&body_of(r).await).contains(&x));
+    }
+
+    /// Review finding: a container's date stayed valid from when a member's removal was
+    /// released until the touch after it landed, so an If-Modified-Since from before the
+    /// removal could meet a 304 on a listing that had changed. The date counts as behind from
+    /// before the removal's locks go until the touch lands.
+    #[tokio::test]
+    async fn a_listing_has_no_date_until_the_touch_after_a_change_lands() {
+        use super::super::test_store::{request as req, state};
+        let (st, _store) = state(100).await;
+        let anon = Agent::anonymous();
+        for slug in ["a", "b"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &anon).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let root = st.cfg.storage();
+        let since = httpdate::fmt_http_date(
+            std::time::SystemTime::now() + std::time::Duration::from_secs(3600),
+        );
+        // Every touch of the root waits.
+        let touch = st.locks.lock(&format!("{root}\0touch")).await.unwrap();
+        let removal = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                handle(
+                    &st,
+                    &req(Method::DELETE, "/b", &[], ""),
+                    &Agent::anonymous(),
+                )
+                .await
+            })
+        };
+        let b = format!("{root}b");
+        for _ in 0..200 {
+            if !st.store.exists(&b).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!st.store.exists(&b).await.unwrap());
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", since.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        drop(touch);
+        assert!(removal.await.unwrap().status().is_success());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+    }
+
+    /// Review finding: visibility was checked only as a request came in, so one already
+    /// waiting on a lock when the change holding it was set aside waited on until the change
+    /// was put back. Every lock is taken only while its IRI is visible, and a wait for one
+    /// gives up as soon as it is set aside.
+    #[tokio::test]
+    async fn a_request_waiting_on_a_lock_is_answered_once_it_is_set_aside() {
+        use super::super::test_store::{request as req, state};
+        use super::super::{Undo, Unsettled};
+        let (st, store) = state(100).await;
+        let anon = Agent::anonymous();
+        let h = [("slug", "x"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &anon).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = format!("{}x", st.cfg.storage());
+        let held = st.locks.lock(&x).await.unwrap();
+        let waiting: Vec<_> = [Method::GET, Method::PUT, Method::DELETE]
+            .into_iter()
+            .map(|m| {
+                let st = st.clone();
+                tokio::spawn(async move {
+                    let h = [("content-type", "text/plain")];
+                    let r = req(m.clone(), "/x", &h, "y");
+                    (m, handle(&st, &r, &Agent::anonymous()).await.status())
+                })
+            })
+            .collect();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        *store.fail_delete_of.lock().unwrap() = Some(x.clone());
+        let undo = Undo::Restore {
+            key: x.clone(),
+            prior: None,
+        };
+        st.set_aside(Unsettled(vec![undo]), held);
+        for task in waiting {
+            let (m, status) = tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .expect("answered at once")
+                .unwrap();
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{m}");
+        }
+        *store.fail_delete_of.lock().unwrap() = None;
     }
 
     /// Review finding: a recursive delete found out it was too large to undo only after removing

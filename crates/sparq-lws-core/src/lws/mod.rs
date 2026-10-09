@@ -439,13 +439,11 @@ pub struct Inner<S: Store> {
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
     pub locks: resources::IriLocks,
-    /// The resources failed changes could not yet be put back on, each with how many such
-    /// changes are to it (see [`LwsState::set_aside`]).
-    set_aside: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
     set_aside_bytes: std::sync::atomic::AtomicUsize,
-    /// The containers whose own modification time could not be moved on after a change to them.
-    untouched: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The containers whose own modification time may be behind a change to them: each with
+    /// whether the last touch failed, and how many touches are yet to land.
+    untouched: std::sync::Mutex<std::collections::HashMap<String, (bool, usize)>>,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -488,41 +486,47 @@ impl<S: Store + 'static> LwsState<S> {
                 cfg,
                 http,
                 locks: Default::default(),
-                set_aside: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
             }),
         })
     }
 
-    /// Whether a change to the container `uri` may be later than its stored modification time.
+    /// Whether a change to the container `uri` may be later than its stored modification time:
+    /// a touch after it failed, or is yet to land.
     pub(crate) fn is_untouched(&self, uri: &str) -> bool {
         self.untouched
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .contains(uri)
+            .contains_key(uri)
     }
 
-    /// Record whether the container `uri`'s modification time is behind a change to it.
-    pub(crate) fn untouched(&self, uri: &str, behind: bool) {
-        let mut set = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
-        if behind {
-            set.insert(uri.to_string());
-        } else {
-            set.remove(uri);
+    /// Record that the container `uri`'s listing changed and a touch of it is to follow: until
+    /// it lands ([`LwsState::touched`]), the container's modification time is behind.
+    pub(crate) fn touching(&self, uri: &str) {
+        let mut map = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
+        map.entry(uri.to_string()).or_default().1 += 1;
+    }
+
+    /// Record that a touch of the container `uri` begun by [`LwsState::touching`] is over, and
+    /// whether it landed.
+    pub(crate) fn touched(&self, uri: &str, landed: bool) {
+        let mut map = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(uri.to_string()).or_default();
+        entry.0 = !landed;
+        entry.1 = entry.1.saturating_sub(1);
+        if *entry == (false, 0) {
+            map.remove(uri);
         }
     }
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
-    /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). The
-    /// one check every route makes before it reads or waits on anything of `uri`; one that is
-    /// not visible is answered `503` at once, or skipped by a walk over many.
+    /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). Every
+    /// route checks it before anything else, and every lock is taken only while it holds
+    /// ([`resources::IriLocks::lock`]), so one that is not visible is answered `503` at once, or
+    /// skipped by a walk over many, and never waited on.
     pub(crate) fn visible(&self, uri: &str) -> bool {
-        !self
-            .set_aside
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains_key(uri)
+        self.locks.visible(uri)
     }
 
     /// Whether a new change may start: not while set-aside changes hold [`MAX_SET_ASIDE_BYTES`]
@@ -554,31 +558,14 @@ impl<S: Store + 'static> LwsState<S> {
         let bytes = left.bytes();
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
-        {
-            let mut set = self.set_aside.lock().unwrap_or_else(|e| e.into_inner());
-            for iri in &iris {
-                *set.entry(iri.clone()).or_default() += 1;
-            }
-        }
+        self.locks.hide(&iris);
         let state = self.clone();
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
             }
             drop(left);
-            {
-                let mut set = state.set_aside.lock().unwrap_or_else(|e| e.into_inner());
-                for iri in &iris {
-                    if let std::collections::hash_map::Entry::Occupied(mut e) =
-                        set.entry(iri.clone())
-                    {
-                        *e.get_mut() -= 1;
-                        if *e.get() == 0 {
-                            e.remove();
-                        }
-                    }
-                }
-            }
+            state.locks.show(&iris);
             state
                 .set_aside_bytes
                 .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
