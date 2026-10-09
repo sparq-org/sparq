@@ -945,7 +945,7 @@ pub async fn handle<S: Store + 'static>(
                     let _admission = admission;
                     // Shared with other members' changes; a conditional create holds it alone.
                     let _listing = state.locks.read(&container).await;
-                    super::delete_record(&state, &iri, &container).await?;
+                    super::delete_record(&state.store, &iri, &container).await?;
                     state.access.map(grants).write().expect("lock").remove(&id);
                     state.access.bump(grants);
                     Ok::<_, ServerError>(())
@@ -1783,7 +1783,8 @@ mod tests {
 
     /// Review finding: a create that failed before it committed, whose removal and lookup failed
     /// too (a backend outage), was registered anyway: a grant in force with nothing stored. It
-    /// is never put in force: its removal is retried until the store answers.
+    /// is never put in force: after a few tries its removal is set aside, with the container,
+    /// until the store answers.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_uncertain_create_is_in_force_only_once_seen_stored() {
         use std::sync::atomic::Ordering;
@@ -1795,22 +1796,29 @@ mod tests {
             &[],
             &access_doc("AccessGrant", "https://a/", None),
         );
-        // The create fails before it lands; removing it and looking it up fail too, so it is
-        // retried, with the container held, until the store answers.
+        // The create fails before it lands; removing it and looking it up fail too, so the
+        // container is set aside until the store answers.
         *store.fail_step.lock().unwrap() = Some(0);
         store.fail_delete.store(true, Ordering::SeqCst);
         store.fail_exists.store(true, Ordering::SeqCst);
-        let pending = tokio::spawn({
-            let state = state.clone();
-            async move { handle(&state, &post, &Agent::anonymous()).await.status() }
-        });
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(!pending.is_finished());
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let container = state.cfg.absolute(GRANTS_PATH);
+        assert!(state.is_set_aside(&container));
+        let listing = test_store::request(Method::GET, GRANTS_PATH, &[], "");
+        let r = super::super::route(&state, listing).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
         assert!(state.access.grant_policies().is_empty(), "in force unseen");
         // The store recovers: the record is not there, and never comes into force.
         store.fail_delete.store(false, Ordering::SeqCst);
         store.fail_exists.store(false, Ordering::SeqCst);
-        assert_eq!(pending.await.unwrap(), StatusCode::INTERNAL_SERVER_ERROR);
+        for _ in 0..200 {
+            if !state.is_set_aside(&container) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!state.is_set_aside(&container));
         assert!(state.access.grant_policies().is_empty());
         assert!(state
             .store
@@ -1823,7 +1831,7 @@ mod tests {
     /// Review finding: a grant whose create committed but reported a failure (a remote store's
     /// lost reply), or whose client went away while it was pending, was stored but never put in
     /// force in memory: it could be neither listed nor revoked, and came into force at the next
-    /// boot. Such a record is now removed, retried until it is, and a create that was sent is
+    /// boot. Such a record is now removed (set aside until it is), and a create that was sent is
     /// registered whether or not its client is still there.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_created_grant_is_never_stored_unregistered() {
@@ -1847,22 +1855,23 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(stored().await, 0);
         assert!(state.access.grant_policies().is_empty());
-        // And when it cannot be removed yet, the create keeps the container and tries again until
-        // it can: the record is never stored out of force, nor in force once refused.
+        // And when it cannot be removed yet, the create ends (500) and the record and its
+        // container are set aside, the container held, until it can be: the record is never
+        // stored out of force, nor in force once refused.
         store.fail_delete.store(true, Ordering::SeqCst);
-        let pending = tokio::spawn({
-            let (state, req) = (state.clone(), post());
-            async move { handle(&state, &req, &Agent::anonymous()).await.status() }
-        });
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(
-            !pending.is_finished(),
-            "the create gave up with its record stored"
-        );
+        let resp = handle(&state, &post(), &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(state.is_set_aside(&container));
         assert!(state.access.grant_policies().is_empty());
         store.fail_after_create.store(false, Ordering::SeqCst);
         store.fail_delete.store(false, Ordering::SeqCst);
-        assert_eq!(pending.await.unwrap(), StatusCode::INTERNAL_SERVER_ERROR);
+        for _ in 0..200 {
+            if !state.is_set_aside(&container) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!state.is_set_aside(&container));
         assert_eq!(stored().await, 0);
         assert!(state.access.grant_policies().is_empty());
         // The client goes away while the create is pending: once it lands, the grant is in force.

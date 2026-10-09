@@ -134,6 +134,11 @@ impl Watch {
         match &self.snapshot {
             Some(s) => access::allowed_as(state, Action::Read, &self.uri, &self.agent, s).await,
             None => {
+                // A resource set aside is not read (its lock is held until it is put back): the
+                // delivery fails its check rather than wait.
+                if state.is_set_aside(&self.uri) {
+                    return false;
+                }
                 let _guard = state.locks.read(&self.uri).await;
                 state.allowed(Action::Read, &self.uri, &self.agent).await
             }
@@ -398,7 +403,7 @@ impl Notifier {
             let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
             // Shared with other members' changes; a conditional create holds it alone.
             let _listing = state.locks.read(&container).await;
-            super::delete_record(&state, &format!("{container}{id}"), &container)
+            super::delete_record(&state.store, &format!("{container}{id}"), &container)
                 .await
                 .map_err(|e| e.to_string())?;
             let me = &state.notify;

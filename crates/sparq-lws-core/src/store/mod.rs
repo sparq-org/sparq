@@ -646,9 +646,22 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 }
                 Ok(meta)
             }
-            Err(SparqError::NotFound) => Err(ServerError::NotFound),
-            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
+            Err(e) => {
+                // A restore is retried until it lands, each attempt under a fresh key: the bytes
+                // of one whose record did not land are reclaimed here, so failed attempts do not
+                // pile up in the blob store. A record that did land (a lost reply) is kept; when
+                // that cannot be told, the bytes are left to the reconciler.
+                match self.sparq.get_meta(iri).await {
+                    Ok(now) if now.blob_key == meta.blob_key => return Ok(meta),
+                    Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&meta.blob_key).await,
+                    Err(_) => {}
+                }
+                Err(match e {
+                    SparqError::NotFound => ServerError::NotFound,
+                    SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                    SparqError::Backend(e) => ServerError::Storage(e),
+                })
+            }
         }
     }
 
@@ -797,6 +810,32 @@ mod tests {
     use crate::store::sparq::InMemorySparqClient;
 
     type S = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
+
+    /// Review finding: every attempt at a restore uploaded its bytes under a fresh key, and an
+    /// attempt whose record did not land left them behind, so a restore retried against a
+    /// failing index could fill the blob store. They are reclaimed now.
+    #[tokio::test]
+    async fn a_restore_that_does_not_land_leaves_no_bytes() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let meta = ResourceMeta {
+            content_type: "text/plain".into(),
+            blob_key: String::new(),
+            etag: "\"e\"".into(),
+            last_modified: None,
+        };
+        for _ in 0..3 {
+            let r = store
+                .restore(
+                    "https://pod.example/missing/a",
+                    Some("https://pod.example/missing/"),
+                    Bytes::from_static(b"x"),
+                    &meta,
+                )
+                .await;
+            assert!(matches!(r, Err(ServerError::NotFound)), "{r:?}");
+        }
+        assert!(store.blob.list().await.unwrap().is_empty());
+    }
 
     #[test]
     fn validated_child_iri_accepts_valid_rejects_malformed() {
