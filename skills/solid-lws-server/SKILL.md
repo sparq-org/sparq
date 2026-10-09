@@ -281,7 +281,10 @@ What the server exposes, all discoverable from the storage description
   and `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
   absolute, and one that is not a URI reference gets `422`, as does a target attribute not
   shaped as RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and
-  extension attributes arrays of strings; `name*` arrays of `{value, language}`). JSON Patch paths are
+  extension attributes arrays of strings; `name*` arrays of `{value, language}`). Before anything
+  is resolved, the result is held to 256 entries, 1024 targets and 4096 bytes per anchor,
+  relation and `href`, and its worst-case resolved size to the body limit; past any of these,
+  `413`. The links the type index matches are the stored linkset's own, never resolved again. JSON Patch paths are
   RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
   (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.

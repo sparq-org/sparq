@@ -1372,15 +1372,6 @@ fn resolve_reference(base: &str, target: &str) -> Option<String> {
     )
 }
 
-/// `target` resolved against `base`, or as it is when it cannot be.
-fn resolve_against(base: &str, target: &str) -> String {
-    url::Url::parse(base)
-        .ok()
-        .and_then(|b| b.join(target).ok())
-        .map(|u| u.to_string())
-        .unwrap_or_else(|| target.to_string())
-}
-
 /// The types a representation states for the resource itself: `<> a <T>` in Turtle.
 fn content_types(uri: &str, content_type: &str, body: &[u8]) -> Result<Vec<String>, Response> {
     let mut types = Vec::new();
@@ -2847,11 +2838,13 @@ async fn patch<S: Store + 'static>(
             .linkset
             .clone()
             .or_else(|| initial_linkset(uri, &rmeta.links))
-            .map(|d| user_linkset(&d, uri))
+            .map(|d| user_linkset(&Resolved::stored(d), uri).into_value())
             .unwrap_or_else(|| json!({"linkset": []}));
+        // Link header targets were resolved by [`link_declared`].
         add_links(&mut user, uri, &links);
+        let user = Resolved::stored(user);
         rmeta.links = links_of(&user, uri);
-        rmeta.linkset = Some(user);
+        rmeta.linkset = Some(user.into_value());
         rmeta.linkset_etag = None;
         Some((rmeta, old))
     } else {
@@ -3168,32 +3161,94 @@ fn target_attribute_ok(key: &str, value: &Value) -> bool {
 enum Unresolved {
     /// An anchor or href is not a URI reference, or a target attribute is misshapen.
     Invalid,
-    /// The resolved anchors and hrefs alone would pass the budget.
+    /// The document passes a cap, or resolving it could pass the budget ([`linkset_cost`]).
     TooLarge,
+}
+
+/// How many entries a linkset document a client writes may hold.
+const MAX_LINKSET_ENTRIES: usize = 256;
+/// How many link targets, over all its entries and relations, it may hold.
+const MAX_LINKSET_TARGETS: usize = 1024;
+/// How long an anchor, a relation and an href in it may each be, in bytes.
+const MAX_LINKSET_FIELD: usize = 4096;
+/// What [`linkset_cost`] charges each entry and target beyond its strings.
+const LINKSET_OVERHEAD: usize = 64;
+
+/// The most that resolving a linkset document against a base of `base_len` bytes, and then
+/// deriving its indexed links ([`links_of`]), can allocate: every entry as if it had the
+/// longest anchor, and every target as if it had the longest href and the longest relation,
+/// each resolved against the base (a resolved reference is at most the base and the reference
+/// long). Computed from the parsed document before any of that work is done; `None` when the
+/// document passes a cap (entries, targets, or one field's length).
+fn linkset_cost(doc: &Value, base_len: usize) -> Option<usize> {
+    let entries = doc
+        .get("linkset")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice);
+    if entries.len() > MAX_LINKSET_ENTRIES || base_len > MAX_LINKSET_FIELD * 2 {
+        return None;
+    }
+    let len = |v: &Value| v.as_str().map_or(0, str::len);
+    let (mut targets, mut anchor, mut rel, mut href) = (0usize, 0usize, 0usize, 0usize);
+    for entry in entries {
+        for (k, v) in entry.as_object().into_iter().flatten() {
+            if k == "anchor" {
+                anchor = anchor.max(len(v));
+                continue;
+            }
+            rel = rel.max(k.len());
+            for t in v.as_array().into_iter().flatten() {
+                targets += 1;
+                href = href.max(t.get("href").map_or(0, len));
+            }
+        }
+    }
+    if targets > MAX_LINKSET_TARGETS || [anchor, rel, href].iter().any(|&n| n > MAX_LINKSET_FIELD) {
+        return None;
+    }
+    let entry = LINKSET_OVERHEAD + base_len + anchor;
+    let target = LINKSET_OVERHEAD + base_len + href + rel;
+    Some(entries.len() * entry + targets * target)
+}
+
+/// A linkset document whose every `anchor` and `href` is absolute: made by [`absolute_linkset`]
+/// from what a client wrote, or taken from what the server stored or built itself
+/// ([`Resolved::stored`]). Its links are used as they are and never resolved again
+/// ([`links_of`]).
+#[derive(Clone, Debug, PartialEq)]
+struct Resolved(Value);
+
+impl Resolved {
+    /// A linkset the server stored or built: what a client wrote was resolved by
+    /// [`absolute_linkset`] before it was stored, and Link header targets by
+    /// [`link_declared`], so every link in it is absolute.
+    fn stored(doc: Value) -> Self {
+        Self(doc)
+    }
+
+    fn into_value(self) -> Value {
+        self.0
+    }
 }
 
 /// A linkset document with every `anchor` and `href` resolved against `base`, the linkset's own
 /// URI (RFC 9264 section 4: the context of relative references in a linkset is the resource that
 /// delivers it, not the resource it describes). [`Unresolved::Invalid`] when one is not a URI
 /// reference (RFC 3986), or a target attribute has not the shape RFC 9264 gives it
-/// ([`target_attribute_ok`]), which the document may not hold. Resolving can make a short
-/// reference as long as `base` (an empty `href` is the base itself), so the resolved anchors and
-/// hrefs are charged against `budget` as each is made, and [`Unresolved::TooLarge`] is returned
-/// as soon as they pass it: a document whose links alone pass it would be too large to keep, and
-/// it is never built.
-fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Value, Unresolved> {
+/// ([`target_attribute_ok`]), which the document may not hold. Before anything is resolved, the
+/// document is held to the caps and its [`linkset_cost`] to `budget`: past either it is
+/// [`Unresolved::TooLarge`], and nothing is built.
+fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Resolved, Unresolved> {
     use Unresolved::Invalid;
+    if linkset_cost(doc, base.len()).is_none_or(|cost| cost > budget) {
+        return Err(Unresolved::TooLarge);
+    }
     let base = oxiri::Iri::parse(base).map_err(|_| Invalid)?;
-    let mut left = budget;
-    let mut resolve = |v: &Value| -> Result<Value, Unresolved> {
+    let resolve = |v: &Value| -> Result<Value, Unresolved> {
         let resolved = base
             .resolve(v.as_str().ok_or(Invalid)?)
-            .map_err(|_| Invalid)?
-            .into_inner();
-        left = left
-            .checked_sub(resolved.len())
-            .ok_or(Unresolved::TooLarge)?;
-        Ok(Value::String(resolved))
+            .map_err(|_| Invalid)?;
+        Ok(Value::String(resolved.into_inner()))
     };
     let mut entries = Vec::new();
     for entry in doc
@@ -3223,14 +3278,15 @@ fn absolute_linkset(doc: &Value, base: &str, budget: usize) -> Result<Value, Unr
         }
         entries.push(Value::Object(out));
     }
-    Ok(json!({"linkset": entries}))
+    Ok(Resolved(json!({"linkset": entries})))
 }
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
 /// entries about `uri`. A client cannot write those relations; whatever a patch puts there is
 /// ignored and the server's own values stand.
-fn user_linkset(doc: &Value, uri: &str) -> Value {
+fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
     let entries = doc
+        .0
         .get("linkset")
         .and_then(Value::as_array)
         .cloned()
@@ -3249,16 +3305,20 @@ fn user_linkset(doc: &Value, uri: &str) -> Value {
             Some(e)
         })
         .collect();
-    json!({"linkset": kept})
+    Resolved(json!({"linkset": kept}))
 }
 
-/// The user-managed links a linkset document holds about `uri`, by relation, resolved: what the
-/// type index matches relations against, kept equal to the document.
-fn links_of(doc: &Value, uri: &str) -> Links {
+/// The user-managed links a linkset document holds about `uri`, by relation: what the type
+/// index matches relations against, kept equal to the document. Its links are absolute already
+/// ([`Resolved`]) and are taken as they are. Repeats are found per relation, borrowing the
+/// document's own strings, so a relation is copied once for each entry it is in and an href
+/// once.
+fn links_of(doc: &Resolved, uri: &str) -> Links {
     let mut links = Links::new();
-    // Repeats are found with a set, as in [`link_declared`].
-    let mut seen = std::collections::HashSet::new();
+    let mut seen: std::collections::HashMap<String, std::collections::HashSet<&str>> =
+        Default::default();
     for entry in doc
+        .0
         .get("linkset")
         .and_then(Value::as_array)
         .into_iter()
@@ -3270,19 +3330,21 @@ fn links_of(doc: &Value, uri: &str) -> Links {
             if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&key.as_str()) {
                 continue;
             }
+            let seen = seen.entry(key.clone()).or_default();
+            let out = links.entry(key).or_default();
             for href in targets
                 .as_array()
                 .into_iter()
                 .flatten()
                 .filter_map(|t| t.get("href").and_then(Value::as_str))
             {
-                let resolved = resolve_against(uri, href);
-                if seen.insert((key.clone(), resolved.clone())) {
-                    links.entry(key.clone()).or_default().push(resolved);
+                if seen.insert(href) {
+                    out.push(href.to_string());
                 }
             }
         }
     }
+    links.retain(|_, hrefs| !hrefs.is_empty());
     links
 }
 
@@ -3358,7 +3420,7 @@ async fn linkset_document<S: Store + 'static>(
         .linkset
         .clone()
         .or_else(|| initial_linkset(uri, &meta.links))
-        .map(|d| user_linkset(&d, uri))
+        .map(|d| user_linkset(&Resolved::stored(d), uri).into_value())
         .unwrap_or_else(|| json!({"linkset": []}));
     let mut entries = user["linkset"].as_array().cloned().unwrap_or_default();
     match entries.iter().position(|e| anchored_at(e, uri)) {
@@ -3504,7 +3566,7 @@ async fn linkset<S: Store + 'static>(
             // it, so the two never drift apart.
             let user = user_linkset(&patched, uri);
             meta.links = links_of(&user, uri);
-            meta.linkset = Some(user);
+            meta.linkset = Some(user.into_value());
             meta.linkset_etag = None;
             // The size is checked on the document as it will be served: the server-managed links
             // (`up`, `type`, `self`) a patch may strip are put back, and they count too.
@@ -4142,7 +4204,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            user_linkset(&doc, "http://h/a"),
+            user_linkset(&doc, "http://h/a").into_value(),
             json!({"linkset": [
                 {"anchor": "http://h/a", "license": [{"href": "http://h/l"}]},
                 {"anchor": "http://h/b", "up": [{"href": "http://h/z"}]},
@@ -5712,50 +5774,121 @@ mod tests {
         assert!(served.len() <= 64 << 10, "{}", served.len());
     }
 
-    /// Review finding: relative references were resolved with no bound, and the size checked
-    /// only on the rebuilt document, so a patch of many empty `href`s under a long name (each
-    /// one resolving to the whole linkset URI) allocated far more than the body limit first.
-    /// What resolving makes is charged as it is made, and a patch past the bound is refused.
-    #[tokio::test]
-    async fn resolving_a_linksets_references_is_bounded() {
-        let mut cfg = super::super::LwsConfig::new(BASE);
-        cfg.open = true;
-        cfg.max_body = 64 << 10;
-        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
-        let st = LwsState::new(store, cfg).await.expect("state");
-        let name = "n".repeat(200);
-        let text = ("content-type", "text/plain");
-        let r = call(&st, "POST", "/", &[text, ("slug", &name)], "x").await;
-        assert_eq!(r.status(), StatusCode::CREATED);
-        let at = r.headers()[header::LOCATION].to_str().unwrap().to_string();
-        assert!(at.len() > 100, "{at}");
-        let empties = |n: usize| {
-            json!({"linkset": [{
-                "anchor": at.clone(),
-                "https://e.example/rel": vec![json!({"href": ""}); n],
-            }]})
+    /// Review findings: relative references were resolved with no bound, the size checked only
+    /// on the rebuilt document, and the indexed links copied a relation for every target: a patch
+    /// of many short references under a long name, or of many targets under one long relation,
+    /// allocated far more than the body limit first. A document a client writes is held to caps
+    /// on entries, targets and each field, and its worst case to the budget, before anything is
+    /// resolved.
+    #[test]
+    fn a_linkset_is_measured_before_it_is_resolved() {
+        let base = "http://h/r.meta";
+        let doc = |entries: usize, targets: usize, rel: &str, href: &str| {
+            let entry = |i: usize| {
+                let mut e = Map::new();
+                e.insert("anchor".into(), json!(format!("http://h/{i}")));
+                e.insert(rel.into(), json!(vec![json!({"href": href}); targets]));
+                Value::Object(e)
+            };
+            json!({"linkset": (0..entries).map(entry).collect::<Vec<_>>()})
         };
-        let base = format!("{at}.meta");
-        // Refused as soon as the resolved references pass the bound, before the rest is made.
+        let ok = |d: &Value| absolute_linkset(d, base, usize::MAX).is_ok();
+        let large = |d: &Value| absolute_linkset(d, base, usize::MAX) == Err(Unresolved::TooLarge);
+        // Entries.
+        assert!(ok(&doc(MAX_LINKSET_ENTRIES, 1, "license", "x")));
+        assert!(large(&doc(MAX_LINKSET_ENTRIES + 1, 1, "license", "x")));
+        // Targets, over every entry.
+        let per = MAX_LINKSET_TARGETS / 4;
+        assert!(ok(&doc(4, per, "license", "x")));
+        let mut over = doc(4, per, "license", "x");
+        over["linkset"][0]["license"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"href": "y"}));
+        assert!(large(&over));
+        // Each field.
+        let at = "r".repeat(MAX_LINKSET_FIELD);
+        let past = "r".repeat(MAX_LINKSET_FIELD + 1);
+        assert!(ok(&doc(1, 1, &format!("x:{}", &at[2..]), "x")));
+        assert!(large(&doc(1, 1, &format!("x:{}", &past[2..]), "x")));
+        assert!(ok(&doc(1, 1, "license", &at)));
+        assert!(large(&doc(1, 1, "license", &past)));
+        let mut anchored = doc(1, 1, "license", "x");
+        anchored["linkset"][0]["anchor"] = json!(format!("http://h/{}", &at[9..]));
+        assert!(ok(&anchored));
+        anchored["linkset"][0]["anchor"] = json!(format!("http://h/{}", &past[9..]));
+        assert!(large(&anchored));
+        // The worst case against the budget: at it, and one byte short of it.
+        let d = doc(4, 8, "license", "x");
+        let cost = linkset_cost(&d, base.len()).unwrap();
+        assert!(absolute_linkset(&d, base, cost).is_ok());
         assert_eq!(
-            absolute_linkset(&empties(4000), &base, 64 << 10),
+            absolute_linkset(&d, base, cost - 1),
             Err(Unresolved::TooLarge)
         );
-        assert!(absolute_linkset(&empties(4000), &base, usize::MAX).is_ok());
-        // Exactly at the bound is fine; one byte under it is not.
-        let exact = at.len() + 4000 * base.len();
-        assert!(absolute_linkset(&empties(4000), &base, exact).is_ok());
+        // One long relation over many targets: every target is charged the relation, so the
+        // copies the indexed links could make are within the budget, or it is refused.
+        let rel = format!("x:{}", "k".repeat(MAX_LINKSET_FIELD - 2));
+        let hrefs: Vec<Value> = (0..MAX_LINKSET_TARGETS)
+            .map(|i| json!({"href": format!("x:{i:05}")}))
+            .collect();
+        let many = json!({"linkset": [{"anchor": "http://h/r", rel.clone(): hrefs}]});
+        let cost = linkset_cost(&many, base.len()).unwrap();
+        assert!(cost >= MAX_LINKSET_TARGETS * rel.len());
         assert_eq!(
-            absolute_linkset(&empties(4000), &base, exact - 1),
+            absolute_linkset(&many, base, PATCH_BUDGET.min(cost - 1)),
             Err(Unresolved::TooLarge)
         );
+        let resolved = absolute_linkset(&many, base, cost).unwrap();
+        let links = links_of(&resolved, "http://h/r");
+        assert_eq!(links[&rel].len(), MAX_LINKSET_TARGETS);
+    }
+
+    /// Review finding: the indexed links resolved a linkset's references again, with other
+    /// rules than the linkset's own, so a stored link could name another target than the
+    /// served one. They are taken as resolved.
+    #[test]
+    fn indexed_links_are_the_linksets_own() {
+        let doc = json!({"linkset": [{"anchor": "https://example.test/d", "license": [
+            {"href": "https:foo"}, {"href": "https:foo"}, {"href": "/l"},
+        ]}]});
+        let resolved = absolute_linkset(&doc, "https://example.test/d.meta", usize::MAX).unwrap();
+        let served: Vec<&str> = resolved.0["linkset"][0]["license"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["href"].as_str().unwrap())
+            .collect();
+        let links = links_of(&resolved, "https://example.test/d");
+        let mut once = served.clone();
+        once.dedup();
+        assert_eq!(links["license"], once);
+    }
+
+    /// A PATCH past the caps is refused with 413, with a body under the limit.
+    #[tokio::test]
+    async fn a_linkset_patch_past_the_caps_is_refused() {
+        let st = state().await;
+        let uri = post(&st, "doc", "text/plain", "x", &[]).await;
+        let path = format!("{}{META_SUFFIX}", path_of(&uri));
         let patch = ("content-type", "application/merge-patch+json");
-        let path = format!("{}.meta", at.strip_prefix(BASE).unwrap());
-        let body = empties(4000).to_string();
-        assert!(body.len() < 64 << 10);
-        let r = call(&st, "PATCH", &path, &[patch], &body).await;
+        let targets = |n: usize| {
+            json!({"linkset": [{
+                "anchor": uri,
+                "license": (0..n).map(|i| json!({"href": format!("x:{i}")})).collect::<Vec<_>>(),
+            }]})
+            .to_string()
+        };
+        let r = call(
+            &st,
+            "PATCH",
+            &path,
+            &[patch],
+            &targets(MAX_LINKSET_TARGETS + 1),
+        )
+        .await;
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        let r = call(&st, "PATCH", &path, &[patch], &empties(2).to_string()).await;
+        let r = call(&st, "PATCH", &path, &[patch], &targets(MAX_LINKSET_TARGETS)).await;
         assert!(r.status().is_success(), "{}", r.status());
     }
 
