@@ -632,6 +632,8 @@ let materialized: Vec<[u64; 3]> = g.closure();   // feed back into Graph::from_p
 ```
 
 > Note: an `insert`/`delete` touching a **TBox** triple (`subClassOf`/`subPropertyOf`/`domain`/`range`, and the OWL schema predicates) triggers a full rematerialize — watch `g.full_rebuilds()`. Keep ABox edits and schema edits separate when you care about incremental cost.
+>
+> A **meta** schema — an RDFS schema property (`rdf:type`, `subClassOf`, `subPropertyOf`, `domain`, `range`) is itself a sub-property or has a domain/range — needs a true fixpoint (#5090). `materialize_rdfs` and `MaterializedGraph` then run a semi-naive evaluation whose hierarchy rules step along raw schema edges, so the closure is complete and `why()` still explains every derived fact. In that mode every `insert` (TBox included) is incremental and every `delete` is a full rebuild.
 
 **4. Incremental N3 with a fallback check.** Term-level facts; verify you actually got the fast path.
 

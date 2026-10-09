@@ -41,6 +41,13 @@
 //! TBox closure + re-sweep of affected predicates/classes only) is a follow-up, as is wiring
 //! this into the T17 store overlay.
 //!
+//! **Meta schemas** (#5090) — an RDFS schema property that is a sub-property target/source or
+//! carries a domain/range, detected by the same `crate::rdfs::schema_is_meta` predicate the batch
+//! closure uses — break the one-step argument: derived facts feed back into the schema. Then the
+//! closure is kept by the semi-naive `crate::rdfs::meta::MetaClosure` (the same engine the batch
+//! closure uses for meta schemas): an insert adds only its consequences; a delete rebuilds it
+//! (linear in the fixpoint's joins). Ordinary schemas keep exact counting.
+//!
 //! # Semantics
 //!
 //! * `insert`/`delete` operate on the **base** (explicitly asserted) triples with set
@@ -52,7 +59,10 @@
 //!   their support exists (standard materialized-view semantics).
 
 use crate::owl::{Owl, XSD_HIERARCHY};
-use crate::rdfs::{close_dr, for_each_reachable, prop_orientation_closure, sweep, transitive_closure};
+use crate::rdfs::{
+    close_dr, for_each_reachable, prop_orientation_closure, schema_is_meta, sweep,
+    transitive_closure, MonoOwl,
+};
 use crate::Vocab;
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
@@ -65,6 +75,8 @@ use sparq_core::dict::{Dict, Id};
 mod incremental_explain;
 #[cfg(feature = "explain")]
 use incremental_explain::{OwlExplain, RdfsExplain};
+
+use crate::rdfs::meta::MetaClosure;
 
 const OWL_NS: &str = "http://www.w3.org/2002/07/owl#";
 const XSD_NS: &str = "http://www.w3.org/2001/XMLSchema#";
@@ -95,6 +107,11 @@ pub struct MaterializedGraph {
     sp_closure: FxHashMap<Id, Vec<Id>>,
     dom_full: FxHashMap<Id, Vec<Id>>,
     rng_full: FxHashMap<Id, Vec<Id>>,
+    /// `Some` when the base's schema is meta (`crate::rdfs::schema_is_meta`): derived facts
+    /// feed back into the schema, so the one-step counting argument fails. The closure is then
+    /// maintained by a semi-naive fixpoint (`counts` mirrors its derived facts, each at 1):
+    /// inserts extend it by their consequences only; deletes rebuild it.
+    meta: Option<Box<MetaClosure>>,
     /// How many times the v1 full-rematerialization fallback ran (TBox mutations). The initial
     /// materialization in [`new`](Self::new) is not counted. Exposed for tests/telemetry.
     rebuilds: usize,
@@ -121,6 +138,7 @@ impl MaterializedGraph {
             sp_closure: FxHashMap::default(),
             dom_full: FxHashMap::default(),
             rng_full: FxHashMap::default(),
+            meta: None,
             rebuilds: 0,
             #[cfg(feature = "explain")]
             explain: RdfsExplain::default(),
@@ -138,7 +156,9 @@ impl MaterializedGraph {
     /// Full re-materialization from the current base: recompute the TBox closures, re-sweep
     /// every base triple, and rebuild all derivation counts. Mirrors
     /// `crate::rdfs::rdfs_closure(.., emit_dr_closure = false, MonoOwl::default())` exactly,
-    /// except emissions are *counted* instead of deduplicated away.
+    /// except emissions are *counted* instead of deduplicated away. For a meta schema (where
+    /// the batch closure iterates rounds, #5090) the derived set comes from a semi-naive
+    /// [`MetaClosure`] instead.
     fn rematerialize(&mut self) {
         self.rebuilds += 1;
         let v = &self.v;
@@ -163,6 +183,23 @@ impl MaterializedGraph {
         self.sp_closure = transitive_closure(&sp);
         self.dom_full = close_dr(&dom, &self.sp_closure, &self.sc_closure);
         self.rng_full = close_dr(&rng, &self.sp_closure, &self.sc_closure);
+        if schema_is_meta(v, &self.sp_closure, &dom, &rng, &MonoOwl::default()) {
+            let mc = MetaClosure::build(&self.base, v);
+            self.counts = mc
+                .facts
+                .iter()
+                .filter(|t| !self.base.contains(*t))
+                .map(|&t| (t, 1))
+                .collect();
+            self.meta = Some(Box::new(mc));
+            // TBox-closure facts of the ASSERTED edges: `why()` keeps proving these as rdfs11 /
+            // rdfs5 chains over asserted edges; everything else uses the fixpoint provenance.
+            self.fill_schema_facts();
+            #[cfg(feature = "explain")]
+            self.explain.rebuild(&self.base, sc, sp, dom, rng);
+            return;
+        }
+        self.meta = None;
         // 3. Sweep every base triple against the closed TBox, counting emissions.
         let asserted: Vec<[Id; 3]> = self.base.iter().copied().collect();
         let emitted = sweep(
@@ -179,6 +216,13 @@ impl MaterializedGraph {
             *self.counts.entry(t).or_insert(0) += 1;
         }
         // 4. TBox-closure facts (rdfs11 / rdfs5), maintained as a set of their own.
+        self.fill_schema_facts();
+        #[cfg(feature = "explain")]
+        self.explain.rebuild(&self.base, sc, sp, dom, rng);
+    }
+
+    fn fill_schema_facts(&mut self) {
+        let v = &self.v;
         self.schema_facts.clear();
         for (&c, ds) in &self.sc_closure {
             self.schema_facts.extend(ds.iter().map(|&d| [c, v.sub_class, d]));
@@ -186,8 +230,6 @@ impl MaterializedGraph {
         for (&p, qs) in &self.sp_closure {
             self.schema_facts.extend(qs.iter().map(|&q| [p, v.sub_prop, q]));
         }
-        #[cfg(feature = "explain")]
-        self.explain.rebuild(&self.base, sc, sp, dom, rng);
     }
 
     /// All one-step consequences (the exact emission multiset) of `triples` against the
@@ -222,6 +264,21 @@ impl MaterializedGraph {
         if added.is_empty() {
             return 0;
         }
+        // Meta mode: inserts are monotone, so the semi-naive fixpoint just absorbs them (a meta
+        // schema stays meta under inserts).
+        if let Some(mc) = self.meta.as_mut() {
+            for t in mc.insert(&added, &self.v) {
+                if !self.base.contains(&t) {
+                    self.counts.insert(t, 1);
+                }
+            }
+            for t in &added {
+                self.counts.remove(t);
+            }
+            #[cfg(feature = "explain")]
+            self.explain.add_triples(&added);
+            return added.len();
+        }
         if tbox {
             self.rematerialize();
             return added.len();
@@ -253,7 +310,9 @@ impl MaterializedGraph {
         if removed.is_empty() {
             return 0;
         }
-        if tbox {
+        // Meta mode: a delete can retract fixpoint facts, so the closure is rebuilt (linear
+        // transitivity keeps that proportional to the closure's joins, not cubic).
+        if tbox || self.meta.is_some() {
             self.rematerialize();
             return removed.len();
         }
@@ -2744,6 +2803,200 @@ mod tests {
             [a, hp, b],
         ];
         (v, base)
+    }
+
+    /// Every closure triple that is not asserted has a `why()` whose every node is either an
+    /// asserted base triple or a valid single application of rdfs2/3/5/7/9/11 to its two
+    /// premises, and whose root is the triple asked about.
+    #[cfg(feature = "explain")]
+    fn assert_whys_valid(g: &MaterializedGraph, dict: &Dict, base: &FxHashSet<[Id; 3]>) {
+        use crate::explain::id_triple_strings;
+        let vv = vocab(&mut dict.clone());
+        let [ty, sc, sp] = id_triple_strings(dict, [vv.ty, vv.sc, vv.sp]);
+        let [dom, rng, _] = id_triple_strings(dict, [vv.dom, vv.rng, vv.ty]);
+        let base_s: FxHashSet<[String; 3]> =
+            base.iter().map(|&t| id_triple_strings(dict, t)).collect();
+        let valid = |rule: &str, c: &[String; 3], x: &[String; 3], y: &[String; 3]| -> bool {
+            let one = |a: &[String; 3], b: &[String; 3]| match rule {
+                "rdfs11" | "rdfs5" => {
+                    let r = if rule == "rdfs11" { &sc } else { &sp };
+                    &a[1] == r
+                        && &b[1] == r
+                        && a[2] == b[0]
+                        && c == &[a[0].clone(), r.clone(), b[2].clone()]
+                }
+                "rdfs9" => {
+                    a[1] == sc
+                        && b[1] == ty
+                        && b[2] == a[0]
+                        && c == &[b[0].clone(), ty.clone(), a[2].clone()]
+                }
+                "rdfs7" => {
+                    a[1] == sp && b[1] == a[0] && c == &[b[0].clone(), a[2].clone(), b[2].clone()]
+                }
+                "rdfs2" => {
+                    a[1] == dom && b[1] == a[0] && c == &[b[0].clone(), ty.clone(), a[2].clone()]
+                }
+                "rdfs3" => {
+                    a[1] == rng && b[1] == a[0] && c == &[b[2].clone(), ty.clone(), a[2].clone()]
+                }
+                _ => false,
+            };
+            one(x, y) || one(y, x)
+        };
+        for t in g.closure() {
+            if base.contains(&t) {
+                continue;
+            }
+            let proof = g
+                .why(dict, t)
+                .unwrap_or_else(|| panic!("no why() for {:?}", id_triple_strings(dict, t)));
+            assert_eq!(proof.conclusion(), &id_triple_strings(dict, t));
+            for n in proof.nodes() {
+                if n.rule == "asserted" {
+                    assert!(
+                        base_s.contains(&n.conclusion),
+                        "asserted leaf not in base: {:?}",
+                        n.conclusion
+                    );
+                } else {
+                    assert_eq!(n.premises.len(), 2, "{} node {:?}", n.rule, n.conclusion);
+                    let (x, y) = (
+                        &proof.nodes()[n.premises[0] as usize],
+                        &proof.nodes()[n.premises[1] as usize],
+                    );
+                    assert!(
+                        valid(&n.rule, &n.conclusion, &x.conclusion, &y.conclusion),
+                        "invalid {} step {:?} from {:?}, {:?}",
+                        n.rule,
+                        n.conclusion,
+                        x.conclusion,
+                        y.conclusion
+                    );
+                }
+            }
+        }
+    }
+
+    fn check_step(g: &MaterializedGraph, dict: &mut Dict, base: &FxHashSet<[Id; 3]>) {
+        assert_matches_oracle(g, dict, base);
+        #[cfg(feature = "explain")]
+        assert_whys_valid(g, dict, base);
+    }
+
+    /// #5090 meta schemas (a schema property with a domain, or a sub-property of a schema
+    /// property): construction, every single-triple delete and re-insert, and an insert-only
+    /// build-up must all equal the batch closure, including across meta/non-meta transitions,
+    /// and (with `explain`) every derived triple keeps a valid `why()`.
+    #[test]
+    fn meta_schema_insert_delete_match_batch() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let mut e = |l: &str| ex(&mut dict, l);
+        let (thing, x, c, d, a, b, cc) =
+            (e("Thing"), e("x"), e("C"), e("D"), e("A"), e("B"), e("CC"));
+        let (sub, kind, spo, p, q, s_, o_) = (
+            e("sub"),
+            e("kind"),
+            e("spo"),
+            e("p"),
+            e("q"),
+            e("s"),
+            e("o"),
+        );
+        let cases: Vec<Vec<[Id; 3]>> = vec![
+            vec![[v.ty, v.dom, thing], [x, v.ty, c]],
+            vec![[sub, v.sp, v.sc], [a, sub, b], [b, v.sc, cc], [x, v.ty, a]],
+            vec![[kind, v.sp, v.ty], [x, kind, c], [c, v.sc, d]],
+            vec![[v.ty, v.dom, thing], [x, v.ty, c], [c, v.sc, d]],
+            vec![[spo, v.sp, v.sp], [p, spo, q], [s_, p, o_]],
+            // Review example: an ordinary two-edge rdfs11 proof must survive meta mode.
+            vec![[a, v.sc, b], [b, v.sc, cc], [v.ty, v.dom, thing]],
+        ];
+        for base in cases {
+            let full: FxHashSet<[Id; 3]> = base.iter().copied().collect();
+            let mut g = MaterializedGraph::new(&mut dict, &base);
+            check_step(&g, &mut dict, &full);
+            for &t in &base {
+                let mut rest = full.clone();
+                rest.remove(&t);
+                assert_eq!(g.delete(&[t]), 1);
+                check_step(&g, &mut dict, &rest);
+                assert_eq!(g.insert(&[t]), 1);
+                check_step(&g, &mut dict, &full);
+            }
+            let mut g = MaterializedGraph::new(&mut dict, &[]);
+            let mut sofar: FxHashSet<[Id; 3]> = FxHashSet::default();
+            for &t in base.iter().rev() {
+                g.insert(&[t]);
+                sofar.insert(t);
+                check_step(&g, &mut dict, &sofar);
+            }
+        }
+    }
+
+    /// Randomized differential: small graphs over a vocabulary that includes the RDFS schema
+    /// properties in every position (so most are meta). The incremental graph, built and then
+    /// grown triple by triple, must equal the batch closure at every step.
+    #[test]
+    fn meta_schema_random_differential() {
+        let mut dict = Dict::new();
+        let v = vocab(&mut dict);
+        let mut terms: Vec<Id> = vec![v.ty, v.sc, v.sp, v.dom, v.rng];
+        for i in 0..6 {
+            terms.push(ex(&mut dict, &format!("n{i}")));
+        }
+        let mut seed: u64 = 0x5090;
+        let mut next = |n: usize| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((seed >> 33) as usize) % n
+        };
+        for _ in 0..400 {
+            let len = 4 + next(10);
+            let triples: Vec<[Id; 3]> = (0..len)
+                .map(|_| {
+                    [
+                        terms[next(terms.len())],
+                        terms[next(terms.len())],
+                        terms[next(terms.len())],
+                    ]
+                })
+                .collect();
+            // The batch closure itself agrees with a rule-by-rule semi-naive evaluation.
+            let all: FxHashSet<[Id; 3]> = triples.iter().copied().collect();
+            let vv = crate::Vocab::intern(&mut dict);
+            let mut idx = crate::RdfsIndex::default();
+            let mut seen = all.clone();
+            let mut work: Vec<[Id; 3]> = seen.iter().copied().collect();
+            let mut out = Vec::new();
+            while let Some(t) = work.pop() {
+                idx.insert(t, &vv);
+                out.clear();
+                idx.derive(t, &vv, &mut out);
+                work.extend(out.drain(..).filter(|&d| seen.insert(d)));
+            }
+            assert_eq!(
+                oracle(&mut dict, &all),
+                seen,
+                "batch closure != rule-by-rule fixpoint"
+            );
+            let (head, tail) = triples.split_at(len / 2);
+            let mut g = MaterializedGraph::new(&mut dict, head);
+            let mut sofar: FxHashSet<[Id; 3]> = head.iter().copied().collect();
+            check_step(&g, &mut dict, &sofar);
+            for &t in tail {
+                g.insert(&[t]);
+                sofar.insert(t);
+                check_step(&g, &mut dict, &sofar);
+            }
+            if let Some(&t) = head.first() {
+                g.delete(&[t]);
+                sofar.remove(&t);
+                check_step(&g, &mut dict, &sofar);
+            }
+        }
     }
 
     #[test]
