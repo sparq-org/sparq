@@ -23,6 +23,7 @@
 
 pub mod access;
 pub mod authz_server;
+mod intents;
 pub mod jose;
 pub mod resources;
 pub mod subject_tokens;
@@ -446,6 +447,9 @@ pub struct Inner<S: Store> {
     /// The containers whose own modification time may be behind a change to them: each with
     /// whether the last touch failed, and how many touches are yet to land.
     untouched: std::sync::Mutex<std::collections::HashMap<String, (bool, usize)>>,
+    /// The intents of kept changes that wait on a touch of each container (see
+    /// [`LwsState::owe_touch`]).
+    owed_touches: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -468,7 +472,8 @@ impl<S: Store + 'static> LwsState<S> {
         Journal::new(self, limit)
     }
 
-    /// Build the state: ensure the storage root exists.
+    /// Build the state: ensure the storage root exists, and put back any change a process stop
+    /// cut short (see the `intents` module).
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
@@ -482,7 +487,7 @@ impl<S: Store + 'static> LwsState<S> {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
         }
-        Ok(Self {
+        let state = Self {
             inner: Arc::new(Inner {
                 store: tracked::Tracked::new(store, cfg.storage()),
                 cfg,
@@ -490,8 +495,12 @@ impl<S: Store + 'static> LwsState<S> {
                 locks: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
+                owed_touches: Default::default(),
             }),
-        })
+        };
+        // Changes a process stop cut short are put back before anything is served.
+        intents::recover(&state).await?;
+        Ok(state)
     }
 
     /// Whether a change to the container `uri` may be later than its stored modification time:
@@ -501,6 +510,27 @@ impl<S: Store + 'static> LwsState<S> {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains_key(uri)
+    }
+
+    /// Record that the intent `record` of a kept change is to be cleared once the container
+    /// `uri` is next touched: a stop before then leaves it, and the next start touches the
+    /// container (see the `intents` module).
+    pub(crate) fn owe_touch(&self, uri: &str, record: String) {
+        self.owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(uri.to_string())
+            .or_default()
+            .push(record);
+    }
+
+    /// The intents waiting on a touch of `uri` (see [`LwsState::owe_touch`]), taken.
+    pub(crate) fn take_owed_touches(&self, uri: &str) -> Vec<String> {
+        self.owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(uri)
+            .unwrap_or_default()
     }
 
     /// Record that the container `uri`'s listing changed and a touch of it is to follow: until
@@ -562,8 +592,28 @@ impl<S: Store + 'static> LwsState<S> {
     /// them meanwhile; the change's listing locks among them) and no request's admission slot,
     /// keeps putting the change back, waiting longer between tries (up to [`UNDO_MAX_WAIT`]).
     /// Once it is back the locks go, and each resource is visible again once no other
-    /// set-aside change is to it.
+    /// set-aside change is to it. Then the containers whose touch waited on it are touched
+    /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
+    /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let hidden = self.hide(&left);
+        self.settle_aside(left, hidden, locks);
+    }
+
+    /// Set aside each of `all` ([`LwsState::set_aside`]), every one's resources hidden before
+    /// any is put back: a change settled early touches the containers owed a touch that are
+    /// visible ([`LwsState::touch_owed`]), and must not touch one that a later change in `all`
+    /// would then restore to a date from before the touch.
+    pub(crate) fn set_aside_all(&self, all: Vec<Unsettled>) {
+        let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
+        for (left, hidden) in all.into_iter().zip(hidden) {
+            self.settle_aside(left, hidden, ());
+        }
+    }
+
+    /// Hide the resources of `left` and the containers listing them, and count what it holds to
+    /// put back: what [`LwsState::settle_aside`] undoes once it is back.
+    fn hide(&self, left: &Unsettled) -> (Vec<String>, usize) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
         let parents: Vec<String> = iris
@@ -577,10 +627,32 @@ impl<S: Store + 'static> LwsState<S> {
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
         self.locks.hide(&iris);
+        (iris, bytes)
+    }
+
+    /// Put `left` back in a task of its own, holding `locks`, then show what [`LwsState::hide`]
+    /// hid (`hidden`) and touch the containers owed a touch.
+    fn settle_aside<L: Send + 'static>(
+        &self,
+        left: Unsettled,
+        hidden: (Vec<String>, usize),
+        locks: L,
+    ) {
+        let (iris, bytes) = hidden;
         let state = self.clone();
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
+                if let Undo::Resolve {
+                    record,
+                    touch: Some(container),
+                    ..
+                } = undo
+                {
+                    // Kept, the intent names the container until the touch lands; put back,
+                    // it is gone, and clearing it again does nothing.
+                    state.owe_touch(container, record.clone());
+                }
             }
             drop(left);
             state.locks.show(&iris);
@@ -588,7 +660,43 @@ impl<S: Store + 'static> LwsState<S> {
                 .set_aside_bytes
                 .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
             drop(locks);
+            state.touch_owed().await;
         });
+    }
+
+    /// Touch every container whose touch is owed ([`LwsState::owe_touch`]) and that is visible
+    /// (one still set aside is touched when its own change is settled), each until the touch
+    /// lands and clears the intents waiting on it, waiting longer between tries (up to
+    /// [`UNDO_MAX_WAIT`]).
+    pub(crate) async fn touch_owed(&self) {
+        let owed: Vec<String> = self
+            .owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        for container in owed {
+            let mut wait = std::time::Duration::from_millis(100);
+            while self.visible(&container) && self.owes_touch(&container) {
+                self.touching(&container);
+                resources::touch_container(self, &container).await;
+                if !self.owes_touch(&container) {
+                    break;
+                }
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(UNDO_MAX_WAIT);
+            }
+        }
+    }
+
+    /// Whether a touch of `uri` is owed.
+    fn owes_touch(&self, uri: &str) -> bool {
+        self.owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(uri)
+            .is_some_and(|r| !r.is_empty())
     }
 
     /// Whether `agent` may perform `action` on the resource at `uri` (see [`access::allowed`]).
@@ -755,6 +863,14 @@ pub(crate) struct Journal<'a, S: Store + 'static> {
     staged: std::collections::HashMap<String, Option<(Bytes, StoredMeta)>>,
     held: usize,
     limit: usize,
+    /// What putting back each resource staged so far takes, in the order staged: the durable
+    /// intent ([`intents`]) stores it, last first, before a step changes anything.
+    planned: Vec<Undo>,
+    planned_keys: std::collections::HashSet<String>,
+    /// How many of `planned` the stored intent holds.
+    persisted: usize,
+    /// The stored intent, once there is one.
+    intent: Option<String>,
 }
 
 type StoredMeta = crate::store::ResourceMeta;
@@ -785,6 +901,23 @@ pub(crate) enum Undo {
     /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
     /// waits on that lock while the rest is put back.
     Locked { iri: String },
+    /// The durable intent `record` of a change (see [`intents`]), cleared once the change is
+    /// put back: until then its resources (`iris`) stay set aside, so no later write to them can
+    /// happen while a start could still replay it.
+    Forget { record: String, iris: Vec<String> },
+    /// A kept change whose intent could not be recorded as kept (rewritten to name only its
+    /// container, or cleared): the store may have done it anyway, a lost reply. Settled from
+    /// what the intent `record` holds now: cleared, or naming only a container, the change is
+    /// kept; still holding its plan, the change is put back (`undo`, in order) and the intent
+    /// cleared. Until then its resources (`iris`) stay set aside, as for [`Undo::Forget`]. Once
+    /// it is settled, the container `touch` its change listed is touched, either way (see
+    /// [`LwsState::set_aside`]).
+    Resolve {
+        record: String,
+        undo: Vec<Undo>,
+        iris: Vec<String>,
+        touch: Option<String>,
+    },
 }
 
 impl Undo {
@@ -818,6 +951,16 @@ impl Undo {
             }
             Undo::Remove { iri, parent } => delete_record(store, iri, parent).await,
             Undo::Locked { .. } => Ok(()),
+            Undo::Forget { record, .. } => intents::clear(store, record).await,
+            Undo::Resolve { record, undo, .. } => {
+                if intents::kept(store, record).await? {
+                    return Ok(());
+                }
+                for step in undo {
+                    Box::pin(step.apply(store)).await?;
+                }
+                intents::clear(store, record).await
+            }
         }
     }
 
@@ -830,6 +973,9 @@ impl Undo {
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
             Undo::Locked { iri } => vec![iri],
+            Undo::Forget { iris, .. } | Undo::Resolve { iris, .. } => {
+                iris.iter().map(String::as_str).collect()
+            }
         }
     }
 }
@@ -841,32 +987,41 @@ pub(crate) struct Unsettled(Vec<Undo>);
 impl Unsettled {
     /// About how many bytes it holds to put back: each body, and each record at its limit.
     fn bytes(&self) -> usize {
-        self.0
-            .iter()
-            .map(|u| match u {
-                Undo::Restore {
-                    prior: Some((body, _)),
-                    ..
-                }
-                | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
-                Undo::Locked { .. } => 0,
-                _ => MAX_META_BYTES,
-            })
-            .fold(0, usize::saturating_add)
+        bytes_of(&self.0)
     }
 
     /// The resources it is to, each once.
     fn iris(&self) -> Vec<String> {
-        let mut iris: Vec<String> = self
-            .0
-            .iter()
-            .flat_map(Undo::iris)
-            .map(str::to_string)
-            .collect();
-        iris.sort();
-        iris.dedup();
-        iris
+        iris_of(&self.0)
     }
+}
+
+/// About how many bytes `undo` holds to put back: each body, and each record at its limit.
+fn bytes_of(undo: &[Undo]) -> usize {
+    undo.iter()
+        .map(|u| match u {
+            Undo::Restore {
+                prior: Some((body, _)),
+                ..
+            }
+            | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
+            Undo::Locked { .. } | Undo::Forget { .. } => 0,
+            Undo::Resolve { undo, .. } => bytes_of(undo),
+            _ => MAX_META_BYTES,
+        })
+        .fold(0, usize::saturating_add)
+}
+
+/// The resources `undo` is to, each once.
+fn iris_of(undo: &[Undo]) -> Vec<String> {
+    let mut iris: Vec<String> = undo
+        .iter()
+        .flat_map(Undo::iris)
+        .map(str::to_string)
+        .collect();
+    iris.sort();
+    iris.dedup();
+    iris
 }
 
 /// How many times each step of putting a change back is tried while the request that made the
@@ -929,6 +1084,10 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             staged: std::collections::HashMap::new(),
             held: 0,
             limit,
+            planned: Vec::new(),
+            planned_keys: Default::default(),
+            persisted: 0,
+            intent: None,
         }
     }
 
@@ -952,7 +1111,61 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 "the change is too large to make atomically".into(),
             ));
         }
+        if self.planned_keys.insert(key.to_string()) {
+            self.planned.push(Undo::Restore {
+                key: key.to_string(),
+                prior: prior.clone(),
+            });
+        }
         self.staged.insert(key.to_string(), prior);
+        Ok(())
+    }
+
+    /// [`Journal::stage`] the member `iri` of `parent`: put back, it is recreated in `parent`
+    /// (or removed from it, when it was absent).
+    pub(crate) async fn stage_member(
+        &mut self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<(), crate::error::ServerError> {
+        let fresh = !self.planned_keys.contains(iri);
+        self.stage(iri).await?;
+        if fresh {
+            let restore = self.planned.pop().expect("just planned");
+            let Undo::Restore { key, prior } = restore else {
+                unreachable!("stage plans a restore")
+            };
+            self.planned.push(match (prior, parent) {
+                (Some((body, meta)), _) => Undo::Recreate {
+                    iri: key,
+                    parent: parent.map(str::to_string),
+                    body,
+                    meta,
+                },
+                (None, Some(parent)) => Undo::Remove {
+                    iri: key,
+                    parent: parent.to_string(),
+                },
+                (None, None) => Undo::Restore { key, prior: None },
+            });
+        }
+        Ok(())
+    }
+
+    /// Store the intent to put back everything staged so far, unless it is stored already:
+    /// before any step that changes something.
+    async fn durable(&mut self) -> Result<(), crate::error::ServerError> {
+        if self.persisted == self.planned.len() {
+            return Ok(());
+        }
+        let existing = self.intent.is_some();
+        let record = self
+            .intent
+            .get_or_insert_with(|| intents::mint(&self.state.cfg.storage()))
+            .clone();
+        let undo: Vec<&Undo> = self.planned.iter().rev().collect();
+        intents::store(self.state, &record, existing, &undo, &[]).await?;
+        self.persisted = self.planned.len();
         Ok(())
     }
 
@@ -973,6 +1186,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         content_type: &str,
     ) -> Result<StoredMeta, crate::error::ServerError> {
         let prior = self.prior(key).await?;
+        self.durable().await?;
         let written = self.state.store.write(key, body, content_type).await;
         // A backend failure may follow a write that landed (a lost reply): it is put back all the
         // same. A refusal wrote nothing, and there is nothing to put back.
@@ -1004,6 +1218,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         if prior.is_none() {
             return Ok(());
         }
+        self.durable().await?;
         let deleted = self.state.store.delete(&key, None).await;
         if may_have_happened(&deleted) {
             self.undo.push(Undo::Restore { key, prior });
@@ -1023,6 +1238,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         let Some((body, meta)) = self.prior(iri).await? else {
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
+        self.durable().await?;
         let outcome = remove_member(&self.state.store, iri, parent).await;
         // Only a member that went, or may have, is recreated.
         if matches!(
@@ -1039,8 +1255,85 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         outcome
     }
 
-    /// Keep every change.
-    pub(crate) fn commit(self) {}
+    /// Keep every change. When it changed what the container `touch` lists, its intent is
+    /// rewritten to name only that container, to be cleared once the container is touched
+    /// ([`LwsState::owe_touch`]): a stop before then leaves the container's date for the next
+    /// start to move on. Otherwise its intent is cleared.
+    ///
+    /// When that fails, the store may have done it anyway (a lost reply): putting the change
+    /// back regardless could leave the intent no longer holding the plan to finish that, should
+    /// the process stop. So the intent is read back: still holding its plan, the change is put
+    /// back; cleared or naming only the container, it is kept. While it cannot be read, this
+    /// fails with an [`Undo::Resolve`], to set aside with the locks, which settles it the same
+    /// way later; meanwhile the container's listing has no date, as after a touch that failed.
+    pub(crate) async fn commit(
+        self,
+        touch: Option<&str>,
+    ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
+        let Some(record) = self.intent.clone() else {
+            return Ok(());
+        };
+        let kept = match touch {
+            Some(container) => {
+                let owed = [container.to_string()];
+                let rewritten = intents::store(self.state, &record, true, &[], &owed).await;
+                if rewritten.is_ok() {
+                    self.state.owe_touch(container, record.clone());
+                }
+                rewritten.is_ok()
+            }
+            None => {
+                let forget = Undo::Forget {
+                    record: record.clone(),
+                    iris: Vec::new(),
+                };
+                settle(&self.state.store, vec![forget]).await.is_none()
+            }
+        };
+        if kept {
+            return Ok(());
+        }
+        // Whether the store did it anyway is read back from the intent: still holding its plan,
+        // the change is put back; cleared or naming only the container, it is kept.
+        let mut wait = std::time::Duration::from_millis(50);
+        for attempt in 1..=UNDO_ATTEMPTS {
+            match intents::kept(&self.state.store, &record).await {
+                Ok(true) => {
+                    if let Some(container) = touch {
+                        self.state.owe_touch(container, record);
+                    }
+                    return Ok(());
+                }
+                Ok(false) => {
+                    return Err((
+                        crate::error::ServerError::Storage(
+                            "the change could not be recorded as kept".into(),
+                        ),
+                        self.rollback().await,
+                    ));
+                }
+                Err(_) if attempt < UNDO_ATTEMPTS => {
+                    tokio::time::sleep(wait).await;
+                    wait *= 4;
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some(container) = touch {
+            self.state.touching(container);
+            self.state.touched(container, false);
+        }
+        let resolve = Undo::Resolve {
+            touch: touch.map(str::to_string),
+            record,
+            iris: iris_of(&self.planned),
+            undo: self.undo.into_iter().rev().collect(),
+        };
+        Err((
+            crate::error::ServerError::Storage("the change could not be recorded as kept".into()),
+            Some(Unsettled(vec![resolve])),
+        ))
+    }
 
     /// Put back every change, the last first, with the mutation's locks still held: each step
     /// is tried a few times ([`settle`]). What is left when one keeps failing comes back, for
@@ -1049,8 +1342,22 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     /// write can be overwritten by an old undo and no reader sees a state in between. The
     /// mutations run in a task of their own (see [`resources::hold_locks`]), so a client that
     /// goes away does not cut this short.
+    ///
+    /// Once it is all put back its intent is cleared; until then the intent stays, and goes with
+    /// what is left (so its resources stay set aside until it is cleared too).
     pub(crate) async fn rollback(self) -> Option<Unsettled> {
-        settle(&self.state.store, self.undo.into_iter().rev().collect()).await
+        let forget = self.intent.map(|record| Undo::Forget {
+            record,
+            iris: iris_of(&self.planned),
+        });
+        let store = &self.state.store;
+        match settle(store, self.undo.into_iter().rev().collect()).await {
+            None => settle(store, forget.into_iter().collect()).await,
+            Some(mut left) => {
+                left.0.extend(forget);
+                Some(left)
+            }
+        }
     }
 }
 
@@ -1424,6 +1731,8 @@ pub(crate) mod test_store {
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `write` of every IRI that starts with this fails with a backend error.
+        pub fail_write_under: Arc<std::sync::Mutex<Option<String>>>,
         /// When set, how many more writes succeed; every write past them fails, as in a store
         /// with a bounded number of blob slots.
         pub write_budget: Arc<std::sync::Mutex<Option<usize>>>,
@@ -1487,6 +1796,7 @@ pub(crate) mod test_store {
                 occupied: Default::default(),
                 fail_delete_of: Default::default(),
                 fail_write_of: Default::default(),
+                fail_write_under: Default::default(),
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
                 hide: Default::default(),
@@ -1572,7 +1882,14 @@ pub(crate) mod test_store {
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
             self.step()?;
-            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
+            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri)
+                || self
+                    .fail_write_under
+                    .lock()
+                    .unwrap()
+                    .as_deref()
+                    .is_some_and(|p| iri.starts_with(p))
+            {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             if self.refuse_write_of.lock().unwrap().as_deref() == Some(iri) {
