@@ -235,13 +235,22 @@ pub(crate) fn parse_n3(src: &str, base: &str) -> Bounded<Option<super::parser::P
     }
 }
 
-/// `year` if the epoch arithmetic of the `time:` builtins can represent it; a year past
-/// it gives no value, and is a cut.
-pub(crate) fn epoch_year(year: i64) -> Bounded<Option<i64>> {
-    if year <= EPOCH_YEAR_CAP {
-        Bounded::complete(Some(year))
-    } else {
-        Bounded::cut(None, "a date/time year passed the epoch arithmetic's range")
+/// The (unsigned) year field of a date lexical form, for the epoch arithmetic of the
+/// `time:` builtins. Text that is not all ASCII digits is malformed: no value, and no
+/// cut (the builtin is false by definition). A digit-only year past the range the
+/// arithmetic accepts, however many digits, gives no value and is a cut: checked on the
+/// digits, before any integer conversion, so even a year past `i64` is a cut.
+pub(crate) fn epoch_year(field: &str) -> Bounded<Option<i64>> {
+    if field.is_empty() || !field.bytes().all(|b| b.is_ascii_digit()) {
+        return Bounded::complete(None);
+    }
+    let digits = field.trim_start_matches('0');
+    let cap = EPOCH_YEAR_CAP.to_string();
+    let within = digits.len() < cap.len() || (digits.len() == cap.len() && digits <= cap.as_str());
+    match digits.parse::<i64>() {
+        Ok(year) if within => Bounded::complete(Some(year)),
+        _ if digits.is_empty() => Bounded::complete(Some(0)),
+        _ => Bounded::cut(None, "a date/time year passed the epoch arithmetic's range"),
     }
 }
 
@@ -305,7 +314,19 @@ mod tests {
             .expect("join");
         assert_eq!(deep, (true, true), "the nesting limit is a cut");
 
-        assert_eq!(cut_of(epoch_year(2024)), (Some(2024), false));
-        assert_eq!(cut_of(epoch_year(EPOCH_YEAR_CAP + 1)), (None, true));
+        assert_eq!(cut_of(epoch_year("2024")), (Some(2024), false));
+        assert_eq!(cut_of(epoch_year("0000")), (Some(0), false));
+        assert_eq!(
+            cut_of(epoch_year("0999999999")),
+            (Some(EPOCH_YEAR_CAP), false)
+        );
+        assert_eq!(cut_of(epoch_year("1000000000")), (None, true));
+        assert_eq!(
+            cut_of(epoch_year("9223372036854775808")),
+            (None, true),
+            "past i64"
+        );
+        assert_eq!(cut_of(epoch_year("20x4")), (None, false), "malformed");
+        assert_eq!(cut_of(epoch_year("")), (None, false), "malformed");
     }
 }

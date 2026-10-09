@@ -109,10 +109,7 @@ fn limits_live_in_the_bounded_module() {
         let mut current_fn = String::new();
         for (n, code, comments) in code_lines(&src) {
             let t = code.trim_start();
-            if code.starts_with("pub fn ")
-                || code.starts_with("fn ")
-                || code.starts_with("pub(crate) fn ")
-            {
+            if t.starts_with("pub fn ") || t.starts_with("fn ") || t.starts_with("pub(crate) fn ") {
                 current_fn = t.to_string();
             }
             let entry = current_fn.starts_with("pub fn ")

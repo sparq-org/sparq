@@ -3395,8 +3395,9 @@ fn epoch_parts(s: &str, cuts: &bounded::Cuts) -> Option<(i64, i64)> {
         None => (false, date),
     };
     let mut dp = date.split('-');
-    // The year must be one the day/second arithmetic below can represent in i64.
-    let y = settle(cuts, bounded::epoch_year(field(dp.next()?, 0..=i64::MAX)?))?;
+    // The year is checked on its digits in bounded.rs (a year past the range, even past
+    // i64, is a cut; malformed text is not).
+    let y = settle(cuts, bounded::epoch_year(dp.next()?))?;
     let y = if neg { -y } else { y };
     let m = dp.next().map(|x| field(x, 1..=12)).unwrap_or(Some(1))?;
     let d = dp.next().map(|x| field(x, 1..=31)).unwrap_or(Some(1))?;
@@ -3644,6 +3645,11 @@ mod tests {
                 "epoch year",
                 String::new(),
                 "\"1000000000-01-01T00:00:00Z\" time:inSeconds ?s".into(),
+            ),
+            (
+                "epoch year past i64",
+                String::new(),
+                "\"9223372036854775808-01-01T00:00:00Z\" time:inSeconds ?s".into(),
             ),
         ];
         let resolve = move |iri: &str| (iri == "http://ex/deep").then(|| deep.clone());

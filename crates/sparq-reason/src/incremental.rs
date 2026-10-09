@@ -1536,6 +1536,9 @@ pub struct MaterializedN3Graph {
     layer_derived: Vec<FxHashSet<[N3Term; 3]>>,
     fallback_closure: FxHashSet<[N3Term; 3]>,
     rebuilds: usize,
+    /// Where the counting evaluation records a cut ([`crate::n3::bounded`]). A cut changes
+    /// no result and is not yet reported.
+    cuts: crate::n3::bounded::Cuts,
 }
 
 /// Evaluation phase of a non-seed plain atom relative to the delta seed (the counting
@@ -1558,6 +1561,9 @@ struct N3Cx<'a> {
     delta: Option<(&'a FxHashSet<[N3Term; 3]>, bool)>,
     /// Set when evaluation meets data the parity whitelist does not cover.
     unsupported: &'a Cell<bool>,
+    /// The graph's cut record ([`crate::n3::bounded::Cuts`]). Kept apart from
+    /// `unsupported`: a cut changes no result, so it never switches the evaluation path.
+    cuts: &'a crate::n3::bounded::Cuts,
 }
 
 impl N3Cx<'_> {
@@ -1658,6 +1664,7 @@ fn eval_n3_builtin(
     o: &N3Term,
     b: &NB,
     unsupported: &Cell<bool>,
+    cuts: &crate::n3::bounded::Cuts,
 ) -> Option<NB> {
     let sv = n3_apply(s, b);
     match op {
@@ -1726,9 +1733,9 @@ fn eval_n3_builtin(
             let (N3Term::Lit(text, _, _), N3Term::Lit(pat, _, _)) = (&ms[0], &ms[1]) else {
                 return None;
             };
-            // A pattern the regex engine refuses sends the run to the checked engine,
-            // which evaluates it the same way (no match).
-            let re = crate::n3::bounded::settle(unsupported, crate::n3::bounded::regex(pat))?;
+            // A pattern the regex engine refuses is no match, as on the checked engine; the
+            // cut is recorded on the graph's record and does not change the path.
+            let re = crate::n3::bounded::settle(cuts, crate::n3::bounded::regex(pat))?;
             let cap = re.captures(text)?.get(1)?.as_str().to_string();
             let lit = N3Term::Lit(cap, N3_XSD_STRING.into(), None);
             let mut nb = b.clone();
@@ -1851,7 +1858,7 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
             N3Atom::Builtin { op, s, o } => {
                 binds = binds
                     .into_iter()
-                    .filter_map(|b| eval_n3_builtin(*op, s, o, &b, cx.unsupported))
+                    .filter_map(|b| eval_n3_builtin(*op, s, o, &b, cx.unsupported, cx.cuts))
                     .collect();
                 n3_term_vars(s, &mut bound);
                 n3_term_vars(o, &mut bound);
@@ -2279,6 +2286,7 @@ impl MaterializedN3Graph {
             layer_derived: vec![FxHashSet::default(); n_layers],
             fallback_closure: FxHashSet::default(),
             rebuilds: 0,
+            cuts: crate::n3::bounded::Cuts::top_level(),
         };
         g.rematerialize();
         g.rebuilds = 0;
@@ -2352,6 +2360,7 @@ impl MaterializedN3Graph {
     fn propagate(&mut self, mut pending: Vec<[N3Term; 3]>, inserting: bool) -> bool {
         let Some(compiled) = self.compiled.clone() else { return false };
         let unsupported = Cell::new(false);
+        let cuts = self.cuts.clone();
         while !pending.is_empty() {
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
@@ -2444,6 +2453,7 @@ impl MaterializedN3Graph {
                     guards: &self.index,
                     delta: Some((&pend_set, inserting)),
                     unsupported: &unsupported,
+                    cuts: &cuts,
                 };
                 for rule in &compiled.counted {
                     for atom in &rule.atoms {
@@ -2508,6 +2518,7 @@ impl MaterializedN3Graph {
         unsupported: &Cell<bool>,
     ) -> (Vec<[N3Term; 3]>, Vec<[N3Term; 3]>) {
         let def = &compiled.layers[li];
+        let cuts = self.cuts.clone();
         // Seed: relevant facts of the closure, minus the layer's own (possibly stale)
         // contribution — unless a fact is independently present (base / counted).
         let mut seed: Vec<[N3Term; 3]> = Vec::new();
@@ -2532,8 +2543,13 @@ impl MaterializedN3Graph {
         while !pending.is_empty() {
             let mut emissions = Vec::new();
             {
-                let cx =
-                    N3Cx { facts: &local, guards: &self.index, delta: None, unsupported };
+                let cx = N3Cx {
+                    facts: &local,
+                    guards: &self.index,
+                    delta: None,
+                    unsupported,
+                    cuts: &cuts,
+                };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
                         let N3Atom::Plain { pat, plain_ix } = atom else { continue };
