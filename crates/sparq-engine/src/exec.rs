@@ -15191,39 +15191,24 @@ fn integer_argument(v: &Value) -> Option<i128> {
 /// The lexical of a well-formed `xsd:decimal`, `xsd:integer` or unbounded integer-subtype
 /// literal too large for the i128 tower (`Num::of_literal` declines it). Such a value is
 /// still a number: the ORDER BY total order compares it exactly by its lexical instead of
-/// as an opaque string. The raw lexical is validated as is (no trimming), and a subtype's
-/// sign facet is checked; a beyond-tower value is never zero, so the sign alone decides it.
-/// The bounded subtypes (`xsd:long`, ...) cannot hold such a value, so they stay `None`.
+/// as an opaque string. The raw lexical is validated as is by `numeric_literal_valid`
+/// (no trimming of any whitespace, ASCII or Unicode), which also checks a subtype's sign
+/// facet. The bounded subtypes (`xsd:long`, ...) cannot hold such a value, so they stay `None`.
 fn beyond_tower_lexical(v: &Value) -> Option<&str> {
     let Value::Term(Term::Literal(l)) = v else { return None };
     if l.language().is_some() || Num::of_literal(l).is_some() {
         return None;
     }
-    let lex = l.value();
-    if lex.bytes().any(|b| b.is_ascii_whitespace()) {
-        return None;
-    }
     let dt = l.datatype();
-    let negative = lex.starts_with('-');
-    let integer = if dt == xsd::DECIMAL {
-        false
-    } else if dt == xsd::INTEGER {
-        true
-    } else if dt == xsd::NEGATIVE_INTEGER || dt == xsd::NON_POSITIVE_INTEGER {
-        if !negative {
-            return None;
-        }
-        true
-    } else if dt == xsd::POSITIVE_INTEGER || dt == xsd::NON_NEGATIVE_INTEGER {
-        if negative {
-            return None;
-        }
-        true
-    } else {
-        return None;
-    };
-    split_decimal(lex)?;
-    (!integer || !lex.contains('.')).then_some(lex)
+    let unbounded = dt == xsd::DECIMAL
+        || dt == xsd::INTEGER
+        || dt == xsd::NEGATIVE_INTEGER
+        || dt == xsd::NON_POSITIVE_INTEGER
+        || dt == xsd::POSITIVE_INTEGER
+        || dt == xsd::NON_NEGATIVE_INTEGER;
+    let lex = l.value();
+    (unbounded && sparq_core::numeric_literal_valid(lex, dt.as_str()) && split_decimal(lex).is_some())
+        .then_some(lex)
 }
 
 /// An exact decimal lexical for a numeric `Value`: an integer/decimal (in or beyond the

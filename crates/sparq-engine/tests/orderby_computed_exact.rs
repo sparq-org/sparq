@@ -171,3 +171,29 @@ fn padded_beyond_i128_lexical_is_not_a_number() {
     let order = subjects(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?v } ORDER BY ?v");
     assert_ne!(order[0], "<http://ex/a>", "{order:?}");
 }
+
+// A Unicode-whitespace-padded lexical (U+00A0) is not a number either. Admitting it as one
+// while its `f64` image failed made the comparator cyclic (2 < 10 < "11\u{a0}" < 2), so
+// the sorted order depended on input order.
+#[test]
+fn unicode_padded_lexical_is_not_a_number_and_order_is_input_independent() {
+    let vals = ["\"11\u{a0}\"^^xsd:integer", "2", "10"];
+    let perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    let mut seen = None;
+    for p in perms {
+        let names = ["a", "b", "c"];
+        let g = graph(&p.map(|i| (names[i], vals[i])));
+        let order = subjects(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?v } ORDER BY ?v");
+        let min = subjects(&g, "SELECT (MIN(?v) AS ?m) WHERE { ?s <http://ex/v> ?v }");
+        let max = subjects(&g, "SELECT (MAX(?v) AS ?m) WHERE { ?s <http://ex/v> ?v }");
+        let got = (order, min, max);
+        match &seen {
+            None => seen = Some(got),
+            Some(first) => assert_eq!(&got, first, "input order {p:?}"),
+        }
+    }
+    // The two real numbers stay in numeric order.
+    let (order, ..) = seen.unwrap();
+    let pos = |s: &str| order.iter().position(|o| o == s).unwrap();
+    assert!(pos("<http://ex/b>") < pos("<http://ex/c>"), "{order:?}");
+}
