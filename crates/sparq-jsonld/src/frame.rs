@@ -44,6 +44,7 @@ use crate::json::Json;
 use crate::loader::DocumentLoader;
 use crate::node_map::generate_node_map;
 use crate::options::{JsonLdOptions, ProcessingMode};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 // ---------------------------------------------------------------------------
@@ -831,15 +832,22 @@ fn filter_subjects(
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
+    let memo = Memo::default();
     for id in sorted {
         if let Some(node) = graph_subjects.get(id) {
-            if filter_subject(graph_subjects, node, frame_obj, flags)? {
+            if filter_subject(graph_subjects, node, frame_obj, flags, &memo)? {
                 out.push(id.clone());
             }
         }
     }
     Ok(out)
 }
+
+/// Results of matching a subject against a nested node pattern, keyed by the subject's
+/// and the pattern's addresses (both borrowed for the whole match) and `@requireAll`.
+/// Each pair is evaluated once, so nested patterns over shared subjects cannot make
+/// matching exponential.
+type Memo = RefCell<BTreeMap<(usize, usize, bool), bool>>;
 
 /// **Frame Matching** for one node (§4.3): duck-type the node against the frame's
 /// `@id` / `@type` / property patterns. With `@requireAll`, every frame entry must
@@ -849,6 +857,7 @@ fn filter_subject(
     node: &Json,
     frame_obj: &Json,
     flags: &Flags,
+    memo: &Memo,
 ) -> Result<bool, JsonLdError> {
     let Json::Obj(frame_members) = frame_obj else {
         return Ok(true);
@@ -936,9 +945,7 @@ fn filter_subject(
                         Some(lp) if is_value_object(lp) => {
                             node_list.iter().any(|lv| value_match(lp, lv))
                         }
-                        Some(lp) => node_list
-                            .iter()
-                            .any(|lv| node_match(graph_subjects, lp, lv, flags).unwrap_or(false)),
+                        Some(lp) => any_node_match(graph_subjects, lp, &node_list, flags, memo)?,
                         None => false,
                     };
                 }
@@ -955,9 +962,7 @@ fn filter_subject(
                     if is_wildcard_node_pattern(tf) {
                         match_this = !node_values.is_empty();
                     } else {
-                        match_this = node_values
-                            .iter()
-                            .any(|nv| node_match(graph_subjects, tf, nv, flags).unwrap_or(false));
+                        match_this = any_node_match(graph_subjects, tf, &node_values, flags, memo)?;
                     }
                 }
                 Some(_) => {
@@ -988,13 +993,34 @@ fn is_wildcard_node_pattern(tf: &Json) -> bool {
     }
 }
 
+/// Whether any of `values` matches the node `pattern` ([`node_match`]).
+fn any_node_match(
+    graph_subjects: &Subjects,
+    pattern: &Json,
+    values: &[&Json],
+    flags: &Flags,
+    memo: &Memo,
+) -> Result<bool, JsonLdError> {
+    for value in values {
+        if node_match(graph_subjects, pattern, value, flags, memo)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// **Node Match**: a node-object value matches a node pattern iff it references a
 /// subject of the active graph that itself matches the pattern (§4.3 step 2.5).
+///
+/// This is the one recursive entry of frame matching: it is memoised per subject and
+/// pattern, and each evaluation is charged to the call's work budget and nests one
+/// level deeper.
 fn node_match(
     graph_subjects: &Subjects,
     pattern: &Json,
     value: &Json,
     flags: &Flags,
+    memo: &Memo,
 ) -> Result<bool, JsonLdError> {
     let Some(id) = value.get("@id").and_then(Json::as_str) else {
         return Ok(false);
@@ -1002,7 +1028,15 @@ fn node_match(
     let Some(node) = graph_subjects.get(id) else {
         return Ok(false);
     };
-    filter_subject(graph_subjects, node, pattern, flags)
+    let key = (node as *const Json as usize, pattern as *const Json as usize, flags.require_all);
+    if let Some(&known) = memo.borrow().get(&key) {
+        return Ok(known);
+    }
+    let _nested = crate::context::budget::nest()?;
+    crate::context::budget::charge(1)?;
+    let matched = filter_subject(graph_subjects, node, pattern, flags, memo)?;
+    memo.borrow_mut().insert(key, matched);
+    Ok(matched)
 }
 
 /// **Value Pattern Matching** (§2.2 / §4.3): a value object matches a value pattern iff
@@ -1538,5 +1572,29 @@ mod tests {
         let mut s = String::new();
         kept.write(&mut s);
         assert!(s.contains("_:b"), "bnode id kept without pruning: {s}");
+    }
+
+    /// Nested node patterns over subjects that reference each other are matched once per
+    /// subject and pattern, so a deep frame no node satisfies fails fast instead of
+    /// searching every path (2^50 here).
+    #[test]
+    fn nested_patterns_match_in_polynomial_time() {
+        let doc = parse(
+            r#"[{"@id":"http://ex/a","http://ex/p":[{"@id":"http://ex/a"},{"@id":"http://ex/b"}]},
+                {"@id":"http://ex/b","http://ex/p":[{"@id":"http://ex/a"},{"@id":"http://ex/b"}]}]"#,
+        );
+        let mut pattern = r#"{"@type":"http://ex/Missing"}"#.to_string();
+        for _ in 0..50 {
+            pattern = format!(r#"{{"http://ex/p":{pattern}}}"#);
+        }
+        let frame_doc = parse(&pattern);
+        let opts = JsonLdOptions::default();
+        let started = std::time::Instant::now();
+        let out = frame_match(&doc, &frame_doc, &opts, &FrameOptions::default(), &NoopLoader);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        let out = out.expect("the frame matches nothing, cleanly");
+        let mut text = String::new();
+        out.write(&mut text);
+        assert!(!text.contains("http://ex/a"), "{text}");
     }
 }

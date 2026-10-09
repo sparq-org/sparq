@@ -732,6 +732,9 @@ fn gen_node(g: &mut Gen, depth: usize, ids: &mut usize) -> String {
             members.push(format!(r#""{p}":[{}]"#, values.join(",")));
         }
     }
+    if g.chance(15) {
+        members.push(format!(r#""@reverse":{{"{}":[{{"@id":"http://ex/b"}}]}}"#, g.pick(&PROPS)));
+    }
     format!("{{{}}}", members.join(","))
 }
 
@@ -767,6 +770,8 @@ fn gen_scoped(g: &mut Gen) -> String {
         r#""p":{"@id":"http://ex/p","@container":"@index","@index":"q"}"#,
         r#""q":{"@id":"http://ex/q","@nest":"@nest"}"#,
         r#""r":{"@id":"http://ex/r","@container":["@graph","@id"]}"#,
+        r#""p":{"@reverse":"http://ex/q"}"#,
+        r#""rp":{"@reverse":"http://ex/p"}"#,
     ] {
         if g.chance(20) {
             entries.push(entry.to_string());
@@ -790,6 +795,9 @@ fn gen_context(g: &mut Gen) -> String {
         if g.chance(40) {
             entries.push(alias.to_string());
         }
+    }
+    if g.chance(30) {
+        entries.push(format!(r#""rp":{{"@reverse":"{}"}}"#, g.pick(&PROPS)));
     }
     for (term, iri) in [("T", "http://ex/T"), ("U", "http://ex/U")] {
         if g.chance(50) {
@@ -844,7 +852,8 @@ fn generated_documents_round_trip_under_scoped_contexts() {
     let (mut checked, mut failures) = (0, Vec::new());
     // Each family must be exercised by accepted cases, so a generator change that stops
     // producing one fails instead of silently shrinking the test.
-    let families: [(&str, &str); 12] = [
+    let families: [(&str, &str); 13] = [
+        ("@reverse term", r#"{"@reverse":"#),
         ("@id map", r#""@container":"@id""#),
         ("@type map", r#""@container":"@type""#),
         ("@index map", r#""@container":"@index""#),
@@ -858,7 +867,7 @@ fn generated_documents_round_trip_under_scoped_contexts() {
         ("@propagate false", r#""@propagate":false"#),
         ("scoped map term", r#""@container":"@id","@context""#),
     ];
-    let mut seen = [0usize; 12];
+    let mut seen = [0usize; 13];
     let cases: u64 = std::env::var("ROUND_TRIP_CASES").ok().and_then(|n| n.parse().ok()).unwrap_or(20_000);
     let only: Option<u64> = std::env::var("ROUND_TRIP_CASE").ok().and_then(|n| n.parse().ok());
     for case in 0..cases {

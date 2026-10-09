@@ -743,20 +743,28 @@ fn compact_element(
             // term is a reverse property onto the node itself.
             "@reverse" => {
                 let compacted = compact_element(cur, Some("@reverse"), expanded_value, Read::Value, env)?;
+                // The reverse map's terms and values were compacted under its own context
+                // (see `node_ctx`), so they move onto the node only when that is this
+                // context; otherwise the @reverse map keeps them.
+                let rev = node_ctx(cur, Some("@reverse"), expanded_value, Read::Value, env)?;
+                let same_ctx = rev.is_none();
+                let rev: &Ctx = rev.as_deref().unwrap_or(cur);
                 if let Json::Obj(rev_members) = compacted {
                     let mut remaining: Vec<(String, Json)> = Vec::new();
                     for (prop, val) in rev_members {
-                        let is_rev = cur
-                            .active
-                            .term_definition(&prop)
-                            .map(|d| d.is_reverse())
-                            .unwrap_or(false);
+                        let is_rev = same_ctx && cur.active.term_definition(&prop).is_some_and(|d| d.is_reverse());
                         if is_rev {
                             let as_array = term_container(&cur.active, Some(&prop))
                                 .iter()
                                 .any(|c| c == "@set")
                                 || !env.options.compact_arrays;
                             add_value(&mut result, &prop, val, as_array);
+                        } else if rev.active.term_definition(&prop).is_some_and(|d| d.is_reverse()) {
+                            // Inside @reverse a reverse term would read as forward.
+                            return Err(JsonLdError::with_detail(
+                                E::InvalidReversePropertyMap,
+                                format!("the reverse term {prop} reads differently on the node"),
+                            ));
                         } else {
                             remaining.push((prop, val));
                         }
@@ -2159,6 +2167,23 @@ mod tests {
         let doc = Json::parse(
             r#"[{"@id":"http://ex/a","@type":["http://ex/T"],
                 "http://ex/p":[{"http://ex/q":[{"@value":"v"}],"@id":"http://ex/b"}]}]"#,
+        )
+        .unwrap();
+        let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
+        assert_eq!(expand(&out, &opts, &NoopLoader).unwrap(), doc, "{out:?}");
+    }
+
+    // A reverse map's terms are chosen under the reverted context; one moves onto the
+    // node only when the node's (type-scoped) context reads it the same way.
+    #[test]
+    fn reverse_terms_move_only_where_both_contexts_agree() {
+        let opts = JsonLdOptions::default();
+        let ctx = Json::parse(
+            r#"{"p":"http://ex/p","T":{"@id":"http://ex/T","@context":{"p":{"@reverse":"http://ex/q"}}}}"#,
+        )
+        .unwrap();
+        let doc = Json::parse(
+            r#"[{"@id":"http://ex/b","@type":["http://ex/T"],"@reverse":{"http://ex/p":[{"@id":"http://ex/a"}]}}]"#,
         )
         .unwrap();
         let out = compact_expanded(&doc, &ctx, &opts, &NoopLoader).unwrap();
