@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "scope": "native read-query FROM RDF merge; no guest or proof claim",
+  "source_sha256": "1525b098f86f661de60d8f6db91c9aaf766c3a44d285e29293a1988e2f4cb2e0",
+  "mutations": [
+    {
+      "guard": "graph-separation",
+      "test": "merged_source_graphs",
+      "mutated_source_sha256": "682b66dd9766564f76767ba1c609be3d4520f38fc4b72eac37c9037d70f0d7b7",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "preserved-namespace",
+      "test": "merged_nodes_cannot_collide",
+      "mutated_source_sha256": "6805bb8c988da0d5b11aa85a76de49d95f992b904bd71f83ff9c70117d080537",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "recursive-identity",
+      "test": "triple_term_nodes",
+      "mutated_source_sha256": "e9eb357ac1be0037f8c84e401659a4c822f7658041a44b1cc3a8edd7b4c0415c",
+      "exit_code": 101,
+      "assertion_failed": true
+    }
+  ],
+  "restored_tests": 6,
+  "restored_exit_code": 0
+}

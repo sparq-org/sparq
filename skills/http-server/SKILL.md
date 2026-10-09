@@ -23,6 +23,10 @@ curl --compressed -G http://127.0.0.1:3030/sparql \
   --data-urlencode 'query=SELECT * WHERE { ?s ?p ?o }'
 ```
 
+Query VERSION metadata survives protocol dataset overrides and prepared
+execution. The query engine resolves its [scoped EBV rules](../sparql-query/ebv-dialects.md);
+this is not a full SPARQL 1.2 protocol or language conformance claim.
+
 ## Quickstart
 
 Run the binary (server stack is the default-on `server` feature):
@@ -510,7 +514,7 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > port, so it does not touch the engine's egress allowlist). It ratchets a MEASURED PASS floor
 > over **(A) the Service Description** (`GET /sparql` with no query): the `sd:Service` advertises
 > exactly the result/input formats (SRJ/SRX/CSV/TSV + Turtle/N-Triples/RDF-XML), the query/update
-> languages, the SPARQL versions (`sd:supportedVersion` 1.0/1.1/1.2) and `sd:BasicFederatedQuery`
+> languages, the SPARQL versions (`sd:supportedVersion` 1.0/1.1) and `sd:BasicFederatedQuery`
 > that the server GENUINELY implements — **no over-advertising** (each advertised result format is
 > cross-checked against a real SELECT request, and JSON-LD — not served in this build — must NOT
 > appear) — and **(B) the Graph Store Protocol**: a GET/PUT/POST/DELETE round-trip on a named graph
@@ -1068,13 +1072,14 @@ advertise itself as a discoverable federation node by serving two read-only RDF 
       conformance-verifies, as `sparql:version-*` IRIs (`http://www.w3.org/ns/sparql#`). SPARQL
       1.2 SD moves version negotiation off `sd:Language` onto `sd:supportedVersion`, so a
       1.2-aware federation client can discover triple-term / `dir`-lang support without probing.
-      sparq advertises `version-1.0`, `version-1.1` and the **full** `version-1.2` (not the
-      `version-1.2-basic` profile) because the engine passes the complete W3C SPARQL 1.0/1.1/1.2
-      suites at 100% (`conformance-report.md`). **HONESTY GATE**: there is no `sparql12`/`rdf12`
-      cargo feature — SPARQL 1.2 is compiled into the base engine — so this is keyed off the
-      DOCUMENTED conformance state (`descriptors::CONFORMANCE_VERIFIED_VERSIONS`), never a `cfg!`
-      or an aspiration; were any 1.2 group to regress to a partial pass, the honest edit is to
-      drop to `version-1.2-basic` (or omit 1.2) in that one constant;
+      sparq advertises `version-1.0` and `version-1.1` only. `VERSION "1.2"` (or
+      `1.2-basic`) selects just the pinned draft EBV rule; unannounced queries use REC 2013,
+      temporal values keep the REC 2013 lexical space, and UPDATE supports REC 2013 only and
+      rejects non-`1.1` announcements, including through protocol dataset overrides. Because
+      `sd:supportedVersion` claims the whole language version, `version-1.2` stays unadvertised
+      until those semantics follow the announcement. See the
+      [version-pinned EBV contract](../sparql-query/ebv-dialects.md) and generated
+      conformance report for the exact tested scope;
     - `sd:resultFormat` — the four SPARQL-results serialisations (JSON/XML/CSV/TSV) plus the RDF
       graph serialisations the CONSTRUCT/DESCRIBE/GSP-read path emits (Turtle/N-Triples/RDF-XML),
       and `sd:inputFormat` — the RDF serialisations the GSP write path parses (Turtle/N-Triples/

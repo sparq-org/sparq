@@ -14,6 +14,8 @@ use sparq_conformance::run::{self, Status};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+mod min_fixture_divergence;
+
 /// What a section runs from its manifests. The same manifest tree may appear
 /// twice with different scopes (e.g. `sparql12/manifest.ttl` mixes evaluation
 /// and syntax entries; the 1.1 query/update manifests include their syntax
@@ -261,10 +263,10 @@ fn main() {
                 };
                 total_run += 1;
                 let divergence = match &status {
-                    Status::Fail(_) => DOCUMENTED_DIVERGENCES
+                    Status::Fail(reason) => min_fixture_divergence::classify(entry, reason).or_else(|| DOCUMENTED_DIVERGENCES
                         .iter()
                         .find(|(suite, name, _)| *suite == entry.suite && *name == entry.name)
-                        .map(|(_, _, rationale)| *rationale),
+                        .map(|(_, _, rationale)| *rationale)),
                     _ => None,
                 };
                 let stats = suites.entry(entry.suite.clone()).or_default();

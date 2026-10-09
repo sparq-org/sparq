@@ -105,7 +105,7 @@ let r = query_text(&graph, r#"
 ## 📚 Learn more
 
 - **How-to** — [`skills/full-text-search/SKILL.md`](../../skills/full-text-search/SKILL.md)
-  (the full predicate table, tokenizer/scoring semantics, and the durability contract).
+  (the full predicate table, tokenizer/scoring semantics, and the durability contract). Text rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — `cargo doc -p sparq-text --open` (not on crates.io / docs.rs: `publish = false`).
 - **Benchmark** — `cargo run --release -p sparq-text --example bench_text` (no figures
   baked in here; query cost is dominated by hits scored — a short prefix over the

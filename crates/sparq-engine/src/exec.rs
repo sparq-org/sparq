@@ -12,7 +12,7 @@ use oxrdf::{BlankNode, Literal, NamedOrBlankNode, Term, Variable};
 use rustc_hash::FxHashMap;
 use sparq_core::dict::{self, Id, NO_ID};
 use sparq_core::store::Pattern as IdPattern;
-use sparq_core::temporal::{Temporal, Timeline};
+use sparq_core::temporal::{ExactTemporal, ExactTimeline, Temporal};
 use sparq_core::Graph;
 // [OPUS-4.8] sq-ev41x (epic sq-qonbz): the id-level numeric value tower (`Num` / `Dec` /
 // `ArithOp` / `RoundMode` and the XSD lexical helpers) now lives in the `sparq-substrate`
@@ -56,6 +56,9 @@ use std::cmp::Ordering;
 #[path = "eqjoin.rs"]
 mod eqjoin;
 
+#[path = "numeric_capacity.rs"]
+mod numeric_capacity;
+
 // ---- Cooperative query budget (T15 server hardening) -------------------------
 //
 // A thread-local, cooperatively-checked budget installed by the
@@ -66,7 +69,7 @@ mod eqjoin;
 // suffices; the rayon-parallel branches use a captured `Limits` snapshot to cap
 // their own work and the next on-thread check converts that into the error.
 pub(crate) mod budget {
-    use crate::QueryBudget;
+    use crate::{BudgetExceeded, EvaluationCapacity, QueryBudget, QueryFailure};
     use sparq_core::dict::Id;
     use std::cell::Cell;
     use std::ptr::NonNull;
@@ -124,6 +127,9 @@ pub(crate) mod budget {
         /// the row cap also misses. A running high-water sum, added to the working-set
         /// estimate on every check.
         extra_bytes: usize,
+        temporal_year_range: Option<(i64, i64)>,
+        strict_numeric_capacity: bool,
+        ebv_semantics: crate::EbvSemantics,
         cancel: Option<CancelPtr>,
     }
 
@@ -135,6 +141,9 @@ pub(crate) mod budget {
         max_bytes: usize::MAX,
         byte_width: BYTES_PER_ID,
         extra_bytes: 0,
+        temporal_year_range: None,
+        strict_numeric_capacity: false,
+        ebv_semantics: crate::EbvSemantics::Rec2013,
         cancel: None,
     };
 
@@ -149,30 +158,30 @@ pub(crate) mod budget {
         /// WHY the limits are hit at `rows`, or `None` when they are not — the pure (no
         /// thread-local) counterpart of [`exhausted`]'s reason, for rayon closures where
         /// the installing thread's sticky flag is out of reach. The reasons are the SAME
-        /// strings [`exhausted`] records, so a worker can raise EXACTLY the error
+        /// typed causes [`exhausted`] records, so a worker can raise EXACTLY the error
         /// [`check`] would rather than inventing one (or guessing a result). [SONNET-4.6]
         /// (sq-qk6ac)
         #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
         #[inline]
-        pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
+        pub(in crate::exec) fn why(&self, rows: usize) -> Option<BudgetExceeded> {
             if !self.on {
                 return None;
             }
             if rows > self.max_rows {
-                return Some("max-rows");
+                return Some(BudgetExceeded::Rows);
             }
             if self.bytes(rows) > self.max_bytes {
-                return Some("max-bytes");
+                return Some(BudgetExceeded::Bytes);
             }
             #[cfg(not(target_arch = "wasm32"))]
             if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-                return Some("timeout");
+                return Some(BudgetExceeded::Deadline);
             }
             if let Some(cancel) = self.cancel {
                 // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
                 // QueryBudget alive until this scoped snapshot load finishes.
                 if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                    return Some("cancelled");
+                    return Some(BudgetExceeded::Cancelled);
                 }
             }
             None
@@ -193,13 +202,16 @@ pub(crate) mod budget {
 
     thread_local! {
         static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
-        static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+        static EXCEEDED: Cell<Option<BudgetExceeded>> = const { Cell::new(None) };
+        // Semantic capacity cannot be refunded by a SERVICE byte rollback.
+        static CAPACITY_EXCEEDED: Cell<Option<EvaluationCapacity>> = const { Cell::new(None) };
     }
 
     // [GPT-6 Astra] Private: callers cannot forget or drop a frame out of order.
     struct Guard<'a> {
         previous: Limits,
-        exceeded: Option<&'static str>,
+        exceeded: Option<BudgetExceeded>,
+        capacity_exceeded: Option<EvaluationCapacity>,
         _budget: std::marker::PhantomData<&'a QueryBudget>,
         _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
     }
@@ -207,6 +219,7 @@ pub(crate) mod budget {
         fn drop(&mut self) {
             ACTIVE.with(|a| a.set(self.previous));
             EXCEEDED.with(|e| e.set(self.exceeded));
+            CAPACITY_EXCEEDED.with(|e| e.set(self.capacity_exceeded));
         }
     }
 
@@ -219,9 +232,11 @@ pub(crate) mod budget {
         let on = b.deadline.is_some()
             || b.max_rows.is_some()
             || b.max_bytes.is_some()
+            || b.temporal_year_range.is_some()
+            || b.strict_numeric_capacity
             || cancel.is_some();
         #[cfg(target_arch = "wasm32")]
-        let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
+        let on = b.max_rows.is_some() || b.max_bytes.is_some() || b.temporal_year_range.is_some() || b.strict_numeric_capacity || cancel.is_some();
         let previous = ACTIVE.with(|a| {
             a.replace(Limits {
                 on,
@@ -231,16 +246,37 @@ pub(crate) mod budget {
                 max_bytes: b.max_bytes.unwrap_or(usize::MAX),
                 byte_width: BYTES_PER_ID,
                 extra_bytes: 0,
+                temporal_year_range: b.temporal_year_range,
+                strict_numeric_capacity: b.strict_numeric_capacity,
+                ebv_semantics: b.ebv_semantics.unwrap_or_default(),
                 cancel,
             })
         });
         let exceeded = EXCEEDED.with(|e| e.replace(None));
+        let capacity_exceeded = CAPACITY_EXCEEDED.with(|e| e.replace(None));
         Guard {
             previous,
             exceeded,
+            capacity_exceeded,
             _budget: std::marker::PhantomData,
             _not_send: std::marker::PhantomData,
         }
+    }
+
+    // Query entry only. The resolved rule is copied into LocalVocab;
+    // per-row evaluation and Rayon workers never consult this TLS selector.
+    pub(crate) fn with_query_budget<T>(b: &QueryBudget, semantics: crate::EbvSemantics, f: impl FnOnce() -> T) -> T {
+        let _scope = install(b);
+        ACTIVE.with(|a| {
+            let mut limits = a.get();
+            limits.ebv_semantics = semantics;
+            a.set(limits);
+        });
+        f()
+    }
+
+    pub(super) fn ebv_semantics() -> crate::EbvSemantics {
+        ACTIVE.with(|a| a.get().ebv_semantics)
     }
 
     /// [GPT-6 Astra] Runs a child budget, restoring its parent on return or unwind.
@@ -301,7 +337,7 @@ pub(crate) mod budget {
             if a.extra_bytes > a.max_bytes {
                 EXCEEDED.with(|e| {
                     if e.get().is_none() {
-                        e.set(Some("max-bytes"));
+                        e.set(Some(BudgetExceeded::Bytes));
                     }
                 });
             }
@@ -390,7 +426,7 @@ pub(crate) mod budget {
     #[derive(Clone, Copy)]
     pub(crate) struct ByteSavepoint {
         extra_bytes: usize,
-        exceeded: Option<&'static str>,
+        exceeded: Option<BudgetExceeded>,
     }
 
     /// Capture the current byte accumulator + exhaustion flag. [OPUS-4.8] (sq-my8wd.4)
@@ -433,20 +469,20 @@ pub(crate) mod budget {
         if !a.on {
             return false;
         }
-        if EXCEEDED.with(|e| e.get()).is_some() {
+        if CAPACITY_EXCEEDED.with(|e| e.get()).is_some() || EXCEEDED.with(|e| e.get()).is_some() {
             return true;
         }
         if rows > a.max_rows {
-            EXCEEDED.with(|e| e.set(Some("max-rows")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Rows)));
             return true;
         }
         if a.bytes(rows) > a.max_bytes {
-            EXCEEDED.with(|e| e.set(Some("max-bytes")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Bytes)));
             return true;
         }
         #[cfg(not(target_arch = "wasm32"))]
         if a.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-            EXCEEDED.with(|e| e.set(Some("timeout")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Deadline)));
             return true;
         }
         if let Some(cancel) = a.cancel {
@@ -456,7 +492,7 @@ pub(crate) mod budget {
             // it never publishes or guards a shared query buffer. If that changes,
             // the load/store pair must become Acquire/Release.
             if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                EXCEEDED.with(|e| e.set(Some("cancelled")));
+                EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Cancelled)));
                 return true;
             }
         }
@@ -466,11 +502,109 @@ pub(crate) mod budget {
     /// Propagates an exhausted budget as the query error.
     #[inline]
     pub(crate) fn check(rows: usize) -> Result<(), String> {
+        if let Some(reason) = CAPACITY_EXCEEDED.with(|e| e.get()) {
+            return Err(format!("query evaluation capacity exceeded ({reason})"));
+        }
         if exhausted(rows) {
-            let why = EXCEEDED.with(|e| e.get()).unwrap_or("timeout");
+            let why = EXCEEDED.with(|e| e.get()).unwrap_or(BudgetExceeded::Deadline);
             return Err(format!("query budget exceeded ({why})"));
         }
         Ok(())
+    }
+
+    // Read before Guard restores the parent frame. Only actual emitters
+    // set these enums; arbitrary callback/evaluation error strings cannot do so.
+    pub(crate) fn failure() -> Option<QueryFailure> {
+        CAPACITY_EXCEEDED.with(Cell::get).map(QueryFailure::Capacity)
+            .or_else(|| EXCEEDED.with(Cell::get).map(QueryFailure::Budget))
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(in crate::exec) fn record_worker_failure(cause: BudgetExceeded) {
+        EXCEEDED.with(|slot| {
+            if slot.get().is_none() { slot.set(Some(cause)); }
+        });
+    }
+
+    #[cfg(test)]
+    mod typed_failure_tests {
+        use super::*;
+
+        #[test]
+        fn nested_failure_and_spoofed_diagnostic_do_not_escape_their_scope() {
+            with_budget(&QueryBudget::unlimited(), || {
+                assert_eq!(failure(), None);
+                let child = with_budget(&QueryBudget::unlimited(), || {
+                    let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                    failure().unwrap()
+                });
+                assert_eq!(child, QueryFailure::Capacity(EvaluationCapacity::TemporalYear));
+                assert_eq!(failure(), None);
+                let forged = "query evaluation capacity exceeded (numeric-representation)".to_owned();
+                assert_eq!(failure().unwrap_or(QueryFailure::Evaluation(forged.clone())),
+                           QueryFailure::Evaluation(forged));
+                let _ = fail_capacity(EvaluationCapacity::NumericRepresentation);
+                with_budget(&QueryBudget::unlimited(), || assert_eq!(failure(), None));
+                assert_eq!(failure(), Some(QueryFailure::Capacity(EvaluationCapacity::NumericRepresentation)));
+            });
+            assert_eq!(failure(), None);
+            let _ = std::panic::catch_unwind(|| with_budget(&QueryBudget::unlimited(), || {
+                let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                panic!("controlled unwind");
+            }));
+            assert_eq!(failure(), None);
+        }
+
+        #[cfg(feature = "parallel")]
+        #[test]
+        fn worker_cause_handback_is_typed_and_query_local() {
+            let flag = std::sync::Arc::new(AtomicBool::new(true));
+            with_budget(&QueryBudget::cancelled_by(flag), || {
+                let snapshot = snapshot();
+                let cause = std::thread::scope(|scope| {
+                    scope.spawn(move || {
+                        assert_eq!(failure(), None);
+                        snapshot.why(0).unwrap()
+                    }).join().unwrap()
+                });
+                assert_eq!(failure(), None);
+                record_worker_failure(cause);
+                assert_eq!(failure(), Some(QueryFailure::Budget(BudgetExceeded::Cancelled)));
+            });
+            assert_eq!(failure(), None);
+        }
+    }
+
+    /// Marks an evaluation-capacity failure independently of expression errors.
+    pub(in crate::exec) fn fail_capacity(reason: EvaluationCapacity) -> Result<(), String> {
+        CAPACITY_EXCEEDED.with(|e| {
+            if e.get().is_none() { e.set(Some(reason)); }
+        });
+        Err(format!("query evaluation capacity exceeded ({reason})"))
+    }
+
+    pub(in crate::exec) fn check_temporal(value: &str, datatype: &str) -> Result<(), String> {
+        if let Some((min, max)) = ACTIVE.with(|a| a.get().temporal_year_range) {
+            if !sparq_core::temporal::year_within_capacity(value, datatype, min, max) {
+                return fail_capacity(EvaluationCapacity::TemporalYear);
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "parallel")]
+    pub(in crate::exec) fn evaluation_capacity_active() -> bool {
+        ACTIVE.with(|a| a.get().temporal_year_range.is_some() || a.get().strict_numeric_capacity)
+    }
+
+    #[inline]
+    pub(in crate::exec) fn strict_numeric() -> bool {
+        ACTIVE.with(|a| a.get().strict_numeric_capacity)
+    }
+
+    #[inline]
+    pub(in crate::exec) fn temporal_capacity_active() -> bool {
+        ACTIVE.with(|active| active.get().temporal_year_range.is_some())
     }
 
     /// Returns `true` when a budget is currently installed (even if not yet exhausted).
@@ -511,6 +645,29 @@ pub(crate) mod budget {
         use super::*;
         use std::sync::Arc;
 
+        #[test]
+        fn capacity_failure_is_sticky_and_nested_scopes_restore_it() {
+            let parent = QueryBudget { temporal_year_range: Some((1, 10)), ..QueryBudget::unlimited() };
+            with_budget(&parent, || {
+                assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
+                with_budget(&QueryBudget::unlimited(), || assert!(check(0).is_ok()));
+                assert_eq!(check(0).unwrap_err(), "query evaluation capacity exceeded (temporal-year)");
+                assert!(exhausted(0));
+            });
+            with_budget(&parent, || assert!(check(0).is_ok()));
+        }
+
+        #[cfg(any(feature = "service", feature = "service-local"))]
+        #[test]
+        fn service_byte_rollback_cannot_refund_evaluation_capacity() {
+            with_budget(&QueryBudget::unlimited(), || {
+                let checkpoint = byte_savepoint();
+                assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
+                restore_bytes(checkpoint);
+                assert!(check(0).unwrap_err().contains("evaluation capacity exceeded"));
+            });
+        }
+
         fn assert_state(want: Limits, sticky: Option<&'static str>) {
             let got = ACTIVE.with(Cell::get);
             assert_eq!(got.on, want.on);
@@ -521,7 +678,7 @@ pub(crate) mod budget {
             assert_eq!(got.cancel.map(|p| p.0), want.cancel.map(|p| p.0));
             #[cfg(not(target_arch = "wasm32"))]
             assert_eq!(got.deadline, want.deadline);
-            assert_eq!(EXCEEDED.with(Cell::get), sticky);
+            assert_eq!(EXCEEDED.with(Cell::get).map(BudgetExceeded::label), sticky);
         }
 
         #[test]
@@ -687,8 +844,8 @@ pub(crate) mod budget {
                     assert_ne!(a.0, owner);
                     assert_ne!(b.0, owner);
                     assert_ne!(a.0, b.0);
-                    assert_eq!(a.1, Some("cancelled"));
-                    assert_eq!(b.1, Some("cancelled"));
+                    assert_eq!(a.1, Some(BudgetExceeded::Cancelled));
+                    assert_eq!(b.1, Some(BudgetExceeded::Cancelled));
                     assert_eq!(a.2, Ok(()));
                     assert_eq!(b.2, Ok(()));
                 });
@@ -786,7 +943,7 @@ pub(crate) mod budget {
         fn assert_reason(budget: &QueryBudget, rows: usize, want: &'static str) {
             with_budget(budget, || {
                 let snap = snapshot();
-                assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
+                assert_eq!(snap.why(rows).map(BudgetExceeded::label), Some(want), "wrong snapshot reason for {}", want);
                 assert!(snap.hit(rows), "hit must agree with why for {}", want);
                 assert_eq!(
                     check(rows),
@@ -840,7 +997,7 @@ pub(crate) mod budget {
             with_budget(&budget, || {
                 let snap = snapshot();
                 assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
-                assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+                assert_eq!(snap.why(5), Some(BudgetExceeded::Rows), "one past the cap trips");
             })
         }
 
@@ -860,7 +1017,7 @@ pub(crate) mod budget {
                 assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
                 assert_eq!(
                     worker_reason,
-                    Some("cancelled"),
+                    Some(BudgetExceeded::Cancelled),
                     "the captured snapshot must carry the cancellation across threads"
                 );
                 assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
@@ -896,7 +1053,7 @@ pub(crate) mod budget {
                     check(0),
                     Err("query budget exceeded (cancelled)".to_owned())
                 );
-                assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+                assert_eq!(EXCEEDED.with(Cell::get), Some(BudgetExceeded::Cancelled));
             })
         }
 
@@ -1069,8 +1226,9 @@ pub(crate) mod trace {
 //
 // Soundness (bag semantics): `A ⋈ B = ⊎_C (A_C ⋈ B)` where `A_C` partitions `A` by the
 // pushed-variable values `C`, and `A_C ⋈ B = A_C ⋈ σ_{P=C}(B)`. Because every pushed
-// variable is a CERTAIN variable of `B` (bound in every `B` solution), substituting the
-// constant is exactly `σ_{P=C}(B)` with the pushed columns projected out (re-supplied by
+// variable is a CERTAIN variable of `B` (bound in every `B` solution), and the
+// admitted shape is positive and scope-preserving, substituting the constant is
+// `σ_{P=C}(B)` with the pushed columns projected out (re-supplied by
 // `A_C`). Pushed values are restricted to IRIs (term identity — no literal value-space /
 // numeric-precision hazard), matching the design record (research/
 // sp2bench-complex-shape-deficit.md §2.2). SP2Bench q08/q12b: the 1-row `?erdoes` side
@@ -1352,8 +1510,8 @@ const SIP_MAX_SMALL_ROWS: usize = 64;
 
 /// Certain (always-bound) REAL variables of a graph pattern — a sound
 /// UNDER-approximation of the SPARQL bound set: it never adds a variable that some
-/// solution may leave unbound, so any variable it reports is safe to substitute as a
-/// constant. Blank-node slots are excluded (we never substitute into them).
+/// solution may leave unbound. These are substitution candidates; `subst_pattern`
+/// separately checks the algebra and expression scopes. Blank-node slots are excluded.
 fn certain_vars(p: &GraphPattern, out: &mut FxHashSet<Variable>) {
     use GraphPattern as G;
     // A directly-positioned (non-quoted, non-blank) query variable of a term slot.
@@ -1646,87 +1804,58 @@ fn nnp_var_ref(p: &NamedNodePattern) -> Option<&Variable> {
     }
 }
 
-/// Substitutes each `var -> IRI` in `sub` throughout a graph pattern, returning `None`
-/// when substitution is not clearly sound (e.g. a `SERVICE`, a sub-`SELECT`/aggregate
-/// that projects a substituted variable, or a `BOUND(?v)` on a substituted variable) —
-/// in which case the caller falls back to cold evaluation.
+/// Restricts positive patterns by IRI bindings without crossing scopes.
+/// Both ordinary SIP and the theta anti-join seed path use this admission rule.
+/// Other algebra uses ordinary evaluation: constant replacement is not selection
+/// through binding, negative, nullable-domain, or solution-modifier boundaries.
 fn subst_pattern(p: &GraphPattern, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Option<GraphPattern> {
     use GraphPattern as G;
     Some(match p {
         G::Bgp { patterns } => G::Bgp {
             patterns: patterns.iter().map(|tp| subst_triple(tp, sub)).collect::<Option<Vec<_>>>()?,
         },
-        G::Path { subject, path, object } => G::Path {
-            subject: subst_term(subject, sub)?,
-            path: path.clone(),
-            object: subst_term(object, sub)?,
+        G::Path { subject, path, object } => {
+            // Variable-bearing triple terms are decomposed only in
+            // BGPs. Grounding one here would erase the ordinary path error.
+            if matches!(subject, TermPattern::Triple(_)) || matches!(object, TermPattern::Triple(_)) {
+                return None;
+            }
+            let substituted = |term: &TermPattern| {
+                matches!(term, TermPattern::Variable(v) if sub.contains_key(v))
+            };
+            if path_nullable(path) && (substituted(subject) || substituted(object)) {
+                return None;
+            }
+            G::Path {
+                subject: subst_term(subject, sub)?,
+                path: path.clone(),
+                object: subst_term(object, sub)?,
+            }
         },
         G::Join { left, right } => G::Join {
             left: Box::new(subst_pattern(left, sub)?),
             right: Box::new(subst_pattern(right, sub)?),
         },
-        G::LeftJoin { left, right, expression } => G::LeftJoin {
-            left: Box::new(subst_pattern(left, sub)?),
-            right: Box::new(subst_pattern(right, sub)?),
-            expression: match expression {
-                Some(e) => Some(subst_expr(e, sub)?),
-                None => None,
-            },
-        },
-        G::Filter { expr, inner } => G::Filter {
-            expr: subst_expr(expr, sub)?,
-            inner: Box::new(subst_pattern(inner, sub)?),
-        },
         G::Union { left, right } => G::Union {
             left: Box::new(subst_pattern(left, sub)?),
             right: Box::new(subst_pattern(right, sub)?),
         },
-        G::Graph { name, inner } => G::Graph {
-            name: subst_nnp(name, sub),
-            inner: Box::new(subst_pattern(inner, sub)?),
-        },
-        G::Minus { left, right } => G::Minus {
-            left: Box::new(subst_pattern(left, sub)?),
-            right: Box::new(subst_pattern(right, sub)?),
-        },
-        G::Extend { inner, variable, expression } => {
-            // A BIND target that is itself a substituted variable would shadow the
-            // constant — bail conservatively.
-            if sub.contains_key(variable) {
+        G::Filter { expr, inner } => {
+            // A binding supplied by a sibling is not in this FILTER's input.
+            // Rewriting it would turn an unbound/error expression into a value.
+            let mut bound = FxHashSet::default();
+            certain_vars(inner, &mut bound);
+            if !sub.keys().all(|v| bound.contains(v)) {
                 return None;
             }
-            G::Extend {
+            G::Filter {
+                expr: subst_expr(expr, sub)?,
                 inner: Box::new(subst_pattern(inner, sub)?),
-                variable: variable.clone(),
-                expression: subst_expr(expression, sub)?,
             }
-        }
-        G::Values { variables, bindings } => {
-            if variables.iter().any(|v| sub.contains_key(v)) {
-                return None;
-            }
-            G::Values { variables: variables.clone(), bindings: bindings.clone() }
-        }
-        G::OrderBy { inner, expression } => G::OrderBy {
-            inner: Box::new(subst_pattern(inner, sub)?),
-            expression: expression.iter().map(|oe| subst_order(oe, sub)).collect::<Option<Vec<_>>>()?,
         },
-        G::Distinct { inner } => G::Distinct { inner: Box::new(subst_pattern(inner, sub)?) },
-        G::Reduced { inner } => G::Reduced { inner: Box::new(subst_pattern(inner, sub)?) },
-        G::Slice { inner, start, length } => G::Slice {
-            inner: Box::new(subst_pattern(inner, sub)?),
-            start: *start,
-            length: *length,
-        },
-        // A sub-SELECT / GROUP that projects a substituted variable would emit it
-        // unbound; if it does not project any, the substitution is still sound.
-        G::Project { inner, variables } => {
-            if variables.iter().any(|v| sub.contains_key(v)) {
-                return None;
-            }
-            G::Project { inner: Box::new(subst_pattern(inner, sub)?), variables: variables.clone() }
-        }
-        // Aggregation and everything else (Service, …): conservative bail.
+        // MINUS depends on domains and its full right relation; OPTIONAL and
+        // binders introduce scopes; projection/modifiers can change which rows
+        // exist. Graph/service boundaries also stay outside this positive shape.
         _ => return None,
     })
 }
@@ -1759,13 +1888,6 @@ fn subst_nnp(p: &NamedNodePattern, sub: &FxHashMap<Variable, oxrdf::NamedNode>) 
         },
         NamedNodePattern::NamedNode(_) => p.clone(),
     }
-}
-
-fn subst_order(oe: &OrderExpression, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Option<OrderExpression> {
-    Some(match oe {
-        OrderExpression::Asc(e) => OrderExpression::Asc(subst_expr(e, sub)?),
-        OrderExpression::Desc(e) => OrderExpression::Desc(subst_expr(e, sub)?),
-    })
 }
 
 fn subst_expr(e: &Expression, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Option<Expression> {
@@ -1802,11 +1924,16 @@ fn subst_expr(e: &Expression, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Op
             bx(subst_expr(f, sub))?,
         ),
         E::Coalesce(list) => E::Coalesce(list.iter().map(|x| subst_expr(x, sub)).collect::<Option<Vec<_>>>()?),
-        E::FunctionCall(f, args) => E::FunctionCall(
-            f.clone(),
-            args.iter().map(|x| subst_expr(x, sub)).collect::<Option<Vec<_>>>()?,
-        ),
-        E::Exists(gp) => E::Exists(Box::new(subst_pattern(gp, sub)?)),
+        E::FunctionCall(f, args) => {
+            use spargebra::algebra::Function as F;
+            // Volatile or externally supplied behavior must not be duplicated
+            // across the optimizer's binding partitions.
+            if matches!(f, F::Now | F::Rand | F::Uuid | F::StrUuid | F::BNode | F::Custom(_)) {
+                return None;
+            }
+            E::FunctionCall(f.clone(), args.iter().map(|x| subst_expr(x, sub)).collect::<Option<Vec<_>>>()?)
+        },
+        E::Exists(_) => return None,
         // `BOUND(?v)` on a substituted (certainly-bound) variable is always true, but
         // rewriting it changes nothing measurable here — bail conservatively rather
         // than synthesise a boolean literal.
@@ -2178,7 +2305,7 @@ pub(crate) mod multiplicity {
 // `Copy`) and re-install it around each item exactly like the `functions` / `view`
 // / `spatial` registries above, restoring the previous value on drop (rayon runs
 // some items on the installing thread itself).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 pub(crate) mod query_now {
     use std::cell::Cell;
 
@@ -2535,7 +2662,8 @@ fn local_term_bytes(t: &Term) -> usize {
 /// Per-query vocabulary for terms produced during evaluation (BIND, aggregates)
 /// that are not in the graph dictionary.
 #[derive(Default)]
-pub struct LocalVocab {
+pub struct LocalVocab<'dataset> {
+    ebv_semantics: crate::EbvSemantics,
     terms: Vec<Term>,
     ids: FxHashMap<Term, Id>,
     /// Parallel to `terms`: the f64 value of each numeric local literal (NaN
@@ -2543,12 +2671,33 @@ pub struct LocalVocab {
     /// FILTER/comparison over a BIND-computed numeric does not clone + re-parse
     /// the term per row.
     nums: Vec<f64>,
+    /// Bound outer terms for EXISTS expression substitution. Kept with
+    /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
+    /// inherit another evaluation's bindings through thread-local state.
+    correlation: FxHashMap<Variable, Term>,
+    /// The active dataset catalog is independent of the active graph.
+    /// Nested GRAPH switches graph dictionaries without losing this borrowed
+    /// catalog; it is scoped to this evaluation, with no cloning or global state.
+    dataset: Option<&'dataset Graph>,
+    /// Remove substituted variables before domain-sensitive operators.
+    substitute_exists_domains: bool,
 }
 
-impl LocalVocab {
+impl<'dataset> LocalVocab<'dataset> {
+    fn for_query() -> Self {
+        Self { ebv_semantics: budget::ebv_semantics(), ..Self::default() }
+    }
+
+    fn for_dataset(dataset: &'dataset Graph) -> Self {
+        Self { dataset: Some(dataset), ..Self::for_query() }
+    }
     /// Interns a term, returning a stable id: equal terms get the same id so
     /// DISTINCT, GROUP BY, joins and equality work on computed values.
     fn intern(&mut self, t: Term) -> Id {
+        if let Term::Literal(literal) = &t {
+            // Sticky: interning cannot turn an evaluation-capacity failure into unbound.
+            let _ = budget::check_temporal(literal.value(), literal.datatype().as_str());
+        }
         if let Some(&id) = self.ids.get(&t) {
             return id;
         }
@@ -2557,7 +2706,7 @@ impl LocalVocab {
             // [FABLE-5] sq-74oy4 / sq-6b1lj: cache the DATATYPE-AWARE f64 (`numeric_cache_f64`)
             // — the SAME acceptance the graph `numeric_value` cache and the lenient `as_num`
             // seam use — so a computed (BIND/aggregate) numeric term joins/compares identically
-            // to a graph term. It TRIMS (XSD `collapse` facet) and rejects a per-datatype-
+            // to a graph term. It validates raw RDF lexical bytes verbatim and rejects a per-datatype-
             // ill-formed lexical (`"1.5"^^xsd:integer`); either folds to the NaN cache-miss
             // sentinel, deferring `=`/`<`/`>` to the exact evaluator (which type-errors it).
             Term::Literal(l) => numeric_cache_f64(l).unwrap_or(f64::NAN),
@@ -2642,7 +2791,7 @@ impl Bindings {
 }
 
 pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult, String> {
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     // Final budget gate: converts a row-capped/timed-out evaluation (including the
     // uninstrumented rayon branches) into the error before the expensive term
@@ -2666,7 +2815,7 @@ pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult,
         col_of.iter().map(|c| c.and_then(|i| term_of(graph, &local, row[i]))).collect()
     };
     #[cfg(feature = "parallel")]
-    let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD {
+    let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         bindings.rows.par_iter().map(materialise).collect()
     } else {
@@ -2861,7 +3010,7 @@ fn single_pattern_scan_json_emit(
     // the overrun to ~one chunk per worker. A blanket !budget-active → true flip is
     // REJECTED (see `parallel_json_fanout`).
     #[cfg(feature = "parallel")]
-    if scan_rows.len() >= PAR_THRESHOLD {
+    if scan_rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         if let Some(limits) = budget::parallel_json_fanout() {
             use rayon::prelude::*;
             // One string per chunk (≈ per worker), not per row — avoids one heap
@@ -3034,7 +3183,7 @@ pub fn eval_select_json_emit(
         budget::check(0)?; // sticky: the streaming loop may have stopped mid-scan
         return Ok(());
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
 
@@ -3083,7 +3232,7 @@ pub fn eval_select_json_emit(
     // mid-serialize and gate the final chunk on `budget::check` — a late-but-complete
     // result is reported as the budget error, never returned as if it were in time.
     #[cfg(feature = "parallel")]
-    if bindings.rows.len() >= PAR_THRESHOLD {
+    if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // Limit snapshot the workers re-check at each par-chunk boundary (the installing
         // thread's sticky flag is out of reach inside rayon).
@@ -3178,10 +3327,11 @@ pub fn eval_ask(graph: &Graph, pattern: &GraphPattern) -> Result<bool, String> {
     let simplified = ask_simplify(pattern);
     // Exact-count fast path (a single-pattern BGP answers from the index).
     if let Some(n) = try_count(graph, &simplified) {
+        budget::check(0)?;
         return Ok(n > 0);
     }
     let sliced = GraphPattern::Slice { inner: Box::new(simplified), start: 0, length: Some(1) };
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let b = eval_modified(graph, &mut local, &sliced)?;
     budget::check(b.rows.len())?;
     Ok(!b.rows.is_empty())
@@ -3227,9 +3377,10 @@ fn ask_simplify(p: &GraphPattern) -> GraphPattern {
 /// evaluates and counts the rows.
 pub fn count_select(graph: &Graph, pattern: &GraphPattern) -> Result<usize, String> {
     if let Some(n) = try_count(graph, pattern) {
+        budget::check(0)?;
         return Ok(n);
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
     Ok(bindings.rows.len())
@@ -3348,7 +3499,8 @@ fn eval_modified(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Res
     // Pin NOW() for this execution (SPARQL 1.1 §17.4.5.1). Outermost call samples
     // the clock once; the recursive / EXISTS re-entries see it active and keep the
     // outer instant (a Cell read). [FABLE-5] sq-98w7z.1
-    #[cfg(not(target_arch = "wasm32"))]
+    // A proof guest has no wall clock; its wrapper rejects NOW().
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
     let _query_now = query_now::scope();
     match p {
         GraphPattern::Project { inner, variables } => {
@@ -5400,14 +5552,11 @@ fn count_single_filtered(
             .iter()
             .filter(|row| graph.numeric_value(scan.to_spo(row)[pos]).is_some_and(|x| cmp.test(x)))
             .count(),
-        [(pos, ScanCmp::Temp(op, t))] => scan
+        [(pos, ScanCmp::Temp(op, t, approx))] => scan
             .rows
             .iter()
             .filter(|row| {
-                graph
-                    .temporal_value(scan.to_spo(row)[pos])
-                    .and_then(|v| Temporal::cmp_t(v, t))
-                    .is_some_and(|o| op.eval(o))
+                temporal_cmp_of_id(graph, scan.to_spo(row)[pos], t, approx).is_some_and(|o| op.eval(o))
             })
             .count(),
         _ => scan
@@ -5619,7 +5768,12 @@ fn eval_graph_named_pref(
         // default (wasm) build is byte-identical.
         #[cfg(feature = "zk")]
         let _zk = crate::zk::graph_scope(gname);
-        let mut sub_local = LocalVocab::default();
+        let mut sub_local = LocalVocab {
+            ebv_semantics: local.ebv_semantics,
+            correlation: local.correlation.clone(),
+            dataset: local.dataset,
+            ..LocalVocab::default()
+        };
         let b = eval_graph_pattern(sub, &mut sub_local, inner)?;
         let rows: Vec<Row> = b
             .rows
@@ -5635,6 +5789,7 @@ fn eval_graph_named_pref(
             .collect();
         Ok(Bindings::unsorted(b.vars, rows))
     }
+    let dataset = local.dataset.unwrap_or(graph);
     match name {
         NamedNodePattern::NamedNode(n) => {
             let target = Term::NamedNode(n.clone());
@@ -5642,7 +5797,7 @@ fn eval_graph_named_pref(
             // branch below: non-visible must be INDISTINGUISHABLE from absent
             // (the L1 view's security property).
             let sub = if view::allows(&target) {
-                graph.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
+                dataset.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
             } else {
                 None
             };
@@ -5666,7 +5821,7 @@ fn eval_graph_named_pref(
                     #[cfg(feature = "zk")]
                     let _zk = crate::zk::graph_scope(&target);
                     let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
-                    let mut el = LocalVocab::default();
+                    let mut el = LocalVocab { ebv_semantics: local.ebv_semantics, dataset: local.dataset, ..LocalVocab::default() };
                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
                     b.rows.clear();
                     Ok(b)
@@ -5753,7 +5908,7 @@ fn eval_graph_named_pref(
                 // The view-visibility (L1) check stays — a non-visible graph is still skipped.
                 Some(pref) => {
                     let mut err: Option<String> = None;
-                    graph.for_named_graphs_with_prefix(pref, |gname, sub| {
+                    dataset.for_named_graphs_with_prefix(pref, |gname, sub| {
                         if err.is_some() || !view::allows(gname) {
                             return;
                         }
@@ -5767,7 +5922,7 @@ fn eval_graph_named_pref(
                 }
                 // Full enumeration (no prefix restriction).
                 None => {
-                    for (gname, sub) in &graph.named {
+                    for (gname, sub) in &dataset.named {
                         if !view::allows(gname) {
                             continue; // not visible under the installed dataset view (L1)
                         }
@@ -5870,7 +6025,24 @@ fn trace_label(p: &GraphPattern) -> String {
     }
 }
 
+#[path = "exists_domain.rs"]
+mod exists_domain;
+
 fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
+    let bindings = eval_graph_pattern_unsubstituted(graph, local, p)?;
+    if !local.substitute_exists_domains {
+        return Ok(bindings);
+    }
+    // Charge the materialized intermediate before capture filtering and
+    // projection reduce it. Tracing then sees the actual substituted output.
+    let previous = budget::set_width(bindings.vars.len());
+    let result = budget::check(bindings.rows.len());
+    budget::restore_width(previous);
+    result?;
+    Ok(exists_domain::restrict(graph, local, bindings))
+}
+
+fn eval_graph_pattern_unsubstituted(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
     budget::check(0)?; // coarse cooperative cancellation: once per operator entry
     if is_conjunctive(p) {
         let mut patterns = Vec::new();
@@ -6983,37 +7155,37 @@ impl CmpOp {
 }
 
 /// A sargable FILTER predicate pushed down into a pattern scan: numeric (via the f64
-/// `numerics` cache) or temporal (via the `temporals` cache — dateTime/date vs a
+/// `numerics` cache) or temporal (via exact borrowed dateTime/date lexicals vs a
 /// temporal constant).
 #[derive(Clone, Copy)]
-pub(crate) enum ScanCmp {
+pub(crate) enum ScanCmp<'a> {
     Num(NumCmp),
     /// `value OP temporal-constant`. A row passes when the comparison is DECIDABLE and
     /// satisfies the operator; an indeterminate (mixed-timezone window), cross-family
     /// (dateTime vs date) or non-temporal operand is a FILTER type error — the row is
     /// excluded, which `false` reproduces exactly. (For `=`, cross-family is "known
     /// different" rather than an error — also excluded, also `false`.)
-    Temp(CmpOp, Temporal),
+    /// The cached approximate key of the constant (when it has one) only lets
+    /// [`temporal_cmp_of_id`] skip the exact key for rows far from the constant.
+    Temp(CmpOp, ExactTemporal<'a>, Option<Temporal>),
 }
 
-impl ScanCmp {
+impl ScanCmp<'_> {
     /// Human-readable comparison for EXPLAIN output, e.g. `> 28`.
     pub(crate) fn render(&self) -> String {
         match *self {
             ScanCmp::Num(c) => c.render(),
-            ScanCmp::Temp(op, t) => format!("{} temporal(instant {})", op.render(), t.instant),
+            ScanCmp::Temp(op, t, _) => format!("{} exact temporal {:?}", op.render(), t.timeline),
         }
     }
 
     /// Evaluates the pushed-down predicate against one scanned column id, through the
-    /// graph's numeric / temporal value cache — O(1), no term materialised.
+    /// numeric cache or exact borrowed temporal key; no term is materialised.
     #[inline]
     fn test_id(&self, graph: &Graph, id: Id) -> bool {
         match *self {
             ScanCmp::Num(c) => graph.numeric_value(id).is_some_and(|x| c.test(x)),
-            ScanCmp::Temp(op, t) => {
-                graph.temporal_value(id).and_then(|v| Temporal::cmp_t(v, t)).is_some_and(|o| op.eval(o))
-            }
+            ScanCmp::Temp(op, t, approx) => temporal_cmp_of_id(graph, id, t, approx).is_some_and(|o| op.eval(o)),
         }
     }
 }
@@ -7056,12 +7228,13 @@ fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// `"1.000000000000000001"^^xsd:decimal` collapses onto the f64 `1.0`), so such comparisons
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
 /// graph with no f64-inexact decimal keeps the numeric fast path.
-fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)> {
+fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, ScanCmp<'a>)> {
+    if budget::strict_numeric() { return None; }
     // (threshold, whether the float tier could round it) — see the decline below.
     fn lit_num(e: &Expression) -> Option<(f64, bool)> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
-                // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant (`numeric_cache_f64`).
+                // sq-6b1lj: datatype-aware, verbatim-validated constant (`numeric_cache_f64`).
                 // A datatype-ill-formed threshold (`"1.5"^^xsd:integer`) yields `None`, so
                 // `extract_sargable` DECLINES the numeric fast path and the FILTER takes the
                 // exact general comparison — which type-errors the ill-formed constant,
@@ -7092,7 +7265,7 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
     // A well-formed dateTime/dateTimeStamp/date constant: its cached-comparable value.
     // (The runtime compare through the cache is bit-identical to the per-row parse, so
     // no precision guard is needed — unlike the f64 numeric threshold above.)
-    fn lit_temp(e: &Expression) -> Option<Temporal> {
+    fn lit_temp(e: &Expression) -> Option<ExactTemporal<'_>> {
         match e {
             Expression::Literal(l) => temporal_of_lit(l),
             _ => None,
@@ -7136,7 +7309,11 @@ fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)
             continue;
         }
         if let Some(t) = lit_temp(konst) {
-            return Some((v, ScanCmp::Temp(op, t)));
+            let approx = match konst {
+                Expression::Literal(l) => Temporal::of_lit(l.value(), l.datatype().as_str()),
+                _ => None,
+            };
+            return Some((v, ScanCmp::Temp(op, t, approx)));
         }
     }
     None
@@ -7160,7 +7337,7 @@ fn pattern_var_pos(tp: &TriplePattern, var: &Variable) -> Option<usize> {
 /// Splits FILTERs into per-pattern sargable numeric predicates (pushed into the
 /// scan of the first pattern that binds the variable) and the residual filters
 /// (applied normally afterwards).
-pub(crate) fn split_sargable(graph: &Graph, patterns: &[TriplePattern], filters: &[Expression]) -> (Vec<Option<(usize, ScanCmp)>>, Vec<Expression>) {
+pub(crate) fn split_sargable<'a>(graph: &Graph, patterns: &[TriplePattern], filters: &'a [Expression]) -> (Vec<Option<(usize, ScanCmp<'a>)>>, Vec<Expression>) {
     // zk-trace: a sargable FILTER pushed into the scan would make the scan
     // record only the POST-filter rows (the rows that PASSED), losing the
     // FILTER obligation and under-capturing the input set — the proof must
@@ -7538,30 +7715,30 @@ fn eval_path(
     enum End {
         Var(Variable),
         Bound(Id),
-        /// A concrete term ABSENT from the dictionary — unsatisfiable for ordinary
-        /// paths, but still the start of a zero-length solution for `p*` / `p?`.
-        Missing(Term),
     }
-    let resolve = |t: &TermPattern| -> Result<End, String> {
+    let mut resolve = |t: &TermPattern| -> Result<End, String> {
         Ok(match t {
             TermPattern::Variable(v) => End::Var(v.clone()),
             TermPattern::BlankNode(b) => End::Var(bnode_var(b)),
             other => {
                 let term = term_pattern_to_term(other)?;
-                match graph.id_of(&term) {
-                    Some(id) => End::Bound(id),
-                    None => End::Missing(term),
-                }
+                // Keep absent constants as ordinary local IDs throughout
+                // the recursive relation, so alternatives retain each identity.
+                End::Bound(graph.id_of(&term).unwrap_or_else(|| local.intern(term)))
             }
         })
     };
     let (s_end, o_end) = (resolve(subject)?, resolve(object)?);
-    // Paths that admit the ZERO-LENGTH solution connect every term to itself — even
-    // terms that do not occur in the data (a constant endpoint on an empty graph).
-    let zero_len = matches!(path, PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_));
-
-    let s_var = if let End::Var(v) = &s_end { Some(v.clone()) } else { None };
-    let o_var = if let End::Var(v) = &o_end { Some(v.clone()) } else { None };
+    let s_var = if let End::Var(v) = &s_end {
+        Some(v.clone())
+    } else {
+        None
+    };
+    let o_var = if let End::Var(v) = &o_end {
+        Some(v.clone())
+    } else {
+        None
+    };
     let same_var = matches!((&s_var, &o_var), (Some(a), Some(b)) if a == b);
     let mut vars: Vec<Variable> = Vec::new();
     if let Some(v) = &s_var {
@@ -7572,102 +7749,127 @@ fn eval_path(
             vars.push(v.clone());
         }
     }
-    // A concrete-but-absent endpoint makes the pattern unsatisfiable — unless the
-    // path has a zero-length solution, handled below.
-    if !zero_len && (matches!(s_end, End::Missing(_)) || matches!(o_end, End::Missing(_))) {
-        return Ok(Bindings::unsorted(vars, Vec::new()));
-    }
-    let s_bound = if let End::Bound(id) = &s_end { Some(*id) } else { None };
-    let o_bound = if let End::Bound(id) = &o_end { Some(*id) } else { None };
-
-    let mut rows: Vec<Row> = Vec::new();
-    let mut seen: FxHashSet<Row> = FxHashSet::default();
-    // DefaultGraphMode::Empty (L1 dataset view): no data pairs at top-level graph
-    // scope — exactly the empty-graph evaluation. The zero-length constant
-    // solutions below still apply (`<s> p* <s>` holds even on an empty graph).
-    if !(view::default_is_empty() || matches!(s_end, End::Missing(_)) || matches!(o_end, End::Missing(_))) {
-        let ends = PathEnds { s: s_bound, o: o_bound };
-        // `?x p ?x` (same variable at both ends — necessarily both unbound): only
-        // diagonal pairs survive the filter, and for the recursive operators the
-        // diagonal is computable WITHOUT the all-pairs closure: the zero-length
-        // operators' diagonal is exactly the node domain, and `p+`'s diagonal is
-        // the set of nodes on a directed cycle (SCC size >= 2, or a self-loop).
-        let pairs: FxHashSet<(Id, Id)> = if same_var {
-            match path {
-                PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_) => {
-                    graph_nodes(graph).into_iter().map(|n| (n, n)).collect()
-                }
-                PropertyPathExpression::OneOrMore(a) => {
-                    cyclic_nodes(graph, a)?.into_iter().map(|n| (n, n)).collect()
-                }
-                _ => path_pairs(graph, path, ends)?,
+    let s_bound = if let End::Bound(id) = s_end {
+        Some(id)
+    } else {
+        None
+    };
+    let o_bound = if let End::Bound(id) = o_end {
+        Some(id)
+    } else {
+        None
+    };
+    let ends = PathEnds::terms(s_bound, o_bound);
+    // Use the same recursive rules on an empty active default graph. Its node
+    // domain is empty, but concrete endpoints retain their original local IDs.
+    let empty_graph;
+    let active = if view::default_is_empty() {
+        empty_graph = Graph::new();
+        &empty_graph
+    } else {
+        graph
+    };
+    let pairs: Vec<(Id, Id)> = if same_var {
+        match path {
+            PropertyPathExpression::ZeroOrMore(_) | PropertyPathExpression::ZeroOrOne(_) => {
+                graph_nodes(active).into_iter().map(|n| (n, n)).collect()
             }
-        } else {
-            path_pairs(graph, path, ends)?
-        };
-        for (s, o) in pairs {
-            if s_bound.is_some_and(|b| s != b) || o_bound.is_some_and(|b| o != b) || (same_var && s != o) {
-                continue;
-            }
-            let mut row: Row = SmallVec::new();
-            if s_var.is_some() {
-                row.push(s);
-            }
-            if o_var.is_some() && !same_var {
-                row.push(o);
-            }
-            if seen.insert(row.clone()) {
-                rows.push(row); // property-path solutions are a set (DISTINCT)
-            }
+            PropertyPathExpression::OneOrMore(a) => cyclic_nodes(active, a)?
+                .into_iter()
+                .map(|n| (n, n))
+                .collect(),
+            _ => path_bag_pairs(active, path, ends)?,
         }
-    }
-    if zero_len {
-        // The zero-length solution for a CONSTANT endpoint: `<s> p* ?x` yields
-        // {?x -> <s>} even on the empty graph (interning the absent term locally);
-        // `<s> p* <s>` yields the unit solution. (Variable–variable zero-length
-        // solutions over the graph's nodes come from `path_pairs` above.)
-        let const_id = |e: &End, local: &mut LocalVocab| match e {
-            End::Bound(id) => Some(*id),
-            End::Missing(t) => Some(local.intern(t.clone())),
-            End::Var(_) => None,
-        };
-        let zrow: Option<Row> = match (&s_end, &o_end) {
-            (End::Var(_), End::Var(_)) => None,
-            (s_c, End::Var(_)) => const_id(s_c, local).map(|id| std::iter::once(id).collect()),
-            (End::Var(_), o_c) => const_id(o_c, local).map(|id| std::iter::once(id).collect()),
-            (s_c, o_c) => {
-                let (a, b) = (const_id(s_c, local), const_id(o_c, local));
-                (a == b).then(SmallVec::new)
-            }
-        };
-        if let Some(row) = zrow {
-            if seen.insert(row.clone()) {
-                rows.push(row);
-            }
+    } else {
+        path_bag_pairs(active, path, ends)?
+    };
+    let mut rows = Vec::new();
+    for (s, o) in pairs {
+        if s_bound.is_some_and(|b| s != b)
+            || o_bound.is_some_and(|b| o != b)
+            || (same_var && s != o)
+        {
+            continue;
         }
+        check_path_growth(rows.len(), 1)?;
+        let mut row: Row = SmallVec::new();
+        if s_var.is_some() {
+            row.push(s);
+        }
+        if o_var.is_some() && !same_var {
+            row.push(o);
+        }
+        rows.push(row);
     }
     Ok(Bindings::unsorted(vars, rows))
 }
 
-/// Endpoint constraints pushed down into a path-relation computation (`None` =
-/// that end is unbound). CONTRACT: `path_pairs(graph, path, ends)` returns a
-/// SUBSET of the path's full (start,end) relation that contains EVERY pair
-/// satisfying the bounds. A sub-evaluation is free to IGNORE the hint and
-/// return extra relation pairs (callers always post-filter), but must never
-/// invent pairs outside the relation — so the pushdown is purely an
-/// optimisation and the post-filter in `eval_path` is the correctness backstop.
+/// Endpoint roles and optional scan hints. A concrete RDF term can
+/// seed a nullable path even outside nodes(G); a variable merely constrained
+/// by an optimization cannot. In particular, sequence midpoints remain
+/// variables. Hints may return supersets, but must never invent relation pairs.
 #[derive(Clone, Copy, Default)]
 struct PathEnds {
     s: Option<Id>,
     o: Option<Id>,
+    s_term: bool,
+    o_term: bool,
 }
 
 impl PathEnds {
-    const NONE: PathEnds = PathEnds { s: None, o: None };
-    /// The constraint seen through `^path` (endpoints exchange roles).
+    const NONE: Self = Self {
+        s: None,
+        o: None,
+        s_term: false,
+        o_term: false,
+    };
+
+    fn terms(s: Option<Id>, o: Option<Id>) -> Self {
+        Self {
+            s,
+            o,
+            s_term: s.is_some(),
+            o_term: o.is_some(),
+        }
+    }
+
+    /// Left side of a sequence: the midpoint is always a fresh variable.
+    fn left(self, midpoint: Option<Id>) -> Self {
+        Self {
+            s: self.s,
+            o: midpoint,
+            s_term: self.s_term,
+            o_term: false,
+        }
+    }
+
+    fn right(self, midpoint: Option<Id>) -> Self {
+        Self {
+            s: midpoint,
+            o: self.o,
+            s_term: false,
+            o_term: self.o_term,
+        }
+    }
+
     #[inline]
-    fn swapped(self) -> PathEnds {
-        PathEnds { s: self.o, o: self.s }
+    fn swapped(self) -> Self {
+        Self {
+            s: self.o,
+            o: self.s,
+            s_term: self.o_term,
+            o_term: self.s_term,
+        }
+    }
+
+    /// Concrete endpoints take precedence over variable hints when selecting
+    /// a traversal seed (SPARQL 1.1 §18.4 term-var versus var-term rules).
+    fn seed(self) -> Option<(Id, Option<Id>, Dir, bool)> {
+        if self.s_term || (!self.o_term && self.s.is_some()) {
+            self.s.map(|s| (s, self.o, Dir::Fwd, self.s_term))
+        } else {
+            self.o.map(|o| (o, self.s, Dir::Rev, self.o_term))
+        }
     }
 }
 
@@ -7680,26 +7882,140 @@ impl PathEnds {
 /// the hash join instead.
 const SEQ_MIDPOINT_FANOUT_LIMIT: usize = 1024;
 
+// SPARQL 1.1 §18.4 defines alternatives as multiset union and
+// sequences as join followed by projection. Reachability operators deliberately
+// retain the set evaluator below, so duplicate routes do not multiply p*/p+.
+fn path_bag_pairs(
+    graph: &Graph,
+    path: &PropertyPathExpression,
+    ends: PathEnds,
+) -> Result<Vec<(Id, Id)>, String> {
+    use PropertyPathExpression as P;
+    budget::check(0)?;
+    match path {
+        P::Reverse(inner) => Ok(path_bag_pairs(graph, inner, ends.swapped())?
+            .into_iter()
+            .map(|(s, o)| (o, s))
+            .collect()),
+        P::Alternative(left, right) => {
+            let mut pairs = path_bag_pairs(graph, left, ends)?;
+            let more = path_bag_pairs(graph, right, ends)?;
+            check_path_growth(pairs.len(), more.len())?;
+            pairs.extend(more);
+            Ok(pairs)
+        }
+        P::Sequence(left, right) => {
+            if let Some(s) = ends.s {
+                let near = path_bag_pairs(graph, left, ends.left(None))?;
+                let mut mids: FxHashMap<Id, usize> = FxHashMap::default();
+                for &(start, mid) in &near {
+                    if start == s {
+                        *mids.entry(mid).or_default() += 1;
+                    }
+                }
+                if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
+                    let mut pairs = Vec::new();
+                    for (mid, count) in mids {
+                        for (start, o) in path_bag_pairs(graph, right, ends.right(Some(mid)))? {
+                            if start == mid {
+                                check_path_growth(pairs.len(), count)?;
+                                pairs.extend(std::iter::repeat_n((s, o), count));
+                            }
+                        }
+                    }
+                    return Ok(pairs);
+                }
+                join_path_bags(near, path_bag_pairs(graph, right, ends.right(None))?)
+            } else if let Some(o) = ends.o {
+                let near = path_bag_pairs(graph, right, ends.right(None))?;
+                let mut mids: FxHashMap<Id, usize> = FxHashMap::default();
+                for &(mid, end) in &near {
+                    if end == o {
+                        *mids.entry(mid).or_default() += 1;
+                    }
+                }
+                if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
+                    let mut pairs = Vec::new();
+                    for (mid, count) in mids {
+                        for (s, end) in path_bag_pairs(graph, left, ends.left(Some(mid)))? {
+                            if end == mid {
+                                check_path_growth(pairs.len(), count)?;
+                                pairs.extend(std::iter::repeat_n((s, o), count));
+                            }
+                        }
+                    }
+                    return Ok(pairs);
+                }
+                join_path_bags(path_bag_pairs(graph, left, PathEnds::NONE)?, near)
+            } else {
+                join_path_bags(
+                    path_bag_pairs(graph, left, PathEnds::NONE)?,
+                    path_bag_pairs(graph, right, PathEnds::NONE)?,
+                )
+            }
+        }
+        _ => {
+            let pairs = path_pairs(graph, path, ends)?;
+            budget::check(pairs.len())?;
+            Ok(pairs.into_iter().collect())
+        }
+    }
+}
+
+fn check_path_growth(current: usize, added: usize) -> Result<(), String> {
+    let total = current
+        .checked_add(added)
+        .ok_or("property path multiplicity overflow")?;
+    budget::check(total)
+}
+
+fn join_path_bags(left: Vec<(Id, Id)>, right: Vec<(Id, Id)>) -> Result<Vec<(Id, Id)>, String> {
+    let mut by_start: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
+    for (mid, end) in right {
+        by_start.entry(mid).or_default().push(end);
+    }
+    let mut pairs = Vec::new();
+    for (start, mid) in left {
+        budget::check(pairs.len())?;
+        if let Some(ends) = by_start.get(&mid) {
+            check_path_growth(pairs.len(), ends.len())?;
+            pairs.extend(ends.iter().map(|&end| (start, end)));
+        }
+    }
+    Ok(pairs)
+}
+
 /// All `(subject, object)` id pairs connected by a property path expression,
 /// narrowed by any bound endpoints (see [`PathEnds`] for the exact contract).
 /// Bound endpoints reach the leaves as range-scan prefixes and turn the
 /// recursive operators into single-source directed traversals.
-fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> Result<FxHashSet<(Id, Id)>, String> {
+fn path_pairs(
+    graph: &Graph,
+    path: &PropertyPathExpression,
+    ends: PathEnds,
+) -> Result<FxHashSet<(Id, Id)>, String> {
     use PropertyPathExpression as P;
     Ok(match path {
         P::NamedNode(p) => predicate_pairs(graph, p, ends),
-        P::Reverse(a) => path_pairs(graph, a, ends.swapped())?.into_iter().map(|(s, o)| (o, s)).collect(),
+        P::Reverse(a) => path_pairs(graph, a, ends.swapped())?
+            .into_iter()
+            .map(|(s, o)| (o, s))
+            .collect(),
         P::Sequence(a, c) => {
             if let Some(s) = ends.s {
                 // Bound start: evaluate the near hop from `s` only, then push each
                 // reached midpoint into the far hop (which also receives the bound
                 // object, enabling early exit deeper down).
-                let av = path_pairs(graph, a, PathEnds { s: Some(s), o: None })?;
-                let mids: FxHashSet<Id> = av.iter().filter(|&&(x, _)| x == s).map(|&(_, m)| m).collect();
+                let av = path_pairs(graph, a, ends.left(None))?;
+                let mids: FxHashSet<Id> = av
+                    .iter()
+                    .filter(|&&(x, _)| x == s)
+                    .map(|&(_, m)| m)
+                    .collect();
                 if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
                     let mut out = FxHashSet::default();
                     for &m in &mids {
-                        for (m2, o) in path_pairs(graph, c, PathEnds { s: Some(m), o: ends.o })? {
+                        for (m2, o) in path_pairs(graph, c, ends.right(Some(m)))? {
                             if m2 == m {
                                 out.insert((s, o));
                             }
@@ -7709,17 +8025,21 @@ fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> R
                 } else {
                     // Fan-out too large for per-midpoint pushes: the far hop gets
                     // only the outer bound endpoint.
-                    join_seq(av, path_pairs(graph, c, PathEnds { s: None, o: ends.o })?)
+                    join_seq(av, path_pairs(graph, c, ends.right(None))?)
                 }
             } else if let Some(o) = ends.o {
                 // Bound object only: mirror image — far hop backwards from `o`,
                 // midpoints pushed into the near hop as bound objects.
-                let cv = path_pairs(graph, c, PathEnds { s: None, o: Some(o) })?;
-                let mids: FxHashSet<Id> = cv.iter().filter(|&&(_, y)| y == o).map(|&(m, _)| m).collect();
+                let cv = path_pairs(graph, c, ends.right(None))?;
+                let mids: FxHashSet<Id> = cv
+                    .iter()
+                    .filter(|&&(_, y)| y == o)
+                    .map(|&(m, _)| m)
+                    .collect();
                 if mids.len() <= SEQ_MIDPOINT_FANOUT_LIMIT {
                     let mut out = FxHashSet::default();
                     for &m in &mids {
-                        for (s, m2) in path_pairs(graph, a, PathEnds { s: None, o: Some(m) })? {
+                        for (s, m2) in path_pairs(graph, a, ends.left(Some(m)))? {
                             if m2 == m {
                                 out.insert((s, o));
                             }
@@ -7730,7 +8050,10 @@ fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> R
                     join_seq(path_pairs(graph, a, PathEnds::NONE)?, cv)
                 }
             } else {
-                join_seq(path_pairs(graph, a, PathEnds::NONE)?, path_pairs(graph, c, PathEnds::NONE)?)
+                join_seq(
+                    path_pairs(graph, a, PathEnds::NONE)?,
+                    path_pairs(graph, c, PathEnds::NONE)?,
+                )
             }
         }
         // Endpoints push into BOTH branches of an alternative unchanged.
@@ -7739,47 +8062,46 @@ fn path_pairs(graph: &Graph, path: &PropertyPathExpression, ends: PathEnds) -> R
             s.extend(path_pairs(graph, c, ends)?);
             s
         }
-        P::OneOrMore(a) => match (ends.s, ends.o) {
-            (Some(s), _) => directed_reach(graph, a, s, ends.o, Dir::Fwd)?.into_iter().map(|r| (s, r)).collect(),
-            (None, Some(o)) => directed_reach(graph, a, o, None, Dir::Rev)?.into_iter().map(|r| (r, o)).collect(),
-            (None, None) => transitive_closure_pairs(path_pairs(graph, a, PathEnds::NONE)?),
-        },
-        P::ZeroOrMore(a) => match (ends.s, ends.o) {
-            // A bound endpoint needs only ITS reflexive pair, not the whole node
-            // domain (`<s> p* <s>` holds for any term, see the zero-length rules).
-            (Some(s), _) => {
-                let mut c: FxHashSet<(Id, Id)> =
-                    directed_reach(graph, a, s, ends.o, Dir::Fwd)?.into_iter().map(|r| (s, r)).collect();
-                c.insert((s, s));
-                c
-            }
-            (None, Some(o)) => {
-                let mut c: FxHashSet<(Id, Id)> =
-                    directed_reach(graph, a, o, None, Dir::Rev)?.into_iter().map(|r| (r, o)).collect();
-                c.insert((o, o));
-                c
-            }
-            (None, None) => {
-                let mut c = transitive_closure_pairs(path_pairs(graph, a, PathEnds::NONE)?);
-                c.extend(graph_nodes(graph).into_iter().map(|n| (n, n)));
-                c
-            }
-        },
-        P::ZeroOrOne(a) => {
-            let mut s = path_pairs(graph, a, ends)?;
-            match (ends.s, ends.o) {
-                // Bound endpoint: only its own reflexive pair (no full-store node scan).
-                (Some(x), None) | (None, Some(x)) => {
-                    s.insert((x, x));
-                }
-                (Some(x), Some(y)) => {
-                    if x == y {
-                        s.insert((x, x));
+        P::OneOrMore(a) | P::ZeroOrMore(a) => {
+            let reflexive = matches!(path, P::ZeroOrMore(_));
+            if let Some((start, target, dir, is_term)) = ends.seed() {
+                // A variable hint outside nodes(G) cannot become a new ALP
+                // source. Checking the two indexes avoids a full node scan.
+                if !is_term && !is_graph_node(graph, start) {
+                    FxHashSet::default()
+                } else {
+                    let mut reached = directed_reach(graph, a, start, target, dir)?;
+                    if reflexive {
+                        reached.insert(start);
                     }
+                    reached
+                        .into_iter()
+                        .map(|end| match dir {
+                            Dir::Fwd => (start, end),
+                            Dir::Rev => (end, start),
+                        })
+                        .collect()
                 }
-                (None, None) => s.extend(graph_nodes(graph).into_iter().map(|n| (n, n))),
+            } else {
+                let mut pairs = transitive_closure_pairs(path_pairs(graph, a, PathEnds::NONE)?);
+                if reflexive {
+                    pairs.extend(graph_nodes(graph).into_iter().map(|n| (n, n)));
+                }
+                pairs
             }
-            s
+        }
+        P::ZeroOrOne(a) => {
+            let mut pairs = path_pairs(graph, a, ends)?;
+            if let Some((node, target, _, is_term)) = ends.seed() {
+                if target.is_none_or(|target| target == node)
+                    && (is_term || is_graph_node(graph, node))
+                {
+                    pairs.insert((node, node));
+                }
+            } else {
+                pairs.extend(graph_nodes(graph).into_iter().map(|n| (n, n)));
+            }
+            pairs
         }
         P::NegatedPropertySet(props) => negated_property_pairs(graph, props, ends),
     })
@@ -7851,8 +8173,8 @@ fn directed_reach(
             // "may return extra relation pairs" clause.
             None => {
                 let ends = match dir {
-                    Dir::Fwd => PathEnds { s: Some(node), o: None },
-                    Dir::Rev => PathEnds { s: None, o: Some(node) },
+                    Dir::Fwd => PathEnds::terms(Some(node), None),
+                    Dir::Rev => PathEnds::terms(None, Some(node)),
                 };
                 for (s, o) in path_pairs(graph, sub, ends)? {
                     match dir {
@@ -8031,6 +8353,25 @@ fn negated_property_pairs(graph: &Graph, props: &[oxrdf::NamedNode], ends: PathE
         }
     }
     out
+}
+
+// Structural nullability is a conservative substitution guard; the
+// actual relation still follows endpoint roles and sequence's fresh midpoint.
+fn path_nullable(path: &PropertyPathExpression) -> bool {
+    use PropertyPathExpression as P;
+    match path {
+        P::NamedNode(_) | P::NegatedPropertySet(_) => false,
+        P::ZeroOrMore(_) | P::ZeroOrOne(_) => true,
+        P::Reverse(inner) | P::OneOrMore(inner) => path_nullable(inner),
+        P::Sequence(left, right) => path_nullable(left) && path_nullable(right),
+        P::Alternative(left, right) => path_nullable(left) || path_nullable(right),
+    }
+}
+
+// Dictionary membership also includes predicate-only terms.
+fn is_graph_node(graph: &Graph, id: Id) -> bool {
+    !graph.store.scan(&[Some(id), None, None]).rows.is_empty()
+        || !graph.store.scan(&[None, None, Some(id)]).rows.is_empty()
 }
 
 /// Every id that appears as a subject or object (the domain of zero-length path matches).
@@ -9542,7 +9883,7 @@ fn scan_to_bindings(
 
     // No LIMIT and a large relation: build the rows in parallel (order-preserving).
     #[cfg(feature = "parallel")]
-    if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD {
+    if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let rows: Vec<Row> = scan_rows.par_iter().filter_map(build_row).collect();
         return Bindings { vars, rows, sorted_by };
@@ -9670,7 +10011,7 @@ fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // JoinTable = hashbrown::HashMap<Key, Posting, FxBuildHasher>; the type inference here
     // avoids a dependency on rustc_hash::FxHashMap in the type annotation. [SONNET-4.6] sq-7d3dj.19
     #[cfg(feature = "parallel")]
-    let tables = if build.rows.len() >= PAR_THRESHOLD {
+    let tables = if build.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let parts: Vec<u8> = build
             .rows
@@ -9686,7 +10027,7 @@ fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // The probe is read-only over the (partitioned) table, so for a large probe side build the
     // output in parallel on native.
     #[cfg(feature = "parallel")]
-    if probe.rows.len() >= PAR_THRESHOLD {
+    if probe.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // Budget snapshot for the workers (the installing thread's thread-local is
         // invisible to them): a worker that hits the limits stops adding to its own
@@ -10294,7 +10635,7 @@ fn left_outer_join(graph: &Graph, local: &mut LocalVocab, left: Bindings, right:
                 None => true,
                 Some(e) => {
                     let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                 }
             };
             if keep {
@@ -10359,7 +10700,7 @@ fn left_outer_merge(
                     None => true,
                     Some(e) => {
                         let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                     }
                 };
                 if keep {
@@ -10663,7 +11004,7 @@ fn try_theta_antijoin(
         // path: today the build truncates to nothing and the caller's operator-exit
         // `budget::check` raises this same message, just after the wasted work.
         #[cfg(feature = "parallel")]
-        if left_b.rows.len() >= PAR_THRESHOLD {
+        if left_b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
             use rayon::prelude::*;
             let limits = budget::snapshot();
             let fns = functions::snapshot();
@@ -10683,7 +11024,7 @@ fn try_theta_antijoin(
                     // One non-tripping `Instant` read per row under a deadline budget, and
                     // a single `on` test when no budget is installed.
                     if let Some(why) = limits.why(0) {
-                        return Err(format!("query budget exceeded ({})", why));
+                        return Err((Some(why), format!("query budget exceeded ({})", why)));
                     }
                     let _fns = functions::worker_install(&fns);
                     let _vw = view::worker_install(&vw);
@@ -10693,9 +11034,13 @@ fn try_theta_antijoin(
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
                     let _qb = query_base_worker_install(&qb);
-                    eliminated(lrow)
+                    eliminated(lrow).map_err(|message| (None, message))
                 })
-                .collect::<Result<Vec<bool>, String>>()?;
+                .collect::<Result<Vec<bool>, (Option<crate::BudgetExceeded>, String)>>()
+                .map_err(|(cause, message)| {
+                    if let Some(cause) = cause { budget::record_worker_failure(cause); }
+                    message
+                })?;
 
             // Serial ordered build + budget truncation: identical to the serial probe
             // loop's `if !matched { push } ; break on budget` — the survivor prefix and
@@ -10905,7 +11250,7 @@ fn antijoin_row_matches(
             .collect();
         let mut ok = true;
         for e in checks {
-            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?) {
+            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics) {
                 ok = false;
                 break;
             }
@@ -11231,7 +11576,7 @@ fn values_bindings(graph: &Graph, local: &mut LocalVocab, variables: &[Variable]
 
 fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: &Variable, expr: &Expression) -> Result<Bindings, String> {
     // Pre-resolve Variable → column index once before the row loop. [OPUS-4.8] sq-7d3dj.4.
-    let compiled = compile_expr(expr, &b);
+    let compiled = compile_expr(expr, &b, local);
     // BIND was fully serial because each row's computed value was interned immediately. Split it
     // (T1.0b): a PARALLEL pass evaluates the expression (read-only) and resolves the value to an
     // id read-only (inline / graph-dict / already-local); only genuinely new terms fall through to
@@ -11241,7 +11586,7 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
     let scope = b.rows.as_ptr() as usize;
     #[cfg(feature = "parallel")]
-    let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD {
+    let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let lv: &LocalVocab = local;
         let bref = &b;
@@ -11322,7 +11667,7 @@ fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: 
 /// variable is never bound (no column) — its key id is then `NO_ID` (unbound) for every row.
 fn build_groups(b: &Bindings, key_cols: &[Option<usize>]) -> (Vec<Key>, Vec<Vec<usize>>) {
     #[cfg(feature = "parallel")]
-    if b.rows.len() >= PAR_THRESHOLD {
+    if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         use std::hash::{Hash, Hasher};
         const P: usize = 64;
@@ -11433,7 +11778,7 @@ fn group_aggregate(
     // in the sequential path, one group at a time), interning and pushing each batch's rows
     // before evaluating the next, so only a bounded slice of `Value`s is live.
     #[cfg(feature = "parallel")]
-    let parallel_eval = b.rows.len() >= PAR_THRESHOLD;
+    let parallel_eval = b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active();
     #[cfg(not(feature = "parallel"))]
     let parallel_eval = false;
 
@@ -11600,9 +11945,9 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
             Ok(Value::Num(Num::Int(n as i64)))
         }
         AggregateExpression::FunctionCall { name, expr, distinct } => {
-            // MIN/MAX over an all-temporal column: fold at the ID level through the
-            // temporals cache — no term materialised, no per-comparison lexical
-            // re-parse. Falls through to the general path on any non-temporal member.
+            // MIN/MAX over an all-temporal column: borrow exact lexical keys by ID.
+            // No term is materialised; parsing is linear in the literal length.
+            // Fall through to the general path on any non-temporal member.
             if let AggregateFunction::Min | AggregateFunction::Max = name {
                 let is_min = matches!(name, AggregateFunction::Min);
                 if let Some(v) = minmax_temporal(graph, local, b, members, expr, *distinct, is_min) {
@@ -11672,13 +12017,12 @@ fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, members: &[us
                         return Ok(Value::Num(Num::Int(0))); // AVG({}) = 0 per SPARQL
                     }
                     Ok(sum_values(&vals, errored)
-                        .and_then(|s| s.binop(Num::Int(vals.len() as i64), ArithOp::Div))
+                        .and_then(|s| numeric_capacity::binop(s, Num::Int(vals.len() as i64), ArithOp::Div))
                         .map(Value::Num)
                         .unwrap_or(Value::Error))
                 }
-                // MIN/MAX over an all-numeric group return the typed VALUE (promoted,
-                // canonically serialised — "2.0E-1"^^xsd:double); mixed groups keep the
-                // lenient term path.
+                // MIN/MAX select an input RDF term. Numeric comparisons
+                // must not replace its lexical form or datatype with a new term.
                 AggregateFunction::Min => Ok(minmax_values(vals, Ordering::Less)),
                 AggregateFunction::Max => Ok(minmax_values(vals, Ordering::Greater)),
                 AggregateFunction::GroupConcat { separator } => {
@@ -11752,28 +12096,28 @@ fn sum_values(vals: &[Value], errored: bool) -> Option<Num> {
     }
     let mut acc = Num::Int(0);
     for v in vals {
-        acc = acc.binop(as_numeric(v)?, ArithOp::Add)?;
+        acc = numeric_capacity::binop(acc, as_numeric(v)?, ArithOp::Add)?;
     }
     Some(acc)
 }
 
 /// MIN/MAX: an all-numeric group compares by VALUE (exact for int/decimal) and returns
-/// the typed value; any non-numeric member falls back to the lenient total-order term
+/// the selected original operand; any non-numeric member uses the total-order term
 /// comparison (which must order across types for the SPARQL MIN/MAX-over-anything case).
-fn minmax_values(vals: Vec<Value>, keep: Ordering) -> Value {
+fn minmax_values(mut vals: Vec<Value>, keep: Ordering) -> Value {
     if vals.is_empty() {
         return Value::Unbound;
     }
     let nums: Option<Vec<Num>> = vals.iter().map(as_numeric).collect();
     match nums {
         Some(nums) => {
-            let mut best = nums[0];
-            for &n in &nums[1..] {
-                if num_extremum_compare(n, best) == Some(keep) {
-                    best = n;
+            let mut best = 0;
+            for (i, &n) in nums.iter().enumerate().skip(1) {
+                if num_extremum_compare(n, nums[best]) == Some(keep) {
+                    best = i;
                 }
             }
-            num_canonical_term(best)
+            vals.swap_remove(best)
         }
         None => {
             let cmp = |a: &Value, c: &Value| compare_values(a, c).unwrap_or(Ordering::Equal);
@@ -11786,14 +12130,14 @@ fn minmax_values(vals: Vec<Value>, keep: Ordering) -> Value {
 }
 
 /// MIN/MAX over a variable whose group members are ALL well-formed temporal
-/// (dateTime/date) graph terms, folded at the id level through the temporals cache.
+/// (dateTime/date) graph terms, folded through exact borrowed lexical keys.
 /// `None` falls back to the general (materialise + compare_values) path: any unbound
 /// member is skipped (as the general path skips it), but a local-vocab or
 /// non-temporal member aborts the fast path entirely.
 ///
 /// Tie semantics replicate `minmax_values` exactly: the comparator is
 /// `compare_values(..).unwrap_or(Equal)` — which for two temporals IS
-/// `Temporal::cmp_t_total` (kind-first, then the timeline order extended over the
+/// `ExactTemporal::compare_total` (kind-first, then the timeline order extended over the
 /// indeterminate mixed-timezone window) — with MIN keeping the FIRST of
 /// equal members (`Iterator::min_by`) and MAX the LAST (`Iterator::max_by`); DISTINCT
 /// drops later duplicate terms first (same term ⇔ same id for graph terms), which can
@@ -11811,7 +12155,7 @@ fn minmax_temporal(
     let Expression::Variable(v) = expr else { return None };
     let col = b.col(v)?;
     let mut seen: FxHashSet<Id> = FxHashSet::default();
-    let mut best: Option<(Temporal, Id)> = None;
+    let mut best: Option<(ExactTemporal<'_>, Id)> = None;
     for &ri in members {
         let id = b.rows[ri][col];
         if id == NO_ID {
@@ -11820,7 +12164,7 @@ fn minmax_temporal(
         if is_local(id) {
             return None; // computed term: general path
         }
-        let t = graph.temporal_value(id)?; // non-temporal/ill-formed: general path
+        let t = temporal_of_id(graph, id)?; // non-temporal/ill-formed: general path
         if distinct && !seen.insert(id) {
             continue;
         }
@@ -11828,12 +12172,12 @@ fn minmax_temporal(
             None => (t, id),
             Some((bt, bid)) => {
                 // [FABLE-5] sq-wjl8i KIND-FIRST + [SONNET-4.6] sq-2k5py, both now in the
-                // shared `Temporal::cmp_t_total`, so this fold cannot drift from
+                // shared `ExactTemporal::compare_total`, so this fold cannot drift from
                 // `compare_values`: a cross-kind (dateTime vs date) pair ranks by
                 // `LiteralKind` (DateTime < Date), never lexically, and within a kind the
                 // timeline order is TOTAL (instant, then timezone presence) — the former
                 // lexical fallback for the indeterminate window was intransitive.
-                let ord = Temporal::cmp_t_total(t, bt);
+                let ord = ExactTemporal::compare_total(t, bt);
                 let replace = if is_min { ord == Ordering::Less } else { ord != Ordering::Less };
                 if replace {
                     (t, id)
@@ -11855,6 +12199,9 @@ fn minmax_temporal(
 /// integer/decimal compares in the FLOAT tier (`"0.1"^^xsd:float = 0.1` is true), not as two
 /// `f64`s.
 fn num_compare(a: Num, c: Num) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        return numeric_capacity::comparable(a, c).then(|| a.cmp_relational(c)).flatten();
+    }
     a.cmp_relational(c)
 }
 
@@ -11865,6 +12212,9 @@ fn num_compare(a: Num, c: Num) -> Option<Ordering> {
 /// (`MAX(0.1, "0.1"^^xsd:float, 0.1000000001e0)` is the float, whose value is
 /// 0.10000000149…). `f64` widening is exact for a float, so this keeps every strict order.
 fn num_extremum_compare(a: Num, c: Num) -> Option<Ordering> {
+    if budget::strict_numeric() && !numeric_capacity::comparable(a, c) {
+        return None;
+    }
     if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
         if let Some(o) = x.cmp(y) {
             return Some(o);
@@ -11941,8 +12291,8 @@ fn slice_bindings(b: &mut Bindings, start: usize, length: Option<usize>) {
 /// its CACHED comparison value + id — no term materialised, no per-comparison lexical
 /// re-parse (the q09-class fix: ORDER BY dateTime was re-parsing both lexicals on every
 /// comparison of the sort). Everything else keeps the identity-preserving `Value`.
-enum SortCell {
-    Temp { t: Temporal, id: Id },
+enum SortCell<'graph> {
+    Temp { id: Id, key: ExactTemporal<'graph> },
     /// A numeric GRAPH term: the cached f64 for the fast compare PLUS its dictionary id, so
     /// an f64 TIE can be rechecked EXACTLY from the id's exact lexical — distinct integers
     /// beyond 2^53 / high-precision decimals that share one f64 (the numerics cache stores
@@ -12003,7 +12353,7 @@ enum SortCell {
 /// (same lexical kind), never a per-comparison `lit_kind` / `is_numeric_dt` /
 /// `value_str`-allocation re-derivation. [FABLE-5] sq-7d3dj.30.12
 #[inline]
-fn sort_cell_val(v: Value) -> SortCell {
+fn sort_cell_val(v: Value) -> SortCell<'static> {
     let class = v.term_class() as u8;
     // Only the literal class consults the kind rank; skip the (cheap but non-trivial)
     // `lit_kind` dispatch entirely for the non-literal classes.
@@ -12033,23 +12383,18 @@ fn sort_cell_val(v: Value) -> SortCell {
 }
 
 /// Compares two ORDER BY key cells under the lenient total order, reproducing
-/// `compare_values` exactly: two temporals by `Temporal::cmp_t_total` (kind-first, then
+/// `compare_values` exactly: two temporals by `ExactTemporal::compare_total` (kind-first, then
 /// the timeline order extended over the indeterminate mixed-timezone window — the same
 /// definition `compare_values` reaches through `CompareTerm::strict_cmp`); a temporal
 /// against any other key materialises the term lazily (rare: only mixed-type columns)
 /// and defers to `compare_values` itself.
 #[inline]
-fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell) -> Ordering {
+fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell<'_>, c: &SortCell<'_>) -> Ordering {
     match (a, c) {
-        (SortCell::Temp { t: ta, .. }, SortCell::Temp { t: tb, .. }) => {
-            // [FABLE-5] sq-wjl8i KIND-FIRST + [SONNET-4.6] sq-2k5py: both now live in the
-            // shared `Temporal::cmp_t_total` — a dateTime never value-compares against a
-            // date (`LiteralKind::DateTime < Date`), and within one kind the timeline order
-            // is TOTAL (instant, then timezone presence). The former lexical fallback for
-            // the indeterminate window is gone: it mixed timeline-decided and
-            // lexical-decided pairs inside one kind, which is intransitive. Ill-formed
-            // temporals never enter the cache, so both cells here are well-formed.
-            Temporal::cmp_t_total(*ta, *tb)
+        (SortCell::Temp { key: a, .. }, SortCell::Temp { key: b, .. }) => {
+            // Keys already borrow validated lexicals; no dictionary lookup,
+            // calendar parsing, allocation, or validity assertion occurs here.
+            ExactTemporal::compare_total(*a, *b)
         }
         // Two numeric graph terms: f64 fast compare, with the EXACT tie recheck below.
         (SortCell::Num { f: fa, id: ia }, SortCell::Num { f: fb, id: ib }) => {
@@ -12245,7 +12590,7 @@ fn cmp_exact_lex_f64(lex: &str, f: f64) -> Ordering {
 }
 
 // [SONNET-4.6] sq-2k5py: the lexical-form fallback for temporal sort cells (`cmp_sort_cells_lex`)
-// is GONE — `Temporal::cmp_t_total` decides every temporal pair by value now, and a lexical
+// is GONE — `ExactTemporal::compare_total` decides every temporal pair by value now, and a lexical
 // fallback inside one temporal kind is exactly the intransitivity this bead removed.
 
 /// Materialises a temporal sort cell's term for the (rare) mixed-type-column
@@ -12326,19 +12671,22 @@ fn order_bindings(
     let compiled_order: Vec<(bool, CompiledExpr)> = exprs
         .iter()
         .map(|oe| match oe {
-            OrderExpression::Asc(e) => (false, compile_expr(e, b)),
-            OrderExpression::Desc(e) => (true, compile_expr(e, b)),
+            OrderExpression::Asc(e) => (false, compile_expr(e, b, local)),
+            OrderExpression::Desc(e) => (true, compile_expr(e, b, local)),
         })
         .collect();
 
     // The sort key cell for one compiled ORDER expression of one row. Numeric keys use the
-    // numerics cache and temporal keys the temporals cache (no per-comparison reparse); IRI
+    // numerics cache; temporal keys borrow prevalidated exact cache entries. IRI
     // terms precompute the IRI string once (SortCell::Iri) — eliminating per-comparison
     // term_of materialisation + value_str allocation for IRI ORDER BY columns; other
     // expressions fall back to identity-preserving evaluation. The plain-variable case is
     // unpacked here so the column lookup and the cache probes happen exactly once per row
     // (column index was pre-resolved above). [OPUS-4.8] sq-7d3dj.4 / [SONNET-4.6] sq-7d3dj.30.2 (Iri).
     let cell_of = |row: &Row, e: &CompiledExpr| -> Result<SortCell, String> {
+        if budget::strict_numeric() {
+            return Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?));
+        }
         if let CompiledExpr::Var(Some(c)) = e {
             let id = row[*c];
             if id != NO_ID && !is_local(id) {
@@ -12347,8 +12695,8 @@ fn order_bindings(
                     // exactly (integers > 2^53 / high-precision decimals sharing one f64).
                     return Ok(SortCell::Num { f: n, id });
                 }
-                if let Some(t) = graph.temporal_value(id) {
-                    return Ok(SortCell::Temp { t, id });
+                if let Some(key) = temporal_of_id(graph, id) {
+                    return Ok(SortCell::Temp { id, key });
                 }
                 // [FABLE-5] sq-7d3dj.30.21 — LAZY STRING-LITERAL key: a plain `xsd:string`
                 // store-literal becomes a zero-allocation `SortCell::StrId(id)` (compared via
@@ -12422,7 +12770,7 @@ fn order_bindings(
             // [SONNET-4.6] sq-7d3dj.30.23
             // Use Vec<_> to avoid the clippy::type_complexity lint on the explicit type.
             #[cfg(feature = "parallel")]
-            let mut keyed: Vec<_> = if n >= PAR_THRESHOLD {
+            let mut keyed: Vec<_> = if n >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
                 use rayon::prelude::*;
                 // sq-6aefu: mirror FILTER/BIND worker_install pattern — key_of -> eval_compiled
                 // can re-enter EXISTS / custom extension functions / spatial expressions on rayon
@@ -12505,7 +12853,7 @@ fn order_bindings(
     // Full stable sort path (unchanged). Precompute the keys (independent, read-only)
     // — in parallel for large result sets.
     #[cfg(feature = "parallel")]
-    let mut keyed: Vec<(Vec<(bool, SortCell)>, Row)> = if n >= PAR_THRESHOLD {
+    let mut keyed: Vec<(Vec<(bool, SortCell)>, Row)> = if n >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // sq-6aefu: mirror FILTER/BIND worker_install pattern — same rationale as the
         // top-k path above: key_of -> eval_compiled can re-enter EXISTS / custom
@@ -12563,7 +12911,7 @@ fn order_bindings(
     // tie-break defect in this sort. So no total-order tie-breaker is added: it would cost a
     // term materialisation per tied row for an order the spec does not constrain.
     #[cfg(feature = "parallel")]
-    if keyed.len() >= PAR_THRESHOLD {
+    if keyed.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         keyed.par_sort_by(cmp);
     } else {
@@ -12855,7 +13203,7 @@ mod lazy_strkey_differential {
     }
 
     /// The eager cell the feature-OFF path builds for a term.
-    fn eager(t: &Term) -> SortCell {
+    fn eager(t: &Term) -> SortCell<'static> {
         sort_cell_val(Value::Term(t.clone()))
     }
 
@@ -12937,9 +13285,11 @@ fn apply_filter(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr: &Expr
     // delegation for tie/unknown lanes. Declines (→ scalar path) for anything not provably
     // byte-identical to `apply_filter_scalar`. I5 probe counters updated on each call.
     #[cfg(feature = "vectorized")]
-    if let Some(rows) = columnar_filter(graph, local, b, expr)? {
-        b.rows = rows;
-        return Ok(());
+    if local.correlation.is_empty() {
+        if let Some(rows) = columnar_filter(graph, local, b, expr)? {
+            b.rows = rows;
+            return Ok(());
+        }
     }
     apply_filter_scalar(graph, local, b, expr)
 }
@@ -13138,7 +13488,7 @@ fn columnar_filter(
             let global_idx = start + local_idx;
             let row = &rows[global_idx];
             let val = eval_expr(graph, local, b, row.as_ref(), expr)?;
-            if effective_boolean(&val) {
+            if effective_boolean(&val, local.ebv_semantics) {
                 delegated_passes.push(local_idx);
             }
         }
@@ -13329,7 +13679,7 @@ fn columnar_aggregate(
                                 let sum_i64 = crate::reduce::narrow_sum_to_i64(sum_i128)?;
                                 // integer / integer → Decimal (SPARQL §17.4.4.3).
                                 // Mirrors: sum_values → binop(Div) → value_to_id.
-                                let result = Num::Int(sum_i64).binop(Num::Int(count_i64), ArithOp::Div)?;
+                                let result = numeric_capacity::binop(Num::Int(sum_i64), Num::Int(count_i64), ArithOp::Div)?;
                                 value_to_id(graph, local, &Value::Num(result))
                             }
                         }
@@ -13395,7 +13745,7 @@ fn with_idfast_nonlit_cols<R>(cols: FxHashSet<usize>, f: impl FnOnce() -> R) -> 
 fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr: &Expression) -> Result<(), String> {
     // Pre-resolve Variable → column index once before the row loop. [OPUS-4.8] sq-7d3dj.4.
     #[cfg_attr(not(feature = "id-filter-fastpath"), allow(unused_mut))]
-    let mut compiled = compile_expr(expr, b);
+    let mut compiled = compile_expr(expr, b, local);
     // [FABLE-5] (sq-7d3dj.30.11) Rewrite eligible `=` nodes into the id-level fast path using the
     // non-literal columns the FILTER dispatch computed for THIS operator (empty for every other
     // caller → no-op). Done ONCE, before the row loop; rayon workers see the rewritten program.
@@ -13417,7 +13767,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
     let scope = b.rows.as_ptr() as usize;
     #[cfg(feature = "parallel")]
-    let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD {
+    let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // The extension-function registry and the dataset view are thread-local:
         // snapshot them here and re-install per worker item (free when neither is
@@ -13447,14 +13797,14 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
                 let _qn = query_now::worker_install(qn);
                 let _qb = query_base_worker_install(&qb);
                 ROW_SCOPE.set((scope, i));
-                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?))
+                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics))
             })
             .collect::<Result<Vec<bool>, String>>()?
     } else {
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -13463,7 +13813,7 @@ fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -13526,10 +13876,14 @@ enum Value {
 enum CompiledExpr {
     /// Pre-resolved column: `Some(c)` → `row[c]`; `None` → variable not in scope (always unbound).
     Var(Option<usize>),
+    /// An outer EXISTS term, including blank nodes and computed literals.
+    Captured(Term),
+    CapturedBound,
     /// `BOUND(?v)`: `Some(c)` → `row[c] != NO_ID`; `None` → always `false`.
     BoundCol(Option<usize>),
     NamedNode(oxrdf::NamedNode),
-    Literal(Literal),
+    /// A constant; the flag caches whether it is a valid exact-numeric lexical.
+    Literal(Literal, bool),
     And(Box<Self>, Box<Self>),
     Or(Box<Self>, Box<Self>),
     Not(Box<Self>),
@@ -13633,51 +13987,64 @@ fn idfast_rewrite(e: &mut CompiledExpr, nonlit_cols: &FxHashSet<usize>) {
         }
         C::IdEqNonLit(..)
         | C::Var(_)
+        | C::Captured(_)
+        | C::CapturedBound
         | C::BoundCol(_)
         | C::NamedNode(_)
-        | C::Literal(_)
+        | C::Literal(..)
         | C::Exists(_) => {}
     }
 }
 
+/// A compiled constant with its exact-numeric validity checked once, not per row.
+fn compiled_literal(l: &Literal) -> CompiledExpr {
+    CompiledExpr::Literal(l.clone(), exact_lexical_of_literal(l).is_some())
+}
+
 /// Walk `e` once, resolving all `Variable`/`Bound` nodes to column indices. [OPUS-4.8] sq-7d3dj.4.
-fn compile_expr(e: &Expression, b: &Bindings) -> CompiledExpr {
+fn compile_expr(e: &Expression, b: &Bindings, local: &LocalVocab) -> CompiledExpr {
     use Expression::*;
     match e {
-        Variable(v) => CompiledExpr::Var(b.col(v)),
+        Variable(v) => match local.correlation.get(v) {
+            Some(Term::NamedNode(n)) => CompiledExpr::NamedNode(n.clone()),
+            Some(Term::Literal(l)) => compiled_literal(l),
+            Some(term) => CompiledExpr::Captured(term.clone()),
+            None => CompiledExpr::Var(b.col(v)),
+        },
+        Bound(v) if local.correlation.contains_key(v) => CompiledExpr::CapturedBound,
         Bound(v) => CompiledExpr::BoundCol(b.col(v)),
         NamedNode(n) => CompiledExpr::NamedNode(n.clone()),
-        Literal(l) => CompiledExpr::Literal(l.clone()),
-        And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b))),
-        Equal(a, d) => CompiledExpr::Equal(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        SameTerm(a, d) => CompiledExpr::SameTerm(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Greater(a, d) => CompiledExpr::Greater(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
+        Literal(l) => compiled_literal(l),
+        And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b, local))),
+        Equal(a, d) => CompiledExpr::Equal(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        SameTerm(a, d) => CompiledExpr::SameTerm(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Greater(a, d) => CompiledExpr::Greater(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         GreaterOrEqual(a, d) => {
-            CompiledExpr::GreaterOrEqual(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b)))
+            CompiledExpr::GreaterOrEqual(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local)))
         }
-        Less(a, d) => CompiledExpr::Less(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
+        Less(a, d) => CompiledExpr::Less(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         LessOrEqual(a, d) => {
-            CompiledExpr::LessOrEqual(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b)))
+            CompiledExpr::LessOrEqual(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local)))
         }
-        Add(a, d) => CompiledExpr::Add(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Subtract(a, d) => CompiledExpr::Subtract(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Multiply(a, d) => CompiledExpr::Multiply(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Divide(a, d) => CompiledExpr::Divide(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        UnaryPlus(a) => CompiledExpr::UnaryPlus(Box::new(compile_expr(a, b))),
-        UnaryMinus(a) => CompiledExpr::UnaryMinus(Box::new(compile_expr(a, b))),
+        Add(a, d) => CompiledExpr::Add(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Subtract(a, d) => CompiledExpr::Subtract(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Multiply(a, d) => CompiledExpr::Multiply(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Divide(a, d) => CompiledExpr::Divide(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        UnaryPlus(a) => CompiledExpr::UnaryPlus(Box::new(compile_expr(a, b, local))),
+        UnaryMinus(a) => CompiledExpr::UnaryMinus(Box::new(compile_expr(a, b, local))),
         If(cond, t, f) => CompiledExpr::If(
-            Box::new(compile_expr(cond, b)),
-            Box::new(compile_expr(t, b)),
-            Box::new(compile_expr(f, b)),
+            Box::new(compile_expr(cond, b, local)),
+            Box::new(compile_expr(t, b, local)),
+            Box::new(compile_expr(f, b, local)),
         ),
-        Coalesce(es) => CompiledExpr::Coalesce(es.iter().map(|ce| compile_expr(ce, b)).collect()),
+        Coalesce(es) => CompiledExpr::Coalesce(es.iter().map(|ce| compile_expr(ce, b, local)).collect()),
         In(a, list) => {
-            CompiledExpr::In(Box::new(compile_expr(a, b)), list.iter().map(|ce| compile_expr(ce, b)).collect())
+            CompiledExpr::In(Box::new(compile_expr(a, b, local)), list.iter().map(|ce| compile_expr(ce, b, local)).collect())
         }
         FunctionCall(f, args) => {
-            CompiledExpr::FunctionCall(f.clone(), args.iter().map(|ce| compile_expr(ce, b)).collect())
+            CompiledExpr::FunctionCall(f.clone(), args.iter().map(|ce| compile_expr(ce, b, local)).collect())
         }
         Exists(inner) => CompiledExpr::Exists(inner.clone()),
     }
@@ -13708,38 +14075,45 @@ fn num_canonical_term(n: Num) -> Value {
     Value::Term(Term::Literal(Literal::new_typed_literal(n.canonical_lexical(), n.datatype())))
 }
 
-fn effective_boolean(v: &Value) -> bool {
-    ebv(v) == Some(true)
+fn effective_boolean(v: &Value, semantics: crate::EbvSemantics) -> bool {
+    ebv(v, semantics) == Some(true)
 }
 
 /// SPARQL effective boolean value, three-valued: `None` is a TYPE ERROR (unbound,
-/// non-literal terms, literals of unknown datatypes, ill-formed boolean / numeric
-/// lexicals) — it matters because `!error` must stay an error, not become true.
-fn ebv(v: &Value) -> Option<bool> {
+/// non-literal terms and unknown datatypes). Invalid numeric/boolean lexicals
+/// instead have false EBV per SPARQL 1.1 §17.2.2, or error under the pinned
+/// 1.2 draft, independently of arithmetic capacity errors.
+fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
     match v {
         Value::Bool(b) => Some(*b),
         Value::Num(n) => Some(!n.is_zero() && !n.is_nan()),
         Value::Unbound | Value::Error => None,
         Value::Term(Term::Literal(l)) => {
             if l.language().is_some() {
-                // rdf:langString / rdf:dirLangString is NOT xsd:string: its EBV is a
-                // type error per SPARQL (1.2 `expression/not-not` pins this down).
-                return None;
+                // SPARQL 1.1 §17.2.2 gives every plain literal, language-tagged ones
+                // included, a length-based EBV. The 1.2 draft makes rdf:langString /
+                // rdf:dirLangString a type error (`expression/not-not` pins this down);
+                // directional strings postdate the Recommendation, so they error in both.
+                return (semantics == crate::EbvSemantics::Rec2013 && l.direction().is_none())
+                    .then(|| !l.value().is_empty());
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
-                match l.value() {
-                    "true" | "1" => Some(true),
-                    "false" | "0" => Some(false),
-                    _ => None,
-                }
+                // Raw RDF booleans have exactly four lexical forms.
+                // Constructor whitespace normalization applies only to string inputs.
+                as_bool_val(v).or_else(|| (semantics == crate::EbvSemantics::Rec2013).then_some(false))
             } else if is_numeric_dt(l) {
-                // [OPUS-4.8] sq-rkzhr: XSD acceptance set (via `parse_xsd_f64`) — a
-                // numeric-typed literal with an ill-formed lexical is a type error (`None`),
-                // matching `as_num` rather than silently swallowing Rust-only spellings.
-                // Valued per datatype (#3825): a tiny `xsd:float` lexical whose `f32` value is
-                // zero is false, even though its nearest `f64` is not zero.
-                sparq_core::numeric_lexical_f64(l.value(), dt).map(|n| n != 0.0 && !n.is_nan())
+                // EBV needs zero/NaN classification, not finite arithmetic.
+                // Validate datatype facets before inspecting exact decimal digits;
+                // converting them to f64 could underflow a nonzero value to false.
+                if !sparq_core::numeric_literal_valid(l.value(), dt) {
+                    (semantics == crate::EbvSemantics::Rec2013).then_some(false)
+                } else if sparq_core::is_integer_datatype(dt) || dt == xsd::DECIMAL.as_str() {
+                    Some(l.value().bytes().any(|b| matches!(b, b'1'..=b'9')))
+                } else {
+                    // Float/double zero is measured in that datatype's value space.
+                    Num::of_literal(l).map(|n| !n.is_zero() && !n.is_nan())
+                }
             } else if dt == xsd::STRING.as_str() {
                 Some(!l.value().is_empty())
             } else {
@@ -13750,47 +14124,59 @@ fn ebv(v: &Value) -> Option<bool> {
     }
 }
 
+/// General expression operands share the constructor capacity boundary.
+fn checked_term_value(term: Term) -> Result<Value, String> {
+    if let Term::Literal(literal) = &term {
+        budget::check_temporal(literal.value(), literal.datatype().as_str())?;
+    }
+    Ok(Value::Term(term))
+}
+
 fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Result<Value, String> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => checked_term_value(local.correlation[v].clone()),
         Variable(v) => match b.col(v) {
             // Always return the original term so term identity is preserved
             // (sameTerm, BIND passthrough, STR, etc.). The numeric fast path that
             // skips this materialisation lives in `eval_numeric`, used only by the
             // arithmetic / comparison operators where only the value matters.
-            Some(c) if row[c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[c]).unwrap())),
+            Some(c) if row[c] != NO_ID => checked_term_value(term_of(graph, local, row[c]).unwrap()),
             _ => Ok(Value::Unbound),
         },
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
+        Literal(l) => {
+            budget::check_temporal(l.value(), l.datatype().as_str())?;
+            Ok(Value::Term(Term::Literal(l.clone())))
+        },
         And(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: false dominates, so once the
             // left is false we return false WITHOUT evaluating the right (which may be
             // an error or an unsupported expression that would otherwise abort).
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: true dominates.
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error, // !error = error
         }),
         Equal(a, c) => equal_expr(graph, local, b, row, a, c),
         SameTerm(a, c) => {
             let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-            Ok(Value::Bool(matches!((&x, &y), (Value::Term(p), Value::Term(q)) if p == q)))
+            Ok(same_term_value(&x, &y))
         }
         Greater(a, c) => cmp_expr(graph, local, b, row, a, c, |o| o == Ordering::Greater),
         GreaterOrEqual(a, c) => cmp_expr(graph, local, b, row, a, c, |o| o != Ordering::Less),
@@ -13800,18 +14186,19 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
         Subtract(a, c) => arith(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_expr(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_expr(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             // Typed negation: the result keeps the argument's (promoted) numeric
             // datatype; a non-numeric operand is a type error.
             let v = eval_expr(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
-        Bound(v) => Ok(Value::Bool(b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
+        Bound(v) => Ok(Value::Bool(local.correlation.contains_key(v)
+            || b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
         If(cond, t, f) => {
             // A type error in the condition propagates (it does NOT silently select
             // the else branch).
-            match ebv3(&eval_expr(graph, local, b, row, cond)?) {
+            match ebv3(&eval_expr(graph, local, b, row, cond)?, local.ebv_semantics) {
                 Some(true) => eval_expr(graph, local, b, row, t),
                 Some(false) => eval_expr(graph, local, b, row, f),
                 None => Ok(Value::Error),
@@ -13850,12 +14237,12 @@ fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Ex
     }
 }
 
-/// Correlated `EXISTS { inner }` for one outer solution row: evaluate `inner` and
-/// test whether any of its solutions is join-compatible with the row on the
-/// variables they share (same term, or unbound on the inner side). Working at the
-/// id/term level — rather than substituting the row's terms into the pattern AST —
-/// keeps blank-node-valued bindings expressible (spargebra has no ground blank-node
-/// term pattern).
+/// Correlated `EXISTS { inner }` for one outer solution row. The bounded
+/// BGP/Join/UNION/FILTER/MINUS branch constrains captured IRI/literal values and
+/// removes their columns before MINUS observes child domains, per SPARQL 1.1.
+/// Other shapes retain the native practical compatibility evaluation, including
+/// the unresolved blank-node and variable-only-position substitution cases.
+/// These fallbacks are not a claim of complete published-2013 correlation support.
 ///
 /// The inner pattern is evaluated against `graph`, which inside `GRAPH <g> { … }`
 /// is the active named graph — so an EXISTS nested in a GRAPH pattern sees the same
@@ -13887,7 +14274,13 @@ fn eval_exists(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], inne
     eval_exists_inner(graph, local, b, row, inner)
 }
 
-fn eval_exists_inner(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], inner: &GraphPattern) -> Result<bool, String> {
+fn eval_exists_inner(
+    graph: &Graph,
+    local: &LocalVocab,
+    b: &Bindings,
+    row: &[Id],
+    inner: &GraphPattern,
+) -> Result<bool, String> {
     // zk-trace: the inner pattern is re-run per outer row; tag its scans
     // `in_exists` and suppress their steps / filter obligations (EXISTS is
     // outside the stage-1 verifiable fragment — sparq-zk::verify rejects it;
@@ -13895,59 +14288,82 @@ fn eval_exists_inner(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id]
     #[cfg(feature = "zk")]
     let _zk = crate::zk::exists_scope();
 
-    // Uncorrelated EXISTS: no in-scope inner variable is also a BOUND outer column,
-    // so no inner solution can be ruled out by compatibility — existence alone
-    // decides it. `on_in_scope_variable` is spargebra's authoritative in-scope set
-    // (exactly the columns `eval_graph_pattern` would expose), so this never misses a
-    // genuinely-shared variable (which would make an early `true` unsound).
+    // SPARQL 1.1 §18.6 substitutes every bound outer variable,
+    // including variables used only in FILTER expressions. A separate local
+    // vocabulary preserves actual term identity across graph/local ID spaces.
+    let mut inner_local = LocalVocab {
+        ebv_semantics: local.ebv_semantics,
+        correlation: local.correlation.clone(),
+        dataset: local.dataset,
+        ..LocalVocab::default()
+    };
+    for (column, variable) in b.vars.iter().enumerate() {
+        if let Some(term) = term_of(graph, local, row[column]) {
+            inner_local
+                .correlation
+                .entry(variable.clone())
+                .or_insert(term);
+        }
+    }
+
+    // MINUS observes solution domains before final compatibility. For
+    // the admitted BGP/Join/UNION/FILTER/MINUS shape, restrict and remove each
+    // bound IRI/literal column before its parent operator can inspect domains.
+    if exists_domain::required(inner, &inner_local.correlation) {
+        inner_local.substitute_exists_domains = true;
+        let result = eval_graph_pattern(graph, &mut inner_local, inner)?;
+        return Ok(!result.rows.is_empty());
+    }
+
+    // Only shared solution columns require the compatibility scan below.
+    // Expression-only dependencies are already captured in inner_local and
+    // therefore remain valid under the first-solution shortcut.
     let mut correlated = false;
     inner.on_in_scope_variable(|v| {
-        if b.col(v).is_some_and(|oc| row[oc] != NO_ID) {
+        if inner_local.correlation.contains_key(v) {
             correlated = true;
         }
     });
     if !correlated {
         // First-solution stop, reusing the ASK machinery (count pushdown / capped
         // single-pattern scan). zk-trace stays armed inside via the scope above.
-        let sliced = GraphPattern::Slice { inner: Box::new(inner.clone()), start: 0, length: Some(1) };
-        let mut inner_local = LocalVocab::default();
+        let sliced = GraphPattern::Slice {
+            inner: Box::new(inner.clone()),
+            start: 0,
+            length: Some(1),
+        };
         let b1 = eval_modified(graph, &mut inner_local, &sliced)?;
         budget::check(b1.rows.len())?;
         return Ok(!b1.rows.is_empty());
     }
 
-    let mut inner_local = LocalVocab::default();
     let inner_b = eval_graph_pattern(graph, &mut inner_local, inner)?;
     budget::check(inner_b.rows.len())?;
-    // Columns shared between the inner solutions and the (bound part of the) outer row.
-    let shared: Vec<(usize, usize)> = inner_b
+    // Include inherited captures: a nested EXISTS can refer to a
+    // grandparent variable absent from its immediate parent's solution columns.
+    let shared: Vec<(usize, &Term, Option<Id>)> = inner_b
         .vars
         .iter()
         .enumerate()
-        .filter_map(|(ic, v)| b.col(v).map(|oc| (oc, ic)))
-        .filter(|&(oc, _)| row[oc] != NO_ID)
+        .filter_map(|(ic, v)| {
+            inner_local
+                .correlation
+                .get(v)
+                .map(|term| (ic, term, graph.id_of(term)))
+        })
         .collect();
     Ok(inner_b.rows.iter().any(|irow| {
-        shared
-            .iter()
-            .all(|&(oc, ic)| exists_compatible(graph, local, row[oc], &inner_local, irow[ic]))
+        shared.iter().all(|&(ic, expected, graph_id)| {
+            let actual = irow[ic];
+            actual == NO_ID
+                || if !is_local(actual) {
+                    graph_id == Some(actual)
+                } else {
+                    inner_local.term(actual) == expected
+                }
+        })
     }))
 }
-
-/// Join-compatibility of an outer cell with an inner EXISTS cell, where the two rows
-/// were produced against different local vocabs: unbound inner is compatible; ids in
-/// the shared spaces (graph dictionary / inline integers) compare directly; anything
-/// involving a local id falls back to term equality.
-fn exists_compatible(graph: &Graph, outer_local: &LocalVocab, o: Id, inner_local: &LocalVocab, i: Id) -> bool {
-    if i == NO_ID {
-        return true;
-    }
-    if !is_local(o) && !is_local(i) {
-        return o == i;
-    }
-    term_of(graph, outer_local, o) == term_of(graph, inner_local, i)
-}
-
 
 /// Fast numeric evaluation that never materialises a term: a numeric variable
 /// resolves to its value via the dictionary cache, a numeric literal via one
@@ -13957,6 +14373,7 @@ fn exists_compatible(graph: &Graph, outer_local: &LocalVocab, o: Id, inner_local
 fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<f64> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let c = b.col(v)?;
             let id = row[c];
@@ -13970,7 +14387,7 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
                 graph.numeric_value(id)
             }
         }
-        // [FABLE-5] sq-6b1lj: the CONSTANT operand is datatype-aware/trimmed too
+        // sq-6b1lj: the CONSTANT operand is datatype-aware and validated verbatim too
         // (`numeric_cache_f64`), so a datatype-ill-formed literal constant (`"1.5"^^xsd:integer`)
         // is a type error on this fast comparison path exactly as the graph-term side is.
         Literal(l) => numeric_cache_f64(l),
@@ -13986,14 +14403,15 @@ fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: 
 
 /// Fast temporal (xsd:dateTime / xsd:dateTimeStamp / xsd:date) evaluation that never
 /// materialises a term: a variable bound to a graph term resolves through the
-/// load-time `temporals` cache (O(1), no lexical re-parse); a constant literal and a
-/// BIND-computed (local-vocab) term parse once here. Returns `None` for anything
+/// borrowed dictionary lexical; constants and BIND-computed terms borrow their
+/// original literal too. Parsing is linear in the literal length. Returns `None` for anything
 /// non-temporal or ill-formed, so the caller falls back to the general path (which
 /// yields the exact type-error semantics). Used only where the VALUE matters
 /// (comparison operators); term identity is never needed there.
-fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
+fn eval_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, b: &Bindings, row: &[Id], e: &'a Expression) -> Option<ExactTemporal<'a>> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let c = b.col(v)?;
             let id = row[c];
@@ -14003,7 +14421,7 @@ fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e:
                 // Computed values are rare; parse through the local vocab term.
                 temporal_of_term(local.term(id))
             } else {
-                graph.temporal_value(id)
+                temporal_of_id(graph, id)
             }
         }
         Literal(l) => temporal_of_lit(l),
@@ -14012,18 +14430,98 @@ fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e:
 }
 
 /// The temporal value of a term, if it is a well-formed dateTime/date literal.
-fn temporal_of_term(t: &Term) -> Option<Temporal> {
+fn temporal_of_term(t: &Term) -> Option<ExactTemporal<'_>> {
     match t {
         Term::Literal(l) => temporal_of_lit(l),
         _ => None,
     }
 }
 
-fn temporal_of_lit(l: &Literal) -> Option<Temporal> {
+fn temporal_of_lit(l: &Literal) -> Option<ExactTemporal<'_>> {
     if l.language().is_some() {
         return None;
     }
-    Temporal::of_lit(l.value(), l.datatype().as_str())
+    budget::check_temporal(l.value(), l.datatype().as_str()).ok()?;
+    ExactTemporal::of_lit(l.value(), l.datatype().as_str())
+}
+
+/// Stored temporal values obey the same evaluation domain as constructors.
+fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>> {
+    if dict::is_inline(id) { return None; }
+    // Capacity checks remain input-based even for malformed/out-of-cache values.
+    // Native unbounded evaluation avoids dictionary/year parsing on the hot path.
+    if budget::temporal_capacity_active() {
+        if let dict::TermParts::Lit { value, datatype, .. } = graph.dict.term_parts(id) {
+            budget::check_temporal(value, datatype).ok()?;
+        }
+    }
+    graph.exact_temporal_value(id)
+}
+
+/// Compares a stored temporal id with an exact constant, skipping the exact key when
+/// the cached f64 instants alone decide the order.
+///
+/// The cached instant of a value is within a few ulps (plus a sub-femtosecond
+/// fraction error) of its exact instant, so a cached difference beyond `margin`
+/// (and beyond the fourteen-hour window for mixed timezone presence) has the sign
+/// of the exact difference. Everything closer, every capacity-checked evaluation
+/// and every id without a cached value takes the exact comparison.
+#[inline]
+fn temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>, approx: Option<Temporal>) -> Option<std::cmp::Ordering> {
+    if let Some(c) = approx {
+        if !budget::temporal_capacity_active() {
+            if let Some(v) = graph.temporal_value(id) {
+                if v.kind != c.kind {
+                    return None;
+                }
+                if let Some(order) = approx_temporal_order(v, c) {
+                    return Some(order);
+                }
+            }
+        }
+    }
+    exact_temporal_cmp_of_id(graph, id, exact)
+}
+
+/// The exact fallback of [`temporal_cmp_of_id`], kept out of line so the cached
+/// fast path stays small enough to inline into scans.
+#[inline(never)]
+fn exact_temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>) -> Option<std::cmp::Ordering> {
+    temporal_of_id(graph, id).and_then(|v| ExactTemporal::compare(v, exact))
+}
+
+/// The order of two same-family cached temporals when their f64 instants alone
+/// decide it (see [`temporal_cmp_of_id`]); `None` means "use the exact keys".
+#[inline]
+fn approx_temporal_order(v: Temporal, c: Temporal) -> Option<std::cmp::Ordering> {
+    let d = v.instant - c.instant;
+    let margin = 1.0 + 8.0 * f64::EPSILON * (v.instant.abs() + c.instant.abs());
+    let band = if v.has_tz == c.has_tz { 0.0 } else { 14.0 * 3600.0 };
+    if d > band + margin {
+        Some(std::cmp::Ordering::Greater)
+    } else if d < -(band + margin) {
+        Some(std::cmp::Ordering::Less)
+    } else {
+        None
+    }
+}
+
+/// The cached approximate temporal of a graph-term variable or a constant, for
+/// [`approx_temporal_order`] only. `None` (including under an active temporal
+/// capacity budget) sends the caller to the exact path.
+fn eval_approx_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
+    if budget::temporal_capacity_active() {
+        return None;
+    }
+    match e {
+        Expression::Variable(v) if local.correlation.contains_key(v) => None,
+        Expression::Variable(v) => {
+            let id = row[b.col(v)?];
+            if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
+        }
+        Expression::Literal(l) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
+        _ => None,
+    }
 }
 
 /// The lexical form of an expression IF it is an exact-valued numeric operand (an
@@ -14033,6 +14531,7 @@ fn temporal_of_lit(l: &Literal) -> Option<Temporal> {
 fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<String> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let id = row[b.col(v)?];
             if id == NO_ID {
@@ -14056,14 +14555,15 @@ fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id
     }
 }
 
+// Every exact lexical shortcut validates the original RDF datatype first.
+fn exact_lexical_of_literal(l: &Literal) -> Option<&str> {
+    (l.language().is_none() && sparq_core::exact_numeric_literal_valid(l.value(), l.datatype().as_str()))
+        .then_some(l.value())
+}
+
 fn exact_lexical_of_term(t: &Term) -> Option<String> {
     match t {
-        Term::Literal(l)
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL) =>
-        {
-            Some(l.value().to_string())
-        }
+        Term::Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
         _ => None,
     }
 }
@@ -14082,8 +14582,8 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
             let id = row[c];
             if id == NO_ID { None } else if is_local(id) { local.numeric(id) } else { graph.numeric_value(id) }
         }
-        // [FABLE-5] sq-6b1lj: datatype-aware/trimmed constant, matching `eval_numeric`.
-        Literal(l) => numeric_cache_f64(l),
+        // sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
+        Literal(l, _) => numeric_cache_f64(l),
         Add(a, d) => Some(eval_compiled_numeric(graph, local, row, a)? + eval_compiled_numeric(graph, local, row, d)?),
         Subtract(a, d) => {
             Some(eval_compiled_numeric(graph, local, row, a)? - eval_compiled_numeric(graph, local, row, d)?)
@@ -14101,7 +14601,7 @@ fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Comp
 }
 
 /// Fast temporal evaluation on a pre-compiled expression. Mirrors [`eval_temporal`]. [OPUS-4.8] sq-7d3dj.4.
-fn eval_compiled_temporal(graph: &Graph, local: &LocalVocab, row: &[Id], e: &CompiledExpr) -> Option<Temporal> {
+fn eval_compiled_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, row: &[Id], e: &'a CompiledExpr) -> Option<ExactTemporal<'a>> {
     use CompiledExpr::*;
     match e {
         Var(col) => {
@@ -14112,10 +14612,25 @@ fn eval_compiled_temporal(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Com
             } else if is_local(id) {
                 temporal_of_term(local.term(id))
             } else {
-                graph.temporal_value(id)
+                temporal_of_id(graph, id)
             }
         }
-        Literal(l) => temporal_of_lit(l),
+        Literal(l, _) => temporal_of_lit(l),
+        _ => None,
+    }
+}
+
+/// Mirrors [`eval_approx_temporal`] on a pre-compiled expression.
+fn eval_compiled_approx_temporal(graph: &Graph, row: &[Id], e: &CompiledExpr) -> Option<Temporal> {
+    if budget::temporal_capacity_active() {
+        return None;
+    }
+    match e {
+        CompiledExpr::Var(col) => {
+            let id = row[(*col)?];
+            if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
+        }
+        CompiledExpr::Literal(l, _) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
         _ => None,
     }
 }
@@ -14135,9 +14650,7 @@ fn eval_compiled_dec(graph: &Graph, local: &LocalVocab, row: &[Id], e: &Compiled
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l, exact) => if *exact { Dec::parse(l.value()) } else { None },
         Add(a, d) => eval_compiled_dec(graph, local, row, a)?.checked_add(eval_compiled_dec(graph, local, row, d)?),
         Subtract(a, d) => {
             eval_compiled_dec(graph, local, row, a)?.checked_sub(eval_compiled_dec(graph, local, row, d)?)
@@ -14169,17 +14682,7 @@ fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row: &[Id], e:
                 graph.exact_numeric_lexical(id)
             }
         }
-        Literal(l) => {
-            // Avoid a `Term` allocation: check directly whether the literal has an exact
-            // integer/decimal lexical form (same condition as `exact_lexical_of_term`).
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL)
-            {
-                Some(l.value().to_string())
-            } else {
-                None
-            }
-        }
+        Literal(l, exact) => exact.then(|| l.value().to_owned()),
         UnaryPlus(a) => eval_compiled_exact_lexical(graph, local, row, a),
         UnaryMinus(a) => eval_compiled_exact_lexical(graph, local, row, a).map(|s| match s.strip_prefix('-') {
             Some(r) => r.to_string(),
@@ -14261,6 +14764,7 @@ fn expr_has_arith(e: &Expression) -> bool {
 fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Dec> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let id = row[b.col(v)?];
             if id == NO_ID {
@@ -14271,9 +14775,7 @@ fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Exp
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
         Add(a, c) => eval_dec(graph, local, b, row, a)?.checked_add(eval_dec(graph, local, b, row, c)?),
         Subtract(a, c) => eval_dec(graph, local, b, row, a)?.checked_sub(eval_dec(graph, local, b, row, c)?),
         Multiply(a, c) => eval_dec(graph, local, b, row, a)?.checked_mul(eval_dec(graph, local, b, row, c)?),
@@ -14292,6 +14794,13 @@ fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Exp
 /// turns into "excluded". (Distinct from the lenient total order `compare_values`
 /// used by ORDER BY / MIN / MAX, which must order across every type.)
 fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, f: impl Fn(Ordering) -> bool) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
     // present (the common, arithmetic-free comparison keeps the f64 fast path below).
@@ -14327,11 +14836,20 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
             return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
         }
     }
-    // Fast path: both sides temporal -> compare cached/parsed timeline values, no term
+    // Cached f64 instants decide same-family pairs that are far apart; anything
+    // closer falls through to the exact keys below.
+    if let (Some(va), Some(vb)) = (eval_approx_temporal(graph, local, b, row, a), eval_approx_temporal(graph, local, b, row, c)) {
+        if va.kind == vb.kind {
+            if let Some(o) = approx_temporal_order(va, vb) {
+                return Ok(Value::Bool(f(o)));
+            }
+        }
+    }
+    // Fast path: both sides temporal -> compare exact borrowed timeline values, no term
     // materialised. `None` from `cmp_t` is exactly the strict path's type-error cases
     // (cross-family dateTime vs date, or mixed timezone presence inside the ±14h window).
     if let (Some(ta), Some(tb)) = (eval_temporal(graph, local, b, row, a), eval_temporal(graph, local, b, row, c)) {
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(f(o)),
             None => Value::Error,
         });
@@ -14342,11 +14860,17 @@ fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Exp
 
 /// The typed result of a relational operator (`<`, `<=`, `>`, `>=`) once both operands are
 /// evaluated. An incomparable pair is a type error, EXCEPT two numerics that are unordered
-/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there.
-/// That case is only applied when `arith` sent the comparison here (an arithmetic operand,
-/// which the f64 fast path used to decide, returning false for NaN); the NaN-free typed path
-/// is unchanged.
+/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there,
+/// whether the NaN is stored or computed. Other unordered numeric pairs are false only when
+/// `arith` sent the comparison here (an arithmetic operand the f64 fast path used to decide).
 fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
+    // A NaN operand (stored NaN misses the numeric cache and lands here) is false, never a
+    // type error, matching the strict-capacity path and XPath numeric comparisons.
+    if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+        if a.is_nan() || b.is_nan() {
+            return Value::Bool(false);
+        }
+    }
     match value_compare_strict(x, y) {
         Some(o) => Value::Bool(f(o)),
         None if arith && as_numeric(x).is_some() && as_numeric(y).is_some() => Value::Bool(false),
@@ -14356,6 +14880,10 @@ fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> b
 
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
 fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // EXACT integer/decimal arithmetic equality (see `cmp_expr`) — `0.1 + 0.2 = 0.3`.
     let arith = expr_has_arith(a) || expr_has_arith(c);
     if arith {
@@ -14393,7 +14921,7 @@ fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &E
         if ta.kind != tb.kind {
             return Ok(Value::Bool(false));
         }
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(o == Ordering::Equal),
             None => Value::Error,
         });
@@ -14415,9 +14943,9 @@ enum LitKind<'a> {
     /// A boolean-datatype operand; `None` = ill-formed lexical.
     Bool(Option<bool>),
     /// xsd:dateTime / xsd:dateTimeStamp on the timeline; `None` = ill-formed.
-    DateTime(Option<Timeline>),
+    DateTime(Option<ExactTimeline<'a>>),
     /// xsd:date on the timeline (midnight); `None` = ill-formed.
-    Date(Option<Timeline>),
+    Date(Option<ExactTimeline<'a>>),
     /// Another XSD datatype (time, duration, gYear, …): (datatype IRI, lexical).
     OtherXsd(&'a str, &'a str),
     /// Language-tagged: (lowercased tag, value).
@@ -14437,15 +14965,15 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
             }
             let dt = l.datatype();
             if is_numeric_dt(l) {
-                LitKind::Num(Num::of_literal(l))
+                LitKind::Num(numeric_capacity::operand(l))
             } else if dt == xsd::STRING {
                 LitKind::Str(l.value())
             } else if dt == xsd::BOOLEAN {
                 LitKind::Bool(as_bool_val(v))
             } else if dt == xsd::DATE_TIME || dt == xsd::DATE_TIME_STAMP {
-                LitKind::DateTime(Timeline::parse_datetime(l.value()))
+                LitKind::DateTime(temporal_of_lit(l).map(|value| value.timeline))
             } else if dt == xsd::DATE {
-                LitKind::Date(Timeline::parse_date(l.value()))
+                LitKind::Date(temporal_of_lit(l).map(|value| value.timeline))
             } else if dt.as_str().starts_with("http://www.w3.org/2001/XMLSchema#") {
                 LitKind::OtherXsd(dt.as_str(), l.value())
             } else {
@@ -14456,8 +14984,31 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
     }
 }
 
-// `Timeline` (the parsed xsd:date/dateTime value) and its comparison rules live in
-// `sparq_core::temporal`, shared with the graph's load-time `temporals` cache.
+/// Whether `t` is an `xsd:double` / `xsd:float` `NaN` literal: the one RDF term that is
+/// not `=` to itself (op:numeric-equal), so identical-term shortcuts must skip it.
+fn term_is_nan_literal(t: &Term) -> bool {
+    matches!(t, Term::Literal(l) if l.language().is_none() && is_nan_lexical(l.value(), l.datatype().as_str()))
+}
+
+/// [`term_is_nan_literal`] for an id, without materialising the term.
+#[cfg(feature = "id-filter-fastpath")]
+fn id_is_nan_literal(graph: &Graph, local: &LocalVocab, id: Id) -> bool {
+    if id == NO_ID || dict::is_inline(id) {
+        false
+    } else if is_local(id) {
+        term_is_nan_literal(local.term(id))
+    } else {
+        matches!(graph.dict.term_parts(id), dict::TermParts::Lit { value, datatype, lang: None } if is_nan_lexical(value, datatype))
+    }
+}
+
+/// XSD's only `NaN` lexical is the exact string `NaN` (no padding, no sign).
+fn is_nan_lexical(value: &str, datatype: &str) -> bool {
+    value == "NaN" && (datatype == xsd::DOUBLE.as_str() || datatype == xsd::FLOAT.as_str())
+}
+
+// Exact borrowed date/dateTime keys live in core; approximate load-time epoch
+// caches remain available separately for representation consumers.
 
 /// SPARQL `=` (and, negated, `!=`) as a three-valued result: `Some(true/false)` for a
 /// decided comparison, `None` for a type error. OPEN-WORLD rules: identical terms are
@@ -14467,12 +15018,21 @@ fn lit_kind(v: &Value) -> LitKind<'_> {
 /// ill-formed lexicals, cross-family pairs — is a TYPE ERROR (`"a"^^ex:dt != "b"^^ex:other`
 /// filters the row out rather than evaluating to true).
 fn values_equal(x: &Value, y: &Value) -> Option<bool> {
+    if budget::strict_numeric() {
+        // Equality of identical terms may otherwise bypass every numeric consumer.
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            // NaN is not numerically equal to itself, even with identical RDF terms.
+            return Some(num_compare(a, b) == Some(Ordering::Equal));
+        }
+    }
     if matches!(x, Value::Unbound | Value::Error) || matches!(y, Value::Unbound | Value::Error) {
         return None;
     }
     if let (Value::Term(p), Value::Term(q)) = (x, y) {
         if p == q {
-            return Some(true); // sameTerm decides even for unknown datatypes
+            // sameTerm decides even for unknown datatypes, except a float/double NaN:
+            // op:numeric-equal(NaN, NaN) is false, matching the strict-capacity path above.
+            return Some(!term_is_nan_literal(p));
         }
         // RDF 1.2 triple terms compare componentwise, with VALUE equality on the
         // objects (`<<(:a :b 01)>> = <<(:a :b 1)>>` is true, errors propagate).
@@ -14497,11 +15057,14 @@ fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         (Str(a), Str(b)) => Some(a == b),
         (Bool(Some(a)), Bool(Some(b))) => Some(a == b),
         (Bool(_), Bool(_)) => None,
-        (DateTime(Some(a)), DateTime(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
-        (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
+        (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
+        (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
         (DateTime(_), DateTime(_)) | (Date(_), Date(_)) => None,
         // date and dateTime values are disjoint -> known different.
-        (DateTime(_), Date(_)) | (Date(_), DateTime(_)) => Some(false),
+        // An ill-formed operand (e.g. a timezone-free dateTimeStamp) is not a value: error.
+        (DateTime(Some(_)), Date(Some(_))) | (Date(Some(_)), DateTime(Some(_))) => Some(false),
+        // Nor is it known different from a language-tagged literal (#3902): still an error.
+        (DateTime(None) | Date(None), _) | (_, DateTime(None) | Date(None)) => None,
         // A language-tagged literal equals only a literal with the same (ci) tag.
         (Lang(t1, v1), Lang(t2, v2)) => Some(t1 == t2 && v1 == v2),
         (Lang(..), _) | (_, Lang(..)) => Some(false),
@@ -14520,8 +15083,8 @@ fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
         (Num(Some(a)), Num(Some(b))) => num_compare(a, b),
         (Str(a), Str(b)) => Some(a.cmp(b)),
         (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
-        (DateTime(Some(a)), DateTime(Some(b))) => Timeline::cmp_tl(a, b),
-        (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b),
+        (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b),
+        (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b),
         // Same language tag: compare values (the suites' lenient extension).
         (Lang(t1, v1), Lang(t2, v2)) if t1 == t2 => Some(v1.cmp(v2)),
         // Same other-XSD datatype: lexical order (correct for time, gYear, …).
@@ -14538,7 +15101,7 @@ fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
 fn temporal_total_cmp(x: &Value, y: &Value) -> Option<Ordering> {
     match (lit_kind(x), lit_kind(y)) {
         (LitKind::DateTime(Some(a)), LitKind::DateTime(Some(b)))
-        | (LitKind::Date(Some(a)), LitKind::Date(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
+        | (LitKind::Date(Some(a)), LitKind::Date(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
         _ => None,
     }
 }
@@ -14557,8 +15120,8 @@ fn as_bool_val(v: &Value) -> Option<bool> {
 
 /// Three-valued effective boolean: `None` is a SPARQL error (type error or unbound),
 /// used by the logical operators to implement SPARQL's 3-valued `&&` / `||` / `!`.
-fn ebv3(v: &Value) -> Option<bool> {
-    ebv(v)
+fn ebv3(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
+    ebv(v, semantics)
 }
 
 fn and3(x: Option<bool>, y: Option<bool>) -> Value {
@@ -14585,7 +15148,7 @@ fn or3(x: Option<bool>, y: Option<bool>) -> Value {
 fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, op: ArithOp) -> Result<Value, String> {
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -14596,27 +15159,47 @@ fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expres
 fn as_numeric(v: &Value) -> Option<Num> {
     match v {
         Value::Num(n) => Some(*n),
-        Value::Term(Term::Literal(l)) => Num::of_literal(l),
+        Value::Term(Term::Literal(l)) => numeric_capacity::operand(l),
+        _ => None,
+    }
+}
+
+// XPath numeric-unary-plus returns its numeric operand unchanged.
+// Validate the value space without imposing the arithmetic representation bound.
+fn unary_plus(value: Value) -> Value {
+    match &value {
+        Value::Num(_) => value,
+        Value::Term(Term::Literal(l))
+            if sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) => value,
+        _ => Value::Error,
+    }
+}
+
+// SUBSTR's SPARQL signature requires integer operands, not numeric coercion.
+fn integer_argument(v: &Value) -> Option<i128> {
+    match v {
+        Value::Num(Num::Int(n)) => Some(i128::from(*n)),
+        Value::Term(Term::Literal(l))
+            if l.language().is_none()
+                && sparq_core::is_integer_datatype(l.datatype().as_str())
+                && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
+        {
+            numeric_capacity::representable(true,
+                l.value().parse().ok())
+        }
         _ => None,
     }
 }
 
 fn as_num(v: &Value) -> Option<f64> {
+    if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
+        return as_numeric(v).map(Num::f64);
+    }
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        // [FABLE-5] sq-74oy4 / sq-6b1lj: route the lexical→f64 arm through the DATATYPE-AWARE
-        // `numeric_cache_f64` — the SAME acceptance the graph `numeric_value` cache and
-        // `LocalVocab::intern` use. This keeps the lenient relational `<`/`>` seam in lock-step
-        // with the equality reference `Num::of_literal` on BOTH residuals sq-9781x left open:
-        // (a) whitespace — the value is TRIMMED (XSD `collapse` facet), so a padded
-        // `" 1"^^xsd:integer` is value-1 on `<`/`>` exactly as it is on `=` (was: type-error
-        // on `<`/`>`, cache-miss, but value-1 on `=` via the trimming cache); (b) per-datatype
-        // well-formedness — a lexical ill-formed FOR its datatype (`"1.5"^^xsd:integer`,
-        // `"1E2"^^xsd:decimal`, an i128-overflow decimal) is `None` here, a type error on
-        // `<`/`>` matching `of_literal` (was: compared as f64). The XSD f64 SPELLINGS
-        // (INF/+INF/-INF/NaN yes; Rust-only inf/infinity/nan no) are still enforced by the
-        // underlying `parse_xsd_f64` image.
+        // Keep scalar comparisons and caches on the same raw
+        // lexical/facet acceptance path; string constructors preprocess separately.
         Value::Term(Term::Literal(l)) => numeric_cache_f64(l),
         _ => None,
     }
@@ -14630,25 +15213,12 @@ fn is_numeric_dt(l: &Literal) -> bool {
         || dt == xsd::FLOAT.as_str()
 }
 
-/// The DATATYPE-AWARE cached/lenient f64 of a numeric literal, matching the graph's
-/// `Graph::numeric_value` cache acceptance (sparq-core `cached_numeric_f64`): `Some` iff the
-/// lexical is well-formed FOR ITS DATATYPE (`Num::of_literal` accepts it), imaged by the
-/// shared `parse_xsd_f64` on the TRIMMED lexical so the value is bit-identical to what the
-/// graph cache and `LocalVocab::intern` store for the same term. `None` (a datatype-ill-formed
-/// lexical like `"1.5"^^xsd:integer`, or a non-numeric) is a SPARQL type error.
-///
-/// [FABLE-5] (sq-74oy4 / sq-6b1lj) This is the single acceptance the lenient relational seam
-/// (`as_num`/`as_f64`), the local-vocab numeric cache (`LocalVocab::intern`), and the graph
-/// cache now all share — closing the pre-fix asymmetry where `as_num`/`intern` parsed
-/// datatype-agnostically (and un-trimmed) while `Num::of_literal` (the equality reference)
-/// did not, so a padded or per-datatype-ill-formed lexical compared numerically on `<`/`>`
-/// yet type-errored on `=`. Acceptance is gated on `Num::of_literal` (the strictest, so the
-/// datatype rules can never drift); the f64 image is `parse_xsd_f64` (every lexical
-/// `of_literal` accepts, `parse_xsd_f64` also accepts, for the same value).
+/// Returns the raw literal's numeric image within the shared cache lane.
+/// Invalid lexical forms, subtype facets and unsupported representations return None.
 #[inline]
 fn numeric_cache_f64(l: &Literal) -> Option<f64> {
     if is_numeric_dt(l) && Num::of_literal(l).is_some() {
-        sparq_core::numeric_lexical_f64(l.value().trim(), l.datatype().as_str())
+        sparq_core::numeric_lexical_f64(l.value(), l.datatype().as_str())
     } else {
         None
     }
@@ -14716,7 +15286,7 @@ impl CompareTerm for Value {
         // `num_extremum_compare`) deliberately KEEP their own semantics; this total
         // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
-            (Some(a), Some(b)) => Some(a.cmp_total(b)),
+            (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
             _ => None,
         }
     }
@@ -14765,6 +15335,11 @@ impl CompareTerm for Value {
 /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
 #[inline]
 fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
+        }
+    }
     compare_terms(x, y)
 }
 
@@ -14877,21 +15452,26 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(x) => x,
                 None => return Ok(Value::Error),
             };
-            let start = match as_num(&ev(1)?) {
-                Some(n) => n as i64,
+            let start = match integer_argument(&ev(1)?) {
+                Some(n) => n,
                 None => return Ok(Value::Error),
             };
-            let chars: Vec<char> = s.chars().collect();
-            let from = (start.max(1) - 1) as usize; // SPARQL SUBSTR is 1-indexed by codepoint
-            let out: String = if nargs >= 3 {
-                let len = match as_num(&ev(2)?) {
-                    Some(n) => n.max(0.0) as usize,
+            // XPath positions satisfy start <= position < start+length.
+            // Clipping the start before adding length incorrectly extends slices
+            // that start before position one. Widen before addition to avoid overflow.
+            let end = if nargs >= 3 {
+                let len = match integer_argument(&ev(2)?) {
+                    Some(n) => n.max(0),
                     None => return Ok(Value::Error),
                 };
-                chars.iter().skip(from).take(len).collect()
+                start.saturating_add(len)
             } else {
-                chars.iter().skip(from).collect()
+                i128::MAX
             };
+            let out = s.chars().enumerate().take_while(|(i, _)| (*i as i128 + 1) < end).filter_map(|(i, ch)| {
+                let position = i as i128 + 1;
+                (position >= start && position < end).then_some(ch)
+            }).collect();
             lit_with_lang(out, lang.as_deref())
         }
         // [OPUS-4.8] ENCODE_FOR_URI's operand is a STRING LITERAL, per SPARQL 1.1
@@ -14928,19 +15508,20 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::IsNumeric => match ev(0)? {
             Value::Unbound | Value::Error => Value::Error,
             Value::Num(_) => Value::Bool(true),
-            Value::Term(Term::Literal(l)) => Value::Bool(is_numeric_dt(&l)),
+            Value::Term(Term::Literal(l)) => Value::Bool(sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str())),
             _ => Value::Bool(false),
         },
         // ABS/CEIL/FLOOR/ROUND preserve the argument's numeric DATATYPE
         // (CEIL("2.5"^^xsd:decimal) is "3"^^xsd:decimal, not xsd:integer).
-        F::Abs => as_numeric(&ev(0)?).map(|n| Value::Num(n.abs())).unwrap_or(Value::Error),
-        F::Ceil => as_numeric(&ev(0)?).map(|n| Value::Num(n.ceil())).unwrap_or(Value::Error),
-        F::Floor => as_numeric(&ev(0)?).map(|n| Value::Num(n.floor())).unwrap_or(Value::Error),
-        F::Round => as_numeric(&ev(0)?).map(|n| Value::Num(n.round())).unwrap_or(Value::Error),
+        F::Abs => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::abs)).map(Value::Num).unwrap_or(Value::Error),
+        F::Ceil => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::ceil)).map(Value::Num).unwrap_or(Value::Error),
+        F::Floor => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::floor)).map(Value::Num).unwrap_or(Value::Error),
+        F::Round => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::round)).map(Value::Num).unwrap_or(Value::Error),
         // STRDT(lexical, datatypeIRI) -> typed literal. The first argument must be a
         // SIMPLE literal (= xsd:string in RDF 1.1) — lang-tagged / typed input errors.
         F::StrDt => match (str_lit(&ev(0)?), ev(1)?) {
             (Some((lex, None)), Value::Term(Term::NamedNode(dt))) => {
+                budget::check_temporal(&lex, dt.as_str())?;
                 Value::Term(Term::Literal(Literal::new_typed_literal(lex, dt)))
             }
             _ => Value::Error,
@@ -15033,16 +15614,16 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         // NOW(): the execution's pinned instant as xsd:dateTime. RAND(): xsd:double in
         // [0, 1) from a per-thread splitmix64 seeded once from the OS RNG (see
         // `rand_unit`) — both native-only for the same reason as UUID()/STRUUID().
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Now => Value::Term(Term::Literal(Literal::new_typed_literal(now_lexical(), xsd::DATE_TIME))),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Rand => Value::Num(Num::Double(rand_unit::next())),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Uuid => Value::Term(Term::NamedNode(oxrdf::NamedNode::new_unchecked(format!(
             "urn:uuid:{}",
             uuid::Uuid::new_v4()
         )))),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::StrUuid => simple(uuid::Uuid::new_v4().to_string()),
         // xsd:dateTime accessors — parse the lexical form and return the numeric component.
         F::Year => datetime_field(&ev(0)?, 0),
@@ -15177,6 +15758,14 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 vals.push(ev(i)?);
             }
             if vals.len() == 1 {
+                if let Value::Term(Term::Literal(literal)) = &vals[0] {
+                    // Capacity applies to the constructed lexical after the
+                    // string-cast preprocessing, while raw typed terms stay strict.
+                    let lexical = if literal.datatype() == xsd::STRING && nn.as_str() == xsd::DATE_TIME.as_str() {
+                        literal.value().trim_matches([' ', '\t', '\r', '\n'])
+                    } else { literal.value() };
+                    budget::check_temporal(lexical, nn.as_str())?;
+                }
                 if let Some(out) = eval_cast(nn.as_str(), &vals[0]) {
                     return Ok(out);
                 }
@@ -15195,7 +15784,12 @@ fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                     }
                 }
                 return Ok(match f(&terms) {
-                    Ok(t) => Value::Term(t),
+                    Ok(t) => {
+                        if let Term::Literal(literal) = &t {
+                            budget::check_temporal(literal.value(), literal.datatype().as_str())?;
+                        }
+                        Value::Term(t)
+                    }
                     Err(_) => Value::Error,
                 });
             }
@@ -15236,6 +15830,13 @@ fn cmp_compiled(
     c: &CompiledExpr,
     f: impl Fn(Ordering) -> bool,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
     if arith {
         if let (Some(da), Some(db)) =
@@ -15271,10 +15872,20 @@ fn cmp_compiled(
             return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
         }
     }
+    // Mirrors `cmp_expr`: cached instants decide far-apart same-family pairs.
+    if let (Some(va), Some(vb)) =
+        (eval_compiled_approx_temporal(graph, row, a), eval_compiled_approx_temporal(graph, row, c))
+    {
+        if va.kind == vb.kind {
+            if let Some(o) = approx_temporal_order(va, vb) {
+                return Ok(Value::Bool(f(o)));
+            }
+        }
+    }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
     {
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(f(o)),
             None => Value::Error,
         });
@@ -15329,6 +15940,10 @@ fn equal_compiled(
     a: &CompiledExpr,
     c: &CompiledExpr,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // [FABLE-5] (sq-7d3dj.30.11) Fast path (b): EQUAL ids of ANY kind are the SAME term (the
     // canonicalising dict gives each term one id), so `=` is `true` — mirroring the `p == q`
     // sameTerm short-circuit `values_equal` takes today, which is safe even for ill-typed
@@ -15336,10 +15951,13 @@ fn equal_compiled(
     // single-id terms and BOTH bound (an unbound `NO_ID` column would be a type error, not
     // equal). UNEQUAL ids fall through to the exact path unchanged — crucially, unequal ids of
     // value-equal literals (`"1"^^integer` = `"1.0"^^decimal`, sq-lr2ii) must NOT be decided here.
+    // An active temporal year range must still see both operands, so it takes the exact path.
     #[cfg(feature = "id-filter-fastpath")]
-    if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
-        if ida != NO_ID && ida == idc {
-            return Ok(Value::Bool(true));
+    if !budget::temporal_capacity_active() {
+        if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
+            if ida != NO_ID && ida == idc && !id_is_nan_literal(graph, local, ida) {
+                return Ok(Value::Bool(true));
+            }
         }
     }
     let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
@@ -15383,7 +16001,7 @@ fn equal_compiled(
         if ta.kind != tb.kind {
             return Ok(Value::Bool(false));
         }
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(o == Ordering::Equal),
             None => Value::Error,
         });
@@ -15406,7 +16024,7 @@ fn arith_compiled(
 ) -> Result<Value, String> {
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -15424,29 +16042,34 @@ fn eval_compiled(
     use CompiledExpr::*;
     match e {
         Var(col) => match col {
-            Some(c) if row[*c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[*c]).unwrap())),
+            Some(c) if row[*c] != NO_ID => checked_term_value(term_of(graph, local, row[*c]).unwrap()),
             _ => Ok(Value::Unbound),
         },
+        Captured(term) => checked_term_value(term.clone()),
+        CapturedBound => Ok(Value::Bool(true)),
         BoundCol(col) => Ok(Value::Bool(col.map(|c| row[c] != NO_ID).unwrap_or(false))),
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
+        Literal(l, _) => {
+            budget::check_temporal(l.value(), l.datatype().as_str())?;
+            Ok(Value::Term(Term::Literal(l.clone())))
+        },
         And(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error,
         }),
@@ -15455,7 +16078,7 @@ fn eval_compiled(
         IdEqNonLit(a, c) => Ok(equal_idfast(graph, row, a, c)),
         SameTerm(a, c) => {
             let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-            Ok(Value::Bool(matches!((&x, &y), (Value::Term(p), Value::Term(q)) if p == q)))
+            Ok(same_term_value(&x, &y))
         }
         Greater(a, c) => cmp_compiled(graph, local, b, row, a, c, |o| o == Ordering::Greater),
         GreaterOrEqual(a, c) => cmp_compiled(graph, local, b, row, a, c, |o| o != Ordering::Less),
@@ -15465,12 +16088,12 @@ fn eval_compiled(
         Subtract(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_compiled(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_compiled(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             let v = eval_compiled(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
-        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?) {
+        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?, local.ebv_semantics) {
             Some(true) => eval_compiled(graph, local, b, row, t),
             Some(false) => eval_compiled(graph, local, b, row, f),
             None => Ok(Value::Error),
@@ -15523,7 +16146,8 @@ fn dec_trim_min1(d: Dec) -> String {
         d.scale -= 1;
     }
     if d.scale == 0 {
-        d = Dec { mant: d.mant.saturating_mul(10), scale: 1 };
+        // Adding a lexical fraction digit must not overflow the numeric mantissa.
+        return format!("{}.0", d.mant);
     }
     d.lexical()
 }
@@ -15549,7 +16173,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     // (language-tagged literals and non-string types are NOT castable as strings).
     let src_str = || match v {
         Value::Term(Term::Literal(l)) if l.language().is_none() && l.datatype() == xsd::STRING => {
-            Some(l.value().trim().to_string())
+            // XSD whitespace collapse excludes Unicode spaces such as NBSP.
+            Some(l.value().trim_matches([' ', '\t', '\r', '\n']).to_string())
         }
         _ => None,
     };
@@ -15596,7 +16221,8 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     if target == xsd::DATE_TIME.as_str() {
         return Some(match v {
             Value::Term(Term::Literal(l))
-                if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP =>
+                if (l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP)
+                    && temporal_of_lit(l).is_some() =>
             {
                 typed(l.value().to_string(), xsd::DATE_TIME)
             }
@@ -15621,18 +16247,31 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         if let Some(n) = src_num() {
             return Some(match n {
                 Num::Int(i) => Value::Num(Num::Int(i)),
-                Num::Dec(d) => Value::Num(Num::Int((d.mant / 10i128.pow(d.scale)) as i64)),
+                Num::Dec(d) => {
+                    // An unrepresentable power means |value| < 1, so
+                    // truncation is zero. Reject an out-of-range integer instead
+                    // of wrapping its i128 mantissa through an `as i64` cast.
+                    let integer = 10i128.checked_pow(d.scale).map_or(0, |p| d.mant / p);
+                    numeric_capacity::representable(true, i64::try_from(integer).ok())
+                        .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
+                },
                 Num::Float(_) | Num::Double(_) => {
                     let f = n.f64();
-                    if f.is_finite() && f.abs() < 9.2e18 {
+                    // i64::MAX rounds up to 2^63 in f64: use an exclusive
+                    // positive bound and inclusive negative bound.
+                    let lower = i64::MIN as f64;
+                    if (lower..-lower).contains(&f) {
                         Value::Num(Num::Int(f.trunc() as i64))
                     } else {
+                        let _ = numeric_capacity::representable::<()>(f.is_finite(), None);
                         Value::Error
                     }
                 }
             });
         }
-        return Some(src_str().and_then(|s| s.parse::<i64>().ok()).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
+        return Some(src_str().and_then(|s| numeric_capacity::representable(
+            sparq_core::numeric_literal_valid(&s, xsd::INTEGER.as_str()), s.parse::<i64>().ok()))
+            .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
     }
     if is_dec {
         if let Some(b) = as_bool_val(v) {
@@ -15659,7 +16298,7 @@ fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         // fraction digit ("+33.3300" -> "33.33", "0" -> "0.0").
         return Some(
             src_str()
-                .and_then(|s| Dec::parse_lexical(&s))
+                .and_then(|s| numeric_capacity::decimal_cast(&s))
                 .map(|d| typed(dec_trim_min1(d), xsd::DECIMAL))
                 .unwrap_or(Value::Error),
         );
@@ -15781,7 +16420,7 @@ thread_local! {
 /// scope pinned in `eval_modified`, so every `NOW()` in one execution — across rows,
 /// rayon workers and `EXISTS` re-entry — formats the SAME value (SPARQL 1.1
 /// §17.4.5.1); an un-scoped call falls back to a fresh sample. [FABLE-5] sq-98w7z.1
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 fn now_lexical() -> String {
     let secs = query_now::epoch_secs();
     let days = secs.div_euclid(86400);
@@ -15811,7 +16450,7 @@ fn now_lexical() -> String {
 /// per thread per process), rayon workers get independent streams, and `EXISTS`
 /// re-entry merely draws the next value — there is no layout- or query-dependent
 /// state to leak. Deliberately NOT deterministic or query-constant.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 mod rand_unit {
     use std::cell::Cell;
 
@@ -15927,6 +16566,7 @@ fn datetime_arg_tz(v: &Value) -> Option<String> {
         }
         _ => return None,
     };
+    temporal_of_lit(l)?; // Shared datatype validation includes dateTimeStamp's required timezone.
     let s = l.value();
     parse_datetime(s)?; // lexical shape check
     let (_, time) = s.split_once('T')?;
@@ -16075,11 +16715,24 @@ fn encode_for_uri(s: &str) -> String {
 /// form. YEAR…MINUTES return xsd:integer; SECONDS returns xsd:decimal (per SPARQL),
 /// parsed from the lexical so fractional seconds stay exact.
 fn datetime_field(v: &Value, idx: usize) -> Value {
-    let s = match value_str(v) {
-        Some(s) => s,
-        None => return Value::Error,
+    // Date accessors accept typed dateTime values, not strings or IRIs
+    // whose text happens to look like a timestamp.
+    let s = match v {
+        Value::Term(Term::Literal(l))
+            if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => {
+                // `parse_datetime` below validates the lexical; this adds only the checks
+                // `temporal_of_lit` makes beyond it, without a second full parse.
+                if budget::check_temporal(l.value(), l.datatype().as_str()).is_err()
+                    || (l.datatype() == xsd::DATE_TIME_STAMP
+                        && !l.value().split_once('T').is_some_and(|(_, time)| time.contains(['Z', '+', '-'])))
+                {
+                    return Value::Error;
+                }
+                l.value()
+            },
+        _ => return Value::Error,
     };
-    let fields = match parse_datetime(&s) {
+    let fields = match parse_datetime(s) {
         Some(f) => f,
         None => return Value::Error,
     };
@@ -16089,8 +16742,22 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
             .split_once('T')
             .map(|(_, t)| if let Some(i) = t.find(['Z', '+', '-']) { &t[..i] } else { t })
             .and_then(|t| t.rsplit_once(':').map(|(_, sec)| sec));
-        return match lex.and_then(Dec::parse_lexical) {
-            Some(d) => Value::Num(Num::Dec(d)),
+        return match lex {
+            Some(lex) => match Dec::parse_lexical(lex) {
+                Some(d) => Value::Num(Num::Dec(d)),
+                None => {
+                    // Accessor output is lexical, not bounded-decimal arithmetic.
+                    // Preserve every validated fractional digit without f64/i128 rounding.
+                    let (whole, fraction) = lex.split_once('.').unwrap_or((lex, ""));
+                    let whole = whole.trim_start_matches('0');
+                    let fraction = fraction.trim_end_matches('0');
+                    Value::Term(Term::Literal(Literal::new_typed_literal(
+                        format!("{}.{}", if whole.is_empty() { "0" } else { whole },
+                            if fraction.is_empty() { "0" } else { fraction }),
+                        xsd::DECIMAL,
+                    )))
+                }
+            },
             None => Value::Error,
         };
     }
@@ -16101,20 +16768,42 @@ fn datetime_field(v: &Value, idx: usize) -> Value {
 /// `[year, month, day, hours, minutes, seconds]`. Timezone is stripped (component accessors are on
 /// the local time per SPARQL); seconds keeps any fractional part.
 fn parse_datetime(s: &str) -> Option<[f64; 6]> {
+    // One validation boundary also serves the graph's temporal cache and
+    // comparison fast paths. Component extraction below preserves local time
+    // and reads fixed-width digits the validator has already checked.
+    ExactTimeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
-    let mut d = date.strip_prefix('-').unwrap_or(date).split('-');
-    let year: f64 = d.next()?.parse().ok()?;
-    let year = if neg { -year } else { year };
-    let month: f64 = d.next()?.parse().ok()?;
-    let day: f64 = d.next()?.parse().ok()?;
+    let date = date.strip_prefix('-').unwrap_or(date);
+    let (year_lex, month_day) = date.split_at(date.len().checked_sub(6)?);
+    let two = |b: &[u8]| i64::from(b[0] - b'0') * 10 + i64::from(b[1] - b'0');
+    let (md, tb) = (month_day.as_bytes(), time.as_bytes());
+    let mut year: i64 = year_lex.parse().ok()?;
+    if neg {
+        year = -year;
+    }
+    let (mut month, mut day) = (two(&md[1..3]), two(&md[4..6]));
+    let (mut hours, minutes) = (two(&tb[0..2]), two(&tb[3..5]));
     // Strip the timezone (Z, or +hh:mm / -hh:mm after the seconds — the time part itself has no '-').
-    let time = if let Some(i) = time.find(['Z', '+', '-']) { &time[..i] } else { time };
-    let mut t = time.split(':');
-    let hours: f64 = t.next()?.parse().ok()?;
-    let minutes: f64 = t.next()?.parse().ok()?;
-    let seconds: f64 = t.next()?.parse().ok()?;
-    Some([year, month, day, hours, minutes, seconds])
+    let seconds_lex = &time[6..time.find(['Z', '+', '-']).unwrap_or(time.len())];
+    let seconds: f64 = seconds_lex.parse().ok()?;
+    // XPath component extraction uses the value: 24:00 is next-day midnight.
+    // Reuse the shared calendar validator for month length and leap years.
+    if hours == 24 {
+        hours = 0;
+        day += 1;
+        let next_date = format!("{}{}-{:02}-{:02}", if neg { "-" } else { "" }, year_lex, month, day);
+        if sparq_core::temporal::parse_civil_date(&next_date).is_none() {
+            day = 1;
+            month += 1;
+            if month == 13 {
+                month = 1;
+                year += 1;
+                if year == 0 { year = 1; } // XSD 1.0 has no year zero.
+            }
+        }
+    }
+    Some([year as f64, month as f64, day as f64, hours as f64, minutes as f64, seconds])
 }
 
 fn value_str(v: &Value) -> Option<String> {
@@ -16175,6 +16864,19 @@ fn value_to_id(graph: &Graph, local: &mut LocalVocab, v: &Value) -> Id {
         }
     };
     local.intern(term)
+}
+
+/// `sameTerm` over evaluated operands. Computed numerics and booleans compare as the
+/// literal a BIND of them would produce, so `sameTerm(1 + 0, 1)` is true; an unbound
+/// or error operand is a type error rather than `false`.
+fn same_term_value(x: &Value, y: &Value) -> Value {
+    if let (Value::Term(p), Value::Term(q)) = (x, y) {
+        return Value::Bool(p == q);
+    }
+    match (value_as_term(x), value_as_term(y)) {
+        (Some(p), Some(q)) => Value::Bool(p == q),
+        _ => Value::Error,
+    }
 }
 
 /// A computed value as a concrete RDF term (`None` for unbound / type error).
@@ -18351,7 +19053,7 @@ mod path_pushdown_tests {
         let mut rows = 0usize;
         for &s in &starts {
             let t = Instant::now();
-            let r = path_pairs(&g, &plus, PathEnds { s: Some(s), o: None }).unwrap();
+            let r = path_pairs(&g, &plus, PathEnds::terms(Some(s), None)).unwrap();
             times.push(t.elapsed().as_secs_f64());
             rows += r.len();
         }
@@ -18374,18 +19076,18 @@ mod path_pushdown_tests {
         let (a, hit, miss) = (id(0), id(SIZE - 1), id(SIZE)); // same cluster / next cluster
         let t = Instant::now();
         for _ in 0..100 {
-            let _ = path_pairs(&g, &plus, PathEnds { s: Some(a), o: Some(hit) }).unwrap();
+            let _ = path_pairs(&g, &plus, PathEnds::terms(Some(a), Some(hit))).unwrap();
         }
         eprintln!("both-bound (hit, early exit): {:.3?}/iter", t.elapsed() / 100);
         let t = Instant::now();
         for _ in 0..100 {
-            let r = path_pairs(&g, &plus, PathEnds { s: Some(a), o: Some(miss) }).unwrap();
+            let r = path_pairs(&g, &plus, PathEnds::terms(Some(a), Some(miss))).unwrap();
             assert!(!r.iter().any(|&(_, y)| y == miss));
         }
         eprintln!("both-bound (miss, cluster exhausted): {:.3?}/iter", t.elapsed() / 100);
         let t = Instant::now();
         for _ in 0..100 {
-            let _ = path_pairs(&g, &plus, PathEnds { s: None, o: Some(a) }).unwrap();
+            let _ = path_pairs(&g, &plus, PathEnds::terms(None, Some(a))).unwrap();
         }
         eprintln!("bound-object reverse traversal: {:.3?}/iter", t.elapsed() / 100);
     }
@@ -19718,14 +20420,14 @@ mod f64_collapse_order_agreement {
             );
         }
 
-        // [FABLE-5] sq-74oy4 / sq-6b1lj: the alignment now extends to PER-DATATYPE
-        // well-formedness AND whitespace. `as_num` is datatype-aware and trimming, so it
-        // agrees with `as_numeric` (`Num::of_literal`) on integer/decimal lexicals too — a
-        // padded lexical is its trimmed value; a lexical ill-formed FOR its datatype is None.
+        // Both numeric seams validate raw RDF lexicals verbatim.
+        // Padding and per-datatype malformed forms are ordinary type errors.
         let ints = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::INTEGER)));
         let decs = |s: &str| Value::Term(Term::Literal(Literal::new_typed_literal(s, xsd::DECIMAL)));
-        assert_eq!(as_num(&ints(" 1 ")), Some(1.0), "padded integer trims to 1");
-        assert_eq!(as_num(&decs(" 1.5 ")), Some(1.5), "padded decimal trims to 1.5");
+        assert_eq!(as_num(&ints(" 1 ")), None, "raw padded integer is invalid");
+        assert_eq!(as_num(&decs(" 1.5 ")), None, "raw padded decimal is invalid");
+        assert_eq!(as_num(&ints("1")), Some(1.0), "plain integer control");
+        assert_eq!(as_num(&decs("1.5")), Some(1.5), "plain decimal control");
         assert_eq!(as_num(&ints("1.5")), None, "fraction on integer is a type error");
         assert_eq!(as_num(&ints("1E2")), None, "exponent on integer is a type error");
         assert_eq!(as_num(&decs("1E2")), None, "exponent on decimal is a type error");
@@ -20079,7 +20781,7 @@ mod columnar_filter_seam {
 // coverage of paths reachable only from inside the crate: `minus_bindings` (disjoint
 // fast path + fully-bound fast path + the unbound-shared-variable general compatibility
 // scan), `effective_boolean` / `ebv` error arms, aggregate-error propagation via
-// `sum_values(_, errored=true)`, and the `minmax_values` numeric-promotion + mixed-type
+// `sum_values(_, errored=true)`, and the `minmax_values` numeric-selection + mixed-type
 // fallback paths. [OPUS-4.8]
 
 /// Direct unit tests for `minus_bindings` — exercises the fast-path (disjoint
@@ -20200,90 +20902,95 @@ mod effective_boolean_unit {
     #[test]
     fn ebv_error_is_none() {
         // SPARQL EBV: error → None (a type error in the expression).
-        assert_eq!(ebv(&Value::Error), None, "ebv(Error) must be None");
-        assert!(!effective_boolean(&Value::Error), "effective_boolean(Error) must be false (drop row)");
+        assert_eq!(ebv(&Value::Error, crate::EbvSemantics::Rec2013), None, "ebv(Error) must be None");
+        assert!(!effective_boolean(&Value::Error, crate::EbvSemantics::Rec2013), "effective_boolean(Error) must be false (drop row)");
     }
 
     #[test]
     fn ebv_unbound_is_none() {
-        assert_eq!(ebv(&Value::Unbound), None, "ebv(Unbound) must be None");
-        assert!(!effective_boolean(&Value::Unbound), "effective_boolean(Unbound) must be false (drop row)");
+        assert_eq!(ebv(&Value::Unbound, crate::EbvSemantics::Rec2013), None, "ebv(Unbound) must be None");
+        assert!(!effective_boolean(&Value::Unbound, crate::EbvSemantics::Rec2013), "effective_boolean(Unbound) must be false (drop row)");
     }
 
     #[test]
     fn ebv_bool_true_is_some_true() {
-        assert_eq!(ebv(&Value::Bool(true)), Some(true));
-        assert!(effective_boolean(&Value::Bool(true)));
+        assert_eq!(ebv(&Value::Bool(true), crate::EbvSemantics::Rec2013), Some(true));
+        assert!(effective_boolean(&Value::Bool(true), crate::EbvSemantics::Rec2013));
     }
 
     #[test]
     fn ebv_bool_false_is_some_false() {
-        assert_eq!(ebv(&Value::Bool(false)), Some(false));
-        assert!(!effective_boolean(&Value::Bool(false)));
+        assert_eq!(ebv(&Value::Bool(false), crate::EbvSemantics::Rec2013), Some(false));
+        assert!(!effective_boolean(&Value::Bool(false), crate::EbvSemantics::Rec2013));
     }
 
     #[test]
     fn ebv_nonzero_int_is_true() {
-        assert_eq!(ebv(&Value::Num(Num::Int(1))), Some(true));
-        assert_eq!(ebv(&Value::Num(Num::Int(-1))), Some(true));
+        assert_eq!(ebv(&Value::Num(Num::Int(1)), crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&Value::Num(Num::Int(-1)), crate::EbvSemantics::Rec2013), Some(true));
     }
 
     #[test]
     fn ebv_zero_int_is_false() {
-        assert_eq!(ebv(&Value::Num(Num::Int(0))), Some(false));
+        assert_eq!(ebv(&Value::Num(Num::Int(0)), crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_iri_term_is_none_type_error() {
         use oxrdf::NamedNode;
         let iri = Value::Term(Term::NamedNode(NamedNode::new_unchecked("http://ex/x")));
-        assert_eq!(ebv(&iri), None, "EBV of IRI is a type error → None");
-        assert!(!effective_boolean(&iri), "effective_boolean(IRI) = false (drop row)");
+        assert_eq!(ebv(&iri, crate::EbvSemantics::Rec2013), None, "EBV of IRI is a type error → None");
+        assert!(!effective_boolean(&iri, crate::EbvSemantics::Rec2013), "effective_boolean(IRI) = false (drop row)");
     }
 
     #[test]
     fn ebv_nonempty_string_is_true() {
         let t = Value::Term(Term::Literal(Literal::new_simple_literal("hello")));
-        assert_eq!(ebv(&t), Some(true), "non-empty string literal EBV = true");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(true), "non-empty string literal EBV = true");
     }
 
     #[test]
     fn ebv_empty_string_is_false() {
         let t = Value::Term(Term::Literal(Literal::new_simple_literal("")));
-        assert_eq!(ebv(&t), Some(false), "empty string literal EBV = false");
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(false), "empty string literal EBV = false");
     }
 
     #[test]
-    fn ebv_lang_tagged_literal_is_none_type_error() {
-        // rdf:langString is NOT xsd:string: its EBV is a type error.
+    fn ebv_lang_tagged_literal_follows_the_dialect() {
+        // SPARQL 1.1 (REC 2013): plain literals, language-tagged ones included, use length.
+        // The 1.2 draft: rdf:langString is NOT xsd:string, so its EBV is a type error.
         let t = Value::Term(Term::Literal(Literal::new_language_tagged_literal_unchecked("hello", "en")));
-        assert_eq!(ebv(&t), None, "lang-tagged literal EBV is type error → None");
+        let empty = Value::Term(Term::Literal(Literal::new_language_tagged_literal_unchecked("", "en")));
+        assert_eq!(ebv(&t, crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&empty, crate::EbvSemantics::Rec2013), Some(false));
+        assert_eq!(ebv(&t, crate::EbvSemantics::Draft20260912), None, "lang-tagged literal EBV is type error → None");
     }
 
     #[test]
     fn ebv_typed_boolean_true_false() {
         let tt = Value::Term(Term::Literal(Literal::new_typed_literal("true", xsd::BOOLEAN)));
         let ff = Value::Term(Term::Literal(Literal::new_typed_literal("false", xsd::BOOLEAN)));
-        assert_eq!(ebv(&tt), Some(true));
-        assert_eq!(ebv(&ff), Some(false));
+        assert_eq!(ebv(&tt, crate::EbvSemantics::Rec2013), Some(true));
+        assert_eq!(ebv(&ff, crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
-    fn ebv_ill_formed_boolean_is_type_error() {
+    fn ebv_ill_formed_boolean_is_false_per_sparql_11() {
         let ill = Value::Term(Term::Literal(Literal::new_typed_literal("yes", xsd::BOOLEAN)));
-        assert_eq!(ebv(&ill), None, "ill-formed boolean EBV is type error");
+        // REC §17.2.2 first bullet explicitly specifies false here.
+        assert_eq!(ebv(&ill, crate::EbvSemantics::Rec2013), Some(false));
     }
 
     #[test]
     fn ebv_xsd_string_nonempty_is_true() {
         let s = Value::Term(Term::Literal(Literal::new_typed_literal("abc", xsd::STRING)));
-        assert_eq!(ebv(&s), Some(true));
+        assert_eq!(ebv(&s, crate::EbvSemantics::Rec2013), Some(true));
     }
 
     #[test]
     fn ebv_xsd_string_empty_is_false() {
         let s = Value::Term(Term::Literal(Literal::new_typed_literal("", xsd::STRING)));
-        assert_eq!(ebv(&s), Some(false));
+        assert_eq!(ebv(&s, crate::EbvSemantics::Rec2013), Some(false));
     }
 }
 
@@ -20346,7 +21053,7 @@ mod sum_values_unit {
     }
 }
 
-/// Direct unit tests for `minmax_values` — numeric promotion path and empty-set path.
+/// Direct unit tests for `minmax_values` — numeric selection path and empty-set path.
 #[cfg(test)]
 mod minmax_values_unit {
     use super::*;
@@ -20368,9 +21075,8 @@ mod minmax_values_unit {
     fn min_over_integers_is_smallest() {
         let vals = vec![Value::Num(Num::Int(5)), Value::Num(Num::Int(2)), Value::Num(Num::Int(8))];
         let min = minmax_values(vals, std::cmp::Ordering::Less);
-        // MIN over an all-integer set is the smallest member (2). `minmax_values` returns
-        // it via `num_canonical_term`, i.e. a `Value::Term` carrying the canonical
-        // xsd:integer literal "2". Assert the EXACT lexical value AND datatype — NOT a
+        // MIN over an all-integer set selects the smallest member (2), preserving
+        // its representation. Assert the EXACT lexical value AND datatype — NOT a
         // substring `contains('2')`, which is vacuous because the xsd:integer datatype
         // IRI (…/2001/XMLSchema#integer) already contains '2' regardless of the value.
         match min {
@@ -20392,8 +21098,8 @@ mod minmax_values_unit {
     fn max_over_integers_is_largest() {
         let vals = vec![Value::Num(Num::Int(5)), Value::Num(Num::Int(2)), Value::Num(Num::Int(8))];
         let max = minmax_values(vals, std::cmp::Ordering::Greater);
-        // MAX over an all-integer set is the largest member (8), returned as a canonical
-        // xsd:integer `Value::Term`. Assert the EXACT lexical value AND datatype — a
+        // MAX over an all-integer set selects the largest member (8), preserving
+        // its representation. Assert the EXACT lexical value AND datatype — a
         // substring `contains('8')` would also pass for wrong values like 18 or 80, so it
         // is not an acceptable check for the `Value::Term` representation.
         match max {
@@ -20467,12 +21173,12 @@ mod columnar_aggregate_seam {
     /// cannot catch a columnar mutation. This helper replicates the sequential scalar fallback
     /// of `group_aggregate` WITHOUT the columnar seam. [SONNET-4.6]
     /// (C2-fix sq-pntvh.4 adversarial review)
-    fn scalar_oracle(
-        g: &Graph,
+    fn scalar_oracle<'g>(
+        g: &'g Graph,
         b: &Bindings,
         group_vars: &[Variable],
         aggregates: &[(Variable, AggregateExpression)],
-    ) -> (Vec<Row>, LocalVocab) {
+    ) -> (Vec<Row>, LocalVocab<'g>) {
         let key_cols: Vec<Option<usize>> = group_vars.iter().map(|v| b.col(v)).collect();
         let (mut order, mut members) = build_groups(b, &key_cols);
         if group_vars.is_empty() && order.is_empty() {
@@ -20897,7 +21603,7 @@ mod compiled_expr_tests {
 
     /// `eval_expr` == `eval_compiled` for every row of `b` with expression `e`.
     fn assert_compiled_matches_original(graph: &Graph, local: &LocalVocab, b: &Bindings, e: &Expression) {
-        let compiled = compile_expr(e, b);
+        let compiled = compile_expr(e, b, local);
         for row in &b.rows {
             let expected = eval_expr(graph, local, b, row, e).expect("eval_expr error");
             let got = eval_compiled(graph, local, b, row, &compiled).expect("eval_compiled error");
@@ -20947,7 +21653,7 @@ mod compiled_expr_tests {
                 .iter()
                 .filter(|row| {
                     eval_expr(&g, &local, &b_ref, row, expr)
-                        .map(|val| effective_boolean(&val))
+                        .map(|val| effective_boolean(&val, crate::EbvSemantics::Rec2013))
                         .unwrap_or(false)
                 })
                 .cloned()
@@ -21226,6 +21932,15 @@ mod compiled_expr_tests {
         for e in &exprs {
             assert_compiled_matches_original(&g, &local, &b, e);
         }
+        // Compare all expression lanes with captured outer terms too.
+        // Inner columns deliberately contain different values (and UNBOUND).
+        let mut captured = LocalVocab::default();
+        captured.correlation.insert(va, Term::BlankNode(BlankNode::new_unchecked("outer")));
+        captured.correlation.insert(vb, Term::Literal(Literal::new_typed_literal("9007199254740993", xsd::INTEGER)));
+        captured.correlation.insert(vc, Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/outer")));
+        for e in &exprs {
+            assert_compiled_matches_original(&g, &captured, &b, e);
+        }
     }
 }
 
@@ -21502,11 +22217,11 @@ mod idfast_unit {
         expr: &Expression,
         nonlit_cols: &FxHashSet<usize>,
     ) -> Vec<Option<bool>> {
-        let mut compiled = compile_expr(expr, b);
+        let mut compiled = compile_expr(expr, b, local);
         idfast_rewrite(&mut compiled, nonlit_cols);
         b.rows
             .iter()
-            .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap()))
+            .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap(), crate::EbvSemantics::Rec2013))
             .collect()
     }
 
@@ -22044,7 +22759,7 @@ mod idfast_unit {
             Box::new(Expression::Variable(var("a"))),
             Box::new(Expression::Variable(var("b"))),
         );
-        let mut compiled = compile_expr(&expr, &b);
+        let mut compiled = compile_expr(&expr, &b, &LocalVocab::default());
         idfast_rewrite(&mut compiled, &cols);
         assert!(
             matches!(compiled, CompiledExpr::IdEqNonLit(..)),
@@ -22188,7 +22903,7 @@ mod idfast_unit {
         // ...so an inverted verdict (false) would be a detectable mismatch.
         let mutated = Value::Bool(false);
         assert_ne!(
-            ebv3(&mutated),
+            ebv3(&mutated, crate::EbvSemantics::Rec2013),
             reference_equal(&g, &local, id, id),
             "an inverted equal-id verdict must disagree with the oracle"
         );
@@ -22956,6 +23671,34 @@ mod capped_rhs_tests {
             1,
             "off-diagonal repeated-variable rows must not survive"
         );
+    }
+}
+
+// Nullable path semantics have an independent bottom-up test oracle.
+#[cfg(test)]
+#[path = "nullable_path_tests.rs"]
+mod nullable_path_tests;
+
+#[cfg(test)]
+mod exact_temporal_sort_cache_tests {
+    // The comparator consumes prevalidated keys, not dictionary IDs.
+    use super::*;
+
+    #[test]
+    fn temporal_sort_compares_borrowed_keys_without_dictionary_reparsing() {
+        let graph = Graph::load_str("", "nt").unwrap();
+        let local = LocalVocab::default();
+        let a = SortCell::Temp {
+            id: 1,
+            key: ExactTemporal::of_lit("2024-01-01T00:00:00.000000001Z", "http://www.w3.org/2001/XMLSchema#dateTime").unwrap(),
+        };
+        let b = SortCell::Temp {
+            id: 2,
+            key: ExactTemporal::of_lit("2024-01-01T00:00:00.000000002Z", "http://www.w3.org/2001/XMLSchema#dateTime").unwrap(),
+        };
+        assert_eq!(cmp_sort_cells(&graph, &local, &a, &b), Ordering::Less);
+        assert_eq!(cmp_sort_cells(&graph, &local, &b, &a), Ordering::Greater);
+        assert_eq!(cmp_sort_cells(&graph, &local, &a, &a), Ordering::Equal);
     }
 }
 

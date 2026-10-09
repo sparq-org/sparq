@@ -1,0 +1,86 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -39,3 +38,0 @@
+-[dependencies.proc-macro-error2]
+-version = "2.0.1"
+-
+--- a/Cargo.toml.orig
++++ b/Cargo.toml.orig
+@@ -19 +18,0 @@
+-proc-macro-error2 = "2.0.1"
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -3 +2,0 @@
+-use proc_macro_error2::proc_macro_error;
+@@ -8 +6,0 @@
+-#[proc_macro_error]
+@@ -12,2 +10,3 @@
+-    let gen = value_type::impl_value_type(&input);
+-    gen.into()
++    value_type::impl_value_type(&input)
++        .unwrap_or_else(syn::Error::into_compile_error)
++        .into()
+--- a/src/value_type.rs
++++ b/src/value_type.rs
+@@ -2 +1,0 @@
+-use proc_macro_error2::abort;
+@@ -7,8 +6,12 @@
+-fn check_repr(input: &DeriveInput) {
+-    let reprs = input
+-        .attrs
+-        .iter()
+-        .filter_map(|attr| {
+-            if let Meta::List(MetaList { path, nested, .. }) = attr.parse_meta().unwrap() {
+-                if path.is_ident("repr") {
+-                    return Some(nested.into_iter().collect::<Vec<_>>());
++fn check_repr(input: &DeriveInput) -> syn::Result<()> {
++    // We require either repr(C) or repr(transparent) to ensure fields are in
++    // source code order. [GPT-6] Preserve lazy validation and return diagnostics.
++    for attr in &input.attrs {
++        if let Meta::List(MetaList { path, nested, .. }) = attr.parse_meta()? {
++            if path.is_ident("repr") {
++                for meta in nested {
++                    if let NestedMeta::Meta(Meta::Path(path)) = meta {
++                        if path.is_ident("C") || path.is_ident("transparent") {
++                            return Ok(());
++                        }
++                    }
+@@ -16,11 +18,0 @@
+-            }
+-            None
+-        })
+-        .flatten();
+-
+-    // We require either repr(C) or repr(transparent) to ensure fields are in
+-    // source code order.
+-    for meta in reprs {
+-        if let NestedMeta::Meta(Meta::Path(path)) = meta {
+-            if path.is_ident("C") || path.is_ident("transparent") {
+-                return;
+@@ -31 +23 @@
+-    abort!(
++    Err(syn::Error::new_spanned(
+@@ -33,2 +25,2 @@
+-        "ValueType can only be derived for #[repr(C)] or #[repr(transparent)] structs"
+-    )
++        "ValueType can only be derived for #[repr(C)] or #[repr(transparent)] structs",
++    ))
+@@ -91,2 +83,2 @@
+-pub fn impl_value_type(input: &DeriveInput) -> TokenStream {
+-    check_repr(input);
++pub fn impl_value_type(input: &DeriveInput) -> syn::Result<TokenStream> {
++    check_repr(input)?;
+@@ -98 +90,6 @@
+-        _ => abort!(input, "ValueType can only be derived for structs"),
++        _ => {
++            return Err(syn::Error::new_spanned(
++                input,
++                "ValueType can only be derived for structs",
++            ));
++        }
+@@ -103 +100 @@
+-    quote! {
++    Ok(quote! {
+@@ -110 +107 @@
+-    }
++    })
