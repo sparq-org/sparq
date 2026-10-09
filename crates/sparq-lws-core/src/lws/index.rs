@@ -247,6 +247,12 @@ impl Kept {
         }
     }
 
+    /// What the budget has left.
+    fn left(&self) -> usize {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.budget.saturating_sub(self.bytes.load(Relaxed))
+    }
+
     fn refund(&self, n: usize) {
         use std::sync::atomic::Ordering::Relaxed;
         self.bytes
@@ -264,7 +270,7 @@ impl Kept {
 /// The walk keeps no record of where it has been: the storage is a tree, and a container's
 /// members are only followed when they lie strictly below it, so nothing is visited twice. What
 /// it does keep, the URIs still to visit and the listing in hand, is charged to `kept` with what
-/// `visit` keeps.
+/// `visit` keeps, and a listing is only read while it fits what is left.
 async fn readable<S: Store + 'static>(
     state: &LwsState<S>,
     agent: &Agent,
@@ -280,8 +286,11 @@ async fn readable<S: Store + 'static>(
         // A listing that cannot be read fails the index rather than leaving out what is under
         // it; a container removed meanwhile has nothing to list.
         if is_container {
-            let children = match state.store.list_children(&uri).await {
-                Ok(c) => c,
+            // The listing is read only while it fits what the budget has left, so one too large
+            // to keep is refused before it is held whole.
+            let children = match state.store.list_children_within(&uri, kept.left()).await {
+                Ok(Some(c)) => c,
+                Ok(None) => return Err(Failed::TooLarge),
                 Err(crate::error::ServerError::NotFound) => Vec::new(),
                 Err(_) => return Err(Failed::Store),
             };
@@ -832,6 +841,20 @@ mod tests {
         // Review finding: what the walk itself holds (the URIs it has yet to visit) was not
         // charged, so a search matching nothing could hold any amount. A listing larger than the
         // budget fails the walk, whatever matches.
+        // Review finding: the listing was held whole before it was charged. It is read only
+        // while it fits what the budget has left.
+        assert!(state
+            .store
+            .list_children_within(&root, listed - 1)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(state
+            .store
+            .list_children_within(&root, listed)
+            .await
+            .unwrap()
+            .is_some());
         let tiny = root.len() + listed / 2;
         assert_eq!(
             handle_within(&state, &none, &anyone, tiny).await.status(),

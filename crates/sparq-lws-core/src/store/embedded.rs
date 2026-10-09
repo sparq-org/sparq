@@ -247,6 +247,43 @@ impl EmbeddedSparqClient {
     /// analogue of the HTTP client's request count. A query that fails to BUILD (a rejected untrusted
     /// IRI) returns before ever reaching here, so a fail-closed rejection is correctly NOT counted as
     /// a round-trip.
+    /// The children `q` selects, or `None` once their IRIs pass `max_bytes`.
+    async fn children(
+        &self,
+        q: String,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("list_children", e))?;
+            let child_col = var_col(&result, "child").ok_or_else(|| {
+                SparqError::Backend("fatal: select-children result missing ?child column".into())
+            })?;
+            let mut children = Vec::with_capacity(result.rows.len());
+            let mut bytes = 0usize;
+            for row in &result.rows {
+                // A `SELECT ?child` row MUST carry a bound `child`. A missing/unbound value is a
+                // malformed result, NOT an empty list — surface it as a fatal error (the same
+                // fail-closed posture as the HTTP impl), because `list_children` feeds the
+                // empty-container DELETE check (a silently-shortened list could wrongly allow a
+                // non-empty container's delete).
+                let child =
+                    term_value(row.get(child_col).and_then(|c| c.as_ref())).ok_or_else(|| {
+                        SparqError::Backend(
+                            "fatal: select-children row missing the 'child' binding".into(),
+                        )
+                    })?;
+                bytes = bytes.saturating_add(child.len());
+                if bytes > max_bytes {
+                    return Ok(None);
+                }
+                children.push(child);
+            }
+            Ok(Some(children))
+        })
+        .await
+    }
+
     async fn dispatch<T, F>(&self, f: F) -> Result<T, SparqError>
     where
         F: FnOnce(&mut Graph) -> Result<T, SparqError> + Send + 'static,
@@ -405,7 +442,8 @@ impl SparqClient for EmbeddedSparqClient {
         // `update_delete_resource` builder. Atomic single-op.
         let u = sparql::update_delete_resource(iri)?;
         self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("delete_meta", e))
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("delete_meta", e))
         })
         .await
     }
@@ -494,44 +532,35 @@ impl SparqClient for EmbeddedSparqClient {
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         let u = sparql::update_remove_child(container, child)?;
         self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("remove_child", e))
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("remove_child", e))
         })
         .await
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
-        let q = sparql::select_children(container)?;
-        self.dispatch(move |graph| {
-            let result =
-                sparq_engine::query(graph, &q).map_err(|e| engine_err("list_children", e))?;
-            let child_col = var_col(&result, "child").ok_or_else(|| {
-                SparqError::Backend("fatal: select-children result missing ?child column".into())
-            })?;
-            let mut children = Vec::with_capacity(result.rows.len());
-            for row in &result.rows {
-                // A `SELECT ?child` row MUST carry a bound `child`. A missing/unbound value is a
-                // malformed result, NOT an empty list — surface it as a fatal error (the same
-                // fail-closed posture as the HTTP impl), because `list_children` feeds the
-                // empty-container DELETE check (a silently-shortened list could wrongly allow a
-                // non-empty container's delete).
-                let child =
-                    term_value(row.get(child_col).and_then(|c| c.as_ref())).ok_or_else(|| {
-                        SparqError::Backend(
-                            "fatal: select-children row missing the 'child' binding".into(),
-                        )
-                    })?;
-                children.push(child);
-            }
-            Ok(children)
-        })
+        let children = self.children(sparql::select_children(container)?, usize::MAX);
+        Ok(children.await?.unwrap_or_default())
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let limit = super::sparq::row_limit(container, max_bytes);
+        self.children(
+            sparql::select_children_limited(container, limit)?,
+            max_bytes,
+        )
         .await
     }
 
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
         let q = sparql::select_referenced_blob_keys();
         self.dispatch(move |graph| {
-            let result =
-                sparq_engine::query(graph, &q).map_err(|e| engine_err("referenced_blob_keys", e))?;
+            let result = sparq_engine::query(graph, &q)
+                .map_err(|e| engine_err("referenced_blob_keys", e))?;
             let bk_col = var_col(&result, "bk").ok_or_else(|| {
                 SparqError::Backend("fatal: referenced-blob-keys result missing ?bk column".into())
             })?;
@@ -792,6 +821,53 @@ mod tests {
                 (N + 2) as u64,
                 "one dispatch per call: 1 put_meta + {} create_child + 1 list_children",
                 N
+            );
+        });
+    }
+
+    /// Review finding: the index read a container's whole listing before charging it. A listing
+    /// read within a budget stops at it, and asks the engine for no more rows than can fit.
+    #[test]
+    fn a_listing_read_within_a_budget_stops_at_it() {
+        block_on(async {
+            let c = client();
+            let container = "http://pod/alice/c/";
+            c.put_meta(container, meta("text/turtle", "cbk", "\"ce\""))
+                .await
+                .unwrap();
+            for i in 0..10 {
+                let child = format!("{container}n{i}");
+                c.create_child(
+                    container,
+                    &child,
+                    meta("text/turtle", &format!("bk{i}"), "\"e\""),
+                )
+                .await
+                .unwrap();
+            }
+            let all: usize = c
+                .list_children(container)
+                .await
+                .unwrap()
+                .iter()
+                .map(String::len)
+                .sum();
+            assert_eq!(
+                c.list_children_within(container, all)
+                    .await
+                    .unwrap()
+                    .map(|v| v.len()),
+                Some(10)
+            );
+            assert_eq!(
+                c.list_children_within(container, all - 1).await.unwrap(),
+                None
+            );
+            assert_eq!(c.list_children_within(container, 0).await.unwrap(), None);
+            assert_eq!(
+                super::super::sparq::row_limit(container, 3 * (container.len() + 1)),
+                4,
+                "no more members than the budget can hold are asked for"
             );
         });
     }

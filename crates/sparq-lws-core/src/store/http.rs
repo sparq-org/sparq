@@ -187,6 +187,44 @@ impl HttpSparqClient {
         }
     }
 
+    /// The children `q` selects, or `None` once their IRIs pass `max_bytes`.
+    async fn children(
+        &self,
+        q: String,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let (body, _ct) = self
+            .query_raw(&q, ACCEPT_RESULTS_JSON)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
+        let mut children = Vec::with_capacity(result.rows.len());
+        let mut bytes = 0usize;
+        for row in result.rows {
+            // A row of a `SELECT ?child` MUST carry the `child` binding. A row missing it is a
+            // malformed backend response, NOT an empty/partial list — surface it as a fatal error
+            // rather than silently dropping it, because list_children feeds the fail-closed
+            // empty-container DELETE check (a silently-shortened list could wrongly let a non-empty
+            // container be deleted).
+            match row.get("child") {
+                Some(child) => {
+                    bytes = bytes.saturating_add(child.len());
+                    if bytes > max_bytes {
+                        return Ok(None);
+                    }
+                    children.push(child.clone())
+                }
+                None => {
+                    return Err(SparqHttpError::Malformed(
+                        "select-children row missing the 'child' binding".into(),
+                    )
+                    .into_sparq())
+                }
+            }
+        }
+        Ok(Some(children))
+    }
+
     /// Issue a SPARQL **query**, returning the raw body bytes + the response `Content-Type`. The
     /// `accept` header drives the result serialisation.
     async fn query_raw(
@@ -504,30 +542,21 @@ impl SparqClient for HttpSparqClient {
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
-        let q = sparql::select_children(container)?;
-        let (body, _ct) = self
-            .query_raw(&q, ACCEPT_RESULTS_JSON)
-            .await
-            .map_err(SparqHttpError::into_sparq)?;
-        let result = parse_select_json(&body).map_err(SparqHttpError::into_sparq)?;
-        let mut children = Vec::with_capacity(result.rows.len());
-        for row in result.rows {
-            // A row of a `SELECT ?child` MUST carry the `child` binding. A row missing it is a
-            // malformed backend response, NOT an empty/partial list — surface it as a fatal error
-            // rather than silently dropping it, because list_children feeds the fail-closed
-            // empty-container DELETE check (a silently-shortened list could wrongly let a non-empty
-            // container be deleted).
-            match row.get("child") {
-                Some(child) => children.push(child.clone()),
-                None => {
-                    return Err(SparqHttpError::Malformed(
-                        "select-children row missing the 'child' binding".into(),
-                    )
-                    .into_sparq())
-                }
-            }
-        }
-        Ok(children)
+        let children = self.children(sparql::select_children(container)?, usize::MAX);
+        Ok(children.await?.unwrap_or_default())
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let limit = super::sparq::row_limit(container, max_bytes);
+        self.children(
+            sparql::select_children_limited(container, limit)?,
+            max_bytes,
+        )
+        .await
     }
 
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {

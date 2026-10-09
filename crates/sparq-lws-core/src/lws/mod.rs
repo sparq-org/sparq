@@ -2052,6 +2052,16 @@ pub(crate) mod test_store {
             }
             self.inner.list_children(container).await
         }
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+            if self.fail_list_of.lock().unwrap().as_deref() == Some(container) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.list_children_within(container, max_bytes).await
+        }
     }
 
     /// What can be seen of `resources` (each one's content, content type and stored metadata) and
