@@ -56,7 +56,7 @@
 //! Backward rules (`<=`, log:isImpliedBy) are GOAL-DIRECTED, matching EYE:
 //! they never fire forward; a forward-rule premise atom resolves against
 //! backward conclusions SLD-style (standardized apart, depth-bounded by
-//! `BW_DEPTH`), with structural unification through lists and quoted
+//! the backward depth limit in `bounded`), with structural unification through lists and quoted
 //! formulae on both sides.
 //!
 //! Conclusion blank nodes are EXISTENTIALS instantiated fresh once per
@@ -99,7 +99,9 @@ pub mod parser;
 // output ([`reason_n3_pass_all`]) even though the chainer itself consumes rules.
 pub mod serialize;
 // Automatic stratification for store-scoped negation-as-failure (GH #6201, #5756).
+pub(crate) mod bounded;
 mod strata;
+use bounded::{settle, Bounded, Truncation};
 pub use strata::NegationCycles;
 
 pub use model::{Rule, Term};
@@ -173,11 +175,6 @@ const STRING: &str = "http://www.w3.org/2000/10/swap/string#";
 const LIST: &str = "http://www.w3.org/2000/10/swap/list#";
 const TIME: &str = "http://www.w3.org/2000/10/swap/time#";
 
-/// Depth bound for goal-directed (`<=`) resolution: a backward proof may chain through at
-/// most this many backward-rule applications. Bounds runaway recursion (e.g. a rule whose
-/// premise re-poses its own goal) — within the bound, proofs are exhaustive.
-const BW_DEPTH: usize = 64;
-
 /// An OPT-IN document accessor for `log:semantics` / `log:content`: maps an
 /// IRI to that document's source text. The engine itself never touches the
 /// filesystem or network — reasoning stays a pure function of its inputs
@@ -228,17 +225,11 @@ struct BwCtx<'a> {
     truncated: Truncation,
 }
 
-/// The first reason any search of a run was cut short: the backward proof depth limit, the
-/// formula-containment budget, the data-list walk cap, or a nested closure left unclosed
-/// by the import-cycle guard. A cut search under-approximates the facts it reports, so
-/// once this is set nothing that reads absence may trust the store ([`negation_gate`]).
-/// Shared with every nested closure of the run.
-type Truncation = std::rc::Rc<std::cell::Cell<Option<&'static str>>>;
-
-/// Record that a search was cut short (keeps the first reason).
-fn truncate(bw: &BwCtx, why: &'static str) {
-    if bw.truncated.get().is_none() {
-        bw.truncated.set(Some(why));
+impl BwCtx<'_> {
+    /// Use a budgeted or fallible step's result, recording a cut on the run
+    /// ([`bounded::settle`]).
+    fn settle<T>(&self, b: Bounded<T>) -> T {
+        settle(&self.truncated, b)
     }
 }
 
@@ -634,6 +625,10 @@ pub fn reason_n3_stratified_with_cycles(
     let mut carried: Vec<[Term; 3]> = Vec::new();
     let mut facts = FactIndex::default();
     let mut strata_facts = Vec::with_capacity(strata.len());
+    // One truncation flag for the whole pipeline: a cut search in an earlier stratum
+    // leaves the facts it carries forward incomplete, so a later stratum's negation gate
+    // must see it.
+    let truncated = Truncation::default();
     for (i, src) in strata.iter().enumerate() {
         let mut parsed = parser::parse(src)?;
         if !carried.is_empty() {
@@ -651,7 +646,13 @@ pub fn reason_n3_stratified_with_cycles(
             }
         }
         parsed.facts.append(&mut carried);
-        let (f, _steps, _) = run_closure(parsed, None, None, StepMode::None, cycles)?;
+        let (f, _steps, _) = run_closure(
+            parsed,
+            None,
+            Some((VisitedDocs::default(), truncated.clone())),
+            StepMode::None,
+            cycles,
+        )?;
         strata_facts.push(f.all.len());
         if i + 1 < strata.len() {
             carried = f.all.iter().cloned().collect();
@@ -1030,6 +1031,8 @@ fn run_closure(
         }
         let mut first_round = true;
         loop {
+            // A round with `first_round` set is NAIVE: every rule over the whole fact set.
+            let naive_round = first_round;
             let mut produced: Vec<DerivationStep> = Vec::new();
             for (ri, rule) in rules.iter().enumerate() {
                 if strata.rule_stratum.as_ref().is_some_and(|rs| rs[ri] != stratum) {
@@ -1099,7 +1102,7 @@ fn run_closure(
                             &Binding::new(),
                             Some((&delta, k)),
                             &bw,
-                            BW_DEPTH,
+                            bounded::backward_depth(),
                         ));
                     }
                     bs
@@ -1184,7 +1187,19 @@ fn run_closure(
             }
             first_round = false;
             if new_delta.is_empty() {
-                break;
+                if naive_round {
+                    break;
+                }
+                // Completeness check pass: the stratum closes only after one NAIVE round
+                // (every rule of the stratum over the whole fact set, exactly round 0)
+                // derives nothing new. Semi-naive scheduling skips a rule whose join atoms
+                // saw no new fact, but a rule can read the store through other premises
+                // (list builtins walking derived rdf:first/rest, log:includes, aggregation),
+                // so only a naive round that derives nothing proves the fixpoint. Anything
+                // it derives resumes the semi-naive loop.
+                first_round = true;
+                delta = facts.all.clone();
+                continue;
             }
             delta = new_delta;
         }
@@ -1310,7 +1325,7 @@ type Binding = HashMap<String, Term>;
 /// rule-local list STRUCTURE (rdf:first/rest over fresh bnodes), not data to match — they are
 /// extracted up front and consumed by the functional builtins (e.g. `math:sum`).
 fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Binding> {
-    match_premise_seeded(premise, facts, &Binding::new(), None, bw, BW_DEPTH)
+    match_premise_seeded(premise, facts, &Binding::new(), None, bw, bounded::backward_depth())
 }
 
 /// Match `premise` starting from an existing partial binding `seed`. For SEMI-NAIVE
@@ -1521,7 +1536,7 @@ fn match_premise_seeded(
         } else if let Some(op) = binder_builtin(&pat[1]) {
             bindings = bindings.into_iter().filter_map(|b| eval_binder(op, &pat[0], &pat[2], b)).collect();
         } else if let Some(op) = builtin(&pat[1]) {
-            bindings.retain(|b| eval_builtin(op, &pat[0], &pat[2], b));
+            bindings.retain(|b| eval_builtin(op, &pat[0], &pat[2], b, bw));
         } else {
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
@@ -1554,12 +1569,11 @@ fn match_premise_seeded(
                     }
                 }
                 if !bw.rules.is_empty() {
-                    if depth > 0 {
-                        next.extend(backward_prove(pat, b, facts, bw, depth - 1));
-                    } else if bw.rules.iter().flat_map(|r| &r.conclusion).any(|c| {
+                    let could_match = bw.rules.iter().flat_map(|r| &r.conclusion).any(|c| {
                         !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b)
-                    }) {
-                        truncate(bw, "backward proof search reached its depth limit");
+                    });
+                    if let Some(d) = bw.settle(bounded::backward_step(depth, could_match)) {
+                        next.extend(backward_prove(pat, b, facts, bw, d));
                     }
                 }
             }
@@ -1787,22 +1801,15 @@ fn fact_list(head: &Term, facts: &FactIndex, bw: &BwCtx) -> Option<Vec<Term>> {
     let rest = Term::Iri(parser::RDF_REST.into());
     let nil = Term::Iri(parser::RDF_NIL.into());
     let empty = Term::List(Vec::new());
-    let mut out = Vec::new();
-    let mut cur = head.clone();
-    let mut guard = 0;
-    loop {
-        if cur == nil || cur == empty {
-            return Some(out);
-        }
-        if guard > 100_000 {
-            truncate(bw, "a data list walk passed its length cap");
-            return None;
-        }
-        guard += 1;
-        let f = facts.ps.get(&(first.clone(), cur.clone()))?.first()?.clone();
-        out.push(f);
-        cur = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
-    }
+    bw.settle(bounded::walk_list(
+        head.clone(),
+        |cur| *cur == nil || *cur == empty,
+        |cur| {
+            let f = facts.ps.get(&(first.clone(), cur.clone()))?.first()?.clone();
+            let r = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
+            Some((f, r))
+        },
+    ))
 }
 
 /// Rename blank labels per `map` in a conclusion triple (recursing into lists;
@@ -2016,7 +2023,7 @@ fn builtin(p: &Term) -> Option<Builtin> {
     None
 }
 
-fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> bool {
+fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding, bw: &BwCtx) -> bool {
     let (s, o) = (apply(s, b), apply(o, b));
     match op {
         Builtin::LogEq => s == o,
@@ -2043,8 +2050,10 @@ fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> bool {
                 Builtin::StrLt => x < y,
                 Builtin::StrNotGt => x <= y,
                 Builtin::StrNotLt => x >= y,
-                Builtin::StrMatches => regex::Regex::new(y).map(|re| re.is_match(x)).unwrap_or(false),
-                Builtin::StrNotMatches => regex::Regex::new(y).map(|re| !re.is_match(x)).unwrap_or(false),
+                Builtin::StrMatches => bw.settle(bounded::regex(y)).is_some_and(|re| re.is_match(x)),
+                Builtin::StrNotMatches => {
+                    bw.settle(bounded::regex(y)).is_some_and(|re| !re.is_match(x))
+                }
                 Builtin::StrContainsIgnCase => x.to_lowercase().contains(&y.to_lowercase()),
                 Builtin::StrContainsRoughly => {
                     // cwm roughly.n3: case-insensitive, any whitespace run = one space.
@@ -2219,12 +2228,9 @@ fn formula_containment(
         })
         .collect();
     let mut out = Vec::new();
-    let mut budget = 100_000usize;
+    let mut budget = bounded::StepBudget::containment();
     containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut budget);
-    if budget == 0 {
-        truncate(bw, "formula containment search exhausted its step budget");
-    }
-    out
+    bw.settle(budget.finish(out))
 }
 
 fn containment_search(
@@ -2233,12 +2239,11 @@ fn containment_search(
     b: Binding,
     defers_left: usize,
     out: &mut Vec<Binding>,
-    budget: &mut usize,
+    budget: &mut bounded::StepBudget,
 ) {
-    if *budget == 0 {
+    if !budget.take() {
         return;
     }
-    *budget -= 1;
     let Some((pat, rest)) = remaining.split_first() else {
         out.push(b);
         return;
@@ -2318,8 +2323,10 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // cycle: with `bw.resolver` `None` the set stays empty and this is a no-op.)
     let key = formula_key(ts);
     if !bw.visited.borrow_mut().insert(key) {
-        truncate(bw, "a nested closure re-entered a document already being closed and was left unclosed");
-        return ts.to_vec();
+        return bw.settle(Bounded::cut(
+            ts.to_vec(),
+            "a nested closure re-entered a document already being closed and was left unclosed",
+        ));
     }
 
     let mut facts: Vec<[Term; 3]> = Vec::new();
@@ -2975,7 +2982,7 @@ fn eval_functional(
             if args.len() != 2 {
                 return None;
             }
-            let re = regex::Regex::new(lex(&args[1])?).ok()?;
+            let re = bw.settle(bounded::regex(lex(&args[1])?))?;
             let cap = re.captures(lex(&args[0])?)?.get(1)?.as_str().to_string();
             Term::Lit(cap, XSD_STRING.into(), None)
         }
@@ -3105,7 +3112,7 @@ fn eval_functional(
             if args.len() != 3 {
                 return None;
             }
-            let re = regex::Regex::new(lex(&args[1])?).ok()?;
+            let re = bw.settle(bounded::regex(lex(&args[1])?))?;
             let out = re.replace_all(lex(&args[0])?, lex(&args[2])?).into_owned();
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
@@ -4567,7 +4574,7 @@ mod tests {
         // A 3-link backward chain (transitive ancestor) proven goal-directed: each recursive
         // link consumes one of the REMAINING depth budget (`depth - 1`), exercising the
         // depth-decrement path distinctly from the cyclic-cutoff test. Finite, well within
-        // BW_DEPTH.
+        // the backward depth limit.
         let src = r#"
             @prefix : <http://ex/> .
             :a :parent :b . :b :parent :c . :c :parent :d .

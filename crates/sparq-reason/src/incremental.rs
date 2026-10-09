@@ -1734,7 +1734,9 @@ fn eval_n3_builtin(
             let (N3Term::Lit(text, _, _), N3Term::Lit(pat, _, _)) = (&ms[0], &ms[1]) else {
                 return None;
             };
-            let re = regex::Regex::new(pat).ok()?;
+            // A pattern the regex engine refuses cannot decide the match: the checked
+            // engine takes over (and its negation gate sees the cut).
+            let re = crate::n3::bounded::settle(unsupported, crate::n3::bounded::regex(pat))?;
             let cap = re.captures(text)?.get(1)?.as_str().to_string();
             let lit = N3Term::Lit(cap, N3_XSD_STRING.into(), None);
             let mut nb = b.clone();

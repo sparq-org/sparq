@@ -485,17 +485,57 @@ fn truncated_backward_proof_cannot_authorize_through_negation() {
     assert!(c.contains(&t("r", "permittedBy", "g")));
 }
 
+/// A regex the regex engine refuses: 251 nested capture groups, past its nesting limit.
+fn deep_regex() -> String {
+    format!("{}a{}", "(".repeat(251), ")".repeat(251))
+}
+
+/// The ways a search can be cut short, each as (what, facts and rules, trigger rule).
+/// The trigger rule's premise runs into the cut and would derive `:a :proved :b`.
+fn truncation_sources() -> Vec<(&'static str, String, String)> {
+    vec![
+        (
+            "backward depth limit",
+            deep_chain(),
+            "{ :a :p0 :b } => { :a :proved :b } .\n".to_string(),
+        ),
+        (
+            "regex limit in string:scrape",
+            String::new(),
+            format!(
+                "{{ (\"a\" \"{}\") string:scrape ?v }} => {{ :a :proved :b }} .\n",
+                deep_regex()
+            ),
+        ),
+        (
+            "regex limit in string:matches",
+            String::new(),
+            format!(
+                "{{ \"a\" string:matches \"{}\" }} => {{ :a :proved :b }} .\n",
+                deep_regex()
+            ),
+        ),
+        (
+            "regex limit in string:notMatches",
+            String::new(),
+            format!(
+                "{{ \"a\" string:notMatches \"{}\" }} => {{ :a :proved :b }} .\n",
+                deep_regex()
+            ),
+        ),
+    ]
+}
+
 /// Every negation and aggregation builtin, through every entry point, over an input
-/// whose backward proof search is cut short: each is refused (an error, never an answer
-/// that read the cut as absence).
+/// whose evaluation was cut short by every kind of cut: each is refused (an error,
+/// never an answer that read the cut as absence).
 #[test]
 fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point() {
-    // Rule 0 runs first and cuts its search; the probe rule then negates or aggregates.
-    let trigger = "{ :a :p0 :b } => { :a :proved :b } .\n";
+    let pre = format!("{PRE}@prefix string: <http://www.w3.org/2000/10/swap/string#> .\n");
     let probes: [(&str, &str); 6] = [
         (
             "notIncludes, store scope",
-            "?s log:notIncludes { :a :p0 :b }",
+            "?s log:notIncludes { :a :proved :b }",
         ),
         (
             "notIncludes, formula scope",
@@ -507,71 +547,135 @@ fn every_negation_and_aggregation_refuses_a_truncated_input_at_every_entry_point
         ),
         (
             "collectAllIn, store scope",
-            "( ?x { :a :p0 ?x } ?l ) log:collectAllIn ?s",
+            "( ?x { :a :proved ?x } ?l ) log:collectAllIn ?s",
         ),
         (
             "forAllIn, store scope",
-            "( { :a :p0 ?x } { :a :never ?x } ) log:forAllIn ?s",
+            "( { :a :proved ?x } { :a :never ?x } ) log:forAllIn ?s",
         ),
         (
             "collectAllIn, formula scope",
             "( ?x { :c :d ?x } ?l ) log:collectAllIn { :c :d :e }",
         ),
     ];
-    for (what, probe) in probes {
-        let rules = format!("{trigger}{{ {probe} }} => {{ :r :permittedBy :g }} .");
-        let body = format!("{}{rules}", deep_chain());
-        let src = format!("{PRE}{body}");
-        let refused = |r: Result<(), String>, entry: &str| match r {
-            Err(e) => assert!(e.contains("incomplete"), "{what} / {entry}: {e}"),
-            Ok(()) => panic!("{what} / {entry}: accepted a truncated input"),
-        };
-        refused(reason_n3(&mut Dict::new(), &src).map(drop), "reason_n3");
-        refused(reason_n3_terms(&src, None).map(drop), "reason_n3_terms");
-        for cycles in [NegationCycles::Reject, NegationCycles::FailClosed] {
+    let refused = |r: Result<(), String>, what: &str| match r {
+        Err(e) => assert!(e.contains("incomplete"), "{what}: {e}"),
+        Ok(()) => panic!("{what}: accepted a truncated input"),
+    };
+    for (cut, base, trigger) in truncation_sources() {
+        for (probe_name, probe) in probes {
+            let what = |entry: &str| format!("{cut} / {probe_name} / {entry}");
+            let body = format!("{base}{trigger}{{ {probe} }} => {{ :r :permittedBy :g }} .");
+            let src = format!("{pre}{body}");
             refused(
-                reason_n3_terms_with_cycles(&src, None, None, cycles).map(drop),
-                "reason_n3_terms_with_cycles",
+                reason_n3(&mut Dict::new(), &src).map(drop),
+                &what("reason_n3"),
+            );
+            refused(
+                reason_n3_terms(&src, None).map(drop),
+                &what("reason_n3_terms"),
+            );
+            for cycles in [NegationCycles::Reject, NegationCycles::FailClosed] {
+                refused(
+                    reason_n3_terms_with_cycles(&src, None, None, cycles).map(drop),
+                    &what("reason_n3_terms_with_cycles"),
+                );
+            }
+            refused(
+                sparq_reason::reason_n3_proof(&mut Dict::new(), &src).map(drop),
+                &what("proof"),
+            );
+            refused(
+                sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).map(drop),
+                &what("pass_all"),
+            );
+            refused(
+                reason_n3_stratified(&mut Dict::new(), &[&src]).map(drop),
+                &what("stratified"),
+            );
+            // Explicit strata: the cut happens in the first document (which has no
+            // negation and succeeds alone); the second document negates.
+            let first = format!("{pre}{base}{trigger}");
+            let second = format!("{pre}{{ {probe} }} => {{ :r :permittedBy :g }} .");
+            refused(
+                reason_n3_stratified(&mut Dict::new(), &[&first, &second]).map(drop),
+                &what("stratified across documents"),
+            );
+            // Query: the cut is in the data closure, the probe in the query premise.
+            let q = format!("{pre}{{ {probe} }} => {{ :r :permittedBy :g }} .");
+            refused(
+                reason_n3_query_terms(&first, &q).map(drop),
+                &what("query_terms"),
+            );
+            refused(
+                sparq_reason::reason_n3_query(&mut Dict::new(), &first, &q).map(drop),
+                &what("query"),
+            );
+            // Nested closure: the whole document inside log:conclusion.
+            let nested = format!(
+                "{pre}{{ {{ {body} }} log:conclusion ?c . ?c log:notIncludes {{ :r :x :y }} }} => {{ :r :ok :g }} ."
+            );
+            refused(
+                reason_n3_terms(&nested, None).map(drop),
+                &what("nested log:conclusion"),
+            );
+            // Incremental: the fallback runs the checked engine; construction refuses.
+            refused(
+                MaterializedN3Graph::new(&src, &[]).map(drop),
+                &what("MaterializedN3Graph"),
+            );
+            // Compiled: backward rules, regex filters and aggregation are outside the
+            // subset, and a scrape regex that cannot be compiled refuses the rule set.
+            #[cfg(feature = "compiled-rules")]
+            assert!(
+                sparq_reason::n3::compiled::compile(&src).is_err(),
+                "{}",
+                what("compiled")
             );
         }
-        refused(
-            sparq_reason::reason_n3_proof(&mut Dict::new(), &src).map(drop),
-            "proof",
-        );
-        refused(
-            sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).map(drop),
-            "pass_all",
-        );
-        refused(
-            reason_n3_stratified(&mut Dict::new(), &[&src]).map(drop),
-            "stratified",
-        );
-        // Query: the chain is data, the trigger and the probe are the query's premise.
-        let data = format!("{PRE}{}", deep_chain());
-        let q = format!("{PRE}{{ :a :p0 :b }} => {{ :a :proved :b }} .\n{{ {probe} }} => {{ :r :permittedBy :g }} .");
-        refused(reason_n3_query_terms(&data, &q).map(drop), "query_terms");
-        refused(
-            sparq_reason::reason_n3_query(&mut Dict::new(), &data, &q).map(drop),
-            "query",
-        );
-        // Nested closure: the whole document inside log:conclusion, negation inside.
-        let nested = format!(
-            "{PRE}{{ {{ {body} }} log:conclusion ?c . ?c log:notIncludes {{ :r :x :y }} }} => {{ :r :ok :g }} ."
-        );
-        refused(
-            reason_n3_terms(&nested, None).map(drop),
-            "nested log:conclusion",
-        );
-        // Incremental: the fallback runs the checked engine; construction refuses.
-        refused(
-            MaterializedN3Graph::new(&src, &[]).map(drop),
-            "MaterializedN3Graph::new",
-        );
-        // Compiled: backward rules (the truncation source) are outside the subset.
-        #[cfg(feature = "compiled-rules")]
-        assert!(
-            sparq_reason::n3::compiled::compile(&src).is_err(),
-            "{what} / compiled"
-        );
     }
+}
+
+/// A rule whose only premise reads the store through a list builtin (no join atom) must
+/// see a list another rule of its stratum derives later; the next stratum's negation then
+/// sees the prohibition. Through every entry point.
+#[test]
+fn list_consumer_sees_a_list_derived_later_in_its_stratum() {
+    let body = ":seed :p :v .\n\
+        { :seed :p :v } => { :h rdf:first :blocked ; rdf:rest rdf:nil } .\n\
+        { :h list:member :blocked } => { :r :blocked :g } .\n\
+        { ?s log:notIncludes { :r :blocked :g } } => { :r :permittedBy :g } .";
+    let src = format!("{PRE}{body}");
+    let permit = t("r", "permittedBy", "g");
+    let (c, _) = run(body);
+    assert!(c.contains(&t("r", "blocked", "g")), "{c:?}");
+    assert!(
+        !c.contains(&permit),
+        "list consumer missed the derived list: {c:?}"
+    );
+    let mut d = Dict::new();
+    let ids = reason_n3(&mut d, &src).expect("reason_n3");
+    let permit_iri = |d: &Dict, id| d.term(id).to_string().contains("permittedBy");
+    assert!(!ids.iter().any(|t| permit_iri(&d, t[1])));
+    let mut d = Dict::new();
+    let ids = sparq_reason::reason_n3_proof(&mut d, &src)
+        .expect("proof")
+        .0;
+    assert!(!ids.iter().any(|t| permit_iri(&d, t[1])));
+    let pass = sparq_reason::reason_n3_pass_all(&src, sparq_reason::RuleVars::N3).expect("pass");
+    // The closure statements (the echoed rules mention the permit in their conclusion).
+    let permit_line = "<http://ex/r> <http://ex/permittedBy> <http://ex/g> .";
+    assert!(!pass.lines().any(|l| l.trim() == permit_line), "{pass}");
+    let mut d = Dict::new();
+    let st = reason_n3_stratified(&mut d, &[&src]).expect("stratified");
+    assert!(!st.facts.iter().any(|t| permit_iri(&d, t[1])));
+    let q = format!("{PRE}{{ ?s log:notIncludes {{ :r :blocked :g }} }} => {{ :r :ok :g }} .");
+    let data = format!(
+        "{PRE}:seed :p :v .\n\
+        {{ :seed :p :v }} => {{ :h rdf:first :blocked ; rdf:rest rdf:nil }} .\n\
+        {{ :h list:member :blocked }} => {{ :r :blocked :g }} ."
+    );
+    assert!(reason_n3_query_terms(&data, &q).expect("query").is_empty());
+    let g = MaterializedN3Graph::new(&src, &[]).expect("incremental");
+    assert!(!g.closure().contains(&permit));
 }

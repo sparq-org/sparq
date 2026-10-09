@@ -176,8 +176,8 @@ enum Step {
     },
     /// `string:scrape` — `( str regex )`: the first capture group of the first match.
     /// The regex is a compile-time constant, pre-compiled into
-    /// [`CompiledRuleSet::regexes`] (`None` = invalid pattern ⇒ the step fails every
-    /// row, exactly like the text engine's per-evaluation `Regex::new(..).ok()?`).
+    /// [`CompiledRuleSet::regexes`]; a pattern the regex engine refuses (syntax or a
+    /// resource limit) makes [`compile`] an error instead of a step that never matches.
     Scrape {
         arg: CTerm,
         regex: usize,
@@ -212,7 +212,7 @@ struct CompiledRule {
 #[derive(Debug)]
 pub struct CompiledRuleSet {
     symbols: Vec<Term>,
-    regexes: Vec<Option<regex::Regex>>,
+    regexes: Vec<regex::Regex>,
     facts: Vec<[u32; 3]>,
     rules: Vec<CompiledRule>,
     /// The engine's automatic stratification (GH #6201).
@@ -432,7 +432,7 @@ pub fn eval(dict: &mut Dict, facts: &[[Id; 3]], rules: &CompiledRuleSet) -> Vec<
 struct Compiler {
     sym_map: FxHashMap<Term, u32>,
     symbols: Vec<Term>,
-    regexes: Vec<Option<regex::Regex>>,
+    regexes: Vec<regex::Regex>,
     facts: Vec<[u32; 3]>,
     rules: Vec<CompiledRule>,
 }
@@ -808,7 +808,7 @@ impl Compiler {
                             );
                         };
                         let regex = self.regexes.len();
-                        self.regexes.push(regex::Regex::new(pat).ok());
+                        self.regexes.push(super::bounded::regex_or_refuse(pat)?);
                         let (out, out_bound) = self.output(&atom[2], &mut ctx)?;
                         steps.push(Step::Scrape {
                             arg,
@@ -1283,10 +1283,9 @@ impl BoundRuleSet<'_> {
                     out: o,
                     out_bound,
                 } => {
-                    let re = self.compiled.regexes[*regex].as_ref();
+                    let re = &self.compiled.regexes[*regex];
                     let mut next = Vec::with_capacity(rows.len());
                     for mut row in rows {
-                        let Some(re) = re else { break }; // invalid regex: fails every row
                         let id = self.resolve(*arg, &row);
                         let oxrdf::Term::Literal(l) = dict.term(id) else {
                             continue;
