@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-tag1q.9: internal-stub README for a publish=false crate; full posture + public-API surface live in skills/e2ee-ng/SKILL.md and the design record. -->
+<!-- sq-tag1q.9: internal-stub README for a publish=false crate; full posture + public-API surface live in skills/e2ee-ng/SKILL.md and the design record. -->
 # sparq-e2ee-ng
 
 Opt-in **E2EE-NG profile primitives** for sparq: the *capability / envelope /

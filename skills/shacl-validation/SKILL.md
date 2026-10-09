@@ -699,19 +699,18 @@ SHACL-spec-correct conforms/violations).
 - **§6 limits:** the W3C `sparql/component/*` suite `owl:imports` the external
   `http://datashapes.org/dash` vocabulary; it is run offline (`tests/w3c_sparql_component.rs`)
   by resolving that import against a vendored, minimal pinned excerpt at
-  `crates/sparq-shacl/tests/vendor/dash.ttl`. Still out of scope: the `sparql/pre-binding`
-  *rejection* channel (signalling a failure for a re-binding / `SELECT *` sub-select) and
-  `$shapesGraph` — see the crate's open beads (`bd list -l area:sparq-shacl`).
+  `crates/sparq-shacl/tests/vendor/dash.ttl`. The `sparql/pre-binding` *rejection*
+  channel is `validate_strict` (see above). Still out of scope: `$shapesGraph` — see the
+  crate's open beads (`bd list -l area:sparq-shacl`).
 - **W3C conformance:** 98/98 of the *1.0/1.1* core `sht:Validate` suite passes
   (`--test w3c_core`). The **full vendored SHACL 1.2** tree is gated by a ratchet
   (sq-6glcr) in BOTH feature states: full core **136** (default) / **137** (`shacl-af`)
   — every in-scope core entry passes, 0 honest FAILs (sq-pb0wm closed the final
   per-statement reified-annotation gap) — (`--test w3c_core_full_shacl12`), 1.2 SPARQL
   **24** of 24 incl. 7 expected-rejection
-  `sht:Failure` entries (`--test w3c_sparql_shacl12`), node-expr **62 + 1 xfail**
-  (driven through the REAL `eval_node_expression`, `--test w3c_node_expr`, `shacl-af`;
-  the xfail is the harness `sht:scope-*` var entry the crate's eval has no counterpart
-  for). Pass must not drop, the gap must
+  `sht:Failure` entries (`--test w3c_sparql_shacl12`), node-expr **63**, every runnable
+  entry (driven through the REAL `eval_node_expression_with_scope`, `--test w3c_node_expr`,
+  `shacl-af`; the former `sht:scope-*` var xfail is closed, sq-u5rxj). Pass must not drop, the gap must
   not grow — the not-yet-passing entries are the honest per-category gap map in
   `research/shacl12-conformance-gap.md` (clustered into beads sq-sx15d / sq-rnkdh /
   sq-mue75 / sq-0mjfd under epic sq-waf9o). Reproduce with
@@ -719,12 +718,12 @@ SHACL-spec-correct conforms/violations).
   `cargo test -p sparq-shacl --test w3c_core` (self-skips if the gitignored suite is absent).
 - §6 SPARQL-based constraint *components* are implemented and tested
   (`tests/sparql_components.rs` plus the W3C `sparql/component` sub-suite in
-  `tests/w3c_sparql_component.rs`); the crate README documents them under
-  "Supported constraint components".
+  `tests/w3c_sparql_component.rs`); the crate README documents them under its
+  "SHACL-SPARQL + custom §6 components" feature bullet.
 
 ## See also
 
 - `sparql-query` — running standalone SPARQL through `sparq-engine` (what `sh:sparql`
   routes through).
-- `graph-loading` / `compressed-ingest` — building the `sparq_core::Graph` you validate.
+- `data-formats` — building the `sparq_core::Graph` you validate.
 - `fused-decompress-parse`, `hdt-format` — alternative ingest paths feeding a `Graph`.
