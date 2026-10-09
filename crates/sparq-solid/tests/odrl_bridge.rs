@@ -1645,16 +1645,14 @@ fn purpose_prohibition_dual_through_enforcement() {
     assert!(!out2.prohibited, "a non-marketing purpose is not carved out: {out2:?}");
     assert!(reads_n1(&mut store2, ALICE), "allow survives: research purpose not prohibited");
 
-    // (c) NO purpose stated → the carve-out is *unprovable*, so materialize_prohibition
-    //     emits NO deny: it materializes a deny only when the prohibition DEFINITELY
-    //     matches (the matched_prohibition boundary). The deny is materialized once a
-    //     request actually states the banned purpose. The *deny-retraction* direction —
-    //     where unprovable must NOT restore an existing deny — is prohibition_status's
-    //     job (ProhibitionStatus::Ambiguous keeps it; asserted in sparq-policy's tests).
+    // (c) NO purpose stated → the carve-out is *unknown*, and a prohibition fires
+    //     unless it definitely does not apply (the matched_prohibition boundary), so the
+    //     deny is materialized: the request might be for the banned purpose.
     let mut store3 = PodStore::new(pod());
     assert!(store3.materialize_odrl_permission(&permit, &unconstrained).granted);
     let out3 = store3.materialize_odrl_prohibition(&prohib, &unconstrained);
-    assert!(!out3.prohibited, "no purpose evidence → no definite carve-out materialized");
+    assert!(out3.prohibited, "no purpose evidence → the carve-out still applies: {out3:?}");
+    assert!(!reads_n1(&mut store3, ALICE), "deny-overrides on an unknown purpose");
 }
 
 // ===========================================================================

@@ -12,6 +12,11 @@
 //!    out" a forbidden sub-set — ODRL Formal Semantics §conflict).
 //! 4. **Fail-closed default:** no matching+discharged permission, OR any matching
 //!    prohibition, ⇒ DENY. An empty/malformed policy denies everything.
+//! 5. **Three-valued constraints:** each constraint and compound is True, False or
+//!    Unknown. Missing evidence, an unsupported or malformed constraint (the parser's
+//!    guard), and an incomparable pair are all Unknown, and `and`/`or`/`xone` propagate
+//!    it (Kleene). A permission grants only on True; a prohibition fires on True **or**
+//!    Unknown, so it stops applying only when one of its constraints is definitely False.
 //!
 //! [OPUS-4.8]
 
@@ -447,18 +452,23 @@ impl Decision {
 pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
     let req_action = Action(request.action.clone());
 
-    // 1. A matching prohibition overrides everything (fail-closed carve-out).
+    // 1. A prohibition overrides everything unless it DEFINITELY does not apply: one
+    //    whose constraints are Unknown (no evidence, unsupported, incomparable) still
+    //    fires (fail-closed carve-out). A permission below grants only on a definite yes.
     let mut blocking: Vec<String> = Vec::new();
+    let mut why: Vec<String> = Vec::new();
     for rule in &policy.prohibitions {
-        if rule_matches(rule, request, &req_action).is_match {
-            blocking.push(rule.id.clone());
+        match classify_prohibition(rule, request, &req_action) {
+            RuleClass::Match => why.push(format!("prohibition {} matches the request", rule.id)),
+            RuleClass::Ambiguous => why.push(format!(
+                "prohibition {} may match the request (a constraint is unknown)",
+                rule.id
+            )),
+            RuleClass::DefinitelyNo => continue,
         }
+        blocking.push(rule.id.clone());
     }
     if !blocking.is_empty() {
-        let why = blocking
-            .iter()
-            .map(|id| format!("prohibition {id} matches the request"))
-            .collect();
         return Decision::deny(blocking, why);
     }
 
@@ -470,11 +480,12 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
             caveats.extend(m.reasons);
             continue;
         }
-        // Matched — now require every duty discharged.
+        // Matched — now require every duty discharged. A duty's own constraints are
+        // not evaluated, so a constrained duty is never provably discharged.
         let undischarged: Vec<&str> = rule
             .duties
             .iter()
-            .filter(|d| !request.discharged_duties.contains(&d.action.0))
+            .filter(|d| !d.constraints.is_empty() || !request.discharged_duties.contains(&d.action.0))
             .map(|d| d.action.0.as_str())
             .collect();
         if undischarged.is_empty() {
@@ -499,10 +510,10 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
-/// The first [`Prohibition`](crate::model::Rule) in `policy` that **matches**
+/// The first [`Prohibition`](crate::model::Rule) in `policy` that **applies** to
 /// `request` (its action permits the requested action, its target/assignee agree,
-/// and every constraint is satisfied), or `None` if no prohibition carves the
-/// request out. [OPUS-4.8] sq-w693.
+/// and no constraint is definitely false — an Unknown constraint still applies), or
+/// `None` if no prohibition carves the request out. [OPUS-4.8] sq-w693.
 ///
 /// This is the same match test [`evaluate`] applies in step 1 (a matching
 /// prohibition overrides everything) — exposed so the `sparq-solid` ODRL→AUTH_GRAPH
@@ -535,27 +546,25 @@ pub fn matched_prohibition<'p>(policy: &'p Policy, request: &Request) -> Option<
     policy
         .prohibitions
         .iter()
-        .find(|rule| rule_matches(rule, request, &req_action).is_match)
+        .find(|rule| !matches!(classify_prohibition(rule, request, &req_action), RuleClass::DefinitelyNo))
 }
 
 /// Whether `policy`'s prohibitions still carve `request` out — and, when they do
 /// not, **whether that is a definite no or merely unprovable**. [OPUS-4.8] sq-2pcf.
 ///
-/// This is the *deny-retraction dual* of [`matched_prohibition`]. A bare
-/// `matched_prohibition(..).is_none()` collapses two semantically different worlds:
+/// This is the *deny-retraction dual* of [`matched_prohibition`], which (like
+/// [`evaluate`]) treats a prohibition as applying unless it is definitely withdrawn.
+/// This function additionally separates a definite match from an Unknown one:
 ///
 /// - the prohibition was genuinely **withdrawn / no longer structurally applies**
 ///   (its action/target/assignee no longer name this request, or a constraint it
 ///   carries is *definitely* false because the request supplies evidence that fails
 ///   the bound), and
 /// - the prohibition still structurally names this request but a constraint is
-///   **unprovable** because the request lacks evidence for that dimension
-///   (`constraint_satisfied` returns `false` on a missing context value).
+///   **unprovable** (Unknown: no evidence, unsupported, or incomparable).
 ///
-/// For a *grant* both collapse to "deny access" — fail-closed. But for **retracting a
-/// materialized `auth:deny*`** they must NOT: retracting on the second case would
-/// RESTORE access on missing evidence (fail-OPEN). This function keeps them apart so
-/// the bridge only retracts a deny on a *definite* "no longer holds".
+/// Only the first may retract a materialized `auth:deny*`: retracting on the second
+/// would RESTORE access on missing evidence (fail-OPEN).
 ///
 /// Returns:
 /// - [`ProhibitionStatus::Applies`] if some prohibition still carves the request out
@@ -1104,8 +1113,16 @@ enum ConstraintStatus {
 }
 
 fn constraint_status(c: &Constraint, request: &Request) -> ConstraintStatus {
+    // The parser's guard for an unsupported or malformed constraint is Unknown, never
+    // a definite false: a prohibition carrying it still fires.
+    if c.left == crate::parse::MALFORMED {
+        return ConstraintStatus::Unprovable;
+    }
     match resolve_actual(c, request) {
         None => ConstraintStatus::Unprovable,
+        // An incomparable pair (mismatched types, an unparseable dateTime, a typed set
+        // member) is Unknown too, so it can neither satisfy nor refute a constraint.
+        Some(actual) if !comparable(actual, c.operator, &c.right) => ConstraintStatus::Unprovable,
         Some(actual) => {
             if compare_constraint(c, actual, request) {
                 ConstraintStatus::Satisfied
@@ -1438,10 +1455,7 @@ fn rule_matches(rule: &Rule, request: &Request, req_action: &Action) -> Match {
 /// meets a constraint we have no evidence about — including a `recipient neq X`
 /// constraint with no identity to compare).
 fn constraint_satisfied(c: &Constraint, request: &Request) -> bool {
-    let Some(actual) = resolve_actual(c, request) else {
-        return false; // no evidence for this dimension → fail-closed
-    };
-    compare_constraint(c, actual, request)
+    constraint_status(c, request) == ConstraintStatus::Satisfied
 }
 
 /// Compare an actual request value against a constraint right-operand under an
@@ -1564,6 +1578,25 @@ fn is_none_of(actual: &Value, bound: &Value) -> bool {
 /// `|`/space/comma set encoding covers). See [`is_none_of`]. [FABLE-5] sq-uaz85.
 fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
     matches!(actual, Value::Iri(_) | Value::Str(_)) && matches!(bound, Value::Iri(_) | Value::Str(_))
+}
+
+/// Whether `actual op bound` has a defined answer. Equality needs operands of one
+/// kind (two numbers, two parseable dateTimes, or IRI/string values); an order
+/// operator needs [`order`] to succeed; set membership compares IRI/string values
+/// only. Anything else is Unknown to the evaluator, not false.
+fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
+    let textual = |v: &Value| matches!(v, Value::Iri(_) | Value::Str(_));
+    match op {
+        Operator::Eq | Operator::IsA | Operator::Neq => match (actual, bound) {
+            (Value::Num(_), Value::Num(_)) => true,
+            (Value::DateTime(x), Value::DateTime(y)) => {
+                parse_instant(x).is_some() && parse_instant(y).is_some()
+            }
+            _ => textual(actual) && textual(bound),
+        },
+        Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq => order(actual, bound).is_some(),
+        Operator::IsPartOf | Operator::IsAnyOf | Operator::IsNoneOf => textual(actual) && textual(bound),
+    }
 }
 
 /// A total-ish order for orderable values: numeric by magnitude, dateTime by
