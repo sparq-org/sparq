@@ -65,10 +65,10 @@ _:c odrl:leftOperand odrl:recipient , odrl:dateTime ;
 fn defect1_two_operand_expired_permission_is_not_granted_by_n3() {
     let request = req("read", "urn:alice", Some("2026-07-25T00:00:00Z"));
 
-    // The Rust reference path denies: the two right-operands under a non-set operator
-    // fold to an ambiguous (unsatisfiable) guard — fail-closed.
-    let rust = rust_outcome(POL_TWO_OPERAND_EXPIRED, &request);
-    assert!(!rust.granted, "Rust reference path must NOT grant the expired permission");
+    // The Rust reference refuses the policy outright: one constraint node with several
+    // distinct left operands is malformed, so nothing can grant (fail-closed).
+    let refused = parse_policy_str(POL_TWO_OPERAND_EXPIRED, "turtle");
+    assert!(refused.is_err(), "Rust reference must refuse the two-operand node: {refused:?}");
 
     // The N3 path must not be more permissive. A constraint node whose operands it
     // cannot fully evaluate is REFUSED outright (fail-closed), materializing nothing.
