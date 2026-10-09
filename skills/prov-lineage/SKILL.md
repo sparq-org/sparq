@@ -21,6 +21,7 @@ default at the dependency level** — the leanest gating, with zero core overhea
 ```toml
 [dependencies]
 sparq-prov = { path = "crates/sparq-prov" }   # or your workspace path
+sparq-core = { path = "crates/sparq-core" }   # same checkout, so `Graph` types match
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 
@@ -166,7 +167,7 @@ let ntriples = prov_ntriples(&proof, &ProvProofConfig::default());   // String
 
 `prov_ntriples` is the one-call serializer for the same ordered lineage triples.
 With the default clock-free configuration, both the triples and their
-content-addressed IRIs are deterministic. <!-- [GPT-5.6] sq-8jn86 -->
+content-addressed IRIs are deterministic. <!-- sq-8jn86 -->
 
 Emitted shape — for each proof node (fact) `F` and the rule firing `R` that
 generated a non-leaf `F` from premises `Pᵢ`:
@@ -204,7 +205,7 @@ a proof tree — derivation provenance at the rule/premise level).
 
 ## Missing-answer explanation (`why-not` feature)
 
-<!-- [GPT-5.6] sq-lsp7k.17 -->
+<!-- sq-lsp7k.17 -->
 
 The non-default `why-not` feature handles one bounded case: a fully-ground target
 binding that did not appear in the answers to a single basic graph pattern (BGP).
@@ -216,7 +217,10 @@ the vector is empty because that target would satisfy the BGP.
 ```toml
 [dependencies]
 sparq-prov = { path = "crates/sparq-prov", features = ["why-not"] }
-spargebra = { version = "0.4", features = ["sparql-12", "sep-0006"] }
+sparq-core = { path = "crates/sparq-core" }
+oxrdf = { version = "0.3", features = ["rdf-12"] }
+# Same checkout: sparq-prov uses the vendored fork, so take spargebra from it too.
+spargebra = { path = "vendor/spargebra", package = "sparq-spargebra", features = ["sparql-12", "sep-0006"] }
 ```
 
 The accepted algebra node is exactly `GraphPattern::Bgp`. `OPTIONAL`, `UNION`,
@@ -263,7 +267,7 @@ assert!(turtle.contains("spqprov:absent"));
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-<!-- [GPT-5.6] sq-lsp7k -->
+<!-- sq-lsp7k -->
 Both report functions validate that `target` still grounds every retained
 pattern to its recorded `MissingPattern::grounded()` triple; a different or
 incomplete target fails closed. The emitted graph has one deterministic report

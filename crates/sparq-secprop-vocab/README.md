@@ -1,4 +1,4 @@
-<!-- [OPUS-5] sq-3705: internal-stub README for a publish=false crate. -->
+<!-- sq-3705: internal-stub README for a publish=false crate. -->
 # sparq-secprop-vocab
 
 The shared `sec-prop:`/`secx:` security-property IRI constants, the canonical

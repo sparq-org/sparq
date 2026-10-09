@@ -41,7 +41,7 @@ CLI equivalent (materialize and optionally dump the closure as N-Triples):
 ```bash
 cargo run --release -p sparq-cli -- reason ontology.ttl turtle rdfs            # rdfs | owl | n3
 cargo run --release -p sparq-cli -- reason ontology.ttl turtle owl out.nt      # write full closure
-cargo run --release -p sparq-cli -- query data.ttl 'SELECT ...' --reason rdfs  # reason then query
+cargo run --release -p sparq-cli -- query data.ttl turtle 'SELECT ...' --reason rdfs  # reason then query
 
 # OWL 2 EL classification — the class hierarchy RL cannot reach (opt-in `el` feature). Complete
 # for E1+E2 only: the CLI omits `cdomain`, so concrete-domain axioms land in `skipped_axioms`.
@@ -88,7 +88,7 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_proof(dict: &mut Dict, src: &str)
     -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String>; // term-level, no Dict
-pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>;
+pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>; // n3:: only
 // EYE --pass-all / --pass-all-ground: the closure PLUS the document's own rules, echoed
 // back as ONE N3 document (the chainer consumes rules, so --pass output alone can derive
 // nothing further). Closure statements are sorted (deterministic), then rules in document
@@ -155,7 +155,7 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
-`Id` / `Dict` come from `sparq_core::dict`; `Term`, `Rule`, `N3Closure`, `ProofStep`, `Resolver` from `sparq_reason::n3` (re-exported at the crate root).
+`Id` / `Dict` come from `sparq_core::dict`; `N3Closure`, `ProofStep`, `RuleVars` from `sparq_reason::n3` (re-exported at the crate root); `Term`, `Rule`, `Resolver` and `reason_n3_terms_with_resolver` are reached through `sparq_reason::n3::…`.
 
 ```rust
 // `compiled-rules` feature only (`sparq_reason::n3::compiled`, sq-zgbso.3): id-level
@@ -311,9 +311,9 @@ Incremental maintenance is differential-pinned (closure == from-scratch `eval` a
 every randomized insert/delete step) and skips strata whose input predicates did not
 change; its per-update set/index bookkeeping is O(affected visible input) — the
 incrementality win is delta-driven RULE-FIRING work (deterministic counters), not set
-ops. <!-- [GPT-5.6] sq-citho / sq-a7bmo --> <!-- [FABLE-5] sq-4foq0 -->
+ops. <!-- sq-citho / sq-a7bmo --> <!-- sq-4foq0 -->
 
-**CLI surface** (`sparq-cli --features datalog`; [SONNET-4.6] sq-p4zci). The rules live in a file,
+**CLI surface** (`sparq-cli --features datalog`; sq-p4zci). The rules live in a file,
 because unlike `rdfs`/`owl` a Datalog program is user-supplied, so the reasoning profile carries an
 argument — `datalog:<rules.dlog>`, split on the first `:`:
 
@@ -362,9 +362,9 @@ The loaders desugar every RDF 1.2 quotation form (`<< :s :p :o >>`, `:s :p :o ~ 
 
 **Opacity:** quotation never asserts — `:r rdf:reifies <<( :s :p :o )>>` does NOT entail `:s :p :o` — and no rule rewrites inside a triple term (`owl:sameAs` substitutes whole ids only). Reifier ANNOTATIONS are ordinary triples and get full RL reasoning without touching the quoted content.
 
-**Strict opacity (`ReifyMode`, second increment):** <!-- [FABLE-5] sq-afun3 --> the bridge COMPOSITION (destructure → eq-rep on the classic vocabulary → construct) can still quote an `owl:sameAs`-VARIANT spelling of an existing triple. `materialize_owl_rl_reify(&mut dict, &mut triples, ReifyMode::DestructureOnly)` suppresses that: reif-ctr never runs, so inference never mints a triple term at all — destructure, annotation reasoning, and the RL core are unchanged. `materialize_owl_rl` ≡ `ReifyMode::Bridge` (the full bridge).
+**Strict opacity (`ReifyMode`, second increment):** <!-- sq-afun3 --> the bridge COMPOSITION (destructure → eq-rep on the classic vocabulary → construct) can still quote an `owl:sameAs`-VARIANT spelling of an existing triple. `materialize_owl_rl_reify(&mut dict, &mut triples, ReifyMode::DestructureOnly)` suppresses that: reif-ctr never runs, so inference never mints a triple term at all — destructure, annotation reasoning, and the RL core are unchanged. `materialize_owl_rl` ≡ `ReifyMode::Bridge` (the full bridge).
 
-**Strict opacity incrementally (third increment):** <!-- [OPUS-5] sq-afun3 --> `MaterializedOwlGraph::with_reify_mode(&mut dict, &base, ReifyMode::DestructureOnly)` fixes the mode at construction; every Fallback re-materialization (the initial one and every mutation's) runs it, so the handle's closure always equals the MATCHING batch oracle — `materialize_owl_rl_reify(dict, base, mode)` from scratch — and inference never mints a triple term under an edit sequence either. `MaterializedOwlGraph::new` ≡ `ReifyMode::Bridge`; `reify_mode()` reports the mode. Mode DETECTION is unchanged (reify vocabulary → Fallback in both reify modes: the counting modes model neither bridge rule).
+**Strict opacity incrementally (third increment):** <!-- sq-afun3 --> `MaterializedOwlGraph::with_reify_mode(&mut dict, &base, ReifyMode::DestructureOnly)` fixes the mode at construction; every Fallback re-materialization (the initial one and every mutation's) runs it, so the handle's closure always equals the MATCHING batch oracle — `materialize_owl_rl_reify(dict, base, mode)` from scratch — and inference never mints a triple term under an edit sequence either. `MaterializedOwlGraph::new` ≡ `ReifyMode::Bridge`; `reify_mode()` reports the mode. Mode DETECTION is unchanged (reify vocabulary → Fallback in both reify modes: the counting modes model neither bridge rule).
 
 **OFF by default** (the bridge is a deliberate, non-normative entailment extension): plain `Profile::OwlRl` closures are byte-identical without the feature, and occurrence-guarded even with it (reify-free data pays nothing). `MaterializedOwlGraph` routes reify-vocabulary bases to its documented Fallback mode (incremental == from-scratch parity preserved). No new `Profile` variant, no new deps.
 
@@ -373,7 +373,9 @@ The loaders desugar every RDF 1.2 quotation form (`<< :s :p :o >>`, `:s :p :o ~ 
 OWL 2 RL is **sound but silently incomplete for class classification**: it has no rule that reasons *through* an existential successor, so `--reason owl` over an EL ontology (GO/ChEBI/SNOMED-style) returns a `rdfs:subClassOf` hierarchy that **silently omits** subsumptions like `A ⊑ D` from `A ⊑ ∃r.B`, `B ⊑ C`, `∃r.C ⊑ D` (Krötzsch, ISWC 2012). **`sparq-reason-el`** closes that gap — a consequence-based classifier that normalizes the TBox (Baader–Brandt–Lutz forms) and saturates `S(C)`/`R(r)` under completion rules **CR1–CR5** to compute the **complete** subsumption lattice, then emits it into the **same** `(Dict, Vec<[Id;3]>)` seam as the RL `scm-*` rules (queryable by plain BGP eval).
 
 ```rust,ignore
-// Cargo.toml:  sparq-reason-el = "0.1"     // a SEPARATE crate; depending on it is the opt-in
+// Cargo.toml (publish = false: take sparq-core from the SAME git source, or Dict types differ):
+//   sparq-core      = { git = "https://github.com/sparq-org/sparq" }
+//   sparq-reason-el = { git = "https://github.com/sparq-org/sparq" }  // SEPARATE; depending on it is the opt-in
 use sparq_core::Graph;
 use sparq_reason_el::{classify_graph, Classifier};
 
@@ -410,7 +412,9 @@ let _ = h.report().thing_unsatisfiable; // global owl:Thing ⊑ owl:Nothing clas
 OWL 2 QL (DL-Lite_R) is **FO-rewritable**: instead of materializing a closure, you **rewrite the query** into a **union of conjunctive queries** (UCQ) that, evaluated over the **unmodified data**, returns the **certain answers** under the schema (Calvanese et al., *PerfectRef*, JAR 2007). **`sparq-reason-ql`** is a query-rewriter (not a materializer): it reuses the engine's query path — it emits a rewritten `spargebra::Query` (a `Union`-folded UCQ) that the planner/executor run unchanged.
 
 ```rust,ignore
-// Cargo.toml:  sparq-reason-ql = { version = "0.1", features = ["experimental"] }
+// Cargo.toml (publish = false; take spargebra from the SAME git source so `Query` types match):
+//   sparq-reason-ql = { git = "https://github.com/sparq-org/sparq", features = ["experimental"] }
+//   spargebra       = { git = "https://github.com/sparq-org/sparq", package = "sparq-spargebra" }
 use sparq_reason_ql::{rewrite, rewrite_production, as_conjunctive_query, CqError};
 use spargebra::SparqlParser;
 
@@ -471,7 +475,7 @@ ground ABox) — never beyond it; the implementation is not claimed worst-case o
 satisfiability is EXPTIME-complete).
 
 **Opt-in transitive roles (`dl_transitive` cargo feature, OFF by default, bead sq-zfwzq
-[GPT-5.6]):** extends the fragment to **ALCH + transitive roles** (Horrocks–Sattler *S with
+):** extends the fragment to **ALCH + transitive roles** (Horrocks–Sattler *S with
 role hierarchies* — still NO inverses / cardinality / nominals, which stay fail-closed): L1
 recognises `owl:TransitiveProperty` as the feature-gated `Axiom::TransitiveObjectProperty`
 (instead of refusing it), L2 classifies it per the profile grammars (IN EL §2, NOT-in QL §3,
@@ -497,7 +501,8 @@ feature, bead sq-pbz04.4.4):** NOW BUILT. `check::DirectChecker` (constructed wi
 `with_budget(Budget)`) dispatches an extracted ontology IN ORDER — RL (via `sparq-reason`
 materialization + clash scan, Theorem-PR1-precondition-CHECKED, divergence-guarded), EL (via
 `sparq-reason-el`, triple-guarded: skipped-axioms / unapplied-axiom-kinds / ⊤-guard), QL
-(consistency wholly deferred to sq-pbz04.3.4 — always abstains), else the L3 ALCH tableau —
+(always abstains `QlConsistencyPending` unless the opt-in `dispatch_ql` feature routes it to
+`sparq-reason-ql`'s consistency checker, sq-fj8lj), else the L3 ALCH tableau —
 returning `ConsistencyOutcome` / `EntailmentOutcome`: a tri-state verdict PLUS the `Branch`
 that produced it (traceability). `entailment()` checks `O ⊨ α` per conclusion axiom by an
 argued refutation encoding onto the tableau (`SubClassOf`, `ClassAssertion`,
@@ -547,7 +552,7 @@ semantics). Functional-syntax-only inputs (27 cases) and `owl:imports` are OutOf
 (5 named rows; audited mechanisms M3/M5/M6; M1/M2/M4 FIXED and removed from the pin),
 abstention counters `DL_DIRECT_ABSTAINED` / `DL_PROFILE_ABSTAINED`, pass floors
 `DL_DIRECT_FLOOR` / `DL_PROFILE_FLOOR` — all EXACT-pinned (`==` not `>=`; both inflation and
-regression fail CI). Design record: `research/owl2-direct-semantics-scoping.md`. [OPUS-4.8]
+regression fail CI). Design record: `research/owl2-direct-semantics-scoping.md`.
 sq-pbz04.4.6
 
 **L1 extraction boundary** (`extract.rs` `ExtractError` — one out-of-fragment triple refuses
@@ -667,7 +672,7 @@ if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
 **6. `log:semantics` / `log:content` document access.** The engine does NO I/O of its own; supply a `Resolver` closure to decide what an IRI may dereference to (otherwise those builtins simply don't fire):
 
 ```rust
-use sparq_reason::reason_n3_terms_with_resolver;
+use sparq_reason::n3::reason_n3_terms_with_resolver;
 let resolver = |iri: &str| std::fs::read_to_string(iri.trim_start_matches("file://")).ok();
 let closure = reason_n3_terms_with_resolver(src, Some("http://ex/"), Some(&resolver))?;
 # Ok::<(), String>(())
@@ -694,7 +699,7 @@ the profile.
 
 ## Gotchas / feature flags / prerequisites
 
-- **Not in the *lean* wasm bundle, but wasm-portable.** `sparq-reason` pulls `regex` and (by default) `rayon`; it is never in the **lean** `sparq-wasm` triplestore bundle. For wasm or single-threaded builds use `default-features = false` (disables the `parallel`/rayon feature). The crate itself compiles to `wasm32-unknown-unknown` — `regex` (the N3 `string:matches` builtin) is pure-Rust and wasm-portable — and ships as the **tier-b `sparq-reason-wasm` ("W-reason") bundle** ([OPUS-4.8] sq-6qw3): a `Reasoner` exposing `materialize` / `entailed` / `materializeStats` / `reasonN3` (and, behind the bundle's opt-in `explain` feature, `why()` / `whyN3()` proof trees — the latter [FABLE-5] sq-ixc3.20: one witness derivation of an N3-derived triple under the same combined rules+facts document `reasonN3` consumes, powering the GUI's click-to-explain proof panel) for in-tab live inference, lazy-loaded on the showcase site's `/surface/inference` page and in the GUI workbench. There is no Noir/ZK toolchain requirement here — proofs are plain Rust structs.
+- **Not in the *lean* wasm bundle, but wasm-portable.** `sparq-reason` pulls `regex` and (by default) `rayon`; it is never in the **lean** `sparq-wasm` triplestore bundle. For wasm or single-threaded builds use `default-features = false` (disables the `parallel`/rayon feature). The crate itself compiles to `wasm32-unknown-unknown` — `regex` (the N3 `string:matches` builtin) is pure-Rust and wasm-portable — and ships as the **tier-b `sparq-reason-wasm` ("W-reason") bundle** (sq-6qw3): a `Reasoner` exposing `materialize` / `entailed` / `materializeStats` / `reasonN3` (and, behind the bundle's opt-in `explain` feature, `why()` / `whyN3()` proof trees — the latter sq-ixc3.20: one witness derivation of an N3-derived triple under the same combined rules+facts document `reasonN3` consumes, powering the GUI's click-to-explain proof panel) for in-tab live inference, lazy-loaded on the showcase site's `/surface/inference` page and in the GUI workbench. There is no Noir/ZK toolchain requirement here — proofs are plain Rust structs.
 - **Features:** `parallel` (default, rayon-parallel fixpoint), `explain` (NON-default — enables `why()`/`why_with()` and the `explain` module; zero hot-path cost when off, and `why` methods don't exist without it), `d-entail` (NON-default — enables `Profile::D` + the `dtype` module; zero code when off — the lean default/wasm build is byte-identical, `sq-e5atd`), `rif-core` (NON-default — enables the `rif` module: the RIF-Core monotone-Horn rule front-end over the N3 chainer with range-restriction safety; zero code when off, no new `Profile` variant, `sq-rh4gu`), `substrate-join` (NON-default — the RDFS predicate join + the rdfs9 type join + the OWL-RL `Δ⋈full` delta adjacency (`sq-qonbz.2`) drive the SHARED `sparq-substrate::join` kernels; `sq-yk6or` + `sq-pbz04.1.1` + `sq-qonbz.2`, see next bullet), `substrate-compare` (NON-default — the `compare` module: the SHARED `sparq-substrate::compare` SPARQL term total order implemented for dictionary ids, so entailed-solution ordering is parity-identical to the engine's `ORDER BY`; zero code when off, `sq-pbz04.1.2`, see the bullet after next), `compiled-rules` (NON-default — the `n3::compiled` module: id-level COMPILED N3 evaluation for the access-control rule subset over the shared substrate join kernels; zero code when off, `sq-zgbso.3`, see the Key-APIs compiled block).
 - **Shared join kernels (`substrate-join`, opt-in, `sq-yk6or`, epic `sq-pbz04`).** The RDFS single-pass predicate join — rdfs7 (subPropertyOf rewrite), rdfs2 (domain typing), rdfs3 (range typing), keyed on the asserted triple's predicate — and the rdfs9 subclass-typing join (`sq-pbz04.1.1`, keyed on the type-assertion's OBJECT column: the "orientation" is just a different `JoinKeys` probe-column index) drive the *same* `sparq_substrate::join::{build_table, probe_emit, hash_probe_serial}` hash-join body the SPARQL engine drives (epic `sq-qonbz` Phase 3, #1300). The reasoner supplies its OWN `JoinKeys` (predicate-keyed) + its OWN `Budget` (the unbounded `NoBudget`; materialisation runs to completion — a closure-level budget is a fixpoint concern, installed around the whole call, not per-join), monomorphically — no `Box<dyn>`/vtable on the probe loop. This is the end-to-end proof of "share join logic across the engine AND the reasoners" (`research/shared-eval-substrate.md` Phase 5). **Behaviour-neutral:** the materialised closure is byte-identical to the hand-rolled `FxHashMap` adjacency path (asserted per-branch by `rdfs::tests::substrate_join_emits_identical_plain_branch` / `substrate_join_emits_identical_type_branch`, and whole-closure by `closure_is_byte_identical_across_join_paths`, which runs in BOTH feature states); only the join machinery changes. **OFF by default** so the byte/bundle ratchets stay exactly the hand-rolled path; the only deps it pulls (`sparq-substrate` `rows`+`join`, `smallvec`) are already in the crate's tree. **Residual disposition (`sq-pbz04.1.1`):** the `PropExpand` inverseOf/Symmetric predicate-rewrite branch is RETAINED hand-rolled *permanently* — its per-match combine is data-dependent (the `swapped` flag picks the subject/object orientation per matched build row) and cascades into a second dom/rng join keyed on the DERIVED predicate, a variable-arity shape the kernel's one-fixed-row-per-match combine cannot express without rebuilding the rule structure around it (full rationale in `substrate_join.rs`; the oriented emission is pinned by `rdfs::tests::prop_expand_inverse_types_through_oriented_domain` so any future adoption attempt inherits a red/green harness). **OWL-RL delta adjacency (`sq-qonbz.2`, NOW SHIPPED under this same feature):** the semi-naive `Δ⋈full` adjacency for `prp-fp` (functional), `prp-ifp` (inverse-functional), and `prp-trp` (transitive) is also behind `substrate-join`. A persistent `DeltaAdj` struct (two `DeltaTable`s — forward `out_tbl` keyed on `[p,s]`, backward `inc_tbl` keyed on `[p,o]`) replaces the per-round nested `FxHashMap` probes; `extend_one` grows both tables incrementally as new delta triples commit, and `probe_out`/`probe_inc` emit results via a generic `FnMut(Id)` closure (monomorphised, no `Box<dyn>`, no vtable — `check-no-dyn-dispatch.py` is clean). **Behaviour-neutral:** the OWL-RL ratchet output is byte-identical in both feature states; the three probe paths (`prp-fp` forward, `prp-ifp` backward, `prp-trp` backward) are pinned by `tests/substrate_join_owl.rs` (8 required-feature tests: fp/ifp/trp alone and in combination, closure-length and no-chain guards). UnionFind (`sameAs` merge) is NOT touched by this change.
 - **Shared term total order (`substrate-compare`, opt-in, `sq-pbz04.1.2`, substrate seam 3).** The `compare` module implements the substrate's `CompareTerm` trait for the reasoner's term representation — a dictionary `Id` resolved against its `Dict` (`compare::IdTerm`) — so `compare::compare_ids` / `compare::sort_ids` order ids under the *same* `sparq_substrate::compare::compare_terms` total order the SPARQL engine's `ORDER BY` drives: error/unbound < blank < IRI < literal < RDF 1.2 triple term; literals numeric-aware (with the `exact_cmp` f64-collapse recheck for distinct integers past 2^53), then strict typed/temporal (`xsd:dateTime`/`xsd:date` by TIMELINE via the shared `sparq_core::temporal::Timeline` — cross-timezone order, not lexical; booleans; same-tag language strings; same-other-XSD lexically), then lexical string fallback; triple terms component-wise through the dict's structural component ids. **Ordering parity is pinned byte-for-byte against a REAL engine `ORDER BY`** over the same materialised closure (`tests/compare_parity.rs`, a mixed IRI/bnode/literal/triple-term fixture whose entailed rows participate); the observation hooks reuse the shared machinery (`Timeline`, the substrate `Num`/`Dec` tower, `parse_xsd_f64`) rather than reimplementing it, and the small `Num::of_literal` borrowed-parts mirror is anti-drift-pinned by a unit test against the substrate itself. Adopted MONOMORPHICALLY — `IdTerm` is a generic `CompareTerm` impl, no `Box<dyn>`/`&dyn` between the sort loop and the comparator (`scripts/check-no-dyn-dispatch.py` lists the module). **Purely additive:** no materialiser calls it — which triples are entailed and their emission order are byte-identical in both feature states; undecidable pairs (e.g. `NaN`) collapse to `Equal` exactly as the engine's sort does, and equal-comparing DISTINCT terms (equal values across datatypes, equal instants across timezones) keep stable-sort input order on both sides — the engine's own tie semantics, not a divergence.
@@ -746,5 +751,5 @@ full output-mode + builtins-coverage tables.
 - `hdt-format`, `fused-decompress-parse`, `rust-parallel-parsing` — sibling ingest/storage skills for getting triples into the graph you then reason over.
 - `research/owl2-el-ql-reasoning-spike.md` — the EL/QL feasibility spike: why EL first, the RL-incompleteness proof (the CR4 counterexample), and the phased plan (E1–E6) `sparq-reason-el` implements.
 - `research/reasoner-suite-on-substrate.md` §2.5 — the QL track design: the PerfectRef applicability trap, the strict CQ-shape gate, and why the production path (tree-witness + UCQ-containment minimisation) is sequenced late by soundness risk (the phased plan `sparq-reason-ql` implements through phases Q1–Q3, and the sparq-extension conformance floors — the DL-Lite_R certain-answer floor `QL_DLLITE_FLOOR` and the sound-subset entailment-arm floor `QL_ENTAILMENT_FLOOR` — have both graduated, sq-qo1a9 / sq-pbz04.3.4).
-- **N3 conformance — what is measured.** `sparq-inference-conformance` runs the w3c/N3 community-group manifests (reasoner / parser / extended / TurtleTests; results in `inference-conformance-report.md`). The community **notation3tests** suite (codeberg `phochste/notation3tests`, issue #6467) runs through `sparq-notation3tests` (`crates/sparq-conformance/src/notation3tests.rs`: cases are the `.n3` files under the checkout's `tests/`, scored by the suite's name-keyed expectation: `success-*` must derive `:result :has :<name>` or `:test :is true` (never `false`), negative `fail-*` must derive no verdict at all, `crash-*` input must be rejected (parse/reasoning error); buckets pass / nonconform / incomplete / crashed / timeout; one process per test, `--timeout`) in the ADVISORY weekly lane `.github/workflows/notation3tests.yml`. It has **no measured baseline yet** and no floor — do not cite an N3 pass rate from it until a run at a pinned suite SHA records one. Goal-directed `log:query` output is not implemented, so tests that only report through it fail.
-- `crates/sparq-conformance/tests/ufo_sn3/` — **UFO-SN3**: a finite-world, function-free, range-restricted N3 projection of representative UFO (Unified Foundational Ontology) concepts — rigidity, identity criteria, relators, events/participation, dispositions, commitments/norms, situations/worlds/accessibility — run as committed vocab + rules + fixture cases through plain `reason_n3` (`tests/ufo_sn3_suite.rs`, `UFO_SN3_FLOOR`, an UNGATED sparq-EXTENSION row in the central scoreboard). Demonstrates the reification-node projection for statement-level (triple-term-shaped) claims, since the N3 `Term` model has no triple-term variant (a tracked gap). [FABLE-5]
+- **N3 conformance — what is measured.** `sparq-inference-conformance` runs the w3c/N3 community-group manifests (reasoner / parser / extended / TurtleTests; results in `inference-conformance-report.md`). The community **notation3tests** suite (codeberg `phochste/notation3tests`, issue #6467) runs through `sparq-notation3tests` (`crates/sparq-conformance/src/notation3tests.rs`: cases are the `.n3` files under the checkout's `tests/`, scored by the suite's name-keyed expectation: `success-*` must derive `:result :has :<name>` or `:test :is true` (never `false`), negative `fail-*` must derive no verdict at all, `crash-*` input must be rejected (parse/reasoning error); buckets pass / nonconform / incomplete / crashed / timeout, plus unavailable for a `log:content`/`log:semantics` resource the offline runner cannot serve; one process per test, `--timeout`) in the ADVISORY weekly lane `.github/workflows/notation3tests.yml`. It has **no measured baseline yet** and no floor — do not cite an N3 pass rate from it until a run at a pinned suite SHA records one. Goal-directed `log:query` output is not implemented, so tests that only report through it fail.
+- `crates/sparq-conformance/tests/ufo_sn3/` — **UFO-SN3**: a finite-world, function-free, range-restricted N3 projection of representative UFO (Unified Foundational Ontology) concepts — rigidity, identity criteria, relators, events/participation, dispositions, commitments/norms, situations/worlds/accessibility — run as committed vocab + rules + fixture cases through plain `reason_n3` (`tests/ufo_sn3_suite.rs`, `UFO_SN3_FLOOR`, an UNGATED sparq-EXTENSION row in the central scoreboard). Demonstrates the reification-node projection for statement-level (triple-term-shaped) claims, since the N3 `Term` model has no triple-term variant (a tracked gap).

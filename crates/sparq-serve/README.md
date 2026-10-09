@@ -1,9 +1,9 @@
-<!-- [OPUS-4.8] sq-4kr5: README for the library-internal serving core. It is
+<!-- sq-4kr5: README for the library-internal serving core. It is
      PUBLISHABLE (no `publish = false`) only because the published `sparq-server`
      depends on it — a crates.io crate cannot depend on a `publish = false` crate;
      it has no standalone public API surface of its own. Keep this in sync with
      crates/sparq-serve/Cargo.toml. -->
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-serve
 
 The **concurrent-serving core** of [sparq](../../README.md): a lock-free
@@ -26,7 +26,7 @@ never enter `sparq-wasm`'s dependency graph.
 
 ## 🔌 `embed` — in-process embedding seam (#1248)
 
-[OPUS-4.8] The `embed` module is a documented facade that lets an external host
+The `embed` module is a documented facade that lets an external host
 (e.g. `solid-server-rs`) call the engine **in-process** instead of over HTTP — the
 read/write/probe entry points (`query_json` / `ask` / `update_in_place` /
 `apply_delta_nquads` / `exists`+`metadata`, thin wrappers, no new behaviour) plus a

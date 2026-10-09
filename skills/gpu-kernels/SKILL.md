@@ -53,7 +53,7 @@ use sparq_gpu::Gpu;
 
 let Some(gpu) = Gpu::new() else { return; };       // no adapter → skip
 
-// FILTER + count: how many elements fall in [lo, hi]?
+// FILTER + count: how many elements fall in [lo, hi)?
 let col = gpu.upload_u32(&[1u32, 5, 9, 3, 7]);
 let n = gpu.filter_count_u32(&col, 4, 8)?;         // -> 2  (5 and 7)
 
@@ -79,7 +79,7 @@ let _ = (n, matches, payload_sum, per_group);
   `upload_table` (build), and `write_u32` / `write_f64` / `write_table` (re-fill an
   existing buffer in place). Resident types: `ColU32`, `ColF64`, `HashTable`.
 - Kernels (all reduce **on-device** and read back O(1)/O(groups) bytes):
-  - `filter_count_u32(&col, lo, hi) -> Result<u64, GpuError>` — count elements in `[lo, hi]`.
+  - `filter_count_u32(&col, lo, hi) -> Result<u64, GpuError>` — count elements in `[lo, hi)` (`lo <= v < hi`).
   - `filter_count_f64_gt(&col, t) -> Result<u64, GpuError>` — count `> t`. WGSL has **no f64**, so the
     f64 kernel compares IEEE-754 bit patterns mapped to a monotonic u64 key (sign-flip
     trick): **exact, NaN-correct, no float math on the device** for comparisons.
