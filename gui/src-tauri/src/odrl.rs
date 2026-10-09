@@ -11,10 +11,10 @@
 // THE PANES SHOW THE POLICY'S OWN VERDICT: each requester's readable set is
 // `sparq_policy::decide(policy, read <graph> by <requester>)` for every named graph, evaluated
 // per request. Nothing is materialized into an enforcement store, so the preview does not
-// inherit the bridge's static-grant limits (since #6734 the bridge stores a grant only for an
-// unconstrained permission naming exactly one party, and turns every prohibition into a deny
-// for all parties). A server running v0.1.5 enforces prohibitions that conservatively until
-// request-time decisions (#6743) land; the UI says so next to the panes.
+// inherit the bridge's storage limits: since #6734 the bridge stores a lasting grant only for an
+// unconstrained permission naming exactly one party, and a persisted conditional prohibition
+// (`materialize_odrl_prohibition_conditional`) denies every party on the asset it covers until
+// request-time decisions (#6743) land. The UI says so next to the panes.
 //
 // OPT-IN: the capability sits behind this crate's non-default `odrl` cargo feature (pulling
 // the optional `sparq-policy` + `sparq-solid` crates). A lean build compiles a stub that
