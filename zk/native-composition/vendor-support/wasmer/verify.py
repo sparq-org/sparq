@@ -84,6 +84,11 @@ def verify(native=NATIVE, policy=None):
     require(not any(p["name"] in ("proc-macro-error2", "proc-macro-error-attr2") for p in lock["package"]), "diagnostic lock edge remains")
     delta = json.loads((support / "lock-delta.json").read_text())
     require(sha((native / "Cargo.lock").read_bytes()) == delta["candidate_lock_sha256"], "unreviewed native lock change")
+    chained = delta.get("wasmer_edit_lock_sha256", delta["candidate_lock_sha256"])
+    for refresh in delta.get("later_refreshes", []):
+        require(refresh["base_lock_sha256"] == chained, "lock refresh does not chain")
+        chained = refresh["candidate_lock_sha256"]
+    require(chained == delta["candidate_lock_sha256"], "lock refresh chain does not reach the native lock")
     policy = policy or native.parents[1] / "supply-chain/config.toml"
     config = tomllib.loads(policy.read_text())
     require(config["policy"]["wasmer-derive"]["audit-as-crates-io"] is True, "upstream vet obligation missing")
