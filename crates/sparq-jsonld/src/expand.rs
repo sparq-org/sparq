@@ -475,15 +475,11 @@ fn expand_keyword(
             Json::Arr(items) if frame_expansion => {
                 let mut ids = Vec::new();
                 for it in items {
-                    match it {
-                        // The wildcard `{}` stays a pattern (json-ld11-framing §4.1).
-                        Json::Obj(m) if m.is_empty() => ids.push(Json::obj()),
-                        Json::Str(s) => {
-                            if let Some(iri) = active_context.expand_iri(s, true, false) {
-                                ids.push(Json::Str(iri));
-                            }
-                        }
-                        _ => return Err(JsonLdError::new(E::InvalidIdValue)),
+                    let Json::Str(s) = it else {
+                        return Err(JsonLdError::new(E::InvalidIdValue));
+                    };
+                    if let Some(iri) = active_context.expand_iri(s, true, false) {
+                        ids.push(Json::Str(iri));
                     }
                 }
                 set_obj(result, "@id", Json::Arr(ids));

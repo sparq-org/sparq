@@ -1,6 +1,5 @@
 //! A per-call bound on context-processing work. Each public entry point (`expand`,
-//! `compact`, `compact_expanded`, `frame`, `frame_match`, `ActiveContext::process`) runs
-//! under [`with_budget`];
+//! `compact`, `compact_expanded`, `ActiveContext::process`) runs under [`with_budget`];
 //! context processing charges every term table it copies and every definition it creates,
 //! including definitions loaded from remote contexts or later discarded by a `null`, and
 //! fails with `context overflow` once the call's budget is spent. Nested entry points
@@ -54,7 +53,7 @@ pub(crate) fn with_budget<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
-/// How deeply the recursive document walks (expansion, compaction, frame matching) may
+/// How deeply the recursive document walks (expansion, compaction) may
 /// nest on one thread before they fail with `context overflow` instead of exhausting the
 /// stack. Parsed documents nest at most [`MAX_DEPTH`](crate::json::MAX_DEPTH) deep.
 pub(crate) const MAX_NESTING: usize = 128;

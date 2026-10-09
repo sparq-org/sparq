@@ -556,9 +556,8 @@ JSON-LD crate ships framing). It implements:
   default/null. **List framing** keeps the `{"@list":…}` wrapper, framing each element.
 
 Output is a `{"@context":…,"@graph":[…]}` document, collapsing to the bare framed node merged with
-`@context` for a single matched root (the `omitGraph` default). Nodes in named graphs are matched
-against the frame together with the default graph (the W3C merged node map), so a matched node is
-emitted bare, without a graph wrapper. The framed shape is
+`@context` for a single matched root (the `omitGraph` default). Each named graph in the dataset is
+framed against the same pattern (wrapped `{"@id":<graph>,"@graph":[…]}`). The framed shape is
 **differential-tested byte-for-byte against the pyld reference processor's `frame`** across the
 flag matrix (sq-oy1f.17), and **ratcheted against the official `w3c/json-ld-framing` suite**
 (sq-oy1f.19; see the conformance bullet below) — each `jld:FrameTest` expanded input is framed and
