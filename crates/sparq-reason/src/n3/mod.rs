@@ -122,9 +122,9 @@ type DerivationStep = ([Term; 3], usize, Vec<[Term; 3]>);
 #[derive(Default)]
 struct FactIndex {
     all: FxHashSet<[Term; 3]>,
-    /// The [`alpha_key`] of every fact holding a non-ground quoted formula (GH #6757):
-    /// what [`FactIndex::insert_derived`] dedupes against. Empty for a closure with no
-    /// such fact.
+    /// The [`alpha_key`] of every DERIVED fact that holds a variable the run's backward
+    /// chainer freshened ([`FreshVars`]): what [`FactIndex::insert_derived`] dedupes
+    /// against (GH #6757). Empty for a closure in which no such fact arises.
     alpha: FxHashSet<[Term; 3]>,
     ps: FxHashMap<(Term, Term), Vec<Term>>, // (pred, subj) -> objects
     po: FxHashMap<(Term, Term), Vec<Term>>, // (pred, obj) -> subjects
@@ -142,25 +142,21 @@ impl FactIndex {
     fn contains(&self, t: &[Term; 3]) -> bool {
         self.all.contains(t)
     }
-    /// Add a fact exactly as given (asserted facts: two alpha-equivalent asserted facts
-    /// both stay). Registers its [`alpha_key`] so a later derived copy dedupes against it.
+    /// Add a fact exactly as given (the asserted facts).
     fn insert(&mut self, t: [Term; 3]) -> bool {
-        let key = alpha_key(&t);
-        let new = self.insert_exact(t);
-        if let (true, Some(k)) = (new, key) {
-            self.alpha.insert(k);
-        }
-        new
+        self.insert_exact(t)
     }
-    /// Add a DERIVED fact unless an equal fact, or one alpha-equivalent to it (it differs
-    /// only by a consistent renaming of the variables inside its quoted formulas, see
-    /// [`alpha_key`]), is already present, asserted or derived. Every forward-closure loop
-    /// adds its conclusions through this, so the closure saturates even though each
-    /// backward proof standardizes a projected formula's variables apart under fresh names
-    /// (GH #6757). A fact with no non-ground formula costs one cheap scan on top of the
-    /// exact insert. Returns whether the fact was added.
-    fn insert_derived(&mut self, t: [Term; 3]) -> bool {
-        match alpha_key(&t) {
+    /// Add a DERIVED fact unless an equal fact is present, or an earlier derived fact that
+    /// is this one up to a consistent, injective renaming of the variables the backward
+    /// chainer freshened (`fresh`, the run's [`FreshVars::minted`] registry; see
+    /// [`alpha_key`]). Every other variable, IRI, literal and blank compares exactly, so a
+    /// source formula `{ ?y :q :z }` never matches `{ ?x :q :z }`, while two rounds'
+    /// `{ ?__bw3_x :q :z }` and `{ ?__bw7_x :q :z }` do. The forward closure adds its
+    /// conclusions through this, so it saturates even though each backward proof
+    /// standardizes a projected formula apart under new names (GH #6757). A fact with no
+    /// freshened variable is exactly [`FactIndex::insert`]. Returns whether it was added.
+    fn insert_derived(&mut self, t: [Term; 3], fresh: &FxHashSet<String>) -> bool {
+        match alpha_key(&t, fresh) {
             None => self.insert_exact(t),
             Some(k) => {
                 if self.all.contains(&t) || !self.alpha.insert(k) {
@@ -201,51 +197,75 @@ impl FactIndex {
     }
 }
 
-/// Whether `t` holds a quoted formula with a variable in it, at any depth (inside lists
-/// and quoted triples too). Cheap for the common case: an IRI, literal or blank answers at
-/// once, and a formula stops at its first variable.
-fn has_open_formula(t: &Term) -> bool {
+/// Call `f` on every variable name in `t`, at any depth (formulas, lists, quoted triples).
+fn for_each_var<'a>(t: &'a Term, f: &mut impl FnMut(&'a str)) {
     match t {
-        Term::Formula(_) => !t.is_ground(),
-        Term::List(ms) => ms.iter().any(has_open_formula),
-        Term::Triple(tr) => tr.iter().any(has_open_formula),
-        _ => false,
+        Term::Var(v) => f(v),
+        Term::Formula(ts) => ts.iter().flatten().for_each(|m| for_each_var(m, f)),
+        Term::List(ms) => ms.iter().for_each(|m| for_each_var(m, f)),
+        Term::Triple(tr) => tr.iter().for_each(|m| for_each_var(m, f)),
+        _ => {}
     }
 }
 
-/// The alpha-equivalence key of a fact holding a non-ground quoted formula, or `None` for
-/// any other fact (GH #6757).
+/// The run's provenance record of the variables its backward chainer created (GH #6757).
 ///
-/// The variables inside the fact's formulas (nested formulas, lists and quoted triples
-/// included) are numbered by first occurrence across the WHOLE fact, so two facts get the
-/// same key exactly when one is the other under a consistent, injective renaming of those
-/// variables. The renaming is joint per fact, not per formula: a variable shared by two
-/// formulas of one fact is one variable, and `{ ?x :q :z } :pair { ?x :q :w }` must not
-/// collapse with `{ ?x :q :z } :pair { ?y :q :w }`. A variable that also occurs in the fact
-/// outside every formula keeps its name, as do IRIs, literals and blank nodes (a blank's
-/// identity is not a binding the closure renames; keeping it exact can only keep two facts
-/// apart, never merge distinct ones). A copy of an `@forAll` universal is keyed with the
-/// universal's IRI, so it never merges with a plain variable or another universal.
+/// `backward_prove` standardizes each rule application `n` apart by renaming the rule's
+/// variable `?v` to `?__bw<n>_v`. A source document can spell such a name too, so the
+/// spelling proves nothing: freshness is tracked here instead. `taken` holds every variable
+/// name the run did NOT create — all variables of its input (facts, rules, backward rules)
+/// and every variable a document builtin or nested closure later brings in
+/// ([`BwCtx::observe`]). An application number whose names would hit `taken` is skipped
+/// ([`BwCtx::next_application`]), so every generated name is fresh against the input.
+/// `minted` is the registry [`alpha_key`] canonicalises: the generated names that a backward
+/// proof projected onto a goal inside a formula ([`BwCtx::register`]), the only way one can
+/// reach a fact. A name later brought in from outside leaves it, so it is compared exactly
+/// from then on.
+#[derive(Default)]
+struct FreshVars {
+    minted: FxHashSet<String>,
+    taken: FxHashSet<String>,
+    /// Whether some `taken` name has the `__bw` shape at all; when not (the usual case), no
+    /// generated name can collide and the per-application check is skipped.
+    taken_bw: bool,
+}
+
+impl FreshVars {
+    fn take(&mut self, v: &str) {
+        self.minted.remove(v);
+        if !self.taken.contains(v) {
+            self.taken_bw |= v.starts_with("__bw");
+            self.taken.insert(v.to_string());
+        }
+    }
+}
+
+/// The dedup key of a derived fact that holds a freshened variable (one in `fresh`, the
+/// run's [`FreshVars::minted`] registry), or `None` for any other fact (GH #6757).
+///
+/// Only the registry variables are canonicalised, numbered by first occurrence jointly
+/// across the WHOLE fact (inside formulas, lists and quoted triples, at any position), so two
+/// facts get the same key exactly when one is the other under a consistent, injective
+/// renaming of freshened variables to freshened variables. Every other variable keeps its
+/// name, as do IRIs, literals and blank nodes, so a fact with source variables only never
+/// matches anything but itself. A freshened copy of an `@forAll` universal is keyed with the
+/// universal's IRI, so it never merges with a plain variable or another universal. The
+/// placeholder spelling holds a control character no parsed variable can carry.
 ///
 /// The key is only ever compared with other keys; it never becomes a fact, a binding or
 /// output, so reasoning sees every variable under its own name.
-fn alpha_key(t: &[Term; 3]) -> Option<[Term; 3]> {
-    if !t.iter().any(has_open_formula) {
+fn alpha_key(t: &[Term; 3], fresh: &FxHashSet<String>) -> Option<[Term; 3]> {
+    if fresh.is_empty() {
         return None;
     }
-    fn outer_vars<'a>(t: &'a Term, out: &mut FxHashSet<&'a str>) {
-        match t {
-            Term::Var(v) => {
-                out.insert(v);
-            }
-            Term::List(ms) => ms.iter().for_each(|m| outer_vars(m, out)),
-            Term::Triple(tr) => tr.iter().for_each(|m| outer_vars(m, out)),
-            _ => {}
-        }
+    let mut any = false;
+    t.iter().for_each(|x| for_each_var(x, &mut |v| any |= fresh.contains(v)));
+    if !any {
+        return None;
     }
-    fn canon<'a>(t: &'a Term, inside: bool, outer: &FxHashSet<&str>, map: &mut FxHashMap<&'a str, usize>) -> Term {
+    fn canon<'a>(t: &'a Term, fresh: &FxHashSet<String>, map: &mut FxHashMap<&'a str, usize>) -> Term {
         match t {
-            Term::Var(v) if inside && !outer.contains(v.as_str()) => {
+            Term::Var(v) if fresh.contains(v.as_str()) => {
                 let next = map.len();
                 let i = *map.entry(v).or_insert(next);
                 Term::Var(match serialize::universal_iri(v) {
@@ -254,23 +274,17 @@ fn alpha_key(t: &[Term; 3]) -> Option<[Term; 3]> {
                 })
             }
             Term::Formula(ts) => Term::Formula(
-                ts.iter()
-                    .map(|tr| [canon(&tr[0], true, outer, map), canon(&tr[1], true, outer, map), canon(&tr[2], true, outer, map)])
-                    .collect(),
+                ts.iter().map(|tr| [canon(&tr[0], fresh, map), canon(&tr[1], fresh, map), canon(&tr[2], fresh, map)]).collect(),
             ),
-            Term::List(ms) => Term::List(ms.iter().map(|m| canon(m, inside, outer, map)).collect()),
-            Term::Triple(tr) => Term::Triple(Box::new([
-                canon(&tr[0], inside, outer, map),
-                canon(&tr[1], inside, outer, map),
-                canon(&tr[2], inside, outer, map),
-            ])),
+            Term::List(ms) => Term::List(ms.iter().map(|m| canon(m, fresh, map)).collect()),
+            Term::Triple(tr) => {
+                Term::Triple(Box::new([canon(&tr[0], fresh, map), canon(&tr[1], fresh, map), canon(&tr[2], fresh, map)]))
+            }
             _ => t.clone(),
         }
     }
-    let mut outer = FxHashSet::default();
-    t.iter().for_each(|x| outer_vars(x, &mut outer));
     let mut map = FxHashMap::default();
-    Some([canon(&t[0], false, &outer, &mut map), canon(&t[1], false, &outer, &mut map), canon(&t[2], false, &outer, &mut map)])
+    Some([canon(&t[0], fresh, &mut map), canon(&t[1], fresh, &mut map), canon(&t[2], fresh, &mut map)])
 }
 
 const MATH: &str = "http://www.w3.org/2000/10/swap/math#";
@@ -316,6 +330,8 @@ fn formula_key(ts: &[[Term; 3]]) -> u64 {
 struct BwCtx<'a> {
     rules: &'a [Rule],
     rename: std::cell::Cell<usize>,
+    /// Which variables this run's standardizing-apart created ([`FreshVars`], GH #6757).
+    fresh: std::cell::RefCell<FreshVars>,
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
@@ -334,6 +350,45 @@ impl BwCtx<'_> {
     /// ([`bounded::settle`]).
     fn settle<T>(&self, b: Bounded<T>) -> T {
         settle(&self.truncated, b)
+    }
+    /// Record that every variable in `t` came from outside the backward chainer (the run's
+    /// input, a parsed document, a nested closure): no generated name may equal it, and if
+    /// one already did, that name leaves the registry ([`FreshVars`]).
+    fn observe(&self, t: &Term) {
+        let mut fresh = self.fresh.borrow_mut();
+        for_each_var(t, &mut |v| fresh.take(v));
+    }
+    /// The next rule-application number for standardizing `rule` apart, skipping any whose
+    /// generated names ([`rename_vars`]) would equal a name in [`FreshVars::taken`]: the
+    /// names are then provably fresh against every variable the run did not create.
+    fn next_application(&self, rule: &Rule) -> usize {
+        loop {
+            let n = self.rename.get();
+            self.rename.set(n + 1);
+            let fresh = self.fresh.borrow();
+            if !fresh.taken_bw {
+                return n;
+            }
+            let mut clash = false;
+            rule.conclusion.iter().chain(&rule.premise).flatten().for_each(|t| {
+                for_each_var(t, &mut |v| clash |= fresh.taken.contains(&format!("__bw{n}_{v}")))
+            });
+            if !clash {
+                return n;
+            }
+        }
+    }
+    /// Register the generated names in `projected`, a non-ground formula a backward proof
+    /// projects onto its goal: every variable in it that the run did not bring in
+    /// ([`FreshVars::taken`]) is one this chainer generated, and it can now reach a fact.
+    fn register(&self, projected: &Term) {
+        let mut fresh = self.fresh.borrow_mut();
+        let FreshVars { minted, taken, .. } = &mut *fresh;
+        for_each_var(projected, &mut |v| {
+            if !taken.contains(v) && !minted.contains(v) {
+                minted.insert(v.to_string());
+            }
+        });
     }
 }
 
@@ -368,6 +423,7 @@ impl<'a> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
+            fresh: std::cell::RefCell::new(FreshVars::default()),
             base: String::new(),
             resolver: None,
             visited: VisitedDocs::default(),
@@ -1208,8 +1264,11 @@ fn run_closure(
     // A program with no such negation is ONE stratum and takes exactly the single-pass
     // loop below. Rules on a cycle through negation follow `cycles`.
     let strata = strata::stratify(&rules, &backward_rules, cycles)?;
-    let mut facts = FactIndex::from_iter(facts0);
     let mut bw = BwCtx::new(&backward_rules, truncated.clone());
+    // Every variable of the input is the run's own, not the backward chainer's: generated
+    // names are kept fresh against them ([`FreshVars`], GH #6757).
+    facts0.iter().chain(rules.iter().chain(&backward_rules).flat_map(|r| r.premise.iter().chain(&r.conclusion))).flatten().for_each(|t| bw.observe(t));
+    let mut facts = FactIndex::from_iter(facts0);
     bw.cycles = cycles;
     bw.base = base;
     bw.resolver = resolver;
@@ -1523,7 +1582,7 @@ fn run_closure(
             // generators (a fact may be produced by several rules in one round — OR the flags).
             let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
             for (g, ri, prem) in produced {
-                let is_new = facts.insert_derived(g.clone());
+                let is_new = facts.insert_derived(g.clone(), &bw.fresh.borrow().minted);
                 if is_new {
                     new_delta.insert(g.clone());
                 }
@@ -2137,8 +2196,7 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                 }
             }
             // Standardize apart: fresh names for this rule application's variables.
-            let n = bw.rename.get();
-            bw.rename.set(n + 1);
+            let n = bw.next_application(rule);
             let rc = [rename_vars(&concl[0], n), rename_vars(&concl[1], n), rename_vars(&concl[2], n)];
             let mut subst = b.clone();
             if !(unify_walked(&goal[0], &rc[0], &mut subst)
@@ -2162,6 +2220,9 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
                         let val = apply(&walk(g, &sol), &sol);
+                        if matches!(val, Term::Formula(_)) && !val.is_ground() {
+                            bw.register(&val);
+                        }
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
                             && !unify_term(g, &val, &mut nb)
                         {
@@ -2180,7 +2241,8 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
 }
 
 /// `t` with every variable renamed into the standardize-apart space of rule application `n`
-/// (recursing into quoted formulae).
+/// (recursing into quoted formulae). `n` comes from [`BwCtx::next_application`], which
+/// keeps these names fresh against every variable the run did not create.
 fn rename_vars(t: &Term, n: usize) -> Term {
     match t {
         Term::Var(v) => Term::Var(format!("__bw{n}_{v}")),
@@ -3139,6 +3201,8 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
         }
     }
     bw.visited.borrow_mut().remove(&key);
+    // The nested run standardized apart in its own namespace: its names are not this run's.
+    result.iter().flatten().for_each(|t| bw.observe(t));
     result
 }
 
@@ -3966,7 +4030,9 @@ fn eval_functional_inner(
                     // recursion, so no marking is needed here.
                     // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                     let parsed = bounded::parse_n3(&text, doc, pending).ok()?;
-                    Term::Formula(reencode_statements(parsed))
+                    let f = Term::Formula(reencode_statements(parsed));
+                    bw.observe(&f);
+                    f
                 }
             }
             _ => return None,
@@ -3975,7 +4041,9 @@ fn eval_functional_inner(
             [Term::Lit(src, _, _)] => {
                 // no-match: ill-typed (not N3 text; `parse_n3` already recorded a parser limit as a cut)
                 let parsed = bounded::parse_n3(src, &bw.base, pending).ok()?;
-                Term::Formula(reencode_statements(parsed))
+                let f = Term::Formula(reencode_statements(parsed));
+                bw.observe(&f);
+                f
             }
             _ => return None,
         },
@@ -4677,7 +4745,7 @@ fn n3_term_to_oxrdf(t: &Term) -> Result<oxrdf::Term, String> {
 #[cfg(test)]
 mod tests {
     /// GH #6757 guard: the forward closure adds every derived fact through
-    /// `FactIndex::insert_derived` (dedup up to alpha-equivalence of formula variables), and
+    /// `FactIndex::insert_derived` (dedup up to renaming of freshened variables), and
     /// nothing outside `FactIndex` adds a fact through the exact `insert`, which only seeds
     /// the asserted facts. `run_closure` is the one fixpoint loop behind `reason_n3`,
     /// `reason_n3_terms`, `reason_n3_stratified`, `reason_n3_proof_run`, the query path and
@@ -4699,25 +4767,33 @@ mod tests {
         assert_eq!(code.matches("\nfn run_closure(").count(), 1);
     }
 
-    /// Alpha keys: renaming merges, sharing does not, top-level terms stay exact.
+    /// Dedup keys canonicalise registry (freshened) variables only: renaming one into
+    /// another merges, sharing does not, and every other variable stays exact.
     #[test]
-    fn alpha_key_is_joint_per_fact() {
-        use super::{alpha_key, Term};
+    fn alpha_key_renames_only_registry_variables() {
+        use super::{alpha_key, FxHashSet, Term};
         let v = |n: &str| Term::Var(n.into());
         let i = |n: &str| Term::Iri(n.into());
         let f = |s: Term, o: &str| Term::Formula(vec![[s, i("q"), i(o)]]);
-        assert_eq!(alpha_key(&[i("a"), i("p"), i("b")]), None);
-        assert_eq!(alpha_key(&[i("a"), i("p"), Term::Formula(vec![[i("s"), i("q"), i("z")]])]), None);
-        let a = alpha_key(&[i("a"), i("p"), f(v("__bw1_x"), "z")]);
+        let fresh: FxHashSet<String> = ["__bw1_x", "__bw9_x", "__bw2_y"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(alpha_key(&[i("a"), i("p"), i("b")], &fresh), None);
+        // Source variables only: no key, so the fact only ever matches itself.
+        assert_eq!(alpha_key(&[i("a"), i("p"), f(v("x"), "z")], &fresh), None);
+        assert_eq!(alpha_key(&[i("a"), i("p"), f(v("__bw5_x"), "z")], &fresh), None, "spelling is not provenance");
+        let a = alpha_key(&[i("a"), i("p"), f(v("__bw1_x"), "z")], &fresh);
         assert!(a.is_some());
-        assert_eq!(a, alpha_key(&[i("a"), i("p"), f(v("__bw9_x"), "z")]));
-        assert_ne!(a, alpha_key(&[i("b"), i("p"), f(v("__bw9_x"), "z")]));
-        let shared = alpha_key(&[f(v("x"), "z"), i("pair"), f(v("x"), "w")]);
-        let apart = alpha_key(&[f(v("x"), "z"), i("pair"), f(v("y"), "w")]);
+        assert_eq!(a, alpha_key(&[i("a"), i("p"), f(v("__bw9_x"), "z")], &fresh));
+        assert_ne!(a, alpha_key(&[i("b"), i("p"), f(v("__bw9_x"), "z")], &fresh));
+        // Joint per fact: shared versus independent freshened variables.
+        let shared = alpha_key(&[f(v("__bw1_x"), "z"), i("pair"), f(v("__bw1_x"), "w")], &fresh);
+        let apart = alpha_key(&[f(v("__bw1_x"), "z"), i("pair"), f(v("__bw2_y"), "w")], &fresh);
         assert_ne!(shared, apart);
-        assert_eq!(shared, alpha_key(&[f(v("u"), "z"), i("pair"), f(v("u"), "w")]));
-        // A variable also free outside every formula keeps its name.
-        assert_ne!(alpha_key(&[v("x"), i("p"), f(v("x"), "z")]), alpha_key(&[v("x"), i("p"), f(v("y"), "z")]));
+        assert_eq!(shared, alpha_key(&[f(v("__bw9_x"), "z"), i("pair"), f(v("__bw9_x"), "w")], &fresh));
+        // A source variable beside a freshened one stays exact.
+        assert_ne!(
+            alpha_key(&[f(v("y"), "z"), i("pair"), f(v("__bw1_x"), "w")], &fresh),
+            alpha_key(&[f(v("u"), "z"), i("pair"), f(v("__bw9_x"), "w")], &fresh)
+        );
     }
 
     /// Every registry entry's declared store read, walked over the whole registry

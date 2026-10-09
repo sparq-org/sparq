@@ -2,8 +2,10 @@
 //! `@forAll` universal), copied out by a forward rule, must let the forward closure reach
 //! its fixpoint. Each backward application standardizes the rule apart under fresh names,
 //! so every round derived a fact that differed from the last only by that renaming, and
-//! the closure never saturated. The closure now dedupes derived facts up to
-//! alpha-equivalence of the variables inside their formulas; no variable is ever renamed.
+//! the closure never saturated. The closure now dedupes a derived fact against an earlier
+//! one up to renaming of the variables the backward chainer itself freshened (tracked by
+//! provenance, never by spelling); every other variable compares exactly, and no variable
+//! is ever renamed.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -184,7 +186,9 @@ fn shared_and_independent_formula_variables_are_not_merged() {
     assert_eq!(pairs.iter().filter(|t| shares(t)).count(), 1, "{pairs:?}");
 }
 
-/// Two ASSERTED alpha-equivalent facts both stay: only derived facts dedupe up to alpha.
+/// Two ASSERTED alpha-equivalent facts both stay, and a derived copy with freshened
+/// variables matches neither: only freshened variables are renamed for the dedup, so the
+/// closure holds the two source formulas plus one copy.
 #[test]
 fn asserted_alpha_equivalent_facts_both_stay() {
     let facts = closure_facts(
@@ -195,7 +199,65 @@ fn asserted_alpha_equivalent_facts_both_stay() {
          { :a :p ?f } => { :a :r ?f } .\n",
     );
     let objs: Vec<&Term> = facts.iter().filter(|t| t[0] == iri("a") && t[1] == iri("r")).map(|t| &t[2]).collect();
-    assert_eq!(objs.len(), 2, "{objs:?}");
+    assert_eq!(objs.len(), 3, "{objs:?}");
+    let names: Vec<&str> = objs.iter().map(|o| var_name(&only_triple(o)[0])).collect();
+    assert!(names.contains(&"x") && names.contains(&"y"), "{names:?}");
+}
+
+/// Codex review of #6762: normalising SOURCE variables changed `log:equalTo` results. A
+/// forward-only copy of a source formula must stay exactly that formula, so the copy
+/// equals its source and `:result :ok true` is derived, as on main.
+#[test]
+fn copied_source_formula_keeps_exact_equality() {
+    let facts = closure_facts(
+        "@prefix : <http://ex/>.\n\
+         @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+         :c :p { ?x :q :z }.\n\
+         :b :seed { ?y :q :z }.\n\
+         { :b :seed ?f } => { :c :p ?f }.\n\
+         { :b :seed ?f. :c :p ?g. ?f log:equalTo ?g } => { :result :ok true }.\n",
+    );
+    assert!(facts.iter().any(|t| t[0] == Term::Iri("http://ex/result".into())), "{facts:?}");
+    let ps = facts.iter().filter(|t| t[0] == Term::Iri("http://ex/c".into())).count();
+    assert_eq!(ps, 2, "the asserted and the copied formula both stay: {facts:?}");
+}
+
+/// The same, with source variables spelled exactly like the names the backward chainer
+/// generates and a backward rule in the document, so the run does mint names: the source
+/// variables are still not the chainer's, so they compare exactly.
+#[test]
+fn copied_source_formula_spelled_like_a_copy_keeps_exact_equality() {
+    let facts = closure_facts(
+        "@prefix : <http://ex/>.\n\
+         @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+         :c :p { ?__bw0_x :q :z }.\n\
+         :b :seed { ?__bw1_x :q :z }.\n\
+         { :d :e { ?x :q :z } } <= true.\n\
+         { :d :e ?h } => { :d :f ?h }.\n\
+         { :b :seed ?f } => { :c :p ?f }.\n\
+         { :b :seed ?f. :c :p ?g. ?f log:equalTo ?g } => { :result :ok true }.\n",
+    );
+    assert!(facts.iter().any(|t| t[0] == Term::Iri("http://ex/result".into())), "{facts:?}");
+    let ps = facts.iter().filter(|t| t[0] == Term::Iri("http://ex/c".into())).count();
+    assert_eq!(ps, 2, "{facts:?}");
+}
+
+/// A source variable spelled exactly like the first name the backward chainer would
+/// generate (`?__bw0_x`) keeps its identity: the chainer skips that name, so the asserted
+/// formula and the one backward copy are two facts, and the source one is unrenamed.
+#[test]
+fn source_variable_spelled_like_a_generated_name_keeps_its_identity() {
+    let objs = r_objects(
+        "@prefix : <http://example.org/#>.\n\
+         :s :t { ?__bw0_x :q :z } .\n\
+         { :a :p { ?x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r ?f } .\n\
+         { :s :t ?g } => { :a :r ?g } .\n",
+    );
+    assert_eq!(objs.len(), 2, "the source formula and one backward copy: {objs:?}");
+    let names: Vec<&str> = objs.iter().map(|o| var_name(&only_triple(o)[0])).collect();
+    assert!(names.contains(&"__bw0_x"), "{names:?}");
+    assert!(names.iter().any(|n| *n != "__bw0_x"), "the copy is not spelled like the source: {names:?}");
 }
 
 /// Every closure entry point terminates on the GH #6757 repros (each one runs the same
