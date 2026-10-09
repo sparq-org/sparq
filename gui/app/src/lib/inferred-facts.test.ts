@@ -133,8 +133,8 @@ test("entailed facts retain one exact, explainable N-Triples line per added trip
 });
 
 test("an asserted triple term matches the reasoner's closure spelling (escaped tab)", () => {
-  // The shared JS writer emits a raw TAB inside a literal; the Rust closure writer emits `\t`.
-  // Both spell the SAME asserted fact, so it must never be reported as inferred.
+  // Both the shared JS writer and the Rust closure writer emit the canonical `\t` escape for
+  // a TAB inside a literal. The asserted fact must never be reported as inferred.
   const a: SparqlTerm = { type: "uri", value: "http://ex/a" };
   const p: SparqlTerm = { type: "uri", value: "http://ex/p" };
   const r: SparqlTerm = { type: "uri", value: "http://ex/r" };
@@ -144,7 +144,7 @@ test("an asserted triple term matches the reasoner's closure spelling (escaped t
     value: { subject: a, predicate: p, object: tabbed },
   };
   const snapshot = `${termToNT(r)} ${termToNT(p)} ${termToNT(quoted)} .`;
-  assert.ok(snapshot.includes("x\ty"), "JS writer keeps the raw tab");
+  assert.ok(snapshot.includes('"x\\ty"'), "JS writer escapes the tab");
   const closure = '<http://ex/r> <http://ex/p> <<( <http://ex/a> <http://ex/p> "x\\ty" )>> .';
 
   const base = tripleKeysOfNTriples(snapshot);

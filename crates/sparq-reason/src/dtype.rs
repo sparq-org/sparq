@@ -53,10 +53,12 @@
 //! `D_ENTAIL_FLOOR` ratchet are byte-identical before/after. Two pieces stay local
 //! by DESIGN, not omission (design record §4 keeps facet validation dtype-resident):
 //!
-//! - **`integer_subtype_ok` (bounded-range facets) stays local.** The substrate
-//!   `Num::of_literal` parses magnitude only; it does NOT reject `"200"^^xsd:byte`
-//!   (out of the `byte` value space). rdfD1 must not type an out-of-range literal, so
-//!   the `i128` parse + range-facet reject is applied HERE before the canonical key.
+//! - **The bounded-range facet check stays in sparq-reason.** Substrate
+//!   `Num::of_literal` now also rejects out-of-range integer subtypes
+//!   (`"200"^^xsd:byte`), but rdfD1 still applies the `i128` parse + range-facet
+//!   reject HERE before the unbounded canonical-key path, via the crate-internal
+//!   `xsd_facets` table shared with the RIF front-end (#5337), so the D-entailment
+//!   value space does not depend on the SPARQL numeric parser.
 //! - **`parse_xsd_double` (local double/float parser) MIGRATED in sq-s3b10 [SONNET-4.6].**
 //!   The local blocklist (`contains("inf")`, case-sensitive) was replaced by the shared
 //!   `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32`, so dtype.rs and the
@@ -68,7 +70,7 @@
 //!   conformance suite stays green (no W3C test uses those forbidden spellings).
 //! - **The integer/decimal KEY stays `canon_decimal`; it does NOT delegate to
 //!   `Num::cmp_relational` (sq-fvxko, issue #3137) [SONNET-4.6].** That follow-on was
-//!   proposed as behaviour-neutral. It is not, in three measured ways — pinned by
+//!   proposed as behaviour-neutral. It is not, in two measured ways — pinned by
 //!   `tests::cmp_relational_delegation_would_change_behaviour`:
 //!   1. **Magnitude.** `as_numeric` routes `xsd:decimal` through `Dec::parse_lexical`,
 //!      whose `i128` mantissa overflows past ~38 significant digits and yields `None`.
@@ -79,9 +81,11 @@
 //!      Under D these are DIFFERENT value spaces (`DValue::Decimal` vs `DValue::F64` —
 //!      see "Why NOT an f64 fast path" above); equating them is exactly the unsound
 //!      aliasing this module is built to avoid.
-//!   3. **Range facets.** `as_numeric` parses magnitude only, so `cmp_relational`
-//!      equates `"200"^^xsd:byte` with `"200"^^xsd:integer` — but 200 is outside the
-//!      `byte` value space, so rdfD1 must not type it (see `integer_subtype_ok` below).
+//!
+//!   Range facets now agree across both parsers (`"200"^^xsd:byte` is outside the
+//!   `byte` value space for `as_numeric` and `xsd_facets::integer_in_bounds` alike); the
+//!   regression keeps that agreement explicit alongside the two remaining reasons not
+//!   to substitute a numeric comparator.
 //!
 //!   There is also a structural blocker: `d_value_key` must return a standalone `Eq` KEY
 //!   (`DValue`), and a pairwise `Option<Ordering>` comparator cannot produce one — only
@@ -376,7 +380,7 @@ pub fn has_value_mapping(dt: &str) -> bool {
 /// [SONNET-4.6] sq-s3b10: the double/float lexical parser NOW DELEGATES to the shared
 /// `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32` — the local
 /// `parse_xsd_double` helper is removed; see the module doc's ledger for the tightening.
-/// `integer_subtype_ok` stays local (facet validation is dtype-resident by design).
+/// The integer range facets stay in-crate (`xsd_facets`; facet validation is not delegated).
 ///
 /// [SONNET-4.6] sq-pbz04.6.2: added anyURI, language/Name/NCName/NMTOKEN,
 /// hexBinary/base64Binary.
@@ -459,7 +463,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
     if is_integer_datatype(dt) {
         let v: i128 = lex.parse().ok()?;
         // Integer-subtype range facets (the value must be IN the datatype's space).
-        if !integer_subtype_ok(dt, v) {
+        if !crate::xsd_facets::integer_in_bounds(dt, v) {
             return None;
         }
         return Some(DValue::Decimal(canon_decimal(&v.to_string())?));
@@ -577,39 +581,6 @@ pub enum DValue {
     /// equal D-values across the two datatypes.
     /// [SONNET-4.6] sq-pbz04.6.2.
     Octets(Vec<u8>),
-}
-
-/// The integer-subtype range facet check: the value must be inside the bounded
-/// derived type's value space (e.g. `xsd:byte` is [-128, 127]). [SONNET-4.6]
-/// sq-pbz04.6.1: every derived integer type carries BOTH its sign facet AND its
-/// magnitude bounds. A value like `"200"^^xsd:byte` parses fine as `i128` but is
-/// outside the `byte` value space, so it is ill-formed and must NOT be typed by
-/// rdfD1; likewise `"4294967296"^^xsd:unsignedInt` exceeds the `unsignedInt` upper
-/// bound. Only genuinely-unbounded `xsd:integer` (and any unrecognized-shaped IRI)
-/// falls through to the permissive `_` arm. Ranges use `RangeInclusive::contains`
-/// so the two-sided bound stays `clippy::manual_range_contains`-clean.
-fn integer_subtype_ok(dt: &str, v: i128) -> bool {
-    let Some(local) = dt.strip_prefix(XSD) else {
-        return true;
-    };
-    match local {
-        // Sign-only facets (no magnitude bound in the value space). [SONNET-4.6]
-        "nonNegativeInteger" => v >= 0,
-        "positiveInteger" => v > 0,
-        "nonPositiveInteger" => v <= 0,
-        "negativeInteger" => v < 0,
-        // Bounded signed derived integers. [SONNET-4.6]
-        "long" => (i64::MIN as i128..=i64::MAX as i128).contains(&v),
-        "int" => (i32::MIN as i128..=i32::MAX as i128).contains(&v),
-        "short" => (-32768..=32767).contains(&v),
-        "byte" => (-128..=127).contains(&v),
-        // Bounded unsigned derived integers (lower bound 0 AND an upper bound). [SONNET-4.6]
-        "unsignedLong" => (0..=18446744073709551615_i128).contains(&v),
-        "unsignedInt" => (0..=4294967295).contains(&v),
-        "unsignedShort" => (0..=65535).contains(&v),
-        "unsignedByte" => (0..=255).contains(&v),
-        _ => true,
-    }
 }
 
 /// Canonicalize a decimal lexical form to (sign)(minimal-int).(minimal-frac);
@@ -1585,12 +1556,11 @@ mod tests {
     /// [SONNET-4.6] sq-fvxko (issue #3137): the REFUSED-delegation guard.
     ///
     /// The follow-on proposed replacing the `canon_decimal` numeric arm with a delegation to
-    /// `Num::cmp_relational`, claimed behaviour-neutral. It is NOT. This test pins the three
-    /// concrete divergences so the migration cannot be re-attempted silently — each assertion
-    /// is exactly the point where `d_value_key`/`d_value_eq` and `cmp_relational` disagree,
-    /// and a delegating rewrite turns each one red.
+    /// `Num::cmp_relational`, claimed behaviour-neutral. It is NOT. This test pins the two
+    /// remaining divergences and the now-shared range-facet rejection. Replacing the D-value
+    /// key with the numeric comparator would still change magnitude and value-space behavior.
     ///
-    /// (The fourth objection is structural, not testable here: `d_value_key` must return a
+    /// (The additional objection is structural, not testable here: `d_value_key` must return a
     /// standalone `Eq` KEY — `DValue` — and a pairwise `Option<Ordering>` comparator cannot
     /// produce one. Only `d_value_eq` could delegate at all.)
     #[test]
@@ -1629,8 +1599,8 @@ mod tests {
         );
 
         // (3) RANGE FACETS. rdfD1 must not type a literal outside its datatype's value
-        // space, so "200"^^xsd:byte has NO D-value. `as_numeric` parses magnitude only, so
-        // `cmp_relational` happily equates it with "200"^^xsd:integer.
+        // space, so "200"^^xsd:byte has NO D-value. The shared numeric
+        // parser must reject the same invalid operand before comparison.
         assert!(
             d_value_key("200", &byte).is_none(),
             "200 is outside the xsd:byte value space — no D-value"
@@ -1641,8 +1611,8 @@ mod tests {
         );
         assert_eq!(
             substrate_cmp("200", &byte, "200", &integer),
-            Some(Ordering::Equal),
-            "substrate ignores the facet — a delegation would type an out-of-range literal"
+            None,
+            "both parsers reject the out-of-range byte operand"
         );
     }
 

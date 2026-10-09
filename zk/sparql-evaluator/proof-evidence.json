@@ -1,0 +1,255 @@
+{
+  "schema_version": 1,
+  "source_commit": "c52da1b63dcffdd9bb8ef9e6e735ac4de518e8da",
+  "date": "2026-09-12",
+  "platform": "macOS arm64",
+  "toolchain": {
+    "risc0_sdk_server": "3.0.6",
+    "guest_rust": "1.97.0",
+    "host_rust": "1.97.1"
+  },
+  "artifact_sha256": "1c525659d3b85f31707429ce2eb6e4d6a10881ac4eaafba2bec5aaa921dc3711",
+  "image_id": [
+    3349839000,
+    2569075226,
+    3955238603,
+    927883224,
+    545385949,
+    27556686,
+    3708057837,
+    2250340220
+  ],
+  "receipt_kind": "Succinct",
+  "dev_mode_disabled": true,
+  "genuine_proof_fixtures": [
+    "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+    "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+    "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+  ],
+  "genuine_proof_fixtures_result": "passed",
+  "actual_guest_positive_control": "ASK {}",
+  "actual_guest_rejection_cases": 21,
+  "actual_guest_rejections_result": "passed",
+  "artifact_admission_tests": 3,
+  "artifact_admission_result": "passed",
+  "native_evidence": {
+    "normative_positive_cases": 82,
+    "rejection_cases": 34,
+    "relation_tests": 16,
+    "coverage_metadata_tests": 2,
+    "result": "passed",
+    "is_cryptographic_proof_evidence": false,
+    "builtin_rec_derived_cases": 61,
+    "builtin_implementation_capacity_controls": 2
+  },
+  "gates": {
+    "detached_workspace_clippy": "passed",
+    "privacy_claims": "passed",
+    "no_perf_numbers": "passed",
+    "selector_tests": 6,
+    "selector_result": "passed"
+  },
+  "hosted_ci": "running on draft PR6497; not yet established",
+  "cross_platform_reproducibility": "not established",
+  "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim.",
+  "validation_source_commit": "c52da1b63dcffdd9bb8ef9e6e735ac4de518e8da",
+  "actual_guest_rejections_class": "SDK Guest panicked plus exact controlled relation-rejection message; IPC/OOM/execution failures are not counted",
+  "actual_guest_positive_semantic_cases": 3,
+  "actual_guest_positive_semantic_cases_result": "passed",
+  "actual_guest_positive_semantic_cases_family": "negated property set forward/reverse/mixed endpoint multiplicity",
+  "publication_ready": false,
+  "publication_boundary": "Current candidate guest execution and all three genuine receipt fixtures passed, including the corrected SUBSTR false-ASK branch. Hosted checks and candidate source review remain pending on unarmed draft PR6497. These bounded fixtures are not complete SPARQL conformance or an external cryptographic audit.",
+  "actual_guest_builtin_edges": {
+    "source": "../../crates/sparq-engine/tests/fixtures/builtin_edges.json",
+    "runner": "host/tests/actual_builtin_edges.rs",
+    "rec_derived_cases": 61,
+    "implementation_capacity_controls": 2,
+    "result": "passed",
+    "is_individual_cryptographic_receipt_evidence": false
+  },
+  "false_ask_discriminator": {
+    "branches": [
+      "numeric absence",
+      "nullable variable endpoint domain",
+      "VALUES joined with MINUS variable domain",
+      "SUBSTR zero-start interval"
+    ],
+    "old_builtin_source_result": "Ask(true), observed failing native test before331a4f7 integration",
+    "corrected_result": "Ask(false), native and genuine receipt passed"
+  },
+  "historical_campaigns": [
+    {
+      "schema_version": 1,
+      "source_commit": "4ee4d37196c9ef0f6899179875dfd40b1a37fc2e",
+      "date": "2026-09-12",
+      "platform": "macOS arm64",
+      "toolchain": {
+        "risc0_sdk_server": "3.0.6",
+        "guest_rust": "1.97.0",
+        "host_rust": "1.97.1"
+      },
+      "artifact_sha256": "f264453bf5c1540d55606004d90591e427dc52e9a099d8a0686f096775617325",
+      "image_id": [
+        1844958981,
+        1102442688,
+        1171445332,
+        1686823665,
+        3152485354,
+        231568236,
+        2811660215,
+        3165796702
+      ],
+      "receipt_kind": "Succinct",
+      "dev_mode_disabled": true,
+      "genuine_proof_fixtures": [
+        "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+        "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+        "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+      ],
+      "genuine_proof_fixtures_result": "passed",
+      "actual_guest_positive_control": "ASK {}",
+      "actual_guest_rejection_cases": 21,
+      "actual_guest_rejections_result": "passed",
+      "artifact_admission_tests": 3,
+      "artifact_admission_result": "passed",
+      "native_evidence": {
+        "normative_positive_cases": 82,
+        "rejection_cases": 34,
+        "relation_tests": 16,
+        "coverage_metadata_tests": 2,
+        "result": "passed",
+        "is_cryptographic_proof_evidence": false
+      },
+      "gates": {
+        "detached_workspace_clippy": "passed",
+        "privacy_claims": "passed",
+        "no_perf_numbers": "passed",
+        "selector_tests": 6,
+        "selector_result": "passed"
+      },
+      "hosted_ci": "pending publication",
+      "cross_platform_reproducibility": "not established",
+      "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim.",
+      "validation_source_commit": "4ee4d37196c9ef0f6899179875dfd40b1a37fc2e",
+      "actual_guest_rejections_class": "SDK Guest panicked plus exact controlled relation-rejection message; IPC/OOM/execution failures are not counted",
+      "actual_guest_positive_semantic_cases": 3,
+      "actual_guest_positive_semantic_cases_result": "passed",
+      "actual_guest_positive_semantic_cases_family": "negated property set forward/reverse/mixed endpoint multiplicity",
+      "publication_ready": false,
+      "publication_boundary": "This campaign includes the corrected shared substitution barrier and discriminatory VALUES/MINUS and nullable-path false-ASK branches. A subsequent deterministic builtin edge audit confirmed admitted semantic defects; its correction batch must be integrated and validated before publication. Passing these bounded fixtures is not full SPARQL conformance."
+    },
+    {
+      "schema_version": 1,
+      "source_commit": "bab2e021624204936f48931aef153f0dcf568891",
+      "date": "2026-09-12",
+      "platform": "macOS arm64",
+      "toolchain": {
+        "risc0_sdk_server": "3.0.6",
+        "guest_rust": "1.97.0",
+        "host_rust": "1.97.1"
+      },
+      "artifact_sha256": "59b8726900d68f5300e515b8f2fdfdf41712c50e2cb14a660a582cdf8742422d",
+      "image_id": [
+        224670942,
+        2631607430,
+        2163020884,
+        966411787,
+        527482683,
+        2069213101,
+        1867083503,
+        1653638852
+      ],
+      "receipt_kind": "Succinct",
+      "dev_mode_disabled": true,
+      "genuine_proof_fixtures": [
+        "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+        "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+        "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+      ],
+      "genuine_proof_fixtures_result": "passed",
+      "actual_guest_positive_control": "ASK {}",
+      "actual_guest_rejection_cases": 21,
+      "actual_guest_rejections_result": "passed",
+      "artifact_admission_tests": 3,
+      "artifact_admission_result": "passed",
+      "native_evidence": {
+        "normative_positive_cases": 82,
+        "rejection_cases": 34,
+        "relation_tests": 16,
+        "coverage_metadata_tests": 2,
+        "result": "passed",
+        "is_cryptographic_proof_evidence": false
+      },
+      "gates": {
+        "detached_workspace_clippy": "passed",
+        "privacy_claims": "passed",
+        "no_perf_numbers": "passed",
+        "selector_tests": 6,
+        "selector_result": "passed"
+      },
+      "hosted_ci": "pending publication",
+      "cross_platform_reproducibility": "not established",
+      "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim.",
+      "validation_source_commit": "b22e9eb2a0f2890e03b4f2c39875f43ec43d1382",
+      "actual_guest_rejections_class": "SDK Guest panicked plus exact controlled relation-rejection message; IPC/OOM/execution failures are not counted",
+      "actual_guest_positive_semantic_cases": 3,
+      "actual_guest_positive_semantic_cases_result": "passed",
+      "actual_guest_positive_semantic_cases_family": "negated property set forward/reverse/mixed endpoint multiplicity",
+      "publication_ready": false,
+      "publication_boundary": "A subsequently identified ordinary SIP/MINUS substitution defect is undergoing a shared eligibility audit. This artifact remains historical evidence, not a completeness claim for that counterexample."
+    },
+    {
+      "schema_version": 1,
+      "source_commit": "db21481af0e1b1b91c0ff7d458b9c0d5ec40cfae",
+      "date": "2026-09-12",
+      "platform": "macOS arm64",
+      "toolchain": {
+        "risc0_sdk_server": "3.0.6",
+        "guest_rust": "1.97.0",
+        "host_rust": "1.97.1"
+      },
+      "artifact_sha256": "9e62a058b952ba3b256dec7502c1f55d9ceaecdfa8bafab22cff675464ada408",
+      "image_id": [
+        4226903298,
+        1737109912,
+        323086654,
+        132275724,
+        1898706681,
+        4167760866,
+        1885247632,
+        3084952257
+      ],
+      "receipt_kind": "Succinct",
+      "dev_mode_disabled": true,
+      "genuine_proof_fixtures": [
+        "real_exact_result_rejects_all_public_binding_tampering_and_replay",
+        "real_false_ask_proves_absence_from_the_accepted_complete_graph",
+        "real_holder_declared_bag_preserves_duplicates_unbound_and_provenance"
+      ],
+      "genuine_proof_fixtures_result": "passed",
+      "actual_guest_positive_control": "ASK {}",
+      "actual_guest_rejection_cases": 21,
+      "actual_guest_rejections_result": "passed",
+      "artifact_admission_tests": 3,
+      "artifact_admission_result": "passed",
+      "native_evidence": {
+        "normative_positive_cases": 79,
+        "rejection_cases": 34,
+        "relation_tests": 16,
+        "coverage_metadata_tests": 2,
+        "result": "passed",
+        "is_cryptographic_proof_evidence": false
+      },
+      "gates": {
+        "detached_workspace_clippy": "passed",
+        "privacy_claims": "passed",
+        "no_perf_numbers": "passed",
+        "selector_tests": 6,
+        "selector_result": "passed"
+      },
+      "hosted_ci": "pending publication",
+      "cross_platform_reproducibility": "not established",
+      "privacy_limit": "Standard Succinct receipts retain outer recursion control metadata; this is not an external cryptographic audit or complete execution-length hiding claim."
+    }
+  ]
+}

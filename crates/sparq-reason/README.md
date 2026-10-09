@@ -8,7 +8,9 @@
 
 **Opt-in RDFS / OWL-RL / Notation3 reasoning** for the [sparq](../../README.md) RDF engine.
 
-It forward-chains the deductive closure (RDFS, the OWL 2 RL property/class axioms, or
+[Exact temporal ordering](../../skills/zk-query-proofs/references/exact-temporals.md) serves `substrate-compare`.
+
+The reasoner forward-chains the closure (RDFS, OWL 2 RL axioms, or
 user-supplied N3 rules — including RDF 1.2 `<< s p o >>` quoted-triple terms in rule
 bodies and heads) over dictionary-encoded triples and **materializes** the entailed
 facts, so querying stays exactly as fast as before. Reasoning runs over integer ids (joins
@@ -65,7 +67,7 @@ let g = Graph::from_parts(dict, triples);
   over the shared exact/float/double tower. The **stratification checker** rejects cycles
   through NOT/AGGREGATE and conservatively couples variable predicates to every relation;
   the semi-naive evaluator and incremental maintainer share that invariant. Surfaced by
-  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- [GPT-5.6] sq-a7bmo, [SONNET-4.6] sq-p4zci -->
+  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- sq-a7bmo, sq-p4zci -->
 - **Quoted-triple inference** (opt-in `quoted-triples`) — RDF 1.2 reifier rules for the
   OWL-RL profile: **reif-dtr** destructures `R rdf:reifies <<( s p o )>>` into the classic
   `rdf:subject`/`rdf:predicate`/`rdf:object` view of `R` (so RL rules reason over reifier
@@ -80,8 +82,8 @@ let g = Graph::from_parts(dict, triples);
   premises, recursively down to asserted facts (a flat, ZK-witness-friendly shape).
 - **RIF/XML importer** (opt-in `rif-xml`) — parse the W3C RIF-Core XML presentation
   syntax into a `rif::Document` with Or-split and Exists-flatten desugaring; fail-closed
-  taxonomy rejects `Import` directives, non-Core elements, unknown builtins, and
-  malformed XML with named error variants. See the `rif_xml` module docs.
+  taxonomy rejects `Import` directives, non-Core elements, unknown builtins, non-RIF
+  namespaces, over-deep nesting, and malformed XML with named error variants. See `rif_xml`.
 - **Shared join kernels** (opt-in `substrate-join`) — the RDFS predicate join (rdfs2/3/7)
   and the rdfs9 type join drive the *same* `sparq-substrate::join` hash-join body the SPARQL
   engine drives, supplying the reasoner's own key projection + budget monomorphically.
@@ -107,11 +109,9 @@ let g = Graph::from_parts(dict, triples);
 
 ## 📚 Learn more
 
-- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (profiles,
-  incremental maintenance, proof trees, CLI seam).
+- **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (profiles, incremental maintenance, proof trees, CLI seam).
 - **API reference** — [docs.rs/sparq-reason](https://docs.rs/sparq-reason).
-- **Design** — the inference verdicts in [`research/`](../../research) and
-  [`research/ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
+- **Design** — [`research/`](../../research) and [`ARCHITECTURE.md`](../../research/ARCHITECTURE.md).
 - **Performance** — see the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench).
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md).
 

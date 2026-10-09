@@ -1,0 +1,81 @@
+{
+  "schema": "sparq-evidence-export-native-checks-v1",
+  "source_sha256": "efadc836259af0b25bdd5bfa3c48e4b1de1b150f7513b08ceef125ff5e2e4de1",
+  "test_kind": "Hermetic collector rejection tests only; synthetic envelopes are not proofs.",
+  "mutations": [
+    {
+      "guard": "artifact-digest",
+      "mutation": {
+        "replace": "if bytes(pin[\"sha256\"]).hex() != digest(artifact):",
+        "with": "if False:"
+      },
+      "mutated_sha256": "651e61de208edbeea7f52c5c517aa7c42a2bc349ac2730706f3eca8cddfa509a",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-artifact-digest.log"
+    },
+    {
+      "guard": "receipt-inventory",
+      "mutation": {
+        "replace": "if set(paths) != expected:",
+        "with": "if False:"
+      },
+      "mutated_sha256": "f2a3c3543228bed42a937cbbe0c5ee966892370b30e4222200a67074e59afbaa",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-receipt-inventory.log"
+    },
+    {
+      "guard": "dirty-source",
+      "mutation": {
+        "replace": "if capture([\"git\", \"status\", \"--porcelain\", \"--untracked-files=no\"], root):",
+        "with": "if False:"
+      },
+      "mutated_sha256": "bcb012d55cef061f1d23c123912a0f525f1bc69a676ca9f016de548036b20954",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-dirty-source.log"
+    },
+    {
+      "guard": "checkout-binding",
+      "mutation": {
+        "replace": "or sha != checkout:",
+        "with": "or False:"
+      },
+      "mutated_sha256": "75d53f4eab5c76f5317eeef2dc0df413658d4e147c002a2e191bc3763246aac6",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-checkout-binding.log"
+    },
+    {
+      "guard": "hal-observation",
+      "mutation": {
+        "replace": "if not targets:",
+        "with": "if False:"
+      },
+      "mutated_sha256": "025495e48260fdb8ffc584c9d7fdb75e67bc63d2590e137efecf32d7af483172",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-hal-observation.log"
+    },
+    {
+      "guard": "guest-clean-scope",
+      "mutation": {
+        "replace": "command.extend([\"--release\", \"--target\", \"riscv32im-risc0-zkvm-elf\"])",
+        "with": "pass"
+      },
+      "mutated_sha256": "8ec67351951a3aea68cae0af7dcb3ac510fb24d8c89465434e3f228b9d512ed6",
+      "assertion_failure_observed": true,
+      "log": "/private/tmp/sparq-evidence-mutant-guest-clean-scope.log"
+    }
+  ],
+  "source_restored": true,
+  "actual_guest_compilation_execution_receipts": "pending combined source/dependency freeze",
+  "actual_readonly_guest_clean_scope_check": {
+    "package": "sparq-core",
+    "target_dir": "/private/tmp/sparq-risc0-smoke-target/sparq-exact-guest",
+    "default_scope_files": 0,
+    "explicit_release_riscv32_scope_files": 7,
+    "explicit_bytes_reported": "2.7MiB",
+    "files_deleted": false,
+    "logs": {
+      "/private/tmp/sparq-guest-clean-default-dry-run.log": "1c30d7e45d72d1d4ff0a35f8ac60747ccdbbb19adf24d12dca5b53cd354d4b36",
+      "/private/tmp/sparq-guest-clean-target-dry-run.log": "7332b1c65648a38d2bafb83d61cc451113477e7c3a6ed33462091485fd2730a5"
+    }
+  }
+}

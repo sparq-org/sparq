@@ -30,6 +30,11 @@ on:
     - cron: "27 6 * * 1" # Mondays 06:27 UTC
   workflow_dispatch:
 
+# A newer push to main supersedes a queued or running analysis of an older commit.
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
 # Top-level: read-only. The analysis job opts into exactly what it needs.
 permissions:
   contents: read

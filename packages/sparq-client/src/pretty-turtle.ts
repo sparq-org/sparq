@@ -395,7 +395,7 @@ function groupBySubject(statements: RdfStatement[]): Array<{
 
 // rdf:type (the `a` predicate) sorts first within a subject block — the idiomatic Turtle order.
 function predicateSortKey(p: RdfTerm): string {
-  if (p.kind === "iri" && p.value === RDF_TYPE) return " ";
+  if (p.kind === "iri" && p.value === RDF_TYPE) return "\u0000";
   return p.nt;
 }
 

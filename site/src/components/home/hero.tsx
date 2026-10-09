@@ -13,9 +13,10 @@
 // /app is a SEPARATE Next.js app overlaid at /app/, so this is a HARD full-page anchor
 // (withBasePath + trailing slash), NOT a next/link soft nav (which would fetch /app/index.txt).
 
-import { ArrowRight, Github } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Github } from "@/components/github-icon";
 import { HeroQueryRunnerLazy } from "@/components/home/hero-runner-lazy";
 import { withBasePath } from "@/lib/base-path";
 

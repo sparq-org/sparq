@@ -63,7 +63,8 @@ let order = topological_sort(&g)?;                         // Err(CycleError) on
 - **Degree centrality** — In / Out / Total, raw counts or normalised to `[0, 1]`, plus a
   deterministic `top_k`.
 - **Extended centrality** — with the default-OFF `centrality-extended` feature, exact
-  unweighted Brandes betweenness and normalised harmonic closeness. Both treat each directed
+  unweighted Brandes betweenness, normalised harmonic closeness, and `core_number`
+  (k-core decomposition, O(V + E)). All three treat each directed
   edge as an undirected connection; reciprocal edges and self-loops do not multiply paths.
   Harmonic closeness assigns unreachable nodes a zero contribution, so disconnected graphs
   have finite scores.
@@ -73,7 +74,7 @@ let order = topological_sort(&g)?;                         // Err(CycleError) on
   strongly connected components, their count accessor, and a canonical topological sort.
   SCC ids are densified by ascending node index; topological-sort ties choose the smallest
   ready node and cycles, including self-loops, return `CycleError`; `is_acyclic` exposes the
-  same check as a boolean. [GPT-5.6] sq-awq7n.
+  same check as a boolean. sq-awq7n.
 - **Opt-in & lean** — consumes only sparq-core's public read API; the only dependencies
   are `sparq-core`, `oxrdf`, and `rustc-hash`. The heavier all-pairs algorithms are behind
   `centrality-extended`, and directed topology is behind `topology`; both features are OFF

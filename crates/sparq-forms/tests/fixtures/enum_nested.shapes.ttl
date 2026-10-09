@@ -1,3 +1,6 @@
+# SCOPE: two-file rule. A content change here moves fixtures/enum_nested.golden.json;
+# regenerate it in the same change with
+# `UPDATE_GOLDENS=1 cargo test -p sparq-forms --test golden` and review the diff.
 # DASH-style widget-resolution shapes: sh:in enum (EnumSelect), sh:class
 # (InstancesSelect + AutoComplete alternative), nested sh:node (DetailsEditor
 # recursion into an address sub-form), explicit dash:viewer override,

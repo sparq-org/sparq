@@ -63,7 +63,7 @@
 //!   non-numeric operand (IRI, bnode, string, boolean, langString) → type error.
 //! * `<` `>` var against var (issue #2443): the strict comparator
 //!   (`value_compare_strict`) decides only same-family pairs — numeric×numeric by
-//!   value (a NaN operand → type error, as above), xsd:string×xsd:string by
+//!   value (a NaN operand → false, as above), xsd:string×xsd:string by
 //!   codepoint, boolean×boolean with false < true, and SAME-TAG langString pairs
 //!   by lexical (the lenient engine extension: `FILTER("a"@en < "b"@en)` is TRUE);
 //!   a cross-tag langString pair and every cross-kind pair (IRI or bnode operands
@@ -80,12 +80,12 @@
 //!   shortest-round-trip mantissa-E-exponent form with ≥ 1 fraction digit ("2.5E0",
 //!   "2.0E-1"). The oracle re-derives this INDEPENDENTLY via the `ryu` shortest
 //!   formatter (`fmt_double_oracle`), not the engine's `format!("{:E}")` path.
-//! * xsd:double NaN (sq-ilweo): `=` on NaN is sameTerm-true for the identical
-//!   `"NaN"^^xsd:double` term (the open-world identical-terms fast path) and FALSE
-//!   against any other numeric (op:numeric-equal is undecided → known-different);
-//!   `<` `>` against a numeric constant is a TYPE ERROR (the stored-NaN numeric
-//!   cache reads back as a miss, so NaN takes the strict path, where num_compare is
-//!   undecided); ORDER BY totalises NaN FIRST — before -INF, equal to itself.
+//! * xsd:double NaN (sq-ilweo): `=` on NaN is FALSE against every numeric, the
+//!   identical `"NaN"^^xsd:double` term included (op:numeric-equal(NaN, NaN) is
+//!   false, so the identical-terms fast path skips NaN; `sameTerm` stays true);
+//!   `<` `>` with a NaN operand is FALSE, not a type error (XPath numeric
+//!   comparisons; normal and strict-capacity execution agree); ORDER BY totalises
+//!   NaN FIRST — before -INF, equal to itself.
 //! * ORDER BY: unbound < blank < IRI < literal; literals KIND-FIRST per the
 //!   substrate `LiteralKind` rank (numeric < boolean < string < langString);
 //!   IRIs / xsd:strings by codepoint; numerics by value across int/decimal/double
@@ -368,11 +368,10 @@ fn eq_spec(a: &T, b: &T) -> Result<bool, ()> {
         _ => match (num_of(a), num_of(b)) {
             (Some(x), Some(y)) => {
                 if num_f64(&x).is_nan() || num_f64(&y).is_nan() {
-                    // NaN `=` (probe-pinned, sq-ilweo): the IDENTICAL "NaN" term is
-                    // equal via the engine's open-world sameTerm fast path; any
-                    // OTHER numeric pairing is undecided by op:numeric-equal and
-                    // therefore known-different (false, not a type error).
-                    Ok(a == b)
+                    // NaN `=` (sq-ilweo): op:numeric-equal is false for every NaN
+                    // pairing, the identical "NaN" term included (known-different,
+                    // not a type error), in normal and strict-capacity execution alike.
+                    Ok(false)
                 } else {
                     Ok(num_cmp(&x, &y) == std::cmp::Ordering::Equal)
                 }
@@ -384,37 +383,36 @@ fn eq_spec(a: &T, b: &T) -> Result<bool, ()> {
 }
 
 /// SPARQL `<` / `>` of a term against an integer constant: numeric-only, anything
-/// else is a type error (probe-pinned). A NaN operand is ALSO a type error: the
-/// stored-NaN numeric cache reads back as a miss, so the engine takes the strict
-/// comparison path, where the NaN pair is undecided (sq-ilweo).
-fn cmp_int_spec(t: &T, k: i64) -> Result<std::cmp::Ordering, ()> {
+/// else is a type error (probe-pinned). A NaN operand is UNORDERED (`Ok(None)`): every
+/// relational operator is false there, not a type error (XPath numeric comparisons).
+fn cmp_int_spec(t: &T, k: i64) -> Result<Option<std::cmp::Ordering>, ()> {
     let n = num_of(t).ok_or(())?;
     if num_f64(&n).is_nan() {
-        return Err(());
+        return Ok(None);
     }
-    Ok(num_cmp(&n, &Num::I(k)))
+    Ok(Some(num_cmp(&n, &Num::I(k))))
 }
 
 /// SPARQL `<` / `>` of a var against another var: the engine's STRICT relational
 /// semantics (`value_compare_strict`, probe-pinned by
 /// `oracle_known_answer_var_var_relational` — issue #2443). Only same-family pairs
-/// decide: numeric×numeric by value (a NaN operand is undecided → type error,
-/// exactly as in `cmp_int_spec`); xsd:string×xsd:string by codepoint;
+/// decide: numeric×numeric by value (a NaN operand is unordered → false, exactly
+/// as in `cmp_int_spec`); xsd:string×xsd:string by codepoint;
 /// boolean×boolean with false < true; langString×langString with the SAME tag by
 /// lexical (the lenient engine extension — a cross-tag pair is a type error).
 /// Every other pair — IRI or bnode operands, cross-kind literals — is a type error.
-fn cmp_vv_spec(a: &T, b: &T) -> Result<std::cmp::Ordering, ()> {
+fn cmp_vv_spec(a: &T, b: &T) -> Result<Option<std::cmp::Ordering>, ()> {
     use T::*;
     match (a, b) {
-        (Str(x), Str(y)) => Ok(x.cmp(y)),
-        (Bool(x), Bool(y)) => Ok(x.cmp(y)),
-        (Lang(x, tx), Lang(y, ty)) if tx == ty => Ok(x.cmp(y)),
+        (Str(x), Str(y)) => Ok(Some(x.cmp(y))),
+        (Bool(x), Bool(y)) => Ok(Some(x.cmp(y))),
+        (Lang(x, tx), Lang(y, ty)) if tx == ty => Ok(Some(x.cmp(y))),
         _ => match (num_of(a), num_of(b)) {
             (Some(x), Some(y)) => {
                 if num_f64(&x).is_nan() || num_f64(&y).is_nan() {
-                    Err(())
+                    Ok(None)
                 } else {
-                    Ok(num_cmp(&x, &y))
+                    Ok(Some(num_cmp(&x, &y)))
                 }
             }
             _ => Err(()),
@@ -723,7 +721,7 @@ fn eval_bind(b: &Bind, row: &Row) -> Option<T> {
         },
         Bind::LtK(v, k) => {
             let t = row[*v as usize].as_ref()?;
-            cmp_int_spec(t, *k).ok().map(|o| T::Bool(o == std::cmp::Ordering::Less))
+            cmp_int_spec(t, *k).ok().map(|o| T::Bool(o == Some(std::cmp::Ordering::Less)))
         }
         Bind::StrLenOf(v) => {
             let t = row[*v as usize].as_ref()?;
@@ -738,10 +736,10 @@ fn eval_expr(e: &Expr, row: &Row) -> Result<bool, ()> {
     match e {
         Expr::EqVV(a, b) => eq_spec(get(a)?, get(b)?),
         Expr::EqVC(v, c) => eq_spec(get(v)?, c),
-        Expr::LtVK(v, k) => Ok(cmp_int_spec(get(v)?, *k)? == std::cmp::Ordering::Less),
-        Expr::GtVK(v, k) => Ok(cmp_int_spec(get(v)?, *k)? == std::cmp::Ordering::Greater),
-        Expr::LtVV(a, b) => Ok(cmp_vv_spec(get(a)?, get(b)?)? == std::cmp::Ordering::Less),
-        Expr::GtVV(a, b) => Ok(cmp_vv_spec(get(a)?, get(b)?)? == std::cmp::Ordering::Greater),
+        Expr::LtVK(v, k) => Ok(cmp_int_spec(get(v)?, *k)? == Some(std::cmp::Ordering::Less)),
+        Expr::GtVK(v, k) => Ok(cmp_int_spec(get(v)?, *k)? == Some(std::cmp::Ordering::Greater)),
+        Expr::LtVV(a, b) => Ok(cmp_vv_spec(get(a)?, get(b)?)? == Some(std::cmp::Ordering::Less)),
+        Expr::GtVV(a, b) => Ok(cmp_vv_spec(get(a)?, get(b)?)? == Some(std::cmp::Ordering::Greater)),
         Expr::Bound(v) => Ok(row[*v as usize].is_some()),
         // is* over an unbound var is a type error per SPARQL 17.2 (`get(v)?`);
         // the engine now conforms, so generation covers it (sq-qeltv widened).
@@ -1718,10 +1716,10 @@ fn oracle_known_answer_computed_double() {
 }
 
 /// NaN value semantics, hand-computed (sq-ilweo): `=` against the NaN constant is
-/// sameTerm-TRUE for the stored NaN term and FALSE (not an error!) for any other
-/// numeric — pinned by the NEGATED filter, which keeps exactly the false rows;
-/// `<` against a numeric constant is a TYPE ERROR (not false!) — pinned by the
-/// negated filter dropping the NaN row (`!err = err`); ORDER BY totalises NaN
+/// FALSE (not an error!) for every numeric, the stored NaN term included
+/// (op:numeric-equal) — pinned by the NEGATED filter, which keeps every row;
+/// `<` against a numeric constant is FALSE (not an error!) — pinned by the
+/// negated filter keeping the NaN row (`!false = true`); ORDER BY totalises NaN
 /// FIRST, before -INF.
 #[test]
 fn oracle_known_answer_nan() {
@@ -1746,14 +1744,15 @@ fn oracle_known_answer_nan() {
     };
     let row = |i: usize| vec![Some(s(i).render())];
     let cases: Vec<(Expr, Vec<Vec<Option<String>>>)> = vec![
-        // ?v = NaN keeps exactly the identical NaN term (sameTerm fast path).
-        (Expr::EqVC(1, nan()), vec![row(0)]),
-        // !(?v = NaN) keeps the OTHER numerics: their verdict is false, not error.
-        (Expr::Not(Box::new(Expr::EqVC(1, nan()))), vec![row(1), row(2)]),
-        // ?v < 7 drops NaN as a TYPE ERROR and keeps the comparable rows.
+        // ?v = NaN keeps nothing: op:numeric-equal(NaN, NaN) is false even for the
+        // identical NaN term.
+        (Expr::EqVC(1, nan()), vec![]),
+        // !(?v = NaN) keeps every row: each verdict is false, not error.
+        (Expr::Not(Box::new(Expr::EqVC(1, nan()))), vec![row(0), row(1), row(2)]),
+        // ?v < 7 is false for NaN (not a type error) and keeps the comparable rows.
         (Expr::LtVK(1, 7), vec![row(1), row(2)]),
-        // !(?v < 7) drops EVERYTHING: !err = err for NaN, !true = false for the rest.
-        (Expr::Not(Box::new(Expr::LtVK(1, 7))), vec![]),
+        // !(?v < 7) keeps exactly NaN: !false = true there, !true = false for the rest.
+        (Expr::Not(Box::new(Expr::LtVK(1, 7))), vec![row(0)]),
     ];
     for (filter, expected) in cases {
         let q = mk(filter);
@@ -1793,7 +1792,7 @@ fn oracle_known_answer_var_var_relational() {
         (s(4), T::Str("a".to_string()), T::Str("b".to_string())), // string codepoint: Less
         (s(5), T::Int(1), T::Dec(150, 2)),        // numeric by value across tiers: 1 < 1.50
         (b(0), T::Bool(false), T::Bool(true)),    // boolean: false < true
-        (b(1), T::Dbl("NaN".to_string(), f64::NAN), T::Int(0)), // NaN operand: type error
+        (b(1), T::Dbl("NaN".to_string(), f64::NAN), T::Int(0)), // NaN operand: unordered, false
         (b(2), s(0), s(1)),                       // IRI pair: not value-comparable, type error
     ];
     let mut data = Vec::new();
@@ -1817,16 +1816,21 @@ fn oracle_known_answer_var_var_relational() {
     };
     let row = |t: &T| vec![Some(t.render())];
     let less_subjects = || vec![row(&s(0)), row(&s(4)), row(&s(5)), row(&b(0))];
+    let with_nan = |mut rows: Vec<Vec<Option<String>>>| {
+        rows.push(row(&b(1)));
+        rows
+    };
     let cases: Vec<(Expr, Vec<Vec<Option<String>>>)> = vec![
         // ?v1 < ?v2 keeps exactly the decided-Less pairs — including "a"@en < "b"@en.
         (Expr::LtVV(1, 2), less_subjects()),
-        // !(?v1 < ?v2) keeps ONLY the decided-Greater pair: every type-error pair
-        // (cross-tag lang, lang×string, NaN, IRIs) stays dropped (!err = err).
-        (Expr::Not(Box::new(Expr::LtVV(1, 2))), vec![row(&s(1))]),
+        // !(?v1 < ?v2) keeps the decided-Greater pair and the NaN pair (false, so
+        // !false = true); every type-error pair (cross-tag lang, lang×string, IRIs)
+        // stays dropped (!err = err).
+        (Expr::Not(Box::new(Expr::LtVV(1, 2))), with_nan(vec![row(&s(1))])),
         // ?v1 > ?v2 keeps the decided-Greater pair,
         (Expr::GtVV(1, 2), vec![row(&s(1))]),
-        // and its negation keeps the decided-Less pairs.
-        (Expr::Not(Box::new(Expr::GtVV(1, 2))), less_subjects()),
+        // and its negation keeps the decided-Less pairs plus NaN.
+        (Expr::Not(Box::new(Expr::GtVV(1, 2))), with_nan(less_subjects())),
     ];
     for (filter, expected) in cases {
         let q = mk(filter);

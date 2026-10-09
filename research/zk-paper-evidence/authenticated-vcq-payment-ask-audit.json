@@ -1,0 +1,428 @@
+{
+  "schema": "sparq.independent-genuine-evidence-audit.v1",
+  "at": "2026-10-05T17:43:32.026542+00:00",
+  "source": "ff83bcfbee57d7db90f8f406a5e09574f81e5a91",
+  "source_note": "Branch claude/zk-payment-false-ask (PR #6642) at ff83bcfb; its head ff456e3c differs only in .github/workflows/zk-authrdf-genuine.yml. Guest source is unchanged from codex/zk-vcq-authenticated-rdf (0c845ce9). Both guests were exported in this container from that tree; the V5 artifact hash differs from the earlier c35f5e4b because the build path differs.",
+  "proof_job_sha256": "c987eade336c21e12a819ff356d6704d56c5a705d8ca951cd4c43af4bd25c253",
+  "completed_at": "2026-10-05T17:37:00+00:00",
+  "outcome": "pass",
+  "scope": "One synthetic payment-history credential in the eddsa-rdfc-2022 canonical RDF profile; generic VCQ authenticated V5 ASK under a verifier-agreed anchor (the paper's 'was any payment returned?' example). No other declared case, benchmark or external security certification.",
+  "genuine_receipts": 1,
+  "protocol_accepted_receipts": 1,
+  "protocol_rejected_genuine_receipts": {
+    "released_row_bound": 0
+  },
+  "case": "ask-false-payment-verifier-agreed",
+  "all_defined_cases_run": false,
+  "query": "ASK { ?p a <https://bank.example/vocab#Payment> ; <https://bank.example/vocab#paymentStatus> <https://bank.example/vocab#Returned> }",
+  "contract": "AskBoolean",
+  "authority": "VerifierAgreedAnchor",
+  "dataset": "payment-history",
+  "fixture": {
+    "agreed_anchor": "4329e8906b164b6a5307158bd21769d41a9a69fd48684d2671a8ac7601a4441f",
+    "document_sha256": "c9b4d8917d6fa0802e762e80a5bc38c987436f322aec3bd50d391c6ca7bf91c5",
+    "proof_config_sha256": "b76ec93a8c2f2121288bc717aaad5ffc5fda6e657f80aa18dcd3a1190386127c",
+    "salt": "a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5",
+    "source": "synthetic payment-history credential, eddsa-rdfc-2022 profile, signed with the public RFC 8032 section 7.1 TEST 1 key"
+  },
+  "verifier_policy": {
+    "authorization": [
+      {
+        "issuer": "https://bank.example/issuers/1",
+        "public_key": [
+          215,
+          90,
+          152,
+          1,
+          130,
+          177,
+          10,
+          183,
+          213,
+          75,
+          254,
+          211,
+          201,
+          100,
+          7,
+          58,
+          14,
+          225,
+          114,
+          243,
+          218,
+          166,
+          35,
+          37,
+          175,
+          2,
+          26,
+          104,
+          247,
+          7,
+          81,
+          26
+        ],
+        "verification_method": "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw#z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw"
+      }
+    ],
+    "cryptosuite": "EddsaRdfc2022",
+    "evaluation": {
+      "canonicalization": {
+        "max_hndq_calls": 64,
+        "max_input_bytes": 1048576,
+        "max_output_bytes": 1048576,
+        "max_permutation_steps": 1048576,
+        "max_quads": 32768
+      },
+      "dataset": {
+        "max_dataset_bytes": 65536,
+        "max_named_graphs": 16,
+        "max_rows": 4096,
+        "max_triples": 256
+      },
+      "describe": "OutgoingBlankNodeClosure"
+    },
+    "mapping": "ScopedCanonicalUnion"
+  },
+  "descriptor_sha256": "ead874a5cc99036833dfe2206c2c5f23bbc1aed28d77d3cd2d3c8762c78debe3",
+  "parameter_digest": "4a48bd4b06462c9274483c77c5c39bf65b489e7828b167c83cc1edf2c22f7f66",
+  "policy_digest": "0b1252e7996190ea34c1c53475e1fb2dd2810f73b7a73f35e90fa1e7455e7d0d",
+  "expected_result": {
+    "Ask": false
+  },
+  "actual_result": {
+    "Ask": false
+  },
+  "actual_provenance": "VerifierAgreedAuthenticated",
+  "actual_dataset_commitment": [
+    67,
+    41,
+    232,
+    144,
+    107,
+    22,
+    75,
+    106,
+    83,
+    7,
+    21,
+    139,
+    210,
+    23,
+    105,
+    212,
+    26,
+    154,
+    105,
+    253,
+    72,
+    104,
+    77,
+    38,
+    113,
+    168,
+    172,
+    118,
+    1,
+    164,
+    68,
+    31
+  ],
+  "receipt": {
+    "inner": "Succinct",
+    "seal_words": 55667,
+    "seal_bytes": 222668,
+    "exit_code": "Halted(0)",
+    "dev_mode": false,
+    "receipt_sha256": "3d2a1d025807e63e13087a919543d2cb5c6140a980db71db0b7ae65220ee6f10",
+    "journal_sha256": "0d6f21af32cc4e3c6b1cf594acb52a163421aae708fcd0121062f88ac9e4d699",
+    "request_sha256": "8b74b3a558d5c1adb50ec366638a39df2b6a79e95f49d867f2ce9e0234a6a26d",
+    "presentation_file": {
+      "bytes": 583644,
+      "sha256": "cc94ecb7d9f8d8b3d177d2e224b6e33bcc0e6ae6536a98f5cb28a752b37398f6"
+    },
+    "vcq_transport": {
+      "bytes": 1751333,
+      "sha256": "8a65e911fb7de4ae35297b1d7ddb1cbadc0c7b2dd303d8529ea18db61c3c41a9"
+    },
+    "pin": {
+      "image_id": [
+        2951228887,
+        3926186660,
+        1186683922,
+        3989014236,
+        1581570996,
+        3326900839,
+        702825042,
+        505486668
+      ],
+      "sha256": [
+        123,
+        104,
+        220,
+        6,
+        86,
+        171,
+        254,
+        58,
+        130,
+        91,
+        17,
+        110,
+        154,
+        148,
+        223,
+        62,
+        151,
+        29,
+        197,
+        151,
+        157,
+        238,
+        254,
+        122,
+        182,
+        22,
+        232,
+        205,
+        94,
+        27,
+        72,
+        46
+      ]
+    },
+    "artifact_sha256": "7b68dc0656abfe3a825b116e9a94df3e971dc5979deefe7ab616e8cd5e1b482e",
+    "pin_file_sha256": "27ab89962469cfe157fee1421aa3bbdaf1a33d50537aac23e5889d8903caaf94",
+    "verification": "The driver completed SDK verification with dev mode disabled under the accepted V5 pin, compared the journal with the native model and the hand-written expectation, and ran the generic protocol checks. This record re-reads the retained files; it launched no extra verification process."
+  },
+  "control_count": 28,
+  "controls": [
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "changed_query_same_form"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "wrong_challenge"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "changed_stored_audience_matching_supplied"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "changed_window_containing_now"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-audience-mismatch\")",
+      "control": "wrong_verifier_audience"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-request-expired\")",
+      "control": "expired"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-request-not-yet-valid\")",
+      "control": "not_yet_valid"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "wrong_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "altered_journal_result"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "flipped_journal_byte"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "fake_receipt"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "scope_substitution_agreed_to_holder"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "wrong_agreed_anchor"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "anchor_under_other_salt"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_other_key_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_other_key_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_other_issuer_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_other_issuer_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_other_method_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_other_method_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_table_widened_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_table_widened_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-descriptor-digest-mismatch\")",
+      "control": "policy_rows_tightened_descriptor_digest"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "policy_rows_tightened_spliced"
+    },
+    {
+      "class": "Invalid",
+      "code": "Backend(\"vcq-proof-rejected\")",
+      "control": "cross_image_exact_guest_spliced"
+    },
+    {
+      "code": "ChallengeReplayed",
+      "control": "replay_same_store",
+      "store_calls": 2
+    },
+    {
+      "class": "Infrastructure",
+      "code": "ChallengeStoreFailure(\"test-broken\")",
+      "control": "broken_store",
+      "store_calls": 1
+    },
+    {
+      "accepted": 1,
+      "control": "concurrent_verifications",
+      "replayed": 1,
+      "store_calls": 2
+    }
+  ],
+  "binding_controls_store_calls": 0,
+  "challenge_store_scope": "In-memory test doubles only, not production durability/concurrency certification.",
+  "exact_cross_image_pin": {
+    "image_id": [
+      2514992226,
+      185579825,
+      3826571858,
+      878582747,
+      3704365836,
+      2758369440,
+      1777557476,
+      2006428658
+    ],
+    "sha256": [
+      122,
+      239,
+      20,
+      144,
+      191,
+      24,
+      4,
+      93,
+      24,
+      167,
+      177,
+      32,
+      2,
+      164,
+      244,
+      168,
+      207,
+      150,
+      47,
+      142,
+      129,
+      85,
+      79,
+      122,
+      123,
+      96,
+      71,
+      215,
+      37,
+      109,
+      170,
+      86
+    ]
+  },
+  "executable": {
+    "zk/sparql-evaluator/target/debug/deps/vcq_authenticated_genuine-4c66c4438c45a862": {
+      "sha256": "64e20c14dfefff6b05e0f10f993ed16a0454bb0781fa6cf747dc7deb03418170"
+    }
+  },
+  "r0vm": {
+    "sha256": "751b9b188d341e8bec5e02060086b7b1dc3f7289e90f726c38589bb6735dd6d7",
+    "version": "risc0-r0vm 3.0.6",
+    "install": "official v3.0.6 release asset, SHA-256 615d961b... checked as in zk-exact-evaluator.yml"
+  },
+  "summary_sha256": "6075b9f7b5818d8897b6baf9808df1d139813fa1994f79e365818621e7a6a1e5",
+  "metadata_sha256": "e94fec7b03daebdb08811b0839a19c8c29be19d29c565735735267a4831dbbbd",
+  "record_sha256": "bbe763980ea35ff72c5ed4c7289cf68f1b2b690c66e3f456180de5f0178fccab",
+  "log_sha256": "c59f7782f76be1ece111b2a29b76d197db08cb13eaa61f2768181eed148b07c6",
+  "artifact_archive": {
+    "path": "project files: zk-evidence/ask-false-payment-verifier-agreed-local.tar.gz",
+    "bytes": 983871,
+    "sha256": "70395538d7c75d3b27dd96a8140424f7f00fa4c38277580028d2d65d7fadb1b0"
+  },
+  "resource_scope": {
+    "host": "Claude Code cloud container",
+    "cpus": 4,
+    "memory_bytes_total": 17179869184,
+    "swap": 0,
+    "driver_wall_seconds": 3952,
+    "observed_memory_peak_bytes": null,
+    "limits": "Wall time covers the whole driver (one proof, verification and 28 controls) and is noncanonical; it is not a performance comparison. Peak memory was not captured."
+  },
+  "limitations": [
+    "Synthetic credential, not issued by a real bank: three settled payments signed with the RFC 8032 section 7.1 TEST 1 key, whose secret key is public.",
+    "One declared case; all_defined_cases_run is false.",
+    "The case record's 'fixture' string is the driver's fixed W3C-vector text; the dataset field and metadata.json name the payment-history fixture correctly.",
+    "No credential status, holder binding, validity-period check, JSON-LD processing or wallet/world completeness established; completeness is relative to the verifier-agreed commitment only.",
+    "No independent second-party audit of this run and no external cryptographic review.",
+    "No guest cycle metric was emitted by this proof driver."
+  ]
+}
