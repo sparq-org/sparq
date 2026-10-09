@@ -843,7 +843,7 @@ async fn read<S: Store + 'static>(
                 Ok(b) => b,
                 Err(e) => return store_error(e),
             };
-            ranged(req, body, &meta.content_type, &etag, modified)
+            ranged(req, body, &meta.content_type, &etag)
         }
     };
     let h = resp.headers_mut();
@@ -859,20 +859,14 @@ async fn read<S: Store + 'static>(
 /// 200 with the whole body, 206 with one byte range, or 416 for an unsatisfiable single range.
 /// A Range the server ignores (a multi-range, a range in another unit, malformed syntax, or one
 /// an If-Range validator no longer matches) gets the whole body (RFC 9110 sections 14.2, 13.1.5).
-fn ranged(
-    req: &LwsRequest,
-    body: Bytes,
-    content_type: &str,
-    etag: &str,
-    modified_secs: Option<u64>,
-) -> Response {
+fn ranged(req: &LwsRequest, body: Bytes, content_type: &str, etag: &str) -> Response {
     let len = body.len() as u64;
     // Range applies to GET only: a HEAD answers with the headers of the whole representation
     // (RFC 9110 section 14.2).
     let range = req
         .header(header::RANGE)
         .filter(|_| req.method == Method::GET)
-        .filter(|_| if_range_holds(req.header(header::IF_RANGE), etag, modified_secs));
+        .filter(|_| if_range_holds(req.header(header::IF_RANGE), etag));
     match range.map(|r| parse_range(r, len)) {
         Some(ByteRange::Unsatisfiable) => {
             let mut r = problem(StatusCode::RANGE_NOT_SATISFIABLE, None);
@@ -905,9 +899,11 @@ fn ranged(
     }
 }
 
-/// Whether an If-Range precondition lets the Range apply (RFC 9110 section 13.1.5): absent, a
-/// strong entity tag equal to the current one, or an HTTP date equal to Last-Modified.
-fn if_range_holds(if_range: Option<&str>, etag: &str, modified_secs: Option<u64>) -> bool {
+/// Whether an If-Range precondition lets the Range apply (RFC 9110 section 13.1.5): absent, or a
+/// strong entity tag equal to the current one. A date never does: two versions written within
+/// one second share a Last-Modified, so a date is not a strong validator here, and the whole
+/// representation is served instead.
+fn if_range_holds(if_range: Option<&str>, etag: &str) -> bool {
     let Some(v) = if_range.map(str::trim) else {
         return true;
     };
@@ -915,7 +911,7 @@ fn if_range_holds(if_range: Option<&str>, etag: &str, modified_secs: Option<u64>
         // A weak tag never matches: the comparison is strong.
         return !v.starts_with("W/") && !etag.starts_with("W/") && v == etag;
     }
-    parse_http_date(Some(v)).is_some_and(|d| modified_secs == Some(d))
+    false
 }
 
 /// What a Range header asks of an entity.
@@ -1092,12 +1088,16 @@ async fn read_container<S: Store + 'static>(
     let Some(media_type) = negotiate_container(req.header(header::ACCEPT)) else {
         return Ok(problem(StatusCode::NOT_ACCEPTABLE, None));
     };
+    // Whether the container's date is behind is read before anything the date is computed
+    // from: a touch that lands while the listing is made must not make a date from before it
+    // count.
+    let untouched = state.is_untouched(uri);
     let all = match members(state, uri, exclusive).await {
         Ok(m) => m,
         Err(Unlisted::Store(e)) => return Ok(store_error(e)),
         Err(Unlisted::Busy(busy)) => return Err(busy),
     };
-    Ok(listing(state, req, uri, meta, media_type, all).await)
+    Ok(listing(state, req, uri, meta, media_type, all, untouched).await)
 }
 
 async fn listing<S: Store + 'static>(
@@ -1107,6 +1107,7 @@ async fn listing<S: Store + 'static>(
     meta: &crate::store::sparq::ResourceMeta,
     media_type: String,
     all: Vec<(Value, crate::store::sparq::ResourceMeta)>,
+    untouched: bool,
 ) -> Response {
     let cmeta = match state.resource_meta(uri).await {
         Ok(m) => m,
@@ -1155,7 +1156,7 @@ async fn listing<S: Store + 'static>(
     // latest of the container's own and every listed member's: an If-Modified-Since never meets a
     // 304 for a listing whose members moved on since. A container whose own time could not be
     // moved on after a change to it has none, until it is.
-    let modified = (!state.is_untouched(uri)).then(|| {
+    let modified = (!untouched).then(|| {
         all.iter()
             .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
             .filter_map(|t| u64::try_from(t).ok())
@@ -2596,17 +2597,14 @@ mod tests {
     #[test]
     fn if_range() {
         let date = http_date(1_700_000_000);
-        assert!(if_range_holds(None, "\"a\"", Some(1_700_000_000)));
-        assert!(if_range_holds(Some("\"a\""), "\"a\"", None));
-        assert!(!if_range_holds(Some("\"b\""), "\"a\"", None));
-        assert!(!if_range_holds(Some("W/\"a\""), "\"a\"", None));
-        assert!(if_range_holds(Some(&date), "\"a\"", Some(1_700_000_000)));
-        assert!(!if_range_holds(Some(&date), "\"a\"", Some(1_700_000_001)));
-        assert!(!if_range_holds(
-            Some("garbage"),
-            "\"a\"",
-            Some(1_700_000_000)
-        ));
+        assert!(if_range_holds(None, "\"a\""));
+        assert!(if_range_holds(Some("\"a\""), "\"a\""));
+        assert!(!if_range_holds(Some("\"b\""), "\"a\""));
+        assert!(!if_range_holds(Some("W/\"a\""), "\"a\""));
+        // Review finding: a date is not a strong validator (two versions can share one), so
+        // even one equal to Last-Modified serves the whole representation.
+        assert!(!if_range_holds(Some(&date), "\"a\""));
+        assert!(!if_range_holds(Some("garbage"), "\"a\""));
     }
 
     #[test]
