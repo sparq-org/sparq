@@ -1757,6 +1757,10 @@ pub struct BridgeLedger {
     /// `None` until the first static materialization is captured (a store that only
     /// ever bridged grants has an empty static baseline — refresh starts from nothing).
     static_baseline: Option<Vec<[Term; 3]>>,
+    /// The auth view was dropped (its rules could not be materialized) after the baseline was
+    /// captured: the baseline no longer describes the rules, so nothing is rebuilt from it, and
+    /// nothing is bridged on top, until the next static materialization captures a new one.
+    suspended: bool,
     /// The injected usage-counter store backing every [`BridgeKind::PermissionCounted`]
     /// entry's stateful `odrl:count` budget. Set on the first counted bridge call and
     /// re-used by [`refresh`](BridgeLedger::refresh) to re-check (read-only) whether a
@@ -1823,6 +1827,20 @@ impl BridgeLedger {
     /// bridged grant on top.
     pub fn capture_static_baseline(&mut self, graph: &Graph) {
         self.static_baseline = Some(named_graph_triples(graph, AUTH_GRAPH));
+        self.suspended = false;
+    }
+
+    /// The auth view was dropped: until [`BridgeLedger::capture_static_baseline`] runs again,
+    /// [`BridgeLedger::refresh`] rebuilds nothing (the captured baseline would resurrect the
+    /// view the drop removed) and no grant is bridged on top. The entries are kept, and
+    /// replayed over the next captured baseline.
+    pub fn suspend(&mut self) {
+        self.suspended = true;
+    }
+
+    /// Whether the ledger is [suspended](BridgeLedger::suspend).
+    pub fn is_suspended(&self) -> bool {
+        self.suspended
     }
 
     /// Re-evaluate every tracked bridged grant against its (possibly changed) ODRL
@@ -1847,6 +1865,10 @@ impl BridgeLedger {
     /// - A static grant is never in `entries`, never re-evaluated, and always present in
     ///   the baseline — refresh cannot widen or drop it.
     pub fn refresh(&mut self, graph: &mut Graph) -> usize {
+        // 0. A dropped view stays dropped: its baseline describes rules that no longer hold.
+        if self.suspended {
+            return 0;
+        }
         // 1. Reset the enforcement view to the captured static baseline, and clear ALL
         //    bridged provenance — nothing bridged survives unless an entry re-emits it.
         //    `None` vs `Some(empty)` matters: only a CAPTURED (static) baseline may keep

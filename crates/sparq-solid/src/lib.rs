@@ -1343,25 +1343,36 @@ impl PodStore {
         // Authorize against the CURRENT auth view before mutating anything (fail-closed).
         let auth = Arc::clone(&self.auth);
         let permit = update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget)?;
-        // Authorized: apply through the engine's in-place delta path, under the same budget.
-        sparq_engine::update_in_place_with_budget(&mut self.graph, sparql, budget)?;
-        // A change to the access-control rules invalidates the auth view. The update is
-        // already applied, so a view that cannot be rebuilt no longer describes the rules:
-        // it is dropped rather than left granting what the new rules may revoke.
-        if permit.rematerialize {
-            let rebuilt = if acp {
-                self.materialize_acp().map(drop)
-            } else {
-                self.materialize_wac().map(drop)
-            };
-            if let Err(e) = rebuilt {
-                self.drop_auth_view();
-                return Err(format!(
-                    "the update was applied but the authorization view could not be rebuilt \
-                     ({e}); every request is denied until it is re-materialized"
-                ));
-            }
+        // An update that leaves the access-control rules as they were is applied as one request:
+        // all of it or (on any error, a budget overrun included) none of it.
+        if !permit.rematerialize {
+            return sparq_engine::update_in_place_atomic_with_budget(&mut self.graph, sparql, budget);
         }
+        // One that changes them is applied to a fork, and the auth view is rebuilt there from
+        // the rules it leaves, before anything is committed: rules that cannot be materialized
+        // refuse the update and change nothing (the current view still describes the current
+        // rules), so no writer of one access-control document can take the whole store's view
+        // down. Only once both succeed are the update and its view swapped in together.
+        let mut candidate = self.graph.fork();
+        sparq_engine::update_in_place_with_budget(&mut candidate, sparql, budget)?;
+        let rebuilt = if acp {
+            materialize_acp_with_credentials(
+                &mut candidate,
+                &AccessProvenance::new(),
+                &VerifiedCredentials::new(),
+            )
+        } else {
+            materialize_wac(&mut candidate)
+        };
+        if let Err(e) = rebuilt {
+            return Err(format!(
+                "update denied: the access-control rules it leaves cannot be materialized ({e}); \
+                 nothing was changed"
+            ));
+        }
+        self.graph = candidate;
+        self.reconcile_bridged_after_static();
+        self.reindex_with(ReindexScope::Full);
         Ok(())
     }
 
@@ -1371,6 +1382,9 @@ impl PodStore {
     /// granting what the change revoked.
     pub(crate) fn drop_auth_view(&mut self) {
         loader::strip_reserved_graphs(&mut self.graph);
+        // The bridge must not rebuild the view from the baseline it captured before the drop.
+        #[cfg(feature = "odrl-bridge")]
+        self.bridge_ledger.suspend();
         self.reindex_with(ReindexScope::Full);
     }
 
@@ -1402,6 +1416,10 @@ impl PodStore {
         policy: &sparq_policy::Policy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it (see `BridgeLedger::suspend`).
+        if self.bridge_ledger.is_suspended() {
+            return odrl_bridge::BridgeOutcome::default();
+        }
         let outcome = odrl_bridge::materialize_permission(&mut self.graph, policy, request);
         if outcome.granted {
             // Track for refresh/retraction (sq-dpk4), then rebuild index + drop cache.
@@ -1431,6 +1449,10 @@ impl PodStore {
         policy: &sparq_policy::Policy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it (see `BridgeLedger::suspend`).
+        if self.bridge_ledger.is_suspended() {
+            return odrl_bridge::BridgeOutcome::default();
+        }
         let outcome = odrl_bridge::materialize_prohibition(&mut self.graph, policy, request);
         if outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Prohibition);
@@ -1454,6 +1476,10 @@ impl PodStore {
         policy: &sparq_policy::Policy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it (see `BridgeLedger::suspend`).
+        if self.bridge_ledger.is_suspended() {
+            return odrl_bridge::BridgeOutcome::default();
+        }
         let outcome = odrl_bridge::materialize_policy(&mut self.graph, policy, request);
         if outcome.granted || outcome.prohibited {
             self.bridge_ledger.record(policy, request, odrl_bridge::BridgeKind::Policy);
@@ -1480,6 +1506,10 @@ impl PodStore {
         policy: &sparq_policy::Policy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it (see `BridgeLedger::suspend`).
+        if self.bridge_ledger.is_suspended() {
+            return odrl_bridge::BridgeOutcome::default();
+        }
         let outcome =
             odrl_bridge::materialize_permission_conditional(&mut self.graph, policy, request);
         if outcome.granted {
@@ -1511,6 +1541,10 @@ impl PodStore {
         policy: &sparq_policy::Policy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it (see `BridgeLedger::suspend`).
+        if self.bridge_ledger.is_suspended() {
+            return odrl_bridge::BridgeOutcome::default();
+        }
         let outcome =
             odrl_bridge::materialize_prohibition_conditional(&mut self.graph, policy, request);
         if outcome.prohibited {
@@ -1560,6 +1594,10 @@ impl PodStore {
         request: &sparq_policy::Request,
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
     ) -> odrl_bridge::BridgeOutcome {
+        // A dropped view is not rebuilt by bridging onto it (see `BridgeLedger::suspend`).
+        if self.bridge_ledger.is_suspended() {
+            return odrl_bridge::BridgeOutcome::default();
+        }
         let outcome = odrl_bridge::count::materialize_permission_counted(
             &mut self.graph,
             policy,
@@ -1701,6 +1739,27 @@ mod scoped_cache_tests {
         let mut store = PodStore::new(Graph::load_dataset(nq, "nquads").expect("loads"));
         store.materialize_wac().expect("materializes");
         store
+    }
+
+    /// Review finding: a dropped auth view (rules that could not be materialized) was rebuilt
+    /// by the next bridge refresh from the static baseline captured before the drop, granting
+    /// again what the drop withdrew. The ledger is suspended until a static materialization
+    /// captures a new baseline.
+    #[cfg(feature = "odrl-bridge")]
+    #[test]
+    fn a_bridge_refresh_does_not_resurrect_a_dropped_view() {
+        let mut store = two_pod_store();
+        let alice = sess(ALICE);
+        assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
+        store.drop_auth_view();
+        assert!(store.accessible(&alice, Mode::Read).is_empty());
+        assert_eq!(store.refresh_odrl_grants(), 0);
+        assert!(store.accessible(&alice, Mode::Read).is_empty(), "the refresh resurrected the view");
+        assert!(store.bridge_ledger().is_suspended());
+        // A static materialization rebuilds the view, and the ledger resumes.
+        store.materialize_wac().expect("materializes");
+        assert!(!store.bridge_ledger().is_suspended());
+        assert_eq!(store.accessible(&alice, Mode::Read).len(), 2);
     }
 
     fn key_for(s: &Session) -> SessionKey {
