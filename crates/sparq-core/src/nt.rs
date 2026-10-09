@@ -132,28 +132,28 @@ pub fn parse_quads_chunk(bytes: &[u8]) -> Result<Vec<(Option<GraphKey>, Dict, Ve
         let s_start = i;
         check_position(bytes, i, false).map_err(as_nquads_err)?;
         let j = span_term(bytes, i)?;
-        i = skip_ws(bytes, j);
+        i = skip_hws(bytes, j);
         let p_start = i;
         check_position(bytes, i, true).map_err(as_nquads_err)?;
         let j = span_term(bytes, i)?;
-        i = skip_ws(bytes, j);
+        i = skip_hws(bytes, j);
         let o_start = i;
         let j = span_object(bytes, i)?;
-        i = skip_ws(bytes, j);
+        i = skip_hws(bytes, j);
         // Optional graph term, then the mandatory `.`.
         let graph = if i < n && bytes[i] == b'.' {
-            i += 1;
+            i = end_of_statement(bytes, i + 1).map_err(as_nquads_err)?;
             None
         } else {
             // Span first: it rejects a `<<(` triple term in graph position with the precise
             // object-only message before `graph_key`'s IRI scan sees the inner `<`.
             let jg = span_term(bytes, i)?;
             let g = graph_key(bytes, i)?;
-            i = skip_ws(bytes, jg);
+            i = skip_hws(bytes, jg);
             if i >= n || bytes[i] != b'.' {
                 return Err(format!("N-Quads: expected '.' at byte {i}"));
             }
-            i += 1;
+            i = end_of_statement(bytes, i + 1).map_err(as_nquads_err)?;
             Some(g)
         };
         // Resolve (or create) the bucket for this graph, then intern S/P/O into ITS dict.
@@ -254,15 +254,15 @@ fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
             "N-Quads: RDF 1.2 triple term nested more than {MAX_TRIPLE_TERM_DEPTH} levels deep at byte {i}"
         ));
     }
-    let mut j = skip_ws(b, i + 3);
+    let mut j = skip_hws(b, i + 3);
     check_position(b, j, false).map_err(as_nquads_err)?;
     let k = span_term(b, j)?;
-    j = skip_ws(b, k);
+    j = skip_hws(b, k);
     check_position(b, j, true).map_err(as_nquads_err)?;
     let k = span_term(b, j)?;
-    j = skip_ws(b, k);
+    j = skip_hws(b, k);
     let k = span_object_depth(b, j, depth + 1)?;
-    j = skip_ws(b, k);
+    j = skip_hws(b, k);
     if b.get(j) == Some(&b')') && b.get(j + 1) == Some(&b'>') && b.get(j + 2) == Some(&b'>') {
         Ok(j + 3)
     } else {
@@ -397,7 +397,7 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
                 sid
             }
         };
-        i = skip_ws(bytes, i);
+        i = skip_hws(bytes, i);
         // Predicate: same stack-buffer cache (predicates repeat even more than subjects).
         let p_start = i;
         let p = {
@@ -426,16 +426,16 @@ pub fn parse_chunk(bytes: &[u8], dict: &mut Dict) -> Result<Vec<[Id; 3]>, String
                 pid
             }
         };
-        i = skip_ws(bytes, i);
+        i = skip_hws(bytes, i);
         // [OPUS-4.8] (sq-hxgb) Only the OBJECT position may be an RDF 1.2 triple term
         // `<<( s p o )>>` (matching the Turtle loader / RDF 1.2 grammar — triple terms
         // are object-only and may nest through their own object).
         let (o, j) = object_term(bytes, i, dict)?;
-        i = skip_ws(bytes, j);
+        i = skip_hws(bytes, j);
         if i >= n || bytes[i] != b'.' {
             return Err(format!("N-Triples: expected '.' at byte {}", i));
         }
-        i += 1;
+        i = end_of_statement(bytes, i + 1)?;
         out.push([s, p, o]);
     }
     Ok(out)
@@ -623,15 +623,15 @@ fn triple_term(b: &[u8], i: usize, dict: &mut Dict, depth: usize) -> Result<(Id,
         ));
     }
     // Skip the `<<(` opener.
-    let mut j = skip_ws(b, i + 3);
+    let mut j = skip_hws(b, i + 3);
     check_position(b, j, false)?;
     let (s, k) = term(b, j, dict)?;
-    j = skip_ws(b, k);
+    j = skip_hws(b, k);
     check_position(b, j, true)?;
     let (p, k) = term(b, j, dict)?;
-    j = skip_ws(b, k);
+    j = skip_hws(b, k);
     let (o, k) = object_term_depth(b, j, dict, depth + 1)?;
-    j = skip_ws(b, k);
+    j = skip_hws(b, k);
     // Closer `)>>`.
     if b.get(j) == Some(&b')') && b.get(j + 1) == Some(&b'>') && b.get(j + 2) == Some(&b'>') {
         Ok((dict.intern_triple_ids([s, p, o]), j + 3))
@@ -646,8 +646,12 @@ fn triple_term(b: &[u8], i: usize, dict: &mut Dict, depth: usize) -> Result<(Id,
 #[inline]
 fn check_position(b: &[u8], i: usize, predicate: bool) -> Result<(), String> {
     match b.get(i) {
-        Some(b'"') => Err(format!("N-Triples: a literal cannot be a subject or predicate, at byte {i}")),
-        Some(b'_') if predicate => Err(format!("N-Triples: a blank node cannot be a predicate, at byte {i}")),
+        Some(b'"') => Err(format!(
+            "N-Triples: a literal cannot be a subject or predicate, at byte {i}"
+        )),
+        Some(b'_') if predicate => Err(format!(
+            "N-Triples: a blank node cannot be a predicate, at byte {i}"
+        )),
         _ => Ok(()),
     }
 }
@@ -659,27 +663,37 @@ fn version_directive(b: &[u8], i: usize) -> Result<usize, String> {
     if !b[i..].starts_with(b"VERSION") {
         return Err(format!("N-Triples: unexpected term start at byte {i}"));
     }
-    // Statements are separated by EOL: only spaces/tabs may precede VERSION on its line.
-    // (A chunk always starts at a line start: the splitter cuts after `\n`.)
-    let line_start = b[..i].iter().rev().find(|&&c| c != b' ' && c != b'\t');
-    if !matches!(line_start, None | Some(b'\n' | b'\r')) {
-        return Err(format!("N-Triples: VERSION directive must start its line, at byte {i}"));
-    }
+    // No line-start check is needed: every statement ends through [`end_of_statement`], and a
+    // chunk always starts at a line start (the splitter cuts after `\n`).
     let mut j = i + 7;
     while matches!(b.get(j), Some(b' ' | b'\t')) {
         j += 1;
     }
     if b.get(j) != Some(&b'"') {
-        return Err(format!("N-Triples: VERSION needs a quoted version string at byte {j}"));
+        return Err(format!(
+            "N-Triples: VERSION needs a quoted version string at byte {j}"
+        ));
     }
     // The value is ignored, but it goes through the same lexer as a literal's.
-    let (_value, mut j) = lex_string(b, j)?;
-    while matches!(b.get(j), Some(b' ' | b'\t')) {
-        j += 1;
+    let (_value, j) = lex_string(b, j)?;
+    end_of_statement(b, j)
+}
+
+/// THE end of every statement and directive (triple, quad, `VERSION`), called right after its
+/// terminator on both entry points: statements are separated by `EOL`, so only spaces/tabs and
+/// an optional comment may follow before a line break or the end of input. Returns the index of
+/// that line break (or `b.len()`).
+#[inline]
+fn end_of_statement(b: &[u8], i: usize) -> Result<usize, String> {
+    let mut j = skip_hws(b, i);
+    if b.get(j) == Some(&b'#') {
+        j = next_line(b, j);
     }
     match b.get(j) {
-        None | Some(b'\n' | b'\r' | b'#') => Ok(j),
-        _ => Err(format!("N-Triples: VERSION directive must end its line, at byte {j}")),
+        None | Some(b'\n' | b'\r') => Ok(j),
+        _ => Err(format!(
+            "N-Triples: expected end of line after statement, at byte {j}"
+        )),
     }
 }
 
@@ -1104,15 +1118,167 @@ mod tests {
         }
     }
 
+    /// Every statement form against every separator that can follow its terminator, on both
+    /// fast entry points and the serial parser: statements are separated by `EOL`, so after `.`
+    /// (or a `VERSION` string) only spaces/tabs and a comment may come before a line break or
+    /// EOF, and no line break may fall between the terms of a statement.
+    #[test]
+    fn statement_terminator_and_separator_table() {
+        // (statement, is a quad, is a VERSION directive)
+        let forms: &[(&str, bool, bool)] = &[
+            ("<urn:s> <urn:p> <urn:o> .", false, false),
+            ("<urn:s> <urn:p> <urn:o>.", false, false),
+            ("<urn:s> <urn:p> _:o .", false, false),
+            ("<urn:s> <urn:p> _:o.", false, false),
+            ("_:s <urn:p> \"x\" .", false, false),
+            ("<urn:s> <urn:p> \"x\"@en .", false, false),
+            ("<urn:s> <urn:p> \"x\"^^<urn:dt>.", false, false),
+            (
+                "<urn:s> <urn:p> <<( <urn:a> <urn:b> <urn:c> )>> .",
+                false,
+                false,
+            ),
+            ("<urn:s> <urn:p> <urn:o> <urn:g> .", true, false),
+            ("<urn:s> <urn:p> <urn:o> _:g.", true, false),
+            ("VERSION \"1.2\"", false, true),
+        ];
+        // (separator, accepted). `next` is a full second statement on its own line, so
+        // `sep + next` either keeps the first statement alone on its line or does not.
+        let next = "<urn:s2> <urn:p2> <urn:o2> .\n";
+        let seps: &[(&str, bool)] = &[
+            ("\n", true),
+            ("\r\n", true),
+            ("\r", true),
+            ("\n\n", true),
+            (" \t\n", true),
+            ("#c\n", true),
+            (" # c\n", true),
+            ("\t#c\r", true),
+            ("", false),
+            (" ", false),
+            ("\t", false),
+            (" _:b <urn:p> <urn:o> .\n", false),
+            ("_:b <urn:p> <urn:o> .\n", false),
+            (" \"x\" .\n", false),
+            (" . \n", false),
+            (" VERSION \"1.2\"\n", false),
+            ("VERSION \"1.2\"\n", false),
+        ];
+        // EOF straight after the statement, with optional trailing WS/comment.
+        let eofs = ["", " ", "\t", "#c", " # c"];
+
+        let fast_nt = |doc: &str| {
+            parse_chunk(doc.as_bytes(), &mut Dict::new())
+                .map(|t| t.len())
+                .ok()
+        };
+        #[cfg(feature = "parallel")]
+        let fast_nq = |doc: &str| {
+            parse_quads_chunk(doc.as_bytes())
+                .map(|b| b.iter().map(|(_, _, t)| t.len()).sum::<usize>())
+                .ok()
+        };
+        let serial_nt = |doc: &str| {
+            oxttl::NTriplesParser::new()
+                .for_slice(doc.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .map(|v| v.len())
+                .ok()
+        };
+        let serial_nq = |doc: &str| {
+            oxttl::NQuadsParser::new()
+                .for_slice(doc.as_bytes())
+                .collect::<Result<Vec<_>, _>>()
+                .map(|v| v.len())
+                .ok()
+        };
+        let check = |doc: &str, quad: bool, version: bool, n_ok: Option<usize>| {
+            let nt_expect = if quad { None } else { n_ok };
+            assert_eq!(fast_nt(doc), nt_expect, "parse_chunk on {doc:?}");
+            #[cfg(feature = "parallel")]
+            assert_eq!(fast_nq(doc), n_ok, "parse_quads_chunk on {doc:?}");
+            // The serial parser predates `VERSION`; it must agree on every other form.
+            if !version {
+                assert_eq!(serial_nt(doc), nt_expect, "serial N-Triples on {doc:?}");
+                assert_eq!(serial_nq(doc), n_ok, "serial N-Quads on {doc:?}");
+            }
+        };
+        for &(form, quad, version) in forms {
+            let first = usize::from(!version);
+            for &(sep, ok) in seps {
+                let doc = format!("{form}{sep}{next}");
+                let n = if ok { Some(first + 1) } else { None };
+                // A separator carrying `VERSION` is outside the serial parser's grammar.
+                check(&doc, quad, version || sep.contains("VERSION"), n);
+            }
+            for eof in eofs {
+                check(&format!("{form}{eof}"), quad, version, Some(first));
+            }
+        }
+
+        // No line break between the terms of a statement (or inside a triple term), from any
+        // entry point; spaces and tabs are fine there.
+        let split: &[(&str, bool)] = &[
+            ("<urn:s>\t<urn:p>  <urn:o>\t.\n", true),
+            (
+                "<urn:s> <urn:p> <<(\t<urn:a>\t<urn:b>  <urn:c> )>>\t.\n",
+                true,
+            ),
+            ("<urn:s>\n<urn:p> <urn:o> .\n", false),
+            ("<urn:s> <urn:p>\n<urn:o> .\n", false),
+            ("<urn:s> <urn:p> <urn:o>\n.\n", false),
+            ("<urn:s>\r<urn:p> <urn:o> .\n", false),
+            ("<urn:s> <urn:p>\r\n<urn:o> .\n", false),
+            ("_:s\n<urn:p> <urn:o> .\n", false),
+            ("<urn:s> <urn:p> \"x\"\n.\n", false),
+            ("<urn:s> <urn:p> \"x\"\n@en .\n", false),
+            (
+                "<urn:s> <urn:p> <<(\n<urn:a> <urn:b> <urn:c> )>> .\n",
+                false,
+            ),
+            (
+                "<urn:s> <urn:p> <<( <urn:a> <urn:b> <urn:c>\n)>> .\n",
+                false,
+            ),
+        ];
+        for &(doc, ok) in split {
+            check(doc, false, false, ok.then_some(1));
+        }
+        let quad_split = [
+            "<urn:s> <urn:p> <urn:o>\n<urn:g> .\n",
+            "<urn:s> <urn:p> <urn:o> <urn:g>\n.\n",
+        ];
+        for doc in quad_split {
+            check(doc, true, false, None);
+        }
+        check("VERSION\n\"1.2\"\n", false, true, None);
+    }
+
     /// The W3C grammar's character classes, transcribed independently of the parser
     /// (RDF 1.2 N-Triples `PN_CHARS_BASE`, `PN_CHARS_U`, `PN_CHARS`).
     const PN_CHARS_BASE_RANGES: &[(u32, u32)] = &[
-        (0x41, 0x5A), (0x61, 0x7A), (0xC0, 0xD6), (0xD8, 0xF6), (0xF8, 0x2FF), (0x370, 0x37D),
-        (0x37F, 0x1FFF), (0x200C, 0x200D), (0x2070, 0x218F), (0x2C00, 0x2FEF), (0x3001, 0xD7FF),
-        (0xF900, 0xFDCF), (0xFDF0, 0xFFFD), (0x10000, 0xEFFFF),
+        (0x41, 0x5A),
+        (0x61, 0x7A),
+        (0xC0, 0xD6),
+        (0xD8, 0xF6),
+        (0xF8, 0x2FF),
+        (0x370, 0x37D),
+        (0x37F, 0x1FFF),
+        (0x200C, 0x200D),
+        (0x2070, 0x218F),
+        (0x2C00, 0x2FEF),
+        (0x3001, 0xD7FF),
+        (0xF900, 0xFDCF),
+        (0xFDF0, 0xFFFD),
+        (0x10000, 0xEFFFF),
     ];
-    const PN_CHARS_EXTRA_RANGES: &[(u32, u32)] =
-        &[(0x2D, 0x2D), (0x30, 0x39), (0xB7, 0xB7), (0x300, 0x36F), (0x203F, 0x2040)];
+    const PN_CHARS_EXTRA_RANGES: &[(u32, u32)] = &[
+        (0x2D, 0x2D),
+        (0x30, 0x39),
+        (0xB7, 0xB7),
+        (0x300, 0x36F),
+        (0x203F, 0x2040),
+    ];
     fn in_ranges(c: u32, r: &[(u32, u32)]) -> bool {
         r.iter().any(|&(lo, hi)| (lo..=hi).contains(&c))
     }
