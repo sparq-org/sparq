@@ -297,8 +297,8 @@ What the server exposes, all discoverable from the storage description
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
   anything is removed. When putting back fails too, it is tried a few more times with the
-  resource's locks held; if it still fails the request ends with `5xx` and the resources are
-  **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
+  resource's locks held; if it still fails the request ends with `5xx` and the resources
+  (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
   the half-done state in between. A create whose store reply was lost is removed whole the same
   way. The set-aside state lives in the process (a crash mid-way is not covered). A container

@@ -771,11 +771,14 @@ impl Undo {
         }
     }
 
-    /// The resource this change is to.
-    fn iri(&self) -> &str {
+    /// The resources this change is to: a member's container too, when its listing changes.
+    fn iris(&self) -> Vec<&str> {
         match self {
-            Undo::Restore { key, .. } => key.strip_suffix(META_SUFFIX).unwrap_or(key),
-            Undo::Recreate { iri, .. } | Undo::Remove { iri, .. } => iri,
+            Undo::Restore { key, .. } => vec![key.strip_suffix(META_SUFFIX).unwrap_or(key)],
+            Undo::Recreate { iri, parent, .. } => std::iter::once(iri.as_str())
+                .chain(parent.as_deref())
+                .collect(),
+            Undo::Remove { iri, parent } => vec![iri, parent],
         }
     }
 }
@@ -787,7 +790,12 @@ pub(crate) struct Unsettled(Vec<Undo>);
 impl Unsettled {
     /// The resources it is to, each once.
     fn iris(&self) -> Vec<String> {
-        let mut iris: Vec<String> = self.0.iter().map(|u| u.iri().to_string()).collect();
+        let mut iris: Vec<String> = self
+            .0
+            .iter()
+            .flat_map(Undo::iris)
+            .map(str::to_string)
+            .collect();
         iris.sort();
         iris.dedup();
         iris

@@ -5437,8 +5437,10 @@ mod tests {
         }
         let r = handle(&st, &req(Method::GET, "/kept.txt.meta", &[], ""), &owner).await;
         assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
-        // Nobody else takes its lock while it is set aside.
+        // Nobody else takes its lock while it is set aside, and its container, whose listing
+        // may show it, is set aside with it.
         assert!(st.locks.try_lock(&kept).is_none());
+        assert!(st.is_set_aside(&st.cfg.storage()));
         *store.fail_delete_of.lock().unwrap() = None;
         for _ in 0..100 {
             if !st.is_set_aside(&kept) {
