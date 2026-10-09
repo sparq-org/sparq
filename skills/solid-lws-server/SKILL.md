@@ -273,17 +273,22 @@ What the server exposes, all discoverable from the storage description
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
   `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
-  lines counts every line, and one that cannot be read gets `412`. A `POST` whose name is taken (or is being created,
+  lines counts every line; an entity-tag list that cannot be read by the RFC 9110 grammar gets
+  `412` (a comma inside a quoted tag is part of the tag), and a date that is not one valid
+  HTTP-date is ignored. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
   patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
   full serialized size (keys and separators as well as values). A JSON Patch may hold at most
   1,000 operations, and the bytes its operations copy, move, add, replace or test are charged
   against a work budget of four times the body limit; past either it gets `413`. A `POST`
-  whose request is cancelled after the member is written is still announced. `livez` and `readyz` are never
+  whose request is cancelled after the member is written is still announced; a `DELETE` that
+  fails, and is being put back, announces nothing. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
   `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
-  body limit as it will be served, with the server-managed links put back. JSON Patch paths are
+  body limit as it will be served, with the server-managed links put back. Its relative `anchor`
+  and `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
+  absolute, and one that is not a URI reference gets `422`. JSON Patch paths are
   RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
   (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.
@@ -319,10 +324,12 @@ What the server exposes, all discoverable from the storage description
   has not expired, and that the subscriber may still read the resource. A Delete is checked against
   the resource as it was before removal. A delivery that fails a check is dropped.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
-  `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and
-  put it all back when a later step fails, so content, metadata and listings are as they were. A
-  delete too large to put back is refused with `409`. When putting back fails too, the resource
-  is left **fail-closed**: only the owner and its creator may act on it until a write completes.
+  `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
+  all back when a later step fails, so content, metadata, listings and validators (`ETag`,
+  `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
+  anything is removed. When putting back fails too, the resource is left **fail-closed**: only
+  the owner and its creator may act on it until a write completes, and what could not be put
+  back is kept and retried in the background, unless a later write or create replaces it first.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
@@ -341,7 +348,8 @@ What the server exposes, all discoverable from the storage description
   A QUERY's filter is always its body; the `q` parameter only carries it on the `GET` page
   links. Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
   any listing, permission check or metadata read fails, the whole index fails with one
-  generic `500` that names no resource.
+  generic `500` that names no resource. Both carry an `ETag` of what they serve and
+  answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,

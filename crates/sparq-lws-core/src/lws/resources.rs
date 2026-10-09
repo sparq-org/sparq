@@ -72,9 +72,6 @@ async fn handle_now<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    if let Some(refused) = refuse_encoded(req) {
-        return refused;
-    }
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         let uri = state.cfg.absolute(stem);
@@ -222,27 +219,93 @@ fn quoted(tag: &str) -> String {
     }
 }
 
-/// Whether an If-Match / If-None-Match list matches `etag`. `weak` compares opaque tags only.
-fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
-    let strip = |t: &str| t.trim().trim_start_matches("W/").to_string();
-    header.split(',').map(str::trim).any(|t| {
-        if t == "*" {
-            return true;
-        }
-        if weak {
-            strip(t) == strip(etag)
-        } else {
-            !t.starts_with("W/") && !etag.starts_with("W/") && t == etag
-        }
-    })
+/// An `If-Match` / `If-None-Match` field value: `*`, or entity tags as `(weak, opaque-tag)`, the
+/// opaque tag with its quotes.
+enum TagList {
+    Any,
+    Tags(Vec<(bool, String)>),
 }
 
-/// A body sent with a content coding other than `identity` is refused (`415`, with
+impl TagList {
+    /// Parse a field value by the RFC 9110 grammar (`"*" / #entity-tag`, section 8.8.3): a comma
+    /// inside a quoted tag belongs to the tag, and `*` is the whole value or not a wildcard.
+    /// Anything else is unreadable.
+    fn parse(v: &str) -> Result<Self, ()> {
+        if v.trim() == "*" {
+            return Ok(Self::Any);
+        }
+        let b = v.as_bytes();
+        let mut i = 0;
+        let mut tags = Vec::new();
+        loop {
+            while i < b.len() && matches!(b[i], b' ' | b'\t' | b',') {
+                i += 1;
+            }
+            if i == b.len() {
+                break;
+            }
+            let weak = b[i..].starts_with(b"W/");
+            if weak {
+                i += 2;
+            }
+            if b.get(i) != Some(&b'"') {
+                return Err(());
+            }
+            let start = i;
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if !(b[i] == 0x21 || (0x23..=0x7e).contains(&b[i]) || b[i] >= 0x80) {
+                    return Err(());
+                }
+                i += 1;
+            }
+            if i == b.len() {
+                return Err(());
+            }
+            i += 1;
+            tags.push((weak, v[start..i].to_string()));
+            while i < b.len() && matches!(b[i], b' ' | b'\t') {
+                i += 1;
+            }
+            if i < b.len() && b[i] != b',' {
+                return Err(());
+            }
+        }
+        if tags.is_empty() {
+            return Err(());
+        }
+        Ok(Self::Tags(tags))
+    }
+
+    /// Whether the list matches `etag` (the server's own, quoted). `weak` compares opaque tags
+    /// only (RFC 9110 section 8.8.3.2).
+    fn matches(&self, etag: &str, weak: bool) -> bool {
+        let (etag_weak, opaque) = match etag.strip_prefix("W/") {
+            Some(o) => (true, o),
+            None => (false, etag),
+        };
+        match self {
+            Self::Any => true,
+            Self::Tags(tags) => tags
+                .iter()
+                .any(|(w, t)| t == opaque && (weak || (!w && !etag_weak))),
+        }
+    }
+}
+
+#[cfg(test)]
+fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
+    TagList::parse(header).is_ok_and(|l| l.matches(etag, weak))
+}
+
+/// A body (of POST, PUT, PATCH or QUERY) sent with a content coding other than `identity` is refused (`415`, with
 /// `Accept-Encoding: identity`, RFC 9110 section 15.5.16) before anything reads it: the server
 /// does not decode bodies, and storing the coded bytes as the representation would drop the
 /// coding.
-fn refuse_encoded(req: &LwsRequest) -> Option<Response> {
-    if !matches!(req.method, Method::POST | Method::PUT | Method::PATCH) {
+pub(crate) fn refuse_encoded(req: &LwsRequest) -> Option<Response> {
+    if !matches!(req.method, Method::POST | Method::PUT | Method::PATCH)
+        && req.method.as_str() != "QUERY"
+    {
         return None;
     }
     let codings = req.header_all(header::CONTENT_ENCODING);
@@ -286,9 +349,10 @@ pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
 }
 
 /// Preconditions are read once, here, from every field line: a list header (`If-Match`,
-/// `If-None-Match`) sent as several lines is all of them, not the first. A precondition that
-/// cannot be read (not visible ASCII, or a date header sent twice) fails the request rather than
-/// being skipped.
+/// `If-None-Match`) sent as several lines is all of them, not the first. An entity-tag list that
+/// cannot be read (not visible ASCII, or not the RFC 9110 grammar) fails the request rather than
+/// being skipped; a date that is not one valid HTTP-date (unparsable, or sent twice) is ignored,
+/// as RFC 9110 sections 13.1.3 and 13.1.4 require.
 fn evaluate(
     headers: &HeaderMap,
     etag: Option<&str>,
@@ -298,8 +362,8 @@ fn evaluate(
     let Ok(pre) = Preconditions::read(headers) else {
         return Precondition::Failed;
     };
-    if let Some(im) = pre.if_match.as_deref() {
-        if !etag.is_some_and(|e| etag_listed(im, e, false)) {
+    if let Some(im) = pre.if_match.as_ref() {
+        if !etag.is_some_and(|e| im.matches(e, false)) {
             return Precondition::Failed;
         }
     } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
@@ -307,8 +371,8 @@ fn evaluate(
             return Precondition::Failed;
         }
     }
-    if let Some(inm) = pre.if_none_match.as_deref() {
-        if etag.is_some_and(|e| etag_listed(inm, e, true)) {
+    if let Some(inm) = pre.if_none_match.as_ref() {
+        if etag.is_some_and(|e| inm.matches(e, true)) {
             return if read {
                 Precondition::NotModified
             } else {
@@ -328,30 +392,31 @@ fn evaluate(
 
 /// A request's preconditions, every field line of each read.
 struct Preconditions {
-    if_match: Option<String>,
-    if_none_match: Option<String>,
+    if_match: Option<TagList>,
+    if_none_match: Option<TagList>,
     if_unmodified_since: Option<u64>,
     if_modified_since: Option<u64>,
 }
 
 impl Preconditions {
     fn read(headers: &HeaderMap) -> Result<Self, ()> {
-        let list = |n: header::HeaderName| -> Result<Option<String>, ()> {
+        let list = |n: header::HeaderName| -> Result<Option<TagList>, ()> {
             let lines = headers
                 .get_all(n)
                 .iter()
                 .map(|v| v.to_str().map_err(drop))
                 .collect::<Result<Vec<_>, ()>>()?;
-            Ok((!lines.is_empty()).then(|| lines.join(", ")))
+            if lines.is_empty() {
+                return Ok(None);
+            }
+            TagList::parse(&lines.join(", ")).map(Some)
         };
         let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
             let mut lines = headers.get_all(n).iter();
-            match (lines.next(), lines.next()) {
-                (None, _) => Ok(None),
-                // An unparsable date is ignored (RFC 9110 sections 13.1.3 and 13.1.4).
-                (Some(v), None) => Ok(parse_http_date(v.to_str().ok())),
-                (Some(_), Some(_)) => Err(()),
-            }
+            Ok(match (lines.next(), lines.next()) {
+                (Some(v), None) => parse_http_date(v.to_str().ok()),
+                _ => None,
+            })
         };
         Ok(Self {
             if_match: list(header::IF_MATCH)?,
@@ -2633,7 +2698,7 @@ async fn delete<S: Store + 'static>(
         }
     }
     // Who hears of each removal is decided before the resources go, while who may read each can
-    // still be decided; the notifications go out only for removals that happened. A recursive
+    // still be decided; the notifications go out only once the whole removal happened. A recursive
     // delete removes every descendant, and each removal is a Delete of its own.
     let mut notices = Vec::with_capacity(doomed.len());
     // They share the delivery queue's bound: what is prepared past it would be dropped when
@@ -2656,8 +2721,13 @@ async fn delete<S: Store + 'static>(
         let state = state.clone();
         async move {
             let (removed, outcome) = remove(&state, &doomed).await;
-            for pending in notices.into_iter().take(removed) {
-                state.notify.send(&state, pending);
+            // Only a delete that happened whole is announced. One that failed is being put back
+            // (what could not be put back at once is retried), so nothing it touched is
+            // announced as gone.
+            if outcome.is_ok() {
+                for pending in notices {
+                    state.notify.send(&state, pending);
+                }
             }
             (removed, outcome, state)
         }
@@ -2670,8 +2740,8 @@ async fn delete<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     listing.take();
-    // A removal that was put back changed nothing; one that could not be is counted in `removed`.
-    if removed > 0 {
+    // A removal that was put back changed nothing; what could not be is in `removed`.
+    if !removed.is_empty() {
         if let Some(p) = parent {
             touch_container(state, &p).await;
         }
@@ -2746,14 +2816,34 @@ async fn lock_subtree<S: Store + 'static>(
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
 /// metadata (which says who may act on it, so it goes only once the resource has), through one
 /// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
-/// removal before it is put back. Returns how many of `doomed` are gone (all of them, or none
-/// unless putting back failed too), and the outcome. A subtree too large to put back is refused
-/// (409) the same way.
+/// removal before it is put back. Returns which of `doomed` are gone (all of them, or none
+/// unless putting back failed too, when each removed before the failure is looked up again: what
+/// was put back before the rollback stopped is not gone), and the outcome. A subtree too large to
+/// put back is refused (409) the same way.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
-) -> (usize, Result<(), ServerError>) {
-    let mut journal = state.journal();
+) -> (Vec<String>, Result<(), ServerError>) {
+    remove_in(state, state.journal(), doomed).await
+}
+
+/// [`remove`], recorded in `journal`.
+async fn remove_in<S: Store + 'static>(
+    state: &LwsState<S>,
+    mut journal: super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> (Vec<String>, Result<(), ServerError>) {
+    // Everything the removal could need to put back is read first: a subtree too large to
+    // remove atomically is refused before any of it is removed.
+    for (node, _) in doomed {
+        let staged = match journal.stage(node).await {
+            Ok(()) => journal.stage(&meta_key(node)).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = staged {
+            return (Vec::new(), Err(e));
+        }
+    }
     let mut failed = None;
     for (i, (node, parent)) in doomed.iter().enumerate() {
         // The record and its parent's membership edge go in one step, data resources included:
@@ -2763,7 +2853,7 @@ async fn remove<S: Store + 'static>(
             Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
                 "the container gained a member while it was deleted".into(),
             )),
-            Ok(_) => journal.delete(&meta_key(node)).await,
+            Ok(_) => journal.delete_meta(node).await,
             Err(e) => Err(e),
         };
         if let Err(e) = removed {
@@ -2774,12 +2864,21 @@ async fn remove<S: Store + 'static>(
     match failed {
         None => {
             journal.commit();
-            (doomed.len(), Ok(()))
+            (doomed.iter().map(|(n, _)| n.clone()).collect(), Ok(()))
         }
         Some((i, e)) => match journal.rollback().await {
-            Ok(()) => (0, Err(e)),
-            // Something may be gone: report it so the container is touched.
-            Err(_) => (i.max(1), Err(e)),
+            Ok(()) => (Vec::new(), Err(e)),
+            // Some may be gone: each one the steps reached is looked up again. One whose lookup
+            // fails too counts as gone, so its container is not left looking unchanged.
+            Err(_) => {
+                let mut gone = Vec::new();
+                for (node, _) in &doomed[..=i] {
+                    if !matches!(state.store.exists(node).await, Ok(true)) {
+                        gone.push(node.clone());
+                    }
+                }
+                (gone, Err(e))
+            }
         },
     }
 }
@@ -2791,12 +2890,42 @@ async fn remove<S: Store + 'static>(
 /// server restrict `up`; `self` carries the representation's format, size and modification time.
 const SERVER_MANAGED: &[&str] = &["up", "type", "self", "linkset"];
 
-/// Whether a linkset entry is about `uri` (its anchor, resolved against `uri`).
+/// Whether a linkset entry is about `uri`. Anchors are absolute: every document the server keeps
+/// was resolved by [`absolute_linkset`] (or built with absolute anchors).
 fn anchored_at(entry: &Value, uri: &str) -> bool {
-    entry
-        .get("anchor")
-        .and_then(Value::as_str)
-        .is_some_and(|a| a == uri || resolve_against(uri, a) == uri)
+    entry.get("anchor").and_then(Value::as_str) == Some(uri)
+}
+
+/// A linkset document with every `anchor` and `href` resolved against `base`, the linkset's own
+/// URI (RFC 9264 section 4: the context of relative references in a linkset is the resource that
+/// delivers it, not the resource it describes). `None` when one is not a URI reference
+/// (RFC 3986), which the document may not hold.
+fn absolute_linkset(doc: &Value, base: &str) -> Option<Value> {
+    let base = oxiri::Iri::parse(base).ok()?;
+    let resolve = |v: &Value| -> Option<Value> {
+        Some(Value::String(base.resolve(v.as_str()?).ok()?.into_inner()))
+    };
+    let mut entries = Vec::new();
+    for entry in doc.get("linkset")?.as_array()? {
+        let mut out = Map::new();
+        for (k, v) in entry.as_object()? {
+            let v = if k == "anchor" {
+                resolve(v)?
+            } else {
+                let mut targets = Vec::new();
+                for t in v.as_array()? {
+                    let mut t = t.as_object()?.clone();
+                    let href = resolve(t.get("href")?)?;
+                    t.insert("href".into(), href);
+                    targets.push(Value::Object(t));
+                }
+                Value::Array(targets)
+            };
+            out.insert(k.clone(), v);
+        }
+        entries.push(Value::Object(out));
+    }
+    Some(json!({"linkset": entries}))
 }
 
 /// The user-managed part of a linkset document: every server-managed relation dropped from the
@@ -3050,6 +3179,14 @@ async fn linkset<S: Store + 'static>(
                     Some("the result is not a linkset document"),
                 );
             }
+            // Relative references are resolved once, here, against the linkset's own URI: what
+            // is stored, served and indexed is then the same absolute link.
+            let Some(patched) = absolute_linkset(&patched, &format!("{uri}{META_SUFFIX}")) else {
+                return problem(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    Some("an anchor or href is not a URI reference"),
+                );
+            };
             // Only the user-managed part is kept; the links the type index matches are taken from
             // it, so the two never drift apart.
             let user = user_linkset(&patched, uri);
@@ -3364,6 +3501,12 @@ mod tests {
         assert!(!etag_listed("W/\"b\"", "\"b\"", false));
         assert!(etag_listed("W/\"b\"", "\"b\"", true));
         assert!(etag_listed("*", "\"x\"", false));
+        // A comma inside a tag is part of it, never a wildcard.
+        assert!(!etag_listed("\"x,*,y\"", "\"x\"", false));
+        assert!(etag_listed("\"x,*,y\"", "\"x,*,y\"", false));
+        assert!(!etag_listed("\"a\", *", "\"x\"", false));
+        assert!(!etag_listed("\"a", "\"a\"", false));
+        assert!(!etag_listed("a", "a", false));
     }
 
     // ---- request-level tests over an in-memory store ----
@@ -3673,21 +3816,78 @@ mod tests {
 
     #[test]
     fn user_linkset_strips_server_relations_of_the_anchor_only() {
-        let doc = json!({"linkset": [
-            {"anchor": "http://h/a", "up": [{"href": "x"}], "self": [{"href": "y"}], "license": [{"href": "l"}]},
-            {"anchor": "http://h/b", "up": [{"href": "z"}]},
-            {"anchor": "/a", "type": [{"href": "t"}]},
-        ]});
+        let doc = absolute_linkset(
+            &json!({"linkset": [
+                {"anchor": "http://h/a", "up": [{"href": "x"}], "self": [{"href": "y"}], "license": [{"href": "l"}]},
+                {"anchor": "http://h/b", "up": [{"href": "z"}]},
+                {"anchor": "/a", "type": [{"href": "t"}]},
+            ]}),
+            "http://h/a.meta",
+        )
+        .unwrap();
         assert_eq!(
             user_linkset(&doc, "http://h/a"),
             json!({"linkset": [
-                {"anchor": "http://h/a", "license": [{"href": "l"}]},
-                {"anchor": "http://h/b", "up": [{"href": "z"}]},
+                {"anchor": "http://h/a", "license": [{"href": "http://h/l"}]},
+                {"anchor": "http://h/b", "up": [{"href": "http://h/z"}]},
             ]})
         );
         let links = links_of(&doc, "http://h/a");
         assert_eq!(links.keys().collect::<Vec<_>>(), vec!["license"]);
         assert_eq!(links["license"], vec!["http://h/l".to_string()]);
+    }
+
+    /// Review finding: relative references in a patched linkset were resolved against the
+    /// resource, while clients resolve them against the linkset that delivers them (RFC 9264
+    /// section 4), and malformed references were kept and served.
+    #[tokio::test]
+    async fn linkset_references_resolve_against_the_linkset() {
+        let st = state().await;
+        let uri = post(&st, "doc", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let linkset = format!("{uri}{META_SUFFIX}");
+        let patch = json!({"linkset": [
+            {"anchor": uri, "license": [{"href": "#license"}]},
+            {"anchor": "", "author": [{"href": "https://ex.org/a"}]},
+        ]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", MERGE_PATCH)],
+            &patch.to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let entries = doc["linkset"].as_array().unwrap();
+        let about = |a: &str| entries.iter().find(|e| e["anchor"] == a).unwrap().clone();
+        // What is served and what the type index matches name the same link.
+        assert_eq!(
+            about(&uri)["license"][0]["href"],
+            format!("{linkset}#license")
+        );
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
+        // An empty anchor is the linkset itself, not the resource it describes.
+        assert_eq!(about(&linkset)["author"][0]["href"], "https://ex.org/a");
+        assert!(!m.links.contains_key("author"));
+        for bad in [
+            json!({"linkset": [{"anchor": "http://[", "license": [{"href": "https://ex.org/l"}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "%ZZ"}]}]}),
+        ] {
+            let r = call(
+                &st,
+                "PATCH",
+                &meta,
+                &[("content-type", MERGE_PATCH)],
+                &bad.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        }
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
     }
 
     /// Review finding: a PATCH with `Prefer: set-linkset` adds to a resource's links and types,
@@ -5280,13 +5480,18 @@ mod tests {
             call(&st, "GET", "/y", &[], "").await.status(),
             StatusCode::NOT_FOUND
         );
+        // Every route that takes a body, the token endpoint included.
+        let form = ("content-type", "application/x-www-form-urlencoded");
+        let h = [form, ("content-encoding", "gzip")];
+        let r = call(&st, "POST", super::super::AS_TOKEN_PATH, &h, "grant_type=x").await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
         let h = [text, ("content-encoding", "identity")];
         assert!(call(&st, "PUT", "/x", &h, "c").await.status().is_success());
     }
 
     /// Review finding: only the first field line of a conditional header was read, so a second
-    /// `If-None-Match: *` line let a write through. Every line counts now, and a precondition
-    /// that cannot be read fails the request.
+    /// `If-None-Match: *` line let a write through. Every line counts now, an entity-tag list
+    /// that cannot be read fails the request, and a date that is not one valid date is ignored.
     #[tokio::test]
     async fn every_line_of_a_precondition_counts() {
         let st = state().await;
@@ -5294,14 +5499,9 @@ mod tests {
         let r = call(&st, "POST", "/", &[("slug", "x"), text], "a").await;
         assert_eq!(r.status(), StatusCode::CREATED);
         let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
-        let since = "Thu, 01 Jan 2099 00:00:00 GMT";
         for refused in [
             &[("if-none-match", "\"other\""), ("if-none-match", "*")][..],
             &[("if-match", "\"other\""), ("if-match", "\"other2\"")][..],
-            &[
-                ("if-unmodified-since", since),
-                ("if-unmodified-since", since),
-            ][..],
             &[("if-match", "\"caf\u{e9}\"")][..],
             &[("if-none-match", "\"other\""), ("if-none-match", "\u{e9}")][..],
         ] {
@@ -5318,6 +5518,16 @@ mod tests {
         ];
         let r = call(&st, "GET", "/x", &lines, "").await;
         assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        // A date sent twice is not a valid HTTP-date, and is ignored (RFC 9110 section 13.1.4).
+        let past = "Thu, 01 Jan 1970 00:00:00 GMT";
+        let lines = [
+            ("if-unmodified-since", past),
+            ("if-unmodified-since", past),
+            text,
+        ];
+        let r = call(&st, "PUT", "/x", &lines, "b").await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
         let lines = [("if-match", "\"other\""), ("if-match", tag.as_str()), text];
         let r = call(&st, "PUT", "/x", &lines, "b").await;
         assert!(r.status().is_success(), "{}", r.status());
@@ -5935,16 +6145,13 @@ mod tests {
         assert_eq!(body_of(r).await, Bytes::from("public"));
         // When the content cannot be put back either, the new content is not served under the
         // old public type: the resource stays pending and the listing is not left unchanged.
-        // The steps: the pending mark, the content (its reply lost), then putting it back.
+        // The steps: the pending mark, the content (its reply lost), then putting it back,
+        // which fails until the store lets it.
         *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
-        *store.fail_step.lock().unwrap() = Some(2);
+        *store.fail_restore_of.lock().unwrap() = Some(uri.clone());
         let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
         assert!(r.status().is_server_error(), "{}", r.status());
         *store.fail_after_write_of.lock().unwrap() = None;
-        assert!(
-            store.fail_step.lock().unwrap().take().is_none(),
-            "the third step failed"
-        );
         assert_ne!(version().await, before);
         assert_eq!(
             st.store.read(&uri).await.unwrap().body,
@@ -5956,6 +6163,19 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         assert_eq!(handle(&st, &get, &owner).await.status(), StatusCode::OK);
+        // What could not be put back is not dropped: once the store lets it, the resource is
+        // back as it was, content first and then its metadata.
+        *store.fail_restore_of.lock().unwrap() = None;
+        for _ in 0..200 {
+            if !st.resource_meta(&uri).await.unwrap().pending {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!st.resource_meta(&uri).await.unwrap().pending);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public"));
         // A write that fails before it is sent still restores the old metadata.
         let r = handle(&st, &put(public, "public again"), &owner).await;
         assert!(r.status().is_success(), "{}", r.status());
@@ -6140,6 +6360,83 @@ mod tests {
             steps >= 3,
             "a PATCH that changes metadata took {steps} steps"
         );
+    }
+
+    /// Review finding: when putting a failed delete back failed too, the number of removals
+    /// attempted was reported as gone, so a resource put back before the rollback stopped was
+    /// counted (and announced) as deleted. Each one is looked up again.
+    #[tokio::test]
+    async fn a_failed_rollback_reports_only_what_is_gone() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        for slug in ["a", "b", "c"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let doomed: Vec<(String, Option<String>)> = ["a", "b", "c"]
+            .iter()
+            .map(|n| (format!("{root}{n}"), Some(root.clone())))
+            .collect();
+        // a and b go (two steps each), c fails; putting back restores b's metadata and b, then
+        // fails on a's metadata.
+        let before = st.store.meta(&doomed[0].0).await.unwrap().unwrap();
+        *store.fail_delete_of.lock().unwrap() = Some(doomed[2].0.clone());
+        *store.fail_step.lock().unwrap() = Some(7);
+        let (gone, outcome) = remove(&st, &doomed).await;
+        *store.fail_delete_of.lock().unwrap() = None;
+        assert!(
+            store.fail_step.lock().unwrap().take().is_none(),
+            "the rollback failed"
+        );
+        assert!(outcome.is_err());
+        assert_eq!(gone, vec![doomed[0].0.clone()]);
+        assert!(st.store.exists(&doomed[1].0).await.unwrap());
+        // What could not be put back then is not dropped: it comes back, as it was, once the
+        // store lets it.
+        let mut back = None;
+        for _ in 0..100 {
+            if let Ok(Some(m)) = st.store.meta(&doomed[0].0).await {
+                back = Some(m);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let back = back.expect("the removed member was never put back");
+        assert_eq!(
+            (back.etag, back.last_modified),
+            (before.etag, before.last_modified)
+        );
+        assert!(st.store.exists(&meta_key(&doomed[0].0)).await.unwrap());
+    }
+
+    /// Review finding: a recursive delete found out it was too large to undo only after removing
+    /// part of the tree. Everything it could need to put back is now read first.
+    #[tokio::test]
+    async fn a_delete_too_large_to_undo_removes_nothing() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        let mut doomed = Vec::new();
+        for slug in ["a", "b", "c"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+            doomed.push((format!("{root}{slug}"), Some(root.clone())));
+        }
+        // Room to put back two of the three, not all.
+        let mut journal = st.journal();
+        journal.limit = 2 * (doomed[0].0.len() + "x".len() + meta_key(&doomed[0].0).len()) + 1;
+        // Every store step is counted down: none may be taken.
+        *store.fail_step.lock().unwrap() = Some(1000);
+        let (gone, outcome) = remove_in(&st, journal, &doomed).await;
+        assert!(matches!(outcome, Err(ServerError::Conflict(_))));
+        assert!(gone.is_empty());
+        assert_eq!(*store.fail_step.lock().unwrap(), Some(1000));
+        for (node, _) in &doomed {
+            assert!(st.store.exists(node).await.unwrap());
+        }
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
