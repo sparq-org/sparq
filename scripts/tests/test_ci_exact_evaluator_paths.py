@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -15,12 +16,49 @@ BASE, HEAD = "a" * 40, "b" * 40
 EXACT_INPUTS = ["zk/sparql-evaluator/fixtures/case.json", "crates/sparq-engine/src/exec.rs",
                 "crates/sparq-core/Cargo.toml", "crates/sparq-substrate/src/lib.rs",
                 "crates/sparq-canon/src/lib.rs", "crates/sparq-canon/Cargo.toml",
-                "vendor/spargebra/src/parser.rs", ".cargo/config.toml", "Cargo.lock",
+                "vendor/spargebra/src/parser.rs", "vendor/spargebra-shim/Cargo.toml",
+                "crates/sparq-query-protocol/src/lib.rs", ".cargo/config.toml", "Cargo.lock",
                 "Cargo.toml", "rust-toolchain.toml", ".github/workflows/zk-exact-evaluator.yml",
                 "scripts/ci_exact_evaluator_paths.py", "scripts/ci_exact_evaluator_evidence.py",
                 "scripts/tests/test_ci_exact_evaluator_evidence.py", "vendor/zk-sdk/risc0-build/src/lib.rs",
                 "bench/zk-bindings/exact_ci.py", "bench/zk-bindings/corpus.py",
                 "bench/zk-bindings/exact-originals.json", "crates/sparq-conformance/examples/proof_corpus.rs"]
+
+
+ROOT = Path(__file__).resolve().parents[2]
+EVALUATOR = ROOT / "zk/sparql-evaluator"
+
+
+def _path_deps(manifest: Path, data: dict):
+    """Yield every `path =` dependency directory declared in one manifest."""
+    tables = [data.get(k, {}) for k in ("dependencies", "dev-dependencies", "build-dependencies")]
+    tables += [t.get(k, {}) for t in data.get("target", {}).values()
+               for k in ("dependencies", "dev-dependencies", "build-dependencies")]
+    tables.append(data.get("workspace", {}).get("dependencies", {}))
+    tables += list(data.get("patch", {}).values())
+    for table in tables:
+        for spec in table.values():
+            if isinstance(spec, dict) and "path" in spec:
+                yield (manifest.parent / spec["path"]).resolve()
+
+
+def evaluator_path_closure():
+    """Every local crate the evaluator workspace and both guest workspaces can build."""
+    seeds = [EVALUATOR, *(EVALUATOR / m for m in ("model", "host", "methods")),
+             *(EVALUATOR / "methods" / g for g in ("guest", "guest-authrdf"))]
+    seen, todo = set(), [d.resolve() for d in seeds]
+    while todo:
+        crate = todo.pop()
+        if crate in seen:
+            continue
+        seen.add(crate)
+        manifest = crate / "Cargo.toml"
+        data = tomllib.loads(manifest.read_text())
+        todo += [crate / m for m in data.get("workspace", {}).get("members", [])]
+        todo += [crate / m for m in data.get("package", {}).get("metadata", {})
+                 .get("risc0", {}).get("methods", [])]
+        todo += list(_path_deps(manifest, data))
+    return seen
 
 
 def completed(stdout=b""):
@@ -40,6 +78,15 @@ class ExactEvaluatorSelection(unittest.TestCase):
     def test_every_execution_input_is_relevant(self):
         for path in EXACT_INPUTS:
             self.assertTrue(selector.relevant_path(path), path)
+
+    def test_every_local_crate_in_the_evaluator_closure_is_relevant(self):
+        # A hand list drifts: derive the evaluator's local crate closure from its manifests.
+        closure = evaluator_path_closure()
+        self.assertIn((ROOT / "vendor/spargebra-shim").resolve(), closure)
+        self.assertIn((ROOT / "crates/sparq-query-protocol").resolve(), closure)
+        missing = sorted(str(c.relative_to(ROOT)) for c in closure
+                         if not selector.relevant_path(f"{c.relative_to(ROOT).as_posix()}/Cargo.toml"))
+        self.assertEqual(missing, [], "evaluator inputs missing from EXACT_PREFIXES")
 
     def test_unknown_scope_is_an_error_not_a_skip(self):
         # An empty diff never consults relevant_path, so the scope is checked first.
