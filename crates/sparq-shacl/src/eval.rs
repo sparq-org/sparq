@@ -10,8 +10,9 @@ use crate::sparql::{ComponentResultFields, PreparedValidator};
 use crate::view::GraphView;
 use oxrdf::{Literal, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
-use sparq_core::dict::{is_inline, is_literal_id, split_lang_dir, Id, TermParts};
+use sparq_core::dict::{is_inline, split_lang_dir, Id, TermParts};
 use sparq_core::Graph;
+use sparq_core::temporal::ExactTemporal;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::rc::Rc;
@@ -630,41 +631,17 @@ impl<'a> Validator<'a> {
         id
     }
 
-    /// Id twin of the `sh:hasValue` membership check: does any id in `ids`
-    /// denote a term SHACL-equal ([`equal_value`]) to `t`? Exact term equality
-    /// is id equality (the dictionary is injective; a `t` absent from the
-    /// dictionary can exactly-equal no data id); value equality (SPARQL `=`
-    /// families) only relates LITERALS, so only literal ids materialise — and
-    /// only when `t` is itself a literal.
+    /// Id twin of the `sh:hasValue` membership check: does any id in `ids` denote `t`?
+    /// SHACL membership is RDF-term equality, which is id equality (the dictionary is
+    /// injective; a `t` absent from the dictionary equals no data id).
     fn equal_value_ids(&mut self, ids: &[Id], t: &Term) -> bool {
-        if let Some(tid) = self.term_id(t) {
-            if ids.contains(&tid) {
-                return true;
-            }
-        }
-        if !matches!(t, Term::Literal(_)) {
-            return false;
-        }
-        ids.iter().any(|&v| {
-            is_literal_id(&self.data.graph().dict, v)
-                && matches!(cmp_terms(&self.data.term_of(v), t), Some(Ordering::Equal))
-        })
+        self.term_id(t).is_some_and(|tid| ids.contains(&tid))
     }
 
-    /// Id twin of the per-value `sh:in` membership check (`any(equal_value)`),
-    /// under the same exact-vs-value split as [`Self::equal_value_ids`].
+    /// Id twin of the per-value `sh:in` membership check (`any(equal_value)`): RDF-term
+    /// equality, so id equality.
     fn in_list_id(&mut self, v: Id, list: &[Term]) -> bool {
-        if list.iter().any(|m| self.term_id(m) == Some(v)) {
-            return true;
-        }
-        if !is_literal_id(&self.data.graph().dict, v)
-            || !list.iter().any(|m| matches!(m, Term::Literal(_)))
-        {
-            return false;
-        }
-        let vt = self.data.term_of(v);
-        list.iter()
-            .any(|m| matches!(cmp_terms(&vt, m), Some(Ordering::Equal)))
+        list.iter().any(|m| self.term_id(m) == Some(v))
     }
 
     /// Id-level `sh:closed` scan of one value node: walks the value's
@@ -2829,13 +2806,11 @@ fn lang_matches(lang: &str, range: &str) -> bool {
     lang == range || (lang.starts_with(&range) && lang.as_bytes().get(range.len()) == Some(&b'-'))
 }
 
-/// SHACL "equal values" (sh:hasValue / sh:in): same term, or literals equal
-/// under SPARQL `=` value semantics (numeric / boolean / date-time families).
+/// SHACL membership for `sh:hasValue` / `sh:in`: RDF-term equality (SHACL 1.0
+/// §4.8.1–4.8.2), not SPARQL value equality. Two distinct literals with one value
+/// (`"1"^^xsd:integer` and `"01"^^xsd:integer`) are different members.
 fn equal_value(a: &Term, b: &Term) -> bool {
-    if a == b {
-        return true;
-    }
-    matches!(cmp_terms(a, b), Some(Ordering::Equal))
+    a == b
 }
 
 /// SPARQL-operator-style comparison of two terms; `None` when not comparable
@@ -2867,29 +2842,46 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
         let pb = parse_bool(b.value())?;
         return Some(pa.cmp(&pb));
     }
-    if is_date_time(da) && is_date_time(db) {
-        let (ta, tza) = timestamp(a.value(), da)?;
-        let (tb, tzb) = timestamp(b.value(), db)?;
-        if tza != tzb {
-            // XSD's ±14h rule (XSD 1.1 pt.2 §3.3.7): an untimezoned value may
-            // lie in any timezone from -14:00 to +14:00, so it denotes a 28h
-            // window of instants around its as-if-UTC timestamp. Order against
-            // a timezoned instant is DETERMINATE only when the whole window
-            // falls strictly on one side; otherwise the pair is incomparable.
-            const TZ_WINDOW_SECS: f64 = 14.0 * 3600.0;
-            let (u, z) = if tza { (tb, ta) } else { (ta, tb) };
-            let ord = if u + TZ_WINDOW_SECS < z {
-                Ordering::Less
-            } else if u - TZ_WINDOW_SECS > z {
-                Ordering::Greater
-            } else {
-                return None;
-            };
-            return Some(if tza { ord.reverse() } else { ord });
-        }
-        return ta.partial_cmp(&tb);
+    if is_date_time(da) || is_date_time(db) {
+        return cmp_temporal(a.value(), da, b.value(), db);
     }
     None
+}
+
+/// The one temporal comparison every SHACL constraint uses (`sh:lessThan`,
+/// `sh:lessThanOrEquals`, `sh:min/maxInclusive`, `sh:min/maxExclusive`), through the
+/// engine's exact comparator (#3526). `None` (incomparable, so a validation result)
+/// for a temporal paired with anything of another family: a date against a dateTime,
+/// either against an `xsd:time`, a temporal against a non-temporal. Within a family the
+/// ±14h mixed-timezone window is decided on exact instants and an ill-formed raw
+/// lexical (a timezone-free dateTimeStamp, a padded value: XSD whitespace processing
+/// does not apply to an RDF literal) compares as nothing.
+fn cmp_temporal(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
+    let time = xsd("time");
+    if da == time && db == time {
+        // An xsd:time is a dateTime on the XSD reference date (1972-12-31). The strict
+        // dateTime parser checks the whole lexical first (fields, hour 24 only as
+        // 24:00:00 with a zero fraction, timezone); a value it rejects compares with
+        // nothing. Only then is a valid hour 24 read as midnight of the same day.
+        let dt = xsd("dateTime");
+        let on_ref = |v: &str| -> Option<String> {
+            let anchored = format!("1972-12-31T{v}");
+            ExactTemporal::of_lit(&anchored, &dt)?;
+            Some(match v.strip_prefix("24:00:00") {
+                Some(rest) => format!(
+                    "1972-12-31T00:00:00{}",
+                    rest.trim_start_matches(['.', '0'])
+                ),
+                None => anchored,
+            })
+        };
+        let (a, b) = (on_ref(a)?, on_ref(b)?);
+        return ExactTemporal::of_lit(&a, &dt)?.compare(ExactTemporal::of_lit(&b, &dt)?);
+    }
+    if !(is_exact_temporal(da) && is_exact_temporal(db)) {
+        return None;
+    }
+    ExactTemporal::of_lit(a, da)?.compare(ExactTemporal::of_lit(b, db)?)
 }
 
 fn xsd(local: &str) -> String {
@@ -2919,6 +2911,13 @@ fn is_numeric(dt: &str) -> bool {
             | "unsignedShort"
             | "unsignedByte"
     )
+}
+
+fn is_exact_temporal(dt: &str) -> bool {
+    let Some(local) = dt.strip_prefix(XSD) else {
+        return false;
+    };
+    matches!(local, "dateTime" | "date" | "dateTimeStamp")
 }
 
 fn is_date_time(dt: &str) -> bool {
@@ -3351,6 +3350,38 @@ mod tests {
             cmp_literals(&lit("2000-01-01T00:00:00"), &lit("2000-01-01T14:00:01Z")),
             Some(Ordering::Less),
             "one second past the window edge -> determinate <"
+        );
+        // #3526: pairs exactly 14h apart whose f64 instants rounded across the window
+        // edge. The exact comparator keeps them indeterminate.
+        let pairs = [
+            ("1970-01-01T04:12:16.1", "1970-01-01T18:12:16.1Z"),
+            ("1969-12-31T14:16:40.1", "1970-01-01T04:16:40.1Z"),
+            ("1969-12-31T14:16:40.0000005", "1970-01-01T04:16:40.0000005Z"),
+        ];
+        for (a, b) in pairs {
+            assert_eq!(cmp_literals(&lit(a), &lit(b)), None, "{a} vs {b}");
+        }
+        assert_eq!(
+            cmp_literals(&lit("2000-01-01T00:00:00"), &lit("2000-01-01T14:00:00.0000004Z")),
+            Some(Ordering::Less),
+            "a fraction past the window edge is determinate"
+        );
+        // date and dateTime are disjoint XSD types: incomparable, as in SPARQL.
+        let typed = |v: &str, dt: &str| {
+            Literal::new_typed_literal(v, oxrdf::NamedNode::new(xsd(dt)).unwrap())
+        };
+        let date = typed("2000-01-01", "date");
+        assert_eq!(cmp_literals(&date, &lit("2000-01-05T00:00:00Z")), None);
+        // A timezone-free dateTimeStamp is ill-formed, so it compares as nothing.
+        let stamp = typed("2000-01-01T00:00:00", "dateTimeStamp");
+        assert_eq!(cmp_literals(&stamp, &lit("2000-01-01T00:00:00")), None);
+        assert_eq!(
+            cmp_literals(
+                &typed(" 2000-01-01T00:00:00Z\n", "dateTimeStamp"),
+                &lit("2000-01-01T00:00:00Z")
+            ),
+            None,
+            "a padded RDF literal is ill-typed, so it compares as nothing"
         );
     }
 }

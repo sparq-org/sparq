@@ -613,8 +613,15 @@ type RuleOut = ([Term; 2], RuleKind);
 /// the parser would change, the writer refuses. Because the bijection spans the document,
 /// two variables that are distinct in different statements (`__bw0___ua.x` in one,
 /// `__bw1___ua.x` in another) can never both read back as one.
-fn verify_document(text: &str, facts: &[&[Term; 3]], rules: &[RuleOut]) -> Result<(), NotRepresentable> {
-    let p = super::parser::parse(text)
+fn verify_document(
+    text: &str,
+    facts: &[&[Term; 3]],
+    rules: &[RuleOut],
+    cuts: &super::bounded::Cuts,
+) -> Result<(), NotRepresentable> {
+    // Re-read under the caller's run record: a nesting cut while re-reading is a refusal
+    // like any other.
+    let p = super::bounded::parse_n3(text, "", cuts)
         .map_err(|e| NotRepresentable::Reparse(format!("its N3 form does not re-parse ({e})")))?;
     let (fwd, bwd): (Vec<&RuleOut>, Vec<&RuleOut>) = rules.iter().partition(|r| r.1 == RuleKind::Forward);
     if p.facts.len() != facts.len() || p.rules.len() != fwd.len() || p.backward_rules.len() != bwd.len() {
@@ -658,7 +665,7 @@ pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
     let mut s = String::new();
     Unit::exact(&[t], &BTreeSet::new())?.term(t, &mut s);
     let k = Term::Iri(CHECK_IRI.into());
-    verify_document(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[&[k.clone(), k, t.clone()]], &[])?;
+    verify_document(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[&[k.clone(), k, t.clone()]], &[], &super::bounded::Cuts::top_level())?;
     out.push_str(&s);
     Ok(())
 }
@@ -826,7 +833,7 @@ pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result
         let outer = binders.before(f.iter(), &mut out).map_err(|e| in_statement(f, e))?;
         out.push_str(&statement_text(f, &outer)?);
     }
-    verify_document(&out, &facts, &[])?;
+    verify_document(&out, &facts, &[], &super::bounded::Cuts::top_level())?;
     Ok(out)
 }
 
@@ -850,6 +857,7 @@ pub(super) fn write_document(
     facts: &[&[Term; 3]],
     rules: &[(&Rule, RuleKind)],
     vars: RuleVars,
+    cuts: &super::bounded::Cuts,
     out: &mut String,
 ) -> Result<(), NotRepresentable> {
     let sides: Vec<RuleOut> = rules.iter().map(|(r, kind)| (rule_sides(r, *kind, vars), *kind)).collect();
@@ -946,7 +954,7 @@ pub(super) fn write_document(
             }
         }
     }
-    verify_document(&doc, &fact_order, &rule_order)?;
+    verify_document(&doc, &fact_order, &rule_order, cuts)?;
     out.push_str(&doc);
     Ok(())
 }
@@ -999,7 +1007,7 @@ pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) ->
     let unit = Unit::exact(&[&sides[0], &sides[1]], &BTreeSet::new()).map_err(|e| in_rule(&sides, kind, e))?;
     let mut s = String::new();
     write_rule_sides(&unit, &sides, kind, &mut s);
-    verify_document(&s, &[], &[(sides.clone(), kind)]).map_err(|e| in_rule(&sides, kind, e))?;
+    verify_document(&s, &[], &[(sides.clone(), kind)], &super::bounded::Cuts::top_level()).map_err(|e| in_rule(&sides, kind, e))?;
     out.push_str(&s);
     Ok(())
 }

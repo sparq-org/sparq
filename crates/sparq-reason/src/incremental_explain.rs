@@ -1135,7 +1135,7 @@ impl MaterializedN3Graph {
             .collect();
         keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         let (_facts, steps) =
-            crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone())).ok()?;
+            crate::n3::reason_n3_terms_proof(&self.rules_src, keyed.into_iter().map(|(_, f)| f.clone()), &self.cuts).ok()?;
         // One step per derived fact (first derivation wins).
         let mut step_map: FxHashMap<&[N3Term; 3], (usize, &[[N3Term; 3]])> = FxHashMap::default();
         for (conclusion, rule, premises) in &steps {

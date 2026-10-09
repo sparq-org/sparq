@@ -984,7 +984,7 @@ mod tests {
     // Signed short years must survive the shared parser's lexical validation.
     #[test]
     fn gyear_epoch_preserves_padding_and_fails_soft_on_capacity() {
-        for year in ["0001", "0009", "0500", "-0001", "-0009", "-0500", "12000"] {
+        for year in ["0000", "-0000", "0001", "0009", "0500", "-0001", "-0009", "-0500", "12000"] {
             assert_eq!(
                 temporal_value(year, dt::G_YEAR),
                 temporal_value(&format!("{year}-01-01"), dt::DATE),
@@ -992,7 +992,7 @@ mod tests {
             );
             assert!(temporal_value(year, dt::G_YEAR).is_some());
         }
-        for year in ["0000", "-0000", "00001", "9223372036854775807", "é000", "0001+é:00", "0001+15:00"] {
+        for year in ["00001", "9223372036854775807", "é000", "0001+é:00", "0001+15:00"] {
             assert!(temporal_value(year, dt::G_YEAR).is_none(), "{year}");
         }
     }

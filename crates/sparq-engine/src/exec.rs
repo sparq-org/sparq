@@ -16850,8 +16850,7 @@ fn parse_datetime(s: &str) -> Option<[f64; 6]> {
             month += 1;
             if month == 13 {
                 month = 1;
-                year += 1;
-                if year == 0 { year = 1; } // XSD 1.0 has no year zero.
+                year += 1; // XSD 1.1 counts through year zero.
             }
         }
     }
