@@ -1068,3 +1068,74 @@ fn generated_id_patterns_select_exactly_the_named_nodes() {
         }
     }
 }
+
+/// Value patterns follow the W3C framing suite (#t0045): for each of `@value`, `@type`
+/// and `@language`, an omitted or match-none `[]` constraint admits only values without
+/// that member, the wildcard `{}` only values with it, and a list the listed ones.
+#[test]
+fn generated_value_patterns_follow_the_framing_suite() {
+    use sparq_jsonld::frame::{frame_match, FrameOptions};
+    let values = [
+        r#""v""#,
+        r#"{"@value":"v","@type":"http://ex/T"}"#,
+        r#"{"@value":"v","@type":"http://ex/U"}"#,
+        r#"{"@value":"v","@language":"en"}"#,
+        r#"{"@value":"w","@language":"EN"}"#,
+    ];
+    // (value, type, language) of each input value, after expansion.
+    let members: [(&str, Option<&str>, Option<&str>); 5] = [
+        ("v", None, None),
+        ("v", Some("http://ex/T"), None),
+        ("v", Some("http://ex/U"), None),
+        ("v", None, Some("en")),
+        ("w", None, Some("en")),
+    ];
+    // Constraint spellings and what they admit (None = the member is absent).
+    type Admits = fn(Option<&str>) -> bool;
+    let value_forms: [(Option<&str>, Admits); 4] =
+        [(None, |v| v.is_none()), (Some("{}"), |v| v.is_some()), (Some(r#""v""#), |v| v == Some("v")), (Some(r#"["v","w"]"#), |v| v.is_some())];
+    let type_forms: [(Option<&str>, Admits); 4] = [
+        (None, |t| t.is_none()),
+        (Some("[]"), |t| t.is_none()),
+        (Some("{}"), |t| t.is_some()),
+        (Some(r#""http://ex/T""#), |t| t == Some("http://ex/T")),
+    ];
+    let language_forms: [(Option<&str>, Admits); 4] = [
+        (None, |l| l.is_none()),
+        (Some("[]"), |l| l.is_none()),
+        (Some("{}"), |l| l.is_some()),
+        (Some(r#""En""#), |l| l == Some("en")),
+    ];
+    for (vf, v_ok) in value_forms {
+        for (tf, t_ok) in type_forms {
+            for (lf, l_ok) in language_forms {
+                // A value pattern needs at least one member; an all-omitted one is a node pattern.
+                // and a value object can't constrain both its type and its language.
+                if (vf.is_none() && tf.is_none() && lf.is_none()) || (tf.is_some() && lf.is_some()) {
+                    continue;
+                }
+                let pattern: Vec<String> = [("@value", vf), ("@type", tf), ("@language", lf)]
+                    .iter()
+                    .filter_map(|(k, f)| f.map(|f| format!(r#""{k}":{f}"#)))
+                    .collect();
+                let frame = format!(r#"{{"@explicit":true,"http://ex/p":{{{}}}}}"#, pattern.join(","));
+                for (i, value) in values.iter().enumerate() {
+                    let input = format!(r#"{{"@id":"http://ex/s","http://ex/p":{value}}}"#);
+                    let out = frame_match(
+                        &Json::parse(&input).unwrap(),
+                        &Json::parse(&frame).unwrap(),
+                        &JsonLdOptions::default(),
+                        &FrameOptions::default(),
+                        &NoopLoader,
+                    )
+                    .unwrap_or_else(|e| panic!("{frame} over {value}: {e:?}"));
+                    let (v, t, l) = members[i];
+                    // The value matches exactly when it is kept on the framed node.
+                    let want = v_ok(Some(v)) && t_ok(t) && l_ok(l);
+                    let kept = render(&out).contains(r#""@value":""#);
+                    assert_eq!(kept, want, "{frame} over {value}: {}", render(&out));
+                }
+            }
+        }
+    }
+}

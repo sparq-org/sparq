@@ -364,6 +364,24 @@ mod tests {
         assert!(out.contains("http://ex/s"), "{out}");
     }
 
+    /// Value patterns follow the W3C framing suite (#t0045): a pattern that omits
+    /// `@language` or `@type` admits only values without one, and naming it (or `{}`)
+    /// admits the tagged or typed literal.
+    #[test]
+    fn value_patterns_constrain_type_and_language() {
+        for ttl in [
+            "<http://ex/s> <http://ex/p> \"yes\"@en .",
+            "<http://ex/s> <http://ex/p> \"yes\"^^<http://ex/T> .",
+        ] {
+            let out = frame_doc(ttl, r#"{"http://ex/p":{"@value":"yes"}}"#);
+            assert!(!out.contains("http://ex/s"), "{ttl}: {out}");
+        }
+        let out = frame_doc("<http://ex/s> <http://ex/p> \"yes\"@en .", r#"{"http://ex/p":{"@value":"yes","@language":"en"}}"#);
+        assert!(out.contains("http://ex/s"), "{out}");
+        let out = frame_doc("<http://ex/s> <http://ex/p> \"yes\"^^<http://ex/T> .", r#"{"http://ex/p":{"@value":"yes","@type":{}}}"#);
+        assert!(out.contains("http://ex/s"), "{out}");
+    }
+
     #[test]
     fn default_fills_absent_property() {
         let out = frame_doc(

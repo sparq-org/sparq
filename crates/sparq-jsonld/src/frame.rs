@@ -249,6 +249,7 @@ pub fn frame_expanded(
         bnode_counts: BTreeMap::new(),
         last_ids: BTreeSet::new(),
         output_left: output_bound(expanded_input, &frame_arr),
+        reverse: BTreeMap::new(),
     };
 
     // §4.1 steps 5–6: match the frame over every subject of the active graph.
@@ -325,6 +326,8 @@ struct FState<'a> {
     bnode_counts: BTreeMap<String, usize>,
     /// Output values this call may still emit (see [`FState::emit`]).
     output_left: usize,
+    /// (graph, reverse property) → referenced id → referring subjects ([`FState::referrers`]).
+    reverse: BTreeMap<(String, String), BTreeMap<String, Vec<String>>>,
 }
 
 /// Bytes a framing call may allocate for its output per byte of its input and frame,
@@ -346,6 +349,83 @@ fn output_bound(input: &Json, frame: &Json) -> usize {
 }
 
 impl FState<'_> {
+    /// Copies `value` (from the input or the frame) for the output, charging its size
+    /// first. With the constructors below, this is the only way [`match_frame`] creates
+    /// an owned value (`match_frame_allocates_only_through_the_budget` enforces it).
+    fn copy(&mut self, value: &Json) -> Result<Json, JsonLdError> {
+        self.emit(json_bytes(value))?;
+        Ok(value.clone())
+    }
+
+    /// A new output node object `{"@id": id}`, to be added under `property`.
+    fn node(&mut self, id: &str, property: Option<&str>) -> Result<Json, JsonLdError> {
+        self.emit(NODE_BYTES + id.len() + property.map_or(0, str::len))?;
+        Ok(Json::Obj(vec![("@id".to_string(), Json::Str(id.to_string()))]))
+    }
+
+    /// A new, empty list object `{"@list": []}`, to be added under `property`.
+    fn list(&mut self, property: &str) -> Result<Json, JsonLdError> {
+        self.emit(2 * NODE_BYTES + property.len())?;
+        Ok(Json::Obj(vec![("@list".to_string(), Json::Arr(Vec::new()))]))
+    }
+
+    /// The implicit sub-frame carrying `flags` forward ([`implicit_frame`]).
+    fn implicit(&mut self, flags: &Flags) -> Result<Json, JsonLdError> {
+        let frame = implicit_frame(flags);
+        self.emit(json_bytes(&frame))?;
+        Ok(frame)
+    }
+
+    /// The `@default` fill for `property`: the frame's `default` values (or `@null`),
+    /// wrapped in `@preserve` unless `property` is `@type`.
+    fn default_fill(&mut self, default: Option<&Json>, property: &str) -> Result<Json, JsonLdError> {
+        self.emit(default.map_or(16, json_bytes) + 3 * NODE_BYTES + property.len())?;
+        let values = match default {
+            Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
+            None => Json::Arr(vec![Json::Str("@null".to_string())]),
+        };
+        Ok(if property == "@type" {
+            // A `@type` default fills DIRECTLY (its values are IRIs that must go through
+            // IRI compaction; `@preserve` would shield them).
+            values
+        } else {
+            Json::Arr(vec![Json::Obj(vec![("@preserve".to_string(), values)])])
+        })
+    }
+
+    /// The subject ids of `graph`, in order.
+    fn subject_ids(&mut self, graph: &Subjects) -> Result<Vec<String>, JsonLdError> {
+        self.emit(graph.keys().map(|k| k.len() + 8).sum())?;
+        Ok(graph.keys().cloned().collect())
+    }
+
+    /// The subjects of the active graph whose `property` references `id`, in order. The
+    /// graph is scanned once per property and indexed, so `@reverse` framing stays linear.
+    fn referrers(&mut self, maps: &GraphMaps, property: &str, id: &str) -> Result<Vec<String>, JsonLdError> {
+        let key = (self.graph.clone(), property.to_string());
+        if !self.reverse.contains_key(&key) {
+            let mut index: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            if let Some(g) = maps.graphs.get(&self.graph) {
+                self.emit(g.len() * 8)?;
+                for (sid, node) in g.iter() {
+                    for v in node.get(property).map(as_slice).unwrap_or_default() {
+                        if let Some(target) = v.get("@id").and_then(Json::as_str) {
+                            let list = index.entry(target.to_string()).or_default();
+                            if list.last() != Some(sid) {
+                                self.emit(sid.len() + target.len() + 16)?;
+                                list.push(sid.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            self.reverse.insert(key.clone(), index);
+        }
+        let found = self.reverse[&key].get(id).cloned().unwrap_or_default();
+        self.emit(found.iter().map(|s| s.len() + 8).sum())?;
+        Ok(found)
+    }
+
     /// Charges `n` bytes to the call's output bound before they are allocated, failing
     /// with `context overflow` once it is spent. Every node, reference, copied value,
     /// wrapper, default and frame copy framing builds is charged here, so its output (and
@@ -379,8 +459,7 @@ fn json_bytes(json: &Json) -> usize {
                 stack.extend(members.iter().map(|(_, v)| v));
                 members.iter().fold(NODE_BYTES, |n, (k, _)| n.saturating_add(k.len() + 8))
             }
-            Json::Str(s) => s.len() + 8,
-            _ => 8,
+            Json::Str(s) | Json::Raw(s) => s.len() + 8,
         });
     }
     size
@@ -529,8 +608,7 @@ fn match_frame(
             continue;
         }
 
-        st.emit(NODE_BYTES + id.len() + property.map_or(0, str::len))?;
-        let mut output = Json::Obj(vec![("@id".to_string(), Json::Str(id.clone()))]);
+        let mut output = st.node(&id, property)?;
         if id.starts_with("_:") {
             *st.bnode_counts.entry(id.clone()).or_insert(0) += 1;
         }
@@ -569,31 +647,25 @@ fn match_frame(
 
         // Named-graph framing: a matched subject that names a graph recurses into it.
         if maps.graphs.contains_key(&id) {
+            let empty = Json::obj();
             let (recurse, subframe) = match frame_obj.get("@graph") {
-                None => (st.graph != "@merged", Json::obj()),
+                None => (st.graph != "@merged", &empty),
                 Some(gf) => {
-                    let sf = match first_of(gf) {
-                        Some(f) if f.is_obj() => {
-                            st.emit(json_bytes(f))?;
-                            f.clone()
-                        }
-                        _ => Json::obj(),
-                    };
+                    let sf = first_of(gf).filter(|f| f.is_obj()).unwrap_or(&empty);
                     (id != "@merged" && id != "@default", sf)
                 }
             };
             if recurse {
+                let graph_subjects = match maps.graphs.get(&id) {
+                    Some(g) => st.subject_ids(g)?,
+                    None => Vec::new(),
+                };
                 let prev = std::mem::replace(&mut st.graph, id.clone());
-                let graph_subjects: Vec<String> = maps
-                    .graphs
-                    .get(&id)
-                    .map(|g| g.keys().cloned().collect())
-                    .unwrap_or_default();
                 match_frame(
                     maps,
                     st,
                     &graph_subjects,
-                    &Json::Arr(vec![subframe]),
+                    subframe,
                     &mut output,
                     Some("@graph"),
                     false,
@@ -620,6 +692,7 @@ fn match_frame(
             st.subject_stack.pop();
             continue;
         };
+        st.emit(8 * subject_members.len())?;
         let mut props: Vec<&(String, Json)> = subject_members.iter().collect();
         props.sort_by(|a, b| a.0.cmp(&b.0));
         for (prop, objects) in props {
@@ -628,8 +701,8 @@ fn match_frame(
             }
             if prop.starts_with('@') {
                 // Keywords copy verbatim; blank-node @type values count toward pruning.
-                st.emit(json_bytes(objects) + prop.len())?;
-                output.set(prop, objects.clone());
+                let copied = st.copy(objects)?;
+                output.set(prop, copied);
                 if prop == "@type" {
                     for t in as_slice(objects) {
                         if let Some(s) = t.as_str() {
@@ -650,38 +723,48 @@ fn match_frame(
                 if is_list_object(o) {
                     // @list re-emit: node entries recurse with the list sub-frame,
                     // value entries copy verbatim.
-                    let list_frame = frame_prop.and_then(first_of).and_then(|f0| f0.get("@list"));
-                    st.emit(list_frame.map_or(2 * NODE_BYTES, json_bytes) + NODE_BYTES + prop.len())?;
-                    let subframe = list_frame.cloned().unwrap_or_else(|| implicit_frame(&flags));
-                    let mut list = Json::Obj(vec![("@list".to_string(), Json::Arr(vec![]))]);
+                    let implicit;
+                    let subframe = match frame_prop.and_then(first_of).and_then(|f0| f0.get("@list")) {
+                        Some(f) => f,
+                        None => {
+                            implicit = st.implicit(&flags)?;
+                            &implicit
+                        }
+                    };
+                    let mut list = st.list(prop)?;
                     for oo in o.get("@list").map(as_slice).unwrap_or_default() {
                         if let Some(oid) = subject_reference_id(oo) {
                             match_frame(
                                 maps,
                                 st,
                                 &[oid.to_string()],
-                                &subframe,
+                                subframe,
                                 &mut list,
                                 Some("@list"),
                                 true,
                             )?;
                         } else {
-                            st.emit(json_bytes(oo))?;
-                            add_frame_output(&mut list, Some("@list"), oo.clone());
+                            let copied = st.copy(oo)?;
+                            add_frame_output(&mut list, Some("@list"), copied);
                         }
                     }
                     add_frame_output(&mut output, Some(prop), list);
                 } else if let Some(oid) = subject_reference_id(o) {
                     // Node reference: recurse with the property sub-frame (or the
                     // implicit frame inheriting the current flags).
-                    let subframe = frame_prop
-                        .cloned()
-                        .unwrap_or_else(|| implicit_frame(&flags));
+                    let implicit;
+                    let subframe = match frame_prop {
+                        Some(f) => f,
+                        None => {
+                            implicit = st.implicit(&flags)?;
+                            &implicit
+                        }
+                    };
                     match_frame(
                         maps,
                         st,
                         &[oid.to_string()],
-                        &subframe,
+                        subframe,
                         &mut output,
                         Some(prop),
                         true,
@@ -692,8 +775,8 @@ fn match_frame(
                     let empty = Json::obj();
                     let pattern = frame_prop.and_then(first_of).unwrap_or(&empty);
                     if value_match(pattern, o) {
-                        st.emit(json_bytes(o) + prop.len())?;
-                        add_frame_output(&mut output, Some(prop), o.clone());
+                        let copied = st.copy(o)?;
+                        add_frame_output(&mut output, Some(prop), copied);
                     }
                 }
             }
@@ -704,6 +787,7 @@ fn match_frame(
         let Json::Obj(frame_members) = &*frame_obj else {
             unreachable!("validate_frame returns an object")
         };
+        st.emit(8 * frame_members.len())?;
         let mut fprops: Vec<&(String, Json)> = frame_members.iter().collect();
         fprops.sort_by(|a, b| a.0.cmp(&b.0));
         for (prop, pvalue) in fprops {
@@ -719,44 +803,19 @@ fn match_frame(
             }
             let omit_default = frame_flag_bool(next, "@omitDefault", st.options.omit_default);
             if !omit_default && output.get(prop).is_none() {
-                st.emit(next.get("@default").map_or(16, json_bytes) + 2 * NODE_BYTES + prop.len())?;
-                let preserve = match next.get("@default") {
-                    Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
-                    None => Json::Arr(vec![Json::Str("@null".to_string())]),
-                };
-                if prop == "@type" {
-                    // A `@type` default fills DIRECTLY (its values are IRIs that must
-                    // go through IRI compaction; `@preserve` would shield them).
-                    output.set(prop, preserve);
-                } else {
-                    output.set(
-                        prop,
-                        Json::Arr(vec![Json::Obj(vec![("@preserve".to_string(), preserve)])]),
-                    );
-                }
+                let fill = st.default_fill(next.get("@default"), prop)?;
+                output.set(prop, fill);
             }
         }
 
         // @reverse framing: find nodes of the active graph referencing this subject
         // under the reverse property and frame them under output's @reverse map.
         if let Some(Json::Obj(rev)) = frame_obj.get("@reverse") {
+            st.emit(8 * rev.len())?;
             let mut rprops: Vec<&(String, Json)> = rev.iter().collect();
             rprops.sort_by(|a, b| a.0.cmp(&b.0));
             for (reverse_prop, subframe) in rprops {
-                let referrers: Vec<String> = maps
-                    .graphs
-                    .get(&st.graph)
-                    .map(|g| {
-                        g.iter()
-                            .filter(|(_, node)| {
-                                node.get(reverse_prop).map(as_slice).unwrap_or_default().iter().any(
-                                    |v| v.get("@id").and_then(Json::as_str) == Some(id.as_str()),
-                                )
-                            })
-                            .map(|(sid, _)| sid.clone())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let referrers = st.referrers(maps, reverse_prop, &id)?;
                 for sid in referrers {
                     let mut tmp = Json::Arr(Vec::new());
                     match_frame(
@@ -1172,7 +1231,7 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
     }
     // @type: absent-and-unconstrained, in the alternatives, or wildcard (with a type).
     let t_ok = (t2.is_empty() && t1.is_none())
-        || t2.iter().any(|p| p.as_str() == t1)
+        || t2.iter().any(|p| p.as_str().is_some() && p.as_str() == t1)
         || (t1.is_some() && t2.first().map(is_empty_obj).unwrap_or(false));
     if !t_ok {
         return false;
@@ -1864,5 +1923,71 @@ mod tests {
         let mut text = String::new();
         out.write(&mut text);
         assert!(text.contains("http://ex/p") && !text.contains("http://ex/q"), "{text}");
+    }
+
+    /// [`match_frame`] creates owned values only through the charging helpers on
+    /// [`FState`] ([`FState::copy`], [`FState::node`], [`FState::list`],
+    /// [`FState::implicit`], [`FState::default_fill`], [`FState::subject_ids`],
+    /// [`FState::referrers`]); the only other copies are the ids and graph names it
+    /// keeps for bookkeeping.
+    #[test]
+    fn match_frame_allocates_only_through_the_budget() {
+        let src = include_str!("frame.rs");
+        let start = src.find("\nfn match_frame(").expect("match_frame");
+        let body = &src[start..start + src[start..].find("\n}\n").expect("end of match_frame")];
+        for forbidden in ["vec![", ".cloned()", "Json::Str(", "Json::Raw(", "implicit_frame(", ".to_owned()", "format!("] {
+            assert!(!body.contains(forbidden), "match_frame uses `{forbidden}`");
+        }
+        let allowed_clones = ["id.clone()", "st.graph.clone()"];
+        for (at, _) in body.match_indices(".clone()") {
+            let head = &body[..at + ".clone()".len()];
+            assert!(allowed_clones.iter().any(|a| head.ends_with(a)), "match_frame clones: {}", &body[at.saturating_sub(40)..at + 8]);
+        }
+        let allowed_strings = ["oid.to_string()", "s.to_string()"];
+        for (at, _) in body.match_indices(".to_string()") {
+            let head = &body[..at + ".to_string()".len()];
+            assert!(allowed_strings.iter().any(|a| head.ends_with(a)), "match_frame converts: {}", &body[at.saturating_sub(40)..at + 12]);
+        }
+        for (at, _) in body.match_indices("collect()") {
+            let line_start = body[..at].rfind('\n').unwrap_or(0);
+            assert!(body[line_start..at].contains("Vec<&"), "match_frame collects owned values: {}", &body[line_start..at + 9]);
+        }
+    }
+
+    /// A large numeric `@default` is charged by its length: 1,000 fills of a 64 KiB
+    /// number stop at the bound, and 100 render within it.
+    #[test]
+    fn large_numeric_defaults_count_by_their_length() {
+        let number = format!("1{}", "0".repeat(1 << 16));
+        let frame = format!(r#"{{"http://ex/p":{{}},"http://ex/missing":{{"@default":{number}}}}}"#);
+        let subjects = |n: usize| {
+            let nodes: Vec<String> = (0..n).map(|i| format!(r#"{{"@id":"http://ex/s{i}","http://ex/p":"v"}}"#)).collect();
+            parse(&format!("[{}]", nodes.join(",")))
+        };
+        assert_eq!(frame_with(&subjects(1000), &frame).unwrap_err(), E::ContextOverflow);
+        let input = subjects(100);
+        let out = frame_with(&input, &frame).expect("within the bound");
+        let mut text = String::new();
+        out.write(&mut text);
+        assert!(text.len() > 100 << 16 && text.len() <= bound(&input, &frame), "{}", text.len());
+    }
+
+    /// Nested property frames are borrowed, not copied per level: a 55-deep frame over a
+    /// 56-link chain ending in a 1 MiB default frames within the bound.
+    #[test]
+    fn nested_subframes_are_not_copied() {
+        let nodes: Vec<String> = (0..=55)
+            .map(|i| format!(r#"{{"@id":"http://ex/c{i}","http://ex/p":{{"@id":"http://ex/c{}"}}}}"#, i + 1))
+            .collect();
+        let input = parse(&format!("[{}]", nodes.join(",")));
+        let mut pattern = format!(r#"{{"http://ex/p":{{}},"http://ex/q":{{"@default":"{}"}}}}"#, "x".repeat(1 << 20));
+        for _ in 0..54 {
+            pattern = format!(r#"{{"http://ex/p":{pattern}}}"#);
+        }
+        let frame = format!(r#"{{"@id":"http://ex/c0","http://ex/p":{pattern}}}"#);
+        let out = frame_with(&input, &frame).expect("frame ok");
+        let mut text = String::new();
+        out.write(&mut text);
+        assert!(text.contains("http://ex/c56") && text.len() <= bound(&input, &frame), "{}", &text[..text.len().min(300)]);
     }
 }
