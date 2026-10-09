@@ -535,7 +535,7 @@ fn fold_rights(
             if let Some(err) = ill_typed_operand(&m) {
                 return Err(err);
             }
-            if seen.insert(m.to_string(), ()).is_none() {
+            if seen.insert(node_key(&m), ()).is_none() {
                 members.push(m);
             }
         }
@@ -637,9 +637,7 @@ impl RawConstraint {
             if self.ill_typed.is_none() {
                 self.ill_typed = ill_typed_operand(&r);
             }
-            // Full RDF-term identity: a node key ignores a literal's datatype, so it would
-            // collapse `"x"^^A` into a same-lexical `"x"^^B` operand. #3902.
-            if self.rights_seen.insert(r.to_string(), ()).is_none() {
+            if self.rights_seen.insert(node_key(&r), ()).is_none() {
                 self.rights.push(r);
             }
         }

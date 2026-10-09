@@ -3,7 +3,9 @@
 //! value, and dropping just its constraint would disable a prohibition, so the whole policy
 //! is refused (fail-closed on both rule kinds).
 
-use sparq_policy::parse_policy_str;
+use sparq_policy::{evaluate, parse_policy_str, Request};
+
+const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 
 fn policy(rule: &str, stamp: &str) -> String {
     format!(
@@ -67,4 +69,25 @@ fn a_whitespace_padded_zoned_datetimestamp_still_parses() {
     for rule in ["permission", "prohibition"] {
         assert!(parse_policy_str(&policy(rule, " 2026-12-31T00:00:00Z "), "turtle").is_ok(), "{rule}");
     }
+}
+
+/// A zoned `xsd:dateTime` and the same lexical as `xsd:dateTimeStamp` are one temporal
+/// bound, so the prohibition keeps gating: with an unconditional sibling permission, a
+/// request inside the prohibited window is still denied.
+#[test]
+fn a_same_lexical_datetime_and_datetimestamp_bound_keep_the_prohibition() {
+    let ttl = r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<urn:pol/p> a odrl:Set ;
+  odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ;
+  odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ;
+    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
+      odrl:rightOperand "2026-12-31T00:00:00Z"^^xsd:dateTime ,
+                        "2026-12-31T00:00:00Z"^^xsd:dateTimeStamp ] ] .
+"#;
+    let p = parse_policy_str(ttl, "turtle").unwrap();
+    let req = |at: &str| Request::new(format!("{ODRL}read")).on("urn:asset/x").at(at);
+    assert!(!evaluate(&p, &req("2026-06-01T00:00:00Z")).allow, "inside the prohibited window");
+    assert!(evaluate(&p, &req("2027-06-01T00:00:00Z")).allow, "after the prohibited window");
 }
