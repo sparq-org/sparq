@@ -231,9 +231,12 @@ fn analyze(upd: &Update) -> WriteReqs {
     reqs
 }
 
-/// Does the session have `need` on the concrete graph `g`?
-fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need) -> bool {
-    let has = |mode: Mode| auth.accessible(s, mode).iter().any(|x| x == g);
+/// Does the session have `need` on the concrete graph `g`? `veto` removes a mode the
+/// static view grants (the store's request-time ODRL prohibitions, issue #6743).
+fn allowed(auth: &AuthIndex, s: &Session, g: &NamedNode, need: Need, veto: &Veto<'_>) -> bool {
+    let has = |mode: Mode| {
+        auth.accessible(s, mode).iter().any(|x| x == g) && !veto(mode, g.as_str())
+    };
     match need {
         Need::Write => has(Mode::Write),
         Need::WriteOrAppend => has(Mode::Write) || has(Mode::Append),
@@ -265,6 +268,9 @@ pub(crate) struct Permit {
     /// instantiates with [`authorize_writes`].
     pub var_graphs: bool,
 }
+
+/// A per-graph veto over the static write view: `veto(mode, graph)` removes `mode`.
+pub(crate) type Veto<'a> = dyn Fn(Mode, &str) -> bool + 'a;
 
 /// Check that every graph an update's patterns name is in `readable` (the session's read
 /// view), so a `DELETE`/`INSERT … WHERE` reads exactly what a query by the same session
@@ -446,6 +452,7 @@ pub(crate) fn check(
     session: &Session,
     upd: &Update,
     group_docs: &FxHashSet<String>,
+    veto: &Veto<'_>,
 ) -> Result<Permit, String> {
     let mut reqs = analyze(upd);
 
@@ -469,7 +476,7 @@ pub(crate) fn check(
 
     // Static per-graph requirements.
     for (g, need) in &reqs.graphs {
-        if !allowed(auth, session, g, *need) {
+        if !allowed(auth, session, g, *need, veto) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(*need),
@@ -485,7 +492,7 @@ pub(crate) fn check(
             // convention (writing an .acl under a CLEAR ALL needs the Write grant that
             // only Control-holders have).
             let g_need = strongest(need, need_for_graph(g.as_str(), need));
-            if !allowed(auth, session, &g, g_need) {
+            if !allowed(auth, session, &g, g_need, veto) {
                 return Err(format!(
                     "update denied: a graph-wildcard operation (variable GRAPH target or \
                      CLEAR/DROP ALL|NAMED) requires {} permission on every graph, but the \
@@ -522,6 +529,7 @@ pub(crate) fn authorize_writes(
     deletes: &[Option<Term>],
     inserts: &[Option<Term>],
     auth_input: &mut bool,
+    veto: &Veto<'_>,
 ) -> Result<(), String> {
     let slots = deletes
         .iter()
@@ -540,7 +548,7 @@ pub(crate) fn authorize_writes(
             }
         };
         let need = need_for_graph(g.as_str(), base);
-        if !allowed(auth, session, g, need) {
+        if !allowed(auth, session, g, need, veto) {
             return Err(format!(
                 "update denied: session lacks {} permission on <{}>",
                 need_label(need),
