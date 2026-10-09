@@ -340,6 +340,8 @@ What the server exposes, all discoverable from the storage description
   any listing, permission check or metadata read fails, the whole index fails with one
   generic `500` that names no resource. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
+  While walking the storage they keep only what they return (a search its matches, the index
+  its distinct types), at most 16 MiB of URIs and types; past that the request gets `507`.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
