@@ -230,7 +230,9 @@ Anyone authenticated may hold at most 16 access requests and 16 subscriptions (4
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
 and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
-separate share of 512.
+separate share of 512. A request's Link headers may declare at most 128 relations holding
+64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
+64 members each (431 past either).
 
 ```bash
 SOLID_SERVER_PROTOCOL=lws \

@@ -971,6 +971,9 @@ fn body_limit(path: &str, max_body: usize) -> usize {
 
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
+    if let Err(refused) = check_headers(&parts.headers) {
+        return refused;
+    }
     let limit = body_limit(parts.uri.path(), state.cfg.max_body);
     let body = match axum::body::to_bytes(body, limit).await {
         Ok(b) => b,
@@ -1360,6 +1363,61 @@ pub fn has_type(v: &Value, wanted: &str) -> bool {
         Value::Array(a) => a.iter().any(matches),
         other => matches(other),
     }
+}
+
+/// Most link relations (each a target and one relation) a request's Link headers may declare.
+pub const MAX_DECLARED_LINKS: usize = 128;
+
+/// Most bytes the link relations a request's Link headers declare may hold between them, once
+/// each relation has its own copy of its target.
+pub const MAX_DECLARED_LINK_BYTES: usize = 64 * 1024;
+
+/// Most members a list-valued request header (`Accept`, `Prefer`, `If-Match`, `If-None-Match`)
+/// may hold.
+pub const MAX_HEADER_MEMBERS: usize = 64;
+
+/// The bounds every request's headers are held to before anything is built from them. Headers
+/// are input as bodies are: the transport bounds their bytes, and this bounds what they expand
+/// to, so no header-derived structure (the links and types a request declares, a negotiation, a
+/// precondition list) grows past a fixed size whatever the headers say.
+#[allow(clippy::result_large_err)]
+pub(crate) fn check_headers(headers: &HeaderMap) -> Result<(), Response> {
+    let too_large = |what: &str| {
+        problem(
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            Some(&format!("{what} declares more than this server accepts")),
+        )
+    };
+    let all = |name: header::HeaderName| {
+        headers
+            .get_all(name)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let (mut count, mut bytes) = (0usize, 0usize);
+    for (target, params) in parse_links(&all(header::LINK)) {
+        let rels = params
+            .get("rel")
+            .map_or(0, |r| r.split_whitespace().count());
+        count = count.saturating_add(rels.max(1));
+        bytes = bytes.saturating_add(rels.max(1).saturating_mul(target.len()));
+        if count > MAX_DECLARED_LINKS || bytes > MAX_DECLARED_LINK_BYTES {
+            return Err(too_large("the Link header"));
+        }
+    }
+    for name in [
+        header::ACCEPT,
+        header::HeaderName::from_static("prefer"),
+        header::IF_MATCH,
+        header::IF_NONE_MATCH,
+    ] {
+        if all(name.clone()).split(',').count() > MAX_HEADER_MEMBERS {
+            return Err(too_large(name.as_str()));
+        }
+    }
+    Ok(())
 }
 
 /// Parse a Link header value into `(target, params)` pairs, params lower-cased by name.
@@ -1775,6 +1833,53 @@ mod tests {
             crate::store::InMemoryBlobStore::new(),
         );
         router(store, cfg).await.unwrap()
+    }
+
+    /// Review finding: one Link header with a long target and thousands of relations fitted the
+    /// transport's header limit and expanded to hundreds of megabytes of copied targets. Every
+    /// request's headers are held to what they may expand to before anything reads them.
+    #[tokio::test]
+    async fn every_list_header_is_held_to_its_bounds() {
+        use tower::ServiceExt;
+        let app = open_router(1 << 20).await;
+        let send = |name: &'static str, value: String| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method("POST")
+                    .uri("/")
+                    .header("content-type", "text/plain")
+                    .header(name, value)
+                    .body(Body::from("x"))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        let rels: Vec<String> = (0..=MAX_DECLARED_LINKS)
+            .map(|i| format!("urn:r:{i}"))
+            .collect();
+        let many = format!("<https://e.example/t>; rel=\"{}\"", rels.join(" "));
+        let long = format!(
+            "<https://e.example/{}>; rel=\"urn:r:1 urn:r:2\"",
+            "t".repeat(MAX_DECLARED_LINK_BYTES / 2)
+        );
+        let listed = |member: &str| vec![member; MAX_HEADER_MEMBERS + 1].join(", ");
+        for (name, value) in [
+            ("link", many),
+            ("link", long),
+            ("accept", listed("text/plain")),
+            ("prefer", listed("return=minimal")),
+            ("if-match", listed("\"e\"")),
+            ("if-none-match", listed("\"e\"")),
+        ] {
+            assert_eq!(
+                send(name, value).await,
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                "{name}"
+            );
+        }
+        let fine = format!("<https://e.example/t>; rel=\"{}\"", rels[..8].join(" "));
+        assert_eq!(send("link", fine).await, StatusCode::CREATED);
     }
 
     /// Review finding: every body was buffered up to the server-wide ceiling before any route
