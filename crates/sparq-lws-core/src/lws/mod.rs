@@ -1823,6 +1823,8 @@ pub(crate) mod test_store {
         pub partial_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// How many `delete`s named a parent: removals of a member that are not one step.
         pub two_step_deletes: Arc<std::sync::atomic::AtomicUsize>,
+        /// Fail every [`Store::restore`] of this resource until cleared.
+        pub fail_restore_of: Arc<std::sync::Mutex<Option<String>>>,
         /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
         /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
         pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
@@ -1853,6 +1855,7 @@ pub(crate) mod test_store {
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
                 two_step_deletes: Default::default(),
+                fail_restore_of: Default::default(),
                 fail_step: Default::default(),
             }
         }
@@ -1991,6 +1994,9 @@ pub(crate) mod test_store {
         ) -> ServerResult<ResourceMeta> {
             // The same failures as `write`: a record is put back by either.
             self.step()?;
+            if self.fail_restore_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }

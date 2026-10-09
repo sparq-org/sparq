@@ -5848,16 +5848,13 @@ mod tests {
         assert_eq!(body_of(r).await, Bytes::from("public"));
         // When the content cannot be put back either, the new content is not served under the
         // old public type: the resource stays pending and the listing is not left unchanged.
-        // The steps: the pending mark, the content (its reply lost), then putting it back.
+        // The steps: the pending mark, the content (its reply lost), then putting it back,
+        // which fails until the store lets it.
         *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
-        *store.fail_step.lock().unwrap() = Some(2);
+        *store.fail_restore_of.lock().unwrap() = Some(uri.clone());
         let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
         assert!(r.status().is_server_error(), "{}", r.status());
         *store.fail_after_write_of.lock().unwrap() = None;
-        assert!(
-            store.fail_step.lock().unwrap().take().is_none(),
-            "the third step failed"
-        );
         assert_ne!(version().await, before);
         assert_eq!(
             st.store.read(&uri).await.unwrap().body,
@@ -5869,6 +5866,19 @@ mod tests {
             StatusCode::FORBIDDEN
         );
         assert_eq!(handle(&st, &get, &owner).await.status(), StatusCode::OK);
+        // What could not be put back is not dropped: once the store lets it, the resource is
+        // back as it was, content first and then its metadata.
+        *store.fail_restore_of.lock().unwrap() = None;
+        for _ in 0..200 {
+            if !st.resource_meta(&uri).await.unwrap().pending {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!st.resource_meta(&uri).await.unwrap().pending);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public"));
         // A write that fails before it is sent still restores the old metadata.
         let r = handle(&st, &put(public, "public again"), &owner).await;
         assert!(r.status().is_success(), "{}", r.status());
