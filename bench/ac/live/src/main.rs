@@ -405,7 +405,7 @@ fn normalize_odrl_ntriples(nquads: &[String]) -> String {
 /// rather than an advisory count.
 fn odrl_policies_for(
     policies: &[sparq_acbench::CompiledPolicy],
-) -> (Vec<sparq_policy::Policy>, usize) {
+) -> (Vec<sparq_policy::ValidatedPolicy>, usize) {
     let mut parsed = Vec::new();
     let mut unparseable = 0usize;
     for policy in policies {
@@ -449,7 +449,7 @@ fn odrl_request_for(ed: &ExpectedDecision) -> sparq_policy::Request {
 /// provably a bridged ODRL grant.
 fn odrl_store_for_request(
     data_nquads: &str,
-    policies: &[sparq_policy::Policy],
+    policies: &[sparq_policy::ValidatedPolicy],
     request: &sparq_policy::Request,
 ) -> Result<(PodStore, usize), String> {
     let graph = Graph::load_dataset(data_nquads, "nquads")
