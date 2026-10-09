@@ -90,9 +90,10 @@
 //! A prohibition materializes a deny **only** when [`sparq_policy::matched_prohibition`]
 //! reports it carves THIS request out (action permits + target/assignee agree +
 //! constraints satisfied) AND the request action [`action_to_mode`]-maps AND the
-//! request names a concrete party (WebID) + target graph IRI. An un-matched / unmapped
-//! / partyless / targetless prohibition materializes **nothing** — fail-closed; a deny
-//! is never widened on ambiguity (and certainly never silently dropped to widen access).
+//! request names a target graph IRI. A prohibition matched by an anonymous request
+//! denies every session on the target, since there is no party to scope it to. An
+//! un-matched / unmapped / targetless prohibition materializes **nothing**; a deny is
+//! never silently dropped to widen access.
 //!
 //! [`materialize_policy`] composes the two: it materializes every applicable Permit
 //! grant AND every matched-Prohibition deny for the request, so a policy carrying both
@@ -133,15 +134,14 @@
 //! prohibition is genuinely gone*. Static (non-bridged) `auth:deny*` rules are never in
 //! the ledger and so are never re-evaluated or retracted by this path.
 
-use crate::authindex::{Mode, AUTHENTICATED, PUBLIC};
+use crate::authindex::{Mode, PUBLIC};
 use crate::{AUTH_BRIDGED_GRAPH, AUTH_GRAPH, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
 use sparq_policy::{
     conflict_admissibility, evaluate, matched_prohibition, parse_policy_str,
-    prohibition_status, Operator, Permit, ProhibitionStatus, Request, Rule,
-    ValidatedPolicy, Value,
+    prohibition_status, Permit, ProhibitionStatus, Request, Rule, ValidatedPolicy,
 };
 use sparq_reason::n3::compiled::{compile, eval, intern_facts, CompiledRuleSet};
 use std::fmt::Write as _;
@@ -552,23 +552,39 @@ pub fn materialize_prohibition(
         )]);
     };
 
-    // 3. Concrete party (WebID) + target graph required (fail-closed): a partyless
-    //    deny would be meaningless / a targetless deny ambiguous.
-    let Some(party) = request.party.as_deref() else {
-        return BridgeOutcome::denied(vec![
-            "ODRL prohibition has no concrete party (assignee/WebID); no deny materialized"
-                .to_owned(),
-        ]);
-    };
+    // 3. A target graph is required: a targetless deny would be ambiguous.
     let Some(target) = request.target.as_deref() else {
         return BridgeOutcome::denied(vec![
             "ODRL prohibition has no concrete target graph IRI; no deny materialized".to_owned(),
         ]);
     };
+    freeze_deny(graph, request.party.as_deref(), mode, target)
+}
 
-    // 4. Materialize `party auth:deny<Mode> target` into the auth view.
+/// Store the one-shot deny for `party` on `target` in `mode`: `party auth:deny<Mode>
+/// target`. An anonymous request (`None`) has no party to freeze the deny to, and a
+/// session carries nothing else that tells anonymous callers apart, so its deny is an
+/// unconditional deny for every session.
+fn freeze_deny(graph: &mut Graph, party: Option<&str>, mode: Mode, target: &str) -> BridgeOutcome {
+    let Some(party) = party else {
+        let (head, emitted) = append_conditional_grants(
+            graph,
+            &[PUBLIC.to_owned()],
+            &[],
+            &TimeWindow::default(),
+            mode,
+            target,
+            GrantEffect::Deny,
+        );
+        return BridgeOutcome {
+            prohibited: true,
+            mode: Some(mode),
+            deny_triple: Some(head),
+            emitted,
+            ..BridgeOutcome::default()
+        };
+    };
     let (pred, triple) = append_deny(graph, party, mode, target);
-
     BridgeOutcome {
         prohibited: true,
         mode: Some(mode),
@@ -749,8 +765,6 @@ fn mode_iri(mode: Mode) -> &'static str {
     }
 }
 
-/// The ODRL `recipient` constraint left-operand IRI.
-const ODRL_RECIPIENT: &str = "http://www.w3.org/ns/odrl/2/recipient";
 
 /// A faithfully-mappable `odrl:dateTime` validity window persisted onto an
 /// `auth:ConditionalGrant` as live-clock bounds. [OPUS-4.8] sq-0q7n.
@@ -766,20 +780,6 @@ struct TimeWindow {
     not_before: Option<String>,
     /// Upper bound (`odrl:dateTime lteq T` → "until T", inclusive). `None` = unbounded.
     not_after: Option<String>,
-}
-
-/// Split the compact `|`/space/comma right-operand set encoding into its members —
-/// the SAME lexical set `sparq_policy::evaluate` matches for the flat
-/// `isPartOf`/`isAnyOf`/`isNoneOf` base case (its `is_part_of`), so a bridged
-/// matcher-per-member grant re-checks exactly the set the evaluator would.
-/// Empty/whitespace-only members are dropped. [FABLE-5] sq-5fkpp.
-fn set_members(right: &str) -> Vec<String> {
-    right
-        .split(['|', ' ', ','])
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect()
 }
 
 /// Whether a recipient principal IRI is safe to write as an `auth:agent` head: it
@@ -814,30 +814,22 @@ pub fn materialize_permission_conditional(
 }
 
 /// Materialize `policy`'s **prohibitions** on `request`'s action and target as stored
-/// **conditional denies** (`auth:ConditionalGrant` with `auth:effect auth:Deny`), the
-/// dual of [`materialize_permission_conditional`].
+/// **unconditional denies** (`auth:ConditionalGrant` with `auth:effect auth:Deny` on
+/// `auth:Public`), the dual of [`materialize_permission_conditional`].
 ///
-/// The stored denies do not depend on who triggered materialization. For each
-/// prohibition whose action [`action_to_mode`]-maps and whose target is this request's
-/// target (or unset):
-///
-/// - If its conditions are purely about the party (the rule-level assignee IRI, and
-///   `recipient` `eq`/`neq`/`isAnyOf`/`isNoneOf` over plain IRIs, with no party
-///   collection and no compound constraint), it gets heads the session layer re-checks
-///   for whoever is asking: a deny for every agent the conditions are True for, plus a
-///   deny for anonymous sessions.
-/// - Every other prohibition (any other left operand, a party collection, a compound
-///   constraint, a reserved or blank principal) gets an unconditional deny on its target
-///   and mode, for every agent and for anonymous.
+/// Every prohibition whose action covers the request's action and whose target covers
+/// the request's target (the asset itself, an asset collection the request's
+/// `odrl:partOf` evidence puts it in, or no target) denies that target and mode for every
+/// agent and for anonymous sessions. Its assignee and constraints are not re-checked per
+/// session, so the stored deny does not depend on who triggered materialization and
+/// covers every session `decide` would deny. The cost is an over-deny: a prohibition
+/// scoped to one party also denies every other party on that asset. Re-checking the
+/// party per request is issue #6743.
 ///
 /// The one-shot [`materialize_prohibition`] deny for this request is stored as well. A
 /// deny composes through the same `∪ allow ∖ ∪ deny` enforcement
 /// ([`crate::AuthIndex::accessible`]), so it beats any allow. An unmapped action or a
 /// missing target materializes nothing.
-///
-/// Party-collection identity comes from [`sparq_policy::Policy::party_collections`] and
-/// from a non-empty `Request::party_collection_members`; either one routes the rule to
-/// the unconditional deny. Neither source can widen access.
 ///
 /// Returns a [`BridgeOutcome`]; on a deny `prohibited == true`, `deny_triple` reports
 /// the `(agent, auth:effect, graph)` anchor of the first emitted deny head and `mode`
@@ -870,28 +862,25 @@ pub fn materialize_prohibition_conditional(
     //    frozen deny, which also honours request context a session cannot carry.
     let reference = materialize_prohibition(graph, policy, request);
 
-    // 3. One deny per prohibition naming this action and target, independent of who
-    //    asked. A prohibition whose conditions are purely about the party gets heads the
-    //    session layer re-checks for whoever is asking; every other prohibition denies
-    //    every agent and anonymous.
+    // 3. One unconditional deny per prohibition covering this action and target, for
+    //    every agent and anonymous, whoever asked and whatever its conditions.
     let mut emitted = Vec::new();
     let mut first = None;
     for rule in &policy.prohibitions {
         if !rule_action_target_match(rule, request, mode, target) {
             continue;
         }
-        let groups = party_deny_heads(policy, request, rule)
-            .unwrap_or_else(|| vec![(vec![PUBLIC.to_owned()], Vec::new())]);
-        for (agents, excepts) in groups {
-            if agents.is_empty() {
-                continue;
-            }
-            let (head, triples) = append_conditional_grants(
-                graph, &agents, &excepts, &TimeWindow::default(), mode, target, GrantEffect::Deny,
-            );
-            first.get_or_insert(head);
-            emitted.extend(triples);
-        }
+        let (head, triples) = append_conditional_grants(
+            graph,
+            &[PUBLIC.to_owned()],
+            &[],
+            &TimeWindow::default(),
+            mode,
+            target,
+            GrantEffect::Deny,
+        );
+        first.get_or_insert(head);
+        emitted.extend(triples);
     }
     if let Some(first) = first {
         emitted.extend(reference.emitted);
@@ -908,129 +897,16 @@ pub fn materialize_prohibition_conditional(
     reference
 }
 
-/// The deny heads for a prohibition whose conditions are purely about the party, or
-/// `None` when the bridge cannot re-check them per session (the caller then denies every
-/// agent and anonymous).
-///
-/// A session carries only its agent, and with no recipient context `decide` reads the
-/// requesting party as the recipient. So for an authenticated session a `recipient`
-/// constraint over IRIs is definite, and the prohibition applies exactly when the agent
-/// is the rule's assignee (if any) and every constraint holds. An anonymous session is
-/// always denied. Accepted shapes: the rule-level assignee IRI and `recipient`
-/// `eq`/`neq`/`isAnyOf`/`isNoneOf` over IRIs, with no party collection, no compound
-/// constraint and no reserved principal. Each returned group is `(heads, exceptions)`
-/// for [`append_conditional_grants`].
-fn party_deny_heads(
-    policy: &ValidatedPolicy,
-    request: &Request,
-    rule: &Rule,
-) -> Option<Vec<(Vec<String>, Vec<String>)>> {
-    let plain = |p: &str| {
-        recipient_principal_allowed(p)
-            && !p.starts_with("_:")
-            && normalise_recipient_principal(p) == p
-            && !heads_name_party_collection(policy, request, &[p.to_owned()])
-    };
-    if !rule.logical_constraints.is_empty() {
-        return None;
-    }
-    if let Some(a) = &rule.assignee {
-        if !plain(a) {
-            return None;
-        }
-    }
-    // Sessions the constraints admit: `allowed` (None = any agent) minus `excluded`.
-    let mut allowed: Option<std::collections::BTreeSet<String>> = None;
-    let mut excluded = std::collections::BTreeSet::new();
-    for c in &rule.constraints {
-        if c.left != ODRL_RECIPIENT {
-            return None;
-        }
-        let members: Vec<String> = match (&c.operator, &c.right) {
-            (Operator::Eq | Operator::Neq, Value::Iri(s)) => vec![s.clone()],
-            (Operator::IsAnyOf | Operator::IsNoneOf, Value::Iri(s) | Value::Str(s)) => {
-                set_members(s)
-            }
-            _ => return None,
-        };
-        if members.is_empty() || !members.iter().all(|m| plain(m)) {
-            return None;
-        }
-        match c.operator {
-            Operator::Eq | Operator::IsAnyOf => {
-                let set: std::collections::BTreeSet<String> = members.into_iter().collect();
-                allowed = Some(match allowed {
-                    Some(prev) => prev.intersection(&set).cloned().collect(),
-                    None => set,
-                });
-            }
-            _ => excluded.extend(members),
-        }
-    }
-    let mut groups = Vec::new();
-    match (&rule.assignee, allowed) {
-        (Some(a), allowed) => {
-            if allowed.is_none_or(|s| s.contains(a)) && !excluded.contains(a) {
-                groups.push((vec![a.clone()], Vec::new()));
-            }
-        }
-        (None, Some(set)) => {
-            groups.push((set.into_iter().filter(|m| !excluded.contains(m)).collect(), Vec::new()));
-        }
-        (None, None) => groups.push((vec![PUBLIC.to_owned()], excluded.into_iter().collect())),
-    }
-    // An anonymous session is always denied: it carries no party for the check above.
-    groups.push((vec![PUBLIC.to_owned()], vec![AUTHENTICATED.to_owned()]));
-    Some(groups)
-}
-
-/// Does any of `heads` name an `odrl:PartyCollection`? The fail-closed trigger for every
-/// direction a frozen identity-matched head cannot faithfully carry a collection.
-/// [SONNET-4.6] sq-rf9uv.
-///
-/// Collection IDENTITY is read from two independent sources, and **membership evidence is
-/// not required for either**:
-///
-/// 1. [`Policy::party_collections`] — what the policy DOCUMENT says: a subject typed
-///    `a odrl:PartyCollection`, or the object of an `odrl:partOf` edge the document
-///    states. This is the source that closes the zero-member case: a real collection the
-///    request supplied no edges for is still recognised, so its DENY head / carve-out
-///    still routes to the sound path.
-/// 2. A non-empty [`Request::party_collection_members`] — this request's own `odrl:partOf`
-///    evidence. Strictly a lower bound (empty proves nothing on its own), kept as a second
-///    source so a caller reading membership out of the state-of-the-world graph is covered
-///    even when the policy document is silent.
-///
-/// **Why any collection head must leave the frozen path.** The head is fixed at
-/// materialization and the ACP session re-check matches it against the session agent by
-/// IDENTITY alone, so every member of a collection in a **DENY** head walks past the
-/// deny and keeps access. The rule becomes an unconditional deny instead.
-fn heads_name_party_collection(policy: &ValidatedPolicy, request: &Request, heads: &[String]) -> bool {
-    heads.iter().any(|h| {
-        policy.party_collections.contains(h) || !request.party_collection_members(h).is_empty()
-    })
-}
-
-/// Map an ODRL recipient value to a principal-space `auth:agent` IRI. The two ODRL
-/// "any recipient" sentinels are folded onto the auth principals the session layer
-/// already understands; a concrete WebID passes through unchanged.
-fn normalise_recipient_principal(r: &str) -> String {
-    match r {
-        "http://www.w3.org/ns/odrl/2/All" | "http://www.w3.org/ns/odrl/2/Group" => PUBLIC.to_owned(),
-        "http://www.w3.org/ns/odrl/2/AllConnections" => AUTHENTICATED.to_owned(),
-        _ => r.to_owned(),
-    }
-}
-
-/// Does the rule's action permit `mode`'s action and its target agree with the
-/// request? (Assignee/recipient are deferred to the persisted condition.)
+/// Does the rule's action permit the request's action, and does its target cover the
+/// request's target the way `decide` reads it (the asset itself, or a collection the
+/// request's evidence puts it in)?
 fn rule_action_target_match(rule: &Rule, request: &Request, _mode: Mode, target: &str) -> bool {
     let req_action = sparq_policy::Action(request.action.clone());
     if !rule.action.permits(&req_action) {
         return false;
     }
     match &rule.target {
-        Some(t) => t == target,
+        Some(t) => t == target || request.asset_matches(t),
         None => true,
     }
 }
@@ -1565,7 +1441,7 @@ fn refresh_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: &Request
 /// determined by the request (party + action→mode + target), the same one
 /// [`materialize_prohibition`] would emit when the prohibition matched. [OPUS-4.8] sq-2pcf.
 ///
-/// If the request lacks a mappable action or a concrete party/target the deny cannot be
+/// If the request lacks a mappable action or a target the deny cannot be
 /// reconstructed; that emits nothing (and so retracts) — but such an entry could never
 /// have been materialized in the first place (those are the exact fail-closed gates in
 /// [`materialize_prohibition`]), so this branch is unreachable for a tracked deny.
@@ -1576,20 +1452,13 @@ fn reemit_deny(graph: &mut Graph, request: &Request) -> BridgeOutcome {
                 .to_owned(),
         ]);
     };
-    let (Some(party), Some(target)) = (request.party.as_deref(), request.target.as_deref()) else {
+    let Some(target) = request.target.as_deref() else {
         return BridgeOutcome::denied(vec![
-            "ambiguous prohibition re-eval but request lost its party/target; deny not re-emitted"
+            "ambiguous prohibition re-eval but request lost its target; deny not re-emitted"
                 .to_owned(),
         ]);
     };
-    let (pred, triple) = append_deny(graph, party, mode, target);
-    BridgeOutcome {
-        prohibited: true,
-        mode: Some(mode),
-        deny_triple: Some((party.to_owned(), pred, target.to_owned())),
-        emitted: vec![triple],
-        ..BridgeOutcome::default()
-    }
+    freeze_deny(graph, request.party.as_deref(), mode, target)
 }
 
 // ============================================================================

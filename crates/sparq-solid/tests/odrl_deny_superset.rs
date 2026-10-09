@@ -1,16 +1,18 @@
 //! The bridge's denies cover every request `decide` denies.
 //!
 //! Prohibitions are generated over every constraint left operand the evaluator knows
-//! (and one it does not), each assignee shape, and compound constraints, then layered
+//! (and one it does not), compound constraints, assignees (a named agent, one no
+//! request names, a party collection, and wildcard principals), and targets (the asset,
+//! an asset collection holding it, no target, and an unrelated asset). Each is layered
 //! over a public WAC read grant through the one-shot and the conditional deny entry
-//! points, materialized as one requesting party. After materialization, after a ledger
-//! refresh and after a WAC re-materialization that replays the ledger:
+//! points, materialized as one requesting party or anonymously. After materialization,
+//! after a ledger refresh and after a WAC re-materialization that replays the ledger:
 //!
-//! - one-shot: the requesting party is denied whenever a prohibition still applies to
-//!   its request (`matched_prohibition`, which keeps a prohibition in force on Unknown);
+//! - one-shot: the requester is denied whenever a prohibition still applies to its
+//!   request (`matched_prohibition`, which keeps a prohibition in force on Unknown);
 //! - conditional: every session `decide` denies is denied, whoever materialized. The
-//!   session universe holds the parties, one never seen at materialization, and an
-//!   anonymous session.
+//!   session universe holds named parties, a party never seen at materialization, and
+//!   an anonymous session.
 #![cfg(feature = "odrl-bridge")]
 
 use sparq_core::Graph;
@@ -19,15 +21,23 @@ use sparq_solid::{Mode, PodStore, Session};
 
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 const N1: &str = "https://pod.ex/notes/n1";
-const PARTIES: [&str; 4] = [
-    "https://alice.ex/card#me",
-    "https://bob.ex/card#me",
-    "https://carol.ex/card#me",
-    "https://pod.ex/team",
-];
-
+/// An asset collection holding n1, under every request's `odrl:partOf` evidence.
+const NOTES: &str = "https://pod.ex/notes/";
+const ALICE: &str = "https://alice.ex/card#me";
+const TEAM: &str = "https://pod.ex/team";
 /// A party no materializing request names.
 const UNSEEN: &str = "https://dave.ex/card#me";
+/// Session agents checked after materialization (`None` is anonymous).
+const SESSIONS: [Option<&str>; 6] = [
+    Some(ALICE),
+    Some("https://bob.ex/card#me"),
+    Some("https://carol.ex/card#me"),
+    Some(TEAM),
+    Some(UNSEEN),
+    None,
+];
+/// Who materializes (`None` is an anonymous request).
+const MATERIALIZERS: [Option<&str>; 2] = [Some(ALICE), None];
 
 const CONSTRAINTS: &[&str] = &[
     "",
@@ -36,6 +46,11 @@ const CONSTRAINTS: &[&str] = &[
     "odrl:leftOperand odrl:recipient ; odrl:operator odrl:isAnyOf ; odrl:rightOperand \"https://alice.ex/card#me|https://bob.ex/card#me\"",
     "odrl:leftOperand odrl:recipient ; odrl:operator odrl:isNoneOf ; odrl:rightOperand \"https://alice.ex/card#me\"",
     "odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ; odrl:rightOperand <https://pod.ex/team>",
+    "odrl:leftOperand odrl:recipient ; odrl:operator odrl:neq ; odrl:rightOperand <https://sparq.dev/ns/auth#Authenticated>",
+    "odrl:leftOperand odrl:recipient ; odrl:operator odrl:neq ; odrl:rightOperand <https://sparq.dev/ns/auth#Public>",
+    "odrl:leftOperand odrl:recipient ; odrl:operator odrl:isNoneOf ; odrl:rightOperand \"https://sparq.dev/ns/auth#Authenticated\"",
+    "odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ; odrl:rightOperand <https://sparq.dev/ns/auth#Public>",
+    "odrl:leftOperand odrl:recipient ; odrl:operator odrl:neq ; odrl:rightOperand <http://xmlns.com/foaf/0.1/Agent>",
     "odrl:leftOperand odrl:assignee ; odrl:operator odrl:eq ; odrl:rightOperand <https://alice.ex/card#me>",
     "odrl:leftOperand odrl:assignee ; odrl:operator odrl:neq ; odrl:rightOperand <https://alice.ex/card#me>",
     "odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ; odrl:rightOperand \"2030-01-01T00:00:00Z\"^^xsd:dateTime",
@@ -49,14 +64,29 @@ const CONSTRAINTS: &[&str] = &[
     "a odrl:LogicalConstraint ; odrl:and ( [ odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ; odrl:rightOperand <https://alice.ex/card#me> ] )",
 ];
 
-const ASSIGNEES: [Option<&str>; 3] = [
+const ASSIGNEES: [Option<&str>; 8] = [
     None,
-    Some("https://alice.ex/card#me"),
-    Some("https://pod.ex/team"),
+    Some(ALICE),
+    Some(UNSEEN),
+    Some(TEAM),
+    Some("https://sparq.dev/ns/auth#Public"),
+    Some("https://sparq.dev/ns/auth#Authenticated"),
+    Some("http://xmlns.com/foaf/0.1/Agent"),
+    Some("http://www.w3.org/ns/auth/acl#AuthenticatedAgent"),
 ];
 
-fn policy(constraint: &str, assignee: Option<&str>, collection: bool) -> Option<ValidatedPolicy> {
-    let mut rule = format!("odrl:action odrl:read ; odrl:target <{N1}>");
+const TARGETS: [Option<&str>; 4] = [Some(N1), Some(NOTES), None, Some("https://pod.ex/notes/n2")];
+
+fn policy(
+    constraint: &str,
+    assignee: Option<&str>,
+    collection: bool,
+    target: Option<&str>,
+) -> Option<ValidatedPolicy> {
+    let mut rule = "odrl:action odrl:read".to_owned();
+    if let Some(t) = target {
+        rule += &format!(" ; odrl:target <{t}>");
+    }
     if let Some(a) = assignee {
         rule += &format!(" ; odrl:assignee <{a}>");
     }
@@ -68,7 +98,7 @@ fn policy(constraint: &str, assignee: Option<&str>, collection: bool) -> Option<
          <urn:pol/p> a odrl:Set ; odrl:prohibition [ {rule} ] .\n"
     );
     if collection {
-        ttl += "<https://pod.ex/team> a odrl:PartyCollection .\n";
+        ttl += &format!("<{TEAM}> a odrl:PartyCollection .\n");
     }
     parse_policy_str(&ttl, "turtle").ok()
 }
@@ -100,23 +130,26 @@ fn reads(store: &mut PodStore, agent: Option<&str>) -> bool {
         .any(|g| g.as_str() == N1)
 }
 
-fn read_by(party: &str) -> Request {
-    Request::new(format!("{ODRL}read")).on(N1).by(party)
+/// A read of n1 by `agent` (anonymous for `None`), carrying the `n1 odrl:partOf notes`
+/// evidence.
+fn read(agent: Option<&str>, at: Option<&str>) -> Request {
+    let mut req = Request::new(format!("{ODRL}read"))
+        .on(N1)
+        .with_asset_membership(N1, NOTES);
+    if let Some(a) = agent {
+        req = req.by(a);
+    }
+    if let Some(t) = at {
+        req = req.at(t);
+    }
+    req
 }
 
-/// Whether `decide` denies a read of n1 by `agent` (anonymous for `None`), with or
-/// without a clock.
+/// Whether `decide` denies a read of n1 by `agent`, with or without a clock.
 fn decide_denies(pol: &ValidatedPolicy, agent: Option<&str>) -> bool {
-    [None, Some("2025-06-01T00:00:00Z")].into_iter().any(|at| {
-        let mut req = Request::new(format!("{ODRL}read")).on(N1);
-        if let Some(a) = agent {
-            req = req.by(a);
-        }
-        if let Some(t) = at {
-            req = req.at(t);
-        }
-        matched_prohibition(pol, &req).is_some()
-    })
+    [None, Some("2025-06-01T00:00:00Z")]
+        .into_iter()
+        .any(|at| matched_prohibition(pol, &read(agent, at)).is_some())
 }
 
 fn check(
@@ -127,21 +160,15 @@ fn check(
     when: &str,
     case: &str,
 ) {
-    let party = req.party.as_deref().unwrap();
+    let party = req.party.as_deref();
     if matched_prohibition(pol, req).is_some() {
         assert!(
-            !reads(store, Some(party)),
-            "{when}: requester {party} not denied\n{case}"
+            !reads(store, party),
+            "{when}: requester {party:?} not denied\n{case}"
         );
     }
     if conditional {
-        let universe = PARTIES
-            .iter()
-            .copied()
-            .chain([UNSEEN])
-            .map(Some)
-            .chain([None]);
-        for s in universe {
+        for s in SESSIONS {
             if decide_denies(pol, s) {
                 assert!(!reads(store, s), "{when}: session {s:?} not denied\n{case}");
             }
@@ -151,46 +178,47 @@ fn check(
 
 #[test]
 fn bridged_denies_cover_every_decide_deny() {
-    let (mut cases, mut anonymous) = (0, 0);
+    let (mut cases, mut denied) = (0, 0);
     for constraint in CONSTRAINTS {
         for assignee in ASSIGNEES {
             for collection in [false, true] {
-                let Some(pol) = policy(constraint, assignee, collection) else {
-                    continue;
-                };
-                for party in PARTIES {
-                    for at in [None, Some("2025-06-01T00:00:00Z")] {
-                        let mut req = read_by(party);
-                        if let Some(t) = at {
-                            req = req.at(t);
-                        }
-                        for conditional in [false, true] {
-                            let case = format!(
-                                "constraint [{constraint}] assignee {assignee:?} collection \
-                                 {collection} party {party} at {at:?} conditional {conditional}"
-                            );
-                            let mut store = public_store();
-                            assert!(reads(&mut store, Some(party)), "public grant in force");
-                            if conditional {
-                                store.materialize_odrl_prohibition_conditional(&pol, &req);
-                            } else {
-                                store.materialize_odrl_prohibition(&pol, &req);
-                            }
-                            cases += 1;
-                            check(
-                                &mut store,
-                                &pol,
-                                &req,
-                                conditional,
-                                "after materialize",
-                                &case,
-                            );
-                            store.refresh_odrl_grants();
-                            check(&mut store, &pol, &req, conditional, "after refresh", &case);
-                            store.materialize_wac().expect("wac");
-                            check(&mut store, &pol, &req, conditional, "after replay", &case);
-                            if conditional && decide_denies(&pol, None) {
-                                anonymous += 1;
+                for target in TARGETS {
+                    let Some(pol) = policy(constraint, assignee, collection, target) else {
+                        continue;
+                    };
+                    if decide_denies(&pol, None) || SESSIONS.iter().any(|s| decide_denies(&pol, *s))
+                    {
+                        denied += 1;
+                    }
+                    for party in MATERIALIZERS {
+                        for at in [None, Some("2025-06-01T00:00:00Z")] {
+                            let req = read(party, at);
+                            for conditional in [false, true] {
+                                let case = format!(
+                                    "constraint [{constraint}] assignee {assignee:?} collection \
+                                     {collection} target {target:?} party {party:?} at {at:?} \
+                                     conditional {conditional}"
+                                );
+                                let mut store = public_store();
+                                assert!(reads(&mut store, party), "public grant in force");
+                                if conditional {
+                                    store.materialize_odrl_prohibition_conditional(&pol, &req);
+                                } else {
+                                    store.materialize_odrl_prohibition(&pol, &req);
+                                }
+                                cases += 1;
+                                check(
+                                    &mut store,
+                                    &pol,
+                                    &req,
+                                    conditional,
+                                    "after materialize",
+                                    &case,
+                                );
+                                store.refresh_odrl_grants();
+                                check(&mut store, &pol, &req, conditional, "after refresh", &case);
+                                store.materialize_wac().expect("wac");
+                                check(&mut store, &pol, &req, conditional, "after replay", &case);
                             }
                         }
                     }
@@ -198,9 +226,9 @@ fn bridged_denies_cover_every_decide_deny() {
             }
         }
     }
-    assert!(cases >= 500, "only {cases} cases ran");
+    assert!(cases >= 5000, "only {cases} cases ran");
     assert!(
-        anonymous >= 100,
-        "only {anonymous} conditional cases deny anonymous under decide"
+        denied >= 300,
+        "only {denied} policies deny some session under decide"
     );
 }

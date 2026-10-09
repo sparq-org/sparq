@@ -395,8 +395,8 @@ impl Request {
 
     /// Whether the request's target asset is `target` or a member of the collection
     /// `target` (`asset odrl:partOf target`) under the supplied membership evidence.
-    /// [OPUS-4.8] sq-k7itg.
-    pub(crate) fn asset_matches(&self, target: &str) -> bool {
+    /// This is the target test [`decide`] applies to a rule.
+    pub fn asset_matches(&self, target: &str) -> bool {
         match self.target.as_deref() {
             Some(a) => {
                 a == target

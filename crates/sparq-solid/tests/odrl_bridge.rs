@@ -494,8 +494,8 @@ fn unmatched_prohibition_materializes_nothing() {
     assert!(!out3.prohibited, "unmapped umbrella deny not materialized: {out3:?}");
     assert!(!out3.reasons.is_empty(), "the unmappable carve-out is reported, not silent");
 
-    // (d) Partyless prohibition (no assignee) matched by a partyless request → nothing
-    //     (a deny with no concrete principal is meaningless here).
+    // (d) Partyless prohibition (no assignee) matched by an anonymous request: there is
+    //     no party to freeze the deny to, so it denies every session on the target.
     let any_prohib = parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -506,7 +506,9 @@ fn unmatched_prohibition_materializes_nothing() {
     .unwrap();
     let mut g4 = pod();
     let no_party = Request::new(odrl("modify")).on(N1);
-    assert!(!materialize_prohibition(&mut g4, &any_prohib, &no_party).prohibited);
+    let out4 = materialize_prohibition(&mut g4, &any_prohib, &no_party);
+    assert!(out4.prohibited, "{out4:?}");
+    assert_eq!(cond_denies_for(&g4, Some("https://sparq.dev/ns/auth#Public")), 1);
 
     // (e) Targetless request → nothing.
     let mut g5 = pod();
@@ -1651,8 +1653,9 @@ fn cond_denies_for(graph: &Graph, agent: Option<&str>) -> usize {
     sparq_engine::query(graph, &q).expect("query").rows.len()
 }
 
-/// "carol (recipient) is PROHIBITED from reading n1" — a recipient-eq prohibition that
-/// the conditional path maps to a per-session deny carving out exactly carol.
+/// "carol (recipient) is PROHIBITED from reading n1" — a recipient-eq prohibition. The
+/// conditional path does not re-check the recipient per session yet (#6743), so it
+/// denies every session on n1.
 fn prohibit_recipient_carol_policy() -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         r#"
@@ -1669,23 +1672,23 @@ fn prohibit_recipient_carol_policy() -> sparq_policy::ValidatedPolicy {
 }
 
 // 24. The conditional-deny BRIDGE SHAPE: a recipient-eq prohibition materializes a
-//     ConditionalGrant with auth:effect auth:Deny headed by carol (re-checked, NOT frozen).
+//     ConditionalGrant with auth:effect auth:Deny on auth:Public, whoever materialized it.
 #[test]
 fn conditional_deny_emits_deny_effect_condition() {
     let mut g = pod();
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
     let out = materialize_prohibition_conditional(&mut g, &prohibit_recipient_carol_policy(), &req);
-    assert!(out.prohibited, "faithful recipient prohibition maps to a deny condition: {out:?}");
-    assert_eq!(cond_denies_for(&g, Some(CAROL)), 1, "carol deny condition present");
-    assert_eq!(cond_denies_for(&g, Some(ALICE)), 0, "no deny for the materializer");
+    assert!(out.prohibited, "the recipient prohibition maps to a deny condition: {out:?}");
+    assert_eq!(cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")), 1, "one deny on auth:Public");
+    assert_eq!(cond_denies_for(&g, Some(CAROL)), 0, "no per-party head");
     // It is a DENY, not an allow (the audit anchor reports the effect predicate).
     assert_eq!(out.deny_triple.as_ref().map(|t| t.1.as_str()),
         Some("https://sparq.dev/ns/auth#effect"), "deny anchor: {out:?}");
 }
 
-// 25. RE-CHECKED end-to-end with DENY-OVERRIDES: a public allow grant is in force, and a
-//     conditional deny carves out carol. carol is denied (deny beats allow); everyone
-//     else keeps the allow. This composes the conditional deny with an existing allow.
+// 25. DENY-OVERRIDES end-to-end: a public allow grant is in force, and a prohibition on
+//     carol is layered over it. carol is denied (deny beats allow). Until #6743 re-checks
+//     the recipient per request, bob is denied too: a documented over-deny.
 #[test]
 fn conditional_deny_overrides_allow_for_carved_party() {
     let mut store = PodStore::new(pod());
@@ -1706,7 +1709,7 @@ fn conditional_deny_overrides_allow_for_carved_party() {
     let out = store.materialize_odrl_prohibition_conditional(&prohibit_recipient_carol_policy(), &req);
     assert!(out.prohibited, "deny condition materialized: {out:?}");
     assert!(!reads(&mut store, CAROL), "DENY-OVERRIDES: carol loses access");
-    assert!(reads(&mut store, BOB), "bob keeps the allow (only carol is denied)");
+    assert!(!reads(&mut store, BOB), "bob is over-denied until #6743");
     // End-to-end query_as: carol sees nothing, bob sees the content.
     // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
@@ -1714,7 +1717,7 @@ fn conditional_deny_overrides_allow_for_carved_party() {
     let carol = Session { agent: Some(CAROL), client: None, issuer: None, now: None };
     let bob = Session { agent: Some(BOB), client: None, issuer: None, now: None };
     assert_eq!(store.query_as(&carol, Mode::Read, sel).unwrap().rows.len(), 0);
-    assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 1);
+    assert_eq!(store.query_as(&bob, Mode::Read, sel).unwrap().rows.len(), 0);
 }
 
 // 25b. An `odrl:assignee` CONSTRAINT has no evidence in a request, so `decide` keeps the
@@ -1754,9 +1757,9 @@ fn assignee_constrained_prohibition_denies_everyone_decide_denies() {
     assert!(!reads(&mut store, BOB), "the deny survives a ledger refresh");
 }
 
-// 26. The deny APPEARS/RETRACTS as the condition flips: a recipient-neq prohibition maps
-//     to a deny on everyone EXCEPT bob; when the prohibition is WITHDRAWN, refresh
-//     retracts the deny and access is restored (composes with sq-2pcf deny-retraction).
+// 26. The deny APPEARS/RETRACTS: a recipient-neq prohibition denies n1 (for everyone
+//     until #6743); when the prohibition is WITHDRAWN, refresh retracts the deny and
+//     access is restored (composes with sq-2pcf deny-retraction).
 #[test]
 fn conditional_deny_retracts_when_prohibition_withdrawn() {
     let mut store = PodStore::new(pod());
@@ -1782,9 +1785,8 @@ fn conditional_deny_retracts_when_prohibition_withdrawn() {
     )
     .unwrap();
     assert!(store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited);
-    // The deny carves out everyone except bob: carol denied, bob keeps the allow.
     assert!(!reads(&mut store, CAROL), "carol (not bob) is denied by the conditional deny");
-    assert!(reads(&mut store, BOB), "bob is excepted from the deny → keeps the allow");
+    assert!(!reads(&mut store, BOB), "bob is over-denied until #6743");
 
     // WITHDRAW the prohibition entirely → refresh → the deny is retracted → access back.
     let empty = parse_policy_str(
@@ -1797,6 +1799,7 @@ fn conditional_deny_retracts_when_prohibition_withdrawn() {
     assert!(matched, "the tracked deny slot matched");
     assert_eq!(retracted, 1, "the withdrawn deny condition was retracted");
     assert!(reads(&mut store, CAROL), "deny withdrawn → carol regains access");
+    assert!(reads(&mut store, BOB), "and so does bob");
     assert_eq!(cond_denies_for(&store.graph, None), 0, "no residual deny condition");
 }
 
@@ -2170,10 +2173,11 @@ fn isnoneof_reserved_member_sinks_whole_rule_to_one_shot() {
     assert!(!reads(&mut store, BOB), "bob (excluded member) denied");
 }
 
-// 35. The PROHIBITION dual: `recipient isAnyOf <set>` on a prohibition persists one
-//     re-checked conditional DENY per member, composing with deny-overrides.
+// 35. The PROHIBITION dual: `recipient isAnyOf <set>` on a prohibition persists an
+//     unconditional deny (the members, and until #6743 everyone else), composing with
+//     deny-overrides.
 #[test]
-fn isanyof_prohibition_persists_conditional_deny_per_member() {
+fn isanyof_prohibition_conditional_denies_the_target() {
     // A public allow (bare permission via the conditional path → Public head)…
     let permit = parse_policy_str(
         r#"
@@ -2202,13 +2206,13 @@ fn isanyof_prohibition_persists_conditional_deny_per_member() {
     let req = Request::new(odrl("read")).on(N1).by(ALICE);
     install_public_read(&mut store, &permit);
     let out = store.materialize_odrl_prohibition_conditional(&prohib, &req);
-    assert!(out.prohibited, "isAnyOf prohibition maps to per-member deny conditions: {out:?}");
+    assert!(out.prohibited, "the isAnyOf prohibition maps to a deny: {out:?}");
 
     // Deny-overrides through the real path: the set members lose the public allow.
     assert!(!reads(&mut store, BOB), "bob (in set) denied — deny beats allow");
     assert!(!reads(&mut store, CAROL), "carol (in set) denied — deny beats allow");
-    assert!(reads(&mut store, ALICE), "alice (not in set) keeps the public allow");
-    assert!(reads(&mut store, DAVE), "dave (not in set) keeps the public allow");
+    assert!(!reads(&mut store, ALICE), "alice (not in set) is over-denied until #6743");
+    assert!(!reads(&mut store, DAVE), "dave (not in set) is over-denied until #6743");
 }
 
 // ===========================================================================
@@ -2218,17 +2222,18 @@ fn isanyof_prohibition_persists_conditional_deny_per_member() {
 // access-control WIDENING bug: `condition_agents` used to ignore `rule.assignee`
 // and default an empty recipient set to auth:Public, so a permission scoped to
 // ONE assignee granted EVERYONE (incl. anonymous), and a prohibition scoped to
-// one assignee DENIED everyone (over-deny). Both are closed by folding
-// `rule.assignee` into the condition head when there is no recipient constraint.
+// one assignee DENIED everyone (over-deny). The permission side is closed: a constrained
+// grant is not stored. The prohibition side denies everyone on purpose until #6743
+// re-checks the party per request.
 // ===========================================================================
 
 // 31. A bare-assignee prohibition (assignee=alice, ZERO constraints) via the
-//     CONDITIONAL entry point denies alice's sessions and anonymous ones; bob keeps a
-//     pre-existing public allow.
+//     CONDITIONAL entry point denies alice. Until #6743 re-checks the party per
+//     request, it denies every other session on n1 too: a documented over-deny.
 #[test]
-fn bare_assignee_prohibition_conditional_scopes_to_assignee_not_public() {
+fn bare_assignee_prohibition_conditional_denies_the_target() {
     let mut store = PodStore::new(pod());
-    // Baseline PUBLIC allow so we can observe the deny biting only the assignee.
+    // Baseline PUBLIC allow so we can observe the deny biting.
     let permit = parse_policy_str(
         r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
         <urn:pol/pub> a odrl:Set ; odrl:permission [
@@ -2250,24 +2255,20 @@ fn bare_assignee_prohibition_conditional_scopes_to_assignee_not_public() {
     )
     .unwrap();
 
-    // Free-function form: the deny head is ALICE, NOT auth:Public.
+    // Free-function form: one unconditional deny on auth:Public, no per-party head.
     let mut g = pod();
     let dout = materialize_prohibition_conditional(&mut g, &prohib, &req);
     assert!(dout.prohibited, "bare-assignee prohibition materialises a deny: {dout:?}");
-    assert_eq!(
-        cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")),
-        1,
-        "one auth:Public head, the anonymous-only deny (it excepts authenticated sessions)"
-    );
-    assert_eq!(cond_denies_for(&g, Some(ALICE)), 1, "the agent deny head is scoped to alice");
+    assert_eq!(cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")), 1);
+    assert_eq!(cond_denies_for(&g, Some(ALICE)), 0, "no per-party head");
 
-    // Through the real enforcement path: alice and anonymous lose access, bob keeps it.
+    // Through the real enforcement path: every session loses access.
     assert!(store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited);
     assert!(!reads(&mut store, ALICE), "alice (the assignee) is denied — deny-overrides");
-    assert!(reads(&mut store, BOB), "bob keeps the public allow — NOT over-denied");
+    assert!(!reads(&mut store, BOB), "bob is over-denied until #6743");
     assert!(
         store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "an anonymous session is denied: it carries no party to check"
+        "an anonymous session is denied too"
     );
 }
 
@@ -2361,9 +2362,9 @@ fn compound_only_permission_conditional_scopes_not_public() {
 //     ZERO atomic constraints) is not re-checked per session, so the CONDITIONAL entry
 //     point denies every session; the compound restriction is never dropped.
 #[test]
-fn compound_only_prohibition_conditional_scopes_not_public() {
+fn compound_only_prohibition_conditional_denies_the_target() {
     let mut store = PodStore::new(pod());
-    // Baseline PUBLIC allow so we can observe the deny biting only the recipient.
+    // Baseline PUBLIC allow so we can observe the deny biting.
     let permit = parse_policy_str(
         r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
         <urn:pol/pub> a odrl:Set ; odrl:permission [
