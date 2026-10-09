@@ -49,8 +49,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 
 **Required production configuration:**
 
-- **Base URL:** `SOLID_SERVER_BASE_URL` = the public `https://` origin (set
-  `SOLID_SERVER_AUDIENCE` only if the token audience differs).
+- **Base URL:** `SOLID_SERVER_BASE_URL` = the public `https://` origin (set `SOLID_SERVER_AUDIENCE` only if the token audience differs).
 - **TLS:** terminate at a trusted proxy (keep the container port private), or mount PEMs
   and set both `SOLID_SERVER_TLS_CERT` + `SOLID_SERVER_TLS_KEY` (setting one fails boot;
   uid 65532 must read them).
