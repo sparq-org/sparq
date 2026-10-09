@@ -795,11 +795,27 @@ fn start_element(
         let raw = std::str::from_utf8(&a.value).map_err(|_| "a non-UTF-8 attribute value")?;
         budget.charge(key.len() + raw.len() + NODE_OVERHEAD)?;
         let value = unescape(raw, true)?;
+        // Canonical XML 1.0 section 2.1, which exclusive canonicalization inherits: a document
+        // with a relative namespace URI, even an unused one, cannot be canonicalized.
+        let absolute = |v: &str| {
+            v.split_once(':').is_some_and(|(scheme, _)| {
+                scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                    && scheme
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            })
+        };
         if key == "xmlns" {
+            if !value.is_empty() && !absolute(&value) {
+                return Err("a relative namespace URI cannot be canonicalized".into());
+            }
             declared.push((String::new(), value));
         } else if let Some(p) = key.strip_prefix("xmlns:") {
             if value.is_empty() {
                 return Err("a prefixed namespace cannot be undeclared in XML 1.0".into());
+            }
+            if !absolute(&value) {
+                return Err("a relative namespace URI cannot be canonicalized".into());
             }
             declared.push((p.to_string(), value));
         } else {
@@ -985,7 +1001,11 @@ fn render(
     if exclude == Some(el as *const Element) {
         return Ok(());
     }
-    budget.charge((1 + el.attrs.len() + inclusive.len()) * NODE_OVERHEAD)?;
+    // Each inclusive prefix is looked up in scope and copied at every element, and each prefix
+    // wanted is looked up twice and its URI compared (and copied when rendered): all charged
+    // before it is done, by the bytes it weighs.
+    let inclusive_bytes: usize = inclusive.iter().map(|p| 2 * p.len()).sum();
+    budget.charge((1 + el.attrs.len() + inclusive.len()) * NODE_OVERHEAD + inclusive_bytes)?;
     let start = out.len();
     // Namespaces this element visibly utilizes, plus the inclusive ones in scope.
     let mut wanted: Vec<String> = vec![el.prefix.clone()];
@@ -1010,7 +1030,9 @@ fn render(
         if p == "xml" {
             continue;
         }
+        budget.charge(2 * p.len())?;
         let uri = el.scope.get(&p).map(String::as_str).unwrap_or_default();
+        budget.charge(2 * uri.len())?;
         if p.is_empty() {
             let before = rendered.get("").map(String::as_str).unwrap_or("");
             if uri != before {
@@ -1196,6 +1218,53 @@ mod tests {
         while doc.canonicalize(doc.root(), None, &[]).is_ok() {
             rounds += 1;
             assert!(rounds < 100, "the budget was never spent");
+        }
+    }
+
+    /// Review finding: comparing an inherited namespace URI with its rendered copy cost its bytes
+    /// at every element, uncharged, so a long URI named as an inclusive prefix and thousands of
+    /// small elements cost gigabytes of comparisons. Lookups, comparisons and copies are charged
+    /// by the bytes they weigh.
+    #[test]
+    fn namespace_comparisons_draw_on_the_budget() {
+        let xml = format!(
+            "<r xmlns:p=\"urn:{}\">{}</r>",
+            "x".repeat(100_000),
+            "<a/>".repeat(30_000)
+        );
+        let doc = Document::parse(&xml).unwrap();
+        assert_eq!(
+            doc.canonicalize(doc.root(), None, &["p".to_string()])
+                .unwrap_err(),
+            OVER_BUDGET
+        );
+        let long = "q".repeat(100_000);
+        let xml = format!("<r xmlns:{long}=\"urn:q\">{}</r>", "<a/>".repeat(30_000));
+        let doc = Document::parse(&xml).unwrap();
+        assert_eq!(
+            doc.canonicalize(doc.root(), None, &[long]).unwrap_err(),
+            OVER_BUDGET
+        );
+    }
+
+    /// Review finding: relative namespace URIs were accepted, though canonicalization must fail
+    /// on them (Canonical XML 1.0 section 2.1), unused ones included.
+    #[test]
+    fn relative_namespaces_are_refused() {
+        for xml in [
+            r#"<r xmlns:unused="relative"/>"#,
+            r#"<r xmlns="relative"/>"#,
+            r#"<r xmlns:p="../x"/>"#,
+            r#"<r xmlns:p="1urn:x"/>"#,
+        ] {
+            assert!(parse(xml).is_err(), "{xml}");
+        }
+        for xml in [
+            r#"<r xmlns:p="urn:x"/>"#,
+            r#"<r xmlns="http://e.example/ns"/>"#,
+            r#"<r xmlns=""/>"#,
+        ] {
+            assert!(parse(xml).is_ok(), "{xml}");
         }
     }
 
