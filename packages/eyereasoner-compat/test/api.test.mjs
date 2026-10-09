@@ -98,3 +98,20 @@ test('rdf helpers round-trip N-Triples <-> quads', () => {
   assert.equal(back[0].object.language, 'en');
   assert.equal(back[1].object.datatype.value, 'http://www.w3.org/2001/XMLSchema#integer');
 });
+
+test('writeQuads rejects term parts that could inject statements', () => {
+  const { namedNode, blankNode, literal, quad } = dataFactory;
+  const s = namedNode('http://a/s');
+  const p = namedNode('http://a/p');
+  const evil = '> <http://evil/p> <http://evil/o> .\n<http://evil/s';
+  assert.throws(() => writeQuads([quad(s, p, namedNode(`http://a/o${evil}`))]), /IRI/);
+  assert.throws(() => writeQuads([quad(s, p, namedNode('http://a/o b'))]), /IRI/);
+  assert.throws(() => writeQuads([quad(blankNode('b0 <http://evil/p> <http://evil/o> .\n_:x'), p, s)]), /blank node/);
+  assert.throws(() => writeQuads([quad(s, p, literal('x', 'en .\n<http://evil/s> <http://evil/p> <http://evil/o>'))]), /language tag/);
+  assert.throws(() => writeQuads([quad(s, p, literal('1', namedNode(`http://a/dt${evil}`)))]), /datatype IRI/);
+  // A literal payload is escaped and stays one statement; controls use the canonical escapes.
+  const nt = writeQuads([quad(s, p, literal('x" .\n<http://evil/s> <http://evil/p> "y\u0001\b'))]);
+  assert.equal(nt, '<http://a/s> <http://a/p> "x\\" .\\n<http://evil/s> <http://evil/p> \\"y\\u0001\\b" .');
+  assert.equal(parseNTriples(nt).length, 1);
+  assert.equal(writeQuads([quad(blankNode('a.b'), p, s)]), '_:a.b <http://a/p> <http://a/s> .');
+});

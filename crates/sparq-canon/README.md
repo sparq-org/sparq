@@ -10,7 +10,6 @@ signing, diffing, deduplication, and content-addressing.
 
 [RDF Dataset Canonicalization]: https://www.w3.org/TR/rdf-canon/
 
-> Model: Opus 4.8 (Fable unavailable — flag for re-review when Fable returns).
 > Surfaced from `sparq-zk::canon` per bead sq-0qip.
 
 ## 🚀 Quickstart
@@ -35,16 +34,16 @@ let map = sparq_canon::issued_identifiers(&[q]).unwrap();  // issuer map
   `issued_identifiers`/`issue_quads` return the blank-node issuer map. The other
   `*_with::<D: Digest>` functions select a non-default RDFC-1.0 hash profile.
 - **Single-graph API** — `canonicalize_triples` / `canonicalize_graph_content`
-  return a `CanonicalGraph` (sorted canonical N-Quads lines + re-parsed canonical
-  triples) — what the ZK per-graph commitment pipeline consumes
-  (`leaf_index = line index`).
+  return a `CanonicalGraph` (sorted canonical N-Quads lines + re-parsed canonical triples) — what the ZK
+  per-graph commitment pipeline consumes (`leaf_index = line index`).
+- **Explicit work bounds** — `canonicalize_quads_bounded_with` / `issue_quads_bounded_with` add `CanonicalizationLimits`
+  (quads, input/output bytes, HNDQ calls, a conservative permutation bound); exhaustion rejects.
 - **Fail-closed on poison graphs** — RDFC-1.0's pathological blow-ups hit the HNDQ call-limit guard
   (`CanonError::Canonicalization`). RDF 1.2 triple terms and directional literals (`"…"@en--ltr`) are outside
   RDFC-1.0: the standard paths fail closed with `CanonError::TripleTerm` / `CanonError::DirectionalLiteral`
   unless the `rdf12-triple-terms` profile is enabled.
-- **W3C-conformant** — validated against the official [rdf-canon test suite]
-  (eval + issued-map + negative cases, SHA-256 and SHA-384) through this crate's
-  own public API (`tests/rdf_canon_suite.rs`).
+- **W3C-conformant** — validated against the official [rdf-canon test suite] (eval + issued-map + negative cases,
+  SHA-256 and SHA-384) through this crate's own public API (`tests/rdf_canon_suite.rs`).
 
 [rdf-canon test suite]: https://github.com/w3c/rdf-canon
 
@@ -101,9 +100,9 @@ is **not** independent of RDFC-1.0 itself.
 
 ### Opt-in, single-sourced
 
-`publish = false`, and nothing in sparq's default dependency graph or the wasm
-artifact depends on this crate, so both are byte-identical with or without it and
-`sparq-core` stays lean. The RDFC-1.0 **algorithm** is the maintained zkp-ld
+`publish = false`; no published sparq crate nor the default wasm artifact depends on it
+(it builds by default only as a `sparq-bench` dependency; `sparq-wasm` pulls it behind
+its opt-in `canon` feature), so `sparq-core` stays lean. The RDFC-1.0 **algorithm** is the maintained zkp-ld
 [`rdf-canon`](https://crates.io/crates/rdf-canon) crate (oxrdf 0.2); this crate
 owns the single canonical-N-Quads-text bridge from sparq's oxrdf 0.3, so the
 bridge lives in exactly one place. `sparq-zk` depends on it (its `canon` module

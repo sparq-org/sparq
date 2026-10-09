@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: internal-stub README for a publish=false crate; full surface lives in skills/usage-control-policy/SKILL.md. -->
+<!-- sq-inzv: internal-stub README for a publish=false crate; full surface lives in skills/usage-control-policy/SKILL.md. -->
 # sparq-policy
 
 **ODRL usage-control** over the [sparq](../../README.md) engine — the declarative
@@ -14,8 +14,8 @@ conflict/containment lints, the stateful `count-enforcement` counter stores, the
 the opt-in `decision-report` deterministic summary of already-computed decisions —
 lives in [`skills/usage-control-policy/SKILL.md`](../../skills/usage-control-policy/SKILL.md).
 
-> **Internal crate — not published** to crates.io (`publish = false`); opt-in,
-> dependency-of-nothing in the workspace. **Single-node only.** The headline
+> **Internal crate — not published** to crates.io (`publish = false`); opt-in;
+> other workspace crates reach it only through optional, default-off features. **Single-node only.** The headline
 > federated-disclosure / ODRL→MPC composition (per-node ODRL driving the
 > `sparq-mpc` disclosed-vs-hidden split; `Duty` → ZK proof obligation) is
 > **deferred** — it would inherit the MPC honest-majority/LAN envelope and the

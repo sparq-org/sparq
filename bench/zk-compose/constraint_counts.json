@@ -23,6 +23,15 @@
     "nargo_at_last_measurement": "nargo version = 1.0.0-beta.21"
   },
   "layers": {
+    "result": {
+      "families": [
+        "result_v4",
+        "result_v3",
+        "result_v2",
+        "result_v1"
+      ],
+      "members": 32
+    },
     "query": {
       "families": [
         "scan",
@@ -49,6 +58,1316 @@
     }
   },
   "families": {
+    "result_v4": {
+      "layer": "result",
+      "role": "Version 4 support for released SELECT DISTINCT mappings. The first BGP pattern whose slots are all constants or projected variables is moved to index zero and checked against a public triple table the verifier reconstructs from its query and the released rows, instead of private typed openings. Issuer authentication, credential status (tree depth d), leaf membership and the remaining patterns' private typed and shared-variable joins stay in-circuit. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v4_k1_n16_p3_r4_f0_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          },
+          "circuit_size": 31209
+        },
+        {
+          "member": "result_v4_k2_n16_p3_r4_f0_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          },
+          "circuit_size": 58022
+        }
+      ],
+      "min_circuit_size": 31209,
+      "max_circuit_size": 58022,
+      "scaling": [
+        {
+          "parameter": "k",
+          "from_member": "result_v4_k1_n16_p3_r4_f0_d10",
+          "from_value": 1,
+          "from_circuit_size": 31209,
+          "to_member": "result_v4_k2_n16_p3_r4_f0_d10",
+          "to_value": 2,
+          "to_circuit_size": 58022,
+          "delta_gates": 26813,
+          "ratio": 1.8591,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          }
+        }
+      ],
+      "invariances": []
+    },
+    "result_v3": {
+      "layer": "result",
+      "role": "Separately versioned support for released SELECT DISTINCT mappings with canonical signed i64 predicates (s=64; s=0 has no private predicate) and status tree depth d. Sign and exact lexical length have no public selector. Preserves issuer authentication and original string-commitment binding, without result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "s",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v3_k1_n16_p3_r4_f0_s0_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 10
+          },
+          "circuit_size": 32288
+        },
+        {
+          "member": "result_v3_k1_n16_p3_r4_f0_s0_d17",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 17
+          },
+          "circuit_size": 32836
+        },
+        {
+          "member": "result_v3_k1_n16_p3_r4_f0_s0_d20",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 20
+          },
+          "circuit_size": 33071
+        },
+        {
+          "member": "result_v3_k1_n16_p3_r4_f2_s64_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 10
+          },
+          "circuit_size": 436341
+        },
+        {
+          "member": "result_v3_k1_n16_p3_r4_f2_s64_d17",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 17
+          },
+          "circuit_size": 436889
+        },
+        {
+          "member": "result_v3_k1_n16_p3_r4_f2_s64_d20",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 20
+          },
+          "circuit_size": 437124
+        },
+        {
+          "member": "result_v3_k2_n16_p3_r4_f0_s0_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 10
+          },
+          "circuit_size": 59101
+        },
+        {
+          "member": "result_v3_k2_n16_p3_r4_f0_s0_d17",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 17
+          },
+          "circuit_size": 60197
+        },
+        {
+          "member": "result_v3_k2_n16_p3_r4_f0_s0_d20",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 20
+          },
+          "circuit_size": 60667
+        },
+        {
+          "member": "result_v3_k2_n16_p3_r4_f2_s64_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 10
+          },
+          "circuit_size": 463150
+        },
+        {
+          "member": "result_v3_k2_n16_p3_r4_f2_s64_d17",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 17
+          },
+          "circuit_size": 464246
+        },
+        {
+          "member": "result_v3_k2_n16_p3_r4_f2_s64_d20",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 20
+          },
+          "circuit_size": 464716
+        }
+      ],
+      "min_circuit_size": 32288,
+      "max_circuit_size": 464716,
+      "scaling": [
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k1_n16_p3_r4_f0_s0_d10",
+          "from_value": 10,
+          "from_circuit_size": 32288,
+          "to_member": "result_v3_k1_n16_p3_r4_f0_s0_d17",
+          "to_value": 17,
+          "to_circuit_size": 32836,
+          "delta_gates": 548,
+          "ratio": 1.017,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k1_n16_p3_r4_f0_s0_d10",
+          "from_value": 10,
+          "from_circuit_size": 32288,
+          "to_member": "result_v3_k1_n16_p3_r4_f0_s0_d20",
+          "to_value": 20,
+          "to_circuit_size": 33071,
+          "delta_gates": 783,
+          "ratio": 1.0243,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k1_n16_p3_r4_f0_s0_d17",
+          "from_value": 17,
+          "from_circuit_size": 32836,
+          "to_member": "result_v3_k1_n16_p3_r4_f0_s0_d20",
+          "to_value": 20,
+          "to_circuit_size": 33071,
+          "delta_gates": 235,
+          "ratio": 1.0072,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k1_n16_p3_r4_f2_s64_d10",
+          "from_value": 10,
+          "from_circuit_size": 436341,
+          "to_member": "result_v3_k1_n16_p3_r4_f2_s64_d17",
+          "to_value": 17,
+          "to_circuit_size": 436889,
+          "delta_gates": 548,
+          "ratio": 1.0013,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k1_n16_p3_r4_f2_s64_d10",
+          "from_value": 10,
+          "from_circuit_size": 436341,
+          "to_member": "result_v3_k1_n16_p3_r4_f2_s64_d20",
+          "to_value": 20,
+          "to_circuit_size": 437124,
+          "delta_gates": 783,
+          "ratio": 1.0018,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k1_n16_p3_r4_f2_s64_d17",
+          "from_value": 17,
+          "from_circuit_size": 436889,
+          "to_member": "result_v3_k1_n16_p3_r4_f2_s64_d20",
+          "to_value": 20,
+          "to_circuit_size": 437124,
+          "delta_gates": 235,
+          "ratio": 1.0005,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k2_n16_p3_r4_f0_s0_d10",
+          "from_value": 10,
+          "from_circuit_size": 59101,
+          "to_member": "result_v3_k2_n16_p3_r4_f0_s0_d17",
+          "to_value": 17,
+          "to_circuit_size": 60197,
+          "delta_gates": 1096,
+          "ratio": 1.0185,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k2_n16_p3_r4_f0_s0_d10",
+          "from_value": 10,
+          "from_circuit_size": 59101,
+          "to_member": "result_v3_k2_n16_p3_r4_f0_s0_d20",
+          "to_value": 20,
+          "to_circuit_size": 60667,
+          "delta_gates": 1566,
+          "ratio": 1.0265,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k2_n16_p3_r4_f0_s0_d17",
+          "from_value": 17,
+          "from_circuit_size": 60197,
+          "to_member": "result_v3_k2_n16_p3_r4_f0_s0_d20",
+          "to_value": 20,
+          "to_circuit_size": 60667,
+          "delta_gates": 470,
+          "ratio": 1.0078,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k2_n16_p3_r4_f2_s64_d10",
+          "from_value": 10,
+          "from_circuit_size": 463150,
+          "to_member": "result_v3_k2_n16_p3_r4_f2_s64_d17",
+          "to_value": 17,
+          "to_circuit_size": 464246,
+          "delta_gates": 1096,
+          "ratio": 1.0024,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k2_n16_p3_r4_f2_s64_d10",
+          "from_value": 10,
+          "from_circuit_size": 463150,
+          "to_member": "result_v3_k2_n16_p3_r4_f2_s64_d20",
+          "to_value": 20,
+          "to_circuit_size": 464716,
+          "delta_gates": 1566,
+          "ratio": 1.0034,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v3_k2_n16_p3_r4_f2_s64_d17",
+          "from_value": 17,
+          "from_circuit_size": 464246,
+          "to_member": "result_v3_k2_n16_p3_r4_f2_s64_d20",
+          "to_value": 20,
+          "to_circuit_size": 464716,
+          "delta_gates": 470,
+          "ratio": 1.001,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v3_k1_n16_p3_r4_f0_s0_d10",
+          "from_value": 1,
+          "from_circuit_size": 32288,
+          "to_member": "result_v3_k2_n16_p3_r4_f0_s0_d10",
+          "to_value": 2,
+          "to_circuit_size": 59101,
+          "delta_gates": 26813,
+          "ratio": 1.8304,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 10
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v3_k1_n16_p3_r4_f0_s0_d17",
+          "from_value": 1,
+          "from_circuit_size": 32836,
+          "to_member": "result_v3_k2_n16_p3_r4_f0_s0_d17",
+          "to_value": 2,
+          "to_circuit_size": 60197,
+          "delta_gates": 27361,
+          "ratio": 1.8333,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v3_k1_n16_p3_r4_f0_s0_d20",
+          "from_value": 1,
+          "from_circuit_size": 33071,
+          "to_member": "result_v3_k2_n16_p3_r4_f0_s0_d20",
+          "to_value": 2,
+          "to_circuit_size": 60667,
+          "delta_gates": 27596,
+          "ratio": 1.8344,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "s": 0,
+            "d": 20
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v3_k1_n16_p3_r4_f2_s64_d10",
+          "from_value": 1,
+          "from_circuit_size": 436341,
+          "to_member": "result_v3_k2_n16_p3_r4_f2_s64_d10",
+          "to_value": 2,
+          "to_circuit_size": 463150,
+          "delta_gates": 26809,
+          "ratio": 1.0614,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 10
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v3_k1_n16_p3_r4_f2_s64_d17",
+          "from_value": 1,
+          "from_circuit_size": 436889,
+          "to_member": "result_v3_k2_n16_p3_r4_f2_s64_d17",
+          "to_value": 2,
+          "to_circuit_size": 464246,
+          "delta_gates": 27357,
+          "ratio": 1.0626,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v3_k1_n16_p3_r4_f2_s64_d20",
+          "from_value": 1,
+          "from_circuit_size": 437124,
+          "to_member": "result_v3_k2_n16_p3_r4_f2_s64_d20",
+          "to_value": 2,
+          "to_circuit_size": 464716,
+          "delta_gates": 27592,
+          "ratio": 1.0631,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "s": 64,
+            "d": 20
+          }
+        }
+      ],
+      "invariances": []
+    },
+    "result_v2": {
+      "layer": "result",
+      "role": "Versioned support for released SELECT DISTINCT mappings with canonical unsigned integer capacity i bits (0 means no private predicate) and status tree depth d. Exact decimal length is private. The small i=8 lane admits values through 99; i=64 covers u64. Preserves issuer authentication and string-commitment binding, without result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "i",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v2_k1_n16_p3_r4_f0_i0_d17",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0,
+            "d": 17
+          },
+          "circuit_size": 32836
+        },
+        {
+          "member": "result_v2_k1_n16_p3_r4_f0_i0_d20",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0,
+            "d": 20
+          },
+          "circuit_size": 33071
+        },
+        {
+          "member": "result_v2_k1_n16_p3_r4_f2_i8_d17",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8,
+            "d": 17
+          },
+          "circuit_size": 69619
+        },
+        {
+          "member": "result_v2_k1_n16_p3_r4_f2_i8_d20",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8,
+            "d": 20
+          },
+          "circuit_size": 69854
+        },
+        {
+          "member": "result_v2_k1_n16_p3_r4_f2_i64_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 10
+          },
+          "circuit_size": 462049
+        },
+        {
+          "member": "result_v2_k1_n16_p3_r4_f2_i64_d17",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 17
+          },
+          "circuit_size": 462597
+        },
+        {
+          "member": "result_v2_k1_n16_p3_r4_f2_i64_d20",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 20
+          },
+          "circuit_size": 462832
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f0_i0_d17",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0,
+            "d": 17
+          },
+          "circuit_size": 60197
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f0_i0_d20",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0,
+            "d": 20
+          },
+          "circuit_size": 60667
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f2_i8_d17",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8,
+            "d": 17
+          },
+          "circuit_size": 96979
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f2_i8_d20",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8,
+            "d": 20
+          },
+          "circuit_size": 97449
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f2_i64_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 10
+          },
+          "circuit_size": 488858
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f2_i64_d17",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 17
+          },
+          "circuit_size": 489954
+        },
+        {
+          "member": "result_v2_k2_n16_p3_r4_f2_i64_d20",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 20
+          },
+          "circuit_size": 490424
+        }
+      ],
+      "min_circuit_size": 32836,
+      "max_circuit_size": 490424,
+      "scaling": [
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k1_n16_p3_r4_f0_i0_d17",
+          "from_value": 17,
+          "from_circuit_size": 32836,
+          "to_member": "result_v2_k1_n16_p3_r4_f0_i0_d20",
+          "to_value": 20,
+          "to_circuit_size": 33071,
+          "delta_gates": 235,
+          "ratio": 1.0072,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 462049,
+          "to_member": "result_v2_k1_n16_p3_r4_f2_i64_d17",
+          "to_value": 17,
+          "to_circuit_size": 462597,
+          "delta_gates": 548,
+          "ratio": 1.0012,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 462049,
+          "to_member": "result_v2_k1_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 462832,
+          "delta_gates": 783,
+          "ratio": 1.0017,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i64_d17",
+          "from_value": 17,
+          "from_circuit_size": 462597,
+          "to_member": "result_v2_k1_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 462832,
+          "delta_gates": 235,
+          "ratio": 1.0005,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i8_d17",
+          "from_value": 17,
+          "from_circuit_size": 69619,
+          "to_member": "result_v2_k1_n16_p3_r4_f2_i8_d20",
+          "to_value": 20,
+          "to_circuit_size": 69854,
+          "delta_gates": 235,
+          "ratio": 1.0034,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k2_n16_p3_r4_f0_i0_d17",
+          "from_value": 17,
+          "from_circuit_size": 60197,
+          "to_member": "result_v2_k2_n16_p3_r4_f0_i0_d20",
+          "to_value": 20,
+          "to_circuit_size": 60667,
+          "delta_gates": 470,
+          "ratio": 1.0078,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k2_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 488858,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d17",
+          "to_value": 17,
+          "to_circuit_size": 489954,
+          "delta_gates": 1096,
+          "ratio": 1.0022,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k2_n16_p3_r4_f2_i64_d10",
+          "from_value": 10,
+          "from_circuit_size": 488858,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 490424,
+          "delta_gates": 1566,
+          "ratio": 1.0032,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k2_n16_p3_r4_f2_i64_d17",
+          "from_value": 17,
+          "from_circuit_size": 489954,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 20,
+          "to_circuit_size": 490424,
+          "delta_gates": 470,
+          "ratio": 1.001,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64
+          }
+        },
+        {
+          "parameter": "d",
+          "from_member": "result_v2_k2_n16_p3_r4_f2_i8_d17",
+          "from_value": 17,
+          "from_circuit_size": 96979,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i8_d20",
+          "to_value": 20,
+          "to_circuit_size": 97449,
+          "delta_gates": 470,
+          "ratio": 1.0048,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8
+          }
+        },
+        {
+          "parameter": "i",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i8_d17",
+          "from_value": 8,
+          "from_circuit_size": 69619,
+          "to_member": "result_v2_k1_n16_p3_r4_f2_i64_d17",
+          "to_value": 64,
+          "to_circuit_size": 462597,
+          "delta_gates": 392978,
+          "ratio": 6.6447,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "i",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i8_d20",
+          "from_value": 8,
+          "from_circuit_size": 69854,
+          "to_member": "result_v2_k1_n16_p3_r4_f2_i64_d20",
+          "to_value": 64,
+          "to_circuit_size": 462832,
+          "delta_gates": 392978,
+          "ratio": 6.6257,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "d": 20
+          }
+        },
+        {
+          "parameter": "i",
+          "from_member": "result_v2_k2_n16_p3_r4_f2_i8_d17",
+          "from_value": 8,
+          "from_circuit_size": 96979,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d17",
+          "to_value": 64,
+          "to_circuit_size": 489954,
+          "delta_gates": 392975,
+          "ratio": 5.0522,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "i",
+          "from_member": "result_v2_k2_n16_p3_r4_f2_i8_d20",
+          "from_value": 8,
+          "from_circuit_size": 97449,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 64,
+          "to_circuit_size": 490424,
+          "delta_gates": 392975,
+          "ratio": 5.0326,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "d": 20
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f0_i0_d17",
+          "from_value": 1,
+          "from_circuit_size": 32836,
+          "to_member": "result_v2_k2_n16_p3_r4_f0_i0_d17",
+          "to_value": 2,
+          "to_circuit_size": 60197,
+          "delta_gates": 27361,
+          "ratio": 1.8333,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f0_i0_d20",
+          "from_value": 1,
+          "from_circuit_size": 33071,
+          "to_member": "result_v2_k2_n16_p3_r4_f0_i0_d20",
+          "to_value": 2,
+          "to_circuit_size": 60667,
+          "delta_gates": 27596,
+          "ratio": 1.8344,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "i": 0,
+            "d": 20
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i64_d10",
+          "from_value": 1,
+          "from_circuit_size": 462049,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d10",
+          "to_value": 2,
+          "to_circuit_size": 488858,
+          "delta_gates": 26809,
+          "ratio": 1.058,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 10
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i64_d17",
+          "from_value": 1,
+          "from_circuit_size": 462597,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d17",
+          "to_value": 2,
+          "to_circuit_size": 489954,
+          "delta_gates": 27357,
+          "ratio": 1.0591,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i64_d20",
+          "from_value": 1,
+          "from_circuit_size": 462832,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i64_d20",
+          "to_value": 2,
+          "to_circuit_size": 490424,
+          "delta_gates": 27592,
+          "ratio": 1.0596,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 64,
+            "d": 20
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i8_d17",
+          "from_value": 1,
+          "from_circuit_size": 69619,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i8_d17",
+          "to_value": 2,
+          "to_circuit_size": 96979,
+          "delta_gates": 27360,
+          "ratio": 1.393,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8,
+            "d": 17
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v2_k1_n16_p3_r4_f2_i8_d20",
+          "from_value": 1,
+          "from_circuit_size": 69854,
+          "to_member": "result_v2_k2_n16_p3_r4_f2_i8_d20",
+          "to_value": 2,
+          "to_circuit_size": 97449,
+          "delta_gates": 27595,
+          "ratio": 1.395,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2,
+            "i": 8,
+            "d": 20
+          }
+        }
+      ],
+      "invariances": []
+    },
+    "result_v1": {
+      "layer": "result",
+      "role": "Support for released SELECT DISTINCT mappings: issuer authentication, credential status, selected triple membership, BGP joins and residual private integer FILTERs. Capacity parameters: k credentials, n triples per credential, p patterns, r released rows, f private FILTERs per row. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f"
+      ],
+      "members": [
+        {
+          "member": "result_v1_k1_n16_p3_r4_f0",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0
+          },
+          "circuit_size": 32288
+        },
+        {
+          "member": "result_v1_k1_n16_p3_r4_f2",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2
+          },
+          "circuit_size": 68963
+        },
+        {
+          "member": "result_v1_k2_n16_p3_r4_f0",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0
+          },
+          "circuit_size": 59101
+        },
+        {
+          "member": "result_v1_k2_n16_p3_r4_f2",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2
+          },
+          "circuit_size": 95775
+        }
+      ],
+      "min_circuit_size": 32288,
+      "max_circuit_size": 95775,
+      "scaling": [
+        {
+          "parameter": "f",
+          "from_member": "result_v1_k1_n16_p3_r4_f0",
+          "from_value": 0,
+          "from_circuit_size": 32288,
+          "to_member": "result_v1_k1_n16_p3_r4_f2",
+          "to_value": 2,
+          "to_circuit_size": 68963,
+          "delta_gates": 36675,
+          "ratio": 2.1359,
+          "held_fixed": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4
+          }
+        },
+        {
+          "parameter": "f",
+          "from_member": "result_v1_k2_n16_p3_r4_f0",
+          "from_value": 0,
+          "from_circuit_size": 59101,
+          "to_member": "result_v1_k2_n16_p3_r4_f2",
+          "to_value": 2,
+          "to_circuit_size": 95775,
+          "delta_gates": 36674,
+          "ratio": 1.6205,
+          "held_fixed": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v1_k1_n16_p3_r4_f0",
+          "from_value": 1,
+          "from_circuit_size": 32288,
+          "to_member": "result_v1_k2_n16_p3_r4_f0",
+          "to_value": 2,
+          "to_circuit_size": 59101,
+          "delta_gates": 26813,
+          "ratio": 1.8304,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0
+          }
+        },
+        {
+          "parameter": "k",
+          "from_member": "result_v1_k1_n16_p3_r4_f2",
+          "from_value": 1,
+          "from_circuit_size": 68963,
+          "to_member": "result_v1_k2_n16_p3_r4_f2",
+          "to_value": 2,
+          "to_circuit_size": 95775,
+          "delta_gates": 26812,
+          "ratio": 1.3888,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 2
+          }
+        }
+      ],
+      "invariances": []
+    },
     "scan": {
       "layer": "query",
       "role": "BGP row membership + per-scan completeness over k committed graphs, n slot bucket, r disclosed-row bucket.",
@@ -1100,10 +2419,10 @@
     ]
   },
   "summary": {
-    "families": 14,
-    "members": 37,
-    "snapshot_members": 37,
-    "scaling_pairs": 33,
+    "families": 18,
+    "members": 69,
+    "snapshot_members": 69,
+    "scaling_pairs": 77,
     "invariance_facts": 3
   }
 }

@@ -26,11 +26,13 @@ on:
 permissions:
   contents: read
 
-# One run per PR (a new push cancels the stale run); push-to-main / merge_group /
-# dispatch runs are never cancelled (each has its own ref or run id in the group).
+# One run per PR (a new push cancels the stale run) and one per pushed branch: a newer
+# push to main cancels the superseded main run, since the newest commit's run covers it
+# and shared runners otherwise queue a run per merge. merge_group / dispatch runs are
+# never cancelled (the run id is in their group).
 concurrency:
-  group: ci-fast-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.ref, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-fast-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 # Same build env as ci.yml (copied verbatim, see the sq-6vshe.1 note there): no
 # incremental, thin debuginfo, lld. Keeping it IDENTICAL also keeps Swatinem/rust-cache's
@@ -89,7 +91,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: nextest
       # `--profile ci` = the retry policy in .config/nextest.toml (a retried-then-passed

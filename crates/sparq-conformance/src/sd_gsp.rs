@@ -218,23 +218,22 @@ fn service_description_assertions(report: &mut SuiteReport, addr: SocketAddr) {
         200,
     );
 
-    // Supported VERSIONS: the conformance-verified 1.0 / 1.1 / 1.2 (full, not -basic).
+    // Supported VERSIONS: 1.0 / 1.1. 1.2 is not advertised while the announced 1.2 semantics
+    // are only partly implemented.
     assert_contains(
         report,
-        "SD advertises sd:supportedVersion 1.0 / 1.1 / 1.2",
+        "SD advertises sd:supportedVersion 1.0 / 1.1",
         body,
         &[
             "<http://www.w3.org/ns/sparql#version-1.0>",
             "<http://www.w3.org/ns/sparql#version-1.1>",
-            "<http://www.w3.org/ns/sparql#version-1.2>",
         ],
     );
-    // Full 1.2, NOT the -basic profile (the engine passes the full sparql12 suite).
     assert_absent(
         report,
-        "SD advertises full version-1.2, NOT the -basic profile",
+        "SD does not advertise sparql:version-1.2",
         body,
-        "version-1.2-basic",
+        "sparql#version-1.2",
     );
 
     // RESULT formats it can RETURN — and each is cross-checked against the live server below.

@@ -1,0 +1,27 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -50,8 +50,7 @@
+ [dependencies.derive_builder]
+ version = "0.20.2"
+ 
+-[dependencies.dirs]
+-version = "6.0.0"
++# [GPT-6] Removed unused dirs dependency; no source path used it.
+ 
+ [dependencies.docker-generate]
+ version = "0.1"
+@@ -66,6 +65,7 @@
+ 
+ [dependencies.risc0-zkos-v1compat]
+ version = "2.2.3"
++default-features = false
+ 
+ [dependencies.risc0-zkp]
+ version = "3.0.5"
+@@ -96,3 +96,6 @@
+ 
+ [dependencies.tempfile]
+ version = "3"
++
++# [GPT-6] Keep this vendored package outside the main workspace.
++[workspace]

@@ -1,0 +1,15 @@
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -52 +52 @@
+-version = "0.2"
++version = "0.3.23"
+--- a/Cargo.toml.orig
++++ b/Cargo.toml.orig
+@@ -19 +19 @@
+-tracing-subscriber = { version = "0.2", default-features = false, optional = true }
++tracing-subscriber = { version = "0.3.23", default-features = false, optional = true }
+--- a/src/r1cs/trace.rs
++++ b/src/r1cs/trace.rs
+@@ -62 +62 @@
+-    fn new_span(&self, _attrs: &span::Attributes<'_>, _id: &span::Id, _ctx: layer::Context<'_, S>) {
++    fn on_new_span(&self, _attrs: &span::Attributes<'_>, _id: &span::Id, _ctx: layer::Context<'_, S>) {

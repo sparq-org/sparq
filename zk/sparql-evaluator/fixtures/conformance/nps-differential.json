@@ -1,0 +1,148 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-12",
+  "fixture_source_commit": "4ee4d37196c9ef0f6899179875dfd40b1a37fc2e",
+  "script": "scripts/reproduce_nps_differential.py",
+  "runs": [
+    {
+      "schema_version": 1,
+      "engine": "pyoxigraph",
+      "version": "0.5.11",
+      "fixture_source": "fixtures/conformance/cases.json",
+      "evidence_kind": "bounded_external_implementation_observation",
+      "is_conformance_oracle": false,
+      "is_guest_or_receipt_evidence": false,
+      "observations": [
+        {
+          "case_id": "path-negated-duplicate-forward",
+          "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !ex:excluded ?o }",
+          "dataset_ntriples": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+          "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+          "rec_derived_expected_rows": [
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_rows": [
+            [
+              "<http://ex/b>"
+            ],
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_cardinality": 2
+        },
+        {
+          "case_id": "path-negated-duplicate-reverse",
+          "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a ^(!ex:excluded) ?o }",
+          "dataset_ntriples": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+          "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+          "rec_derived_expected_rows": [
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_rows": [
+            [
+              "<http://ex/b>"
+            ],
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_cardinality": 2
+        },
+        {
+          "case_id": "path-negated-both-orientations",
+          "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !(ex:excluded|^ex:excluded) ?o }",
+          "dataset_ntriples": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+          "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+          "rec_derived_expected_rows": [
+            [
+              "<http://ex/b>"
+            ],
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_rows": [
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_cardinality": 1
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "engine": "rdflib",
+      "version": "7.6.0",
+      "fixture_source": "fixtures/conformance/cases.json",
+      "evidence_kind": "bounded_external_implementation_observation",
+      "is_conformance_oracle": false,
+      "is_guest_or_receipt_evidence": false,
+      "observations": [
+        {
+          "case_id": "path-negated-duplicate-forward",
+          "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !ex:excluded ?o }",
+          "dataset_ntriples": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+          "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+          "rec_derived_expected_rows": [
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_rows": [
+            [
+              "<http://ex/b>"
+            ],
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_cardinality": 2
+        },
+        {
+          "case_id": "path-negated-duplicate-reverse",
+          "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a ^(!ex:excluded) ?o }",
+          "dataset_ntriples": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+          "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+          "rec_derived_expected_rows": [
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_rows": [
+            [
+              "<http://ex/b>"
+            ],
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "actual_cardinality": 2
+        },
+        {
+          "case_id": "path-negated-both-orientations",
+          "query": "PREFIX ex: <http://ex/> SELECT ?o { ex:a !(ex:excluded|^ex:excluded) ?o }",
+          "dataset_ntriples": "<http://ex/a> <http://ex/p> <http://ex/b> .\n<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/b> <http://ex/r> <http://ex/a> .\n<http://ex/b> <http://ex/s> <http://ex/a> .\n",
+          "spec": "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#defn_evalNPS",
+          "rec_derived_expected_rows": [
+            [
+              "<http://ex/b>"
+            ],
+            [
+              "<http://ex/b>"
+            ]
+          ],
+          "error": {
+            "type": "Exception",
+            "message": "Invalid path in NegatedPath: InversePath_InversePath_{}"
+          }
+        }
+      ]
+    }
+  ]
+}

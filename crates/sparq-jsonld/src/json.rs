@@ -116,11 +116,14 @@ impl Json {
     ///
     /// Numbers, `true`, `false`, and `null` are preserved verbatim as [`Json::Raw`] scalar
     /// tokens; strings are unescaped. Duplicate object keys keep the last value (first
-    /// position). Object member order is preserved.
+    /// position). Object member order is preserved. Arrays and objects nested deeper than
+    /// [`MAX_DEPTH`] are rejected, so the recursive walks over a parsed value stay within
+    /// the stack.
     pub fn parse(input: &str) -> Result<Json, JsonParseError> {
         let mut p = Parser {
             bytes: input.as_bytes(),
             pos: 0,
+            depth: 0,
         };
         p.skip_ws();
         let value = p.parse_value()?;
@@ -150,10 +153,15 @@ impl std::fmt::Display for JsonParseError {
 
 impl std::error::Error for JsonParseError {}
 
+/// How deeply [`Json::parse`] lets arrays and objects nest.
+pub const MAX_DEPTH: usize = 256;
+
 /// A minimal recursive-descent JSON parser over the input bytes.
 struct Parser<'a> {
     bytes: &'a [u8],
     pos: usize,
+    /// Arrays and objects open around the current position.
+    depth: usize,
 }
 
 impl Parser<'_> {
@@ -180,8 +188,19 @@ impl Parser<'_> {
 
     fn parse_value(&mut self) -> Result<Json, JsonParseError> {
         match self.peek() {
-            Some(b'{') => self.parse_object(),
-            Some(b'[') => self.parse_array(),
+            Some(b'{' | b'[') => {
+                if self.depth >= MAX_DEPTH {
+                    return Err(self.error("arrays and objects nest too deeply"));
+                }
+                self.depth += 1;
+                let value = if self.peek() == Some(b'{') {
+                    self.parse_object()
+                } else {
+                    self.parse_array()
+                };
+                self.depth -= 1;
+                value
+            }
             Some(b'"') => Ok(Json::Str(self.parse_string()?)),
             Some(b't') => self.parse_literal("true", Json::Raw("true".to_string())),
             Some(b'f') => self.parse_literal("false", Json::Raw("false".to_string())),
@@ -422,21 +441,31 @@ impl Parser<'_> {
 /// and `\u00XX` for the remaining C0 controls. Everything else (including non-ASCII, which
 /// JSON permits raw in UTF-8) passes through verbatim.
 fn json_escape(s: &str, out: &mut String) {
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0C}' => out.push_str("\\f"),
-            c if (c as u32) < 0x20 => {
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
+    // Copy runs of bytes that need no escaping in one go; only `"`, `\\` and control
+    // characters (all ASCII, so never inside a multi-byte sequence) are rewritten.
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        let esc = match b {
+            b'"' => "\\\"",
+            b'\\' => "\\\\",
+            b'\n' => "\\n",
+            b'\r' => "\\r",
+            b'\t' => "\\t",
+            0x08 => "\\b",
+            0x0C => "\\f",
+            b if b < 0x20 => "",
+            _ => continue,
+        };
+        out.push_str(&s[start..i]);
+        if esc.is_empty() {
+            let _ = write!(out, "\\u{:04x}", b);
+        } else {
+            out.push_str(esc);
         }
+        start = i + 1;
     }
+    out.push_str(&s[start..]);
 }
 
 #[cfg(test)]

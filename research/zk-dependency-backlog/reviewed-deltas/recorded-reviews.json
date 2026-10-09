@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "scope": "Ten actual source delta approvals, separate from backlog exemptions",
+  "units": [
+    {
+      "name": "android_system_properties",
+      "from": "0.1.5",
+      "to": "0.1.6",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "19c29793e7a7c6bd6b8b06adb59895e96b919275a43d5aaafbc8fc13fc68cf07"
+    },
+    {
+      "name": "arrayvec",
+      "from": "0.7.6",
+      "to": "0.7.8",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "a9bdc70908fb303fff455ec12badc6030c5af1170d49df144a2c813f6849cd54"
+    },
+    {
+      "name": "either",
+      "from": "1.16.0",
+      "to": "1.18.0",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "ea52a13b8c415fa9dbdfbe90295de083417bd6d408be982aaf7f1272cb908ef4"
+    },
+    {
+      "name": "num-integer",
+      "from": "0.1.46",
+      "to": "0.1.47",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "2b10d159e5ce80bf220a92836e6fd6129e32fd4d8bdd11c6b78ebdba3b21c1d3"
+    },
+    {
+      "name": "proc-macro2",
+      "from": "1.0.106",
+      "to": "1.0.107",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "2210f56efce3d325fba061e309bcfc6343c493239d7fdb2d59fbda9c1d9435b8"
+    },
+    {
+      "name": "rustversion",
+      "from": "1.0.22",
+      "to": "1.0.23",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "8239f0ecd20f25bc7384f331173d341862a3c4219b90531737cffa1be75d1299"
+    },
+    {
+      "name": "serde",
+      "from": "1.0.228",
+      "to": "1.0.229",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "80e45cc372bc98f09c460a02100694d74c78325f7f1bb937f7be44fefb3fff90"
+    },
+    {
+      "name": "smallvec",
+      "from": "1.15.2",
+      "to": "1.16.1",
+      "reviewer": "Claude Fable 5.1",
+      "recorded_by": "GPT-6",
+      "review_sha256": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+      "source_manifest_sha256": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+      "patch_sha256": "08502e40447fa2ef39a7d2c491c66d384801ace6d11d730a1f35b8dd9842bc00"
+    },
+    {
+      "name": "serde_core",
+      "from": "1.0.228",
+      "to": "1.0.229",
+      "reviewer": "GPT-6",
+      "recorded_by": "GPT-6",
+      "review_sha256": "6e0674d7476ede4b6325a4a9320fe9fd1b9f7ab445103bccc1b9799fc5899d8b",
+      "source_manifest_sha256": "a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516",
+      "patch_sha256": "efea1423554f85f6fcb30cef4e3907dfc1611cdcfde592e74d96ee61d0589988"
+    },
+    {
+      "name": "serde_derive",
+      "from": "1.0.228",
+      "to": "1.0.229",
+      "reviewer": "GPT-6",
+      "recorded_by": "GPT-6",
+      "review_sha256": "6e0674d7476ede4b6325a4a9320fe9fd1b9f7ab445103bccc1b9799fc5899d8b",
+      "source_manifest_sha256": "a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516",
+      "patch_sha256": "c217e6d5fd5b25dc6ab1e9097ec6676a6f504a1f7765e6cbf9f0702f33e234c4"
+    }
+  ],
+  "files": {
+    "serde-gpt6/source-manifest.json": "a955a84e030fccaf881e1f4d52a35511333501487ac0e07c45fe9d92bbe38516",
+    "serde-gpt6/review-final.txt": "6e0674d7476ede4b6325a4a9320fe9fd1b9f7ab445103bccc1b9799fc5899d8b",
+    "serde-gpt6/serde_derive.patch": "c217e6d5fd5b25dc6ab1e9097ec6676a6f504a1f7765e6cbf9f0702f33e234c4",
+    "serde-gpt6/serde_core.patch": "efea1423554f85f6fcb30cef4e3907dfc1611cdcfde592e74d96ee61d0589988",
+    "serde-gpt6/review-outcome.json": "6915ef2b02a978140d981e5a8b258263f3fbc206412c395a220b4064ac582888",
+    "eight-fable/source-manifest.json": "f48a233cb50e735417af3aaf5ff62d8e9fd97e96c594713094845edeb505129c",
+    "eight-fable/arrayvec.patch": "a9bdc70908fb303fff455ec12badc6030c5af1170d49df144a2c813f6849cd54",
+    "eight-fable/either.patch": "ea52a13b8c415fa9dbdfbe90295de083417bd6d408be982aaf7f1272cb908ef4",
+    "eight-fable/review-final.txt": "9c977005339864b802d48d0a36000f27520de6bd7eabac590f2d8ab7fdb18a9f",
+    "eight-fable/proc-macro2.patch": "2210f56efce3d325fba061e309bcfc6343c493239d7fdb2d59fbda9c1d9435b8",
+    "eight-fable/smallvec.patch": "08502e40447fa2ef39a7d2c491c66d384801ace6d11d730a1f35b8dd9842bc00",
+    "eight-fable/serde.patch": "80e45cc372bc98f09c460a02100694d74c78325f7f1bb937f7be44fefb3fff90",
+    "eight-fable/android_system_properties.patch": "19c29793e7a7c6bd6b8b06adb59895e96b919275a43d5aaafbc8fc13fc68cf07",
+    "eight-fable/rustversion.patch": "8239f0ecd20f25bc7384f331173d341862a3c4219b90531737cffa1be75d1299",
+    "eight-fable/review-outcome.json": "da84acc39f87d858de033d525aefefa209e15dfbd78e21cdd905bd8a9e2d3c47",
+    "eight-fable/num-integer.patch": "2b10d159e5ce80bf220a92836e6fd6129e32fd4d8bdd11c6b78ebdba3b21c1d3"
+  }
+}

@@ -664,3 +664,313 @@ fn flatten_survives_a_compaction_round_trip() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Generated round trips: nested lists, type maps and scoped contexts
+// ---------------------------------------------------------------------------
+
+/// A small deterministic generator (64-bit LCG), so failures reproduce from the case
+/// number alone.
+struct Gen(u64);
+
+impl Gen {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+    fn chance(&mut self, percent: u64) -> bool {
+        self.next() % 100 < percent
+    }
+    fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+        items[self.below(items.len())]
+    }
+}
+
+const PROPS: [&str; 3] = ["http://ex/p", "http://ex/q", "http://ex/r"];
+const TYPES: [&str; 3] = ["http://ex/T", "http://ex/U", "http://other/T"];
+
+/// One value of an expanded document: a literal, a reference, an embedded node or a
+/// list (which may hold nested lists).
+fn gen_value(g: &mut Gen, depth: usize, ids: &mut usize) -> String {
+    match g.below(if depth > 0 { 8 } else { 5 }) {
+        0 => format!(r#"{{"@value":"{}"}}"#, g.pick(&["a", "b", "T", "p"])),
+        4 => format!(r#"{{"@value":"{}","@index":"{}"}}"#, g.pick(&["a", "b"]), g.pick(&["i", "j"])),
+        // A graph object carries no @index: JSON-LD 1.1 compaction drops it in an
+        // @graph @id map (W3C compact/0088), and RDF has none to carry.
+        5 => format!(r#"{{"@graph":[{}]}}"#, gen_node(g, depth - 1, ids)),
+        1 => r#"{"@value":"x","@language":"en"}"#.to_string(),
+        2 => format!(r#"{{"@id":"{}"}}"#, g.pick(&["http://ex/T", "http://ex/b", "http://other/c"])),
+        3 => r#"{"@value":"1","@type":"http://ex/dt"}"#.to_string(),
+        6 => gen_node(g, depth - 1, ids),
+        _ => {
+            let items: Vec<String> = (0..g.below(3) + 1).map(|_| gen_value(g, depth - 1, ids)).collect();
+            format!(r#"{{"@list":[{}]}}"#, items.join(","))
+        }
+    }
+}
+
+fn gen_node(g: &mut Gen, depth: usize, ids: &mut usize) -> String {
+    *ids += 1;
+    let mut members = vec![format!(r#""@id":"http://ex/n{}""#, ids)];
+    if g.chance(20) {
+        members.push(format!(r#""@index":"{}""#, g.pick(&["i", "j"])));
+    }
+    if g.chance(70) {
+        let mut types: Vec<&str> = TYPES.iter().copied().filter(|_| g.chance(50)).collect();
+        if types.is_empty() {
+            types.push(g.pick(&TYPES));
+        }
+        let types: Vec<String> = types.iter().map(|t| format!(r#""{t}""#)).collect();
+        members.push(format!(r#""@type":[{}]"#, types.join(",")));
+    }
+    for p in PROPS {
+        if g.chance(50) {
+            let values: Vec<String> = (0..g.below(2) + 1).map(|_| gen_value(g, depth, ids)).collect();
+            members.push(format!(r#""{p}":[{}]"#, values.join(",")));
+        }
+    }
+    if g.chance(15) {
+        members.push(format!(r#""@reverse":{{"{}":[{{"@id":"http://ex/b"}}]}}"#, g.pick(&PROPS)));
+    }
+    format!("{{{}}}", members.join(","))
+}
+
+/// A small context to scope under a term: it may move @vocab, take over or redefine
+/// keyword aliases, and respell types and properties.
+fn gen_scoped(g: &mut Gen) -> String {
+    let mut entries = Vec::new();
+    for entry in [
+        r#""@vocab":"http://other/""#,
+        r#""@vocab":"http://ex/""#,
+        r#""type":"http://ex/data""#,
+        r#""t":"@type""#,
+        r#""l":"http://ex/data""#,
+        r#""ls":"@list""#,
+        r#""id":"http://ex/data""#,
+        r#""T":"http://other/T""#,
+        r#""U":"http://ex/T""#,
+        r#""q":"http://ex/r""#,
+        r#""type":"@type""#,
+        r#""p":{"@id":"http://ex/p","@type":"@id"}"#,
+        r#""r":{"@id":"http://ex/r","@container":"@list"}"#,
+        r#""@propagate":false"#,
+        r#""ex":"http://other/""#,
+        r#""ex":"http://ex/""#,
+        r#""@language":"en""#,
+        r#""p":{"@id":"http://ex/p","@container":"@language"}"#,
+        r#""v":"@value""#,
+        r#""l":"@value""#,
+        r#""none":"@none""#,
+        r#""p":{"@id":"http://ex/p","@container":"@id","@context":{"q":"http://ex/q"}}"#,
+        r#""q":{"@id":"http://ex/q","@container":"@index","@context":{"@vocab":"http://other/"}}"#,
+        r#""r":{"@id":"http://ex/r","@container":"@type","@context":{"p":"http://ex/q"}}"#,
+        r#""p":{"@id":"http://ex/p","@container":"@index","@index":"q"}"#,
+        r#""q":{"@id":"http://ex/q","@nest":"@nest"}"#,
+        r#""r":{"@id":"http://ex/r","@container":["@graph","@id"]}"#,
+        r#""p":{"@reverse":"http://ex/q"}"#,
+        r#""rp":{"@reverse":"http://ex/p"}"#,
+    ] {
+        if g.chance(20) {
+            entries.push(entry.to_string());
+        }
+    }
+    format!("{{{}}}", entries.join(","))
+}
+
+fn gen_context(g: &mut Gen) -> String {
+    let mut entries = Vec::new();
+    if g.chance(70) {
+        entries.push(format!(r#""@vocab":"{}""#, g.pick(&["http://ex/", "http://other/"])));
+    }
+    if g.chance(50) {
+        entries.push(format!(r#""ex":"{}""#, g.pick(&["http://ex/", "http://other/"])));
+    }
+    if g.chance(20) {
+        entries.push(r#""@language":"en""#.to_string());
+    }
+    for alias in [r#""type":"@type""#, r#""l":"@list""#, r#""id":"@id""#, r#""v":"@value""#, r#""none":"@none""#] {
+        if g.chance(40) {
+            entries.push(alias.to_string());
+        }
+    }
+    if g.chance(30) {
+        entries.push(format!(r#""rp":{{"@reverse":"{}"}}"#, g.pick(&PROPS)));
+    }
+    for (term, iri) in [("T", "http://ex/T"), ("U", "http://ex/U")] {
+        if g.chance(50) {
+            let scoped = if g.chance(50) { format!(r#","@context":{}"#, gen_scoped(g)) } else { String::new() };
+            entries.push(format!(r#""{term}":{{"@id":"{iri}"{scoped}}}"#));
+        }
+    }
+    for (term, iri) in [("p", PROPS[0]), ("q", PROPS[1]), ("r", PROPS[2])] {
+        if g.chance(70) {
+            let mut def = vec![format!(r#""@id":"{iri}""#)];
+            if g.chance(40) {
+                def.push(format!(
+                    r#""@container":{}"#,
+                    g.pick(&[
+                        r#""@type""#,
+                        r#""@list""#,
+                        r#""@set""#,
+                        r#""@id""#,
+                        r#""@language""#,
+                        r#""@graph""#,
+                        r#""@index""#,
+                        r#"["@graph","@id"]"#,
+                        r#"["@graph","@index"]"#,
+                        r#"["@index","@set"]"#,
+                    ])
+                ));
+                if def[1].contains(r#""@index""#) && g.chance(30) {
+                    def.push(format!(r#""@index":"{}""#, g.pick(&["q", "r"])));
+                }
+            } else if g.chance(15) {
+                def.push(r#""@nest":"@nest""#.to_string());
+            }
+            if g.chance(20) {
+                def.push(format!(r#""@type":"{}""#, g.pick(&["@id", "@vocab"])));
+            }
+            if g.chance(50) {
+                def.push(format!(r#""@context":{}"#, gen_scoped(g)));
+            }
+            entries.push(format!(r#""{term}":{{{}}}"#, def.join(",")));
+        }
+    }
+    format!("{{{}}}", entries.join(","))
+}
+
+/// `expand(compact_expanded(D, C)) ≡ D` over generated expanded documents and contexts
+/// mixing nested lists, type maps, keyword aliases and property- and type-scoped
+/// contexts. A context or document the processor rejects is skipped; any document it
+/// accepts must read back unchanged.
+#[test]
+fn generated_documents_round_trip_under_scoped_contexts() {
+    let opts = JsonLdOptions::default();
+    let (mut checked, mut failures) = (0, Vec::new());
+    // Each family must be exercised by accepted cases, so a generator change that stops
+    // producing one fails instead of silently shrinking the test.
+    let families: [(&str, &str); 13] = [
+        ("@reverse term", r#"{"@reverse":"#),
+        ("@id map", r#""@container":"@id""#),
+        ("@type map", r#""@container":"@type""#),
+        ("@index map", r#""@container":"@index""#),
+        ("property-valued @index map", r#""@index":"q""#),
+        ("@graph @id map", r#"["@graph","@id"]"#),
+        ("@graph @index map", r#"["@graph","@index"]"#),
+        ("@list container", r#""@container":"@list""#),
+        ("@nest", r#""@nest":"@nest""#),
+        ("@value alias", r#""v":"@value""#),
+        ("@none alias", r#""none":"@none""#),
+        ("@propagate false", r#""@propagate":false"#),
+        ("scoped map term", r#""@container":"@id","@context""#),
+    ];
+    let mut seen = [0usize; 13];
+    let cases: u64 = std::env::var("ROUND_TRIP_CASES").ok().and_then(|n| n.parse().ok()).unwrap_or(20_000);
+    let only: Option<u64> = std::env::var("ROUND_TRIP_CASE").ok().and_then(|n| n.parse().ok());
+    for case in 0..cases {
+        if only.is_some_and(|o| o != case) {
+            continue;
+        }
+        let mut g = Gen(case.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03);
+        let mut ids = 0;
+        let mut nodes = vec![gen_node(&mut g, 2, &mut ids)];
+        if g.chance(30) {
+            let inner = gen_node(&mut g, 1, &mut ids);
+            nodes.push(format!(r#"{{"@id":"http://ex/g","@graph":[{inner}]}}"#));
+        }
+        let doc = format!("[{}]", nodes.join(","));
+        let ctx = gen_context(&mut g);
+        let doc = Json::parse(&doc).expect("generated document parses");
+        let ctx_json = Json::parse(&ctx).expect("generated context parses");
+        // The generated document is close to expanded form; expansion normalises it
+        // (dropping, for one, a node that is only an @id inside a @graph).
+        let Ok(expanded) = expand(&doc, &opts, &NoopLoader) else { continue };
+        let Ok(compacted) = sparq_jsonld::compact::compact_expanded(&expanded, &ctx_json, &opts, &NoopLoader) else {
+            continue;
+        };
+        checked += 1;
+        for (n, (_, needle)) in seen.iter_mut().zip(&families) {
+            *n += usize::from(ctx.contains(needle));
+        }
+        let back = expand(&compacted, &opts, &NoopLoader);
+        if !back.as_ref().is_ok_and(|b| json_ld_equal(b, &expanded)) {
+            failures.push(format!(
+                "case {case}\n  context:  {ctx}\n  input:    {}\n  output:   {}\n  read back:{}",
+                render(&expanded),
+                render(&compacted),
+                back.map(|b| render(&b)).unwrap_or_else(|e| format!("{e:?}"))
+            ));
+        }
+    }
+    assert!(only.is_some() || checked > 1000, "only {checked} cases were accepted");
+    if only.is_none() && cases >= 20_000 {
+        for ((family, _), n) in families.iter().zip(seen) {
+            assert!(n >= 50, "only {n} accepted cases exercise {family}");
+        }
+    }
+    assert!(failures.is_empty(), "{} of {checked} changed the data:\n{}", failures.len(), failures.iter().take(5).cloned().collect::<Vec<_>>().join("\n"));
+}
+
+/// Every container kind, defined (with a property-scoped context) inside a type-scoped
+/// context, on a chain of nodes nested 30 deep through that property. Compaction must
+/// finish within its linear work bound and read back unchanged, so a container kind whose
+/// items are compacted twice, or under a context expansion does not use, fails here.
+#[test]
+fn every_container_kind_reads_back_under_a_type_scoped_definition() {
+    const DEPTH: usize = 30;
+    let kinds: [&str; 11] = [
+        r#""""#,
+        r#""@set""#,
+        r#""@list""#,
+        r#""@index""#,
+        r#""@id""#,
+        r#""@type""#,
+        r#""@language""#,
+        r#""@graph""#,
+        r#"["@graph","@id"]"#,
+        r#"["@graph","@index"]"#,
+        r#"["@index","@set"]"#,
+    ];
+    let opts = JsonLdOptions::default();
+    for kind in kinds {
+        let container = if kind == r#""""# { String::new() } else { format!(r#""@container":{kind},"#) };
+        let ctx = format!(
+            r#"{{"@vocab":"http://outer/","none":"@none","T":{{"@id":"http://ex/T","@context":{{"v":"@value","p":{{"@id":"http://ex/p",{container}"@context":{{"q":"http://ex/q"}}}}}}}}}}"#
+        );
+        // The innermost node, then each level wraps the previous one as its `p` value.
+        let mut node = r#"{"@id":"http://ex/n0","@type":["http://ex/T"],"http://ex/q":[{"@value":"v"}]}"#.to_string();
+        for level in 1..=DEPTH {
+            let value = match kind {
+                r#""@list""# => format!(r#"{{"@list":[{node}]}}"#),
+                r#""@language""# => r#"{"@value":"v","@language":"en"}"#.to_string(),
+                // A bare @graph container keeps no @index (RDF carries none either).
+                r#""@graph""# | r#"["@graph","@id"]"# => format!(r#"{{"@graph":[{node}]}}"#),
+                r#"["@graph","@index"]"# => format!(r#"{{"@graph":[{node}],"@index":"i{level}"}}"#),
+                r#""@index""# | r#"["@index","@set"]"# => {
+                    let mut n = node.clone();
+                    n.insert_str(1, &format!(r#""@index":"i{level}","#));
+                    n
+                }
+                _ => node.clone(),
+            };
+            node = format!(
+                r#"{{"@id":"http://ex/n{level}","@type":["http://ex/T"],"http://ex/q":[{{"@value":"v"}}],"http://ex/p":[{value}]}}"#
+            );
+        }
+        let doc = Json::parse(&format!("[{node}]")).expect("chain parses");
+        let ctx_json = Json::parse(&ctx).expect("context parses");
+        let expanded = expand(&doc, &opts, &NoopLoader).expect("chain expands");
+        let compacted = sparq_jsonld::compact::compact_expanded(&expanded, &ctx_json, &opts, &NoopLoader)
+            .unwrap_or_else(|e| panic!("{kind}: compaction failed: {e}"));
+        let back = expand(&compacted, &opts, &NoopLoader).unwrap_or_else(|e| panic!("{kind}: re-expansion failed: {e}"));
+        assert!(
+            json_ld_equal(&back, &expanded),
+            "{kind}: the chain changed\n  output:    {}\n  read back: {}",
+            render(&compacted),
+            render(&back)
+        );
+    }
+}
