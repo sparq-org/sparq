@@ -1090,14 +1090,22 @@ async fn read_container<S: Store + 'static>(
     };
     // Whether the container's date is behind is read before anything the date is computed
     // from: a touch that lands while the listing is made must not make a date from before it
-    // count.
+    // count. And a listing made while a change to the container was published, or a touch of
+    // it landed, is made again: it could pair members from before with a date from after.
+    let generation = state.generation(uri);
     let untouched = state.is_untouched(uri);
     let all = match members(state, uri, exclusive).await {
         Ok(m) => m,
         Err(Unlisted::Store(e)) => return Ok(store_error(e)),
         Err(Unlisted::Busy(busy)) => return Err(busy),
     };
-    Ok(listing(state, req, uri, meta, media_type, all, untouched).await)
+    let resp = listing(state, req, uri, meta, media_type, all, untouched).await;
+    // Held exclusively, the container cannot change meanwhile (a counter it shares with
+    // others may move, which says nothing about it).
+    if !exclusive && state.generation(uri) != generation {
+        return Err(Busy(uri.to_string()));
+    }
+    Ok(resp)
 }
 
 async fn listing<S: Store + 'static>(
@@ -1623,7 +1631,12 @@ async fn create<S: Store + 'static>(
     let mut resp = problem(StatusCode::CREATED, None);
     let h = resp.headers_mut();
     set(h, header::LOCATION, &child);
-    set(h, header::ETAG, &quoted(&created.etag));
+    // A data resource's tag is its content's. A container's representation is its listing,
+    // whose tag a read computes ([`read_container`]); the stored record's would match nothing a
+    // read or a conditional request sees, so none is sent.
+    if !is_container {
+        set(h, header::ETAG, &quoted(&created.etag));
+    }
     add_link(h, parent, "up", None);
     add_link(h, &lws_type(&child), "type", None);
     for t in &meta.types {
@@ -4770,6 +4783,100 @@ mod tests {
         assert!(removal.await.unwrap().status().is_success());
         let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anon).await;
         assert!(r.headers().contains_key(header::LAST_MODIFIED));
+    }
+
+    /// Review findings, three rounds on container validators: a listing could pair members from
+    /// before a change with a date from after it, and a container's create answered with a tag
+    /// no read of it carries. For each change to a container, its listing's entity tag changes
+    /// whenever the listing does (and stays when nothing changed), a listing is never served with a date older than one of
+    /// its members, and a new container's create sends no tag of its own.
+    #[tokio::test]
+    async fn container_validators_change_exactly_when_the_listing_does() {
+        use super::super::test_store::{request as req, state};
+        let (st, _store) = state(100).await;
+        let anon = Agent::anonymous();
+        let call = |m: Method, p: &'static str, h: Vec<(&'static str, &'static str)>, b| {
+            let st = st.clone();
+            async move { handle(&st, &req(m, p, &h, b), &Agent::anonymous()).await }
+        };
+        let r = call(
+            Method::POST,
+            "/",
+            vec![("slug", "c"), ("link", CONTAINER_LINK)],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert!(
+            !r.headers().contains_key(header::ETAG),
+            "a container's create sends no tag"
+        );
+        let listing = || async {
+            let r = handle(
+                &st,
+                &req(
+                    Method::GET,
+                    "/c/",
+                    &[("accept", "application/lws+json")],
+                    "",
+                ),
+                &anon,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::OK);
+            let etag = r.headers()[header::ETAG].to_str().unwrap().to_string();
+            let date = r
+                .headers()
+                .get(header::LAST_MODIFIED)
+                .and_then(|v| parse_http_date(v.to_str().ok()));
+            let doc: Value = serde_json::from_slice(&body_of(r).await).unwrap();
+            // The date covers every member listed.
+            if let Some(date) = date {
+                for item in doc["items"].as_array().into_iter().flatten() {
+                    let m = item["modified"].as_str().and_then(parse_rfc3339).unwrap();
+                    assert!(m as u64 <= date, "a member newer than the listing's date");
+                }
+            }
+            (etag, doc)
+        };
+        let text = vec![("content-type", "text/plain")];
+        type Headers = Vec<(&'static str, &'static str)>;
+        let changes: Vec<(&str, Method, &str, Headers, &str)> = vec![
+            (
+                "create",
+                Method::POST,
+                "/c/",
+                vec![("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            ("replace", Method::PUT, "/c/a", text.clone(), "y"),
+            ("same bytes", Method::PUT, "/c/a", text.clone(), "y"),
+            (
+                "create another",
+                Method::POST,
+                "/c/",
+                vec![("slug", "b"), ("content-type", "text/plain")],
+                "z",
+            ),
+            ("delete", Method::DELETE, "/c/b", vec![], ""),
+            ("read", Method::GET, "/c/a", vec![], ""),
+        ];
+        let (mut etag, mut doc) = listing().await;
+        for (what, m, p, h, b) in changes {
+            let r = call(m, p, h, b).await;
+            assert!(r.status().is_success(), "{what}: {}", r.status());
+            let (now_etag, now_doc) = listing().await;
+            // A listing that changed has a new tag; one that did not (and no member's content
+            // changed, which the tag also covers) keeps its tag.
+            if now_doc != doc {
+                assert_ne!(now_etag, etag, "{what}");
+            }
+            if what == "read" {
+                assert_eq!(now_etag, etag, "{what}");
+                assert_eq!(now_doc, doc, "{what}");
+            }
+            (etag, doc) = (now_etag, now_doc);
+        }
     }
 
     /// Review finding: visibility was checked only as a request came in, so one already

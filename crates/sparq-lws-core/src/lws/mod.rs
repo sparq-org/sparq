@@ -444,6 +444,18 @@ pub struct Inner<S: Store> {
     /// The containers whose own modification time may be behind a change to them: each with
     /// whether the last touch failed, and how many touches are yet to land.
     untouched: std::sync::Mutex<std::collections::HashMap<String, (bool, usize)>>,
+    /// See [`LwsState::generation`].
+    generations: [std::sync::atomic::AtomicU64; GENERATIONS],
+}
+
+/// How many counters [`LwsState::generation`] spreads the containers over.
+const GENERATIONS: usize = 256;
+
+fn generation_slot(uri: &str) -> usize {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    uri.hash(&mut h);
+    (h.finish() as usize) % GENERATIONS
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -488,6 +500,7 @@ impl<S: Store + 'static> LwsState<S> {
                 locks: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
+                generations: std::array::from_fn(|_| Default::default()),
             }),
         })
     }
@@ -504,6 +517,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Record that the container `uri`'s listing changed and a touch of it is to follow: until
     /// it lands ([`LwsState::touched`]), the container's modification time is behind.
     pub(crate) fn touching(&self, uri: &str) {
+        self.changed(uri);
         let mut map = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
         map.entry(uri.to_string()).or_default().1 += 1;
     }
@@ -511,6 +525,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Record that a touch of the container `uri` begun by [`LwsState::touching`] is over, and
     /// whether it landed.
     pub(crate) fn touched(&self, uri: &str, landed: bool) {
+        self.changed(uri);
         let mut map = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
         let entry = map.entry(uri.to_string()).or_default();
         entry.0 = !landed;
@@ -518,6 +533,18 @@ impl<S: Store + 'static> LwsState<S> {
         if *entry == (false, 0) {
             map.remove(uri);
         }
+    }
+
+    /// A count that moves on whenever a change to the container `uri`'s listing is published
+    /// ([`LwsState::touching`]) or a touch of it ends ([`LwsState::touched`]): a listing made
+    /// while it moved is made again. Containers share [`GENERATIONS`] counters, so an unrelated
+    /// one can make a listing be made again, never a moved one go unnoticed.
+    pub(crate) fn generation(&self, uri: &str) -> u64 {
+        self.generations[generation_slot(uri)].load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    fn changed(&self, uri: &str) {
+        self.generations[generation_slot(uri)].fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
