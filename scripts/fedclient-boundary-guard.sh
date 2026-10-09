@@ -36,9 +36,11 @@ FORBIDDEN_DEPENDENTS=(sparq-core sparq-engine)
 # (no tree on stdout). We detect that explicitly and report it as the boundary violation
 # it is, surfacing the cycle path; we ALSO keep the inverse-tree grep for any (theoretical)
 # non-cyclic dependent.
+# `--workspace` roots the tree at every member: without it cargo uses `default-members`,
+# which does not include sparq-fedclient, so the inverted tree would be empty.
 err_file="$(mktemp)"
 trap 'rm -f "$err_file"' EXIT
-tree="$(cargo tree -i "$CLIENT" --all-features -e no-dev 2>"$err_file" || true)"
+tree="$(cargo tree --workspace -i "$CLIENT" --all-features -e no-dev 2>"$err_file" || true)"
 stderr="$(cat "$err_file")"
 
 # A `cyclic package dependency` involving a forbidden dependent IS a boundary violation.
