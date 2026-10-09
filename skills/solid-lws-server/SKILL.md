@@ -302,8 +302,10 @@ What the server exposes, all discoverable from the storage description
   Token's agent is its `sub`, whose controlled identifier document names its OpenID
   Provider; it must be addressed to this server, and when bound by `cnf.jkt` it needs the
   same proof. The proof key is matched by the thumbprint of the key itself, whatever its JWK
-  spelling. A token time (`exp`, `iat`, `nbf`) that is not a whole second between 1970 and
-  9999 is refused.
+  spelling. The identity document may be compact JSON, any other JSON-LD form (expanded,
+  flattened, a graph; read as RDF without loading remote contexts) or Turtle. A token time
+  (`exp`, `iat`, `nbf`) may carry a fraction (RFC 7519 NumericDate); one that is not a number
+  between 1970 and 9999 is refused.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
 - **Access grants and requests** (Access Profile) under `/.lws/grants/` and

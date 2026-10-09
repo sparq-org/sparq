@@ -316,7 +316,7 @@ pub fn check_dpop(
         return Err("the DPoP proof's htu is not the token endpoint".into());
     }
     let iat = jws.claim_time("iat")?.ok_or("the DPoP proof has no iat")?;
-    if iat.abs_diff(now) > DPOP_WINDOW_SECS.unsigned_abs() {
+    if (iat - now as f64).abs() > DPOP_WINDOW_SECS as f64 {
         return Err("the DPoP proof is not fresh".into());
     }
     let jti = jws
@@ -327,7 +327,8 @@ pub fn check_dpop(
         owner,
         jkt,
         jti,
-        iat.saturating_add(DPOP_WINDOW_SECS + 1),
+        // Kept until the proof could no longer be fresh, a part second rounded up.
+        (iat.ceil() as i64).saturating_add(DPOP_WINDOW_SECS + 1),
         now,
     ) {
         return Err("the DPoP proof was used before".into());
@@ -382,16 +383,16 @@ pub fn parse(token: &str) -> Result<Jws, String> {
 /// each, when present, a time [`Jws::claim_time`] reads.
 pub fn check_times(jws: &Jws, now: i64) -> Result<(), String> {
     let exp = jws.claim_time("exp")?.ok_or("exp is required")?;
-    if exp <= now.saturating_sub(SKEW_SECS) {
+    if exp <= now.saturating_sub(SKEW_SECS) as f64 {
         return Err("the credential has expired".into());
     }
     let iat = jws.claim_time("iat")?.ok_or("iat is required")?;
-    if iat > now.saturating_add(SKEW_SECS) {
+    if iat > now.saturating_add(SKEW_SECS) as f64 {
         return Err("iat lies in the future".into());
     }
     if jws
         .claim_time("nbf")?
-        .is_some_and(|nbf| nbf > now.saturating_add(SKEW_SECS))
+        .is_some_and(|nbf| nbf > now.saturating_add(SKEW_SECS) as f64)
     {
         return Err("the credential is not valid yet".into());
     }
@@ -1056,14 +1057,23 @@ fn names_issuer_in(
     issuer: &str,
 ) -> Option<IssuerLinks> {
     let mut links = IssuerLinks::default();
+    let base = subject.split('#').next().unwrap_or(subject);
     if let Ok(doc) = serde_json::from_slice::<Value>(body) {
+        // A compact document about the subject is read by its keys; any other JSON-LD form
+        // (expanded, flattened, a graph) is read as RDF, without loading remote contexts.
         if doc
             .get("id")
             .or_else(|| doc.get("@id"))
             .and_then(Value::as_str)
             != Some(subject)
         {
-            return None;
+            let parser = oxjsonld::JsonLdParser::new().with_base_iri(base).ok()?;
+            let triples = parser
+                .for_slice(body)
+                .filter_map(Result::ok)
+                .filter(|q| q.graph_name == oxrdf::GraphName::DefaultGraph)
+                .map(|q| oxrdf::Triple::new(q.subject, q.predicate, q.object));
+            return links_in(triples, body.len(), subject, issuer);
         }
         let services = match doc.get("service") {
             Some(Value::Array(a)) => a.as_slice(),
@@ -1114,16 +1124,31 @@ fn names_issuer_in(
     {
         return Some(links);
     }
-    let base = subject.split('#').next().unwrap_or(subject);
     let parser = oxttl::TurtleParser::new().with_base_iri(base).ok()?;
+    links_in(
+        parser.for_slice(body).filter_map(Result::ok),
+        body.len(),
+        subject,
+        issuer,
+    )
+}
+
+/// The issuer links of `subject` among the triples of its identity document (of `len` bytes).
+fn links_in(
+    parsed: impl Iterator<Item = oxrdf::Triple>,
+    len: usize,
+    subject: &str,
+    issuer: &str,
+) -> Option<IssuerLinks> {
+    let mut links = IssuerLinks::default();
     // The document is the subject's to write (and is read before any signature is checked), so
     // the work is bounded: so many triples are read, so many services looked at, and the triples
     // are indexed by subject once, so each service costs only its own triples.
     // The expanded terms are bounded too (see [`super::expansion_budget`]): a document whose
-    // prefixes expand past it is refused.
-    let mut budget = super::expansion_budget(body.len());
+    // prefixes (or contexts) expand past it is refused.
+    let mut budget = super::expansion_budget(len);
     let mut triples: Vec<oxrdf::Triple> = Vec::new();
-    for t in parser.for_slice(body).filter_map(Result::ok) {
+    for t in parsed {
         budget = budget.checked_sub(super::triple_bytes(&t))?;
         triples.push(t);
         if triples.len() == MAX_IDENTITY_TRIPLES {
@@ -2052,7 +2077,8 @@ mod tests {
 
     /// Review finding: a time past the range a claim may hold was read as no claim at all, so a
     /// far-future `nbf` lifted the token's validity restriction. A claim present and out of
-    /// range is refused, wherever it is read.
+    /// range is refused, wherever it is read. Review finding: fractional times, which RFC 7519
+    /// allows, were refused; they are read and compared as they are.
     #[test]
     fn out_of_range_times_are_refused_not_ignored() {
         let key = jose::EcKey::generate("x");
@@ -2067,9 +2093,17 @@ mod tests {
         };
         assert_eq!(check_times(&at(json!({})), now), Ok(()));
         assert_eq!(check_times(&at(json!({"nbf": now})), now), Ok(()));
-        for bad in [
+        // Fractions are NumericDates too (RFC 7519 section 2), and are compared as they are.
+        for good in [
             json!({"nbf": 1.5}),
+            json!({"iat": now as f64 - 0.5}),
             json!({"exp": (now + 300) as f64 + 0.5}),
+        ] {
+            assert_eq!(check_times(&at(good.clone()), now), Ok(()), "{good}");
+        }
+        assert!(check_times(&at(json!({"exp": (now - SKEW_SECS) as f64 - 0.5})), now).is_err());
+        assert!(check_times(&at(json!({"nbf": (now + SKEW_SECS) as f64 + 0.5})), now).is_err());
+        for bad in [
             json!({"exp": (jose::MAX_TIME as f64) + 0.5}),
             json!({"iat": -0.5}),
             json!({"nbf": jose::MAX_TIME + 1}),
@@ -2081,6 +2115,47 @@ mod tests {
         ] {
             assert!(check_times(&at(bad.clone()), now).is_err(), "{bad}");
         }
+    }
+
+    /// Review finding: an identity document served as expanded JSON-LD (the representation the
+    /// fetch prefers) named no issuer, because only compact documents were read.
+    #[test]
+    fn expanded_json_ld_profiles_name_their_issuer() {
+        let me = "https://alice.example/#me";
+        let op = "https://op.example/";
+        let expanded = json!([{
+            "@id": me,
+            SOLID_OIDC_ISSUER: [{"@id": op}],
+        }])
+        .to_string();
+        let links = names_issuer("application/ld+json", expanded.as_bytes(), me, op);
+        assert!(links.solid_oidc_issuer);
+        // A graph with an inline context reads the same.
+        let graph = json!({
+            "@context": {"solid": "http://www.w3.org/ns/solid/terms#"},
+            "@graph": [{"@id": me, "solid:oidcIssuer": {"@id": op}}],
+        })
+        .to_string();
+        assert!(names_issuer("application/ld+json", graph.as_bytes(), me, op).solid_oidc_issuer);
+        // Naming another subject, or another issuer, is no link.
+        assert!(
+            !names_issuer(
+                "application/ld+json",
+                expanded.as_bytes(),
+                "https://bob.example/#me",
+                op
+            )
+            .solid_oidc_issuer
+        );
+        assert!(
+            !names_issuer(
+                "application/ld+json",
+                expanded.as_bytes(),
+                me,
+                "https://other.example/"
+            )
+            .solid_oidc_issuer
+        );
     }
 
     #[test]

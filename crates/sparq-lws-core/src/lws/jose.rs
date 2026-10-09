@@ -341,19 +341,19 @@ impl Jws {
         self.claims.get(name).and_then(Value::as_str)
     }
 
-    /// A NumericDate claim: whole seconds since the epoch, between the epoch and the end of year
-    /// 9999. `None` when the token does not carry it, and an error when it carries anything else,
-    /// a fraction included. Every time a token carries is read here, so a time outside that range
-    /// is refused rather than read as absent or rounded into it, and arithmetic on a claim's time
-    /// cannot overflow.
-    pub fn claim_time(&self, name: &str) -> Result<Option<i64>, String> {
+    /// A NumericDate claim: seconds since the epoch, fractions kept (RFC 7519 section 2), between
+    /// the epoch and the end of year 9999. `None` when the token does not carry it, and an error
+    /// when it carries anything else. Every time a token carries is read here, so a time outside
+    /// that range is refused rather than read as absent or rounded into it; within it, every
+    /// whole second is exact, and arithmetic on a claim's time cannot overflow.
+    pub fn claim_time(&self, name: &str) -> Result<Option<f64>, String> {
         let Some(v) = self.claims.get(name) else {
             return Ok(None);
         };
-        v.as_i64()
-            .filter(|t| (0..=MAX_TIME).contains(t))
+        v.as_f64()
+            .filter(|t| (0.0..=MAX_TIME as f64).contains(t))
             .map(Some)
-            .ok_or_else(|| format!("{name} is not a whole second between 1970 and 9999"))
+            .ok_or_else(|| format!("{name} is not a time between 1970 and 9999"))
     }
 
     /// The `aud` claim as a list (a single string is a one-element list).
