@@ -198,13 +198,13 @@ fn stratified_negation_sees_earlier_strata_complete() {
         "stratified: :a IS a member, never rejected; got {:?}",
         strat
     );
-    // The single-document run pins WHY stratification is needed: the unsound
-    // early firing persists (derived facts are never retracted).
+    // The single document now agrees: the engine stratifies it automatically
+    // (GH #6201), so the negation waits for the complete :Member extent. Before
+    // that, the early firing persisted (derived facts are never retracted).
     let single = closure(&format!("{}\n{}", s1, s2));
-    assert!(
-        single.iter().any(|(_, p, _)| p == &iri("rejected")),
-        "single document: negation fires before :Member derives and persists; got {:?}",
-        single
+    assert_eq!(
+        single, strat,
+        "auto-stratified single document = explicit strata"
     );
 }
 

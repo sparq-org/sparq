@@ -226,10 +226,27 @@ pub async fn admission_middleware(
     admission.metrics.in_flight.fetch_add(1, Ordering::Relaxed);
     let _gauge = InFlightGuard(admission.metrics.clone());
 
+    // The permit is shared with the request: work a handler detaches from the request (a write that
+    // must finish once started) clones the [`AdmissionSlot`] and holds it until it ends, so the slot
+    // stays taken while that work runs even after the request itself has timed out or gone away.
+    let mut req = req;
+    let slot = AdmissionSlot {
+        _permit: Arc::new(permit),
+    };
+    req.extensions_mut().insert(slot.clone());
     let response = next.run(req).await;
-    // The permit + gauge guard drop here (after the response is produced), releasing the slot.
-    drop(permit);
+    // This hold and the gauge guard drop here (after the response is produced); the slot is released
+    // once every detached holder has finished too.
+    drop(slot);
     response
+}
+
+/// A share of an admitted request's admission permit. The slot is released when the last share is
+/// dropped, so work detached from a request keeps counting against the concurrency ceiling until
+/// it finishes.
+#[derive(Clone)]
+pub struct AdmissionSlot {
+    _permit: Arc<OwnedSemaphorePermit>,
 }
 
 /// RAII guard that decrements the in-flight gauge on drop — so an admitted request always

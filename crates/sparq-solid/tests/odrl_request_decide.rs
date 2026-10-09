@@ -110,6 +110,11 @@ fn policy(
 /// n1 is readable by every session through its own ACL; alice holds every mode on
 /// everything else (n2 and the notes container) through the root ACL.
 fn bare_store() -> PodStore {
+    bare_store_with("")
+}
+
+/// [`bare_store`] plus the N-Quads `extra`.
+fn bare_store_with(extra: &str) -> PodStore {
     let nq = r#"
 <https://pod.ex/.acl#alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
 <https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
@@ -126,7 +131,8 @@ fn bare_store() -> PodStore {
 <https://pod.ex/notes/n1.acl#a> <http://www.w3.org/ns/auth/acl#agentClass> <http://xmlns.com/foaf/0.1/Agent> <https://pod.ex/notes/n1.acl> .
 <https://pod.ex/notes/n1.acl#a> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/notes/n1.acl> .
 "#;
-    let mut store = PodStore::new(Graph::load_dataset(nq, "nquads").expect("pod loads"));
+    let mut store =
+        PodStore::new(Graph::load_dataset(&format!("{nq}{extra}"), "nquads").expect("pod loads"));
     store.materialize_wac().expect("wac");
     store
 }
@@ -577,4 +583,33 @@ fn party_collection_prohibitions_fail_closed() {
     let mut s = store();
     s.attach_odrl_policy(off_team).expect("attach");
     assert!(!reads(&s, &alice, N2), "an exclusion must reach a possible non-member");
+}
+
+/// A read prohibition also confines what an update's WHERE can read: a conditional write
+/// cannot copy prohibited data into a graph the session may read back.
+#[test]
+fn read_prohibitions_reach_update_conditions() {
+    const OUT: &str = "https://pod.ex/notes/out";
+    let alice = session(Some(ALICE), None);
+    let mut s = bare_store_with(&format!("<urn:o> <urn:p> \"out\" <{OUT}> .\n"));
+    s.attach_odrl_policy(policy("prohibition", "read", "", Some(ALICE), Some(N2)).expect("policy"))
+        .expect("attach");
+    assert!(
+        s.update_as(
+            &alice,
+            &format!("INSERT {{ GRAPH <{OUT}> {{ ?s ?p ?o }} }} WHERE {{ GRAPH <{N2}> {{ ?s ?p ?o }} }}"),
+        )
+        .is_err(),
+        "a constant prohibited source is refused"
+    );
+    s.update_as(
+        &alice,
+        &format!("INSERT {{ GRAPH <{OUT}> {{ ?s ?p ?o }} }} WHERE {{ GRAPH ?g {{ ?s ?p ?o }} }}"),
+    )
+    .expect("a variable source ranges over readable graphs");
+    let copied = s
+        .query_json_as(&alice, Mode::Read, &format!("SELECT ?o WHERE {{ GRAPH <{OUT}> {{ ?s ?p ?o }} }}"))
+        .expect("query");
+    assert!(copied.contains("hello"), "readable data is copied: {copied}");
+    assert!(!copied.contains("private"), "prohibited data leaked: {copied}");
 }

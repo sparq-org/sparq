@@ -1319,13 +1319,9 @@ impl PodStore {
     /// the budgeted read entry points, for a caller that must bound *every* evaluation it
     /// issues (an agent tool surface, an HTTP handler). [FABLE-5] sq-yhlf0.
     ///
-    /// The budget covers BOTH evaluations an update can perform:
-    ///
-    /// - the authorization check's `GRAPH ?var` binding SELECT (see the precise-resolution
-    ///   note on [`PodStore::update_as`]) — an exhausted budget there is a **deny**, and
-    ///   nothing is mutated;
-    /// - the apply's `DELETE`/`INSERT … WHERE` evaluation, via
-    ///   [`sparq_engine::update_in_place_with_budget`].
+    /// The budget covers the one evaluation an update performs, its
+    /// `DELETE`/`INSERT … WHERE` (which also yields the `GRAPH ?var` write targets the
+    /// authorization checks); an exhausted budget is an error and nothing is mutated.
     ///
     /// The remaining operations never consult the budget, and — importantly — capping the
     /// accepted update text does **not** bound all of them, because their cost is set by the
@@ -1398,13 +1394,48 @@ impl PodStore {
     ) -> Result<(), String> {
         // Authorize against the CURRENT auth view before mutating anything (fail-closed).
         let auth = Arc::clone(&self.auth);
+        let upd = sparq_engine::parse_update_rec2013(sparql)?;
+        // Every pattern the update evaluates runs under the session's read view, the same
+        // graph set `view_for` gives a query, so an unreadable graph is never evaluated.
+        // Only a `DELETE`/`INSERT … WHERE` evaluates one, so the view is fetched only then.
+        let reads = update::evaluates_patterns(&upd).then(|| self.accessible_set(s, Mode::Read));
+        if let Some(reads) = &reads {
+            update::scope_reads(&upd, reads)?;
+        }
         let veto = |mode: Mode, g: &str| self.odrl_denies(s, mode, g);
-        let permit =
-            update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget, &veto)?;
-        // Authorized: apply through the engine's in-place delta path, under the same budget.
-        sparq_engine::update_in_place_with_budget(&mut self.graph, sparql, budget)?;
+        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), &veto)?;
+        // Authorized: apply the checked algebra through the engine's in-place delta path,
+        // under the same read view and budget. A `GRAPH ?var` template's destinations are
+        // authorized as the engine instantiates them, from its one evaluation of the WHERE,
+        // before the operation changes anything (`check` admits such an operation only on
+        // its own, so a denial leaves the store untouched).
+        let mut auth_input = false;
+        if permit.var_graphs {
+            // Borrow the (now initialized) field itself, disjoint from `self.graph`.
+            self.group_docs();
+            let group_docs = self.group_docs.get().expect("initialized above");
+            // The same gate as `odrl_denies`, borrowing only the ODRL field.
+            #[cfg(feature = "odrl-bridge")]
+            let odrl = &self.odrl;
+            #[cfg(feature = "odrl-bridge")]
+            let veto = |mode: Mode, g: &str| odrl.denies(s, mode, g);
+            #[cfg(not(feature = "odrl-bridge"))]
+            let veto = |_: Mode, _: &str| false;
+            let mut authorize = |dels: &[Option<Term>], ins: &[Option<Term>]| {
+                update::authorize_writes(&auth, s, group_docs, dels, ins, &mut auth_input, &veto)
+            };
+            sparq_engine::update_in_place_algebra_with_budget(
+                &mut self.graph,
+                &upd,
+                reads.as_ref(),
+                Some(&mut authorize),
+                budget,
+            )?;
+        } else {
+            sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, reads.as_ref(), None, budget)?;
+        }
         // A change to the access-control rules invalidates the auth view.
-        if permit.rematerialize {
+        if permit.rematerialize || auth_input {
             if acp {
                 self.materialize_acp()?;
             } else {

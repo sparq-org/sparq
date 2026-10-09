@@ -62,14 +62,14 @@ hdt = ["dep:sparq-hdt"]
 # `query_service` call installs the engine's STRICT fail-closed egress allowlist (federation.rs).
 federation = ["sparq-engine/service"]
 # [FABLE-5] sq-ixc3.15 — the ODRL policy tool's native backing: author/validate a Turtle ODRL
-# policy, evaluate a request, and preview the access-controlled result set (PodStore::query_as
-# via the odrl-bridge, fail-closed per-session named-graph gating) next to the ungated results.
+# policy, evaluate a request, and preview the result set each requester may read by the
+# policy's own per-request verdict (sparq_policy::decide) next to the ungated results.
 # OFF by default for the same lean-build reasons as `hdt`/`federation`: it pulls the optional
-# research-track sparq-policy evaluator + sparq-solid enforcement store. The desktop release
+# research-track sparq-policy evaluator + sparq-solid's read rewrite. The desktop release
 # build turns it ON; the webview/wasm target never links these crates (the tool degrades
 # honestly to a native-only message in the browser). Lean builds register a stub that fails
 # loudly with a rebuild hint (odrl.rs).
-odrl = ["dep:sparq-policy", "dep:sparq-solid"]
+odrl = ["dep:sparq-policy", "dep:sparq-solid", "dep:oxrdf"]
 # [GPT-5.6] sq-1cnox — native SHACL-to-form derivation for the Forms tool. OFF by
 # default so the standalone desktop shell stays lean unless a release explicitly
 # opts into the sparq-forms + SHACL model stack. Lean builds still register the
@@ -117,11 +117,11 @@ sparq-engine = { path = "../../crates/sparq-engine", features = ["serialize-rdf"
 sparq-hdt = { path = "../../crates/sparq-hdt", optional = true }
 
 # [FABLE-5] sq-ixc3.15 — opt-in native-only ODRL usage-control stack for the ODRL policy tool:
-# the sparq-policy evaluator (parse/validate a Turtle policy + evaluate a request) and the
-# sparq-solid enforcement store (`PodStore::query_json_as` fail-closed named-graph gating, fed
-# by the `odrl-bridge` materialization). Pulled in only under this crate's `odrl` feature.
+# the sparq-policy evaluator (parse/validate a Turtle policy + decide each request) and
+# sparq-solid's read rewrite (the `PodStore::query_json_as` view path the gated panes reuse).
+# Pulled in only under this crate's `odrl` feature.
 sparq-policy = { path = "../../crates/sparq-policy", optional = true }
-sparq-solid = { path = "../../crates/sparq-solid", features = ["odrl-bridge"], optional = true }
+sparq-solid = { path = "../../crates/sparq-solid", optional = true }
 
 # [GPT-5.6] sq-1cnox — optional native Forms bridge. oxrdf is named directly because the
 # Tauri boundary validates the serialized focus/shape nodes into typed RDF terms before it

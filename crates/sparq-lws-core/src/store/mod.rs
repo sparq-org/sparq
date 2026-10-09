@@ -152,6 +152,27 @@ pub trait Store: Send + Sync {
         content_type: &str,
     ) -> ServerResult<ResourceMeta>;
 
+    /// Put a record back as it was: `body` under `meta`'s content type, entity tag and
+    /// modification time (its blob key is minted afresh), as a member of `container` when one is
+    /// given (the [`create_in_container`](Store::create_in_container) path) and in place otherwise
+    /// (the [`write`](Store::write) path). This is how a mutation that fails partway is undone
+    /// without changing what it reports as unchanged: a restored resource keeps its validators.
+    ///
+    /// The default refuses: a store that cannot keep a record's validators cannot undo a change
+    /// faithfully, and says so rather than restoring something that looks newer.
+    async fn restore(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        body: Bytes,
+        meta: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        let _ = (iri, container, body, meta);
+        Err(ServerError::Storage(
+            "this store cannot restore a record as it was".into(),
+        ))
+    }
+
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -593,6 +614,57 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         }
     }
 
+    async fn restore(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        body: Bytes,
+        meta: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        // As `write` and `create_in_container`, with the record's own validators kept.
+        let blob_key = Self::mint_blob_key(iri)?;
+        self.blob.put(&blob_key, body).await.map_err(|e| match e {
+            BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+            other => ServerError::Storage(format!("{other}")),
+        })?;
+        let meta = ResourceMeta {
+            blob_key,
+            ..meta.clone()
+        };
+        let committed = match container {
+            Some(c) => self
+                .sparq
+                .create_child(c, iri, meta.clone())
+                .await
+                .map(|()| None),
+            None => self.sparq.replace_meta(iri, meta.clone()).await,
+        };
+        match committed {
+            Ok(previous) => {
+                if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
+                    self.reclaim_blob(&old.blob_key).await;
+                }
+                Ok(meta)
+            }
+            Err(e) => {
+                // A restore is retried until it lands, each attempt under a fresh key: the bytes
+                // of one whose record did not land are reclaimed here, so failed attempts do not
+                // pile up in the blob store. A record that did land (a lost reply) is kept; when
+                // that cannot be told, the bytes are left to the reconciler.
+                match self.sparq.get_meta(iri).await {
+                    Ok(now) if now.blob_key == meta.blob_key => return Ok(meta),
+                    Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&meta.blob_key).await,
+                    Err(_) => {}
+                }
+                Err(match e {
+                    SparqError::NotFound => ServerError::NotFound,
+                    SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                    SparqError::Backend(e) => ServerError::Storage(e),
+                })
+            }
+        }
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         // Look up the byte-pointer from the authoritative index so we delete the right blob.
         let blob_key = match self.sparq.get_meta(iri).await {
@@ -738,6 +810,32 @@ mod tests {
     use crate::store::sparq::InMemorySparqClient;
 
     type S = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
+
+    /// Review finding: every attempt at a restore uploaded its bytes under a fresh key, and an
+    /// attempt whose record did not land left them behind, so a restore retried against a
+    /// failing index could fill the blob store. They are reclaimed now.
+    #[tokio::test]
+    async fn a_restore_that_does_not_land_leaves_no_bytes() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let meta = ResourceMeta {
+            content_type: "text/plain".into(),
+            blob_key: String::new(),
+            etag: "\"e\"".into(),
+            last_modified: None,
+        };
+        for _ in 0..3 {
+            let r = store
+                .restore(
+                    "https://pod.example/missing/a",
+                    Some("https://pod.example/missing/"),
+                    Bytes::from_static(b"x"),
+                    &meta,
+                )
+                .await;
+            assert!(matches!(r, Err(ServerError::NotFound)), "{r:?}");
+        }
+        assert!(store.blob.list().await.unwrap().is_empty());
+    }
 
     #[test]
     fn validated_child_iri_accepts_valid_rejects_malformed() {

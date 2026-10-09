@@ -5,15 +5,15 @@
 //
 // The whole round-trip runs in ONE native command (`odrl_preview`, gui/src-tauri/src/odrl.rs):
 // parse the Turtle ODRL policy → evaluate the (party, action, target) request per requester →
-// materialize through the odrl-bridge → run the SAME SPARQL query ungated AND per requester
-// through PodStore's fail-closed per-session named-graph gating. NATIVE-ONLY: the ODRL stack
+// decide `read` on every named graph per requester → run the SAME SPARQL query ungated AND per
+// requester over exactly the graphs the policy's own verdict grants. NATIVE-ONLY: the ODRL stack
 // is not in the in-tab wasm bundle, so the hosted web build degrades honestly (WEB_ODRL_MESSAGE,
 // run disabled) — never a fabricated decision.
 //
 // Follows the GUI workbench translation rule (research/gui-design.md §A.4/§A.5): marketing
 // chrome CUT, live-result rendering only, honest error messaging. FAIL-CLOSED UX invariants:
 //   - A malformed policy renders the deny-everything banner with the parser's verbatim reason;
-//     every gated pane shows the REAL zero-row result the empty auth index produced.
+//     every gated pane shows the REAL zero-row result over the empty granted set.
 //   - A requester's pane lists the named graphs the policy HID versus the ungated pane, so a
 //     prohibition visibly flips a previously visible graph to hidden.
 //   - No result is ever synthesized in the webview; every row comes from the native engine.
@@ -193,7 +193,7 @@ function RequesterPane({
       </div>
       {pane.bridge_notes.length > 0 && (
         <details className="border-t px-2 py-1 text-[11px] text-muted-foreground">
-          <summary className="cursor-pointer">Bridge notes ({pane.bridge_notes.length})</summary>
+          <summary className="cursor-pointer">Per-graph verdicts ({pane.bridge_notes.length})</summary>
           <ul className="space-y-0.5 pt-1">
             {pane.bridge_notes.map((n, i) => (
               <li key={i} className="break-all font-mono">
@@ -440,7 +440,7 @@ function PreviewResult({ preview }: { preview: OdrlPreviewResult }) {
           Policy OK — {preview.permissions} permission(s), {preview.prohibitions}{" "}
           prohibition(s).
           {preview.refused &&
-            " REFUSED: the policy's odrl:conflict strategy cannot be honored — nothing was materialized (fail-closed)."}
+            " REFUSED: the policy's odrl:conflict strategy cannot be honored — nothing is granted (fail-closed)."}
         </p>
       ) : (
         <pre
@@ -450,6 +450,11 @@ function PreviewResult({ preview }: { preview: OdrlPreviewResult }) {
           {describeMalformedPolicy(preview.policy_error ?? "unknown parse error")}
         </pre>
       )}
+
+      <p className="text-xs text-muted-foreground" data-odrl-verdict-note="">
+        {"Each pane shows the policy's own verdict, decided per request for that requester. " +
+          "Enforcement on a sparq v0.1.5 server can differ from this preview."}
+      </p>
 
       {/* The two gated panes, side by side. */}
       <div className="flex flex-col gap-3 lg:flex-row">

@@ -49,8 +49,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 
 **Required production configuration:**
 
-- **Base URL:** `SOLID_SERVER_BASE_URL` = the public `https://` origin (set
-  `SOLID_SERVER_AUDIENCE` only if the token audience differs).
+- **Base URL:** `SOLID_SERVER_BASE_URL` = the public `https://` origin (set `SOLID_SERVER_AUDIENCE` only if the token audience differs).
 - **TLS:** terminate at a trusted proxy (keep the container port private), or mount PEMs
   and set both `SOLID_SERVER_TLS_CERT` + `SOLID_SERVER_TLS_KEY` (setting one fails boot;
   uid 65532 must read them).
@@ -86,6 +85,7 @@ docker run --rm --name sparq-lws-core -p 127.0.0.1:3000:3000 \
 - **Transport hardening** — HTTP/2 rapid-reset and HTTP/1 slowloris guards (explicit
   header-count, aggregate-byte, and slow-header timeout bounds); request timeouts, body
   limits, per-connection max-requests, rate limiting, and overload shedding.
+- **LWS 1.0 mode** — `SOLID_SERVER_PROTOCOL=lws` serves W3C Linked Web Storage (`src/lws/`, skill § *Run the LWS 1.0 protocol*, [`conformance/lws/`](./conformance/lws)).
 - Cargo features:
   - `embedded-sparq` (**default-on**, sq-gg0qq.3) — the first-class in-process
     SPARQ engine backend (in-workspace path deps on `sparq-core`/`sparq-engine`);

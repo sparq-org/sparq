@@ -344,10 +344,10 @@ let out = store.materialize_odrl_policy(&policy, &req);
 - **One gate.** Every entry point goes through it:
   - the reads behind the cached session set: `accessible`, `accessible_set`, the views and queries, `wac_allow` and `scoped_dataset`;
   - point decisions: `decide`, `decide_batch` and `decide_create`;
-  - every update path.
+  - every update path, including the graphs an update's `WHERE` reads (it is evaluated under the same session read set).
   
   `decide_create` refuses control-document names first, then checks prohibitions on the container and on the child. `tests/odrl_request_decide.rs` fails when a new public function that takes a `Session` is not classified.
-- **Session context.** The session's agent is the party and default recipient, and its `now` is the request time. `WAC-Allow`'s `public` field keeps the request clock. `add_odrl_asset_membership(asset, collection)` adds `odrl:partOf` evidence to every request, so an asset that joins a prohibited collection is denied at once.
+- **Session context.** The session's agent is the party and default recipient, and its `now` is the request time. `WAC-Allow`'s `public` field keeps the request clock. `add_odrl_asset_membership(asset, collection)` adds `odrl:partOf` evidence to every request, so an asset that joins a prohibited collection is denied at once. No party-membership evidence reaches a request, so when a policy names an `odrl:PartyCollection` a prohibition applies if it applies under any membership the agent could have: a prohibition on a collection reaches every authenticated agent, and one excluding a collection still reaches them too.
 - **Mode mapping.** A mode is removed when a prohibition applies (True or Unknown) to any ODRL action of that mode:
   - the read family maps to `Read`;
   - `append`/`modify`/`delete`/`write` map to both `Append` and `Write`.
