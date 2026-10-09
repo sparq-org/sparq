@@ -208,19 +208,83 @@ fn quoted(tag: &str) -> String {
     }
 }
 
-/// Whether an If-Match / If-None-Match list matches `etag`. `weak` compares opaque tags only.
+/// An `If-Match` / `If-None-Match` field value: `*`, or entity tags as `(weak, opaque-tag)`, the
+/// opaque tag with its quotes.
+enum TagList {
+    Any,
+    Tags(Vec<(bool, String)>),
+}
+
+impl TagList {
+    /// Parse a field value by the RFC 9110 grammar (`"*" / #entity-tag`, section 8.8.3): a comma
+    /// inside a quoted tag belongs to the tag, and `*` is the whole value or not a wildcard.
+    /// Anything else is unreadable.
+    fn parse(v: &str) -> Result<Self, ()> {
+        if v.trim() == "*" {
+            return Ok(Self::Any);
+        }
+        let b = v.as_bytes();
+        let mut i = 0;
+        let mut tags = Vec::new();
+        loop {
+            while i < b.len() && matches!(b[i], b' ' | b'\t' | b',') {
+                i += 1;
+            }
+            if i == b.len() {
+                break;
+            }
+            let weak = b[i..].starts_with(b"W/");
+            if weak {
+                i += 2;
+            }
+            if b.get(i) != Some(&b'"') {
+                return Err(());
+            }
+            let start = i;
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                if !(b[i] == 0x21 || (0x23..=0x7e).contains(&b[i]) || b[i] >= 0x80) {
+                    return Err(());
+                }
+                i += 1;
+            }
+            if i == b.len() {
+                return Err(());
+            }
+            i += 1;
+            tags.push((weak, v[start..i].to_string()));
+            while i < b.len() && matches!(b[i], b' ' | b'\t') {
+                i += 1;
+            }
+            if i < b.len() && b[i] != b',' {
+                return Err(());
+            }
+        }
+        if tags.is_empty() {
+            return Err(());
+        }
+        Ok(Self::Tags(tags))
+    }
+
+    /// Whether the list matches `etag` (the server's own, quoted). `weak` compares opaque tags
+    /// only (RFC 9110 section 8.8.3.2).
+    fn matches(&self, etag: &str, weak: bool) -> bool {
+        let (etag_weak, opaque) = match etag.strip_prefix("W/") {
+            Some(o) => (true, o),
+            None => (false, etag),
+        };
+        match self {
+            Self::Any => true,
+            Self::Tags(tags) => tags
+                .iter()
+                .any(|(w, t)| t == opaque && (weak || (!w && !etag_weak))),
+        }
+    }
+}
+
+#[cfg(test)]
 fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
-    let strip = |t: &str| t.trim().trim_start_matches("W/").to_string();
-    header.split(',').map(str::trim).any(|t| {
-        if t == "*" {
-            return true;
-        }
-        if weak {
-            strip(t) == strip(etag)
-        } else {
-            !t.starts_with("W/") && !etag.starts_with("W/") && t == etag
-        }
-    })
+    TagList::parse(header).is_ok_and(|l| l.matches(etag, weak))
 }
 
 /// A body (of POST, PUT, PATCH or QUERY) sent with a content coding other than `identity` is refused (`415`, with
@@ -264,9 +328,9 @@ enum Precondition {
 
 /// Preconditions are read once, here, from every field line: a list header (`If-Match`,
 /// `If-None-Match`) sent as several lines is all of them, not the first. An entity-tag list that
-/// cannot be read (not visible ASCII) fails the request rather than being skipped; a date that is
-/// not one valid HTTP-date (unparsable, or sent twice) is ignored, as RFC 9110 sections 13.1.3
-/// and 13.1.4 require.
+/// cannot be read (not visible ASCII, or not the RFC 9110 grammar) fails the request rather than
+/// being skipped; a date that is not one valid HTTP-date (unparsable, or sent twice) is ignored,
+/// as RFC 9110 sections 13.1.3 and 13.1.4 require.
 fn evaluate(
     headers: &HeaderMap,
     etag: Option<&str>,
@@ -276,8 +340,8 @@ fn evaluate(
     let Ok(pre) = Preconditions::read(headers) else {
         return Precondition::Failed;
     };
-    if let Some(im) = pre.if_match.as_deref() {
-        if !etag.is_some_and(|e| etag_listed(im, e, false)) {
+    if let Some(im) = pre.if_match.as_ref() {
+        if !etag.is_some_and(|e| im.matches(e, false)) {
             return Precondition::Failed;
         }
     } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
@@ -285,8 +349,8 @@ fn evaluate(
             return Precondition::Failed;
         }
     }
-    if let Some(inm) = pre.if_none_match.as_deref() {
-        if etag.is_some_and(|e| etag_listed(inm, e, true)) {
+    if let Some(inm) = pre.if_none_match.as_ref() {
+        if etag.is_some_and(|e| inm.matches(e, true)) {
             return if read {
                 Precondition::NotModified
             } else {
@@ -306,21 +370,24 @@ fn evaluate(
 
 /// A request's preconditions, every field line of each read.
 struct Preconditions {
-    if_match: Option<String>,
-    if_none_match: Option<String>,
+    if_match: Option<TagList>,
+    if_none_match: Option<TagList>,
     if_unmodified_since: Option<u64>,
     if_modified_since: Option<u64>,
 }
 
 impl Preconditions {
     fn read(headers: &HeaderMap) -> Result<Self, ()> {
-        let list = |n: header::HeaderName| -> Result<Option<String>, ()> {
+        let list = |n: header::HeaderName| -> Result<Option<TagList>, ()> {
             let lines = headers
                 .get_all(n)
                 .iter()
                 .map(|v| v.to_str().map_err(drop))
                 .collect::<Result<Vec<_>, ()>>()?;
-            Ok((!lines.is_empty()).then(|| lines.join(", ")))
+            if lines.is_empty() {
+                return Ok(None);
+            }
+            TagList::parse(&lines.join(", ")).map(Some)
         };
         let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
             let mut lines = headers.get_all(n).iter();
@@ -1937,7 +2004,26 @@ async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
 ) -> (Vec<String>, Result<(), ServerError>) {
-    let mut journal = state.journal();
+    remove_in(state, state.journal(), doomed).await
+}
+
+/// [`remove`], recorded in `journal`.
+async fn remove_in<S: Store + 'static>(
+    state: &LwsState<S>,
+    mut journal: super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> (Vec<String>, Result<(), ServerError>) {
+    // Everything the removal could need to put back is read first: a subtree too large to
+    // remove atomically is refused before any of it is removed.
+    for (node, _) in doomed {
+        let staged = match journal.stage(node).await {
+            Ok(()) => journal.stage(&meta_key(node)).await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = staged {
+            return (Vec::new(), Err(e));
+        }
+    }
     let mut failed = None;
     for (i, (node, parent)) in doomed.iter().enumerate() {
         // The record and its parent's membership edge go in one step, data resources included:
@@ -1947,7 +2033,7 @@ async fn remove<S: Store + 'static>(
             Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
                 "the container gained a member while it was deleted".into(),
             )),
-            Ok(_) => journal.delete(&meta_key(node)).await,
+            Ok(_) => journal.delete_meta(node).await,
             Err(e) => Err(e),
         };
         if let Err(e) = removed {
@@ -2242,6 +2328,12 @@ mod tests {
         assert!(!etag_listed("W/\"b\"", "\"b\"", false));
         assert!(etag_listed("W/\"b\"", "\"b\"", true));
         assert!(etag_listed("*", "\"x\"", false));
+        // A comma inside a tag is part of it, never a wildcard.
+        assert!(!etag_listed("\"x,*,y\"", "\"x\"", false));
+        assert!(etag_listed("\"x,*,y\"", "\"x,*,y\"", false));
+        assert!(!etag_listed("\"a\", *", "\"x\"", false));
+        assert!(!etag_listed("\"a", "\"a\"", false));
+        assert!(!etag_listed("a", "a", false));
     }
 
     // ---- request-level tests over an in-memory store ----
@@ -3866,6 +3958,7 @@ mod tests {
             .collect();
         // a and b go (two steps each), c fails; putting back restores b's metadata and b, then
         // fails on a's metadata.
+        let before = st.store.meta(&doomed[0].0).await.unwrap().unwrap();
         *store.fail_delete_of.lock().unwrap() = Some(doomed[2].0.clone());
         *store.fail_step.lock().unwrap() = Some(7);
         let (gone, outcome) = remove(&st, &doomed).await;
@@ -3877,6 +3970,50 @@ mod tests {
         assert!(outcome.is_err());
         assert_eq!(gone, vec![doomed[0].0.clone()]);
         assert!(st.store.exists(&doomed[1].0).await.unwrap());
+        // What could not be put back then is not dropped: it comes back, as it was, once the
+        // store lets it.
+        let mut back = None;
+        for _ in 0..100 {
+            if let Ok(Some(m)) = st.store.meta(&doomed[0].0).await {
+                back = Some(m);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let back = back.expect("the removed member was never put back");
+        assert_eq!(
+            (back.etag, back.last_modified),
+            (before.etag, before.last_modified)
+        );
+        assert!(st.store.exists(&meta_key(&doomed[0].0)).await.unwrap());
+    }
+
+    /// Review finding: a recursive delete found out it was too large to undo only after removing
+    /// part of the tree. Everything it could need to put back is now read first.
+    #[tokio::test]
+    async fn a_delete_too_large_to_undo_removes_nothing() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        let mut doomed = Vec::new();
+        for slug in ["a", "b", "c"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+            doomed.push((format!("{root}{slug}"), Some(root.clone())));
+        }
+        // Room to put back two of the three, not all.
+        let mut journal = st.journal();
+        journal.limit = 2 * (doomed[0].0.len() + "x".len() + meta_key(&doomed[0].0).len()) + 1;
+        // Every store step is counted down: none may be taken.
+        *store.fail_step.lock().unwrap() = Some(1000);
+        let (gone, outcome) = remove_in(&st, journal, &doomed).await;
+        assert!(matches!(outcome, Err(ServerError::Conflict(_))));
+        assert!(gone.is_empty());
+        assert_eq!(*store.fail_step.lock().unwrap(), Some(1000));
+        for (node, _) in &doomed {
+            assert!(st.store.exists(node).await.unwrap());
+        }
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
