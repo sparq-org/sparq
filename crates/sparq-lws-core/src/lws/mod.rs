@@ -446,6 +446,8 @@ pub struct Inner<S: Store> {
     untouched: std::sync::Mutex<std::collections::HashMap<String, (bool, usize)>>,
     /// See [`LwsState::generation`].
     generations: [std::sync::atomic::AtomicU64; GENERATIONS],
+    /// See [`LwsState::meta_in_flight`].
+    meta_writes: [std::sync::atomic::AtomicU64; GENERATIONS],
 }
 
 /// How many counters [`LwsState::generation`] spreads the containers over.
@@ -501,6 +503,7 @@ impl<S: Store + 'static> LwsState<S> {
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
                 generations: std::array::from_fn(|_| Default::default()),
+                meta_writes: std::array::from_fn(|_| Default::default()),
             }),
         })
     }
@@ -535,16 +538,55 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// A count that moves on whenever a change to the container `uri`'s listing is published
-    /// ([`LwsState::touching`]) or a touch of it ends ([`LwsState::touched`]): a listing made
+    /// A count that moves on whenever what the container `uri`'s listing shows may change: a
+    /// change to its listing is published ([`LwsState::touching`]), a touch of it ends
+    /// ([`LwsState::touched`]), or a metadata write to it or to a member container (which the
+    /// listing shows the date of) begins or ends ([`LwsState::meta_write`]). A listing made
     /// while it moved is made again. Containers share [`GENERATIONS`] counters, so an unrelated
     /// one can make a listing be made again, never a moved one go unnoticed.
     pub(crate) fn generation(&self, uri: &str) -> u64 {
         self.generations[generation_slot(uri)].load(std::sync::atomic::Ordering::Acquire)
     }
 
+    /// Whether a metadata write to the container `uri`, or to a member container of it, is in
+    /// flight ([`LwsState::meta_write`]): a listing made meanwhile has no date.
+    pub(crate) fn meta_in_flight(&self, uri: &str) -> bool {
+        self.meta_writes[generation_slot(uri)].load(std::sync::atomic::Ordering::Acquire) > 0
+    }
+
+    /// Mark a write of the container `uri`'s own metadata (its date and version) as begun
+    /// (`true`) or over (`false`): for `uri` and for the container listing it, the
+    /// [generation](LwsState::generation) moves on both times, and [`LwsState::meta_in_flight`]
+    /// holds in between.
+    pub(crate) fn meta_write(&self, uri: &str, begun: bool) {
+        use std::sync::atomic::Ordering;
+        for slot in self.slots_of(uri) {
+            if begun {
+                self.meta_writes[slot].fetch_add(1, Ordering::AcqRel);
+            }
+            self.generations[slot].fetch_add(1, Ordering::AcqRel);
+            if !begun {
+                self.meta_writes[slot].fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+    }
+
+    /// The counters of `uri` and of the container listing it.
+    fn slots_of(&self, uri: &str) -> Vec<usize> {
+        let mut slots = vec![generation_slot(uri)];
+        if let Some(parent) = resources::parent_of(uri, &self.cfg.storage()) {
+            let p = generation_slot(&parent);
+            if p != slots[0] {
+                slots.push(p);
+            }
+        }
+        slots
+    }
+
     fn changed(&self, uri: &str) {
-        self.generations[generation_slot(uri)].fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        for slot in self.slots_of(uri) {
+            self.generations[slot].fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
     }
 
     /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,

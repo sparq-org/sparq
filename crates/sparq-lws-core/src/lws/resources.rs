@@ -613,7 +613,10 @@ async fn touch<S: Store + 'static>(state: &LwsState<S>, container: &str) -> bool
     };
     meta.modified_ms = Some(now_ms());
     meta.version = Some(jose::random_id());
-    state.put_resource_meta(container, &meta).await.is_ok()
+    state.meta_write(container, true);
+    let landed = state.put_resource_meta(container, &meta).await.is_ok();
+    state.meta_write(container, false);
+    landed
 }
 
 fn store_error(e: ServerError) -> Response {
@@ -1093,7 +1096,7 @@ async fn read_container<S: Store + 'static>(
     // count. And a listing made while a change to the container was published, or a touch of
     // it landed, is made again: it could pair members from before with a date from after.
     let generation = state.generation(uri);
-    let untouched = state.is_untouched(uri);
+    let untouched = state.is_untouched(uri) || state.meta_in_flight(uri);
     let all = match members(state, uri, exclusive).await {
         Ok(m) => m,
         Err(Unlisted::Store(e)) => return Ok(store_error(e)),
@@ -1499,14 +1502,22 @@ async fn create<S: Store + 'static>(
             Ok(m) => m,
             Err(r) => return r,
         };
-        // Held exclusively: no change to a member is in flight.
-        let listing = read_container(state, &plain_get(req), parent, &meta, true)
-            .await
-            .unwrap_or_else(|_| set_aside_meanwhile());
-        if !listing.status().is_success() {
-            return listing;
-        }
-        let (etag, modified) = validators_of(&listing);
+        // Evaluated against the representation a GET would select: at the storage root that
+        // may be the storage description rather than the listing (see [`read`]).
+        let get = plain_get(req);
+        let (etag, modified) =
+            if parent == state.cfg.storage() && serves_description(get.header(header::ACCEPT)) {
+                (Some(description_etag(&storage_description(state))), None)
+            } else {
+                // Held exclusively: no change to a member is in flight.
+                let listing = read_container(state, &get, parent, &meta, true)
+                    .await
+                    .unwrap_or_else(|_| set_aside_meanwhile());
+                if !listing.status().is_success() {
+                    return listing;
+                }
+                validators_of(&listing)
+            };
         if let Some(refused) = unless_preconditions(req, etag.as_deref(), modified) {
             return refused;
         }
@@ -4877,6 +4888,91 @@ mod tests {
             }
             (etag, doc) = (now_etag, now_doc);
         }
+    }
+
+    /// Review finding: a touch of a member container changes the date its parent's listing
+    /// shows for it, but moved only the member's own generation, so a parent listing made
+    /// across touches of two members could pair one's old date with the other's new one under
+    /// a date from after both. A metadata write to a container moves its parent's generation
+    /// too, before and after, and a listing made while one is in flight has no date.
+    #[tokio::test]
+    async fn a_member_containers_touch_moves_its_parents_snapshot() {
+        use super::super::test_store::{request as req, state};
+        let (st, _store) = state(100).await;
+        let anon = Agent::anonymous();
+        for (parent, slug) in [("/", "c"), ("/c/", "a"), ("/c/", "b")] {
+            let h = [("slug", slug), ("link", CONTAINER_LINK)];
+            let r = handle(&st, &req(Method::POST, parent, &h, ""), &anon).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let c = st.cfg.absolute("/c/");
+        let a = st.cfg.absolute("/c/a/");
+        let dated = || async {
+            let h = [("accept", "application/lws+json")];
+            let r = handle(&st, &req(Method::GET, "/c/", &h, ""), &anon).await;
+            assert_eq!(r.status(), StatusCode::OK);
+            r.headers().contains_key(header::LAST_MODIFIED)
+        };
+        assert!(dated().await);
+        let before = st.generation(&c);
+        st.meta_write(&a, true);
+        assert_ne!(
+            st.generation(&c),
+            before,
+            "a member's touch moves its parent"
+        );
+        assert!(
+            !dated().await,
+            "no date while a member's date is being written"
+        );
+        let during = st.generation(&c);
+        st.meta_write(&a, false);
+        assert_ne!(st.generation(&c), during);
+        assert!(dated().await);
+        // A real touch does the same.
+        let before = st.generation(&c);
+        touch_container(&st, &a).await;
+        assert_ne!(st.generation(&c), before);
+    }
+
+    /// Review finding: a conditional POST to the storage root was evaluated against the root's
+    /// listing even when a GET of it (no Accept, or the description's type) selects the
+    /// storage description, so the description's own tag failed If-Match.
+    #[tokio::test]
+    async fn a_conditional_create_at_the_root_uses_the_representation_a_get_selects() {
+        use super::super::test_store::{request as req, state};
+        let (st, _store) = state(100).await;
+        let anon = Agent::anonymous();
+        let r = handle(&st, &req(Method::GET, "/", &[], ""), &anon).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let tag = r.headers()[header::ETAG].to_str().unwrap().to_string();
+        let h = [
+            ("slug", "x"),
+            ("content-type", "text/plain"),
+            ("if-match", tag.as_str()),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &anon).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // Asking for the listing, the listing's tag is what counts.
+        let accept = [("accept", "application/lws+json")];
+        let r = handle(&st, &req(Method::GET, "/", &accept, ""), &anon).await;
+        let listing = r.headers()[header::ETAG].to_str().unwrap().to_string();
+        let h = [
+            ("slug", "y"),
+            ("content-type", "text/plain"),
+            ("accept", "application/lws+json"),
+            ("if-match", listing.as_str()),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, "y"), &anon).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let h = [
+            ("slug", "z"),
+            ("content-type", "text/plain"),
+            ("accept", "application/lws+json"),
+            ("if-match", tag.as_str()),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, "z"), &anon).await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
     }
 
     /// Review finding: visibility was checked only as a request came in, so one already
