@@ -300,8 +300,12 @@ What the server exposes, all discoverable from the storage description
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
-  the half-done state in between. A create whose store reply was lost is removed whole the same
-  way. The set-aside state lives in the process (a crash mid-way is not covered). A container
+  the half-done state in between. A resource stays set aside until every stuck change to it is
+  put back. While set-aside changes hold 256 MiB or more to put back, new writes are answered
+  `503` too (reads go on). A write's container is touched by the task that runs its store
+  calls, so a client that goes away mid-write cannot leave the container's date behind. A
+  create whose store reply was lost is removed whole the same way. The set-aside state lives
+  in the process (a crash mid-way is not covered). A container
   whose modification time could not be moved on after a change has no `Last-Modified` until it
   is, so `If-Modified-Since` never answers `304` on a stale date. A PUT with `Content-Range`
   (a partial PUT) is refused with `400`.
