@@ -685,7 +685,9 @@ fn scan_string(b: &[u8], open: usize) -> Result<(usize, usize, bool, usize), Str
     Err(format!("N-Triples: unterminated delimiter from byte {open}"))
 }
 
-/// Scans `<...>` returning the (escaped?) content range and the index past `>`.
+/// Scans `<...>` returning the (escaped?) content range and the index past `>` (used only by
+/// the no-intern N-Quads span walk; the interning paths use [`scan_iri`] / [`scan_string`]).
+#[cfg(feature = "parallel")]
 fn scan_delim(b: &[u8], open: usize, close: u8) -> Result<(usize, usize, bool, usize), String> {
     let start = open + 1;
     let mut j = start;
