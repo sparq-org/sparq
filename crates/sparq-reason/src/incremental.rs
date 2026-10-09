@@ -1544,8 +1544,10 @@ pub struct MaterializedN3Graph {
     rebuilds: usize,
     /// The batch engine's stratification diagnostic from the last fallback rebuild.
     strat_warning: Option<String>,
-    /// Where the counting evaluation records a cut ([`crate::n3::bounded`]). A cut changes
-    /// no result and is not yet reported.
+    /// The cut record of the current closure ([`crate::n3::bounded`]). Every full
+    /// rematerialization starts a fresh one, shared by all of its nested evaluations, and
+    /// leaves it here; incremental inserts record into it. So a cut lasts only while the
+    /// facts that caused it are present.
     cuts: crate::n3::bounded::Truncation,
 }
 
@@ -2303,9 +2305,9 @@ impl MaterializedN3Graph {
             fallback_closure: FxHashSet::default(),
             rebuilds: 0,
             strat_warning: None,
-            cuts,
+            cuts: cuts.clone(),
         };
-        g.rematerialize();
+        g.rematerialize(cuts);
         g.rebuilds = 0;
         if let Some(w) = g.strat_warning.take() {
             return Err(format!("{w} The rules document is rejected."));
@@ -2327,7 +2329,12 @@ impl MaterializedN3Graph {
         self.compiled.as_ref().is_some_and(|c| c.guard_preds.contains(p))
     }
 
-    fn rematerialize(&mut self) {
+    /// Recompute the whole closure from the base. `run` is this rebuild's fresh cut record
+    /// (made by the calling entry point): it replaces the graph's record before any
+    /// evaluation, so every nested evaluation of the rebuild records into it, and a cut
+    /// from an earlier rebuild whose cause is gone does not survive.
+    fn rematerialize(&mut self, run: crate::n3::bounded::Truncation) {
+        self.cuts = run;
         self.strat_warning = None;
         self.rebuilds += 1;
         self.counts.clear();
@@ -2638,13 +2645,15 @@ impl MaterializedN3Graph {
             return 0;
         }
         if rebuild || self.mode == N3Mode::Fallback {
-            self.rematerialize();
+            self.rematerialize(crate::n3::bounded::Truncation::top_level());
             return added.len();
         }
         let pending: Vec<[N3Term; 3]> =
             added.iter().filter(|f| !self.index.contains(f)).cloned().collect();
+        // An insert only adds facts, so a cut it records has its cause present: it joins
+        // the graph's record.
         if !self.propagate(pending, true) {
-            self.rematerialize();
+            self.rematerialize(crate::n3::bounded::Truncation::top_level());
         }
         added.len()
     }
@@ -2664,8 +2673,11 @@ impl MaterializedN3Graph {
         if removed.is_empty() {
             return 0;
         }
-        if rebuild || self.mode == N3Mode::Fallback {
-            self.rematerialize();
+        // A delta cannot tell whether a recorded cut's cause is among the removed facts,
+        // so a graph that carries a cut (or meets one during the delta) rebuilds and
+        // recomputes it from the remaining facts.
+        if rebuild || self.mode == N3Mode::Fallback || self.cuts.get().is_some() {
+            self.rematerialize(crate::n3::bounded::Truncation::top_level());
             return removed.len();
         }
         let pending: Vec<[N3Term; 3]> = removed
@@ -2673,8 +2685,8 @@ impl MaterializedN3Graph {
             .filter(|f| !self.counts.contains_key(*f) && !self.in_any_layer(f))
             .cloned()
             .collect();
-        if !self.propagate(pending, false) {
-            self.rematerialize();
+        if !self.propagate(pending, false) || self.cuts.get().is_some() {
+            self.rematerialize(crate::n3::bounded::Truncation::top_level());
         }
         removed.len()
     }
@@ -2767,6 +2779,71 @@ mod tests {
         let clean = "{ ?s <http://ex/p> ?v } => { ?s <http://ex/q> ?v } .";
         let g = MaterializedN3Graph::new(clean, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
         assert!(g.cuts.get().is_none());
+    }
+
+    /// A cut lasts only while the facts that caused it are present. An invalid regex
+    /// under `string:scrape` cuts the rebuild and the negation over `:blocked` is refused;
+    /// once that fact is deleted (or replaced by a clean one) the next rebuild records no
+    /// cut and equals a fresh graph over the remaining facts.
+    #[test]
+    fn a_cut_is_recomputed_on_every_rebuild_and_clears_with_its_cause() {
+        let rules = "@prefix : <http://ex/> .\n\
+             @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             { ?s :text ?t . ?s :pat ?p . (?t ?p) string:scrape ?m } => { ?s :blocked ?m } .\n\
+             { ?s :kind :Item . ?SCOPE log:notIncludes { ?s :blocked ?any } } \
+               => { ?s :allowed :yes } .";
+        let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+        let lit = |s: &str| N3Term::Lit(s.to_string(), N3_XSD_STRING.into(), None);
+        let base = vec![
+            [iri("a"), iri("kind"), iri("Item")],
+            [iri("a"), iri("text"), lit("hello")],
+            [iri("a"), iri("pat"), lit("(h)")],
+            [iri("b"), iri("kind"), iri("Item")],
+            [iri("b"), iri("text"), lit("xyz")],
+        ];
+        let allowed_b = [iri("b"), iri("allowed"), iri("yes")];
+        let sorted = |mut v: Vec<[N3Term; 3]>| {
+            v.sort_unstable_by_key(|t| format!("{t:?}"));
+            v
+        };
+        // Incremental state must equal a fresh graph over the same base, cut included.
+        let matches_fresh = |g: &MaterializedN3Graph, base: &[[N3Term; 3]]| {
+            let fresh = MaterializedN3Graph::new(rules, base).expect("rules");
+            assert_eq!(sorted(g.closure()), sorted(fresh.closure()));
+            assert_eq!(g.cuts.get(), fresh.cuts.get());
+        };
+
+        let mut g = MaterializedN3Graph::new(rules, &base).expect("rules");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        assert!(g.contains(&allowed_b) && g.cuts.get().is_none());
+
+        // The invalid regex cuts the rebuild; the negation is refused (fail closed).
+        let bad = [iri("b"), iri("pat"), lit("(")];
+        g.insert(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_some(), "the invalid regex is a cut");
+        assert!(
+            !g.contains(&allowed_b),
+            "the negation is refused over a cut run"
+        );
+
+        // Deleting the cause clears the cut and the negation evaluates again.
+        g.delete(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_none(), "the cut left with its cause");
+        assert!(g.contains(&allowed_b));
+        matches_fresh(&g, &base);
+
+        // Re-insert path: cut, delete, then a clean pattern for the same subject.
+        g.insert(std::slice::from_ref(&bad));
+        assert!(g.cuts.get().is_some());
+        g.delete(std::slice::from_ref(&bad));
+        let clean = [iri("b"), iri("pat"), lit("(q)")];
+        g.insert(std::slice::from_ref(&clean));
+        let mut with_clean = base.clone();
+        with_clean.push(clean);
+        assert!(g.cuts.get().is_none());
+        assert!(g.contains(&allowed_b), "no match, so :b is still allowed");
+        matches_fresh(&g, &with_clean);
     }
 
     /// `why` re-derives by reparsing the serialized base. A base fact built in code can
