@@ -98,6 +98,9 @@ pub mod parser;
 // whole rules). Rule serialization is what lets a caller emit EYE's "closure PLUS rules"
 // output ([`reason_n3_pass_all`]) even though the chainer itself consumes rules.
 pub mod serialize;
+// Every limit of N3 evaluation, and the one way to use a limited step's result.
+pub(crate) mod bounded;
+use bounded::{settle, Bounded};
 
 pub use model::{Rule, Term};
 pub use serialize::{RuleKind, RuleVars};
@@ -170,10 +173,6 @@ const STRING: &str = "http://www.w3.org/2000/10/swap/string#";
 const LIST: &str = "http://www.w3.org/2000/10/swap/list#";
 const TIME: &str = "http://www.w3.org/2000/10/swap/time#";
 
-/// Depth bound for goal-directed (`<=`) resolution: a backward proof may chain through at
-/// most this many backward-rule applications. Bounds runaway recursion (e.g. a rule whose
-/// premise re-poses its own goal) — within the bound, proofs are exhaustive.
-const BW_DEPTH: usize = 64;
 
 /// An OPT-IN document accessor for `log:semantics` / `log:content`: maps an
 /// IRI to that document's source text. The engine itself never touches the
@@ -215,6 +214,9 @@ struct BwCtx<'a> {
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
+    /// Where every limited step of this run records a cut ([`bounded`]). Recording a cut
+    /// changes no result; the run's cuts are not yet reported to callers.
+    cuts: bounded::Cuts,
 }
 
 impl<'a> BwCtx<'a> {
@@ -225,6 +227,7 @@ impl<'a> BwCtx<'a> {
             base: String::new(),
             resolver: None,
             visited: VisitedDocs::default(),
+            cuts: bounded::Cuts::default(),
         }
     }
 }
@@ -925,7 +928,7 @@ fn run_closure(
                         &Binding::new(),
                         Some((&delta, k)),
                         &bw,
-                        BW_DEPTH,
+                        bounded::backward_depth(),
                     ));
                 }
                 bs
@@ -1132,7 +1135,14 @@ type Binding = HashMap<String, Term>;
 /// rule-local list STRUCTURE (rdf:first/rest over fresh bnodes), not data to match — they are
 /// extracted up front and consumed by the functional builtins (e.g. `math:sum`).
 fn match_premise(premise: &[[Term; 3]], facts: &FactIndex, bw: &BwCtx) -> Vec<Binding> {
-    match_premise_seeded(premise, facts, &Binding::new(), None, bw, BW_DEPTH)
+    match_premise_seeded(
+        premise,
+        facts,
+        &Binding::new(),
+        None,
+        bw,
+        bounded::backward_depth(),
+    )
 }
 
 /// Match `premise` starting from an existing partial binding `seed`. For SEMI-NAIVE
@@ -1201,11 +1211,13 @@ fn match_premise_seeded(
                         } else {
                             ts
                         };
-                        formula_containment(&scope, inner, &b)
+                        settle(&bw.cuts, formula_containment(&scope, inner, &b))
                     }
                     // `{}` parses as the literal true — the EMPTY formula:
                     // it includes nothing (and notIncludes everything).
-                    Term::Lit(v, _, _) if v == "true" => formula_containment(&[], inner, &b),
+                    Term::Lit(v, _, _) if v == "true" => {
+                        settle(&bw.cuts, formula_containment(&[], inner, &b))
+                    }
                     _ => match_premise_seeded(inner, facts, &b, None, bw, depth),
                 };
                 if is_not {
@@ -1257,8 +1269,12 @@ fn match_premise_seeded(
                         _ => return None,
                     };
                     Some(match apply_deep(&pat[2], seed) {
-                        Term::Formula(scope) => formula_containment(&scope, atoms, seed),
-                        Term::Lit(v, _, _) if v == "true" => formula_containment(&[], atoms, seed),
+                        Term::Formula(scope) => {
+                            settle(&bw.cuts, formula_containment(&scope, atoms, seed))
+                        }
+                        Term::Lit(v, _, _) if v == "true" => {
+                            settle(&bw.cuts, formula_containment(&[], atoms, seed))
+                        }
                         _ => match_premise_seeded(atoms, facts, seed, None, bw, depth),
                     })
                 };
@@ -1305,7 +1321,7 @@ fn match_premise_seeded(
                 // variable (walked from the fact store).
                 let members: Option<Vec<Term>> = match &head {
                     Term::List(ms) => Some(ms.clone()),
-                    _ => fact_list(&head, facts),
+                    _ => settle(&bw.cuts, fact_list(&head, facts)),
                 };
                 if let Some(members) = members {
                     for (ix, m) in members.iter().enumerate() {
@@ -1334,7 +1350,7 @@ fn match_premise_seeded(
         } else if let Some(op) = binder_builtin(&pat[1]) {
             bindings = bindings.into_iter().filter_map(|b| eval_binder(op, &pat[0], &pat[2], b)).collect();
         } else if let Some(op) = builtin(&pat[1]) {
-            bindings.retain(|b| eval_builtin(op, &pat[0], &pat[2], b));
+            bindings.retain(|b| eval_builtin(op, &pat[0], &pat[2], b, &bw.cuts));
         } else {
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
@@ -1366,8 +1382,14 @@ fn match_premise_seeded(
                         next.push(nb);
                     }
                 }
-                if !bw.rules.is_empty() && depth > 0 {
-                    next.extend(backward_prove(pat, b, facts, bw, depth - 1));
+                if !bw.rules.is_empty() {
+                    let could_match =
+                        bw.rules.iter().flat_map(|r| &r.conclusion).any(
+                            |c| !matches!((&p_a, &c[1]), (Term::Iri(a), Term::Iri(b)) if a != b),
+                        );
+                    if let Some(d) = settle(&bw.cuts, bounded::backward_step(depth, could_match)) {
+                        next.extend(backward_prove(pat, b, facts, bw, d));
+                    }
                 }
             }
             bindings = next;
@@ -1589,26 +1611,24 @@ fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
 /// asserted in the data, reached through a bound variable) — the complement of
 /// [`extract_lists`], which resolves rule-local structure. `rdf:nil` is the
 /// empty list.
-fn fact_list(head: &Term, facts: &FactIndex) -> Option<Vec<Term>> {
+fn fact_list(head: &Term, facts: &FactIndex) -> Bounded<Option<Vec<Term>>> {
     let first = Term::Iri(parser::RDF_FIRST.into());
     let rest = Term::Iri(parser::RDF_REST.into());
     let nil = Term::Iri(parser::RDF_NIL.into());
     let empty = Term::List(Vec::new());
-    let mut out = Vec::new();
-    let mut cur = head.clone();
-    let mut guard = 0;
-    loop {
-        if cur == nil || cur == empty {
-            return Some(out);
-        }
-        if guard > 100_000 {
-            return None;
-        }
-        guard += 1;
-        let f = facts.ps.get(&(first.clone(), cur.clone()))?.first()?.clone();
-        out.push(f);
-        cur = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
-    }
+    bounded::walk_list(
+        head.clone(),
+        |cur| *cur == nil || *cur == empty,
+        |cur| {
+            let f = facts
+                .ps
+                .get(&(first.clone(), cur.clone()))?
+                .first()?
+                .clone();
+            let r = facts.ps.get(&(rest.clone(), cur.clone()))?.first()?.clone();
+            Some((f, r))
+        },
+    )
 }
 
 /// Rename blank labels per `map` in a conclusion triple (recursing into lists;
@@ -1822,7 +1842,7 @@ fn builtin(p: &Term) -> Option<Builtin> {
     None
 }
 
-fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> bool {
+fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding, cuts: &bounded::Cuts) -> bool {
     let (s, o) = (apply(s, b), apply(o, b));
     match op {
         Builtin::LogEq => s == o,
@@ -1849,8 +1869,12 @@ fn eval_builtin(op: Builtin, s: &Term, o: &Term, b: &Binding) -> bool {
                 Builtin::StrLt => x < y,
                 Builtin::StrNotGt => x <= y,
                 Builtin::StrNotLt => x >= y,
-                Builtin::StrMatches => regex::Regex::new(y).map(|re| re.is_match(x)).unwrap_or(false),
-                Builtin::StrNotMatches => regex::Regex::new(y).map(|re| !re.is_match(x)).unwrap_or(false),
+                Builtin::StrMatches => {
+                    settle(cuts, bounded::regex(y)).is_some_and(|re| re.is_match(x))
+                }
+                Builtin::StrNotMatches => {
+                    settle(cuts, bounded::regex(y)).is_some_and(|re| !re.is_match(x))
+                }
                 Builtin::StrContainsIgnCase => x.to_lowercase().contains(&y.to_lowercase()),
                 Builtin::StrContainsRoughly => {
                     // cwm roughly.n3: case-insensitive, any whitespace run = one space.
@@ -2007,7 +2031,11 @@ fn apply_deep(t: &Term, b: &Binding) -> Term {
 /// with pattern blanks as wildcards, pattern variables binding, and scope
 /// terms — including its quantified variables — as opaque constants. Returns
 /// one binding per complete match.
-fn formula_containment(scope: &[[Term; 3]], pattern: &[[Term; 3]], seed: &Binding) -> Vec<Binding> {
+fn formula_containment(
+    scope: &[[Term; 3]],
+    pattern: &[[Term; 3]],
+    seed: &Binding,
+) -> Bounded<Vec<Binding>> {
     // Pattern existentials (blanks) become wildcard variables.
     let pat: Vec<[Term; 3]> = pattern
         .iter()
@@ -2020,9 +2048,9 @@ fn formula_containment(scope: &[[Term; 3]], pattern: &[[Term; 3]], seed: &Bindin
         })
         .collect();
     let mut out = Vec::new();
-    let mut budget = 100_000usize;
-    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut budget);
-    out
+    let mut steps = bounded::StepBudget::containment();
+    containment_search(&pat, scope, seed.clone(), pat.len(), &mut out, &mut steps);
+    steps.finish(out)
 }
 
 fn containment_search(
@@ -2031,12 +2059,11 @@ fn containment_search(
     b: Binding,
     defers_left: usize,
     out: &mut Vec<Binding>,
-    budget: &mut usize,
+    steps: &mut bounded::StepBudget,
 ) {
-    if *budget == 0 {
+    if !steps.take() {
         return;
     }
-    *budget -= 1;
     let Some((pat, rest)) = remaining.split_first() else {
         out.push(b);
         return;
@@ -2055,7 +2082,7 @@ fn containment_search(
                         };
                         let mut nb = b.clone();
                         if unify_term(&pat[2], &val, &mut nb) {
-                            containment_search(rest, scope, nb, rest.len(), out, budget);
+                            containment_search(rest, scope, nb, rest.len(), out, steps);
                         }
                     }
                     return;
@@ -2064,7 +2091,7 @@ fn containment_search(
                     // Subject not yet bound — try the other triples first.
                     let mut rotated: Vec<[Term; 3]> = rest.to_vec();
                     rotated.push(pat.clone());
-                    containment_search(&rotated, scope, b, defers_left - 1, out, budget);
+                    containment_search(&rotated, scope, b, defers_left - 1, out, steps);
                     return;
                 }
                 _ => {} // fall through to plain scope matching
@@ -2074,7 +2101,7 @@ fn containment_search(
     for st in scope {
         let mut nb = b.clone();
         if (0..3).all(|k| unify_term(&pat[k], &st[k], &mut nb)) {
-            containment_search(rest, scope, nb, rest.len(), out, budget);
+            containment_search(rest, scope, nb, rest.len(), out, steps);
         }
     }
 }
@@ -2652,7 +2679,8 @@ fn eval_functional(
         // First-class list value (already substituted by `apply`).
         Term::List(ms) => Some(ms.clone()),
         // A data list written as rdf:first/rest triples, via a bound variable.
-        _ => fact_list(&subj_applied, facts).map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
+        _ => settle(&bw.cuts, fact_list(&subj_applied, facts))
+            .map(|ms| ms.iter().map(|m| apply(m, &b)).collect()),
     };
     let was_list = resolved_list.is_some();
     // The list:-namespace ops are only defined ON lists.
@@ -2752,7 +2780,7 @@ fn eval_functional(
             if args.len() != 2 {
                 return None;
             }
-            let re = regex::Regex::new(lex(&args[1])?).ok()?;
+            let re = settle(&bw.cuts, bounded::regex(lex(&args[1])?))?;
             let cap = re.captures(lex(&args[0])?)?.get(1)?.as_str().to_string();
             Term::Lit(cap, XSD_STRING.into(), None)
         }
@@ -2872,7 +2900,7 @@ fn eval_functional(
             for a in &args {
                 match a {
                     Term::List(ms) => merged.extend(ms.iter().cloned()),
-                    other => merged.extend(fact_list(other, facts)?),
+                    other => merged.extend(settle(&bw.cuts, fact_list(other, facts))?),
                 }
             }
             Term::List(merged)
@@ -2882,14 +2910,18 @@ fn eval_functional(
             if args.len() != 3 {
                 return None;
             }
-            let re = regex::Regex::new(lex(&args[1])?).ok()?;
+            let re = settle(&bw.cuts, bounded::regex(lex(&args[1])?))?;
             let out = re.replace_all(lex(&args[0])?, lex(&args[2])?).into_owned();
             Term::Lit(out, "http://www.w3.org/2001/XMLSchema#string".into(), None)
         }
-        Func::Year | Func::Month | Func::Day | Func::Hours | Func::Minutes | Func::Seconds
-        | Func::DayOfWeek | Func::InSeconds => {
-            number_term(datetime_part(lex(&args[0])?, f)? as f64)
-        }
+        Func::Year
+        | Func::Month
+        | Func::Day
+        | Func::Hours
+        | Func::Minutes
+        | Func::Seconds
+        | Func::DayOfWeek
+        | Func::InSeconds => number_term(datetime_part(lex(&args[0])?, f, &bw.cuts)? as f64),
         Func::TimeZone => {
             // Only an EXPLICIT numeric offset is a time zone (cwm: `Z`/absent
             // yield nothing).
@@ -3246,7 +3278,7 @@ fn eval_exact(f: Func, args: &[Term]) -> Option<Term> {
 
 /// Extract a component of an `xsd:dateTime`/`xsd:date` lexical form for `time:` builtins.
 /// Lexical: `[-]YYYY-MM-DD[Thh:mm:ss[.sss]][Z|±hh:mm]`.
-fn datetime_part(s: &str, f: Func) -> Option<i64> {
+fn datetime_part(s: &str, f: Func, cuts: &bounded::Cuts) -> Option<i64> {
     let (date, time) = s.split_once('T').unwrap_or((s, ""));
     let neg = date.starts_with('-');
     let mut dparts = date.trim_start_matches('-').split('-');
@@ -3267,7 +3299,7 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
             part.split('.').next().unwrap_or(part).parse().ok()
         }
         Func::DayOfWeek | Func::InSeconds => {
-            let (days, secs) = epoch_parts(s)?;
+            let (days, secs) = epoch_parts(s, cuts)?;
             if matches!(f, Func::DayOfWeek) {
                 return Some((days + 4).rem_euclid(7)); // 1970-01-01 = Thursday
             }
@@ -3285,7 +3317,7 @@ fn datetime_part(s: &str, f: Func) -> Option<i64> {
 /// fall back to a default and so bind a different, valid instant. The timezone
 /// suffix is separated first (on a date as well as a dateTime) so it is never read
 /// as part of a calendar or clock field. #3804.
-fn epoch_parts(s: &str) -> Option<(i64, i64)> {
+fn epoch_parts(s: &str, cuts: &bounded::Cuts) -> Option<(i64, i64)> {
     fn field(x: &str, range: std::ops::RangeInclusive<i64>) -> Option<i64> {
         if x.is_empty() || !x.bytes().all(|b| b.is_ascii_digit()) {
             return None;
@@ -3319,8 +3351,8 @@ fn epoch_parts(s: &str) -> Option<(i64, i64)> {
         None => (false, date),
     };
     let mut dp = date.split('-');
-    // Bound the year so the day/second arithmetic below cannot overflow i64.
-    let y = field(dp.next()?, 0..=999_999_999)?;
+    // The year must be one the day/second arithmetic below can represent in i64.
+    let y = settle(cuts, bounded::epoch_year(field(dp.next()?, 0..=i64::MAX)?))?;
     let y = if neg { -y } else { y };
     let m = dp.next().map(|x| field(x, 1..=12)).unwrap_or(Some(1))?;
     let d = dp.next().map(|x| field(x, 1..=31)).unwrap_or(Some(1))?;

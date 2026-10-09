@@ -173,7 +173,7 @@ enum Step {
     /// `string:scrape` — `( str regex )`: the first capture group of the first match.
     /// The regex is a compile-time constant, pre-compiled into
     /// [`CompiledRuleSet::regexes`] (`None` = invalid pattern ⇒ the step fails every
-    /// row, exactly like the text engine's per-evaluation `Regex::new(..).ok()?`).
+    /// row, exactly like the text engine's per-evaluation regex compile).
     Scrape {
         arg: CTerm,
         regex: usize,
@@ -720,7 +720,12 @@ impl Compiler {
                             );
                         };
                         let regex = self.regexes.len();
-                        self.regexes.push(regex::Regex::new(pat).ok());
+                        // A compiled rule set has no run to report a cut to: a pattern
+                        // the regex engine refuses fails every row, as the text engine's
+                        // scrape does.
+                        let refused = std::cell::Cell::new(false);
+                        self.regexes
+                            .push(super::bounded::settle(&refused, super::bounded::regex(pat)));
                         let (out, out_bound) = self.output(&atom[2], &mut ctx)?;
                         steps.push(Step::Scrape {
                             arg,

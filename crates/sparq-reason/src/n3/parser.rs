@@ -263,8 +263,6 @@ struct Parser<'a> {
     depth: usize,
 }
 
-/// Maximum bracket-nesting depth (see `Parser::depth`).
-const MAX_DEPTH: usize = 4096;
 
 impl<'a> Parser<'a> {
     fn new(src: &'a str) -> Parser<'a> {
@@ -1093,8 +1091,8 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> Result<(), String> {
         self.depth += 1;
-        if self.depth > MAX_DEPTH {
-            return Err(format!("nesting deeper than {MAX_DEPTH}"));
+        if !super::bounded::nesting_allowed(self.depth) {
+            return Err(super::bounded::nesting_error());
         }
         Ok(())
     }

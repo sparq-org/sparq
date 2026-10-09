@@ -582,8 +582,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality,
-            ow.o.max_qual_card,
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -667,8 +667,8 @@ impl MaterializedOwlGraph {
             ow.o.intersection,
             ow.o.union,
             ow.o.has_key,
-            ow.o.max_cardinality,
-            ow.o.max_qual_card,
+            ow.o.max_cardinality, // not-a-limit: data-value (an owl:maxCardinality value)
+            ow.o.max_qual_card,   // not-a-limit: data-value (an owl:maxCardinality value)
             ow.o.on_class,
             ow.o.one_of,
         ]
@@ -1012,7 +1012,7 @@ impl MaterializedOwlGraph {
     #[cfg(feature = "parallel")]
     fn count_sweep(&self, triples: &[[Id; 3]]) -> Vec<[Id; 3]> {
         use rayon::prelude::*;
-        const PAR_THRESHOLD: usize = 4096;
+        const PAR_THRESHOLD: usize = 4096; // not-a-limit: parallelism (a threshold, no cut)
         if triples.len() < PAR_THRESHOLD {
             let mut out = Vec::new();
             for &t in triples {
@@ -1726,7 +1726,9 @@ fn eval_n3_builtin(
             let (N3Term::Lit(text, _, _), N3Term::Lit(pat, _, _)) = (&ms[0], &ms[1]) else {
                 return None;
             };
-            let re = regex::Regex::new(pat).ok()?;
+            // A pattern the regex engine refuses sends the run to the checked engine,
+            // which evaluates it the same way (no match).
+            let re = crate::n3::bounded::settle(unsupported, crate::n3::bounded::regex(pat))?;
             let cap = re.captures(text)?.get(1)?.as_str().to_string();
             let lit = N3Term::Lit(cap, N3_XSD_STRING.into(), None);
             let mut nb = b.clone();
