@@ -106,14 +106,14 @@ renamed deterministically (`b0`, `b1`, …) — do not treat them as graph handl
 Scope: derivation, opt-in live validation hints, plus pure edit-to-UPDATE
 building. An MCP agent can call the derivation as the `describe_form` tool
 (sparq-mcp feature `shacl`, `FormDescription` JSON verbatim — see
-[`agent-tools`](../agent-tools/SKILL.md)). [FABLE-5] sq-lsp7k.1.6. Applying the
+[`agent-tools`](../agent-tools/SKILL.md)). sq-lsp7k.1.6. Applying the
 request, validate-before-commit guards, draft graphs, DASH suggestions,
 `dash:propertyRole`, and the GUI renderer are follow-on beads
 (sq-lsp7k.1.2/.1.4/.1.5); `sparq-shacl` (see
 [`shacl-validation`](../shacl-validation/SKILL.md)) already validates the same
 graphs.
 
-_(status: Verified against sparq-forms 0.1.0 [OPUS-4.8] (sq-vfcxv, 2026-07-27):
+_(status: Verified against sparq-forms 0.1.0 (sq-vfcxv, 2026-07-27):
 56 unit/integration tests incl. per-score widget tests + 4 golden-file fixtures
 (groups/order, enum + nested sh:node, inverse + multi-shape, predicate
 targets). Caveats: (1) widget scores follow datashapes.org/forms
