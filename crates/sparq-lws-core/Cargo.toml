@@ -219,6 +219,13 @@ itoa = "1"
 # Declared for native targets below.
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
+# tokens and RFC 9421 notification signatures. p256 and reqwest are already in the resolved graph
+# (p256 as a dev-dependency, reqwest via solid-oidc-verifier), so these entries add no new crate.
+p256 = { version = "0.13", features = ["ecdsa", "jwk", "std"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+bs58 = "0.5"
+httpdate = "1"
 # Preserve the native dependency graph and feature set exactly. The target split keeps listener,
 # runtime, verifier, filesystem, TLS, PoP, notification, and non-memory backend code out of wasm.
 axum = { version = "0.8", features = ["ws"] }

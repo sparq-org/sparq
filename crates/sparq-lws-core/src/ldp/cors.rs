@@ -34,8 +34,9 @@ use axum::http::{header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode}
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-/// The methods advertised in a preflight `Access-Control-Allow-Methods` — the LDP verb set.
-const ALLOW_METHODS: &str = "OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH";
+/// The methods advertised in a preflight `Access-Control-Allow-Methods` — the LDP verb set, plus
+/// `QUERY` for LWS type search.
+const ALLOW_METHODS: &str = "OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH, QUERY";
 
 /// The response headers a cross-origin script may read. A CONCRETE enumeration (the harness rejects
 /// `*`, which is also invalid alongside `Allow-Credentials: true`). Covers the LDP/Solid surface a
@@ -43,7 +44,7 @@ const ALLOW_METHODS: &str = "OPTIONS, HEAD, GET, PUT, POST, DELETE, PATCH";
 /// `Location`/`Allow`/`Accept-*` advertisements, the `WWW-Authenticate` challenge, and `WAC-Allow`.
 const EXPOSE_HEADERS: &str = "Accept-Ranges, Content-Length, Content-Range, Content-Type, ETag, \
      Last-Modified, Link, Location, Vary, Allow, WWW-Authenticate, Accept-Post, Accept-Patch, \
-     Updates-Via, WAC-Allow";
+     Updates-Via, WAC-Allow, Accept-Query, Content-Location";
 
 /// The default `Access-Control-Allow-Headers` for a preflight that did NOT send
 /// `Access-Control-Request-Headers` (a safe baseline covering the Solid auth + content headers).
