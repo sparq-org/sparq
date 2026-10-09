@@ -133,3 +133,123 @@ fn fallback_base_blank_node_keeps_its_label() {
         set(vec![asserted, [b, iri("q"), int("3")]])
     );
 }
+
+// ---- GH #6775: base blank nodes never alias the rules document's blank nodes ----------
+//
+// The parser labels the document's anonymous `[]` nodes `_b1`, `_b2`, … and keeps a
+// written `_:x` as `x`. A caller's base `Term::Blank("_b1")` / `Term::Blank("x")` is a
+// different node: on both maintenance paths the two must never merge.
+
+fn blank(l: &str) -> Term {
+    Term::Blank(l.into())
+}
+
+/// Rules with document blanks `_b1`, `_b2` (from `[]`) and `x` (from `_:x`) in facts.
+/// `{ ?s :p ?o . ?s :r ?o } => { ?s :both ?o }` fires only if a document blank and a base
+/// blank were the same node. With `fallback`, an unsupported builtin forces the batch
+/// engine.
+fn blank_rules(fallback: bool) -> String {
+    let force = if fallback {
+        "{ ?s <http://ex/z> ?v . (1 2) math:sum ?n } => { ?s <http://ex/zz> ?n } .\n"
+    } else {
+        ""
+    };
+    format!(
+        "@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+         [] <http://ex/p> <http://ex/o1> .\n\
+         [] <http://ex/p> <http://ex/o2> .\n\
+         _:x <http://ex/p> <http://ex/o3> .\n\
+         {{ ?s <http://ex/p> ?o . ?s <http://ex/r> ?o }} => {{ ?s <http://ex/both> ?o }} .\n\
+         {{ ?s <http://ex/r> ?o }} => {{ ?s <http://ex/seen> ?o }} .\n\
+         {force}"
+    )
+}
+
+fn doc_facts() -> Vec<[Term; 3]> {
+    vec![
+        [blank("_b1"), iri("p"), iri("o1")],
+        [blank("_b2"), iri("p"), iri("o2")],
+        [blank("x"), iri("p"), iri("o3")],
+    ]
+}
+
+fn base_blank_facts() -> Vec<[Term; 3]> {
+    vec![
+        [blank("_b1"), iri("r"), iri("o1")],
+        [blank("_b2"), iri("r"), iri("o2")],
+        [blank("x"), iri("r"), iri("o3")],
+    ]
+}
+
+/// The closure over the document facts plus `base`: each base fact and its `:seen` copy,
+/// with the caller's labels, and no `:both` (which would need a merge).
+fn expected_with(base: &[[Term; 3]]) -> FxHashSet<[Term; 3]> {
+    let mut e = set(doc_facts());
+    for [s, _, o] in base {
+        e.insert([s.clone(), iri("r"), o.clone()]);
+        e.insert([s.clone(), iri("seen"), o.clone()]);
+    }
+    e
+}
+
+fn assert_base_blanks_stay_apart(fallback: bool) {
+    let mode = if fallback { N3Mode::Fallback } else { N3Mode::Counting };
+    let base = base_blank_facts();
+    let g = MaterializedN3Graph::new(&blank_rules(fallback), &base).expect("parse");
+    assert_eq!(g.mode(), mode, "{:?}", g.fallback_reason());
+    let closure = set(g.closure());
+    assert!(
+        !closure.iter().any(|t| t[1] == iri("both")),
+        "a base blank merged with a document blank: {closure:?}"
+    );
+    assert_eq!(closure, expected_with(&base));
+    assert_eq!(g.len(), closure.len());
+    for t in &base {
+        assert!(g.contains(t), "asserted base blank triple lost: {t:?}");
+        assert!(g.contains(&[t[0].clone(), iri("seen"), t[2].clone()]));
+    }
+}
+
+#[test]
+fn fallback_base_blanks_do_not_alias_document_blanks() {
+    assert_base_blanks_stay_apart(true);
+}
+
+#[test]
+fn counting_base_blanks_do_not_alias_document_blanks() {
+    assert_base_blanks_stay_apart(false);
+}
+
+fn assert_base_blank_mutations(fallback: bool) {
+    let mode = if fallback { N3Mode::Fallback } else { N3Mode::Counting };
+    let mut g = MaterializedN3Graph::new(&blank_rules(fallback), &[]).expect("parse");
+    assert_eq!(g.mode(), mode, "{:?}", g.fallback_reason());
+    assert_eq!(set(g.closure()), expected_with(&[]));
+    let base = base_blank_facts();
+    assert_eq!(g.insert(&base), base.len());
+    assert_eq!(g.mode(), mode);
+    assert_eq!(set(g.closure()), expected_with(&base));
+    for t in &base {
+        assert!(g.contains(t), "inserted base blank triple lost: {t:?}");
+    }
+    // Re-inserting is a no-op: the caller's label maps to the same node every time.
+    assert_eq!(g.insert(&base), 0);
+    assert_eq!(g.delete(&base[..1]), 1);
+    assert!(!g.contains(&base[0]));
+    assert_eq!(set(g.closure()), expected_with(&base[1..]));
+    // The document's own `_b1` fact is not the caller's: deleting by that label leaves it.
+    assert_eq!(g.delete(&doc_facts()[..1]), 0);
+    assert_eq!(set(g.closure()), expected_with(&base[1..]));
+    assert_eq!(g.delete(&base[1..]), 2);
+    assert_eq!(set(g.closure()), expected_with(&[]));
+}
+
+#[test]
+fn fallback_base_blank_insert_delete_round_trip() {
+    assert_base_blank_mutations(true);
+}
+
+#[test]
+fn counting_base_blank_insert_delete_round_trip() {
+    assert_base_blank_mutations(false);
+}
