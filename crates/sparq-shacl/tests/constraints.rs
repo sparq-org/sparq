@@ -1696,8 +1696,9 @@ fn every_comparison_orders_a_same_family_temporal_pair() {
     }
 }
 
-/// Hour 24 is a time only as 24:00:00 with a zero fraction: 24:00:00.000 is midnight,
-/// and 24:00:00.5 is not a time, so it compares with nothing.
+/// Hour 24 is a time only as 24:00:00 with a zero fraction and an optional timezone:
+/// 24:00:00.000 is midnight, and anything else after hour 24 is not a time, so it
+/// compares with nothing.
 #[test]
 fn hour_24_is_midnight_only_with_a_zero_fraction() {
     let later_than_earlier = [false, false, true, false, true, false];
@@ -1705,12 +1706,12 @@ fn hour_24_is_midnight_only_with_a_zero_fraction() {
     for ((c, got), want) in zero.into_iter().zip(later_than_earlier) {
         assert_eq!(got, want, "{c}: 00:30 vs 24:00:00.000");
     }
-    for (value, other) in [
-        ("\"00:30:00Z\"^^xsd:time", "\"24:00:00.5Z\"^^xsd:time"),
-        ("\"24:00:00.5Z\"^^xsd:time", "\"00:30:00Z\"^^xsd:time"),
-    ] {
-        for (c, conforms) in comparisons(value, other) {
-            assert!(!conforms, "{c}: {value} vs {other} must be incomparable");
+    for bad in ["24:00:00.5Z", "24:00:00.0.5Z", "24:00:00.0Z.5", "24:00:00.0+01:00:00", "24:00:00.0x"] {
+        let bad = format!("\"{bad}\"^^xsd:time");
+        for (value, other) in [("\"00:30:00Z\"^^xsd:time", bad.as_str()), (bad.as_str(), "\"00:30:00Z\"^^xsd:time")] {
+            for (c, conforms) in comparisons(value, other) {
+                assert!(!conforms, "{c}: {value} vs {other} must be incomparable");
+            }
         }
     }
 }

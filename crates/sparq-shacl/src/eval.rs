@@ -2876,6 +2876,16 @@ fn cmp_temporal(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
                 }
                 None => rest,
             };
+            // What follows must be a timezone and nothing else; its range is checked by
+            // ExactTemporal on the rebuilt value.
+            let b = tz.as_bytes();
+            let offset = b.len() == 6
+                && matches!(b[0], b'+' | b'-')
+                && b[3] == b':'
+                && [1, 2, 4, 5].iter().all(|&i| b[i].is_ascii_digit());
+            if !(tz.is_empty() || tz == "Z" || offset) {
+                return None;
+            }
             Some(format!("1972-12-31T00:00:00{tz}"))
         };
         let (a, b) = (on_ref(a)?, on_ref(b)?);
