@@ -23,10 +23,16 @@
 //!
 //! # Fail-closed
 //!
-//! A grant is materialized **only** when [`sparq_policy::evaluate`] returns a
-//! definite Permit (`decision.allow == true`) AND the requested ODRL action maps to
-//! a concrete WAC/ACP [`Mode`] AND the request names a concrete WebID party + target
-//! graph IRI. A Deny, an ambiguous evaluation, an unmapped action, or a missing
+//! Every allow this module writes comes from sparq-policy's one decision point: a
+//! one-shot, counted or N3-derived allow only from the [`Permit`] that
+//! [`sparq_policy::decide`] issues (the N3 reasoner's derived grant is kept only when it
+//! is exactly the permit's). It has no public constructor, and the triple carries
+//! exactly its party, mapped action and target. The requested ODRL action must map to a
+//! concrete WAC/ACP [`Mode`]; the party must be one agent (not `auth:Public`,
+//! `auth:Authenticated` or a reserved encoding) and the recipient the decision checked,
+//! if any; and the permit must depend on nothing that can change ([`Permit::lasting`]:
+//! an unconstrained grant to the named party, in a policy with no prohibitions), since
+//! the stored triple is never re-checked. A Deny, an ambiguous evaluation, an unmapped action, or a missing
 //! party/target materializes **nothing** — access is never widened on ambiguity.
 //!
 //! # Action → Mode mapping
@@ -133,8 +139,9 @@ use oxrdf::{Literal, NamedNode, Term};
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
 use sparq_policy::{
-    conflict_admissibility, evaluate, matched_prohibition, parse_policy_str, prohibition_status,
-    Operator, ProhibitionStatus, ValidatedPolicy, Request, Rule, Value,
+    conflict_admissibility, evaluate, matched_prohibition, parse_policy_str,
+    prohibition_status, Operator, Permit, ProhibitionStatus, Request, Rule,
+    ValidatedPolicy, Value,
 };
 use sparq_reason::n3::compiled::{compile, eval, intern_facts, CompiledRuleSet};
 use std::fmt::Write as _;
@@ -376,38 +383,28 @@ pub fn materialize_permission(
     if let Some(refusal) = refuse_unimplementable_conflict(policy) {
         return refusal;
     }
-    // 1. ODRL evaluation — the single source of the allow/deny decision.
+    // 1. ODRL evaluation — the single source of the allow/deny decision. A grant is
+    //    emitted only from the decision's Permit.
     let decision = evaluate(policy, request);
-    if !decision.allow {
+    match &decision.permit {
+        Some(permit) => emit_allow(graph, permit),
         // Deny / ambiguous → materialize NOTHING (fail-closed).
-        return BridgeOutcome::denied(decision.unmet_constraints);
+        None => BridgeOutcome::denied(decision.unmet_constraints),
     }
+}
 
-    // 2. Action → Mode. An unmapped action (incl. the `use` umbrella) → no grant.
-    let Some(mode) = action_to_mode(&request.action) else {
-        return BridgeOutcome::denied(vec![format!(
-            "ODRL action <{}> has no WAC/ACP mode mapping; no grant materialized",
-            request.action
-        )]);
+/// Materialize the one-shot allow `party auth:<mode> target` a [`Permit`] covers. The
+/// triple comes from the permit, so no allow reaches the auth view without a granting
+/// [`sparq_policy::decide`]. An unmapped action (incl. the `use` umbrella), or a permit
+/// with no concrete party or target, emits nothing: such a grant would widen access.
+fn emit_allow(graph: &mut Graph, permit: &Permit) -> BridgeOutcome {
+    let (mode, party, target) = match allow_binding(permit) {
+        Ok(binding) => binding,
+        Err(why) => return BridgeOutcome::denied(why),
     };
-
-    // 3. Concrete party (WebID principal) + target graph required — a partyless or
-    //    targetless grant would widen access (fail-closed).
-    let Some(party) = request.party.as_deref() else {
-        return BridgeOutcome::denied(vec![
-            "ODRL Permit has no concrete party (assignee/WebID); no grant materialized".to_owned(),
-        ]);
-    };
-    let Some(target) = request.target.as_deref() else {
-        return BridgeOutcome::denied(vec![
-            "ODRL Permit has no concrete target graph IRI; no grant materialized".to_owned(),
-        ]);
-    };
-
-    // 4. Materialize `party auth:<mode> target` into the auth view.
     let pred = format!("{AUTH_NS}{}", mode_predicate(mode));
-    let triple = append_grant(graph, party, &pred, target);
-
+    let triple = triple_of(party, &pred, target);
+    append_bridged_triples(graph, std::slice::from_ref(&triple));
     BridgeOutcome {
         granted: true,
         mode: Some(mode),
@@ -415,6 +412,55 @@ pub fn materialize_permission(
         emitted: vec![triple],
         ..BridgeOutcome::default()
     }
+}
+
+/// The `(mode, party, target)` a stored allow for `permit` binds, or the reasons
+/// `permit` cannot be stored. [`emit_allow`] writes nothing else, and a caller that
+/// must spend something before writing (a usage unit) checks this first.
+fn allow_binding(permit: &Permit) -> Result<(Mode, &str, &str), Vec<String>> {
+    let Some(mode) = action_to_mode(permit.action()) else {
+        return Err(vec![format!(
+            "ODRL action <{}> has no WAC/ACP mode mapping; no grant materialized",
+            permit.action()
+        )]);
+    };
+    let Some(party) = permit.party() else {
+        return Err(vec![
+            "ODRL Permit has no concrete party (assignee/WebID); no grant materialized".to_owned(),
+        ]);
+    };
+    // The triple binds one party, so the party must be one agent: not a principal the
+    // auth view matches for many sessions (auth:Public, auth:Authenticated) and not a
+    // reserved session encoding.
+    if party.starts_with(crate::AUTH_NS) || !recipient_principal_allowed(party) {
+        return Err(vec![format!(
+            "ODRL Permit party <{party}> is not a single agent; no grant materialized"
+        )]);
+    }
+    // The triple grants the party, so the decision must have been about the party
+    // receiving the data.
+    if permit.recipient().is_some_and(|r| r != party) {
+        return Err(vec![format!(
+            "ODRL Permit was decided for recipient <{}>, not the party <{party}>; no grant \
+             materialized",
+            permit.recipient().unwrap_or_default()
+        )]);
+    }
+    // The triple is never re-checked against the clock.
+    if !permit.lasting() {
+        return Err(vec![format!(
+            "permission {} holds now but may not later (a constraint that can change while \
+             the grant stands, or a prohibition that can still start applying); a stored \
+             grant would outlive it",
+            permit.rule()
+        )]);
+    }
+    let Some(target) = permit.target() else {
+        return Err(vec![
+            "ODRL Permit has no concrete target graph IRI; no grant materialized".to_owned(),
+        ]);
+    };
+    Ok((mode, party, target))
 }
 
 /// Evaluate `policy`'s **prohibitions** against `request` and, **iff** a prohibition
@@ -521,8 +567,7 @@ pub fn materialize_prohibition(
     };
 
     // 4. Materialize `party auth:deny<Mode> target` into the auth view.
-    let pred = format!("{AUTH_NS}{}", deny_predicate(mode));
-    let triple = append_grant(graph, party, &pred, target);
+    let (pred, triple) = append_deny(graph, party, mode, target);
 
     BridgeOutcome {
         prohibited: true,
@@ -586,13 +631,19 @@ pub fn materialize_policy(graph: &mut Graph, policy: &ValidatedPolicy, request: 
 /// triple is structurally marked as bridged (vs static) — see [`mirror_bridged`].
 /// Returns the emitted triple so the caller can record it in its bridge ledger
 /// ([OPUS-4.8] sq-dpk4). Idempotent: an identical grant is not duplicated.
-fn append_grant(graph: &mut Graph, subject: &str, predicate: &str, object: &str) -> [Term; 3] {
-    let s = Term::NamedNode(NamedNode::new_unchecked(subject));
-    let p = Term::NamedNode(NamedNode::new_unchecked(predicate));
-    let o = Term::NamedNode(NamedNode::new_unchecked(object));
-    let triple = [s, p, o];
+fn append_deny(graph: &mut Graph, party: &str, mode: Mode, target: &str) -> (String, [Term; 3]) {
+    let pred = format!("{AUTH_NS}{}", deny_predicate(mode));
+    let triple = triple_of(party, &pred, target);
     append_bridged_triples(graph, std::slice::from_ref(&triple));
-    triple
+    (pred, triple)
+}
+
+fn triple_of(subject: &str, predicate: &str, object: &str) -> [Term; 3] {
+    [
+        Term::NamedNode(NamedNode::new_unchecked(subject)),
+        Term::NamedNode(NamedNode::new_unchecked(predicate)),
+        Term::NamedNode(NamedNode::new_unchecked(object)),
+    ]
 }
 
 /// Append `new_triples` to BOTH the `<urn:sparq:auth>` enforcement view and the
@@ -758,59 +809,6 @@ enum AgentMapping {
     Unmappable,
 }
 
-/// Inspect a matched permission's constraints and decide whether the WHOLE rule can
-/// be persisted as re-checked ACP agent conditions.
-///
-/// **Faithful (→ agent matcher):** an `odrl:recipient`/`odrl:assignee` constraint
-/// under `eq`/`isA` (the recipient IS this principal) or `isPartOf`/`isAnyOf` (the
-/// recipient is a member of a static principal set — the evaluator matches both
-/// operators as the same flat lexical set, sq-uaz85). The recipient-of-data is exactly
-/// the session agent the ACP `auth:agent` head re-checks, so the persisted condition
-/// has the SAME semantics — it just re-evaluates per session instead of being frozen.
-///
-/// **Faithful (→ noneOf exception):** an `odrl:recipient`/`odrl:assignee` constraint
-/// under `neq` (the recipient is everyone EXCEPT the named party — the
-/// "everyone-except-X" shape) or `isNoneOf` (everyone except the members of a static
-/// set — the list-valued dual, one exception matcher per member; [FABLE-5] sq-5fkpp).
-/// This maps to an ACP `noneOf`: the grant head is the positive recipient set (or
-/// `auth:Public` if there is no positive constraint) with an `auth:exceptMatcher`
-/// carving out each named party, re-checked per session by the same machinery WAC/ACP
-/// `noneOf` already uses. [OPUS-4.8] sq-5037.
-///
-/// **Faithful (→ live-clock window):** an `odrl:dateTime` constraint under `lteq`
-/// ("until T", inclusive → `auth:notAfter`) or `gteq` ("from T", inclusive →
-/// `auth:notBefore`) with an `xsd:dateTime` right-operand. [OPUS-4.8] sq-0q7n — the
-/// window is persisted onto the grant and re-checked against the session clock
-/// (`Session::now`) per request, so a lapsed window denies *immediately* on the next
-/// request instead of only on the next ledger refresh. Strict bounds (`lt`/`gt`) are
-/// deliberately left **Unmappable** to avoid an inclusive/exclusive off-by-one against
-/// the inclusive `auth:notBefore`/`auth:notAfter` semantics (the one-shot path still
-/// enforces them, frozen).
-///
-/// **Unmappable (→ stay one-shot):** `odrl:purpose` (ACP sessions carry no purpose —
-/// a client app is not a purpose-of-use, so mapping it to a client matcher would
-/// over-grant), a STRICT `odrl:dateTime` bound (`lt`/`gt` — see above), `odrl:count`
-/// (ACP is stateless — no usage counter), any unrecognised left-operand, and a
-/// malformed set right-operand — an EMPTY member set under `isPartOf`/`isAnyOf`/
-/// `isNoneOf`, or a numeric/dateTime operand under `isNoneOf` (the evaluator never
-/// satisfies those — `set_negation_representable` — so persisting an exception for
-/// them would widen access). Any one such constraint forces the whole rule one-shot.
-///
-/// **Unmappable (→ stay one-shot): a COMPOUND `odrl:LogicalConstraint`** ([OPUS-4.8]
-/// sq-izzak — WIDENING FIX). A rule that carries ANY `odrl:and`/`odrl:or`/`odrl:xone`
-/// (`rule.logical_constraints`) has no faithful single-head ACP analogue and MUST stay
-/// one-shot, even when it has ZERO atomic constraints. A grant head is a UNION of
-/// `auth:agent` allows, so: an `odrl:and` of recipient constraints is an INTERSECTION
-/// (folding it as a union widens — wrong direction); an `odrl:or` may mix a recipient
-/// operand with a non-recipient dimension (time/purpose) that has no head analogue; and
-/// `odrl:xone` (exactly-one) has no ACP analogue at all. Over-approximating any compound
-/// agent-restriction into the head would grant unlisted/anonymous agents — the very
-/// widening this classification prevents. Before this fix the loop below examined only
-/// `rule.constraints`, so a rule whose ONLY restriction was a compound constraint mapped
-/// `Faithful` with an EMPTY recipient set → an `auth:Public` head (the compound
-/// restriction silently DROPPED). Fail-closed: any `logical_constraints` forces the whole
-/// rule to the one-shot path ([`materialize_permission`]/[`materialize_prohibition`]),
-/// whose evaluator DOES enforce the compound constraint (frozen) — never dropping it.
 fn map_constraints_to_agents(rule: &Rule) -> AgentMapping {
     // [OPUS-4.8] sq-izzak: a rule carrying any compound `odrl:LogicalConstraint` has no
     // faithful ACP-condition head — stay one-shot so the compound restriction is enforced
@@ -952,203 +950,26 @@ fn recipient_principal_allowed(p: &str) -> bool {
     crate::loader::session_value_allowed(p)
 }
 
-/// Evaluate `policy` against `request` and, for the matched permission, EITHER
-/// persist its recipient/assignee constraint as a re-checked ACP
-/// `auth:ConditionalGrant` (so the granted agent is verified per session through the
-/// real enforcement path) OR — when the permission carries a constraint with no
-/// faithful ACP-condition analogue — fall back to the one-shot
-/// [`materialize_permission`] (the constraint is checked once, at materialization).
+/// Materialize `policy`'s decision for `request` as a stored allow. This is the same
+/// one-shot grant as [`materialize_permission`]: one `party auth:<mode> target` triple
+/// from the [`Permit`] that [`sparq_policy::decide`] issued for this exact request.
 ///
-/// # When a conditional grant is emitted (faithful)
+/// It used to persist recipient, assignee and dateTime constraints as re-checked
+/// `auth:ConditionalGrant` heads. A head re-checks identity and clock but not the rest
+/// of the decision, so it could grant a session the evaluator would deny (a prohibition
+/// on another party or a later time, an assignee and a recipient that must both hold).
+/// Until the enforcement path evaluates each request through `decide` (issue #6743),
+/// nothing is stored that the decision did not settle for good: a permission with a clock upper
+/// bound, or a prohibition that could still start applying, grants nothing here.
 ///
-/// All of the matched permission's constraints are `odrl:recipient`/`odrl:assignee`
-/// constraints under `eq`/`isA`/`isPartOf`/`isAnyOf` (positive heads) or
-/// `neq`/`isNoneOf` (noneOf exceptions), plus an inclusive `odrl:dateTime` window
-/// (see the crate-internal `map_constraints_to_agents`). The emitted grant is:
-///
-/// ```text
-/// <grant> a auth:ConditionalGrant ; auth:effect auth:Allow ;
-///         auth:agent <recipient> ; auth:client auth:AnyClient ; auth:issuer auth:AnyIssuer ;
-///         auth:mode acl:<Mode> ; auth:graph <target> .
-/// ```
-///
-/// re-checked by [`crate::AuthIndex::accessible`]: a session whose agent is the
-/// recipient is granted; any other agent (or anonymous) is denied — **without**
-/// re-running the ODRL evaluator. A recipient *set* emits one grant per member (the
-/// auth view unions the allows). When the rule has NO recipient constraint but carries
-/// an `odrl:assignee` PROPERTY, the grant head is scoped to that one assignee ([OPUS-4.8]
-/// sq-9n1q4 — a bare-assignee rule grants ONLY the assignee, never `auth:Public`). Only
-/// when the rule has NO recipient constraint AND NO assignee is the grant head
-/// `auth:Public` (any session) — legitimately public because the action/target/duties
-/// were already satisfied at materialization.
-///
-/// A head naming an `odrl:PartyCollection` for which the request supplied `odrl:partOf`
-/// evidence ([`sparq_policy::Request::with_party_membership`]) is expanded to one grant
-/// per KNOWN member, keeping the collection IRI itself as a head ([SONNET-4.6] sq-rf9uv).
-/// An ACP `auth:agent` head matches by identity and a session carries no membership
-/// evidence, so the unexpanded collection head matched no member and the grant was dead
-/// — an over-restriction. The expanded head is exactly the party set the evaluator would
-/// admit under the supplied evidence, never wider. A head the policy declares a collection
-/// ([`sparq_policy::Policy::party_collections`]) but for which this request supplied no
-/// member falls back to one-shot instead: there is nothing to expand to, and freezing the
-/// bare collection IRI would persist a grant that binds nobody.
-///
-/// # Fail-closed
-///
-/// - A Deny (prohibition override, unmet *unmappable* constraint, undischarged duty)
-///   materializes **nothing** — exactly as the one-shot path.
-/// - An unmapped action, or a missing target, materializes nothing.
-/// - **Mixed constraints fail safe:** if ANY constraint is unmappable (`purpose`,
-///   a strict `dateTime` bound, `count`, an order/malformed-operand recipient), the
-///   WHOLE rule falls back to the one-shot path so the unmappable bound is still
-///   enforced (frozen) — a persisted condition is emitted ONLY when every constraint
-///   maps faithfully.
-/// - A recipient IRI inside the reserved pair encoding is dropped from the grant head
-///   (it could otherwise impersonate a minted pair principal).
-/// - A `neq`/`isNoneOf` carve-out naming a party collection falls back to one-shot
-///   ([SONNET-4.6] sq-rf9uv): a frozen `noneOf` matcher is matched by identity and cannot
-///   re-check membership, so every member of the excluded collection would escape the
-///   exception and keep access (fail-open). This does **not** depend on the request
-///   supplying membership evidence — collection identity is read from the policy document
-///   too ([`sparq_policy::Policy::party_collections`]), so a collection with zero supplied
-///   member edges takes the same one-shot route.
-///
-/// Returns a [`BridgeOutcome`]; on a conditional grant `grant_triple` reports the
-/// `(agent, auth:effect, graph)` of the FIRST emitted grant (audit anchor) and
-/// `mode` the mapped mode. The free-function form does not reindex a [`crate::PodStore`]
-/// — use [`crate::PodStore::materialize_odrl_permission_conditional`].
+/// The free-function form does not reindex a [`crate::PodStore`]; use
+/// [`crate::PodStore::materialize_odrl_permission_conditional`].
 pub fn materialize_permission_conditional(
     graph: &mut Graph,
     policy: &ValidatedPolicy,
     request: &Request,
 ) -> BridgeOutcome {
-    // 0. Refuse (fail-closed) an unimplementable odrl:conflict strategy first. [OPUS-4.8] sq-ihqbl.
-    if let Some(refusal) = refuse_unimplementable_conflict(policy) {
-        return refusal;
-    }
-    // 1. Action → Mode (shared with the one-shot path). Unmapped → no grant.
-    let Some(mode) = action_to_mode(&request.action) else {
-        return BridgeOutcome::denied(vec![format!(
-            "ODRL action <{}> has no WAC/ACP mode mapping; no grant materialized",
-            request.action
-        )]);
-    };
-
-    // 2. Find the permission whose action/target match AND whose duties are
-    //    discharged AND whose constraints map faithfully to agent conditions. The
-    //    recipient constraint is NOT required to hold against the request party here
-    //    — the persisted condition re-checks it per session. Prohibitions still
-    //    override (deny-overrides), so consult the evaluator's prohibition verdict.
-    if let Some(p) = matched_prohibition(policy, request) {
-        return BridgeOutcome::denied(vec![format!(
-            "prohibition {} matches the request (deny-overrides); no grant materialized",
-            p.id
-        )]);
-    }
-    let Some(target) = request.target.as_deref() else {
-        return BridgeOutcome::denied(vec![
-            "ODRL Permit has no concrete target graph IRI; no grant materialized".to_owned(),
-        ]);
-    };
-
-    let mut fallback_reasons: Vec<String> = Vec::new();
-    for rule in &policy.permissions {
-        // Action + target must agree (assignee/recipient are handled as conditions).
-        if !rule_action_target_match(rule, request, mode, target) {
-            continue;
-        }
-        // Duties must be discharged at materialization (no ACP analogue → one-shot
-        // semantics; an undischarged duty blocks this rule).
-        if rule.duties.iter().any(|d| !request.discharged_duties.contains(&d.action.0)) {
-            fallback_reasons.push(format!("permission {} has an undischarged duty", rule.id));
-            continue;
-        }
-        match map_constraints_to_agents(rule) {
-            AgentMapping::Faithful { agents: recipients, except, window } => {
-                let agents = condition_agents(rule, &recipients);
-                if agents.is_empty() {
-                    // every recipient was reserved-encoded → fail-closed, nothing.
-                    fallback_reasons.push(format!(
-                        "permission {} recipients are all reserved-encoded; no grant",
-                        rule.id
-                    ));
-                    continue;
-                }
-                // `recipient neq X` → an ACP noneOf exception carving out X. A reserved-
-                // encoded exclusion would be silently un-enforceable as a matcher, which
-                // would WIDEN the grant (X regains access) — fail-closed: drop the whole
-                // rule to one-shot rather than emit an exception that cannot bite.
-                let excepts = condition_excepts(&except);
-                if excepts.len() != except.len() {
-                    fallback_reasons.push(format!(
-                        "permission {} has a reserved-encoded neq recipient; one-shot path",
-                        rule.id
-                    ));
-                    continue;
-                }
-                // [SONNET-4.6] sq-rf9uv: a carve-out naming a party COLLECTION cannot be
-                // frozen into `noneOf` heads — the matcher is matched by identity, so every
-                // member escapes the exception and keeps access (fail-OPEN). One-shot
-                // instead, where the evaluator does the real identity-or-membership check.
-                // Collection-ness comes from the POLICY's own declaration as well as the
-                // request's evidence, so a collection with zero supplied member edges is
-                // caught here too.
-                if heads_name_party_collection(policy, request, &excepts) {
-                    fallback_reasons.push(format!(
-                        "permission {} carves out a party collection (its members would \
-                         escape a frozen noneOf); one-shot path",
-                        rule.id
-                    ));
-                    continue;
-                }
-                // [SONNET-4.6] sq-rf9uv: a collection-valued assignee/recipient head is
-                // matched by the evaluator via membership, but by ACP via identity — expand
-                // it to the members the request evidenced, else the grant is dead. A head
-                // the POLICY declares a collection but that this request supplied no member
-                // for has nothing to expand to, so it goes one-shot rather than freeze a
-                // grant that binds nobody.
-                if agents.iter().any(|a| {
-                    policy.party_collections.contains(a)
-                        && request.party_collection_members(a).is_empty()
-                }) {
-                    fallback_reasons.push(format!(
-                        "permission {} grants a party collection with no supplied membership \
-                         evidence (a frozen head would bind no member); one-shot path",
-                        rule.id
-                    ));
-                    continue;
-                }
-                let agents = expand_party_collection_heads(request, &agents);
-                let (first, emitted) = append_conditional_grants(
-                    graph, &agents, &excepts, &window, mode, target, GrantEffect::Allow,
-                );
-                return BridgeOutcome {
-                    granted: true,
-                    mode: Some(mode),
-                    grant_triple: Some(first),
-                    emitted,
-                    ..BridgeOutcome::default()
-                };
-            }
-            AgentMapping::Unmappable => {
-                // This permission carries a constraint with no faithful condition
-                // analogue → the one-shot path must check it (frozen) instead.
-                fallback_reasons.push(format!(
-                    "permission {} has a constraint with no faithful ACP condition; one-shot path",
-                    rule.id
-                ));
-            }
-        }
-    }
-
-    // 3. No faithfully-conditional permission applied → fall back to the EXISTING
-    //    one-shot behaviour (which evaluates the unmappable constraints against the
-    //    supplied request context and emits a frozen allow iff they hold).
-    let out = materialize_permission(graph, policy, request);
-    if !out.granted && out.reasons.is_empty() {
-        return BridgeOutcome::denied(fallback_reasons);
-    }
-    out
+    materialize_permission(graph, policy, request)
 }
 
 /// Evaluate `policy`'s **prohibitions** against `request` and, for a prohibition whose
@@ -1201,7 +1022,7 @@ pub fn materialize_permission_conditional(
 /// otherwise persist a bare collection IRI no member session can match. Two sources are
 /// unioned (see the crate-internal `heads_name_party_collection`):
 ///
-/// - [`Policy::party_collections`] — retained by [`sparq_policy::parse_policy`] from the
+/// - [`sparq_policy::Policy::party_collections`] — retained by [`sparq_policy::parse_policy`] from the
 ///   policy document: a subject typed `a odrl:PartyCollection`, or the object of an
 ///   `odrl:partOf` edge the document states.
 /// - A non-empty `Request::party_collection_members` — this request's own `odrl:partOf`
@@ -1212,7 +1033,7 @@ pub fn materialize_permission_conditional(
 /// ODRL 2.2 an IRI is a party collection because it is *declared* one, so a policy
 /// document asserting neither the type nor a membership edge, materialized against a
 /// request supplying no `odrl:partOf` evidence either, has given nothing in reach of the
-/// bridge a reason to read that head as a collection. Hand-building a [`Policy`] instead
+/// bridge a reason to read that head as a collection. Hand-building a [`sparq_policy::Policy`] instead
 /// of parsing one leaves `party_collections` empty; populate it (or supply the request's
 /// membership evidence) if the rule heads are collections.
 ///
@@ -1265,7 +1086,7 @@ pub fn materialize_prohibition_conditional(
                     ));
                     continue;
                 }
-                let agents = condition_agents(rule, &recipients);
+                let agents = condition_agents(rule, &recipients, PUBLIC);
                 if agents.is_empty() {
                     fallback_reasons.push(format!(
                         "prohibition {} recipients are all reserved-encoded; no deny",
@@ -1348,13 +1169,11 @@ pub fn materialize_prohibition_conditional(
 /// a single `auth:Public` head (any session matches) — a legitimately public rule whose
 /// action/target/duties were already satisfied at materialization.
 ///
-/// The heads returned here are identity-space and request-independent, and nothing here
-/// (or in the parsed [`Policy`]) knows whether a head is an `odrl:PartyCollection` — that
-/// is resolved afterwards, and ONLY against the request's own membership evidence, by
-/// [`expand_party_collection_heads`] (ALLOW only). See [SONNET-4.6] sq-rf9uv for why the
-/// DENY dual must not do the same, and *The limit of the collection check* on
-/// [`materialize_prohibition_conditional`] for the un-evidenced case neither can detect.
-fn condition_agents(rule: &Rule, recipients: &[String]) -> Vec<String> {
+/// The heads returned here are identity-space and request-independent; a head naming an
+/// `odrl:PartyCollection` sends the deny to the one-shot path instead (see
+/// [`heads_name_party_collection`] and *The limit of the collection check* on
+/// [`materialize_prohibition_conditional`]).
+fn condition_agents(rule: &Rule, recipients: &[String], unscoped: &str) -> Vec<String> {
     if recipients.is_empty() {
         // [OPUS-4.8] sq-9n1q4: a bare `odrl:assignee` PROPERTY scopes the head to that
         // one party — it is NOT an unrestricted (auth:Public) rule.
@@ -1365,8 +1184,8 @@ fn condition_agents(rule: &Rule, recipients: &[String]) -> Vec<String> {
             // An all-reserved-encoded assignee → empty head → the caller fails closed
             // (an empty grant/deny head is never widened to auth:Public here).
             Some(_) => return Vec::new(),
-            // No recipient AND no assignee → legitimately public.
-            None => return vec![PUBLIC.to_owned()],
+            // No recipient AND no assignee → the caller's unscoped head.
+            None => return vec![unscoped.to_owned()],
         }
     }
     recipients
@@ -1385,47 +1204,6 @@ fn condition_excepts(except: &[String]) -> Vec<String> {
         .filter(|r| recipient_principal_allowed(r))
         .map(|r| normalise_recipient_principal(r))
         .collect()
-}
-
-/// Expand every head that names an `odrl:PartyCollection` into one head per KNOWN
-/// member, keeping the collection IRI itself as a head. [SONNET-4.6] sq-rf9uv.
-///
-/// The evaluator matches a collection-valued `odrl:assignee`/`odrl:recipient` by
-/// identity-OR-membership (`Request::party_matches` / its recipient twin), but an ACP
-/// `auth:agent` head is matched against the session agent by identity ALONE — a session
-/// carries no membership evidence, so a lone collection-IRI head matches NO member and
-/// the persisted grant is dead (the over-restriction sq-rf9uv reports). Emitting
-/// `{collection} ∪ members(collection)` makes the head the EXACT set of parties the
-/// evaluator would admit under the membership evidence this request supplied.
-///
-/// **Soundness.** The expansion draws only on that caller-supplied evidence, so it can
-/// never grant a party the evaluator would not; a member the request did not evidence is
-/// simply absent (fail-closed under-grant, never a widening). With no evidence the result
-/// is byte-for-byte the input heads. A member inside the reserved pair encoding is
-/// dropped, exactly as [`condition_agents`] drops a reserved-encoded recipient.
-///
-/// This is sound for a positive ALLOW head only. The DENY dual and an ALLOW's `noneOf`
-/// carve-out must NOT be expanded this way — see [`heads_name_party_collection`]. A
-/// positive head that IS a known collection but has no evidenced member is likewise not
-/// expandable here (the frozen head would bind nobody); the caller routes that case to
-/// the one-shot path before calling this.
-fn expand_party_collection_heads(request: &Request, heads: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for head in heads {
-        if !out.contains(head) {
-            out.push(head.clone());
-        }
-        for member in request.party_collection_members(head) {
-            if !recipient_principal_allowed(member) {
-                continue;
-            }
-            let m = normalise_recipient_principal(member);
-            if !out.contains(&m) {
-                out.push(m);
-            }
-        }
-    }
-    out
 }
 
 /// Does any of `heads` name an `odrl:PartyCollection`? The fail-closed trigger for every
@@ -1447,15 +1225,9 @@ fn expand_party_collection_heads(request: &Request, heads: &[String]) -> Vec<Str
 ///
 /// **Why any collection head must leave the frozen path.** The head is fixed at
 /// materialization and the ACP session re-check matches it against the session agent by
-/// IDENTITY alone. For a **DENY** head, or an ALLOW's `noneOf` **carve-out**, that means
-/// every member of the collection — evidenced or not — walks past the restriction and
-/// keeps access, the exact widening the bridge exists to prevent. For a **positive ALLOW**
-/// head with no evidenced member there is nothing to expand to, so the frozen grant binds
-/// nobody and the permission is silently lost. In all three cases the rule falls back to
-/// the one-shot path, whose evaluator performs the real identity-or-membership check
-/// against each request (frozen, but sound). The one case that stays on the frozen path is
-/// a positive ALLOW head WITH evidenced members, where
-/// [`expand_party_collection_heads`] emits exactly the party set the evaluator would admit.
+/// IDENTITY alone, so every member of a collection in a **DENY** head walks past the
+/// deny and keeps access. The rule falls back to the one-shot path, whose evaluator
+/// performs the real identity-or-membership check against the request.
 fn heads_name_party_collection(policy: &ValidatedPolicy, request: &Request, heads: &[String]) -> bool {
     heads.iter().any(|h| {
         policy.party_collections.contains(h) || !request.party_collection_members(h).is_empty()
@@ -1491,8 +1263,6 @@ fn rule_action_target_match(rule: &Rule, request: &Request, _mode: Mode, target:
 /// `auth:effect` object emitted by [`append_conditional_grants`]. [OPUS-4.8] sq-4r70.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum GrantEffect {
-    /// A conditional **allow** (`auth:effect auth:Allow`) — the recipient is granted.
-    Allow,
     /// A conditional **deny** (`auth:effect auth:Deny`) — the dual: the matched
     /// session is denied, and the deny overrides any allow for the same
     /// principal+target+mode (the session layer subtracts `∪ deny` from `∪ allow`).
@@ -1503,7 +1273,6 @@ impl GrantEffect {
     /// The `auth:`-local effect object (`Allow` / `Deny`) and the grant-IRI key.
     fn iri_local(self) -> &'static str {
         match self {
-            GrantEffect::Allow => "Allow",
             GrantEffect::Deny => "Deny",
         }
     }
@@ -2069,8 +1838,7 @@ fn reemit_deny(graph: &mut Graph, request: &Request) -> BridgeOutcome {
                 .to_owned(),
         ]);
     };
-    let pred = format!("{AUTH_NS}{}", deny_predicate(mode));
-    let triple = append_grant(graph, party, &pred, target);
+    let (pred, triple) = append_deny(graph, party, mode, target);
     BridgeOutcome {
         prohibited: true,
         mode: Some(mode),
@@ -2109,11 +1877,11 @@ fn reemit_deny(graph: &mut Graph, request: &Request) -> BridgeOutcome {
 // ============================================================================
 #[cfg(feature = "count-enforcement")]
 pub(crate) mod count {
-    use super::{action_to_mode, append_grant, refuse_unimplementable_conflict, BridgeOutcome, AUTH_NS};
+    use super::{allow_binding, emit_allow, refuse_unimplementable_conflict, BridgeOutcome};
     use sparq_core::Graph;
     use sparq_policy::{
-        count_status, evaluate, evaluate_and_exercise, CountStatus, Policy, Request,
-        UsageCounterStore, ValidatedPolicy, ODRL_COUNT,
+        base_decision, count_status, evaluate_and_exercise, CountStatus, Request,
+        UsageCounterStore, ValidatedPolicy,
     };
     use std::sync::Arc;
 
@@ -2127,17 +1895,6 @@ pub(crate) mod count {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             // The store interior is opaque (a trait object); name the handle only.
             f.write_str("CounterHandle(<UsageCounterStore>)")
-        }
-    }
-
-    /// The `auth:` allow-view predicate a mode grant is materialized under — the SAME
-    /// predicate [`super::materialize_permission`] uses and [`crate::AuthIndex`] reads.
-    fn mode_predicate(mode: crate::Mode) -> &'static str {
-        match mode {
-            crate::Mode::Read => "read",
-            crate::Mode::Write => "write",
-            crate::Mode::Append => "append",
-            crate::Mode::Control => "control",
         }
     }
 
@@ -2172,42 +1929,25 @@ pub(crate) mod count {
         // 1. The atomic, count-aware decision — the single source of allow/deny AND the
         //    one place a unit is consumed. A base deny / exhausted / store-unavailable
         //    returns allow == false and consumes nothing.
+        //    A grant the bridge could not store must not spend a unit, so the same base
+        //    decision is checked for storability first, without consuming.
+        //    A count-limited grant is never lasting, so it is refused here: counted
+        //    access goes through `evaluate_and_exercise` per request, never a stored allow.
+        if let Ok(base) = base_decision(policy, request) {
+            if let Some(permit) = &base.permit {
+                if let Err(why) = allow_binding(permit) {
+                    return BridgeOutcome::denied(why);
+                }
+            }
+        }
         let exercise = evaluate_and_exercise(policy, request, store);
-        if !exercise.allow {
+        let Some(permit) = &exercise.permit else {
             return BridgeOutcome::denied(exercise.reasons);
-        }
-
-        // 2. Same fail-closed mapping gates as the one-shot allow path.
-        let Some(mode) = action_to_mode(&request.action) else {
-            return BridgeOutcome::denied(vec![format!(
-                "ODRL action <{}> has no WAC/ACP mode mapping; no grant materialized",
-                request.action
-            )]);
-        };
-        let Some(party) = request.party.as_deref() else {
-            return BridgeOutcome::denied(vec![
-                "ODRL Permit has no concrete party (assignee/WebID); no grant materialized"
-                    .to_owned(),
-            ]);
-        };
-        let Some(target) = request.target.as_deref() else {
-            return BridgeOutcome::denied(vec![
-                "ODRL Permit has no concrete target graph IRI; no grant materialized".to_owned(),
-            ]);
         };
 
-        // 3. Materialize `party auth:<mode> target` (one-shot allow shape; the count was
-        //    consumed in step 1, and is re-checked read-only on refresh).
-        let pred = format!("{AUTH_NS}{}", mode_predicate(mode));
-        let triple = append_grant(graph, party, &pred, target);
-        BridgeOutcome {
-            granted: true,
-            mode: Some(mode),
-            grant_triple: Some((party.to_owned(), pred, target.to_owned())),
-            consumed: exercise.consumed,
-            emitted: vec![triple],
-            ..BridgeOutcome::default()
-        }
+        // 2. Materialize the permit's one-shot allow (the count was consumed in step 1,
+        //    and is re-checked read-only on refresh).
+        BridgeOutcome { consumed: exercise.consumed, ..emit_allow(graph, permit) }
     }
 
     /// Re-check a tracked counted grant on refresh and re-emit it **iff** it still holds —
@@ -2244,11 +1984,10 @@ pub(crate) mod count {
         //     for a missing count value) — exactly the base shape `evaluate_and_exercise`
         //     uses. A withdrawn permission / now-matching prohibition denies here →
         //     retract. NOTE: this never consumes; consumption only happens at exercise.
-        let stripped = match strip_count_constraints(policy).validate() {
-            Ok(p) => p,
+        let decision = match base_decision(policy, request) {
+            Ok(d) => d,
             Err(why) => return BridgeOutcome::denied(vec![why]),
         };
-        let decision = evaluate(&stripped, request);
         if !decision.allow {
             return BridgeOutcome::denied(decision.unmet_constraints);
         }
@@ -2260,17 +1999,21 @@ pub(crate) mod count {
             .first()
             .and_then(|id| policy.permissions.iter().find(|r| &r.id == id))
         else {
-            // A base grant with no identifiable rule (should not happen for a permission)
-            // → nothing to count; re-emit the plain allow.
-            return super::materialize_permission(graph, &stripped, request);
+            // A base grant with no identifiable rule (should not happen for a permission):
+            // its permit is not lasting, so nothing is stored.
+            return match &decision.permit {
+                Some(permit) => emit_allow(graph, permit),
+                None => BridgeOutcome::denied(decision.unmet_constraints),
+            };
         };
 
         // (c) Read-only count check — NEVER consumes a unit on refresh.
         match count_status(rule, request, store) {
             // Budget remains, or the rule has no count limit → re-emit the allow grant.
-            CountStatus::Satisfied { .. } | CountStatus::NotConstrained => {
-                reemit_grant(graph, request)
-            }
+            CountStatus::Satisfied { .. } | CountStatus::NotConstrained => match &decision.permit {
+                Some(permit) => emit_allow(graph, permit),
+                None => BridgeOutcome::denied(decision.unmet_constraints.clone()),
+            },
             // Exhausted, or unprovable (store outage / malformed) → retract (fail-closed).
             CountStatus::DefinitelyUnsatisfied { consumed, limit } => BridgeOutcome::denied(vec![
                 format!(
@@ -2283,45 +2026,6 @@ pub(crate) mod count {
                 rule.id
             )]),
         }
-    }
-
-    /// Re-emit the `principal auth:<mode> target` allow for `request` (the same triple
-    /// [`materialize_permission_counted`] emitted), used on a still-valid count refresh.
-    /// The triple is fully determined by the request (party + action→mode + target).
-    fn reemit_grant(graph: &mut Graph, request: &Request) -> BridgeOutcome {
-        let Some(mode) = action_to_mode(&request.action) else {
-            return BridgeOutcome::denied(vec![
-                "counted grant action no longer maps on refresh; not re-emitted".to_owned(),
-            ]);
-        };
-        let (Some(party), Some(target)) = (request.party.as_deref(), request.target.as_deref())
-        else {
-            return BridgeOutcome::denied(vec![
-                "counted grant lost its party/target on refresh; not re-emitted".to_owned(),
-            ]);
-        };
-        let pred = format!("{AUTH_NS}{}", mode_predicate(mode));
-        let triple = append_grant(graph, party, &pred, target);
-        BridgeOutcome {
-            granted: true,
-            mode: Some(mode),
-            grant_triple: Some((party.to_owned(), pred, target.to_owned())),
-            emitted: vec![triple],
-            ..BridgeOutcome::default()
-        }
-    }
-
-    /// A copy of `policy` with every `odrl:count` constraint removed from its PERMISSION
-    /// rules — the base shape the stateless [`evaluate`] sees (count is enforced against
-    /// the store, not as a stateless numeric comparison). Mirrors sparq-policy's internal
-    /// `strip_count_constraints` (kept here because that helper is crate-private).
-    /// Prohibitions are untouched (a count on a prohibition keeps its stateless meaning).
-    fn strip_count_constraints(policy: &ValidatedPolicy) -> Policy {
-        let mut out = policy.policy().clone();
-        for rule in &mut out.permissions {
-            rule.constraints.retain(|c| c.left != ODRL_COUNT);
-        }
-        out
     }
 }
 
@@ -2488,10 +2192,26 @@ pub fn materialize_odrl_n3(
         closure = eval(&mut dict, &closure, stratum);
     }
 
-    // Extract auth:* triples from the final closure.
-    let mut new_triples: Vec<[Term; 3]> = Vec::new();
-    let mut grant_triple: Option<(String, String, String)> = None;
+    // Extract auth:* triples from the final closure. A derived deny is kept (fail-closed);
+    // a derived grant is emitted only through the Permit `decide` issues for the same
+    // request, and only when it is exactly the grant that permit covers. The reasoner
+    // never grants on its own: where it derives a grant `decide` does not (a prohibition
+    // it reads as not applying for lack of evidence, a constrained duty), nothing is
+    // granted.
+    let decision = evaluate(&parsed_policy, request);
+    let permitted = decision.permit.as_ref().and_then(|permit| {
+        let mode = action_to_mode(permit.action())?;
+        let triple = (
+            permit.party()?.to_owned(),
+            format!("{AUTH_NS}{}", mode_predicate(mode)),
+            permit.target()?.to_owned(),
+        );
+        Some((permit, triple))
+    });
+    let mut deny_triples: Vec<[Term; 3]> = Vec::new();
     let mut deny_triple: Option<(String, String, String)> = None;
+    let mut derived_grant = false;
+    let mut withheld: Vec<String> = Vec::new();
 
     for t in &closure {
         let Term::NamedNode(p) = dict.term(t[1]) else { continue };
@@ -2501,33 +2221,34 @@ pub fn materialize_odrl_n3(
         }
         let Term::NamedNode(s) = dict.term(t[0]) else { continue };
         let Term::NamedNode(o) = dict.term(t[2]) else { continue };
-        let triple = [
-            Term::NamedNode(NamedNode::new_unchecked(s.as_str())),
-            Term::NamedNode(NamedNode::new_unchecked(p_str)),
-            Term::NamedNode(NamedNode::new_unchecked(o.as_str())),
-        ];
+        let found = (s.as_str().to_owned(), p_str.to_owned(), o.as_str().to_owned());
         let local = p_str.strip_prefix(AUTH_NS).unwrap_or("");
         if local.starts_with("deny") {
-            deny_triple = Some((s.as_str().to_owned(), p_str.to_owned(), o.as_str().to_owned()));
+            deny_triples.push(triple_of(&found.0, &found.1, &found.2));
+            deny_triple = Some(found);
+        } else if permitted.as_ref().is_some_and(|(_, want)| *want == found) {
+            derived_grant = true;
         } else {
-            grant_triple = Some((s.as_str().to_owned(), p_str.to_owned(), o.as_str().to_owned()));
+            withheld.push(format!(
+                "N3 derived <{}> <{}> <{}>, which the reference decision does not permit; \
+                 not materialized (fail-closed)",
+                found.0, found.1, found.2
+            ));
         }
-        new_triples.push(triple);
     }
 
-    if !new_triples.is_empty() {
-        append_bridged_triples(graph, &new_triples);
+    if !deny_triples.is_empty() {
+        append_bridged_triples(graph, &deny_triples);
     }
-
-    let emitted = new_triples;
-    Ok(BridgeOutcome {
-        granted: grant_triple.is_some(),
-        prohibited: deny_triple.is_some(),
-        grant_triple,
-        deny_triple,
-        emitted,
-        ..BridgeOutcome::default()
-    })
+    let mut out = match permitted {
+        Some((permit, _)) if derived_grant => emit_allow(graph, permit),
+        _ => BridgeOutcome::default(),
+    };
+    out.prohibited = deny_triple.is_some();
+    out.deny_triple = deny_triple;
+    out.emitted.extend(deny_triples);
+    out.reasons.extend(withheld);
+    Ok(out)
 }
 
 /// The `xsd:dateTime` datatype IRI (canonical-subset validation on the N3 path).

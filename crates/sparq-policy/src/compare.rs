@@ -244,6 +244,11 @@ pub fn conflict_admissibility(policy: &Policy) -> Result<(), String> {
 /// assert_eq!(contains(&narrow, &broad), Containment::NotContained);
 /// ```
 pub fn contains(outer: &Policy, inner: &Policy) -> Containment {
+    // The rule comparison below assumes deny-overrides; a policy whose conflict
+    // strategy `decide` refuses grants nothing, which rule subsumption does not model.
+    if conflict_admissibility(outer).is_err() || conflict_admissibility(inner).is_err() {
+        return Containment::Unknown;
+    }
     let mut any_unknown = false;
     for inner_perm in &inner.permissions {
         match best_subsumption(outer, inner_perm) {

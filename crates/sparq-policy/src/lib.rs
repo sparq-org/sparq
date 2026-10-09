@@ -60,7 +60,7 @@ pub use validate::ValidatedPolicy;
 // feature is on (matches how the stateless evaluator surface is flat-exported).
 #[cfg(feature = "count-enforcement")]
 pub use count::{
-    count_status, evaluate_and_exercise, ConsumeResult, CountKey, CountStatus, ExerciseDecision,
+    base_decision, count_status, evaluate_and_exercise, ConsumeResult, CountKey, CountStatus, ExerciseDecision,
     InMemoryCounterStore, UsageCounterStore,
 };
 

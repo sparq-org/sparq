@@ -453,3 +453,156 @@ fn containment_does_not_read_lteq_as_lt() {
         Containment::Contains
     );
 }
+
+/// A permit binds the recipient the decision checked; changing the party after
+/// `Request::by` would grant on another identity's recipient evidence, so it denies.
+#[test]
+fn a_permit_binds_the_checked_recipient() {
+    let ttl = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+         odrl:target <urn:asset/x> ; odrl:constraint [ odrl:leftOperand odrl:recipient ; \
+         odrl:operator odrl:neq ; odrl:rightOperand <urn:bob> ] ] ."
+    );
+    let p = parse_policy_str(&ttl, "turtle").unwrap();
+    let read = format!("{ODRL}read");
+    let alice = Request::new(read.clone()).on("urn:asset/x").by("urn:alice");
+    let permit = decide(&p, &alice).permit.expect("alice is not bob");
+    assert_eq!((permit.party(), permit.recipient()), (Some("urn:alice"), Some("urn:alice")));
+
+    let mut swapped = alice.clone();
+    swapped.party = Some("urn:bob".into());
+    assert!(decide(&p, &swapped).permit.is_none(), "party changed after by()");
+    let bob = Request::new(read).on("urn:asset/x").by("urn:bob");
+    assert!(decide(&p, &bob).permit.is_none());
+}
+
+/// ODRL 2.2 left operands, the assignee pseudo-operand, and one unknown operand.
+const LEFT_OPERANDS: [&str; 32] = [
+    "absolutePosition", "absoluteSize", "absoluteSpatialPosition", "absoluteTemporalPosition",
+    "count", "dateTime", "delayPeriod", "deliveryChannel", "device", "elapsedTime", "event",
+    "fileFormat", "industry", "language", "media", "meteredTime", "payAmount", "percentage",
+    "product", "purpose", "recipient", "relativePosition", "relativeSize",
+    "relativeSpatialPosition", "relativeTemporalPosition", "resolution", "spatial",
+    "spatialCoordinates", "systemDevice", "timeInterval", "unitOfCount", "assignee",
+];
+
+/// Exactly one grant shape is lasting: an unconstrained, duty-free permission assigned
+/// to exactly the requesting party, in a policy with no prohibitions, decided without
+/// membership evidence. Every left operand (on the permission, inside a logical
+/// constraint, or on a prohibition that does not apply), every other assignee shape,
+/// a duty and membership evidence each make the grant not lasting.
+#[test]
+fn only_an_unconstrained_grant_to_the_named_party_is_lasting() {
+    let read = format!("{ODRL}read");
+    let alice = || Request::new(read.clone()).on("urn:asset/x").by("urn:alice");
+    let permit = |rules: &str, req: &Request| {
+        let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
+        let p = parse_policy_str(&ttl, "turtle").unwrap_or_else(|e| panic!("{e}: {rules}"));
+        decide(&p, req).permit
+    };
+    let perm = |head: &str, extra: &str| {
+        format!("odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {head} {extra} ]")
+    };
+    let to_alice = "; odrl:assignee <urn:alice>";
+
+    // The one lasting shape, and the same grant with the target left open.
+    assert!(permit(&perm(to_alice, ""), &alice()).unwrap().lasting());
+    let open_target = format!("odrl:permission [ odrl:action odrl:read {to_alice} ]");
+    assert!(permit(&open_target, &alice()).unwrap().lasting());
+
+    // Every left operand, as an atom the request satisfies (when evidence can satisfy
+    // it) and inside an `or` with a satisfied purpose atom (always granted).
+    let mut granted = 0;
+    for left in LEFT_OPERANDS {
+        let atom = format!(
+            "[ odrl:leftOperand odrl:{left} ; odrl:operator odrl:eq ; odrl:rightOperand <urn:v> ]"
+        );
+        let req = alice()
+            .with(format!("{ODRL}{left}"), Value::Iri("urn:v".into()))
+            .for_purpose(Value::Iri("urn:p/a".into()));
+        if let Some(p) = permit(&perm(to_alice, &format!("; odrl:constraint {atom}")), &req) {
+            assert!(!p.lasting(), "atomic {left}");
+        }
+        let either = format!(
+            "; odrl:constraint [ a odrl:LogicalConstraint ; odrl:or ( {atom} {TRUE_C} ) ]"
+        );
+        let p = permit(&perm(to_alice, &either), &req).unwrap_or_else(|| panic!("or {left}"));
+        assert!(!p.lasting(), "{left} inside or");
+        granted += 1;
+
+        // A prohibition on this operand that does not apply now still blocks storage.
+        let never = format!(
+            "{} ; odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
+             odrl:constraint [ odrl:leftOperand odrl:{left} ; odrl:operator odrl:eq ; \
+             odrl:rightOperand <urn:other> ] ]",
+            perm(to_alice, "")
+        );
+        if let Some(p) = permit(&never, &req) {
+            assert!(!p.lasting(), "prohibition on {left}");
+        }
+    }
+    assert_eq!(granted, LEFT_OPERANDS.len());
+
+    // Any prohibition at all, even one on another action or party.
+    for prohibition in [
+        "odrl:prohibition [ odrl:action odrl:modify ; odrl:target <urn:asset/x> ]",
+        "odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; odrl:assignee <urn:bob> ]",
+        "odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/y> ]",
+    ] {
+        let rules = format!("{} ; {prohibition}", perm(to_alice, ""));
+        assert!(!permit(&rules, &alice()).unwrap().lasting(), "{prohibition}");
+    }
+
+    // Every other assignee shape.
+    assert!(!permit(&perm("", ""), &alice()).unwrap().lasting(), "no assignee");
+    let lab = alice().with_party_membership("urn:alice", "urn:lab");
+    let to_lab = perm("; odrl:assignee <urn:lab>", "");
+    assert!(!permit(&to_lab, &lab).unwrap().lasting(), "assignee matched by membership");
+    let declared = format!("{} . <urn:alice> odrl:partOf <urn:lab>", perm("; odrl:assignee <urn:lab>", ""));
+    let lab_itself = Request::new(read.clone()).on("urn:asset/x").by("urn:lab");
+    assert!(!permit(&declared, &lab_itself).unwrap().lasting(), "a declared party collection");
+    assert!(!permit(&perm(to_alice, ""), &lab).unwrap().lasting(), "membership evidence");
+    let in_set = alice().with_asset_membership("urn:asset/x", "urn:set");
+    assert!(!permit(&perm(to_alice, ""), &in_set).unwrap().lasting(), "asset membership");
+
+    // A duty, even a discharged one.
+    let duty = perm(to_alice, "; odrl:duty [ odrl:action odrl:inform ]");
+    let informed = alice().discharge(format!("{ODRL}inform"));
+    assert!(!permit(&duty, &informed).unwrap().lasting(), "a discharged duty");
+}
+
+/// A decision names its rule by id, so two rules sharing one are refused.
+#[test]
+fn duplicate_rule_ids_are_refused() {
+    let ttl = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+         odrl:target <urn:asset/x> ; odrl:assignee <urn:alice> ] ."
+    );
+    let mut policy: Policy = (*parse_policy_str(&ttl, "turtle").unwrap()).clone();
+    let mut twin = policy.permissions[0].clone();
+    twin.assignee = Some("urn:bob".into());
+    policy.permissions.push(twin.clone());
+    assert!(policy.clone().validate().is_err(), "two permissions share an id");
+    policy.permissions.pop();
+    policy.prohibitions.push(twin);
+    assert!(policy.validate().is_err(), "a permission and a prohibition share an id");
+}
+
+/// Containment claims nothing about a policy whose conflict strategy `decide` refuses:
+/// that policy grants nothing, which rule subsumption does not model.
+#[test]
+fn containment_respects_the_conflict_strategy() {
+    let read = format!("{ODRL}read");
+    let inner = Policy {
+        permissions: vec![rule("urn:r", &read)],
+        ..Policy::default()
+    };
+    let outer = Policy {
+        conflict: Some(sparq_policy::ConflictStrategy::Perm),
+        ..inner.clone()
+    };
+    assert_eq!(contains(&outer, &inner), Containment::Unknown);
+    let req = Request::new(read).on("urn:asset/x");
+    assert!(decide(&inner.clone().validate().unwrap(), &req).allow);
+    assert!(!decide(&outer.validate().unwrap(), &req).allow);
+}

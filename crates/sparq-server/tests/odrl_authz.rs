@@ -19,7 +19,7 @@
 #![cfg(feature = "odrl-authz")]
 
 use sparq_core::Graph;
-use sparq_policy::{evaluate, parse_policy_str, Request, Value, ODRL_RECIPIENT};
+use sparq_policy::{decide, evaluate, parse_policy_str, Request, Value, ODRL_RECIPIENT};
 use sparq_server::{router, AppState, ServerConfig};
 use tokio::net::TcpListener;
 
@@ -207,9 +207,13 @@ fn matrix() -> Vec<MatrixRow> {
     ]
 }
 
-/// The library-side oracle: `sparq_policy::evaluate` over the SAME `(policy, request)` the
+/// The library-side oracle: `sparq_policy::decide` over the SAME `(policy, request)` the
 /// HTTP lane materialises — party = the session agent, action = `odrl:read`, target = n1,
 /// recipient = the requesting agent (the delivery recipient of the results), `at` = session now.
+/// The lane goes through the ODRL bridge, which stores only a lasting grant (an
+/// unconstrained grant to the named party, in a policy with no prohibitions), so a grant
+/// that `evaluate` allows but that is not lasting is denied (#6743 tracks per-request
+/// decisions). It is never wider than `evaluate`.
 fn oracle_allows(row: &MatrixRow) -> bool {
     let policy = parse_policy_str(&row.policy_nq, "ntriples").expect("row policy parses");
     let mut request = Request::new(format!("{ODRL}read"))
@@ -219,7 +223,9 @@ fn oracle_allows(row: &MatrixRow) -> bool {
     if let Some(now) = row.now {
         request = request.at(now);
     }
-    evaluate(&policy, &request).allow
+    let stored = decide(&policy, &request).permit.is_some_and(|p| p.lasting());
+    assert!(stored <= evaluate(&policy, &request).allow, "{}: wider than evaluate", row.name);
+    stored
 }
 
 #[tokio::test]
@@ -233,7 +239,7 @@ async fn http_lane_decision_equals_library_evaluate_over_the_matrix() {
         assert_eq!(
             visible, expected,
             "row '{}': HTTP-lane visibility ({visible}) diverged from \
-             sparq_policy::evaluate ({expected})",
+             a lasting sparq_policy::decide grant ({expected})",
             row.name
         );
     }

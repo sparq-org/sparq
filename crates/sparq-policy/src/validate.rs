@@ -49,6 +49,16 @@ impl Policy {
     /// - a prohibition whose action, target or assignee is a blank node (a refined
     ///   action, an anonymous collection), which could never match a request.
     pub fn validate(self) -> Result<ValidatedPolicy, String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for r in self.permissions.iter().chain(&self.prohibitions) {
+            if !ids.insert(r.id.as_str()) {
+                return Err(format!(
+                    "rule id {} is used by more than one rule; a decision names its rule by \
+                     id, so the policy is refused (fail-closed)",
+                    r.id
+                ));
+            }
+        }
         for r in self.permissions.iter().chain(&self.prohibitions) {
             if r.logical_constraints.iter().any(has_empty_compound) {
                 return Err(format!(
