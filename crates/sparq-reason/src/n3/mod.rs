@@ -308,7 +308,7 @@ pub struct ProofStep {
 /// fails rather than read missing facts as absent. Only
 /// [`NegationCycles::SinglePass`] accepts that incomplete result.
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
-    reason_n3_with_cycles(dict, src, NegationCycles::Reject)
+    reason_n3_in(dict, src, NegationCycles::Reject, &Truncation::top_level())
 }
 
 /// As [`reason_n3`], choosing what happens to rules that negate through a dependency
@@ -322,18 +322,21 @@ pub fn reason_n3_with_cycles(
     src: &str,
     cycles: NegationCycles,
 ) -> Result<Vec<[Id; 3]>, String> {
+    reason_n3_in(dict, src, cycles, &Truncation::top_level())
+}
+
+/// [`reason_n3_with_cycles`] recording into the caller's run record `truncated`.
+fn reason_n3_in(
+    dict: &mut Dict,
+    src: &str,
+    cycles: NegationCycles,
+    truncated: &Truncation,
+) -> Result<Vec<[Id; 3]>, String> {
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps, _) = run_closure(
-        parsed,
-        None,
-        None,
-        &Truncation::top_level(),
-        StepMode::None,
-        cycles,
-    )?
-    .top_level();
+    let (facts, steps, _) =
+        run_closure(parsed, None, None, truncated, StepMode::None, cycles)?.top_level();
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -449,6 +452,11 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
 /// (a fact-only or backward-only query document has nothing to project — fail loudly rather
 /// than return an empty answer that reads like "the query matched nothing").
 pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, String> {
+    query_terms_in(data, query, Truncation::top_level())
+}
+
+/// [`reason_n3_query_terms`] recording into the caller's run record `cuts`.
+fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term; 3]>, String> {
     let data_parsed = parser::parse(data)?;
     let query_parsed = parser::parse(query)?;
     if query_parsed.rules.is_empty() {
@@ -489,7 +497,7 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
         .collect();
     strata::stratify(&forward, &backward, NegationCycles::Reject)?;
     // One run: the data closure and the query premises share one cut record.
-    let truncated = Truncation::top_level();
+    let truncated = cuts;
     let facts = run_closure(
         data_parsed,
         None,
@@ -555,7 +563,7 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
 /// formula, which has no dictionary representation; use the term-level entry point for a query
 /// whose conclusion is formula-valued.
 pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[Id; 3]>, String> {
-    let answers = reason_n3_query_terms(data, query)?;
+    let answers = query_terms_in(data, query, Truncation::top_level())?;
     let mut exp = ListExpander::new(&answers);
     let (mut rows, mut structure) = exp.expand_rows(&answers);
     rows.append(&mut structure);
@@ -644,7 +652,12 @@ pub fn reason_n3_stratified(
     dict: &mut Dict,
     strata: &[&str],
 ) -> Result<StratifiedN3Closure, String> {
-    reason_n3_stratified_with_cycles(dict, strata, NegationCycles::Reject)
+    stratified_in(
+        dict,
+        strata,
+        NegationCycles::Reject,
+        Truncation::top_level(),
+    )
 }
 
 /// As [`reason_n3_stratified`], choosing what happens to rules that negate through a
@@ -658,6 +671,17 @@ pub fn reason_n3_stratified_with_cycles(
     strata: &[&str],
     cycles: NegationCycles,
 ) -> Result<StratifiedN3Closure, String> {
+    stratified_in(dict, strata, cycles, Truncation::top_level())
+}
+
+/// [`reason_n3_stratified_with_cycles`] recording into the caller's run record
+/// `truncated`, which the whole pipeline shares.
+fn stratified_in(
+    dict: &mut Dict,
+    strata: &[&str],
+    cycles: NegationCycles,
+    truncated: Truncation,
+) -> Result<StratifiedN3Closure, String> {
     let mut carried: Vec<[Term; 3]> = Vec::new();
     let mut facts = FactIndex::default();
     let mut strata_facts = Vec::with_capacity(strata.len());
@@ -665,7 +689,6 @@ pub fn reason_n3_stratified_with_cycles(
     // One truncation flag for the whole pipeline: a cut search in an earlier stratum
     // leaves the facts it carries forward incomplete, so a later stratum's negation gate
     // must see it.
-    let truncated = Truncation::top_level();
     for (i, src) in strata.iter().enumerate() {
         let mut parsed = parser::parse(src)?;
         if !carried.is_empty() {
@@ -803,13 +826,14 @@ fn stratum_blanks(t: &[Term; 3], prefix: &str) -> [Term; 3] {
 #[allow(clippy::type_complexity)]
 pub(crate) fn reason_n3_terms_proof(
     src: &str,
+    cuts: &Truncation,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
     let (facts, steps, _) = run_closure(
         parsed,
         None,
         None,
-        &Truncation::top_level(),
+        cuts,
         StepMode::Full,
         NegationCycles::Reject,
     )?
@@ -839,7 +863,13 @@ pub struct N3Closure {
 /// and resolves relative IRIs against `base` when given — the entry point used
 /// by the W3C N3 conformance harness (cwm/EYE-style: `--think` then compare).
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String> {
-    reason_n3_terms_with_resolver(src, base, None)
+    reason_n3_terms_in(
+        src,
+        base,
+        None,
+        NegationCycles::Reject,
+        &Truncation::top_level(),
+    )
 }
 
 /// As [`reason_n3_terms`], with an optional document [`Resolver`] enabling the
@@ -852,7 +882,13 @@ pub fn reason_n3_terms_with_resolver(
     base: Option<&str>,
     resolver: Option<&Resolver>,
 ) -> Result<N3Closure, String> {
-    reason_n3_terms_with_cycles(src, base, resolver, NegationCycles::Reject)
+    reason_n3_terms_in(
+        src,
+        base,
+        resolver,
+        NegationCycles::Reject,
+        &Truncation::top_level(),
+    )
 }
 
 /// As [`reason_n3_terms_with_resolver`], choosing what happens to rules that negate
@@ -866,6 +902,19 @@ pub fn reason_n3_terms_with_cycles(
     resolver: Option<&Resolver>,
     cycles: NegationCycles,
 ) -> Result<N3Closure, String> {
+    reason_n3_terms_in(src, base, resolver, cycles, &Truncation::top_level())
+}
+
+/// [`reason_n3_terms_with_cycles`] for a crate-internal caller that already has a run:
+/// every cut is recorded on its record `truncated` (e.g. the incremental graph's
+/// fallback).
+pub(crate) fn reason_n3_terms_in(
+    src: &str,
+    base: Option<&str>,
+    resolver: Option<&Resolver>,
+    cycles: NegationCycles,
+    truncated: &Truncation,
+) -> Result<N3Closure, String> {
     let parsed = match base {
         Some(b) => parser::parse_with_base(src, b)?,
         None => parser::parse(src)?,
@@ -876,7 +925,7 @@ pub fn reason_n3_terms_with_cycles(
         parsed,
         resolver,
         None,
-        &Truncation::top_level(),
+        truncated,
         StepMode::Conclusions,
         cycles,
     )?

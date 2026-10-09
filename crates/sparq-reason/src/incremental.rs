@@ -2366,7 +2366,14 @@ impl MaterializedN3Graph {
         }
         self.mode = N3Mode::Fallback;
         let src = format!("{}\n{}", self.rules_src, n3_serialize(self.base.iter()));
-        match crate::n3::reason_n3_terms(&src, None) {
+        // The graph's own run record: a cut in the fallback reaches it.
+        match crate::n3::reason_n3_terms_in(
+            &src,
+            None,
+            None,
+            crate::NegationCycles::Reject,
+            &self.cuts,
+        ) {
             Ok(closure) => self.fallback_closure = closure.facts.into_iter().collect(),
             // The rules cannot be stratified (a negation cycle, possibly inside a nested
             // closure over base data). Fail closed: no derivation at all.
@@ -2739,6 +2746,27 @@ impl MaterializedN3Graph {
 mod tests {
     use super::*;
     use crate::materialize_rdfs;
+
+    /// A limit met only on the batch fallback (here a regex the engine refuses, inside a
+    /// rule set the counting engine disqualifies) is recorded on the graph's own run
+    /// record, not a throwaway one.
+    #[test]
+    fn a_fallback_only_cut_reaches_the_graphs_record() {
+        let rules = "@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+                     @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+                     { ?s <http://ex/p> ?v . (1 2) math:sum ?o . \"a\" string:matches \"(\" }\n\
+                       => { ?s <http://ex/q> ?o } .";
+        let iri = |s: &str| N3Term::Iri(format!("http://ex/{s}"));
+        let g = MaterializedN3Graph::new(rules, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
+        assert_eq!(g.mode(), N3Mode::Fallback);
+        assert!(
+            g.cuts.get().is_some(),
+            "the fallback's cut must reach the graph's record"
+        );
+        let clean = "{ ?s <http://ex/p> ?v } => { ?s <http://ex/q> ?v } .";
+        let g = MaterializedN3Graph::new(clean, &[[iri("b"), iri("p"), iri("v")]]).expect("rules");
+        assert!(g.cuts.get().is_none());
+    }
     use oxrdf::vocab::{rdf, rdfs};
 
     struct V {
