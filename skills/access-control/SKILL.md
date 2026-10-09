@@ -378,6 +378,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `principal auth:deny<Mode> graph` triple, honoured by this enforcement under **deny-overrides**
   (`∪ allow ∖ ∪ deny` — a deny beats any allow for the same principal+target+mode). `…_policy`
   does both sides at once. Same fail-closed rules; no new enforcement engine.
+- `store.materialize_odrl_policy_for_each(&Policy, &[Request])` — `materialize_odrl_policy` for a
+  batch of requests with one auth-view write and one index rebuild for the whole batch (outcomes
+  parallel to the requests). `store.auth_generation()` counts index rebuilds.
 - **Loud refusal of an unimplementable `odrl:conflict` strategy** (sq-ihqbl): the bridge
   implements only `odrl:conflict odrl:prohibit` (deny-overrides). A policy declaring `odrl:perm`,
   `odrl:invalid` **with** a detected conflict, or an unknown strategy IRI is **REFUSED** — every

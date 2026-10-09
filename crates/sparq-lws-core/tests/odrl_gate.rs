@@ -290,3 +290,28 @@ async fn unattached_gate_leaves_behaviour_unchanged() {
     assert_eq!(resp_b.status(), StatusCode::OK);
     assert!(body_text(resp_b).await.contains(SECRET_MARKER));
 }
+
+/// A prohibition on a collection governs its members over LDP: the WAC-public doc stated
+/// `odrl:partOf` the collection is refused to the prohibited party, while a doc outside the
+/// collection stays public to them.
+#[tokio::test]
+async fn collection_rules_govern_member_reads() {
+    let coll = "https://pod.example/alice/pub/";
+    let policy = format!(
+        r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol> a odrl:Set ;
+  odrl:prohibition [ odrl:action odrl:read ; odrl:target <{coll}> ; odrl:assignee <{REQ_B}> ] .
+<{PUB_DOC}> odrl:partOf <{coll}> .
+"#
+    );
+    let gate = Arc::new(PolicyOdrlGate::from_turtle(&policy).expect("admissible policy"));
+    let h = Harness::new(Some(gate)).await;
+    let req_b = Requester::new(REQ_B);
+
+    let member = h.get_as(&req_b, "/alice/pub/doc").await;
+    assert_eq!(member.status(), StatusCode::FORBIDDEN, "the member is governed");
+    assert!(!body_text(member).await.contains(SECRET_MARKER));
+
+    let outside = h.get_as(&req_b, "/alice/pub/other").await;
+    assert_eq!(outside.status(), StatusCode::OK, "a doc outside the collection is untouched");
+}
