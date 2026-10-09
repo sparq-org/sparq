@@ -28,7 +28,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aztec/bb.js": "5.2.0",
+    "@aztec/bb.js": "5.0.0-nightly.20260324",
     "@noir-lang/noir_js": "1.0.0-beta.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
