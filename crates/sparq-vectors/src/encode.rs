@@ -185,7 +185,8 @@ pub fn numeric_value(lexical: &str) -> Option<f64> {
 pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
     match datatype {
         dt::DATE_TIME | dt::DATE_TIME_STAMP => {
-            sparq_core::temporal::Timeline::parse_datetime(lexical).map(|t| t.instant())
+            // Datatype-aware: a timezone-free dateTimeStamp has no value to encode (#3902).
+            sparq_core::temporal::Temporal::of_lit(lexical, datatype).map(|t| t.instant)
         }
         dt::DATE => sparq_core::temporal::Timeline::parse_date(lexical).map(|t| t.instant()),
         dt::G_YEAR => {
@@ -964,6 +965,10 @@ mod tests {
         assert!(b <= c, "2020-06-15 date <= same-day noon dateTime");
         assert_eq!(temporal_value("garbage", dt::DATE), None);
         assert_eq!(temporal_value("2020-01-01", dt::INTEGER), None); // wrong datatype
+        // xsd:dateTimeStamp requires a timezone (#3902); the same lexical is a valid dateTime.
+        assert_eq!(temporal_value("2020-06-15T12:00:00", dt::DATE_TIME_STAMP), None);
+        assert!(temporal_value("2020-06-15T12:00:00", dt::DATE_TIME).is_some());
+        assert_eq!(temporal_value("2020-06-15T12:00:00Z", dt::DATE_TIME_STAMP), Some(c));
     }
 
     #[test]

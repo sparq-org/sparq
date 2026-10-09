@@ -444,6 +444,12 @@ impl<'a> Parser<'a> {
     /// declared IRI thereafter reads as a variable (forAll) or an existential
     /// blank (forSome) within that scope. Names derive from the IRI so the
     /// same declaration in two documents (action vs reference) compares equal.
+    ///
+    /// A universal keeps its BINDER: a document-level declaration reads as `__ua.<iri>`;
+    /// a FORMULA-level one is numbered, `__uf.<n>.<up>.<iri>`, so two declarations of one IRI
+    /// in different formulae (a rule's premise and its conclusion, sibling formulae, a
+    /// nested formula shadowing an outer one) are different variables, as N3's scoping
+    /// makes them. Re-declaring an IRI in the SAME scope keeps its one variable.
     fn directive_quantifier(&mut self) -> Result<(), String> {
         let universal = self.starts_with("@forAll");
         self.i += if universal { 7 } else { 8 };
