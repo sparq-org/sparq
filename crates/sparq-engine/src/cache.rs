@@ -8,18 +8,17 @@
 //! (the `result-cache` Cargo feature) and pulls **zero new dependencies** — when the
 //! feature is off, none of this module compiles and the default build is unchanged.
 //!
-//! # Soundness — the two correctness obligations
+//! # Soundness — correctness obligations
 //!
 //! A result cache is only correct if a *hit* is exactly the result a fresh
-//! evaluation would have produced. Two things can break that, and this module
-//! guards both:
+//! evaluation would have produced. The cache guards these sources of differing results:
 //!
 //! 1. **The graph changed.** The engine evaluates against a borrowed `&Graph` and
 //!    cannot observe mutations through that borrow, so the cache CANNOT detect
 //!    staleness on its own. The caller therefore supplies a monotonically-increasing
 //!    **version token** ([`u64`]) that it bumps on every mutation
 //!    (`apply_delta` / `update` / reload). A cached entry is keyed by
-//!    `(query, version)`; once the version advances, every prior entry is
+//!    `(query, version, resolved EBV semantics)`; once the version advances, every prior entry is
 //!    unreachable (and reclaimed lazily). This is the standard "the writer owns the
 //!    epoch" contract — the same discipline the snapshot-generation machinery in
 //!    `sparq-core` already uses. A caller that holds an immutable graph snapshot can
@@ -33,6 +32,10 @@
 //!    [`ResultCache::get_or_eval`] then always evaluates fresh and never inserts.
 //!    Determinism is conservative — anything the walker is unsure about is treated as
 //!    non-cacheable.
+//!
+//! 3. **The EBV rules differ.** The resolved query-local EBV semantics
+//!    are part of the key. Use [`ResultCache::get_or_eval_prepared`] to preserve
+//!    VERSION announcements and reject explicit option conflicts before lookup.
 //!
 //! Only SELECT and ASK forms are cached (the [`QueryResult`]-valued surface);
 //! CONSTRUCT / DESCRIBE go through a different return type and are out of scope here.
@@ -205,6 +208,11 @@ fn function_is_deterministic(f: &Function) -> bool {
 struct Key {
     version: u64,
     query: Query,
+    ebv_semantics: crate::EbvSemantics,
+    // Semantic capacity limits change the result (a capacity error versus a value),
+    // so a result cached under one setting must never answer another.
+    temporal_year_range: Option<(i64, i64)>,
+    strict_numeric_capacity: bool,
 }
 
 struct Entry {
@@ -286,6 +294,9 @@ impl ResultCache {
         let key = Key {
             version,
             query: query.clone(),
+            ebv_semantics: budget.ebv_semantics.unwrap_or_default(),
+            temporal_year_range: budget.temporal_year_range,
+            strict_numeric_capacity: budget.strict_numeric_capacity,
         };
 
         // Fast path: a hit at the current version.
@@ -329,6 +340,25 @@ impl ResultCache {
             },
         );
         Ok(result)
+    }
+
+    /// Caches a prepared query while retaining its VERSION announcement.
+    ///
+    /// # Errors
+    /// Rejects declaration/option conflicts before looking up any cached result,
+    /// and propagates evaluation errors. Bare algebra callers must instead set
+    /// [`QueryBudget::ebv_semantics`] explicitly when its default is unsuitable.
+    pub fn get_or_eval_prepared(
+        &self,
+        graph: &sparq_core::Graph,
+        query: &crate::PreparedQuery,
+        version: u64,
+        budget: &QueryBudget,
+    ) -> Result<Arc<QueryResult>, String> {
+        let semantics = query.resolve_ebv_semantics(budget.ebv_semantics)?;
+        let mut resolved = budget.clone();
+        resolved.ebv_semantics = Some(semantics);
+        self.get_or_eval(graph, query.query(), version, &resolved)
     }
 
     /// Drops every stored entry (keeps the configured capacity). A coarse alternative

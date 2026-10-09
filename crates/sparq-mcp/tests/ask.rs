@@ -31,8 +31,17 @@ fn call(server: &mut McpServer, raw: &str) -> Value {
         .expect("response is valid JSON")
 }
 
+/// Serializes the tests that mutate the process-global backend env vars.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Clear every backend-selecting env var so the test is hermetic, run `f`, then restore.
 fn with_no_backend(f: impl FnOnce()) {
+    with_env(&[], f)
+}
+
+/// Clear every backend-selecting env var, apply `set`, run `f`, then restore.
+fn with_env(set: &[(&str, &str)], f: impl FnOnce()) {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let vars = [
         "SPARQ_NLQ_ENDPOINT_URL",
         "SPARQ_NLQ_ENDPOINT_MODEL",
@@ -43,6 +52,9 @@ fn with_no_backend(f: impl FnOnce()) {
         vars.iter().map(|v| (*v, std::env::var(v).ok())).collect();
     for v in vars {
         std::env::remove_var(v);
+    }
+    for (k, v) in set {
+        std::env::set_var(k, v);
     }
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
     for (v, val) in saved {
@@ -60,7 +72,10 @@ fn with_no_backend(f: impl FnOnce()) {
 fn ask_is_not_advertised_when_no_backend_is_configured() {
     with_no_backend(|| {
         let mut server = McpServer::new(graph());
-        let resp = call(&mut server, r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#);
+        let resp = call(
+            &mut server,
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#,
+        );
         let names: Vec<&str> = resp["result"]["tools"]
             .as_array()
             .unwrap()
@@ -100,4 +115,35 @@ fn ask_call_with_no_backend_returns_a_clean_not_configured_error_not_an_answer()
             "an unconfigured ask must NEVER return a fabricated answer: {msg}"
         );
     });
+}
+
+#[test]
+fn ask_with_a_zero_ms_timeout_is_a_timeout_not_a_ten_second_fallback() {
+    // A backend IS configured (an OpenAI-compatible endpoint on a port nothing listens
+    // on), and query_timeout_ms = Some(0). The expired deadline must surface as a timeout
+    // before the model is contacted. Before the fix the adapter fell back to the
+    // NlqConfig 10 s default and went on to call the endpoint (a connection error).
+    with_env(
+        &[
+            ("SPARQ_NLQ_ENDPOINT_URL", "http://127.0.0.1:1/v1"),
+            ("SPARQ_NLQ_ENDPOINT_MODEL", "test-model"),
+        ],
+        || {
+            let config = sparq_mcp::ServerConfig {
+                query_timeout_ms: Some(0),
+                ..sparq_mcp::ServerConfig::default()
+            };
+            let mut server = McpServer::with_config(graph(), config);
+            let req = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+                "name":"ask",
+                "arguments":{"question":"how many people are there?"}
+            }}"#;
+            let resp = call(&mut server, req);
+            assert!(resp["error"].is_null(), "{resp}");
+            assert!(resp["result"]["isError"].as_bool().unwrap(), "{resp}");
+            let msg = resp["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(msg.contains("timeout"), "{msg}");
+            assert!(!msg.contains("\"sparql\""), "{msg}");
+        },
+    );
 }

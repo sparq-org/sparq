@@ -1,0 +1,11 @@
+{
+  "source_repository": "https://github.com/w3c/rdf-tests",
+  "source_commit": "f25dbc092c654d792974848e81bb519d7328f0e8",
+  "source_directory": "sparql/sparql11/aggregates",
+  "files": {
+    "agg-min-02.rq": "2d2dcc8c19c3814f6ec87adb6fe170679593fc3bcf7fcf8ae0fbfb5917d1f522",
+    "agg-numeric.ttl": "a4ab54cec9e85491ba1f70b31809e9a80dc3c96f2ec6e02c567b299309353e99",
+    "agg-min-02.srx": "c2b0a001e264691e858c80409d8aa4150e0ce6e0cb340e2ca1472be8e4855176"
+  },
+  "note": "Unmodified W3C fixture bytes; no corrected golden. See docs/upstream-proposals.md for exact guarded mismatch and published result comparison rules."
+}

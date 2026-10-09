@@ -1,0 +1,8 @@
+[package]
+name = "result_v2_k1_n16_p3_r4_f2_i64_d17"
+type = "bin"
+authors = ["sparq", "GPT-6"]
+compiler_version = ">=1.0.0"
+
+[dependencies]
+sparq_zk_compose_core = { path = "../compose_core" }

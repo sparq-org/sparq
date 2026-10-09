@@ -26,7 +26,6 @@ import { Command } from "cmdk";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import {
   Search,
-  Github,
   Sun,
   Moon,
   CornerDownLeft,
@@ -37,6 +36,7 @@ import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { withBasePath } from "@/lib/base-path";
 import { Badge } from "@/components/ui/badge";
+import { Github } from "@/components/github-icon";
 import {
   FLAGSHIPS,
   GROUPS,
@@ -218,7 +218,7 @@ function PaletteItem({
     <Command.Item
       // cmdk fuzzy-scores the `value`. We keep the human title as the leading token (so the
       // scorer still matches on it) and append an invisible disambiguator for uniqueness.
-      value={valueKey ? `${title} ${valueKey}` : title}
+      value={valueKey ? `${title}\u0000${valueKey}` : title}
       keywords={keywords}
       disabled={disabled}
       onSelect={onSelect}

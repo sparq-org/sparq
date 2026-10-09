@@ -133,11 +133,24 @@ fn is_value_lane(member: &str) -> bool {
     member.starts_with(VALUE_LANE_PREFIX)
 }
 
+/// Kept in lockstep with `RESULT_PREFIXES` in `bb_gates_matrix.py`.
+///
+/// [OPUS-5.5] zkp-15.1 adds the version-4 public-pattern members.
+fn is_successful_result(member: &str) -> bool {
+    ["result_v1_", "result_v2_", "result_v3_", "result_v4_"]
+        .iter()
+        .any(|prefix| member.starts_with(prefix))
+}
+
 /// The design §3.1 legality rule (mirrors `dispatch::resolve_circuit`): value-lane
 /// members are legal only for value-handle methods; string-lane members are
 /// illegal for `value-only`.
 fn expect_legal(method_key: &str, member: &str) -> bool {
-    if is_value_lane(member) {
+    if is_successful_result(member) {
+        // [GPT-6] The additive result relation authenticates whole string-canonical
+        // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
+        method_key == "string-canonical"
+    } else if is_value_lane(member) {
         matches!(method_key, "dual-leaf" | "value-only")
     } else {
         matches!(method_key, "string-canonical" | "dual-leaf")
@@ -496,4 +509,35 @@ fn committed_legality_matches_resolve_circuit() {
          (re-run bench/zk-compose/scripts/bb_gates_matrix.py):\n{}",
         errors.join("\n")
     );
+}
+
+// [GPT-6] Keep all measured result buckets in the comparison without inventing
+// compatibility with the legacy dual-leaf dispatch surface.
+#[test]
+fn successful_result_members_only_admit_string_canonical_commitments() {
+    let (_, matrix) = load();
+    let members: Vec<_> = matrix
+        .matrix
+        .iter()
+        .filter(|(member, _)| is_successful_result(member))
+        .collect();
+    // [OPUS-5.5] zkp-15.1: 30 v1-v3 buckets plus exactly the two measured v4 buckets.
+    assert_eq!(members.len(), 32);
+    let v4: Vec<&str> = members
+        .iter()
+        .map(|(member, _)| member.as_str())
+        .filter(|member| member.starts_with("result_v4_"))
+        .collect();
+    assert_eq!(
+        v4,
+        [
+            "result_v4_k1_n16_p3_r4_f0_d10",
+            "result_v4_k2_n16_p3_r4_f0_d10"
+        ]
+    );
+    for (_, row) in members {
+        assert!(row.configs["string-canonical"].legal);
+        assert!(!row.configs["dual-leaf"].legal);
+        assert!(!row.configs["value-only"].legal);
+    }
 }

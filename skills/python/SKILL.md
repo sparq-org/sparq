@@ -7,6 +7,10 @@ description: "Use the sparq RDF + SPARQL engine from Python (PyPI distribution `
 
 Python bindings (pyo3 + maturin) for the sparq RDF+SPARQL engine: a dictionary-encoded triplestore with SPARQL 1.1 query/update over the full dataset (named graphs included), opt-in RDFS / OWL-RL / Notation3 reasoning with OWL inconsistency reporting, and opt-in BM25 full-text search. Everything is reached through one class, `sparq.Graph`. The PyPI **distribution** name is `sparq-rdf` (`pip install sparq-rdf`), but the **import** name is `sparq` (`import sparq`) — the two intentionally differ because the bare `sparq` distribution name is taken on PyPI by an unrelated package.
 
+Query entry points and structural rewrites retain VERSION announcements;
+see the [version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unsupported
+or incompatible labels do not silently select REC 2013.
+
 ## Quickstart
 
 Install (no published wheel may be available yet — Alpha; build from the repo with maturin):
@@ -163,7 +167,7 @@ g4 = sparq.Graph.open("./mydb")
 - **`update()` / `reason()` / `reason_n3_with()` rebuild the immutable store (O(n) per call)** and mutate the `Graph` in place. Reasoning materialises over the **default graph**; named graphs are carried across untouched. `len(g)` counts default-graph triples only.
 - **Full-text indexes the default graph's plain + language-tagged string literals only** (typed literals like `42`/`xsd:integer` and named graphs are NOT indexed). The index is built lazily on first `text_search`/`query_text`, cached, and **invalidated by every mutating call** (`update`/`reason`/`reason_n3_with`) — the next text call rebuilds it. `query_text` without any `text:` pattern behaves exactly like `query`.
 - **`reason_n3_with(rules)`:** the graph's blank nodes are renamed under a reserved `sparqg` prefix before composition, so a blank-node label in the rules can NOT alias an existing data node. RDF 1.2 triple terms have no N3 form and are rejected there.
-- **No Cargo feature flags to set as a user:** the wheel already enables `sparq-core` `mmap` (for `save`/`open`), plus `sparq-reason` and `sparq-text`. The ZK / Noir estate is NOT part of the Python surface.
+- **No Cargo feature flags to set as a user** (other than the opt-in `arrow` for `query_arrow`): the wheel already enables `sparq-core` `mmap` (for `save`/`open`), plus `sparq-reason` and `sparq-text`. The ZK / Noir estate is NOT part of the Python surface.
 - **GIL:** long-running calls (load, query, update, reason, text search) release the GIL, so other Python threads keep running.
 
 ## See also

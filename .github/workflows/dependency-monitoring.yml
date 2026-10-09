@@ -41,7 +41,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-deny
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-deny
       # Run advisories only; capture the human-readable report. `|| true` so we
@@ -50,7 +50,7 @@ jobs:
         id: deny
         run: |
           set +e
-          REPORT="$(cargo deny check advisories 2>&1)"
+          REPORT="$(python3 scripts/rust-dependency-graphs.py deny-advisories 2>&1)"
           CODE=$?
           echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
           {

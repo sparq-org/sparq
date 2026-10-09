@@ -290,7 +290,8 @@ fn pair_corpus() -> Vec<(S, S)> {
 /// an un-normalized window.
 ///
 /// `start < 1` cases carry the F&O window semantics that `sq-3x7dl.6` fixed in the
-/// circuit and #4275 fixed in sparq-engine.
+/// circuit. sparq-engine now agrees, so every row must pass the ordinary
+/// oracle/reference equality check and remain a live circuit assertion.
 fn substring_corpus() -> Vec<(&'static str, usize, i64, i64)> {
     vec![
         // (value, cap, start, length)
@@ -1468,7 +1469,7 @@ mod tests {
         // A non-exact quotient (sq-3x7dl.4).
         assert!(DIVIDE_CORPUS.iter().any(|&(a, b)| a % b != 0));
         // Every mixed-comparison integer is out of i8 range (sq-3x7dl.5).
-        assert!(MIXED_CORPUS.iter().all(|&(n, _)| n < -128 || n > 127));
+        assert!(MIXED_CORPUS.iter().all(|&(n, _)| !(-128..=127).contains(&n)));
         // A pre-1970 dateTime (sq-3x7dl.7).
         assert!(DATETIME_CORPUS.iter().any(|&(_, y, ..)| y < 1970));
     }
