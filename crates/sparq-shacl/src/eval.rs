@@ -2842,39 +2842,37 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
         let pb = parse_bool(b.value())?;
         return Some(pa.cmp(&pb));
     }
-    if is_exact_temporal(da) && is_exact_temporal(db) {
-        // dateTime / dateTimeStamp / date go through the shared exact comparator, the
-        // one the engine uses (#3526): the ±14h mixed-timezone window is decided on
-        // exact instants, date and dateTime are disjoint (incomparable), and an
-        // ill-formed raw lexical (a timezone-free dateTimeStamp, a padded value: XSD
-        // whitespace processing does not apply to an RDF literal) compares as nothing.
-        let ta = ExactTemporal::of_lit(a.value(), da)?;
-        let tb = ExactTemporal::of_lit(b.value(), db)?;
-        return ta.compare(tb);
-    }
-    if is_date_time(da) && is_date_time(db) {
-        let (ta, tza) = timestamp(a.value(), da)?;
-        let (tb, tzb) = timestamp(b.value(), db)?;
-        if tza != tzb {
-            // XSD's ±14h rule (XSD 1.1 pt.2 §3.3.7): an untimezoned value may
-            // lie in any timezone from -14:00 to +14:00, so it denotes a 28h
-            // window of instants around its as-if-UTC timestamp. Order against
-            // a timezoned instant is DETERMINATE only when the whole window
-            // falls strictly on one side; otherwise the pair is incomparable.
-            const TZ_WINDOW_SECS: f64 = 14.0 * 3600.0;
-            let (u, z) = if tza { (tb, ta) } else { (ta, tb) };
-            let ord = if u + TZ_WINDOW_SECS < z {
-                Ordering::Less
-            } else if u - TZ_WINDOW_SECS > z {
-                Ordering::Greater
-            } else {
-                return None;
-            };
-            return Some(if tza { ord.reverse() } else { ord });
-        }
-        return ta.partial_cmp(&tb);
+    if is_date_time(da) || is_date_time(db) {
+        return cmp_temporal(a.value(), da, b.value(), db);
     }
     None
+}
+
+/// The one temporal comparison every SHACL constraint uses (`sh:lessThan`,
+/// `sh:lessThanOrEquals`, `sh:min/maxInclusive`, `sh:min/maxExclusive`), through the
+/// engine's exact comparator (#3526). `None` (incomparable, so a validation result)
+/// for a temporal paired with anything of another family: a date against a dateTime,
+/// either against an `xsd:time`, a temporal against a non-temporal. Within a family the
+/// ±14h mixed-timezone window is decided on exact instants and an ill-formed raw
+/// lexical (a timezone-free dateTimeStamp, a padded value: XSD whitespace processing
+/// does not apply to an RDF literal) compares as nothing.
+fn cmp_temporal(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
+    let time = xsd("time");
+    if da == time && db == time {
+        // An xsd:time is a dateTime on the XSD reference date (1972-12-31), where 24:00:00
+        // is the same time as 00:00:00.
+        let on_ref = |v: &str| {
+            let v = v.strip_prefix("24:00:00").map_or_else(|| v.to_owned(), |rest| format!("00:00:00{rest}"));
+            format!("1972-12-31T{v}")
+        };
+        let (a, b) = (on_ref(a), on_ref(b));
+        let dt = xsd("dateTime");
+        return ExactTemporal::of_lit(&a, &dt)?.compare(ExactTemporal::of_lit(&b, &dt)?);
+    }
+    if !(is_exact_temporal(da) && is_exact_temporal(db)) {
+        return None;
+    }
+    ExactTemporal::of_lit(a, da)?.compare(ExactTemporal::of_lit(b, db)?)
 }
 
 fn xsd(local: &str) -> String {

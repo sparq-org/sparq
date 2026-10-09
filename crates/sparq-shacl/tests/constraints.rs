@@ -1618,3 +1618,80 @@ fn in_and_has_value_use_rdf_term_membership() {
     "#;
     assert!(run(same, shapes).conforms);
 }
+
+// ---- every comparison constraint over every pair of temporal families ----
+
+/// One value per temporal family: a date, a dateTime, a dateTimeStamp (the dateTime
+/// family), and a time. The earlier of each same-family pair is first.
+const TEMPORALS: [(&str, &str); 4] = [
+    ("date", "\"2000-01-01\"^^xsd:date"),
+    ("dateTime", "\"2000-01-01T00:00:00Z\"^^xsd:dateTime"),
+    ("dateTimeStamp", "\"2000-01-02T00:00:00Z\"^^xsd:dateTimeStamp"),
+    ("time", "\"01:00:00Z\"^^xsd:time"),
+];
+
+fn family(name: &str) -> &str {
+    if name == "dateTimeStamp" {
+        "dateTime"
+    } else {
+        name
+    }
+}
+
+/// `value` against `other` under each comparison constraint; `true` = conforms.
+fn comparisons(value: &str, other: &str) -> [(&'static str, bool); 6] {
+    let pair = |c: &str| {
+        let shapes = format!(
+            "ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:v ; sh:{c} ex:w ] ."
+        );
+        run(&format!("ex:n ex:v {value} ; ex:w {other} ."), &shapes).conforms
+    };
+    let range = |c: &str| {
+        let shapes = format!(
+            "ex:S a sh:NodeShape ; sh:targetNode ex:n ; sh:property [ sh:path ex:v ; sh:{c} {other} ] ."
+        );
+        run(&format!("ex:n ex:v {value} ."), &shapes).conforms
+    };
+    [
+        ("lessThan", pair("lessThan")),
+        ("lessThanOrEquals", pair("lessThanOrEquals")),
+        ("minInclusive", range("minInclusive")),
+        ("maxInclusive", range("maxInclusive")),
+        ("minExclusive", range("minExclusive")),
+        ("maxExclusive", range("maxExclusive")),
+    ]
+}
+
+/// A temporal compared with another family is incomparable, so every comparison
+/// constraint reports it (SHACL 1.0 §4.5, §4.4): a date against a dateTime, and either
+/// against an xsd:time (which the old fallback anchored to 2000-01-01).
+#[test]
+fn every_comparison_rejects_every_mixed_temporal_pair() {
+    for (na, a) in TEMPORALS {
+        for (nb, b) in TEMPORALS {
+            if family(na) == family(nb) {
+                continue;
+            }
+            for (c, conforms) in comparisons(a, b) {
+                assert!(!conforms, "{c}: {na} {a} vs {nb} {b} must be incomparable");
+            }
+        }
+    }
+}
+
+/// The control: a same-family pair still compares, both ways round.
+#[test]
+fn every_comparison_orders_a_same_family_temporal_pair() {
+    let (_, dt) = TEMPORALS[1];
+    let (_, stamp) = TEMPORALS[2];
+    let earlier_than_later = [true, true, false, true, false, true];
+    for ((c, got), want) in comparisons(dt, stamp).into_iter().zip(earlier_than_later) {
+        assert_eq!(got, want, "{c}: dateTime vs later dateTimeStamp");
+    }
+    let times = comparisons("\"00:30:00Z\"^^xsd:time", "\"24:00:00Z\"^^xsd:time");
+    // 24:00:00 is 00:00:00, so 00:30 is after it.
+    let later_than_earlier = [false, false, true, false, true, false];
+    for ((c, got), want) in times.into_iter().zip(later_than_earlier) {
+        assert_eq!(got, want, "{c}: 00:30 vs 24:00 times");
+    }
+}
