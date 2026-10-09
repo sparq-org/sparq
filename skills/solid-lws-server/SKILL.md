@@ -285,7 +285,8 @@ What the server exposes, all discoverable from the storage description
 - **Authorization server**: metadata at `/.well-known/lws-configuration`, keys at
   `/.well-known/lws/jwks`, and RFC 8693 token exchange at `/.well-known/lws/token`.
   A Solid-OIDC ID Token is one carrying `webid` or addressed to `solid`. It must carry a
-  `webid` that is an http(s) URL (that WebID is the agent), include `solid` in `aud`, be
+  `webid` that is an http(s) URL (that WebID is the agent), have an `aud` array holding
+  both `solid` and its `azp`, be
   bound by `cnf.jkt`, and come with a `DPoP` proof of the bound key on the token request
   (RFC 9449: `htm` POST, `htu` the token endpoint, fresh `iat`, unused `jti`). Any other ID
   Token's agent is its `sub`, whose controlled identifier document names its OpenID

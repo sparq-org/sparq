@@ -155,11 +155,23 @@ pub struct DpopReplay(std::sync::Mutex<Replay>);
 /// An entry's place in expiry order: when it expires, and its key and `jti`.
 type Expiry = std::cmp::Reverse<(i64, String, String)>;
 
-/// Shrink a table left much larger than what it holds, so the slots it keeps stay within what
-/// its live entries are charged for ([`DPOP_SLOTS_PER_ENTRY`]).
+/// Rebuild a table left much larger than what it holds, so the slots it keeps stay within what
+/// its live entries are charged for ([`DPOP_SLOTS_PER_ENTRY`]). The live entries move into a new
+/// table sized for them and the old allocation is freed whole: a shrink in place may keep it.
 fn settle<K: Eq + std::hash::Hash, V>(table: &mut std::collections::HashMap<K, V>) {
     if table.capacity() > DPOP_SLOTS_PER_ENTRY * table.len() + DPOP_SPARE_SLOTS {
-        table.shrink_to(2 * table.len());
+        let mut fresh = std::collections::HashMap::with_capacity(table.len());
+        fresh.extend(table.drain());
+        *table = fresh;
+    }
+}
+
+/// As [`settle`], for the expiry order.
+fn settle_heap<T: Ord>(heap: &mut std::collections::BinaryHeap<T>) {
+    if heap.capacity() > DPOP_SLOTS_PER_ENTRY * heap.len() + DPOP_SPARE_SLOTS {
+        let mut fresh = Vec::with_capacity(heap.len());
+        fresh.extend(std::mem::take(heap).into_vec());
+        *heap = std::collections::BinaryHeap::from(fresh);
     }
 }
 
@@ -205,9 +217,7 @@ impl DpopReplay {
         }
         settle(seen);
         settle(used);
-        if expiry.capacity() > DPOP_SLOTS_PER_ENTRY * expiry.len() + DPOP_SPARE_SLOTS {
-            expiry.shrink_to(2 * expiry.len());
-        }
+        settle_heap(expiry);
         let entry = (jkt.to_string(), jti.to_string());
         if seen.contains_key(&entry) {
             return false;
@@ -791,17 +801,20 @@ async fn oidc(
         "application/ld+json, application/cid+json, application/json;q=0.9, text/turtle;q=0.8",
     )
     .await?;
-    match names_issuer(&content_type, &body, &subject, &issuer) {
-        Some(link) if link == suite.issuer_link() => {}
-        Some(IssuerLink::OpenIdProvider) => {
+    // The document must name the issuer the way the token's suite asks; naming it the other way
+    // too is fine, and naming it only the other way is refused with the reason.
+    let links = names_issuer(&content_type, &body, &subject, &issuer);
+    match (links.has(suite.issuer_link()), suite.issuer_link()) {
+        (true, _) => {}
+        (false, IssuerLink::SolidOidcIssuer) if links.open_id_provider => {
             return Err(
                 "a Solid-OIDC ID Token's WebID profile must name its solid:oidcIssuer".into(),
             )
         }
-        Some(IssuerLink::SolidOidcIssuer) => {
+        (false, IssuerLink::OpenIdProvider) if links.solid_oidc_issuer => {
             return Err("an ID Token whose subject names a solid:oidcIssuer needs a webid".into())
         }
-        None => {
+        (false, _) => {
             return Err(format!(
                 "the subject's identity document names no OpenID Provider {issuer}"
             ))
@@ -911,7 +924,16 @@ impl Suite {
     /// Whether the token is addressed as the suite requires.
     fn addressed(self, cfg: &LwsConfig, jws: &Jws) -> bool {
         match self {
-            Suite::SolidOidc => jws.audiences().iter().any(|a| a == "solid"),
+            // "The audience claim MUST be an array of values. The values MUST include the
+            // authorized party claim azp and the string solid" (Solid-OIDC, ID Token): every
+            // member it requires, in the form it requires.
+            Suite::SolidOidc => {
+                let audiences = jws.audiences();
+                let has = |v: &str| audiences.iter().any(|a| a == v);
+                jws.claims.get("aud").is_some_and(Value::is_array)
+                    && has("solid")
+                    && jws.claim_str("azp").is_some_and(has)
+            }
             Suite::LwsOidc => addressed_to_us(cfg, jws),
         }
     }
@@ -947,7 +969,9 @@ impl Admitted {
         check_times(jws, now)?;
         if !suite.addressed(cfg, jws) {
             return Err(match suite {
-                Suite::SolidOidc => "a Solid-OIDC ID Token's aud must include solid",
+                Suite::SolidOidc => {
+                    "a Solid-OIDC ID Token's aud must be an array that includes solid and its azp"
+                }
                 Suite::LwsOidc => "aud does not include this authorization server",
             }
             .into());
@@ -1002,14 +1026,36 @@ pub enum IssuerLink {
     SolidOidcIssuer,
 }
 
-/// Whether the identity document of `subject` (a compact CID JSON document, or Turtle) names
+/// Which ways an identity document names an issuer: a document may advertise its provider both
+/// ways, and each suite asks for its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct IssuerLinks {
+    pub open_id_provider: bool,
+    pub solid_oidc_issuer: bool,
+}
+
+impl IssuerLinks {
+    pub fn has(self, link: IssuerLink) -> bool {
+        match link {
+            IssuerLink::OpenIdProvider => self.open_id_provider,
+            IssuerLink::SolidOidcIssuer => self.solid_oidc_issuer,
+        }
+    }
+}
+
+/// Every way the identity document of `subject` (a compact CID JSON document, or Turtle) names
 /// `issuer` as its OpenID Provider.
-pub fn names_issuer(
+pub fn names_issuer(content_type: &str, body: &[u8], subject: &str, issuer: &str) -> IssuerLinks {
+    names_issuer_in(content_type, body, subject, issuer).unwrap_or_default()
+}
+
+fn names_issuer_in(
     content_type: &str,
     body: &[u8],
     subject: &str,
     issuer: &str,
-) -> Option<IssuerLink> {
+) -> Option<IssuerLinks> {
+    let mut links = IssuerLinks::default();
     if let Ok(doc) = serde_json::from_slice::<Value>(body) {
         if doc
             .get("id")
@@ -1035,9 +1081,7 @@ pub fn names_issuer(
                     _ => false,
                 }
         });
-        if provider {
-            return Some(IssuerLink::OpenIdProvider);
-        }
+        links.open_id_provider = provider;
         let solid = ["solid:oidcIssuer", "oidcIssuer", SOLID_OIDC_ISSUER]
             .iter()
             .any(|k| match doc.get(*k) {
@@ -1054,7 +1098,8 @@ pub fn names_issuer(
                 }),
                 _ => false,
             });
-        return solid.then_some(IssuerLink::SolidOidcIssuer);
+        links.solid_oidc_issuer = solid;
+        return Some(links);
     }
     let ct = content_type
         .split(';')
@@ -1067,7 +1112,7 @@ pub fn names_issuer(
         || ct.is_empty()
         || ct == "text/plain")
     {
-        return None;
+        return Some(links);
     }
     let base = subject.split('#').next().unwrap_or(subject);
     let parser = oxttl::TurtleParser::new().with_base_iri(base).ok()?;
@@ -1097,12 +1142,10 @@ pub fn names_issuer(
     }
     let me = oxrdf::NamedOrBlankNode::NamedNode(oxrdf::NamedNode::new(subject).ok()?);
     let of_subject = by_subject.get(&me).map(Vec::as_slice).unwrap_or_default();
-    if of_subject.iter().any(|t| {
+    links.solid_oidc_issuer = of_subject.iter().any(|t| {
         t.predicate.as_str() == SOLID_OIDC_ISSUER
             && iri(&t.object).is_some_and(|o| same_issuer(o, issuer))
-    }) {
-        return Some(IssuerLink::SolidOidcIssuer);
-    }
+    });
     let provider_type = format!("{LWS_NS}OpenIdProvider");
     for t in of_subject
         .iter()
@@ -1126,10 +1169,11 @@ pub fn names_issuer(
                 && iri(&u.object).is_some_and(|o| same_issuer(o, issuer))
         });
         if typed && endpoint {
-            return Some(IssuerLink::OpenIdProvider);
+            links.open_id_provider = true;
+            break;
         }
     }
-    None
+    Some(links)
 }
 
 /// How many triples of an identity document are read.
@@ -1346,6 +1390,49 @@ mod tests {
         held
     }
 
+    /// The one way a document names an issuer, for documents that name it at most one way.
+    fn first_link(
+        content_type: &str,
+        body: &[u8],
+        subject: &str,
+        issuer: &str,
+    ) -> Option<IssuerLink> {
+        let links = names_issuer(content_type, body, subject, issuer);
+        assert!(
+            !(links.open_id_provider && links.solid_oidc_issuer),
+            "both ways"
+        );
+        [IssuerLink::OpenIdProvider, IssuerLink::SolidOidcIssuer]
+            .into_iter()
+            .find(|l| links.has(*l))
+    }
+
+    /// Review finding: a document advertising its provider both ways answered with the first
+    /// link found, so a Solid-OIDC token whose WebID also listed a CID service was refused. Every
+    /// link the document holds is found, and each suite checks for its own.
+    #[test]
+    fn documents_may_name_their_issuer_both_ways() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let both = IssuerLinks {
+            open_id_provider: true,
+            solid_oidc_issuer: true,
+        };
+        let doc = json!({"id": s, "solid:oidcIssuer": op, "service": [
+            {"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}]});
+        assert_eq!(
+            names_issuer("application/json", doc.to_string().as_bytes(), s, op),
+            both
+        );
+        let ttl = format!(
+            "@prefix cid: <https://www.w3.org/ns/cid/v1#> . <{s}> <{SOLID_OIDC_ISSUER}> <{op}> ; cid:service [ a <https://www.w3.org/ns/lws#OpenIdProvider> ; cid:serviceEndpoint <{op}> ] ."
+        );
+        assert_eq!(names_issuer("text/turtle", ttl.as_bytes(), s, op), both);
+        for suite in Suite::ALL {
+            assert!(both.has(suite.issuer_link()), "{suite:?}");
+        }
+    }
+
     /// Review finding: one key could fill the whole replay cache, refusing every other client's
     /// proofs until its entries expired, and each refusal scanned the cache. A key holds at most
     /// [`MAX_DPOP_BYTES_PER_KEY`] of live entries, and entries leave in expiry order.
@@ -1472,8 +1559,45 @@ mod tests {
             now += 120;
             assert!(replay.first_use(&OWNER, "k", &format!("after{round}"), now + 60, now));
             assert!(footprint(&replay) <= held_bytes(&replay) + spare);
-            assert!(replay.0.lock().unwrap().seen.capacity() <= DPOP_SPARE_SLOTS + 4);
+            // Held to the allocations themselves, not to what the tables hold.
+            let r = replay.0.lock().unwrap();
+            let bound = |len: usize| DPOP_SLOTS_PER_ENTRY * len + DPOP_SPARE_SLOTS;
+            assert!(
+                r.seen.capacity() <= bound(r.seen.len()),
+                "{}",
+                r.seen.capacity()
+            );
+            assert!(
+                r.used.capacity() <= bound(r.used.len()),
+                "{}",
+                r.used.capacity()
+            );
+            assert!(
+                r.expiry.capacity() <= bound(r.expiry.len()),
+                "{}",
+                r.expiry.capacity()
+            );
         }
+    }
+
+    /// Review finding: a shrink in place may keep a table's allocation, so the bound on what the
+    /// replay cache holds rested on the allocator. A settled table is rebuilt at the size of what
+    /// it holds; its capacity, whatever it was, comes back within the bound.
+    #[test]
+    fn settled_tables_are_rebuilt_to_size() {
+        let mut table: std::collections::HashMap<u64, u64> = (0..100_000).map(|i| (i, i)).collect();
+        table.retain(|k, _| *k < 3);
+        let mut heap: std::collections::BinaryHeap<u64> = (0..100_000).collect();
+        while heap.len() > 3 {
+            heap.pop();
+        }
+        settle(&mut table);
+        settle_heap(&mut heap);
+        let bound = DPOP_SLOTS_PER_ENTRY * 3 + DPOP_SPARE_SLOTS;
+        assert!(table.capacity() <= bound, "{}", table.capacity());
+        assert!(heap.capacity() <= bound, "{}", heap.capacity());
+        assert_eq!(table.len(), 3);
+        assert_eq!(heap.into_sorted_vec().len(), 3);
     }
 
     /// Review finding: a DPoP proof's key was matched to the token's `cnf.jkt` by the thumbprint
@@ -1607,13 +1731,13 @@ mod tests {
             .map(|i| format!("<{s}> <urn:p> p:o{i} .\n"))
             .collect();
         let doc = format!("@prefix p: <{long}> .\n<{s}> <http://www.w3.org/ns/solid/terms#oidcIssuer> <{op}> .\n{uses}");
-        assert_eq!(names_issuer("text/turtle", doc.as_bytes(), s, op), None);
+        assert_eq!(first_link("text/turtle", doc.as_bytes(), s, op), None);
         let few: String = (0..5)
             .map(|i| format!("<{s}> <urn:p> p:o{i} .\n"))
             .collect();
         let doc = format!("@prefix p: <{long}> .\n<{s}> <http://www.w3.org/ns/solid/terms#oidcIssuer> <{op}> .\n{few}");
         assert_eq!(
-            names_issuer("text/turtle", doc.as_bytes(), s, op),
+            first_link("text/turtle", doc.as_bytes(), s, op),
             Some(IssuerLink::SolidOidcIssuer)
         );
     }
@@ -1741,11 +1865,11 @@ mod tests {
         let cases: Vec<(Suite, Value)> = vec![
             (
                 Suite::SolidOidc,
-                json!({"sub": alice, "webid": alice, "aud": ["solid"]}),
+                json!({"sub": alice, "webid": alice, "aud": ["solid", "https://app.example/"]}),
             ),
             (
                 Suite::SolidOidc,
-                json!({"sub": "acct-1", "webid": alice, "aud": ["solid", cfg.issuer()]}),
+                json!({"sub": "acct-1", "webid": alice, "aud": ["solid", cfg.issuer(), "https://app.example/"]}),
             ),
             (Suite::LwsOidc, json!({"sub": bob, "aud": [cfg.issuer()]})),
             (Suite::LwsOidc, json!({"sub": bob, "aud": cfg.issuer()})),
@@ -1819,6 +1943,16 @@ mod tests {
                 assert!(exchange(c, true).await.is_err(), "{suite:?} {extra} {aud}");
             }
         }
+        // Review finding: a Solid-OIDC token's audience was checked for `solid` alone. It must
+        // be an array holding both `solid` and the token's `azp`.
+        for aud in [
+            json!("solid"),
+            json!(["solid"]),
+            json!(["solid", "https://other.example/"]),
+        ] {
+            let c = full(&json!({"sub": alice, "webid": alice, "aud": aud}), true);
+            assert!(exchange(c, true).await.is_err(), "{aud}");
+        }
         // The finding: a webid without `solid` among the audiences is a Solid-OIDC token all
         // the same, and is refused as one.
         let addressed_to_us = json!({"sub": alice, "webid": alice, "aud": [cfg.issuer()]});
@@ -1839,7 +1973,7 @@ mod tests {
         let now = jose::now_secs();
         let id_token = |cnf: bool| {
             let mut claims = json!({"iss": base, "sub": alice, "webid": alice,
-                "azp": "https://app.example/", "aud": ["solid"], "iat": now, "exp": now + 300});
+                "azp": "https://app.example/", "aud": ["solid", "https://app.example/"], "iat": now, "exp": now + 300});
             if cnf {
                 claims["cnf"] = json!({"jkt": client.thumbprint()});
             }
@@ -1876,7 +2010,7 @@ mod tests {
         let respelled = {
             let claims = json!({"iss": format!("{base}/"), "sub": alice, "webid": alice,
                 "azp": "https://app.example/",
-                "aud": ["solid"], "iat": now, "exp": now + 300, "cnf": {"jkt": client.thumbprint()}});
+                "aud": ["solid", "https://app.example/"], "iat": now, "exp": now + 300, "cnf": {"jkt": client.thumbprint()}});
             op.sign_jws(serde_json::Map::new(), &claims)
         };
         let proof = dpop_proof(&client, "POST", &htu, now, "w");
@@ -1886,7 +2020,7 @@ mod tests {
         // `webid` whatever shape `sub` has.
         let account = {
             let claims = json!({"iss": base, "sub": format!("{base}/accounts/123"), "webid": alice,
-                "azp": "https://app.example/", "aud": ["solid"], "iat": now, "exp": now + 300,
+                "azp": "https://app.example/", "aud": ["solid", "https://app.example/"], "iat": now, "exp": now + 300,
                 "cnf": {"jkt": client.thumbprint()}});
             op.sign_jws(serde_json::Map::new(), &claims)
         };
@@ -1896,9 +2030,12 @@ mod tests {
         // Solid-OIDC token must carry a `webid` that is an http(s) URL, and a subject whose
         // profile names a `solid:oidcIssuer` is reached only through one.
         for (aud, webid) in [
-            (json!(["solid"]), None),
-            (json!(["solid"]), Some(json!(42))),
-            (json!(["solid"]), Some(json!("urn:x:alice"))),
+            (json!(["solid", "https://app.example/"]), None),
+            (json!(["solid", "https://app.example/"]), Some(json!(42))),
+            (
+                json!(["solid", "https://app.example/"]),
+                Some(json!("urn:x:alice")),
+            ),
             (json!([cfg.issuer()]), None),
         ] {
             let mut claims = json!({"iss": base, "sub": alice, "azp": "https://app.example/",
@@ -2285,11 +2422,11 @@ mod tests {
         let doc = json!({"id": s, "service": [{"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}]});
         let body = doc.to_string();
         assert_eq!(
-            names_issuer("application/json", body.as_bytes(), s, op),
+            first_link("application/json", body.as_bytes(), s, op),
             Some(IssuerLink::OpenIdProvider)
         );
         assert_eq!(
-            names_issuer(
+            first_link(
                 "application/json",
                 body.as_bytes(),
                 s,
@@ -2299,18 +2436,18 @@ mod tests {
         );
         let ttl = format!("<{s}> <{SOLID_OIDC_ISSUER}> <{op}/> .");
         assert_eq!(
-            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            first_link("text/turtle", ttl.as_bytes(), s, op),
             Some(IssuerLink::SolidOidcIssuer)
         );
         let ttl = format!(
             "@prefix cid: <https://www.w3.org/ns/cid/v1#> . <{s}> cid:service [ a <https://www.w3.org/ns/lws#OpenIdProvider> ; cid:serviceEndpoint <{op}> ] ."
         );
         assert_eq!(
-            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            first_link("text/turtle", ttl.as_bytes(), s, op),
             Some(IssuerLink::OpenIdProvider)
         );
         assert_eq!(
-            names_issuer("text/turtle", ttl.as_bytes(), "https://bob.example/id", op),
+            first_link("text/turtle", ttl.as_bytes(), "https://bob.example/id", op),
             None
         );
     }
@@ -2341,18 +2478,18 @@ mod tests {
         // Within the caps the provider is found wherever it is.
         let ttl = doc(MAX_IDENTITY_SERVICES - 1, false);
         assert_eq!(
-            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            first_link("text/turtle", ttl.as_bytes(), s, op),
             Some(IssuerLink::OpenIdProvider)
         );
         // Thousands of services: quick, and only the first ones are looked at.
         let ttl = doc(3000, true);
         let started = std::time::Instant::now();
         assert_eq!(
-            names_issuer("text/turtle", ttl.as_bytes(), s, op),
+            first_link("text/turtle", ttl.as_bytes(), s, op),
             Some(IssuerLink::OpenIdProvider)
         );
         let ttl = doc(3000, false);
-        assert_eq!(names_issuer("text/turtle", ttl.as_bytes(), s, op), None);
+        assert_eq!(first_link("text/turtle", ttl.as_bytes(), s, op), None);
         assert!(
             started.elapsed() < std::time::Duration::from_secs(3),
             "{:?}",
@@ -2366,10 +2503,7 @@ mod tests {
             json!({"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}),
         );
         let body = json!({"id": s, "service": services}).to_string();
-        assert_eq!(
-            names_issuer("application/json", body.as_bytes(), s, op),
-            None
-        );
+        assert_eq!(first_link("application/json", body.as_bytes(), s, op), None);
     }
 
     #[test]
