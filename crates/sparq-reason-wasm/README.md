@@ -1,7 +1,7 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — tier-b W-reason WASM showcase bundle. -->
+<!-- sq-inzv: full-template README — tier-b W-reason WASM showcase bundle. -->
 # sparq-reason-wasm
 
-**The tier-b "W-reason" WebAssembly bundle** ([OPUS-4.8] sq-6qw3) for
+**The tier-b "W-reason" WebAssembly bundle** (sq-6qw3) for
 [`sparq-reason`](../sparq-reason/README.md) — RDFS / OWL 2 RL / Notation3
 forward-chaining **inference, live in the browser tab**.
 

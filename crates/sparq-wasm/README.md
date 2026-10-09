@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — the published @sparq-org/sparq browser/WASM bundle. -->
+<!-- sq-inzv: full-template README — the published @sparq-org/sparq browser/WASM bundle. -->
 # sparq-wasm
 
 The sparq parser + triplestore + SPARQL engine compiled to WebAssembly for the

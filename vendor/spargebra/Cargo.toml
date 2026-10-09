@@ -51,6 +51,10 @@ sep-0002 = []
 sep-0006 = []
 sparql-12 = ["oxrdf/rdf-12"]
 standard-unicode-escaping = []
+# Detached exact-evaluator lowering; not enabled in the lean engine.
+sparq-deterministic-paths = []
+# Entropy-free anonymous query/list/template labels for graph-result guests.
+sparq-deterministic-blank-nodes = []
 
 [lib]
 name = "spargebra"

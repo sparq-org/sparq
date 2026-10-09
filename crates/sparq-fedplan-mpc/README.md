@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2 / sq-pwr.3 / sq-xkrt; [OPUS-5] sq-1fo4: internal README for a publish=false crate; full design lives in research/mpc-untrusted-planner-routing-design.md. -->
+<!-- sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2 / sq-pwr.3 / sq-xkrt; sq-1fo4: internal README for a publish=false crate; full design lives in research/mpc-untrusted-planner-routing-design.md. -->
 # sparq-fedplan-mpc
 
 The opt-in seam between cost-based federated source selection (`sparq-fedplan`) and MPC-over-federated-SPARQL routing (`sparq-mpc`) — without coupling the
