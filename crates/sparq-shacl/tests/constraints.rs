@@ -1593,3 +1593,28 @@ fn per_statement_override_on_sh_property_does_not_govern_nested_results() {
         r.to_text()
     );
 }
+
+/// #3526: `sh:in` and `sh:hasValue` are RDF-term membership (SHACL 1.0 §4.8.1–4.8.2).
+/// A distinct literal with the same value is not a member, for numerics and for two
+/// dateTime lexicals that denote one instant.
+#[test]
+fn in_and_has_value_use_rdf_term_membership() {
+    let shapes = r#"
+        ex:S a sh:NodeShape ; sh:targetNode ex:a ;
+            sh:property [ sh:path ex:n ; sh:in ( 1 ) ] ;
+            sh:property [ sh:path ex:t ; sh:hasValue "2000-01-01T00:00:59.99999999999999999999Z"^^xsd:dateTime ] .
+    "#;
+    let data = r#"
+        ex:a ex:n "01"^^xsd:integer ;
+             ex:t "2000-01-01T00:00:59.999999999999999999990Z"^^xsd:dateTime .
+    "#;
+    let r = run(data, shapes);
+    assert_eq!(count_component(&r, "InConstraintComponent"), 1, "{r:?}");
+    assert_eq!(count_component(&r, "HasValueConstraintComponent"), 1, "{r:?}");
+    // The identical terms are members.
+    let same = r#"
+        ex:a ex:n 1 ;
+             ex:t "2000-01-01T00:00:59.99999999999999999999Z"^^xsd:dateTime .
+    "#;
+    assert!(run(same, shapes).conforms);
+}

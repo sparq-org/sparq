@@ -631,41 +631,17 @@ impl<'a> Validator<'a> {
         id
     }
 
-    /// Id twin of the `sh:hasValue` membership check: does any id in `ids`
-    /// denote a term SHACL-equal ([`equal_value`]) to `t`? Exact term equality
-    /// is id equality (the dictionary is injective; a `t` absent from the
-    /// dictionary can exactly-equal no data id); value equality (SPARQL `=`
-    /// families) only relates LITERALS, so only literal ids materialise — and
-    /// only when `t` is itself a literal.
+    /// Id twin of the `sh:hasValue` membership check: does any id in `ids` denote `t`?
+    /// SHACL membership is RDF-term equality, which is id equality (the dictionary is
+    /// injective; a `t` absent from the dictionary equals no data id).
     fn equal_value_ids(&mut self, ids: &[Id], t: &Term) -> bool {
-        if let Some(tid) = self.term_id(t) {
-            if ids.contains(&tid) {
-                return true;
-            }
-        }
-        if !matches!(t, Term::Literal(_)) {
-            return false;
-        }
-        ids.iter().any(|&v| {
-            is_literal_id(&self.data.graph().dict, v)
-                && matches!(cmp_terms(&self.data.term_of(v), t), Some(Ordering::Equal))
-        })
+        self.term_id(t).is_some_and(|tid| ids.contains(&tid))
     }
 
-    /// Id twin of the per-value `sh:in` membership check (`any(equal_value)`),
-    /// under the same exact-vs-value split as [`Self::equal_value_ids`].
+    /// Id twin of the per-value `sh:in` membership check (`any(equal_value)`): RDF-term
+    /// equality, so id equality.
     fn in_list_id(&mut self, v: Id, list: &[Term]) -> bool {
-        if list.iter().any(|m| self.term_id(m) == Some(v)) {
-            return true;
-        }
-        if !is_literal_id(&self.data.graph().dict, v)
-            || !list.iter().any(|m| matches!(m, Term::Literal(_)))
-        {
-            return false;
-        }
-        let vt = self.data.term_of(v);
-        list.iter()
-            .any(|m| matches!(cmp_terms(&vt, m), Some(Ordering::Equal)))
+        list.iter().any(|m| self.term_id(m) == Some(v))
     }
 
     /// Id-level `sh:closed` scan of one value node: walks the value's
@@ -2830,13 +2806,11 @@ fn lang_matches(lang: &str, range: &str) -> bool {
     lang == range || (lang.starts_with(&range) && lang.as_bytes().get(range.len()) == Some(&b'-'))
 }
 
-/// SHACL "equal values" (sh:hasValue / sh:in): same term, or literals equal
-/// under SPARQL `=` value semantics (numeric / boolean / date-time families).
+/// SHACL membership for `sh:hasValue` / `sh:in`: RDF-term equality (SHACL 1.0
+/// §4.8.1–4.8.2), not SPARQL value equality. Two distinct literals with one value
+/// (`"1"^^xsd:integer` and `"01"^^xsd:integer`) are different members.
 fn equal_value(a: &Term, b: &Term) -> bool {
-    if a == b {
-        return true;
-    }
-    matches!(cmp_terms(a, b), Some(Ordering::Equal))
+    a == b
 }
 
 /// SPARQL-operator-style comparison of two terms; `None` when not comparable
@@ -2872,9 +2846,10 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
         // dateTime / dateTimeStamp / date go through the shared exact comparator, the
         // one the engine uses (#3526): the ±14h mixed-timezone window is decided on
         // exact instants, date and dateTime are disjoint (incomparable), and an
-        // ill-formed value (e.g. a timezone-free dateTimeStamp) compares as nothing.
-        let ta = ExactTemporal::of_lit(xsd_collapse(a.value()), da)?;
-        let tb = ExactTemporal::of_lit(xsd_collapse(b.value()), db)?;
+        // ill-formed raw lexical (a timezone-free dateTimeStamp, a padded value: XSD
+        // whitespace processing does not apply to an RDF literal) compares as nothing.
+        let ta = ExactTemporal::of_lit(a.value(), da)?;
+        let tb = ExactTemporal::of_lit(b.value(), db)?;
         return ta.compare(tb);
     }
     if is_date_time(da) && is_date_time(db) {
@@ -2936,12 +2911,6 @@ fn is_exact_temporal(dt: &str) -> bool {
         return false;
     };
     matches!(local, "dateTime" | "date" | "dateTimeStamp")
-}
-
-/// The XSD `whiteSpace="collapse"` facet for a single-token lexical: strip the
-/// leading and trailing XSD whitespace (space, tab, CR, LF) only.
-fn xsd_collapse(v: &str) -> &str {
-    v.trim_matches([' ', '\t', '\r', '\n'])
 }
 
 fn is_date_time(dt: &str) -> bool {
@@ -3404,8 +3373,8 @@ mod tests {
                 &typed(" 2000-01-01T00:00:00Z\n", "dateTimeStamp"),
                 &lit("2000-01-01T00:00:00Z")
             ),
-            Some(Ordering::Equal),
-            "XSD whitespace collapse applies before parsing"
+            None,
+            "a padded RDF literal is ill-typed, so it compares as nothing"
         );
     }
 }
