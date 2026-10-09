@@ -1059,14 +1059,20 @@ fn names_issuer_in(
     let mut links = IssuerLinks::default();
     let base = subject.split('#').next().unwrap_or(subject);
     if let Ok(doc) = serde_json::from_slice::<Value>(body) {
-        // A compact document about the subject is read by its keys; any other JSON-LD form
-        // (expanded, flattened, a graph) is read as RDF, without loading remote contexts.
-        if doc
+        // A compact document about the subject whose terms are all defined by a context known
+        // here (or that has none: CID documents may be read as plain JSON) is read by its keys.
+        // Any other JSON-LD form (expanded, flattened, a graph, an inline or scoped context that
+        // could give a key another meaning) is read as RDF, without loading remote contexts, and
+        // only when what it can expand to is bounded (see [`expansion_bound`]).
+        let about_subject = doc
             .get("id")
             .or_else(|| doc.get("@id"))
             .and_then(Value::as_str)
-            != Some(subject)
-        {
+            == Some(subject);
+        if !(about_subject && known_contexts_only(&doc)) {
+            if expansion_bound(&doc, body.len(), base) > super::expansion_budget(body.len()) {
+                return None;
+            }
             let parser = oxjsonld::JsonLdParser::new().with_base_iri(base).ok()?;
             let triples = parser
                 .for_slice(body)
@@ -1092,22 +1098,22 @@ fn names_issuer_in(
                 }
         });
         links.open_id_provider = provider;
-        let solid = ["solid:oidcIssuer", "oidcIssuer", SOLID_OIDC_ISSUER]
-            .iter()
-            .any(|k| match doc.get(*k) {
-                Some(Value::String(e)) => same_issuer(e, issuer),
-                Some(Value::Object(o)) => o
-                    .get("@id")
-                    .or_else(|| o.get("id"))
-                    .and_then(Value::as_str)
-                    .is_some_and(|e| same_issuer(e, issuer)),
-                Some(Value::Array(a)) => a.iter().any(|v| {
-                    v.as_str()
-                        .or_else(|| v.get("@id").or_else(|| v.get("id")).and_then(Value::as_str))
-                        .is_some_and(|e| same_issuer(e, issuer))
-                }),
-                _ => false,
-            });
+        // The known contexts do not define `solid:` or `oidcIssuer`: only the full IRI is the
+        // Solid term here (a document that defines a shorter one is read as RDF above).
+        let solid = [SOLID_OIDC_ISSUER].iter().any(|k| match doc.get(*k) {
+            Some(Value::String(e)) => same_issuer(e, issuer),
+            Some(Value::Object(o)) => o
+                .get("@id")
+                .or_else(|| o.get("id"))
+                .and_then(Value::as_str)
+                .is_some_and(|e| same_issuer(e, issuer)),
+            Some(Value::Array(a)) => a.iter().any(|v| {
+                v.as_str()
+                    .or_else(|| v.get("@id").or_else(|| v.get("id")).and_then(Value::as_str))
+                    .is_some_and(|e| same_issuer(e, issuer))
+            }),
+            _ => false,
+        });
         links.solid_oidc_issuer = solid;
         return Some(links);
     }
@@ -1131,6 +1137,67 @@ fn names_issuer_in(
         subject,
         issuer,
     )
+}
+
+/// Remote contexts whose definitions of the keys read from a compact document (`id`, `type`,
+/// `service`, `serviceEndpoint`) are the CID ones.
+const KNOWN_CONTEXTS: &[&str] = &[
+    super::CID_CONTEXT,
+    "https://www.w3.org/ns/did/v1",
+    super::LWS_CONTEXT,
+];
+
+/// Whether every context in `doc` is a [`KNOWN_CONTEXTS`] reference at the top level (or there
+/// is none): no inline definition, and no context nested anywhere below, could change what a key
+/// means.
+fn known_contexts_only(doc: &Value) -> bool {
+    let top = match doc.get("@context") {
+        None => true,
+        Some(Value::String(c)) => KNOWN_CONTEXTS.contains(&c.as_str()),
+        Some(Value::Array(a)) => a
+            .iter()
+            .all(|c| c.as_str().is_some_and(|c| KNOWN_CONTEXTS.contains(&c))),
+        Some(_) => false,
+    };
+    fn nested(v: &Value) -> bool {
+        match v {
+            Value::Object(o) => o.iter().any(|(k, v)| k == "@context" || nested(v)),
+            Value::Array(a) => a.iter().any(nested),
+            _ => false,
+        }
+    }
+    let below = match doc {
+        Value::Object(o) => o.iter().any(|(k, v)| k != "@context" && nested(v)),
+        other => nested(other),
+    };
+    top && !below
+}
+
+/// An upper bound on the bytes `doc` (`len` bytes, read against `base`) can expand to, counted
+/// before any expansion. Every expanded term or IRI is at most every inline context's bytes
+/// (term definitions chain at most through all of them) plus the base, plus its own bytes in the
+/// document; there are at most `len / 2` of them. A remote context is never loaded, so inline
+/// ones are all there are.
+fn expansion_bound(doc: &Value, len: usize, base: &str) -> usize {
+    fn contexts(v: &Value) -> usize {
+        match v {
+            Value::Object(o) => o
+                .iter()
+                .map(|(k, v)| {
+                    if k == "@context" {
+                        serde_json::to_string(v).map_or(usize::MAX, |s| s.len())
+                    } else {
+                        contexts(v)
+                    }
+                })
+                .fold(0, usize::saturating_add),
+            Value::Array(a) => a.iter().map(contexts).fold(0, usize::saturating_add),
+            _ => 0,
+        }
+    }
+    (len / 2)
+        .saturating_mul(contexts(doc).saturating_add(base.len()))
+        .saturating_add(len)
 }
 
 /// The issuer links of `subject` among the triples of its identity document (of `len` bytes).
@@ -1443,7 +1510,7 @@ mod tests {
             open_id_provider: true,
             solid_oidc_issuer: true,
         };
-        let doc = json!({"id": s, "solid:oidcIssuer": op, "service": [
+        let doc = json!({"id": s, SOLID_OIDC_ISSUER: op, "service": [
             {"type": "https://www.w3.org/ns/lws#OpenIdProvider", "serviceEndpoint": op}]});
         assert_eq!(
             names_issuer("application/json", doc.to_string().as_bytes(), s, op),
@@ -2115,6 +2182,67 @@ mod tests {
         ] {
             assert!(check_times(&at(bad.clone()), now).is_err(), "{bad}");
         }
+    }
+
+    /// Review finding: a compact document was read by its keys whatever its context said, so a
+    /// context could give `oidcIssuer` (or `service`) another meaning and still be read as the
+    /// Solid (or CID) term; and a document was expanded with no bound on what a short inline
+    /// context could make of it. Only known contexts are read by keys, and a document that could
+    /// expand past the budget is refused before it is expanded.
+    #[test]
+    fn identity_documents_are_read_as_their_contexts_say() {
+        let me = "https://alice.example/#me";
+        let op = "https://op.example/";
+        // An inline context that maps `oidcIssuer` to an unrelated term.
+        let remapped = json!({
+            "@context": {"oidcIssuer": "https://example.org/notTheIssuer"},
+            "id": me,
+            "oidcIssuer": op,
+        })
+        .to_string();
+        assert!(
+            !names_issuer("application/ld+json", remapped.as_bytes(), me, op).solid_oidc_issuer
+        );
+        // A scoped context below the top level is not read by keys either.
+        let scoped = json!({
+            "@context": super::super::CID_CONTEXT,
+            "id": me,
+            "service": [{
+                "@context": {"serviceEndpoint": "https://example.org/elsewhere"},
+                "type": "OpenIdProvider",
+                "serviceEndpoint": op,
+            }],
+        })
+        .to_string();
+        assert!(!names_issuer("application/ld+json", scoped.as_bytes(), me, op).open_id_provider);
+        // The full Solid IRI is read by key under a known context.
+        let known = json!({
+            "@context": super::super::CID_CONTEXT,
+            "id": me,
+            SOLID_OIDC_ISSUER: {"id": op},
+        })
+        .to_string();
+        assert!(names_issuer("application/ld+json", known.as_bytes(), me, op).solid_oidc_issuer);
+        // A short document whose inline context defines a long term, used many times, could
+        // expand far past its size: it is refused before it is expanded.
+        let long = format!("https://e.example/{}", "x".repeat(8 * 1024));
+        let mut amplified = serde_json::Map::new();
+        amplified.insert("@context".into(), json!({"t": long}));
+        amplified.insert("@id".into(), json!(me));
+        amplified.insert(
+            "t".into(),
+            Value::Array((0..4096).map(|i| json!({"t": i})).collect()),
+        );
+        let amplified = Value::Object(amplified);
+        let body = amplified.to_string();
+        assert!(
+            expansion_bound(&amplified, body.len(), me)
+                > super::super::expansion_budget(body.len())
+        );
+        assert_eq!(
+            names_issuer("application/ld+json", body.as_bytes(), me, op),
+            IssuerLinks::default()
+        );
     }
 
     /// Review finding: an identity document served as expanded JSON-LD (the representation the
