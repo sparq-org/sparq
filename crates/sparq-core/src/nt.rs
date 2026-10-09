@@ -274,7 +274,7 @@ fn span_triple_term(b: &[u8], i: usize, depth: usize) -> Result<usize, String> {
 /// index just past it. Mirrors [`literal`]'s grammar without interning.
 #[cfg(feature = "parallel")]
 fn span_literal(b: &[u8], i: usize) -> Result<usize, String> {
-    let (_vs, _ve, _vesc, after) = scan_string(b, i)?;
+    let (_value, after) = lex_string(b, i)?;
     match b.get(after) {
         Some(b'^') if b.get(after + 1) == Some(&b'^') => {
             let open = after + 2;
@@ -512,8 +512,9 @@ fn validate_chunk_utf8(bytes: &[u8], format: &str) -> Result<(), String> {
 ///   (every other loop exit returns `Err` before any span is taken). The `\` escape skip can only ever step over bytes,
 ///   never change which byte the closer test matched.
 /// * `blank` and `graph_key` — `x = i + 2` past the ASCII `_:`; `y` from `blank_label`,
-///   which stops at an ASCII non-label byte (or `b.len()`; non-ASCII bytes are consumed whole)
-///   and then backs over ASCII `.` bytes.
+///   which stops at `b.len()`, an ASCII non-label byte, or the LEAD byte of a rejected
+///   non-ASCII scalar (accepted scalars are consumed whole), then backs over ASCII `.` bytes.
+///   Its one-scalar decode slices `b[j..j + len]` from a lead byte by that byte's UTF-8 width.
 /// * `literal`'s `@lang` tag — `x = after + 1` past the ASCII `@`; `y` is the first index whose
 ///   byte fails `is_ascii_alphanumeric() || == b'-'`, i.e. either `b.len()` or the index OF a
 ///   non-ASCII byte. A non-ASCII byte reached by scanning forward over ASCII bytes in a valid
@@ -643,7 +644,8 @@ fn version_directive(b: &[u8], i: usize) -> Result<usize, String> {
     if b.get(j) != Some(&b'"') {
         return Err(format!("N-Triples: VERSION needs a quoted version string at byte {j}"));
     }
-    let (_s, _e, _esc, mut j) = scan_string(b, j)?;
+    // The value is ignored, but it goes through the same lexer as a literal's.
+    let (_value, mut j) = lex_string(b, j)?;
     while matches!(b.get(j), Some(b' ' | b'\t')) {
         j += 1;
     }
@@ -683,6 +685,17 @@ fn scan_string(b: &[u8], open: usize) -> Result<(usize, usize, bool, usize), Str
         }
     }
     Err(format!("N-Triples: unterminated delimiter from byte {open}"))
+}
+
+/// THE lexer for a `STRING_LITERAL_QUOTE` (`'"' ([^#x22#x5C#xA#xD] | ECHAR | UCHAR)* '"'`):
+/// every quoted string — literal values on every entry point, the N-Quads span walk, and
+/// `VERSION` specifiers — goes through here, so all of them get the same raw-line-break,
+/// ECHAR and UCHAR (scalar-value) checks. Returns the decoded value and the index past the
+/// closing quote.
+#[inline]
+fn lex_string(b: &[u8], open: usize) -> Result<(Cow<'_, str>, usize), String> {
+    let (start, end, esc, next) = scan_string(b, open)?;
+    Ok((decode(&b[start..end], esc)?, next))
 }
 
 /// Scans `<...>` returning the (escaped?) content range and the index past `>` (used only by
@@ -806,40 +819,62 @@ fn iri(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
 }
 
 /// End index (exclusive) of a `BLANK_NODE_LABEL` body starting at `start` (the byte after
-/// `_:`): `(PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?`. The scan runs over label bytes
-/// (ASCII `[A-Za-z0-9_.-]`, plus any non-ASCII byte: the Unicode PN_CHARS ranges are only
-/// checked for the first character) and then backs over trailing `.` bytes, which are the statement terminator, not
+/// `_:`): `(PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?`. The scan takes ASCII bytes
+/// through a fast path and decodes each non-ASCII scalar against the full `PN_CHARS_BASE` /
+/// `PN_CHARS` ranges, stopping at the first character that cannot continue the label, then
+/// backs over trailing `.` bytes, which are the statement terminator, not
 /// part of the label (`_:a.b` → `a.b`; `_:abc.` → `abc`, matching oxttl). Stopping at the first
 /// non-label byte lets a label abut the next term (`_:s<http://p>`, W3C `minimal_whitespace`);
-/// an empty label or one starting with `-` / `.` / a non-`PN_CHARS_U` combining character such
-/// as U+00B7 is an error (`nt-syntax-bad-bnode-01`), and a
-/// stray `:` is left for the caller to reject as the next term (`nt-syntax-bad-bnode-02`).
+/// a label whose first character is not `PN_CHARS_U` or a digit (`-`, `.`, U+00B7, U+00D7, ...)
+/// is empty and so an error (`nt-syntax-bad-bnode-01`); a non-label character later in the
+/// label (a stray `:` or U+00D7) ends it and is left for the caller to reject as the next
+/// term (`nt-syntax-bad-bnode-02`).
 /// The single source of truth shared by [`blank`] (interning), [`span_term`] (no-intern span)
 /// and [`graph_key`] (graph field) so the three never diverge.
 fn blank_label(b: &[u8], start: usize) -> Result<usize, String> {
     let mut j = start;
-    while j < b.len() && (b[j].is_ascii_alphanumeric() || matches!(b[j], b'_' | b'-' | b'.') || b[j] >= 0x80) {
-        j += 1;
+    while j < b.len() {
+        let c = b[j];
+        let first = j == start;
+        if c < 0x80 {
+            // ASCII fast path: PN_CHARS_U | [0-9] first, then PN_CHARS | '.'.
+            if c.is_ascii_alphanumeric() || c == b'_' || (!first && matches!(c, b'-' | b'.')) {
+                j += 1;
+                continue;
+            }
+            break;
+        }
+        // Non-ASCII: decode one scalar (chunk is valid UTF-8 and `j` is a lead byte).
+        let len = match c {
+            0xF0.. => 4,
+            0xE0.. => 3,
+            _ => 2,
+        };
+        let ch = str_of(&b[j..(j + len).min(b.len())]).chars().next().unwrap_or('\0');
+        if is_pn_chars_base(ch) || (!first && matches!(ch, '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')) {
+            j += len;
+            continue;
+        }
+        break;
     }
     while j > start && b[j - 1] == b'.' {
         j -= 1;
     }
-    let bad_first = match b.get(start) {
-        Some(b'-' | b'.') => true,
-        // PN_CHARS but not PN_CHARS_U: U+00B7, U+0300-U+036F, U+203F-U+2040 cannot start a label.
-        Some(&c) if c >= 0x80 => str_of(&b[start..j])
-            .chars()
-            .next()
-            .is_some_and(|ch| matches!(ch, '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}')),
-        _ => false,
-    };
-    if bad_first {
-        Err(format!("N-Triples: bad blank node label at byte {start}"))
-    } else if j == start {
-        Err(format!("N-Triples: empty blank node label at byte {start}"))
+    if j == start {
+        Err(format!("N-Triples: bad or empty blank node label at byte {start}"))
     } else {
         Ok(j)
     }
+}
+
+/// The non-ASCII part of `PN_CHARS_BASE` (the ASCII letters are handled by the fast path).
+#[inline]
+fn is_pn_chars_base(ch: char) -> bool {
+    matches!(ch,
+        '\u{C0}'..='\u{D6}' | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}' | '\u{370}'..='\u{37D}'
+        | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}'
+        | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}' | '\u{F900}'..='\u{FDCF}'
+        | '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
 }
 
 fn blank(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
@@ -884,8 +919,7 @@ fn valid_lang_tag(t: &[u8]) -> bool {
 }
 
 fn literal(b: &[u8], i: usize, dict: &mut Dict) -> Result<(Id, usize), String> {
-    let (vstart, vend, vesc, after) = scan_string(b, i)?;
-    let value = decode(&b[vstart..vend], vesc)?;
+    let (value, after) = lex_string(b, i)?;
     match b.get(after) {
         // ^^<datatype>
         Some(b'^') if b.get(after + 1) == Some(&b'^') => {
@@ -1024,6 +1058,12 @@ mod tests {
             "VERSION \"1.2\" <http://example/s> <http://example/p> <http://example/o> .",
             "VERSION 1.2\n",
             "VERSIONX \"1.2\"\n",
+            "VERSION \"\\q\"\n",
+            "VERSION \"\\uD800\"\n",
+            "_:\u{D7} <http://example/p> <http://example/o> .",
+            "_:a\u{D7} <http://example/p> <http://example/o> .",
+            "_:a\u{D7}b <http://example/p> <http://example/o> .",
+            "<http://example/s> <http://example/p> _:o\u{D7} .",
         ];
         for doc in bad {
             assert!(parse_chunk(doc.as_bytes(), &mut Dict::new()).is_err(), "N-Triples accepted {doc:?}");
@@ -1032,16 +1072,97 @@ mod tests {
         }
     }
 
+    /// The W3C grammar's character classes, transcribed independently of the parser
+    /// (RDF 1.2 N-Triples `PN_CHARS_BASE`, `PN_CHARS_U`, `PN_CHARS`).
+    const PN_CHARS_BASE_RANGES: &[(u32, u32)] = &[
+        (0x41, 0x5A), (0x61, 0x7A), (0xC0, 0xD6), (0xD8, 0xF6), (0xF8, 0x2FF), (0x370, 0x37D),
+        (0x37F, 0x1FFF), (0x200C, 0x200D), (0x2070, 0x218F), (0x2C00, 0x2FEF), (0x3001, 0xD7FF),
+        (0xF900, 0xFDCF), (0xFDF0, 0xFFFD), (0x10000, 0xEFFFF),
+    ];
+    const PN_CHARS_EXTRA_RANGES: &[(u32, u32)] =
+        &[(0x2D, 0x2D), (0x30, 0x39), (0xB7, 0xB7), (0x300, 0x36F), (0x203F, 0x2040)];
+    fn in_ranges(c: u32, r: &[(u32, u32)]) -> bool {
+        r.iter().any(|&(lo, hi)| (lo..=hi).contains(&c))
+    }
+    fn spec_pn_chars_u(c: u32) -> bool {
+        in_ranges(c, PN_CHARS_BASE_RANGES) || c == 0x5F
+    }
+    fn spec_pn_chars(c: u32) -> bool {
+        spec_pn_chars_u(c) || in_ranges(c, PN_CHARS_EXTRA_RANGES)
+    }
+
+    /// Every boundary code point (lo-1, lo, hi, hi+1) of every PN_CHARS_BASE / PN_CHARS_U /
+    /// PN_CHARS range, as a label's first character and as a middle character, on both entry
+    /// points: accepted exactly when the grammar allows it there.
+    #[test]
+    fn blank_label_matches_grammar_at_every_class_boundary() {
+        let mut points: Vec<u32> = vec![0x5E, 0x5F, 0x60, 0x2E];
+        for &(lo, hi) in PN_CHARS_BASE_RANGES.iter().chain(PN_CHARS_EXTRA_RANGES) {
+            points.extend([lo.saturating_sub(1), lo, hi, hi + 1]);
+        }
+        for cp in points {
+            let Some(c) = char::from_u32(cp) else { continue };
+            // First position: PN_CHARS_U or [0-9].
+            let first_ok = spec_pn_chars_u(cp) || c.is_ascii_digit();
+            let doc = format!("_:{c}x <http://example/p> <http://example/o> .\n");
+            let got = parse_chunk(doc.as_bytes(), &mut Dict::new()).is_ok();
+            assert_eq!(got, first_ok, "first char U+{cp:04X}");
+            #[cfg(feature = "parallel")]
+            assert_eq!(parse_quads_chunk(doc.as_bytes()).is_ok(), first_ok, "N-Quads first char U+{cp:04X}");
+            // Middle position: PN_CHARS or '.'. A disallowed character ends the label and the
+            // rest (`{c}y`) is not a term, so the document is rejected.
+            let mid_ok = spec_pn_chars(cp) || c == '.';
+            let doc = format!("_:x{c}y <http://example/p> <http://example/o> .\n");
+            let mut d = Dict::new();
+            let got = parse_chunk(doc.as_bytes(), &mut d);
+            assert_eq!(got.is_ok(), mid_ok, "middle char U+{cp:04X}");
+            if mid_ok {
+                let label = format!("x{c}y");
+                assert!(d.lookup(&Term::BlankNode(BlankNode::new_unchecked(label))) != 0, "U+{cp:04X} kept in label");
+            }
+            #[cfg(feature = "parallel")]
+            assert_eq!(parse_quads_chunk(doc.as_bytes()).is_ok(), mid_ok, "N-Quads middle char U+{cp:04X}");
+        }
+    }
+
+    /// ECHAR / UCHAR boundaries through the one string lexer, in a literal and in a VERSION
+    /// specifier, on both entry points.
+    #[test]
+    fn string_escapes_match_grammar_at_boundaries() {
+        let cases: &[(&str, bool)] = &[
+            (r"\t", true), (r"\b", true), (r"\n", true), (r"\r", true), (r"\f", true),
+            (r#"\""#, true), (r"\'", true), (r"\\", true),
+            (r"\a", false), (r"\v", false), (r"\/", false), (r"\q", false), (r"\0", false),
+            (r"\u0000", true), (r"퟿", true), (r"\uD800", false), (r"\uDFFF", false),
+            (r"", true), (r"￿", true), (r"\U0010FFFF", true), (r"\U00110000", false),
+            (r"\U0000D800", false), (r"\u12", false), (r"\uGGGG", false), (r"\U0001F6Z0", false),
+        ];
+        for &(esc, ok) in cases {
+            for doc in [
+                format!("<http://example/s> <http://example/p> \"a{esc}b\" .\n"),
+                format!("VERSION \"1.2{esc}\"\n"),
+            ] {
+                assert_eq!(parse_chunk(doc.as_bytes(), &mut Dict::new()).is_ok(), ok, "{doc:?}");
+                #[cfg(feature = "parallel")]
+                assert_eq!(parse_quads_chunk(doc.as_bytes()).is_ok(), ok, "N-Quads {doc:?}");
+            }
+        }
+    }
+
     /// A lone CR ends a comment line (EOL is `[#xD#xA]+`), RDF 1.2 VERSION directives are
     /// accepted, and a mid-label U+00B7 / `--rtl` direction still parse.
     #[test]
     fn cr_comment_version_and_valid_unicode_accepted() {
         let doc = "VERSION \"1.2\"\r\nVERSION \"1.2-basic\" # c\n#comment\r<urn:s> <urn:p> <urn:o> .\n\
-                   _:a\u{B7}b <urn:p> \"x\"@ar--RTL .\n";
-        let t = parse_chunk(doc.as_bytes(), &mut Dict::new()).expect("valid N-Triples 1.2");
-        assert_eq!(t.len(), 2, "the triple after a CR-terminated comment is kept");
+                   _:a\u{B7}b <urn:p> \"x\"@ar--RTL .\n\
+                   _:\u{E9}t\u{E9}\u{301}-\u{3042}.\u{10000}_9 <urn:p> _:\u{D8}\u{2C00}\u{203F}x .\n\
+                   VERSION \"1.2\\u0041\"\n";
+        let mut d = Dict::new();
+        let t = parse_chunk(doc.as_bytes(), &mut d).expect("valid N-Triples 1.2");
+        assert_eq!(t.len(), 3, "the triple after a CR-terminated comment is kept");
+        assert!(d.lookup(&Term::BlankNode(BlankNode::new_unchecked("\u{E9}t\u{E9}\u{301}-\u{3042}.\u{10000}_9"))) != 0);
         #[cfg(feature = "parallel")]
-        assert_eq!(parse_quads_chunk(doc.as_bytes()).expect("valid N-Quads 1.2")[0].2.len(), 2);
+        assert_eq!(parse_quads_chunk(doc.as_bytes()).expect("valid N-Quads 1.2")[0].2.len(), 3);
     }
 
     /// #2716: a blank-node label ends at the first non-label byte, so it may abut the next term
@@ -1724,14 +1845,15 @@ mod tests {
     #[cfg(feature = "parallel")]
     #[test]
     fn parse_quads_chunk_multibyte_graph_and_terms_round_trip() {
-        let input = "<http://ex/s> <http://ex/p> \"é\" <http://ex/g𝔄> .\n_:é <http://ex/p> \"→\" _:g→ .\n";
+        // (`→` U+2192 is fine in a literal but is not `PN_CHARS`, so the label uses `ā`.)
+        let input = "<http://ex/s> <http://ex/p> \"é\" <http://ex/g𝔄> .\n_:é <http://ex/p> \"→\" _:gā .\n";
         let buckets = parse_quads_chunk(input.as_bytes()).expect("multi-byte quads must parse");
         let keys: Vec<Option<GraphKey>> = buckets.iter().map(|(g, _, _)| g.clone()).collect();
         assert_eq!(
             keys,
             vec![
                 Some(GraphKey::Iri("http://ex/g𝔄".to_string())),
-                Some(GraphKey::Blank("g→".to_string())),
+                Some(GraphKey::Blank("gā".to_string())),
             ]
         );
         assert_eq!(buckets[0].1.term(buckets[0].2[0][2]), Term::Literal(Literal::new_simple_literal("é")));
