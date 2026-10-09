@@ -1121,13 +1121,74 @@ fn names_issuer_in(
     {
         return Some(links);
     }
+    // The parser holds a term for every level of nesting open before it yields a triple, so a
+    // short document nesting deeply under a long prefix could take far more than the expansion
+    // budget before that budget sees a triple. Nesting is bounded before the parser runs, and
+    // parsing stops at the first error, so the parser never resynchronises past what was
+    // checked.
+    if !turtle_nesting_ok(body) {
+        return None;
+    }
     let parser = oxttl::TurtleParser::new().with_base_iri(base).ok()?;
     links_in(
-        parser.for_slice(body).filter_map(Result::ok),
+        parser.for_slice(body).map_while(Result::ok),
         body.len(),
         subject,
         issuer,
     )
+}
+
+/// Most `[ … ]` and `( … )` an identity document may nest, one inside another.
+const MAX_TURTLE_NESTING: usize = 8;
+
+/// Whether `body`, read as Turtle, nests no deeper than [`MAX_TURTLE_NESTING`]: brackets are
+/// counted outside IRIs, string literals and comments, as the grammar reads them (an IRI ends at
+/// its first `>`, which no escape in an IRI can stand for).
+fn turtle_nesting_ok(body: &[u8]) -> bool {
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < body.len() {
+        match body[i] {
+            b'#' => {
+                while i < body.len() && !matches!(body[i], b'\n' | b'\r') {
+                    i += 1;
+                }
+            }
+            b'<' => {
+                while i < body.len() && body[i] != b'>' {
+                    i += 1;
+                }
+            }
+            q @ (b'"' | b'\'') => {
+                let long = body[i..].starts_with(&[q, q, q]);
+                i += if long { 3 } else { 1 };
+                while i < body.len() {
+                    if body[i] == b'\\' {
+                        i += 2;
+                        continue;
+                    }
+                    if long && body[i..].starts_with(&[q, q, q]) {
+                        i += 2;
+                        break;
+                    }
+                    if !long && body[i] == q {
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            b'[' | b'(' => {
+                depth += 1;
+                if depth > MAX_TURTLE_NESTING {
+                    return false;
+                }
+            }
+            b']' | b')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        i += 1;
+    }
+    true
 }
 
 /// Remote contexts whose definitions of the keys read from a compact document (`id`, `type`,
@@ -1796,6 +1857,67 @@ mod tests {
             first_link("text/turtle", doc.as_bytes(), s, op),
             Some(IssuerLink::SolidOidcIssuer)
         );
+    }
+
+    /// Review finding: the parser held an expanded predicate for every open level of nesting
+    /// before it yielded a triple, so a document of well under a megabyte nesting a hundred
+    /// thousand property lists under a 64 KiB prefix took gigabytes before the expansion budget
+    /// saw anything. Nesting is bounded before the parser runs.
+    #[test]
+    fn deeply_nested_identity_documents_are_refused_unparsed() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let issuer = "<http://www.w3.org/ns/solid/terms#oidcIssuer>";
+        let prefix = format!("@prefix p: <https://p.example/{}#> .\n", "x".repeat(64 * 1024));
+        let depth = 100_000;
+        let nested = format!(
+            "{prefix}<{s}> {issuer} <{op}> .\n<{s}> p:p {}0{} .\n",
+            "[ p:p ".repeat(depth),
+            " ]".repeat(depth)
+        );
+        assert!(nested.len() < MAX_DOC);
+        let started = std::time::Instant::now();
+        assert_eq!(first_link("text/turtle", nested.as_bytes(), s, op), None);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        // Collections nest the same way.
+        let listed = format!(
+            "{prefix}<{s}> {issuer} <{op}> .\n<{s}> p:p {}0{} .\n",
+            "( ".repeat(depth),
+            " )".repeat(depth)
+        );
+        assert_eq!(first_link("text/turtle", listed.as_bytes(), s, op), None);
+        assert_eq!(first_link("application/n-triples", listed.as_bytes(), s, op), None);
+        // A little nesting, and brackets inside IRIs, strings and comments, are fine.
+        let shallow = format!(
+            "{prefix}# ((((((((([[[[[[[[[\n<{s}> {issuer} <{op}> ; p:p [ p:p [ p:p \"[[[[[[[[[[\" ] ] ; \
+             p:q \"\"\"(((((((((((\"\"\" ; p:r <urn:x:[[[[[[[[[[[> .\n"
+        );
+        assert_eq!(
+            first_link("text/turtle", shallow.as_bytes(), s, op),
+            Some(IssuerLink::SolidOidcIssuer)
+        );
+    }
+
+    /// The scan agrees with the grammar on where IRIs, strings and comments end.
+    #[test]
+    fn turtle_nesting_is_counted_as_the_grammar_reads_it() {
+        let deep = "[ ".repeat(MAX_TURTLE_NESTING + 1);
+        assert!(!turtle_nesting_ok(deep.as_bytes()));
+        assert!(turtle_nesting_ok("[ ".repeat(MAX_TURTLE_NESTING).as_bytes()));
+        for hidden in [
+            format!("<{deep}>"),
+            format!("\"{deep}\""),
+            format!("'{deep}'"),
+            format!("\"\"\"{deep}\"\"\""),
+            format!("# {deep}\n"),
+            format!("\"a\\\"{deep}\""),
+        ] {
+            assert!(turtle_nesting_ok(hidden.as_bytes()), "{hidden}");
+        }
+        // An escape cannot end an IRI early, and a string's end is where the grammar puts it.
+        assert!(!turtle_nesting_ok(format!("<a\\> {deep}").as_bytes()));
+        assert!(!turtle_nesting_ok(format!("\"a\" {deep}").as_bytes()));
+        assert!(!turtle_nesting_ok(format!("\"\"\"a\"\"\" {deep}").as_bytes()));
     }
 
     #[test]
