@@ -2886,14 +2886,16 @@ fn target_attribute_ok(key: &str, value: &Value) -> bool {
     match key {
         "href" | "title" | "type" | "media" => value.is_string(),
         "hreflang" => strings(value),
+        // One or more value objects (RFC 9264 section 4.2.4.2).
         k if k.ends_with('*') => value.as_array().is_some_and(|a| {
-            a.iter().all(|o| {
-                o.as_object().is_some_and(|o| {
-                    o.get("value").is_some_and(Value::is_string)
-                        && o.get("language").is_none_or(Value::is_string)
-                        && o.keys().all(|k| k == "value" || k == "language")
+            !a.is_empty()
+                && a.iter().all(|o| {
+                    o.as_object().is_some_and(|o| {
+                        o.get("value").is_some_and(Value::is_string)
+                            && o.get("language").is_none_or(Value::is_string)
+                            && o.keys().all(|k| k == "value" || k == "language")
+                    })
                 })
-            })
         }),
         _ => strings(value),
     }
@@ -3886,6 +3888,7 @@ mod tests {
         // An empty anchor is the linkset itself, not the resource it describes.
         assert_eq!(about(&linkset)["author"][0]["href"], "https://ex.org/a");
         assert!(!m.links.contains_key("author"));
+        let before = json_of(call(&st, "GET", &meta, &[], "").await).await;
         for bad in [
             json!({"linkset": [{"anchor": "http://[", "license": [{"href": "https://ex.org/l"}]}]}),
             json!({"linkset": [{"anchor": uri, "license": [{"href": "%ZZ"}]}]}),
@@ -3893,6 +3896,7 @@ mod tests {
             json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title": 123}]}]}),
             json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "hreflang": "en"}]}]}),
             json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title*": [{"value": 1}]}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title*": []}]}]}),
             json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "ext": "x"}]}]}),
         ] {
             let r = call(
@@ -3906,17 +3910,27 @@ mod tests {
             assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
         }
         // The same through a JSON Patch.
-        let bad = json!([{"op": "replace", "path": "/linkset", "value": [{"anchor": uri,
-            "license": [{"href": "https://ex.org/l", "hreflang": "en"}]}]}]);
-        let r = call(
-            &st,
-            "PATCH",
-            &meta,
-            &[("content-type", JSON_PATCH)],
-            &bad.to_string(),
-        )
-        .await;
-        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        for target in [
+            json!({"href": "https://ex.org/l", "hreflang": "en"}),
+            json!({"href": "https://ex.org/l", "title*": []}),
+        ] {
+            let bad = json!([{"op": "replace", "path": "/linkset", "value": [{"anchor": uri,
+                "license": [target]}]}]);
+            let r = call(
+                &st,
+                "PATCH",
+                &meta,
+                &[("content-type", JSON_PATCH)],
+                &bad.to_string(),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        }
+        // None of them changed the metadata.
+        assert_eq!(
+            json_of(call(&st, "GET", &meta, &[], "").await).await,
+            before
+        );
         // Well-shaped attributes are kept.
         let good = json!({"linkset": [{"anchor": uri, "license": [{"href": "#license",
             "title": "L", "hreflang": ["en"], "title*": [{"value": "L", "language": "en"}]}]}]});
