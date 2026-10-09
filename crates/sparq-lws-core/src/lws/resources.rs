@@ -270,9 +270,7 @@ impl TagList {
                 return Err(());
             }
         }
-        if tags.is_empty() {
-            return Err(());
-        }
+        // An empty list (`#entity-tag` allows one) names no tag: it matches nothing.
         Ok(Self::Tags(tags))
     }
 
@@ -3442,6 +3440,9 @@ mod tests {
         assert!(!etag_listed("\"a\", *", "\"x\"", false));
         assert!(!etag_listed("\"a", "\"a\"", false));
         assert!(!etag_listed("a", "a", false));
+        // An empty list matches nothing, and is not unreadable.
+        assert!(!etag_listed("", "\"x\"", true));
+        assert!(TagList::parse(" , ").is_ok());
     }
 
     // ---- request-level tests over an in-memory store ----
