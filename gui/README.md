@@ -120,14 +120,16 @@ refused pre-HTTP. The browser build labels SERVICE **native-only** (CORS) instea
 
 For **usage control** (`sq-ixc3.15`), the **Policies (ODRL) tool** runs its whole round-trip in
 one native command (`odrl_preview`, behind the crate's opt-in `odrl` feature, pulling the
-research-track `sparq-policy` evaluator + `sparq-solid` enforcement store): author/validate a
+research-track `sparq-policy` evaluator + `sparq-solid`'s read rewrite): author/validate a
 Turtle ODRL policy, evaluate a (party, action, target) request — decision + matched rules + unmet
-constraints — then run the SAME SPARQL query ungated AND per requester through `PodStore`'s
-**fail-closed** per-session named-graph gating (the one-shot `odrl-bridge` materialization path;
-the `*_conditional` variants with the bare-assignee widening hazard, bead `sq-9n1q4`, are not
-wired). A malformed policy materializes **nothing** — deny-everything with the parser's verbatim
-reason — and an `odrl:prohibition` visibly flips a previously visible named graph to hidden in
-that requester's pane. The browser build labels the tool **native-only** (the ODRL stack is not
+constraints — then run the SAME SPARQL query ungated AND per requester over the named graphs the
+**policy's own verdict** (`sparq_policy::decide`, one `read` request per graph) lets that requester
+read, through the same fail-closed view path as `PodStore::query_json_as`. Nothing is
+materialized, so the panes show what the policy says, not the stricter v0.1.5 server enforcement:
+it denies every party on an asset a prohibition covers until request-time decisions land (#6743).
+The UI notes this beside the panes. A malformed policy grants **nothing** — deny-everything with
+the parser's verbatim reason — and an `odrl:prohibition` visibly flips a previously visible named
+graph to hidden in that requester's pane. The browser build labels the tool **native-only** (the ODRL stack is not
 in the wasm bundle) instead of pretending.
 
 ## File ingest library (`lib/file-ingest.ts`, sq-vnh1v)

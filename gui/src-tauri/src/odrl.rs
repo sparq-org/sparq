@@ -1,32 +1,36 @@
 // [FABLE-5] sq-ixc3.15 — the ODRL policy tool's native command: author/validate a policy,
 // evaluate a request, and preview the access-controlled result set next to the ungated one.
 //
-// The GUI's in-tab WASM engine ships neither the ODRL evaluator (sparq-policy) nor the
-// usage-control enforcement store (sparq-solid's `PodStore` + odrl-bridge), so this whole
-// tool is NATIVE-ONLY: exactly ONE command, `odrl_preview`, scoped to the one round-trip the
-// webview cannot do itself — parse a Turtle ODRL policy, evaluate the user's request
-// (party/action/target), materialize the policy through the odrl-bridge into a `PodStore`,
-// and run the SAME SPARQL query as each requester through `query_json_as` (fail-closed
-// per-session named-graph gating) alongside the ungated evaluation over the raw dataset.
+// The GUI's in-tab WASM engine ships neither the ODRL evaluator (sparq-policy) nor sparq-solid's
+// access-controlled read path, so this whole tool is NATIVE-ONLY: exactly ONE command,
+// `odrl_preview`, scoped to the one round-trip the webview cannot do itself — parse a Turtle
+// ODRL policy, evaluate the user's request (party/action/target), and run the SAME SPARQL query
+// per requester over the named graphs the policy lets that requester read, alongside the
+// ungated evaluation over the raw dataset.
+//
+// THE PANES SHOW THE POLICY'S OWN VERDICT: each requester's readable set is
+// `sparq_policy::decide(policy, read <graph> by <requester>)` for every named graph, evaluated
+// per request. Nothing is materialized into an enforcement store, so the preview does not
+// inherit the bridge's static-grant limits (since #6734 the bridge stores a grant only for an
+// unconstrained permission naming exactly one party, and turns every prohibition into a deny
+// for all parties). A server running v0.1.5 enforces prohibitions that conservatively until
+// request-time decisions (#6743) land; the UI says so next to the panes.
 //
 // OPT-IN: the capability sits behind this crate's non-default `odrl` cargo feature (pulling
-// the optional `sparq-policy` + `sparq-solid`/odrl-bridge crates). A lean build compiles a
-// stub that fails LOUDLY with a rebuild hint — never a silent no-op — the same discipline as
-// the `hdt` and `federation` features.
+// the optional `sparq-policy` + `sparq-solid` crates). A lean build compiles a stub that
+// fails LOUDLY with a rebuild hint — never a silent no-op — the same discipline as the `hdt`
+// and `federation` features.
 //
 // FAIL-CLOSED INVARIANTS (mirrored in the frontend and asserted by the tests below):
-//   - A malformed policy materializes NOTHING: every requester sees ZERO rows (an empty
-//     authorized-graph set is the PodStore default), and the parse error is returned verbatim
-//     as the visible reason. Deny-everything, never a guess.
-//   - A policy whose `odrl:conflict` strategy the bridge cannot honor is REFUSED whole
-//     (`BridgeOutcome::refused`): again nothing materializes, and the reasons are surfaced.
+//   - A malformed policy grants NOTHING: every requester sees ZERO rows, and the parse error
+//     is returned verbatim as the visible reason. Deny-everything, never a guess.
+//   - A policy whose `odrl:conflict` strategy `decide` cannot honor is REFUSED whole: `decide`
+//     denies every request, so every pane is empty, and the reason is surfaced.
 //   - A requester with no applicable grant gets an `Ok` result with zero rows (authorization
 //     never errors) — indistinguishable from the graphs being absent.
-//
-// WIDENING HAZARD deliberately avoided: this command uses ONLY the one-shot
-// `materialize_odrl_policy` path, which honors a bare `odrl:assignee` rule attribute. The
-// `*_conditional` bridge variants drop a bare assignee to `auth:Public` (bead sq-9n1q4) and
-// are NOT wired here.
+//   - The gated query runs through sparq-solid's read rewrite (`wrap_for_view_opt_in`) over a
+//     view holding only the granted graphs, exactly as `PodStore::query_json_as` does, so it
+//     can never range over a graph the policy did not grant.
 
 /// One requester's pane in the two-pane preview: the ODRL decision for the explicit request,
 /// the bridge's materialization notes, and the gated result set (SPARQL 1.1 JSON) produced by
@@ -41,11 +45,12 @@ pub struct OdrlPane {
     pub matched_rules: Vec<String>,
     /// Human-readable reasons each permission did NOT grant (unmet constraints).
     pub unmet_constraints: Vec<String>,
-    /// The bridge's materialization notes for this requester across every rule target —
-    /// which auth grants/denies were written, or why nothing was.
+    /// The policy's read verdict for this requester on every named graph, one line each
+    /// (`read <g>: allowed|denied`, with the deciding rules or the reason). The field keeps
+    /// its historical name for the frontend contract.
     pub bridge_notes: Vec<String>,
-    /// The gated result set: the SAME query, evaluated through the fail-closed per-session
-    /// named-graph view. SPARQL 1.1 JSON results document.
+    /// The gated result set: the SAME query, evaluated over the named graphs the policy
+    /// lets this requester read. SPARQL 1.1 JSON results document.
     pub results_json: String,
 }
 
@@ -54,15 +59,15 @@ pub struct OdrlPane {
 /// `policy_error` as the visible reason.
 #[derive(Debug, serde::Serialize)]
 pub struct OdrlPreview {
-    /// Whether the policy parsed as Turtle ODRL. False ⇒ NOTHING was materialized.
+    /// Whether the policy parsed as Turtle ODRL. False ⇒ nothing is granted.
     pub policy_ok: bool,
     /// The verbatim parse error when `policy_ok` is false (the visible fail-closed reason).
     pub policy_error: Option<String>,
     /// Parsed rule counts (0 when the policy is malformed).
     pub permissions: usize,
     pub prohibitions: usize,
-    /// True when the policy's `odrl:conflict` strategy is one the bridge cannot honor: the
-    /// WHOLE policy is refused and nothing materializes (fail-closed, reasons in the panes).
+    /// True when the policy's `odrl:conflict` strategy is one `decide` cannot honor: the
+    /// WHOLE policy is refused and nothing is granted (fail-closed, reasons in the panes).
     pub refused: bool,
     /// The ungated evaluation of the same query over the raw dataset (SPARQL 1.1 JSON).
     pub ungated_json: String,
@@ -99,8 +104,14 @@ fn run_odrl_preview(
     requesters: Vec<String>,
     query: &str,
 ) -> Result<OdrlPreview, String> {
-    use sparq_policy::{evaluate, parse_policy_str, Request};
-    use sparq_solid::{Mode, PodStore, Session};
+    use oxrdf::Term;
+    use sparq_engine::{DatasetView, DefaultGraphMode, FxHashSet};
+    use sparq_policy::{conflict_admissibility, decide, parse_policy_str, Request};
+    use std::sync::Arc;
+
+    const ODRL_READ: &str = "http://www.w3.org/ns/odrl/2/read";
+    // Reserved graph names (an enforcement store's auth view) are never pod data.
+    const RESERVED_PREFIX: &str = "urn:sparq:";
 
     // An empty dataset is a legal store (author a policy before loading data).
     let graph = if dataset.trim().is_empty() {
@@ -109,26 +120,32 @@ fn run_odrl_preview(
         sparq_core::Graph::load_dataset(dataset, format)?
     };
 
-    // The UNGATED pane: the same query over the raw dataset, before any gating. Evaluated
-    // first because `PodStore::new` takes ownership of the graph.
+    // The UNGATED pane: the same query over the raw dataset, before any gating.
     let ungated_json = sparq_engine::query_json(&graph, query)?;
+    // Every gated pane runs the read rewrite `PodStore::query_json_as` applies.
+    let wrapped = sparq_solid::wrap_for_view_opt_in(query)?;
 
-    // The enforcement store: strips reserved graphs, starts with an EMPTY auth index — the
-    // fail-closed default every requester keeps unless the policy grants otherwise.
-    let mut store = PodStore::new(graph);
-
-    // (a) Parse/validate. Malformed ⇒ deny-everything: materialize NOTHING and surface the
-    // parse error verbatim; the gated queries below then run against the empty auth index.
+    // (a) Parse/validate. Malformed ⇒ deny-everything: nothing is granted and the parse error
+    // is surfaced verbatim; the gated queries below then run over an empty graph set.
     let (policy, policy_error) = match parse_policy_str(policy_text, "turtle") {
         Ok(p) => (Some(p), None),
         Err(e) => (None, Some(e)),
     };
+    let refused = policy.as_ref().is_some_and(|p| conflict_admissibility(p).is_err());
 
-    // (b)+(c) Evaluate the explicit request per requester, then materialize the policy for
-    // every (requester × rule-target) pair so the preview reflects the WHOLE policy — a rule
-    // targeting another graph still shapes that requester's view. Grants/denies written by
-    // the one-shot bridge are strictly per-principal, so requesters cannot widen each other.
-    let mut refused = false;
+    let graph_names: Vec<(&str, &Term)> = graph
+        .named
+        .iter()
+        .filter_map(|(name, _)| match name {
+            Term::NamedNode(n) if !n.as_str().starts_with(RESERVED_PREFIX) => {
+                Some((n.as_str(), name))
+            }
+            _ => None,
+        })
+        .collect();
+
+    // (b) Per requester: the explicit request's decision, then the policy's read verdict on
+    // every named graph, and the SAME query over exactly the granted graphs.
     let mut panes: Vec<OdrlPane> = Vec::with_capacity(requesters.len());
     for webid in &requesters {
         let mut pane = OdrlPane {
@@ -139,54 +156,37 @@ fn run_odrl_preview(
             bridge_notes: Vec::new(),
             results_json: String::new(),
         };
+        let mut readable: FxHashSet<Term> = FxHashSet::default();
         if let Some(policy) = &policy {
-            let request = Request::new(action).on(target).by(webid.as_str());
-            let decision = evaluate(policy, &request);
+            let decision = decide(policy, &Request::new(action).on(target).by(webid.as_str()));
             pane.allow = decision.allow;
             pane.matched_rules = decision.matched_rules;
             pane.unmet_constraints = decision.unmet_constraints;
 
-            // Every distinct rule target, with the explicit request target included — sorted
-            // (BTreeSet) so the notes are deterministic.
-            let mut targets: std::collections::BTreeSet<String> = policy
-                .permissions
-                .iter()
-                .chain(policy.prohibitions.iter())
-                .filter_map(|r| r.target.clone())
-                .collect();
-            targets.insert(target.to_owned());
-            for t in &targets {
-                let req = Request::new(action).on(t.as_str()).by(webid.as_str());
-                let outcome = store.materialize_odrl_policy(policy, &req);
-                if outcome.refused {
-                    refused = true;
-                }
-                if let Some((p, m, g)) = &outcome.grant_triple {
-                    pane.bridge_notes.push(format!("grant: {p} {m} {g}"));
-                }
-                if let Some((p, m, g)) = &outcome.deny_triple {
-                    pane.bridge_notes.push(format!("deny: {p} {m} {g}"));
-                }
-                for reason in outcome.reasons {
-                    pane.bridge_notes.push(format!("{t}: {reason}"));
+            for (g, term) in &graph_names {
+                let verdict = decide(policy, &Request::new(ODRL_READ).on(*g).by(webid.as_str()));
+                let why = if verdict.matched_rules.is_empty() {
+                    verdict.unmet_constraints.join("; ")
+                } else {
+                    format!("rules {}", verdict.matched_rules.join(", "))
+                };
+                let word = if verdict.allow { "allowed" } else { "denied" };
+                pane.bridge_notes.push(format!("read <{g}>: {word} ({why})"));
+                if verdict.allow {
+                    readable.insert((*term).clone());
                 }
             }
         } else if let Some(err) = &policy_error {
             pane.bridge_notes
-                .push(format!("policy malformed — nothing materialized (deny-everything): {err}"));
+                .push(format!("policy malformed — nothing granted (deny-everything): {err}"));
         }
-        panes.push(pane);
-    }
-
-    // The GATED panes: the SAME query per requester through the fail-closed per-session
-    // named-graph view. Run AFTER all materialization so every pane sees the final auth
-    // state. Authorization never errors: no grant ⇒ zero rows, not an Err.
-    for pane in &mut panes {
-        let session = Session {
-            agent: Some(pane.requester.as_str()),
-            ..Session::default()
+        let view = DatasetView {
+            base: &graph,
+            named: Arc::new(readable),
+            default: DefaultGraphMode::Empty,
         };
-        pane.results_json = store.query_json_as(&session, Mode::Read, query)?;
+        pane.results_json = sparq_engine::query_json_view(&view, &wrapped)?;
+        panes.push(pane);
     }
 
     let (permissions, prohibitions) = policy
@@ -388,6 +388,56 @@ mod tests {
             "bob's grant must surface the graph: {}",
             out.panes[1].results_json
         );
+    }
+
+    /// Each pane is the policy's own verdict: a graph appears in a requester's rows exactly
+    /// when `decide(read <graph> by <requester>)` allows it — for party-scoped rules,
+    /// constrained rules the request carries no evidence for, and a refused conflict
+    /// strategy alike.
+    #[test]
+    #[cfg(feature = "odrl")]
+    fn panes_match_decide_for_every_graph() {
+        use sparq_policy::{decide, parse_policy_str, Request};
+        const PREFIXES: &str = "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
+             @prefix ex: <http://example.org/> .\n\
+             @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n";
+        let rules = [
+            POLICY_PERMIT_ALL.to_string(),
+            POLICY_PROHIBIT_ALICE_SECRET.to_string(),
+            format!("{PREFIXES}ex:p a odrl:Set ; odrl:permission [ odrl:action odrl:use ] ."),
+            format!(
+                "{PREFIXES}ex:p a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+                 odrl:target ex:public ; odrl:constraint [ odrl:leftOperand odrl:dateTime ; \
+                 odrl:operator odrl:lt ; odrl:rightOperand \"2030-01-01T00:00:00Z\"^^xsd:dateTime ] ] ."
+            ),
+            format!(
+                "{PREFIXES}ex:p a odrl:Set ; odrl:permission [ odrl:action odrl:read ] ; \
+                 odrl:prohibition [ odrl:action odrl:use ; odrl:assignee ex:bob ] ."
+            ),
+            format!(
+                "{PREFIXES}ex:p a odrl:Set ; odrl:conflict odrl:perm ; \
+                 odrl:permission [ odrl:action odrl:read ] ."
+            ),
+        ];
+        for policy in &rules {
+            let parsed = parse_policy_str(policy, "turtle").expect("policy parses");
+            let out = preview(policy);
+            for pane in &out.panes {
+                for (graph, title) in [
+                    ("http://example.org/public", "Public report"),
+                    ("http://example.org/secret", "Secret memo"),
+                ] {
+                    let req = Request::new(ODRL_READ).on(graph).by(pane.requester.as_str());
+                    assert_eq!(
+                        pane.results_json.contains(title),
+                        decide(&parsed, &req).allow,
+                        "{} on {graph} under {policy}",
+                        pane.requester
+                    );
+                }
+            }
+        }
+        assert!(preview(&rules[5]).refused, "an odrl:perm strategy is refused");
     }
 
     /// Lean build (feature OFF): the stub fails LOUDLY with the actionable rebuild hint —
