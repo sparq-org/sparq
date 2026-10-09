@@ -662,12 +662,12 @@ fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool 
 /// How to put back one change a [`Journal`] made.
 enum Undo {
     /// `key`, held under the lock of `lock`, as it was (its bytes and record, or absent). `left`
-    /// is what the change may have put there instead: the bytes written, or `None` for a removal.
+    /// is what the change may have put there instead.
     Restore {
         lock: String,
         key: String,
         prior: Option<(Bytes, StoredMeta)>,
-        left: Option<Bytes>,
+        left: Left,
     },
     /// A removed member, recreated in its container as it was.
     Recreate {
@@ -676,6 +676,15 @@ enum Undo {
         body: Bytes,
         meta: StoredMeta,
     },
+}
+
+/// What a change may have left at a key: the record it wrote (known when the store confirmed
+/// the write: its blob key is minted for that write alone), bytes it may have written (when the
+/// store's reply was lost), or nothing (a removal).
+enum Left {
+    Written(StoredMeta),
+    Maybe(Bytes),
+    Removed,
 }
 
 impl Undo {
@@ -719,11 +728,14 @@ impl Undo {
     }
 
     /// Put this change back after the mutation's locks were released, under the lock of what it
-    /// changed, and only if nothing since replaced what the mutation left: a later write or
-    /// create stands.
+    /// changed, and only if what is there is still what the mutation left: a later write or
+    /// create stands, even one with the same bytes. A record the store confirmed is recognized
+    /// by its blob key (minted per write); one whose reply was lost, by its bytes and a
+    /// modification time no later than `fence`, when the mutation still held its locks.
     async fn recover<S: Store + 'static>(
         &self,
         state: &LwsState<S>,
+        fence: std::time::SystemTime,
     ) -> Result<(), crate::error::ServerError> {
         let _guard = state.locks.lock(self.lock()).await;
         if let Undo::Restore {
@@ -731,12 +743,28 @@ impl Undo {
         } = self
         {
             let now = match state.store.read(key).await {
-                Ok(r) => Some(r.body),
+                Ok(r) => Some(r),
                 Err(crate::error::ServerError::NotFound) => None,
                 Err(e) => return Err(e),
             };
-            let as_was = now.as_ref() == prior.as_ref().map(|(b, _)| b);
-            let as_left = now.as_ref() == left.as_ref();
+            // Already as it was, validators included.
+            let as_was = match (&now, prior) {
+                (None, None) => true,
+                (Some(r), Some((body, meta))) => {
+                    r.body == body
+                        && r.meta.etag == meta.etag
+                        && r.meta.last_modified == meta.last_modified
+                }
+                _ => false,
+            };
+            let as_left = match (&now, left) {
+                (None, Left::Removed) => true,
+                (Some(r), Left::Written(m)) => r.meta.blob_key == m.blob_key,
+                (Some(r), Left::Maybe(body)) => {
+                    r.body == body && r.meta.last_modified.is_some_and(|t| t <= fence)
+                }
+                _ => false,
+            };
             if as_was || !as_left {
                 return Ok(());
             }
@@ -813,7 +841,10 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 lock: lock.to_string(),
                 key: key.to_string(),
                 prior,
-                left: Some(body),
+                left: match &written {
+                    Ok(meta) => Left::Written(meta.clone()),
+                    Err(_) => Left::Maybe(body),
+                },
             });
         }
         written
@@ -854,7 +885,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 lock: iri.to_string(),
                 key,
                 prior,
-                left: None,
+                left: Left::Removed,
             });
         }
         match deleted {
@@ -915,11 +946,13 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             return Ok(());
         };
         let state = self.state.clone();
+        // Still under the mutation's locks: nothing written after this is the mutation's.
+        let fence = crate::clock::now();
         tokio::spawn(async move {
             let mut wait = std::time::Duration::from_millis(100);
             let mut left = std::collections::VecDeque::from(left);
             while let Some(undo) = left.front() {
-                match undo.recover(&state).await {
+                match undo.recover(&state, fence).await {
                     Ok(()) => {
                         left.pop_front();
                     }
@@ -2015,5 +2048,56 @@ mod tests {
         assert_eq!(meta_key("http://h/a/b"), "http://h/a/b.meta");
         assert_eq!(meta_key("http://h/a/b/"), "http://h/a/b/.meta");
         assert_eq!(meta_key("http://h/"), "http://h/.meta");
+    }
+
+    /// Review finding: recovery compared bytes only, so a later write of the same bytes (or
+    /// one that came back to them) could be overwritten by the old undo. A confirmed write is
+    /// recognized by its blob key, which no later write shares.
+    #[tokio::test]
+    async fn recovery_never_overwrites_a_later_write() {
+        let (st, _store) = test_store::state(4).await;
+        let key = format!("{}r", st.cfg.storage());
+        let old = st
+            .store
+            .write(&key, "old".into(), "text/plain")
+            .await
+            .unwrap();
+        let ours = st
+            .store
+            .write(&key, "new".into(), "text/plain")
+            .await
+            .unwrap();
+        let undo = |left| Undo::Restore {
+            lock: key.clone(),
+            key: key.clone(),
+            prior: Some((Bytes::from("old"), old.clone())),
+            left,
+        };
+        let fence = crate::clock::now();
+        // Someone else writes the same bytes afterwards: theirs stands.
+        st.store
+            .write(&key, "new".into(), "text/plain")
+            .await
+            .unwrap();
+        undo(Left::Written(ours.clone()))
+            .recover(&st, fence)
+            .await
+            .unwrap();
+        assert_eq!(st.store.read(&key).await.unwrap().body, Bytes::from("new"));
+        // A reply that was lost: bytes written after the fence are not the mutation's.
+        undo(Left::Maybe(Bytes::from("new")))
+            .recover(&st, old.last_modified.unwrap())
+            .await
+            .unwrap();
+        assert_eq!(st.store.read(&key).await.unwrap().body, Bytes::from("new"));
+        // What the mutation left is put back, validators and all.
+        let left = st.store.meta(&key).await.unwrap().unwrap();
+        undo(Left::Written(left)).recover(&st, fence).await.unwrap();
+        let back = st.store.read(&key).await.unwrap();
+        assert_eq!(back.body, Bytes::from("old"));
+        assert_eq!(
+            (back.meta.etag, back.meta.last_modified),
+            (old.etag, old.last_modified)
+        );
     }
 }
