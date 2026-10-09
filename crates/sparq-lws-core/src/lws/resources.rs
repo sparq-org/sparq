@@ -46,21 +46,20 @@ pub async fn handle<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    // A write or a delete runs in a task of its own, spawned before it takes any lock: a client
-    // that goes away then cannot cut its store calls off half way, nor release its locks while a
-    // call is still pending (see [`hold_locks`]). (A create spawns its writes itself, under the
-    // container's shared lock.)
-    if matches!(req.method, Method::PUT | Method::DELETE) {
-        // The task holds the request, and with it its share of the admission permit
-        // (`req.admission`): a write that outlives its request still counts against the
-        // concurrency ceiling until it ends.
-        let (state, req, agent) = (state.clone(), req.clone(), agent.clone());
-        return tokio::spawn(async move { handle_now(&state, &req, &agent).await })
-            .await
-            .unwrap_or_else(|e| {
-                store_error(ServerError::Storage(format!("the request failed: {e}")))
-            });
+    // A resource a failed change could not yet be put back on is unavailable until it is, and
+    // a request for it is answered at once rather than left waiting on its locks.
+    let target = req.path.strip_suffix(META_SUFFIX).unwrap_or(&req.path);
+    if state.is_set_aside(&state.cfg.absolute(target)) {
+        let mut resp = problem(
+            StatusCode::SERVICE_UNAVAILABLE,
+            Some("a failed change to this resource is still being put back"),
+        );
+        set(resp.headers_mut(), header::RETRY_AFTER, "5");
+        return resp;
     }
+    // A write or a delete waits for its locks and checks its preconditions in the request, where
+    // a client that goes away (or a timeout) cancels the wait; only its store calls run in a
+    // task of their own, once they are ready to start (see [`hold_locks`]).
     handle_now(state, req, agent).await
 }
 
@@ -106,6 +105,12 @@ async fn handle_now<S: Store + 'static>(
     match req.method {
         Method::GET | Method::HEAD => read(state, req, agent, &uri).await,
         Method::POST => create(state, req, agent, &uri).await,
+        // A partial PUT (RFC 9110 section 14.5) is not supported: taken as a whole
+        // representation, it would replace the resource with the part.
+        Method::PUT if req.headers.contains_key(header::CONTENT_RANGE) => problem(
+            StatusCode::BAD_REQUEST,
+            Some("a partial PUT (Content-Range) is not supported"),
+        ),
         Method::PUT => update(state, req, agent, &uri).await,
         Method::DELETE => delete(state, req, agent, &uri).await,
         Method::OPTIONS => options(state, &uri).await,
@@ -530,13 +535,18 @@ async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &st
     let _guard = state.locks.read(container).await;
     let _listing = listing_guard(state, container).await;
     let _touch = state.locks.lock(&format!("{container}\0touch")).await;
-    // Metadata that cannot be read is left as it is, not replaced by a default.
+    // Metadata that cannot be read is left as it is, not replaced by a default. Until a touch
+    // lands, the container's listing has no Last-Modified (see [`read_container`]): its own
+    // time, and its members', may all be from before the change, and an If-Modified-Since
+    // would pass on a listing that changed.
     let Ok(mut meta) = state.resource_meta(container).await else {
+        state.untouched(container, true);
         return;
     };
     meta.modified_ms = Some(now_ms());
     meta.version = Some(jose::random_id());
-    let _ = state.put_resource_meta(container, &meta).await;
+    let touched = state.put_resource_meta(container, &meta).await.is_ok();
+    state.untouched(container, !touched);
 }
 
 fn store_error(e: ServerError) -> Response {
@@ -969,34 +979,6 @@ async fn read_container<S: Store + 'static>(
         Ok(m) => m,
         Err(e) => return store_error(e),
     };
-    // The entity tag covers the whole listing: every field of every member it represents (a
-    // member container's `modified` included, which moves when something is created in it, while
-    // that container's own stored tag does not), and each member's own tag.
-    let mut hasher = Sha256::new();
-    hasher.update(meta.etag.as_bytes());
-    hasher.update(cmeta.version.as_deref().unwrap_or_default().as_bytes());
-    for (m, _) in &all {
-        hasher.update(serde_json::to_vec(m).unwrap_or_default());
-        hasher.update(b"\n");
-    }
-    let tag = jose::b64url(&hasher.finalize()[..18]);
-    // The listing changed no earlier than any member it lists did, so its Last-Modified is the
-    // latest of the container's own and every listed member's: an If-Modified-Since never meets a
-    // 304 for a listing whose members moved on since.
-    let modified = all
-        .iter()
-        .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
-        .filter_map(|t| u64::try_from(t).ok())
-        .fold(
-            to_secs(
-                cmeta
-                    .modified_ms
-                    .or(meta.last_modified.map(epoch_ms))
-                    .unwrap_or_default(),
-            ),
-            u64::max,
-        );
-
     let page_size = state.cfg.page_size;
     let pages = all.len().div_ceil(page_size).max(1);
     let page = match req.query_param("page") {
@@ -1006,24 +988,9 @@ async fn read_container<S: Store + 'static>(
     if page < 1 || page > pages {
         return problem(StatusCode::NOT_FOUND, None);
     }
-    // Each page is its own representation, so a later page has its own entity tag.
-    let etag = if page == 1 {
-        format!("\"{tag}\"")
-    } else {
-        format!("\"{tag}-p{page}\"")
-    };
-    match evaluate(&req.headers, Some(&etag), Some(modified), true) {
-        Precondition::Failed => return problem(StatusCode::PRECONDITION_FAILED, None),
-        Precondition::NotModified => {
-            let mut r = StatusCode::NOT_MODIFIED.into_response();
-            set(r.headers_mut(), header::ETAG, &etag);
-            set(r.headers_mut(), header::LAST_MODIFIED, &http_date(modified));
-            set(r.headers_mut(), header::VARY, "Accept");
-            resource_links(state, r.headers_mut(), uri, &cmeta.types);
-            return r;
-        }
-        Precondition::Proceed => {}
-    }
+    // The page is made whole, sizes included, before its validators: a size that cannot be read
+    // (its version replaced since, or a failed read) is left out, and the entity tag covers what
+    // is shown, so two different representations never share a strong tag.
     let mut shown: Vec<(Value, crate::store::sparq::ResourceMeta)> = all
         .iter()
         .skip((page - 1) * page_size)
@@ -1038,6 +1005,57 @@ async fn read_container<S: Store + 'static>(
         .collect();
     with_sizes(state, &mut shown).await;
     let items: Vec<Value> = shown.into_iter().map(|(m, _)| m).collect();
+    // The entity tag covers the whole listing: every field of every member it represents (a
+    // member container's `modified` included, which moves when something is created in it, while
+    // that container's own stored tag does not), and each member's own tag; and the page as
+    // shown.
+    let mut hasher = Sha256::new();
+    hasher.update(meta.etag.as_bytes());
+    hasher.update(cmeta.version.as_deref().unwrap_or_default().as_bytes());
+    for (m, _) in &all {
+        hasher.update(serde_json::to_vec(m).unwrap_or_default());
+        hasher.update(b"\n");
+    }
+    hasher.update(serde_json::to_vec(&items).unwrap_or_default());
+    let tag = jose::b64url(&hasher.finalize()[..18]);
+    // The listing changed no earlier than any member it lists did, so its Last-Modified is the
+    // latest of the container's own and every listed member's: an If-Modified-Since never meets a
+    // 304 for a listing whose members moved on since. A container whose own time could not be
+    // moved on after a change to it has none, until it is.
+    let modified = (!state.is_untouched(uri)).then(|| {
+        all.iter()
+            .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
+            .filter_map(|t| u64::try_from(t).ok())
+            .fold(
+                to_secs(
+                    cmeta
+                        .modified_ms
+                        .or(meta.last_modified.map(epoch_ms))
+                        .unwrap_or_default(),
+                ),
+                u64::max,
+            )
+    });
+    // Each page is its own representation, so a later page has its own entity tag.
+    let etag = if page == 1 {
+        format!("\"{tag}\"")
+    } else {
+        format!("\"{tag}-p{page}\"")
+    };
+    match evaluate(&req.headers, Some(&etag), modified, true) {
+        Precondition::Failed => return problem(StatusCode::PRECONDITION_FAILED, None),
+        Precondition::NotModified => {
+            let mut r = StatusCode::NOT_MODIFIED.into_response();
+            set(r.headers_mut(), header::ETAG, &etag);
+            if let Some(modified) = modified {
+                set(r.headers_mut(), header::LAST_MODIFIED, &http_date(modified));
+            }
+            set(r.headers_mut(), header::VARY, "Accept");
+            resource_links(state, r.headers_mut(), uri, &cmeta.types);
+            return r;
+        }
+        Precondition::Proceed => {}
+    }
     let body = json!({
         "@context": LWS_CONTEXT,
         "id": uri,
@@ -1048,7 +1066,9 @@ async fn read_container<S: Store + 'static>(
     let mut resp = json_response(StatusCode::OK, &media_type, &body);
     let h = resp.headers_mut();
     set(h, header::ETAG, &etag);
-    set(h, header::LAST_MODIFIED, &http_date(modified));
+    if let Some(modified) = modified {
+        set(h, header::LAST_MODIFIED, &http_date(modified));
+    }
     // "Because the Content-Type of a container response depends on the request's Accept header,
     // these responses SHOULD include a Vary: Accept header."
     set(h, header::VARY, "Accept");
@@ -1423,19 +1443,24 @@ async fn create<S: Store + 'static>(
                     // A refusal created nothing, and the metadata goes. A backend failure may
                     // follow a create that committed (a remote store's lost reply): the member is
                     // removed first, so committed content is never left without its creator.
-                    // Both are tried until the store takes them, with the locks held, so no
-                    // request sees the member or its metadata in between.
+                    // Both are tried a few times with the locks held, so no request sees the
+                    // member or its metadata in between; what is left then is set aside with
+                    // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
+                    let mut undo = Vec::new();
                     if matches!(e, ServerError::Storage(_)) {
-                        super::until_done(|| super::delete_record(&state, &child, &parent)).await;
+                        undo.push(super::Undo::Remove {
+                            iri: child.clone(),
+                            parent: parent.clone(),
+                        });
                     }
-                    super::until_done(|| async {
-                        match state.store.delete(&meta_key(&child), None).await {
-                            Ok(()) | Err(ServerError::NotFound) => Ok(()),
-                            Err(e) => Err(e),
-                        }
-                    })
-                    .await;
-                    drop(locks);
+                    undo.push(super::Undo::Restore {
+                        key: meta_key(&child),
+                        prior: None,
+                    });
+                    match super::settle(&state.store, undo).await {
+                        None => drop(locks),
+                        Some(left) => state.set_aside(left, locks),
+                    }
                     return Err(e);
                 }
             };
@@ -1627,18 +1652,41 @@ async fn stored_meta<S: Store + 'static>(
 }
 
 /// Run a mutation's store writes (`writes`) while `locks` are held; the locks come back with the
-/// outcome. The mutations run in a task of their own ([`handle`] spawns them, before any lock is
-/// taken), so a client that goes away cannot release the locks while a write is still pending (a
-/// remote store may commit a request that was already sent): nobody else acts on the resource
-/// until the writes are over, and none of them is cut off half way. The task is spawned before
-/// the locks are taken, not here, so its scheduling never sits inside the critical section that
-/// every writer of the resource waits on.
-async fn hold_locks<L, T, F>(locks: L, writes: F) -> Result<(T, L), ServerError>
+/// outcome. The writes run in a task of their own, spawned once the locks are held and the
+/// request's checks are done, so a client that goes away cannot release the locks while a write
+/// is still pending (a remote store may commit a request that was already sent): nobody else acts
+/// on the resource until the writes are over, and none of them is cut off half way. The task
+/// holds `admission`, the request's share of its admission permit, so a write that outlives its
+/// request still counts against the concurrency ceiling until it ends.
+///
+/// When the writes failed and could not be put back (`writes` yields what is left), the task
+/// sets that aside with the locks ([`LwsState::set_aside`](super::LwsState::set_aside)) and the
+/// locks do not come back.
+async fn hold_locks<S, L, T, F>(
+    state: &LwsState<S>,
+    locks: L,
+    admission: Option<crate::overload::AdmissionSlot>,
+    writes: F,
+) -> Result<(T, Option<L>), ServerError>
 where
-    F: std::future::Future<Output = T>,
+    S: Store + 'static,
+    L: Send + 'static,
+    T: Send + 'static,
+    F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
 {
-    let out = writes.await;
-    Ok((out, locks))
+    let state = state.clone();
+    tokio::spawn(async move {
+        let _admission = admission;
+        match writes.await {
+            (out, None) => (out, Some(locks)),
+            (out, Some(left)) => {
+                state.set_aside(left, locks);
+                (out, None)
+            }
+        }
+    })
+    .await
+    .map_err(|e| ServerError::Storage(format!("the request failed: {e}")))
 }
 
 /// Write new content for `uri` and, with `meta` = `(new, old)`, its new metadata, such that a
@@ -1667,6 +1715,7 @@ async fn write_with_meta<S: Store + 'static>(
     body: Bytes,
     content_type: &str,
     meta: Option<(ResourceMeta, Option<ResourceMeta>)>,
+    admission: Option<crate::overload::AdmissionSlot>,
 ) -> (
     Result<crate::store::sparq::ResourceMeta, ServerError>,
     Option<IriGuard>,
@@ -1684,36 +1733,42 @@ async fn write_with_meta<S: Store + 'static>(
     }
     let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
     let Some((new, old)) = changed else {
-        let write = async move { state.store.write(&uri, body, &content_type).await };
-        return match hold_locks(guard, write).await {
-            Ok((written, guard)) => (written, Some(guard), false),
+        let write = {
+            let state = state.clone();
+            async move { (state.store.write(&uri, body, &content_type).await, None) }
+        };
+        return match hold_locks(&state, guard, admission, write).await {
+            Ok((written, guard)) => (written, guard, false),
             Err(e) => (Err(e), None, false),
         };
     };
-    let writes = async move {
-        let mut journal = state.journal();
-        let steps = async {
-            let mut closed = old.clone().unwrap_or_default();
-            closed.pending = true;
-            journal.write_meta(&uri, &closed).await?;
-            let written = journal.write(&uri, body, &content_type).await?;
-            journal.write_meta(&uri, &new).await?;
-            Ok(written)
-        }
-        .await;
-        match steps {
-            Ok(written) => {
-                journal.commit();
-                (Ok(written), false)
+    let writes = {
+        let state = state.clone();
+        async move {
+            let mut journal = state.journal();
+            let steps = async {
+                let mut closed = old.clone().unwrap_or_default();
+                closed.pending = true;
+                journal.write_meta(&uri, &closed).await?;
+                let written = journal.write(&uri, body, &content_type).await?;
+                journal.write_meta(&uri, &new).await?;
+                Ok(written)
             }
-            Err(e) => {
-                journal.rollback().await;
-                (Err(e), true)
+            .await;
+            match steps {
+                Ok(written) => {
+                    journal.commit();
+                    ((Ok(written), false), None)
+                }
+                Err(e) => match journal.rollback().await {
+                    None => ((Err(e), true), None),
+                    left => ((Err(e), false), left),
+                },
             }
         }
     };
-    match hold_locks(guard, writes).await {
-        Ok(((outcome, undone), guard)) => (outcome, Some(guard), undone),
+    match hold_locks(&state, guard, admission, writes).await {
+        Ok(((outcome, undone), guard)) => (outcome, guard, undone),
         Err(e) => (Err(e), None, false),
     }
 }
@@ -1811,6 +1866,7 @@ async fn update<S: Store + 'static>(
         req.body.clone(),
         &content_type,
         Some((rmeta, old_rmeta)),
+        req.admission.clone(),
     )
     .await;
     let written = match written {
@@ -1924,12 +1980,12 @@ async fn delete<S: Store + 'static>(
     let removal = {
         let state = state.clone();
         async move {
-            let (removed, outcome) = remove(&state, &doomed).await;
-            (removed, outcome, state)
+            let (removed, outcome, left) = remove(&state, &doomed).await;
+            ((removed, outcome), left)
         }
     };
-    let (removed, outcome) = match hold_locks(guards, removal).await {
-        Ok(((removed, outcome, _), guards)) => {
+    let (removed, outcome) = match hold_locks(state, guards, req.admission.clone(), removal).await {
+        Ok(((removed, outcome), guards)) => {
             drop(guards);
             (removed, outcome)
         }
@@ -2013,12 +2069,17 @@ async fn lock_subtree<S: Store + 'static>(
 /// metadata (which says who may act on it, so it goes only once the resource has), through one
 /// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
 /// removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)), with
-/// the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), and the
-/// outcome. A subtree too large to put back is refused (409) before anything is removed.
+/// the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
+/// outcome, and what could not be put back (when something could not, every one of `doomed`
+/// counts as gone). A subtree too large to put back is refused (409) before anything is removed.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
-) -> (Vec<String>, Result<(), ServerError>) {
+) -> (
+    Vec<String>,
+    Result<(), ServerError>,
+    Option<super::Unsettled>,
+) {
     remove_in(state.journal(), doomed).await
 }
 
@@ -2026,7 +2087,11 @@ async fn remove<S: Store + 'static>(
 async fn remove_in<S: Store + 'static>(
     mut journal: super::Journal<'_, S>,
     doomed: &[(String, Option<String>)],
-) -> (Vec<String>, Result<(), ServerError>) {
+) -> (
+    Vec<String>,
+    Result<(), ServerError>,
+    Option<super::Unsettled>,
+) {
     // Everything the removal could need to put back is read first: a subtree too large to
     // remove atomically is refused before any of it is removed.
     for (node, _) in doomed {
@@ -2035,7 +2100,7 @@ async fn remove_in<S: Store + 'static>(
             Err(e) => Err(e),
         };
         if let Err(e) = staged {
-            return (Vec::new(), Err(e));
+            return (Vec::new(), Err(e), None);
         }
     }
     let mut failed = None;
@@ -2055,15 +2120,16 @@ async fn remove_in<S: Store + 'static>(
             break;
         }
     }
+    let all = || doomed.iter().map(|(n, _)| n.clone()).collect();
     match failed {
         None => {
             journal.commit();
-            (doomed.iter().map(|(n, _)| n.clone()).collect(), Ok(()))
+            (all(), Ok(()), None)
         }
-        Some(e) => {
-            journal.rollback().await;
-            (Vec::new(), Err(e))
-        }
+        Some(e) => match journal.rollback().await {
+            None => (Vec::new(), Err(e), None),
+            left => (all(), Err(e), left),
+        },
     }
 }
 
@@ -3596,7 +3662,9 @@ mod tests {
     /// Review finding: a create whose store call reported a failure removed the new member's
     /// metadata, though a remote store may have committed the content before its reply was lost:
     /// the content stayed, without its creator, types and links. The metadata now goes only once
-    /// the content is known to be gone.
+    /// the content is known to be gone. Review finding: retrying that removal without bound held
+    /// the request (and its admission slot) for as long as the store failed; after a few tries
+    /// the member is now set aside instead.
     #[tokio::test]
     async fn a_create_whose_outcome_is_unknown_is_removed_whole() {
         use super::super::test_store::{request as req, FlakyStore};
@@ -3614,25 +3682,38 @@ mod tests {
                 "x",
             )
         };
-        // The content lands, the reply is lost, and the content cannot be removed yet: the create
-        // keeps its locks and tries again until it can, so the content never stands without its
-        // creator, then goes whole.
+        // The content lands, the reply is lost, and the content cannot be removed yet: after a
+        // few tries the create answers 5xx and the member is set aside, its locks held by the
+        // task that keeps removing it. Meanwhile it is unavailable (503), so the content is
+        // never served or changed without its creator; once it can be removed it goes whole.
         let kept = st.cfg.absolute("/kept.txt");
         store.fail_after_create.store(true, Ordering::SeqCst);
         *store.fail_delete_of.lock().unwrap() = Some(kept.clone());
-        let pending = tokio::spawn({
-            let (st, owner, req) = (st.clone(), owner.clone(), post("kept.txt"));
-            async move { create(&st, &req, &owner, &st.cfg.storage()).await.status() }
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        assert!(
-            !pending.is_finished(),
-            "the create gave up with its content stored"
-        );
+        let r = create(&st, &post("kept.txt"), &owner, &st.cfg.storage()).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        assert!(st.is_set_aside(&kept));
+        for method in [Method::GET, Method::PUT, Method::DELETE] {
+            let r = handle(&st, &req(method.clone(), "/kept.txt", &[], "y"), &owner).await;
+            assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE, "{method}");
+            assert!(r.headers().contains_key(header::RETRY_AFTER));
+        }
+        let r = handle(&st, &req(Method::GET, "/kept.txt.meta", &[], ""), &owner).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // Nobody else takes its lock while it is set aside.
+        assert!(st.locks.try_lock(&kept).is_none());
         *store.fail_delete_of.lock().unwrap() = None;
-        assert!(pending.await.unwrap().is_server_error());
+        for _ in 0..100 {
+            if !st.is_set_aside(&kept) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(!st.is_set_aside(&kept));
+        assert!(st.locks.try_lock(&kept).is_some());
         assert!(!st.store.exists(&kept).await.unwrap());
         assert!(stored_meta(&st, &kept).await.unwrap().is_none());
+        store.fail_after_create.store(true, Ordering::SeqCst);
         // When the content can be removed, it goes, and its metadata with it.
         let gone = st.cfg.absolute("/gone.txt");
         let r = create(&st, &post("gone.txt"), &owner, &st.cfg.storage()).await;
@@ -3981,7 +4062,7 @@ mod tests {
         // fails once on a's metadata, which is tried again.
         *store.fail_delete_of.lock().unwrap() = Some(doomed[2].0.clone());
         *store.fail_step.lock().unwrap() = Some(7);
-        let (gone, outcome) = remove(&st, &doomed).await;
+        let (gone, outcome, _) = remove(&st, &doomed).await;
         *store.fail_delete_of.lock().unwrap() = None;
         assert!(
             store.fail_step.lock().unwrap().take().is_none(),
@@ -3994,6 +4075,176 @@ mod tests {
             assert_eq!((now.etag, now.last_modified), (was.etag, was.last_modified));
             assert!(st.store.exists(&meta_key(node)).await.unwrap());
         }
+    }
+
+    /// Review finding: a container whose own time could not be moved on after a member was
+    /// deleted kept its old Last-Modified, and every time in its listing could be older still,
+    /// so an If-Modified-Since from before the delete met a 304. Until a touch lands the
+    /// listing has no Last-Modified, and a date alone never makes it 304.
+    #[tokio::test]
+    async fn a_failed_touch_leaves_no_date_to_validate_against() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        for slug in ["a", "b"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &anyone).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = handle(
+            &st,
+            &req(Method::GET, "/", &[("accept", "application/lws+json")], ""),
+            &anyone,
+        )
+        .await;
+        let since = r.headers()[header::LAST_MODIFIED]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let root = st.cfg.storage();
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&root));
+        let r = handle(&st, &req(Method::DELETE, "/b", &[], ""), &anyone).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        *store.fail_write_of.lock().unwrap() = None;
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", since.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        // The next touch that lands brings the date back.
+        let h = [("slug", "c"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &anyone).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = handle(
+            &st,
+            &req(Method::GET, "/", &[("accept", "application/lws+json")], ""),
+            &anyone,
+        )
+        .await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+    }
+
+    /// Review finding: a container's entity tag was computed before the sizes were added, so a
+    /// listing that could not read a member's size and one that could shared a strong tag. The
+    /// tag covers the page as shown.
+    #[tokio::test]
+    async fn a_listing_tag_covers_the_sizes_it_shows() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let h = [("slug", "a"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "abc"), &anyone).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let tag = |r: &Response| r.headers()[header::ETAG].to_str().unwrap().to_string();
+        let whole = handle(
+            &st,
+            &req(Method::GET, "/", &[("accept", "application/lws+json")], ""),
+            &anyone,
+        )
+        .await;
+        *store.fail_read_of.lock().unwrap() = Some(st.cfg.absolute("/a"));
+        let sizeless = handle(
+            &st,
+            &req(Method::GET, "/", &[("accept", "application/lws+json")], ""),
+            &anyone,
+        )
+        .await;
+        *store.fail_read_of.lock().unwrap() = None;
+        assert_eq!(sizeless.status(), StatusCode::OK);
+        assert_ne!(tag(&whole), tag(&sizeless));
+        let again = handle(
+            &st,
+            &req(Method::GET, "/", &[("accept", "application/lws+json")], ""),
+            &anyone,
+        )
+        .await;
+        assert_eq!(tag(&whole), tag(&again));
+    }
+
+    /// Review finding: a PUT with Content-Range replaced the whole resource with the part it
+    /// carried. It is refused (RFC 9110 section 14.5), and nothing changes.
+    #[tokio::test]
+    async fn a_partial_put_is_refused() {
+        use super::super::test_store::{request as req, state};
+        let (st, _store) = state(100).await;
+        let h = [("slug", "p"), ("content-type", "text/plain")];
+        let r = handle(
+            &st,
+            &req(Method::POST, "/", &h, "abcdef"),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let h = [
+            ("content-type", "text/plain"),
+            ("content-range", "bytes 1-2/6"),
+        ];
+        let r = handle(&st, &req(Method::PUT, "/p", &h, "XY"), &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+        let r = handle(&st, &req(Method::GET, "/p", &[], ""), &Agent::anonymous()).await;
+        assert_eq!(&body_of(r).await[..], b"abcdef");
+    }
+
+    /// Review finding: a rollback retried without bound held its locks, and the request its
+    /// admission slot, for as long as the store failed, and every request for what it held
+    /// waited behind it. After a few tries the request now ends (5xx) and what is left is set
+    /// aside: answered 503 at once, its locks held by a task that keeps putting it back, and
+    /// served again, as it was, once that is done.
+    #[tokio::test]
+    async fn a_rollback_that_keeps_failing_is_set_aside() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        for slug in ["a", "b", "c"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let h = [("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::PUT, "/b", &h, "y"), &Agent::anonymous()).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let b = format!("{root}b");
+        let was = st.store.meta(&b).await.unwrap().unwrap();
+        // b goes, then c cannot, and b cannot be put back.
+        let doomed: Vec<(String, Option<String>)> = ["b", "c"]
+            .iter()
+            .map(|n| (format!("{root}{n}"), Some(root.clone())))
+            .collect();
+        *store.fail_delete_of.lock().unwrap() = Some(doomed[1].0.clone());
+        *store.fail_restore_of.lock().unwrap() = Some(b.clone());
+        let (gone, outcome, left) = remove(&st, &doomed).await;
+        assert!(outcome.is_err());
+        assert_eq!(gone.len(), 2, "what could not be put back counts as gone");
+        let left = left.expect("set aside");
+        *store.fail_delete_of.lock().unwrap() = None;
+        let guard = st.locks.lock(&b).await;
+        st.set_aside(left, guard);
+        let get = |p: &'static str| {
+            let (st, r) = (st.clone(), req(Method::GET, p, &[], ""));
+            async move { handle(&st, &r, &Agent::anonymous()).await }
+        };
+        let r = get("/b").await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            get("/b.meta").await.status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        // What it does not hold is served as usual.
+        assert_eq!(get("/a").await.status(), StatusCode::OK);
+        *store.fail_restore_of.lock().unwrap() = None;
+        for _ in 0..100 {
+            if !st.is_set_aside(&b) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let r = get("/b").await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let now = st.store.meta(&b).await.unwrap().expect("put back");
+        assert_eq!((now.etag, now.last_modified), (was.etag, was.last_modified));
+        assert_eq!(&body_of(r).await[..], b"y");
     }
 
     /// Review finding: a recursive delete found out it was too large to undo only after removing
@@ -4015,7 +4266,7 @@ mod tests {
         journal.limit = 2 * (doomed[0].0.len() + "x".len() + meta_key(&doomed[0].0).len()) + 1;
         // Every store step is counted down: none may be taken.
         *store.fail_step.lock().unwrap() = Some(1000);
-        let (gone, outcome) = remove_in(journal, &doomed).await;
+        let (gone, outcome, _) = remove_in(journal, &doomed).await;
         assert!(matches!(outcome, Err(ServerError::Conflict(_))));
         assert!(gone.is_empty());
         assert_eq!(*store.fail_step.lock().unwrap(), Some(1000));
