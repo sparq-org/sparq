@@ -1026,15 +1026,15 @@ version = "0.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.hickory-net]]
-version = "0.26.1"
+version = "0.26.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.hickory-proto]]
-version = "0.26.1"
+version = "0.26.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.hickory-resolver]]
-version = "0.26.1"
+version = "0.26.3"
 criteria = "safe-to-deploy"
 notes = "solid-server-rs import pre-flight (sq-gg0qq.1): transitive of solid-oidc-verifier — its DNS-pinned SSRF-guarded async resolver (0.26.1 carries the GHSA-q2qq-hmj6-3wpp hickory-proto fix). [FABLE-5]"
 
