@@ -3,13 +3,14 @@
 //! Prohibitions are generated over every constraint left operand the evaluator knows
 //! (and one it does not), each assignee shape, and compound constraints, then layered
 //! over a public WAC read grant through the one-shot and the conditional deny entry
-//! points, for each requesting party. After materialization and again after a ledger
-//! refresh:
+//! points, materialized as one requesting party. After materialization, after a ledger
+//! refresh and after a WAC re-materialization that replays the ledger:
 //!
-//! - the requesting party is denied whenever a prohibition still applies to its request
-//!   (`matched_prohibition`, which keeps a prohibition in force on Unknown);
-//! - when the conditional path stored a re-checked deny head, every session agent a
-//!   prohibition applies to is denied, since that head is consulted for every session.
+//! - one-shot: the requesting party is denied whenever a prohibition still applies to
+//!   its request (`matched_prohibition`, which keeps a prohibition in force on Unknown);
+//! - conditional: every session `decide` denies is denied, whoever materialized. The
+//!   session universe holds the parties, one never seen at materialization, and an
+//!   anonymous session.
 #![cfg(feature = "odrl-bridge")]
 
 use sparq_core::Graph;
@@ -24,6 +25,9 @@ const PARTIES: [&str; 4] = [
     "https://carol.ex/card#me",
     "https://pod.ex/team",
 ];
+
+/// A party no materializing request names.
+const UNSEEN: &str = "https://dave.ex/card#me";
 
 const CONSTRAINTS: &[&str] = &[
     "",
@@ -45,8 +49,11 @@ const CONSTRAINTS: &[&str] = &[
     "a odrl:LogicalConstraint ; odrl:and ( [ odrl:leftOperand odrl:recipient ; odrl:operator odrl:eq ; odrl:rightOperand <https://alice.ex/card#me> ] )",
 ];
 
-const ASSIGNEES: [Option<&str>; 3] =
-    [None, Some("https://alice.ex/card#me"), Some("https://pod.ex/team")];
+const ASSIGNEES: [Option<&str>; 3] = [
+    None,
+    Some("https://alice.ex/card#me"),
+    Some("https://pod.ex/team"),
+];
 
 fn policy(constraint: &str, assignee: Option<&str>, collection: bool) -> Option<ValidatedPolicy> {
     let mut rule = format!("odrl:action odrl:read ; odrl:target <{N1}>");
@@ -80,24 +87,63 @@ fn public_store() -> PodStore {
     store
 }
 
-fn reads(store: &mut PodStore, agent: &str) -> bool {
-    let s = Session { agent: Some(agent), client: None, issuer: None, now: None };
-    store.accessible(&s, Mode::Read).iter().any(|g| g.as_str() == N1)
+fn reads(store: &mut PodStore, agent: Option<&str>) -> bool {
+    let s = Session {
+        agent,
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    store
+        .accessible(&s, Mode::Read)
+        .iter()
+        .any(|g| g.as_str() == N1)
 }
 
 fn read_by(party: &str) -> Request {
     Request::new(format!("{ODRL}read")).on(N1).by(party)
 }
 
-fn check(store: &mut PodStore, pol: &ValidatedPolicy, req: &Request, head: bool, when: &str, case: &str) {
+/// Whether `decide` denies a read of n1 by `agent` (anonymous for `None`), with or
+/// without a clock.
+fn decide_denies(pol: &ValidatedPolicy, agent: Option<&str>) -> bool {
+    [None, Some("2025-06-01T00:00:00Z")].into_iter().any(|at| {
+        let mut req = Request::new(format!("{ODRL}read")).on(N1);
+        if let Some(a) = agent {
+            req = req.by(a);
+        }
+        if let Some(t) = at {
+            req = req.at(t);
+        }
+        matched_prohibition(pol, &req).is_some()
+    })
+}
+
+fn check(
+    store: &mut PodStore,
+    pol: &ValidatedPolicy,
+    req: &Request,
+    conditional: bool,
+    when: &str,
+    case: &str,
+) {
     let party = req.party.as_deref().unwrap();
     if matched_prohibition(pol, req).is_some() {
-        assert!(!reads(store, party), "{when}: requester {party} not denied\n{case}");
+        assert!(
+            !reads(store, Some(party)),
+            "{when}: requester {party} not denied\n{case}"
+        );
     }
-    if head {
-        for s in PARTIES {
-            if matched_prohibition(pol, &read_by(s)).is_some() {
-                assert!(!reads(store, s), "{when}: session {s} not denied by the stored head\n{case}");
+    if conditional {
+        let universe = PARTIES
+            .iter()
+            .copied()
+            .chain([UNSEEN])
+            .map(Some)
+            .chain([None]);
+        for s in universe {
+            if decide_denies(pol, s) {
+                assert!(!reads(store, s), "{when}: session {s:?} not denied\n{case}");
             }
         }
     }
@@ -105,11 +151,13 @@ fn check(store: &mut PodStore, pol: &ValidatedPolicy, req: &Request, head: bool,
 
 #[test]
 fn bridged_denies_cover_every_decide_deny() {
-    let (mut cases, mut heads) = (0, 0);
+    let (mut cases, mut anonymous) = (0, 0);
     for constraint in CONSTRAINTS {
         for assignee in ASSIGNEES {
             for collection in [false, true] {
-                let Some(pol) = policy(constraint, assignee, collection) else { continue };
+                let Some(pol) = policy(constraint, assignee, collection) else {
+                    continue;
+                };
                 for party in PARTIES {
                     for at in [None, Some("2025-06-01T00:00:00Z")] {
                         let mut req = read_by(party);
@@ -122,20 +170,28 @@ fn bridged_denies_cover_every_decide_deny() {
                                  {collection} party {party} at {at:?} conditional {conditional}"
                             );
                             let mut store = public_store();
-                            assert!(reads(&mut store, party), "public grant in force");
-                            let out = if conditional {
-                                store.materialize_odrl_prohibition_conditional(&pol, &req)
+                            assert!(reads(&mut store, Some(party)), "public grant in force");
+                            if conditional {
+                                store.materialize_odrl_prohibition_conditional(&pol, &req);
                             } else {
-                                store.materialize_odrl_prohibition(&pol, &req)
-                            };
-                            let head = out.deny_triple.as_ref().is_some_and(|t| {
-                                t.1 == "https://sparq.dev/ns/auth#effect"
-                            });
-                            heads += usize::from(head);
+                                store.materialize_odrl_prohibition(&pol, &req);
+                            }
                             cases += 1;
-                            check(&mut store, &pol, &req, head, "after materialize", &case);
+                            check(
+                                &mut store,
+                                &pol,
+                                &req,
+                                conditional,
+                                "after materialize",
+                                &case,
+                            );
                             store.refresh_odrl_grants();
-                            check(&mut store, &pol, &req, head, "after refresh", &case);
+                            check(&mut store, &pol, &req, conditional, "after refresh", &case);
+                            store.materialize_wac().expect("wac");
+                            check(&mut store, &pol, &req, conditional, "after replay", &case);
+                            if conditional && decide_denies(&pol, None) {
+                                anonymous += 1;
+                            }
                         }
                     }
                 }
@@ -143,5 +199,8 @@ fn bridged_denies_cover_every_decide_deny() {
         }
     }
     assert!(cases >= 500, "only {cases} cases ran");
-    assert!(heads >= 20, "only {heads} conditional heads were stored");
+    assert!(
+        anonymous >= 100,
+        "only {anonymous} conditional cases deny anonymous under decide"
+    );
 }

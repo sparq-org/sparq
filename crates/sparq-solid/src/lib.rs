@@ -1468,16 +1468,13 @@ impl PodStore {
     }
 
     /// [OPUS-4.8] sq-4r70 — the deny dual of
-    /// [`PodStore::materialize_odrl_permission_conditional`]: persist a matched ODRL
-    /// **prohibition** whose recipient/assignee constraints map faithfully as a
-    /// re-checked ACP **conditional deny** (`auth:effect auth:Deny`) rather than freezing
-    /// it one-shot. The carve-out is re-verified per session through the SAME enforcement
-    /// path ([`PodStore::accessible`] / [`PodStore::query_as`]); the deny **overrides**
-    /// any allow for the same principal+target+mode (deny-overrides).
-    ///
-    /// A prohibition carrying a constraint with **no** faithful ACP-condition analogue
-    /// (`odrl:purpose`, `odrl:dateTime`, `odrl:count`) falls back to the one-shot deny
-    /// ([`odrl_bridge::materialize_prohibition`], frozen at materialization) — see
+    /// [`PodStore::materialize_odrl_permission_conditional`]: persist each ODRL
+    /// **prohibition** on the request's action and target as an ACP **conditional deny**
+    /// (`auth:effect auth:Deny`) that does not depend on who triggered materialization.
+    /// A prohibition whose conditions are purely about the party is re-checked per
+    /// session (anonymous sessions are always denied); every other prohibition denies
+    /// every session. The deny **overrides** any allow for the same
+    /// principal+target+mode (deny-overrides). See
     /// [`odrl_bridge::materialize_prohibition_conditional`] for the full rationale.
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_prohibition_conditional(

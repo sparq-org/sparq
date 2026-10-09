@@ -1800,9 +1800,8 @@ fn conditional_deny_retracts_when_prohibition_withdrawn() {
     assert_eq!(cond_denies_for(&store.graph, None), 0, "no residual deny condition");
 }
 
-// 27. MIXED / unmappable constraint falls back to ONE-SHOT: a recipient-eq + dateTime
-//     prohibition cannot persist the time bound as a condition (ACP has no clock), so it
-//     falls back to the one-shot deny (frozen, materialized iff the prohibition matches).
+// 27. A constraint a session cannot carry (here a dateTime bound; ACP has no clock)
+//     turns the prohibition into an unconditional deny for every session.
 #[test]
 fn conditional_deny_mixed_constraint_falls_back_one_shot() {
     let pol = parse_policy_str(
@@ -1827,11 +1826,10 @@ fn conditional_deny_mixed_constraint_falls_back_one_shot() {
         .by(CAROL)
         .with(odrl("dateTime"), Value::DateTime("2026-06-16T00:00:00Z".to_owned()));
     let out = materialize_prohibition_conditional(&mut g, &pol, &req);
-    assert!(out.prohibited, "one-shot deny materializes inside the window: {out:?}");
-    // No re-checked deny CONDITION emitted — the time bound forced the one-shot path.
-    assert_eq!(cond_denies_for(&g, None), 0, "unmappable dateTime → no deny condition");
-    // The frozen one-shot deny names carol via auth:denyRead.
-    assert_eq!(out.deny_triple.as_ref().map(|t| t.1.contains("denyRead")), Some(true), "{out:?}");
+    assert!(out.prohibited, "a deny materializes: {out:?}");
+    // A session carries no clock, so the time bound becomes an unconditional deny.
+    assert_eq!(cond_denies_for(&g, None), 1, "one deny head: {out:?}");
+    assert_eq!(cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")), 1, "on auth:Public");
 }
 
 // ===========================================================================
@@ -2224,10 +2222,9 @@ fn isanyof_prohibition_persists_conditional_deny_per_member() {
 // `rule.assignee` into the condition head when there is no recipient constraint.
 // ===========================================================================
 
-// 31. WIDENING CLOSED (prohibition dual): a bare-assignee prohibition
-//     (assignee=alice, ZERO constraints) via the CONDITIONAL entry point denies
-//     ONLY alice — bob keeps a pre-existing public allow. Before the fix this
-//     materialized a PUBLIC deny (over-deny: everyone, incl. bob, denied).
+// 31. A bare-assignee prohibition (assignee=alice, ZERO constraints) via the
+//     CONDITIONAL entry point denies alice's sessions and anonymous ones; bob keeps a
+//     pre-existing public allow.
 #[test]
 fn bare_assignee_prohibition_conditional_scopes_to_assignee_not_public() {
     let mut store = PodStore::new(pod());
@@ -2259,18 +2256,18 @@ fn bare_assignee_prohibition_conditional_scopes_to_assignee_not_public() {
     assert!(dout.prohibited, "bare-assignee prohibition materialises a deny: {dout:?}");
     assert_eq!(
         cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")),
-        0,
-        "NO auth:Public deny — the deny is scoped to the assignee"
+        1,
+        "one auth:Public head, the anonymous-only deny (it excepts authenticated sessions)"
     );
-    assert_eq!(cond_denies_for(&g, Some(ALICE)), 1, "the deny head is scoped to alice");
+    assert_eq!(cond_denies_for(&g, Some(ALICE)), 1, "the agent deny head is scoped to alice");
 
-    // Through the real enforcement path: deny-overrides removes ONLY alice's access.
+    // Through the real enforcement path: alice and anonymous lose access, bob keeps it.
     assert!(store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited);
     assert!(!reads(&mut store, ALICE), "alice (the assignee) is denied — deny-overrides");
     assert!(reads(&mut store, BOB), "bob keeps the public allow — NOT over-denied");
     assert!(
-        !store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "an anonymous session keeps the public allow — NOT over-denied"
+        store.accessible(&Session::default(), Mode::Read).is_empty(),
+        "an anonymous session is denied: it carries no party to check"
     );
 }
 
@@ -2360,13 +2357,9 @@ fn compound_only_permission_conditional_scopes_not_public() {
     );
 }
 
-// 33. WIDENING CLOSED (prohibition dual): a compound-only prohibition (an
-//     `odrl:xone` of a single `recipient eq alice`, ZERO atomic constraints) via
-//     the CONDITIONAL entry point denies ONLY alice — bob AND an anonymous session
-//     keep a pre-existing public allow. Before the fix this materialized a PUBLIC
-//     deny (over-deny: everyone, incl. bob + anonymous, denied). `odrl:xone` is
-//     used to exercise a second combinator (satisfied iff exactly one operand
-//     holds — here the single `recipient eq alice`).
+// 33. A compound-only prohibition (an `odrl:xone` of a single `recipient eq alice`,
+//     ZERO atomic constraints) is not re-checked per session, so the CONDITIONAL entry
+//     point denies every session; the compound restriction is never dropped.
 #[test]
 fn compound_only_prohibition_conditional_scopes_not_public() {
     let mut store = PodStore::new(pod());
@@ -2403,17 +2396,17 @@ fn compound_only_prohibition_conditional_scopes_not_public() {
     assert!(dout.prohibited, "compound-only prohibition materialises a deny for alice: {dout:?}");
     assert_eq!(
         cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")),
-        0,
-        "NO auth:Public deny — the compound restriction is NOT dropped"
+        1,
+        "a compound restriction is not re-checked per session, so it denies everyone"
     );
 
-    // Through the real enforcement path: deny-overrides removes ONLY alice's access.
+    // Through the real enforcement path: the deny is unconditional and beats the allow.
     assert!(store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited);
     assert!(!reads(&mut store, ALICE), "alice (the recipient) is denied — deny-overrides");
-    assert!(reads(&mut store, BOB), "bob keeps the public allow — NOT over-denied");
+    assert!(!reads(&mut store, BOB), "bob is denied too: the deny does not depend on the asker");
     assert!(
-        !store.accessible(&Session::default(), Mode::Read).is_empty(),
-        "an anonymous session keeps the public allow — NOT over-denied"
+        store.accessible(&Session::default(), Mode::Read).is_empty(),
+        "an anonymous session is denied"
     );
 }
 
@@ -2634,10 +2627,9 @@ fn collection_assignee_without_evidence_emits_no_conditional_grant() {
     assert!(!reads(&mut store, CAROL), "and nothing widened to a non-member");
 }
 
-// 42. THE DENY DUAL STAYS ONE-SHOT: a collection-valued deny head cannot re-check
-//     membership, so freezing it to the evidenced members would let every UNLISTED member
-//     escape the prohibition (fail-OPEN). No deny CONDITION is emitted; the one-shot
-//     evaluator — which does the real identity-or-membership check — denies instead.
+// 42. A collection-valued deny head cannot re-check membership, so freezing it to the
+//     evidenced members would let every UNLISTED member escape the prohibition
+//     (fail-OPEN). The rule becomes an unconditional deny instead.
 #[test]
 fn collection_prohibition_stays_one_shot() {
     let prohib = lab_prohibition();
@@ -2646,11 +2638,11 @@ fn collection_prohibition_stays_one_shot() {
     let mut g = pod();
     let out = materialize_prohibition_conditional(&mut g, &prohib, &req);
     assert!(out.prohibited, "the member's deny still materializes: {out:?}");
-    assert_eq!(cond_denies_for(&g, None), 0, "NO re-checked deny condition for a collection");
+    assert_eq!(cond_denies_for(&g, Some(LAB)), 0, "never the bare collection IRI");
     assert_eq!(
-        out.deny_triple.as_ref().map(|t| (t.0.as_str(), t.1.contains("denyRead"))),
-        Some((ALICE, true)),
-        "the frozen one-shot deny names the requesting member: {out:?}"
+        cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")),
+        1,
+        "a collection cannot be re-checked per session, so the deny is unconditional"
     );
 
     // End-to-end with deny-overrides: a public allow is in force; each member's own
@@ -2663,8 +2655,8 @@ fn collection_prohibition_stays_one_shot() {
     assert!(!reads(&mut store, ALICE), "DENY-OVERRIDES: the member loses access");
     let bob_req = lab_members(Request::new(odrl("read")).on(N1).by(BOB));
     assert!(store.materialize_odrl_prohibition_conditional(&prohib, &bob_req).prohibited);
-    assert!(!reads(&mut store, BOB), "bob's own request denies bob");
-    assert!(reads(&mut store, CAROL), "a non-member keeps the public allow");
+    assert!(!reads(&mut store, BOB), "bob is denied");
+    assert!(!reads(&mut store, CAROL), "the unconditional deny binds a non-member too");
 }
 
 // 43. AN ALLOW'S CARVE-OUT NAMING A COLLECTION ALSO STAYS ONE-SHOT: a frozen ACP
@@ -2694,8 +2686,8 @@ fn collection_carve_out_stays_one_shot() {
 //     supplied NO `odrl:partOf` edge for used to take the ordinary concrete-head path and
 //     persist the bare collection IRI as a deny head — a head no member session can match,
 //     so every member escaped the prohibition. Collection identity now comes from the
-//     policy's own `a odrl:PartyCollection` declaration, so the rule leaves the frozen path
-//     regardless of evidence: NO conditional deny is emitted, and nothing is widened.
+//     policy's own `a odrl:PartyCollection` declaration, so the rule becomes an
+//     unconditional deny regardless of evidence, and never a bare collection head.
 #[test]
 fn zero_edge_collection_prohibition_emits_no_conditional_deny() {
     let prohib = lab_prohibition();
@@ -2704,7 +2696,7 @@ fn zero_edge_collection_prohibition_emits_no_conditional_deny() {
 
     let mut g = pod();
     let out = materialize_prohibition_conditional(&mut g, &prohib, &req);
-    assert_eq!(cond_denies_for(&g, None), 0, "NO re-checked deny condition: {out:?}");
+    assert_eq!(cond_denies_for(&g, None), 1, "one unconditional deny: {out:?}");
     assert_eq!(
         cond_denies_for(&g, Some(LAB)),
         0,
@@ -2717,12 +2709,10 @@ fn zero_edge_collection_prohibition_emits_no_conditional_deny() {
     let permit = public_read_permit();
     let mut store = PodStore::new(pod());
     install_public_read(&mut store, &permit);
-    assert!(!store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited,
-        "carol is not a member under any evidence, so no deny is materialized for her");
-    assert!(reads(&mut store, CAROL), "the non-member keeps the public allow");
-    let alice_req = lab_members(Request::new(odrl("read")).on(N1).by(ALICE));
-    assert!(store.materialize_odrl_prohibition_conditional(&prohib, &alice_req).prohibited);
-    assert!(!reads(&mut store, ALICE), "the member is bound by the one-shot deny");
+    assert!(store.materialize_odrl_prohibition_conditional(&prohib, &req).prohibited,
+        "the deny does not depend on who materialized it");
+    assert!(!reads(&mut store, CAROL), "the unconditional deny binds everyone");
+    assert!(!reads(&mut store, ALICE), "including every member, evidenced or not");
 }
 
 // 45. THE ZERO-EDGE CARVE-OUT IS CLOSED — the case that actually WIDENED access. With no
@@ -2754,8 +2744,8 @@ fn zero_edge_collection_carve_out_emits_no_conditional_grant() {
 
 // 46. IDENTITY WITHOUT A TYPE TRIPLE: a document that states `<alice> odrl:partOf <lab>`
 //     has identified `<lab>` as a collection just as surely as `a odrl:PartyCollection`,
-//     and the parser retains both. The prohibition still leaves the frozen path even
-//     though the REQUEST carries no membership evidence at all.
+//     and the parser retains both. The prohibition still becomes an unconditional deny
+//     even though the REQUEST carries no membership evidence at all.
 #[test]
 fn policy_stated_membership_edge_identifies_the_collection() {
     let prohib = parse_policy_str(
@@ -2780,7 +2770,11 @@ fn policy_stated_membership_edge_identifies_the_collection() {
     let req = Request::new(odrl("read")).on(N1).by(CAROL); // no request-side evidence
     materialize_prohibition_conditional(&mut g, &prohib, &req);
     assert_eq!(cond_denies_for(&g, Some(LAB)), 0, "no bare collection deny head");
-    assert_eq!(cond_denies_for(&g, None), 0, "no conditional deny at all");
+    assert_eq!(
+        cond_denies_for(&g, Some("https://sparq.dev/ns/auth#Public")),
+        1,
+        "the collection rule denies everyone instead"
+    );
 }
 
 // ===========================================================================
