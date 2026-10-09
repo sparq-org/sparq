@@ -134,17 +134,31 @@ impl Watch {
         match &self.snapshot {
             Some(s) => access::allowed_as(state, Action::Read, &self.uri, &self.agent, s).await,
             None => {
-                // A resource set aside is not read (its lock is held until it is put back): the
-                // delivery fails its check rather than wait.
-                if state.is_set_aside(&self.uri) {
-                    return false;
-                }
-                let _guard = state.locks.read(&self.uri).await;
-                state.allowed(Action::Read, &self.uri, &self.agent).await
+                // A resource that is not visible is not read (its lock is held until it is put
+                // back): the delivery fails its check rather than wait, including when the
+                // resource is set aside while the delivery waits for its lock.
+                let read = state.locks.read(&self.uri);
+                tokio::pin!(read);
+                let _guard = loop {
+                    if !state.visible(&self.uri) {
+                        return false;
+                    }
+                    tokio::select! {
+                        guard = &mut read => break guard,
+                        _ = tokio::time::sleep(SET_ASIDE_POLL) => {}
+                    }
+                };
+                // The subscription may have been cancelled, or expired, meanwhile.
+                state.notify.is_live(&self.subscription)
+                    && state.allowed(Action::Read, &self.uri, &self.agent).await
             }
         }
     }
 }
+
+/// How often a delivery waiting for a resource's lock looks again whether the resource was set
+/// aside meanwhile (see [`Watch::stands`]).
+const SET_ASIDE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Most distinct topics one subscription may name.
 pub const MAX_TOPICS: usize = 64;
@@ -499,7 +513,13 @@ impl Notifier {
                     "object": {"id": linkset, "type": ["DataResource"]},
                 }));
             }
+            // The bound is on what is prepared: a subscription naming both the resource and its
+            // linkset brings two, and what is past the bound is dropped and counted so.
             for activity in activities {
+                if out.len() == limit {
+                    self.note_dropped(1, &event.uri);
+                    continue;
+                }
                 out.push(Pending {
                     inbox: sub.inbox.clone(),
                     activity,
@@ -1151,12 +1171,19 @@ async fn subscribe<S: Store + 'static>(
     };
     // "If a subscriber does not have the equivalent of read access to all resources listed in the
     // topic array, the server MUST reject the subscription request." A topic outside this storage,
-    // or naming nothing, is refused the same way.
+    // or naming nothing, is refused the same way. A resource's linkset is read under the
+    // resource's authorization (as a GET of it is), so a topic naming one is checked as the
+    // resource, under the resource's shared lock; the topic itself is kept as named.
     let storage = state.cfg.storage();
     for topic in &topics {
+        let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
+        if let Some(unavailable) = super::resources::set_aside(state, resource, &Method::GET) {
+            return unavailable;
+        }
+        let _guard = state.locks.read(resource).await;
         let exists =
-            topic.starts_with(&storage) && state.store.exists(topic).await.unwrap_or(false);
-        if !exists || !state.allowed(Action::Read, topic, agent).await {
+            resource.starts_with(&storage) && state.store.exists(resource).await.unwrap_or(false);
+        if !exists || !state.allowed(Action::Read, resource, agent).await {
             return if agent.is_authenticated() || state.cfg.open {
                 problem(
                     StatusCode::FORBIDDEN,
@@ -1227,6 +1254,7 @@ async fn subscribe<S: Store + 'static>(
         Bytes::from(stored),
         req.admission.clone(),
         held,
+        false,
         register,
     );
     if let Err(e) = created.await {
@@ -1761,6 +1789,71 @@ mod tests {
                 "{kind}"
             );
         }
+    }
+
+    /// Review findings: the delivery bound counted subscriptions, not what they brought (one
+    /// naming a resource and its linkset brings two), so a recursive delete's shared bound
+    /// could underflow; and a delivery waiting for a resource's lock while the resource was set
+    /// aside waited until it was put back, holding a worker.
+    #[tokio::test]
+    async fn deliveries_are_bounded_and_never_wait_on_a_set_aside_resource() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let file = format!("{}file", state.cfg.storage());
+        let sub = Subscription {
+            id: "both".into(),
+            subscriber: None,
+            client: None,
+            topics: vec![file.clone(), format!("{file}{META_SUFFIX}")],
+            inbox: "https://inbox.example/both".into(),
+            expires: None,
+            expires_at: None,
+            failures: 0,
+        };
+        state
+            .notify
+            .subs
+            .write()
+            .unwrap()
+            .insert("both".into(), sub);
+        let event = Event {
+            kind: "Update",
+            uri: file.clone(),
+            is_container: false,
+            relation: None,
+        };
+        let prepared = state.notify.prepare_at_most(&state, &event, 1).await;
+        assert_eq!(prepared.len(), 1);
+        let watch = prepared.into_iter().next().unwrap().watch;
+        // A write holds the resource; the delivery waits for it, and the write's rollback is
+        // then set aside with the lock.
+        let held = state.locks.lock(&file).await;
+        let check = tokio::spawn({
+            let state = state.clone();
+            async move { watch.stands(&state).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let left = super::super::Unsettled(vec![super::super::Undo::Remove {
+            iri: file.clone(),
+            parent: state.cfg.storage(),
+        }]);
+        // Putting it back keeps failing.
+        let failing = |on: bool| {
+            use std::sync::atomic::Ordering::SeqCst;
+            state.store.fail_delete.store(on, SeqCst);
+            state.store.fail_exists.store(on, SeqCst);
+        };
+        failing(true);
+        state.set_aside(left, held);
+        let stands = tokio::time::timeout(std::time::Duration::from_secs(1), check)
+            .await
+            .expect("the delivery gave up rather than wait")
+            .unwrap();
+        assert!(!stands);
+        failing(false);
     }
 
     async fn subscribe_root(state: &LwsState<test_store::FlakyStore>, id: &str) -> String {
