@@ -18,8 +18,8 @@ predicate-IDF-weighted Jaccard over two signatures. Because the indexes *are* th
 feature store, signatures stay correct under incremental graph updates for free.
 
 It consumes only sparq-core's **public read API** (dict lookups, range scans, the
-planner's per-predicate stats). Nothing in the workspace depends on it, and the default
-engine build does not compile it.
+planner's per-predicate stats). Only the opt-in `sparq-nlq` crate depends on it (plus a
+`sparq-vectors` dev-dependency), and the default engine build does not compile it.
 
 ## Quickstart
 
@@ -188,23 +188,23 @@ reward. See the [`vector-search`](../vector-search/SKILL.md) skill for `fuse_sco
   (or the default graph) explicitly; the quads are not merged for you.
 
 _(status: Verified against `crates/sparq-sim/src/lib.rs` + README and the crate's tests
-on 2026-07-18 [SONNET-4.6] for sq-181 v1.1 (added default-off `tbox` feature: T-box-aware
+on 2026-07-18 for sq-181 v1.1 (added default-off `tbox` feature: T-box-aware
 signatures via `rdfs:subClassOf`/`rdfs:subPropertyOf` transitive closure, `TBOX_ATTENUATION=0.5`;
 and default-off `lexical` feature: sorted IRI local-name index + trigram-Jaccard tertiary
 fallback in `most_similar`; both behind `SimConfig::tbox_aware`/`lexical_fallback`; 8 new tests
-green in both feature states); also 2026-07-18 [FABLE-5] for sq-lgw (added the default-off
+green in both feature states); also 2026-07-18 for sq-lgw (added the default-off
 `sketch` feature: `Sim::sketch_index` + `SketchConfig`/`SketchIndex` — MinHash/LSH dense-graph
 candidate generation with exact re-scoring, covered by a randomized differential that every
 returned score equals `Sim::similarity` plus twin-recall and decline witnesses); previously
-2026-07-16 [FABLE-5] for sq-lsp7k (added the default-off `explain` feature:
+2026-07-16 for sq-lsp7k (added the default-off `explain` feature:
 `Sim::explain_similarity` + `SharedElement`/`Direction`, with a differential test that the
 returned weights reconstruct the exact similarity score and a multi-hop min-weight witness);
-previously 2026-07-12 [GPT-5.6] for sq-da2bz.
-Workspace v0.1.0, opt-in (GenAI phase 1, `research/genai-design.md`), zero `unsafe`
+previously 2026-07-12 for sq-da2bz.
+Workspace-versioned, opt-in (GenAI phase 1, `research/genai-design.md`), zero `unsafe`
 (`#![forbid(unsafe_code)]`). Measured quality/latency gates (same-class precision@10;
 `Predicates`-mode class-separation AUC; `most_similar(k=10)` latency) are enforced by
 the `olympics_eval` example — run it for the (non-canonical) numbers rather than baking
 them here. The entity/relation-linking hook into `sparq-nlq` is now wired (sq-uw40 / #647):
 `crates/sparq-nlq/src/link.rs` depends on this crate (`use sparq_sim::Sim;`) and expands each
 linked entity with its `Sim::most_similar` structural siblings during NL→SPARQL grounding,
-covered by an integration test. Code carries [OPUS-4.8] review markers pending re-review.)_
+covered by an integration test. Code carries review markers pending re-review.)_

@@ -67,7 +67,7 @@ let g = Graph::from_parts(dict, triples);
   over the shared exact/float/double tower. The **stratification checker** rejects cycles
   through NOT/AGGREGATE and conservatively couples variable predicates to every relation;
   the semi-naive evaluator and incremental maintainer share that invariant. Surfaced by
-  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- [GPT-5.6] sq-a7bmo, [SONNET-4.6] sq-p4zci -->
+  `sparq-cli --features datalog` as `--reason datalog:<rules.dlog>`. <!-- sq-a7bmo, sq-p4zci -->
 - **Quoted-triple inference** (opt-in `quoted-triples`) — RDF 1.2 reifier rules for the
   OWL-RL profile: **reif-dtr** destructures `R rdf:reifies <<( s p o )>>` into the classic
   `rdf:subject`/`rdf:predicate`/`rdf:object` view of `R` (so RL rules reason over reifier
@@ -82,8 +82,8 @@ let g = Graph::from_parts(dict, triples);
   premises, recursively down to asserted facts (a flat, ZK-witness-friendly shape).
 - **RIF/XML importer** (opt-in `rif-xml`) — parse the W3C RIF-Core XML presentation
   syntax into a `rif::Document` with Or-split and Exists-flatten desugaring; fail-closed
-  taxonomy rejects `Import` directives, non-Core elements, unknown builtins, and
-  malformed XML with named error variants. See the `rif_xml` module docs.
+  taxonomy rejects `Import` directives, non-Core elements, unknown builtins, non-RIF
+  namespaces, over-deep nesting, and malformed XML with named error variants. See `rif_xml`.
 - **Shared join kernels** (opt-in `substrate-join`) — the RDFS predicate join (rdfs2/3/7)
   and the rdfs9 type join drive the *same* `sparq-substrate::join` hash-join body the SPARQL
   engine drives, supplying the reasoner's own key projection + budget monomorphically.

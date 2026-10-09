@@ -139,7 +139,7 @@ if you want them without canonicalizing.
 ## Errors — fail closed
 
 `CanonError` is `#[non_exhaustive]` (variants have been added ungated as the
-crate grew — keep a wildcard arm) and has five variants:
+crate grew — keep a wildcard arm) and has six variants:
 
 - `TripleTerm` — the dataset contains an RDF 1.2 triple term as an object; these
   are outside W3C RDFC-1.0's data model, so the **standard** paths fail closed.
@@ -155,6 +155,11 @@ crate grew — keep a wildcard arm) and has five variants:
   descent (HNDQ gossip, relabelling, serialization — and oxrdf's own
   `Drop`/`Clone` recurse), so adversarially deep nesting fails closed instead
   of risking a stack overflow. Ungated, like `NestedBlankNode`.
+- `DirectionalLiteral` — an RDF 1.2 directional language-tagged literal
+  (`"…"@en--ltr` / `--rtl`) reached a **standard** entry point: RDFC-1.0 is
+  RDF-1.1-only and the oxrdf-0.2 bridge cannot carry a base direction, so the
+  standard paths fail closed. The opt-in `rdf12-triple-terms` profile
+  canonicalizes directional literals natively.
 - `Canonicalization(String)` — `rdf-canon` rejected the dataset. This includes
   the **HNDQ call-limit guard**: RDFC-1.0 has pathological-input blow-ups, so a
   recursive call exhaustion fails closed. The separate bounded APIs also guard
@@ -244,7 +249,7 @@ an independent oracle before asserting the canon differs, so a future
 false-equal would be caught. The whether-the-marker-needs-a-sub-discriminator
 question is a spec-clarity / robustness matter, not a latent defect.
 
-## Opt-in `urn:concept:` record verification (`concept` feature) — [SONNET-4.6] issue #1746
+## Opt-in `urn:concept:` record verification (`concept` feature) — issue #1746
 
 **OFF by default.** A federated concept record is named by a content address,
 `urn:concept:<multibase-multihash>`; before indexing a record you were handed,
@@ -318,7 +323,7 @@ suite](https://github.com/w3c/rdf-canon) — all eval (canonical-output),
 issued-map, and negative (poison-graph) cases, under both SHA-256 and SHA-384 —
 through this crate's own public API. See `crates/sparq-canon/tests/`.
 
-## Comparative panel (bench/canon) — [FABLE-5] sq-hmd7l.16
+## Comparative panel (bench/canon) — sq-hmd7l.16
 
 `bash bench/canon/run.sh --smoke` drives the public API over the vendored W3C
 suite via `crates/sparq-canon/examples/canon_bench.rs` (also a deterministic
@@ -345,21 +350,21 @@ its algorithm to that same crate). Honesty notes + tunables:
 Verified against `sparq-canon` 0.1.0 source. The standard RDFC-1.0 path is
 `rdf-canon` 0.15.3 (W3C-suite validated); `sparq-canon` is the single-sourced
 bridge + public API. The opt-in, off-by-default `rdf12-triple-terms` profile
-(sq-hslb [OPUS-4.8]) is a native RDFC-1.0 re-implementation extended to RDF 1.2
+(sq-hslb) is a native RDFC-1.0 re-implementation extended to RDF 1.2
 triple terms — **non-standard** (W3C RDFC-1.0 is RDF-1.1-only) — now with a
 `*_with::<D: Digest>` hash-profile sibling on every entry point for SHA-384
-parity (sq-5i1d [OPUS-4.8]) and a constrained ground-triple-term
+parity (sq-5i1d) and a constrained ground-triple-term
 (error-on-nested-bnode) `*_ground_terms` wrapper family for the common
-credential/VC case (sq-iaxd [FABLE-5]). The `canonicalize_nquads` / `parse_nquads` text seam
+credential/VC case (sq-iaxd). The `canonicalize_nquads` / `parse_nquads` text seam
 and the `sparq-wasm` opt-in `canon` feature (`canonicalizeNQuads` binding for the
-`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t [OPUS-4.8]; that wasm consumer pulls
+`@sparq-org/sparq` RDF/JS `Dataset`) are sq-1dd5t; that wasm consumer pulls
 `sparq-canon` with `default-features = false` (the crate now disables
 `sparq-core`'s default `parallel` and re-enables it via its own default `parallel`
 feature, so native builds are byte-identical and the wasm build drops rayon).
-The opt-in, off-by-default `concept` feature ([SONNET-4.6] issue #1746) adds the
+The opt-in, off-by-default `concept` feature (issue #1746) adds the
 `urn:concept:` multibase/multihash envelope plus the recompute-and-byte-compare
 ingestion guard; it fixes no scope-extraction rule and makes no independence
 claim beyond producer-side re-derivation (see that section).
-`publish = false`, non-default workspace member — nothing in sparq's default graph
-depends on it, so the default build and lean wasm artifact are byte-identical with
-or without it.
+`publish = false`; none of sparq's published crates depends on it (it is in the default
+workspace build only as a dependency of the `sparq-bench` harness), so the default
+library build and lean wasm artifact are byte-identical with or without it.

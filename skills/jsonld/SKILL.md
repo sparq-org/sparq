@@ -1,6 +1,6 @@
 ---
 name: jsonld
-description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with sparq — the native, dependency-free document-level pipeline in the `sparq-jsonld` crate (expand/flatten/compact/frame/fromRdf over a JSON AST, deny-by-default document loader) and how each surface exposes it (native CLI `dump … jsonld[-compact] --context/--frame`, the HTTP server's `application/ld+json` content-negotiation, the Solid/LWS server's profile-aware expanded/compacted negotiation, the wasm `serializeCompact`, the engine's RDF-first writer matrix). Use when converting JSON-LD document forms, choosing a surface, or reasoning about the honest conformance / remote-loading posture.
+description: Parse, expand, flatten, compact, and frame W3C JSON-LD 1.1 with sparq — the native, dependency-free document-level pipeline in the `sparq-jsonld` crate (expand/flatten/compact/frame/fromRdf over a JSON AST, deny-by-default document loader) and how each surface exposes it (native CLI `dump … jsonld[-compact] --context`; CLI framing is planned, the HTTP server's `application/ld+json` content-negotiation, the Solid/LWS server's profile-aware expanded/compacted negotiation, the wasm `serializeCompact`, the engine's RDF-first writer matrix). Use when converting JSON-LD document forms, choosing a surface, or reasoning about the honest conformance / remote-loading posture.
 license: MIT
 metadata:
   version: "0.1.0"
@@ -27,13 +27,13 @@ There are **two** JSON-LD code paths, and it is load-bearing to keep them apart:
    says which is which for every surface.
 
 > This document was verified against the source on branch `main` (2026-07-13,
-> `[GPT-5.6]`). Every function, flag, and conformance number below exists today; where a
+> ``). Every function, flag, and conformance number below exists today; where a
 > form is *not* exposed on a surface, it is called out as planned, not implied.
 
 ## Native pipeline — the `sparq-jsonld` crate
 
 `sparq-jsonld` is `#![forbid(unsafe_code)]`, has **zero mandatory dependencies**, and
-is `publish = false` (an internal crate, path-depended). It has **no cargo feature of
+is published to crates.io as part of `sparq-engine`'s dependency closure. It has **no cargo feature of
 its own** — it is always compiled when a crate depends on it, so there is no
 "jsonld-off" build of *this* crate; the opt-in gating lives in the consumers (below).
 
@@ -85,17 +85,11 @@ If you already hold the expanded form, skip re-expansion with the `_expanded` va
 &context, &options, &loader)`, and `frame::frame_expanded(&expanded_input,
 &expanded_frame, &options, &frame_options)`.
 
-### Runnable end-to-end example
+### End-to-end composition
 
-The canonical demo is `examples/jsonld_roundtrip.rs` — a full expand → flatten →
-compact → frame pipeline over an inline document that asserts the framed output
-round-trips. Run it:
-
-```sh
-cargo run -p sparq-jsonld --example jsonld_roundtrip
-```
-
-Its shape (mirroring the example verbatim):
+The four operations compose as a full expand → flatten → compact → frame pipeline over
+an inline document (the crate ships no stand-alone demo example; its only example,
+`jsonld_conformance`, is the W3C suite scoreboard runner):
 
 ```rust
 let input = Json::parse(DOCUMENT).expect("valid JSON");
@@ -197,7 +191,7 @@ compacted / framed forms (`Accept: application/ld+json;profile=…`) is planned
 
 ### Solid/LWS server (`sparq-lws-core`, experimental)
 
-[FABLE-5] The experimental Solid/LDP server serialises RDF resource reads through the
+The experimental Solid/LDP server serialises RDF resource reads through the
 vendored oxjsonld writer (neither the native pipeline nor the engine writer) and —
 unlike `sparq-server` — already honours the JSON-LD `profile` media-type parameter on
 an explicit `Accept: application/ld+json;profile="…"` range, for the LDP and identity
@@ -239,9 +233,9 @@ failures plus intentional skips (negatives, JSON-LD-1.0-only, non-inline/remote 
 | ------- | -------------: | ------ |
 | toRdf   | 413 / 467      | oxjsonld RDF-dataset comparison |
 | fromRdf | 52 / 53        | native document comparison + RDF round-trip |
-| expand  | 276 / 385      | native document-level comparison |
+| expand  | 381 / 385      | native document-level comparison |
 | flatten | 53 / 58        | native document-level comparison |
-| compact | 228 / 246      | native normative document comparison |
+| compact | 243 / 246      | native normative document comparison |
 | frame   | 92 / 92        | native normative document comparison (incl. negatives) |
 
 The authoritative constants live in

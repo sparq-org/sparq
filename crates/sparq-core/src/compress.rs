@@ -1544,7 +1544,7 @@ mod byte_attribution {
     /// divide the row count, so the short tail block is covered).
     #[test]
     fn attribution_total_exact_at_every_swept_block_size() {
-        let triples = synth_watdiv(20_000, 500_000, 0xB10C);
+        let triples = synth_watdiv(if cfg!(miri) { 300 } else { 20_000 }, 500_000, 0xB10C);
         for bs in [7usize, 32, 128, 512, 4096] {
             for (name, order) in PERM_ORDERS {
                 let rows = perm_rows(&triples, order);
@@ -1578,6 +1578,9 @@ mod byte_attribution {
     /// harness's to measure (`scripts/bench/compressed-query-delta.sh`, sq-7d3dj.32.2.2),
     /// not this spike's to assert.
     #[test]
+    // A size statistic over a 200K-triple corpus with no unsafe code on the path: Miri adds
+    // nothing and cannot finish it (sq-0s15k).
+    #[cfg_attr(miri, ignore = "size statistic, no unsafe on the path (sq-0s15k)")]
     fn store_bytes_per_triple_falls_monotonically_with_block_size() {
         let triples = synth_watdiv(SWEEP_N, 500_000, 0xB10C);
         let mut prev: Option<(usize, f64, f64)> = None;
@@ -1621,6 +1624,9 @@ mod byte_attribution {
     /// adopted `SPQCPRM2` frame-of-reference encoding (sq-7d3dj.32.2.6/.7) attacks. A
     /// block-size change is the wrong lever, and is now measured rather than assumed.
     #[test]
+    // A size statistic over a 200K-triple corpus with no unsafe code on the path: Miri adds
+    // nothing and cannot finish it (sq-0s15k).
+    #[cfg_attr(miri, ignore = "size statistic, no unsafe on the path (sq-0s15k)")]
     fn block_size_cannot_flatten_the_scale_growth() {
         // Same triple count, ~20x term space: the id-density axis in isolation.
         let sparse = synth_watdiv(SWEEP_N, 100_000, 0xB10C);

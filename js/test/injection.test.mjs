@@ -21,7 +21,7 @@
 // literal values and already-legal IRIs.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DataFactory as DF, SparqStore, termToNT } from '../dist/index.js';
+import { DataFactory as DF, Dataset, SparqStore, quadsToNQuads, termToNT } from '../dist/index.js';
 
 const seed = () => SparqStore.fromString('<http://ex/s> <http://ex/p> <http://ex/o> .', 'nt');
 
@@ -152,4 +152,63 @@ test('hostile terms cannot inject through a SPARQL UPDATE delta (applyDelta path
   assert.equal(store.match(DF.namedNode('http://ex/s'), undefined, undefined).length, 1);
   // No phantom <http://x> <http://y> <http://z> triple was injected.
   assert.equal(store.match(DF.namedNode('http://x'), undefined, undefined).length, 0);
+});
+
+// --- term parts with no escape form (blank-node labels, language tags, directions) ----------
+// These cannot be percent-encoded or escaped, so termToNT validates them (BLANK_NODE_LABEL,
+// LANGTAG, ltr/rtl) and throws. Every public writer path goes through it.
+
+const BNODE_PAYLOAD = 'a <urn:p> <urn:o> .\n<urn:injected>';
+const LANG_PAYLOAD = 'en . } UNION { ?s ?p ?o';
+const evilBnode = () => DF.blankNode(BNODE_PAYLOAD);
+const evilLang = () => DF.literal('x', LANG_PAYLOAD);
+const evilDir = () => DF.literal('x', { language: 'en', direction: 'ltr <urn:p> <urn:o> .\n<urn:s> <urn:p>' });
+const P = DF.namedNode('urn:p');
+const O = DF.namedNode('urn:o');
+
+test('termToNT rejects blank-node labels, language tags and directions that could break out', () => {
+  assert.throws(() => termToNT(evilBnode()), /BLANK_NODE_LABEL/);
+  for (const label of ['', 'a b', 'a.', '.a', '-a', 'a>b', 'a"b', 'a\nb']) {
+    assert.throws(() => termToNT(DF.blankNode(label)), /BLANK_NODE_LABEL/, JSON.stringify(label));
+  }
+  assert.throws(() => termToNT(evilLang()), /LANGTAG/);
+  for (const lang of ['en-', '-en', 'e n', '1en', 'en"']) {
+    assert.throws(() => termToNT(DF.literal('x', lang)), /LANGTAG/, lang);
+  }
+  assert.throws(() => termToNT(evilDir()), /base direction/);
+  assert.throws(() => termToNT(DF.literal('a\uD800')), /lone surrogate/);
+  assert.throws(() => termToNT(DF.namedNode('http://ex/\uDC00')), /lone surrogate/);
+  // Valid parts are unchanged.
+  assert.equal(termToNT(DF.blankNode('a.b')), '_:a.b');
+  assert.equal(termToNT(DF.blankNode('_x-1')), '_:_x-1');
+  assert.equal(termToNT(DF.literal('x', 'en-GB')), '"x"@en-gb');
+  assert.equal(termToNT(DF.literal('x', { language: 'ar', direction: 'rtl' })), '"x"@ar--rtl');
+});
+
+test('quadsToNQuads / Dataset reject an injecting blank node, language tag or direction', async () => {
+  assert.throws(() => quadsToNQuads([DF.quad(evilBnode(), P, O)]), /BLANK_NODE_LABEL/);
+  assert.throws(() => quadsToNQuads([DF.quad(DF.namedNode('urn:s'), P, evilLang())]), /LANGTAG/);
+  await assert.rejects(Dataset.fromQuads([DF.quad(DF.namedNode('urn:s'), P, evilDir())]), /base direction/);
+  const ds = await Dataset.fromQuads([DF.quad(DF.namedNode('urn:s'), P, DF.literal('x', 'en'))]);
+  assert.equal(ds.toString(), '<urn:s> <urn:p> "x"@en .\n');
+  assert.throws(() => ds.has(DF.quad(DF.namedNode('urn:s'), P, evilLang())), /LANGTAG/);
+});
+
+test('fromQuads / addQuads / applyDelta reject an injecting blank node, language tag or direction', async () => {
+  await assert.rejects(SparqStore.fromQuads([DF.quad(evilBnode(), P, O)]), /BLANK_NODE_LABEL/);
+  const store = await seed();
+  assert.throws(() => store.addQuads([DF.quad(evilBnode(), P, O)]), /BLANK_NODE_LABEL/);
+  assert.throws(() => store.applyDelta([DF.quad(DF.namedNode('urn:s'), P, evilLang())]), /LANGTAG/);
+  assert.throws(() => store.applyDelta([], [DF.quad(DF.namedNode('urn:s'), P, evilDir())]), /base direction/);
+  // Nothing was written: the store still holds only the seed triple, and no <urn:injected>.
+  assert.equal(store.size, 1);
+  assert.equal(store.match(DF.namedNode('urn:injected'), undefined, undefined).length, 0);
+});
+
+test('match / countQuads reject an injecting language tag or direction instead of querying', async () => {
+  const store = await seed();
+  assert.throws(() => store.match(undefined, undefined, evilLang()), /LANGTAG/);
+  assert.throws(() => store.countQuads(undefined, undefined, evilLang()), /LANGTAG/);
+  assert.throws(() => store.countQuads(undefined, undefined, evilDir()), /base direction/);
+  assert.equal(store.countQuads(undefined, undefined, DF.literal('x', 'en')), 0);
 });

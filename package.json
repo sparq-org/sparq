@@ -23,8 +23,10 @@
     "got": "11.8.5",
     "git-up": "7.0.0",
     "next": {
-      "postcss": "8.5.15"
+      "postcss": "8.5.29"
     },
-    "postcss": "8.5.15"
+    "postcss": "8.5.29",
+    "compression": "1.8.2",
+    "http-cache-semantics": "4.3.0"
   }
 }

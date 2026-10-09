@@ -71,7 +71,7 @@ still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md)
 - **Incremental updates** — start from `Graph::new()` / `Graph::default()` (an empty graph) and
   `insert_triple(s, p, o)` / `remove_triple(s, p, o)` a single triple from `oxrdf` terms, or apply
   a whole batch with `apply_delta` — in place, with an optional write-ahead log.
-- **Experimental deletion projections** — [GPT-6 Astra] enable the default-off
+- **Experimental deletion projections** — enable the default-off
   `overlay-deleted-projections` Cargo feature on `sparq-core` to cache sorted
   tombstone projections for repeated range counts. The default uses the original
   linear deletion scan and carries no deletion projection slots. Each requested
@@ -90,7 +90,7 @@ still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md)
   point lookups for an id that is ABSENT from the permutation (result-equivalent, never
   serialised; for a PRESENT id the zone map already narrows the candidate window to about one
   block, so there is little left to skip).
-  [GPT-6] Persisted predicate statistics have deterministic record order across builds and
+  Persisted predicate statistics have deterministic record order across builds and
   re-saves; older unordered statistics files remain readable.
 - **Compressed-seek column codecs (prototype)** — the opt-in `elias-fano` feature adds
   Elias-Fano and Partitioned-Elias-Fano codecs whose `next_geq(target)` answers a successor

@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4lvq: README brought to template (deferred from sq-inzv). -->
+<!-- sq-4lvq: README brought to template (deferred from sq-inzv). -->
 # sparq-sim
 
 **Training-free structural entity similarity** for the sparq RDF engine — an **opt-in**
@@ -117,4 +117,4 @@ by precision@10.
 
 ## License
 
-MIT. [OPUS-4.8] sq-lsxd
+MIT. sq-lsxd

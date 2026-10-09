@@ -115,7 +115,8 @@ before every notification it sends — so a revoked grant is not replayable thro
 an already-issued `receiveFrom` URL, and an open socket is closed (code 1008) once
 its subscriber loses read access. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
-Lacking the mode returns `403`, whether or not the topic exists.
+Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
+server's storage root is refused with `400` before the WAC gate runs.
 
 ## Serve provider WebIDs off the pod (optional)
 
@@ -218,7 +219,10 @@ return `application/sparql-results+json`; `CONSTRUCT` returns
 The endpoint assembles one named graph per RDF resource that the caller may
 read under WAC. The default graph is empty. Failed enumeration,
 authorization, body reads, or RDF parsing exclude a resource in the safe
-direction. Protocol `default-graph-uri` and `named-graph-uri` parameters may
+direction. A resource rewritten concurrently (its body reclaimed between
+authorization and read) is re-planned and re-authorized instead; if the race
+persists the query fails with `503` and `Retry-After` rather than silently
+dropping that graph. Protocol `default-graph-uri` and `named-graph-uri` parameters may
 select from that authorized dataset; they cannot make an unreadable resource
 visible.
 

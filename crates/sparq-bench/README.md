@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4kr5: internal-stub README for a publish=false crate. -->
+<!-- sq-4kr5: internal-stub README for a publish=false crate. -->
 # sparq-bench
 
 The **benchmark + differential harness** for [sparq](../../README.md): it runs

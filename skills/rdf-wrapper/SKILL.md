@@ -5,12 +5,13 @@ description: "Traverse sparq RDF graphs as native Rust objects with the opt-in s
 
 # Use sparq-wrapper
 
-Add the opt-in crate explicitly:
+Add the opt-in crate explicitly. It is `publish = false` (not on crates.io), so
+take it and `sparq-core` from the same git source to share one `Graph` type:
 
 ```toml
 [dependencies]
-sparq-core = "0.1"
-sparq-wrapper = "0.1"
+sparq-core = { git = "https://github.com/sparq-org/sparq" }
+sparq-wrapper = { git = "https://github.com/sparq-org/sparq" }
 oxrdf = "0.3"
 ```
 
@@ -48,7 +49,7 @@ Choose ownership deliberately:
   `insert`/`remove`. Nodes borrow the store, so stop using them before a write
   and reacquire them afterwards.
 - Traversal addresses the default graph in M1. Reach named graphs through the
-  raw graph until a scoped-dataset surface lands.
+  opt-in `proposed-graph-scope` `GraphScope` (below) or the raw graph.
 
 Typed accessors are strict:
 
@@ -66,7 +67,7 @@ Eleven explicitly experimental, default-off features track proposals that
 remain unlanded in rdfjs/wrapper:
 
 ```toml
-sparq-wrapper = { version = "0.1", features = [
+sparq-wrapper = { git = "https://github.com/sparq-org/sparq", features = [
   "proposed-async-events",
   "proposed-async-node",
   "proposed-async-store",
@@ -120,7 +121,7 @@ subject is rejected before the backend is asked to do anything) and return the
 backend future, so the call site reads `store.add(s, p, o)?.await?`. `add` /
 `delete` resolve to whether that write changed the store; a backend must decide
 this atomically with the write, not from an earlier `has`.
-<!-- [SONNET-4.6] sq-1rg2q.8 -->
+<!-- sq-1rg2q.8 -->
 
 `proposed-async-node` adds `sparq_wrapper::proposed::async_node`, the async
 counterpart of the mapped cardinality reads (rdfjs/wrapper draft PR #98).
@@ -247,7 +248,7 @@ Use the mapped reads when a property has an explicit RDF cardinality. The
 required and optional variants wrap M1 `CardinalityError` data in
 `CardinalityViewError`; `many` returns a `Vec`, preserving every distinct RDF
 term even when two terms map to equal Rust values. A mapper error is returned
-without changing the store. <!-- [GPT-5.6] sq-1rg2q.3 -->
+without changing the store. <!-- sq-1rg2q.3 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
@@ -299,7 +300,7 @@ and #94. Dataset callbacks receive a typed `ChangeEvent`; `LiveValues::subscribe
 filters by subject and predicate and maps the changed RDF object into an
 application `ValueChange<T>`. Duplicate adds and absent deletes stay silent,
 and callbacks receive the committed graph only after the mutable graph borrow
-has ended. <!-- [GPT-5.6] sq-1rg2q.5 -->
+has ended. <!-- sq-1rg2q.5 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode};
@@ -337,7 +338,7 @@ string-sourced constructors; this change does not alter the proposed codec.
 `rdf:langString`; `decode_lang_string` returns an owned `LangString` containing
 both `value` and `language`, so a round trip cannot discard the tag. Datatype,
 integer, language-tag, and missing-language failures are represented by the
-typed `CodecError` variants. <!-- [GPT-5.6] sq-1rg2q.4 -->
+typed `CodecError` variants. <!-- sq-1rg2q.4 -->
 
 ```rust
 use oxrdf::Literal;
@@ -368,7 +369,7 @@ Its `NodeFactory` binds one borrowed graph, store, or dataset view and can wrap
 many terms without cloning the graph. Kind-specific constructors return a
 `TypedNode` whose available traversals reflect the term's legal positions;
 `NodeFactory::term` instead returns `AnyNode`, whose enum variant preserves the
-concrete focus kind at run time. <!-- [GPT-5.6] sq-1rg2q.2 -->
+concrete focus kind at run time. <!-- sq-1rg2q.2 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
@@ -414,7 +415,7 @@ ancestors of the node being written, so a diamond is expanded once per path;
 `RepeatedFocus::OnRepeat` references every node expanded earlier in the
 document, so each node is expanded at most once. `with_max_depth` bounds
 recursion depth (default `DEFAULT_MAX_DEPTH`), truncating to the same reference
-form. <!-- [SONNET-4.6] sq-1rg2q.11 -->
+form. <!-- sq-1rg2q.11 -->
 
 Output is deterministic — predicates in lexicographic IRI order, each
 predicate's objects in lexicographic N-Triples order — so projecting the same

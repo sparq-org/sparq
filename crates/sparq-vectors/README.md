@@ -1,9 +1,7 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-vectors
 
 <p>
-  <a href="https://crates.io/crates/sparq-vectors"><img src="https://img.shields.io/crates/v/sparq-vectors.svg" alt="crates.io"></a>
-  <a href="https://docs.rs/sparq-vectors"><img src="https://docs.rs/sparq-vectors/badge.svg" alt="docs.rs"></a>
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
@@ -16,7 +14,7 @@ DiskANN/Vamana graph by default, or an in-RAM HNSW index behind the opt-in `appr
 feature (the only third-party ANN dependency; **recall < 1.0**). Embeddings are produced
 **outside** the engine; the crate verbalizes entities to text, embeds via a provider-agnostic
 trait, and fuses with another ranked signal for hybrid search. It is a **separate crate** —
-nothing in the workspace (or the wasm build) depends on it.
+only `sparq-terse` (optionally) depends on it; the wasm build does not.
 
 ## 🚀 Quickstart
 
@@ -94,7 +92,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
 - **Live embeddings (opt-in)** — the default build is **socket-free**. The non-default `provider`
   feature carries the OpenAI-compatible `/v1/embeddings` shape with a caller-supplied `Transport`;
   `embeddings` adds a concrete reqwest client + `RemoteEmbedder::from_env(dim)`. Never in the wasm bundle.
-- **Structure-aware vectorisation (opt-in `structure` / `structure-shacl`; measurement behind `kge`)** — research-grade. **P0:** `close_for_vectorise` materialises the `sparq-reason` closure **before** vectorising; a `NegativeSampler` emits type-constrained corruptions (Krompass 2015) with an **on/off ablation**. [GPT-5.6] `TermScope::IriBlank` is the default, byte-stable entity scope; opt into `TermScope::Embeddable` with `NegativeSampler::new_scoped` to admit RDF 1.2 triple terms while keeping atomic and triple-term corruption pools separate.
+- **Structure-aware vectorisation (opt-in `structure` / `structure-shacl`; measurement behind `kge`)** — research-grade. **P0:** `close_for_vectorise` materialises the `sparq-reason` closure **before** vectorising; a `NegativeSampler` emits type-constrained corruptions (Krompass 2015) with an **on/off ablation**. `TermScope::IriBlank` is the default, byte-stable entity scope; opt into `TermScope::Embeddable` with `NegativeSampler::new_scoped` to admit RDF 1.2 triple terms while keeping atomic and triple-term corruption pools separate.
   **P1/P2:** typed-literal encoders — `route`r, **order-preserving** `NumericEncoder`, `BooleanEncoder`, `DateEncoder`, enum `Codebook`, `SchemaHeader` (metric guard); QUDT unit-`normalise` (`1000 m` ≡ `1 km`); **`structure-shacl`** adds the `ShaclPriors` reader (enum/datatype/cardinality from `sparq-shacl`).
   **P3:** `TaxonomyDag` + `EuclideanTaxonomyEncoder` (Euclidean default; hyperbolic **only past** the measured-distortion `GeometryGate`) + an **answer-safe** `DisjointnessOracle` (train-time repulsion + serve-time hard mask dropping *provably-disjoint* candidates only).
   **P4:** `ground` — a per-request modality dispatcher (subgraph / typed sub-vector / NL / typed value), **profile-relative** completeness + ABSTAT-style minimality; ambiguous → the exact subgraph; opt-in `reconcile_units` canonicalises **known** commensurable units (`1 mi`≡`1.609344 km`), unknown/compound units stay as-declared. **P5 (`neuro-symbolic`):** `propose_then_verify` — vectors **propose** candidate bindings (recall only, NOT sound), then a **deductive gate** admits one only if it adds no new SHACL violation (`sparq-shacl`) **and** no new OWL inconsistency (`sparq-reason`); a failing candidate is **rejected** (fail-closed), so the verified set only ever **shrinks to a sound subset**.
@@ -105,7 +103,7 @@ let _neighbours = nearest_term_exact(&store, &graph, &some_term, 10);
 
 - **How-to** — [`skills/vector-search/SKILL.md`](../../skills/vector-search/SKILL.md) (label /
   verbalized / hybrid pipelines, DiskANN, quantization, bulk import, API surface, `.spqv`/`.spqg`). Vector-predicate rewrites preserve query VERSION announcements and explicit evaluator conflicts; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
-- **API reference** — [docs.rs/sparq-vectors](https://docs.rs/sparq-vectors); **design** —
+- **API reference** — `cargo doc -p sparq-vectors --open` (not on crates.io / docs.rs: `publish = false`); **design** —
   [`research/genai-text-embedding-practices.md`](../../research/genai-text-embedding-practices.md).
 - **Accuracy & throughput** — not baked into docs; the recall / DiskANN / PQ / throughput gates are
   `cargo test`s, with live numbers on the [benchmarks dashboard](https://sparq.jeswr.org/dev/bench).

@@ -44,7 +44,20 @@ if !update.is_empty() {
 The descriptions must name the same focus node. Only values on editable bare
 forward-predicate paths (`<p>`) participate; read-only/off-shape, inverse,
 computed, and complex property-path fields are excluded. A no-change or
-mismatched-focus input returns an empty update string.
+mismatched-focus input returns an empty update string. The build is
+all-or-nothing and fails closed: if any (possibly deserialized) `TermRef` has
+an invalid IRI (term or datatype), blank-node label or language tag,
+triple-term text that is not exactly one RDF 1.2 triple term, or an unknown
+`kind`, or a field path is not a valid `<IRI>`, the result is also the empty
+string, so renderer-supplied terms cannot splice update syntax. IRIs are
+validated rather than escaped (SPARQL decodes `\uXXXX` before parsing), and
+triple terms accept the full RDF 1.2 grammar, including labels like `_:a..b`,
+nested up to 128 levels (the sparq-core N-Triples cap); deeper input, a `:` in a
+blank-node label or a raw line break in a quoted string also fails closed.
+Every editable forward field's path must be exactly a path derive renders
+(one `<IRI>`, or a complex SHACL path in SPARQL or Turtle form, with valid
+IRIs); anything else fails the whole update, even when other fields carry
+valid edits. Recognised complex and inverse paths stay excluded, not rejected.
 
 What the description carries (all serde `Serialize + Deserialize`):
 
@@ -93,14 +106,14 @@ renamed deterministically (`b0`, `b1`, …) — do not treat them as graph handl
 Scope: derivation, opt-in live validation hints, plus pure edit-to-UPDATE
 building. An MCP agent can call the derivation as the `describe_form` tool
 (sparq-mcp feature `shacl`, `FormDescription` JSON verbatim — see
-[`agent-tools`](../agent-tools/SKILL.md)). [FABLE-5] sq-lsp7k.1.6. Applying the
+[`agent-tools`](../agent-tools/SKILL.md)). sq-lsp7k.1.6. Applying the
 request, validate-before-commit guards, draft graphs, DASH suggestions,
 `dash:propertyRole`, and the GUI renderer are follow-on beads
 (sq-lsp7k.1.2/.1.4/.1.5); `sparq-shacl` (see
 [`shacl-validation`](../shacl-validation/SKILL.md)) already validates the same
 graphs.
 
-_(status: Verified against sparq-forms 0.1.0 [OPUS-4.8] (sq-vfcxv, 2026-07-27):
+_(status: Verified against sparq-forms 0.1.0 (sq-vfcxv, 2026-07-27):
 56 unit/integration tests incl. per-score widget tests + 4 golden-file fixtures
 (groups/order, enum + nested sh:node, inverse + multi-shape, predicate
 targets). Caveats: (1) widget scores follow datashapes.org/forms

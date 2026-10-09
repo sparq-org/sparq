@@ -64,7 +64,7 @@ cached values avoid per-row parsing. [Numeric guide](../../skills/substrate/SKIL
   `build_table` / `build_partitioned` / `probe_emit` / `probe_gather_indices` / `hash_probe_serial`
   (hash, `JoinTable` type alias backed by `hashbrown::HashMap<Key, Posting, FxBuildHasher>`,
   single-hash probe + batch-reserve), `bind_combine` (indexed groups) / `bind_combine_rows`
-  (contiguous row slices; appends rows, preserves duplicates and existing output; [GPT-6-ASTRA]),
+  (contiguous row slices; appends rows, preserves duplicates and existing output),
   `lftj_recurse` over `Trie` / `TrieIter` (WCOJ), plus `compatible` / `merge_rows` / `any_unbound`.
   `probe_gather_indices` is the M4 batch-emission contract (gather indices, materialise once
   per chunk, sq-pntvh.7). Also `join::delta::DeltaTable` — persistent build-side table with
@@ -94,7 +94,7 @@ cached values avoid per-row parsing. [Numeric guide](../../skills/substrate/SKIL
   records. It MEASURES the "zero measured marginal overhead" claim; a non-zero delta carries an
   honest `root_cause`, never bent to the claim. Implies `join`+`numeric`+`compare`; links no new
   dep. Run: `cargo run -p sparq-substrate --example substrate_overhead --features overhead
-  --release -- --json` (add `--canonical` only on a dedicated quiet host). [FABLE-5] sq-atjue
+  --release -- --json` (add `--canonical` only on a dedicated quiet host). sq-atjue
 
 All features are **off by default**. The crate is `forbid(unsafe_code)`.
 

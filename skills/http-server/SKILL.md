@@ -53,7 +53,7 @@ cargo run -p sparq-server --features http2 -- data.ttl \
 The PEM flags are a pair: supplying only one fails startup. Omitting both preserves plain HTTP.
 The HTTP/1 slow-loris header deadline, body idle deadline, peer `ConnectInfo`, graceful drain, and
 WebSocket upgrade remain on the same bespoke serve path; HTTP/2 uses the same router and request
-middleware. [GPT-5.6] sq-oprna.6
+middleware. sq-oprna.6
 
 Opt-in HTTP/3 adds an encrypted QUIC/UDP listener beside the unchanged plain-HTTP TCP
 listener. The two listeners dispatch through the same router; the UDP address defaults to
@@ -72,7 +72,7 @@ secures TCP and negotiates h2/h1 through ALPN. The pre-1.0 h3 stack is contained
 default-off feature. `/subscriptions` WebSockets remain HTTP/1.1-only; clients must fall back because
 HTTP/3 extended CONNECT is not implemented. Once the UDP endpoint has bound, every plain-HTTP TCP
 response advertises its live port as `Alt-Svc: h3=":<port>"; ma=86400`; no header is emitted when
-`--http3` is absent or startup cannot bind the QUIC listener. [GPT-5.6] sq-oprna.4
+`--http3` is absent or startup cannot bind the QUIC listener. sq-oprna.4
 
 > **Security: optional Bearer-token write gate; loopback by default.** With no token
 > configured, every endpoint is unauthenticated (the back-compat default). Set
@@ -126,7 +126,7 @@ response advertises its live port as `Alt-Svc: h3=":<port>"; ma=86400`; no heade
 > retains it (`sq-2bhm`).
 >
 > **Error bodies carry a generic class, never internals (ASVS V7 / ASVS-G3; beads `sq-cz89`,
-> `sq-j9zs`, [OPUS-4.8] `sq-kfel`).** Every error is the structured `{"error":"<msg>"}` envelope
+> `sq-j9zs`, `sq-kfel`).** Every error is the structured `{"error":"<msg>"}` envelope
 > where `<msg>` is a STABLE generic category (malformed-query / auth / not-found / server-error) —
 > never the caller's input, a loaded-RDF fragment, a server filesystem path, a secret, or a
 > `Debug` of an internal type. The full detail goes to the server log under
@@ -183,9 +183,9 @@ Library surface re-exported from `sparq_server` (behind the default `server` fea
 
 - `fn router(state: AppState) -> axum::Router` — builds the hardened endpoint router
   (`/sparql`, `/sparql/graph`, `/graphs/*path`, `/subscriptions`, `/subscriptions/sse`,
-  `/health`, `/metrics`, plus feature-gated routes such as `/facets` and `/complete`). [OPUS-4.8] sq-bxog:
-  `/subscriptions/sse` is the SSE transport. [GPT-5.6] sq-lsp7k.5.2: `/facets` needs the
-  `facets` build feature and the runtime `ServerConfig::facets` flag. [GPT-5.6] sq-lsp7k.9.3:
+  `/health`, `/metrics`, plus feature-gated routes such as `/facets` and `/complete`). sq-bxog:
+  `/subscriptions/sse` is the SSE transport. sq-lsp7k.5.2: `/facets` needs the
+  `facets` build feature and the runtime `ServerConfig::facets` flag. sq-lsp7k.9.3:
   `/complete` similarly needs the `complete` feature and `ServerConfig::complete`.
 - `AppState::new(graph: Graph) -> AppState` — default `ServerConfig`.
 - `AppState::with_config(graph: Graph, config: ServerConfig) -> AppState`.
@@ -265,11 +265,11 @@ Library surface re-exported from `sparq_server` (behind the default `server` fea
   Option<Duration>, shutdown: impl Future<Output=()>) -> std::io::Result<()>` (**`http2` feature
   only**) — TLS counterpart to `serve`; the binary supplies a TLS-1.3 config advertising
   `h2,http/1.1` via ALPN. It shares the auto-builder connection body, middleware, timeout hooks,
-  peer `ConnectInfo`, and graceful drain with the cleartext feature-on path. [GPT-5.6] sq-oprna.6
+  peer `ConnectInfo`, and graceful drain with the cleartext feature-on path. sq-oprna.6
 - Re-exports for cache layers/tests: `PinnedGen`, `GLOBAL_POD: &str`
   (`"urn:sparq:pod:global"`), and `sparq_serve::{Epoch, PodEpochs, PodId}`.
 - **Response-bytes result cache** (opt-in, `sparq-serve`'s `result-cache` feature,
-  OFF by default — [OPUS-4.8] sq-jluc). A serving-layer cache from a request
+  OFF by default — sq-jluc). A serving-layer cache from a request
   *identity* to the pre-serialized response body, distinct from `sparq-engine`'s
   in-engine algebra-keyed `result-cache`. Public surface (feature-gated):
   `sparq_serve::{ResultCache, CacheConfig, ScopeKey, ReadFootprint, LeaseOutcome,
@@ -296,7 +296,7 @@ Library surface re-exported from `sparq_server` (behind the default `server` fea
   update-side `using-*` override), `enum QueryForm { Select, Ask, Construct, Describe }`; module
   `sparq_server::results`.
 
-### In-process embedding seam — `sparq_serve::embed` ([OPUS-4.8] sq-xa15c, #1248)
+### In-process embedding seam — `sparq_serve::embed` (sq-xa15c, #1248)
 
 When the consumer is **another Rust process** (e.g. `solid-server-rs`) and wants to
 drop the HTTP hop entirely, embed the engine in-process via the `sparq_serve::embed`
@@ -328,7 +328,7 @@ re-export of the runtime-agnostic concurrency wrapper. No axum/tokio, no HTTP.
 
 **1. Query forms and result negotiation.** Default result media is SPARQL-JSON. Set
 `Accept` to choose (q-value aware, defaults to JSON for SELECT/ASK, N-Triples for
-CONSTRUCT/DESCRIBE). <!-- [OPUS-4.8] sq-406acc --> An **absent / empty / `*/*` `Accept` gets
+CONSTRUCT/DESCRIBE). <!-- sq-406acc --> An **absent / empty / `*/*` `Accept` gets
 that default**; a present `Accept` that names **only unsupported media types and no wildcard is
 `406 Not Acceptable`** (Oxigraph parity, w3c/sparql-protocol#40) — sparq no longer silently
 falls back to JSON in that case (the EXPLAIN `Accept: text/x-sparq-explain` short-circuits this
@@ -338,7 +338,7 @@ and the Graph-Store-Protocol read path keeps its lenient default):
 | --- | --- | --- |
 | SELECT | `application/sparql-results+json` (default) / `+xml` / `text/csv` / `text/tab-separated-values` | matching results media |
 | ASK | json (default) / xml | `application/sparql-results+json` / `+xml` |
-| CONSTRUCT / DESCRIBE | `application/n-triples` (default) / `text/turtle` / `application/rdf+xml` / `application/ld+json` (the `jsonld` feature — **default-on**) | matching RDF media; N-Triples, prefix-compacting Turtle, RDF/XML, <!-- [OPUS-4.8] sq-rt6v --> or flattened JSON-LD <!-- [OPUS-4.8] sq-oy1f.1/.4 --> |
+| CONSTRUCT / DESCRIBE | `application/n-triples` (default) / `text/turtle` / `application/rdf+xml` / `application/ld+json` (the `jsonld` feature — **default-on**) | matching RDF media; N-Triples, prefix-compacting Turtle, RDF/XML, <!-- sq-rt6v --> or flattened JSON-LD <!-- sq-oy1f.1/.4 --> |
 
 **CSV / TSV / XML SELECT bodies stream too** (#5517), with the CONSTRUCT / DESCRIBE contract
 below: the engine materialises the `QueryResult`, then the document is written straight into
@@ -347,7 +347,7 @@ prices) are never held whole, not even for one row with a very large literal. On
 `sparq_server::results::write_select_{csv,tsv,xml}` write to any `io::Write` and are
 byte-identical to `select_to_{csv,tsv,xml}`.
 
-<!-- [OPUS-4.8] sq-u79ee (survey §C1 / FINDINGS F21) -->
+<!-- sq-u79ee (survey §C1 / FINDINGS F21) -->
 Per the W3C SPARQL Results TSV format, the **TSV** serialiser abbreviates an
 `xsd:integer` / `xsd:decimal` / `xsd:double` / `xsd:boolean` literal whose lexical form is
 a valid Turtle token to its **bare** token (no quotes, no `^^datatype`) — e.g. `30`, `2.2`,
@@ -359,7 +359,7 @@ round-trips its original spelling (`"1.0E6"^^xsd:double` → `1.0E6`, not canoni
 canonically. **CSV** writes each value's bare lexical string (datatype/lang dropped — lossy by
 spec); **JSON/XML** carry the full term (value + datatype) unchanged.
 
-<!-- [OPUS-4.8] sq-7d3dj.34.2 -->
+<!-- sq-7d3dj.34.2 -->
 **SELECT-JSON streams (TTFB).** The `application/sparql-results+json` SELECT path streams its
 body: the engine serialises on a blocking worker feeding a bounded channel, so the results
 header + early solutions are written to the socket **before the whole result is serialised**
@@ -379,7 +379,7 @@ the correct `400` / `413` / `503`. But once the header has been flushed for a ge
 multi-chunk result, the HTTP status is committed: a later cap/deadline trip can only **truncate**
 the body — a streamed `200` cannot retroactively become a `413`/`503`.
 
-<!-- [SONNET-4.6] sq-7d3dj.26 -->
+<!-- sq-7d3dj.26 -->
 **Truncation safety (the invariant).** *A client MUST NOT be able to mistake a truncated stream
 for a complete result.* Two mechanisms enforce it, the second strictly on top of the first:
 
@@ -436,7 +436,7 @@ solutions it is instantiated from), which both paths do — see
 [`bench/construct-stream/README.md`](../../bench/construct-stream/README.md) for the harness and
 the first-read finding.
 
-<!-- [OPUS-4.8] sq-7d3dj.34.1 -->
+<!-- sq-7d3dj.34.1 -->
 **Single parse per request (HTTP floor).** The read path parses each request query with
 `spargebra` exactly ONCE — the server parses to classify the form + apply any protocol dataset
 override, then hands the resulting algebra straight to the engine's `*_prepared` entry points
@@ -454,7 +454,7 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: text/turtle' \
 # RDF/XML:
 curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/rdf+xml' \
      --data-urlencode 'query=CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }'
-# JSON-LD (flattened) — default-on, works on the standard build: [OPUS-4.8] sq-oy1f.1/.4
+# JSON-LD (flattened) — default-on, works on the standard build: sq-oy1f.1/.4
 curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
      --data-urlencode 'query=CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }'
 ```
@@ -473,7 +473,7 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 >   body is a **415** (it is not a valid operation under QUERY). Use POST for an update.
 > - It enforces the SAME auth / egress gates as GET/POST (a QUERY is a read — gated by
 >   `--auth-token-read`). It does **not** emit `Cache-Control` / `Content-Location` headers
->   (Oxigraph does not either). [OPUS-4.8]
+>   (Oxigraph does not either).
 > ```sh
 > curl -X QUERY 'http://127.0.0.1:3030/sparql?default-graph-uri=http://ex/g1' \
 >      -H 'Content-Type: application/sparql-query' \
@@ -481,7 +481,7 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 >      --data 'SELECT * WHERE { ?s ?p ?o }'
 > ```
 
-<!-- [OPUS-4.8] sq-jaj38: comment separates the two adjacent blockquotes (markdownlint MD028). -->
+<!-- sq-jaj38: comment separates the two adjacent blockquotes (markdownlint MD028). -->
 
 > **SPARQL 1.1 Protocol conformance lane (sq-jaj38, epic sq-my8wd) — what is ratcheted.** The
 > protocol surface above is now covered by a dedicated W3C **SPARQL 1.1 Protocol (HTTP)**
@@ -492,7 +492,7 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > GET / POST-urlencoded / POST-direct, the `QUERY` method, update via POST, the
 > `default-graph-uri` / `named-graph-uri` overrides, SELECT/ASK negotiation (SRJ / SRX / CSV /
 > TSV), a **present-but-unsatisfiable `Accept` → 406 Not Acceptable** (Oxigraph parity,
-> w3c/sparql-protocol#40 — <!-- [OPUS-4.8] sq-406acc --> formerly a divergence, now a genuine
+> w3c/sparql-protocol#40 — <!-- sq-406acc --> formerly a divergence, now a genuine
 > PASS that raised the floor 20→21), and the **200 / 400 / 405 (with `Allow`) / 406 / 415**
 > status codes. **Honest boundary:** two behaviours remain DOCUMENTED DIVERGENCES (reported
 > separately, NOT summed into the floor, so they never inflate the conformance number): an
@@ -501,9 +501,9 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > `Accept: text/csv` falls back to a JSON boolean** (CSV/TSV have no boolean serialisation). Run
 > it with
 > `cargo test -p sparq-conformance --features http-protocol --test http_protocol_suite`; the row
-> is in the central scoreboard (`W3C SPARQL 1.1 Protocol (HTTP)`). [OPUS-4.8]
+> is in the central scoreboard (`W3C SPARQL 1.1 Protocol (HTTP)`).
 
-<!-- [OPUS-4.8] sq-1uuxz: comment separates the two adjacent blockquotes (markdownlint MD028). -->
+<!-- sq-1uuxz: comment separates the two adjacent blockquotes (markdownlint MD028). -->
 
 > **Service Description + Graph Store Protocol conformance lane (sq-1uuxz, epic sq-my8wd) — what
 > is ratcheted.** The federation-descriptor + GSP write surfaces (see "Federation discovery" and
@@ -525,11 +525,10 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > existing); this is a DOCUMENTED DIVERGENCE, reported separately and NOT summed into the floor. Run
 > it with `cargo test -p sparq-conformance --features federation-descriptors --test sd_gsp_suite`;
 > the row is in the central scoreboard (`SPARQL 1.1 Service Description + Graph Store Protocol`).
-> [OPUS-4.8]
 
-<!-- [OPUS-4.8] sq-b3df9: comment separates the two adjacent blockquotes (markdownlint MD028). -->
+<!-- sq-b3df9: comment separates the two adjacent blockquotes (markdownlint MD028). -->
 
-> **JSON-LD content negotiation (`jsonld` feature — default-on, [OPUS-4.8] sq-oy1f.4).** The
+> **JSON-LD content negotiation (`jsonld` feature — default-on, sq-oy1f.4).** The
 > server speaks `application/ld+json` out of the box (the `jsonld` feature is in the default set —
 > a maintainer-directed exception to opt-in-by-default). `application/ld+json` joins the
 > q-value-aware RDF negotiation in BOTH directions: a CONSTRUCT/DESCRIBE or a Graph-Store-Protocol
@@ -542,9 +541,9 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > — byte-identical to a JSON-LD-disabled build. What is default-on now: JSON-LD parse + serialise
 > (flattened) + content-negotiation; full conneg-conformance ratcheting is on the sq-oy1f roadmap.
 
-<!-- [FABLE-5] sq-7d3dj.30.13: comment separates the two adjacent blockquotes (markdownlint MD028). -->
+<!-- sq-7d3dj.30.13: comment separates the two adjacent blockquotes (markdownlint MD028). -->
 
-> **Default-on algebra rewrite (`algebra-rewrite` feature — [FABLE-5] sq-7d3dj.30.13).** The
+> **Default-on algebra rewrite (`algebra-rewrite` feature — sq-7d3dj.30.13).** The
 > server's default set also lights sparq-engine's pre-execution algebra rewrite pass (#1735): a
 > result-equivalent `FILTER(?v = <iri>)` IRI-constant folding + `FILTER(!bound)` anti-join applied
 > at parse time, so the shipped server executes the same plans the CLI and the canonical benchmarks
@@ -553,9 +552,9 @@ curl -G http://127.0.0.1:3030/sparql -H 'Accept: application/ld+json' \
 > for an explicitly rewrite-dark build; the sparq-engine LIBRARY default remains OFF for lean
 > library consumers.
 
-<!-- [OPUS-5] sq-7d3dj.30.15: comment separates the two adjacent blockquotes (markdownlint MD028). -->
+<!-- sq-7d3dj.30.15: comment separates the two adjacent blockquotes (markdownlint MD028). -->
 
-> **Default-on DPccp join-order planner (`dp-planner` feature — [OPUS-5] sq-7d3dj.30.15).** The
+> **Default-on DPccp join-order planner (`dp-planner` feature — sq-7d3dj.30.15).** The
 > server's default set also lights sparq-engine's DPccp planner (sq-7d3dj.30.5): a connected BGP
 > with 3 or more patterns that fits the connected-subgraph budget is planned as a cost-optimal
 > BUSHY join tree instead of by greedy GOO. It is DEFAULT-ON once compiled, so every request gets
@@ -647,7 +646,7 @@ server:  {"unsubscribed": {"id": 1}}
 `addedResults`/`removedResults` are each full SPARQL-JSON results objects. Refusals and
 failed re-evaluations come back as `{"error": {"message": …, "id"?: n}}`.
 
-[OPUS-4.8] sq-cxk5: when `--auth-token-read` is set, the upgrade is gated behind the read
+sq-cxk5: when `--auth-token-read` is set, the upgrade is gated behind the read
 token (`401` before upgrade otherwise). A non-browser client sends `Authorization: Bearer
 <TOKEN>` on the handshake; a **browser** (which cannot set WS handshake headers) passes it as
 a subprotocol: `new WebSocket("ws://host/subscriptions", ["bearer." + token])`. The server
@@ -655,7 +654,7 @@ takes the substring after the `bearer.` prefix as the token, validates it (const
 and echoes the subprotocol back per RFC 6455. With no read token configured, the upgrade is
 open (back-compatible).
 
-**4b. SSE subscriptions (`text/event-stream`).** [OPUS-4.8] sq-bxog: the SAME subscription
+**4b. SSE subscriptions (`text/event-stream`).** sq-bxog: the SAME subscription
 engine over Server-Sent Events, for clients that prefer a plain HTTP GET stream to a
 WebSocket. `GET /subscriptions/sse?query=<SELECT>[&alias=<x>]` opens one subscription per
 stream (the query is in the query string — SSE is one-way, so there is no `subscribe`/
@@ -680,7 +679,7 @@ event: notification
 id: 1
 data: {"notification":{"id":1,"sequence":1,"alias":"ages","addedResults":{…},"removedResults":{…}}}
 ```
-[OPUS-4.8] sq-cxk5: like the WS path, when `--auth-token-read` is set this GET is gated
+sq-cxk5: like the WS path, when `--auth-token-read` is set this GET is gated
 behind the read token via the `Authorization: Bearer <TOKEN>` header (it is a plain GET, so
 the header is the only auth channel — no WS subprotocol) — `401` before the stream opens
 otherwise. A registration refusal (missing/non-SELECT/malformed `query` → `400`; capacity/budget →
@@ -695,16 +694,16 @@ gauge count SSE streams and WS subscriptions together.
 ```sh
 # READ (GET/HEAD): serialises the addressed graph in the Accept-negotiated RDF syntax
 # (default N-Triples; also text/turtle = prefix-compacting Turtle, application/rdf+xml = RDF/XML,
-#  and application/ld+json = flattened JSON-LD with `--features jsonld` [OPUS-4.8] sq-oy1f.1)
+#  and application/ld+json = flattened JSON-LD with `--features jsonld` sq-oy1f.1)
 curl http://127.0.0.1:3030/sparql/graph?default                 # GSP indirect (default graph)
 curl 'http://127.0.0.1:3030/sparql/graph?graph=http://ex/g'     # GSP indirect (named graph)
 curl http://127.0.0.1:3030/graphs/whatever                      # GSP direct (request URI is the graph IRI)
-curl -H 'Accept: application/rdf+xml' http://127.0.0.1:3030/sparql/graph?default   # RDF/XML read [OPUS-4.8] sq-rt6v
-curl -H 'Accept: application/ld+json' http://127.0.0.1:3030/sparql/graph?default   # JSON-LD read (--features jsonld) [OPUS-4.8] sq-oy1f.1
+curl -H 'Accept: application/rdf+xml' http://127.0.0.1:3030/sparql/graph?default   # RDF/XML read sq-rt6v
+curl -H 'Accept: application/ld+json' http://127.0.0.1:3030/sparql/graph?default   # JSON-LD read (--features jsonld) sq-oy1f.1
 
 # WRITE (sq-gxsj): body is RDF, format by Content-Type
-#   (turtle | n-triples | n-quads | trig | application/rdf+xml [OPUS-4.8] sq-rt6v
-#    | application/ld+json with `--features jsonld` [OPUS-4.8] sq-oy1f.1)
+#   (turtle | n-triples | n-quads | trig | application/rdf+xml sq-rt6v
+#    | application/ld+json with `--features jsonld` sq-oy1f.1)
 # PUT = REPLACE graph contents (201 if created, 204 if replaced):
 curl -X PUT 'http://127.0.0.1:3030/sparql/graph?graph=http://ex/g' \
      -H 'content-type: text/turtle' --data '<http://ex/s> <http://ex/p> <http://ex/o> .'
@@ -910,7 +909,7 @@ marker entry (no `data`) — never silently flattened away.
 `GetRecords` shape. Configure a log directory (`--change-stream DIR` / `SPARQ_CHANGE_STREAM`,
 `ServerConfig::change_stream_dir`) and the server (1) RECORDS every published group-commit
 generation as one ordered change record on the writer thread (possibly containing several
-concurrent SPARQL Updates; [GPT-5.6] `sq-kqofk`), and (2) serves `GET /streams` over it (the route
+concurrent SPARQL Updates; `sq-kqofk`), and (2) serves `GET /streams` over it (the route
 is `404` unless the directory is set — the same double-opt-in as `/tpf`). Parameters: `iteratorType`
 (`TRIM_HORIZON` = replay everything RETAINED, the default; `AT_SEQUENCE_NUMBER` + `at=N`;
 `AFTER_SEQUENCE_NUMBER` + `after=N`, the resume case; `LATEST` = tail only) and `limit` (max commits per page, default 100,
@@ -934,7 +933,7 @@ broker is the separate `sparq-serve` `change-sink` opt-in (`sq-l6zks`, above), n
 endpoint.
 
 **`GET /queries` + `DELETE /queries/{id}` — running-query registry (`sparq-server` feature
-`query-registry`, default OFF; sq-qsm5z, [SONNET-4.6]).** An opt-in in-memory registry of
+`query-registry`, default OFF; sq-qsm5z).** An opt-in in-memory registry of
 currently executing SPARQL queries, providing GraphDB query-monitoring and kill parity.
 
 - **`GET /queries`** — READ-gated (fail-closed). Returns `{"queries":[…]}` where each entry
@@ -947,8 +946,8 @@ currently executing SPARQL queries, providing GraphDB query-monitoring and kill 
   `404` if the id is not found (already finished or bad id).
 - **RAII lifetime**: each executing SELECT/ASK/CONSTRUCT/DESCRIBE/**EXPLAIN (plan + analyze)**
   registers on start and deregisters on completion, error, or panic — the entry is always cleaned
-  up. (EXPLAIN ANALYZE wiring added in sq-t1isr, [SONNET-4.6].)
-- **SPARQL UPDATEs are registered too** (`kind: "update"`; sq-m9prn, [SONNET-4.6]). An UPDATE
+  up. (EXPLAIN ANALYZE wiring added in sq-t1isr,.)
+- **SPARQL UPDATEs are registered too** (`kind: "update"`; sq-m9prn). An UPDATE
   registers when the sequenced writer thread STARTS applying it — not when it is queued — so a
   row names exactly what is consuming the writer, which is the operation whose cancellation
   also unblocks every write queued behind it. The flag reaches the `DELETE/INSERT … WHERE`
@@ -1018,7 +1017,7 @@ resource applies an atomic modify to the addressed graph, with two body dialects
 
 **5b. Container (ghcr.io).** Published on every `vX.Y.Z` release tag as a distroless OCI image
 index at `ghcr.io/sparq-org/sparq-server`, with `linux/amd64` and `linux/arm64` runtime images.
-[GPT-5.6] `sq-fvzi6`: each release publishes `:X.Y.Z` (pin this for reproducible deployments),
+`sq-fvzi6`: each release publishes `:X.Y.Z` (pin this for reproducible deployments),
 `:X.Y` (tracks the newest patch in that minor line), and `:latest` (tracks the newest release);
 an omitted tag selects `:latest`. The image sets `SPARQ_ALLOW_REMOTE=1` so the `0.0.0.0` bind it
 needs (loopback is unreachable through Docker's port map) boots out of the box — running the
@@ -1126,7 +1125,7 @@ curl http://127.0.0.1:3030/.well-known/void                         # VoID + scs
 curl -H 'Accept: application/n-triples' http://127.0.0.1:3030/sparql # Service Description (no query)
 ```
 
-**5c-bis. Grouped facet counts (OPT-IN, [GPT-5.6] `sq-lsp7k.5.2`; feature `facets`).**
+**5c-bis. Grouped facet counts (OPT-IN, `sq-lsp7k.5.2`; feature `facets`).**
 `POST /facets` evaluates one `sparq_introspect::FacetRequest` against a pinned store snapshot and
 returns its `FacetResponse` JSON: candidate-subject count plus ranked type, predicate, and requested
 object-value distributions. `class` is an optional `rdf:type` class IRI; every `constraints` pair is
@@ -1149,7 +1148,7 @@ READ, so `--auth-token-read` gates it. It is double opt-in and OFF by default: t
 feature compiles the route + `sparq-introspect` dependency, and `--facets` / `SPARQ_FACETS=1`
 serves it. Feature on but flag off gives `404`; feature off compiles no route or dependency.
 
-**5c-ter. IRI/label prefix completion (OPT-IN, [GPT-5.6] `sq-lsp7k.9.3`; feature
+**5c-ter. IRI/label prefix completion (OPT-IN, `sq-lsp7k.9.3`; feature
 `complete`).** `GET /complete?q=<prefix>&limit=<k>` returns case-insensitive prefix matches from
 complete IRI strings, IRI local names, and literal `rdfs:label` / `skos:prefLabel` values. `q` is
 required (missing → `400`); `limit` defaults to 20 and is capped at 100. The response is a JSON
@@ -1297,7 +1296,7 @@ is also set (mirrors `tpf` / `federation-descriptors`). Without the feature, zer
 no SHACL code — `sparq-core`/the wasm bundle are untouched); with the feature but not the flag,
 `/shacl/validate` is `404`. Reads are gated by `--auth-token-read` like any GET.
 
-**SHACL transaction guard (`sq-lsp7k.2.4`, same `shacl` feature; [GPT-5.6]).** Build with
+**SHACL transaction guard (`sq-lsp7k.2.4`, same `shacl` feature).** Build with
 `--features shacl`, load a shapes graph with `--shacl-shapes FILE` (env
 `SPARQ_SHACL_SHAPES`), and enable `--shacl-guard` (env `SPARQ_SHACL_GUARD=1`) to validate the
 post-state of every SPARQL Update and Graph Store write. A conforming candidate commits normally;
@@ -1355,7 +1354,7 @@ by `--auth-token-read` like a GET. The CLI exposes the same transpiler as `sparq
 `cli` skill).
 
 **5g. Named parameterized SPARQL templates (OPT-IN, `sq-lsp7k.10`; feature `templates`).
-[FABLE-5]** Server-stored, IRI-identified query/UPDATE templates with **typed, fail-closed
+** Server-stored, IRI-identified query/UPDATE templates with **typed, fail-closed
 parameter binding** — the GraphDB "SPARQL templates" (smart updates) / Stardog "stored
 queries" parity surface, and what an app backend or LLM agent should call instead of
 composing free-form UPDATE strings.
@@ -1512,14 +1511,14 @@ env overrides the default.
 | `--time-travel-generations N` | `SPARQ_TIME_TRAVEL_GENERATIONS` | `16` | (feature) retained generations |
 | `--time-travel-max-age SECS` | `SPARQ_TIME_TRAVEL_MAX_AGE` | off | (feature) age-out window |
 | `--federation-descriptors` | `SPARQ_FEDERATION_DESCRIPTORS` | off | (feature `federation-descriptors`) serve a VoID at `/.well-known/void` + a SPARQL Service Description on `GET /sparql` with no query — see "Federation discovery" |
-| `--facets` | `SPARQ_FACETS` | off | (feature `facets`) serve `POST /facets` grouped type/predicate/value counts over a pinned snapshot; read-gated — see "Grouped facet counts" ([GPT-5.6] sq-lsp7k.5.2) |
-| `--complete` | `SPARQ_COMPLETE` | off | (feature `complete`) serve `GET /complete?q=<prefix>&limit=<k>` IRI/local-name/label prefix completion from a generation-cached index; read-gated — see "IRI/label prefix completion" ([GPT-5.6] sq-lsp7k.9.3) |
+| `--facets` | `SPARQ_FACETS` | off | (feature `facets`) serve `POST /facets` grouped type/predicate/value counts over a pinned snapshot; read-gated — see "Grouped facet counts" (sq-lsp7k.5.2) |
+| `--complete` | `SPARQ_COMPLETE` | off | (feature `complete`) serve `GET /complete?q=<prefix>&limit=<k>` IRI/local-name/label prefix completion from a generation-cached index; read-gated — see "IRI/label prefix completion" (sq-lsp7k.9.3) |
 | `--tpf` | `SPARQ_TPF` | off | (feature `tpf`) serve a Triple Pattern Fragments / LDF source endpoint at `GET /tpf?subject=&predicate=&object=` (paged, full Hydra paging incl. `first`/`last`, read-only); same flag also serves brTPF bind-restricted fragments (`values` param / `POST` body) when built with the `brtpf` feature — see "Triple Pattern Fragments" |
 | `--shacl` | `SPARQ_SHACL` | off | (feature `shacl`) serve the SHACL validate endpoint `POST /shacl/validate` — POST a shapes graph, the server validates its loaded data graph against it; JSON report (default) or W3C report Turtle (`Accept: text/turtle`); read-only — see "SHACL validation endpoint" |
 | `--shacl-guard` | `SPARQ_SHACL_GUARD` | off | (feature `shacl`) reject non-conforming UPDATE/GSP post-states with `422` + JSON validation report; store unchanged |
 | `--shacl-shapes FILE` | `SPARQ_SHACL_SHAPES` | unset | (feature `shacl`) load the guard shapes graph once at startup; required when the guard is on |
 | `--solid-authz` | `SPARQ_SOLID_AUTHZ` | off | (feature `solid-authz`) serve the Solid WAC/ACP authorization endpoints `POST /authz/decide`+`/wac-allow`+`/query` — a fail-closed HTTP shell over `sparq-solid`; POST the pod dataset (or `"source":"server"` for the server's own loaded store, sq-snopa.8) + an already-resolved session, get the decision / `WAC-Allow` value / access-controlled query result; read-only — see "Solid WAC/ACP authorization endpoints" |
-| `--solid-authz-trust` | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
 | `--brtpf-max-bindings N` | `SPARQ_BRTPF_MAX_BINDINGS` | `1024` (`0`=off) | (feature `brtpf`) **DoS cap on the brTPF binding-set mapping COUNT** — one index scan per mapping, so cost is super-linear in the count, not the bytes → `413` (`sq-r74h`) |
 | `--brtpf-max-values-bytes N` | `SPARQ_BRTPF_MAX_VALUES_BYTES` | `1048576` (`0`=off) | (feature `brtpf`) **DoS cap on the raw brTPF `values` payload BYTES** — bounds the GET query-string carrier that `--max-body-bytes` never sees → `413` (`sq-r74h`) |
 | `--audit-log` | `SPARQ_AUDIT_LOG` | off | (feature `audit-log`) per-query **access audit log** — see "Access audit log" |
@@ -1844,9 +1843,9 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   `500`. `federation-descriptors` (default **off**, `sq-d3d8`) pulls the light
   `sparq-introspect` crate and serves the OPT-IN VoID + Service-Description discovery
   endpoints (still gated at runtime by `--federation-descriptors`; see "Federation
-  discovery"). `facets` (default **off**, [GPT-5.6] `sq-lsp7k.5.2`) uses the same light
+  discovery"). `facets` (default **off**, `sq-lsp7k.5.2`) uses the same light
   `sparq-introspect` dependency for `POST /facets`, still gated at runtime by `--facets`.
-  `complete` (default **off**, [GPT-5.6] `sq-lsp7k.9.3`) pulls `sparq-text` with its default
+  `complete` (default **off**, `sq-lsp7k.9.3`) pulls `sparq-text` with its default
   features disabled and serves `GET /complete`, still gated at runtime by `--complete`.
   Run feature tests: `cargo test -p sparq-server --features time-travel` / `--features geo` /
   `--features federation-descriptors` / `--features facets` / `--features complete`.
@@ -1942,7 +1941,7 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   `Content-Type: application/json` (the `405` keeps its `Allow` header). POST query
   requires `Content-Type: application/sparql-query` or `application/x-www-form-urlencoded`
   (else `415`); a GET without `query=` is `400`. An **unmatched route** is a `404` with the
-  categorised body `{"error":"not found"}` ([OPUS-4.8] sq-pj6u — previously the bare
+  categorised body `{"error":"not found"}` (sq-pj6u — previously the bare
   `{"error":""}`); the message is server-constructed and never echoes the requested path.
 - **Transient vs permanent status contract (for retry classifiers — sq-r5bv / gh-50).** A retry
   classifier should treat **only `429` and `503` as transient** (a retry of the identical request
@@ -1955,7 +1954,7 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   truncation. **Classify on the status code, not the body text** (bodies are sanitised generic
   classes — see the next bullet). There is **no `Retry-After`** header today. Full contract +
   rationale: the `sparq_server::status_contract` crate doc, asserted by `tests/status_contract.rs`.
-- **The versioned HTTP wire contract ([FABLE-5] sq-fdurb / gh-1416, PSS ask).** The endpoints,
+- **The versioned HTTP wire contract (sq-fdurb / gh-1416, PSS ask).** The endpoints,
   params, media types, negotiation rules, status codes and error-body shape an **HTTP-only
   consumer** may rely on are enumerated as the **v1 wire contract** in
   [`docs/http-wire-contract.md`](../../docs/http-wire-contract.md) — frozen-vs-unstable

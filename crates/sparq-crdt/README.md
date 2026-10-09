@@ -1,6 +1,6 @@
 # sparq-crdt
 
-<!-- [FABLE-5] sq-tag1q.7.2: internal-stub README for a publish = false crate. -->
+<!-- sq-tag1q.7.2: internal-stub README for a publish = false crate. -->
 
 Opt-in SPARQL-CRDT replication primitives for sparq (epic `sq-tag1q.7`): the
 bounded **canonical delta-envelope codec**, **causal summaries** (version-vector
