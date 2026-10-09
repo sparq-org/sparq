@@ -124,13 +124,19 @@ pub struct Watch {
 impl Watch {
     /// Whether the delivery may still be made: the subscription stands (not cancelled, not
     /// expired) and its subscriber may read the resource (grants revoked or expired since count).
+    /// The resource is read under its shared lock, as a GET reads it, so the decision rests on a
+    /// state some write left whole, never on one a write is part way through (or rolling back).
+    /// The lock is not held through the send: a slow inbox must not hold up writes.
     async fn stands<S: Store + 'static>(&self, state: &LwsState<S>) -> bool {
         if !state.notify.is_live(&self.subscription) {
             return false;
         }
         match &self.snapshot {
             Some(s) => access::allowed_as(state, Action::Read, &self.uri, &self.agent, s).await,
-            None => state.allowed(Action::Read, &self.uri, &self.agent).await,
+            None => {
+                let _guard = state.locks.read(&self.uri).await;
+                state.allowed(Action::Read, &self.uri, &self.agent).await
+            }
         }
     }
 }
@@ -1012,7 +1018,7 @@ async fn purge_expired<S: Store + 'static>(
     let expired: Vec<String> = {
         use std::ops::Bound::{Excluded, Unbounded};
         let subs = state.notify.subs.read().expect("lock");
-        let mut cursor = state.notify.purged_to.lock().expect("lock");
+        let cursor = state.notify.purged_to.lock().expect("lock");
         let expired: Vec<String> = subs
             .range::<String, _>((Excluded(&*cursor), Unbounded))
             .chain(subs.range::<String, _>(..=&*cursor))
@@ -1021,12 +1027,13 @@ async fn purge_expired<S: Store + 'static>(
             .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
             .map(|s| s.id.clone())
             .collect();
-        if let Some(last) = expired.last() {
-            cursor.clone_from(last);
-        }
+        drop(cursor);
         expired
     };
+    // The cursor moves to each one as its removal is tried, not before: a request that goes away
+    // part way leaves the ones it never tried first in line.
     for id in expired {
+        state.notify.purged_to.lock().expect("lock").clone_from(&id);
         let _ = state.notify.remove(state, &id, admission.clone()).await;
     }
 }

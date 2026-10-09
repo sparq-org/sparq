@@ -313,8 +313,8 @@ What the server exposes, all discoverable from the storage description
   key in the storage description's `verificationMethod`. Deliveries go through a bounded queue and worker pool (see the
   `SOLID_SERVER_LWS_DELIVERY_*` variables); a Delete is announced only once the removal happened.
   Each delivery attempt, retries included, first checks that its subscription still exists and
-  has not expired, and that the subscriber may still read the resource, holding the resource's
-  read lock through the check and the send. A Delete is checked against
+  has not expired, and that the subscriber may still read the resource, reading the resource under
+  its shared lock, as a GET does. A Delete is checked against
   the resource as it was before removal. A delivery that fails a check is dropped.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it

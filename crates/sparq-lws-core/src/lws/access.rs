@@ -1149,8 +1149,10 @@ fn announce<S: Store + 'static>(
     }
 }
 
-/// The inboxes of the access requests associated with `grant`: those made by, or asking for, an
-/// agent one of its policies is assigned to (public grants name no requester).
+/// The inboxes of the access requests associated with `grant`: those an agent one of its policies
+/// is assigned to made itself. A request that only names an assignee is not that agent's word
+/// (anyone may make one, with any inbox), so its inbox is not told; public grants name no
+/// requester.
 fn requester_inboxes<S: Store + 'static>(state: &LwsState<S>, grant: &Value) -> BTreeSet<String> {
     let grantees: BTreeSet<String> = assignees(grant)
         .into_iter()
@@ -1162,10 +1164,7 @@ fn requester_inboxes<S: Store + 'static>(state: &LwsState<S>, grant: &Value) -> 
         .read()
         .expect("lock")
         .values()
-        .filter(|r| {
-            r.author.as_ref().is_some_and(|a| grantees.contains(a))
-                || assignees(&r.document).iter().any(|a| grantees.contains(a))
-        })
+        .filter(|r| r.author.as_ref().is_some_and(|a| grantees.contains(a)))
         .filter_map(|r| r.document.get("inbox").and_then(Value::as_str))
         .filter(|i| is_uri(i))
         .map(str::to_string)
@@ -1968,12 +1967,32 @@ mod tests {
         let grant: Value =
             serde_json::from_str(&access_doc("AccessGrant", "https://bob.example/#me", None))
                 .unwrap();
-        // Bob's request asked for Bob; Alice's request was made by Alice, for Alice.
+        // Review finding: a request Alice made naming Bob, with an inbox of her choosing, was
+        // told of Bob's grant. Only the requests Bob made himself are.
+        assert!(requester_inboxes(&state, &grant).is_empty());
+        let bob = Agent {
+            subject: Some("https://bob.example/#me".into()),
+            client: None,
+        };
+        let req = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc(
+                "AccessRequest",
+                "https://bob.example/#me",
+                Some("https://bob.example/own-inbox/"),
+            ),
+        );
+        assert_eq!(
+            handle(&state, &req, &bob).await.status(),
+            StatusCode::CREATED
+        );
         assert_eq!(
             requester_inboxes(&state, &grant)
                 .into_iter()
                 .collect::<Vec<_>>(),
-            vec!["https://bob.example/inbox/".to_string()]
+            vec!["https://bob.example/own-inbox/".to_string()]
         );
         let alice_grant: Value = serde_json::from_str(&access_doc(
             "AccessGrant",
