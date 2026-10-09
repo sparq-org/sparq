@@ -348,6 +348,22 @@ mod tests {
         assert_eq!(any, r#"{"@id":"http://ex/s","http://ex/p":"x"}"#);
     }
 
+    /// `@id` and `@type` must both match: a listed node whose type differs is not framed,
+    /// whichever member comes first.
+    #[test]
+    fn id_and_type_patterns_both_constrain() {
+        let ttl = "<http://ex/s> a <http://ex/T> ; <http://ex/p> \"x\" .";
+        for frame in [
+            r#"{"@id":"http://ex/s","@type":"http://ex/Missing"}"#,
+            r#"{"@type":"http://ex/Missing","@id":"http://ex/s"}"#,
+        ] {
+            let out = frame_doc(ttl, frame);
+            assert!(!out.contains("http://ex/s"), "{frame}: {out}");
+        }
+        let out = frame_doc(ttl, r#"{"@type":"http://ex/T","@id":"http://ex/s"}"#);
+        assert!(out.contains("http://ex/s"), "{out}");
+    }
+
     #[test]
     fn default_fills_absent_property() {
         let out = frame_doc(

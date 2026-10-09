@@ -977,7 +977,8 @@ fn every_container_kind_reads_back_under_a_type_scoped_definition() {
 
 /// Framing selects exactly the nodes an `@id` pattern names, for every valid pattern
 /// form: an IRI or compact IRI, a list of them, the wildcard `{}` (alone or listed) and
-/// the match-none `[]`; `@explicit` then keeps only the framed property.
+/// the match-none `[]`; `@explicit` then keeps only the framed property. A `@type`
+/// pattern beside it must match too, in either member order and whatever `@requireAll`.
 #[test]
 fn generated_id_patterns_select_exactly_the_named_nodes() {
     use sparq_jsonld::frame::{frame_match, FrameOptions};
@@ -986,7 +987,11 @@ fn generated_id_patterns_select_exactly_the_named_nodes() {
         "[{}]",
         names
             .iter()
-            .map(|n| format!(r#"{{"@id":"http://ex/{n}","http://ex/p":"{n}","http://ex/q":"x"}}"#))
+            .enumerate()
+            .map(|(i, n)| {
+                let t = if i % 2 == 0 { "T" } else { "U" };
+                format!(r#"{{"@id":"http://ex/{n}","@type":"http://ex/{t}","http://ex/p":"{n}","http://ex/q":"x"}}"#)
+            })
             .collect::<Vec<_>>()
             .join(",")
     ))
@@ -1016,8 +1021,24 @@ fn generated_id_patterns_select_exactly_the_named_nodes() {
             _ => format!("[{}]", items.join(",")),
         };
         let explicit = g.chance(50);
+        // The @type pattern and which typed nodes (by index) it lets through.
+        let (type_pattern, type_ok): (Option<&str>, fn(usize) -> bool) = match g.below(5) {
+            0 => (None, |_| true),
+            1 => (Some(r#""ex:T""#), |i| i % 2 == 0),
+            2 => (Some(r#""http://ex/Missing""#), |_| false),
+            3 => (Some("{}"), |_| true),
+            _ => (Some("[]"), |_| false),
+        };
+        let id_member = format!(r#""@id":{pattern}"#);
+        let type_member = type_pattern.map(|t| format!(r#","@type":{t}"#)).unwrap_or_default();
+        let members = if g.chance(50) {
+            format!("{id_member}{type_member}")
+        } else {
+            format!("{}{}{id_member}", type_member.trim_start_matches(','), if type_member.is_empty() { "" } else { "," })
+        };
         let frame = format!(
-            r#"{{"@context":{{"ex":"http://ex/"}},"@id":{pattern}{}}}"#,
+            r#"{{"@context":{{"ex":"http://ex/"}},{members},"@requireAll":{}{}}}"#,
+            g.chance(50),
             if explicit { r#","@explicit":true,"http://ex/p":{}"# } else { "" }
         );
         let out = frame_match(
@@ -1034,11 +1055,12 @@ fn generated_id_patterns_select_exactly_the_named_nodes() {
             .filter_map(|n| n.get("@id").and_then(Json::as_str))
             .collect();
         got.sort_unstable();
-        let mut want: Vec<String> = if wildcard {
-            names.iter().map(|n| format!("http://ex/{n}")).collect()
-        } else {
-            chosen.iter().filter(|n| **n != "z").map(|n| format!("http://ex/{n}")).collect()
-        };
+        let mut want: Vec<String> = names
+            .iter()
+            .enumerate()
+            .filter(|(i, n)| (wildcard || chosen.contains(n)) && type_ok(*i))
+            .map(|(_, n)| format!("http://ex/{n}"))
+            .collect();
         want.sort_unstable();
         assert_eq!(got, want, "case {case}: {frame}");
         for n in nodes {

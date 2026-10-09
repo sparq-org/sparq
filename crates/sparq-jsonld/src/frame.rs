@@ -229,7 +229,7 @@ pub fn frame_expanded(
         unique_embeds: BTreeMap::new(),
         bnode_counts: BTreeMap::new(),
         last_ids: BTreeSet::new(),
-        output_left: json_size(expanded_input).saturating_mul(OUTPUT_PER_INPUT).saturating_add(OUTPUT_FLOOR),
+        output_left: output_bound(expanded_input, &frame_arr),
     };
 
     // §4.1 steps 5–6: match the frame over every subject of the active graph.
@@ -301,17 +301,29 @@ struct FState<'a> {
     output_left: usize,
 }
 
-/// Output values a frame may emit per value of its input, beyond [`OUTPUT_FLOOR`].
-/// `@once` embeds each subject once per top-level match, so legitimate output can be
-/// quadratic in the input; `@always` over shared subjects can be exponential.
+/// Bytes a framing call may allocate for its output per byte of its input and frame,
+/// beyond [`OUTPUT_FLOOR`]. `@once` embeds each subject once per top-level match, so
+/// legitimate output can be quadratic in the input; `@always` over shared subjects can be
+/// exponential.
 const OUTPUT_PER_INPUT: usize = 32;
-/// Output values any frame may emit, whatever the input's size.
-const OUTPUT_FLOOR: usize = 1 << 20;
+/// Bytes any framing call may allocate for its output, whatever the input's size.
+const OUTPUT_FLOOR: usize = 1 << 24;
+/// What one emitted object costs beyond its strings (the map, its first array and slack).
+const NODE_BYTES: usize = 32;
+
+/// The output bound of a framing call over `input` with `frame` (both expanded).
+fn output_bound(input: &Json, frame: &Json) -> usize {
+    json_bytes(input)
+        .saturating_add(json_bytes(frame))
+        .saturating_mul(OUTPUT_PER_INPUT)
+        .saturating_add(OUTPUT_FLOOR)
+}
 
 impl FState<'_> {
-    /// Charges `n` emitted output values (node objects, references, copied values) to
-    /// the call's output bound, failing with `context overflow` once it is spent, so
-    /// framing's output, like compaction's work, stays bounded by its input.
+    /// Charges `n` bytes to the call's output bound before they are allocated, failing
+    /// with `context overflow` once it is spent. Every node, reference, copied value,
+    /// wrapper, default and frame copy framing builds is charged here, so its output (and
+    /// the compaction and rendering that are linear in it) stays bounded by its input.
     fn emit(&mut self, n: usize) -> Result<(), JsonLdError> {
         match self.output_left.checked_sub(n) {
             Some(left) => {
@@ -326,17 +338,24 @@ impl FState<'_> {
     }
 }
 
-/// The number of JSON values in `json`.
-fn json_size(json: &Json) -> usize {
-    let mut size = 0;
+/// An upper estimate of the bytes `json` occupies: every string and member name by its
+/// length, plus [`NODE_BYTES`] per array or object and 8 per scalar.
+fn json_bytes(json: &Json) -> usize {
+    let mut size = 0usize;
     let mut stack = vec![json];
     while let Some(j) = stack.pop() {
-        size += 1;
-        match j {
-            Json::Arr(items) => stack.extend(items),
-            Json::Obj(members) => stack.extend(members.iter().map(|(_, v)| v)),
-            _ => {}
-        }
+        size = size.saturating_add(match j {
+            Json::Arr(items) => {
+                stack.extend(items);
+                NODE_BYTES
+            }
+            Json::Obj(members) => {
+                stack.extend(members.iter().map(|(_, v)| v));
+                members.iter().fold(NODE_BYTES, |n, (k, _)| n.saturating_add(k.len() + 8))
+            }
+            Json::Str(s) => s.len() + 8,
+            _ => 8,
+        });
     }
     size
 }
@@ -434,6 +453,7 @@ fn match_frame(
     embedded: bool,
 ) -> Result<(), JsonLdError> {
     let _nested = crate::context::budget::nest()?;
+    st.emit(json_bytes(frame))?;
     let frame_obj = validate_frame(frame)?;
     let flags = Flags {
         embed: frame_flag_embed(&frame_obj, st.options)?,
@@ -451,7 +471,7 @@ fn match_frame(
         }
         st.unique_embeds.entry(st.graph.clone()).or_default();
 
-        let Some(subject) = maps.graphs.get(&st.graph).and_then(|g| g.get(&id)).cloned() else {
+        let Some(subject) = maps.graphs.get(&st.graph).and_then(|g| g.get(&id)) else {
             continue;
         };
 
@@ -468,7 +488,7 @@ fn match_frame(
             continue;
         }
 
-        st.emit(1)?;
+        st.emit(NODE_BYTES + id.len() + property.map_or(0, str::len))?;
         let mut output = Json::Obj(vec![("@id".to_string(), Json::Str(id.clone()))]);
         if id.starts_with("_:") {
             *st.bnode_counts.entry(id.clone()).or_insert(0) += 1;
@@ -512,7 +532,10 @@ fn match_frame(
                 None => (st.graph != "@merged", Json::obj()),
                 Some(gf) => {
                     let sf = match first_of(gf) {
-                        Some(f) if f.is_obj() => f.clone(),
+                        Some(f) if f.is_obj() => {
+                            st.emit(json_bytes(f))?;
+                            f.clone()
+                        }
                         _ => Json::obj(),
                     };
                     (id != "@merged" && id != "@default", sf)
@@ -552,7 +575,7 @@ fn match_frame(
         }
 
         // Iterate the subject's properties in lexicographical order.
-        let Json::Obj(subject_members) = &subject else {
+        let Json::Obj(subject_members) = subject else {
             st.subject_stack.pop();
             continue;
         };
@@ -564,7 +587,7 @@ fn match_frame(
             }
             if prop.starts_with('@') {
                 // Keywords copy verbatim; blank-node @type values count toward pruning.
-                st.emit(json_size(objects))?;
+                st.emit(json_bytes(objects) + prop.len())?;
                 output.set(prop, objects.clone());
                 if prop == "@type" {
                     for t in as_slice(objects) {
@@ -586,12 +609,9 @@ fn match_frame(
                 if is_list_object(o) {
                     // @list re-emit: node entries recurse with the list sub-frame,
                     // value entries copy verbatim.
-                    let subframe = frame_prop
-                        .and_then(first_of)
-                        .and_then(|f0| f0.get("@list"))
-                        .cloned()
-                        .unwrap_or_else(|| implicit_frame(&flags));
-                    st.emit(1)?;
+                    let list_frame = frame_prop.and_then(first_of).and_then(|f0| f0.get("@list"));
+                    st.emit(list_frame.map_or(2 * NODE_BYTES, json_bytes) + NODE_BYTES + prop.len())?;
+                    let subframe = list_frame.cloned().unwrap_or_else(|| implicit_frame(&flags));
                     let mut list = Json::Obj(vec![("@list".to_string(), Json::Arr(vec![]))]);
                     for oo in o.get("@list").map(as_slice).unwrap_or_default() {
                         if let Some(oid) = subject_reference_id(oo) {
@@ -605,7 +625,7 @@ fn match_frame(
                                 true,
                             )?;
                         } else {
-                            st.emit(json_size(oo))?;
+                            st.emit(json_bytes(oo))?;
                             add_frame_output(&mut list, Some("@list"), oo.clone());
                         }
                     }
@@ -631,7 +651,7 @@ fn match_frame(
                     let empty = Json::obj();
                     let pattern = frame_prop.and_then(first_of).unwrap_or(&empty);
                     if value_match(pattern, o) {
-                        st.emit(json_size(o))?;
+                        st.emit(json_bytes(o) + prop.len())?;
                         add_frame_output(&mut output, Some(prop), o.clone());
                     }
                 }
@@ -646,7 +666,8 @@ fn match_frame(
         let mut fprops: Vec<&(String, Json)> = frame_members.iter().collect();
         fprops.sort_by(|a, b| a.0.cmp(&b.0));
         for (prop, pvalue) in fprops {
-            let next = first_of(pvalue).cloned().unwrap_or_default();
+            let empty = Json::obj();
+            let next = first_of(pvalue).unwrap_or(&empty);
             if prop == "@type" {
                 // Only the `@type: {"@default": …}` form participates in default fill.
                 if next.get("@default").is_none() {
@@ -655,13 +676,13 @@ fn match_frame(
             } else if prop.starts_with('@') {
                 continue;
             }
-            let omit_default = frame_flag_bool(&next, "@omitDefault", st.options.omit_default);
+            let omit_default = frame_flag_bool(next, "@omitDefault", st.options.omit_default);
             if !omit_default && output.get(prop).is_none() {
+                st.emit(next.get("@default").map_or(16, json_bytes) + 2 * NODE_BYTES + prop.len())?;
                 let preserve = match next.get("@default") {
                     Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
                     None => Json::Arr(vec![Json::Str("@null".to_string())]),
                 };
-                st.emit(json_size(&preserve))?;
                 if prop == "@type" {
                     // A `@type` default fills DIRECTLY (its values are IRIs that must
                     // go through IRI compaction; `@preserve` would shield them).
@@ -919,43 +940,39 @@ fn filter_subject(
         let is_empty = frame_values.is_empty();
         let match_this;
 
+        // @id and @type are mandatory constraints (json-ld11-framing, Frame Matching): a node that
+        // fails either does not match, whatever @requireAll says; one that passes counts
+        // as matching that property.
         if key == "@id" {
-            // `[]` matches no node; a wildcard `{}` matches every node; otherwise the
-            // node's @id must be listed.
-            if frame_values.iter().any(is_empty_obj) {
-                match_this = true;
-            } else {
-                let nid = node.get("@id").and_then(Json::as_str);
-                match_this = frame_values.iter().any(|v| v.as_str() == nid);
+            // A wildcard `{}` matches every node, `[]` none, and a list of IRIs the
+            // listed nodes.
+            let nid = node.get("@id").and_then(Json::as_str);
+            if !frame_values.iter().any(|v| is_empty_obj(v) || v.as_str() == nid) {
+                return Ok(false);
             }
-            if !flags.require_all {
-                return Ok(match_this);
-            }
+            match_this = true;
         } else if key == "@type" {
             wildcard = false;
-            if is_empty {
+            match_this = if is_empty {
                 // Match-none: the node must have no @type.
-                if !node_values.is_empty() {
-                    return Ok(false);
-                }
-                match_this = true;
+                node_values.is_empty()
             } else if frame_values.len() == 1 && is_empty_obj(&frame_values[0]) {
                 // Wildcard: the node must have some @type.
-                match_this = !node_values.is_empty();
+                !node_values.is_empty()
             } else if frame_values
                 .first()
                 .map(|f| f.get("@default").is_some())
                 .unwrap_or(false)
             {
                 // A default-map @type matches any node.
-                match_this = true;
+                true
             } else {
-                match_this = frame_values
+                frame_values
                     .iter()
-                    .any(|t| node_values.iter().any(|nv| nv == t));
-            }
-            if !flags.require_all {
-                return Ok(match_this);
+                    .any(|t| node_values.iter().any(|nv| nv == t))
+            };
+            if !match_this {
+                return Ok(false);
             }
         } else if key.starts_with('@') {
             // Other keywords do not participate in matching.
@@ -1671,9 +1688,17 @@ mod tests {
         parse(&format!("[{}]", nodes.join(",")))
     }
 
-    /// The output bound of a framing call over `input`.
-    fn output_bound(input: &Json) -> usize {
-        json_size(input) * OUTPUT_PER_INPUT + OUTPUT_FLOOR
+    /// Frames `input` with `frame`, returning the result or the error code.
+    fn frame_with(input: &Json, frame: &str) -> Result<Json, E> {
+        frame_match(input, &parse(frame), &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader)
+            .map_err(|e| e.code())
+    }
+
+    /// The output bound of a framing call over `input` with `frame`.
+    fn bound(input: &Json, frame: &str) -> usize {
+        let opts = JsonLdOptions { frame_expansion: true, ..JsonLdOptions::default() };
+        let expanded = crate::expand(&parse(frame), &opts, &NoopLoader).expect("frame expands");
+        output_bound(&crate::expand(input, &JsonLdOptions::default(), &NoopLoader).unwrap(), &expanded)
     }
 
     /// `@always` over shared subjects would embed 2^30 copies from 61 nodes; framing
@@ -1691,7 +1716,30 @@ mod tests {
         let input = layered(8);
         let out = frame_match(&input, &frame_doc, &opts, &FrameOptions::default(), &NoopLoader)
             .expect("small enough to embed");
-        assert!(json_size(&out) <= output_bound(&input));
+        assert!(json_bytes(&out) <= bound(&input, r#"{"@id":"http://ex/root","@embed":"@always"}"#));
+        // 18 layers emit about 2^19 nodes, past the bound for so small an input.
+        assert_eq!(
+            frame_with(&layered(18), r#"{"@id":"http://ex/root","@embed":"@always"}"#).unwrap_err(),
+            E::ContextOverflow
+        );
+    }
+
+    /// Copied strings count by their length: 2^12 embedded copies of a 64 KiB literal
+    /// (256 MiB) stop at the output bound.
+    #[test]
+    fn copied_literals_count_by_their_size() {
+        let mut input = layered(11);
+        let big = "x".repeat(1 << 16);
+        let Json::Arr(nodes) = &mut input else { unreachable!() };
+        for node in nodes.iter_mut().filter(|n| n.get("http://ex/p").is_none()) {
+            node.set("http://ex/v", Json::Str(big.clone()));
+        }
+        let started = std::time::Instant::now();
+        assert_eq!(
+            frame_with(&input, r#"{"@id":"http://ex/root","@embed":"@always"}"#).unwrap_err(),
+            E::ContextOverflow
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
     }
 
     /// A 51-link chain framed with a 50-deep frame embeds every link once, within the bound.
@@ -1713,7 +1761,7 @@ mod tests {
         let mut text = String::new();
         out.write(&mut text);
         assert!(text.contains("http://ex/c51"), "{text}");
-        assert!(json_size(&out) <= output_bound(&input));
+        assert!(json_bytes(&out) <= bound(&input, &format!(r#"{{"@id":"http://ex/c0","@embed":"@always","http://ex/p":{pattern}}}"#)));
     }
 
     /// The valid `@id` pattern forms: an IRI, a list of IRIs, the wildcard `{}` (alone or
@@ -1735,6 +1783,28 @@ mod tests {
         assert_eq!(ids(r#"{"@id":{}}"#), ["http://ex/a", "http://ex/b"]);
         assert_eq!(ids(r#"{"@id":[{}]}"#), ["http://ex/a", "http://ex/b"]);
         assert!(ids(r#"{"@id":[]}"#).is_empty());
+        // @id and @type must both match, in either member order and whatever @requireAll says.
+        let typed = parse(r#"[{"@id":"http://ex/a","@type":"http://ex/T"},{"@id":"http://ex/b","@type":"http://ex/T"}]"#);
+        let typed_ids = |frame: &str| -> Vec<String> {
+            let out = frame_with(&typed, frame).expect("frame ok");
+            as_slice(&out).iter().filter_map(|n| n.get("@id").and_then(Json::as_str).map(str::to_string)).collect()
+        };
+        for all in ["false", "true"] {
+            for frame in [
+                format!(r#"{{"@id":"http://ex/a","@type":"http://ex/Missing","@requireAll":{all}}}"#),
+                format!(r#"{{"@type":"http://ex/Missing","@id":"http://ex/a","@requireAll":{all}}}"#),
+                format!(r#"{{"@id":"http://ex/a","@type":[],"@requireAll":{all}}}"#),
+            ] {
+                assert!(typed_ids(&frame).is_empty(), "{frame}");
+            }
+            for frame in [
+                format!(r#"{{"@id":"http://ex/a","@type":"http://ex/T","@requireAll":{all}}}"#),
+                format!(r#"{{"@type":"http://ex/T","@id":"http://ex/a","@requireAll":{all}}}"#),
+                format!(r#"{{"@type":{{}},"@id":["http://ex/a"],"@requireAll":{all}}}"#),
+            ] {
+                assert_eq!(typed_ids(&frame), ["http://ex/a"], "{frame}");
+            }
+        }
         // A wildcard with @explicit keeps only the framed property.
         let out = frame_match(
             &input,
