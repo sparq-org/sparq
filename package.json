@@ -27,6 +27,7 @@
     },
     "postcss": "8.5.29",
     "compression": "1.8.2",
-    "http-cache-semantics": "4.3.0"
+    "http-cache-semantics": "4.3.0",
+    "basic-ftp": "6.2.2"
   }
 }
