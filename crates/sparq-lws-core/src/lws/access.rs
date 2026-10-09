@@ -280,7 +280,7 @@ pub struct Policy {
     /// resource of the storage the grant is scoped to.
     pub target: Option<Target>,
     /// The grant's `storage`: the scope of an untargeted policy.
-    pub storage: String,
+    pub storage: std::sync::Arc<str>,
     pub constraints: Vec<Constraint>,
 }
 
@@ -324,6 +324,8 @@ pub struct AccessStore {
     owner_inbox: tokio::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
     grants_etag: RwLock<String>,
     requests_etag: RwLock<String>,
+    /// The share of the store access requests may take (see [`super::Quota`]).
+    request_quota: super::Quota,
 }
 
 fn new_etag() -> String {
@@ -358,6 +360,7 @@ impl AccessStore {
             owner_inbox: Default::default(),
             grants_etag: RwLock::new(new_etag()),
             requests_etag: RwLock::new(new_etag()),
+            request_quota: super::Quota::new(MAX_REQUESTS, MAX_REQUESTS_PER_AUTHOR),
         };
         for grants in [true, false] {
             let container = cfg.absolute(if grants { GRANTS_PATH } else { REQUESTS_PATH });
@@ -507,7 +510,7 @@ pub async fn allowed_as<S: Store + 'static>(
     .unwrap_or(false)
 }
 
-fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
+pub(crate) fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {
     let subject = agent.subject.as_deref();
     subject.is_some() && subject == state.cfg.owner.as_deref()
 }
@@ -579,6 +582,8 @@ async fn decide<S: Store + 'static>(
 /// malformed.
 pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
     let list = access.as_array().filter(|a| !a.is_empty())?;
+    // Every policy shares the one copy of the grant's storage.
+    let storage: std::sync::Arc<str> = storage.into();
     let mut out = Vec::new();
     for p in list {
         // type is REQUIRED and MUST include AccessPolicy.
@@ -661,7 +666,7 @@ pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
             actions,
             assignee,
             target,
-            storage: storage.to_string(),
+            storage: storage.clone(),
             constraints,
         });
     }
@@ -841,8 +846,17 @@ async fn create<S: Store + 'static>(
     grants: bool,
     held: Option<super::resources::IriGuard>,
 ) -> Response {
-    let Ok(body) = serde_json::from_slice::<Value>(&req.body) else {
-        return problem(StatusCode::BAD_REQUEST, Some("the body is not JSON"));
+    // Anyone authenticated may ask for access, so a request is held to its size before it is
+    // parsed; grants come from the owner and are held to the request body ceiling.
+    let body = if grants {
+        serde_json::from_slice::<Value>(&req.body)
+            .map_err(|_| problem(StatusCode::BAD_REQUEST, Some("the body is not JSON")))
+    } else {
+        super::bounded_json(&req.body, MAX_REQUEST_BYTES, "an access request")
+    };
+    let body = match body {
+        Ok(b) => b,
+        Err(r) => return r,
     };
     let wanted = if grants {
         "AccessGrant"
@@ -872,36 +886,28 @@ async fn create<S: Store + 'static>(
     else {
         return problem(StatusCode::BAD_REQUEST, Some("not a valid access document"));
     };
-    // Anyone authenticated may ask for access, and each request is stored as a resource is:
-    // requests are held to a share of their own, overall and per author, so asking can never
-    // fill the storage that resources and grants need.
-    if !grants {
-        if req.body.len() > MAX_REQUEST_BYTES {
-            return problem(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                Some(&format!(
-                    "an access request is at most {MAX_REQUEST_BYTES} bytes"
-                )),
-            );
+    // Each request is stored as a resource is: requests are held to a share of their own, overall
+    // and per author, so asking can never fill the storage that resources and grants need. The
+    // place is reserved before anything is stored and held until the request is registered.
+    let slot = if grants {
+        None
+    } else {
+        let reserved = state
+            .access
+            .request_quota
+            .reserve(agent.subject.as_deref(), || {
+                let requests = state.access.requests.read().expect("lock");
+                let mine = requests
+                    .values()
+                    .filter(|r| r.author == agent.subject)
+                    .count();
+                (requests.len(), mine)
+            });
+        match reserved {
+            Ok(slot) => Some(slot),
+            Err(full) => return full.response("open access requests"),
         }
-        let requests = state.access.map(false).read().expect("lock");
-        let mine = requests
-            .values()
-            .filter(|r| r.author == agent.subject)
-            .count();
-        if mine >= MAX_REQUESTS_PER_AUTHOR {
-            return problem(
-                StatusCode::TOO_MANY_REQUESTS,
-                Some("this agent has as many open access requests as it may"),
-            );
-        }
-        if requests.len() >= MAX_REQUESTS {
-            return problem(
-                StatusCode::INSUFFICIENT_STORAGE,
-                Some("the server holds as many access requests as it may"),
-            );
-        }
-    }
+    };
     let id = jose::random_id();
     let base = if grants { GRANTS_PATH } else { REQUESTS_PATH };
     let container = state.cfg.absolute(base);
@@ -926,6 +932,8 @@ async fn create<S: Store + 'static>(
                 .expect("lock")
                 .insert(id, record);
             state.access.bump(grants);
+            // Counted as registered from here on.
+            drop(slot);
         }
     };
     let created = super::create_record(
@@ -1692,6 +1700,42 @@ mod tests {
         );
         let r = handle(&state, &post(&big), &other).await;
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // The size is checked before the body is parsed, so an oversized body is refused for its
+        // size whatever it holds.
+        let r = handle(&state, &post(&"[".repeat(MAX_REQUEST_BYTES + 1)), &other).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// Review finding: the request caps were checked, then the request was stored and registered
+    /// later, so concurrent requests all passed the check. A place is reserved before anything
+    /// is stored.
+    #[tokio::test]
+    async fn concurrent_access_requests_are_held_to_their_share() {
+        let (state, _store) = super::super::test_store::state(100).await;
+        let body = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessRequest"],
+            "storage": state.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let asker = Agent {
+            subject: Some("https://asker.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = super::super::test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let all = (0..2 * MAX_REQUESTS_PER_AUTHOR).map(|_| handle(&state, &post, &asker));
+        let created = futures_util::future::join_all(all)
+            .await
+            .iter()
+            .filter(|r| r.status() == StatusCode::CREATED)
+            .count();
+        assert_eq!(created, MAX_REQUESTS_PER_AUTHOR);
     }
 
     #[test]

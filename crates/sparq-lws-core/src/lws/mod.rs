@@ -774,6 +774,117 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
     }
 }
 
+/// Parse a JSON body that anyone authenticated may send for a record of their own (an access
+/// request, a subscription), refusing it with 413 before any parsing when it is over `limit`
+/// bytes: what such a record costs is bounded by its size, never by what parsing it builds.
+#[allow(clippy::result_large_err)]
+pub(crate) fn bounded_json(body: &[u8], limit: usize, what: &str) -> Result<Value, Response> {
+    if body.len() > limit {
+        return Err(problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some(&format!("{what} is at most {limit} bytes")),
+        ));
+    }
+    serde_json::from_slice(body)
+        .map_err(|_| problem(StatusCode::BAD_REQUEST, Some("the body is not JSON")))
+}
+
+/// The share of the store that records anyone authenticated may create (access requests,
+/// subscriptions) can take: at most `total` of them, and `per_author` by one agent. A create
+/// [`Quota::reserve`]s its place before any storage work, under the same lock as every other
+/// reservation, and holds the [`QuotaSlot`] until its record is registered (or the create
+/// fails), so concurrent creates cannot both take the last place.
+pub(crate) struct Quota {
+    total: usize,
+    per_author: usize,
+    in_flight: Arc<std::sync::Mutex<QuotaCounts>>,
+}
+
+#[derive(Default)]
+struct QuotaCounts {
+    total: usize,
+    by_author: std::collections::HashMap<Option<String>, usize>,
+}
+
+/// Why [`Quota::reserve`] refused.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum QuotaFull {
+    Author,
+    Total,
+}
+
+impl QuotaFull {
+    pub(crate) fn response(&self, what: &str) -> Response {
+        match self {
+            QuotaFull::Author => problem(
+                StatusCode::TOO_MANY_REQUESTS,
+                Some(&format!("this agent holds as many {what} as it may")),
+            ),
+            QuotaFull::Total => problem(
+                StatusCode::INSUFFICIENT_STORAGE,
+                Some(&format!("the server holds as many {what} as it may")),
+            ),
+        }
+    }
+}
+
+/// A place reserved by [`Quota::reserve`]; dropping it gives the place back. Drop it once the
+/// record it was for is registered: from then on the record itself is counted.
+pub(crate) struct QuotaSlot {
+    in_flight: Arc<std::sync::Mutex<QuotaCounts>>,
+    author: Option<String>,
+}
+
+impl Drop for QuotaSlot {
+    fn drop(&mut self) {
+        let mut c = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        c.total -= 1;
+        if let Some(n) = c.by_author.get_mut(&self.author) {
+            *n -= 1;
+            if *n == 0 {
+                c.by_author.remove(&self.author);
+            }
+        }
+    }
+}
+
+impl Quota {
+    pub(crate) fn new(total: usize, per_author: usize) -> Self {
+        Self {
+            total,
+            per_author,
+            in_flight: Default::default(),
+        }
+    }
+
+    /// Reserve a place for a record by `author`. `registered` counts the records already in
+    /// force, overall and by `author`; it is called under the reservation lock, so a record
+    /// registered concurrently is counted either there or as a reservation still held, never
+    /// neither (a registration inserts its record before it drops its slot).
+    pub(crate) fn reserve(
+        &self,
+        author: Option<&str>,
+        registered: impl FnOnce() -> (usize, usize),
+    ) -> Result<QuotaSlot, QuotaFull> {
+        let mut c = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        let (all, mine) = registered();
+        let author = author.map(str::to_string);
+        let mine = mine + c.by_author.get(&author).copied().unwrap_or(0);
+        if mine >= self.per_author {
+            return Err(QuotaFull::Author);
+        }
+        if all + c.total >= self.total {
+            return Err(QuotaFull::Total);
+        }
+        c.total += 1;
+        *c.by_author.entry(author.clone()).or_default() += 1;
+        Ok(QuotaSlot {
+            in_flight: self.in_flight.clone(),
+            author,
+        })
+    }
+}
+
 /// How many bytes of expanded terms the triples parsed from `body_len` bytes of Turtle may hold
 /// between them. A prefix is written once and expanded at every use, so a short document can
 /// stand for an unbounded amount of text: parsing stops (and the document is refused) past this.
@@ -1315,6 +1426,9 @@ pub(crate) mod test_store {
         pub fail_after_create: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `delete` of this IRI detaches it from its parent, then fails with the record still
+        /// there, as a two-step delete does when its second step fails.
+        pub partial_delete_of: Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl FlakyStore {
@@ -1340,6 +1454,7 @@ pub(crate) mod test_store {
                 fail_after_write_of: Default::default(),
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
+                partial_delete_of: Default::default(),
             }
         }
     }
@@ -1443,6 +1558,13 @@ pub(crate) mod test_store {
             created
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+            if self.partial_delete_of.lock().unwrap().as_deref() == Some(iri) {
+                let kept = self.inner.read(iri).await?;
+                self.inner.delete(iri, parent).await?;
+                let ct = kept.meta.content_type.clone();
+                self.inner.write(iri, kept.body, &ct).await?;
+                return Err(ServerError::Storage("the record delete failed".into()));
+            }
             if self.fail_delete.load(Ordering::SeqCst)
                 || self.fail_delete_of.lock().unwrap().as_deref() == Some(iri)
             {
@@ -1471,7 +1593,31 @@ pub(crate) mod test_store {
             iri: &str,
             parent: Option<&str>,
         ) -> ServerResult<DeleteOutcome> {
-            self.inner.delete_container_if_empty(iri, parent).await
+            // The same failures as `delete`: a resource is removed by either.
+            if self.fail_delete.load(Ordering::SeqCst)
+                || self.fail_delete_of.lock().unwrap().as_deref() == Some(iri)
+            {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            if let Some(gate) = held(&self.hold_next_delete_of, iri) {
+                let (inner, iri, parent) = (
+                    self.inner.clone(),
+                    iri.to_string(),
+                    parent.map(str::to_string),
+                );
+                let sent = tokio::spawn(async move {
+                    gate.acquire().await.expect("gate").forget();
+                    inner
+                        .delete_container_if_empty(&iri, parent.as_deref())
+                        .await
+                });
+                return sent.await.expect("delete");
+            }
+            let outcome = self.inner.delete_container_if_empty(iri, parent).await?;
+            if self.fail_after_delete_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("blob cleanup failed".into()));
+            }
+            Ok(outcome)
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             self.inner.list_children(container).await
@@ -1541,6 +1687,32 @@ pub(crate) mod test_store {
 mod tests {
     use super::*;
     use test_store::{body_json, links, request};
+
+    /// Review finding: request caps were checked against what was registered, and the record
+    /// registered after an asynchronous create, so concurrent creates all passed. Places are
+    /// reserved under one lock and held until registration.
+    #[test]
+    fn quota_places_are_reserved_until_released() {
+        let q = Quota::new(3, 2);
+        let a = q.reserve(Some("a"), || (0, 0)).unwrap();
+        let _a2 = q.reserve(Some("a"), || (0, 0)).unwrap();
+        assert_eq!(
+            q.reserve(Some("a"), || (0, 0)).err(),
+            Some(QuotaFull::Author)
+        );
+        let _b = q.reserve(Some("b"), || (0, 0)).unwrap();
+        assert_eq!(
+            q.reserve(Some("c"), || (0, 0)).err(),
+            Some(QuotaFull::Total)
+        );
+        // Registered records count too.
+        drop(a);
+        assert_eq!(
+            q.reserve(Some("a"), || (1, 1)).err(),
+            Some(QuotaFull::Author)
+        );
+        assert!(q.reserve(Some("c"), || (0, 0)).is_ok());
+    }
 
     async fn http(app: &Router, method: &str, path: &str, body: &'static str) -> StatusCode {
         use tower::ServiceExt;

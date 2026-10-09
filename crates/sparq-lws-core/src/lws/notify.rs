@@ -138,6 +138,19 @@ impl Watch {
 /// Most distinct topics one subscription may name.
 pub const MAX_TOPICS: usize = 64;
 
+/// Most subscriptions held at once, expired ones included until they are removed: anyone who
+/// can read a resource may subscribe to it, and each subscription is stored as a resource is.
+pub const MAX_SUBSCRIPTIONS: usize = 512;
+
+/// Most subscriptions one subscriber (other than the storage owner) may hold.
+pub const MAX_SUBSCRIPTIONS_PER_SUBSCRIBER: usize = 16;
+
+/// Largest subscription request body, in bytes.
+pub const MAX_SUBSCRIPTION_BYTES: usize = 16 * 1024;
+
+/// Most expired subscriptions a new subscription removes before it is counted.
+const EXPIRED_REMOVED_PER_SUBSCRIBE: usize = 16;
+
 /// A change to a storage resource, announced to the subscriptions whose topics cover it.
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -212,6 +225,8 @@ pub struct Notifier {
     workers: Arc<tokio::sync::Semaphore>,
     /// Per inbox origin, its own limit (dropped once no delivery holds it).
     inboxes: Mutex<HashMap<String, Weak<tokio::sync::Semaphore>>>,
+    /// The share of the store subscriptions may take (see [`super::Quota`]).
+    quota: super::Quota,
 }
 
 fn new_etag() -> String {
@@ -298,6 +313,7 @@ impl Notifier {
             dropped: AtomicU64::new(0),
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
             inboxes: Mutex::new(HashMap::new()),
+            quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
         })
     }
 
@@ -399,15 +415,19 @@ impl Notifier {
         event: &Event,
         limit: usize,
     ) -> Vec<Pending> {
-        let mut candidates: Vec<Subscription> = self
-            .live()
-            .into_iter()
-            .filter(|s| s.covers(&event.uri))
-            .collect();
-        // Those past the bound are dropped as a full queue drops them, and counted so.
-        if candidates.len() > limit {
-            self.note_dropped(candidates.len() - limit, &event.uri);
-            candidates.truncate(limit);
+        // Only the subscriptions within the bound are copied out; those past it are dropped as a
+        // full queue drops them, and counted so.
+        let now = jose::now_secs();
+        let (candidates, over) = {
+            let subs = self.subs.read().expect("lock");
+            let mut matching = subs
+                .values()
+                .filter(|s| !s.expired(now) && s.covers(&event.uri));
+            let candidates: Vec<Subscription> = matching.by_ref().take(limit).cloned().collect();
+            (candidates, matching.count())
+        };
+        if over > 0 {
+            self.note_dropped(over, &event.uri);
         }
         let mut out = Vec::new();
         // A Delete is prepared while the resource is still there; its deliveries, made once it
@@ -961,9 +981,11 @@ async fn subscribe<S: Store + 'static>(
             Some("a subscription request is application/lws+json"),
         );
     }
-    let Ok(body) = serde_json::from_slice::<Value>(&req.body) else {
-        return problem(StatusCode::BAD_REQUEST, Some("the body is not JSON"));
-    };
+    let body =
+        match super::bounded_json(&req.body, MAX_SUBSCRIPTION_BYTES, "a subscription request") {
+            Ok(b) => b,
+            Err(r) => return r,
+        };
     if !body.is_object() {
         return problem(
             StatusCode::BAD_REQUEST,
@@ -1053,6 +1075,45 @@ async fn subscribe<S: Store + 'static>(
             };
         }
     }
+    // Expired subscriptions still hold their place in the store until they are removed: a few go
+    // now, before this one is counted. (Not while this create holds the container alone for its
+    // preconditions: a removal waits for the container.)
+    let now = jose::now_secs();
+    let expired: Vec<String> = if held.is_some() {
+        Vec::new()
+    } else {
+        state
+            .notify
+            .subs
+            .read()
+            .expect("lock")
+            .values()
+            .filter(|s| s.expired(now))
+            .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
+            .map(|s| s.id.clone())
+            .collect()
+    };
+    for id in expired {
+        let _ = state.notify.remove(state, &id, req.admission.clone()).await;
+    }
+    // The place is reserved before anything is stored and held until the subscription is
+    // registered. The storage owner is not held to a subscriber's share.
+    let slot = if access::is_owner(state, agent) {
+        None
+    } else {
+        let reserved = state.notify.quota.reserve(agent.subject.as_deref(), || {
+            let subs = state.notify.subs.read().expect("lock");
+            let mine = subs
+                .values()
+                .filter(|s| s.subscriber == agent.subject)
+                .count();
+            (subs.len(), mine)
+        });
+        match reserved {
+            Ok(slot) => Some(slot),
+            Err(full) => return full.response("subscriptions"),
+        }
+    };
     let id = jose::random_id();
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
     let iri = format!("{container}{id}");
@@ -1072,6 +1133,8 @@ async fn subscribe<S: Store + 'static>(
         move || {
             state.notify.subs.write().expect("lock").insert(id, sub);
             *state.notify.etag.write().expect("lock") = new_etag();
+            // Counted as registered from here on.
+            drop(slot);
         }
     };
     let created = super::create_record(
@@ -1099,6 +1162,71 @@ mod tests {
     use p256::ecdsa::{Signature, VerifyingKey};
 
     use super::super::test_store;
+
+    /// Review finding: anyone who could read a resource could store subscriptions without limit,
+    /// filling the store resources need, and a large one was parsed before any limit applied.
+    /// Subscriptions are held to a share of their own, reserved before anything is stored, and
+    /// a request body is held to its size before it is parsed.
+    #[tokio::test]
+    async fn subscriptions_are_held_to_their_share() {
+        let (state, _store) = test_store::state(100).await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |body: &str| {
+            test_store::request(
+                Method::POST,
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON)],
+                body,
+            )
+        };
+        let reader = Agent {
+            subject: Some("https://reader.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let req = post(&body);
+        let all = (0..2 * MAX_SUBSCRIPTIONS_PER_SUBSCRIBER).map(|_| handle(&state, &req, &reader));
+        let created = futures_util::future::join_all(all)
+            .await
+            .iter()
+            .filter(|r| r.status() == StatusCode::CREATED)
+            .count();
+        assert_eq!(created, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
+        let r = handle(&state, &post(&body), &reader).await;
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        let r = handle(
+            &state,
+            &post(&"[".repeat(MAX_SUBSCRIPTION_BYTES + 1)),
+            &reader,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // An expired subscription gives its place back once a new one is asked for.
+        let mine = state
+            .notify
+            .subs
+            .read()
+            .unwrap()
+            .keys()
+            .next()
+            .cloned()
+            .unwrap();
+        state
+            .notify
+            .subs
+            .write()
+            .unwrap()
+            .get_mut(&mine)
+            .unwrap()
+            .expires_at = Some(1);
+        let r = handle(&state, &post(&body), &reader).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        assert!(!state.notify.subs.read().unwrap().contains_key(&mine));
+    }
 
     /// Review finding: a subscription was cancelled whatever the request's `If-Match` named.
     #[tokio::test]
@@ -1601,7 +1729,7 @@ mod tests {
                 actions: vec![Action::Read],
                 assignee: bob.into(),
                 target: None,
-                storage: state.cfg.storage(),
+                storage: state.cfg.storage().into(),
                 constraints: Vec::new(),
             }],
         );
