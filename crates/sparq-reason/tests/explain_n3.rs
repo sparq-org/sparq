@@ -210,48 +210,42 @@ fn id_level_bridge_from_reason_n3_proof() {
     assert!(n3_proof_tree(&dict, &run, [a, par, b], ExplainOpts::default()).expect("unambiguous").is_none());
 }
 
-/// GH #6701 review rounds 3–4: a proof renders an `@forAll` universal by its IRI under a
-/// formula-scoped declaration. Rendering it by its bare local name wrote `{ :x :q ?x }` as
-/// `{ ?x :q ?x }` — a formula requiring the two to be equal.
+/// GH #6701 review rounds 3–4: a proof never renders an `@forAll` universal by its bare
+/// local name — that wrote `{ :x :q ?x }` as `{ ?x :q ?x }`, a formula requiring the two to
+/// be equal. The display has no document line to declare it under, so it spells the
+/// universal as a plain variable that differs from every variable of the fact (`?x_2`);
+/// the KEY carries the universal itself. Declared at document level or in the formula, it
+/// is the same one variable (GH #6754), so both read the same.
 #[test]
 fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
     // through the batch engine (the counting path does not currently derive through a
     // formula that carries a variable — a separate issue).
-    // Declared IN the formula, so the display declares it there too (a DOCUMENT-level
-    // `@forAll :x.` has no binder inside a lone fact; see the end of this test).
-    let src = "@prefix : <http://ex/>. :a :p { @forAll :x. :x :q ?x }.
-{ :a ?p ?f } => { :b :r ?f }.
-";
-    let formula = "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }";
-    let closure = reason_n3_terms(src, None).expect("oracle").facts;
-    let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
-    let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");
-    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
-    assert_eq!(g.mode(), N3Mode::Fallback);
+    for src in [
+        "@prefix : <http://ex/>. :a :p { @forAll :x. :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+        "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+    ] {
+        let formula = "{ ?x_2 <http://ex/q> ?x . }";
+        let closure = reason_n3_terms(src, None).expect("oracle").facts;
+        let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
+        let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");
+        let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+        assert_eq!(g.mode(), N3Mode::Fallback);
 
-    let proof = g.why(asserted).expect("asserted fact explains");
-    assert_eq!(proof.conclusion()[2], formula, "{}", proof.to_text());
+        let proof = g.why(asserted).expect("asserted fact explains");
+        assert_eq!(proof.conclusion()[2], formula, "{}", proof.to_text());
+        assert!(proof.nodes()[0].key[2].contains("__ua.http://ex/x"), "{:?}", proof.nodes()[0].key);
 
-    let proof = g.why(derived).expect("derived fact explains");
-    let nodes = proof.nodes();
-    assert_eq!(nodes.len(), 2, "{}", proof.to_text());
-    // The premise and the conclusion carry the same formula, named the same way.
-    for n in nodes {
-        assert_eq!(n.conclusion[2], formula, "{}", proof.to_text());
+        let proof = g.why(derived).expect("derived fact explains");
+        let nodes = proof.nodes();
+        assert_eq!(nodes.len(), 2, "{}", proof.to_text());
+        // The premise and the conclusion carry the same formula, named the same way.
+        for n in nodes {
+            assert_eq!(n.conclusion[2], formula, "{}", proof.to_text());
+        }
+        assert_eq!(nodes[1].premises, vec![0]);
     }
-    assert_eq!(nodes[1].premises, vec![0]);
-
-    // Document-level: a declaration inside the formula would rebind it, so the display spells
-    // it as a plain variable, still distinct from `?x`, and the keys keep the binder.
-    let src = "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n";
-    let closure = reason_n3_terms(src, None).expect("oracle").facts;
-    let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
-    let proof = MaterializedN3Graph::new(src, &[]).expect("rules parse").why(asserted).expect("explains");
-    assert_eq!(proof.conclusion()[2], "{ ?x_2 <http://ex/q> ?x . }", "{}", proof.to_text());
-    assert!(proof.nodes()[0].key[2].contains("__ua.http://ex/x"), "{:?}", proof.nodes()[0].key);
 }
-
 
 /// GH #6701 review round 4 (3): a fact renders the SAME in every proof it appears in.
 /// `sparq-prov` hashes these strings into the fact's identity, so per-proof naming (`?x` in

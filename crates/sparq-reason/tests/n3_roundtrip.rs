@@ -21,7 +21,7 @@
 //! its backward-chaining copy) are never merged, and identity keys (`statement_keys`,
 //! which provenance addresses facts by) are injective over every `Term` field.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sparq_reason::n3::serialize::{serialize_facts, statement_keys, write_rule, write_statement, NotRepresentable};
 use sparq_reason::n3::Resolver;
