@@ -799,7 +799,7 @@ async fn oidc(
         cfg,
         http,
         &subject,
-        "application/ld+json, application/cid+json, application/json;q=0.9, text/turtle;q=0.8",
+        "text/turtle, application/cid+json;q=0.9, application/ld+json;q=0.8, application/json;q=0.7",
     )
     .await?;
     // The document must name the issuer the way the token's suite asks; naming it the other way
@@ -1059,27 +1059,19 @@ fn names_issuer_in(
     let mut links = IssuerLinks::default();
     let base = subject.split('#').next().unwrap_or(subject);
     if let Ok(doc) = serde_json::from_slice::<Value>(body) {
-        // A compact document about the subject whose terms are all defined by a context known
-        // here (or that has none: CID documents may be read as plain JSON) is read by its keys.
-        // Any other JSON-LD form (expanded, flattened, a graph, an inline or scoped context that
-        // could give a key another meaning) is read as RDF, without loading remote contexts, and
-        // only when what it can expand to is bounded (see [`expansion_bound`]).
+        // Only a compact document about the subject whose terms are all defined by a context
+        // known here (or that has none: CID documents may be read as plain JSON) is read, by its
+        // keys. Any other JSON-LD form (expanded, flattened, a graph, an inline or scoped
+        // context that could give a key another meaning) names no issuer: the document is the
+        // subject's to write and is read before any signature is checked, and general JSON-LD
+        // expansion cannot be bounded before it allocates, so it is never run on it.
         let about_subject = doc
             .get("id")
             .or_else(|| doc.get("@id"))
             .and_then(Value::as_str)
             == Some(subject);
         if !(about_subject && known_contexts_only(&doc)) {
-            if expansion_bound(&doc, base) > super::expansion_budget(body.len()) {
-                return None;
-            }
-            let parser = oxjsonld::JsonLdParser::new().with_base_iri(base).ok()?;
-            let triples = parser
-                .for_slice(body)
-                .filter_map(Result::ok)
-                .filter(|q| q.graph_name == oxrdf::GraphName::DefaultGraph)
-                .map(|q| oxrdf::Triple::new(q.subject, q.predicate, q.object));
-            return links_in(triples, body.len(), subject, issuer);
+            return None;
         }
         let services = match doc.get("service") {
             Some(Value::Array(a)) => a.as_slice(),
@@ -1170,56 +1162,6 @@ fn known_contexts_only(doc: &Value) -> bool {
         other => nested(other),
     };
     top && !below
-}
-
-/// An upper bound on the bytes the quads parsed from `doc` (`len` bytes, read against `base`)
-/// can hold, counted before any expansion: the parser may build them all before it yields the
-/// first. A quad holds at most four terms (subject, predicate, object or its datatype, graph),
-/// and every expanded term is at most every inline context's bytes (term definitions chain at
-/// most through all of them), plus the base, plus the longest string in the document (a key, a
-/// value, a compact IRI's suffix), plus a generated blank node label. A JSON value (a key's
-/// value, an array member, an object) gives rise to at most three quads (a list member: its
-/// value, `rdf:first` and `rdf:rest`). A remote context is never loaded, so inline ones are
-/// all there are.
-fn expansion_bound(doc: &Value, base: &str) -> usize {
-    #[derive(Default)]
-    struct Walk {
-        contexts: usize,
-        values: usize,
-        longest: usize,
-    }
-    fn walk(v: &Value, w: &mut Walk) {
-        w.values = w.values.saturating_add(1);
-        match v {
-            Value::Object(o) => {
-                for (k, v) in o {
-                    w.longest = w.longest.max(k.len());
-                    if k == "@context" {
-                        let bytes = serde_json::to_string(v).map_or(usize::MAX, |s| s.len());
-                        w.contexts = w.contexts.saturating_add(bytes);
-                    } else {
-                        walk(v, w);
-                    }
-                }
-            }
-            Value::Array(a) => a.iter().for_each(|v| walk(v, w)),
-            Value::String(s) => w.longest = w.longest.max(s.len()),
-            Value::Number(n) => w.longest = w.longest.max(n.to_string().len()),
-            _ => {}
-        }
-    }
-    let mut w = Walk::default();
-    walk(doc, &mut w);
-    let term = w
-        .contexts
-        .saturating_add(base.len())
-        .saturating_add(w.longest)
-        .saturating_add(64);
-    w.values
-        .saturating_mul(3)
-        .saturating_add(3)
-        .saturating_mul(4)
-        .saturating_mul(term)
 }
 
 /// The issuer links of `subject` among the triples of its identity document (of `len` bytes).
@@ -2246,7 +2188,7 @@ mod tests {
         .to_string();
         assert!(names_issuer("application/ld+json", known.as_bytes(), me, op).solid_oidc_issuer);
         // A short document whose inline context defines a long term, used many times, could
-        // expand far past its size: it is refused before it is expanded.
+        // expand far past its size: no JSON-LD is expanded, so it names no issuer.
         let long = format!("https://e.example/{}", "x".repeat(8 * 1024));
         let mut amplified = serde_json::Map::new();
         amplified.insert("@context".into(), json!({"t": long}));
@@ -2255,18 +2197,19 @@ mod tests {
             "t".into(),
             Value::Array((0..4096).map(|i| json!({"t": i})).collect()),
         );
-        let amplified = Value::Object(amplified);
-        let body = amplified.to_string();
-        assert!(expansion_bound(&amplified, me) > super::super::expansion_budget(body.len()));
-        // Review finding: with no context at all, a long subject is copied into every quad the
-        // parser builds before it yields one. Refused before parsing too.
+        let amplified = Value::Object(amplified).to_string();
+        assert_eq!(
+            names_issuer("application/ld+json", amplified.as_bytes(), me, op),
+            IssuerLinks::default()
+        );
+        // Review finding: with no context at all, a long subject was copied into every quad the
+        // parser built before it yielded one. Never parsed now.
         let long_subject = json!({
             "@id": format!("https://e.example/{}", "s".repeat(512 * 1024)),
             "https://p.example/": vec![0; 100_000],
         });
         let body = long_subject.to_string();
         assert!(body.len() < MAX_DOC);
-        assert!(expansion_bound(&long_subject, me) > super::super::expansion_budget(body.len()));
         assert_eq!(
             names_issuer("application/ld+json", body.as_bytes(), me, op),
             IssuerLinks::default()
@@ -2285,10 +2228,12 @@ mod tests {
         );
     }
 
-    /// Review finding: an identity document served as expanded JSON-LD (the representation the
-    /// fetch prefers) named no issuer, because only compact documents were read.
+    /// Review findings (rounds 6 and 7): general JSON-LD expansion of an identity document, which
+    /// is read before any signature is checked, could not be bounded before it allocated. Only
+    /// the compact forms are read; expanded and graph forms name no issuer, and the fetch asks
+    /// for Turtle first.
     #[test]
-    fn expanded_json_ld_profiles_name_their_issuer() {
+    fn only_compact_json_ld_profiles_are_read() {
         let me = "https://alice.example/#me";
         let op = "https://op.example/";
         let expanded = json!([{
@@ -2296,34 +2241,23 @@ mod tests {
             SOLID_OIDC_ISSUER: [{"@id": op}],
         }])
         .to_string();
-        let links = names_issuer("application/ld+json", expanded.as_bytes(), me, op);
-        assert!(links.solid_oidc_issuer);
-        // A graph with an inline context reads the same.
+        assert_eq!(
+            names_issuer("application/ld+json", expanded.as_bytes(), me, op),
+            IssuerLinks::default()
+        );
         let graph = json!({
             "@context": {"solid": "http://www.w3.org/ns/solid/terms#"},
             "@graph": [{"@id": me, "solid:oidcIssuer": {"@id": op}}],
         })
         .to_string();
-        assert!(names_issuer("application/ld+json", graph.as_bytes(), me, op).solid_oidc_issuer);
-        // Naming another subject, or another issuer, is no link.
-        assert!(
-            !names_issuer(
-                "application/ld+json",
-                expanded.as_bytes(),
-                "https://bob.example/#me",
-                op
-            )
-            .solid_oidc_issuer
+        assert_eq!(
+            names_issuer("application/ld+json", graph.as_bytes(), me, op),
+            IssuerLinks::default()
         );
-        assert!(
-            !names_issuer(
-                "application/ld+json",
-                expanded.as_bytes(),
-                me,
-                "https://other.example/"
-            )
-            .solid_oidc_issuer
-        );
+        let compact = json!({"@id": me, SOLID_OIDC_ISSUER: {"@id": op}}).to_string();
+        assert!(names_issuer("application/ld+json", compact.as_bytes(), me, op).solid_oidc_issuer);
+        let turtle = format!("<{me}> <{SOLID_OIDC_ISSUER}> <{op}> .");
+        assert!(names_issuer("text/turtle", turtle.as_bytes(), me, op).solid_oidc_issuer);
     }
 
     #[test]

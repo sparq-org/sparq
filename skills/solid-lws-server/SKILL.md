@@ -302,12 +302,10 @@ What the server exposes, all discoverable from the storage description
   Token's agent is its `sub`, whose controlled identifier document names its OpenID
   Provider; it must be addressed to this server, and when bound by `cnf.jkt` it needs the
   same proof. The proof key is matched by the thumbprint of the key itself, whatever its JWK
-  spelling. The identity document may be compact JSON whose only contexts are the CID, DID or
-  LWS ones (read by its keys; the Solid issuer by its full IRI, as a node reference
-  `{"id": …}`), any other JSON-LD form
-  (expanded, flattened, a graph, an inline context; read as RDF without loading remote
-  contexts, and refused when what it could expand to, counted before parsing from its values,
-  longest string and inline contexts, is past a fixed multiple of its size) or Turtle. A token time
+  spelling. The identity document may be Turtle (asked for first) or compact JSON about the
+  subject whose only contexts are the CID, DID or LWS ones, read by its keys (the Solid issuer
+  by its full IRI, as a node reference `{"id": …}`). Any other JSON-LD form (expanded,
+  flattened, a graph, an inline or nested context) is not expanded and names no issuer. A token time
   (`exp`, `iat`, `nbf`) may carry a fraction (RFC 7519 NumericDate); one that is not a number
   between 1970 and 9999 is refused.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
