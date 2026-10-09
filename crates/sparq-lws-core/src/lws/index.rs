@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use axum::http::{header, Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
 use super::access::Action;
 use super::{
@@ -80,14 +80,11 @@ pub enum FilterError {
     TooManyGroups,
 }
 
-/// Parse a filter body. An empty body is the empty filter, which matches every readable resource.
-/// Keys starting with `@` (a JSON-LD context, say) are ignored.
+/// Parse a filter body: a JSON object (`{}` is the empty filter, which matches every readable
+/// resource; an empty body is no JSON object, so it is malformed). Keys starting with `@` (a
+/// JSON-LD context, say) are ignored.
 pub fn parse_filter(bytes: &[u8]) -> Result<Filter, FilterError> {
-    let value: Value = if bytes.is_empty() {
-        Value::Object(Map::new())
-    } else {
-        serde_json::from_slice(bytes).map_err(|_| FilterError::Malformed)?
-    };
+    let value: Value = serde_json::from_slice(bytes).map_err(|_| FilterError::Malformed)?;
     let Value::Object(fields) = value else {
         return Err(FilterError::Malformed);
     };
@@ -231,24 +228,54 @@ enum Failed {
     TooLarge,
 }
 
+/// What a walk of the storage keeps, against one budget: the URIs it has yet to visit, the
+/// listing it is reading, and whatever its visitor keeps. Past the budget, [`Failed::TooLarge`].
+struct Kept {
+    bytes: std::sync::atomic::AtomicUsize,
+    budget: usize,
+}
+
+impl Kept {
+    fn charge(&self, n: usize) -> Result<(), Failed> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let bytes = self.bytes.load(Relaxed).saturating_add(n);
+        self.bytes.store(bytes, Relaxed);
+        if bytes > self.budget {
+            Err(Failed::TooLarge)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn refund(&self, n: usize) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.bytes
+            .store(self.bytes.load(Relaxed).saturating_sub(n), Relaxed);
+    }
+}
+
 /// Visit every resource the agent may read now, with its types (full IRIs) and its metadata;
 /// an error when a listing, a permission check or the metadata of one cannot be read, or when
 /// `visit` refuses. Each resource's shared lock is held from its permission check through the
 /// read of its metadata and its visit, so the types and relations seen are those of the state
 /// the check allowed (a delete and a re-create by someone else cannot slip in between); the lock
-/// is released, and the metadata dropped, before the next resource: only what `visit` keeps is
-/// held across the walk.
+/// is released, and the metadata dropped, before the next resource.
+///
+/// The walk keeps no record of where it has been: the storage is a tree, and a container's
+/// members are only followed when they lie strictly below it, so nothing is visited twice. What
+/// it does keep, the URIs still to visit and the listing in hand, is charged to `kept` with what
+/// `visit` keeps.
 async fn readable<S: Store + 'static>(
     state: &LwsState<S>,
     agent: &Agent,
+    kept: &Kept,
     mut visit: impl FnMut(&str, Vec<String>, &ResourceMeta) -> Result<(), Failed>,
 ) -> Result<(), Failed> {
-    let mut stack = vec![state.cfg.storage()];
-    let mut seen = BTreeSet::new();
+    let root = state.cfg.storage();
+    kept.charge(root.len())?;
+    let mut stack = vec![root];
     while let Some(uri) = stack.pop() {
-        if !seen.insert(uri.clone()) {
-            continue;
-        }
+        kept.refund(uri.len());
         let is_container = uri.ends_with('/');
         // A listing that cannot be read fails the index rather than leaving out what is under
         // it; a container removed meanwhile has nothing to list.
@@ -258,12 +285,24 @@ async fn readable<S: Store + 'static>(
                 Err(crate::error::ServerError::NotFound) => Vec::new(),
                 Err(_) => return Err(Failed::Store),
             };
-            for child in children {
+            let listed: usize = children.iter().map(|c| c.as_str().len()).sum();
+            kept.charge(listed)?;
+            // A listing that names a member twice is followed once.
+            let mut once = std::collections::HashSet::new();
+            for child in &children {
                 let child = child.as_str();
-                if !child.ends_with(META_SUFFIX) && child.starts_with(uri.as_str()) {
+                if !child.ends_with(META_SUFFIX)
+                    && child.len() > uri.len()
+                    && child.starts_with(uri.as_str())
+                    && once.insert(child)
+                {
+                    kept.charge(child.len())?;
                     stack.push(child.to_string());
                 }
             }
+            drop(once);
+            drop(children);
+            kept.refund(listed);
         }
         let _guard = state.locks.read(&uri).await;
         // A resource removed since it was listed is not in the index.
@@ -436,20 +475,16 @@ async fn handle_within<S: Store + 'static>(
     // A failure says nothing of the resource it met: its URI, and so its existence, may be
     // something the agent may not read. Every failure gets the same response.
     // What is kept while the storage is walked is charged against one budget.
-    let mut kept = 0usize;
-    let mut charge = |bytes: usize| {
-        kept = kept.saturating_add(bytes);
-        if kept > budget {
-            Err(Failed::TooLarge)
-        } else {
-            Ok(())
-        }
+    let kept = Kept {
+        bytes: std::sync::atomic::AtomicUsize::new(0),
+        budget,
     };
+    let charge = |bytes: usize| kept.charge(bytes);
     let mut items: Vec<(String, Vec<String>)> = Vec::new();
     let mut all_types: BTreeSet<String> = BTreeSet::new();
     let walked = if search {
         // A search keeps only what it matched, with its types.
-        readable(state, agent, |uri, types, meta| {
+        readable(state, agent, &kept, |uri, types, meta| {
             let have: std::collections::HashSet<&str> = types.iter().map(String::as_str).collect();
             let mut matched = all_groups(&filter.types, |v| have.contains(v));
             if matched && !filter.relations.is_empty() {
@@ -468,7 +503,7 @@ async fn handle_within<S: Store + 'static>(
         .await
     } else {
         // The index keeps only the distinct types.
-        readable(state, agent, |_, types, _| {
+        readable(state, agent, &kept, |_, types, _| {
             for t in types {
                 if !all_types.contains(&t) {
                     charge(t.len())?;
@@ -618,6 +653,14 @@ mod tests {
         parse_filter(s.as_bytes())
     }
 
+    /// Review finding: an empty QUERY body was read as `{}`, an unrestricted search. A filter is
+    /// a JSON object; `{}` still is the empty filter.
+    #[test]
+    fn an_empty_body_is_no_filter() {
+        assert_eq!(parse(""), Err(FilterError::Malformed));
+        assert_eq!(parse("{}"), Ok(Filter::default()));
+    }
+
     /// Review finding: every page link carried the whole filter as sent, so a filter padded to a
     /// megabyte gave links no request head can carry. A filter is held to its size first.
     #[tokio::test]
@@ -748,7 +791,7 @@ mod tests {
         use super::super::test_store;
         let (state, _store) = test_store::state(4).await;
         let root = state.cfg.storage();
-        for i in 0..20 {
+        for i in 0..200 {
             state
                 .store
                 .create_in_container(&root, &format!("{root}r{i}"), "x".into(), "text/plain")
@@ -766,8 +809,17 @@ mod tests {
             r.method = Method::from_bytes(b"QUERY").unwrap();
             r
         };
-        // Room for a few matches, not twenty.
-        let budget = 4 * format!("{root}r10{LWS_NS}DataResource").len();
+        // Room for the listing in hand and the members still to visit (each charged once), and
+        // for a few matches more, not two hundred.
+        let listed: usize = state
+            .store
+            .list_children(&root)
+            .await
+            .unwrap()
+            .iter()
+            .map(|c| c.as_str().len())
+            .sum();
+        let budget = 2 * (root.len() + listed) + 8 * format!("{root}r10{LWS_NS}DataResource").len();
         let all = handle_within(&state, &query("{}"), &anyone, budget).await;
         assert_eq!(all.status(), StatusCode::INSUFFICIENT_STORAGE);
         // A search that matches nothing keeps nothing, and the index keeps two types.
@@ -777,7 +829,15 @@ mod tests {
         let get = test_store::request(Method::GET, TYPE_INDEX_PATH, &[], "");
         let r = handle_within(&state, &get, &anyone, budget).await;
         assert_eq!(r.status(), StatusCode::OK);
-        // Under the real budget, all twenty are found.
+        // Review finding: what the walk itself holds (the URIs it has yet to visit) was not
+        // charged, so a search matching nothing could hold any amount. A listing larger than the
+        // budget fails the walk, whatever matches.
+        let tiny = root.len() + listed / 2;
+        assert_eq!(
+            handle_within(&state, &none, &anyone, tiny).await.status(),
+            StatusCode::INSUFFICIENT_STORAGE
+        );
+        // Under the real budget, all two hundred are found.
         assert_eq!(
             handle(&state, &query("{}"), &anyone).await.status(),
             StatusCode::OK
@@ -897,7 +957,6 @@ mod tests {
 
     #[test]
     fn empty_filters_match_everything() {
-        assert_eq!(parse(""), Ok(Filter::default()));
         assert_eq!(parse("{}"), Ok(Filter::default()));
         assert_eq!(
             parse(r#"{"@context": "https://www.w3.org/ns/lws/v1", "type": []}"#),

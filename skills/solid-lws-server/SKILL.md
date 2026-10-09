@@ -342,12 +342,14 @@ What the server exposes, all discoverable from the storage description
 - **Type index** (`GET /.lws/types/index`) and **type search** (`QUERY /.lws/types/search`
   with an `application/lws-query+json` filter), both scoped to what the caller may read.
   A QUERY's filter is always its body; the `q` parameter only carries it on the `GET` page
-  links. Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
+  links. The filter is a JSON object (`{}` matches everything; an empty body gets `400`).
+  Filter IRIs must be valid absolute IRIs (RFC 3987), or the filter gets `400`. When
   any listing, permission check or metadata read fails, the whole index fails with one
   generic `500` that names no resource. Both carry an `ETag` of what they serve and
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
   While walking the storage they keep only what they return (a search its matches, the index
-  its distinct types), at most 16 MiB of URIs and types; past that the request gets `507`.
+  its distinct types) and the walk's own state (the listing in hand and the members still to
+  visit), at most 16 MiB in all; past that the request gets `507`.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
