@@ -2734,7 +2734,7 @@ fn eval_builtin_inner(
         _ => {
             // XPath numeric type promotion by datatype (GH #6745): exact for
             // integer/decimal pairs, IEEE in the float or double tier.
-            let (Some(x), Some(y)) = (cmp_num(&s), cmp_num(&o)) else {
+            let (Some(x), Some(y)) = (cmp_num(&s, false), cmp_num(&o, false)) else {
                 return false;
             };
             let ord = cmp_promoted(x, y);
@@ -3157,26 +3157,40 @@ impl CmpNum<'_> {
 /// lexical shape, as EYE does: an exponent or `INF` / `NaN` reads as a double, a plain
 /// `[+-]digits[.digits]` numeral as an exact number. An ill-typed lexical form, or a
 /// non-literal, is not numeric (`None`: the builtin does not match).
-fn cmp_num(t: &Term) -> Option<CmpNum<'_>> {
+///
+/// Whitespace: the XSD numeric datatypes have `whiteSpace=collapse`, so leading and
+/// trailing XML whitespace (space, tab, CR, LF) of a TYPED numeric literal is collapsed
+/// before validation (`" 3"^^xsd:integer` is 3; an internal space stays ill-typed). A
+/// string operand is trimmed only when `trim_strings` is set — the bound-object value
+/// check of a functional builtin (`(1 2) math:sum " 3"` holds); the six comparisons
+/// leave it as written, so `" 3"` is not numeric there.
+fn cmp_num(t: &Term, trim_strings: bool) -> Option<CmpNum<'_>> {
     use sparq_substrate::numeric::{parse_xsd_f32, parse_xsd_f64, split_decimal};
     let Term::Lit(v, dt, _) = t else { return None };
+    // XSD whiteSpace=collapse for the numeric datatypes (leading/trailing XML whitespace).
+    let collapsed = v.trim_matches([' ', '\t', '\r', '\n']);
     // An integer type (with its facets, e.g. `xsd:positiveInteger`) or `xsd:decimal`.
     if sparq_core::is_integer_datatype(dt) || dt == parser::XSD_DECIMAL {
         // no-match: ill-typed (not of its integer or decimal type)
-        return sparq_core::numeric_literal_valid(v, dt).then_some(CmpNum::Exact(v));
+        return sparq_core::numeric_literal_valid(collapsed, dt)
+            .then_some(CmpNum::Exact(collapsed));
     }
     match dt.as_str() {
-        parser::XSD_DOUBLE => parse_xsd_f64(v).map(CmpNum::Double), // no-match: ill-typed (not a double)
-        "http://www.w3.org/2001/XMLSchema#float" => parse_xsd_f32(v).map(CmpNum::Float), // no-match: ill-typed (not a float)
-        _ => match v.as_str() {
-            "INF" | "+INF" => Some(CmpNum::Double(f64::INFINITY)),
-            "-INF" => Some(CmpNum::Double(f64::NEG_INFINITY)),
-            "NaN" => Some(CmpNum::Double(f64::NAN)),
-            _ if !v.contains(['e', 'E']) && v.trim() == v && split_decimal(v).is_some() => {
-                Some(CmpNum::Exact(v))
+        parser::XSD_DOUBLE => parse_xsd_f64(collapsed).map(CmpNum::Double), // no-match: ill-typed (not a double)
+        "http://www.w3.org/2001/XMLSchema#float" => parse_xsd_f32(collapsed).map(CmpNum::Float), // no-match: ill-typed (not a float)
+        _ => {
+            // A string is coerced as written, or trimmed as `numval` trims (bound object).
+            let v = if trim_strings { v.trim() } else { v.as_str() };
+            match v {
+                "INF" | "+INF" => Some(CmpNum::Double(f64::INFINITY)),
+                "-INF" => Some(CmpNum::Double(f64::NEG_INFINITY)),
+                "NaN" => Some(CmpNum::Double(f64::NAN)),
+                _ if !v.contains(['e', 'E']) && v.trim() == v && split_decimal(v).is_some() => {
+                    Some(CmpNum::Exact(v))
+                }
+                _ => v.parse::<f64>().ok().map(CmpNum::Double), // no-match: ill-typed (not numeric)
             }
-            _ => v.parse::<f64>().ok().map(CmpNum::Double), // no-match: ill-typed (not numeric)
-        },
+        }
     }
 }
 
@@ -4181,7 +4195,7 @@ fn eval_functional_inner(
     let mut nb = b;
     let obj_applied = apply(obj, &nb);
     if obj_applied.is_ground() {
-        if let (Some(x), Some(y)) = (cmp_num(&obj_applied), cmp_num(&result)) {
+        if let (Some(x), Some(y)) = (cmp_num(&obj_applied, true), cmp_num(&result, true)) {
             return (cmp_promoted(x, y) == Some(std::cmp::Ordering::Equal)).then_some(nb);
         }
     }
@@ -5754,6 +5768,22 @@ mod tests {
             ("(9007199254740992 1) math:sum \"9007199254740992\"^^xsd:double", true),
             ("(1 2) math:sum \"3\"^^xsd:double", true),
             ("(0.1 0.2) math:sum 0.3", true),
+            // XSD whiteSpace=collapse: a typed numeric literal's leading/trailing XML
+            // whitespace is collapsed; an internal space stays ill-typed.
+            ("(1 2) math:sum \" 3\"^^xsd:integer", true),
+            ("(1 2) math:sum \"3\\n\"^^xsd:decimal", true),
+            ("\" 3\"^^xsd:integer math:equalTo 3", true),
+            ("\"\\t3.0 \"^^xsd:double math:equalTo 3", true),
+            ("\" 3\"^^xsd:float math:lessThan 4", true),
+            ("\"3 4\"^^xsd:integer math:notEqualTo 3", false),
+            ("(1 2) math:sum \"3 4\"^^xsd:integer", false),
+            // A string bound object is trimmed as before (numval coercion)...
+            ("(1 2) math:sum \" 3\"", true),
+            ("(1 2) math:sum \"3 \"", true),
+            // ...but a string comparison operand is not: `\" 3\"` is not numeric there.
+            ("\" 3\" math:equalTo 3", false),
+            ("\" 3\" math:lessThan 4", false),
+            ("\" 3\" math:notEqualTo 4", false),
         ];
         let mut src = String::from(
             "@prefix : <http://ex/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
