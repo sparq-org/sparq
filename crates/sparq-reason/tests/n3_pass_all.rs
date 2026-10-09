@@ -177,8 +177,10 @@ fn a_source_variable_spelled_like_the_rewrite_stays_a_variable() {
 
 /// GH #5391: the parser rewrites an `@forAll :x` universal to an engine-internal rule
 /// variable. That name must never reach the output. `--pass-all` writes the universal back
-/// as its own IRI under an `@forAll` declaration, so the document re-parses to the SAME
-/// rule; `--pass-all-ground` grounds it to its `var:x` IRI.
+/// as its own IRI under ONE `@forAll` declaration that scopes both sides — a document-level
+/// line before the rules that share a universal across premise and conclusion (GH #6701
+/// round 10: a declaration per side would be two quantifiers) — so the document re-parses
+/// to the SAME rule; `--pass-all-ground` grounds it to its `var:x` IRI.
 #[test]
 fn a_for_all_universal_is_echoed_under_its_declared_iri() {
     let src = "@prefix : <http://ex/>. @forAll :x.
@@ -187,9 +189,11 @@ fn a_for_all_universal_is_echoed_under_its_declared_iri() {
     let doc = reason_n3_pass_all(src, RuleVars::N3).expect("pass-all");
     assert!(!doc.contains("__ua"), "no engine-internal variable name: {doc}");
     let rule = format!(
-        "{{ @forAll <http://ex/x> . <http://ex/x> <{TYPE}> <http://ex/Human> . }} => \
-         {{ @forAll <http://ex/x> . <http://ex/x> <{TYPE}> <http://ex/Mortal> . }} ."
+        "\n@forAll <http://ex/x> .\n{{ <http://ex/x> <{TYPE}> <http://ex/Human> . }} => \
+         {{ <http://ex/x> <{TYPE}> <http://ex/Mortal> . }} .\n"
     );
+    assert_eq!(doc.matches("@forAll").count(), 1, "{doc}");
+    assert!(doc.ends_with(&rule), "the shared-universal rule is the trailer: {doc}");
     assert!(doc.contains(&rule), "{doc}");
     assert_eq!(rule_terms(&doc), rule_terms(src), "{doc}");
     assert!(doc.contains(&format!("<http://ex/a> <{TYPE}> <http://ex/Mortal> .")), "{doc}");
