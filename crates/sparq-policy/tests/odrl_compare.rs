@@ -38,9 +38,10 @@ fn permission_and_prohibition_same_target_conflict() {
     assert_eq!(conflicts[0].overlap, Overlap::Certain);
 }
 
-/// A permission and a prohibition on DIFFERENT targets never overlap — no conflict.
+/// A permission and a prohibition on DIFFERENT targets may still meet: a request's
+/// asset membership evidence can place x inside y. A possible conflict, never certain.
 #[test]
-fn different_targets_no_conflict() {
+fn different_targets_possibly_conflict() {
     let ttl = r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 <urn:pol/p> a odrl:Set ;
@@ -48,7 +49,9 @@ fn different_targets_no_conflict() {
   odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/y> ] .
 "#;
     let p = parse_policy_str(ttl, "turtle").unwrap();
-    assert!(detect_conflicts(&p).is_empty());
+    let conflicts = detect_conflicts(&p);
+    assert_eq!(conflicts.len(), 1, "{conflicts:?}");
+    assert_eq!(conflicts[0].overlap, Overlap::Possible);
 }
 
 /// A permission and a prohibition on different ACTIONS (read vs write) never
@@ -557,35 +560,91 @@ fn compound_constrained_outer_makes_containment_unknown() {
     );
 }
 
-/// An outer permission grants only once its duties are discharged, and a constrained
-/// duty never is, so a duty-bearing outer permission cannot be proven to cover an inner
-/// one that does not require the same unconstrained duty.
+/// Containment is definite only for shapes the rule comparison decides statically.
+/// Every shape below depends on something it cannot see (membership evidence, a duty
+/// that is never discharged), on either side, and must come back `Unknown`.
 #[test]
-fn outer_duties_block_a_containment_claim() {
-    let pol = |duty: &str| {
+fn undecidable_shapes_are_never_definite() {
+    let pol = |body: &str| {
         parse_policy_str(
             &format!(
-                r#"
-@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
-<urn:pol/o> a odrl:Set ;
-  odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {duty} ] .
-"#
+                "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
+                 <urn:pol/p> a odrl:Set ;\n{body} ."
             ),
             "turtle",
         )
         .unwrap()
     };
-    let plain = pol("");
-    let constrained = pol(
-        "; odrl:duty [ odrl:action odrl:compensate ; odrl:constraint [ \
-         odrl:leftOperand odrl:payAmount ; odrl:operator odrl:eq ; odrl:rightOperand 5 ] ]",
-    );
-    let unconstrained = pol("; odrl:duty [ odrl:action odrl:attribute ]");
-    assert_eq!(contains(&constrained, &plain), Containment::Unknown);
-    assert_eq!(contains(&constrained, &constrained), Containment::Unknown);
-    assert_eq!(contains(&unconstrained, &plain), Containment::Unknown);
-    // The same unconstrained duty on both sides is discharged on every inner grant.
-    assert_eq!(contains(&unconstrained, &unconstrained), Containment::Contains);
-    // A duty on the inner side only narrows it.
-    assert_eq!(contains(&plain, &constrained), Containment::Contains);
+    let read = |extra: &str| {
+        format!(
+            "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
+             odrl:assignee <https://alice.ex/me> {extra} ]"
+        )
+    };
+    let plain = pol(&read(""));
+    let constrained_duty = "; odrl:duty [ odrl:action odrl:compensate ; odrl:constraint [ \
+        odrl:leftOperand odrl:payAmount ; odrl:operator odrl:eq ; odrl:rightOperand 5 ] ]";
+    let shapes = [
+        // A constrained duty on the permission.
+        ("constrained duty", pol(&read(constrained_duty))),
+        // An unconstrained duty the other side does not require.
+        ("unshared duty", pol(&read("; odrl:duty [ odrl:action odrl:attribute ]"))),
+        // A declared party collection.
+        (
+            "party collection",
+            pol(&format!(
+                "{} .\n<https://lab.ex/team> a odrl:PartyCollection",
+                read("")
+            )),
+        ),
+        // A prohibition on another party: membership can make alice part of it.
+        (
+            "prohibition on another party",
+            pol(&format!(
+                "{} ;\n odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
+                 odrl:assignee <https://lab.ex/team> ]",
+                read("")
+            )),
+        ),
+        // A prohibition on another asset: membership can make x part of it.
+        (
+            "prohibition on another asset",
+            pol(&format!(
+                "{} ;\n odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/all> ]",
+                read("")
+            )),
+        ),
+    ];
+    for (name, shape) in &shapes {
+        assert_eq!(contains(shape, &plain), Containment::Unknown, "{name} as outer");
+        if !name.starts_with("prohibition") && *name != "unshared duty" {
+            // A prohibition or an unconstrained duty only narrows the inner side.
+            assert_eq!(contains(&plain, shape), Containment::Unknown, "{name} as inner");
+        }
+    }
+    // An empty outer policy against an inner permission with a constrained duty: the
+    // inner grants nothing, so `NotContained` would have no witness.
+    let empty = pol("odrl:prohibition [ odrl:action odrl:delete ; odrl:target <urn:asset/y> ]");
+    assert_eq!(contains(&empty, &shapes[0].1), Containment::Unknown);
+    // Controls: the same unconstrained duty on both sides, and the plain shape, decide.
+    assert_eq!(contains(&shapes[1].1, &shapes[1].1), Containment::Contains);
+    assert_eq!(contains(&plain, &plain), Containment::Contains);
+}
+
+/// `use` does not cover the `transfer` subtree, so a `use` permission does not contain
+/// a `sell` one.
+#[test]
+fn use_does_not_contain_sell() {
+    let pol = |action: &str| {
+        parse_policy_str(
+            &format!(
+                "@prefix odrl: <http://www.w3.org/ns/odrl/2/> .\n\
+                 <urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:{action} ] ."
+            ),
+            "turtle",
+        )
+        .unwrap()
+    };
+    assert_eq!(contains(&pol("use"), &pol("sell")), Containment::NotContained);
+    assert_eq!(contains(&pol("use"), &pol("read")), Containment::Contains);
 }

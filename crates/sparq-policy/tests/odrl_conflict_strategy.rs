@@ -100,8 +100,9 @@ fn invalid_strategy_with_conflict_is_refused() {
     assert!(err.contains("invalid"), "error names the strategy: {err}");
 }
 
-/// `odrl:conflict odrl:invalid` with NO detected conflict (disjoint targets) → nothing to
-/// void → admissible.
+/// `odrl:conflict odrl:invalid` with NO detected conflict (disjoint actions) → nothing to
+/// void → admissible. Disjoint targets are not enough: asset membership evidence can
+/// place one inside the other.
 #[test]
 fn invalid_strategy_without_conflict_is_admissible() {
     let ttl = r#"
@@ -109,7 +110,7 @@ fn invalid_strategy_without_conflict_is_admissible() {
 <urn:pol/p> a odrl:Set ;
   odrl:conflict odrl:invalid ;
   odrl:permission  [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ;
-  odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/y> ] .
+  odrl:prohibition [ odrl:action odrl:modify ; odrl:target <urn:asset/x> ] .
 "#;
     let p = parse_policy_str(ttl, "turtle").unwrap();
     assert_eq!(p.conflict, Some(ConflictStrategy::Invalid));

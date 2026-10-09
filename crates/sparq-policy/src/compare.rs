@@ -249,6 +249,17 @@ pub fn contains(outer: &Policy, inner: &Policy) -> Containment {
     if conflict_admissibility(outer).is_err() || conflict_admissibility(inner).is_err() {
         return Containment::Unknown;
     }
+    // Only shapes the rule comparison can decide statically get a definite verdict.
+    // A declared party collection depends on membership evidence the comparison does
+    // not have, and a constrained duty is never discharged, so its permission grants
+    // nothing and any witness built from it is false.
+    if !outer.party_collections.is_empty()
+        || !inner.party_collections.is_empty()
+        || has_constrained_duty(outer)
+        || has_constrained_duty(inner)
+    {
+        return Containment::Unknown;
+    }
     let mut any_unknown = false;
     for inner_perm in &inner.permissions {
         match best_subsumption(outer, inner_perm) {
@@ -262,6 +273,15 @@ pub fn contains(outer: &Policy, inner: &Policy) -> Containment {
     } else {
         Containment::Contains
     }
+}
+
+/// Whether any rule of `policy` carries a duty with its own constraints.
+fn has_constrained_duty(policy: &Policy) -> bool {
+    policy
+        .permissions
+        .iter()
+        .chain(&policy.prohibitions)
+        .any(|rule| rule.duties.iter().any(|d| !d.constraints.is_empty()))
 }
 
 /// Per-inner-permission subsumption verdict against the whole `outer` policy.
@@ -415,16 +435,11 @@ fn permission_subsumes(op: &Rule, ip: &Rule) -> SubsumeOne {
 }
 
 /// Is action `a` at least as broad as `b` — does `a` permit every action `b` does?
-/// `use` permits everything, so `use ⊇ anything`; a specific action subsumes only
-/// itself, and crucially does NOT subsume the `use` umbrella.
+/// Exactly [`Action::permits`]: `use` covers every action outside the `transfer`
+/// subtree (and itself), and a specific action covers only itself, never the `use`
+/// umbrella.
 fn action_at_least_as_broad(a: &Action, b: &Action) -> bool {
-    if is_use(a) {
-        return true; // use permits everything b could.
-    }
-    if is_use(b) {
-        return false; // b is the umbrella; a (non-use) cannot cover all of it.
-    }
-    a == b
+    a.permits(b)
 }
 
 fn is_use(a: &Action) -> bool {
@@ -519,35 +534,16 @@ fn bound_le(a: &Value, b: &Value, strict: bool) -> bool {
 /// Can prohibition `proh` carve out any request inner permission `ip` grants?
 /// Sound *over*-approximation (we say "can" unless we can prove it cannot), because
 /// a missed carve-out would be the fail-OPEN error: claiming containment a deny
-/// breaks. We can prove it CANNOT carve only when the structural attributes are
-/// disjoint (different concrete action, target, or assignee).
+/// breaks. We can prove it CANNOT carve only when the actions are disjoint. Unequal
+/// targets or assignees prove nothing: a request's membership evidence can make any
+/// party or asset IRI a collection the other is part of.
 fn prohibition_can_carve(proh: &Rule, ip: &Rule) -> bool {
-    // Disjoint action (both concrete and different, neither the umbrella) → cannot.
-    if actions_disjoint(&proh.action, &ip.action) {
-        return false;
-    }
-    // Disjoint concrete target → cannot.
-    if attrs_disjoint(proh.target.as_deref(), ip.target.as_deref()) {
-        return false;
-    }
-    // Disjoint concrete assignee → cannot.
-    if attrs_disjoint(proh.assignee.as_deref(), ip.assignee.as_deref()) {
-        return false;
-    }
-    // Otherwise the structural footprints intersect — conservatively, it can carve
-    // (we do not try to prove a constraint makes the prohibition vacuous).
-    true
+    !actions_disjoint(&proh.action, &ip.action)
 }
 
 /// Two actions are provably disjoint iff both are concrete (non-`use`) and unequal.
 fn actions_disjoint(a: &Action, b: &Action) -> bool {
     !is_use(a) && !is_use(b) && a != b
-}
-
-/// Two structural attributes are provably disjoint iff both pin a value and differ.
-/// A `None` (= any) overlaps with anything.
-fn attrs_disjoint(a: Option<&str>, b: Option<&str>) -> bool {
-    matches!((a, b), (Some(x), Some(y)) if x != y)
 }
 
 /// Compute the action IRI a conflict overlaps on (the prohibition's when it is the
@@ -563,11 +559,9 @@ fn overlap_action(perm: &Rule, proh: &Rule) -> Option<String> {
 /// The conflict test for one permission/prohibition pair. Returns `None` if they
 /// provably never overlap; else the [`Overlap`] strength. [OPUS-4.8] sq-zabv.
 fn rule_overlap(perm: &Rule, proh: &Rule) -> Option<Overlap> {
-    // Provably-disjoint structural footprints → no conflict at all.
-    if actions_disjoint(&perm.action, &proh.action)
-        || attrs_disjoint(perm.target.as_deref(), proh.target.as_deref())
-        || attrs_disjoint(perm.assignee.as_deref(), proh.assignee.as_deref())
-    {
+    // Only disjoint actions prove the rules never meet. Unequal targets or assignees
+    // do not: a request's membership evidence can place one inside the other.
+    if actions_disjoint(&perm.action, &proh.action) {
         return None;
     }
     // The footprints intersect. The carve-out is CERTAIN (covers the whole
@@ -581,7 +575,11 @@ fn rule_overlap(perm: &Rule, proh: &Rule) -> Option<Overlap> {
     // modelled here, and it may make the prohibition fire only conditionally; so a
     // prohibition carrying any compound constraint can never be proven to carve out the
     // *whole* permission → degrade to `Possible` (never over-claim `Certain`).
+    // The prohibition must also name every party and asset the permission does: it is
+    // unpinned, or pins the same IRI.
     let certain = proh.logical_constraints.is_empty()
+        && attr_at_least_as_broad(proh.target.as_deref(), perm.target.as_deref())
+        && attr_at_least_as_broad(proh.assignee.as_deref(), perm.assignee.as_deref())
         && proh
             .constraints
             .iter()
