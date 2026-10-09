@@ -28,6 +28,42 @@ use sparq_reason::n3::reason_n3_terms_with_resolver;
 use sparq_reason::{reason_n3_pass_all, RuleVars};
 
 const UA: &str = "__ua.";
+const UF: &str = "__uf.";
+
+/// A universal's (IRI, binder): `None` for a document-level binder, `Some(up)` for a
+/// formula-level one bound `up` levels above the deepest formula enclosing its uses.
+fn binder_of(name: &str) -> Option<(String, Option<usize>)> {
+    if let Some(i) = name.strip_prefix(UA) {
+        return Some((i.to_string(), None));
+    }
+    let rest = name.strip_prefix(UF)?;
+    let (_, rest) = rest.split_once('.')?;
+    let (up, i) = rest.split_once('.')?;
+    Some((i.to_string(), Some(up.parse().ok()?)))
+}
+
+/// `t` with formula-level binder NUMBERS renamed by first appearance — a re-parse numbers
+/// its declarations afresh, and the number only names the binder.
+fn renumbered(ts: &[Term]) -> Vec<Term> {
+    fn walk(t: &Term, map: &mut BTreeMap<String, usize>) -> Term {
+        match t {
+            Term::Var(v) => match v.strip_prefix(UF).and_then(|r| r.split_once('.')) {
+                Some((n, rest)) => {
+                    let next = map.len();
+                    let k = *map.entry(n.to_string()).or_insert(next);
+                    var(&format!("{UF}{k}.{rest}"))
+                }
+                None => t.clone(),
+            },
+            Term::List(ms) => Term::List(ms.iter().map(|m| walk(m, map)).collect()),
+            Term::Triple(tr) => Term::Triple(Box::new(tr.clone().map(|m| walk(&m, map)))),
+            Term::Formula(ts) => formula(ts.iter().map(|r| r.clone().map(|m| walk(&m, map))).collect()),
+            _ => t.clone(),
+        }
+    }
+    let mut map = BTreeMap::new();
+    ts.iter().map(|t| walk(t, &mut map)).collect()
+}
 
 fn iri(s: &str) -> Term {
     Term::Iri(s.into())
@@ -39,22 +75,26 @@ fn formula(rows: Vec<[Term; 3]>) -> Term {
     Term::Formula(rows)
 }
 
-/// The atoms every shape is built from: a universal, its freshened copy, the plain IRI it
-/// was declared from, a source variable with the universal's local name, a source variable
-/// spelled like the first collision-free fallback, an IRI and a universal that need
-/// `IRIREF` escaping, a universal from another namespace with the same local name, and an
-/// unrelated constant.
+/// The atoms every shape is built from: a formula-level universal (bound in the deepest
+/// formula enclosing its occurrences), its freshened copy, the plain IRI it was declared
+/// from, a source variable with the universal's local name, a source variable spelled like
+/// the first collision-free fallback, an IRI and a universal that need `IRIREF` escaping, a
+/// universal from another namespace with the same local name, an unrelated constant, a
+/// DOCUMENT-level universal of the same IRI, and another binder of it one formula level
+/// further up.
 fn atoms() -> Vec<Term> {
     vec![
-        var("__ua.http://ex/x"),
-        var("__bw0___ua.http://ex/x"),
+        var("__uf.0.0.http://ex/x"),
+        var("__bw0___uf.0.0.http://ex/x"),
         iri("http://ex/x"),
         var("x"),
         var("x_2"),
         iri("http://ex/a\\b"),
-        var("__ua.http://ex/a\\b"),
+        var("__uf.2.0.http://ex/a\\b"),
         iri("http://ex/k"),
-        var("__ua.http://other/x"),
+        var("__uf.3.0.http://other/x"),
+        var("__ua.http://ex/x"),
+        var("__uf.5.1.http://ex/x"),
     ]
 }
 
@@ -70,7 +110,7 @@ fn normalise(t: &Term) -> Term {
                     _ => break,
                 }
             }
-            if rest.starts_with(UA) { var(rest) } else { t.clone() }
+            if rest.starts_with(UA) || rest.starts_with(UF) { var(rest) } else { t.clone() }
         }
         Term::List(ms) => Term::List(ms.iter().map(normalise).collect()),
         Term::Triple(tr) => Term::Triple(Box::new(tr.clone().map(|m| normalise(&m)))),
@@ -97,7 +137,8 @@ type Pos = Vec<usize>;
 /// outermost first, as (the formula's position, the row the occurrence is in).
 fn occurrences(t: &Term, pos: &mut Pos, up: &mut Vec<(Pos, usize)>, out: &mut BTreeMap<String, Vec<Vec<(Pos, usize)>>>) {
     match t {
-        Term::Var(v) if v.starts_with(UA) => out.entry(v[UA.len()..].to_string()).or_default().push(up.clone()),
+        Term::Var(v) if binder_of(v).is_some() => out.entry(v.clone()).or_default().push(up.clone()),
+        Term::Iri(i) => out.entry(format!("iri:{i}")).or_default().push(up.clone()),
         Term::List(ms) => {
             for (i, m) in ms.iter().enumerate() {
                 pos.push(i);
@@ -158,29 +199,58 @@ fn at<'a>(terms: &'a [Term], pos: &[usize]) -> &'a [[Term; 3]] {
 }
 
 /// The oracle for one unit (a statement's terms, or a rule's two sides, already
-/// normalised): does some universal have no single exact declaration? Its owner is the
-/// deepest formula on every occurrence's path; it is declared before the first row holding
-/// an occurrence, and must not capture a plain mention there or later.
-fn unplaceable(terms: &[Term]) -> bool {
+/// normalised), simulating N3's quantifier scoping on its own: every universal is declared
+/// at its RECORDED binder — at document level (only when `document` allows one), or in the
+/// formula `up` levels above the deepest formula enclosing its occurrences, before the
+/// first row holding one. Then every occurrence must be bound by exactly its own
+/// declaration (the innermost one in effect), and every plain mention of a declared IRI by
+/// none. Does some universal fail that?
+fn unplaceable(terms: &[Term], document: bool) -> bool {
     let mut occ = BTreeMap::new();
     for (i, t) in terms.iter().enumerate() {
         occurrences(t, &mut vec![i], &mut Vec::new(), &mut occ);
     }
-    occ.iter().any(|(iri, paths)| {
+    // IRI → declarations: (binding universal, formula position or None for the document, row).
+    let mut decls: BTreeMap<String, Vec<(String, Option<Pos>, usize)>> = BTreeMap::new();
+    for (name, paths) in occ.iter().filter(|(n, _)| !n.starts_with("iri:")) {
+        let (i, up) = binder_of(name).unwrap();
+        let Some(up) = up else {
+            if !document {
+                return true;
+            }
+            decls.entry(i).or_default().push((name.clone(), None, 0));
+            continue;
+        };
         let depth = (0..paths[0].len())
             .take_while(|&d| paths.iter().all(|p| p.get(d).map(|e| &e.0) == Some(&paths[0][d].0)))
             .count();
-        if depth == 0 {
-            return true;
+        let Some(level) = depth.checked_sub(up + 1) else { return true };
+        let row = paths.iter().map(|p| p[level].1).min().unwrap();
+        decls.entry(i).or_default().push((name.clone(), Some(paths[0][level].0.clone()), row));
+    }
+    // The declaration of `iri` in effect at an occurrence with enclosing chain `path`.
+    let in_effect = |iri: &str, path: &Vec<(Pos, usize)>| -> Option<String> {
+        let ds = decls.get(iri)?;
+        // innermost formula first, then the document
+        for (pos, row) in path.iter().rev() {
+            if let Some(d) = ds.iter().filter(|d| d.1.as_ref() == Some(pos) && d.2 <= *row).max_by_key(|d| d.2) {
+                return Some(d.0.clone());
+            }
         }
-        let row = paths.iter().map(|p| p[depth - 1].1).min().unwrap();
-        at(terms, &paths[0][depth - 1].0)[row..].iter().flatten().any(|m| mentions(m, iri))
+        ds.iter().find(|d| d.1.is_none()).map(|d| d.0.clone())
+    };
+    occ.iter().any(|(name, paths)| match name.strip_prefix("iri:") {
+        Some(i) => paths.iter().any(|p| in_effect(i, p).is_some()),
+        None => {
+            let (i, _) = binder_of(name).unwrap();
+            paths.iter().any(|p| in_effect(&i, p).as_deref() != Some(name.as_str()))
+        }
     })
 }
 
 /// Does the oracle say `s` has no lossless form?
 fn lossy(s: &[Term; 3]) -> bool {
-    unplaceable(&s.clone().map(|t| normalise(&t))) || merges(s.iter())
+    unplaceable(&s.clone().map(|t| normalise(&t)), true) || merges(s.iter())
 }
 
 /// Would normalising `terms` merge two distinct variables (a universal and a copy of it)?
@@ -208,7 +278,7 @@ fn check_statement(s: &[Term; 3]) -> Option<String> {
     let mut text = String::new();
     let wrote = write_statement(s, &mut text);
     let noise = [
-        [iri("http://noise/n"), iri("http://ex/k"), formula(vec![[var("__ua.http://noise/n"), iri("http://ex/k"), var("x")]])],
+        [iri("http://noise/n"), iri("http://ex/k"), formula(vec![[var("__uf.9.0.http://noise/n"), iri("http://ex/k"), var("x")]])],
         [var("x"), iri("http://ex/k"), formula(vec![[iri("http://noise/n"), iri("http://ex/k"), var("x_2")]])],
     ];
     let doc = serialize_facts([&noise[0], s, &noise[1]].into_iter());
@@ -222,10 +292,12 @@ fn check_statement(s: &[Term; 3]) -> Option<String> {
     let back = parser::parse(&text).unwrap_or_else(|e| panic!("does not re-parse ({e}):\n{text}"));
     assert!(back.rules.is_empty() && back.facts.len() == 1, "{text}");
     let norm = s.clone().map(|t| normalise(&t));
-    assert_eq!(back.facts[0], norm, "not exact:\n  wrote {s:?}\n  text  {text}");
-    // Render independence: the same line inside a document of unrelated statements.
+    assert_eq!(renumbered(&back.facts[0]), renumbered(&norm), "not exact:\n  wrote {s:?}\n  text  {text}");
+    // Render independence: the same lines inside a document of unrelated statements.
     let doc = doc.expect("noise and statement are representable");
-    assert_eq!(doc.lines().nth(1).map(|l| format!("{l}\n")), Some(text.clone()), "rendering depends on neighbours:\n{doc}");
+    let lines: Vec<&str> = doc.lines().collect();
+    let middle: String = lines[1..lines.len() - 1].iter().map(|l| format!("{l}\n")).collect();
+    assert_eq!(middle, text, "rendering depends on neighbours:\n{doc}");
     Some(text)
 }
 
@@ -250,7 +322,7 @@ fn check_through_the_reasoner(s: &[Term; 3], text: &str) {
         .facts;
     for who in ["http://ex/got", "http://ex/sem"] {
         let got = closure.iter().find(|f| f[0] == iri(who)).unwrap_or_else(|| panic!("no {who}:\n{src}"));
-        assert_eq!(got[2], formula(vec![norm.clone()]), "{who} disagrees:\n{text}");
+        assert_eq!(renumbered(&[got[2].clone()]), renumbered(&[formula(vec![norm.clone()])]), "{who} disagrees:\n{text}");
     }
 }
 
@@ -356,7 +428,8 @@ fn closure(doc: &str) -> BTreeSet<String> {
         .unwrap_or_else(|e| panic!("{e}\n{src}"))
         .facts
         .iter()
-        .map(|f| format!("{:?}", f.clone().map(|t| canon(&t))))
+        // Formula-level binder numbers are names a re-parse assigns afresh.
+        .map(|f| format!("{:?}", renumbered(&f.clone().map(|t| canon(&t)))))
         .collect()
 }
 
@@ -364,6 +437,14 @@ fn closure(doc: &str) -> BTreeSet<String> {
 /// whose closure — directly, via `log:conclusion`, and via `log:semantics` — is the
 /// source's, and which is itself a fixpoint. The `:bad :is true` marker is never derived.
 fn check_document(body: &str, want_refusal: bool) {
+    check_document_with(body, want_refusal, want_refusal)
+}
+
+/// [`check_document`], with the verdict for the document plus [`CONSUMERS`] given apart:
+/// `log:conclusion` COPIES a formula into a second fact, and a formula-level binder copied
+/// into two formulae is one variable in the term model but two declarations in any N3 text,
+/// which the exactness check refuses (GH #6701 round 11).
+fn check_document_with(body: &str, want_refusal: bool, consumed_refusal: bool) {
     let src = format!("{PRE}{body}");
     let derives_bad = |c: &BTreeSet<String>| c.iter().any(|f| f.starts_with("[Iri(\"http://ex/bad\")"));
     let original = closure(&src);
@@ -371,6 +452,7 @@ fn check_document(body: &str, want_refusal: bool) {
     assert!(original.iter().any(|f| f.starts_with("[Iri(\"http://ex/doc\"), Iri(\"http://ex/closure\")")), "log:semantics did not run:\n{src}");
     let consumed = format!("{src}{CONSUMERS}");
     for doc_src in [&src, &consumed] {
+        let want_refusal = if doc_src == &src { want_refusal } else { consumed_refusal };
         match reason_n3_pass_all(doc_src, RuleVars::N3) {
             Err(e) => assert!(want_refusal, "refused a representable document ({e}):\n{doc_src}"),
             Ok(doc) => {
@@ -401,16 +483,18 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         ":x :marker :z.\n@forAll :x.\n:a :p { :x :q :z }.\n{ :a :p ?f. \"@prefix : <http://ex/>. @forAll :x. :x :q :z.\" log:parsedAsN3 ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
         // A universal in the body and in a nested head formula, beside a source `?x`.
         "@forAll :x.\n{ :x :p ?x } => { :x :q { :x :r ?x } }.\n:a :p :b.\n",
-        // A mid-formula declaration after a plain mention.
-        ":a :p { :m :r :x. @forAll :x. :x :p :b }.\n",
+        // Codex round 5 (1), under recorded binders (round 11): the premise and the
+        // conclusion each declare `:x`, so they are two variables, each declared in its own
+        // formula — the premise's after its plain mention there.
+        "{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
+        // A bare top-level universal fact: its binder is the document, which declares it
+        // (round 11, MEDIUM).
+        "@forAll :x.\n:x :p :o.\n",
         // A quoted rule in data: its body and head share the universal, and
         // `log:conclusion` runs it — one shared variable after the round trip too.
         "@forAll :x.\n:a :p { :m :q :o. { :x :q ?o } => { :x :r ?o } }.\n",
         // The same quoted rule, DERIVED (its universal reaches the data through a rule).
         "@forAll :x.\n{ :go :go :go } => { :out :has { :m :q :o. { :x :q :o } => { :x :r :o } } }.\n:go :go :go.\n",
-        // A derived formula holding the universal in a nested formula and the plain IRI
-        // after it, outside that formula's scope: each level is scoped on its own.
-        ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { { :x :link :k } :k ?s } }.\n",
         // Builtin-generated terms that DO have an exact form (Codex round 8).
         "{ ( \"hi\" \"en\" ) log:langlit ?l } => { :s :p ?l }.\n",
         "{ ( \"1\" <http://ex/d> ) log:dtlit ?l } => { :s :p ?l }.\n",
@@ -420,22 +504,24 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
     for body in representable {
         check_document(body, false);
     }
+    // A mid-formula declaration after a plain mention. Written exactly — but once
+    // `log:conclusion` COPIES the formula into a second fact, its one binder would need two
+    // declarations, so the consumed document is refused (round 11).
+    check_document_with(":a :p { :m :r :x. @forAll :x. :x :p :b }.\n", false, true);
     // `log:conclusion` really ran the quoted rule, binding its universal on both sides.
-    let c = closure(&format!("{PRE}{}", representable[6]));
+    let c = closure(&format!("{PRE}{}", representable[7]));
     let shared = reason_n3_pass_all(&format!("{PRE}{}", representable[0]), RuleVars::N3).expect("pass-all");
     assert_eq!(shared.matches("@forAll").count(), 1, "{shared}");
     assert!(c.iter().any(|f| f.starts_with("[Iri(\"http://ex/a\"), Iri(\"http://ex/concl\")") && f.contains("Iri(\"http://ex/m\"), Iri(\"http://ex/r\"), Iri(\"http://ex/o\")")), "{c:#?}");
     let lossy = [
-        // Codex round 5 (1): body and head share a universal, AND the body mentions the IRI
-        // plainly. Only a document-level declaration scopes both sides, and it would capture
-        // the plain mention (round 10: separate per-side declarations are two quantifiers).
-        "{ :marker :ref :x. @forAll :x. :x :p :b } => { @forAll :x. :x :q :b }.\n:c :p :b. :marker :ref :x.\n",
+        // A derived formula holding the DOCUMENT-level universal and, after it, the plain
+        // IRI: the document's declaration would capture the plain mention, and declaring it
+        // inside the formula would move its binder (round 11).
+        ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { { :x :link :k } :k ?s } }.\n",
         // Codex round 7: a derived formula carries the plain IRI and the universal in ONE
         // triple. Any written spelling re-parses as a second, different formula, and
         // re-reasoning then derives `:bad`.
         ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { ?s :link :x } }.\n{ :out :has ?f. :out :has ?g. ?f log:notEqualTo ?g } => { :bad :is true }.\n",
-        // A bare top-level universal fact: no statement-local scope exists.
-        "@forAll :x.\n:x :p :o.\n",
         // A quoted rule in derived data whose BODY mentions the plain IRI after the
         // universal: no placement scopes one and not the other, and declaring only the head
         // would split the variable `log:conclusion` binds across both sides.
@@ -459,9 +545,9 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         check_document(body, true);
     }
     // The normalized terms really are in the source closure (else the refusals prove nothing).
-    let c = closure(&format!("{PRE}{}", lossy[5]));
+    let c = closure(&format!("{PRE}{}", lossy[4]));
     assert!(c.iter().any(|f| f.contains("Some(\"EN\")")), "{c:#?}");
-    let c = closure(&format!("{PRE}{}", lossy[6]));
+    let c = closure(&format!("{PRE}{}", lossy[5]));
     assert!(c.iter().any(|f| f.contains("Iri(\"http://www.w3.org/1999/02/22-rdf-syntax-ns#nil\")")), "{c:#?}");
 }
 
@@ -474,8 +560,12 @@ fn a_lossy_closure_is_refused_not_written() {
     let src = format!("@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n{src}");
     let e = reason_n3_pass_all(&src, RuleVars::N3).expect_err("no lossless form exists");
     assert!(e.contains("<http://ex/x>") && e.contains("plain mention"), "{e}");
-    let e = reason_n3_pass_all("@prefix : <http://ex/>. @forAll :x. :x :p :o.\n", RuleVars::N3).expect_err("bare");
-    assert!(e.contains("outside every formula"), "{e}");
+    // A bare top-level universal fact is NOT lossy any more (GH #6701 round 11): its binder
+    // is the document, and the document declares it.
+    let src = "@prefix : <http://ex/>. @forAll :x. :x :p :o.\n";
+    let doc = reason_n3_pass_all(src, RuleVars::N3).expect("a document-level binder is written");
+    assert_eq!(doc, "@forAll <http://ex/x> .\n<http://ex/x> <http://ex/p> <http://ex/o> .\n");
+    assert_eq!(parser::parse(&doc).unwrap().facts, parser::parse(src).unwrap().facts);
     // The display writer still shows such a statement, as the one function allowed to.
     let x = var("__ua.http://ex/x");
     let f = [iri("http://ex/out"), iri("http://ex/has"), formula(vec![[iri("http://ex/x"), iri("http://ex/link"), x]])];
@@ -557,10 +647,10 @@ fn decls(text: &str) -> usize {
     text.matches("@forAll").count()
 }
 
-/// GH #6701 review round 10: quantifier SCOPE is part of what must round-trip. Each row of
-/// the table is written with exactly one `@forAll` per universal, at the one scope that
-/// owns every occurrence, or refused with the dedicated error — never a per-formula
-/// redeclaration that would read back as a different quantifier structure.
+/// GH #6701 review rounds 10–11: quantifier SCOPE is part of what must round-trip. The
+/// parser records each universal's binder, and each row of the table is written with one
+/// `@forAll` per binder, at that binder's own scope — distinct binders of one IRI (siblings,
+/// nested shadowing) stay distinct — or refused with the dedicated error.
 #[test]
 fn every_universal_gets_one_declaration_at_its_owning_scope_or_is_refused() {
     let p = "@prefix : <http://ex/>.\n";
@@ -569,45 +659,48 @@ fn every_universal_gets_one_declaration_at_its_owning_scope_or_is_refused() {
         Err(NotRepresentable::UnrepresentableScope(_)) => {}
         other => panic!("expected UnrepresentableScope, got {other:?}"),
     };
+    let x = "<http://ex/x>";
     // Written: (source, the declaration count, a fragment of the text).
     let written = [
         // Positive control: a universal in one formula.
-        (":a :p { @forAll :x. :x :q :o }.", 1, "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> <http://ex/o> . }"),
-        // Nested shadowing (the parser reads both declarations as the same universal): ONE
-        // declaration, in the outer formula; the inner one does not redeclare.
-        (":a :p { @forAll :x. :x :q { @forAll :x. :x :r :o } }.", 1, "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> { <http://ex/x>"),
-        // Sibling formulae inside one formula: declared once, in the formula holding both.
-        (":a :p { :s :q { @forAll :x. :x :q :o }. :s :r { @forAll :x. :x :r :o } }.", 1, "{ @forAll <http://ex/x> . <http://ex/s> <http://ex/q> {"),
-        // Only the inner formula uses it, after a plain mention in the outer one: declared
-        // in the inner formula, which the plain mention is outside of.
-        (":a :p { :m :r :x. :s :q { @forAll :x. :x :q :o } }.", 1, "{ <http://ex/m> <http://ex/r> <http://ex/x> . <http://ex/s> <http://ex/q> { @forAll"),
+        (":a :p { @forAll :x. :x :q :o }.", 1, format!("{{ @forAll {x} . {x} <http://ex/q> <http://ex/o> . }}")),
+        // Nested shadowing: two binders, each declared in its own formula.
+        (":a :p { @forAll :x. :x :q { @forAll :x. :x :r :o } }.", 2, format!("{{ @forAll {x} . {x} <http://ex/q> {{ @forAll {x} . {x} <http://ex/r>")),
+        // Sibling formulae inside one formula: two binders, one in each sibling.
+        (":a :p { :s :q { @forAll :x. :x :q :o }. :s :r { @forAll :x. :x :r :o } }.", 2, format!("<http://ex/s> <http://ex/q> {{ @forAll {x} .")),
+        // Siblings as two terms of one statement, and in a list: likewise.
+        ("{ @forAll :x. :x :q :o } :p { @forAll :x. :x :r :o }.", 2, format!("{{ @forAll {x} . {x} <http://ex/q> <http://ex/o> . }} <http://ex/p> {{ @forAll {x} .")),
+        (":a :p ( { @forAll :x. :x :q :o } { @forAll :x. :x :r :o } ).", 2, format!("( {{ @forAll {x} .")),
+        // Declared in the OUTER formula but used only in an inner one: declared in the outer.
+        (":a :p { @forAll :x. :s :q { :x :q :o } }.", 1, format!("{{ @forAll {x} . <http://ex/s> <http://ex/q> {{ {x} <http://ex/q>")),
+        // Only the inner formula binds it, after a plain mention in the outer one.
+        (":a :p { :m :r :x. :s :q { @forAll :x. :x :q :o } }.", 1, format!("{{ <http://ex/m> <http://ex/r> {x} . <http://ex/s> <http://ex/q> {{ @forAll")),
+        // A document-level binder of a top-level fact (round 11, medium): the document
+        // declares it.
+        ("@forAll :x. :x :p :o.", 1, format!("@forAll {x} .\n{x} <http://ex/p> <http://ex/o> .")),
     ];
     for (src, n, frag) in written {
         let f = facts(src);
         let text = serialize_facts(f.iter()).unwrap_or_else(|e| panic!("{e}\n{src}"));
         assert_eq!(decls(&text), n, "{src}\n{text}");
-        assert!(text.contains(frag), "{src}\n{text}");
-        assert_eq!(parser::parse(&text).expect("re-parses").facts, f, "{text}");
+        assert!(text.contains(&frag), "{src}\n{text}");
+        let back = parser::parse(&text).expect("re-parses").facts;
+        assert_eq!(renumbered(&back.concat()), renumbered(&f.concat()), "{text}");
     }
-    // Refused, UnrepresentableScope: sibling formulae as two terms of one statement (no
-    // formula of the statement owns both), a universal outside every formula, and a plain
-    // mention inside the owner after the declaration point.
-    for src in [
-        "{ @forAll :x. :x :q :o } :p { @forAll :x. :x :r :o }.",
-        ":a :p ( { @forAll :x. :x :q :o } { @forAll :x. :x :r :o } ).",
-        "@forAll :x. :x :p :o.",
-    ] {
-        let f = facts(src);
-        scope_error(serialize_facts(f.iter()));
-        let mut out = String::new();
-        assert!(write_statement(&f[0], &mut out).is_err() && out.is_empty(), "{src}");
-    }
-
-    // A plain mention of the IRI inside the owning formula, after the declaration point
-    // (built as terms: the parser itself reads every later `:x` there as the universal).
+    // Refused, UnrepresentableScope: a lone term holding a formula-level universal whose
+    // binding formula it is not part of; a binder one level ABOVE the only formula there
+    // is; a plain mention its one declaration would capture.
     let k = iri("http://ex/k");
-    let captured = [k.clone(), k.clone(), formula(vec![[var("__ua.http://ex/x"), k.clone(), formula(vec![[k.clone(), k.clone(), iri("http://ex/x")]])]])];
+    let mut out = String::new();
+    assert!(matches!(
+        sparq_reason::n3::serialize::write_term(&var("__uf.0.0.http://ex/x"), &mut out),
+        Err(NotRepresentable::UnrepresentableScope(_))
+    ));
+    let orphan = [k.clone(), k.clone(), formula(vec![[var("__uf.0.1.http://ex/x"), k.clone(), k.clone()]])];
+    scope_error(serialize_facts([&orphan].into_iter()));
+    let captured = [k.clone(), k.clone(), formula(vec![[var("__uf.0.0.http://ex/x"), k.clone(), formula(vec![[k.clone(), k.clone(), iri("http://ex/x")]])]])];
     scope_error(serialize_facts([&captured].into_iter()));
+    assert!(out.is_empty());
 
     // A rule whose body and head share a universal: the whole document puts ONE
     // declaration before it; the rule written on its own has nowhere to put it.
@@ -642,6 +735,29 @@ fn every_universal_gets_one_declaration_at_its_owning_scope_or_is_refused() {
     assert!(serialize_facts([&fu, &fu.clone()].into_iter()).is_ok());
 }
 
+/// GH #6701 review round 11 (HIGH), Codex's counterexample: a DOCUMENT-level universal used
+/// only in a rule's premise must stay bound at document level. Written inside the premise
+/// (`{ @forAll :x. :x :p :o } => …`) it would read back as a different binder — the
+/// re-parse gate now compares binders, so that placement would be a refusal, never output.
+#[test]
+fn a_document_level_binder_is_never_moved_into_a_formula() {
+    let p = "@prefix : <http://ex/>.\n";
+    let doc_level = format!("{p}@forAll :x. {{ :x :p :o }} => {{ :ok :is true }}.\n");
+    let in_premise = format!("{p}{{ @forAll :x. :x :p :o }} => {{ :ok :is true }}.\n");
+    let premise = |src: &str| one_rule(src).premise[0][0].clone();
+    assert_eq!(premise(&doc_level), var("__ua.http://ex/x"));
+    assert_eq!(premise(&in_premise), var("__uf.0.0.http://ex/x"), "two different binders");
+    let doc = reason_n3_pass_all(&doc_level, RuleVars::N3).expect("pass-all");
+    assert_eq!(
+        doc,
+        "@forAll <http://ex/x> .\n{ <http://ex/x> <http://ex/p> <http://ex/o> . } => { <http://ex/ok> <http://ex/is> \"true\"^^<http://www.w3.org/2001/XMLSchema#boolean> . } .\n"
+    );
+    assert_eq!(premise(&doc), var("__ua.http://ex/x"));
+    let doc = reason_n3_pass_all(&in_premise, RuleVars::N3).expect("pass-all");
+    assert!(doc.starts_with("{ @forAll <http://ex/x> . <http://ex/x> <http://ex/p>"), "{doc}");
+    assert_eq!(premise(&doc), var("__uf.0.0.http://ex/x"));
+}
+
 /// Deterministic xorshift64* RNG — no dev-dependency needed.
 struct Rng(u64);
 
@@ -657,86 +773,195 @@ impl Rng {
     }
 }
 
-/// A random term: the universals `x` and `y` (and copies of `x`), the plain IRI `x`, a
-/// source variable, constants, blank nodes, and — below `depth` — formulae (1–3 rows),
-/// lists and quoted triples, so the same universal lands in nested, sibling and unrelated
-/// formulae at random.
-fn random_term(r: &mut Rng, depth: usize, blanks: bool) -> Term {
-    let leaves = [
-        var("__ua.http://ex/x"),
-        var("__ua.http://ex/y"),
-        var("__bw0___ua.http://ex/x"),
-        iri("http://ex/x"),
-        var("v"),
-        iri("http://ex/k"),
-        Term::Lit("l".into(), "http://ex/d".into(), None),
-        Term::Blank("b".into()),
-    ];
-    let n = leaves.len() - usize::from(!blanks);
-    match (depth, r.below(10)) {
-        (0, _) | (_, 0..=4) => leaves[r.below(n)].clone(),
-        (_, 5..=7) => formula((0..1 + r.below(3)).map(|_| random_row(r, depth - 1, blanks)).collect()),
-        (_, 8) => Term::List((0..r.below(3)).map(|_| random_term(r, depth - 1, blanks)).collect()),
-        _ => Term::Triple(Box::new(random_row(r, depth - 1, blanks))),
+/// One generated N3 document with its INDEPENDENT binding oracle: for every statement, the
+/// mentions of `:x` / `:y` in text order, each with the declaration that binds it under
+/// N3's scoping (innermost `@forAll` in effect, "thereafter") — `Some((id, document?))` —
+/// or `None` for a plain IRI.
+struct Generated {
+    text: String,
+    /// Per statement: is it a rule; its mentions in text order.
+    statements: Vec<(bool, Vec<Option<(usize, bool)>>)>,
+}
+
+struct Gen<'r> {
+    r: &'r mut Rng,
+    text: String,
+    /// Scope frames, document first: IRI local name → binding declaration id.
+    frames: Vec<BTreeMap<&'static str, usize>>,
+    next: usize,
+    mentions: Vec<Option<(usize, bool)>>,
+}
+
+impl Gen<'_> {
+    /// `@forAll :x.` / `:y.` here. Re-declaring an IRI in the SAME scope keeps its one
+    /// binder (one scope, one quantifier); in an inner scope it shadows.
+    fn declare(&mut self) {
+        let name = ["x", "y"][self.r.below(2)];
+        self.text.push_str(&format!("@forAll :{name}. "));
+        let next = self.next;
+        if let std::collections::btree_map::Entry::Vacant(e) = self.frames.last_mut().unwrap().entry(name) {
+            e.insert(next);
+            self.next += 1;
+        }
+    }
+    fn mention(&mut self, name: &'static str) {
+        let bound = self.frames.iter().enumerate().rev().find_map(|(d, f)| f.get(name).map(|&id| (id, d == 0)));
+        self.mentions.push(bound);
+        self.text.push_str(&format!(":{name} "));
+    }
+    fn term(&mut self, depth: usize) {
+        match (depth, self.r.below(10)) {
+            (0, _) | (_, 0..=5) => match self.r.below(5) {
+                0 | 1 => self.mention("x"),
+                2 => self.mention("y"),
+                3 => self.text.push_str("?v "),
+                _ => self.text.push_str(":k "),
+            },
+            (_, 6) => {
+                self.text.push_str("( ");
+                for _ in 0..1 + self.r.below(2) {
+                    self.term(depth - 1);
+                }
+                self.text.push_str(") ");
+            }
+            _ => self.formula(depth - 1, None),
+        }
+    }
+    /// `{ rows }`, with `@forAll` declarations at random row boundaries; `first`, if any,
+    /// is written as its first row.
+    fn formula(&mut self, depth: usize, first: Option<&str>) {
+        self.text.push_str("{ ");
+        self.frames.push(BTreeMap::new());
+        if let Some(row) = first {
+            self.text.push_str(row);
+        }
+        for _ in 0..1 + self.r.below(3) {
+            if self.r.below(3) == 0 {
+                self.declare();
+            }
+            self.term(depth);
+            self.text.push_str(":q ");
+            self.term(depth);
+            self.text.push_str(". ");
+        }
+        self.frames.pop();
+        self.text.push_str("} ");
     }
 }
 
-fn random_row(r: &mut Rng, depth: usize, blanks: bool) -> [Term; 3] {
-    [random_term(r, depth, blanks), iri("http://ex/p"), random_term(r, depth, blanks)]
+fn generate(r: &mut Rng) -> Generated {
+    let mut g = Gen { r, text: "@prefix : <http://ex/>.\n".into(), frames: vec![BTreeMap::new()], next: 0, mentions: Vec::new() };
+    let mut statements = Vec::new();
+    for i in 0..1 + g.r.below(3) {
+        if g.r.below(3) == 0 {
+            g.declare();
+        }
+        let rule = g.r.below(3) == 0;
+        if rule {
+            // A rule that never fires (nothing is ever `<urn:never>`), tagged `<urn:s{i}>`.
+            g.formula(2, Some(&format!("<urn:never> <urn:never> <urn:s{i}> . ")));
+            g.text.push_str("=> ");
+            g.formula(2, None);
+        } else {
+            g.term(3);
+            g.text.push_str(&format!("<urn:p{i}> "));
+            g.term(3);
+        }
+        g.text.push_str(".\n");
+        statements.push((rule, std::mem::take(&mut g.mentions)));
+    }
+    Generated { text: g.text, statements }
 }
 
-/// GH #6701 review round 10, as a property: random documents of 1–3 statements, and random
-/// rules, with universals and blank nodes at random scopes (the same universal in sibling
-/// and nested formulae, the same variable reused across statements). Every write is exact
-/// — the text re-parses to the very same terms — or refused, exactly when the independent
-/// oracle says no single declaration can place a universal or two variables would merge.
-/// Nothing ever changes silently.
+/// Every `:x` / `:y` mention in `t`, in text order: the universal's variable name, or `None`
+/// for the plain IRI.
+fn mentions_in(t: &Term, out: &mut Vec<Option<String>>) {
+    match t {
+        Term::Var(v) if binder_of(v).is_some() => out.push(Some(v.clone())),
+        Term::Iri(i) if i == "http://ex/x" || i == "http://ex/y" => out.push(None),
+        Term::List(ms) => ms.iter().for_each(|m| mentions_in(m, out)),
+        Term::Triple(tr) => tr.iter().for_each(|m| mentions_in(m, out)),
+        Term::Formula(ts) => ts.iter().flatten().for_each(|m| mentions_in(m, out)),
+        _ => {}
+    }
+}
+
+/// The parsed statements of `doc` tagged `i` (a fact with predicate `<urn:p{i}>`, or a
+/// rule whose premise starts with the `<urn:s{i}>` row), as their mentions in text order.
+fn mentions_of(doc: &parser::Parsed, i: usize, rule: bool) -> Vec<Option<String>> {
+    let mut out = Vec::new();
+    if rule {
+        let s = Term::Iri(format!("urn:s{i}"));
+        let r = doc.rules.iter().find(|r| r.premise.first().is_some_and(|row| row[2] == s)).expect("the rule is there");
+        r.premise.iter().chain(&r.conclusion).flatten().for_each(|t| mentions_in(t, &mut out));
+    } else {
+        let p = Term::Iri(format!("urn:p{i}"));
+        let f = doc.facts.iter().find(|f| f[1] == p).expect("the fact is there");
+        f.iter().for_each(|t| mentions_in(t, &mut out));
+    }
+    out
+}
+
+/// The oracle's binding of every mention against the parsed names: one-to-one between
+/// declarations and variables (over the whole document), plain exactly where unbound, and
+/// a document-level declaration exactly where the name is `__ua.`.
+fn same_binding(g: &Generated, doc: &parser::Parsed) -> Result<(), String> {
+    let (mut fwd, mut back) = (BTreeMap::new(), BTreeMap::new());
+    for (i, (rule, want)) in g.statements.iter().enumerate() {
+        let got = mentions_of(doc, i, *rule);
+        if got.len() != want.len() {
+            return Err(format!("statement {i}: {} mentions, oracle {}", got.len(), want.len()));
+        }
+        for (w, n) in want.iter().zip(&got) {
+            match (w, n) {
+                (None, None) => {}
+                (Some((id, document)), Some(name)) => {
+                    if binder_of(name).unwrap().1.is_none() != *document {
+                        return Err(format!("statement {i}: `{name}` bound at the wrong level"));
+                    }
+                    if *fwd.entry(*id).or_insert(name.clone()) != *name || *back.entry(name.clone()).or_insert(*id) != *id {
+                        return Err(format!("statement {i}: `{name}` is not declaration {id}"));
+                    }
+                }
+                _ => return Err(format!("statement {i}: oracle {w:?}, parsed {n:?}")),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// GH #6701 review round 11, as a property over SCOPE-CARRYING input: random N3 documents
+/// of 1–3 statements (facts, and rules that never fire), with `@forAll :x` / `:y`
+/// declarations at random scopes — the document, any formula, between any two rows — so
+/// the same IRI is declared in sibling formulae, shadowed in nested ones, bound at
+/// document level across statements, and mentioned plainly outside every scope. An oracle
+/// computes, from the GENERATED text alone, which declaration binds every mention. The
+/// parse must agree with it; and `reason_n3_pass_all` either writes a document whose
+/// re-parse agrees with it too — binder for binder, level for level — or refuses. Nothing
+/// is ever re-bound silently.
 #[test]
-fn random_scopes_round_trip_exactly_or_are_refused() {
+fn random_scopes_round_trip_with_their_binders_or_are_refused() {
     let mut r = Rng(0x9E37_79B9_7F4A_7C15);
-    let (mut wrote, mut refused) = (0, 0);
-    let (mut rules_wrote, mut rules_refused) = (0, 0);
+    let (mut wrote, mut refused, mut caught) = (0, 0, 0);
     for _ in 0..3000 {
-        let doc: Vec<[Term; 3]> = (0..1 + r.below(3)).map(|_| random_row(&mut r, 3, true)).collect();
-        let want_refusal = doc.iter().any(lossy) || merges(doc.iter().flatten());
-        match serialize_facts(doc.iter()) {
-            Ok(text) => {
-                assert!(!want_refusal, "written although the oracle refuses:\n{doc:?}\n{text}");
-                let back = parser::parse(&text).unwrap_or_else(|e| panic!("{e}\n{text}"));
-                let norm: Vec<[Term; 3]> = doc.iter().map(|f| f.clone().map(|t| normalise(&t))).collect();
-                assert!(back.rules.is_empty() && back.backward_rules.is_empty(), "{text}");
-                assert_eq!(back.facts, norm, "changed silently:\n{text}");
+        let g = generate(&mut r);
+        let src = parser::parse(&g.text).unwrap_or_else(|e| panic!("{e}\n{}", g.text));
+        same_binding(&g, &src).unwrap_or_else(|e| panic!("the PARSER disagrees with the oracle: {e}\n{}", g.text));
+        match reason_n3_pass_all(&g.text, RuleVars::N3) {
+            Ok(doc) => {
+                let back = parser::parse(&doc).unwrap_or_else(|e| panic!("{e}\n{doc}"));
+                same_binding(&g, &back).unwrap_or_else(|e| panic!("re-bound silently: {e}\n{}\n---\n{doc}", g.text));
                 wrote += 1;
             }
             Err(e) => {
-                // A formula related by log:implies is not generated; an empty list is
-                // `()`, which is exact. So the oracle's reasons are the only ones.
-                assert!(want_refusal, "refused a representable document ({e}):\n{doc:?}");
                 refused += 1;
-            }
-        }
-        // A rule from two random formulae (no blanks: a premise blank is a rule variable).
-        let side = |r: &mut Rng| (0..1 + r.below(2)).map(|_| random_row(r, 2, false)).collect::<Vec<_>>();
-        let rule = Rule { premise: side(&mut r), conclusion: side(&mut r) };
-        let sides = [formula(rule.premise.clone()), formula(rule.conclusion.clone())];
-        let n = sides.clone().map(|t| normalise(&t));
-        let want_refusal = unplaceable(&n) || merges(sides.iter());
-        let mut out = String::new();
-        match write_rule(&rule, RuleKind::Forward, RuleVars::N3, &mut out) {
-            Ok(()) => {
-                assert!(!want_refusal, "rule written although the oracle refuses:\n{rule:?}\n{out}");
-                let back = parser::parse(&out).unwrap_or_else(|e| panic!("{e}\n{out}"));
-                assert_eq!(back.rules.len(), 1, "{out}");
-                let got = [formula(back.rules[0].premise.clone()), formula(back.rules[0].conclusion.clone())];
-                assert_eq!(got, n, "rule changed silently:\n{out}");
-                rules_wrote += 1;
-            }
-            Err(e) => {
-                assert!(want_refusal && out.is_empty(), "refused a representable rule ({e}):\n{rule:?}");
-                rules_refused += 1;
+                caught += usize::from(e.contains("re-parses as") || e.contains("does not re-parse"));
+                if std::env::var("SHOW_REFUSED").is_ok() && refused < 6 {
+                    eprintln!("REFUSED {e}\n{}", g.text);
+                }
             }
         }
     }
-    assert!(wrote > 300 && refused > 300, "{wrote} written, {refused} refused");
-    assert!(rules_wrote > 100 && rules_refused > 300, "{rules_wrote} rules written, {rules_refused} refused");
+    eprintln!("{wrote} written, {refused} refused ({caught} by the re-parse gate)");
+    assert!(wrote > 2000 && refused > 10 && caught == 0, "{wrote} written, {refused} refused, {caught} by the gate");
 }
