@@ -15322,7 +15322,21 @@ impl CompareTerm for Value {
         // `num_extremum_compare`) deliberately KEEP their own semantics; this total
         // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
-            (Some(a), Some(b)) => numeric_capacity::comparable(a, b).then(|| a.cmp_total(b)),
+            (Some(a), Some(b)) => {
+                if !numeric_capacity::comparable(a, b) {
+                    return None;
+                }
+                // Two in-tower decimals whose scale alignment overflows i128 would fall
+                // back to their (equal) f64 images; compare their exact lexicals instead,
+                // the same exact order a beyond-tower lexical gets below, so the total
+                // order stays transitive across the tower boundary.
+                if let (Some(x), Some(y)) = (a.to_dec(), b.to_dec()) {
+                    if x.cmp(y).is_none() {
+                        return cmp_decimal_str(&a.lexical(), &b.lexical());
+                    }
+                }
+                Some(a.cmp_total(b))
+            }
             // A strict numeric budget has already failed capacity on a lexical beyond the tower.
             _ if budget::strict_numeric() => None,
             // At least one side is beyond the i128 tower: compare exact decimal lexicals
