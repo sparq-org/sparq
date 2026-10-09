@@ -2973,7 +2973,16 @@ async fn remove_in<S: Store + 'static>(
         }
         Some(e) => match journal.rollback().await {
             None => (Vec::new(), Err(e), None),
-            left => (all(), Err(e), left),
+            // What the delete had not reached is locked too, and is set aside with the rest: a
+            // request or a walk skips it rather than waits on its lock.
+            Some(mut left) => {
+                left.0.extend(
+                    doomed
+                        .iter()
+                        .map(|(node, _)| super::Undo::Locked { iri: node.clone() }),
+                );
+                (all(), Err(e), Some(left))
+            }
         },
     }
 }
@@ -6852,6 +6861,76 @@ mod tests {
         st.set_aside_bytes
             .store(0, std::sync::atomic::Ordering::Release);
         assert!(call(Method::PUT, "/c").await.is_success());
+    }
+
+    /// Review finding: a recursive delete whose rollback was set aside hid only what it had
+    /// removed, while its task held the locks of the whole subtree; what it had not reached yet
+    /// stayed visible, so a request for it (or a walk over it) waited on a lock that would not
+    /// come back until the rollback was done. Everything the delete holds is set aside with it.
+    #[tokio::test]
+    async fn a_stuck_recursive_delete_sets_aside_what_it_had_not_reached() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        let anon = Agent::anonymous();
+        let mk = |p: &'static str, slug: &'static str, container: bool| {
+            let st = st.clone();
+            async move {
+                let mut h = vec![("slug", slug), ("content-type", "text/plain")];
+                if container {
+                    h.push(("link", CONTAINER_LINK));
+                }
+                let r = handle(&st, &req(Method::POST, p, &h, "x"), &Agent::anonymous()).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+            }
+        };
+        mk("/", "d", true).await;
+        mk("/d/", "x", false).await;
+        mk("/d/", "e", true).await;
+        mk("/d/e/", "z", false).await;
+        let at = |p: &str| format!("{root}{p}");
+        // x goes; z cannot, and x cannot be put back. e and z were never reached.
+        let doomed: Vec<(String, Option<String>)> = vec![
+            (at("d/x"), Some(at("d/"))),
+            (at("d/e/z"), Some(at("d/e/"))),
+            (at("d/e/"), Some(at("d/"))),
+            (at("d/"), Some(root.clone())),
+        ];
+        let (guards, _) = lock_subtree(&st, &at("d/"), Some(root.clone()))
+            .await
+            .unwrap();
+        *store.fail_delete_of.lock().unwrap() = Some(at("d/e/z"));
+        *store.fail_restore_of.lock().unwrap() = Some(at("d/x"));
+        let (_, outcome, left) = remove(&st, &doomed).await;
+        assert!(outcome.is_err());
+        *store.fail_delete_of.lock().unwrap() = None;
+        st.set_aside(left.expect("set aside"), guards);
+        let get = |p: &'static str| {
+            let (st, r) = (st.clone(), req(Method::GET, p, &[], ""));
+            async move {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    handle(&st, &r, &Agent::anonymous()),
+                )
+                .await
+                .expect("answered at once")
+                .status()
+            }
+        };
+        for p in ["/d/", "/d/x", "/d/e/", "/d/e/z", "/d/e/z.meta"] {
+            assert_eq!(get(p).await, StatusCode::SERVICE_UNAVAILABLE, "{p}");
+        }
+        *store.fail_restore_of.lock().unwrap() = None;
+        for _ in 0..100 {
+            if st.visible(&at("d/e/z")) && st.visible(&at("d/x")) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        for p in ["/d/x", "/d/e/z"] {
+            let r = handle(&st, &req(Method::GET, p, &[], ""), &anon).await;
+            assert_eq!(r.status(), StatusCode::OK, "{p}");
+        }
     }
 
     /// Review finding: a recursive delete found out it was too large to undo only after removing
