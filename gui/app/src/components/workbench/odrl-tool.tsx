@@ -452,8 +452,8 @@ function PreviewResult({ preview }: { preview: OdrlPreviewResult }) {
       )}
 
       <p className="text-xs text-muted-foreground" data-odrl-verdict-note="">
-        Each pane shows the policy's own verdict, decided per request for that requester. Enforcement
-        on a sparq v0.1.5 server can differ from this preview.
+        {"Each pane shows the policy's own verdict, decided per request for that requester. " +
+          "Enforcement on a sparq v0.1.5 server can differ from this preview."}
       </p>
 
       {/* The two gated panes, side by side. */}
