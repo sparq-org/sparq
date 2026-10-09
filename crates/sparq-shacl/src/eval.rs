@@ -10,7 +10,7 @@ use crate::sparql::{ComponentResultFields, PreparedValidator};
 use crate::view::GraphView;
 use oxrdf::{Literal, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
-use sparq_core::dict::{is_inline, is_literal_id, split_lang_dir, Id, TermParts};
+use sparq_core::dict::{is_inline, split_lang_dir, Id, TermParts};
 use sparq_core::Graph;
 use sparq_core::temporal::ExactTemporal;
 use std::borrow::Cow;
