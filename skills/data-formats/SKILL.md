@@ -489,11 +489,16 @@ with a compact IRI on read-back, sq-oy1f.11; a plain **literal** value under a `
 term moves to a non-coerced key so it does not read back as a node IRI, sq-oy1f.13). Build the
 context with `parse_context_json(r#"{…}"#)` (a string → `JsonLdValue`, returns `None` if not a JSON
 object) or construct the `JsonLdValue` directly; the parsed `ActiveContext` drives compaction. The
-output is a `{"@context":…,"@graph":[…]}` document and the compaction is **lossless** — every
-coercion is invertible against the same `@context`, so a JSON-LD-to-RDF round-trip reconstructs the
-original triples. *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always emits
-RDF, so the input is a `Graph`, not an arbitrary remote document; scoped/typed contexts,
-`@propagate`, remote `@context` fetching, `@import`, `@protected` are out of scope (JSON-LD
+output is the W3C Compaction Algorithm's document: `@context` merged into the single top-level node,
+or `@context` plus a `@graph` array when there are several, with nodes in code-point order of their
+expanded `@id`. The compaction is **lossless** — every coercion is invertible against the same
+`@context`, so a JSON-LD-to-RDF round-trip reconstructs the original dataset (list cells typed
+`rdf:List`, referenced from another graph, naming a graph or used as a type stay explicit nodes;
+`rdf:JSON` literals stay typed strings with their exact lexical form; a predicate whose `@vocab`
+suffix holds a `:` keeps its full IRI; an empty named graph is kept as `{"@id":…,"@graph":[]}`; when a `@type` map would hold a node object, which sparq's oxjsonld reader cannot load, the output is redone with that context's `@type` containers removed, and the emitted `@context` shows it). *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always
+emits RDF, so the input is a `Graph`, not an arbitrary remote document. Scoped and type-scoped
+contexts, `@propagate` and `@protected` follow the W3C algorithm; a remote `@context` or `@import` is
+never fetched, so such a context yields the lossless expanded document instead (JSON-LD
 **Framing** is its own recipe below, sq-oy1f.17). *Strict third-party faithfulness:* the compaction
 round-trip is verified both against sparq's own JSON-LD→RDF reader **and** differentially against the
 **pyld** W3C reference processor (`expand`/`toRdf`) for the `@reverse`, language-map, `@type:@id`,
