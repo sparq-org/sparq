@@ -315,7 +315,9 @@ What the server exposes, all discoverable from the storage description
   Each delivery attempt, retries included, first checks that its subscription still exists and
   has not expired, and that the subscriber may still read the resource, reading the resource under
   its shared lock, as a GET does. A Delete is checked against
-  the resource as it was before removal. A delivery that fails a check is dropped.
+  the resource as it was before removal. A delivery that fails a check is dropped. A subscription
+  to a resource's linkset (`{resource}.meta`) hears of each change to the resource as of the
+  linkset, checked as the resource.
 - Writes and deletes are **whole or not at all**: a PUT or PATCH that changes metadata and a
   `DELETE` (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

@@ -445,11 +445,15 @@ impl Notifier {
         // Only the subscriptions within the bound are copied out; those past it are dropped as a
         // full queue drops them, and counted so.
         let now = jose::now_secs();
+        // A resource's linkset changes with it, and is read under its authorization: a
+        // subscription to the linkset itself hears of it as of the resource.
+        let linkset = format!("{}{META_SUFFIX}", event.uri);
+        let names_linkset = |s: &Subscription| s.topics.contains(&linkset);
         let (candidates, over) = {
             let subs = self.subs.read().expect("lock");
             let mut matching = subs
                 .values()
-                .filter(|s| !s.expired(now) && s.covers(&event.uri));
+                .filter(|s| !s.expired(now) && (s.covers(&event.uri) || names_linkset(s)));
             let candidates: Vec<Subscription> = matching.by_ref().take(limit).cloned().collect();
             (candidates, matching.count())
         };
@@ -473,24 +477,37 @@ impl Notifier {
             if !state.allowed(Action::Read, &event.uri, &sub.agent()).await {
                 continue;
             }
-            let mut activity = json!({
-                "type": [event.kind],
-                "object": {"id": event.uri, "type": [if event.is_container { "Container" } else { "DataResource" }]},
-            });
-            if let Some((rel, container)) = &event.relation {
-                activity[*rel] = Value::String(container.clone());
+            let mut activities = Vec::new();
+            if sub.covers(&event.uri) {
+                let mut activity = json!({
+                    "type": [event.kind],
+                    "object": {"id": event.uri, "type": [if event.is_container { "Container" } else { "DataResource" }]},
+                });
+                if let Some((rel, container)) = &event.relation {
+                    activity[*rel] = Value::String(container.clone());
+                }
+                activities.push(activity);
             }
-            let agent = sub.agent();
-            out.push(Pending {
-                inbox: sub.inbox,
-                activity,
-                watch: Watch {
-                    agent,
-                    subscription: sub.id,
-                    uri: event.uri.clone(),
-                    snapshot: snapshot.clone(),
-                },
-            });
+            if names_linkset(&sub) {
+                activities.push(json!({
+                    "type": [event.kind],
+                    "object": {"id": linkset, "type": ["DataResource"]},
+                }));
+            }
+            for activity in activities {
+                out.push(Pending {
+                    inbox: sub.inbox.clone(),
+                    activity,
+                    // Checked as the resource the linkset describes: its lock and who may
+                    // read it.
+                    watch: Watch {
+                        agent: sub.agent(),
+                        subscription: sub.id.clone(),
+                        uri: event.uri.clone(),
+                        snapshot: snapshot.clone(),
+                    },
+                });
+            }
         }
         out
     }
@@ -1672,6 +1689,75 @@ mod tests {
     }
 
     /// A subscription to the storage root, put straight into the state and the store.
+    /// Review finding: a subscription to a resource's linkset was accepted and never heard
+    /// anything, since changes were announced only for the resource. The linkset's subscribers
+    /// hear of them as of the linkset, checked as the resource it describes.
+    #[tokio::test]
+    async fn a_linkset_subscription_hears_of_its_resource() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let root = state.cfg.storage();
+        let file = format!("{root}file");
+        for (id, topic) in [
+            ("linkset", format!("{file}{META_SUFFIX}")),
+            ("other", format!("{root}other{META_SUFFIX}")),
+            ("root", root.clone()),
+        ] {
+            let sub = Subscription {
+                id: id.into(),
+                subscriber: None,
+                client: None,
+                topics: vec![topic],
+                inbox: format!("https://inbox.example/{id}"),
+                expires: None,
+                expires_at: None,
+                failures: 0,
+            };
+            state.notify.subs.write().unwrap().insert(id.into(), sub);
+        }
+        for kind in ["Create", "Update", "Delete"] {
+            let event = Event {
+                kind,
+                uri: file.clone(),
+                is_container: false,
+                relation: None,
+            };
+            let mut heard: Vec<(String, String, String)> = state
+                .notify
+                .prepare(&state, &event)
+                .await
+                .into_iter()
+                .map(|p| {
+                    (
+                        p.inbox,
+                        p.activity["object"]["id"].as_str().unwrap().to_string(),
+                        p.watch.uri,
+                    )
+                })
+                .collect();
+            heard.sort();
+            assert_eq!(
+                heard,
+                vec![
+                    (
+                        "https://inbox.example/linkset".into(),
+                        format!("{file}{META_SUFFIX}"),
+                        file.clone()
+                    ),
+                    (
+                        "https://inbox.example/root".into(),
+                        file.clone(),
+                        file.clone()
+                    ),
+                ],
+                "{kind}"
+            );
+        }
+    }
+
     async fn subscribe_root(state: &LwsState<test_store::FlakyStore>, id: &str) -> String {
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         let sub = Subscription {
