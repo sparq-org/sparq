@@ -712,7 +712,7 @@ impl Num {
                 } else if f == f32::NEG_INFINITY {
                     "-INF".to_string()
                 } else if f.fract() == 0.0 && f.abs() < 1e15 {
-                    format!("{}", f as i64)
+                    integral_lexical(f as i64, f.is_sign_negative())
                 } else {
                     let s = format!("{f:E}");
                     match s.split_once('E') {
@@ -894,10 +894,13 @@ fn apply_f32(a: f32, b: f32, op: ArithOp) -> f32 {
 #[inline]
 fn round_half_to_pos_inf(x: f64) -> f64 {
     let fl = x.floor();
-    if x - fl >= 0.5 {
-        fl + 1.0
+    let r = if x - fl >= 0.5 { fl + 1.0 } else { fl };
+    // F&O 3.1 §4.4.4: a negative argument in [-0.5, 0) rounds to NEGATIVE zero, but
+    // `-1.0 + 1.0` is +0.0 — so a zero result takes the argument's sign (#4276).
+    if r == 0.0 {
+        r.copysign(x)
     } else {
-        fl
+        r
     }
 }
 
@@ -944,6 +947,16 @@ pub fn parse_xsd_f32(v: &str) -> Option<f32> {
     v.parse::<f32>().ok()
 }
 
+/// The plain-integral lexical of a float/double: `i` as digits, except that negative zero
+/// keeps its sign ("-0"), since XSD's float/double value spaces distinguish it (#4276).
+fn integral_lexical(i: i64, negative: bool) -> String {
+    if i == 0 && negative {
+        "-0".to_string()
+    } else {
+        i.to_string()
+    }
+}
+
 /// Float/double serialisation: an INTEGRAL value prints as a plain integer ("6",
 /// "1050" — matching the dominant convention across the W3C expected results, which
 /// mix plain and scientific forms); anything else uses the XSD canonical
@@ -959,7 +972,7 @@ pub fn fmt_xsd_double(v: f64) -> String {
         return "-INF".to_string();
     }
     if v.fract() == 0.0 && v.abs() < 1e15 {
-        return format!("{}", v as i64);
+        return integral_lexical(v as i64, v.is_sign_negative());
     }
     let s = format!("{v:E}"); // shortest round-trip mantissa, e.g. "2E-1"
     match s.split_once('E') {
@@ -1124,6 +1137,11 @@ mod tests {
         assert_eq!(round_half_to_pos_inf(1.5), 2.0);
         assert_eq!(round_half_to_pos_inf(2.5), 3.0);
         assert_eq!(round_half_to_pos_inf(-0.5), 0.0); // towards +INF, not -1
+        // ...and the zero keeps the argument's sign (#4276).
+        assert!(round_half_to_pos_inf(-0.5).is_sign_negative());
+        assert!(round_half_to_pos_inf(-0.2).is_sign_negative());
+        assert!(round_half_to_pos_inf(-0.0).is_sign_negative());
+        assert!(round_half_to_pos_inf(0.2).is_sign_positive());
         assert_eq!(round_half_to_pos_inf(-1.5), -1.0);
         assert_eq!(round_half_to_pos_inf(-2.5), -2.0);
         assert_eq!(round_half_to_pos_inf(2.4), 2.0);
@@ -1173,6 +1191,10 @@ mod tests {
         assert_eq!(fmt_xsd_double(0.2), "2.0E-1");
         assert_eq!(fmt_xsd_double(f64::INFINITY), "INF");
         assert_eq!(fmt_xsd_double(f64::NAN), "NaN");
+        assert_eq!(fmt_xsd_double(-0.0), "-0");
+        assert_eq!(fmt_xsd_double(0.0), "0");
+        assert_eq!(Num::Float(-0.0).lexical(), "-0");
+        assert_eq!(Num::Double(-0.0).canonical_lexical(), "-0.0E0");
     }
 
     #[test]
