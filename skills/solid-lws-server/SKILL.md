@@ -279,7 +279,9 @@ What the server exposes, all discoverable from the storage description
   `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
   body limit as it will be served, with the server-managed links put back. Its relative `anchor`
   and `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
-  absolute, and one that is not a URI reference gets `422`. JSON Patch paths are
+  absolute, and one that is not a URI reference gets `422`, as does a target attribute not
+  shaped as RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and
+  extension attributes arrays of strings; `name*` arrays of `{value, language}`). JSON Patch paths are
   RFC 6901 pointers read by one parser: an array index is `0` or digits without a leading zero
   (`-` only where an add may append), and an escape other than `~0` or `~1` gets `400`. Stored metadata that cannot be read
   makes a request fail with `500` rather than fall back to defaults.

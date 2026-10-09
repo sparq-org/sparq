@@ -2810,10 +2810,33 @@ fn anchored_at(entry: &Value, uri: &str) -> bool {
     entry.get("anchor").and_then(Value::as_str) == Some(uri)
 }
 
+/// Whether a link target attribute has the shape RFC 9264 section 4.2.4 gives it: `href`,
+/// `title`, `type` and `media` a string; `hreflang` an array of strings; an internationalised
+/// attribute (`title*`, any `name*`) an array of `{"value", "language"?}` objects of strings;
+/// any other (extension) attribute an array of strings.
+fn target_attribute_ok(key: &str, value: &Value) -> bool {
+    let strings = |v: &Value| v.as_array().is_some_and(|a| a.iter().all(Value::is_string));
+    match key {
+        "href" | "title" | "type" | "media" => value.is_string(),
+        "hreflang" => strings(value),
+        k if k.ends_with('*') => value.as_array().is_some_and(|a| {
+            a.iter().all(|o| {
+                o.as_object().is_some_and(|o| {
+                    o.get("value").is_some_and(Value::is_string)
+                        && o.get("language").is_none_or(Value::is_string)
+                        && o.keys().all(|k| k == "value" || k == "language")
+                })
+            })
+        }),
+        _ => strings(value),
+    }
+}
+
 /// A linkset document with every `anchor` and `href` resolved against `base`, the linkset's own
 /// URI (RFC 9264 section 4: the context of relative references in a linkset is the resource that
 /// delivers it, not the resource it describes). `None` when one is not a URI reference
-/// (RFC 3986), which the document may not hold.
+/// (RFC 3986), or a target attribute has not the shape RFC 9264 gives it
+/// ([`target_attribute_ok`]), which the document may not hold.
 fn absolute_linkset(doc: &Value, base: &str) -> Option<Value> {
     let base = oxiri::Iri::parse(base).ok()?;
     let resolve = |v: &Value| -> Option<Value> {
@@ -2829,6 +2852,9 @@ fn absolute_linkset(doc: &Value, base: &str) -> Option<Value> {
                 let mut targets = Vec::new();
                 for t in v.as_array()? {
                     let mut t = t.as_object()?.clone();
+                    if !t.iter().all(|(k, v)| target_attribute_ok(k, v)) {
+                        return None;
+                    }
                     let href = resolve(t.get("href")?)?;
                     t.insert("href".into(), href);
                     targets.push(Value::Object(t));
@@ -3098,7 +3124,7 @@ async fn linkset<S: Store + 'static>(
             let Some(patched) = absolute_linkset(&patched, &format!("{uri}{META_SUFFIX}")) else {
                 return problem(
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    Some("an anchor or href is not a URI reference"),
+                    Some("an anchor or href is not a URI reference, or a target attribute is not shaped as RFC 9264 says"),
                 );
             };
             // Only the user-managed part is kept; the links the type index matches are taken from
@@ -3796,6 +3822,11 @@ mod tests {
         for bad in [
             json!({"linkset": [{"anchor": "http://[", "license": [{"href": "https://ex.org/l"}]}]}),
             json!({"linkset": [{"anchor": uri, "license": [{"href": "%ZZ"}]}]}),
+            // Review finding: target attributes are held to the shapes RFC 9264 gives them.
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title": 123}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "hreflang": "en"}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "title*": [{"value": 1}]}]}]}),
+            json!({"linkset": [{"anchor": uri, "license": [{"href": "https://ex.org/l", "ext": "x"}]}]}),
         ] {
             let r = call(
                 &st,
@@ -3807,6 +3838,30 @@ mod tests {
             .await;
             assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
         }
+        // The same through a JSON Patch.
+        let bad = json!([{"op": "replace", "path": "/linkset", "value": [{"anchor": uri,
+            "license": [{"href": "https://ex.org/l", "hreflang": "en"}]}]}]);
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &bad.to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{bad}");
+        // Well-shaped attributes are kept.
+        let good = json!({"linkset": [{"anchor": uri, "license": [{"href": "#license",
+            "title": "L", "hreflang": ["en"], "title*": [{"value": "L", "language": "en"}]}]}]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", MERGE_PATCH)],
+            &good.to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
         let m = st.resource_meta(&uri).await.unwrap();
         assert_eq!(m.links["license"], vec![format!("{linkset}#license")]);
     }
@@ -6127,8 +6182,12 @@ mod tests {
         let kept = st.resource_meta(&uri).await.unwrap();
         assert_eq!(kept.creator, meta.creator);
         assert_eq!(kept.types, meta.types);
-        // One that fits as stored is taken, and reads back.
-        let r = call(&st, "PATCH", &p, &[("content-type", MERGE_PATCH)], &body(8)).await;
+        // One that fits as stored (and has the shapes RFC 9264 gives its attributes: nothing
+        // nests deeper than an internationalised attribute's objects) is taken, and reads back.
+        let fits = format!(
+            r#"{{"linkset":[{{"anchor":"{uri}","https://e.example/rel":[{{"href":"x","ext":["1"],"title*":[{{"value":"t"}}]}}]}}]}}"#
+        );
+        let r = call(&st, "PATCH", &p, &[("content-type", MERGE_PATCH)], &fits).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert_eq!(st.resource_meta(&uri).await.unwrap().creator, meta.creator);
     }
