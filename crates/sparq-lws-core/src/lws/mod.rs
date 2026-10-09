@@ -447,6 +447,9 @@ pub struct Inner<S: Store> {
     /// The containers whose own modification time may be behind a change to them: each with
     /// whether the last touch failed, and how many touches are yet to land.
     untouched: std::sync::Mutex<std::collections::HashMap<String, (bool, usize)>>,
+    /// The intents of kept changes that wait on a touch of each container (see
+    /// [`LwsState::owe_touch`]).
+    owed_touches: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -492,6 +495,7 @@ impl<S: Store + 'static> LwsState<S> {
                 locks: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
+                owed_touches: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -506,6 +510,27 @@ impl<S: Store + 'static> LwsState<S> {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains_key(uri)
+    }
+
+    /// Record that the intent `record` of a kept change is to be cleared once the container
+    /// `uri` is next touched: a stop before then leaves it, and the next start touches the
+    /// container (see the `intents` module).
+    pub(crate) fn owe_touch(&self, uri: &str, record: String) {
+        self.owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(uri.to_string())
+            .or_default()
+            .push(record);
+    }
+
+    /// The intents waiting on a touch of `uri` (see [`LwsState::owe_touch`]), taken.
+    pub(crate) fn take_owed_touches(&self, uri: &str) -> Vec<String> {
+        self.owed_touches
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(uri)
+            .unwrap_or_default()
     }
 
     /// Record that the container `uri`'s listing changed and a touch of it is to follow: until
@@ -1032,7 +1057,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             .get_or_insert_with(|| intents::mint(&self.state.cfg.storage()))
             .clone();
         let undo: Vec<&Undo> = self.planned.iter().rev().collect();
-        intents::store(self.state, &record, existing, &undo).await?;
+        intents::store(self.state, &record, existing, &undo, &[]).await?;
         self.persisted = self.planned.len();
         Ok(())
     }
@@ -1123,18 +1148,37 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         outcome
     }
 
-    /// Keep every change: its intent is cleared. When that cannot be done, a start could still
-    /// replay it, so the change is put back instead and this fails, with what could not be put
-    /// back (to set aside, as for [`Journal::rollback`]).
-    pub(crate) async fn commit(self) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
+    /// Keep every change. When it changed what the container `touch` lists, its intent is
+    /// rewritten to name only that container, to be cleared once the container is touched
+    /// ([`LwsState::owe_touch`]): a stop before then leaves the container's date for the next
+    /// start to move on. Otherwise its intent is cleared. When that cannot be done, a start could
+    /// still replay the intent over the change, so the change is put back instead and this
+    /// fails, with what could not be put back (to set aside, as for [`Journal::rollback`]).
+    pub(crate) async fn commit(
+        self,
+        touch: Option<&str>,
+    ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
         let Some(record) = self.intent.clone() else {
             return Ok(());
         };
-        let forget = Undo::Forget {
-            record,
-            iris: Vec::new(),
+        let kept = match touch {
+            Some(container) => {
+                let owed = [container.to_string()];
+                let rewritten = intents::store(self.state, &record, true, &[], &owed).await;
+                if rewritten.is_ok() {
+                    self.state.owe_touch(container, record.clone());
+                }
+                rewritten.is_ok()
+            }
+            None => {
+                let forget = Undo::Forget {
+                    record,
+                    iris: Vec::new(),
+                };
+                settle(&self.state.store, vec![forget]).await.is_none()
+            }
         };
-        if settle(&self.state.store, vec![forget]).await.is_none() {
+        if kept {
             return Ok(());
         }
         let left = self.rollback().await;
@@ -1540,6 +1584,8 @@ pub(crate) mod test_store {
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `write` of every IRI that starts with this fails with a backend error.
+        pub fail_write_under: Arc<std::sync::Mutex<Option<String>>>,
         /// When set, how many more writes succeed; every write past them fails, as in a store
         /// with a bounded number of blob slots.
         pub write_budget: Arc<std::sync::Mutex<Option<usize>>>,
@@ -1603,6 +1649,7 @@ pub(crate) mod test_store {
                 occupied: Default::default(),
                 fail_delete_of: Default::default(),
                 fail_write_of: Default::default(),
+                fail_write_under: Default::default(),
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
                 hide: Default::default(),
@@ -1688,7 +1735,14 @@ pub(crate) mod test_store {
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
             self.step()?;
-            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
+            if self.fail_write_of.lock().unwrap().as_deref() == Some(iri)
+                || self
+                    .fail_write_under
+                    .lock()
+                    .unwrap()
+                    .as_deref()
+                    .is_some_and(|p| iri.starts_with(p))
+            {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             if self.refuse_write_of.lock().unwrap().as_deref() == Some(iri) {

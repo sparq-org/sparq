@@ -578,12 +578,25 @@ async fn listing_lock<S: Store + 'static>(
 /// The container's own container lists its modification time, so the touch also holds that
 /// listing shared ([`listing_guard`]): a conditional create there sees no touch between its
 /// check and its create.
-async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
+pub(crate) async fn touch_container<S: Store + 'static>(state: &LwsState<S>, container: &str) {
     // Until a touch lands, the container's listing has no Last-Modified (see
     // [`read_container`]): its own time, and its members', may all be from before the change,
     // and an If-Modified-Since would pass on a listing that changed.
+    // The intents of kept changes waiting on a touch are taken before it starts, so only those
+    // committed before it began are cleared by it; they go back when it does not land.
+    let owed = state.take_owed_touches(container);
     let landed = touch(state, container).await;
     state.touched(container, landed);
+    if !landed {
+        for record in owed {
+            state.owe_touch(container, record);
+        }
+        return;
+    }
+    for record in owed {
+        // A failure leaves the intent, and the next start touches the container again.
+        let _ = super::intents::clear(&state.store, &record).await;
+    }
 }
 
 /// Release `locks`, held through a change to the container's listing, and touch the container
@@ -2002,7 +2015,7 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
         };
     };
     let writes = {
-        let state = state.clone();
+        let (state, parent) = (state.clone(), parent.clone());
         async move {
             let mut journal = state.journal();
             let steps = async {
@@ -2018,7 +2031,7 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
             }
             .await;
             match steps {
-                Ok(written) => match journal.commit().await {
+                Ok(written) => match journal.commit(parent.as_deref()).await {
                     Ok(()) => ((Ok(written), false), None),
                     Err((e, left)) => ((Err(e), left.is_none()), left),
                 },
@@ -2387,7 +2400,10 @@ async fn remove_in<S: Store + 'static>(
         left
     };
     match failed {
-        None => match journal.commit().await {
+        None => match journal
+            .commit(doomed.last().and_then(|(_, p)| p.as_deref()))
+            .await
+        {
             Ok(()) => (all(), Ok(()), None),
             Err((e, None)) => (Vec::new(), Err(e), None),
             Err((e, Some(left))) => (all(), Err(e), Some(locked(left))),

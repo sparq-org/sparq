@@ -297,9 +297,12 @@ What the server exposes, all discoverable from the storage description
   create whose store reply was lost is removed whole the same way. A write that changes
   metadata and a recursive delete first store a durable intent: what each resource it will
   change holds now, kept as a member of a `urn:` container outside the storage (no request can
-  name it). The intent is cleared once the change is kept or put back; one a process stop left
-  is put back when the server next starts, before it serves anything (what cannot be put back
-  then is set aside as above, and an intent that cannot be read stops the start). When a kept
+  name it). The intent is cleared once the change is put back, or once it is kept and its
+  container's date has been moved on (until then it names that container); one a process stop
+  left is settled when the server next starts, before it serves anything: a change cut short is
+  put back, and a kept change's container is touched. Every intent is read before any is
+  settled, so one that cannot be read stops the start with nothing changed or left running;
+  what cannot be put back then is set aside as above. When a kept
   change's intent cannot be cleared, the change is put back instead and the request fails. A
   create needs none: its metadata is written before its content and removed after it, so no
   stop leaves content without its metadata. A container listing never shows a change in

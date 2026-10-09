@@ -134,6 +134,10 @@ impl Step {
 #[derive(Serialize, Deserialize)]
 struct Stored {
     steps: Vec<Step>,
+    /// Containers whose modification time is still to be moved on for a change that was kept
+    /// (see [`super::Journal::commit`]): the intent is cleared once it is.
+    #[serde(default)]
+    touch: Vec<String>,
 }
 
 /// Store the intent to apply `undo` (in this order) as `record`, a new member of the intents
@@ -143,9 +147,11 @@ pub(crate) async fn store<S: Store>(
     record: &str,
     existing: bool,
     undo: &[&Undo],
+    touch: &[String],
 ) -> Result<(), ServerError> {
     let stored = Stored {
         steps: undo.iter().filter_map(|u| Step::of(u)).collect(),
+        touch: touch.to_vec(),
     };
     let body = Bytes::from(
         serde_json::to_vec(&stored).map_err(|e| ServerError::Storage(format!("intent: {e}")))?,
@@ -173,10 +179,12 @@ pub(crate) async fn clear<S: Store>(store: &S, record: &str) -> Result<(), Serve
     super::delete_record(store, record, container).await
 }
 
-/// Put back every change an intent left stored names, when the server starts and before it
-/// serves anything: what cannot be put back after a few tries is set aside (its resources answer
-/// `503`) and put back in the background, and its intent is cleared once it is. An intent that
-/// cannot be read is an error: the server does not start over a change it cannot put back.
+/// Settle every intent a process stop left, when the server starts and before it serves
+/// anything: a change cut short is put back, and a kept change's container is touched. Every
+/// intent is read first: one that cannot be read is an error, and then nothing has been changed
+/// or started (the server does not start over a change it cannot put back). Only then is each
+/// settled; what cannot be put back after a few tries is set aside (its resources answer `503`)
+/// and put back in the background, once every intent has been read and settling cannot fail.
 pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(), String> {
     let container = container(&state.cfg.storage());
     let store = &state.store;
@@ -194,6 +202,7 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
         .list_children(&container)
         .await
         .map_err(|e| format!("intents: {e}"))?;
+    let mut read = Vec::new();
     for record in records {
         let record = record.as_str().to_string();
         let unreadable =
@@ -212,6 +221,18 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
             .map(Step::into_undo)
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| unreadable("a body is not base64".into()))?;
+        read.push((record, undo, stored.touch));
+    }
+    let mut set_aside = Vec::new();
+    for (record, undo, touch) in read {
+        if undo.is_empty() {
+            // A kept change: its containers are touched, and the intent goes once they are.
+            for c in touch {
+                state.owe_touch(&c, record.clone());
+                super::resources::touch_container(state, &c).await;
+            }
+            continue;
+        }
         let iris = super::iris_of(&undo);
         let forget = Undo::Forget {
             record: record.clone(),
@@ -224,9 +245,10 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
                 Some(left)
             }
         };
-        if let Some(left) = left {
-            state.set_aside(left, ());
-        }
+        set_aside.extend(left);
+    }
+    for left in set_aside {
+        state.set_aside(left, ());
     }
     Ok(())
 }
@@ -375,20 +397,33 @@ mod tests {
         assert_eq!(intents_left(&st).await, 0);
     }
 
-    /// A change whose intent cannot be cleared once it is done is put back instead (a start
-    /// could replay the intent over it), the request fails, and its resource stays set aside
-    /// until the intent is cleared.
+    /// A change whose intent cannot be recorded as kept once it is done is put back instead
+    /// (a start could replay the intent over it) and the request fails; when the intent cannot
+    /// be cleared either, its resource stays set aside until it is.
     #[tokio::test]
     async fn a_change_whose_intent_stays_is_put_back() {
         let (st, store, d, before) = typed_doc().await;
-        store.fail_delete.store(true, Ordering::SeqCst);
+        let under = Some(container(&st.cfg.storage()));
         let h = [("content-type", "text/turtle")];
+        // The intent cannot be rewritten as kept: the change is put back, and it is cleared.
+        // Only the rewrite fails: the first write of an intent is a create.
+        *store.fail_write_under.lock().unwrap() = under.clone();
+        let status = call(&st, Method::PUT, "/d", &h, "<> a <urn:B> .").await;
+        assert!(status.is_server_error(), "{status}");
+        assert_eq!(
+            snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
+            before
+        );
+        assert_eq!(intents_left(&st).await, 0);
+        // Nor cleared: set aside until it is.
+        store.fail_delete.store(true, Ordering::SeqCst);
         let status = call(&st, Method::PUT, "/d", &h, "<> a <urn:B> .").await;
         assert!(status.is_server_error(), "{status}");
         assert_eq!(
             call(&st, Method::GET, "/d", &[], "").await,
             StatusCode::SERVICE_UNAVAILABLE
         );
+        *store.fail_write_under.lock().unwrap() = None;
         store.fail_delete.store(false, Ordering::SeqCst);
         let mut waited = 0;
         while call(&st, Method::GET, "/d", &[], "").await == StatusCode::SERVICE_UNAVAILABLE {
@@ -401,6 +436,86 @@ mod tests {
             before
         );
         assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Review finding: a kept change cleared its intent before its container was touched, so a
+    /// stop in between left the container's date from before the change, with nothing to move it
+    /// on. The intent now names the container until the touch lands, and a start touches it.
+    #[tokio::test]
+    async fn a_kept_change_whose_touch_was_cut_short_is_touched_at_start() {
+        let (st, store) = state(100).await;
+        let container_link = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        let h = [("slug", "c"), ("link", container_link)];
+        assert_eq!(
+            call(&st, Method::POST, "/", &h, "").await,
+            StatusCode::CREATED
+        );
+        let h = [("slug", "m"), ("content-type", "text/plain")];
+        assert_eq!(
+            call(&st, Method::POST, "/c/", &h, "m").await,
+            StatusCode::CREATED
+        );
+        let (c, m) = (st.cfg.absolute("/c/"), st.cfg.absolute("/c/m"));
+        let dated = st.resource_meta(&c).await.unwrap().version;
+        let mut journal = st.journal();
+        journal.stage_member(&m, Some(&c)).await.unwrap();
+        journal.stage(&meta_key(&m)).await.unwrap();
+        journal.remove_member(&m, Some(&c)).await.unwrap();
+        journal.delete_meta(&m).await.unwrap();
+        // Kept, and the process stops before the touch.
+        assert!(journal.commit(Some(&c)).await.is_ok());
+        assert_eq!(intents_left(&st).await, 1);
+        let st = restart(&store).await;
+        assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
+        assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
+        assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Review finding: recovery set aside what it could not yet put back, in tasks that outlived
+    /// a start that then failed on a later intent, and could put an old state back over writes
+    /// made after a later start. Every intent is read before anything is settled or started.
+    #[tokio::test]
+    async fn a_start_that_fails_leaves_nothing_running() {
+        let (st, store, d, _) = typed_doc().await;
+        // A change cut short (its process stopped), which cannot be put back yet, and an
+        // intent that cannot be read.
+        let mut journal = st.journal();
+        journal.stage(&meta_key(&d)).await.unwrap();
+        journal.stage(&d).await.unwrap();
+        journal
+            .write(&d, Bytes::from_static(b"<> a <urn:B> ."), "text/turtle")
+            .await
+            .unwrap();
+        std::mem::forget(journal);
+        *store.fail_restore_of.lock().unwrap() = Some(d.clone());
+        let h = [("content-type", "text/turtle")];
+        let bad = mint(&st.cfg.storage());
+        st.store
+            .create_in_container(
+                &container(&st.cfg.storage()),
+                &bad,
+                Bytes::from_static(b"not json"),
+                JSON,
+            )
+            .await
+            .unwrap();
+        drop(st);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        assert!(LwsState::new(store.clone(), cfg).await.is_err());
+        // The unreadable intent is repaired; the store is well; the next start puts `/d` back,
+        // and a write after it stands, however long a task of the failed start might wait.
+        clear(&store, &bad).await.unwrap();
+        *store.fail_restore_of.lock().unwrap() = None;
+        let st = restart(&store).await;
+        let status = call(&st, Method::PUT, "/d", &h, "<> a <urn:C> .").await;
+        assert!(status.is_success(), "{status}");
+        let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(
+            snapshot(&st, &store, std::slice::from_ref(&d), &[]).await,
+            after
+        );
     }
 
     /// A change kept leaves no intent, and a start over a clean store has none to put back.
