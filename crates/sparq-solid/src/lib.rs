@@ -1342,16 +1342,19 @@ impl PodStore {
     ) -> Result<(), String> {
         // Authorize against the CURRENT auth view before mutating anything (fail-closed).
         let auth = Arc::clone(&self.auth);
-        let mut upd = sparq_engine::parse_update_rec2013(sparql)?;
-        // Every pattern the update evaluates sees only what the session may read. Only a
-        // `DELETE`/`INSERT … WHERE` evaluates one, so the read view is fetched only then.
-        if update::evaluates_patterns(&upd) {
-            update::scope_reads(&mut upd, &self.accessible(s, Mode::Read))?;
+        let upd = sparq_engine::parse_update_rec2013(sparql)?;
+        // Every pattern the update evaluates runs under the session's read view, the same
+        // graph set `view_for` gives a query, so an unreadable graph is never evaluated.
+        // Only a `DELETE`/`INSERT … WHERE` evaluates one, so the view is fetched only then.
+        let reads = update::evaluates_patterns(&upd).then(|| self.accessible_set(s, Mode::Read));
+        if let Some(reads) = &reads {
+            update::scope_reads(&upd, reads)?;
         }
-        let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), budget)?;
+        let permit =
+            update::check(&self.graph, &auth, s, &upd, self.group_docs(), reads.as_ref(), budget)?;
         // Authorized: apply the checked algebra through the engine's in-place delta path,
-        // under the same budget.
-        sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, budget)?;
+        // under the same read view and budget.
+        sparq_engine::update_in_place_algebra_with_budget(&mut self.graph, &upd, reads.as_ref(), budget)?;
         // A change to the access-control rules invalidates the auth view.
         if permit.rematerialize {
             if acp {

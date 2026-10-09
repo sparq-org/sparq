@@ -29,7 +29,7 @@ fn acl(graph: &str, modes: &[&str]) -> String {
     nq
 }
 
-fn store() -> PodStore {
+fn small_dataset() -> String {
     let mut nq = format!(
         "<urn:s> <urn:p> \"{SECRET}\" <https://pod.ex/private> .\n\
          <urn:w> <urn:p> \"{SECRET}\" <https://pod.ex/wonly> .\n\
@@ -40,7 +40,11 @@ fn store() -> PodStore {
     nq += &acl("https://pod.ex/out", &["Read", "Write"]);
     nq += &acl("https://pod.ex/pub", &["Read"]);
     nq += &acl("https://pod.ex/wonly", &["Write"]);
-    let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("loads"));
+    nq
+}
+
+fn store() -> PodStore {
+    let mut s = PodStore::new(Graph::load_dataset(&small_dataset(), "nquads").expect("loads"));
     s.materialize_wac().expect("wac");
     s
 }
@@ -179,4 +183,41 @@ fn readable_conditions_still_work() {
         "INSERT { GRAPH <https://pod.ex/out> { <urn:k> <urn:p> 2 } } WHERE { }",
     )
     .expect("an empty condition reads nothing");
+}
+
+/// Updates whose conditions range over every graph the session may read.
+const VARIABLE: &[&str] = &[
+    "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } WHERE { GRAPH ?g { ?s ?p ?o } }",
+    "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> 1 } } WHERE { FILTER EXISTS { GRAPH ?g { ?s ?p ?o } } }",
+    "INSERT { GRAPH <https://pod.ex/out> { ?s ?p ?o } } USING NAMED <https://pod.ex/private> USING NAMED <https://pod.ex/pub> WHERE { GRAPH ?g { ?s ?p ?o } }",
+    "WITH <https://pod.ex/out> INSERT { <urn:f> <urn:p> ?o } WHERE { GRAPH ?g { ?s ?p ?o } }",
+    "INSERT { GRAPH <https://pod.ex/out> { <urn:f> <urn:p> ?n } } WHERE { { SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } } }",
+    // A variable write target: the authorization check evaluates the condition as well.
+    "INSERT { GRAPH ?g { <urn:f> <urn:p> 1 } } WHERE { GRAPH ?g { ?s ?p ?o } FILTER(?g = <https://pod.ex/out>) }",
+];
+
+/// An unreadable graph is never evaluated: a large unreadable graph cannot push a
+/// condition over budget, so the outcome is the same whatever it holds.
+#[test]
+fn unreadable_graphs_are_never_evaluated() {
+    let budget = QueryBudget { max_rows: Some(50), ..QueryBudget::unlimited() };
+    let mut big = String::new();
+    for i in 0..1000 {
+        big += &format!("<urn:s{i}> <urn:p> \"{SECRET}\" <https://pod.ex/private> .\n");
+    }
+    for upd in VARIABLE {
+        let mut small = store();
+        let mut large = PodStore::new(
+            Graph::load_dataset(&(big.clone() + &small_dataset()), "nquads").expect("loads"),
+        );
+        large.materialize_wac().expect("wac");
+        small
+            .update_as_with_budget(&bob(), upd, &budget)
+            .unwrap_or_else(|e| panic!("{upd}: {e}"));
+        large
+            .update_as_with_budget(&bob(), upd, &budget)
+            .unwrap_or_else(|e| panic!("hidden data changed the outcome of {upd}: {e}"));
+        assert_eq!(out(&small), out(&large), "{upd}");
+        assert!(!out(&large).contains(SECRET), "{upd} leaked");
+    }
 }

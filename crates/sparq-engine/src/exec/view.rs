@@ -36,6 +36,13 @@ pub(crate) fn install(v: &DatasetView) -> Guard {
     Guard(ACTIVE.with(|a| std::mem::replace(&mut *a.borrow_mut(), new)))
 }
 
+/// Installs a read view of exactly `named` with an empty default graph, without
+/// borrowing the store (the update path mutates it while the view is installed).
+pub(crate) fn install_reads(named: &Arc<FxHashSet<Term>>) -> Guard {
+    let new = State { named: Some(Arc::clone(named)), default_empty: true, suspended: false };
+    Guard(ACTIVE.with(|a| std::mem::replace(&mut *a.borrow_mut(), new)))
+}
+
 /// Fully suspends the view (named filter AND empty default) for a scope —
 /// used by the entry points once `dataset::build_active` has folded the view
 /// into a dataset-clause ACTIVE graph: the restriction is already applied,

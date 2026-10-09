@@ -63,9 +63,10 @@ use crate::loader::{ACL_SUFFIX, ACR_SUFFIX};
 use crate::{AuthIndex, Mode, Session};
 use oxrdf::{NamedNode, Term, Variable};
 use rustc_hash::FxHashSet;
-use sparq_engine::QueryBudget;
+use sparq_engine::{DatasetView, DefaultGraphMode, QueryBudget};
+use std::sync::Arc;
 use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, GraphTarget, OrderExpression, QueryDataset};
-use spargebra::term::{GraphName, GraphNamePattern, GroundTerm, NamedNodePattern};
+use spargebra::term::{GraphName, GraphNamePattern, NamedNodePattern};
 use spargebra::{GraphUpdateOperation, Query, Update};
 #[cfg(test)]
 use spargebra::SparqlParser;
@@ -349,19 +350,15 @@ fn rescope_dataset(graph: &sparq_core::Graph, u: &QueryDataset) -> QueryDataset 
 /// it. [`Bail::Budget`] means the binding SELECT ran out of the caller's [`QueryBudget`] —
 /// a hard deny, never a fallback (see [`Bail`]).
 ///
-/// # Soundness — why the WHERE runs over the FULL store, not the actor's read view
+/// # Soundness — the binding SELECT sees exactly what the apply sees
 ///
-/// The apply step ([`sparq_engine::update_in_place`]) instantiates the templates by
-/// evaluating this exact WHERE pattern over the **full store**, then writes the resulting
-/// graph slots. To check the right set of graphs we must enumerate the SAME bindings the
-/// engine will — anything narrower (e.g. the actor's authorized read view) could miss a
-/// graph the apply would write and open a hole, which the bead's note explicitly warns
-/// against. Evaluating over the full store is *not* an information leak: we never return
-/// rows to the actor — only an allow/deny verdict, and we deny unless the actor can WRITE
-/// every graph the apply could touch (a graph the actor cannot even read is certainly not
-/// writable, so it forces a deny). The verdict is exactly the one the conservative
-/// wildcard already computed, only tightened to the graphs that genuinely appear as
-/// targets.
+/// The apply step instantiates the templates by evaluating this exact WHERE pattern, then
+/// writes the resulting graph slots. To check the right set of graphs we must enumerate the
+/// SAME bindings the engine will — anything narrower could miss a graph the apply would
+/// write and open a hole. So the SELECT runs under the same `reads` view the apply is given
+/// (the session's read view on [`crate::PodStore`]'s update path, or the full store when
+/// `reads` is `None`). We never return rows to the actor — only an allow/deny verdict, and
+/// we deny unless the actor can WRITE every graph the apply could touch.
 ///
 /// # `USING`/`WITH` re-scope ([OPUS-4.8] sq-cnor)
 ///
@@ -411,6 +408,7 @@ fn rescope_dataset(graph: &sparq_core::Graph, u: &QueryDataset) -> QueryDataset 
 fn resolve_var_graphs(
     graph: &sparq_core::Graph,
     r: &VarGraphResolve,
+    reads: Option<&Arc<FxHashSet<Term>>>,
     budget: &QueryBudget,
 ) -> Result<Vec<(NamedNode, Need)>, Bail> {
     // The strongest need across this operation's slots is the fallback level (and the
@@ -432,7 +430,17 @@ fn resolve_var_graphs(
         },
         base_iri: None,
     };
-    let result = match sparq_engine::query_with_budget(graph, &select.to_string(), budget) {
+    // Under the session's read view when the caller passes one: the apply evaluates the
+    // WHERE under the same view, so both enumerate the same bindings.
+    let run = || sparq_engine::query_with_budget(graph, &select.to_string(), budget);
+    let evaluated = match reads {
+        Some(named) => {
+            let view = DatasetView { base: graph, named: Arc::clone(named), default: DefaultGraphMode::Empty };
+            sparq_engine::with_view(&view, run)
+        }
+        None => run(),
+    };
+    let result = match evaluated {
         Ok(r) => r,
         Err(e) if is_budget_error(&e) => return Err(Bail::Budget(e)),
         Err(_) => return Err(Bail::Wildcard(fallback)), // un-evaluable WHERE → conservative
@@ -519,24 +527,21 @@ pub(crate) struct Permit {
     pub rematerialize: bool,
 }
 
-/// Confine every pattern an update evaluates to the graphs `readable` holds (the session's
-/// read view, sorted), so a `DELETE`/`INSERT … WHERE` reads exactly what a query by the
-/// same session could. A conditional write needs read access to its condition.
+/// Check that every graph an update's patterns name is in `readable` (the session's read
+/// view), so a `DELETE`/`INSERT … WHERE` reads exactly what a query by the same session
+/// could. A conditional write needs read access to its condition. The caller then evaluates
+/// the WHERE, in [`check`] and in the apply, under a view of exactly `readable`, so
+/// `GRAPH ?var` ranges over readable graphs only and an unreadable graph is never scanned.
 ///
 /// - `GRAPH <g>` in a WHERE (or inside its `EXISTS`) requires `g` to be readable, or the
 ///   update is denied.
-/// - `GRAPH ?var` is joined with a `VALUES ?var { … }` of the readable graphs, so the
-///   variable ranges over the read view only, as it does on the query path.
 /// - A default-graph pattern reads the `USING`/`WITH` graphs, each of which must be
 ///   readable. Without `USING`/`WITH` it reads the store's default graph, which no session
 ///   may read (the read path's default graph is empty), so the update is denied.
-///
-/// Rewrites the algebra in place: [`check`] and the apply must both use the result.
-pub(crate) fn scope_reads(upd: &mut Update, readable: &[NamedNode]) -> Result<(), String> {
-    let set: FxHashSet<&NamedNode> = readable.iter().collect();
-    for op in &mut upd.operations {
+pub(crate) fn scope_reads(upd: &Update, readable: &FxHashSet<Term>) -> Result<(), String> {
+    for op in &upd.operations {
         if let GraphUpdateOperation::DeleteInsert { using, pattern, .. } = op {
-            let mut scope = ReadScope { readable, set: &set, default_read: false };
+            let mut scope = ReadScope { readable, default_read: false };
             scope.pattern(pattern, false)?;
             if scope.default_read {
                 let Some(ds) = using else {
@@ -561,22 +566,21 @@ pub(crate) fn evaluates_patterns(upd: &Update) -> bool {
 
 /// The walk behind [`scope_reads`].
 struct ReadScope<'a> {
-    readable: &'a [NamedNode],
-    set: &'a FxHashSet<&'a NamedNode>,
+    readable: &'a FxHashSet<Term>,
     /// A triple or path pattern outside every `GRAPH` block was seen.
     default_read: bool,
 }
 
 impl ReadScope<'_> {
     fn require(&self, g: &NamedNode) -> Result<(), String> {
-        if self.set.contains(g) {
+        if self.readable.contains(&Term::NamedNode(g.clone())) {
             Ok(())
         } else {
             Err(format!("update denied: session lacks read permission on <{}>", g.as_str()))
         }
     }
 
-    fn pattern(&mut self, p: &mut GraphPattern, in_graph: bool) -> Result<(), String> {
+    fn pattern(&mut self, p: &GraphPattern, in_graph: bool) -> Result<(), String> {
         match p {
             GraphPattern::Bgp { patterns } => {
                 self.default_read |= !in_graph && !patterns.is_empty();
@@ -584,20 +588,8 @@ impl ReadScope<'_> {
             GraphPattern::Path { .. } => self.default_read |= !in_graph,
             GraphPattern::Graph { name, inner } => {
                 self.pattern(inner, true)?;
-                match name {
-                    NamedNodePattern::NamedNode(g) => self.require(g)?,
-                    NamedNodePattern::Variable(v) => {
-                        let values = GraphPattern::Values {
-                            variables: vec![v.clone()],
-                            bindings: self
-                                .readable
-                                .iter()
-                                .map(|g| vec![Some(GroundTerm::NamedNode(g.clone()))])
-                                .collect(),
-                        };
-                        let graph = std::mem::replace(p, GraphPattern::Bgp { patterns: Vec::new() });
-                        *p = GraphPattern::Join { left: Box::new(values), right: Box::new(graph) };
-                    }
+                if let NamedNodePattern::NamedNode(g) = name {
+                    self.require(g)?;
                 }
             }
             GraphPattern::Join { left, right }
@@ -648,7 +640,7 @@ impl ReadScope<'_> {
         Ok(())
     }
 
-    fn expression(&mut self, e: &mut Expression, in_graph: bool) -> Result<(), String> {
+    fn expression(&mut self, e: &Expression, in_graph: bool) -> Result<(), String> {
         match e {
             Expression::Exists(p) => self.pattern(p, in_graph)?,
             Expression::Or(a, b)
@@ -709,6 +701,7 @@ pub(crate) fn check(
     session: &Session,
     upd: &Update,
     group_docs: &FxHashSet<String>,
+    reads: Option<&Arc<FxHashSet<Term>>>,
     budget: &QueryBudget,
 ) -> Result<Permit, String> {
     let mut reqs = analyze(upd);
@@ -730,7 +723,7 @@ pub(crate) fn check(
     // (Resolve first, then fold in — `resolve_var_graphs` borrows `reqs.var_graphs`, the
     // folding mutates the rest of `reqs`.)
     let resolutions: Vec<Result<Vec<(NamedNode, Need)>, Bail>> =
-        reqs.var_graphs.iter().map(|r| resolve_var_graphs(graph, r, budget)).collect();
+        reqs.var_graphs.iter().map(|r| resolve_var_graphs(graph, r, reads, budget)).collect();
     for res in resolutions {
         match res {
             Ok(resolved) => {
@@ -912,7 +905,7 @@ mod differential_writeset_tests {
         );
         let mut out = BTreeSet::new();
         for r in &reqs.var_graphs {
-            match resolve_var_graphs(graph, r, &QueryBudget::unlimited()) {
+            match resolve_var_graphs(graph, r, None, &QueryBudget::unlimited()) {
                 Ok(resolved) => {
                     for (n, _need) in resolved {
                         out.insert(n.as_str().to_owned());

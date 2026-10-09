@@ -1090,7 +1090,7 @@ pub fn update_in_place_prepared_with_budget(
     prepared: &PreparedUpdate,
     budget: &QueryBudget,
 ) -> Result<(), String> {
-    update::update_in_place_algebra_with_budget(graph, &prepared.update, budget)
+    update::update_in_place_algebra_with_budget(graph, &prepared.update, None, budget)
 }
 
 /// Executes a SPARQL query string against a graph, materialising the solutions.

@@ -120,6 +120,24 @@ impl Dataset {
         }
     }
 
+    /// [`Dataset::decode`] restricted to the installed view: only visible named graphs, and
+    /// no default graph when the view empties it. Identical to `decode` with no view.
+    fn decode_visible(graph: &Graph) -> Dataset {
+        Dataset {
+            default: if crate::exec::view::default_is_empty() {
+                TripleSet::default()
+            } else {
+                decode_triples(graph)
+            },
+            named: graph
+                .named
+                .iter()
+                .filter(|(name, _)| crate::exec::view::allows(name))
+                .map(|(name, g)| (name.clone(), decode_triples(g)))
+                .collect(),
+        }
+    }
+
     fn graph(&self, name: &Term) -> Option<&TripleSet> {
         self.named.iter().find(|(n, _)| n == name).map(|(_, s)| s)
     }
@@ -558,12 +576,20 @@ pub(crate) fn update_prepared_impl(graph: &Graph, upd: &Update) -> Result<Graph,
 /// the algebra before applying it (a parameterized `PreparedUpdate` under the `params`
 /// feature, or an authorizer that confines the update's patterns), so the text
 /// is never re-parsed and cannot drift from what was checked.
+///
+/// `reads`, when set, is the set of named graphs a `DELETE`/`INSERT … WHERE` may read: the
+/// WHERE (and any `USING`/`WITH` dataset it is evaluated over) runs under a
+/// [`DatasetView`](crate::DatasetView) of exactly those graphs with an empty default graph,
+/// so a graph outside the set is never evaluated, as on the query path. Writes are not
+/// restricted by it; the caller authorizes them.
 pub fn update_in_place_algebra_with_budget(
     graph: &mut Graph,
     upd: &Update,
+    reads: Option<&std::sync::Arc<rustc_hash::FxHashSet<Term>>>,
     budget: &crate::QueryBudget,
 ) -> Result<(), String> {
     require_update_budget(budget)?;
+    let _view = reads.map(crate::exec::view::install_reads);
     crate::exec::budget::with_budget(budget, || {
         apply_update_in_place(graph, upd, None)
     })
@@ -870,7 +896,11 @@ fn apply_update_in_place(
                 // re-scoped active dataset is materialised from the current state.
                 let (dels, inss) = match using {
                     Some(u) => {
-                        let active = Dataset::decode(graph).build_using(u);
+                        // Under a read view only its graphs are decoded, and the re-scoped
+                        // active dataset is already confined, so the view is suspended
+                        // while it is evaluated (as `dataset::build_active` does).
+                        let active = Dataset::decode_visible(graph).build_using(u);
+                        let _folded = crate::exec::view::suspend_all();
                         instantiate_templates(&active, delete, insert, pattern)?
                     }
                     None => instantiate_templates(graph, delete, insert, pattern)?,
