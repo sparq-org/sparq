@@ -24,12 +24,15 @@ use crate::store::Store;
 
 const JSON: &str = "application/json";
 
+/// What the IRI of every intents container starts with.
+pub(crate) const PREFIX: &str = "urn:x-sparq-lws:intents:";
+
 /// The container the intents of the storage `storage` are kept in.
 pub(crate) fn container(storage: &str) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(storage.as_bytes());
     let id: String = digest[..12].iter().map(|b| format!("{b:02x}")).collect();
-    format!("urn:x-sparq-lws:intents:{id}/")
+    format!("{PREFIX}{id}/")
 }
 
 /// A record as it is to be put back: its bytes and the validators [`Store::restore`] keeps.

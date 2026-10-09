@@ -290,13 +290,17 @@ What the server exposes, all discoverable from the storage description
   request states its purpose. A `format` constraint compares media types as RFC 9110 does
   (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
   order). The owner and a resource's creator are always allowed. A grant is in force at
-  boot only when its create was known to land: the record itself is created under an
-  unsettled content type and stored again under its own before it is put in force, and is
-  stored as unsettled again before a revocation removes it (unless the store cannot take that
-  write), so a crash or a store failure with an unknown outcome leaves the grant out of force,
-  and the boot removes it. Each record's own lock is held across its create and its
-  revocation. A revocation whose removal fails takes the grant out of force at once and keeps
-  removing it in the background.
+  boot only when its create was known to land: a create first stores a durable intent to
+  remove the record, creates it under an unsettled content type, stores it again under its
+  own, and puts it in force only once that intent is cleared (read back when clearing fails;
+  while it cannot be read, the create fails and the grant is settled from it later); a
+  revocation first stores a durable intent to remove the record and marks it unsettled. So a
+  crash or a store failure with an unknown outcome leaves the grant out of force, and the next
+  start removes it (before loading grants; a removal that fails is kept at in the background,
+  the grant out of force meanwhile). A revocation that can record neither removes the record
+  at once or, failing that, leaves the grant in force and fails. Each record's own lock is
+  held across its create and its revocation. A revocation whose removal fails takes the grant
+  out of force at once and keeps removing it in the background.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

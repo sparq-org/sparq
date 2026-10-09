@@ -16,7 +16,8 @@ use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
     problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
-    JSON, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX, REQUESTS_PATH,
+    JSON, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
+    REQUESTS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;

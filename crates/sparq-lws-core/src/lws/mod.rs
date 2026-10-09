@@ -496,7 +496,9 @@ impl<S: Store + 'static> LwsState<S> {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
         }
-        let access = access::AccessStore::load(&store, &cfg).await?;
+        // Grants and requests are loaded once changes cut short are put back (a grant's create
+        // or revocation among them).
+        let access = access::AccessStore::empty();
         let state = Self {
             inner: Arc::new(Inner {
                 store: tracked::Tracked::new(store, cfg.storage()),
@@ -511,6 +513,13 @@ impl<S: Store + 'static> LwsState<S> {
         };
         // Changes a process stop cut short are put back before anything is served.
         intents::recover(&state).await?;
+        let (loaded, stuck) =
+            access::AccessStore::load_with(&state.store, &state.cfg, |iri| state.visible(iri))
+                .await?;
+        state.access.replace(loaded);
+        if !stuck.is_empty() {
+            state.set_aside(Unsettled(stuck), ());
+        }
         Ok(state)
     }
 
@@ -1436,11 +1445,14 @@ pub(crate) async fn retype<S: Store>(
 /// - The writes and the registration run in a task of their own, holding the request's share of
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
-/// - With `mark` (a grant: what puts it in force grants access), the record is created under
-///   [`UNSETTLED_TYPE`], stored again under its own type, and only then put in force: a crash
-///   or restart in between, or a second write whose outcome is not known, leaves the record out
-///   of force at the next boot, never in (and one that is not known to have landed is removed,
-///   as a failed create is).
+/// - With `mark` (a grant: what puts it in force grants access), a durable intent to remove
+///   the record is stored first (see the `intents` module), the record is created under
+///   [`UNSETTLED_TYPE`], stored again under its own type, and only once the intent is cleared
+///   put in force: a crash or restart before then leaves the next start removing the record, and
+///   a second write whose outcome is not known leaves it out of force and removed, as a failed
+///   create is. When clearing the intent fails it is read back: cleared after all, the grant is
+///   put in force; still stored, the record is removed; while it cannot be read, the request
+///   fails and a task holding the record's locks settles it the same way later.
 /// - The record's own lock is held from before it is created until it is in force (or
 ///   removed), so a revocation of it waits for that.
 /// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
@@ -1488,6 +1500,36 @@ where
             drop(register);
             return Err(ServerError::Conflict("the record's name is taken".into()));
         };
+        // A grant's create first stores a durable intent to remove it: until the create is
+        // known to have landed whole (the intent is cleared), a stop leaves the next start
+        // removing it, so it is never in force there unless it was here.
+        let intent = match mark {
+            true => {
+                let record = intents::mint(&state.cfg.storage());
+                let plan = Undo::Remove {
+                    iri: iri.clone(),
+                    parent: container.clone(),
+                };
+                if let Err(e) = intents::store(&state, &record, false, &[&plan], &[]).await {
+                    drop(register);
+                    return Err(e);
+                }
+                Some(record)
+            }
+            false => None,
+        };
+        // What removes the record, and then its intent.
+        let removal = || {
+            let mut undo = vec![Undo::Remove {
+                iri: iri.clone(),
+                parent: container.clone(),
+            }];
+            undo.extend(intent.iter().map(|record| Undo::Forget {
+                record: record.clone(),
+                iris: vec![iri.clone()],
+            }));
+            undo
+        };
         let stored_as = if mark { UNSETTLED_TYPE } else { LWS_JSON };
         match state
             .store
@@ -1500,16 +1542,48 @@ where
                     false => Ok(true),
                 };
                 if let Ok(true) = settled {
-                    register();
-                    return Ok(());
+                    let Some(record) = intent.clone() else {
+                        register();
+                        return Ok(());
+                    };
+                    return match landed(&state.store, &record).await {
+                        Some(true) => {
+                            register();
+                            Ok(())
+                        }
+                        Some(false) => {
+                            if let Some(left) = settle(&state.store, removal()).await {
+                                state.set_aside(left, (own, _shared, _held));
+                            }
+                            drop(register);
+                            Err(ServerError::Storage(
+                                "the grant could not be put in force".into(),
+                            ))
+                        }
+                        // Whether the intent was cleared is not known: settled from it once it
+                        // can be read, with the record's locks held, put in force or removed.
+                        None => {
+                            let removal = removal();
+                            let state = state.clone();
+                            tokio::spawn(async move {
+                                let _locks = (own, _shared, _held);
+                                if until_done(|| intents::kept(&state.store, &record)).await {
+                                    register();
+                                    return;
+                                }
+                                for undo in &removal {
+                                    until_done(|| undo.apply(&state.store)).await;
+                                }
+                            });
+                            Err(ServerError::Storage(
+                                "whether the grant is in force is not known yet".into(),
+                            ))
+                        }
+                    };
                 }
                 // Not known to be stored under its own type: never put in force, and removed as
                 // a failed create is (see below). Until it is, the boot removes it.
-                let undo = vec![Undo::Remove {
-                    iri: iri.clone(),
-                    parent: container.clone(),
-                }];
-                if let Some(left) = settle(&state.store, undo).await {
+                if let Some(left) = settle(&state.store, removal()).await {
                     state.set_aside(left, (own, _shared, _held));
                 }
                 drop(register);
@@ -1521,12 +1595,8 @@ where
                 // The create may have committed: it is removed, with the container still held,
                 // so the record is never stored without being in force; tried a few times, then
                 // set aside with the locks ([`LwsState::set_aside`]).
-                if matches!(e, ServerError::Storage(_)) {
-                    let undo = vec![Undo::Remove {
-                        iri: iri.clone(),
-                        parent: container.clone(),
-                    }];
-                    if let Some(left) = settle(&state.store, undo).await {
+                if matches!(e, ServerError::Storage(_)) || intent.is_some() {
+                    if let Some(left) = settle(&state.store, removal()).await {
                         state.set_aside(left, (own, _shared, _held));
                     }
                 }
@@ -1538,6 +1608,30 @@ where
     tokio::spawn(task)
         .await
         .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
+}
+
+/// Clear the intent `record` of a change done whole: `Some(true)` once it is known to be cleared
+/// (the change is kept), `Some(false)` once it is known to be still stored (the change is to be
+/// put back from it), `None` while that cannot be told.
+async fn landed<S: Store>(store: &S, record: &str) -> Option<bool> {
+    let forget = Undo::Forget {
+        record: record.to_string(),
+        iris: Vec::new(),
+    };
+    if settle(store, vec![forget]).await.is_none() {
+        return Some(true);
+    }
+    let mut wait = std::time::Duration::from_millis(50);
+    for attempt in 1..=UNDO_ATTEMPTS {
+        if let Ok(kept) = intents::kept(store, record).await {
+            return Some(kept);
+        }
+        if attempt < UNDO_ATTEMPTS {
+            tokio::time::sleep(wait).await;
+            wait *= 4;
+        }
+    }
+    None
 }
 
 /// The preconditions of a create in a service container (grants, requests),
@@ -2277,7 +2371,8 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
-        /// `read` of this IRI alone fails with a backend error.
+        /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
+        /// fails with a backend error.
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
@@ -2305,11 +2400,15 @@ pub(crate) mod test_store {
         pub hold_next_delete_of: GateOf,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
-        /// The next `write` of this IRI commits, then reports a backend failure, as when a remote
-        /// store's reply is lost after the update landed.
+        /// The next `write` of this IRI (or, one ending in `/`, of a member of that container)
+        /// commits, then reports a backend failure, as when a remote store's reply is lost after
+        /// the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
-        /// `create_in_container` commits, then reports a backend failure, as when a remote
-        /// store's reply is lost after the update landed.
+        /// `meta` fails, as in a backend outage.
+        pub fail_meta: Arc<AtomicBool>,
+        /// `create_in_container` of a resource (not of an intent, see the `intents` module)
+        /// commits, then reports a backend failure, as when a remote store's reply is lost after
+        /// the update landed.
         pub fail_after_create: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
@@ -2351,6 +2450,7 @@ pub(crate) mod test_store {
                 fail_read_of: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
+                fail_meta: Default::default(),
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
@@ -2405,12 +2505,23 @@ pub(crate) mod test_store {
     #[async_trait]
     impl Store for FlakyStore {
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
-            if self.fail_read_of.lock().unwrap().as_deref() == Some(iri) {
+            let failing = self
+                .fail_read_of
+                .lock()
+                .unwrap()
+                .as_deref()
+                .is_some_and(|of| {
+                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
+                });
+            if failing {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             self.inner.read(iri).await
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+            if self.fail_meta.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.meta(iri).await
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
@@ -2462,7 +2573,9 @@ pub(crate) mod test_store {
             let written = self.inner.write(iri, body, ct).await;
             let lost = {
                 let mut slot = self.fail_after_write_of.lock().unwrap();
-                let lost = slot.as_deref() == Some(iri);
+                let lost = slot.as_deref().is_some_and(|of| {
+                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
+                });
                 if lost {
                     *slot = None;
                 }
@@ -2502,7 +2615,9 @@ pub(crate) mod test_store {
                 .inner
                 .create_in_container(container, child, body, ct)
                 .await;
-            if self.fail_after_create.load(Ordering::SeqCst) {
+            if self.fail_after_create.load(Ordering::SeqCst)
+                && !container.starts_with(super::intents::PREFIX)
+            {
                 created?;
                 return Err(ServerError::Storage("the reply was lost".into()));
             }
