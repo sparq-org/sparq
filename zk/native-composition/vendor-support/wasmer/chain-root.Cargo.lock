@@ -2340,7 +2340,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.5"
+version = "0.1.4"
 dependencies = [
  "base16ct",
  "digest",
@@ -2356,7 +2356,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.5"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf 0.3.3",
