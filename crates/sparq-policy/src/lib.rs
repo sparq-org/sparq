@@ -44,9 +44,9 @@ pub use compare::{
     conflict_admissibility, contains, detect_conflicts, Conflict, Containment, Overlap,
 };
 pub use eval::{
-    cmp_datetime, datetime_status, decide, duty_discharged, evaluate, matched_prohibition,
+    cmp_datetime, datetime_status, decide, decide_conditional, duty_discharged, evaluate, matched_prohibition,
     prohibition_status, purpose_status, recipient_status, spatial_status, DateTimeMatch, Decision,
-    Permit, ProhibitionStatus, PurposeMatch, RecipientMatch, Request, SpatialMatch, ODRL_COUNT, ODRL_DATETIME, ODRL_PURPOSE,
+    ConditionalPermit, Permit, ProhibitionStatus, DEFERRED_LEFT_OPERANDS, PurposeMatch, RecipientMatch, Request, SpatialMatch, ODRL_COUNT, ODRL_DATETIME, ODRL_PURPOSE,
     ODRL_RECIPIENT, ODRL_SPATIAL,
 };
 pub use model::{

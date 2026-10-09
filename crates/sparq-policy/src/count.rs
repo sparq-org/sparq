@@ -49,7 +49,7 @@
 //! pretend a multi-process deployment is safe with the in-memory store — that boundary
 //! is documented, and the "atomic across processes" hardening is a deferred bead.
 
-use crate::eval::{evaluate, Decision, Request, ODRL_COUNT};
+use crate::eval::{evaluate, Decision, Permit, Request, ODRL_COUNT};
 use crate::model::{Operator, Policy, Rule, Value};
 use crate::validate::ValidatedPolicy;
 use std::collections::HashMap;
@@ -250,8 +250,10 @@ pub fn count_status(rule: &Rule, request: &Request, store: &dyn UsageCounterStor
 }
 
 /// The result of [`evaluate_and_exercise`]: the base ODRL [`Decision`] plus, when a
-/// count limit applied, what the counter store did. [OPUS-4.8] sq-zi5w.
+/// count limit applied, what the counter store did. [OPUS-4.8] sq-zi5w. Only
+/// [`evaluate_and_exercise`] builds one.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ExerciseDecision {
     /// `true` ⇒ the exercise was granted AND (if count-constrained) one unit was
     /// consumed. `false` ⇒ DENY — and **no** unit was consumed (a denied request never
@@ -266,11 +268,13 @@ pub struct ExerciseDecision {
     /// On a granted count-constrained exercise: the new consumed count (`1..=limit`).
     /// `None` when the grant was not count-constrained or the request was denied.
     pub consumed: Option<u64>,
+    /// The base decision's grant, present exactly when `allow` is true.
+    pub permit: Option<Permit>,
 }
 
 impl ExerciseDecision {
     fn deny(matched: Vec<String>, reasons: Vec<String>) -> ExerciseDecision {
-        ExerciseDecision { allow: false, matched_rules: matched, reasons, consumed: None }
+        ExerciseDecision { allow: false, matched_rules: matched, reasons, consumed: None, permit: None }
     }
 }
 
@@ -384,6 +388,7 @@ fn granted(decision: Decision, consumed: Option<u64>) -> ExerciseDecision {
         matched_rules: decision.matched_rules,
         reasons: Vec::new(),
         consumed,
+        permit: decision.permit,
     }
 }
 

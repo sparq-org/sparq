@@ -572,6 +572,82 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
+/// Proof that [`decide_conditional`] admitted `rule` for a grant the caller re-checks per
+/// session. Everything except who the session is and when it runs is settled: the
+/// conflict strategy, the prohibitions, the rule's action and target, and its duties.
+/// Its fields are private and it has no public constructor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConditionalPermit<'p> {
+    rule: &'p Rule,
+    target: String,
+}
+
+impl<'p> ConditionalPermit<'p> {
+    /// The admitted permission. Its constraints are all [`DEFERRED_LEFT_OPERANDS`].
+    pub fn rule(&self) -> &'p Rule {
+        self.rule
+    }
+    /// The requested target the grant covers.
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+}
+
+/// The left operands a conditional grant leaves to the per-session re-check: the
+/// recipient or assignee identity and the clock.
+pub const DEFERRED_LEFT_OPERANDS: [&str; 3] = [
+    ODRL_RECIPIENT,
+    "http://www.w3.org/ns/odrl/2/assignee",
+    ODRL_DATETIME,
+];
+
+/// The permissions `policy` admits for a grant re-checked per session, in policy order,
+/// or the reasons for denying when nothing can be granted at all.
+///
+/// The same decision as [`decide`] for every part a session does not change: an
+/// unhonourable conflict strategy or a prohibition that is not definitely withdrawn
+/// denies, and a candidate must permit the requested action on the requested target
+/// with every duty discharged ([`duty_discharged`]). What is left open is only the
+/// rule's assignee and its [`DEFERRED_LEFT_OPERANDS`] constraints: a rule with any other
+/// constraint, or a compound one, is not a candidate (the caller decides it once,
+/// through [`decide`]).
+///
+/// # Errors
+///
+/// Why every grant is ruled out: the conflict strategy, a prohibition, or a missing
+/// target.
+pub fn decide_conditional<'p>(
+    policy: &'p ValidatedPolicy,
+    request: &Request,
+) -> Result<Vec<ConditionalPermit<'p>>, Vec<String>> {
+    if let Err(why) = crate::compare::conflict_admissibility(policy) {
+        return Err(vec![why]);
+    }
+    let req_action = Action(request.action.clone());
+    if let Some(p) = policy
+        .prohibitions
+        .iter()
+        .find(|r| !matches!(classify_prohibition(r, request, &req_action), RuleClass::DefinitelyNo))
+    {
+        return Err(vec![format!("prohibition {} may match the request (deny-overrides)", p.id)]);
+    }
+    let Some(target) = request.target.as_deref() else {
+        return Err(vec!["the request names no target".to_owned()]);
+    };
+    Ok(policy
+        .permissions
+        .iter()
+        .filter(|r| {
+            r.action.permits(&req_action)
+                && r.target.as_deref().is_none_or(|t| t == target)
+                && r.duties.iter().all(|d| duty_discharged(d, request))
+                && r.logical_constraints.is_empty()
+                && r.constraints.iter().all(|c| DEFERRED_LEFT_OPERANDS.contains(&c.left.as_str()))
+        })
+        .map(|rule| ConditionalPermit { rule, target: target.to_owned() })
+        .collect())
+}
+
 /// Whether `request` reports `duty` discharged. A duty's own constraints are not
 /// evaluated, so a constrained duty is never provably discharged.
 pub fn duty_discharged(duty: &crate::model::Duty, request: &Request) -> bool {
