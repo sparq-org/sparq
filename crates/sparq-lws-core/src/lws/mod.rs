@@ -2803,4 +2803,63 @@ mod tests {
         assert_eq!(meta_key("http://h/a/b/"), "http://h/a/b/.meta");
         assert_eq!(meta_key("http://h/"), "http://h/.meta");
     }
+
+    /// Review finding: cross-cutting rules were applied per handler, and some routes missed
+    /// them. Every route is walked: each that takes a body refuses a coded one, and each that
+    /// serves a representation answers its preconditions.
+    #[tokio::test]
+    async fn every_route_refuses_codings_and_answers_preconditions() {
+        let (st, _store) = test_store::state(4).await;
+        let bodied = [
+            AS_TOKEN_PATH,
+            SUBSCRIPTIONS_PATH,
+            TYPE_INDEX_PATH,
+            TYPE_SEARCH_PATH,
+            GRANTS_PATH,
+            REQUESTS_PATH,
+            "/",
+            "/x",
+            "/.lws/elsewhere",
+        ];
+        for path in bodied {
+            for method in ["POST", "PUT", "PATCH", "QUERY"] {
+                let m = Method::from_bytes(method.as_bytes()).unwrap();
+                let h = [
+                    ("content-type", "application/json"),
+                    ("content-encoding", "gzip"),
+                ];
+                let r = route(&st, request(m, path, &h, "{}")).await;
+                assert_eq!(
+                    r.status(),
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "{method} {path}"
+                );
+                assert_eq!(r.headers()["accept-encoding"], "identity");
+            }
+        }
+        for path in [
+            "/",
+            TYPE_INDEX_PATH,
+            GRANTS_PATH,
+            REQUESTS_PATH,
+            SUBSCRIPTIONS_PATH,
+        ] {
+            let r = route(&st, request(Method::GET, path, &[], "")).await;
+            assert_eq!(r.status(), StatusCode::OK, "GET {path}");
+            let tag = r.headers()["etag"].to_str().unwrap().to_string();
+            for (h, want) in [
+                ("if-none-match", StatusCode::NOT_MODIFIED),
+                ("if-match", StatusCode::OK),
+            ] {
+                let r = route(&st, request(Method::GET, path, &[(h, &tag)], "")).await;
+                assert_eq!(r.status(), want, "GET {path} {h}");
+            }
+            let r = route(
+                &st,
+                request(Method::GET, path, &[("if-match", "\"other\"")], ""),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "GET {path}");
+        }
+    }
 }
