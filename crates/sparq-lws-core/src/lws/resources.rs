@@ -220,21 +220,20 @@ fn quoted(tag: &str) -> String {
 }
 
 /// An `If-Match` / `If-None-Match` field value: `*`, or entity tags as `(weak, opaque-tag)`, the
-/// opaque tag with its quotes.
+/// opaque tag with its quotes, as bytes (it may hold `obs-text`).
 enum TagList {
     Any,
-    Tags(Vec<(bool, String)>),
+    Tags(Vec<(bool, Vec<u8>)>),
 }
 
 impl TagList {
     /// Parse a field value by the RFC 9110 grammar (`"*" / #entity-tag`, section 8.8.3): a comma
     /// inside a quoted tag belongs to the tag, and `*` is the whole value or not a wildcard.
     /// Anything else is unreadable.
-    fn parse(v: &str) -> Result<Self, ()> {
-        if v.trim() == "*" {
+    fn parse(b: &[u8]) -> Result<Self, ()> {
+        if b.trim_ascii() == b"*" {
             return Ok(Self::Any);
         }
-        let b = v.as_bytes();
         let mut i = 0;
         let mut tags = Vec::new();
         loop {
@@ -263,7 +262,7 @@ impl TagList {
                 return Err(());
             }
             i += 1;
-            tags.push((weak, v[start..i].to_string()));
+            tags.push((weak, b[start..i].to_vec()));
             while i < b.len() && matches!(b[i], b' ' | b'\t') {
                 i += 1;
             }
@@ -286,14 +285,14 @@ impl TagList {
             Self::Any => true,
             Self::Tags(tags) => tags
                 .iter()
-                .any(|(w, t)| t == opaque && (weak || (!w && !etag_weak))),
+                .any(|(w, t)| t == opaque.as_bytes() && (weak || (!w && !etag_weak))),
         }
     }
 }
 
 #[cfg(test)]
 fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
-    TagList::parse(header).is_ok_and(|l| l.matches(etag, weak))
+    TagList::parse(header.as_bytes()).is_ok_and(|l| l.matches(etag, weak))
 }
 
 /// A body (of POST, PUT, PATCH or QUERY) sent with a content coding other than `identity` is refused (`415`, with
@@ -348,7 +347,7 @@ pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
 
 /// Preconditions are read once, here, from every field line: a list header (`If-Match`,
 /// `If-None-Match`) sent as several lines is all of them, not the first. An entity-tag list that
-/// cannot be read (not visible ASCII, or not the RFC 9110 grammar) fails the request rather than
+/// cannot be read (not the RFC 9110 grammar; obs-text is allowed) fails the request rather than
 /// being skipped; a date that is not one valid HTTP-date (unparsable, or sent twice) is ignored,
 /// as RFC 9110 sections 13.1.3 and 13.1.4 require.
 fn evaluate(
@@ -399,15 +398,12 @@ struct Preconditions {
 impl Preconditions {
     fn read(headers: &HeaderMap) -> Result<Self, ()> {
         let list = |n: header::HeaderName| -> Result<Option<TagList>, ()> {
-            let lines = headers
-                .get_all(n)
-                .iter()
-                .map(|v| v.to_str().map_err(drop))
-                .collect::<Result<Vec<_>, ()>>()?;
+            // Read as bytes: an opaque tag may hold obs-text (RFC 9110 section 8.8.3).
+            let lines: Vec<&[u8]> = headers.get_all(n).iter().map(|v| v.as_bytes()).collect();
             if lines.is_empty() {
                 return Ok(None);
             }
-            TagList::parse(&lines.join(", ")).map(Some)
+            TagList::parse(&lines.join(&b", "[..])).map(Some)
         };
         let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
             let mut lines = headers.get_all(n).iter();
@@ -1210,7 +1206,14 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
         let Some(rel) = params.get("rel") else {
             continue;
         };
-        let resolved = resolve_against(uri, &target);
+        // Every target is a URI reference (RFC 8288 section 3), resolved by the one IRI parser;
+        // one that is not refuses the request before anything is written.
+        let Some(resolved) = resolve_reference(uri, &target) else {
+            return Err(problem(
+                StatusCode::BAD_REQUEST,
+                Some("a Link target is not a URI reference"),
+            ));
+        };
         let kept = resolved.len().max(target.len());
         bytes = bytes.saturating_add(rel.split_whitespace().count().saturating_mul(kept));
         if bytes > super::MAX_DECLARED_LINK_BYTES {
@@ -1236,6 +1239,18 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
         }
     }
     Ok((types, links))
+}
+
+/// `target` resolved against `base` by the RFC 3987 parser, or `None` when it is not a URI
+/// reference.
+fn resolve_reference(base: &str, target: &str) -> Option<String> {
+    Some(
+        oxiri::Iri::parse(base)
+            .ok()?
+            .resolve(target)
+            .ok()?
+            .into_inner(),
+    )
 }
 
 /// `target` resolved against `base`, or as it is when it cannot be.
@@ -1430,7 +1445,7 @@ async fn create<S: Store + 'static>(
     // The new member's metadata is written before its content, replacing whatever an earlier
     // resource at the IRI left behind (a delete whose metadata removal failed): content never
     // exists under metadata that is not its own. When the content cannot be created the metadata
-    // is removed again; one left behind describes nothing, and the next create replaces it.
+    // is removed again, with the locks held until it is.
     //
     // The writes run in a task of their own that holds the locks, so a client that goes away
     // cannot release them while a write is still pending (with a remote store, a create sent
@@ -1459,18 +1474,21 @@ async fn create<S: Store + 'static>(
                 Ok(m) => m,
                 Err(e) => {
                     // A refusal created nothing, and the metadata goes. A backend failure may
-                    // follow a create that committed (a remote store's lost reply): the metadata
-                    // goes only once the content is known to be gone too, so committed content is
-                    // never left without its creator.
-                    let gone = !matches!(e, ServerError::Storage(_))
-                        || super::delete_record(&state, &child, &parent).await.is_ok();
-                    if gone {
-                        let _ = state.store.delete(&meta_key(&child), None).await;
-                    } else {
-                        // The member may exist: the container's listing may have changed.
-                        drop(locks);
-                        touch_container(&state, &parent).await;
+                    // follow a create that committed (a remote store's lost reply): the member is
+                    // removed first, so committed content is never left without its creator.
+                    // Both are tried until the store takes them, with the locks held, so no
+                    // request sees the member or its metadata in between.
+                    if matches!(e, ServerError::Storage(_)) {
+                        super::until_done(|| super::delete_record(&state, &child, &parent)).await;
                     }
+                    super::until_done(|| async {
+                        match state.store.delete(&meta_key(&child), None).await {
+                            Ok(()) | Err(ServerError::NotFound) => Ok(()),
+                            Err(e) => Err(e),
+                        }
+                    })
+                    .await;
+                    drop(locks);
                     return Err(e);
                 }
             };
@@ -1749,8 +1767,8 @@ async fn write_with_meta<S: Store + 'static>(
                 (Ok(written), false)
             }
             Err(e) => {
-                let undone = journal.rollback().await.is_ok();
-                (Err(e), undone)
+                journal.rollback().await;
+                (Err(e), true)
             }
         }
     };
@@ -2814,20 +2832,18 @@ async fn lock_subtree<S: Store + 'static>(
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
 /// metadata (which says who may act on it, so it goes only once the resource has), through one
 /// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
-/// removal before it is put back. Returns which of `doomed` are gone (all of them, or none
-/// unless putting back failed too, when each removed before the failure is looked up again: what
-/// was put back before the rollback stopped is not gone), and the outcome. A subtree too large to
-/// put back is refused (409) the same way.
+/// removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)), with
+/// the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), and the
+/// outcome. A subtree too large to put back is refused (409) before anything is removed.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
 ) -> (Vec<String>, Result<(), ServerError>) {
-    remove_in(state, state.journal(), doomed).await
+    remove_in(state.journal(), doomed).await
 }
 
 /// [`remove`], recorded in `journal`.
 async fn remove_in<S: Store + 'static>(
-    state: &LwsState<S>,
     mut journal: super::Journal<'_, S>,
     doomed: &[(String, Option<String>)],
 ) -> (Vec<String>, Result<(), ServerError>) {
@@ -2843,7 +2859,7 @@ async fn remove_in<S: Store + 'static>(
         }
     }
     let mut failed = None;
-    for (i, (node, parent)) in doomed.iter().enumerate() {
+    for (node, parent) in doomed {
         // The record and its parent's membership edge go in one step, data resources included:
         // removed one after the other, a failure in between would leave a live resource its
         // container no longer lists, which a retried recursive delete would not find.
@@ -2855,7 +2871,7 @@ async fn remove_in<S: Store + 'static>(
             Err(e) => Err(e),
         };
         if let Err(e) = removed {
-            failed = Some((i, e));
+            failed = Some(e);
             break;
         }
     }
@@ -2864,20 +2880,10 @@ async fn remove_in<S: Store + 'static>(
             journal.commit();
             (doomed.iter().map(|(n, _)| n.clone()).collect(), Ok(()))
         }
-        Some((i, e)) => match journal.rollback().await {
-            Ok(()) => (Vec::new(), Err(e)),
-            // Some may be gone: each one the steps reached is looked up again. One whose lookup
-            // fails too counts as gone, so its container is not left looking unchanged.
-            Err(_) => {
-                let mut gone = Vec::new();
-                for (node, _) in &doomed[..=i] {
-                    if !matches!(state.store.exists(node).await, Ok(true)) {
-                        gone.push(node.clone());
-                    }
-                }
-                (gone, Err(e))
-            }
-        },
+        Some(e) => {
+            journal.rollback().await;
+            (Vec::new(), Err(e))
+        }
     }
 }
 
@@ -3507,7 +3513,11 @@ mod tests {
         assert!(!etag_listed("a", "a", false));
         // An empty list matches nothing, and is not unreadable.
         assert!(!etag_listed("", "\"x\"", true));
-        assert!(TagList::parse(" , ").is_ok());
+        assert!(TagList::parse(b" , ").is_ok());
+        // obs-text is allowed inside an opaque tag.
+        let mut obs = b"\"\xe9\", ".to_vec();
+        obs.extend_from_slice(b"\"x\"");
+        assert!(TagList::parse(&obs).is_ok_and(|l| l.matches("\"x\"", false)));
     }
 
     // ---- request-level tests over an in-memory store ----
@@ -5850,7 +5860,7 @@ mod tests {
     /// the content stayed, without its creator, types and links. The metadata now goes only once
     /// the content is known to be gone.
     #[tokio::test]
-    async fn a_create_whose_outcome_is_unknown_keeps_its_creator() {
+    async fn a_create_whose_outcome_is_unknown_is_removed_whole() {
         use super::super::test_store::{request as req, FlakyStore};
         use std::sync::atomic::Ordering;
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
@@ -5866,19 +5876,25 @@ mod tests {
                 "x",
             )
         };
-        // The content lands, the reply is lost, and the content cannot be removed: the creator
-        // stays recorded.
+        // The content lands, the reply is lost, and the content cannot be removed yet: the create
+        // keeps its locks and tries again until it can, so the content never stands without its
+        // creator, then goes whole.
         let kept = st.cfg.absolute("/kept.txt");
         store.fail_after_create.store(true, Ordering::SeqCst);
         *store.fail_delete_of.lock().unwrap() = Some(kept.clone());
-        let r = create(&st, &post("kept.txt"), &owner, &st.cfg.storage()).await;
-        assert!(r.status().is_server_error(), "{}", r.status());
-        *store.fail_delete_of.lock().unwrap() = None;
-        assert!(st.store.exists(&kept).await.unwrap());
-        assert_eq!(
-            st.resource_meta(&kept).await.unwrap().creator,
-            owner.subject
+        let pending = tokio::spawn({
+            let (st, owner, req) = (st.clone(), owner.clone(), post("kept.txt"));
+            async move { create(&st, &req, &owner, &st.cfg.storage()).await.status() }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(
+            !pending.is_finished(),
+            "the create gave up with its content stored"
         );
+        *store.fail_delete_of.lock().unwrap() = None;
+        assert!(pending.await.unwrap().is_server_error());
+        assert!(!st.store.exists(&kept).await.unwrap());
+        assert!(stored_meta(&st, &kept).await.unwrap().is_none());
         // When the content can be removed, it goes, and its metadata with it.
         let gone = st.cfg.absolute("/gone.txt");
         let r = create(&st, &post("gone.txt"), &owner, &st.cfg.storage()).await;
@@ -6363,11 +6379,11 @@ mod tests {
         );
     }
 
-    /// Review finding: when putting a failed delete back failed too, the number of removals
-    /// attempted was reported as gone, so a resource put back before the rollback stopped was
-    /// counted (and announced) as deleted. Each one is looked up again.
+    /// Review finding: a rollback that failed part way gave up, and what it had not put back
+    /// was lost or later put back over newer writes. A step that fails is now tried again, with
+    /// the subtree's locks held, until the delete is whole undone, validators included.
     #[tokio::test]
-    async fn a_failed_rollback_reports_only_what_is_gone() {
+    async fn a_failed_rollback_is_retried_until_undone() {
         use super::super::test_store::{request as req, state};
         let (st, store) = state(100).await;
         let root = st.cfg.storage();
@@ -6380,36 +6396,27 @@ mod tests {
             .iter()
             .map(|n| (format!("{root}{n}"), Some(root.clone())))
             .collect();
+        let mut before = Vec::new();
+        for (node, _) in &doomed {
+            before.push(st.store.meta(node).await.unwrap().unwrap());
+        }
         // a and b go (two steps each), c fails; putting back restores b's metadata and b, then
-        // fails on a's metadata.
-        let before = st.store.meta(&doomed[0].0).await.unwrap().unwrap();
+        // fails once on a's metadata, which is tried again.
         *store.fail_delete_of.lock().unwrap() = Some(doomed[2].0.clone());
         *store.fail_step.lock().unwrap() = Some(7);
         let (gone, outcome) = remove(&st, &doomed).await;
         *store.fail_delete_of.lock().unwrap() = None;
         assert!(
             store.fail_step.lock().unwrap().take().is_none(),
-            "the rollback failed"
+            "the rollback never failed"
         );
         assert!(outcome.is_err());
-        assert_eq!(gone, vec![doomed[0].0.clone()]);
-        assert!(st.store.exists(&doomed[1].0).await.unwrap());
-        // What could not be put back then is not dropped: it comes back, as it was, once the
-        // store lets it.
-        let mut back = None;
-        for _ in 0..100 {
-            if let Ok(Some(m)) = st.store.meta(&doomed[0].0).await {
-                back = Some(m);
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(gone.is_empty());
+        for ((node, _), was) in doomed.iter().zip(before) {
+            let now = st.store.meta(node).await.unwrap().expect("put back");
+            assert_eq!((now.etag, now.last_modified), (was.etag, was.last_modified));
+            assert!(st.store.exists(&meta_key(node)).await.unwrap());
         }
-        let back = back.expect("the removed member was never put back");
-        assert_eq!(
-            (back.etag, back.last_modified),
-            (before.etag, before.last_modified)
-        );
-        assert!(st.store.exists(&meta_key(&doomed[0].0)).await.unwrap());
     }
 
     /// Review finding: a recursive delete found out it was too large to undo only after removing
@@ -6431,7 +6438,7 @@ mod tests {
         journal.limit = 2 * (doomed[0].0.len() + "x".len() + meta_key(&doomed[0].0).len()) + 1;
         // Every store step is counted down: none may be taken.
         *store.fail_step.lock().unwrap() = Some(1000);
-        let (gone, outcome) = remove_in(&st, journal, &doomed).await;
+        let (gone, outcome) = remove_in(journal, &doomed).await;
         assert!(matches!(outcome, Err(ServerError::Conflict(_))));
         assert!(gone.is_empty());
         assert_eq!(*store.fail_step.lock().unwrap(), Some(1000));
