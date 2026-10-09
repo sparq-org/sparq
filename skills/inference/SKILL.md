@@ -665,7 +665,7 @@ use sparq_reason::MaterializedGraph;
 let g = MaterializedGraph::new(&mut dict, &base);
 if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
     println!("{}", tree.to_text());   // indented, root first; rule ids like cax-sco / rdfs9 / prp-trp
-    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"rule":..,"premises":[..]}]}
+    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":..,"premises":[..]}]} — "key" = lossless identity (whyN3 wire field too)
 }
 ```
 

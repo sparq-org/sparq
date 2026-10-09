@@ -190,6 +190,16 @@ node's lossless identity key (`ProofNode::key`, not its display strings), so
 lineage from overlapping proofs **stitches** into one DAG (the same shared fact
 names the same entity) and two different facts never share an entity.
 
+**N3 identity migration (GH #6701).** For N3 proofs the key is a structural
+encoding of every term field (`n3::serialize::statement_keys`), the same from
+both N3 entry points (`MaterializedN3Graph::why` and the id-level
+`explain::n3_proof_tree`). Earlier releases hashed N3 display strings, so **N3
+entity/activity IRIs changed**: N3 lineage persisted before this change does not
+stitch with regenerated lineage. Regenerate it, or keep the old graph separate.
+RDFS / OWL-RL IRIs are unchanged (their key is still the conclusion string).
+`sparq-prov` has no identity-scheme version marker; the IRI shape
+(`…fact:<hash>` / `…rule:<hash>`) is the same, only N3 hash inputs differ.
+
 ## Scope — covered vs deferred
 
 | Derivation path | Status |

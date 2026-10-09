@@ -227,7 +227,13 @@ impl std::error::Error for NotRepresentable {}
 ///   [`serialize_facts`], [`write_rule`], `write_document`) plan with [`Unit::exact`]. Their
 ///   output parses back to the very same terms (a backward-chaining copy `__bw<n>___ua.<iri>`
 ///   of a universal reads back as the universal it copies, the one normalisation), or they
-///   return [`NotRepresentable`]. There is no fallback spelling.
+///   return [`NotRepresentable`]. There is no fallback spelling. Exactness is CHECKED, not
+///   predicted: after the static checks below (fast pre-filters with precise messages),
+///   each exact writer re-parses its own output and compares it structurally
+///   ([`verify_statement`], [`verify_rule`]), so any normalisation the parser applies — a
+///   lowercased language tag, `rdf:nil` read as `()`, a `log:implies` statement read as a
+///   rule, an IRI the grammar rejects — is a refusal too. The cost is one parse of the
+///   written text per statement or rule.
 /// * The **display** writers ([`display_lossy`], [`statement_display_lossy`]) plan with
 ///   [`Unit::lossy`] and always produce text, for diagnostics and proof-node strings a person
 ///   reads. Their output is not fed back to a parser anywhere in the crate.
@@ -523,14 +529,69 @@ pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
     f.clone().map(|t| term_key(&t))
 }
 
+/// `t` as an exact rendering of it re-parses: a backward-chaining copy of a universal
+/// (`__bw<n>___ua.<iri>`) reads back as the universal itself — the one normalisation the
+/// exact writers document.
+fn as_reparsed(t: &Term) -> Term {
+    match t {
+        Term::Var(v) => match universal_iri(v) {
+            Some(iri) => Term::Var(format!("{UNIVERSAL_VAR}{iri}")),
+            None => t.clone(),
+        },
+        Term::List(ms) => Term::List(ms.iter().map(as_reparsed).collect()),
+        Term::Triple(tr) => Term::Triple(Box::new([as_reparsed(&tr[0]), as_reparsed(&tr[1]), as_reparsed(&tr[2])])),
+        Term::Formula(ts) => Term::Formula(ts.iter().map(|r| r.clone().map(|m| as_reparsed(&m))).collect()),
+        _ => t.clone(),
+    }
+}
+
+/// The exactness CHECK every exact writer runs on its own output: parse `text` back with the
+/// crate's N3 parser and require exactly the statement `want` (after [`as_reparsed`]). This
+/// is what makes "exact or refused" hold by construction rather than by enumerating the
+/// parser's normalisations (a lowercased language tag, `rdf:nil` read as `()`, a
+/// formula-`log:implies`-formula statement read as a rule, an IRI the `IRIREF` grammar
+/// rejects, …): whatever the parser would change, the writer refuses, naming the term.
+fn verify_statement(text: &str, want: &[Term; 3]) -> Result<(), NotRepresentable> {
+    let want = want.clone().map(|t| as_reparsed(&t));
+    let p = super::parser::parse(text)
+        .map_err(|e| NotRepresentable(format!("its N3 form does not re-parse ({e})")))?;
+    if !p.rules.is_empty() || !p.backward_rules.is_empty() {
+        return Err(NotRepresentable(
+            "its N3 form re-parses as a RULE, not as the statement it is (a formula related by \
+             log:implies / log:isImpliedBy is a rule in N3 text)"
+                .into(),
+        ));
+    }
+    match p.facts.as_slice() {
+        [got] if *got == want => Ok(()),
+        [got] => {
+            let k = (0..3).find(|&k| got[k] != want[k]).unwrap_or(0);
+            Err(NotRepresentable(format!(
+                "the term {} re-parses as {} (the N3 parser normalizes it)",
+                shown(&want[k], &got[k]),
+                shown(&got[k], &want[k])
+            )))
+        }
+        _ => Err(NotRepresentable(format!("its N3 form re-parses as {} statements", p.facts.len()))),
+    }
+}
+
+/// The subject/predicate a lone term is checked under ([`write_term`]).
+const CHECK_IRI: &str = "urn:sparq:serialize:check";
+
 /// Write one N3 term in its surface syntax: IRIs `<…>`, literals `"lex"` (+ `@lang` /
 /// `^^<dt>`, `xsd:string` left implicit), blanks `_:l`, variables `?v`, lists `( … )`,
 /// formulae `{ … }`, RDF-star quoted triples `<< s p o >>`.
 ///
-/// The term is its own unit. Exact: the text parses back to `t`, or this returns
-/// [`NotRepresentable`] and writes nothing (see [`Unit`]).
+/// The term is its own unit. Exact: the text parses back to `t` — the writer re-parses its
+/// own output to check — or this returns [`NotRepresentable`] and writes nothing (see
+/// [`Unit`]). The check costs one parse of the written text.
 pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
-    Unit::exact(&[t])?.term(t, out);
+    let mut s = String::new();
+    Unit::exact(&[t])?.term(t, &mut s);
+    let k = Term::Iri(CHECK_IRI.into());
+    verify_statement(&format!("<{CHECK_IRI}> <{CHECK_IRI}> {s} ."), &[k.clone(), k, t.clone()])?;
+    out.push_str(&s);
     Ok(())
 }
 
@@ -545,9 +606,13 @@ pub fn display_lossy(t: &Term) -> String {
 }
 
 /// Write one statement as `s p o .` plus a newline — its own unit. Exact, like
-/// [`write_term`]: on [`NotRepresentable`] nothing is written.
+/// [`write_term`] (re-parsed and compared before it is written): on [`NotRepresentable`]
+/// nothing is written.
 pub fn write_statement(f: &[Term; 3], out: &mut String) -> Result<(), NotRepresentable> {
-    Unit::exact(&[&f[0], &f[1], &f[2]])?.statement(f, out);
+    let mut s = String::new();
+    Unit::exact(&[&f[0], &f[1], &f[2]])?.statement(f, &mut s);
+    verify_statement(&s, f)?;
+    out.push_str(&s);
     Ok(())
 }
 
@@ -640,19 +705,55 @@ pub enum RuleKind {
 /// newline, rendering its variables per `vars`.
 ///
 /// The premise-blank rewrite the parser applies is undone first — see the module docs — so
-/// a `RuleVars::N3` round trip yields the same rule. Exact, like [`write_term`]: a rule
-/// whose universal no `@forAll` can scope (a plain mention of its IRI at or after its first
-/// use in some formula of the rule) is [`NotRepresentable`], and nothing is written.
+/// a `RuleVars::N3` round trip yields the same rule. Exact, like [`write_term`] (the
+/// written rule is re-parsed and compared before it is written): a rule that would change
+/// on re-parse — e.g. one whose universal no `@forAll` can scope (a plain mention of its
+/// IRI at or after its first use in some formula of the rule) — is [`NotRepresentable`],
+/// and nothing is written.
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) -> Result<(), NotRepresentable> {
     let sides = rule_sides(r, kind, vars);
-    let unit = Unit::exact(&[&sides[0], &sides[1]]).map_err(|e| {
+    let refuse = |e: NotRepresentable| {
         let lossy = Unit::lossy(&[&sides[0], &sides[1]]);
         let mut shown = String::new();
         write_rule_sides(&lossy, &sides, kind, &mut shown);
         NotRepresentable(format!("cannot write the rule `{}` as N3 that re-parses to it: {e}", shown.trim_end()))
-    })?;
-    write_rule_sides(&unit, &sides, kind, out);
+    };
+    let unit = Unit::exact(&[&sides[0], &sides[1]]).map_err(refuse)?;
+    let mut s = String::new();
+    write_rule_sides(&unit, &sides, kind, &mut s);
+    verify_rule(&s, &sides, kind).map_err(refuse)?;
+    out.push_str(&s);
     Ok(())
+}
+
+/// [`verify_statement`] for a rule: `text` must re-parse as exactly one rule of `kind`
+/// whose sides, put through the same premise-blank decoding ([`rule_sides`] with
+/// [`RuleVars::N3`]), equal `want`. The parser's rule index inside a premise-blank name
+/// (`__bn.<i>.x`) is the one difference this allows — it is decoded away on both sides.
+fn verify_rule(text: &str, want: &[Term; 2], kind: RuleKind) -> Result<(), NotRepresentable> {
+    let p = super::parser::parse(text)
+        .map_err(|e| NotRepresentable(format!("its N3 form does not re-parse ({e})")))?;
+    let got = match (kind, p.facts.is_empty(), p.rules.as_slice(), p.backward_rules.as_slice()) {
+        (RuleKind::Forward, true, [r], []) | (RuleKind::Backward, true, [], [r]) => rule_sides(r, kind, RuleVars::N3),
+        _ => return Err(NotRepresentable("its N3 form re-parses as something other than one rule".into())),
+    };
+    let want = want.clone().map(|t| as_reparsed(&t));
+    match (0..2).find(|&k| got[k] != want[k]) {
+        None => Ok(()),
+        Some(k) => Err(NotRepresentable(format!(
+            "its {} re-parses as `{}` (the N3 parser normalizes a term in it)",
+            if k == 0 { "left side" } else { "right side" },
+            shown(&got[k], &want[k])
+        ))),
+    }
+}
+
+/// `t` for a refusal message: its display form, plus its structural key when that display
+/// form is the same as `other`'s (they differ in a field the surface syntax does not show,
+/// such as a language-tagged literal's datatype).
+fn shown(t: &Term, other: &Term) -> String {
+    let d = display_lossy(t);
+    if d == display_lossy(other) { format!("`{d}` ({})", term_key(t)) } else { format!("`{d}`") }
 }
 
 /// A rule's two sides as formula TERMS in written order (left of the arrow first), each
@@ -781,6 +882,8 @@ mod tests {
         s
     }
 
+    const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
     #[test]
     fn writes_each_term_kind() {
         assert_eq!(rendered(&Term::Iri("http://ex/a".into())), "<http://ex/a>");
@@ -791,10 +894,24 @@ mod tests {
             rendered(&Term::Lit("1".into(), "http://ex/d".into(), None)),
             "\"1\"^^<http://ex/d>"
         );
-        let tagged = Term::Lit("hi".into(), XSD_STRING.into(), Some("en".into()));
+        let tagged = Term::Lit("hi".into(), LANG_STRING.into(), Some("en".into()));
         assert_eq!(rendered(&tagged), "\"hi\"@en");
+        // Shapes the parser would normalize are refused, not written (GH #6701 round 8).
+        let mut out = String::new();
+        for odd in [
+            Term::Lit("hi".into(), XSD_STRING.into(), Some("en".into())), // tag + non-langString
+            Term::Lit("hi".into(), LANG_STRING.into(), Some("EN".into())), // uppercase tag
+            Term::Lit("hi".into(), LANG_STRING.into(), Some("e n".into())), // invalid tag
+            Term::Iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#nil".into()), // reads as `()`
+            Term::Iri("http://ex/a b".into()), // the IRIREF grammar rejects it
+        ] {
+            assert!(write_term(&odd, &mut out).is_err(), "{odd:?}");
+        }
+        assert_eq!(out, "");
         assert_eq!(rendered(&Term::List(vec![Term::Var("x".into())])), "( ?x )");
-        assert_eq!(rendered(&Term::Formula(vec![])), "{ }");
+        // The empty formula IS the literal `true` to the parser, so it has no exact form.
+        assert!(write_term(&Term::Formula(vec![]), &mut String::new()).is_err());
+        assert_eq!(display_lossy(&Term::Formula(vec![])), "{ }");
     }
 
     #[test]

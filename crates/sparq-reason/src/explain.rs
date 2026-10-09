@@ -89,7 +89,8 @@ impl ProofTree {
     }
 
     /// JSON rendering (hand-built, house style — no serde):
-    /// `{"root":R,"nodes":[{"id":0,"conclusion":[s,p,o],"rule":"…","premises":[…]},…]}`.
+    /// `{"root":R,"nodes":[{"id":0,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":"…","premises":[…]},…]}`
+    /// — `conclusion` for reading, `key` the node's lossless identity ([`ProofNode::key`]).
     pub fn to_json(&self) -> String {
         let mut out = String::with_capacity(self.nodes.len() * 96);
         out.push_str("{\"root\":");
@@ -103,6 +104,15 @@ impl ProofTree {
             out.push_str(&i.to_string());
             out.push_str(",\"conclusion\":[");
             for (k, t) in n.conclusion.iter().enumerate() {
+                if k > 0 {
+                    out.push(',');
+                }
+                out.push('"');
+                json_escape_into(t, &mut out);
+                out.push('"');
+            }
+            out.push_str("],\"key\":[");
+            for (k, t) in n.key.iter().enumerate() {
                 if k > 0 {
                     out.push(',');
                 }
@@ -234,6 +244,34 @@ pub(crate) fn id_triple_strings(
     [id_term_string(dict, t[0]), id_term_string(dict, t[1]), id_term_string(dict, t[2])]
 }
 
+/// An RDF term from the dictionary as the N3 term it stands for — the inverse of the N3
+/// closure's interning for every ground shape it admits (IRI, blank, literal, quoted triple).
+fn n3_term_of(t: &oxrdf::Term) -> crate::n3::Term {
+    use crate::n3::Term as N;
+    match t {
+        oxrdf::Term::NamedNode(n) => N::Iri(n.as_str().to_string()),
+        oxrdf::Term::BlankNode(b) => N::Blank(b.as_str().to_string()),
+        oxrdf::Term::Literal(l) => N::Lit(
+            l.value().to_string(),
+            l.datatype().as_str().to_string(),
+            l.language().map(str::to_string),
+        ),
+        oxrdf::Term::Triple(tr) => N::Triple(Box::new([
+            n3_term_of(&tr.subject.clone().into()),
+            N::Iri(tr.predicate.as_str().to_string()),
+            n3_term_of(&tr.object),
+        ])),
+    }
+}
+
+/// The N3 identity key ([`ProofNode::key`]) of an id triple from the id-level N3 closure:
+/// the SAME structural key `MaterializedN3Graph::why` gives that fact
+/// (`n3::serialize::statement_keys`), so both N3 proof entry points address one fact —
+/// and one provenance entity — alike.
+fn n3_id_triple_keys(dict: &sparq_core::dict::Dict, t: [sparq_core::dict::Id; 3]) -> [String; 3] {
+    crate::n3::serialize::statement_keys(&t.map(|id| n3_term_of(&dict.term(id))))
+}
+
 /// Sorted copy of a slice (the provers sort every choice point for determinism).
 pub(crate) fn sorted<T: Ord + Copy>(xs: &[T]) -> Vec<T> {
     let mut v = xs.to_vec();
@@ -317,7 +355,12 @@ pub fn n3_proof_tree(
             }
             let r = (|| {
                 let Some(&step) = self.step_map.get(&t) else {
-                    let ix = self.b.push(id_triple_strings(self.dict, t), "asserted", vec![])?;
+                    let ix = self.b.push_keyed(
+                        id_triple_strings(self.dict, t),
+                        n3_id_triple_keys(self.dict, t),
+                        "asserted",
+                        vec![],
+                    )?;
                     self.memo.insert(t, ix);
                     return Some(ix);
                 };
@@ -325,8 +368,9 @@ pub fn n3_proof_tree(
                 for &p in &step.premises {
                     prem.push(self.prove(p, depth + 1)?);
                 }
-                let ix = self.b.push(
+                let ix = self.b.push_keyed(
                     id_triple_strings(self.dict, t),
+                    n3_id_triple_keys(self.dict, t),
                     &format!("n3-rule-{}", step.rule),
                     prem,
                 )?;
@@ -383,9 +427,9 @@ mod tests {
         assert_eq!(
             json,
             "{\"root\":2,\"nodes\":[\
-             {\"id\":0,\"conclusion\":[\"<http://ex/Dog>\",\"<sc>\",\"<http://ex/Animal>\"],\"rule\":\"asserted\",\"premises\":[]},\
-             {\"id\":1,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Dog>\"],\"rule\":\"asserted\",\"premises\":[]},\
-             {\"id\":2,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Animal>\"],\"rule\":\"rdfs9\",\"premises\":[0,1]}]}"
+             {\"id\":0,\"conclusion\":[\"<http://ex/Dog>\",\"<sc>\",\"<http://ex/Animal>\"],\"key\":[\"<http://ex/Dog>\",\"<sc>\",\"<http://ex/Animal>\"],\"rule\":\"asserted\",\"premises\":[]},\
+             {\"id\":1,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Dog>\"],\"key\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Dog>\"],\"rule\":\"asserted\",\"premises\":[]},\
+             {\"id\":2,\"conclusion\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Animal>\"],\"key\":[\"<http://ex/rex>\",\"<ty>\",\"<http://ex/Animal>\"],\"rule\":\"rdfs9\",\"premises\":[0,1]}]}"
         );
         let text = tree.to_text();
         assert!(text.starts_with("#2 <http://ex/rex> <ty> <http://ex/Animal>  [rdfs9]\n"));

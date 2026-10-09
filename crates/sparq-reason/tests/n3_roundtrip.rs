@@ -273,7 +273,8 @@ fn every_shape_round_trips() {
     assert_eq!(by_key.len(), distinct.len());
 }
 
-const PRE: &str = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n";
+const PRE: &str = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>. \
+                   @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>.\n";
 
 /// Rules that CONSUME formula-valued data: `log:conclusion` of every formula-valued fact
 /// (which runs any quoted `log:implies` statement inside it), and `log:semantics` +
@@ -362,6 +363,11 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         // A derived formula holding the universal in a nested formula and the plain IRI
         // after it, outside that formula's scope: each level is scoped on its own.
         ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :has { { :x :link :k } :k ?s } }.\n",
+        // Builtin-generated terms that DO have an exact form (Codex round 8).
+        "{ ( \"hi\" \"en\" ) log:langlit ?l } => { :s :p ?l }.\n",
+        "{ ( \"1\" <http://ex/d> ) log:dtlit ?l } => { :s :p ?l }.\n",
+        "{ ( \"x\" rdf:langString ) log:dtlit ?l } => { :s :p ?l }.\n",
+        "{ ?u log:uri \"http://ex/a\\\\b\" } => { :s :p ?u }.\n",
     ];
     for body in representable {
         check_document(body, false);
@@ -382,10 +388,27 @@ fn every_re_reasonable_write_preserves_semantics_or_refuses() {
         ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :rule { { :x :q ?o. ?s :q ?o } => { :x :r :k } } }.\n",
         // The same with the plain mention in the quoted rule's HEAD, in the universal's triple.
         ":x :p :o.\n@forAll :x.\n{ ?s :p ?o } => { :out :rule { { :x :q ?o } => { :x :r ?s } } }.\n",
+        // Codex round 8: builtin-generated terms the PARSER normalizes. An uppercase tag
+        // (`"hi"@EN` reads back as `@en`) — with a `:bad` probe comparing it to `@en`.
+        "{ ( \"hi\" \"EN\" ) log:langlit ?l } => { :s :p ?l }.\n\
+         { :s :p ?a. :s :p ?b. ?a log:notEqualTo ?b } => { :bad :is true }.\n",
+        // `rdf:nil` as an IRI reads back as the empty list `()`.
+        "{ ?u log:uri \"http://www.w3.org/1999/02/22-rdf-syntax-ns#nil\" } => { :s :p ?u }.\n",
+        // An IRI and a language tag the grammar rejects.
+        "{ ?u log:uri \"http://ex/a b\" } => { :s :p ?u }.\n",
+        "{ ( \"hi\" \"e n\" ) log:langlit ?l } => { :s :p ?l }.\n",
+        // A DERIVED `{ … } log:implies { … }` fact: N3 text spells it as a rule, which
+        // would then fire.
+        "{ :go :go :go } => { { :a :b :c } log:implies { :d :e :f } }.\n:go :go :go.\n:a :b :c.\n",
     ];
     for body in lossy {
         check_document(body, true);
     }
+    // The normalized terms really are in the source closure (else the refusals prove nothing).
+    let c = closure(&format!("{PRE}{}", lossy[4]));
+    assert!(c.iter().any(|f| f.contains("Some(\"EN\")")), "{c:#?}");
+    let c = closure(&format!("{PRE}{}", lossy[5]));
+    assert!(c.iter().any(|f| f.contains("Iri(\"http://www.w3.org/1999/02/22-rdf-syntax-ns#nil\")")), "{c:#?}");
 }
 
 /// Codex round 7, verbatim: the first pass does not derive `:bad`; a written fallback

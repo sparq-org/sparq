@@ -758,3 +758,69 @@ o:x :p :o.
     let again: Vec<String> = asserted.iter().map(|f| entity(f)).collect();
     assert_eq!(alone, again);
 }
+
+/// GH #6701 review round 8: the two N3 proof entry points — the id-level batch bridge
+/// (`reason_n3_proof` + `explain::n3_proof_tree`) and the term-level
+/// `MaterializedN3Graph::why` — give the same fact the same identity key, so its lineage
+/// stitches whichever produced it: the same entity and activity IRIs.
+#[test]
+fn both_n3_proof_entry_points_key_a_fact_alike() {
+    let src = r#"@prefix : <http://ex/> .
+:a :parent :b . :b :parent :c . :a :name "Ann"@en .
+{ ?x :parent ?y } => { ?x :ancestor ?y } .
+{ ?x :ancestor ?y . ?y :parent ?z } => { ?x :ancestor ?z } .
+{ ?x :name ?n } => { ?x :label ?n } .
+"#;
+    let ex = |l: &str| N3Term::Iri(format!("http://ex/{l}"));
+    let ann = N3Term::Lit(
+        "Ann".into(),
+        "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString".into(),
+        Some("en".into()),
+    );
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    let mut dict = Dict::new();
+    let (_closure, steps) = sparq_reason::reason_n3_proof(&mut dict, src).expect("id-level closure");
+    let id = |t: &N3Term| {
+        let id = match t {
+            N3Term::Iri(i) => dict.lookup(&oxrdf::NamedNode::new_unchecked(i.as_str()).into()),
+            _ => dict.lookup_lit("Ann", "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString", Some("en")),
+        };
+        assert_ne!(id, sparq_core::dict::NO_ID, "{t:?} is interned");
+        id
+    };
+    let ids = |prov: &[Triple]| -> (HashSet<String>, HashSet<String>) {
+        let of = |ty: &str| {
+            prov.iter()
+                .filter(|t| t.predicate.as_str() == RDF_TYPE && t.object.to_string() == format!("<{PROV}{ty}>"))
+                .map(|t| t.subject.to_string())
+                .collect()
+        };
+        (of("Entity"), of("Activity"))
+    };
+    let cfg = ProvProofConfig::default();
+    for fact in [[ex("a"), ex("ancestor"), ex("c")], [ex("a"), ex("label"), ann.clone()]] {
+        let term_level = g.why(&fact).expect("term-level proof");
+        let target = [id(&fact[0]), id(&fact[1]), id(&fact[2])];
+        let id_level = sparq_reason::explain::n3_proof_tree(&dict, &steps, target, Default::default())
+            .expect("id-level proof");
+        let keys = |t: &sparq_reason::ProofTree| -> HashSet<[String; 3]> { t.nodes().iter().map(|n| n.key.clone()).collect() };
+        assert_eq!(keys(&term_level), keys(&id_level), "{fact:?}");
+        assert_eq!(term_level.nodes().last().unwrap().key, sparq_reason::n3::serialize::statement_keys(&fact));
+        assert_eq!(ids(&prov_from_proof(&term_level, &cfg)), ids(&prov_from_proof(&id_level, &cfg)), "{fact:?}");
+    }
+}
+
+/// GH #6701 review round 8: proof JSON carries each node's identity `key`, so facts that
+/// DISPLAY alike stay distinguishable in serialized proofs too (the `whyN3` wire format).
+#[test]
+fn proof_json_keeps_facts_that_render_alike_apart() {
+    let src = "@prefix : <http://ex/>.\n@forAll :x.\n:x :p :o.\n?x :p :o.\n";
+    let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
+    let closure = g.closure();
+    let json: Vec<String> = closure.iter().map(|f| g.why(f).expect("asserted").to_json()).collect();
+    assert_eq!(json.len(), 2);
+    let conclusion = |j: &str| j[j.find("\"conclusion\"").unwrap()..j.find("\"key\"").unwrap()].to_string();
+    assert_eq!(conclusion(&json[0]), conclusion(&json[1]), "they display alike");
+    assert_ne!(json[0], json[1], "the JSON must still tell them apart: {json:?}");
+    assert!(json.iter().all(|j| j.contains("\"key\":[\"")), "{json:?}");
+}
