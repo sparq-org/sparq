@@ -16,10 +16,11 @@
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
 //!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
 //!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
-//!   it issues ([`tokens`]).
+//!   it issues ([`tokens`]);
+//! - **access grants and access requests** ([`access`]): the LWS Access Profile.
 //!
-//! Authorization ([`access`]): the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, and
-//! the agent that created a resource may do anything with it.
+//! Authorization: the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, the agent that
+//! created a resource may do anything with it, and anyone else what an access grant gives them.
 //! `SOLID_SERVER_LWS_OPEN=1` is a development mode with no authentication at all.
 
 pub mod access;
@@ -47,6 +48,7 @@ pub const LWS_NS: &str = "https://www.w3.org/ns/lws#";
 pub const LWS_CONTEXT: &str = "https://www.w3.org/ns/lws/v1";
 pub const CID_CONTEXT: &str = "https://www.w3.org/ns/cid/v1";
 pub const AS_CONTEXT: &str = "https://www.w3.org/ns/activitystreams";
+pub const FOAF_AGENT: &str = "http://xmlns.com/foaf/0.1/Agent";
 
 pub const LWS_JSON: &str = "application/lws+json";
 pub const LWS_CID: &str = "application/lws+cid";
@@ -57,6 +59,11 @@ pub const MERGE_PATCH: &str = "application/merge-patch+json";
 pub const JSON_PATCH: &str = "application/json-patch+json";
 pub const PROBLEM_JSON: &str = "application/problem+json";
 
+/// Where the LWS services live, relative to the storage root. The `.lws/` and `.well-known/`
+/// namespaces are never listed in the root container and cannot be created by clients (a POST
+/// slug never starts with a dot).
+pub const GRANTS_PATH: &str = "/.lws/grants/";
+pub const REQUESTS_PATH: &str = "/.lws/requests/";
 pub const AS_METADATA_PATH: &str = "/.well-known/lws-configuration";
 pub const AS_METADATA_OAUTH_PATH: &str = "/.well-known/oauth-authorization-server";
 pub const AS_JWKS_PATH: &str = "/.well-known/lws/jwks";
@@ -438,6 +445,7 @@ impl<S: Store> Clone for LwsState<S> {
 pub struct Inner<S: Store> {
     pub store: S,
     pub cfg: LwsConfig,
+    pub access: access::AccessStore,
     /// Fetches identity documents, OpenID provider metadata and JWKS.
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
@@ -452,7 +460,8 @@ impl<S: Store> std::ops::Deref for LwsState<S> {
 }
 
 impl<S: Store + 'static> LwsState<S> {
-    /// Build the state: ensure the storage root exists.
+    /// Build the state: ensure the storage root and the service containers exist, and load the
+    /// stored access grants and requests.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
@@ -466,10 +475,12 @@ impl<S: Store + 'static> LwsState<S> {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
         }
+        let access = access::AccessStore::load(&store, &cfg).await?;
         Ok(Self {
             inner: Arc::new(Inner {
                 store,
                 cfg,
+                access,
                 http,
                 locks: Default::default(),
             }),
@@ -627,7 +638,7 @@ pub(crate) async fn remove_member<S: Store>(
     store.delete_container_if_empty(iri, parent).await
 }
 
-/// Delete the stored member `iri` of `container`.
+/// Delete the stored record `iri` of a service container (a grant or a request).
 /// The index commit is the deletion point: when the store reports a failure but the record no
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
 /// record is gone.
@@ -642,6 +653,204 @@ pub(crate) async fn delete_record<S: Store + 'static>(
             Ok(false) => Ok(()),
             _ => Err(e),
         },
+    }
+}
+
+/// Store a new record (an access grant or request) at `iri` in `container` and,
+/// once it is stored, put it in force in memory with `register`. Every record in the store is
+/// loaded, and so in force, at the next boot, so the two never part:
+///
+/// - The writes and the registration run in a task of their own, holding the request's share of
+///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
+///   being registered.
+/// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
+///   store's timeout or lost reply), so the record is removed; when that fails too, it is
+///   registered, so it can be listed and revoked like any other.
+pub(crate) async fn create_record<S, F>(
+    state: &LwsState<S>,
+    container: &str,
+    iri: &str,
+    body: Bytes,
+    admission: Option<crate::overload::AdmissionSlot>,
+    held: Option<resources::IriGuard>,
+    register: F,
+) -> Result<(), crate::error::ServerError>
+where
+    S: Store + 'static,
+    F: FnOnce() + Send + 'static,
+{
+    use crate::error::ServerError;
+    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let task = async move {
+        let _admission = admission;
+        // The container's listing changes once the record is registered: a create holds the
+        // container (shared, unless the caller holds it exclusively) until then, so a conditional
+        // create sees no member arrive between its check and its own registration.
+        let _shared = match held {
+            None => Some(state.locks.read(&container).await),
+            Some(_) => None,
+        };
+        let _held = held;
+        match state
+            .store
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await
+        {
+            Ok(_) => {
+                register();
+                Ok(())
+            }
+            Err(e) => {
+                if matches!(e, ServerError::Storage(_))
+                    && delete_record(&state, &iri, &container).await.is_err()
+                {
+                    register();
+                }
+                Err(e)
+            }
+        }
+    };
+    tokio::spawn(task)
+        .await
+        .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
+}
+
+/// The preconditions of a create in a service container (grants, requests),
+/// evaluated against `listing` with the container held exclusively: `Ok(None)` when the create is
+/// unconditional, `Ok(Some(guard))` when its preconditions hold (the guard is passed on to
+/// [`create_record`], so no member arrives or leaves until the new one is registered), and the
+/// response to send otherwise. A listing that cannot be produced (a representation the client does
+/// not accept, a page that does not exist) is that response: its absent `ETag` is not the absence
+/// of the container.
+pub(crate) async fn service_preconditions<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    container: &str,
+    listing: impl FnOnce(&LwsRequest) -> axum::response::Response,
+) -> Result<Option<resources::IriGuard>, axum::response::Response> {
+    if !resources::is_conditional(req) {
+        return Ok(None);
+    }
+    let guard = state.locks.lock(container).await;
+    let current = listing(&resources::plain_get(req));
+    if !current.status().is_success() {
+        return Err(current);
+    }
+    let (etag, modified) = resources::validators_of(&current);
+    match resources::unless_preconditions(req, etag.as_deref(), modified) {
+        Some(refused) => Err(refused),
+        None => Ok(Some(guard)),
+    }
+}
+
+/// Parse a JSON body that anyone authenticated may send for a record of their own (an access
+/// request), refusing it with 413 before any parsing when it is over `limit`
+/// bytes: what such a record costs is bounded by its size, never by what parsing it builds.
+#[allow(clippy::result_large_err)]
+pub(crate) fn bounded_json(body: &[u8], limit: usize, what: &str) -> Result<Value, Response> {
+    if body.len() > limit {
+        return Err(problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some(&format!("{what} is at most {limit} bytes")),
+        ));
+    }
+    serde_json::from_slice(body)
+        .map_err(|_| problem(StatusCode::BAD_REQUEST, Some("the body is not JSON")))
+}
+
+/// The share of the store that records anyone authenticated may create (access requests) can
+/// take: at most `total` of them, and `per_author` by one agent. A create
+/// [`Quota::reserve`]s its place before any storage work, under the same lock as every other
+/// reservation, and holds the [`QuotaSlot`] until its record is registered (or the create
+/// fails), so concurrent creates cannot both take the last place.
+pub(crate) struct Quota {
+    total: usize,
+    per_author: usize,
+    in_flight: Arc<std::sync::Mutex<QuotaCounts>>,
+}
+
+#[derive(Default)]
+struct QuotaCounts {
+    total: usize,
+    by_author: std::collections::HashMap<Option<String>, usize>,
+}
+
+/// Why [`Quota::reserve`] refused.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum QuotaFull {
+    Author,
+    Total,
+}
+
+impl QuotaFull {
+    pub(crate) fn response(&self, what: &str) -> Response {
+        match self {
+            QuotaFull::Author => problem(
+                StatusCode::TOO_MANY_REQUESTS,
+                Some(&format!("this agent holds as many {what} as it may")),
+            ),
+            QuotaFull::Total => problem(
+                StatusCode::INSUFFICIENT_STORAGE,
+                Some(&format!("the server holds as many {what} as it may")),
+            ),
+        }
+    }
+}
+
+/// A place reserved by [`Quota::reserve`]; dropping it gives the place back. Drop it once the
+/// record it was for is registered: from then on the record itself is counted.
+pub(crate) struct QuotaSlot {
+    in_flight: Arc<std::sync::Mutex<QuotaCounts>>,
+    author: Option<String>,
+}
+
+impl Drop for QuotaSlot {
+    fn drop(&mut self) {
+        let mut c = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        c.total -= 1;
+        if let Some(n) = c.by_author.get_mut(&self.author) {
+            *n -= 1;
+            if *n == 0 {
+                c.by_author.remove(&self.author);
+            }
+        }
+    }
+}
+
+impl Quota {
+    pub(crate) fn new(total: usize, per_author: usize) -> Self {
+        Self {
+            total,
+            per_author,
+            in_flight: Default::default(),
+        }
+    }
+
+    /// Reserve a place for a record by `author`. `registered` counts the records already in
+    /// force, overall and by `author`; it is called under the reservation lock, so a record
+    /// registered concurrently is counted either there or as a reservation still held, never
+    /// neither (a registration inserts its record before it drops its slot).
+    pub(crate) fn reserve(
+        &self,
+        author: Option<&str>,
+        registered: impl FnOnce() -> (usize, usize),
+    ) -> Result<QuotaSlot, QuotaFull> {
+        let mut c = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        let (all, mine) = registered();
+        let author = author.map(str::to_string);
+        let mine = mine + c.by_author.get(&author).copied().unwrap_or(0);
+        if mine >= self.per_author {
+            return Err(QuotaFull::Author);
+        }
+        if all + c.total >= self.total {
+            return Err(QuotaFull::Total);
+        }
+        c.total += 1;
+        *c.by_author.entry(author.clone()).or_default() += 1;
+        Ok(QuotaSlot {
+            in_flight: self.in_flight.clone(),
+            author,
+        })
     }
 }
 
@@ -704,12 +913,26 @@ pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Rout
         .layer(axum::middleware::from_fn(crate::ldp::cors::cors_middleware)))
 }
 
+/// The largest body a request to `path` may carry: the service routes that anyone may send to
+/// (access requests) are held to their own limits while the body is
+/// read, so no more than that is ever buffered for them; everything else to `max_body`.
+fn body_limit(path: &str, max_body: usize) -> usize {
+    let limit = if path.starts_with(REQUESTS_PATH) {
+        access::MAX_REQUEST_BYTES
+    } else if path.starts_with(GRANTS_PATH) {
+        access::MAX_GRANT_BYTES
+    } else {
+        max_body
+    };
+    limit.min(max_body)
+}
+
 async fn dispatch<S: Store + 'static>(State(state): State<LwsState<S>>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     if let Err(refused) = check_headers(&parts.headers) {
         return refused;
     }
-    let limit = state.cfg.max_body;
+    let limit = body_limit(parts.uri.path(), state.cfg.max_body);
     let body = match axum::body::to_bytes(body, limit).await {
         Ok(b) => b,
         Err(_) => return problem(StatusCode::PAYLOAD_TOO_LARGE, None),
@@ -794,6 +1017,9 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Ok(agent) => agent,
         Err(error) => return state.challenge(Some(error)),
     };
+    if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
+        return access::handle(state, &req, &agent).await;
+    }
     if path.starts_with("/.lws/") || path == "/.lws" {
         return problem(StatusCode::NOT_FOUND, None);
     }
@@ -859,6 +1085,211 @@ pub fn add_link(headers: &mut HeaderMap, target: &str, rel: &str, media_type: Op
 // helpers give their listings what [`resources`] gives a stored container: content negotiation,
 // paging, an entity tag and the container links.
 
+/// One media range of an Accept header: essence, q and profile.
+fn accept_ranges(accept: &str) -> Vec<(String, f32, Option<String>)> {
+    accept
+        .split(',')
+        .filter_map(|part| {
+            let mut pieces = part.split(';');
+            let essence = pieces.next()?.trim().to_ascii_lowercase();
+            if essence.is_empty() {
+                return None;
+            }
+            let (mut q, mut profile) = (1.0, None);
+            for p in pieces {
+                if let Some((k, v)) = p.split_once('=') {
+                    let (k, v) = (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"'));
+                    if k == "q" {
+                        q = v.parse().unwrap_or(0.0);
+                    } else if k == "profile" {
+                        profile = Some(v.to_string());
+                    }
+                }
+            }
+            Some((essence, q, profile))
+        })
+        .collect()
+}
+
+/// The container media type for `accept`: `application/lws+json`, `application/ld+json` (lws+json
+/// when it names the LWS profile) or `application/json`, the earlier winning ties; lws+json when
+/// there is no Accept; `None` when none of them is acceptable.
+pub fn negotiate_container(accept: Option<&str>) -> Option<&'static str> {
+    const OFFERED: [&str; 3] = [LWS_JSON, LD_JSON, JSON];
+    let Some(accept) = accept.filter(|a| !a.trim().is_empty()) else {
+        return Some(LWS_JSON);
+    };
+    let ranges = accept_ranges(accept);
+    if ranges
+        .iter()
+        .any(|(e, q, p)| e == LD_JSON && p.as_deref() == Some(LWS_CONTEXT) && *q > 0.0)
+    {
+        return Some(LWS_JSON);
+    }
+    let mut best: Option<(f32, usize)> = None;
+    for (i, offer) in OFFERED.iter().enumerate() {
+        // The most specific range that matches the offer decides its q.
+        let mut q_for: Option<(f32, u8)> = None;
+        for (essence, q, _) in &ranges {
+            let spec = if essence == offer {
+                3
+            } else if essence == "application/*" {
+                2
+            } else if essence == "*/*" {
+                1
+            } else {
+                0
+            };
+            if spec > 0 && q_for.is_none_or(|(_, s)| spec > s) {
+                q_for = Some((*q, spec));
+            }
+        }
+        if let Some((q, _)) = q_for.filter(|(q, _)| *q > 0.0) {
+            if best.is_none_or(|(bq, _)| q > bq) {
+                best = Some((q, i));
+            }
+        }
+    }
+    best.map(|(_, i)| OFFERED[i])
+}
+
+/// The page a request asks for (`?page=`, 1 when absent), or `None` when it is not one of `pages`.
+pub fn requested_page(req: &LwsRequest, pages: usize) -> Option<usize> {
+    let page = match req.query_param("page") {
+        None => 1,
+        Some(p) => p.parse::<usize>().ok()?,
+    };
+    (1..=pages).contains(&page).then_some(page)
+}
+
+/// Append the paging links of page `page` of `pages` at `base?page=N`: first (always), prev and
+/// next where there is one, and last.
+pub fn add_page_links(headers: &mut HeaderMap, base: &str, page: usize, pages: usize) {
+    let page_uri = |n: usize| format!("{base}?page={n}");
+    add_link(headers, &page_uri(1), "first", None);
+    if page > 1 {
+        add_link(headers, &page_uri(page - 1), "prev", None);
+    }
+    if page < pages {
+        add_link(headers, &page_uri(page + 1), "next", None);
+    }
+    add_link(headers, &page_uri(pages), "last", None);
+}
+
+/// The links a service container or one of its members carries: `up` (the service container for
+/// a member; the storage root for the container itself, since `/.lws/` is no resource), the
+/// storage, its LWS type and its linkset.
+pub fn service_links(cfg: &LwsConfig, headers: &mut HeaderMap, uri: &str, up: &str) {
+    add_link(headers, up, "up", None);
+    add_link(headers, &cfg.storage(), &format!("{LWS_NS}storage"), None);
+    let ty = if uri.ends_with('/') {
+        "Container"
+    } else {
+        "DataResource"
+    };
+    add_link(headers, &format!("{LWS_NS}{ty}"), "type", None);
+    add_link(headers, &meta_key(uri), "linkset", Some(LINKSET_JSON));
+}
+
+/// A strong entity tag over `parts`.
+pub fn etag_of<'a>(parts: impl IntoIterator<Item = &'a str>) -> String {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    for p in parts {
+        h.update(p.as_bytes());
+        h.update([0]);
+    }
+    format!("\"{}\"", jose::b64url(&h.finalize()[..18]))
+}
+
+/// GET or HEAD on a service container at `uri` holding `items` (each with an `id`, sorted):
+/// negotiated (406 when nothing offered is acceptable), paged at `cfg.page_size` (404 for a page
+/// that does not exist), with an entity tag over `version`, the page and its members (304 when
+/// `If-None-Match` names it), `Vary: Accept` and the container links.
+pub fn service_listing(
+    cfg: &LwsConfig,
+    req: &LwsRequest,
+    uri: &str,
+    items: Vec<Value>,
+    version: &str,
+) -> Response {
+    let Some(media_type) = negotiate_container(req.header(header::ACCEPT)) else {
+        return problem(StatusCode::NOT_ACCEPTABLE, None);
+    };
+    let size = cfg.page_size.max(1);
+    let pages = items.len().div_ceil(size).max(1);
+    let Some(page) = requested_page(req, pages) else {
+        return problem(StatusCode::NOT_FOUND, None);
+    };
+    let total = items.len();
+    let shown: Vec<Value> = items
+        .into_iter()
+        .skip((page - 1) * size)
+        .take(size)
+        .collect();
+    // The tag covers everything the page shows: the members it lists, as listed, and how many
+    // there are in all (which its paging links follow), so a member that leaves without a
+    // version change (an expiry) still changes it.
+    let (page_tag, total_tag) = (page.to_string(), total.to_string());
+    let listed: Vec<String> = shown.iter().map(Value::to_string).collect();
+    let etag = etag_of(
+        [version, page_tag.as_str(), total_tag.as_str()]
+            .into_iter()
+            .chain(listed.iter().map(String::as_str)),
+    );
+    let refusal = resources::read_refusal(req, &etag);
+    if refusal == Some(StatusCode::PRECONDITION_FAILED) {
+        return problem(StatusCode::PRECONDITION_FAILED, None);
+    }
+    let mut resp = if let Some(status) = refusal {
+        status.into_response()
+    } else {
+        let body = json!({
+            "@context": LWS_CONTEXT,
+            "id": uri,
+            "type": "Container",
+            "totalItems": total,
+            "items": shown,
+        });
+        json_response(StatusCode::OK, media_type, &body)
+    };
+    let h = resp.headers_mut();
+    set(h, header::ETAG, &etag);
+    set(h, header::VARY, "Accept");
+    service_links(cfg, h, uri, &cfg.storage());
+    if pages > 1 {
+        add_page_links(h, uri, page, pages);
+    }
+    resp
+}
+
+/// The read-only linkset of a service container or member at `anchor`: it has no user-managed
+/// links.
+pub fn service_linkset(cfg: &LwsConfig, req: &LwsRequest, anchor: &str) -> Response {
+    if !matches!(req.method, Method::GET | Method::HEAD) {
+        return method_not_allowed("GET, HEAD");
+    }
+    let doc = json!({"linkset": [{"anchor": anchor}]});
+    let mut resp = json_response(StatusCode::OK, LINKSET_JSON, &doc);
+    set(resp.headers_mut(), header::ETAG, &etag_of([anchor]));
+    add_link(
+        resp.headers_mut(),
+        &cfg.storage(),
+        &format!("{LWS_NS}storage"),
+        None,
+    );
+    resp
+}
+
+/// Whether a JSON-LD `@context` (a string or an ordered set) includes the LWS context.
+pub fn has_lws_context(v: Option<&Value>) -> bool {
+    match v {
+        Some(Value::String(s)) => s == LWS_CONTEXT,
+        Some(Value::Array(a)) => a.iter().any(|c| c.as_str() == Some(LWS_CONTEXT)),
+        _ => false,
+    }
+}
+
 /// Whether `v` is an absolute URI: a scheme, a colon, and something after it.
 pub fn is_uri(v: &str) -> bool {
     let Some((scheme, rest)) = v.split_once(':') else {
@@ -871,6 +1302,23 @@ pub fn is_uri(v: &str) -> bool {
         && !v.chars().any(|c| {
             c.is_whitespace() || matches!(c, '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`')
         })
+}
+
+/// A JSON value that is a string holding an absolute URI.
+pub fn json_is_uri(v: &Value) -> bool {
+    v.as_str().is_some_and(is_uri)
+}
+
+/// Whether a JSON `type` value (a string or an array) names `wanted`, short or in the LWS namespace.
+pub fn has_type(v: &Value, wanted: &str) -> bool {
+    let matches = |t: &Value| {
+        t.as_str()
+            .is_some_and(|t| t == wanted || t.strip_prefix(LWS_NS) == Some(wanted))
+    };
+    match v {
+        Value::Array(a) => a.iter().any(matches),
+        other => matches(other),
+    }
 }
 
 /// Most link relations (each a target and one relation) a request's Link headers may declare.
@@ -1271,12 +1719,57 @@ pub(crate) mod test_store {
         let state = super::LwsState::new(store.clone(), cfg).await.unwrap();
         (state, store)
     }
+
+    /// The `Link` targets of `resp` with relation `rel`.
+    pub fn links(resp: &axum::response::Response, rel: &str) -> Vec<String> {
+        resp.headers()
+            .get_all(axum::http::header::LINK)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .flat_map(super::parse_links)
+            .filter(|(_, p)| p.get("rel").map(String::as_str) == Some(rel))
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    pub async fn body_json(resp: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_store::request;
+    use test_store::{body_json, links, request};
+
+    /// Review finding: request caps were checked against what was registered, and the record
+    /// registered after an asynchronous create, so concurrent creates all passed. Places are
+    /// reserved under one lock and held until registration.
+    #[test]
+    fn quota_places_are_reserved_until_released() {
+        let q = Quota::new(3, 2);
+        let a = q.reserve(Some("a"), || (0, 0)).unwrap();
+        let _a2 = q.reserve(Some("a"), || (0, 0)).unwrap();
+        assert_eq!(
+            q.reserve(Some("a"), || (0, 0)).err(),
+            Some(QuotaFull::Author)
+        );
+        let _b = q.reserve(Some("b"), || (0, 0)).unwrap();
+        assert_eq!(
+            q.reserve(Some("c"), || (0, 0)).err(),
+            Some(QuotaFull::Total)
+        );
+        // Registered records count too.
+        drop(a);
+        assert_eq!(
+            q.reserve(Some("a"), || (1, 1)).err(),
+            Some(QuotaFull::Author)
+        );
+        assert!(q.reserve(Some("c"), || (0, 0)).is_ok());
+    }
 
     async fn http(app: &Router, method: &str, path: &str, body: &'static str) -> StatusCode {
         use tower::ServiceExt;
@@ -1364,8 +1857,53 @@ mod tests {
         assert_eq!(send("link", fine).await, StatusCode::CREATED);
     }
 
+    /// Review finding: every body was buffered up to the server-wide ceiling before any route
+    /// limit applied, so an anonymous request to a service route anyone may post to buffered
+    /// megabytes before its 16 KiB limit refused it. Each route's limit applies while the body
+    /// is read, and no route can raise the ceiling.
+    #[tokio::test]
+    async fn every_route_reads_no_more_than_its_limit() {
+        use tower::ServiceExt;
+        let max = 1 << 20;
+        let app = open_router(max).await;
+        let send = |method: &'static str, path: &'static str, len: usize| {
+            let app = app.clone();
+            async move {
+                let req = Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header("content-type", LWS_JSON)
+                    .body(Body::from(vec![b' '; len]))
+                    .unwrap();
+                app.oneshot(req).await.unwrap().status()
+            }
+        };
+        let routes = [
+            ("POST", REQUESTS_PATH, access::MAX_REQUEST_BYTES),
+            ("POST", GRANTS_PATH, access::MAX_GRANT_BYTES),
+            ("POST", "/", max),
+            ("PUT", "/x", max),
+            ("PATCH", "/x", max),
+        ];
+        for (method, path, limit) in routes {
+            assert!(limit <= max);
+            assert_eq!(
+                send(method, path, limit + 1).await,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "{method} {path}"
+            );
+            assert_ne!(
+                send(method, path, limit).await,
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "{method} {path}"
+            );
+        }
+        assert_eq!(body_limit("/", 10), 10);
+        assert_eq!(body_limit(REQUESTS_PATH, 10), 10);
+    }
+
     /// Review finding: a member's record and its parent's membership edge were removed in two
-    /// steps on some paths, so a failure in between left
+    /// steps on some paths (service records), so a failure in between left
     /// a live record its container no longer listed. Every removal goes through
     /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
     #[tokio::test]
@@ -1402,6 +1940,27 @@ mod tests {
         let mut req = request(Method::DELETE, "/c/", &[("depth", "infinity")], "");
         req.headers.insert("depth", "infinity".parse().unwrap());
         assert_eq!(route(&state, req).await.status(), StatusCode::NO_CONTENT);
+        // A grant and an access request, each created and removed.
+        let storage = state.cfg.storage();
+        let access = |kind: &str| {
+            json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": [kind],
+                "storage": storage,
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+            })
+            .to_string()
+        };
+        for (path, body) in [
+            (GRANTS_PATH, access("AccessGrant")),
+            (REQUESTS_PATH, access("AccessRequest")),
+        ] {
+            let r = send(Method::POST, path.into(), LWS_JSON, body).await;
+            assert_eq!(r.status(), StatusCode::CREATED, "{path}");
+            let at = local(r.headers()[header::LOCATION].to_str().unwrap());
+            let r = send(Method::DELETE, at, LWS_JSON, String::new()).await;
+            assert!(r.status().is_success(), "{path}: {}", r.status());
+        }
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }
 
@@ -1463,6 +2022,103 @@ mod tests {
             http(&app, "GET", "/", "").await,
             StatusCode::GATEWAY_TIMEOUT
         );
+    }
+
+    #[test]
+    fn container_negotiation() {
+        assert_eq!(negotiate_container(None), Some(LWS_JSON));
+        assert_eq!(negotiate_container(Some("application/json")), Some(JSON));
+        assert_eq!(
+            negotiate_container(Some("application/ld+json")),
+            Some(LD_JSON)
+        );
+        assert_eq!(
+            negotiate_container(Some(
+                "application/ld+json; profile=\"https://www.w3.org/ns/lws/v1\""
+            )),
+            Some(LWS_JSON)
+        );
+        assert_eq!(negotiate_container(Some("*/*")), Some(LWS_JSON));
+        assert_eq!(
+            negotiate_container(Some("application/json, application/lws+json;q=0.5")),
+            Some(JSON)
+        );
+        assert_eq!(negotiate_container(Some("text/turtle")), None);
+        assert_eq!(negotiate_container(Some("application/json;q=0")), None);
+    }
+
+    #[test]
+    fn lws_context_check() {
+        assert!(has_lws_context(Some(&json!([LWS_CONTEXT]))));
+        assert!(has_lws_context(Some(&json!(["https://x/", LWS_CONTEXT]))));
+        assert!(has_lws_context(Some(&json!(LWS_CONTEXT))));
+        assert!(!has_lws_context(Some(&json!(["https://x/"]))));
+        assert!(!has_lws_context(None));
+    }
+
+    #[tokio::test]
+    async fn service_listings_page_negotiate_and_tag() {
+        let cfg = LwsConfig::new("http://h");
+        let uri = cfg.absolute(GRANTS_PATH);
+        let items: Vec<Value> = (0..5)
+            .map(|i| json!({"id": format!("{uri}{i}"), "type": "DataResource"}))
+            .collect();
+        let mut cfg = cfg;
+        cfg.page_size = 2;
+        let cfg = cfg;
+        let get = |q: &str, h: &[(&str, &str)]| {
+            service_listing(
+                &cfg,
+                &request(Method::GET, &format!("{GRANTS_PATH}{q}"), h, ""),
+                &uri,
+                items.clone(),
+                "v1",
+            )
+        };
+        let first = get("", &[]);
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(first.headers()[header::CONTENT_TYPE], LWS_JSON);
+        assert_eq!(first.headers()[header::VARY], "Accept");
+        assert_eq!(links(&first, "type"), vec![format!("{LWS_NS}Container")]);
+        assert_eq!(links(&first, "up"), vec![cfg.storage()]);
+        assert_eq!(links(&first, "linkset"), vec![meta_key(&uri)]);
+        assert_eq!(links(&first, "first"), vec![format!("{uri}?page=1")]);
+        assert_eq!(links(&first, "next"), vec![format!("{uri}?page=2")]);
+        assert_eq!(links(&first, "last"), vec![format!("{uri}?page=3")]);
+        assert!(links(&first, "prev").is_empty());
+        let etag = first.headers()[header::ETAG].to_str().unwrap().to_string();
+        let doc = body_json(first).await;
+        assert_eq!(doc["totalItems"], 5);
+        assert_eq!(doc["items"].as_array().unwrap().len(), 2);
+
+        let last = get("?page=3", &[("accept", "application/json")]);
+        assert_eq!(last.headers()[header::CONTENT_TYPE], JSON);
+        assert_eq!(links(&last, "prev"), vec![format!("{uri}?page=2")]);
+        assert!(links(&last, "next").is_empty());
+        assert_ne!(last.headers()[header::ETAG].to_str().unwrap(), etag);
+        assert_eq!(body_json(last).await["items"].as_array().unwrap().len(), 1);
+
+        assert_eq!(get("?page=4", &[]).status(), StatusCode::NOT_FOUND);
+        assert_eq!(get("?page=0", &[]).status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            get("", &[("accept", "text/turtle")]).status(),
+            StatusCode::NOT_ACCEPTABLE
+        );
+        assert_eq!(
+            get("", &[("if-none-match", &etag)]).status(),
+            StatusCode::NOT_MODIFIED
+        );
+        // A one-page listing carries no paging links.
+        let mut roomy = cfg.clone();
+        roomy.page_size = 10;
+        let one = service_listing(
+            &roomy,
+            &request(Method::GET, GRANTS_PATH, &[], ""),
+            &uri,
+            items.clone(),
+            "v1",
+        );
+        assert!(links(&one, "first").is_empty());
     }
 
     #[test]

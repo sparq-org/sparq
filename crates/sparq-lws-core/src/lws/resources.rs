@@ -15,9 +15,9 @@ use sha2::{Digest, Sha256};
 use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
-    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, JSON,
-    JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, MERGE_PATCH,
-    META_SUFFIX,
+    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
+    JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, MERGE_PATCH,
+    META_SUFFIX, REQUESTS_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -238,6 +238,17 @@ enum Precondition {
     Proceed,
     NotModified,
     Failed,
+}
+
+/// How a read of a service resource (a grant or request, or a service listing)
+/// whose current entity tag is `etag` is answered under the request's preconditions: 304, 412,
+/// or `None` to serve it, as [`evaluate`] decides for storage resources.
+pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
+    match evaluate(&req.headers, Some(etag), None, true) {
+        Precondition::Proceed => None,
+        Precondition::NotModified => Some(StatusCode::NOT_MODIFIED),
+        Precondition::Failed => Some(StatusCode::PRECONDITION_FAILED),
+    }
 }
 
 fn evaluate(
@@ -956,6 +967,18 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
     let cfg = &state.cfg;
     let storage = cfg.storage();
     let service = |frag: &str, ty: &str, endpoint: String| json!({"id": format!("{storage}#{frag}"), "type": ty, "serviceEndpoint": endpoint});
+    let mut grants = service(
+        "access-grants",
+        "AccessGrantService",
+        cfg.absolute(GRANTS_PATH),
+    );
+    grants["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
+    let mut requests = service(
+        "access-requests",
+        "AccessRequestService",
+        cfg.absolute(REQUESTS_PATH),
+    );
+    requests["conformsTo"] = json!([format!("{LWS_NS}AccessProfile")]);
     json!({
         "@context": [CID_CONTEXT, LWS_CONTEXT],
         "id": storage,
@@ -963,6 +986,8 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
         "service": [
             service("storage-root", "StorageRoot", storage.clone()),
             service("authorization-server", "AuthorizationServer", cfg.issuer().to_string()),
+            grants,
+            requests,
         ],
     })
 }
@@ -4564,8 +4589,124 @@ mod tests {
             .ends_with(META_SUFFIX));
     }
 
-    /// Review finding: a create ignored the request's preconditions: a `POST` with
-    /// `If-None-Match: *` to an existing container created a member. They are now evaluated
+    /// Review finding: the metadata was written before the content and a failed rollback was
+    /// ignored. With one write left in a bounded store, a `Prefer: set-linkset` adding a type a
+    /// public grant covers landed its metadata, the content write and the rollback both failed,
+    /// and the old private content became public. Now the resource fails closed instead.
+    #[tokio::test]
+    async fn a_write_that_fails_part_way_fails_closed() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use super::super::FOAF_AGENT;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let public = "https://e.example/Public";
+        // Everyone may read what has the public type.
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": FOAF_AGENT,
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": public}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let base = st.cfg.absolute("");
+        let make = |slug: &'static str| {
+            let st = st.clone();
+            let owner = owner.clone();
+            async move {
+                let h = [("slug", slug), ("content-type", "text/plain")];
+                let r = create(
+                    &st,
+                    &req(Method::POST, "/", &h, "private"),
+                    &owner,
+                    &st.cfg.storage(),
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                hdr(&r, "location")
+            }
+        };
+        let link = format!("<{public}>; rel=\"type\"");
+        let put = |uri: &str| {
+            req(
+                Method::PUT,
+                uri.strip_prefix(base.as_str()).unwrap(),
+                &[
+                    ("content-type", "text/plain"),
+                    ("prefer", "set-linkset"),
+                    ("link", &link),
+                ],
+                "now public",
+            )
+        };
+        let get = |uri: &str| {
+            req(
+                Method::GET,
+                uri.strip_prefix(base.as_str()).unwrap(),
+                &[],
+                "",
+            )
+        };
+        // The control: once the write lands, the stranger reads the new content.
+        let open = make("open.txt").await;
+        assert_eq!(
+            handle(&st, &get(&open), &stranger).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            handle(&st, &put(&open), &owner).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        let r = handle(&st, &get(&open), &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("now public"));
+        // One write left: the first metadata write lands, the content write and the rollback fail.
+        let secret = make("secret.txt").await;
+        *store.write_budget.lock().unwrap() = Some(1);
+        let r = handle(&st, &put(&secret), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.write_budget.lock().unwrap() = None;
+        assert_eq!(
+            st.store.read(&secret).await.unwrap().body,
+            Bytes::from("private")
+        );
+        // Whatever the metadata now says, the old content is not public.
+        let r = handle(&st, &get(&secret), &stranger).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        // The owner still may, and a completed write clears the mark.
+        assert_eq!(
+            handle(&st, &get(&secret), &owner).await.status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            handle(&st, &put(&secret), &owner).await.status(),
+            StatusCode::NO_CONTENT
+        );
+        assert!(!st.resource_meta(&secret).await.unwrap().pending);
+        assert_eq!(
+            handle(&st, &get(&secret), &stranger).await.status(),
+            StatusCode::OK
+        );
+    }
+
+    /// Review finding: a create, and a revocation of an access grant, ignored the request's
+    /// preconditions: a `POST` with `If-None-Match: *` to an existing container created a member,
+    /// and a grant was revoked under an `If-Match` naming another tag. Both are now evaluated
     /// against the target's validators before anything changes.
     #[tokio::test]
     async fn creates_and_service_deletes_evaluate_preconditions() {
@@ -4590,6 +4731,39 @@ mod tests {
         // The listing changed: the old tag no longer matches.
         let r = call(&st, "POST", "/c/", &[text, ("if-match", &tag)], "x").await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        // A grant is revoked only under a matching tag.
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        let r = call(&st, "POST", GRANTS_PATH, &[json], &grant).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let path = hdr(&r, "location")
+            .strip_prefix(&st.cfg.base_url)
+            .unwrap()
+            .to_string();
+        let tag = hdr(&call(&st, "GET", &path, &[], "").await, "etag");
+        let r = call(&st, "DELETE", &path, &[("if-match", "\"other\"")], "").await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            call(&st, "GET", &path, &[], "").await.status(),
+            StatusCode::OK
+        );
+        let r = call(&st, "DELETE", &path, &[("if-match", &tag)], "").await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
     }
 
     /// Review finding: the types a Turtle representation states were deduplicated by scanning
@@ -4761,6 +4935,116 @@ mod tests {
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
+    /// Review finding: a conditional create in a service container checked the listing without
+    /// holding it, so two creates under the same `If-Match` both succeeded; a listing that could
+    /// not be produced (a representation the client does not accept) carried no `ETag` and so
+    /// passed `If-None-Match: *`; and members of an ordinary container were written and deleted
+    /// without waiting for a conditional create holding their container.
+    #[tokio::test]
+    async fn conditional_creates_hold_the_listing_they_checked() {
+        let st = state().await;
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        })
+        .to_string();
+        let json = ("content-type", LWS_JSON);
+        let r = call(
+            &st,
+            "POST",
+            GRANTS_PATH,
+            &[json, ("accept", "text/plain"), ("if-none-match", "*")],
+            &grant,
+        )
+        .await;
+        assert!(!r.status().is_success(), "{}", r.status());
+        let tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let matching = [json, ("if-match", tag.as_str())];
+        let both = tokio::join!(
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+            call(&st, "POST", GRANTS_PATH, &matching, &grant),
+        );
+        let mut statuses = [both.0.status(), both.1.status()];
+        statuses.sort();
+        assert_eq!(
+            statuses,
+            [StatusCode::CREATED, StatusCode::PRECONDITION_FAILED]
+        );
+        // While a conditional create holds a container, its members' changes wait.
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let r = call(&st, "POST", "/", &[("slug", "c"), ("link", &container)], "").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = ("content-type", "text/plain");
+        for name in ["put", "patch", "delete"] {
+            let r = call(&st, "POST", "/c/", &[text, ("slug", name)], "x").await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let merge = ("content-type", "application/merge-patch+json");
+        let r = call(
+            &st,
+            "POST",
+            "/c/",
+            &[("content-type", "application/json"), ("slug", "patch.json")],
+            "{}",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let put_tag = current(&st, &st.cfg.absolute("/c/put"))
+            .await
+            .ok()
+            .map(|m| m.etag);
+        let patch_tag = current(&st, &st.cfg.absolute("/c/patch.json"))
+            .await
+            .ok()
+            .map(|m| m.etag);
+        let grants_tag = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        let held = st.locks.lock(&st.cfg.absolute("/c/")).await;
+        let grants = st.locks.lock(&st.cfg.absolute(GRANTS_PATH)).await;
+        let spawn = |method: &'static str,
+                     path: &'static str,
+                     headers: Vec<(&'static str, &'static str)>,
+                     body: &'static str| {
+            let st = st.clone();
+            tokio::spawn(async move { call(&st, method, path, &headers, body).await.status() })
+        };
+        let waiting = [
+            spawn("PUT", "/c/put", vec![text], "y"),
+            spawn("PATCH", "/c/patch.json", vec![merge], "{\"a\": 1}"),
+            spawn("DELETE", "/c/delete", vec![], ""),
+            spawn(
+                "POST",
+                GRANTS_PATH,
+                vec![json],
+                Box::leak(grant.into_boxed_str()),
+            ),
+        ];
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        for w in &waiting {
+            assert!(!w.is_finished());
+        }
+        // Nothing changed meanwhile: each waits before its write, not only before its touch.
+        let tag = |path: &'static str| {
+            let iri = st.cfg.absolute(path);
+            let st = st.clone();
+            async move { current(&st, &iri).await.ok().map(|m| m.etag) }
+        };
+        assert_eq!(tag("/c/put").await, put_tag);
+        assert_eq!(tag("/c/patch.json").await, patch_tag);
+        assert!(st
+            .store
+            .exists(&st.cfg.absolute("/c/delete"))
+            .await
+            .unwrap());
+        let listed = hdr(&call(&st, "GET", GRANTS_PATH, &[], "").await, "etag");
+        assert_eq!(listed, grants_tag);
+        drop((held, grants));
+        for w in waiting {
+            assert!(w.await.unwrap().is_success());
+        }
+    }
+
     /// Review finding: a create whose store call reported a failure removed the new member's
     /// metadata, though a remote store may have committed the content before its reply was lost:
     /// the content stayed, without its creator, types and links. The metadata now goes only once
@@ -4842,7 +5126,8 @@ mod tests {
     }
 
     /// Sweep finding: HEAD on a 304 carried `Content-Length: 0`, which RFC 9110 section 8.6
-    /// forbids unless the 200 has that length.
+    /// forbids unless the 200 has that length; and service resources and listings answered GET
+    /// with a failing `If-Match` as if it held.
     #[tokio::test]
     async fn bodiless_heads_and_service_reads_follow_their_preconditions() {
         use axum::body::Body;
@@ -4863,7 +5148,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(r.status(), StatusCode::CREATED);
-        for uri in ["/doc.txt"] {
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": "http://localhost:3000/",
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": "https://a/"}],
+        });
+        let r = send(
+            "POST",
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            grant.to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let member = hdr(&r, "location")
+            .strip_prefix("http://localhost:3000")
+            .unwrap()
+            .to_string();
+        for uri in ["/doc.txt", GRANTS_PATH, member.as_str()] {
             let tag = hdr(&send("GET", uri, &[], String::new()).await.unwrap(), "etag");
             let head = send("HEAD", uri, &[("if-none-match", &tag)], String::new())
                 .await
@@ -4966,6 +5270,98 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(status, StatusCode::OK);
+    }
+
+    /// Review finding: a content write that failed was taken not to have landed, and the old
+    /// metadata put back. A remote store can report a failure (a timeout, a lost reply) for an
+    /// update it committed: a PUT that made a public resource private and dropped its public type
+    /// then left the new private content under the old public type. A write whose outcome is not
+    /// known now leaves the resource pending, so it fails closed.
+    #[tokio::test]
+    async fn a_write_whose_outcome_is_unknown_stays_pending() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use super::super::FOAF_AGENT;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = FlakyStore::new();
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let owner = agent("https://owner.example/#me");
+        let stranger = agent("https://stranger.example/#me");
+        let public = "https://e.example/Public";
+        let grant = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": FOAF_AGENT,
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": public}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &grant.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let put = |ty: &str, body: &str| {
+            let link = format!("<{ty}>; rel=\"type\"");
+            req(
+                Method::PUT,
+                "/doc.txt",
+                &[("content-type", "text/plain"), ("link", &link)],
+                body,
+            )
+        };
+        let get = req(Method::GET, "/doc.txt", &[], "");
+        let uri = st.cfg.absolute("/doc.txt");
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, "x"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(hdr(&r, "location"), uri);
+        // Public to begin with.
+        let r = handle(&st, &put(public, "public"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert_eq!(handle(&st, &get, &stranger).await.status(), StatusCode::OK);
+        // Made private; the store commits the content and then reports a failure.
+        let version = || async { st.resource_meta(&st.cfg.storage()).await.unwrap().version };
+        let before = version().await;
+        *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_after_write_of.lock().unwrap() = None;
+        // The write may have happened: the container's listing is not left looking unchanged.
+        assert_ne!(version().await, before);
+        assert_eq!(
+            st.store.read(&uri).await.unwrap().body,
+            Bytes::from("private")
+        );
+        // The new content is not served under the old public type.
+        assert!(st.resource_meta(&uri).await.unwrap().pending);
+        assert_eq!(
+            handle(&st, &get, &stranger).await.status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(handle(&st, &get, &owner).await.status(), StatusCode::OK);
+        // A write that fails before it is sent still restores the old metadata.
+        let r = handle(&st, &put(public, "public again"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        *store.refuse_write_of.lock().unwrap() = Some(uri.clone());
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        *store.refuse_write_of.lock().unwrap() = None;
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        assert!(!st.resource_meta(&uri).await.unwrap().pending);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public again"));
     }
 
     /// Review finding: a conditional DELETE of a container computed the listing's tag only for

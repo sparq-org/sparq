@@ -222,11 +222,13 @@ visible.
 
 Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 (tracking `w3c/lws-protocol` main) instead of the Solid/LDP surface. The mode is
-self-contained in `src/lws/`: its own authorization server, over the same `Store` backend.
-It runs over the
+self-contained in `src/lws/`: its own authorization server and access grants, over the
+same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
 because a remote write reported as failed may still commit later and nothing fences it yet.
-A request's Link headers may declare at most 128 relations holding
+Anyone authenticated may hold at most 16 access requests (429 past that), the server at most
+512 (507), and an access request body is at most 16 KiB (413) and an access grant at most
+256 KiB; these limits apply while the body is read. A request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
 A resource's types, links and linkset are at most 256 KiB together, as stored: a write that would
@@ -241,7 +243,7 @@ cargo run -p sparq-lws-core
 
 | Variable | Meaning |
 |---|---|
-| `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage. Everyone else may act only on the resources they created. |
+| `SOLID_SERVER_LWS_OWNER` | Agent IRI allowed every action on the storage, and the only one who may list or issue grants. |
 | `SOLID_SERVER_LWS_OPEN` (or `SOLID_SERVER_OPEN_MODE`) | `1` disables authorization entirely and implies `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH`. Test-suite use only. |
 | `SOLID_SERVER_LWS_PAGE_SIZE` | Container page size (default 100). |
 | `SOLID_SERVER_LWS_AS_KEY_FILE` | P-256 private JWK for access tokens. A missing file is created with a fresh key (mode 0600) whose `kid` is its RFC 7638 thumbprint. Without a file the key lives only for the process. |
@@ -271,8 +273,14 @@ What the server exposes, all discoverable from the storage description
   self-issued did:key and controlled identifier JWTs.
   Storage requests take `Authorization: Bearer <access token>`; a missing or bad token
   gets `401` with `WWW-Authenticate: Bearer as_uri="…", realm="…"`.
-- **Authorization**: the owner may do anything, and the agent that created a resource may do
-  anything with it.
+- **Access grants and requests** (Access Profile) under `/.lws/grants/` and
+  `/.lws/requests/`. Documents need an `@context` that includes
+  `https://www.w3.org/ns/lws/v1` (otherwise `400`). Grants are ODRL-style policies with
+  client, format, type, purpose and dateTime constraints. A target's `type` is
+  `DataResource`, `Container` or `StorageResource`, and its values name single resources,
+  not their members. A policy with no `target` covers every resource of the grant's
+  `storage`. A `purpose` constraint never holds, because the draft does not say how a
+  request states its purpose. The owner and a resource's creator are always allowed.
 - A PUT or PATCH that changes a resource's metadata (its types, its linkset) and fails part way
   leaves the resource **fail-closed**: only the owner and its creator may act on it until a write
   completes.
@@ -282,6 +290,11 @@ What the server exposes, all discoverable from the storage description
   relations change only with `Prefer: set-linkset`.
 - Every write and delete runs its store calls in a task that holds the resource's locks until
   the store answers, so a client that disconnects cannot release them early.
+- A grant or request `DELETE` takes effect once its stored record is gone, even if cleaning
+  up its bytes then fails.
+- The grant and request services are containers: their listings are
+  negotiated (`lws+json`, `ld+json` or `json`), paged at the page size, and carry an ETag
+  and `up`/`type`/`linkset` links. The linksets are read-only.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
