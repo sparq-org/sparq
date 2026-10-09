@@ -140,8 +140,20 @@ updates:
       # differs. Bump Playwright by hand together with that pin and regenerated
       # baselines. Security updates still come through.
       - dependency-name: "@playwright/test"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
       - dependency-name: "playwright"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
       - dependency-name: "playwright-core"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
 
   # ---- pip (the `sparq` Python bindings build/test deps) ----
   - package-ecosystem: pip
