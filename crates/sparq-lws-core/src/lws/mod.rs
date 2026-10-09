@@ -508,13 +508,11 @@ pub struct Inner<S: Store> {
     pub locks: resources::IriLocks,
     /// DPoP proof ids seen at the token endpoint.
     pub dpop_replay: subject_tokens::DpopReplay,
-    /// The resources failed changes could not yet be put back on, each with how many such
-    /// changes are to it (see [`LwsState::set_aside`]).
-    set_aside: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
     set_aside_bytes: std::sync::atomic::AtomicUsize,
-    /// The containers whose own modification time could not be moved on after a change to them.
-    untouched: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The containers whose own modification time may be behind a change to them: each with
+    /// whether the last touch failed, and how many touches are yet to land.
+    untouched: std::sync::Mutex<std::collections::HashMap<String, (bool, usize)>>,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -563,62 +561,47 @@ impl<S: Store + 'static> LwsState<S> {
                 http,
                 locks: Default::default(),
                 dpop_replay: Default::default(),
-                set_aside: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
             }),
         })
     }
 
-    /// Whether a change to the container `uri` may be later than its stored modification time.
+    /// Whether a change to the container `uri` may be later than its stored modification time:
+    /// a touch after it failed, or is yet to land.
     pub(crate) fn is_untouched(&self, uri: &str) -> bool {
         self.untouched
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(uri)
-    }
-
-    /// Record whether the container `uri`'s modification time is behind a change to it.
-    pub(crate) fn untouched(&self, uri: &str, behind: bool) {
-        let mut set = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
-        if behind {
-            set.insert(uri.to_string());
-        } else {
-            set.remove(uri);
-        }
-    }
-
-    /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
-    /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). The
-    /// one check every route makes before it reads or waits on anything of `uri`; one that is
-    /// not visible is answered `503` at once, or skipped by a walk over many.
-    pub(crate) fn visible(&self, uri: &str) -> bool {
-        !self
-            .set_aside
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .contains_key(uri)
     }
 
-    /// `uri`'s shared lock, unless `uri` is not [visible](Self::visible) or stops being visible
-    /// while the lock is waited for (a change holding it was set aside, with its locks, until
-    /// it is put back): `None` then, at once, so a walk over many resources or a delivery
-    /// skips it rather than waits.
-    pub(crate) async fn read_visible(
-        &self,
-        uri: &str,
-    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
-        let read = self.locks.read(uri);
-        tokio::pin!(read);
-        loop {
-            if !self.visible(uri) {
-                return None;
-            }
-            tokio::select! {
-                guard = &mut read => return self.visible(uri).then_some(guard),
-                _ = tokio::time::sleep(VISIBLE_POLL) => {}
-            }
+    /// Record that the container `uri`'s listing changed and a touch of it is to follow: until
+    /// it lands ([`LwsState::touched`]), the container's modification time is behind.
+    pub(crate) fn touching(&self, uri: &str) {
+        let mut map = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
+        map.entry(uri.to_string()).or_default().1 += 1;
+    }
+
+    /// Record that a touch of the container `uri` begun by [`LwsState::touching`] is over, and
+    /// whether it landed.
+    pub(crate) fn touched(&self, uri: &str, landed: bool) {
+        let mut map = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = map.entry(uri.to_string()).or_default();
+        entry.0 = !landed;
+        entry.1 = entry.1.saturating_sub(1);
+        if *entry == (false, 0) {
+            map.remove(uri);
         }
+    }
+
+    /// Whether `uri` may be read or acted on: not while a change to it, or to a member it lists,
+    /// failed and could not yet be put back (it is set aside, see [`LwsState::set_aside`]). Every
+    /// route checks it before anything else, and every lock is taken only while it holds
+    /// ([`resources::IriLocks::lock`]), so one that is not visible is answered `503` at once, or
+    /// skipped by a walk over many, and never waited on.
+    pub(crate) fn visible(&self, uri: &str) -> bool {
+        self.locks.visible(uri)
     }
 
     /// Whether a new change may start: not while set-aside changes hold [`MAX_SET_ASIDE_BYTES`]
@@ -650,31 +633,14 @@ impl<S: Store + 'static> LwsState<S> {
         let bytes = left.bytes();
         self.set_aside_bytes
             .fetch_add(bytes, std::sync::atomic::Ordering::AcqRel);
-        {
-            let mut set = self.set_aside.lock().unwrap_or_else(|e| e.into_inner());
-            for iri in &iris {
-                *set.entry(iri.clone()).or_default() += 1;
-            }
-        }
+        self.locks.hide(&iris);
         let state = self.clone();
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
             }
             drop(left);
-            {
-                let mut set = state.set_aside.lock().unwrap_or_else(|e| e.into_inner());
-                for iri in &iris {
-                    if let std::collections::hash_map::Entry::Occupied(mut e) =
-                        set.entry(iri.clone())
-                    {
-                        *e.get_mut() -= 1;
-                        if *e.get() == 0 {
-                            e.remove();
-                        }
-                    }
-                }
-            }
+            state.locks.show(&iris);
             state
                 .set_aside_bytes
                 .fetch_sub(bytes, std::sync::atomic::Ordering::AcqRel);
@@ -872,6 +838,10 @@ pub(crate) enum Undo {
     },
     /// A member that may have been created, removed from its container (see [`delete_record`]).
     Remove { iri: String, parent: String },
+    /// Nothing to put back: a resource the change holds the lock of without having changed it
+    /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
+    /// waits on that lock while the rest is put back.
+    Locked { iri: String },
 }
 
 impl Undo {
@@ -904,6 +874,7 @@ impl Undo {
                     .map(drop)
             }
             Undo::Remove { iri, parent } => delete_record(store, iri, parent).await,
+            Undo::Locked { .. } => Ok(()),
         }
     }
 
@@ -915,6 +886,7 @@ impl Undo {
                 .chain(parent.as_deref())
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
+            Undo::Locked { iri } => vec![iri],
         }
     }
 }
@@ -934,6 +906,7 @@ impl Unsettled {
                     ..
                 }
                 | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
+                Undo::Locked { .. } => 0,
                 _ => MAX_META_BYTES,
             })
             .fold(0, usize::saturating_add)
@@ -980,10 +953,6 @@ pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unset
     }
     None
 }
-
-/// How often a wait for a lock looks again whether what it waits for was set aside meanwhile
-/// (see [`LwsState::read_visible`]).
-const VISIBLE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// How many bytes set-aside changes may hold to put back before new changes are refused (see
 /// [`LwsState::may_write`]).
@@ -1160,48 +1129,43 @@ pub(crate) async fn delete_record<S: Store>(
     }
 }
 
-/// What is appended to a service record's IRI (a grant or a request) for the key of its
-/// unsettled mark: a record with the mark is never put in force at boot (see
-/// [`access::AccessStore::load`]). It is stored before a record is created or revoked and
-/// removed once that is known to have landed, so a crash, or a store failure whose outcome is
-/// unknown, leaves the record out of force rather than in.
-pub(crate) const UNSETTLED_SUFFIX: &str = ".unsettled";
+/// The content type a service record (a grant or a request) is stored under while it is not
+/// settled: a grant from when it is created until it is in force, and any record from when its
+/// revocation starts. A record stored so is never put in force at boot, and the boot removes it
+/// (see [`access::AccessStore::load`]): a crash, or a store failure whose outcome is unknown,
+/// leaves the record out of force rather than in. It is the record itself that says so, so
+/// nothing is left behind once it is gone, and it takes no room of its own.
+pub(crate) const UNSETTLED_TYPE: &str = "application/vnd.sparq.unsettled+json";
 
-/// Store the unsettled mark of the record `iri` (see [`UNSETTLED_SUFFIX`]).
-pub(crate) async fn mark_unsettled<S: Store>(
+/// How many times the outcome of a store write that failed is looked up ([`retype`]).
+const LOOKUPS: u32 = 3;
+
+/// Store the record `iri` again, as `body` under `content_type`: `Ok(true)` once it is known to
+/// be stored so, `Ok(false)` once it is known not to be, and an error when that cannot be told (a
+/// write that failed in the backend may have landed, and looking it up failed too).
+pub(crate) async fn retype<S: Store>(
     store: &S,
     iri: &str,
-) -> Result<(), crate::error::ServerError> {
-    store
-        .write(
-            &format!("{iri}{UNSETTLED_SUFFIX}"),
-            Bytes::new(),
-            "text/plain",
-        )
-        .await
-        .map(drop)
-}
-
-/// Remove the unsettled mark of the record `iri` (see [`UNSETTLED_SUFFIX`]).
-pub(crate) async fn clear_unsettled<S: Store>(
-    store: &S,
-    iri: &str,
-) -> Result<(), crate::error::ServerError> {
-    match store
-        .delete(&format!("{iri}{UNSETTLED_SUFFIX}"), None)
-        .await
-    {
-        Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
-        Err(e) => Err(e),
-    }
-}
-
-/// Whether the record `iri` carries its unsettled mark (see [`UNSETTLED_SUFFIX`]).
-pub(crate) async fn is_unsettled<S: Store>(
-    store: &S,
-    iri: &str,
+    body: Bytes,
+    content_type: &str,
 ) -> Result<bool, crate::error::ServerError> {
-    store.exists(&format!("{iri}{UNSETTLED_SUFFIX}")).await
+    let written = store.write(iri, body, content_type).await;
+    if written.is_ok() {
+        return Ok(true);
+    }
+    if !may_have_happened(&written) {
+        return Ok(false);
+    }
+    let mut last = written.err().unwrap_or(crate::error::ServerError::NotFound);
+    for _ in 0..LOOKUPS {
+        match store.meta(iri).await {
+            Ok(Some(m)) => return Ok(m.content_type == content_type),
+            Ok(None) => return Ok(false),
+            Err(e) => last = e,
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(last)
 }
 
 /// Store a new record (an access grant or request, a subscription) at `iri` in `container` and,
@@ -1211,10 +1175,13 @@ pub(crate) async fn is_unsettled<S: Store>(
 /// - The writes and the registration run in a task of their own, holding the request's share of
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
-/// - With `mark` (a grant: what puts it in force grants access), the record's unsettled mark
-///   ([`UNSETTLED_SUFFIX`]) is stored first, and removed only once the record is stored and in
-///   force: a crash or restart in between, or a mark that cannot be removed, leaves the record
-///   out of force at the next boot, never in.
+/// - With `mark` (a grant: what puts it in force grants access), the record is created under
+///   [`UNSETTLED_TYPE`], stored again under its own type, and only then put in force: a crash
+///   or restart in between, or a second write whose outcome is not known, leaves the record out
+///   of force at the next boot, never in (and one that is not known to have landed is removed,
+///   as a failed create is).
+/// - The record's own lock is held from before it is created until it is in force (or
+///   removed), so a revocation of it waits for that.
 /// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
 ///   store's timeout or lost reply), so the record is removed with the container held, tried a
 ///   few times and then set aside with the locks ([`LwsState::set_aside`]); `register` (and the
@@ -1242,28 +1209,52 @@ where
         // container (shared, unless the caller holds it exclusively) until then, so a conditional
         // create sees no member arrive between its check and its own registration.
         let _shared = match held {
-            None => Some(state.locks.read(&container).await),
+            None => match state.locks.read(&container).await {
+                Some(guard) => Some(guard),
+                None => {
+                    drop(register);
+                    return Err(ServerError::Storage(
+                        "a failed change to the container is still being put back".into(),
+                    ));
+                }
+            },
             Some(_) => None,
         };
         let _held = held;
-        if mark {
-            if let Err(e) = mark_unsettled(&state.store, &iri).await {
-                drop(register);
-                return Err(e);
-            }
-        }
+        // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
+        // taking it under the container's cannot deadlock.
+        let Some(own) = state.locks.try_lock(&iri) else {
+            drop(register);
+            return Err(ServerError::Conflict("the record's name is taken".into()));
+        };
+        let stored_as = if mark { UNSETTLED_TYPE } else { LWS_JSON };
         match state
             .store
-            .create_in_container(&container, &iri, body, LWS_JSON)
+            .create_in_container(&container, &iri, body.clone(), stored_as)
             .await
         {
             Ok(_) => {
-                register();
-                // Out of force at the next boot if this fails (see above): never wrongly in.
-                if mark {
-                    let _ = clear_unsettled(&state.store, &iri).await;
+                let settled = match mark {
+                    true => retype(&state.store, &iri, body, LWS_JSON).await,
+                    false => Ok(true),
+                };
+                if let Ok(true) = settled {
+                    register();
+                    return Ok(());
                 }
-                Ok(())
+                // Not known to be stored under its own type: never put in force, and removed as
+                // a failed create is (see below). Until it is, the boot removes it.
+                let undo = vec![Undo::Remove {
+                    iri: iri.clone(),
+                    parent: container.clone(),
+                }];
+                if let Some(left) = settle(&state.store, undo).await {
+                    state.set_aside(left, (own, _shared, _held));
+                }
+                drop(register);
+                Err(settled.err().unwrap_or_else(|| {
+                    ServerError::Storage("the grant could not be put in force".into())
+                }))
             }
             Err(e) => {
                 // The create may have committed: it is removed, with the container still held,
@@ -1275,7 +1266,7 @@ where
                         parent: container.clone(),
                     }];
                     if let Some(left) = settle(&state.store, undo).await {
-                        state.set_aside(left, (_shared, _held));
+                        state.set_aside(left, (own, _shared, _held));
                     }
                 }
                 drop(register);
@@ -1304,7 +1295,9 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
     if !resources::is_conditional(req) {
         return Ok(None);
     }
-    let guard = state.locks.lock(container).await;
+    let Some(guard) = state.locks.lock(container).await else {
+        return Err(resources::set_aside_meanwhile());
+    };
     let current = listing(&resources::plain_get(req));
     if !current.status().is_success() {
         return Err(current);
