@@ -445,15 +445,21 @@ impl Permit {
         self.recipient.as_deref()
     }
     /// Whether the grant holds for this party at every later time as well: the granting
-    /// permission constrains only the party's identity, the request's purpose and
-    /// place, or a lower bound (`gt`/`gteq`) on the clock; and every prohibition is
-    /// withdrawn for good (a structural mismatch, a definitely false constraint on one of
-    /// those operands, or a closed `lt`/`lteq` window). Elapsed time, counters and any
-    /// other operand may change while a stored grant stands, so they are never lasting.
+    /// permission constrains only the party's identity or puts a lower bound
+    /// (`gt`/`gteq`) on the clock; and every prohibition is withdrawn for good (a
+    /// structural mismatch, a definitely false identity constraint, or a closed
+    /// `lt`/`lteq` window). Purpose, place, elapsed time, counters and any other operand
+    /// are never lasting: a stored grant records none of them, and they may change.
     /// A grant that is stored rather than re-checked per request is sound only when this
     /// holds.
     pub fn lasting(&self) -> bool {
         self.lasting
+    }
+
+    /// This grant, marked as not lasting: the decision that made it left out a
+    /// constraint (a usage count) that can end it.
+    pub(crate) fn transient(self) -> Permit {
+        Permit { lasting: false, ..self }
     }
 }
 
@@ -613,15 +619,11 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
-/// Left operands whose value a stored grant may treat as fixed: the identity it is
-/// bound to, and the request's declared purpose and place. Anything else (the clock,
-/// elapsed time, counters, an unknown operand) may change while the grant stands.
-const STABLE_LEFT_OPERANDS: [&str; 4] = [
-    ODRL_RECIPIENT,
-    "http://www.w3.org/ns/odrl/2/assignee",
-    ODRL_PURPOSE,
-    ODRL_SPATIAL,
-];
+/// Left operands whose value a stored grant may treat as fixed: only the identity it
+/// is bound to. A stored grant does not record the purpose or place it was decided for,
+/// so a later request with another purpose or place would ride it; those, the clock,
+/// elapsed time, counters and unknown operands may all change while the grant stands.
+const STABLE_LEFT_OPERANDS: [&str; 2] = [ODRL_RECIPIENT, "http://www.w3.org/ns/odrl/2/assignee"];
 
 fn stable(c: &Constraint) -> bool {
     STABLE_LEFT_OPERANDS.contains(&c.left.as_str())

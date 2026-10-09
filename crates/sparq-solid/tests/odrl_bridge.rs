@@ -584,12 +584,11 @@ fn recipient_policy() -> sparq_policy::ValidatedPolicy {
     .expect("policy parses")
 }
 
-// 16. An UNmappable constraint (`odrl:purpose`) STAYS one-shot: the persisted view
-//     holds NO ConditionalGrant; access is the frozen check against the supplied
-//     request context (granted only if purpose matched at materialization), scoped
-//     to the materializing party.
+// 16. A purpose-gated permission is decided but never stored: the stored allow does not
+//     record the purpose, so a later request with another purpose would ride it. No
+//     ConditionalGrant is persisted either.
 #[test]
-fn purpose_constraint_stays_one_shot() {
+fn purpose_constraint_is_never_stored() {
     let pol = parse_policy_str(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -605,28 +604,20 @@ fn purpose_constraint_stays_one_shot() {
     )
     .unwrap();
 
-    // (a) purpose SATISFIED at materialization → one-shot grant (frozen) for alice.
     let req = Request::new(odrl("read"))
         .on(N1)
         .by(ALICE)
         .with(odrl("purpose"), Value::Str("research".to_owned()));
+    assert!(sparq_policy::evaluate(&pol, &req).allow, "the decision itself allows");
     let mut g = pod();
     let out = materialize_permission_conditional(&mut g, &pol, &req);
-    assert!(out.granted, "purpose satisfied → one-shot grant: {out:?}");
-    // NO ConditionalGrant was persisted (purpose has no faithful ACP analogue).
+    assert!(!out.granted, "a purpose-scoped grant is not stored: {out:?}");
     assert_eq!(cond_grants_for(&g, None), 0, "purpose must NOT become a re-checked condition");
 
-    // The frozen grant is scoped to the materializing party (alice).
     let mut store = PodStore::new(pod());
-    assert!(store.materialize_odrl_permission_conditional(&pol, &req).granted);
-    assert!(reads(&mut store, ALICE), "alice one-shot grant");
+    store.materialize_odrl_permission_conditional(&pol, &req);
+    assert!(!reads(&mut store, ALICE), "nothing stored for alice");
     assert!(!reads(&mut store, CAROL), "no widening");
-
-    // (b) purpose NOT satisfied (missing context) → fail-closed, nothing granted.
-    let mut store2 = PodStore::new(pod());
-    let bad = Request::new(odrl("read")).on(N1).by(ALICE); // no purpose context
-    assert!(!store2.materialize_odrl_permission_conditional(&pol, &bad).granted);
-    assert!(!reads(&mut store2, ALICE), "unsatisfied purpose grants nothing");
 }
 
 // 17a. MIXED constraints with a STRICT dateTime bound (`lt`) fail SAFE: the strict
@@ -1300,9 +1291,9 @@ fn policy_refresh_deny_overrides_composition() {
 
 // ===========================================================================
 // [OPUS-4.8] sq-q56r — faithful odrl:purpose enforcement THROUGH THE REAL
-// enforcement path (PodStore::accessible / query_as). A purpose-gated permission
-// grants ONLY when the request states a matching purpose; a mismatch denies; a
-// MISSING purpose fails closed (no grant); the prohibition dual carves out only on
+// enforcement path (PodStore::accessible / query_as). A purpose-gated permission is
+// never stored (the stored allow has no purpose, so it would outlive the request);
+// a mismatch or MISSING purpose grants nothing; the prohibition dual carves out only on
 // a matching stated purpose, and a missing purpose does NOT withdraw the carve-out.
 // Match is exact (no hierarchy). All assertions go through accessible / query_as.
 // ===========================================================================
@@ -1332,24 +1323,26 @@ fn reads_n1(store: &mut PodStore, agent: &str) -> bool {
     store.accessible(&s, Mode::Read).iter().any(|g| g.as_str() == N1)
 }
 
-// 28. purpose MATCH grants through the real enforcement path; mismatch + missing deny.
+// 28. purpose MATCH is allowed but not stored; mismatch denies.
 #[test]
-fn purpose_match_grants_through_enforcement() {
+fn purpose_match_is_never_stored() {
     let pol = purpose_read_policy();
     // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     let alice = Session { agent: Some(ALICE), client: None, issuer: None, now: None };
 
-    // (a) Matching purpose → grant → alice reads through accessible AND query_as.
+    // (a) Matching purpose → the decision allows, but the stored view has no purpose,
+    //     so nothing is stored (a later marketing request would otherwise ride it).
     let mut store = PodStore::new(pod());
     let ok = Request::new(odrl("read"))
         .on(N1)
         .by(ALICE)
         .for_purpose(Value::Iri(RESEARCH.to_owned()));
-    assert!(store.materialize_odrl_permission(&pol, &ok).granted, "matching purpose grants");
-    assert!(reads_n1(&mut store, ALICE), "alice reads with matching purpose");
-    assert_eq!(store.query_as(&alice, Mode::Read, sel).unwrap().rows.len(), 1);
+    assert!(sparq_policy::evaluate(&pol, &ok).allow, "matching purpose is allowed");
+    assert!(!store.materialize_odrl_permission(&pol, &ok).granted, "but never stored");
+    assert!(!reads_n1(&mut store, ALICE), "no purpose-free read for alice");
+    assert_eq!(store.query_as(&alice, Mode::Read, sel).unwrap().rows.len(), 0);
 
     // (b) Mismatched purpose → no grant, nothing readable.
     let mut store2 = PodStore::new(pod());

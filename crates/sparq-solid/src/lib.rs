@@ -1498,24 +1498,19 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-58mh — STATEFUL `odrl:count` enforcement THROUGH the bridge: evaluate
-    /// `policy` against `request`, **atomically consume** one unit of any applicable
-    /// `odrl:count` budget from `store`, and on a grant materialize the equivalent
-    /// `principal auth:<mode> graph` allow into this store's `<urn:sparq:auth>` view — so
-    /// the existing graph-level WAC/ACP enforcement honours it. The grant then
-    /// **self-retracts on exhaustion**: it is tracked as
-    /// [`odrl_bridge::BridgeKind::PermissionCounted`], and the next
-    /// [`PodStore::refresh_odrl_grants`] re-checks the budget READ-ONLY (never consuming)
-    /// and RETRACTS the grant once the budget is spent — access is GONE through
-    /// [`PodStore::accessible`] / [`PodStore::query_as`].
+    /// Bridge a permission through the count-aware decision: evaluate `policy` against
+    /// `request` via sparq-policy's [`sparq_policy::evaluate_and_exercise`] and, on a
+    /// grant that may be stored, materialize the equivalent `principal auth:<mode> graph`
+    /// allow into this store's `<urn:sparq:auth>` view.
     ///
-    /// This closes the gap the [`PodStore::materialize_odrl_permission_conditional`]
-    /// mapping table left open: ACP is stateless (no per-session usage counter), so the
-    /// count cannot be a re-checked ACP *condition*; instead it is enforced via the
-    /// EXISTING refresh/retraction ledger (sq-dpk4). The decision routes through
-    /// sparq-policy's [`sparq_policy::evaluate_and_exercise`] — the first *N* exercises of
-    /// an "at most *N*" permission grant; the *(N+1)*th denies; a denied / exhausted /
-    /// store-unavailable exercise burns no budget and materializes nothing (fail-closed).
+    /// A **count-limited** grant is never stored: a stored allow would let every later
+    /// read through after one exercise, so its permit is not
+    /// [`lasting`](sparq_policy::Permit::lasting) and this refuses it before spending any
+    /// budget. Enforce a usage count per request with
+    /// [`sparq_policy::evaluate_and_exercise`] instead. A permission with no count limit
+    /// bridges as [`PodStore::materialize_odrl_permission`] would, and is tracked as
+    /// [`odrl_bridge::BridgeKind::PermissionCounted`] for
+    /// [`PodStore::refresh_odrl_grants`].
     ///
     /// `store` is the injected [`sparq_policy::UsageCounterStore`] (shared via `Arc` so
     /// the same budgets back both exercise-time consumption and refresh-time re-checks);

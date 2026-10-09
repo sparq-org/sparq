@@ -1879,8 +1879,8 @@ pub(crate) mod count {
     use super::{allow_binding, emit_allow, refuse_unimplementable_conflict, BridgeOutcome};
     use sparq_core::Graph;
     use sparq_policy::{
-        count_status, evaluate, evaluate_and_exercise, CountStatus, Policy, Request,
-        UsageCounterStore, ValidatedPolicy, ODRL_COUNT,
+        base_decision, count_status, evaluate_and_exercise, CountStatus, Request,
+        UsageCounterStore, ValidatedPolicy,
     };
     use std::sync::Arc;
 
@@ -1930,9 +1930,11 @@ pub(crate) mod count {
         //    returns allow == false and consumes nothing.
         //    A grant the bridge could not store must not spend a unit, so the same base
         //    decision is checked for storability first, without consuming.
-        if let Ok(base) = strip_count_constraints(policy).validate() {
-            if let Some(permit) = evaluate(&base, request).permit {
-                if let Err(why) = allow_binding(&permit) {
+        //    A count-limited grant is never lasting, so it is refused here: counted
+        //    access goes through `evaluate_and_exercise` per request, never a stored allow.
+        if let Ok(base) = base_decision(policy, request) {
+            if let Some(permit) = &base.permit {
+                if let Err(why) = allow_binding(permit) {
                     return BridgeOutcome::denied(why);
                 }
             }
@@ -1981,11 +1983,10 @@ pub(crate) mod count {
         //     for a missing count value) — exactly the base shape `evaluate_and_exercise`
         //     uses. A withdrawn permission / now-matching prohibition denies here →
         //     retract. NOTE: this never consumes; consumption only happens at exercise.
-        let stripped = match strip_count_constraints(policy).validate() {
-            Ok(p) => p,
+        let decision = match base_decision(policy, request) {
+            Ok(d) => d,
             Err(why) => return BridgeOutcome::denied(vec![why]),
         };
-        let decision = evaluate(&stripped, request);
         if !decision.allow {
             return BridgeOutcome::denied(decision.unmet_constraints);
         }
@@ -1997,9 +1998,12 @@ pub(crate) mod count {
             .first()
             .and_then(|id| policy.permissions.iter().find(|r| &r.id == id))
         else {
-            // A base grant with no identifiable rule (should not happen for a permission)
-            // → nothing to count; re-emit the plain allow.
-            return super::materialize_permission(graph, &stripped, request);
+            // A base grant with no identifiable rule (should not happen for a permission):
+            // its permit is not lasting, so nothing is stored.
+            return match &decision.permit {
+                Some(permit) => emit_allow(graph, permit),
+                None => BridgeOutcome::denied(decision.unmet_constraints),
+            };
         };
 
         // (c) Read-only count check — NEVER consumes a unit on refresh.
@@ -2021,19 +2025,6 @@ pub(crate) mod count {
                 rule.id
             )]),
         }
-    }
-
-    /// A copy of `policy` with every `odrl:count` constraint removed from its PERMISSION
-    /// rules — the base shape the stateless [`evaluate`] sees (count is enforced against
-    /// the store, not as a stateless numeric comparison). Mirrors sparq-policy's internal
-    /// `strip_count_constraints` (kept here because that helper is crate-private).
-    /// Prohibitions are untouched (a count on a prohibition keeps its stateless meaning).
-    fn strip_count_constraints(policy: &ValidatedPolicy) -> Policy {
-        let mut out = policy.policy().clone();
-        for rule in &mut out.permissions {
-            rule.constraints.retain(|c| c.left != ODRL_COUNT);
-        }
-        out
     }
 }
 

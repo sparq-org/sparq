@@ -553,6 +553,45 @@ fn an_advancing_operand_is_never_lasting() {
     assert!(permit(perm("")).lasting());
 }
 
+/// A stored grant does not record the purpose or place it was decided for, so a
+/// constraint on either is not lasting: a later request with another purpose would
+/// ride the grant.
+#[test]
+fn a_purpose_or_place_constraint_is_not_lasting() {
+    let req = Request::new(format!("{ODRL}read"))
+        .on("urn:asset/x")
+        .by("urn:alice")
+        .for_purpose(Value::Iri("urn:p/a".into()))
+        .with(format!("{ODRL}spatial"), Value::Iri("urn:region/eu".into()));
+    for (left, right) in [("purpose", "urn:p/a"), ("spatial", "urn:region/eu")] {
+        let c = format!(
+            "odrl:constraint [ odrl:leftOperand odrl:{left} ; odrl:operator odrl:eq ; \
+             odrl:rightOperand <{right}> ]"
+        );
+        let lasting = |rules: String| {
+            let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
+            decide(&parse_policy_str(&ttl, "turtle").unwrap(), &req)
+                .permit
+                .expect("granted")
+                .lasting()
+        };
+        assert!(
+            !lasting(format!(
+                "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; {c} ]"
+            )),
+            "a {left}-scoped permission"
+        );
+        let other = c.replace(right, "urn:other");
+        assert!(
+            !lasting(format!(
+                "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ; \
+                 odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; {other} ]"
+            )),
+            "a prohibition withdrawn only by today's {left}"
+        );
+    }
+}
+
 /// Containment claims nothing about a policy whose conflict strategy `decide` refuses:
 /// that policy grants nothing, which rule subsumption does not model.
 #[test]

@@ -322,11 +322,10 @@ pub fn evaluate_and_exercise(
     //    instead. Everything else (action/target/assignee, prohibitions, purpose,
     //    dateTime, recipient, duties) is checked by the unchanged evaluator on the real
     //    policy shape.
-    let stripped = match strip_count_constraints(policy).validate() {
-        Ok(p) => p,
+    let decision = match base_decision(policy, request) {
+        Ok(d) => d,
         Err(why) => return ExerciseDecision::deny(Vec::new(), vec![why]),
     };
-    let decision = evaluate(&stripped, request);
     if !decision.allow {
         return ExerciseDecision::deny(decision.matched_rules, decision.unmet_constraints);
     }
@@ -421,6 +420,28 @@ fn count_limit(op: Operator, right: &Value) -> Option<u64> {
         // gt/gteq/neq/isPartOf/isA/isAnyOf/isNoneOf do not express a usage ceiling.
         _ => None,
     }
+}
+
+/// The decision [`evaluate_and_exercise`] grants on, without consuming anything: the
+/// policy evaluated with its permissions' `odrl:count` constraints removed. A grant from
+/// a count-limited permission is marked not [`lasting`](Permit::lasting), since its
+/// budget can run out; only an exercise against the counter store may use it, never a
+/// stored grant.
+///
+/// # Errors
+/// The reason the count-free policy fails validation.
+pub fn base_decision(policy: &ValidatedPolicy, request: &Request) -> Result<Decision, String> {
+    let stripped = strip_count_constraints(policy).validate()?;
+    let mut decision = evaluate(&stripped, request);
+    let counted = decision
+        .matched_rules
+        .first()
+        .and_then(|id| policy.permissions.iter().find(|r| &r.id == id))
+        .is_none_or(rule_has_count_constraint);
+    if counted {
+        decision.permit = decision.permit.map(Permit::transient);
+    }
+    Ok(decision)
 }
 
 /// A copy of `policy` with every `odrl:count` constraint removed from its
