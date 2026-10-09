@@ -15,9 +15,9 @@ use sha2::{Digest, Sha256};
 use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
-    add_link, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links, problem, set,
-    Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH, JSON,
-    JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, MERGE_PATCH,
+    add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
+    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
+    JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, MERGE_PATCH,
     META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::error::ServerError;
@@ -1063,16 +1063,29 @@ fn rel_key(r: &str) -> String {
     }
 }
 
-/// The types and user-managed links a request declared in its Link headers.
-fn link_declared(req: &LwsRequest, uri: &str) -> (Vec<String>, Links) {
+/// The types and user-managed links a request declared in its Link headers. What they hold once
+/// resolved against `uri` is held to [`MAX_DECLARED_LINK_BYTES`](super::MAX_DECLARED_LINK_BYTES)
+/// like the header itself (see [`super::check_headers`]): each target is resolved, and charged
+/// for every relation it would be kept under, before any of it is kept; past it, `431`.
+fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Response> {
     let mut types = Vec::new();
     let mut links = Links::new();
     // Repeats are found with a set, as in [`content_types`].
     let mut seen = std::collections::HashSet::new();
+    let mut bytes = 0usize;
     for (target, params) in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = params.get("rel") else {
             continue;
         };
+        let resolved = resolve_against(uri, &target);
+        let kept = resolved.len().max(target.len());
+        bytes = bytes.saturating_add(rel.split_whitespace().count().saturating_mul(kept));
+        if bytes > super::MAX_DECLARED_LINK_BYTES {
+            return Err(problem(
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                Some("the Link header declares more than this server accepts"),
+            ));
+        }
         for r in rel.split_whitespace() {
             let key = rel_key(r);
             if key == "type" {
@@ -1082,15 +1095,14 @@ fn link_declared(req: &LwsRequest, uri: &str) -> (Vec<String>, Links) {
                 {
                     types.push(target.clone());
                 }
-            } else if !STRUCTURAL_RELATIONS.contains(&key.as_str()) {
-                let resolved = resolve_against(uri, &target);
-                if seen.insert((key.clone(), resolved.clone())) {
-                    links.entry(key).or_default().push(resolved);
-                }
+            } else if !STRUCTURAL_RELATIONS.contains(&key.as_str())
+                && seen.insert((key.clone(), resolved.clone()))
+            {
+                links.entry(key).or_default().push(resolved.clone());
             }
         }
     }
-    (types, links)
+    Ok((types, links))
 }
 
 /// `target` resolved against `base`, or as it is when it cannot be.
@@ -1260,7 +1272,10 @@ async fn create<S: Store + 'static>(
     };
     // A container declares its types and links as a data resource does; only types its content
     // states are a data resource's alone (a container has no content of its own).
-    let (declared_types, links) = link_declared(req, &child);
+    let (declared_types, links) = match link_declared(req, &child) {
+        Ok(declared) => declared,
+        Err(r) => return r,
+    };
     let stated = if is_container {
         Vec::new()
     } else {
@@ -1570,6 +1585,10 @@ async fn write_with_meta<S: Store + 'static>(
             (new, old)
         })
         .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
+    // Metadata that could not be stored is refused before anything is written.
+    if let Some(Err(e)) = changed.as_ref().map(|(new, _)| encode_meta(new)) {
+        return (Err(e), Some(guard));
+    }
     let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
     let Some((new, old)) = changed else {
         let write = async move { state.store.write(&uri, body, &content_type).await };
@@ -1650,7 +1669,10 @@ async fn update<S: Store + 'static>(
     // "types-from-link-headers", on every write): the types the content states follow the
     // content (and only they do), and the types a PUT's own Link headers declare replace the
     // declared ones; a PUT that declares none keeps them.
-    let (link_types, links) = link_declared(req, uri);
+    let (link_types, links) = match link_declared(req, uri) {
+        Ok(declared) => declared,
+        Err(r) => return r,
+    };
     let declared = if set_linkset {
         rmeta.linkset = initial_linkset(uri, &links);
         rmeta.links = links;
@@ -2360,7 +2382,10 @@ async fn patch<S: Store + 'static>(
             Ok(m) => m,
             Err(e) => return store_error(e),
         };
-        let (link_types, links) = link_declared(req, uri);
+        let (link_types, links) = match link_declared(req, uri) {
+            Ok(declared) => declared,
+            Err(r) => return r,
+        };
         let mut rmeta = old.clone().unwrap_or_default();
         // Declared types are added to (update-resource is partial); in metadata from before they
         // were kept apart, every type counts as declared, as a JSON resource states none.
@@ -3515,6 +3540,53 @@ mod tests {
         let links = links_of(&doc, "http://h/a");
         assert_eq!(links.keys().collect::<Vec<_>>(), vec!["license"]);
         assert_eq!(links["license"], vec!["http://h/l".to_string()]);
+    }
+
+    /// Review finding: a PATCH with `Prefer: set-linkset` adds to a resource's links and types,
+    /// and nothing bounded what repeated ones accumulated. A resource's metadata is held to
+    /// [`MAX_META_BYTES`](super::super::MAX_META_BYTES): a write that would pass it is refused
+    /// before its content or its metadata is written.
+    #[tokio::test]
+    async fn metadata_is_held_to_its_size() {
+        let st = state().await;
+        let uri = post(&st, "m.json", "application/json", "{}", &[]).await;
+        let p = path_of(&uri);
+        let mut refused = None;
+        for i in 0..1000 {
+            let link = format!(
+                "<https://ex.org/{i}/{}>; rel=\"urn:r:{i}\"",
+                "x".repeat(8000)
+            );
+            let body = format!("[{{\"op\": \"add\", \"path\": \"/n\", \"value\": {i}}}]");
+            let r = call(
+                &st,
+                "PATCH",
+                p,
+                &[
+                    ("content-type", "application/json-patch+json"),
+                    ("prefer", "set-linkset"),
+                    ("link", &link),
+                ],
+                &body,
+            )
+            .await;
+            if !r.status().is_success() {
+                refused = Some((i, r.status()));
+                break;
+            }
+        }
+        let (i, status) = refused.expect("the metadata never filled");
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(i > 1);
+        // Neither the refused write's content nor its metadata was kept.
+        let m = st.resource_meta(&uri).await.unwrap();
+        assert!(encode_meta(&m).unwrap().len() <= super::super::MAX_META_BYTES);
+        assert!(!m.pending);
+        let body = st.store.read(&uri).await.unwrap().body;
+        assert_eq!(
+            serde_json::from_slice::<Value>(&body).unwrap()["n"],
+            json!(i - 1)
+        );
     }
 
     #[tokio::test]

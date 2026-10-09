@@ -938,6 +938,11 @@ pub(crate) fn parse_meta(
 pub(crate) fn encode_meta(meta: &ResourceMeta) -> Result<Vec<u8>, crate::error::ServerError> {
     let body = serde_json::to_vec(meta)
         .map_err(|e| crate::error::ServerError::Storage(format!("metadata: {e}")))?;
+    if body.len() > MAX_META_BYTES {
+        return Err(crate::error::ServerError::Conflict(format!(
+            "the resource's types and links would exceed {MAX_META_BYTES} bytes"
+        )));
+    }
     parse_meta("the resource", &body)?;
     Ok(body)
 }
@@ -1275,11 +1280,15 @@ pub fn service_listing(
         .skip((page - 1) * size)
         .take(size)
         .collect();
-    let page_tag = page.to_string();
+    // The tag covers everything the page shows: the members it lists, as listed, and how many
+    // there are in all (which its paging links follow), so a member that leaves without a
+    // version change (an expiry) still changes it.
+    let (page_tag, total_tag) = (page.to_string(), total.to_string());
+    let listed: Vec<String> = shown.iter().map(Value::to_string).collect();
     let etag = etag_of(
-        [version, page_tag.as_str()]
+        [version, page_tag.as_str(), total_tag.as_str()]
             .into_iter()
-            .chain(shown.iter().filter_map(|i| i["id"].as_str())),
+            .chain(listed.iter().map(String::as_str)),
     );
     let refusal = resources::read_refusal(req, &etag);
     if refusal == Some(StatusCode::PRECONDITION_FAILED) {
@@ -1375,6 +1384,12 @@ pub const MAX_DECLARED_LINK_BYTES: usize = 64 * 1024;
 /// Most members a list-valued request header (`Accept`, `Prefer`, `If-Match`, `If-None-Match`)
 /// may hold.
 pub const MAX_HEADER_MEMBERS: usize = 64;
+
+/// Largest metadata a resource may have, as stored: its types, links and linkset together. Every
+/// metadata write goes through [`encode_meta`], which refuses more, and a write of content and
+/// metadata checks the metadata before writing either, so no sequence of writes grows a
+/// resource's metadata past it.
+pub const MAX_META_BYTES: usize = 256 * 1024;
 
 /// The bounds every request's headers are held to before anything is built from them. Headers
 /// are input as bodies are: the transport bounds their bytes, and this bounds what they expand
@@ -1878,6 +1893,19 @@ mod tests {
                 "{name}"
             );
         }
+        // Review finding: the bound weighed each target as sent, not as resolved and kept, so a
+        // target that grows when resolved (against a long resource URI, or here by
+        // percent-encoding) passed it. Targets are weighed as kept.
+        let grows = format!(
+            "<https://e.example/{}>; rel=\"{}\"",
+            "{".repeat(400),
+            rels[..MAX_DECLARED_LINKS].join(" ")
+        );
+        assert!(grows.len() < MAX_DECLARED_LINK_BYTES);
+        assert_eq!(
+            send("link", grows).await,
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+        );
         let fine = format!("<https://e.example/t>; rel=\"{}\"", rels[..8].join(" "));
         assert_eq!(send("link", fine).await, StatusCode::CREATED);
     }

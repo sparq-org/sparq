@@ -383,7 +383,9 @@ impl Notifier {
                 .await
                 .map_err(|e| e.to_string())?;
             let me = &state.notify;
-            if me.subs.write().expect("lock").remove(&id).is_some() {
+            // An expired subscription is listed nowhere, so its removal changes no listing.
+            let removed = me.subs.write().expect("lock").remove(&id);
+            if removed.is_some_and(|s| !s.expired(jose::now_secs())) {
                 *me.etag.write().expect("lock") = new_etag();
             }
             Ok(())
@@ -866,6 +868,10 @@ pub async fn handle<S: Store + 'static>(
                 if state.needs_auth(agent) {
                     return state.challenge(None);
                 }
+                // Expired subscriptions still hold their place in the store until they are
+                // removed: a few go now, before the listing a conditional create is evaluated
+                // against is held, and before this one is counted.
+                purge_expired(state, req.admission.clone()).await;
                 // A conditional create is evaluated against the listing.
                 let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
                 let held = match super::service_preconditions(state, req, &container, |get| {
@@ -981,6 +987,28 @@ fn listing<S: Store + 'static>(
     resp
 }
 
+/// Remove a few expired subscriptions ([`EXPIRED_REMOVED_PER_SUBSCRIBE`]), as a new one is
+/// requested: never while the request holds the listing alone, since a removal waits for it.
+async fn purge_expired<S: Store + 'static>(
+    state: &LwsState<S>,
+    admission: Option<crate::overload::AdmissionSlot>,
+) {
+    let now = jose::now_secs();
+    let expired: Vec<String> = state
+        .notify
+        .subs
+        .read()
+        .expect("lock")
+        .values()
+        .filter(|s| s.expired(now))
+        .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
+        .map(|s| s.id.clone())
+        .collect();
+    for id in expired {
+        let _ = state.notify.remove(state, &id, admission.clone()).await;
+    }
+}
+
 async fn subscribe<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -1088,30 +1116,12 @@ async fn subscribe<S: Store + 'static>(
             };
         }
     }
-    // Expired subscriptions still hold their place in the store until they are removed: a few go
-    // now, before this one is counted. (Not while this create holds the container alone for its
-    // preconditions: a removal waits for the container.)
-    let now = jose::now_secs();
-    let expired: Vec<String> = if held.is_some() {
-        Vec::new()
-    } else {
-        state
-            .notify
-            .subs
-            .read()
-            .expect("lock")
-            .values()
-            .filter(|s| s.expired(now))
-            .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
-            .map(|s| s.id.clone())
-            .collect()
-    };
-    for id in expired {
-        let _ = state.notify.remove(state, &id, req.admission.clone()).await;
-    }
     // The place is reserved before anything is stored and held until the subscription is
     // registered. The storage owner's subscriptions have a share of their own: they neither
-    // count against everyone else's nor are held to one subscriber's.
+    // count against everyone else's nor are held to one subscriber's. Expired subscriptions take
+    // room in the store until they are removed, but none of their subscriber's share: it can
+    // neither see nor cancel them.
+    let now = jose::now_secs();
     let owner = access::is_owner(state, agent);
     let (quota, what) = if owner {
         (&state.notify.owner_quota, "owner subscriptions")
@@ -1127,7 +1137,7 @@ async fn subscribe<S: Store + 'static>(
             .count();
         let mine = subs
             .values()
-            .filter(|s| s.subscriber == agent.subject)
+            .filter(|s| s.subscriber == agent.subject && !s.expired(now))
             .count();
         (in_share, mine)
     });
@@ -1248,6 +1258,70 @@ mod tests {
         let r = handle(&state, &post(&body), &reader).await;
         assert_eq!(r.status(), StatusCode::CREATED);
         assert!(!state.notify.subs.read().unwrap().contains_key(&mine));
+    }
+
+    /// Review finding: expired subscriptions kept their subscriber's places, and a conditional
+    /// create, holding the listing, removed none, so a subscriber whose subscriptions had all
+    /// expired could never renew one conditionally; and an expiry changed the listing without
+    /// changing its entity tag. Expired subscriptions take none of their subscriber's share and
+    /// are removed before the listing is held, and the listing's tag covers what it shows.
+    #[tokio::test]
+    async fn expired_subscriptions_neither_block_renewal_nor_keep_a_stale_tag() {
+        let (state, _store) = test_store::state(4).await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |headers: &[(&str, &str)]| {
+            let mut h = vec![("content-type", LWS_JSON)];
+            h.extend_from_slice(headers);
+            test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body)
+        };
+        let get = |headers: &[(&str, &str)]| {
+            test_store::request(Method::GET, SUBSCRIPTIONS_PATH, headers, "")
+        };
+        let reader = Agent {
+            subject: Some("https://reader.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let expire_all = || {
+            for s in state.notify.subs.write().unwrap().values_mut() {
+                s.expires_at = Some(1);
+            }
+        };
+        for _ in 0..MAX_SUBSCRIPTIONS_PER_SUBSCRIBER {
+            let r = handle(&state, &post(&[]), &reader).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        expire_all();
+        let listed = handle(&state, &get(&[]), &reader).await;
+        let tag = listed.headers()["etag"].to_str().unwrap().to_string();
+        let r = handle(&state, &post(&[("if-match", &tag)]), &reader).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // Five live subscriptions, four to a page; the fifth expires, and the first page's tag
+        // changes with the count it shows.
+        for _ in 0..4 {
+            let r = handle(&state, &post(&[]), &reader).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let listed = handle(&state, &get(&[]), &reader).await;
+        let tag = listed.headers()["etag"].to_str().unwrap().to_string();
+        let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
+        assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        {
+            let mut subs = state.notify.subs.write().unwrap();
+            // The last listed, on the second page: the first page lists the same members.
+            let live = subs
+                .values_mut()
+                .filter(|s| s.expires_at.is_none())
+                .last()
+                .unwrap();
+            live.expires_at = Some(1);
+        }
+        let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
+        assert_eq!(r.status(), StatusCode::OK);
     }
 
     /// Review finding: the owner's subscriptions were not held to a share, but counted against

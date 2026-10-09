@@ -232,7 +232,9 @@ and each such request body is at most 16 KiB (413). A type-search filter is at m
 access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
 separate share of 512. A request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
-64 members each (431 past either).
+64 members each (431 past either); the targets are weighed as resolved against the resource.
+A resource's types, links and linkset are at most 256 KiB together, as stored: a write that would
+make them larger gets `409`, and neither its content nor its metadata is written.
 
 ```bash
 SOLID_SERVER_PROTOCOL=lws \
