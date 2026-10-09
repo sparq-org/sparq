@@ -501,6 +501,18 @@ impl<S: Store> std::ops::Deref for LwsState<S> {
 }
 
 impl<S: Store + 'static> LwsState<S> {
+    /// A [`Journal`] for one mutation, bounded to what any one write could need to put back (a
+    /// body at the limit and its metadata, twice) and never below 64 MiB.
+    pub(crate) fn journal(&self) -> Journal<'_, S> {
+        let limit = (64usize << 20).max(
+            self.cfg
+                .max_body
+                .saturating_add(MAX_META_BYTES)
+                .saturating_mul(2),
+        );
+        Journal::new(&self.store, limit)
+    }
+
     /// Build the state: ensure the storage root and the service containers exist, and load the
     /// stored access grants, requests and subscriptions.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
@@ -679,6 +691,190 @@ pub(crate) async fn remove_member<S: Store>(
     parent: Option<&str>,
 ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
     store.delete_container_if_empty(iri, parent).await
+}
+
+/// One mutation's store changes, each recorded with what it replaced, so that a failure part way
+/// puts back everything done before it ([`Journal::rollback`]). Every mutation of more than one
+/// store step goes through one: a write or delete that fails leaves content, metadata and
+/// membership as they were. What a journal holds to put things back is bounded (`limit` bytes);
+/// a change that would need more is refused, and what was done before it is put back.
+pub(crate) struct Journal<'a, S: Store> {
+    store: &'a S,
+    undo: Vec<Undo>,
+    held: usize,
+    limit: usize,
+}
+
+/// Whether a store step with this outcome may have changed something: it succeeded, or failed in
+/// the backend, where the change may have landed before the failure was reported.
+fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
+    matches!(outcome, Ok(_) | Err(crate::error::ServerError::Storage(_)))
+}
+
+/// How to put back one change a [`Journal`] made.
+enum Undo {
+    /// `key` as it was: its bytes and content type, or absent.
+    Restore {
+        key: String,
+        prior: Option<(Bytes, String)>,
+    },
+    /// A removed member, recreated in its container.
+    Recreate {
+        iri: String,
+        parent: Option<String>,
+        body: Bytes,
+        content_type: String,
+    },
+}
+
+impl<'a, S: Store> Journal<'a, S> {
+    pub(crate) fn new(store: &'a S, limit: usize) -> Self {
+        Self {
+            store,
+            undo: Vec::new(),
+            held: 0,
+            limit,
+        }
+    }
+
+    /// What is stored at `key` now, to put back later; charged to the journal's bound.
+    async fn prior(
+        &mut self,
+        key: &str,
+    ) -> Result<Option<(Bytes, String)>, crate::error::ServerError> {
+        let prior = match self.store.read(key).await {
+            Ok(r) => Some((r.body, r.meta.content_type)),
+            Err(crate::error::ServerError::NotFound) => None,
+            Err(e) => return Err(e),
+        };
+        self.held = self
+            .held
+            .saturating_add(key.len() + prior.as_ref().map_or(0, |(b, ct)| b.len() + ct.len()));
+        if self.held > self.limit {
+            return Err(crate::error::ServerError::Conflict(
+                "the change is too large to make atomically".into(),
+            ));
+        }
+        Ok(prior)
+    }
+
+    /// Write `body` at `key`.
+    pub(crate) async fn write(
+        &mut self,
+        key: &str,
+        body: Bytes,
+        content_type: &str,
+    ) -> Result<crate::store::ResourceMeta, crate::error::ServerError> {
+        let prior = self.prior(key).await?;
+        let written = self.store.write(key, body, content_type).await;
+        // A backend failure may follow a write that landed (a lost reply): it is put back all the
+        // same. A refusal wrote nothing, and there is nothing to put back.
+        if may_have_happened(&written) {
+            self.undo.push(Undo::Restore {
+                key: key.to_string(),
+                prior,
+            });
+        }
+        written
+    }
+
+    /// Write the metadata of `iri`.
+    pub(crate) async fn write_meta(
+        &mut self,
+        iri: &str,
+        meta: &ResourceMeta,
+    ) -> Result<(), crate::error::ServerError> {
+        let body = encode_meta(meta)?;
+        self.write(&meta_key(iri), Bytes::from(body), JSON)
+            .await
+            .map(|_| ())
+    }
+
+    /// Remove `key` (metadata, not a member: see [`Journal::remove_member`]); absent is fine.
+    pub(crate) async fn delete(&mut self, key: &str) -> Result<(), crate::error::ServerError> {
+        let prior = self.prior(key).await?;
+        if prior.is_none() {
+            return Ok(());
+        }
+        let deleted = self.store.delete(key, None).await;
+        if may_have_happened(&deleted) {
+            self.undo.push(Undo::Restore {
+                key: key.to_string(),
+                prior,
+            });
+        }
+        match deleted {
+            Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Remove the member `iri` of `parent` (see [`remove_member`]).
+    pub(crate) async fn remove_member(
+        &mut self,
+        iri: &str,
+        parent: Option<&str>,
+    ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
+        let Some((body, content_type)) = self.prior(iri).await? else {
+            return Ok(crate::store::DeleteOutcome::NotFound);
+        };
+        let outcome = remove_member(self.store, iri, parent).await;
+        // Only a member that went, or may have, is recreated.
+        if matches!(
+            outcome,
+            Ok(crate::store::DeleteOutcome::Deleted) | Err(crate::error::ServerError::Storage(_))
+        ) {
+            self.undo.push(Undo::Recreate {
+                iri: iri.to_string(),
+                parent: parent.map(str::to_string),
+                body,
+                content_type,
+            });
+        }
+        outcome
+    }
+
+    /// Keep every change.
+    pub(crate) fn commit(self) {}
+
+    /// Put back every change, the last first. Stops at the first step that fails, so what is
+    /// left is a prefix of the mutation (with the metadata written first, a `pending` mark
+    /// stays: see the resources write path), never a mix.
+    pub(crate) async fn rollback(self) -> Result<(), crate::error::ServerError> {
+        for undo in self.undo.into_iter().rev() {
+            match undo {
+                Undo::Restore {
+                    key,
+                    prior: Some((body, ct)),
+                } => {
+                    self.store.write(&key, body, &ct).await?;
+                }
+                Undo::Restore { key, prior: None } => match self.store.delete(&key, None).await {
+                    Ok(()) | Err(crate::error::ServerError::NotFound) => {}
+                    Err(e) => return Err(e),
+                },
+                Undo::Recreate {
+                    iri,
+                    parent,
+                    body,
+                    content_type,
+                } => {
+                    if self.store.exists(&iri).await? {
+                        continue;
+                    }
+                    match parent {
+                        Some(p) => {
+                            self.store
+                                .create_in_container(&p, &iri, body, &content_type)
+                                .await?
+                        }
+                        None => self.store.write(&iri, body, &content_type).await?,
+                    };
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Delete the stored record `iri` of a service container (a grant, a request, a subscription).
@@ -1522,8 +1718,8 @@ pub(crate) mod test_store {
         pub hold_next_delete_of: GateOf,
         /// `exists` reports this IRI absent, as if it was checked just before the IRI appeared.
         pub hide: Arc<std::sync::Mutex<Option<String>>>,
-        /// `write` of this IRI commits, then reports a backend failure, as when a remote store's
-        /// reply is lost after the update landed.
+        /// The next `write` of this IRI commits, then reports a backend failure, as when a remote
+        /// store's reply is lost after the update landed.
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `create_in_container` commits, then reports a backend failure, as when a remote
         /// store's reply is lost after the update landed.
@@ -1535,6 +1731,9 @@ pub(crate) mod test_store {
         pub partial_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// How many `delete`s named a parent: removals of a member that are not one step.
         pub two_step_deletes: Arc<std::sync::atomic::AtomicUsize>,
+        /// When set to `n`, the store step (write, create, delete) after the next `n` fails, once,
+        /// before it changes anything; then it is cleared. See [`each_failure_changes_nothing`].
+        pub fail_step: Arc<std::sync::Mutex<Option<usize>>>,
     }
 
     impl FlakyStore {
@@ -1562,6 +1761,23 @@ pub(crate) mod test_store {
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
                 two_step_deletes: Default::default(),
+                fail_step: Default::default(),
+            }
+        }
+
+        /// Count a store step against [`FlakyStore::fail_step`].
+        fn step(&self) -> ServerResult<()> {
+            let mut slot = self.fail_step.lock().unwrap();
+            match slot.as_mut() {
+                Some(0) => {
+                    *slot = None;
+                    Err(ServerError::Storage("the injected failure".into()))
+                }
+                Some(n) => {
+                    *n -= 1;
+                    Ok(())
+                }
+                None => Ok(()),
             }
         }
     }
@@ -1604,6 +1820,7 @@ pub(crate) mod test_store {
             self.inner.exists(iri).await
         }
         async fn write(&self, iri: &str, body: Bytes, ct: &str) -> ServerResult<ResourceMeta> {
+            self.step()?;
             if self.fail_write_of.lock().unwrap().as_deref() == Some(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
@@ -1625,7 +1842,15 @@ pub(crate) mod test_store {
                 return sent.await.expect("write");
             }
             let written = self.inner.write(iri, body, ct).await;
-            if self.fail_after_write_of.lock().unwrap().as_deref() == Some(iri) {
+            let lost = {
+                let mut slot = self.fail_after_write_of.lock().unwrap();
+                let lost = slot.as_deref() == Some(iri);
+                if lost {
+                    *slot = None;
+                }
+                lost
+            };
+            if lost {
                 written?;
                 return Err(ServerError::Storage("the reply was lost".into()));
             }
@@ -1638,6 +1863,7 @@ pub(crate) mod test_store {
             body: Bytes,
             ct: &str,
         ) -> ServerResult<ResourceMeta> {
+            self.step()?;
             let gate = self.hold_next_create.lock().unwrap().take();
             if let Some(gate) = gate {
                 let (inner, container, child, ct) = (
@@ -1665,6 +1891,7 @@ pub(crate) mod test_store {
             created
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
+            self.step()?;
             if parent.is_some() {
                 self.two_step_deletes.fetch_add(1, Ordering::SeqCst);
             }
@@ -1704,6 +1931,7 @@ pub(crate) mod test_store {
             parent: Option<&str>,
         ) -> ServerResult<DeleteOutcome> {
             // The same failures as `delete`: a resource is removed by either.
+            self.step()?;
             if self.fail_delete.load(Ordering::SeqCst)
                 || self.fail_delete_of.lock().unwrap().as_deref() == Some(iri)
             {
@@ -1732,6 +1960,81 @@ pub(crate) mod test_store {
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             self.inner.list_children(container).await
         }
+    }
+
+    /// What can be seen of `resources` (each one's content, content type and stored metadata) and
+    /// of `listings` (each container's members).
+    pub async fn snapshot(
+        store: &FlakyStore,
+        resources: &[String],
+        listings: &[String],
+    ) -> Vec<String> {
+        let mut out = Vec::new();
+        for iri in resources {
+            for key in [iri.clone(), super::meta_key(iri)] {
+                out.push(match store.inner.read(&key).await {
+                    Ok(r) => format!("{key}: {} {:?}", r.meta.content_type, r.body),
+                    Err(e) => format!("{key}: {e}"),
+                });
+            }
+        }
+        for container in listings {
+            let mut members: Vec<String> = store
+                .inner
+                .list_children(container)
+                .await
+                .map(|c| c.iter().map(|m| m.as_str().to_string()).collect())
+                .unwrap_or_default();
+            members.sort();
+            out.push(format!("{container} holds {members:?}"));
+        }
+        out
+    }
+
+    /// Run a mutation over and over, failing its first store step, then its second, and so on,
+    /// each time on a fresh state from `setup` (which names the resources and listings the
+    /// mutation may change). Every run that fails must leave them all exactly as they were: the
+    /// mutation is whole or not at all. Ends at the first run that hits no injected failure, which
+    /// must succeed; returns how many steps it took.
+    pub async fn each_failure_changes_nothing<Setup, SetupFut, Op, OpFut>(
+        setup: Setup,
+        op: Op,
+    ) -> usize
+    where
+        Setup: Fn() -> SetupFut,
+        SetupFut: std::future::Future<
+            Output = (
+                super::LwsState<FlakyStore>,
+                FlakyStore,
+                Vec<String>,
+                Vec<String>,
+            ),
+        >,
+        Op: Fn(super::LwsState<FlakyStore>) -> OpFut,
+        OpFut: std::future::Future<Output = axum::http::StatusCode>,
+    {
+        for n in 0..10_000 {
+            let (st, store, resources, listings) = setup().await;
+            let before = snapshot(&store, &resources, &listings).await;
+            *store.fail_step.lock().unwrap() = Some(n);
+            let status = op(st).await;
+            let fired = store.fail_step.lock().unwrap().take().is_none();
+            if !fired {
+                assert!(
+                    status.is_success(),
+                    "the mutation failed unprovoked: {status}"
+                );
+                return n;
+            }
+            if !status.is_success() {
+                assert_eq!(
+                    snapshot(&store, &resources, &listings).await,
+                    before,
+                    "step {n} failed ({status}) and left a change behind"
+                );
+            }
+        }
+        panic!("the mutation never finished");
     }
 
     /// A request to `path` (with an optional query) carrying `headers` and `body`.

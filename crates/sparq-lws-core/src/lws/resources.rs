@@ -72,6 +72,9 @@ async fn handle_now<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
+    if let Some(refused) = refuse_encoded(req) {
+        return refused;
+    }
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         let uri = state.cfg.absolute(stem);
@@ -234,6 +237,36 @@ fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
     })
 }
 
+/// A body sent with a content coding other than `identity` is refused (`415`, with
+/// `Accept-Encoding: identity`, RFC 9110 section 15.5.16) before anything reads it: the server
+/// does not decode bodies, and storing the coded bytes as the representation would drop the
+/// coding.
+fn refuse_encoded(req: &LwsRequest) -> Option<Response> {
+    if !matches!(req.method, Method::POST | Method::PUT | Method::PATCH) {
+        return None;
+    }
+    let codings = req.header_all(header::CONTENT_ENCODING);
+    let unreadable = req
+        .headers
+        .get_all(header::CONTENT_ENCODING)
+        .iter()
+        .any(|v| v.to_str().is_err());
+    let coded = unreadable
+        || codings
+            .split(',')
+            .map(str::trim)
+            .any(|c| !c.is_empty() && !c.eq_ignore_ascii_case("identity"));
+    if !coded {
+        return None;
+    }
+    let mut resp = problem(
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        Some("content codings are not supported: send the body unencoded"),
+    );
+    set(resp.headers_mut(), header::ACCEPT_ENCODING, "identity");
+    Some(resp)
+}
+
 /// The outcome of evaluating preconditions (RFC 9110 section 13.2.2).
 enum Precondition {
     Proceed,
@@ -252,26 +285,29 @@ pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
     }
 }
 
+/// Preconditions are read once, here, from every field line: a list header (`If-Match`,
+/// `If-None-Match`) sent as several lines is all of them, not the first. A precondition that
+/// cannot be read (not visible ASCII, or a date header sent twice) fails the request rather than
+/// being skipped.
 fn evaluate(
     headers: &HeaderMap,
     etag: Option<&str>,
     modified_secs: Option<u64>,
     read: bool,
 ) -> Precondition {
-    let h = |n: header::HeaderName| headers.get(n).and_then(|v| v.to_str().ok());
-    if let Some(im) = h(header::IF_MATCH) {
+    let Ok(pre) = Preconditions::read(headers) else {
+        return Precondition::Failed;
+    };
+    if let Some(im) = pre.if_match.as_deref() {
         if !etag.is_some_and(|e| etag_listed(im, e, false)) {
             return Precondition::Failed;
         }
-    } else if let (Some(since), Some(m)) = (
-        parse_http_date(h(header::IF_UNMODIFIED_SINCE)),
-        modified_secs,
-    ) {
+    } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
         if m > since {
             return Precondition::Failed;
         }
     }
-    if let Some(inm) = h(header::IF_NONE_MATCH) {
+    if let Some(inm) = pre.if_none_match.as_deref() {
         if etag.is_some_and(|e| etag_listed(inm, e, true)) {
             return if read {
                 Precondition::NotModified
@@ -280,9 +316,7 @@ fn evaluate(
             };
         }
     } else if read {
-        if let (Some(since), Some(m)) =
-            (parse_http_date(h(header::IF_MODIFIED_SINCE)), modified_secs)
-        {
+        if let (Some(since), Some(m)) = (pre.if_modified_since, modified_secs) {
             let now = to_secs(now_ms());
             if since <= now && m <= since {
                 return Precondition::NotModified;
@@ -290,6 +324,42 @@ fn evaluate(
         }
     }
     Precondition::Proceed
+}
+
+/// A request's preconditions, every field line of each read.
+struct Preconditions {
+    if_match: Option<String>,
+    if_none_match: Option<String>,
+    if_unmodified_since: Option<u64>,
+    if_modified_since: Option<u64>,
+}
+
+impl Preconditions {
+    fn read(headers: &HeaderMap) -> Result<Self, ()> {
+        let list = |n: header::HeaderName| -> Result<Option<String>, ()> {
+            let lines = headers
+                .get_all(n)
+                .iter()
+                .map(|v| v.to_str().map_err(drop))
+                .collect::<Result<Vec<_>, ()>>()?;
+            Ok((!lines.is_empty()).then(|| lines.join(", ")))
+        };
+        let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
+            let mut lines = headers.get_all(n).iter();
+            match (lines.next(), lines.next()) {
+                (None, _) => Ok(None),
+                // An unparsable date is ignored (RFC 9110 sections 13.1.3 and 13.1.4).
+                (Some(v), None) => Ok(parse_http_date(v.to_str().ok())),
+                (Some(_), Some(_)) => Err(()),
+            }
+        };
+        Ok(Self {
+            if_match: list(header::IF_MATCH)?,
+            if_none_match: list(header::IF_NONE_MATCH)?,
+            if_unmodified_since: date(header::IF_UNMODIFIED_SINCE)?,
+            if_modified_since: date(header::IF_MODIFIED_SINCE)?,
+        })
+    }
 }
 
 /// Whether the request carries a precondition a state-changing method evaluates.
@@ -1557,17 +1627,18 @@ where
 /// admits.
 ///
 /// - Metadata unchanged: one content write, which lands whole or not at all.
-/// - Metadata changed: three writes. The old metadata marked `pending` first (when that fails,
-///   nothing changed); then the content; then the new metadata, which clears the mark. When the
-///   content write is refused the old metadata is put back; a backend failure may follow a
-///   write that committed, so it leaves the mark. Whenever a step after the first fails,
-///   rollback included, the `pending` mark stays and the resource fails closed: only its owner
-///   and creator may act on it (see [`access::allowed`](super::access::allowed)) until a write
-///   completes.
+/// - Metadata changed: three writes, through a [`Journal`](super::Journal). The old metadata
+///   marked `pending` first; then the content; then the new metadata, which clears the mark.
+///   When any step fails, the journal puts back what the steps before it did, the last first, so
+///   the resource is as it was: its content and its metadata. When putting back fails too, the
+///   `pending` mark stays and the resource fails closed: only its owner and creator may act on it
+///   (see [`access::allowed`](super::access::allowed)) until a write completes.
 ///
 /// The writes, a lone content write included, run with the resource's lock (`guard`, handed back
 /// when they are done) held, in the request's own task (see [`hold_locks`]), so a client that goes
 /// away mid-way cancels neither the writes nor the rollback, and nobody sees the steps in between.
+///
+/// The last element says the failure is settled: everything was put back, so nothing changed.
 async fn write_with_meta<S: Store + 'static>(
     state: &LwsState<S>,
     guard: IriGuard,
@@ -1578,6 +1649,7 @@ async fn write_with_meta<S: Store + 'static>(
 ) -> (
     Result<crate::store::sparq::ResourceMeta, ServerError>,
     Option<IriGuard>,
+    bool,
 ) {
     let changed = meta
         .map(|(mut new, old)| {
@@ -1587,42 +1659,41 @@ async fn write_with_meta<S: Store + 'static>(
         .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
     // Metadata that could not be stored is refused before anything is written.
     if let Some(Err(e)) = changed.as_ref().map(|(new, _)| encode_meta(new)) {
-        return (Err(e), Some(guard));
+        return (Err(e), Some(guard), true);
     }
     let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
     let Some((new, old)) = changed else {
         let write = async move { state.store.write(&uri, body, &content_type).await };
         return match hold_locks(guard, write).await {
-            Ok((written, guard)) => (written, Some(guard)),
-            Err(e) => (Err(e), None),
+            Ok((written, guard)) => (written, Some(guard), false),
+            Err(e) => (Err(e), None, false),
         };
     };
     let writes = async move {
-        let mut closed = old.clone().unwrap_or_default();
-        closed.pending = true;
-        state.put_resource_meta(&uri, &closed).await?;
-        let written = match state.store.write(&uri, body, &content_type).await {
-            Ok(m) => m,
-            Err(e) => {
-                // The old metadata goes back only when the store refused the write outright. A
-                // backend failure (a remote store's timeout, a lost reply) may come after the
-                // write committed, and the new content must not be served under the old
-                // metadata: the mark stays, as it does when the rollback fails. Fail closed.
-                if !matches!(e, ServerError::Storage(_)) {
-                    let _ = match &old {
-                        Some(old) => state.put_resource_meta(&uri, old).await,
-                        None => state.store.delete(&meta_key(&uri), None).await,
-                    };
-                }
-                return Err(e);
+        let mut journal = state.journal();
+        let steps = async {
+            let mut closed = old.clone().unwrap_or_default();
+            closed.pending = true;
+            journal.write_meta(&uri, &closed).await?;
+            let written = journal.write(&uri, body, &content_type).await?;
+            journal.write_meta(&uri, &new).await?;
+            Ok(written)
+        }
+        .await;
+        match steps {
+            Ok(written) => {
+                journal.commit();
+                (Ok(written), false)
             }
-        };
-        state.put_resource_meta(&uri, &new).await?;
-        Ok(written)
+            Err(e) => {
+                let undone = journal.rollback().await.is_ok();
+                (Err(e), undone)
+            }
+        }
     };
     match hold_locks(guard, writes).await {
-        Ok((outcome, guard)) => (outcome, Some(guard)),
-        Err(e) => (Err(e), None),
+        Ok(((outcome, undone), guard)) => (outcome, Some(guard), undone),
+        Err(e) => (Err(e), None, false),
     }
 }
 
@@ -1712,7 +1783,7 @@ async fn update<S: Store + 'static>(
     };
     rmeta.types = all_types(&declared, stated);
     rmeta.declared_types = Some(declared);
-    let (written, _guard) = write_with_meta(
+    let (written, _guard, undone) = write_with_meta(
         state,
         guard,
         uri,
@@ -1723,6 +1794,7 @@ async fn update<S: Store + 'static>(
     .await;
     let written = match written {
         Ok(m) => m,
+        Err(e) if undone => return store_error(e),
         Err(e) => {
             drop(listing);
             return unsettled(state, uri, e).await;
@@ -1893,10 +1965,7 @@ pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
     let ops = ops.as_array().ok_or(PatchError::Malformed(
         "a JSON Patch is an array of operations",
     ))?;
-    let pointer = |v: Option<&Value>| {
-        v.and_then(Value::as_str)
-            .is_some_and(|p| p.is_empty() || p.starts_with('/'))
-    };
+    let pointer = |v: Option<&Value>| v.and_then(Value::as_str).and_then(Pointer::parse).is_some();
     for op in ops {
         let kind = op
             .get("op")
@@ -1976,25 +2045,28 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
         }
         Ok(())
     };
-    let str_of = |op: &Value, k: &str| op[k].as_str().unwrap_or_default().to_string();
+    // Every pointer was parsed when the patch was validated; it is parsed the same way here.
+    let pointer_of = |op: &Value, k: &str| {
+        op[k]
+            .as_str()
+            .and_then(Pointer::parse)
+            .ok_or(PatchError::Malformed("a JSON Pointer is malformed"))
+    };
     for op in ops {
-        let path = str_of(op, "path");
+        let path = pointer_of(op, "path")?;
         // What an add at `path` would overwrite: an existing object member is replaced.
         let replaced = |doc: &Value| -> usize {
-            let Some((parent, _)) = split_pointer(&path) else {
-                return 0;
-            };
-            if path.is_empty() {
+            let Some((parent, _)) = path.split() else {
                 return json_size(doc);
-            }
-            match (doc.pointer(&parent), doc.pointer(&path)) {
+            };
+            match (walk(doc, parent), path.get(doc)) {
                 (Some(Value::Object(_)), Some(old)) => json_size(old),
                 _ => 0,
             }
         };
         // A value placed at `path` sits under one container per pointer segment.
         let fits = |v: &Value| {
-            if path.matches('/').count() + json_depth(v) > MAX_JSON_DEPTH {
+            if path.0.len() + json_depth(v) > MAX_JSON_DEPTH {
                 return Err(PatchError::TooDeep);
             }
             Ok(())
@@ -2029,7 +2101,7 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
             "replace" => {
                 let v = &op["value"];
                 fits(v)?;
-                let old = doc.pointer(&path).ok_or(Failed)?;
+                let old = path.get(&doc).ok_or(Failed)?;
                 let minus = json_size(old);
                 let value = json_size(v);
                 // Taken out and put back: an array member shifts the rest of its array twice.
@@ -2040,8 +2112,9 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
             }
             "move" => {
-                let from = str_of(op, "from");
-                if path.starts_with(&format!("{from}/")) {
+                let from = pointer_of(op, "from")?;
+                // A value cannot move into itself (RFC 6902 section 4.4).
+                if from.0.len() < path.0.len() && path.0.starts_with(&from.0) {
                     return Err(Failed);
                 }
                 // The value moves; what changes is the member around it (its key, a separator), and
@@ -2059,8 +2132,8 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "copy" => {
-                let from = str_of(op, "from");
-                let source = doc.pointer(&from).ok_or(Failed)?;
+                let from = pointer_of(op, "from")?;
+                let source = from.get(&doc).ok_or(Failed)?;
                 fits(source)?;
                 let copied = json_size(source);
                 let added = copied + member_overhead(&doc, &path, true);
@@ -2070,13 +2143,13 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
                     2 * copied + minus + shift_cost(&doc, &path, true),
                 )?;
                 grow(&mut size, added, minus)?;
-                let v = doc.pointer(&from).ok_or(Failed)?.clone();
+                let v = from.get(&doc).ok_or(Failed)?.clone();
                 pointer_add(&mut doc, &path, v).ok_or(Failed)?;
             }
             "test" => {
                 // A comparison walks no more of the document than the value it is given.
                 charge(&mut work, json_size(&op["value"]))?;
-                if !json_equal(doc.pointer(&path).ok_or(Failed)?, &op["value"]) {
+                if !json_equal(path.get(&doc).ok_or(Failed)?, &op["value"]) {
                     return Err(Failed);
                 }
             }
@@ -2095,22 +2168,19 @@ pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, P
 /// escaped) and colon, and in either container the comma between it and a sibling. `adding`: for a
 /// member about to be added (nothing for an object member that would be replaced); otherwise for
 /// the member there now.
-fn member_overhead(doc: &Value, path: &str, adding: bool) -> usize {
-    let Some((parent, key)) = split_pointer(path) else {
+fn member_overhead(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
         return 0;
     };
-    if path.is_empty() {
-        return 0;
-    }
     let comma = |others: usize| usize::from(others > 0);
-    match doc.pointer(&parent) {
+    match walk(doc, parent) {
         Some(Value::Object(m)) => {
-            let present = m.contains_key(&key);
+            let present = m.contains_key(key);
             if adding && present {
                 return 0;
             }
             let others = m.len() - usize::from(present);
-            json_size(&Value::String(key)) + 1 + comma(others)
+            json_size(&Value::String(key.to_string())) + 1 + comma(others)
         }
         Some(Value::Array(a)) => comma(if adding {
             a.len()
@@ -2124,14 +2194,14 @@ fn member_overhead(doc: &Value, path: &str, adding: bool) -> usize {
 /// The work of the shift an insertion (`adding`) or a removal at `path` makes in the array that
 /// holds it, if one does: every member after the index moves, each counted as the bytes a `Value`
 /// takes in memory. An append, or a member of an object, moves nothing.
-fn shift_cost(doc: &Value, path: &str, adding: bool) -> usize {
-    let Some((parent, key)) = split_pointer(path) else {
+fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
         return 0;
     };
-    if path.is_empty() {
+    let Some(Value::Array(a)) = walk(doc, parent) else {
         return 0;
-    }
-    let (Some(Value::Array(a)), Ok(i)) = (doc.pointer(&parent), key.parse::<usize>()) else {
+    };
+    let Some(i) = array_index(key, a.len(), adding) else {
         return 0;
     };
     let moved = if adding {
@@ -2178,51 +2248,108 @@ fn numbers_equal(x: &serde_json::Number, y: &serde_json::Number) -> bool {
     }
 }
 
-fn split_pointer(path: &str) -> Option<(String, String)> {
-    if path.is_empty() {
-        return Some((String::new(), String::new()));
+/// An RFC 6901 JSON Pointer, parsed once: its reference tokens, unescaped. Every JSON Patch
+/// operation reads its paths through this one parser, so no operation accepts a pointer (or an
+/// array index) that another refuses.
+struct Pointer(Vec<String>);
+
+impl Pointer {
+    /// `None` for anything RFC 6901 does not allow: a non-empty pointer not starting with `/`,
+    /// or a `~` not followed by `0` or `1`.
+    fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() {
+            return Some(Pointer(Vec::new()));
+        }
+        let tokens = s.strip_prefix('/')?.split('/').map(|t| {
+            let mut out = String::with_capacity(t.len());
+            let mut chars = t.chars();
+            while let Some(c) = chars.next() {
+                out.push(if c != '~' {
+                    c
+                } else {
+                    match chars.next()? {
+                        '0' => '~',
+                        '1' => '/',
+                        _ => return None,
+                    }
+                });
+            }
+            Some(out)
+        });
+        tokens.collect::<Option<Vec<_>>>().map(Pointer)
     }
-    let cut = path.rfind('/')?;
-    let last = path[cut + 1..].replace("~1", "/").replace("~0", "~");
-    Some((path[..cut].to_string(), last))
+
+    /// The tokens of the container and the last token; `None` for the whole document.
+    fn split(&self) -> Option<(&[String], &str)> {
+        let (last, parent) = self.0.split_last()?;
+        Some((parent, last))
+    }
+
+    fn get<'a>(&self, doc: &'a Value) -> Option<&'a Value> {
+        walk(doc, &self.0)
+    }
 }
 
-fn pointer_add(doc: &mut Value, path: &str, value: Value) -> Option<()> {
-    if path.is_empty() {
+/// The value `tokens` reference in `doc`.
+fn walk<'a>(doc: &'a Value, tokens: &[String]) -> Option<&'a Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get(t),
+        Value::Array(a) => a.get(array_index(t, a.len(), false)?),
+        _ => None,
+    })
+}
+
+fn walk_mut<'a>(doc: &'a mut Value, tokens: &[String]) -> Option<&'a mut Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get_mut(t),
+        Value::Array(a) => {
+            let i = array_index(t, a.len(), false)?;
+            a.get_mut(i)
+        }
+        _ => None,
+    })
+}
+
+/// An array index token (RFC 6901 section 4): `0`, or digits without a leading zero, below `len`;
+/// when `adding`, also `len` itself and `-` (the end). No sign, no leading zero, no overflow.
+fn array_index(token: &str, len: usize, adding: bool) -> Option<usize> {
+    if adding && token == "-" {
+        return Some(len);
+    }
+    let b = token.as_bytes();
+    let well_formed = token == "0"
+        || (matches!(b.first(), Some(b'1'..=b'9')) && b.iter().all(u8::is_ascii_digit));
+    let i: usize = token.parse().ok().filter(|_| well_formed)?;
+    (i < len || (adding && i == len)).then_some(i)
+}
+
+fn pointer_add(doc: &mut Value, path: &Pointer, value: Value) -> Option<()> {
+    let Some((parent, key)) = path.split() else {
         *doc = value;
         return Some(());
-    }
-    let (parent, key) = split_pointer(path)?;
-    match doc.pointer_mut(&parent)? {
+    };
+    match walk_mut(doc, parent)? {
         Value::Object(m) => {
-            m.insert(key, value);
+            m.insert(key.to_string(), value);
         }
         Value::Array(a) => {
-            if key == "-" {
-                a.push(value);
-            } else {
-                let i: usize = key.parse().ok()?;
-                if i > a.len() {
-                    return None;
-                }
-                a.insert(i, value);
-            }
+            let i = array_index(key, a.len(), true)?;
+            a.insert(i, value);
         }
         _ => return None,
     }
     Some(())
 }
 
-fn pointer_remove(doc: &mut Value, path: &str) -> Option<Value> {
-    if path.is_empty() {
+fn pointer_remove(doc: &mut Value, path: &Pointer) -> Option<Value> {
+    let Some((parent, key)) = path.split() else {
         return Some(std::mem::replace(doc, Value::Null));
-    }
-    let (parent, key) = split_pointer(path)?;
-    match doc.pointer_mut(&parent)? {
-        Value::Object(m) => m.remove(&key),
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => m.remove(key),
         Value::Array(a) => {
-            let i: usize = key.parse().ok()?;
-            (i < a.len()).then(|| a.remove(i))
+            let i = array_index(key, a.len(), false)?;
+            Some(a.remove(i))
         }
         _ => None,
     }
@@ -2410,7 +2537,7 @@ async fn patch<S: Store + 'static>(
     } else {
         None
     };
-    let (written, _guard) = write_with_meta(
+    let (written, _guard, undone) = write_with_meta(
         state,
         guard,
         uri,
@@ -2421,6 +2548,7 @@ async fn patch<S: Store + 'static>(
     .await;
     let written = match written {
         Ok(m) => m,
+        Err(e) if undone => return store_error(e),
         Err(e) => {
             drop(listing);
             return unsettled(state, uri, e).await;
@@ -2542,8 +2670,8 @@ async fn delete<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     listing.take();
-    // A removal whose outcome is unknown may have happened: the container is touched for it too.
-    if removed > 0 || matches!(outcome, Err(ServerError::Storage(_))) {
+    // A removal that was put back changed nothing; one that could not be is counted in `removed`.
+    if removed > 0 {
         if let Some(p) = parent {
             touch_container(state, &p).await;
         }
@@ -2616,36 +2744,44 @@ async fn lock_subtree<S: Store + 'static>(
 }
 
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
-/// metadata (which says who may act on it, so it goes only once the resource has). Stops at the
-/// first failure, the metadata's included; returns how many of `doomed`, from the front, were
-/// removed, and the outcome.
+/// metadata (which says who may act on it, so it goes only once the resource has), through one
+/// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
+/// removal before it is put back. Returns how many of `doomed` are gone (all of them, or none
+/// unless putting back failed too), and the outcome. A subtree too large to put back is refused
+/// (409) the same way.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
 ) -> (usize, Result<(), ServerError>) {
+    let mut journal = state.journal();
+    let mut failed = None;
     for (i, (node, parent)) in doomed.iter().enumerate() {
         // The record and its parent's membership edge go in one step, data resources included:
         // removed one after the other, a failure in between would leave a live resource its
         // container no longer lists, which a retried recursive delete would not find.
-        let removed = match super::remove_member(&state.store, node, parent.as_deref()).await {
+        let removed = match journal.remove_member(node, parent.as_deref()).await {
             Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
                 "the container gained a member while it was deleted".into(),
             )),
-            Ok(_) => Ok(()),
+            Ok(_) => journal.delete(&meta_key(node)).await,
             Err(e) => Err(e),
         };
         if let Err(e) = removed {
-            return (i, Err(e));
-        }
-        // The resource is gone; metadata that survives it would describe the next resource at the
-        // IRI, so a failure to remove it is a failure of the delete (and a create replaces such
-        // metadata before it writes any content).
-        match state.store.delete(&meta_key(node), None).await {
-            Ok(_) | Err(ServerError::NotFound) => {}
-            Err(e) => return (i + 1, Err(e)),
+            failed = Some((i, e));
+            break;
         }
     }
-    (doomed.len(), Ok(()))
+    match failed {
+        None => {
+            journal.commit();
+            (doomed.len(), Ok(()))
+        }
+        Some((i, e)) => match journal.rollback().await {
+            Ok(()) => (0, Err(e)),
+            // Something may be gone: report it so the container is touched.
+            Err(_) => (i.max(1), Err(e)),
+        },
+    }
 }
 
 // ---- linksets ----
@@ -2920,6 +3056,18 @@ async fn linkset<S: Store + 'static>(
             meta.links = links_of(&user, uri);
             meta.linkset = Some(user);
             meta.linkset_etag = None;
+            // The size is checked on the document as it will be served: the server-managed links
+            // (`up`, `type`, `self`) a patch may strip are put back, and they count too.
+            let rebuilt = match linkset_document(state, uri, &meta).await {
+                Ok(d) => d,
+                Err(e) => return store_error(e),
+            };
+            if serde_json::to_vec(&rebuilt).map_or(true, |b| b.len() > patch_budget(state)) {
+                return problem(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    Some("the patched document would be too large"),
+                );
+            }
             // The linkset is checked whole, as it will be stored: inside the metadata it nests a
             // level deeper than in the patched document, and metadata that does not read back
             // would be lost.
@@ -3806,6 +3954,53 @@ mod tests {
             .unwrap();
         assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
         assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
+    }
+
+    /// Review finding: array indexes were parsed with `str::parse`, so `01` and `+1` named
+    /// member 1 in some operations, and escapes other than `~0` and `~1` passed. Every operation
+    /// now reads its pointers through one RFC 6901 parser.
+    #[test]
+    fn json_pointers_follow_rfc_6901() {
+        let doc = json!({"a": [10, 11, 12], "~/": 1});
+        let run = |ops: Value| json_patch(&doc, &ops, PATCH_BUDGET);
+        for index in [
+            "01",
+            "+1",
+            "1.0",
+            " 1",
+            "1 ",
+            "-1",
+            "3",
+            "18446744073709551616",
+            "-",
+        ] {
+            let path = format!("/a/{index}");
+            for op in [
+                json!({"op": "remove", "path": path}),
+                json!({"op": "replace", "path": path, "value": 0}),
+                json!({"op": "test", "path": path, "value": 11}),
+                json!({"op": "copy", "from": path, "path": "/b"}),
+                json!({"op": "move", "from": path, "path": "/b"}),
+            ] {
+                assert_eq!(run(json!([op])), Err(PatchError::Failed), "{op}");
+            }
+            if index != "3" && index != "-" {
+                let add = json!([{"op": "add", "path": path, "value": 0}]);
+                assert_eq!(run(add), Err(PatchError::Failed), "add at {index}");
+            }
+        }
+        for bad in ["a", "/~2", "/~", "/a~"] {
+            let op = json!([{"op": "test", "path": bad, "value": 1}]);
+            assert!(matches!(run(op), Err(PatchError::Malformed(_))), "{bad}");
+        }
+        let ops = json!([
+            {"op": "test", "path": "/a/0", "value": 10},
+            {"op": "test", "path": "/~0~1", "value": 1},
+            {"op": "add", "path": "/a/3", "value": 13},
+            {"op": "add", "path": "/a/-", "value": 14},
+            {"op": "move", "from": "/a/1", "path": "/a/1"},
+        ]);
+        assert_eq!(run(ops).unwrap()["a"], json!([10, 11, 12, 13, 14]));
     }
 
     /// Review finding: the work budget charged what an operation adds, not the array members an
@@ -5058,6 +5253,76 @@ mod tests {
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
     }
 
+    /// Review finding: a gzip body was stored as the representation and its Content-Encoding
+    /// dropped, so a reader got compressed bytes labelled as plain content. Coded bodies are
+    /// refused before anything is written.
+    #[tokio::test]
+    async fn coded_bodies_are_refused() {
+        let st = state().await;
+        let text = ("content-type", "text/plain");
+        let r = call(&st, "POST", "/", &[("slug", "x"), text], "a").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        for coding in ["gzip", "identity, gzip", "x-unknown"] {
+            let h = [text, ("content-encoding", coding), ("slug", "y")];
+            for (method, path) in [("PUT", "/x"), ("POST", "/")] {
+                let r = call(&st, method, path, &h, "b").await;
+                assert_eq!(
+                    r.status(),
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "{method} {coding}"
+                );
+                assert_eq!(hdr(&r, "accept-encoding"), "identity");
+            }
+        }
+        let r = call(&st, "GET", "/x", &[], "").await;
+        assert_eq!(&body_of(r).await[..], b"a");
+        assert_eq!(
+            call(&st, "GET", "/y", &[], "").await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let h = [text, ("content-encoding", "identity")];
+        assert!(call(&st, "PUT", "/x", &h, "c").await.status().is_success());
+    }
+
+    /// Review finding: only the first field line of a conditional header was read, so a second
+    /// `If-None-Match: *` line let a write through. Every line counts now, and a precondition
+    /// that cannot be read fails the request.
+    #[tokio::test]
+    async fn every_line_of_a_precondition_counts() {
+        let st = state().await;
+        let text = ("content-type", "text/plain");
+        let r = call(&st, "POST", "/", &[("slug", "x"), text], "a").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
+        let since = "Thu, 01 Jan 2099 00:00:00 GMT";
+        for refused in [
+            &[("if-none-match", "\"other\""), ("if-none-match", "*")][..],
+            &[("if-match", "\"other\""), ("if-match", "\"other2\"")][..],
+            &[
+                ("if-unmodified-since", since),
+                ("if-unmodified-since", since),
+            ][..],
+            &[("if-match", "\"caf\u{e9}\"")][..],
+            &[("if-none-match", "\"other\""), ("if-none-match", "\u{e9}")][..],
+        ] {
+            let mut h = vec![text];
+            h.extend_from_slice(refused);
+            let r = call(&st, "PUT", "/x", &h, "b").await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{refused:?}");
+        }
+        let r = call(&st, "GET", "/x", &[], "").await;
+        assert_eq!(hdr(&r, "etag"), tag, "a refused write changed the resource");
+        let lines = [
+            ("if-none-match", "\"other\""),
+            ("if-none-match", tag.as_str()),
+        ];
+        let r = call(&st, "GET", "/x", &lines, "").await;
+        assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        let lines = [("if-match", "\"other\""), ("if-match", tag.as_str()), text];
+        let r = call(&st, "PUT", "/x", &lines, "b").await;
+        assert!(r.status().is_success(), "{}", r.status());
+    }
+
     /// Review finding: the types a Turtle representation states were deduplicated by scanning
     /// those already found, so a body stating a hundred thousand types cost billions of
     /// comparisons. Repeats are found with a set, and the first statement of each type keeps its
@@ -5337,6 +5602,38 @@ mod tests {
         }
     }
 
+    /// Review finding: a linkset PATCH was held to the body limit on the document it produced,
+    /// but a patch that strips the server-managed links got them back afterwards, so the served
+    /// linkset could pass the limit. The rebuilt document is what is measured.
+    #[tokio::test]
+    async fn a_linkset_patch_is_measured_with_the_links_it_gets_back() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let types: String = (0..400)
+            .map(|i| format!("<> a <https://e.example/{}{i}> .\n", "t".repeat(80)))
+            .collect();
+        let turtle = ("content-type", "text/turtle");
+        let r = call(&st, "POST", "/", &[turtle, ("slug", "d")], &types).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let replace = |n: usize| {
+            json!([{"op": "replace", "path": "/linkset/0", "value": {
+                "anchor": format!("{BASE}/d"),
+                "https://e.example/rel": [{"href": format!("https://e.example/{}", "x".repeat(n))}],
+            }}])
+            .to_string()
+        };
+        let r = call(&st, "PATCH", "/d.meta", &[patch], &replace(1 << 10)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.meta", &[patch], &replace(30 << 10)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        let served = body_of(call(&st, "GET", "/d.meta", &[], "").await).await;
+        assert!(served.len() <= 64 << 10, "{}", served.len());
+    }
+
     /// Review finding: a create whose store call reported a failure removed the new member's
     /// metadata, though a remote store may have committed the content before its reply was lost:
     /// the content stayed, without its creator, types and links. The metadata now goes only once
@@ -5568,7 +5865,8 @@ mod tests {
     /// metadata put back. A remote store can report a failure (a timeout, a lost reply) for an
     /// update it committed: a PUT that made a public resource private and dropped its public type
     /// then left the new private content under the old public type. A write whose outcome is not
-    /// known now leaves the resource pending, so it fails closed.
+    /// known is now put back whole, content included; and when putting back fails too, the
+    /// resource stays pending, so it fails closed.
     #[tokio::test]
     async fn a_write_whose_outcome_is_unknown_stays_pending() {
         use super::super::test_store::{request as req, FlakyStore};
@@ -5623,20 +5921,35 @@ mod tests {
         let r = handle(&st, &put(public, "public"), &owner).await;
         assert!(r.status().is_success(), "{}", r.status());
         assert_eq!(handle(&st, &get, &stranger).await.status(), StatusCode::OK);
-        // Made private; the store commits the content and then reports a failure.
+        // Made private; the store commits the content and then reports a failure. The content
+        // and the metadata are put back as they were, so nothing changed.
         let version = || async { st.resource_meta(&st.cfg.storage()).await.unwrap().version };
         let before = version().await;
         *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
         let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
         assert!(r.status().is_server_error(), "{}", r.status());
         *store.fail_after_write_of.lock().unwrap() = None;
-        // The write may have happened: the container's listing is not left looking unchanged.
+        assert_eq!(version().await, before);
+        let r = handle(&st, &get, &stranger).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_eq!(body_of(r).await, Bytes::from("public"));
+        // When the content cannot be put back either, the new content is not served under the
+        // old public type: the resource stays pending and the listing is not left unchanged.
+        // The steps: the pending mark, the content (its reply lost), then putting it back.
+        *store.fail_after_write_of.lock().unwrap() = Some(uri.clone());
+        *store.fail_step.lock().unwrap() = Some(2);
+        let r = handle(&st, &put("https://e.example/Private", "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        *store.fail_after_write_of.lock().unwrap() = None;
+        assert!(
+            store.fail_step.lock().unwrap().take().is_none(),
+            "the third step failed"
+        );
         assert_ne!(version().await, before);
         assert_eq!(
             st.store.read(&uri).await.unwrap().body,
             Bytes::from("private")
         );
-        // The new content is not served under the old public type.
         assert!(st.resource_meta(&uri).await.unwrap().pending);
         assert_eq!(
             handle(&st, &get, &stranger).await.status(),
@@ -5717,9 +6030,122 @@ mod tests {
         );
     }
 
+    /// Review finding: a recursive DELETE removed each descendant on its own, so a failure part way
+    /// left those before it gone; and a PUT that changed metadata kept its new content when the
+    /// last write failed. Every mutation of more than one store step goes through one journal:
+    /// failing each of its steps in turn leaves content, metadata and membership as they were.
+    #[tokio::test]
+    async fn mutations_are_whole_or_not_at_all() {
+        use super::super::test_store::{each_failure_changes_nothing, request as req, state};
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let tree = || {
+            let container = container.clone();
+            async move {
+                let (st, store) = state(100).await;
+                let anyone = Agent::anonymous();
+                let post = |path: &str, slug: &str, link: Option<&str>, body: &str| {
+                    let mut h = vec![("slug", slug), ("content-type", "text/turtle")];
+                    if let Some(l) = link {
+                        h.push(("link", l));
+                    }
+                    req(Method::POST, path, &h, body)
+                };
+                for (path, slug, link) in [
+                    ("/", "c", Some(container.as_str())),
+                    ("/c/", "a", None),
+                    ("/c/", "d", Some(container.as_str())),
+                    ("/c/d/", "b", Some("<https://e.example/L>; rel=\"license\"")),
+                ] {
+                    let r = handle(
+                        &st,
+                        &post(path, slug, link, "<> a <https://e.example/T> ."),
+                        &anyone,
+                    )
+                    .await;
+                    assert_eq!(r.status(), StatusCode::CREATED);
+                }
+                let h = [("slug", "j"), ("content-type", "application/json")];
+                let r = handle(&st, &req(Method::POST, "/c/", &h, r#"{"a":1}"#), &anyone).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                let root = st.cfg.storage();
+                // The storage root too: its validators must not move for a change that was undone.
+                let iris: Vec<String> = ["", "c/", "c/a", "c/d/", "c/d/b", "c/n", "c/j"]
+                    .iter()
+                    .map(|p| format!("{root}{p}"))
+                    .collect();
+                let listings = vec![root, iris[1].clone(), iris[3].clone()];
+                (st, store, iris, listings)
+            }
+        };
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let r = handle(
+                &st,
+                &req(Method::DELETE, "/c/", &[("depth", "infinity")], ""),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(steps >= 8, "a delete of four resources took {steps} steps");
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let h = [
+                ("content-type", "text/turtle"),
+                ("prefer", "set-linkset"),
+                ("link", "<https://e.example/Other>; rel=\"type\""),
+            ];
+            let r = handle(
+                &st,
+                &req(Method::PUT, "/c/d/b", &h, "<> a <https://e.example/U> ."),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(
+            steps >= 3,
+            "a write that changes metadata took {steps} steps"
+        );
+        // Creates: the new member, its metadata and the container's listing, or none of them.
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let h = [("content-type", "text/turtle"), ("slug", "n")];
+            let r = handle(
+                &st,
+                &req(Method::POST, "/c/", &h, "<> a <https://e.example/U> ."),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(steps >= 2, "a create took {steps} steps");
+        // A PATCH that changes the linkset too.
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let h = [
+                ("content-type", "application/merge-patch+json"),
+                ("prefer", "set-linkset"),
+                ("link", "<https://e.example/Other>; rel=\"type\""),
+            ];
+            let r = handle(
+                &st,
+                &req(Method::PATCH, "/c/j", &h, r#"{"b":2}"#),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(
+            steps >= 3,
+            "a PATCH that changes metadata took {steps} steps"
+        );
+    }
+
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
-    /// the next resource created at the IRI; and a create wrote its content before its creator
-    /// metadata, so a failure in between left the new content under the old creator.
+    /// the next resource created at the IRI (a failed delete is now put back whole); and a create
+    /// wrote its content before its creator metadata, so a failure in between left the new
+    /// content under the old creator.
     #[tokio::test]
     async fn stale_metadata_never_describes_new_content() {
         use super::super::test_store::{request as req, FlakyStore};
@@ -5756,8 +6182,15 @@ mod tests {
         let r = handle(&st, &req(Method::DELETE, &px, &[], ""), &owner).await;
         assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
         *store.fail_delete_of.lock().unwrap() = None;
-        assert!(!st.store.exists(&x).await.unwrap());
+        // The delete was put back whole: the resource and its metadata are as they were.
+        assert!(st.store.exists(&x).await.unwrap());
         assert_eq!(st.resource_meta(&x).await.unwrap().creator, bob.subject);
+        // Metadata left behind with no resource (as a store failure before deletes were put back
+        // could leave it).
+        super::super::remove_member(&st.store, &x, Some(&st.cfg.storage()))
+            .await
+            .unwrap();
+        assert!(!st.store.exists(&x).await.unwrap());
         // A create at the IRI whose metadata write fails creates nothing under Bob's metadata.
         *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
         assert!(post(owner.clone()).await.status().is_server_error());

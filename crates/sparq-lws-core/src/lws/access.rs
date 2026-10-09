@@ -126,10 +126,12 @@ impl Constraint {
     }
 
     fn compare_now(&self) -> bool {
-        let Some(bound) = self.right.as_str().and_then(parse_rfc3339) else {
+        let Some(bound) = self.right.as_str().and_then(parse_rfc3339_nanos) else {
             return false;
         };
-        let now = jose::now_secs();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as i128);
         match self.operator.as_str() {
             "eq" => now == bound,
             "gt" => now > bound,
@@ -141,11 +143,18 @@ impl Constraint {
     }
 }
 
-/// An RFC 3339 / xsd:dateTime instant, as seconds since the epoch.
+/// An RFC 3339 / xsd:dateTime instant, as whole seconds since the epoch (any fraction dropped).
+pub fn parse_rfc3339(s: &str) -> Option<i64> {
+    parse_rfc3339_nanos(s).map(|n| n.div_euclid(1_000_000_000) as i64)
+}
+
+/// An RFC 3339 / xsd:dateTime instant, as nanoseconds since the epoch: exact, so a temporal
+/// constraint compares the instant it states, not one rounded to its second. A date the calendar
+/// does not have (February 31, a leap second) and a fraction finer than a nanosecond are refused.
 ///
 /// Parsed over bytes with every field checked to be ASCII digits before it is read, so malformed
 /// (including non-ASCII) input is `None`, never a slice-on-a-char-boundary panic.
-pub fn parse_rfc3339(s: &str) -> Option<i64> {
+pub fn parse_rfc3339_nanos(s: &str) -> Option<i128> {
     // YYYY-MM-DDTHH:MM:SS[.frac](Z|±HH:MM)
     let b = s.trim().as_bytes();
     if b.len() < 20
@@ -166,11 +175,13 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
         ascii_num(b, 17, 2)?,
     );
     let mut rest = &b[19..];
+    let mut nanos: i128 = 0;
     if let Some(frac) = rest.strip_prefix(b".") {
         let digits = frac.iter().take_while(|c| c.is_ascii_digit()).count();
-        if digits == 0 {
+        if digits == 0 || digits > 9 {
             return None;
         }
+        nanos = i128::from(ascii_num(frac, 0, digits)?) * 10i128.pow(9 - digits as u32);
         rest = &frac[digits..];
     }
     let offset = match rest {
@@ -184,7 +195,14 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
         }
         _ => return None,
     };
-    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let month_days = match mo {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if !(1..=12).contains(&mo) || !(1..=month_days).contains(&d) || h > 23 || mi > 59 || sec > 59 {
         return None;
     }
     // Days from civil (Howard Hinnant).
@@ -198,7 +216,8 @@ pub fn parse_rfc3339(s: &str) -> Option<i64> {
     let doy = (153 * m2 + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
     let days = era * 146_097 + doe - 719_468;
-    Some(days * 86_400 + h * 3600 + mi * 60 + sec - offset)
+    let secs = days * 86_400 + h * 3600 + mi * 60 + sec - offset;
+    Some(i128::from(secs) * 1_000_000_000 + nanos)
 }
 
 /// The `len` bytes at `b[at..]` as a number, if they exist and are all ASCII digits.
@@ -295,18 +314,19 @@ impl Policy {
             && self.covers(uri)
     }
 
-    /// Whether the policy's target covers `uri`.
+    /// Whether the policy covers `uri`: always within the grant's storage, and then the resources
+    /// its target names, or the whole storage when it names none.
     pub fn covers(&self, uri: &str) -> bool {
-        match &self.target {
-            Some(t) => t.kind.matches(uri) && t.values.iter().any(|v| v == uri),
-            None => {
-                let scope = self.storage.trim_end_matches('/');
-                !scope.is_empty()
-                    && uri
-                        .strip_prefix(scope)
-                        .is_some_and(|rest| rest.starts_with('/'))
+        let scope = self.storage.trim_end_matches('/');
+        let in_storage = !scope.is_empty()
+            && uri
+                .strip_prefix(scope)
+                .is_some_and(|rest| rest.starts_with('/'));
+        in_storage
+            && match &self.target {
+                Some(t) => t.kind.matches(uri) && t.values.iter().any(|v| v == uri),
+                None => true,
             }
-        }
     }
 }
 
@@ -374,11 +394,25 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
-                let Ok(r) = store.read(child.as_str()).await else {
-                    continue;
+                // Every stored request counts against the request quota, so one that cannot be read
+                // stops the server rather than leaving a place uncounted; a grant that cannot be
+                // read grants nothing.
+                let stored = match store.read(child.as_str()).await {
+                    Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
+                    Err(e) if !grants => {
+                        return Err(format!("store: access request {}: {e}", child.as_str()))
+                    }
+                    Err(_) => None,
                 };
-                let Ok(stored) = serde_json::from_slice::<Value>(&r.body) else {
-                    continue;
+                let stored = match stored {
+                    Some(v) => v,
+                    None if !grants => {
+                        return Err(format!(
+                            "access request {} is not a stored record",
+                            child.as_str()
+                        ))
+                    }
+                    None => continue,
                 };
                 let id = child
                     .as_str()
@@ -582,6 +616,27 @@ async fn decide<S: Store + 'static>(
         .any(|p| p.constraints.iter().all(|c| c.satisfied(&ctx))))
 }
 
+/// Whether a constraint's right operand is one its operator can be evaluated against: `isAnyOf` a
+/// non-empty list of strings and every other operator one string; a `dateTime` an exact instant
+/// compared by order or equality; `client`, `format` and `type` compared by equality or
+/// membership. A constraint that fails this is malformed, and its grant with it, so none is ever
+/// enforced in part.
+fn operand_valid(left: &str, op: &str, right: &Value) -> bool {
+    let strings = |v: &Value| v.as_str().is_some_and(|s| !s.is_empty());
+    let shape = match op {
+        "isAnyOf" => right
+            .as_array()
+            .is_some_and(|a| !a.is_empty() && a.iter().all(strings)),
+        _ => strings(right),
+    };
+    shape
+        && match left {
+            "dateTime" => op != "isAnyOf" && right.as_str().and_then(parse_rfc3339_nanos).is_some(),
+            "client" | "format" | "type" => matches!(op, "eq" | "isAnyOf"),
+            _ => true,
+        }
+}
+
 /// The AccessPolicy entries of `access` in a document scoped to `storage`, or `None` when they are
 /// malformed.
 pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
@@ -631,6 +686,9 @@ pub fn policies(access: &Value, storage: &str) -> Option<Vec<Policy>> {
                         return None;
                     }
                     let right = c.get("rightOperand")?.clone();
+                    if !operand_valid(left, op, &right) {
+                        return None;
+                    }
                     let any_of = right
                         .as_array()
                         .into_iter()
@@ -884,6 +942,14 @@ async fn create<S: Store + 'static>(
         .get("storage")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    // A grant or request is about this storage only: one scoped to another is refused, not
+    // stored inert.
+    if valid && storage.trim_end_matches('/') != state.cfg.storage().trim_end_matches('/') {
+        return problem(
+            StatusCode::BAD_REQUEST,
+            Some("an access document's storage must be this storage"),
+        );
+    }
     let Some(parsed) = valid
         .then(|| policies(body.get("access").unwrap_or(&Value::Null), storage))
         .flatten()
@@ -926,6 +992,16 @@ async fn create<S: Store + 'static>(
         author: agent.subject.clone(),
         etag: new_etag(),
     };
+    // "When an inbox property is present on an access request or access grant, the server SHOULD
+    // deliver notifications to that endpoint" (section 11.6).
+    let own_inbox = body
+        .get("inbox")
+        .and_then(Value::as_str)
+        .filter(|i| is_uri(i))
+        .map(str::to_string);
+    let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
+    // The record is put in force, counted and announced in one step, once it is stored: a client
+    // that goes away after the store committed cannot keep it from being announced.
     let register = {
         let state = state.clone();
         move || {
@@ -938,6 +1014,7 @@ async fn create<S: Store + 'static>(
             state.access.bump(grants);
             // Counted as registered from here on.
             drop(slot);
+            announce(&state, grants, &document, own_inbox, activity);
         }
     };
     let created = super::create_record(
@@ -952,26 +1029,31 @@ async fn create<S: Store + 'static>(
     if let Err(e) = created.await {
         return problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
     }
-    let activity = json!({"type": ["Create"], "object": {"id": iri, "type": [wanted]}});
-    // "When an inbox property is present on an access request or access grant, the server SHOULD
-    // deliver notifications to that endpoint" (section 11.6).
-    let mut inboxes: BTreeSet<String> = body
-        .get("inbox")
-        .and_then(Value::as_str)
-        .filter(|i| is_uri(i))
-        .map(str::to_string)
-        .into_iter()
-        .collect();
+    let mut resp = problem(StatusCode::CREATED, None);
+    set(resp.headers_mut(), header::LOCATION, &iri);
+    service_links(&state.cfg, resp.headers_mut(), &iri, &container);
+    resp
+}
+
+/// Announce a new grant or request (`document`, by `activity`): at its own inbox, and
+/// - for a grant, "the requesting agent SHOULD be notified at the inbox specified in the
+///   associated access request." The draft gives a grant no link to its request, so the
+///   associated requests are those by or for an agent the grant names.
+/// - for a request, "the storage controller SHOULD be notified": at the inbox the owner's
+///   identity document names, looked up in the background. The lookup holds a place in the
+///   delivery queue (so lookups are as bounded as deliveries), and lookups share one fetch and
+///   its answer (see [`owner_inbox_cached`]).
+fn announce<S: Store + 'static>(
+    state: &LwsState<S>,
+    grants: bool,
+    document: &Value,
+    own_inbox: Option<String>,
+    activity: Value,
+) {
+    let mut inboxes: BTreeSet<String> = own_inbox.into_iter().collect();
     if grants {
-        // "When a new access grant is created, the requesting agent SHOULD be notified at the inbox
-        // specified in the associated access request." The draft gives a grant no link to its
-        // request, so the associated requests are those by or for an agent the grant names.
-        inboxes.extend(requester_inboxes(state, &document));
+        inboxes.extend(requester_inboxes(state, document));
     } else {
-        // "When a new access request is submitted, the storage controller SHOULD be notified": at
-        // the inbox the owner's identity document names, looked up in the background.
-        // The lookup holds a place in the delivery queue (so lookups are as bounded as
-        // deliveries), and lookups share one fetch and its answer (see [`owner_inbox_cached`]).
         let find = {
             let state = state.clone();
             async move { owner_inbox_cached(&state).await }
@@ -981,10 +1063,6 @@ async fn create<S: Store + 'static>(
     for inbox in inboxes {
         state.notify.deliver(state, &inbox, activity.clone(), None);
     }
-    let mut resp = problem(StatusCode::CREATED, None);
-    set(resp.headers_mut(), header::LOCATION, &iri);
-    service_links(&state.cfg, resp.headers_mut(), &iri, &container);
-    resp
 }
 
 /// The inboxes of the access requests associated with `grant`: those made by, or asking for, an
@@ -1226,6 +1304,210 @@ mod tests {
         assert_eq!(inbox_of(&graph, me).as_deref(), Some("https://a/i/"));
         assert_eq!(inbox_of(&json!({"inbox": "relative/"}), me), None);
         assert_eq!(inbox_of(&json!({"name": "Alice"}), me), None);
+    }
+
+    /// Review finding: a targeted policy was never held to its grant's storage, so a grant
+    /// scoped to another storage still authorized the resources its target named here. Every
+    /// policy covers its storage only, and a grant scoped to another is refused when posted.
+    #[tokio::test]
+    async fn grants_hold_to_their_storage() {
+        let target = json!({"type": "StorageResource", "value": ["https://s/x"]});
+        let elsewhere = policies(
+            &json!([{"type": "AccessPolicy", "action": "read", "assignee": "https://a/",
+                     "target": target}]),
+            "https://other.example/",
+        )
+        .unwrap()
+        .remove(0);
+        assert!(!elsewhere.covers("https://s/x"));
+        assert!(policy(Some(target)).covers("https://s/x"));
+        let (state, _) = test_store::state(100).await;
+        let mut doc: Value =
+            serde_json::from_str(&access_doc("AccessGrant", "https://a/", None)).unwrap();
+        doc["storage"] = json!("https://other.example/");
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &doc.to_string(),
+        );
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(state.access.grant_policies().is_empty());
+    }
+
+    /// Review finding: a temporal bound and the current time were both cut to the second, so a
+    /// bound's fraction was ignored either way, and dates the calendar does not have were read
+    /// as later ones. Instants are exact to the nanosecond, and impossible dates are refused.
+    #[test]
+    fn temporal_constraints_compare_exact_instants() {
+        let ns = |s: &str| parse_rfc3339_nanos(s);
+        assert_eq!(
+            ns("2026-10-09T12:00:00.9Z").unwrap() - ns("2026-10-09T12:00:00.1Z").unwrap(),
+            800_000_000
+        );
+        assert_eq!(ns("1970-01-01T00:00:00.000000001Z"), Some(1));
+        for bad in [
+            "2026-02-31T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2026-04-31T00:00:00Z",
+            "2026-10-09T23:59:60Z",
+            "2026-10-09T12:00:00.1234567891Z",
+        ] {
+            assert_eq!(ns(bad), None, "{bad}");
+        }
+        assert!(ns("2024-02-29T00:00:00Z").is_some());
+        // A bound a few milliseconds past is past, whatever second it falls in.
+        let past = std::time::SystemTime::now() - std::time::Duration::from_millis(5);
+        let d = past.duration_since(std::time::UNIX_EPOCH).unwrap();
+        let bound = format!(
+            "{}.{:09}Z",
+            format_rfc3339(d.as_secs() as i64).trim_end_matches('Z'),
+            d.subsec_nanos()
+        );
+        let constraint = |op: &str| Constraint {
+            left: "dateTime".into(),
+            operator: op.into(),
+            right: json!(bound),
+            any_of: Default::default(),
+        };
+        let ctx = ConstraintContext {
+            client: None,
+            format: None,
+            types: &[],
+        };
+        assert!(!constraint("lteq").satisfied(&ctx));
+        assert!(!constraint("eq").satisfied(&ctx));
+        assert!(constraint("gt").satisfied(&ctx));
+    }
+
+    /// Review finding: an `isAnyOf` operand's members that were not strings were dropped, so a
+    /// malformed constraint was enforced in part. A constraint whose operand its operator cannot
+    /// evaluate makes the whole grant malformed.
+    #[test]
+    fn malformed_operands_refuse_the_grant() {
+        let with = |left: &str, op: &str, right: Value| {
+            policies(
+                &json!([{"type": "AccessPolicy", "action": "read", "assignee": "https://a/",
+                         "constraint": [{"leftOperand": left, "operator": op, "rightOperand": right}]}]),
+                S,
+            )
+        };
+        assert!(with("format", "isAnyOf", json!(["text/plain"])).is_some());
+        assert!(with("dateTime", "lt", json!("2999-01-01T00:00:00Z")).is_some());
+        for (left, op, right) in [
+            ("format", "isAnyOf", json!(["text/plain", 42])),
+            ("format", "isAnyOf", json!([])),
+            ("format", "isAnyOf", json!("text/plain")),
+            ("format", "eq", json!(["text/plain"])),
+            ("format", "gt", json!("text/plain")),
+            ("client", "lteq", json!("https://app/")),
+            ("dateTime", "isAnyOf", json!(["2999-01-01T00:00:00Z"])),
+            ("dateTime", "lt", json!("2026-02-31T00:00:00Z")),
+            ("dateTime", "lt", json!("soon")),
+            ("type", "eq", json!("")),
+        ] {
+            assert!(
+                with(left, op, right.clone()).is_none(),
+                "{left} {op} {right}"
+            );
+        }
+    }
+
+    /// Review finding: a stored access request that could not be read at startup was skipped,
+    /// and so left out of the request quota while it stayed stored. A request that cannot be
+    /// accounted for stops the load.
+    #[tokio::test]
+    async fn requests_that_cannot_be_read_stop_the_load() {
+        let (state, store) = test_store::state(100).await;
+        let req = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        let resp = handle(&state, &req, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let iri = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(AccessStore::load(&store, &state.cfg).await.is_ok());
+        *store.fail_read_of.lock().unwrap() = Some(iri);
+        assert!(AccessStore::load(&store, &state.cfg).await.is_err());
+    }
+
+    /// Review finding (atomicity): a request's store record, its registration and its place in
+    /// the request quota must change together. Failing each store step of a create and of a
+    /// revoke in turn leaves the store as it was, and what is in force in memory (and counted)
+    /// always matches what a restart would load.
+    #[tokio::test]
+    async fn requests_are_stored_and_counted_together() {
+        use test_store::each_failure_changes_nothing;
+        let setup = |with_one: bool| async move {
+            let (state, store) = test_store::state(100).await;
+            let container = state.cfg.absolute(REQUESTS_PATH);
+            let mut iris = Vec::new();
+            if with_one {
+                let req = test_store::request(
+                    Method::POST,
+                    REQUESTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &access_doc("AccessRequest", "https://a/", None),
+                );
+                let resp = handle(&state, &req, &Agent::anonymous()).await;
+                assert_eq!(resp.status(), StatusCode::CREATED);
+                iris.push(
+                    resp.headers()[header::LOCATION]
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                );
+            }
+            (state, store, iris, vec![container])
+        };
+        // In force and counted exactly when stored.
+        let agrees = |state: LwsState<test_store::FlakyStore>| async move {
+            let loaded = AccessStore::load(&state.store, &state.cfg).await.unwrap();
+            let stored = loaded.requests.read().unwrap().len();
+            assert_eq!(state.access.requests.read().unwrap().len(), stored);
+        };
+        let steps = each_failure_changes_nothing(
+            || setup(false),
+            |state| async move {
+                let req = test_store::request(
+                    Method::POST,
+                    REQUESTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &access_doc("AccessRequest", "https://a/", None),
+                );
+                let status = handle(&state, &req, &Agent::anonymous()).await.status();
+                agrees(state).await;
+                status
+            },
+        )
+        .await;
+        assert!(steps >= 1, "a request took {steps} steps");
+        each_failure_changes_nothing(
+            || setup(true),
+            |state| async move {
+                let id = state
+                    .access
+                    .requests
+                    .read()
+                    .unwrap()
+                    .keys()
+                    .next()
+                    .cloned()
+                    .unwrap();
+                let path = format!("{REQUESTS_PATH}{id}");
+                let req = test_store::request(Method::DELETE, &path, &[], "");
+                let status = handle(&state, &req, &Agent::anonymous()).await.status();
+                agrees(state).await;
+                status
+            },
+        )
+        .await;
     }
 
     fn access_doc(kind: &str, assignee: &str, inbox: Option<&str>) -> String {
@@ -1550,6 +1832,59 @@ mod tests {
         let public: Value =
             serde_json::from_str(&access_doc("AccessGrant", FOAF_AGENT, None)).unwrap();
         assert!(requester_inboxes(&state, &public).is_empty());
+    }
+
+    /// Review finding: a grant or request was announced by the handler after the store
+    /// committed it, so a client that went away (or a request timeout) in between left a stored,
+    /// in-force record nobody was told about. It is announced in the step that registers it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn stored_records_are_announced_when_the_client_is_gone() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::time::Duration;
+        let delivered = Arc::new(AtomicUsize::new(0));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = {
+            let delivered = delivered.clone();
+            axum::Router::new().route(
+                "/inbox",
+                axum::routing::post(move || {
+                    let delivered = delivered.clone();
+                    async move {
+                        delivered.fetch_add(1, Ordering::SeqCst);
+                        StatusCode::NO_CONTENT
+                    }
+                }),
+            )
+        };
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        let (state, store) = test_store::state(100).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let inbox = format!("http://{addr}/inbox");
+        let req = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("content-type", LWS_JSON)],
+            &access_doc("AccessGrant", "https://a/", Some(&inbox)),
+        );
+        let client = {
+            let state = state.clone();
+            tokio::spawn(async move { handle(&state, &req, &Agent::anonymous()).await.status() })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        client.abort();
+        assert!(client.await.is_err(), "the client went away mid-create");
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if delivered.load(Ordering::SeqCst) > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(state.access.grant_policies().len(), 1);
+        assert_eq!(delivered.load(Ordering::SeqCst), 1);
     }
 
     /// Review finding: every access request spawned its own fetch of the owner's identity
