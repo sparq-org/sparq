@@ -1696,17 +1696,30 @@ fn every_comparison_orders_a_same_family_temporal_pair() {
     }
 }
 
-/// Hour 24 is a time only as 24:00:00 with a zero fraction and an optional timezone:
-/// 24:00:00.000 is midnight, and anything else after hour 24 is not a time, so it
-/// compares with nothing.
+/// An invalid xsd:time lexical compares with nothing, so every comparison constraint
+/// reports it. Hour 24 is valid only as 24:00:00 with a zero fraction, and is midnight.
 #[test]
-fn hour_24_is_midnight_only_with_a_zero_fraction() {
+fn only_a_valid_time_lexical_compares() {
     let later_than_earlier = [false, false, true, false, true, false];
     let zero = comparisons("\"00:30:00Z\"^^xsd:time", "\"24:00:00.000Z\"^^xsd:time");
     for ((c, got), want) in zero.into_iter().zip(later_than_earlier) {
         assert_eq!(got, want, "{c}: 00:30 vs 24:00:00.000");
     }
-    for bad in ["24:00:00.5Z", "24:00:00.0.5Z", "24:00:00.0Z.5", "24:00:00.0+01:00:00", "24:00:00.0x"] {
+    for bad in [
+        "24:00:00.5Z",
+        "24:00:00.0.0",
+        "24:00:00.0.5Z",
+        "24:00:00.0Z.5",
+        "24:00:01",
+        "24:01:00",
+        "23:59:60",
+        "12:00Z",
+        "12:00:00+14:01",
+        "12:00:00+15:00",
+        "12:00:00+1:00",
+        "12:00:00Z+01:00",
+        "24:00:00.0+01:00:00",
+    ] {
         let bad = format!("\"{bad}\"^^xsd:time");
         for (value, other) in [("\"00:30:00Z\"^^xsd:time", bad.as_str()), (bad.as_str(), "\"00:30:00Z\"^^xsd:time")] {
             for (c, conforms) in comparisons(value, other) {

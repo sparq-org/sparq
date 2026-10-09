@@ -2859,37 +2859,23 @@ fn cmp_literals(a: &Literal, b: &Literal) -> Option<Ordering> {
 fn cmp_temporal(a: &str, da: &str, b: &str, db: &str) -> Option<Ordering> {
     let time = xsd("time");
     if da == time && db == time {
-        // An xsd:time is a dateTime on the XSD reference date (1972-12-31), where 24:00:00
-        // is the same time as 00:00:00. Hour 24 is lexically valid only with a zero
-        // fraction, so 24:00:00.5 is not a time and compares with nothing.
+        // An xsd:time is a dateTime on the XSD reference date (1972-12-31). The strict
+        // dateTime parser checks the whole lexical first (fields, hour 24 only as
+        // 24:00:00 with a zero fraction, timezone); a value it rejects compares with
+        // nothing. Only then is a valid hour 24 read as midnight of the same day.
+        let dt = xsd("dateTime");
         let on_ref = |v: &str| -> Option<String> {
-            let Some(rest) = v.strip_prefix("24:00:00") else {
-                return Some(format!("1972-12-31T{v}"));
-            };
-            let tz = match rest.strip_prefix('.') {
-                Some(frac) => {
-                    let digits = frac.len() - frac.trim_start_matches(|c: char| c.is_ascii_digit()).len();
-                    if digits == 0 || !frac[..digits].bytes().all(|d| d == b'0') {
-                        return None;
-                    }
-                    &frac[digits..]
-                }
-                None => rest,
-            };
-            // What follows must be a timezone and nothing else; its range is checked by
-            // ExactTemporal on the rebuilt value.
-            let b = tz.as_bytes();
-            let offset = b.len() == 6
-                && matches!(b[0], b'+' | b'-')
-                && b[3] == b':'
-                && [1, 2, 4, 5].iter().all(|&i| b[i].is_ascii_digit());
-            if !(tz.is_empty() || tz == "Z" || offset) {
-                return None;
-            }
-            Some(format!("1972-12-31T00:00:00{tz}"))
+            let anchored = format!("1972-12-31T{v}");
+            ExactTemporal::of_lit(&anchored, &dt)?;
+            Some(match v.strip_prefix("24:00:00") {
+                Some(rest) => format!(
+                    "1972-12-31T00:00:00{}",
+                    rest.trim_start_matches(['.', '0'])
+                ),
+                None => anchored,
+            })
         };
         let (a, b) = (on_ref(a)?, on_ref(b)?);
-        let dt = xsd("dateTime");
         return ExactTemporal::of_lit(&a, &dt)?.compare(ExactTemporal::of_lit(&b, &dt)?);
     }
     if !(is_exact_temporal(da) && is_exact_temporal(db)) {
