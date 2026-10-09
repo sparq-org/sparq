@@ -90,3 +90,110 @@ fn computed_decimals_whose_f64_images_crossed_order_by_value() {
     let large = subjects(&g, &format!("{base} ORDER BY DESC(?v + 0) LIMIT 1"));
     assert!(!large[0].contains("0.94699"), "{large:?}");
 }
+
+/// Like [`check`], for the plain variable key only: arithmetic on a value beyond the i128
+/// tower is an error (an unbound key), so only the stored term's order is pinned there.
+fn check_plain(g: &Graph) {
+    let q = |m: &str| subjects(g, &format!("SELECT ?s WHERE {{ ?s <http://ex/v> ?v }} ORDER BY {m}"));
+    assert_eq!(q("?v"), EXPECT_ASC, "ascending");
+    let mut desc = EXPECT_ASC.to_vec();
+    desc.reverse();
+    assert_eq!(q("DESC(?v)"), desc, "descending");
+    assert_eq!(q("?v LIMIT 1"), EXPECT_ASC[..1], "top-1");
+}
+
+// #3157: integers and decimals beyond the i128 tower are numbers in the ORDER BY total
+// order (compared exactly by lexical), not opaque strings ordered lexically.
+#[test]
+fn integers_beyond_i128_order_by_value() {
+    // 40-digit integers: past i128 (~1.7e38). Lexical order would put c ("1000…") first.
+    check_plain(&graph(&[
+        ("a", "\"9999999999999999999999999999999999999999\"^^xsd:integer"),
+        ("b", "\"9999999999999999999999999999999999999998\"^^xsd:integer"),
+        ("c", "\"10000000000000000000000000000000000000000\"^^xsd:integer"),
+    ]));
+}
+
+#[test]
+fn integers_beyond_i128_order_against_in_range_numbers() {
+    // An in-range integer, a double and a beyond-i128 decimal in one column.
+    check_plain(&graph(&[
+        ("a", "\"1.0e39\"^^xsd:double"),
+        ("b", "\"5\"^^xsd:integer"),
+        ("c", "\"1000000000000000000000000000000000000000.5\"^^xsd:decimal"),
+    ]));
+    // Beyond f64's range (both images are +INF): still ordered by exact value.
+    let big = "1".to_string() + &"0".repeat(400);
+    let bigger = "2".to_string() + &"0".repeat(400);
+    check_plain(&graph(&[
+        ("a", &format!("\"{bigger}\"^^xsd:integer")),
+        ("b", &format!("\"{big}\"^^xsd:integer")),
+        ("c", "\"INF\"^^xsd:double"),
+    ]));
+}
+
+#[test]
+fn min_max_over_integers_beyond_i128_use_value_order() {
+    let g = graph(&[
+        ("a", "\"9999999999999999999999999999999999999999\"^^xsd:integer"),
+        ("b", "\"10000000000000000000000000000000000000000\"^^xsd:integer"),
+    ]);
+    let q = |agg: &str| subjects(&g, &format!("SELECT ({agg}(?v) AS ?m) WHERE {{ ?s <http://ex/v> ?v }}"));
+    assert!(q("MAX")[0].starts_with("\"10000000000000000000000000000000000000000\""), "{:?}", q("MAX"));
+    assert!(q("MIN")[0].starts_with("\"9999999999999999999999999999999999999999\""), "{:?}", q("MIN"));
+}
+
+// Unbounded integer subtypes beyond i128 are numbers too, so a negativeInteger sorts
+// below a positive integer; a subtype whose sign facet the lexical breaks stays opaque.
+#[test]
+fn integer_subtypes_beyond_i128_order_by_value() {
+    let big = "10000000000000000000000000000000000000000";
+    check_plain(&graph(&[
+        ("a", &format!("\"{big}\"^^xsd:positiveInteger")),
+        ("b", &format!("\"-{big}\"^^xsd:negativeInteger")),
+        ("c", &format!("\"{big}0\"^^xsd:nonNegativeInteger")),
+    ]));
+    let g = graph(&[
+        ("a", &format!("\"-{big}\"^^xsd:nonPositiveInteger")),
+        ("b", &format!("\"{big}\"^^xsd:integer")),
+    ]);
+    let q = |agg: &str| subjects(&g, &format!("SELECT ({agg}(?v) AS ?m) WHERE {{ ?s <http://ex/v> ?v }}"));
+    assert!(q("MIN")[0].starts_with(&format!("\"-{big}\"")), "{:?}", q("MIN"));
+    assert!(q("MAX")[0].starts_with(&format!("\"{big}\"")), "{:?}", q("MAX"));
+}
+
+// A whitespace-padded raw lexical is not a well-formed beyond-tower number, so it is not
+// ordered as one: a padded huge NEGATIVE integer does not sort below the in-range numbers.
+#[test]
+fn padded_beyond_i128_lexical_is_not_a_number() {
+    let big = "10000000000000000000000000000000000000000";
+    let g = graph(&[("a", &format!("\" -{big} \"^^xsd:integer")), ("b", "5"), ("c", "7")]);
+    let order = subjects(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?v } ORDER BY ?v");
+    assert_ne!(order[0], "<http://ex/a>", "{order:?}");
+}
+
+// A Unicode-whitespace-padded lexical (U+00A0) is not a number either. Admitting it as one
+// while its `f64` image failed made the comparator cyclic (2 < 10 < "11\u{a0}" < 2), so
+// the sorted order depended on input order.
+#[test]
+fn unicode_padded_lexical_is_not_a_number_and_order_is_input_independent() {
+    let vals = ["\"11\u{a0}\"^^xsd:integer", "2", "10"];
+    let perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    let mut seen = None;
+    for p in perms {
+        let names = ["a", "b", "c"];
+        let g = graph(&p.map(|i| (names[i], vals[i])));
+        let order = subjects(&g, "SELECT ?s WHERE { ?s <http://ex/v> ?v } ORDER BY ?v");
+        let min = subjects(&g, "SELECT (MIN(?v) AS ?m) WHERE { ?s <http://ex/v> ?v }");
+        let max = subjects(&g, "SELECT (MAX(?v) AS ?m) WHERE { ?s <http://ex/v> ?v }");
+        let got = (order, min, max);
+        match &seen {
+            None => seen = Some(got),
+            Some(first) => assert_eq!(&got, first, "input order {p:?}"),
+        }
+    }
+    // The two real numbers stay in numeric order.
+    let (order, ..) = seen.unwrap();
+    let pos = |s: &str| order.iter().position(|o| o == s).unwrap();
+    assert!(pos("<http://ex/b>") < pos("<http://ex/c>"), "{order:?}");
+}
