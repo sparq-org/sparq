@@ -126,12 +126,15 @@ fn prohibition(c: &str) -> String {
 }
 
 /// An unconstrained grant for alice: what is live before the policy changes.
-fn granting() -> ValidatedPolicy {
-    let ttl = format!(
+fn granting_ttl() -> String {
+    format!(
         "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
          odrl:target <{N1}> ; odrl:assignee <{ALICE}> ] ."
-    );
-    parse_policy_str(&ttl, "turtle").expect("granting policy parses")
+    )
+}
+
+fn granting() -> ValidatedPolicy {
+    parse_policy_str(&granting_ttl(), "turtle").expect("granting policy parses")
 }
 
 /// Assert no entry point grants alice's read under `ttl`.
@@ -229,8 +232,9 @@ fn no_entry_point_grants_past_a_prohibition_missing_its_evidence() {
     no_entry_point_grants(&ttl, &req, "dateTime prohibition, no clock");
 }
 
-/// The control: a decidable policy still grants on every path (a prohibition whose
-/// window definitely closed before the request).
+/// The control: a decidable policy still grants. `evaluate` grants past a prohibition
+/// whose window definitely closed; every stored-grant path, N3 included, grants the one
+/// lasting shape (an unconstrained grant to alice, in a policy with no prohibitions).
 #[test]
 fn a_decidable_grant_still_reaches_every_entry_point() {
     let ttl = prohibition(
@@ -241,14 +245,17 @@ fn a_decidable_grant_still_reaches_every_entry_point() {
     assert!(evaluate(&policy, &request()).allow);
     let mut g = pod();
     assert!(
-        materialize_odrl_n3(&mut g, &ttl, &request())
+        materialize_odrl_n3(&mut g, &granting_ttl(), &request())
             .unwrap()
             .granted
     );
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_permission(&policy, &request());
+    store.materialize_odrl_permission(&granting(), &request());
     assert!(alice_reads(&store));
     let mut store = PodStore::new(pod());
-    store.materialize_odrl_permission_conditional(&policy, &request());
+    store.materialize_odrl_policy(&granting(), &request());
+    assert!(alice_reads(&store));
+    let mut store = PodStore::new(pod());
+    store.materialize_odrl_permission_conditional(&granting(), &request());
     assert!(alice_reads(&store));
 }

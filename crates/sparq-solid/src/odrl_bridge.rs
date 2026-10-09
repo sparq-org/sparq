@@ -30,8 +30,9 @@
 //! exactly its party, mapped action and target. The requested ODRL action must map to a
 //! concrete WAC/ACP [`Mode`]; the party must be one agent (not `auth:Public`,
 //! `auth:Authenticated` or a reserved encoding) and the recipient the decision checked,
-//! if any; and the permit must hold at every later time ([`Permit::lasting`]), since the
-//! stored triple is not re-checked against the clock. A Deny, an ambiguous evaluation, an unmapped action, or a missing
+//! if any; and the permit must depend on nothing that can change ([`Permit::lasting`]:
+//! an unconstrained grant to the named party, in a policy with no prohibitions), since
+//! the stored triple is never re-checked. A Deny, an ambiguous evaluation, an unmapped action, or a missing
 //! party/target materializes **nothing** — access is never widened on ambiguity.
 //!
 //! # Action → Mode mapping

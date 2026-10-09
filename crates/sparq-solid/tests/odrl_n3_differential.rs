@@ -217,13 +217,15 @@ fn a2_datetime_lteq_past_deadline_no_grant() {
 }
 
 #[test]
-fn a3_datetime_gteq_above_floor_grant() {
-    assert_case("A3", POL_A3, "read", "urn:alice", Some("2026-06-01T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+fn a3_datetime_gteq_above_floor_stores_nothing() {
+    // A clock constraint is not lasting, even a lower bound.
+    assert_case("A3", POL_A3, "read", "urn:alice", Some("2026-06-01T00:00:00Z"), &[]);
 }
 
 #[test]
-fn a4_recipient_eq_match_grant() {
-    assert_case("A4", POL_A4, "read", "urn:alice", None, &[("urn:alice", "read", "urn:t/1")]);
+fn a4_recipient_eq_match_stores_nothing() {
+    // Only an unconstrained grant is stored.
+    assert_case("A4", POL_A4, "read", "urn:alice", None, &[]);
 }
 
 #[test]
@@ -232,9 +234,10 @@ fn a5_recipient_eq_mismatch_no_grant() {
 }
 
 #[test]
-fn a6_recipient_neq_not_excluded_grant() {
-    // urn:alice is NOT the excluded party (urn:bob is) → grant
-    assert_case("A6", POL_A6, "read", "urn:alice", None, &[("urn:alice", "read", "urn:t/1")]);
+fn a6_recipient_neq_not_excluded_stores_nothing() {
+    // urn:alice is NOT the excluded party (urn:bob is), but a constrained grant is
+    // not stored.
+    assert_case("A6", POL_A6, "read", "urn:alice", None, &[]);
 }
 
 #[test]
@@ -349,9 +352,10 @@ fn e3_constrained_prohibition_overrides_matching_permission() {
 }
 
 #[test]
-fn e4_lapsed_prohibition_re_exposes_permission() {
-    // past the window the prohibition no longer carves the request out → grant only
-    assert_case("E4", POL_E2, "read", "urn:alice", Some("2027-06-01T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+fn e4_lapsed_prohibition_stores_nothing() {
+    // past the window the prohibition no longer carves the request out, but a policy
+    // with any prohibition never stores a grant
+    assert_case("E4", POL_E2, "read", "urn:alice", Some("2027-06-01T00:00:00Z"), &[]);
 }
 
 #[test]
@@ -1027,17 +1031,18 @@ fn generated_n3_is_never_more_permissive_than_the_rust_reference() {
     // Pin that the sweep genuinely exercised the comparison — real grants and real
     // denies came out of BOTH paths, and the refusal path fired too.
     assert!(cov.total >= 500, "sweep must be broad, ran {}", cov.total);
-    // Grants are rarer than the other outcomes: a clock-bounded shape stores nothing.
-    assert!(cov.n3_granted >= 10, "N3 must actually grant somewhere, got {}", cov.n3_granted);
+    // Grants are rare: only an unconstrained grant to the named party, in a policy with
+    // no prohibitions, is stored. The floors are the exact counts, so losing one fails.
+    assert!(cov.n3_granted >= 3, "N3 must actually grant somewhere, got {}", cov.n3_granted);
     assert!(cov.n3_denied >= 20, "N3 must actually deny somewhere, got {}", cov.n3_denied);
     assert!(cov.n3_refused >= 20, "the refusal path must fire, got {}", cov.n3_refused);
-    assert!(cov.rust_granted >= 20, "Rust must actually grant somewhere, got {}", cov.rust_granted);
+    assert!(cov.rust_granted >= 4, "Rust must actually grant somewhere, got {}", cov.rust_granted);
     assert!(cov.rust_denied >= 20, "Rust must actually deny somewhere, got {}", cov.rust_denied);
     assert!(cov.rust_refused >= 20, "Rust must refuse somewhere, got {}", cov.rust_refused);
     // The EQUALITY assertion is likewise trivially satisfiable by an empty in-scope
     // sub-corpus, or by one in which both paths always emit nothing.
     assert!(cov.equiv_cases >= 100, "equivalence sub-corpus too small: {}", cov.equiv_cases);
-    assert!(cov.equiv_grants >= 10, "equivalence scope must include grants: {}", cov.equiv_grants);
+    assert!(cov.equiv_grants >= 3, "equivalence scope must include grants: {}", cov.equiv_grants);
     assert!(cov.equiv_denies >= 10, "equivalence scope must include denies: {}", cov.equiv_denies);
     println!(
         "generated differential: {} cases; n3 grant/deny/refuse = {}/{}/{}; \

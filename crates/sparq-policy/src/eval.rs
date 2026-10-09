@@ -21,7 +21,7 @@
 //! [OPUS-4.8]
 
 use crate::model::{
-    Action, Constraint, ConstraintNode, LogicalConstraint, LogicalOperator, Operator, Rule,
+    Action, Constraint, ConstraintNode, LogicalConstraint, LogicalOperator, Operator, Policy, Rule,
     Value,
 };
 use crate::validate::ValidatedPolicy;
@@ -444,20 +444,20 @@ impl Permit {
     pub fn recipient(&self) -> Option<&str> {
         self.recipient.as_deref()
     }
-    /// Whether the grant holds for this party at every later time as well: the granting
-    /// permission constrains only the party's identity or puts a lower bound
-    /// (`gt`/`gteq`) on the clock; and every prohibition is withdrawn for good (a
-    /// structural mismatch, a definitely false identity constraint, or a closed
-    /// `lt`/`lteq` window). Purpose, place, elapsed time, counters and any other operand
-    /// are never lasting: a stored grant records none of them, and they may change.
-    /// A grant that is stored rather than re-checked per request is sound only when this
-    /// holds.
+    /// Whether the grant depends on nothing that can change, so a stored grant, which
+    /// records only party, mode and target, stands for it. Only one shape qualifies: a
+    /// permission with no constraints, logical constraints or duties, assigned to
+    /// exactly the requesting party (not a party collection), targeting exactly the
+    /// requested asset or every asset, decided without membership evidence, in a policy
+    /// with no prohibitions. A grant that is stored rather than re-checked per request
+    /// is sound only when this holds.
     pub fn lasting(&self) -> bool {
         self.lasting
     }
 
     /// This grant, marked as not lasting: the decision that made it left out a
     /// constraint (a usage count) that can end it.
+    #[cfg(feature = "count-enforcement")]
     pub(crate) fn transient(self) -> Permit {
         Permit { lasting: false, ..self }
     }
@@ -597,12 +597,7 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
             .map(|d| d.action.0.as_str())
             .collect();
         if undischarged.is_empty() {
-            let lasting = holds_later(rule)
-                && policy
-                    .prohibitions
-                    .iter()
-                    .all(|p| withdrawn_later(p, request, &req_action));
-            return Decision::grant(rule, request, lasting);
+            return Decision::grant(rule, request, static_grant(policy, rule, request));
         }
         for a in undischarged {
             caveats.push(format!(
@@ -619,51 +614,33 @@ pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
-/// Left operands whose value a stored grant may treat as fixed: only the identity it
-/// is bound to. A stored grant does not record the purpose or place it was decided for,
-/// so a later request with another purpose or place would ride it; those, the clock,
-/// elapsed time, counters and unknown operands may all change while the grant stands.
-const STABLE_LEFT_OPERANDS: [&str; 2] = [ODRL_RECIPIENT, "http://www.w3.org/ns/odrl/2/assignee"];
-
-fn stable(c: &Constraint) -> bool {
-    STABLE_LEFT_OPERANDS.contains(&c.left.as_str())
-}
-
-/// Whether `rule`'s constraints, satisfied now, stay satisfied later: each is on a
-/// stable operand, or is an atomic lower bound on the clock.
-fn holds_later(rule: &Rule) -> bool {
-    rule.constraints.iter().all(|c| {
-        stable(c) || (c.left == ODRL_DATETIME && matches!(c.operator, Operator::Gt | Operator::Gteq))
-    }) && rule.logical_constraints.iter().all(|lc| all_atoms(lc, &stable))
-}
-
-/// Whether prohibition `r`, withdrawn for `request` now, stays withdrawn later: a
-/// structural mismatch, a definitely false constraint on a stable operand, or a
-/// definitely false upper bound (`lt`/`lteq`) on the clock.
-fn withdrawn_later(r: &Rule, request: &Request, req_action: &Action) -> bool {
-    if !r.action.permits(req_action)
-        || r.target.as_deref().is_some_and(|t| !request.asset_matches(t))
-        || r.assignee.as_deref().is_some_and(|a| !request.party_matches(a))
-    {
-        return true;
-    }
-    let closes = |c: &Constraint| {
-        stable(c) || (c.left == ODRL_DATETIME && matches!(c.operator, Operator::Lt | Operator::Lteq))
-    };
-    r.constraints
-        .iter()
-        .any(|c| closes(c) && constraint_status(c, request) == ConstraintStatus::DefinitelyUnsatisfied)
-        || r.logical_constraints.iter().any(|lc| {
-            all_atoms(lc, &stable)
-                && logical_constraint_status(lc, request) == ConstraintStatus::DefinitelyUnsatisfied
-        })
-}
-
-fn all_atoms(lc: &LogicalConstraint, f: &impl Fn(&Constraint) -> bool) -> bool {
-    lc.operands.iter().all(|n| match n {
-        ConstraintNode::Atomic(c) => f(c),
-        ConstraintNode::Compound(inner) => all_atoms(inner, f),
-    })
+/// Whether a grant `rule` made for `request` depends on nothing that can change: the
+/// one shape a stored grant, which records only party, mode and target, can stand for.
+///
+/// That is a permission with no constraints, logical constraints or duties, assigned
+/// to exactly the requesting party (a named IRI, not a declared party collection),
+/// targeting exactly the requested asset or every asset, decided without any party or
+/// asset membership evidence, in a policy with no prohibitions. Every other grant
+/// depends on the clock, a counter, request context, membership evidence or a
+/// prohibition's reach, so it is not lasting.
+fn static_grant(policy: &Policy, rule: &Rule, request: &Request) -> bool {
+    let named_party = rule.assignee.as_deref().is_some_and(|a| {
+        request.party.as_deref() == Some(a)
+            && !a.starts_with("_:")
+            && !policy.party_collections.contains(a)
+    });
+    let exact_target = rule
+        .target
+        .as_deref()
+        .is_none_or(|t| request.target.as_deref() == Some(t));
+    rule.constraints.is_empty()
+        && rule.logical_constraints.is_empty()
+        && rule.duties.is_empty()
+        && named_party
+        && exact_target
+        && request.party_memberships.is_empty()
+        && request.asset_memberships.is_empty()
+        && policy.prohibitions.is_empty()
 }
 
 /// Whether `request` reports `duty` discharged. A duty's own constraints are not

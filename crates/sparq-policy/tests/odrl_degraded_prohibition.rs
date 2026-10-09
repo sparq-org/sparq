@@ -476,120 +476,116 @@ fn a_permit_binds_the_checked_recipient() {
     assert!(decide(&p, &bob).permit.is_none());
 }
 
-/// A grant lasts only when nothing in the decision can turn false as the clock advances.
+/// ODRL 2.2 left operands, the assignee pseudo-operand, and one unknown operand.
+const LEFT_OPERANDS: [&str; 32] = [
+    "absolutePosition", "absoluteSize", "absoluteSpatialPosition", "absoluteTemporalPosition",
+    "count", "dateTime", "delayPeriod", "deliveryChannel", "device", "elapsedTime", "event",
+    "fileFormat", "industry", "language", "media", "meteredTime", "payAmount", "percentage",
+    "product", "purpose", "recipient", "relativePosition", "relativeSize",
+    "relativeSpatialPosition", "relativeTemporalPosition", "resolution", "spatial",
+    "spatialCoordinates", "systemDevice", "timeInterval", "unitOfCount", "assignee",
+];
+
+/// Exactly one grant shape is lasting: an unconstrained, duty-free permission assigned
+/// to exactly the requesting party, in a policy with no prohibitions, decided without
+/// membership evidence. Every left operand (on the permission, inside a logical
+/// constraint, or on a prohibition that does not apply), every other assignee shape,
+/// a duty and membership evidence each make the grant not lasting.
 #[test]
-fn a_permit_lasts_only_when_the_clock_cannot_end_it() {
+fn only_an_unconstrained_grant_to_the_named_party_is_lasting() {
     let read = format!("{ODRL}read");
-    let req = Request::new(read).on("urn:asset/x").by("urn:alice").at("2026-06-01T00:00:00Z");
-    let lasting = |rules: &str| {
+    let alice = || Request::new(read.clone()).on("urn:asset/x").by("urn:alice");
+    let permit = |rules: &str, req: &Request| {
         let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
-        let p = parse_policy_str(&ttl, "turtle").unwrap();
-        decide(&p, &req).permit.expect("granted").lasting()
+        let p = parse_policy_str(&ttl, "turtle").unwrap_or_else(|e| panic!("{e}: {rules}"));
+        decide(&p, req).permit
     };
-    let perm = |c: &str| {
-        format!("odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {c} ]")
+    let perm = |head: &str, extra: &str| {
+        format!("odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {head} {extra} ]")
     };
-    let clock = |op: &str, t: &str| {
-        format!(
-            "; odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:{op} ; \
-             odrl:rightOperand \"{t}\"^^xsd:dateTime ]"
-        )
-    };
-    let prohib = |c: &str| {
-        format!("odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> {c} ]")
-    };
-    assert!(lasting(&perm("")));
-    assert!(lasting(&perm(&clock("gteq", "2026-01-01T00:00:00Z"))), "a lower bound stays true");
-    assert!(!lasting(&perm(&clock("lteq", "2026-12-31T00:00:00Z"))), "an upper bound ends");
-    let p = perm("");
-    assert!(
-        lasting(&format!("{p} ; {}", prohib(&clock("lteq", "2026-01-01T00:00:00Z")))),
-        "a prohibition whose window closed stays withdrawn"
-    );
-    assert!(
-        !lasting(&format!("{p} ; {}", prohib(&clock("gteq", "2027-01-01T00:00:00Z")))),
-        "a prohibition whose window has not opened can still apply"
-    );
-    assert!(
-        lasting(&format!("{p} ; {}", prohib("; odrl:assignee <urn:bob>"))),
-        "a prohibition on another party never applies to this one"
-    );
-}
+    let to_alice = "; odrl:assignee <urn:alice>";
 
-/// Only operands a stored grant may treat as fixed count as lasting; elapsed time (or
-/// any other operand) can change while the grant stands, on a permission or a
-/// prohibition alike.
-#[test]
-fn an_advancing_operand_is_never_lasting() {
-    let elapsed = format!("{ODRL}elapsedTime");
-    let req = Request::new(format!("{ODRL}read"))
-        .on("urn:asset/x")
-        .by("urn:alice")
-        .with(elapsed.clone(), Value::Num(1.0));
-    let c = |op: &str| {
-        format!(
-            "odrl:constraint [ odrl:leftOperand odrl:elapsedTime ; odrl:operator odrl:{op} ; \
-             odrl:rightOperand 10 ]"
-        )
-    };
-    let permit = |rules: String| {
-        let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
-        let p = parse_policy_str(&ttl, "turtle").unwrap();
-        decide(&p, &req).permit.expect("granted")
-    };
-    let perm = |extra: &str| {
-        format!("odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {extra} ]")
-    };
-    assert!(!permit(perm(&format!("; {}", c("lt")))).lasting(), "elapsedTime lt 10 ends");
-    assert!(
-        !permit(format!(
-            "{} ; odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; {} ]",
-            perm(""),
-            c("gteq")
-        ))
-        .lasting(),
-        "a prohibition from elapsedTime 10 can still start applying"
-    );
-    assert!(permit(perm("")).lasting());
-}
+    // The one lasting shape, and the same grant with the target left open.
+    assert!(permit(&perm(to_alice, ""), &alice()).unwrap().lasting());
+    let open_target = format!("odrl:permission [ odrl:action odrl:read {to_alice} ]");
+    assert!(permit(&open_target, &alice()).unwrap().lasting());
 
-/// A stored grant does not record the purpose or place it was decided for, so a
-/// constraint on either is not lasting: a later request with another purpose would
-/// ride the grant.
-#[test]
-fn a_purpose_or_place_constraint_is_not_lasting() {
-    let req = Request::new(format!("{ODRL}read"))
-        .on("urn:asset/x")
-        .by("urn:alice")
-        .for_purpose(Value::Iri("urn:p/a".into()))
-        .with(format!("{ODRL}spatial"), Value::Iri("urn:region/eu".into()));
-    for (left, right) in [("purpose", "urn:p/a"), ("spatial", "urn:region/eu")] {
-        let c = format!(
-            "odrl:constraint [ odrl:leftOperand odrl:{left} ; odrl:operator odrl:eq ; \
-             odrl:rightOperand <{right}> ]"
+    // Every left operand, as an atom the request satisfies (when evidence can satisfy
+    // it) and inside an `or` with a satisfied purpose atom (always granted).
+    let mut granted = 0;
+    for left in LEFT_OPERANDS {
+        let atom = format!(
+            "[ odrl:leftOperand odrl:{left} ; odrl:operator odrl:eq ; odrl:rightOperand <urn:v> ]"
         );
-        let lasting = |rules: String| {
-            let ttl = format!("{PREFIXES}<urn:pol/p> a odrl:Set ; {rules} .");
-            decide(&parse_policy_str(&ttl, "turtle").unwrap(), &req)
-                .permit
-                .expect("granted")
-                .lasting()
-        };
-        assert!(
-            !lasting(format!(
-                "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; {c} ]"
-            )),
-            "a {left}-scoped permission"
+        let req = alice()
+            .with(format!("{ODRL}{left}"), Value::Iri("urn:v".into()))
+            .for_purpose(Value::Iri("urn:p/a".into()));
+        if let Some(p) = permit(&perm(to_alice, &format!("; odrl:constraint {atom}")), &req) {
+            assert!(!p.lasting(), "atomic {left}");
+        }
+        let either = format!(
+            "; odrl:constraint [ a odrl:LogicalConstraint ; odrl:or ( {atom} {TRUE_C} ) ]"
         );
-        let other = c.replace(right, "urn:other");
-        assert!(
-            !lasting(format!(
-                "odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ; \
-                 odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; {other} ]"
-            )),
-            "a prohibition withdrawn only by today's {left}"
+        let p = permit(&perm(to_alice, &either), &req).unwrap_or_else(|| panic!("or {left}"));
+        assert!(!p.lasting(), "{left} inside or");
+        granted += 1;
+
+        // A prohibition on this operand that does not apply now still blocks storage.
+        let never = format!(
+            "{} ; odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; \
+             odrl:constraint [ odrl:leftOperand odrl:{left} ; odrl:operator odrl:eq ; \
+             odrl:rightOperand <urn:other> ] ]",
+            perm(to_alice, "")
         );
+        if let Some(p) = permit(&never, &req) {
+            assert!(!p.lasting(), "prohibition on {left}");
+        }
     }
+    assert_eq!(granted, LEFT_OPERANDS.len());
+
+    // Any prohibition at all, even one on another action or party.
+    for prohibition in [
+        "odrl:prohibition [ odrl:action odrl:modify ; odrl:target <urn:asset/x> ]",
+        "odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/x> ; odrl:assignee <urn:bob> ]",
+        "odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/y> ]",
+    ] {
+        let rules = format!("{} ; {prohibition}", perm(to_alice, ""));
+        assert!(!permit(&rules, &alice()).unwrap().lasting(), "{prohibition}");
+    }
+
+    // Every other assignee shape.
+    assert!(!permit(&perm("", ""), &alice()).unwrap().lasting(), "no assignee");
+    let lab = alice().with_party_membership("urn:alice", "urn:lab");
+    let to_lab = perm("; odrl:assignee <urn:lab>", "");
+    assert!(!permit(&to_lab, &lab).unwrap().lasting(), "assignee matched by membership");
+    let declared = format!("{} . <urn:alice> odrl:partOf <urn:lab>", perm("; odrl:assignee <urn:lab>", ""));
+    let lab_itself = Request::new(read.clone()).on("urn:asset/x").by("urn:lab");
+    assert!(!permit(&declared, &lab_itself).unwrap().lasting(), "a declared party collection");
+    assert!(!permit(&perm(to_alice, ""), &lab).unwrap().lasting(), "membership evidence");
+    let in_set = alice().with_asset_membership("urn:asset/x", "urn:set");
+    assert!(!permit(&perm(to_alice, ""), &in_set).unwrap().lasting(), "asset membership");
+
+    // A duty, even a discharged one.
+    let duty = perm(to_alice, "; odrl:duty [ odrl:action odrl:inform ]");
+    let informed = alice().discharge(format!("{ODRL}inform"));
+    assert!(!permit(&duty, &informed).unwrap().lasting(), "a discharged duty");
+}
+
+/// A decision names its rule by id, so two rules sharing one are refused.
+#[test]
+fn duplicate_rule_ids_are_refused() {
+    let ttl = format!(
+        "{PREFIXES}<urn:pol/p> a odrl:Set ; odrl:permission [ odrl:action odrl:read ; \
+         odrl:target <urn:asset/x> ; odrl:assignee <urn:alice> ] ."
+    );
+    let mut policy: Policy = (*parse_policy_str(&ttl, "turtle").unwrap()).clone();
+    let mut twin = policy.permissions[0].clone();
+    twin.assignee = Some("urn:bob".into());
+    policy.permissions.push(twin.clone());
+    assert!(policy.clone().validate().is_err(), "two permissions share an id");
+    policy.permissions.pop();
+    policy.prohibitions.push(twin);
+    assert!(policy.validate().is_err(), "a permission and a prohibition share an id");
 }
 
 /// Containment claims nothing about a policy whose conflict strategy `decide` refuses:
