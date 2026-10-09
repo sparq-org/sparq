@@ -137,16 +137,8 @@ impl Watch {
                 // A resource that is not visible is not read (its lock is held until it is put
                 // back): the delivery fails its check rather than wait, including when the
                 // resource is set aside while the delivery waits for its lock.
-                let read = state.locks.read(&self.uri);
-                tokio::pin!(read);
-                let _guard = loop {
-                    if !state.visible(&self.uri) {
-                        return false;
-                    }
-                    tokio::select! {
-                        guard = &mut read => break guard,
-                        _ = tokio::time::sleep(SET_ASIDE_POLL) => {}
-                    }
+                let Some(_guard) = state.locks.read(&self.uri).await else {
+                    return false;
                 };
                 // The subscription may have been cancelled, or expired, meanwhile.
                 state.notify.is_live(&self.subscription)
@@ -155,10 +147,6 @@ impl Watch {
         }
     }
 }
-
-/// How often a delivery waiting for a resource's lock looks again whether the resource was set
-/// aside meanwhile (see [`Watch::stands`]).
-const SET_ASIDE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Most distinct topics one subscription may name.
 pub const MAX_TOPICS: usize = 64;
@@ -416,7 +404,9 @@ impl Notifier {
             let _admission = admission;
             let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
             // Shared with other members' changes; a conditional create holds it alone.
-            let _listing = state.locks.read(&container).await;
+            let Some(_listing) = state.locks.read(&container).await else {
+                return Err("a failed change to the subscriptions is still being put back".into());
+            };
             super::delete_record(&state.store, &format!("{container}{id}"), &container)
                 .await
                 .map_err(|e| e.to_string())?;
@@ -933,17 +923,7 @@ pub async fn handle<S: Store + 'static>(
                 // removed: a few go now, before the listing a conditional create is evaluated
                 // against is held, and before this one is counted.
                 purge_expired(state, req.admission.clone()).await;
-                // A conditional create is evaluated against the listing.
-                let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
-                let held = match super::service_preconditions(state, req, &container, |get| {
-                    listing(state, get, agent, owner)
-                })
-                .await
-                {
-                    Ok(held) => held,
-                    Err(refused) => return refused,
-                };
-                subscribe(state, req, agent, held).await
+                subscribe(state, req, agent, owner).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
         };
@@ -1084,7 +1064,7 @@ async fn subscribe<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
     agent: &Agent,
-    held: Option<super::resources::IriGuard>,
+    lister: bool,
 ) -> Response {
     // "The request body MUST conform to the application/lws+json media type."
     if req.content_type().as_deref() != Some(LWS_JSON) {
@@ -1180,7 +1160,9 @@ async fn subscribe<S: Store + 'static>(
         if let Some(unavailable) = super::resources::set_aside(state, resource, &Method::GET) {
             return unavailable;
         }
-        let _guard = state.locks.read(resource).await;
+        let Some(_guard) = state.locks.read(resource).await else {
+            return super::resources::set_aside_meanwhile();
+        };
         let exists =
             resource.starts_with(&storage) && state.store.exists(resource).await.unwrap_or(false);
         if !exists || !state.allowed(Action::Read, resource, agent).await {
@@ -1194,6 +1176,19 @@ async fn subscribe<S: Store + 'static>(
             };
         }
     }
+    // A conditional create is evaluated against the listing, held exclusively from here until
+    // the subscription is registered. Taken only once every topic has been checked (and its
+    // lock released): a topic naming the subscriptions container itself, or its linkset, would
+    // otherwise wait for the lock this holds.
+    let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+    let held = match super::service_preconditions(state, req, &container, |get| {
+        listing(state, get, agent, lister)
+    })
+    .await
+    {
+        Ok(held) => held,
+        Err(refused) => return refused,
+    };
     // The place is reserved before anything is stored and held until the subscription is
     // registered. The storage owner's subscriptions have a share of their own: they neither
     // count against everyone else's nor are held to one subscriber's. Expired subscriptions take
@@ -1650,6 +1645,38 @@ mod tests {
         assert_ne!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
+    /// Review finding: a conditional subscription held the subscriptions container exclusively
+    /// while it checked its topics, and checking a topic naming that container (or its linkset)
+    /// waited for the container's shared lock: the create deadlocked, and every subscription
+    /// create and cancellation behind it. The topics are checked before the container is held.
+    #[tokio::test]
+    async fn a_conditional_subscription_to_its_own_container_does_not_deadlock() {
+        let (state, _store) = test_store::state(100).await;
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        for topic in [container.clone(), format!("{container}{META_SUFFIX}")] {
+            let body = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": WEBHOOK,
+                "topic": [topic],
+                "inbox": "https://inbox.example/",
+            })
+            .to_string();
+            let post = test_store::request(
+                Method::POST,
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON), ("if-match", "*")],
+                &body,
+            );
+            let r = tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                handle(&state, &post, &Agent::anonymous()),
+            )
+            .await
+            .expect("answered");
+            assert_ne!(r.status(), StatusCode::INTERNAL_SERVER_ERROR, "{topic}");
+        }
+    }
+
     /// Review finding: a subscription's cancellation ran in a task of its own that held no
     /// admission permit, so once its request timed out a stalled removal no longer counted
     /// against the concurrency ceiling, and repeated cancellations could pile up past it.
@@ -1830,7 +1857,7 @@ mod tests {
         let watch = prepared.into_iter().next().unwrap().watch;
         // A write holds the resource; the delivery waits for it, and the write's rollback is
         // then set aside with the lock.
-        let held = state.locks.lock(&file).await;
+        let held = state.locks.lock(&file).await.unwrap();
         let check = tokio::spawn({
             let state = state.clone();
             async move { watch.stands(&state).await }
