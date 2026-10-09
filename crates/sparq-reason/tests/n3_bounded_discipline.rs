@@ -10,7 +10,10 @@
 //!
 //! unless the line, or the line above, carries a `// not-a-limit: <category>` marker
 //! whose category is in [`ALLOWED`]. An unknown category fails, so a marker is never a
-//! free-text waiver. It also fails when a new `src/n3/*.rs` file is not on its list.
+//! free-text waiver. It also fails when a new `src/n3/*.rs` file is not on its list, and
+//! when a fresh cut record (`Cuts::top_level`) is made anywhere but an entry point (a
+//! `pub fn`, or a crate-internal `reason_n3*` one): a nested evaluation must record into
+//! its parent's.
 //!
 //! A text scan cannot see every implicit limit (recursion depth, a third-party crate's
 //! internal caps, a limit spelled some other way).
@@ -101,7 +104,26 @@ fn limits_live_in_the_bounded_module() {
                 }
             }
         }
+        // The function each code line sits in: a fresh cut record (`Cuts::top_level`) is
+        // made only by a `pub` entry point; every nested evaluation reuses its parent's.
+        let mut current_fn = String::new();
         for (n, code, comments) in code_lines(&src) {
+            let t = code.trim_start();
+            if code.starts_with("pub fn ")
+                || code.starts_with("fn ")
+                || code.starts_with("pub(crate) fn ")
+            {
+                current_fn = t.to_string();
+            }
+            let entry = current_fn.starts_with("pub fn ")
+                || current_fn.starts_with("pub(crate) fn reason_n3");
+            if code.contains("Cuts::top_level(") && !entry {
+                hits.push(format!(
+                    "{rel}:{n}: a fresh cut record outside a public entry point ({}): {}",
+                    current_fn.trim(),
+                    code.trim()
+                ));
+            }
             let limit = limit_name.is_match(&code) || limit_literal.is_match(&code);
             if limit && !code.contains("bounded::") && !comments.contains("// not-a-limit:") {
                 hits.push(format!(

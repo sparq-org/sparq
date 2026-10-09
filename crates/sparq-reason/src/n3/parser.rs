@@ -76,8 +76,33 @@ pub fn parse_turtle_with_base(src: &str, base: &str) -> Result<Parsed, String> {
 /// directives) against `base` — the document's own location, RFC 3986-style.
 /// An empty `base` keeps relative IRIs as written (the historical behavior).
 pub fn parse_with_base(src: &str, base: &str) -> Result<Parsed, String> {
+    parse_with_base_checked(src, base).map_err(|e| match e {
+        ParseFailure::Syntax(m) => m,
+        ParseFailure::Resource(e) => e.message().to_string(),
+    })
+}
+
+/// Why [`parse_with_base_checked`] failed.
+pub(crate) enum ParseFailure {
+    /// The text is not N3.
+    Syntax(String),
+    /// A parser limit (nesting depth, [`super::bounded::enter_nesting`]): a resource
+    /// limit, not a syntax error.
+    Resource(super::bounded::LimitError),
+}
+
+/// As [`parse_with_base`], telling a syntax error from the nesting limit.
+pub(crate) fn parse_with_base_checked(src: &str, base: &str) -> Result<Parsed, ParseFailure> {
     let mut p = Parser::new(src);
     p.base = base.to_string();
+    let r = parse_document(&mut p, base);
+    r.map_err(|m| match p.stopped.take() {
+        Some(e) => ParseFailure::Resource(e),
+        None => ParseFailure::Syntax(m),
+    })
+}
+
+fn parse_document(p: &mut Parser<'_>, base: &str) -> Result<Parsed, String> {
     let stmts = p.document()?;
     let mut facts = Vec::new();
     let mut rules = Vec::new();
@@ -261,6 +286,8 @@ struct Parser<'a> {
     /// produce a parse ERROR instead of exhausting the stack (the recursive-
     /// descent parser recurses per nesting level).
     depth: usize,
+    /// The limit the parse stopped on, if it did ([`ParseFailure::Resource`]).
+    stopped: Option<super::bounded::LimitError>,
 }
 
 
@@ -277,6 +304,7 @@ impl<'a> Parser<'a> {
             bnode: 0,
             pathvar: 0,
             depth: 0,
+            stopped: None,
         }
     }
 
@@ -1091,8 +1119,10 @@ impl<'a> Parser<'a> {
 
     fn enter(&mut self) -> Result<(), String> {
         self.depth += 1;
-        if !super::bounded::nesting_allowed(self.depth) {
-            return Err(super::bounded::nesting_error());
+        if let Err(e) = super::bounded::enter_nesting(self.depth) {
+            let message = e.message().to_string();
+            self.stopped = Some(e);
+            return Err(message);
         }
         Ok(())
     }

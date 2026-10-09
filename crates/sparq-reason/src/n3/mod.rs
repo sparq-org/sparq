@@ -214,20 +214,21 @@ struct BwCtx<'a> {
     base: String,
     resolver: Option<&'a Resolver>,
     visited: VisitedDocs,
-    /// Where every limited step of this run records a cut ([`bounded`]). Recording a cut
-    /// changes no result; the run's cuts are not yet reported to callers.
+    /// Where every limited step of this run records a cut ([`bounded`]): the run's ONE
+    /// record, shared with every nested closure it evaluates. Recording a cut changes no
+    /// result; the run's cuts are not yet reported to callers.
     cuts: bounded::Cuts,
 }
 
 impl<'a> BwCtx<'a> {
-    fn new(rules: &'a [Rule]) -> BwCtx<'a> {
+    fn new(rules: &'a [Rule], cuts: bounded::Cuts) -> BwCtx<'a> {
         BwCtx {
             rules,
             rename: std::cell::Cell::new(0),
             base: String::new(),
             resolver: None,
             visited: VisitedDocs::default(),
-            cuts: bounded::Cuts::default(),
+            cuts,
         }
     }
 }
@@ -247,7 +248,13 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     // No derivation tracking ([`StepMode::None`]): skips per-firing premise materialization
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(parsed, None, None, StepMode::None);
+    let (facts, steps) = run_closure(
+        parsed,
+        None,
+        None,
+        StepMode::None,
+        &bounded::Cuts::top_level(),
+    );
     Ok(intern_closure(dict, &facts, &steps)?.0)
 }
 
@@ -255,7 +262,13 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
+    let (facts, steps) = run_closure(
+        parsed,
+        None,
+        None,
+        StepMode::Full,
+        &bounded::Cuts::top_level(),
+    );
     intern_closure(dict, &facts, &steps)
 }
 
@@ -295,7 +308,13 @@ pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String> {
     // Clone the rules BEFORE the closure runs: `run_closure` reorders each premise for
     // builtin readiness, and the echo should reflect the document, not that plan.
     let (rules, backward_rules) = (parsed.rules.clone(), parsed.backward_rules.clone());
-    let (facts, _steps) = run_closure(parsed, None, None, StepMode::None);
+    let (facts, _steps) = run_closure(
+        parsed,
+        None,
+        None,
+        StepMode::None,
+        &bounded::Cuts::top_level(),
+    );
     let mut statements: Vec<String> = facts
         .all
         .iter()
@@ -366,8 +385,10 @@ pub fn reason_n3_query_terms(data: &str, query: &str) -> Result<Vec<[Term; 3]>, 
     for r in &mut backward {
         r.premise = order_premise(&r.premise);
     }
-    let (facts, _steps) = run_closure(data_parsed, None, None, StepMode::None);
-    let mut bw = BwCtx::new(&backward);
+    // One run: the data closure and the query premises share one cut record.
+    let cuts = bounded::Cuts::top_level();
+    let (facts, _steps) = run_closure(data_parsed, None, None, StepMode::None, &cuts);
+    let mut bw = BwCtx::new(&backward, cuts);
     bw.base = base;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
@@ -504,6 +525,8 @@ pub fn reason_n3_stratified(
     let mut carried: Vec<[Term; 3]> = Vec::new();
     let mut facts = FactIndex::default();
     let mut strata_facts = Vec::with_capacity(strata.len());
+    // One run: every stratum records into the same cut record.
+    let cuts = bounded::Cuts::top_level();
     for (i, src) in strata.iter().enumerate() {
         let mut parsed = parser::parse(src)?;
         if !carried.is_empty() {
@@ -521,7 +544,7 @@ pub fn reason_n3_stratified(
             }
         }
         parsed.facts.append(&mut carried);
-        let (f, _steps) = run_closure(parsed, None, None, StepMode::None);
+        let (f, _steps) = run_closure(parsed, None, None, StepMode::None, &cuts);
         strata_facts.push(f.all.len());
         if i + 1 < strata.len() {
             carried = f.all.iter().cloned().collect();
@@ -627,7 +650,13 @@ pub(crate) fn reason_n3_terms_proof(
     src: &str,
 ) -> Result<(FxHashSet<[Term; 3]>, Vec<DerivationStep>), String> {
     let parsed = parser::parse(src)?;
-    let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
+    let (facts, steps) = run_closure(
+        parsed,
+        None,
+        None,
+        StepMode::Full,
+        &bounded::Cuts::top_level(),
+    );
     Ok((facts.all, steps))
 }
 
@@ -667,7 +696,13 @@ pub fn reason_n3_terms_with_resolver(
     };
     let (n_rules, n_backward_rules) = (parsed.rules.len(), parsed.backward_rules.len());
     // `derived` needs the conclusions in derivation order but never the premises.
-    let (facts, steps) = run_closure(parsed, resolver, None, StepMode::Conclusions);
+    let (facts, steps) = run_closure(
+        parsed,
+        resolver,
+        None,
+        StepMode::Conclusions,
+        &bounded::Cuts::top_level(),
+    );
     Ok(N3Closure {
         facts: facts.all.into_iter().collect(),
         derived: steps.into_iter().map(|(g, _, _)| g).collect(),
@@ -703,6 +738,9 @@ fn run_closure(
     // a `log:semantics` / `log:content` document IRI active up the stack is still recognised.
     visited: Option<VisitedDocs>,
     mode: StepMode,
+    // The run's cut record ([`bounded::Cuts`]): a fresh one only from a top-level entry
+    // point; a nested run passes its parent's, so an inner cut reaches the parent.
+    cuts: &bounded::Cuts,
 ) -> (FactIndex, Vec<DerivationStep>) {
     // [SONNET-4.6] Rule existentials live in a namespace proven fresh against
     // every blank label in the parsed source, preventing a literal `_:__sk…`
@@ -719,7 +757,7 @@ fn run_closure(
         r.premise = order_premise(&r.premise);
     }
     let mut facts = FactIndex::from_iter(facts0);
-    let mut bw = BwCtx::new(&backward_rules);
+    let mut bw = BwCtx::new(&backward_rules, cuts.clone());
     bw.base = base;
     bw.resolver = resolver;
     if let Some(v) = visited {
@@ -2165,8 +2203,13 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
     // `log:content` document active up the stack is still recognised when its own closure
     // re-imports it through this nested run.
-    let (closed, _steps) =
-        run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None);
+    let (closed, _steps) = run_closure(
+        parsed,
+        bw.resolver,
+        Some(bw.visited.clone()),
+        StepMode::None,
+        &bw.cuts,
+    );
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations.
     let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
@@ -2870,7 +2913,8 @@ fn eval_functional(
                     // taken later by `log:supports` / `log:conclusion`, which is where the
                     // import-cycle guard ([`VisitedDocs`]) applies. Resolution itself does no
                     // recursion, so no marking is needed here.
-                    let parsed = parser::parse_with_base(&text, doc).ok()?;
+                    // A syntax error is no document; the nesting limit is a cut.
+                    let parsed = settle(&bw.cuts, bounded::parse_n3(&text, doc))?;
                     Term::Formula(reencode_statements(parsed))
                 }
             }
@@ -2878,7 +2922,7 @@ fn eval_functional(
         },
         Func::ParsedAsN3 => match &args[..] {
             [Term::Lit(src, _, _)] => {
-                let parsed = parser::parse_with_base(src, &bw.base).ok()?;
+                let parsed = settle(&bw.cuts, bounded::parse_n3(src, &bw.base))?;
                 Term::Formula(reencode_statements(parsed))
             }
             _ => return None,
@@ -3540,6 +3584,91 @@ mod tests {
     fn has(dict: &Dict, set: &FxHashSet<[Id; 3]>, s: &str, p: &str, o: &str) -> bool {
         let (a, b, c) = (id(dict, s), id(dict, p), id(dict, o));
         a != 0 && b != 0 && c != 0 && set.contains(&[a, b, c])
+    }
+
+    /// The cut a run of `src` records, if any.
+    fn run_cut(src: &str, resolver: Option<&Resolver>) -> Option<&'static str> {
+        let cuts = bounded::Cuts::top_level();
+        let parsed = parser::parse(src).expect("parse");
+        let _ = run_closure(parsed, resolver, None, StepMode::None, &cuts);
+        cuts.first()
+    }
+
+    /// Every limit kind records a cut on the run, at the top level and from inside a
+    /// nested `log:conclusion` / `log:supports` closure (whose run shares the parent's
+    /// record), and a document without a limit records none.
+    #[test]
+    fn every_limit_records_a_cut_on_the_run_including_nested_closures() {
+        std::thread::Builder::new()
+            .stack_size(256 << 20)
+            .spawn(every_limit_records_a_cut)
+            .expect("spawn")
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e));
+    }
+
+    fn every_limit_records_a_cut() {
+        let pre = "@prefix : <http://ex/> .\n\
+            @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+            @prefix list: <http://www.w3.org/2000/10/swap/list#> .\n\
+            @prefix string: <http://www.w3.org/2000/10/swap/string#> .\n\
+            @prefix time: <http://www.w3.org/2000/10/swap/time#> .\n\
+            @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .\n";
+        let deep = format!(
+            "<http://ex/a> <http://ex/b> {}1{} .",
+            "(".repeat(5000),
+            ")".repeat(5000)
+        );
+        let mut backward: String = (0..=64)
+            .map(|i| format!("{{ :a :p{i} :b }} <= {{ :a :p{} :b }} .\n", i + 1))
+            .collect();
+        backward.push_str(":a :p65 :b .\n");
+        let big: String = (0..8).map(|i| format!(":s{i} :p :o . ")).collect();
+        // (limit, facts and backward rules, trigger premise)
+        let cases: Vec<(&str, String, String)> = vec![
+            ("backward depth", backward, ":a :p0 :b".into()),
+            (
+                "containment budget",
+                String::new(),
+                format!("{{ {big} }} log:includes {{ ?a :p ?c . ?d :p ?f . ?g :p ?i . ?j :p ?l . ?m :p ?n . ?o :p ?q . ?r :p :never }}"),
+            ),
+            (
+                "list walk cap",
+                ":l rdf:first :x ; rdf:rest :l .\n".into(),
+                ":l list:member :never".into(),
+            ),
+            ("regex", String::new(), "\"a\" string:matches \"(\"".into()),
+            ("parser nesting in log:parsedAsN3", String::new(), format!("\"{deep}\" log:parsedAsN3 ?f")),
+            ("parser nesting in log:semantics", String::new(), "<http://ex/deep> log:semantics ?f".into()),
+            (
+                "epoch year",
+                String::new(),
+                "\"1000000000-01-01T00:00:00Z\" time:inSeconds ?s".into(),
+            ),
+        ];
+        let resolve = move |iri: &str| (iri == "http://ex/deep").then(|| deep.clone());
+        let resolver: &Resolver = &resolve;
+        for (limit, facts, trigger) in &cases {
+            let rule = format!("{{ {trigger} }} => {{ :a :proved :b }} .");
+            let top = format!("{pre}{facts}{rule}");
+            let conclusion =
+                format!("{pre}{{ {{ {facts}{rule} }} log:conclusion ?c }} => {{ :x :y :z }} .");
+            let supports = format!(
+                "{pre}{{ {{ {facts}{rule} }} log:supports {{ :a :proved :b }} }} => {{ :x :y :z }} ."
+            );
+            for (shape, src) in [
+                ("top level", top),
+                ("log:conclusion", conclusion),
+                ("log:supports", supports),
+            ] {
+                assert!(
+                    run_cut(&src, Some(resolver)).is_some(),
+                    "{limit} / {shape}: no cut recorded"
+                );
+            }
+        }
+        let clean = format!("{pre}:a :p1 :b .\n{{ :a :p1 :b }} => {{ :a :proved :b }} .");
+        assert_eq!(run_cut(&clean, None), None);
     }
 
     #[test]
