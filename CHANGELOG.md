@@ -19,12 +19,9 @@ implied by this entry; verify the tagged run and every registry and release arti
   digests in text mode (`<hex>  <name>`). Git Bash's binary-mode `*<name>` record failed the
   archive-digest collector, which stopped the v0.1.4 run before provenance and the GitHub
   Release. (#6717)
-- **sparq-policy / sparq-solid (ODRL):** prohibitions are now evaluated three-valued. A
-  prohibition that can't be decided, has a constraint the parser can't represent, or uses an
-  unsupported refined or typed shape now denies or is rejected, instead of letting a matching
-  permission grant. Every ODRL bridge grant now goes through sparq-policy's decision, so
-  constrained duties, other parties' prohibitions and later time windows are honoured. Some
-  policies accepted by v0.1.4 are now rejected at parse time. (#6734, #6737)
+- **sparq-policy / sparq-solid (ODRL):** hardened ODRL policy evaluation and the ODRL
+  authorization bridge. Some policies accepted by v0.1.4 are now rejected at parse time.
+  (#6734, #6737)
 
 ### Added
 
