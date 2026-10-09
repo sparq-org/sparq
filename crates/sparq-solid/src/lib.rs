@@ -1345,15 +1345,33 @@ impl PodStore {
         let permit = update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget)?;
         // Authorized: apply through the engine's in-place delta path, under the same budget.
         sparq_engine::update_in_place_with_budget(&mut self.graph, sparql, budget)?;
-        // A change to the access-control rules invalidates the auth view.
+        // A change to the access-control rules invalidates the auth view. The update is
+        // already applied, so a view that cannot be rebuilt no longer describes the rules:
+        // it is dropped rather than left granting what the new rules may revoke.
         if permit.rematerialize {
-            if acp {
-                self.materialize_acp()?;
+            let rebuilt = if acp {
+                self.materialize_acp().map(drop)
             } else {
-                self.materialize_wac()?;
+                self.materialize_wac().map(drop)
+            };
+            if let Err(e) = rebuilt {
+                self.drop_auth_view();
+                return Err(format!(
+                    "the update was applied but the authorization view could not be rebuilt \
+                     ({e}); every request is denied until it is re-materialized"
+                ));
             }
         }
         Ok(())
+    }
+
+    /// Drop the materialized auth view, so every decision fails closed (an un-materialized
+    /// store denies, retryably) until a `materialize_*` call succeeds. The fail-closed answer
+    /// to rules that changed without a view rebuilt from them: the previous view would keep
+    /// granting what the change revoked.
+    pub(crate) fn drop_auth_view(&mut self) {
+        loader::strip_reserved_graphs(&mut self.graph);
+        self.reindex_with(ReindexScope::Full);
     }
 
     /// [OPUS-4.8] sq-h3uk — evaluate an ODRL `policy` against `request` and, on a

@@ -192,7 +192,11 @@ Materialize the authorization view from the access-control documents, then enfor
   spec-conformant surface).
 - `store.update_as(&Session, sparql)` / `store.update_as_acp(...)` — **write-path
   gating**: check every graph an update could mutate *before* applying, and
-  auto-re-materialize on `.acl`/`.acr` writes.
+  auto-re-materialize on `.acl`/`.acr` writes. If that re-materialization fails (the
+  update is already applied), the auth view is **dropped**: every request is denied
+  (retryably, as an un-materialized store) until a `materialize_*`, `put_acl` or
+  `delete_acl` succeeds, and the error says so. A `put_acl`/`delete_acl` that cannot put
+  its prior rules back in force does the same.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an
