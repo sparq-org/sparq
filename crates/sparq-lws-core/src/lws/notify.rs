@@ -138,11 +138,13 @@ impl Watch {
 /// Most distinct topics one subscription may name.
 pub const MAX_TOPICS: usize = 64;
 
-/// Most subscriptions held at once, expired ones included until they are removed: anyone who
-/// can read a resource may subscribe to it, and each subscription is stored as a resource is.
+/// Most subscriptions held at once by subscribers other than the storage owner, expired ones
+/// included until they are removed: anyone who can read a resource may subscribe to it, and each
+/// subscription is stored as a resource is.
 pub const MAX_SUBSCRIPTIONS: usize = 512;
 
-/// Most subscriptions one subscriber (other than the storage owner) may hold.
+/// Most subscriptions one subscriber other than the storage owner may hold. The owner has a
+/// share of [`MAX_SUBSCRIPTIONS`] of its own.
 pub const MAX_SUBSCRIPTIONS_PER_SUBSCRIBER: usize = 16;
 
 /// Largest subscription request body, in bytes.
@@ -227,6 +229,8 @@ pub struct Notifier {
     inboxes: Mutex<HashMap<String, Weak<tokio::sync::Semaphore>>>,
     /// The share of the store subscriptions may take (see [`super::Quota`]).
     quota: super::Quota,
+    /// The storage owner's own share, apart from everyone else's.
+    owner_quota: super::Quota,
 }
 
 fn new_etag() -> String {
@@ -298,7 +302,7 @@ impl Notifier {
                 continue;
             }
             if sub.expired(now) {
-                let _ = store.delete(child.as_str(), Some(&container)).await;
+                let _ = super::remove_member(store, child.as_str(), Some(&container)).await;
                 continue;
             }
             subs.insert(sub.id.clone(), sub);
@@ -314,6 +318,7 @@ impl Notifier {
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
             inboxes: Mutex::new(HashMap::new()),
             quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
+            owner_quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS),
         })
     }
 
@@ -1097,22 +1102,30 @@ async fn subscribe<S: Store + 'static>(
         let _ = state.notify.remove(state, &id, req.admission.clone()).await;
     }
     // The place is reserved before anything is stored and held until the subscription is
-    // registered. The storage owner is not held to a subscriber's share.
-    let slot = if access::is_owner(state, agent) {
-        None
+    // registered. The storage owner's subscriptions have a share of their own: they neither
+    // count against everyone else's nor are held to one subscriber's.
+    let owner = access::is_owner(state, agent);
+    let (quota, what) = if owner {
+        (&state.notify.owner_quota, "owner subscriptions")
     } else {
-        let reserved = state.notify.quota.reserve(agent.subject.as_deref(), || {
-            let subs = state.notify.subs.read().expect("lock");
-            let mine = subs
-                .values()
-                .filter(|s| s.subscriber == agent.subject)
-                .count();
-            (subs.len(), mine)
-        });
-        match reserved {
-            Ok(slot) => Some(slot),
-            Err(full) => return full.response("subscriptions"),
-        }
+        (&state.notify.quota, "subscriptions")
+    };
+    let reserved = quota.reserve(agent.subject.as_deref(), || {
+        let subs = state.notify.subs.read().expect("lock");
+        let owners = state.cfg.owner.as_deref();
+        let in_share = subs
+            .values()
+            .filter(|s| (owners.is_some() && s.subscriber.as_deref() == owners) == owner)
+            .count();
+        let mine = subs
+            .values()
+            .filter(|s| s.subscriber == agent.subject)
+            .count();
+        (in_share, mine)
+    });
+    let slot = match reserved {
+        Ok(slot) => slot,
+        Err(full) => return full.response(what),
     };
     let id = jose::random_id();
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
@@ -1226,6 +1239,68 @@ mod tests {
         let r = handle(&state, &post(&body), &reader).await;
         assert_eq!(r.status(), StatusCode::CREATED);
         assert!(!state.notify.subs.read().unwrap().contains_key(&mine));
+    }
+
+    /// Review finding: the owner's subscriptions were not held to a share, but counted against
+    /// everyone else's, so an owner with many left no room for anyone. Each has a share of its
+    /// own.
+    #[tokio::test]
+    async fn owner_subscriptions_have_their_own_share() {
+        let owner = "https://owner.example/#me";
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        cfg.owner = Some(owner.into());
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        {
+            let mut subs = state.notify.subs.write().unwrap();
+            for i in 0..MAX_SUBSCRIPTIONS {
+                let id = format!("o{i}");
+                subs.insert(
+                    id.clone(),
+                    Subscription {
+                        id,
+                        subscriber: Some(owner.into()),
+                        client: None,
+                        topics: vec![state.cfg.storage()],
+                        inbox: "https://inbox.example/".into(),
+                        expires: None,
+                        expires_at: None,
+                    },
+                );
+            }
+        }
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let reader = Agent {
+            subject: Some("https://reader.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        assert_eq!(
+            handle(&state, &post, &reader).await.status(),
+            StatusCode::CREATED
+        );
+        let owner = Agent {
+            subject: Some(owner.into()),
+            ..Agent::anonymous()
+        };
+        // The owner's own share is full.
+        assert_ne!(
+            handle(&state, &post, &owner).await.status(),
+            StatusCode::CREATED
+        );
     }
 
     /// Review finding: a subscription was cancelled whatever the request's `If-Match` named.

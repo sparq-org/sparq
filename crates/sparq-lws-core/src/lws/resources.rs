@@ -2602,11 +2602,7 @@ async fn remove<S: Store + 'static>(
         // The record and its parent's membership edge go in one step, data resources included:
         // removed one after the other, a failure in between would leave a live resource its
         // container no longer lists, which a retried recursive delete would not find.
-        let removed = match state
-            .store
-            .delete_container_if_empty(node, parent.as_deref())
-            .await
-        {
+        let removed = match super::remove_member(&state.store, node, parent.as_deref()).await {
             Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
                 "the container gained a member while it was deleted".into(),
             )),
