@@ -2,7 +2,8 @@
   "base_commit": "d34b709ea9c8140c66fd67305c02d79b4cc283a5",
   "base_lock_sha256": "67d4fc7ad7f2a52d75aec3e963f372f93dc901a646922954376322fb529d3f02",
   "candidate_lock_sha256": "695b5b90dfc130a58cc034b69f0c632467c2dca0d062cb4cf11c91a14fa462bd",
-  "wasmer_edit_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
+  "chain_root_lock_sha256": "9ecb9375da91831500a18d235817a46c6485d7477ee993223bfdcce94c237b22",
+  "chain_root_note": "Lock as re-pinned by #6647; earlier unrecorded re-pins after the Wasmer edit predate the later_refreshes chain.",
   "removed_registry_packages": [
     {
       "name": "proc-macro-error-attr2",
