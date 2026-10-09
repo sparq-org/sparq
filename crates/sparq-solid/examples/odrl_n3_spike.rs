@@ -28,7 +28,7 @@
 use oxrdf::Term;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_policy::{evaluate, parse_policy_str, Policy, Request};
+use sparq_policy::{evaluate, parse_policy_str, Request, ValidatedPolicy};
 use sparq_reason::n3::parser;
 use sparq_reason::reason_n3;
 use sparq_solid::odrl_bridge::materialize_policy;
@@ -70,7 +70,7 @@ struct Scenario {
 // ── the RUST path (real: parse -> evaluate -> materialize_policy into a Graph) ─────────
 
 fn rust_auth_set(s: &Scenario) -> AuthSet {
-    let policy: Policy = parse_policy_str(s.policy_ttl, "turtle").expect("policy parses");
+    let policy: ValidatedPolicy = parse_policy_str(s.policy_ttl, "turtle").expect("policy parses");
     let mut req = Request::new(format!("{}{}", ODRL, s.action_local))
         .on(s.target)
         .by(s.party);

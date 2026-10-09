@@ -15,24 +15,21 @@
 //!
 //! Same [`Vector`]/[`Expected`] schema and the same [`run_vectors`] runner as the WAC/ACP
 //! corpus, so a consumer asserts them exactly the same way — only the store construction
-//! differs ([`build_window_store`] layers the bridged grant over a materialized ACP pod).
+//! differs ([`build_window_store`] runs the ODRL bridge over a materialized ACP pod).
 //!
-//! - **Inside** the window the recipient is allowed; **before** and **after** it is denied,
-//!   with no re-materialization in between — the same store decides all three.
-//! - Both bounds are **inclusive**: a request at exactly `auth:notBefore` and one at
-//!   exactly `auth:notAfter` are both allowed. The endpoints are their own rows, so an
-//!   off-by-one that made either bound exclusive fails the corpus — pinning the boundary
-//!   at the protocol-visible decision surface, not only in `sparq-solid`'s own unit tests.
-//! - A windowed grant evaluated with **no clock** (`now == None`) is **fail-closed**: no
-//!   clock evidence means the request cannot be proven inside the window.
-//! - The window is recipient-scoped — a non-recipient is denied even inside it.
-//! - A grant with **no** window ignores `now` entirely (alice's unwindowed ACP grant
-//!   decides identically inside the window, after it has closed, and with no clock —
-//!   the after-close row is what pins that the window is *grant*-scoped, not global).
+//! The bridge no longer stores a time-windowed grant: a stored grant is never
+//! re-checked, so only an unconstrained grant to the named party is stored, and per-request
+//! ODRL decisions are tracked in #6743. These rows pin that intended behaviour change:
+//!
+//! - carol is **denied** at every instant (inside the window, at both bounds, before,
+//!   after, and with no clock), since nothing was stored for her;
+//! - bob and an anonymous session are denied inside the window;
+//! - alice's unwindowed ACP grant ignores `now` entirely (inside the window, after it has
+//!   closed, and with no clock).
 
 use crate::{
     resolved_default, run_vectors, Expected, Mode, OracleReport, PodStore, Vector, ALICE, BOB,
-    CAROL, READ, RWC,
+    CAROL, RWC,
 };
 use sparq_core::Graph;
 
@@ -61,36 +58,32 @@ const BEFORE: &str = "2026-05-01T00:00:00Z";
 const AFTER: &str = "2027-01-01T00:00:00Z";
 
 /// Decision rows over [`WINDOW_NQUADS`] + [`WINDOW_POLICY_TTL`]. Every row shares one
-/// store, so the before/inside/after verdicts differ ONLY by the request clock — that is
-/// the live-clock re-check, not a re-materialization.
+/// store, so the before/inside/after verdicts differ ONLY by the request clock.
 pub static WINDOW_VECTORS: [Vector; 11] = [
-    // carol INSIDE the window: the bridged conditional grant applies.
+    // carol INSIDE the window: the bridge stored nothing, so she is denied.
     v(
         "window-carol-inside",
         Some(CAROL),
         R,
-        resolved_default(true, READ),
+        resolved_default(false, NONE),
     )
     .at(INSIDE),
-    // the bounds are INCLUSIVE (odrl:dateTime gteq/lteq): a request at exactly the open
-    // instant and one at exactly the close instant are both still admitted. Verified to
-    // go red (and the strictly-inside/before/after rows to stay green) when either
-    // comparison in `window_admits` drops its `Equal` arm.
+    // …and at exactly the open and close instants.
     v(
         "window-carol-at-open-inclusive",
         Some(CAROL),
         R,
-        resolved_default(true, READ),
+        resolved_default(false, NONE),
     )
     .at(WINDOW_NOT_BEFORE),
     v(
         "window-carol-at-close-inclusive",
         Some(CAROL),
         R,
-        resolved_default(true, READ),
+        resolved_default(false, NONE),
     )
     .at(WINDOW_NOT_AFTER),
-    // …and the SAME store denies her before it opens and after it closes.
+    // …and before it opens and after it closes.
     v(
         "window-carol-before-open",
         Some(CAROL),
@@ -105,7 +98,7 @@ pub static WINDOW_VECTORS: [Vector; 11] = [
         resolved_default(false, NONE),
     )
     .at(AFTER),
-    // FAIL-CLOSED: a windowed grant with no clock evidence never applies.
+    // …and with no clock.
     v(
         "window-carol-no-clock-fail-closed",
         Some(CAROL),
@@ -179,16 +172,16 @@ const fn v(
 }
 
 /// Build the window corpus's store: load [`WINDOW_NQUADS`], materialize the ACP auth view
-/// (alice's unwindowed grant), then layer the ODRL bridge's **windowed** conditional grant
-/// for carol on top.
+/// (alice's unwindowed grant), then run the ODRL bridge for carol's windowed permission,
+/// which stores nothing.
 ///
 /// Order matters — `materialize_acp` rebuilds `<urn:sparq:auth>` from scratch, so the
-/// bridged grant must be appended after it, exactly as a server would sequence them.
+/// bridge runs after it, exactly as a server would sequence them.
 ///
 /// # Errors
 ///
-/// If the pod fails to load, if ACP materialization fails, or if the ODRL policy does not
-/// yield a bridged grant (which would leave every windowed row vacuously denied).
+/// If the pod fails to load, if ACP materialization fails, or if the bridge stores a
+/// windowed grant (a stored grant is never re-checked against the clock).
 pub fn build_window_store() -> Result<PodStore, String> {
     let graph = Graph::load_dataset(WINDOW_NQUADS, "nquads")?;
     let mut store = PodStore::new(graph);
@@ -197,13 +190,11 @@ pub fn build_window_store() -> Result<PodStore, String> {
     let policy = sparq_policy::parse_policy_str(WINDOW_POLICY_TTL, "turtle")?;
     let request = sparq_policy::Request::new("http://www.w3.org/ns/odrl/2/read")
         .on(WINDOW_RESOURCE)
-        .by(ALICE);
+        .by(CAROL)
+        .at(INSIDE);
     let outcome = store.materialize_odrl_permission_conditional(&policy, &request);
-    if !outcome.granted {
-        return Err(format!(
-            "the ODRL window policy did not bridge to a conditional grant: {:?}",
-            outcome
-        ));
+    if outcome.granted {
+        return Err(format!("the bridge stored a windowed grant: {:?}", outcome));
     }
     Ok(store)
 }
@@ -217,7 +208,7 @@ pub fn run_window_vectors() -> Result<OracleReport, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AclStatus;
+    use crate::{AclStatus, READ};
 
     /// The row with this `name` — index-free, so growing or reordering
     /// [`WINDOW_VECTORS`] can never silently re-point a test at a different row.
@@ -236,21 +227,26 @@ mod tests {
     }
 
     #[test]
-    fn build_window_store_layers_the_bridged_grant_over_the_acp_view() {
-        // Non-vacuity for the store construction itself: WITHOUT the bridge step carol is
-        // denied at every instant, so the "inside" row can only pass because the windowed
-        // grant really landed.
+    fn the_bridge_adds_nothing_to_the_acp_view() {
+        // carol's windowed permission is allowed by the ODRL decision inside the window,
+        // but the bridged store decides every row exactly as the ACP view alone does.
+        let policy = sparq_policy::parse_policy_str(WINDOW_POLICY_TTL, "turtle").unwrap();
+        let inside = sparq_policy::Request::new("http://www.w3.org/ns/odrl/2/read")
+            .on(WINDOW_RESOURCE)
+            .by(CAROL)
+            .at(INSIDE);
+        assert!(sparq_policy::evaluate(&policy, &inside).allow, "the decision allows carol");
+
         let graph = Graph::load_dataset(WINDOW_NQUADS, "nquads").expect("pod loads");
         let mut acp_only = PodStore::new(graph);
         acp_only.materialize_acp().expect("acp materializes");
-        let inside = row("window-carol-inside");
-        assert!(inside.expect.allow, "precondition: the inside row expects allow");
-        let bare = acp_only.decide(&inside.session(), inside.resource, inside.mode);
-        assert!(!bare.allow, "no bridged grant -> carol denied even inside the window");
-        assert_eq!(bare.status, AclStatus::Resolved, "the ACP view still governs");
-
         let bridged = build_window_store().expect("window store builds");
-        assert!(bridged.decide(&inside.session(), inside.resource, inside.mode).allow);
+        for row in &WINDOW_VECTORS {
+            let bare = acp_only.decide(&row.session(), row.resource, row.mode);
+            let with_bridge = bridged.decide(&row.session(), row.resource, row.mode);
+            assert_eq!(bare.allow, with_bridge.allow, "{}", row.name);
+            assert_eq!(bare.status, AclStatus::Resolved, "the ACP view still governs");
+        }
     }
 
     #[test]
@@ -280,20 +276,8 @@ mod tests {
                 None,
             ]
         );
-        // The INCLUSIVE-bounds claim in this module's docs is load-bearing, so the two
-        // boundary instants must stay in the corpus as ALLOW rows — deleting either would
-        // silently drop this corpus's only coverage distinguishing an inclusive bound
-        // from an exclusive one.
-        for endpoint in [WINDOW_NOT_BEFORE, WINDOW_NOT_AFTER] {
-            let at_endpoint = carol
-                .iter()
-                .find(|row| row.now == Some(endpoint))
-                .unwrap_or_else(|| panic!("no carol row at the boundary instant {}", endpoint));
-            assert!(
-                at_endpoint.expect.allow,
-                "the window bounds are inclusive, so {} must be an allow row",
-                endpoint
-            );
+        for row in &carol {
+            assert!(!row.expect.allow, "nothing is stored for carol: {}", row.name);
         }
     }
 

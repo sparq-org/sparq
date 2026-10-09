@@ -20,7 +20,7 @@
 //!   the member-less head, being read as an ordinary unmatchable value (sq-srjuc —
 //!   both drop authored members and widen decisions).
 
-use sparq_policy::{evaluate, parse_policy_str, Operator, Policy, Request, Value};
+use sparq_policy::{evaluate, parse_policy_str, Operator, Request, Value};
 
 const ODRL: &str = "http://www.w3.org/ns/odrl/2/";
 
@@ -30,7 +30,7 @@ fn action(local: &str) -> String {
 
 /// A permission gated on `purpose <op> <right>` (TTL helper — same shape as
 /// `odrl_set_operators.rs`).
-fn purpose_policy(op: &str, right_ttl: &str) -> Policy {
+fn purpose_policy(op: &str, right_ttl: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .

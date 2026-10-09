@@ -65,10 +65,10 @@ _:c odrl:leftOperand odrl:recipient , odrl:dateTime ;
 fn defect1_two_operand_expired_permission_is_not_granted_by_n3() {
     let request = req("read", "urn:alice", Some("2026-07-25T00:00:00Z"));
 
-    // The Rust reference path denies: the two right-operands under a non-set operator
-    // fold to an ambiguous (unsatisfiable) guard — fail-closed.
-    let rust = rust_outcome(POL_TWO_OPERAND_EXPIRED, &request);
-    assert!(!rust.granted, "Rust reference path must NOT grant the expired permission");
+    // The Rust reference refuses the policy outright: one constraint node with several
+    // distinct left operands is malformed, so nothing can grant (fail-closed).
+    let refused = parse_policy_str(POL_TWO_OPERAND_EXPIRED, "turtle");
+    assert!(refused.is_err(), "Rust reference must refuse the two-operand node: {refused:?}");
 
     // The N3 path must not be more permissive. A constraint node whose operands it
     // cannot fully evaluate is REFUSED outright (fail-closed), materializing nothing.
@@ -449,4 +449,34 @@ fn rules_layer_does_not_satisfy_a_mixed_combinator_logical_constraint() {
          neither lcSat rule may fire; derived: {:?}",
         auth
     );
+}
+
+// ── A prohibition the request gives no evidence for still denies ─────────────
+
+/// alice already holds a read grant; a prohibition bounded by `dateTime lteq` carves
+/// her out, and the request carries no clock. The rules read the prohibition as not
+/// applying for lack of evidence, but the reference path keeps it in force, so the N3
+/// path must materialize the same `auth:denyRead` that removes the existing grant.
+#[test]
+fn a_prohibition_without_clock_evidence_still_denies_on_n3() {
+    let policy = r#"@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+<urn:pol/p> a odrl:Set ; odrl:prohibition [
+    odrl:action odrl:read ; odrl:target <urn:t/1> ; odrl:assignee <urn:alice> ;
+    odrl:constraint [ odrl:leftOperand odrl:dateTime ; odrl:operator odrl:lteq ;
+        odrl:rightOperand "2026-12-31T00:00:00Z"^^xsd:dateTime ] ] .
+"#;
+    let request = req("read", "urn:alice", None);
+    let rust = rust_outcome(policy, &request);
+    assert!(rust.prohibited, "the reference path keeps the prohibition in force");
+
+    let existing = format!(
+        "<urn:alice> <https://sparq.dev/ns/auth#read> <{TARGET}> <{}> .",
+        sparq_solid::AUTH_GRAPH
+    );
+    let mut graph = Graph::load_dataset(&existing, "nquads").expect("auth view loads");
+    let n3 = materialize_odrl_n3(&mut graph, policy, &request).expect("N3 path runs");
+    assert!(n3.prohibited, "N3 must deny where the reference path does");
+    assert_eq!(n3.deny_triple, rust.deny_triple);
+    assert!(!n3.granted);
 }

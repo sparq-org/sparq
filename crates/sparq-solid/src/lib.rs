@@ -1381,7 +1381,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome = odrl_bridge::materialize_permission(&mut self.graph, policy, request);
@@ -1410,7 +1410,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_prohibition(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome = odrl_bridge::materialize_prohibition(&mut self.graph, policy, request);
@@ -1433,7 +1433,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_policy(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome = odrl_bridge::materialize_policy(&mut self.graph, policy, request);
@@ -1444,22 +1444,14 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-hiz4 — like [`PodStore::materialize_odrl_permission`], but persists a
-    /// FAITHFULLY-mappable ODRL constraint (recipient/assignee) as a re-checked ACP
-    /// `auth:ConditionalGrant` rather than freezing it into a one-shot allow: the
-    /// granted agent is re-verified per session through the SAME enforcement path
-    /// ([`PodStore::accessible`] / [`PodStore::query_as`]), not re-running the ODRL
-    /// evaluator.
-    ///
-    /// A constraint with **no** faithful ACP-condition analogue (`odrl:purpose`,
-    /// `odrl:dateTime`/time windows, `odrl:count`, a `neq`/order recipient) keeps the
-    /// one-shot materialization-time behaviour (checked once, frozen) — see
-    /// [`odrl_bridge::materialize_permission_conditional`] for the full mapping table
-    /// and the fail-closed rationale.
+    /// The same one-shot grant as [`PodStore::materialize_odrl_permission`], tracked as
+    /// [`odrl_bridge::BridgeKind::PermissionConditional`]. It no longer persists
+    /// recipient/assignee/dateTime constraints as re-checked condition heads; see
+    /// [`odrl_bridge::materialize_permission_conditional`].
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission_conditional(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome =
@@ -1476,21 +1468,17 @@ impl PodStore {
     }
 
     /// [OPUS-4.8] sq-4r70 — the deny dual of
-    /// [`PodStore::materialize_odrl_permission_conditional`]: persist a matched ODRL
-    /// **prohibition** whose recipient/assignee constraints map faithfully as a
-    /// re-checked ACP **conditional deny** (`auth:effect auth:Deny`) rather than freezing
-    /// it one-shot. The carve-out is re-verified per session through the SAME enforcement
-    /// path ([`PodStore::accessible`] / [`PodStore::query_as`]); the deny **overrides**
-    /// any allow for the same principal+target+mode (deny-overrides).
-    ///
-    /// A prohibition carrying a constraint with **no** faithful ACP-condition analogue
-    /// (`odrl:purpose`, `odrl:dateTime`, `odrl:count`) falls back to the one-shot deny
-    /// ([`odrl_bridge::materialize_prohibition`], frozen at materialization) — see
+    /// [`PodStore::materialize_odrl_permission_conditional`]: persist each ODRL
+    /// **prohibition** covering the request's action and target as an unconditional ACP
+    /// **deny** (`auth:effect auth:Deny` on `auth:Public`) that does not depend on who
+    /// triggered materialization. Until #6743 re-checks the party per request, a
+    /// party-scoped prohibition denies every session on the target. The deny
+    /// **overrides** any allow for the same target and mode (deny-overrides). See
     /// [`odrl_bridge::materialize_prohibition_conditional`] for the full rationale.
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_prohibition_conditional(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
     ) -> odrl_bridge::BridgeOutcome {
         let outcome =
@@ -1506,24 +1494,19 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-58mh — STATEFUL `odrl:count` enforcement THROUGH the bridge: evaluate
-    /// `policy` against `request`, **atomically consume** one unit of any applicable
-    /// `odrl:count` budget from `store`, and on a grant materialize the equivalent
-    /// `principal auth:<mode> graph` allow into this store's `<urn:sparq:auth>` view — so
-    /// the existing graph-level WAC/ACP enforcement honours it. The grant then
-    /// **self-retracts on exhaustion**: it is tracked as
-    /// [`odrl_bridge::BridgeKind::PermissionCounted`], and the next
-    /// [`PodStore::refresh_odrl_grants`] re-checks the budget READ-ONLY (never consuming)
-    /// and RETRACTS the grant once the budget is spent — access is GONE through
-    /// [`PodStore::accessible`] / [`PodStore::query_as`].
+    /// Bridge a permission through the count-aware decision: evaluate `policy` against
+    /// `request` via sparq-policy's [`sparq_policy::evaluate_and_exercise`] and, on a
+    /// grant that may be stored, materialize the equivalent `principal auth:<mode> graph`
+    /// allow into this store's `<urn:sparq:auth>` view.
     ///
-    /// This closes the gap the [`PodStore::materialize_odrl_permission_conditional`]
-    /// mapping table left open: ACP is stateless (no per-session usage counter), so the
-    /// count cannot be a re-checked ACP *condition*; instead it is enforced via the
-    /// EXISTING refresh/retraction ledger (sq-dpk4). The decision routes through
-    /// sparq-policy's [`sparq_policy::evaluate_and_exercise`] — the first *N* exercises of
-    /// an "at most *N*" permission grant; the *(N+1)*th denies; a denied / exhausted /
-    /// store-unavailable exercise burns no budget and materializes nothing (fail-closed).
+    /// A **count-limited** grant is never stored: a stored allow would let every later
+    /// read through after one exercise, so its permit is not
+    /// [`lasting`](sparq_policy::Permit::lasting) and this refuses it before spending any
+    /// budget. Enforce a usage count per request with
+    /// [`sparq_policy::evaluate_and_exercise`] instead. A permission with no count limit
+    /// bridges as [`PodStore::materialize_odrl_permission`] would, and is tracked as
+    /// [`odrl_bridge::BridgeKind::PermissionCounted`] for
+    /// [`PodStore::refresh_odrl_grants`].
     ///
     /// `store` is the injected [`sparq_policy::UsageCounterStore`] (shared via `Arc` so
     /// the same budgets back both exercise-time consumption and refresh-time re-checks);
@@ -1538,7 +1521,7 @@ impl PodStore {
     #[cfg(feature = "count-enforcement")]
     pub fn materialize_odrl_permission_counted(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         store: &Arc<dyn sparq_policy::UsageCounterStore + Send + Sync>,
     ) -> odrl_bridge::BridgeOutcome {
@@ -1625,7 +1608,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     pub fn refresh_odrl_grant(
         &mut self,
-        policy: &sparq_policy::Policy,
+        policy: &sparq_policy::ValidatedPolicy,
         request: &sparq_policy::Request,
         kind: odrl_bridge::BridgeKind,
     ) -> (bool, usize) {

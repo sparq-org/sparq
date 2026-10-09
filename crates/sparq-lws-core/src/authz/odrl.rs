@@ -37,7 +37,7 @@
 //! the shipped default evaluates the SAME `sparq-policy` primitives that bridge builds on,
 //! in-process, with no HTTP round-trip.
 
-use sparq_policy::{conflict_admissibility, evaluate, parse_policy_str, Policy, Request, Value};
+use sparq_policy::{conflict_admissibility, evaluate, parse_policy_str, Request, ValidatedPolicy, Value};
 
 /// The ODRL action a read/query exercises (`odrl:read`) — the only action this gate evidences
 /// (the full query-action contract is sq-lrtc3.2, matching the server lane's scope).
@@ -74,7 +74,7 @@ pub trait OdrlGate: Send + Sync {
 /// read's results are delivered to the requester), matching the server lane's request shape.
 #[derive(Debug)]
 pub struct PolicyOdrlGate {
-    policy: Policy,
+    policy: ValidatedPolicy,
 }
 
 impl PolicyOdrlGate {

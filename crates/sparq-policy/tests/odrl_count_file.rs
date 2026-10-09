@@ -31,7 +31,7 @@ fn read() -> String {
     format!("{ODRL}read")
 }
 
-fn policy_at_most(bound: &str) -> sparq_policy::Policy {
+fn policy_at_most(bound: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .

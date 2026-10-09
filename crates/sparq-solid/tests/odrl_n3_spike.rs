@@ -119,7 +119,13 @@ fn assert_case(
 
 #[test]
 fn a1_allow_within_datetime_window() {
-    assert_case("A1", POLICY_A, "read", "urn:alice", Some("2026-07-05T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+    // The spike's rules derive the grant inside the window, but the bridge stores
+    // nothing: the window closes and a stored triple is never re-checked against the
+    // clock.
+    let at = Some("2026-07-05T00:00:00Z");
+    let want = expect(&[("urn:alice", "read", "urn:t/1")]);
+    assert_eq!(n3_set(POLICY_A, "read", "urn:t/1", "urn:alice", at), want, "A1: N3 rules");
+    assert!(rust_set(POLICY_A, "read", "urn:t/1", "urn:alice", at).is_empty(), "A1: bridge");
 }
 
 #[test]

@@ -35,7 +35,7 @@ const BERLIN: &str = "https://sws.geonames.org/2950159/"; // Berlin
 const USA: &str = "http://publications.europa.eu/resource/authority/country/USA";
 
 /// "MAY distribute asset-X to recipients in the EU region" — spatial isPartOf EU.
-fn eu_region_permission() -> sparq_policy::Policy {
+fn eu_region_permission() -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .
