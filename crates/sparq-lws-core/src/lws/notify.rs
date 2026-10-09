@@ -233,6 +233,9 @@ pub struct Notifier {
     quota: super::Quota,
     /// The storage owner's own share, apart from everyone else's.
     owner_quota: super::Quota,
+    /// The last expired subscription a purge tried: the next starts after it, so ones that cannot
+    /// be removed do not keep the rest from being tried.
+    purged_to: Mutex<String>,
 }
 
 fn new_etag() -> String {
@@ -330,6 +333,7 @@ impl Notifier {
             inboxes: Mutex::new(HashMap::new()),
             quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
             owner_quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS),
+            purged_to: Mutex::new(String::new()),
         })
     }
 
@@ -1003,16 +1007,25 @@ async fn purge_expired<S: Store + 'static>(
     admission: Option<crate::overload::AdmissionSlot>,
 ) {
     let now = jose::now_secs();
-    let expired: Vec<String> = state
-        .notify
-        .subs
-        .read()
-        .expect("lock")
-        .values()
-        .filter(|s| s.expired(now))
-        .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
-        .map(|s| s.id.clone())
-        .collect();
+    // Taken in turn, from after the last one tried round to it: one that cannot be removed is
+    // tried again only after every other expired subscription was.
+    let expired: Vec<String> = {
+        use std::ops::Bound::{Excluded, Unbounded};
+        let subs = state.notify.subs.read().expect("lock");
+        let mut cursor = state.notify.purged_to.lock().expect("lock");
+        let expired: Vec<String> = subs
+            .range::<String, _>((Excluded(&*cursor), Unbounded))
+            .chain(subs.range::<String, _>(..=&*cursor))
+            .map(|(_, s)| s)
+            .filter(|s| s.expired(now))
+            .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
+            .map(|s| s.id.clone())
+            .collect();
+        if let Some(last) = expired.last() {
+            cursor.clone_from(last);
+        }
+        expired
+    };
     for id in expired {
         let _ = state.notify.remove(state, &id, admission.clone()).await;
     }
@@ -1372,6 +1385,56 @@ mod tests {
         }
         let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
         assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    /// Review finding: a purge always tried the first expired subscriptions, so sixteen that could
+    /// not be removed kept every later one from being tried. Purges take them in turn.
+    #[tokio::test]
+    async fn every_expired_subscription_gets_its_turn() {
+        let (state, store) = test_store::state(4).await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let n = EXPIRED_REMOVED_PER_SUBSCRIBE + 4;
+        for i in 0..n {
+            let who = Agent {
+                subject: Some(format!("https://r{i}.example/#me")),
+                ..Agent::anonymous()
+            };
+            let h = [("content-type", LWS_JSON)];
+            let r = handle(
+                &state,
+                &test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body),
+                &who,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let ids: Vec<String> = {
+            let mut subs = state.notify.subs.write().unwrap();
+            for s in subs.values_mut() {
+                s.expires_at = Some(1);
+            }
+            subs.keys().cloned().collect()
+        };
+        // The first sixteen cannot be removed now.
+        store
+            .fail_delete
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        purge_expired(&state, None).await;
+        store
+            .fail_delete
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(state.notify.subs.read().unwrap().len(), n);
+        // The next purge starts with the ones after them.
+        purge_expired(&state, None).await;
+        let left = state.notify.subs.read().unwrap();
+        for id in &ids[EXPIRED_REMOVED_PER_SUBSCRIBE..] {
+            assert!(!left.contains_key(id), "{id} never got its turn");
+        }
     }
 
     /// Review finding: the owner's subscriptions were not held to a share, but counted against

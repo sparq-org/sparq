@@ -2696,7 +2696,7 @@ async fn delete<S: Store + 'static>(
         }
     }
     // Who hears of each removal is decided before the resources go, while who may read each can
-    // still be decided; the notifications go out only for removals that happened. A recursive
+    // still be decided; the notifications go out only once the whole removal happened. A recursive
     // delete removes every descendant, and each removal is a Delete of its own.
     let mut notices = Vec::with_capacity(doomed.len());
     // They share the delivery queue's bound: what is prepared past it would be dropped when
@@ -2719,8 +2719,13 @@ async fn delete<S: Store + 'static>(
         let state = state.clone();
         async move {
             let (removed, outcome) = remove(&state, &doomed).await;
-            for pending in notices.into_iter().take(removed) {
-                state.notify.send(&state, pending);
+            // Only a delete that happened whole is announced. One that failed is being put back
+            // (what could not be put back at once is retried), so nothing it touched is
+            // announced as gone.
+            if outcome.is_ok() {
+                for pending in notices {
+                    state.notify.send(&state, pending);
+                }
             }
             (removed, outcome, state)
         }

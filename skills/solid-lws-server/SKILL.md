@@ -281,7 +281,8 @@ What the server exposes, all discoverable from the storage description
   full serialized size (keys and separators as well as values). A JSON Patch may hold at most
   1,000 operations, and the bytes its operations copy, move, add, replace or test are charged
   against a work budget of four times the body limit; past either it gets `413`. A `POST`
-  whose request is cancelled after the member is written is still announced. `livez` and `readyz` are never
+  whose request is cancelled after the member is written is still announced; a `DELETE` that
+  fails, and is being put back, announces nothing. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. A linkset
   `PATCH` whose result nests too deeply to store gets `422`. A linkset `PATCH` is measured against the
   body limit as it will be served, with the server-managed links put back. Its relative `anchor`
