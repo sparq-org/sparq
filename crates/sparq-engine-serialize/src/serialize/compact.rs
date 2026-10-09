@@ -337,6 +337,17 @@ mod tests {
         );
     }
 
+    /// `"@id": []` matches no node; a wildcard in an `@id` list matches every node and
+    /// still honours `@explicit`.
+    #[test]
+    fn id_patterns_match_none_or_any() {
+        let ttl = "<http://ex/s> <http://ex/p> \"x\" ; <http://ex/q> \"y\" .";
+        let none = frame_doc(ttl, r#"{"@id":[]}"#);
+        assert!(!none.contains("http://ex/s"), "{none}");
+        let any = frame_doc(ttl, r#"{"@id":[{}],"@explicit":true,"http://ex/p":{}}"#);
+        assert_eq!(any, r#"{"@id":"http://ex/s","http://ex/p":"x"}"#);
+    }
+
     #[test]
     fn default_fills_absent_property() {
         let out = frame_doc(

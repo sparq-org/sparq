@@ -229,6 +229,7 @@ pub fn frame_expanded(
         unique_embeds: BTreeMap::new(),
         bnode_counts: BTreeMap::new(),
         last_ids: BTreeSet::new(),
+        output_left: json_size(expanded_input).saturating_mul(OUTPUT_PER_INPUT).saturating_add(OUTPUT_FLOOR),
     };
 
     // §4.1 steps 5–6: match the frame over every subject of the active graph.
@@ -296,6 +297,48 @@ struct FState<'a> {
     last_ids: BTreeSet<String>,
     /// blank-node id → number of framed output objects/`@type` usages (for pruning).
     bnode_counts: BTreeMap<String, usize>,
+    /// Output values this call may still emit (see [`FState::emit`]).
+    output_left: usize,
+}
+
+/// Output values a frame may emit per value of its input, beyond [`OUTPUT_FLOOR`].
+/// `@once` embeds each subject once per top-level match, so legitimate output can be
+/// quadratic in the input; `@always` over shared subjects can be exponential.
+const OUTPUT_PER_INPUT: usize = 32;
+/// Output values any frame may emit, whatever the input's size.
+const OUTPUT_FLOOR: usize = 1 << 20;
+
+impl FState<'_> {
+    /// Charges `n` emitted output values (node objects, references, copied values) to
+    /// the call's output bound, failing with `context overflow` once it is spent, so
+    /// framing's output, like compaction's work, stays bounded by its input.
+    fn emit(&mut self, n: usize) -> Result<(), JsonLdError> {
+        match self.output_left.checked_sub(n) {
+            Some(left) => {
+                self.output_left = left;
+                Ok(())
+            }
+            None => Err(JsonLdError::with_detail(
+                E::ContextOverflow,
+                "framing output exceeds its bound for this input",
+            )),
+        }
+    }
+}
+
+/// The number of JSON values in `json`.
+fn json_size(json: &Json) -> usize {
+    let mut size = 0;
+    let mut stack = vec![json];
+    while let Some(j) = stack.pop() {
+        size += 1;
+        match j {
+            Json::Arr(items) => stack.extend(items),
+            Json::Obj(members) => stack.extend(members.iter().map(|(_, v)| v)),
+            _ => {}
+        }
+    }
+    size
 }
 
 /// The per-frame flags (§4.1), each read from the frame object with the option default.
@@ -425,6 +468,7 @@ fn match_frame(
             continue;
         }
 
+        st.emit(1)?;
         let mut output = Json::Obj(vec![("@id".to_string(), Json::Str(id.clone()))]);
         if id.starts_with("_:") {
             *st.bnode_counts.entry(id.clone()).or_insert(0) += 1;
@@ -520,6 +564,7 @@ fn match_frame(
             }
             if prop.starts_with('@') {
                 // Keywords copy verbatim; blank-node @type values count toward pruning.
+                st.emit(json_size(objects))?;
                 output.set(prop, objects.clone());
                 if prop == "@type" {
                     for t in as_slice(objects) {
@@ -546,6 +591,7 @@ fn match_frame(
                         .and_then(|f0| f0.get("@list"))
                         .cloned()
                         .unwrap_or_else(|| implicit_frame(&flags));
+                    st.emit(1)?;
                     let mut list = Json::Obj(vec![("@list".to_string(), Json::Arr(vec![]))]);
                     for oo in o.get("@list").map(as_slice).unwrap_or_default() {
                         if let Some(oid) = subject_reference_id(oo) {
@@ -559,6 +605,7 @@ fn match_frame(
                                 true,
                             )?;
                         } else {
+                            st.emit(json_size(oo))?;
                             add_frame_output(&mut list, Some("@list"), oo.clone());
                         }
                     }
@@ -584,6 +631,7 @@ fn match_frame(
                     let empty = Json::obj();
                     let pattern = frame_prop.and_then(first_of).unwrap_or(&empty);
                     if value_match(pattern, o) {
+                        st.emit(json_size(o))?;
                         add_frame_output(&mut output, Some(prop), o.clone());
                     }
                 }
@@ -613,6 +661,7 @@ fn match_frame(
                     Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
                     None => Json::Arr(vec![Json::Str("@null".to_string())]),
                 };
+                st.emit(json_size(&preserve))?;
                 if prop == "@type" {
                     // A `@type` default fills DIRECTLY (its values are IRIs that must
                     // go through IRI compaction; `@preserve` would shield them).
@@ -871,7 +920,9 @@ fn filter_subject(
         let match_this;
 
         if key == "@id" {
-            if is_empty || frame_values.first().map(is_empty_obj).unwrap_or(false) {
+            // `[]` matches no node; a wildcard `{}` matches every node; otherwise the
+            // node's @id must be listed.
+            if frame_values.iter().any(is_empty_obj) {
                 match_this = true;
             } else {
                 let nid = node.get("@id").and_then(Json::as_str);
@@ -1596,5 +1647,105 @@ mod tests {
         let mut text = String::new();
         out.write(&mut text);
         assert!(!text.contains("http://ex/a"), "{text}");
+    }
+
+
+    /// A layered graph where each node references both nodes of the next layer.
+    fn layered(layers: usize) -> Json {
+        let mut nodes = vec![format!(
+            r#"{{"@id":"http://ex/root","http://ex/p":[{{"@id":"http://ex/n0a"}},{{"@id":"http://ex/n0b"}}]}}"#
+        )];
+        for l in 0..layers {
+            for side in ["a", "b"] {
+                let next = if l + 1 < layers {
+                    format!(
+                        r#","http://ex/p":[{{"@id":"http://ex/n{n}a"}},{{"@id":"http://ex/n{n}b"}}]"#,
+                        n = l + 1
+                    )
+                } else {
+                    String::new()
+                };
+                nodes.push(format!(r#"{{"@id":"http://ex/n{l}{side}"{next}}}"#));
+            }
+        }
+        parse(&format!("[{}]", nodes.join(",")))
+    }
+
+    /// The output bound of a framing call over `input`.
+    fn output_bound(input: &Json) -> usize {
+        json_size(input) * OUTPUT_PER_INPUT + OUTPUT_FLOOR
+    }
+
+    /// `@always` over shared subjects would embed 2^30 copies from 61 nodes; framing
+    /// stops at the output bound with `context overflow` instead of exhausting memory.
+    #[test]
+    fn always_embeds_stop_at_the_output_bound() {
+        let frame_doc = parse(r#"{"@id":"http://ex/root","@embed":"@always"}"#);
+        let opts = JsonLdOptions::default();
+        let started = std::time::Instant::now();
+        let err = frame_match(&layered(30), &frame_doc, &opts, &FrameOptions::default(), &NoopLoader)
+            .expect_err("exponential output is refused");
+        assert_eq!(err.code(), E::ContextOverflow);
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
+        // Within the bound the same frame succeeds, and its output stays under it.
+        let input = layered(8);
+        let out = frame_match(&input, &frame_doc, &opts, &FrameOptions::default(), &NoopLoader)
+            .expect("small enough to embed");
+        assert!(json_size(&out) <= output_bound(&input));
+    }
+
+    /// A 51-link chain framed with a 50-deep frame embeds every link once, within the bound.
+    #[test]
+    fn deep_chains_frame_within_the_output_bound() {
+        let nodes: Vec<String> = (0..=50)
+            .map(|i| format!(r#"{{"@id":"http://ex/c{i}","http://ex/p":{{"@id":"http://ex/c{}"}}}}"#, i + 1))
+            .collect();
+        let input = parse(&format!("[{}]", nodes.join(",")));
+        let mut pattern = "{}".to_string();
+        for _ in 0..50 {
+            pattern = format!(r#"{{"http://ex/p":{pattern}}}"#);
+        }
+        let frame_doc = parse(&format!(
+            r#"{{"@id":"http://ex/c0","@embed":"@always","http://ex/p":{pattern}}}"#
+        ));
+        let out = frame_match(&input, &frame_doc, &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader)
+            .expect("frame ok");
+        let mut text = String::new();
+        out.write(&mut text);
+        assert!(text.contains("http://ex/c51"), "{text}");
+        assert!(json_size(&out) <= output_bound(&input));
+    }
+
+    /// The valid `@id` pattern forms: an IRI, a list of IRIs, the wildcard `{}` (alone or
+    /// in a list) and the match-none `[]`.
+    #[test]
+    fn id_patterns_select_the_listed_nodes() {
+        let input = parse(
+            r#"[{"@id":"http://ex/a","http://ex/p":"x","http://ex/q":"y"},
+                {"@id":"http://ex/b","http://ex/p":"z"}]"#,
+        );
+        let ids = |frame: &str| -> Vec<String> {
+            let out = frame_match(&input, &parse(frame), &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader)
+                .expect("frame ok");
+            as_slice(&out).iter().filter_map(|n| n.get("@id").and_then(Json::as_str).map(str::to_string)).collect()
+        };
+        assert_eq!(ids(r#"{"@id":"http://ex/a"}"#), ["http://ex/a"]);
+        assert_eq!(ids(r#"{"@id":["http://ex/b"]}"#), ["http://ex/b"]);
+        assert_eq!(ids(r#"{"@id":["http://ex/a","http://ex/b"]}"#), ["http://ex/a", "http://ex/b"]);
+        assert_eq!(ids(r#"{"@id":{}}"#), ["http://ex/a", "http://ex/b"]);
+        assert_eq!(ids(r#"{"@id":[{}]}"#), ["http://ex/a", "http://ex/b"]);
+        assert!(ids(r#"{"@id":[]}"#).is_empty());
+        // A wildcard with @explicit keeps only the framed property.
+        let out = frame_match(
+            &input,
+            &parse(r#"{"@id":[{}],"@explicit":true,"http://ex/p":{}}"#),
+            &JsonLdOptions::default(),
+            &FrameOptions::default(),
+            &NoopLoader,
+        )
+        .expect("frame ok");
+        let mut text = String::new();
+        out.write(&mut text);
+        assert!(text.contains("http://ex/p") && !text.contains("http://ex/q"), "{text}");
     }
 }
