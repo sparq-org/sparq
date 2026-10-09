@@ -3158,6 +3158,11 @@ impl CmpNum<'_> {
 /// `[+-]digits[.digits]` numeral as an exact number. An ill-typed lexical form, or a
 /// non-literal, is not numeric (`None`: the builtin does not match).
 ///
+/// The one exception is `xsd:decimal`'s `inf` / `-inf` / `NaN`: not valid decimals, but
+/// the forms `number_term` gives a non-finite f64 fallback result (`(0.5 -1024)
+/// math:exponentiation`), so they read as ±INF / NaN (doubles) and the result still
+/// matches a bound object or a later comparison.
+///
 /// Whitespace: the XSD numeric datatypes have `whiteSpace=collapse`, so leading and
 /// trailing XML whitespace (space, tab, CR, LF) of a TYPED numeric literal is collapsed
 /// before validation (`" 3"^^xsd:integer` is 3; an internal space stays ill-typed). A
@@ -3170,6 +3175,16 @@ fn cmp_num(t: &Term, trim_strings: bool) -> Option<CmpNum<'_>> {
     // XSD whiteSpace=collapse for the numeric datatypes (leading/trailing XML whitespace).
     let collapsed = v.trim_matches([' ', '\t', '\r', '\n']);
     // An integer type (with its facets, e.g. `xsd:positiveInteger`) or `xsd:decimal`.
+    if dt == parser::XSD_DECIMAL {
+        // The non-finite forms `number_term` renders for an overflowing f64 fallback
+        // (`"inf"` / `"-inf"`, Rust's `NaN`), read as ±INF / NaN as `numval` reads them.
+        match collapsed {
+            "inf" => return Some(CmpNum::Double(f64::INFINITY)),
+            "-inf" => return Some(CmpNum::Double(f64::NEG_INFINITY)),
+            "NaN" => return Some(CmpNum::Double(f64::NAN)),
+            _ => {}
+        }
+    }
     if sparq_core::is_integer_datatype(dt) || dt == parser::XSD_DECIMAL {
         // no-match: ill-typed (not of its integer or decimal type)
         return sparq_core::numeric_literal_valid(collapsed, dt)
@@ -4606,6 +4621,8 @@ fn count_term(n: usize) -> Term {
 }
 
 /// Render an `f64` result as an N3 numeric literal (integer when whole, else decimal).
+/// A non-finite value renders as `inf` / `-inf` / `NaN`^^xsd:decimal, which `cmp_num`
+/// reads back as ±INF / NaN.
 fn number_term(v: f64) -> Term {
     if v.fract() == 0.0 && v.abs() < 9.007e15 {
         // not-a-cut: exact-cast (whole, below 2^53)
@@ -5803,6 +5820,65 @@ mod tests {
             );
             assert_eq!(got, *fires, "{premise}");
         }
+    }
+
+    /// GH #6745 follow-up: a functional `math:` builtin whose f64 fallback overflows renders
+    /// its non-finite result through `number_term` as `"inf"` / `"-inf"`^^xsd:decimal (the
+    /// lexical forms are unchanged). The bound-object check and the `math:` comparisons read
+    /// those exact rendered forms as ±INF / NaN, as the pre-promotion `numval` did, both
+    /// against a ground object and on a variable bound to the result.
+    #[test]
+    fn math_nonfinite_fallback_results_compare_numerically() {
+        // 0.5^-1024 = 2^1024 overflows; (-0.5)^-1025 = -(2^1025) overflows negative;
+        // 0^-1 is +INF; 10^400 overflows the exact tower (a cut) and then f64; nine
+        // factors of 10^38 overflow the exact product (a cut) and then f64.
+        let big = "100000000000000000000000000000000000000";
+        let product = format!("({})", [big; 9].join(" "));
+        let cases: Vec<(String, bool)> = vec![
+            // A ground object.
+            ("(0.5 -1024) math:exponentiation \"INF\"^^xsd:double".into(), true),
+            ("(0.5 -1024) math:exponentiation \"inf\"^^xsd:decimal".into(), true),
+            ("(0.5 -1024) math:exponentiation \"-INF\"^^xsd:double".into(), false),
+            ("(0.5 -1024) math:exponentiation 1".into(), false),
+            ("(-0.5 -1025) math:exponentiation \"-INF\"^^xsd:double".into(), true),
+            ("(-0.5 -1025) math:exponentiation \"INF\"^^xsd:double".into(), false),
+            ("(10 400) math:exponentiation \"INF\"^^xsd:double".into(), true),
+            ("(0 -1) math:exponentiation \"INF\"^^xsd:double".into(), true),
+            (format!("{product} math:product \"INF\"^^xsd:double"), true),
+            // A variable bound to the result, compared afterwards.
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:greaterThan 1".into(), true),
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:lessThan 1".into(), false),
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:equalTo \"INF\"^^xsd:double".into(), true),
+            ("(0.5 -1024) math:exponentiation ?x . ?x math:notLessThan ?x".into(), true),
+            ("(-0.5 -1025) math:exponentiation ?x . ?x math:lessThan -1".into(), true),
+            ("(-0.5 -1025) math:exponentiation ?x . ?x math:equalTo \"-INF\"^^xsd:double".into(), true),
+            ("(10 400) math:exponentiation ?x . ?x math:greaterThan 1".into(), true),
+            ("(0 -1) math:exponentiation ?x . ?x math:greaterThan 1".into(), true),
+            (format!("{product} math:product ?x . ?x math:greaterThan 1"), true),
+            // INF - INF is NaN (a double, since an INF operand is a double): unordered.
+            ("(0.5 -1024) math:exponentiation ?x . (?x ?x) math:difference ?n . ?n math:notEqualTo ?n".into(), true),
+            ("(0.5 -1024) math:exponentiation ?x . (?x ?x) math:difference ?n . ?n math:equalTo ?n".into(), false),
+            // The exact rendered forms read the same as written literals.
+            ("\"inf\"^^xsd:decimal math:greaterThan 1".into(), true),
+            ("\"-inf\"^^xsd:decimal math:lessThan -1".into(), true),
+            ("\"NaN\"^^xsd:decimal math:notEqualTo 1".into(), true),
+            ("\"NaN\"^^xsd:decimal math:equalTo \"NaN\"^^xsd:decimal".into(), false),
+        ];
+        let mut src = String::from(
+            "@prefix : <http://ex/> .\n@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+             @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n",
+        );
+        for (i, (premise, _)) in cases.iter().enumerate() {
+            src += &format!("{{ {premise} }} => {{ :t :fired :c{i} }} .\n");
+        }
+        let (d, s) = closure(&src);
+        let wrong: Vec<_> = (cases.iter().enumerate())
+            .filter(|(i, (_, fires))| {
+                has(&d, &s, "http://ex/t", "http://ex/fired", &format!("http://ex/c{i}")) != *fires
+            })
+            .map(|(_, (premise, fires))| format!("{premise} (expected {fires})"))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
 
     #[test]
