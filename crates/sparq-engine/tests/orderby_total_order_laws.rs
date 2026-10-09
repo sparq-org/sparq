@@ -40,7 +40,11 @@ const POOL: &[&str] = &[
 
 fn sorted(values: &[&str]) -> Vec<String> {
     let g = Graph::load_str("", "turtle").unwrap();
-    let rows = values.iter().map(|v| format!("({v})")).collect::<Vec<_>>().join(" ");
+    let rows = values
+        .iter()
+        .map(|v| format!("({v})"))
+        .collect::<Vec<_>>()
+        .join(" ");
     let q = format!(
         "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> \
          SELECT ?v WHERE {{ VALUES (?v) {{ {rows} }} }} ORDER BY ?v"
@@ -53,11 +57,32 @@ fn sorted(values: &[&str]) -> Vec<String> {
         .collect()
 }
 
+/// `f(?v)` (MIN or MAX) over `values`, as the term's string.
+fn aggregate(f: &str, values: &[&str]) -> String {
+    let g = Graph::load_str("", "turtle").unwrap();
+    let rows = values
+        .iter()
+        .map(|v| format!("({v})"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let q = format!(
+        "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> \
+         SELECT ({f}(?v) AS ?m) WHERE {{ VALUES (?v) {{ {rows} }} }}"
+    );
+    query(&g, &q).unwrap().rows[0][0]
+        .as_ref()
+        .map(|t| t.to_string())
+        .unwrap_or_default()
+}
+
 /// A small deterministic generator, so a failure reproduces.
 struct Lcg(u64);
 impl Lcg {
     fn pick(&mut self, n: usize) -> usize {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((self.0 >> 33) as usize) % n
     }
 }
@@ -65,13 +90,30 @@ impl Lcg {
 #[test]
 fn every_permutation_of_random_triples_sorts_the_same() {
     let mut rng = Lcg(0x5eed);
-    let perms = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+    let perms = [
+        [0, 1, 2],
+        [0, 2, 1],
+        [1, 0, 2],
+        [1, 2, 0],
+        [2, 0, 1],
+        [2, 1, 0],
+    ];
     for _ in 0..400 {
-        let t = [POOL[rng.pick(POOL.len())], POOL[rng.pick(POOL.len())], POOL[rng.pick(POOL.len())]];
+        let t = [
+            POOL[rng.pick(POOL.len())],
+            POOL[rng.pick(POOL.len())],
+            POOL[rng.pick(POOL.len())],
+        ];
         let first = sorted(&t);
         for p in &perms[1..] {
             let got = sorted(&p.map(|i| t[i]));
             assert_eq!(got, first, "input {:?} permuted {p:?}", t);
+        }
+        // MIN and MAX use the same order: the first and last of ORDER BY.
+        for p in &perms {
+            let input = p.map(|i| t[i]);
+            assert_eq!(aggregate("MIN", &input), first[0], "MIN {input:?}");
+            assert_eq!(aggregate("MAX", &input), first[2], "MAX {input:?}");
         }
     }
 }
@@ -95,14 +137,28 @@ fn decimals_across_the_tower_boundary_order_by_exact_value() {
 fn min_max_across_the_tower_boundary_use_exact_value() {
     let (a, b, c) = (POOL[0], POOL[1], POOL[2]);
     let g = Graph::load_str("", "turtle").unwrap();
-    for t in [[a, b, c], [a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]] {
-        let rows = t.iter().map(|v| format!("({v})")).collect::<Vec<_>>().join(" ");
+    for t in [
+        [a, b, c],
+        [a, c, b],
+        [b, a, c],
+        [b, c, a],
+        [c, a, b],
+        [c, b, a],
+    ] {
+        let rows = t
+            .iter()
+            .map(|v| format!("({v})"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let agg = |f: &str| {
             let q = format!(
                 "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> \
                  SELECT ({f}(?v) AS ?m) WHERE {{ VALUES (?v) {{ {rows} }} }}"
             );
-            query(&g, &q).unwrap().rows[0][0].as_ref().map(|t| t.to_string()).unwrap_or_default()
+            query(&g, &q).unwrap().rows[0][0]
+                .as_ref()
+                .map(|t| t.to_string())
+                .unwrap_or_default()
         };
         assert!(agg("MIN").contains("105727\""), "MIN {t:?}: {}", agg("MIN"));
         assert!(agg("MAX").contains("10573\""), "MAX {t:?}: {}", agg("MAX"));
@@ -113,7 +169,14 @@ fn min_max_across_the_tower_boundary_use_exact_value() {
 #[test]
 fn stored_decimals_across_the_tower_boundary_order_by_exact_value() {
     let (a, b, c) = (POOL[0], POOL[1], POOL[2]);
-    for t in [[a, b, c], [a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]] {
+    for t in [
+        [a, b, c],
+        [a, c, b],
+        [b, a, c],
+        [b, c, a],
+        [c, a, b],
+        [c, b, a],
+    ] {
         let mut ttl = String::from("@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n");
         for (i, v) in t.iter().enumerate() {
             ttl.push_str(&format!("<http://ex/s{i}> <http://ex/v> {v} .\n"));
@@ -125,6 +188,30 @@ fn stored_decimals_across_the_tower_boundary_order_by_exact_value() {
             .iter()
             .map(|r| r[0].as_ref().map(|t| t.to_string()).unwrap_or_default())
             .collect();
-        assert!(got[0].contains("105727\"") && got[1].contains("105728\"") && got[2].contains("10573\""), "{t:?}: {got:?}");
+        assert!(
+            got[0].contains("105727\"")
+                && got[1].contains("105728\"")
+                && got[2].contains("10573\""),
+            "{t:?}: {got:?}"
+        );
+    }
+}
+
+/// The two in-tower decimals alone (no beyond-tower member to force the general path):
+/// exactly, B < A, so MIN is B and MAX is A in both input orders.
+#[test]
+fn min_max_of_two_in_tower_decimals_whose_scales_overflow() {
+    let (a, b) = (POOL[0], POOL[1]);
+    for t in [[a, b], [b, a]] {
+        assert!(
+            aggregate("MIN", &t).contains("105727\""),
+            "MIN {t:?}: {}",
+            aggregate("MIN", &t)
+        );
+        assert!(
+            aggregate("MAX", &t).contains("10573\""),
+            "MAX {t:?}: {}",
+            aggregate("MAX", &t)
+        );
     }
 }

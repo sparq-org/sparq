@@ -12108,25 +12108,34 @@ fn minmax_values(mut vals: Vec<Value>, keep: Ordering) -> Value {
     if vals.is_empty() {
         return Value::Unbound;
     }
-    let nums: Option<Vec<Num>> = vals.iter().map(as_numeric).collect();
-    match nums {
-        Some(nums) => {
-            let mut best = 0;
-            for (i, &n) in nums.iter().enumerate().skip(1) {
-                if num_extremum_compare(n, nums[best]) == Some(keep) {
-                    best = i;
-                }
+    // One order for MIN/MAX and ORDER BY: `compare_values(..).unwrap_or(Equal)`, with MIN
+    // keeping the FIRST of equal members and MAX the LAST (`Iterator::min_by`/`max_by`).
+    // Two in-tower int/decimal members with a decidable, unequal exact order are settled
+    // by that order first, which `compare_values` refines but never contradicts; every
+    // other pair (a tie, a float, a scale overflow, a strict-capacity pair) goes to it.
+    // Reading each member as a number also records a strict-budget capacity failure.
+    let nums: Vec<Option<Num>> = vals.iter().map(as_numeric).collect();
+    let decs: Vec<_> = if budget::strict_numeric() {
+        Vec::new()
+    } else {
+        nums.iter().map(|n| n.and_then(Num::to_dec)).collect()
+    };
+    let ord = |i: usize, j: usize| {
+        if let (Some(Some(x)), Some(Some(y))) = (decs.get(i), decs.get(j)) {
+            if let Some(o) = (*x).cmp(*y).filter(|o| *o != Ordering::Equal) {
+                return o;
             }
-            vals.swap_remove(best)
         }
-        None => {
-            let cmp = |a: &Value, c: &Value| compare_values(a, c).unwrap_or(Ordering::Equal);
-            match keep {
-                Ordering::Less => vals.into_iter().min_by(cmp).unwrap(),
-                _ => vals.into_iter().max_by(cmp).unwrap(),
-            }
+        compare_values(&vals[i], &vals[j]).unwrap_or(Ordering::Equal)
+    };
+    let mut best = 0;
+    for i in 1..vals.len() {
+        let o = ord(i, best);
+        if if keep == Ordering::Less { o == Ordering::Less } else { o != Ordering::Less } {
+            best = i;
         }
     }
+    vals.swap_remove(best)
 }
 
 /// MIN/MAX over a variable whose group members are ALL well-formed temporal
@@ -12203,24 +12212,6 @@ fn num_compare(a: Num, c: Num) -> Option<Ordering> {
         return numeric_capacity::comparable(a, c).then(|| a.cmp_relational(c)).flatten();
     }
     a.cmp_relational(c)
-}
-
-/// The order MIN/MAX fold numerics by: exact when both are int/decimal, `f64` otherwise.
-///
-/// Deliberately NOT [`num_compare`]: MAX is defined through `ORDER BY DESC`, so the float-tier
-/// promotion must not create a tie that lets a later member displace a strictly larger one
-/// (`MAX(0.1, "0.1"^^xsd:float, 0.1000000001e0)` is the float, whose value is
-/// 0.10000000149…). `f64` widening is exact for a float, so this keeps every strict order.
-fn num_extremum_compare(a: Num, c: Num) -> Option<Ordering> {
-    if budget::strict_numeric() && !numeric_capacity::comparable(a, c) {
-        return None;
-    }
-    if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
-        if let Some(o) = x.cmp(y) {
-            return Some(o);
-        }
-    }
-    a.f64().partial_cmp(&c.f64())
 }
 
 /// Whether two DISTINCT cached `f64` operand values could still compare EQUAL under XPath
@@ -15318,8 +15309,7 @@ impl CompareTerm for Value {
         // expansion for the MIXED exact/inexact pair (the pre-fix `num_compare`
         // fallback kept the collapsed f64 verdict there, which made the order
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
-        // `<`/`=` (`cmp_expr`, via `num_compare`) and MIN/MAX (`minmax_values`, via
-        // `num_extremum_compare`) deliberately KEEP their own semantics; this total
+        // `<`/`=` (`cmp_expr`, via `num_compare`) deliberately KEEPS its own semantics; this total
         // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
             (Some(a), Some(b)) => {
