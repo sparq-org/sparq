@@ -192,7 +192,11 @@ Materialize the authorization view from the access-control documents, then enfor
   spec-conformant surface).
 - `store.update_as(&Session, sparql)` / `store.update_as_acp(...)` — **write-path
   gating**: check every graph an update could mutate *before* applying, and
-  auto-re-materialize on `.acl`/`.acr` writes.
+  auto-re-materialize on `.acl`/`.acr` writes. The WHERE of a `DELETE`/`INSERT … WHERE`
+  sees only the session's read view: a `GRAPH <g>` (or a `USING`/`WITH` graph) the session
+  cannot read refuses the update, `GRAPH ?var` ranges over readable graphs only, and a
+  default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
+  access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none.
 - `store.update_as_with_budget(&Session, sparql, &QueryBudget)` /
   `store.update_as_acp_with_budget(...)` — the same write path under a cooperative
   `QueryBudget`, for a caller obliged to bound **every SPARQL evaluation** it issues (an

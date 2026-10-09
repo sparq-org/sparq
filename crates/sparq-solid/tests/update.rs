@@ -282,21 +282,21 @@ fn var_graph_precise_denies_readable_but_unwritable_binding() {
 }
 
 #[test]
-fn var_graph_precise_denies_when_a_bound_graph_is_unwritable_control_doc() {
-    // A WHERE matching ANY predicate under team2 also binds `?g` to the team2 `.acl`
-    // graphs (they hold triples). CAROL has Read+Write on team2 content but NO Control,
-    // so she lacks Write on the `.acl` graphs -> the precise check denies (an `.acl`
-    // target needs the Write grant only a Control-holder has), store untouched.
+fn var_graph_never_binds_an_unreadable_control_doc() {
+    // A WHERE matching ANY predicate under team2 scans the team2 `.acl` graphs too (they
+    // hold triples). CAROL has Read+Write on team2 content but NO Control, so she cannot
+    // READ the `.acl` graphs: `?g` ranges over her read view only, exactly as in a query,
+    // and never binds them. The delete clears the content she may read and write, and the
+    // `.acl` graphs are untouched.
     let mut s = wac_store();
     let acl = "https://pod.ex/team2/.acl";
     let before_acl = graph_len(&s, acl);
-    let before_doc = graph_len(&s, TEAM2_DOC);
+    assert!(graph_len(&s, TEAM2_DOC) > 0);
     let upd = "DELETE { GRAPH ?g { ?s ?p ?o } } \
                WHERE  { GRAPH ?g { ?s ?p ?o } FILTER(STRSTARTS(STR(?g), \"https://pod.ex/team2/\")) }";
-    let r = s.update_as(&sess(Some(CAROL)), upd);
-    assert!(r.is_err(), "binding includes team2 .acl docs carol cannot control: {r:?}");
-    assert_eq!(graph_len(&s, acl), before_acl, ".acl untouched on deny");
-    assert_eq!(graph_len(&s, TEAM2_DOC), before_doc, "content untouched on deny (check is pre-apply)");
+    s.update_as(&sess(Some(CAROL)), upd).expect("only readable, writable graphs bind");
+    assert_eq!(graph_len(&s, acl), before_acl, ".acl untouched: carol cannot read it");
+    assert_eq!(graph_len(&s, TEAM2_DOC), 0, "readable content graph cleared");
 }
 
 #[test]
@@ -382,32 +382,25 @@ fn var_graph_with_clause_precise_still_denies_unwritable_binding() {
 }
 
 #[test]
-fn var_graph_with_clause_denies_binding_to_auth_view() {
+fn var_graph_with_clause_never_touches_the_auth_view() {
     // [OPUS-4.8] sq-cnor — the AUTH_GRAPH under-count regression guard at the PRODUCTION
     // `check` boundary. `Dataset::build_using(named: None)` (the `WITH` re-scope) keeps EVERY
-    // store named graph in the active dataset, INCLUDING the reserved `urn:sparq:auth` view.
-    // So a `WITH … DELETE { GRAPH ?g { … } } WHERE { GRAPH ?g { ?s <auth#read> ?o } }` makes
-    // `?g` bind to the auth view and the engine WOULD write it. The prior `rescope_dataset`
-    // dropped the auth view from the materialized `FROM NAMED` set, so the precise resolver
-    // MISSED that binding — the op could be (wrongly) PERMITTED and transiently mutate the
-    // authorization view. With the auth view restored to the materialized set the binding is
-    // resolved, and since no session is ever write-granted on the auth view the op is DENIED
-    // fail-closed. The auth view must be untouched.
+    // store named graph in the active dataset, INCLUDING the reserved `urn:sparq:auth` view,
+    // and `rescope_dataset` keeps it in the precise resolver's set too. On top of that,
+    // `scope_reads` confines `?g` to the session's read view, which never holds the auth
+    // view, so a `WITH … DELETE { GRAPH ?g { … } } WHERE { GRAPH ?g { ?s <auth#read> ?o } }`
+    // binds nothing: a no-op, and the auth view is untouched.
     let mut s = wac_store();
     let auth = "urn:sparq:auth";
     let before = graph_len(&s, auth);
     assert!(before > 0, "materialized auth view holds the WAC grant triples");
-    // `auth#read` triples exist ONLY in the auth view, so `?g` binds exactly {urn:sparq:auth}.
+    // `auth#read` triples exist ONLY in the auth view.
     let upd = "WITH <https://pod.ex/team2/c3/g0/d0.ttl> \
                DELETE { GRAPH ?g { ?s ?p ?o } } \
                WHERE  { GRAPH ?g { ?s <https://sparq.dev/ns/auth#read> ?o . ?s ?p ?o } }";
     let r = s.update_as(&sess(Some(CAROL)), upd);
-    assert!(
-        r.is_err(),
-        "a WITH var-graph op whose ?g binds to the auth view must be DENIED (no write grant on \
-         the auth view); was: {r:?}"
-    );
-    assert_eq!(graph_len(&s, auth), before, "denied op left the auth view untouched");
+    assert!(r.is_ok(), "an empty binding is a permitted no-op: {r:?}");
+    assert_eq!(graph_len(&s, auth), before, "the auth view is untouched");
 }
 
 // --- [OPUS-4.8] sq-3jtd.2: fail-closed-BEFORE-apply — a DENIED update mutates NOTHING ---

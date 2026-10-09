@@ -19,6 +19,8 @@
 //!
 //! Fail-closed, like the read path:
 //!
+//! - an update's WHERE sees only the session's **read** view ([`scope_reads`]): a
+//!   conditional write needs read access to its condition, exactly as a query would;
 //! - the **default graph** is never writable (pod data never lives there — design doc
 //!   §2.1); any default-graph target is denied;
 //! - a write to a graph the actor cannot write in the required mode is denied and the
@@ -62,8 +64,8 @@ use crate::{AuthIndex, Mode, Session};
 use oxrdf::{NamedNode, Term, Variable};
 use rustc_hash::FxHashSet;
 use sparq_engine::QueryBudget;
-use spargebra::algebra::{GraphPattern, GraphTarget, QueryDataset};
-use spargebra::term::{GraphName, GraphNamePattern};
+use spargebra::algebra::{AggregateExpression, Expression, GraphPattern, GraphTarget, OrderExpression, QueryDataset};
+use spargebra::term::{GraphName, GraphNamePattern, GroundTerm, NamedNodePattern};
 use spargebra::{GraphUpdateOperation, Query, Update};
 #[cfg(test)]
 use spargebra::SparqlParser;
@@ -517,8 +519,184 @@ pub(crate) struct Permit {
     pub rematerialize: bool,
 }
 
-/// Authorize an update string for `session` against `auth` over the dataset `graph`,
-/// WITHOUT mutating anything. `Ok(Permit)` means every target is writable; `Err(msg)`
+/// Confine every pattern an update evaluates to the graphs `readable` holds (the session's
+/// read view, sorted), so a `DELETE`/`INSERT … WHERE` reads exactly what a query by the
+/// same session could. A conditional write needs read access to its condition.
+///
+/// - `GRAPH <g>` in a WHERE (or inside its `EXISTS`) requires `g` to be readable, or the
+///   update is denied.
+/// - `GRAPH ?var` is joined with a `VALUES ?var { … }` of the readable graphs, so the
+///   variable ranges over the read view only, as it does on the query path.
+/// - A default-graph pattern reads the `USING`/`WITH` graphs, each of which must be
+///   readable. Without `USING`/`WITH` it reads the store's default graph, which no session
+///   may read (the read path's default graph is empty), so the update is denied.
+///
+/// Rewrites the algebra in place: [`check`] and the apply must both use the result.
+pub(crate) fn scope_reads(upd: &mut Update, readable: &[NamedNode]) -> Result<(), String> {
+    let set: FxHashSet<&NamedNode> = readable.iter().collect();
+    for op in &mut upd.operations {
+        if let GraphUpdateOperation::DeleteInsert { using, pattern, .. } = op {
+            let mut scope = ReadScope { readable, set: &set, default_read: false };
+            scope.pattern(pattern, false)?;
+            if scope.default_read {
+                let Some(ds) = using else {
+                    return Err("update denied: the WHERE reads the default graph, which is \
+                                not readable (pod data lives in named graphs only)"
+                        .to_owned());
+                };
+                for g in &ds.default {
+                    scope.require(g)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether `upd` has an operation that evaluates a pattern over the store (a
+/// `DELETE`/`INSERT … WHERE`), the only kind [`scope_reads`] changes.
+pub(crate) fn evaluates_patterns(upd: &Update) -> bool {
+    upd.operations.iter().any(|op| matches!(op, GraphUpdateOperation::DeleteInsert { .. }))
+}
+
+/// The walk behind [`scope_reads`].
+struct ReadScope<'a> {
+    readable: &'a [NamedNode],
+    set: &'a FxHashSet<&'a NamedNode>,
+    /// A triple or path pattern outside every `GRAPH` block was seen.
+    default_read: bool,
+}
+
+impl ReadScope<'_> {
+    fn require(&self, g: &NamedNode) -> Result<(), String> {
+        if self.set.contains(g) {
+            Ok(())
+        } else {
+            Err(format!("update denied: session lacks read permission on <{}>", g.as_str()))
+        }
+    }
+
+    fn pattern(&mut self, p: &mut GraphPattern, in_graph: bool) -> Result<(), String> {
+        match p {
+            GraphPattern::Bgp { patterns } => {
+                self.default_read |= !in_graph && !patterns.is_empty();
+            }
+            GraphPattern::Path { .. } => self.default_read |= !in_graph,
+            GraphPattern::Graph { name, inner } => {
+                self.pattern(inner, true)?;
+                match name {
+                    NamedNodePattern::NamedNode(g) => self.require(g)?,
+                    NamedNodePattern::Variable(v) => {
+                        let values = GraphPattern::Values {
+                            variables: vec![v.clone()],
+                            bindings: self
+                                .readable
+                                .iter()
+                                .map(|g| vec![Some(GroundTerm::NamedNode(g.clone()))])
+                                .collect(),
+                        };
+                        let graph = std::mem::replace(p, GraphPattern::Bgp { patterns: Vec::new() });
+                        *p = GraphPattern::Join { left: Box::new(values), right: Box::new(graph) };
+                    }
+                }
+            }
+            GraphPattern::Join { left, right }
+            | GraphPattern::Union { left, right }
+            | GraphPattern::Minus { left, right }
+            | GraphPattern::Lateral { left, right } => {
+                self.pattern(left, in_graph)?;
+                self.pattern(right, in_graph)?;
+            }
+            GraphPattern::LeftJoin { left, right, expression } => {
+                self.pattern(left, in_graph)?;
+                self.pattern(right, in_graph)?;
+                if let Some(e) = expression {
+                    self.expression(e, in_graph)?;
+                }
+            }
+            GraphPattern::Filter { expr, inner } => {
+                self.expression(expr, in_graph)?;
+                self.pattern(inner, in_graph)?;
+            }
+            GraphPattern::Extend { inner, expression, .. } => {
+                self.pattern(inner, in_graph)?;
+                self.expression(expression, in_graph)?;
+            }
+            GraphPattern::OrderBy { inner, expression } => {
+                self.pattern(inner, in_graph)?;
+                for o in expression {
+                    let (OrderExpression::Asc(e) | OrderExpression::Desc(e)) = o;
+                    self.expression(e, in_graph)?;
+                }
+            }
+            GraphPattern::Group { inner, aggregates, .. } => {
+                self.pattern(inner, in_graph)?;
+                for (_, a) in aggregates {
+                    if let AggregateExpression::FunctionCall { expr, .. } = a {
+                        self.expression(expr, in_graph)?;
+                    }
+                }
+            }
+            GraphPattern::Project { inner, .. }
+            | GraphPattern::Distinct { inner }
+            | GraphPattern::Reduced { inner }
+            | GraphPattern::Slice { inner, .. } => self.pattern(inner, in_graph)?,
+            GraphPattern::Values { .. } => {}
+            // A SERVICE body is evaluated by the remote endpoint, not over this store.
+            GraphPattern::Service { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn expression(&mut self, e: &mut Expression, in_graph: bool) -> Result<(), String> {
+        match e {
+            Expression::Exists(p) => self.pattern(p, in_graph)?,
+            Expression::Or(a, b)
+            | Expression::And(a, b)
+            | Expression::Equal(a, b)
+            | Expression::SameTerm(a, b)
+            | Expression::Greater(a, b)
+            | Expression::GreaterOrEqual(a, b)
+            | Expression::Less(a, b)
+            | Expression::LessOrEqual(a, b)
+            | Expression::Add(a, b)
+            | Expression::Subtract(a, b)
+            | Expression::Multiply(a, b)
+            | Expression::Divide(a, b) => {
+                self.expression(a, in_graph)?;
+                self.expression(b, in_graph)?;
+            }
+            Expression::UnaryPlus(a) | Expression::UnaryMinus(a) | Expression::Not(a) => {
+                self.expression(a, in_graph)?;
+            }
+            Expression::If(a, b, c) => {
+                self.expression(a, in_graph)?;
+                self.expression(b, in_graph)?;
+                self.expression(c, in_graph)?;
+            }
+            Expression::In(a, list) => {
+                self.expression(a, in_graph)?;
+                for x in list {
+                    self.expression(x, in_graph)?;
+                }
+            }
+            Expression::Coalesce(list) | Expression::FunctionCall(_, list) => {
+                for x in list {
+                    self.expression(x, in_graph)?;
+                }
+            }
+            Expression::NamedNode(_)
+            | Expression::Literal(_)
+            | Expression::Variable(_)
+            | Expression::Bound(_) => {}
+        }
+        Ok(())
+    }
+}
+
+/// Authorize a parsed update for `session` against `auth` over the dataset `graph`,
+/// WITHOUT mutating anything. Run [`scope_reads`] on it first, and apply exactly the
+/// algebra checked here. `Ok(Permit)` means every target is writable; `Err(msg)`
 /// is a deny (fail-closed) and the caller must not apply the update.
 ///
 /// `budget` bounds the ONE evaluation this check may perform — the `GRAPH ?var` binding
@@ -529,12 +707,11 @@ pub(crate) fn check(
     graph: &sparq_core::Graph,
     auth: &AuthIndex,
     session: &Session,
-    sparql: &str,
+    upd: &Update,
     group_docs: &FxHashSet<String>,
     budget: &QueryBudget,
 ) -> Result<Permit, String> {
-    let upd = sparq_engine::parse_update_rec2013(sparql)?;
-    let mut reqs = analyze(&upd);
+    let mut reqs = analyze(upd);
 
     if reqs.touches_default {
         return Err(

@@ -553,11 +553,12 @@ pub(crate) fn update_prepared_impl(graph: &Graph, upd: &Update) -> Result<Graph,
     apply_update_rebuild(graph, upd)
 }
 
-/// [OPUS-4.8] (sq-rp3um) [`update_in_place_with_budget`] over an ALREADY-PARSED bound
-/// `Update` (parameterized [`crate::PreparedUpdate`], `params` feature). Applies the
-/// bound algebra in place through the delta overlay without re-serialising it.
-#[cfg(feature = "params")]
-pub(crate) fn update_in_place_prepared_with_budget(
+/// [`update_in_place_with_budget`] over an ALREADY-PARSED `Update`: applies the algebra in
+/// place through the delta overlay without re-serialising it. For a caller that rewrites
+/// the algebra before applying it (a parameterized `PreparedUpdate` under the `params`
+/// feature, or an authorizer that confines the update's patterns), so the text
+/// is never re-parsed and cannot drift from what was checked.
+pub fn update_in_place_algebra_with_budget(
     graph: &mut Graph,
     upd: &Update,
     budget: &crate::QueryBudget,
