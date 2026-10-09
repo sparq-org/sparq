@@ -470,9 +470,7 @@ pub fn rewrite_query(query: Query) -> Query {
 /// ```
 pub fn geosparql_rewrite(sparql: &str) -> Result<sparq_engine::PreparedQuery, String> {
     let prepared = sparq_engine::PreparedQuery::parse(sparql)?;
-    Ok(sparq_engine::PreparedQuery::from(rewrite_query(
-        prepared.into_query(),
-    )))
+    Ok(prepared.with_query(rewrite_query(prepared.query().clone())))
 }
 
 #[cfg(test)]

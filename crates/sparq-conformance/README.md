@@ -19,7 +19,7 @@ renders the same rows + floors as deterministic JSON, committed as
 paper-evidence bindings can reference suite rows / floors by json-pointer without the mirror silently
 drifting. Several crate-local `cargo test` lanes sit behind **opt-in features** (OFF by default) —
 `jsonld-suite`, `service`, `http-protocol`, `federation-descriptors`, and the inference/geo/syntax
-lanes; the `scoreboard` rustdoc documents each lane's scope, floor and divergences.
+lanes; the `scoreboard` rustdoc documents each lane's scope, floor and divergences. The [grouped-MIN fixture discrepancy](../../docs/upstream-proposals.md#issue-5--sparql11aggregates-agg-min-02-expected-min-changes-the-selected-term) requires pinned source bytes and an exact single-cell mismatch; other differences still fail strict comparison.
 
 > **Internal dev-only harness — not published** (`publish = false`). Test data is
 > fetched by `scripts/fetch-conformance.sh` + the sibling `fetch-inference-suites.sh`

@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "recorded_by": "GPT-6",
+  "package": "ark-relations",
+  "version": "0.4.0",
+  "archive_url": "https://static.crates.io/crates/ark-relations/ark-relations-0.4.0.crate",
+  "archive_sha256": "00796b6efc05a3f48225e59cb6a2cda78881e7c390872d5786aaf112f31fb4f0",
+  "upstream_vcs": {
+    "git": {
+      "sha1": "c139e4aefeb7054674fe4864c5a250a56a4bef14"
+    },
+    "path_in_vcs": "relations"
+  },
+  "package_path": "vendor/ark-relations-0.4.0",
+  "patch_path": "ark-relations.patch",
+  "patch_sha256": "92809ba658fd0efbb280e24871650d11d276d5ed264a07579942ee572ab0b2bf",
+  "patch_application": "git apply --unidiff-zero -p1; reverse and forward reconstruction required",
+  "changed_files": [
+    "Cargo.toml",
+    "Cargo.toml.orig",
+    "src/r1cs/trace.rs"
+  ],
+  "rust_change": "Only empty Layer callback identifier new_span -> on_new_span in src/r1cs/trace.rs at upstream line62; body, constraint arithmetic and all other Rust bytes unchanged.",
+  "files": {
+    ".cargo_vcs_info.json": {
+      "upstream_sha256": "661488233f25acd673cde08cfb96ede0abd9ff3ccb04c29beb4663d6060dadeb",
+      "patched_sha256": "661488233f25acd673cde08cfb96ede0abd9ff3ccb04c29beb4663d6060dadeb"
+    },
+    "Cargo.toml": {
+      "upstream_sha256": "fe02d36a808da58c01d8bb6f94ba92aa26faef12a80cc63523db62db24ccca07",
+      "patched_sha256": "b01295dc2cc80ed2fdbd21d21006ee1eb0c6f553cffedbbe616e671341e749a4"
+    },
+    "Cargo.toml.orig": {
+      "upstream_sha256": "585e521144079dd8125651ec3e867cabe342f71931f6dc4a96818d7bcabc8fd9",
+      "patched_sha256": "6ef59888ca29032be4112801970fba27e9c3bbad03acbde878b383d5667ec6f6"
+    },
+    "LICENSE-APACHE": {
+      "upstream_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "patched_sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+    },
+    "LICENSE-MIT": {
+      "upstream_sha256": "8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208",
+      "patched_sha256": "8f71659370c5268d9a1dc962a46232540e8fca63462586d8efaa95aab492a208"
+    },
+    "src/lib.rs": {
+      "upstream_sha256": "a15c08f7ccd3a54c96d30600252c0ed0d9532d705dcf1d4fd856bc26df6f9211",
+      "patched_sha256": "a15c08f7ccd3a54c96d30600252c0ed0d9532d705dcf1d4fd856bc26df6f9211"
+    },
+    "src/r1cs/constraint_system.rs": {
+      "upstream_sha256": "f7276fe91fdda92076ba786b6e984b87ffa83068d6b97aff118b6c5f5a92d197",
+      "patched_sha256": "f7276fe91fdda92076ba786b6e984b87ffa83068d6b97aff118b6c5f5a92d197"
+    },
+    "src/r1cs/error.rs": {
+      "upstream_sha256": "a5c680f162cffce9e060473c0b78ae5eb3de981dd83d3ca2e485a67b6c0924e3",
+      "patched_sha256": "a5c680f162cffce9e060473c0b78ae5eb3de981dd83d3ca2e485a67b6c0924e3"
+    },
+    "src/r1cs/impl_lc.rs": {
+      "upstream_sha256": "2e995941280e184469364c66a0178b67a6f36fdaffec07af09a8aaf404c954b3",
+      "patched_sha256": "2e995941280e184469364c66a0178b67a6f36fdaffec07af09a8aaf404c954b3"
+    },
+    "src/r1cs/mod.rs": {
+      "upstream_sha256": "9ea1937bfcc567aa952e96a9c31cebd53f80f5d8629c0e58ce4047041e5d5a6c",
+      "patched_sha256": "9ea1937bfcc567aa952e96a9c31cebd53f80f5d8629c0e58ce4047041e5d5a6c"
+    },
+    "src/r1cs/trace.rs": {
+      "upstream_sha256": "c2d8aaadbcd1fdfa0a5aab22496d2838cf0d8b41b8eb5d4ec315f4d94abb3b93",
+      "patched_sha256": "dae08a5c3ceb817b5db84f2992bc98a3a2a20533d4c0f7160635de1d0ce871bc"
+    }
+  }
+}
