@@ -6289,7 +6289,7 @@ mod build_timing {
 /// overran the nightly lane's per-test cap and returned no verdict at all. The chunked paths
 /// take an explicit `target`, so a small corpus still fans out and still puts chunk boundaries
 /// between every statement shape; only the number of repetitions shrinks.
-#[cfg(test)]
+#[cfg(all(test, feature = "parallel"))]
 pub(crate) const fn miri_n(full: usize) -> usize {
     if cfg!(miri) {
         full / 10 + 2
