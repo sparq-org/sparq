@@ -137,16 +137,8 @@ impl Watch {
                 // A resource that is not visible is not read (its lock is held until it is put
                 // back): the delivery fails its check rather than wait, including when the
                 // resource is set aside while the delivery waits for its lock.
-                let read = state.locks.read(&self.uri);
-                tokio::pin!(read);
-                let _guard = loop {
-                    if !state.visible(&self.uri) {
-                        return false;
-                    }
-                    tokio::select! {
-                        guard = &mut read => break guard,
-                        _ = tokio::time::sleep(SET_ASIDE_POLL) => {}
-                    }
+                let Some(_guard) = state.read_visible(&self.uri).await else {
+                    return false;
                 };
                 // The subscription may have been cancelled, or expired, meanwhile.
                 state.notify.is_live(&self.subscription)
@@ -155,10 +147,6 @@ impl Watch {
         }
     }
 }
-
-/// How often a delivery waiting for a resource's lock looks again whether the resource was set
-/// aside meanwhile (see [`Watch::stands`]).
-const SET_ASIDE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// Most distinct topics one subscription may name.
 pub const MAX_TOPICS: usize = 64;

@@ -582,6 +582,27 @@ impl<S: Store + 'static> LwsState<S> {
             .contains_key(uri)
     }
 
+    /// `uri`'s shared lock, unless `uri` is not [visible](Self::visible) or stops being visible
+    /// while the lock is waited for (a change holding it was set aside, with its locks, until
+    /// it is put back): `None` then, at once, so a walk over many resources or a delivery
+    /// skips it rather than waits.
+    pub(crate) async fn read_visible(
+        &self,
+        uri: &str,
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        let read = self.locks.read(uri);
+        tokio::pin!(read);
+        loop {
+            if !self.visible(uri) {
+                return None;
+            }
+            tokio::select! {
+                guard = &mut read => return self.visible(uri).then_some(guard),
+                _ = tokio::time::sleep(VISIBLE_POLL) => {}
+            }
+        }
+    }
+
     /// Whether a new change may start: not while set-aside changes hold [`MAX_SET_ASIDE_BYTES`]
     /// or more to put back. What they hold is bounded so: by that, and by what the changes in
     /// flight (each bounded by its [`Journal`], their number by admission) could add to it.
@@ -941,6 +962,10 @@ pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unset
     }
     None
 }
+
+/// How often a wait for a lock looks again whether what it waits for was set aside meanwhile
+/// (see [`LwsState::read_visible`]).
+const VISIBLE_POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 /// How many bytes set-aside changes may hold to put back before new changes are refused (see
 /// [`LwsState::may_write`]).

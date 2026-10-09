@@ -371,7 +371,8 @@ What the server exposes, all discoverable from the storage description
   answer `If-Match` / `If-None-Match` as a read does; a coded QUERY body gets `415`.
   While walking the storage they keep only what they return (a search its matches, the index
   its distinct types) and the walk's own state (the listing in hand and the members still to
-  visit), at most 16 MiB in all; past that the request gets `507`.
+  visit), at most 16 MiB in all; past that the request gets `507`. A resource a stuck change
+  is to (set aside) is left out, with what is under it, rather than waited on.
 
 Conformance runs against the public suites; the scripts and the CI floor live in
 `crates/sparq-lws-core/conformance/lws/` (`touchstone.sh <module>`, `lws-net.sh`,
