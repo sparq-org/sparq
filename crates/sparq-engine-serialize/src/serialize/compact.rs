@@ -24,7 +24,7 @@
 use super::{coerce_native, NamedGraph};
 use oxrdf::{NamedOrBlankNode, Term, Triple};
 use sparq_jsonld::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
-use sparq_jsonld::frame::{compact_framed, frame_match_expanded, FrameOptions};
+use sparq_jsonld::frame::{compact_framed, frame_match_from_rdf, FrameOptions};
 use sparq_jsonld::compact::compact_expanded;
 use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
 
@@ -248,11 +248,10 @@ fn holds_typed_nodes(doc: &Json, terms: &[String]) -> bool {
 /// JSON-LD 1.1 `omitGraph` default). A frame the processor rejects (e.g. an invalid
 /// `@embed` value) yields the expanded document (module docs).
 pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> String {
-    let doc = expanded(graphs);
     let opts = JsonLdOptions::default();
     let fopts = FrameOptions::default();
     let ctx = frame_doc.get("@context").cloned().unwrap_or_default();
-    let out = frame_match_expanded(&doc, frame_doc, &opts, &fopts, &NoopLoader).and_then(|matched| {
+    let out = frame_match_from_rdf(expanded(graphs), frame_doc, &opts, &fopts, &NoopLoader).and_then(|matched| {
         let framed = compact_framed(&matched, &ctx, &opts, &fopts, &NoopLoader)?;
         // The match stands; only its compaction is redone for a readable shape.
         Ok(match readable_type_maps(&framed, &ctx) {
@@ -263,7 +262,8 @@ pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> Strin
     });
     match out {
         Ok(framed) => render(&framed),
-        Err(_) => render(&doc),
+        // A frame that cannot be applied leaves the document unframed.
+        Err(_) => render(&expanded(graphs)),
     }
 }
 

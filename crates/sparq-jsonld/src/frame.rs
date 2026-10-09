@@ -42,7 +42,7 @@ use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::expand;
 use crate::json::Json;
 use crate::loader::DocumentLoader;
-use crate::node_map::generate_node_map;
+use crate::node_map::{generate_node_map, BlankNodeIssuer};
 use crate::options::{JsonLdOptions, ProcessingMode};
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -142,35 +142,38 @@ pub fn frame_match(
         let mut in_opts = options.clone();
         in_opts.frame_expansion = false;
         let expanded_input = expand(input, &in_opts, loader)?;
-        frame_match_inner(&expanded_input, frame_doc, options, frame_options, loader)
+        let input_bytes = json_bytes(&expanded_input);
+        frame_match_inner(input_bytes, |frame_default| build_graph_maps(&expanded_input, frame_default), frame_doc, options, frame_options, loader)
     })
 }
 
-/// [`frame_match`] over an input that is already in expanded form (for example the
-/// output of fromRdf), skipping its expansion.
-pub fn frame_match_expanded(
-    expanded_input: &Json,
+/// [`frame_match`] over the output of fromRdf, taken by value and not re-expanded.
+/// fromRdf already emits one node object per subject, with each named graph's nodes
+/// under its node's `@graph`, so the graph map is regrouped from it directly instead of
+/// running node map generation, and its blank-node labels are kept.
+pub fn frame_match_from_rdf(
+    from_rdf: Json,
     frame_doc: &Json,
     options: &JsonLdOptions,
     frame_options: &FrameOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
     crate::context::budget::with_budget(|| {
-        frame_match_inner(expanded_input, frame_doc, options, frame_options, loader)
+        let input_bytes = json_bytes(&from_rdf);
+        frame_match_inner(input_bytes, |frame_default| graph_maps_from_rdf(from_rdf, frame_default), frame_doc, options, frame_options, loader)
     })
 }
 
 fn frame_match_inner(
-    expanded_input: &Json,
+    input_bytes: usize,
+    graph_maps: impl FnOnce(bool) -> GraphMaps,
     frame_doc: &Json,
     options: &JsonLdOptions,
     frame_options: &FrameOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
     // §4.1 step 3: expand the frame (frameExpansion).
-    let mut fr_opts = options.clone();
-    fr_opts.frame_expansion = true;
-    let expanded_frame = expand(frame_doc, &fr_opts, loader)?;
+    let expanded_frame = expanded_frame(frame_doc, options, loader)?;
 
     // §4.1 step 4: a top-level `@graph` entry in the frame DOCUMENT selects the
     // default graph instead of the merged graph (the suite's t0047 posture — the
@@ -181,7 +184,64 @@ fn frame_match_inner(
     }
 
     // §4.1 steps 4–7: frame the expanded input (returns the pruned expanded output).
-    frame_expanded(expanded_input, &expanded_frame, options, &fopts)
+    let maps = graph_maps(fopts.frame_default);
+    frame_maps(&maps, input_bytes, &expanded_frame, options, &fopts)
+}
+
+thread_local! {
+    /// The last frame expanded on this thread, its options and its expansion, so callers
+    /// framing many documents with one frame expand it once.
+    static LAST_FRAME: RefCell<Option<(Json, JsonLdOptions, Rc<Json>)>> = const { RefCell::new(None) };
+}
+
+/// `frame_doc` expanded in `frameExpansion` mode, reusing [`LAST_FRAME`] when it matches.
+/// Only frames whose contexts cannot reach the loader are cached, since a loader may
+/// resolve the same IRI differently between calls.
+fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn DocumentLoader) -> Result<Rc<Json>, JsonLdError> {
+    let cacheable = contexts_self_contained(frame_doc);
+    if cacheable {
+        let hit = LAST_FRAME.with(|last| {
+            last.borrow()
+                .as_ref()
+                .filter(|(f, o, _)| f == frame_doc && o == options)
+                .map(|(_, _, e)| Rc::clone(e))
+        });
+        if let Some(expanded) = hit {
+            return Ok(expanded);
+        }
+    }
+    let mut fr_opts = options.clone();
+    fr_opts.frame_expansion = true;
+    let expanded = Rc::new(expand(frame_doc, &fr_opts, loader)?);
+    if cacheable {
+        LAST_FRAME.with(|last| {
+            *last.borrow_mut() = Some((frame_doc.clone(), options.clone(), Rc::clone(&expanded)));
+        });
+    }
+    Ok(expanded)
+}
+
+/// True iff every `@context` in `frame` is [`crate::compact::self_contained`].
+fn contexts_self_contained(frame: &Json) -> bool {
+    let mut stack = vec![frame];
+    while let Some(j) = stack.pop() {
+        match j {
+            Json::Arr(items) => stack.extend(items),
+            Json::Obj(members) => {
+                for (k, v) in members {
+                    if k == "@context" {
+                        if !crate::compact::self_contained(v) {
+                            return false;
+                        }
+                    } else {
+                        stack.push(v);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    true
 }
 
 /// The output half of [`frame`] (§4.1 step 8): compacts `framed` (from [`frame_match`])
@@ -225,16 +285,27 @@ pub fn frame_expanded(
     options: &JsonLdOptions,
     frame_options: &FrameOptions,
 ) -> Result<Json, JsonLdError> {
+    // §4.1 step 4: the graph map (+ @merged unless frameDefault).
+    let maps = build_graph_maps(expanded_input, frame_options.frame_default);
+    frame_maps(&maps, json_bytes(expanded_input), expanded_frame, options, frame_options)
+}
+
+/// [`frame_expanded`] over the input's graph maps; `input_bytes` is the input's
+/// [`json_bytes`], which sets the output bound.
+fn frame_maps(
+    maps: &GraphMaps,
+    input_bytes: usize,
+    expanded_frame: &Json,
+    options: &JsonLdOptions,
+    frame_options: &FrameOptions,
+) -> Result<Json, JsonLdError> {
     // Normalise the expanded frame to a one-object array (an empty frame `{}` expands to
     // `[]`; re-materialise the match-everything object).
     let frame_arr = match expanded_frame {
-        Json::Arr(items) if items.is_empty() => Json::Arr(vec![Json::obj()]),
-        Json::Arr(_) => expanded_frame.clone(),
-        other => Json::Arr(vec![other.clone()]),
+        Json::Arr(items) if items.is_empty() => Cow::Owned(Json::Arr(vec![Json::obj()])),
+        Json::Arr(_) => Cow::Borrowed(expanded_frame),
+        other => Cow::Owned(Json::Arr(vec![other.clone()])),
     };
-
-    // §4.1 step 4: the graph map (+ @merged unless frameDefault).
-    let maps = build_graph_maps(expanded_input, frame_options.frame_default);
     let graph = if frame_options.frame_default {
         "@default"
     } else {
@@ -248,8 +319,9 @@ pub fn frame_expanded(
         unique_embeds: BTreeMap::new(),
         bnode_counts: BTreeMap::new(),
         last_ids: BTreeSet::new(),
-        budget: Budget::new(output_bound(expanded_input, &frame_arr)),
+        budget: Budget::new(output_bound(input_bytes, &frame_arr)),
         reverse: BTreeMap::new(),
+        implicit_frames: Default::default(),
     };
 
     // §4.1 steps 5–6: match the frame over every subject of the active graph.
@@ -259,7 +331,7 @@ pub fn frame_expanded(
         .map(|g| g.keys().cloned().collect())
         .unwrap_or_default();
     let mut framed = Out::array(&mut st.budget)?;
-    match_frame(&maps, &mut st, &subjects, &frame_arr, &mut framed, None, false)?;
+    match_frame(maps, &mut st, &subjects, &frame_arr, &mut framed, None, false)?;
     let mut framed = framed.into_json();
 
     // `@embed: @last`: every occurrence embedded above; keep only the LAST embed of
@@ -329,6 +401,8 @@ struct FState<'a> {
     budget: Budget,
     /// (graph, reverse property) → referenced id → referring subjects ([`FState::referrers`]).
     reverse: BTreeMap<(String, String), BTreeMap<String, Vec<String>>>,
+    /// The implicit frames built so far, by flags ([`FState::implicit`]).
+    implicit_frames: [Option<Rc<Json>>; 16],
 }
 
 /// Bytes a framing call may allocate for its output per byte of its input and frame,
@@ -342,18 +416,24 @@ const OUTPUT_FLOOR: usize = 1 << 24;
 const NODE_BYTES: usize = 32;
 
 /// The output bound of a framing call over `input` with `frame` (both expanded).
-fn output_bound(input: &Json, frame: &Json) -> usize {
-    json_bytes(input)
+fn output_bound(input_bytes: usize, frame: &Json) -> usize {
+    input_bytes
         .saturating_add(json_bytes(frame))
         .saturating_mul(OUTPUT_PER_INPUT)
         .saturating_add(OUTPUT_FLOOR)
 }
 
 impl FState<'_> {
-    /// The implicit sub-frame carrying `flags` forward ([`implicit_frame`]).
-    fn implicit(&mut self, flags: &Flags) -> Result<Json, JsonLdError> {
-        let frame = implicit_frame(flags);
+    /// The implicit sub-frame carrying `flags` forward ([`implicit_frame`]), built once
+    /// per distinct set of flags.
+    fn implicit(&mut self, flags: &Flags) -> Result<Rc<Json>, JsonLdError> {
+        let slot = flags.embed as usize * 4 + usize::from(flags.explicit) * 2 + usize::from(flags.require_all);
+        if let Some(frame) = &self.implicit_frames[slot] {
+            return Ok(Rc::clone(frame));
+        }
+        let frame = Rc::new(implicit_frame(flags));
         self.emit(json_bytes(&frame))?;
+        self.implicit_frames[slot] = Some(Rc::clone(&frame));
         Ok(frame)
     }
 
@@ -470,7 +550,7 @@ mod output {
         pub(super) fn default_fill(budget: &mut Budget, default: Option<&Json>, direct: bool) -> Result<Out, JsonLdError> {
             budget.charge(default.map_or(16, json_bytes) + 3 * NODE_BYTES + "@preserve".len() + 8)?;
             let values = match default {
-                Some(d) => Json::Arr(as_slice(d).into_iter().cloned().collect()),
+                Some(d) => Json::Arr(as_slice(d).to_vec()),
                 None => Json::Arr(vec![Json::Str("@null".to_string())]),
             };
             Ok(Out(if direct {
@@ -590,10 +670,114 @@ enum Embed {
 /// (unless `frame_default`) add the `@merged` graph (Merge Node Maps, JSON-LD 1.1 API
 /// §7.3).
 fn build_graph_maps(expanded_input: &Json, frame_default: bool) -> GraphMaps {
-    let mut graphs: BTreeMap<String, Rc<Subjects>> = generate_node_map(expanded_input)
+    let graphs = generate_node_map(expanded_input)
         .into_graphs()
-        .map(|(name, nodes)| (name, Rc::new(nodes.into_iter().collect())))
+        .map(|(name, nodes)| (name, nodes.into_iter().collect()))
         .collect();
+    finish_graph_maps(graphs, frame_default)
+}
+
+/// The graph maps of fromRdf output ([`frame_match_from_rdf`]): what node map generation
+/// builds from it. Blank nodes are relabelled in the order node map generation visits
+/// them, and since fromRdf omits nodes that are only referenced, a node object
+/// `{"@id": …}` is added for each reference to one, as node map generation does.
+fn graph_maps_from_rdf(from_rdf: Json, frame_default: bool) -> GraphMaps {
+    let mut graphs: BTreeMap<String, Subjects> = BTreeMap::new();
+    graphs.insert("@default".to_string(), Subjects::new());
+    let Json::Arr(mut nodes) = from_rdf else {
+        return finish_graph_maps(graphs, frame_default);
+    };
+    let mut issuer = BlankNodeIssuer::new();
+    for node in &mut nodes {
+        relabel_node(node, &mut issuer);
+    }
+    for node in nodes {
+        let Json::Obj(mut members) = node else { continue };
+        let Some(id) = members.iter().find(|(k, _)| k == "@id").and_then(|(_, v)| v.as_str()).map(str::to_string) else {
+            continue;
+        };
+        if let Some(at) = members.iter().position(|(k, _)| k == "@graph") {
+            let (_, inner) = members.remove(at);
+            let graph = graphs.entry(id.clone()).or_default();
+            let Json::Arr(inner) = inner else { continue };
+            for node in inner {
+                if let Some(gid) = node.get("@id").and_then(Json::as_str) {
+                    graph.insert(gid.to_string(), node);
+                }
+            }
+        }
+        graphs.get_mut("@default").expect("present").insert(id, Json::Obj(members));
+    }
+    for graph in graphs.values_mut() {
+        let mut referenced = Vec::new();
+        for node in graph.values() {
+            let Json::Obj(members) = node else { continue };
+            for (key, values) in members {
+                if key.starts_with('@') {
+                    continue;
+                }
+                for value in as_slice(values) {
+                    let items = value.get("@list").map_or(std::slice::from_ref(value), as_slice);
+                    for item in items {
+                        if let Some(rid) = subject_reference_id(item) {
+                            if !graph.contains_key(rid) {
+                                referenced.push(rid.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for rid in referenced {
+            graph.entry(rid.clone()).or_insert_with(|| Json::Obj(vec![("@id".to_string(), Json::Str(rid))]));
+        }
+    }
+    finish_graph_maps(graphs, frame_default)
+}
+
+/// Relabels the blank nodes of one fromRdf node object in node map generation's order:
+/// its `@id`, then its members in order (`@type` values, `@graph` nodes, and the node
+/// references in property values and lists).
+fn relabel_node(node: &mut Json, issuer: &mut BlankNodeIssuer) {
+    fn relabel(label: &mut String, issuer: &mut BlankNodeIssuer) {
+        if label.starts_with("_:") {
+            *label = issuer.issue(Some(label));
+        }
+    }
+    fn relabel_value(value: &mut Json, issuer: &mut BlankNodeIssuer) {
+        let Json::Obj(members) = value else { return };
+        for (key, v) in members {
+            match (key.as_str(), v) {
+                ("@id", Json::Str(id)) => relabel(id, issuer),
+                ("@list", Json::Arr(items)) => items.iter_mut().for_each(|i| relabel_value(i, issuer)),
+                _ => {}
+            }
+        }
+    }
+    let Json::Obj(members) = node else { return };
+    if let Some((_, Json::Str(id))) = members.iter_mut().find(|(k, _)| k == "@id") {
+        relabel(id, issuer);
+    }
+    for (key, value) in members {
+        let Json::Arr(items) = value else { continue };
+        match key.as_str() {
+            "@type" => {
+                for t in items {
+                    if let Json::Str(t) = t {
+                        relabel(t, issuer);
+                    }
+                }
+            }
+            "@graph" => items.iter_mut().for_each(|n| relabel_node(n, issuer)),
+            k if k.starts_with('@') => {}
+            _ => items.iter_mut().for_each(|v| relabel_value(v, issuer)),
+        }
+    }
+}
+
+/// [`GraphMaps`] over `graphs`, adding `@merged` unless `frame_default`.
+fn finish_graph_maps(graphs: BTreeMap<String, Subjects>, frame_default: bool) -> GraphMaps {
+    let mut graphs: BTreeMap<String, Rc<Subjects>> = graphs.into_iter().map(|(name, nodes)| (name, Rc::new(nodes))).collect();
     if !frame_default {
         // With only the default graph, merging changes nothing: share it.
         let merged = match graphs.len() {
@@ -634,7 +818,7 @@ fn merge_graphs(graphs: &BTreeMap<String, Rc<Subjects>>) -> Subjects {
 
 /// Adds each of `values` to the array member `prop` of `obj` (creating it) unless an
 /// equal value is already there, in time linear in the values.
-fn add_all_unique(obj: &mut Json, prop: &str, values: Vec<&Json>) {
+fn add_all_unique(obj: &mut Json, prop: &str, values: &[Json]) {
     if obj.get(prop).is_none() {
         obj.set(prop, Json::Arr(Vec::new()));
     }
@@ -830,7 +1014,7 @@ fn match_frame(
                         Some(f) => f,
                         None => {
                             implicit = st.implicit(&flags)?;
-                            &implicit
+                            &*implicit
                         }
                     };
                     let mut list = Out::list(&mut st.budget)?;
@@ -859,7 +1043,7 @@ fn match_frame(
                         Some(f) => f,
                         None => {
                             implicit = st.implicit(&flags)?;
-                            &implicit
+                            &*implicit
                         }
                     };
                     match_frame(
@@ -1213,7 +1397,7 @@ fn filter_subject(
                         Some(lp) if is_value_object(lp) => {
                             node_list.iter().any(|lv| value_match(lp, lv))
                         }
-                        Some(lp) => any_node_match(graph_subjects, lp, &node_list, flags, memo)?,
+                        Some(lp) => any_node_match(graph_subjects, lp, node_list, flags, memo)?,
                         None => false,
                     };
                 }
@@ -1230,7 +1414,7 @@ fn filter_subject(
                     if is_wildcard_node_pattern(tf) {
                         match_this = !node_values.is_empty();
                     } else {
-                        match_this = any_node_match(graph_subjects, tf, &node_values, flags, memo)?;
+                        match_this = any_node_match(graph_subjects, tf, node_values, flags, memo)?;
                     }
                 }
                 Some(_) => {
@@ -1265,7 +1449,7 @@ fn is_wildcard_node_pattern(tf: &Json) -> bool {
 fn any_node_match(
     graph_subjects: &Subjects,
     pattern: &Json,
-    values: &[&Json],
+    values: &[Json],
     flags: &Flags,
     memo: &Memo,
 ) -> Result<bool, JsonLdError> {
@@ -1325,7 +1509,7 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
     }
     // @value: in the alternatives, or the alternatives are the wildcard.
     let v_ok = v2.first().map(is_empty_obj).unwrap_or(false)
-        || v1.map(|v| v2.contains(&v)).unwrap_or(false);
+        || v1.map(|v| v2.contains(v)).unwrap_or(false);
     if !v_ok {
         return false;
     }
@@ -1589,10 +1773,10 @@ fn graph_alias(ctx_value: &Json) -> String {
 
 /// View a value as a slice of items (an array borrows its items; a scalar/object is a
 /// one-element view).
-fn as_slice(v: &Json) -> Vec<&Json> {
+fn as_slice(v: &Json) -> &[Json] {
     match v {
-        Json::Arr(items) => items.iter().collect(),
-        other => vec![other],
+        Json::Arr(items) => items,
+        other => std::slice::from_ref(other),
     }
 }
 
@@ -1605,7 +1789,7 @@ fn first_of(v: &Json) -> Option<&Json> {
 }
 
 /// True iff `v` is `{}` (the wildcard).
-fn is_empty_obj(v: &&Json) -> bool {
+fn is_empty_obj(v: &Json) -> bool {
     matches!(v, Json::Obj(m) if m.is_empty())
 }
 
@@ -1867,7 +2051,7 @@ mod tests {
     fn bound(input: &Json, frame: &str) -> usize {
         let opts = JsonLdOptions { frame_expansion: true, ..JsonLdOptions::default() };
         let expanded = crate::expand(&parse(frame), &opts, &NoopLoader).expect("frame expands");
-        output_bound(&crate::expand(input, &JsonLdOptions::default(), &NoopLoader).unwrap(), &expanded)
+        output_bound(json_bytes(&crate::expand(input, &JsonLdOptions::default(), &NoopLoader).unwrap()), &expanded)
     }
 
     /// `@always` over shared subjects would embed 2^30 copies from 61 nodes; framing
@@ -2004,6 +2188,110 @@ mod tests {
         // One embed of the same node fits.
         let out = frame_with(&input, r#"{"@id":"http://ex/n8a"}"#).expect("within the bound");
         assert!(json_bytes(&out) <= bound(&input, r#"{"@id":"http://ex/n8a"}"#));
+    }
+
+    /// Regrouping fromRdf-shaped documents builds the graph maps node map generation
+    /// builds, blank-node labels and their order included: generated documents with
+    /// blank and IRI subjects, `@type`s, references, lists and named graphs, plus the W3C
+    /// frame inputs (flattened, blank nodes renamed so their order changes) when fetched.
+    #[test]
+    fn from_rdf_graph_maps_match_node_map_generation() {
+        fn check(doc: &Json) {
+            for frame_default in [false, true] {
+                let expected = build_graph_maps(doc, frame_default);
+                let actual = graph_maps_from_rdf(doc.clone(), frame_default);
+                let names = |m: &GraphMaps| m.graphs.keys().cloned().collect::<Vec<_>>();
+                assert_eq!(names(&actual), names(&expected), "graphs of {}", text(doc));
+                for (name, graph) in &expected.graphs {
+                    assert_eq!(*actual.graphs[name], **graph, "graph {name} of {}", text(doc));
+                }
+            }
+        }
+        fn text(j: &Json) -> String {
+            let mut s = String::new();
+            j.write(&mut s);
+            s
+        }
+        // A fromRdf-shaped node: sorted subjects, each with `@id`, then `@type` and
+        // property arrays of value objects, references and lists.
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let name = |i: u64| if i.is_multiple_of(3) { format!("http://ex/n{i}") } else { format!("_:z{}", 97 - i) };
+        for _ in 0..300 {
+            let mut graphs: Vec<(Option<String>, Vec<String>)> = vec![(None, Vec::new())];
+            for _ in 0..next(3) {
+                graphs.push((Some(name(next(12))), Vec::new()));
+            }
+            for (_, nodes) in &mut graphs {
+                let mut ids: Vec<String> = (0..1 + next(5)).map(|_| name(next(12))).collect();
+                ids.sort();
+                ids.dedup();
+                for id in ids {
+                    let mut members = vec![format!(r#""@id":"{id}""#)];
+                    if next(3) == 0 {
+                        members.push(format!(r#""@type":["{}"]"#, name(next(12))));
+                    }
+                    for p in 0..next(3) {
+                        let values: Vec<String> = (0..1 + next(3))
+                            .map(|_| match next(4) {
+                                0 => format!(r#"{{"@value":"v{}"}}"#, next(5)),
+                                1 => format!(r#"{{"@list":[{{"@id":"{}"}},{{"@value":"x"}}]}}"#, name(next(12))),
+                                _ => format!(r#"{{"@id":"{}"}}"#, name(next(12))),
+                            })
+                            .collect();
+                        // fromRdf emits each value once.
+                        let mut seen = BTreeSet::new();
+                        let values: Vec<String> = values.into_iter().filter(|v| seen.insert(v.clone())).collect();
+                        members.push(format!(r#""http://ex/p{p}":[{}]"#, values.join(",")));
+                    }
+                    nodes.push(format!("{{{}}}", members.join(",")));
+                }
+            }
+            let mut top: Vec<(String, String)> = Vec::new();
+            for (g, nodes) in &graphs {
+                match g {
+                    None => top.extend(nodes.iter().map(|n| (parse(n).get("@id").and_then(Json::as_str).unwrap().to_string(), n.clone()))),
+                    Some(g) => top.push((g.clone(), format!(r#"{{"@id":"{g}","@graph":[{}]}}"#, nodes.join(",")))),
+                }
+            }
+            top.sort();
+            top.dedup_by(|a, b| a.0 == b.0);
+            check(&parse(&format!("[{}]", top.into_iter().map(|(_, n)| n).collect::<Vec<_>>().join(","))));
+        }
+        // The W3C frame inputs, when the suite has been fetched.
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/w3c/json-ld-framing/tests/frame");
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.to_string_lossy().ends_with("-in.jsonld") {
+                continue;
+            }
+            let Ok(input) = Json::parse(&std::fs::read_to_string(&path).unwrap()) else { continue };
+            let Ok(expanded) = crate::expand(&input, &JsonLdOptions::default(), &NoopLoader) else { continue };
+            let mut flat = text(&crate::flatten_expanded(&expanded));
+            // Reverse the blank nodes' order, then sort subjects by their new labels.
+            for i in (0..64).rev() {
+                flat = flat.replace(&format!("\"_:b{i}\""), &format!("\"_:r{}\"", 99 - i));
+            }
+            let mut doc = parse(&flat);
+            fn sort(j: &mut Json) {
+                if let Json::Arr(nodes) = j {
+                    nodes.sort_by(|a, b| a.get("@id").and_then(Json::as_str).cmp(&b.get("@id").and_then(Json::as_str)));
+                    for n in nodes {
+                        if let Json::Obj(members) = n {
+                            members.iter_mut().filter(|(k, _)| k == "@graph").for_each(|(_, g)| sort(g));
+                        }
+                    }
+                }
+            }
+            sort(&mut doc);
+            check(&doc);
+        }
     }
 
     /// A large numeric `@default` is charged by its length: 1,000 fills of a 64 KiB
