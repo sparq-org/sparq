@@ -16,21 +16,16 @@ use sparq_conformance::line_syntax::{run_suite, LineSuite};
 use std::path::PathBuf;
 
 /// rdf-n-triples floor: MEASURED pass count at the pinned w3c/rdf-tests revision —
-/// 60 of the 70 manifest entries (41 positive + 29 negative syntax tests). The 10
-/// honest FAILs are native `nt.rs` parser divergences RECORDED by wiring this suite
-/// (tracked as bead sq-w64x5, to RAISE the floor when fixed): 9 LENIENT accepts of
-/// negative cases (no IRI character validation: `bad-uri-01/04/06/07/08/09`; no
-/// blank-node-label validation: `bad-bnode-01/02`; no language-tag validation:
-/// `bad-lang-01`) and 1 STRICT reject of the positive `minimal_whitespace` case (a
-/// `BLANK_NODE_LABEL` directly followed by `<` needs no whitespace per the grammar).
-const NT_SYNTAX_FLOOR: usize = 60;
-/// rdf-n-quads floor: MEASURED pass count at the pinned revision — 76 of the 87
-/// manifest entries (53 positive + 34 negative syntax tests; the N-Quads manifest
-/// embeds the N-Triples cases, N-Quads being a superset). The 11 honest FAILs are the
-/// SAME native byte-level parser divergences as the N-Triples suite (shared `nt.rs`
-/// fast path; bead sq-w64x5) plus `nq-syntax-bad-uri-01` (graph-position IRI
-/// validation).
-const NQ_SYNTAX_FLOOR: usize = 76;
+/// all 70 manifest entries (41 positive + 29 negative syntax tests). The native `nt.rs`
+/// parser validates IRIREF characters + absoluteness, blank-node labels and language
+/// tags, and lets a `BLANK_NODE_LABEL` abut the next term (`minimal_whitespace`) (#2716;
+/// the floor was 60 before that fix).
+const NT_SYNTAX_FLOOR: usize = 70;
+/// rdf-n-quads floor: MEASURED pass count at the pinned revision — all 87 manifest
+/// entries (53 positive + 34 negative syntax tests; the N-Quads manifest embeds the
+/// N-Triples cases, N-Quads being a superset), including `nq-syntax-bad-uri-01`
+/// (graph-position relative IRI) (#2716; the floor was 76 before that fix).
+const NQ_SYNTAX_FLOOR: usize = 87;
 /// rdf-trig floor: MEASURED pass count at the pinned revision (ALL 356 manifest
 /// entries — 98 positive + 111 negative syntax, 143 eval, 4 negative eval — pass
 /// through the with-base TriG dataset loader).
