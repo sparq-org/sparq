@@ -591,31 +591,45 @@ impl<'p> ConditionalPermit<'p> {
     pub fn target(&self) -> &str {
         &self.target
     }
+    /// Whether a session with no identity is granted: only when the rule names no
+    /// assignee and constrains no recipient or assignee. An exclusion alone (`neq`,
+    /// `isNoneOf`) needs an identity to hold, so it does not admit an anonymous session.
+    pub fn admits_anonymous(&self) -> bool {
+        !names_identity(self.rule) && !excludes_identity(self.rule)
+    }
 }
 
 /// The left operands a conditional grant leaves to the per-session re-check: the
 /// recipient or assignee identity and the clock.
-pub const DEFERRED_LEFT_OPERANDS: [&str; 3] = [
-    ODRL_RECIPIENT,
-    "http://www.w3.org/ns/odrl/2/assignee",
-    ODRL_DATETIME,
-];
+pub const DEFERRED_LEFT_OPERANDS: [&str; 3] = [ODRL_RECIPIENT, ODRL_ASSIGNEE_LEFT, ODRL_DATETIME];
 
 /// The permissions `policy` admits for a grant re-checked per session, in policy order,
 /// or the reasons for denying when nothing can be granted at all.
 ///
-/// The same decision as [`decide`] for every part a session does not change: an
-/// unhonourable conflict strategy or a prohibition that is not definitely withdrawn
-/// denies, and a candidate must permit the requested action on the requested target
-/// with every duty discharged ([`duty_discharged`]). What is left open is only the
-/// rule's assignee and its [`DEFERRED_LEFT_OPERANDS`] constraints: a rule with any other
-/// constraint, or a compound one, is not a candidate (the caller decides it once,
-/// through [`decide`]).
+/// A conditional grant stands for [`decide`] on the materialising request with only the
+/// session's identity and clock varied, so a candidate is issued only when everything
+/// else is settled for every such session:
+///
+/// - the conflict strategy is honourable, and no prohibition matches this request
+///   (Unknown included, as in [`decide`]);
+/// - every prohibition is withdrawn whoever the session is and whenever it runs: its
+///   action or target does not name the request, or a constraint on a dimension the
+///   session does not vary is definitely False. A prohibition that could apply to
+///   another identity or at another time (its assignee, or a recipient, assignee or
+///   dateTime constraint, left open) leaves no candidate: the caller decides this
+///   request once, through [`decide`];
+/// - the permission names the requested action and target, every duty is discharged
+///   ([`duty_discharged`]), and its constraints are all [`DEFERRED_LEFT_OPERANDS`];
+///
+/// [`ConditionalPermit::admits_anonymous`] says whether a session with no identity is
+/// granted too: only when the rule names no assignee and has no identity constraint. A
+/// bare exclusion ("everyone except Bob") needs an identity, since the evaluator reads
+/// a missing recipient as Unknown.
 ///
 /// # Errors
 ///
-/// Why every grant is ruled out: the conflict strategy, a prohibition, or a missing
-/// target.
+/// Why every grant is ruled out for this request: the conflict strategy, a prohibition,
+/// or a missing target.
 pub fn decide_conditional<'p>(
     policy: &'p ValidatedPolicy,
     request: &Request,
@@ -634,6 +648,13 @@ pub fn decide_conditional<'p>(
     let Some(target) = request.target.as_deref() else {
         return Err(vec!["the request names no target".to_owned()]);
     };
+    if !policy
+        .prohibitions
+        .iter()
+        .all(|r| withdrawn_for_every_session(r, request, &req_action))
+    {
+        return Ok(Vec::new());
+    }
     Ok(policy
         .permissions
         .iter()
@@ -646,6 +667,55 @@ pub fn decide_conditional<'p>(
         })
         .map(|rule| ConditionalPermit { rule, target: target.to_owned() })
         .collect())
+}
+
+const ODRL_ASSIGNEE_LEFT: &str = "http://www.w3.org/ns/odrl/2/assignee";
+
+fn is_identity_left(left: &str) -> bool {
+    left == ODRL_RECIPIENT || left == ODRL_ASSIGNEE_LEFT
+}
+
+/// The rule names who it applies to: an assignee, or a positive identity constraint.
+fn names_identity(r: &Rule) -> bool {
+    r.assignee.is_some()
+        || r.constraints.iter().any(|c| {
+            is_identity_left(&c.left)
+                && matches!(c.operator, Operator::Eq | Operator::IsA | Operator::IsPartOf | Operator::IsAnyOf)
+        })
+}
+
+/// The rule carves an identity out (`neq` / `isNoneOf` on a recipient or assignee).
+fn excludes_identity(r: &Rule) -> bool {
+    r.constraints
+        .iter()
+        .any(|c| is_identity_left(&c.left) && matches!(c.operator, Operator::Neq | Operator::IsNoneOf))
+}
+
+/// A prohibition that does not apply to `request` whoever the session is and whenever it
+/// runs: its action or target does not name the request, or a constraint on a dimension
+/// a session does not vary is definitely False.
+fn withdrawn_for_every_session(r: &Rule, request: &Request, req_action: &Action) -> bool {
+    if !r.action.permits(req_action) {
+        return true;
+    }
+    if r.target.as_deref().is_some_and(|t| !request.asset_matches(t)) {
+        return true;
+    }
+    let fixed = |c: &Constraint| !DEFERRED_LEFT_OPERANDS.contains(&c.left.as_str());
+    r.constraints
+        .iter()
+        .any(|c| fixed(c) && constraint_status(c, request) == ConstraintStatus::DefinitelyUnsatisfied)
+        || r.logical_constraints.iter().any(|lc| {
+            all_atoms(lc, &fixed)
+                && logical_constraint_status(lc, request) == ConstraintStatus::DefinitelyUnsatisfied
+        })
+}
+
+fn all_atoms(lc: &LogicalConstraint, f: &impl Fn(&Constraint) -> bool) -> bool {
+    lc.operands.iter().all(|n| match n {
+        ConstraintNode::Atomic(c) => f(c),
+        ConstraintNode::Compound(inner) => all_atoms(inner, f),
+    })
 }
 
 /// Whether `request` reports `duty` discharged. A duty's own constraints are not

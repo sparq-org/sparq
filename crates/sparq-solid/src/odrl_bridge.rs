@@ -1060,7 +1060,16 @@ pub fn materialize_permission_conditional(
         let rule = permit.rule();
         match map_constraints_to_agents(rule) {
             AgentMapping::Faithful { agents: recipients, except, window } => {
-                let agents = condition_agents(rule, &recipients);
+                // No recipient and no assignee: public, unless an exclusion ("everyone
+                // except X") needs an identity to hold; then any authenticated agent,
+                // never an anonymous session (the evaluator reads a missing recipient
+                // as Unknown).
+                let unscoped = if permit.admits_anonymous() {
+                    PUBLIC
+                } else {
+                    crate::authindex::AUTHENTICATED
+                };
+                let agents = condition_agents(rule, &recipients, unscoped);
                 if agents.is_empty() {
                     // every recipient was reserved-encoded → fail-closed, nothing.
                     fallback_reasons.push(format!(
@@ -1260,7 +1269,7 @@ pub fn materialize_prohibition_conditional(
                     ));
                     continue;
                 }
-                let agents = condition_agents(rule, &recipients);
+                let agents = condition_agents(rule, &recipients, PUBLIC);
                 if agents.is_empty() {
                     fallback_reasons.push(format!(
                         "prohibition {} recipients are all reserved-encoded; no deny",
@@ -1349,7 +1358,7 @@ pub fn materialize_prohibition_conditional(
 /// [`expand_party_collection_heads`] (ALLOW only). See [SONNET-4.6] sq-rf9uv for why the
 /// DENY dual must not do the same, and *The limit of the collection check* on
 /// [`materialize_prohibition_conditional`] for the un-evidenced case neither can detect.
-fn condition_agents(rule: &Rule, recipients: &[String]) -> Vec<String> {
+fn condition_agents(rule: &Rule, recipients: &[String], unscoped: &str) -> Vec<String> {
     if recipients.is_empty() {
         // [OPUS-4.8] sq-9n1q4: a bare `odrl:assignee` PROPERTY scopes the head to that
         // one party — it is NOT an unrestricted (auth:Public) rule.
@@ -1360,8 +1369,8 @@ fn condition_agents(rule: &Rule, recipients: &[String]) -> Vec<String> {
             // An all-reserved-encoded assignee → empty head → the caller fails closed
             // (an empty grant/deny head is never widened to auth:Public here).
             Some(_) => return Vec::new(),
-            // No recipient AND no assignee → legitimately public.
-            None => return vec![PUBLIC.to_owned()],
+            // No recipient AND no assignee → the caller's unscoped head.
+            None => return vec![unscoped.to_owned()],
         }
     }
     recipients
