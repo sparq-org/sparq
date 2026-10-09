@@ -1909,14 +1909,6 @@ notes = "RustCrypto-org crate; transitive dep of the OFF-by-default vc-bridge fe
 version = "0.17.14"
 criteria = "safe-to-deploy"
 
-[[exemptions.rio_api]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.rio_turtle]]
-version = "0.8.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.risc0-binfmt]]
 version = "3.0.5"
 criteria = "safe-to-deploy"
