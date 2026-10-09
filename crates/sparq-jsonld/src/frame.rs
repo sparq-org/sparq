@@ -44,7 +44,9 @@ use crate::json::Json;
 use crate::loader::DocumentLoader;
 use crate::node_map::generate_node_map;
 use crate::options::{JsonLdOptions, ProcessingMode};
+use std::borrow::Cow;
 use std::cell::RefCell;
+use std::rc::Rc;
 use std::collections::{BTreeMap, BTreeSet};
 
 // ---------------------------------------------------------------------------
@@ -135,20 +137,37 @@ pub fn frame_match(
     frame_options: &FrameOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
-    crate::context::budget::with_budget(|| frame_match_inner(input, frame_doc, options, frame_options, loader))
+    crate::context::budget::with_budget(|| {
+        // §4.1 step 2: expand the input (ordinary mode).
+        let mut in_opts = options.clone();
+        in_opts.frame_expansion = false;
+        let expanded_input = expand(input, &in_opts, loader)?;
+        frame_match_inner(&expanded_input, frame_doc, options, frame_options, loader)
+    })
 }
 
-fn frame_match_inner(
-    input: &Json,
+/// [`frame_match`] over an input that is already in expanded form (for example the
+/// output of fromRdf), skipping its expansion.
+pub fn frame_match_expanded(
+    expanded_input: &Json,
     frame_doc: &Json,
     options: &JsonLdOptions,
     frame_options: &FrameOptions,
     loader: &dyn DocumentLoader,
 ) -> Result<Json, JsonLdError> {
-    // §4.1 steps 2–3: expand the input (ordinary mode) and the frame (frameExpansion).
-    let mut in_opts = options.clone();
-    in_opts.frame_expansion = false;
-    let expanded_input = expand(input, &in_opts, loader)?;
+    crate::context::budget::with_budget(|| {
+        frame_match_inner(expanded_input, frame_doc, options, frame_options, loader)
+    })
+}
+
+fn frame_match_inner(
+    expanded_input: &Json,
+    frame_doc: &Json,
+    options: &JsonLdOptions,
+    frame_options: &FrameOptions,
+    loader: &dyn DocumentLoader,
+) -> Result<Json, JsonLdError> {
+    // §4.1 step 3: expand the frame (frameExpansion).
     let mut fr_opts = options.clone();
     fr_opts.frame_expansion = true;
     let expanded_frame = expand(frame_doc, &fr_opts, loader)?;
@@ -162,7 +181,7 @@ fn frame_match_inner(
     }
 
     // §4.1 steps 4–7: frame the expanded input (returns the pruned expanded output).
-    frame_expanded(&expanded_input, &expanded_frame, options, &fopts)
+    frame_expanded(expanded_input, &expanded_frame, options, &fopts)
 }
 
 /// The output half of [`frame`] (§4.1 step 8): compacts `framed` (from [`frame_match`])
@@ -247,8 +266,15 @@ pub fn frame_expanded(
     if !st.last_ids.is_empty() {
         if let Json::Arr(top) = &mut framed {
             for element in top {
-                for id in &st.last_ids {
-                    demote_all_but_last_embed(element, id);
+                // Only ids embedded more than once in this element need a walk, and each
+                // walk is charged to the output bound, so the pass stays bounded.
+                let mut embeds = BTreeMap::new();
+                count_all_embeds(element, &st.last_ids, &mut embeds);
+                for (id, n) in embeds {
+                    if n > 1 {
+                        st.emit(json_bytes(element))?;
+                        demote_all_but_last_embed(element, &id);
+                    }
                 }
             }
         }
@@ -280,7 +306,7 @@ type Subjects = BTreeMap<String, Json>;
 /// The immutable graph maps framing reads: graph name → its subjects (always contains
 /// `@default`; contains `@merged` unless `frameDefault`).
 struct GraphMaps {
-    graphs: BTreeMap<String, Subjects>,
+    graphs: BTreeMap<String, Rc<Subjects>>,
 }
 
 /// The mutable framing state (§4.1 "framing state").
@@ -383,20 +409,16 @@ enum Embed {
 /// (unless `frame_default`) add the `@merged` graph (Merge Node Maps, JSON-LD 1.1 API
 /// §7.3).
 fn build_graph_maps(expanded_input: &Json, frame_default: bool) -> GraphMaps {
-    let nm = generate_node_map(expanded_input);
-    let mut graphs: BTreeMap<String, Subjects> = BTreeMap::new();
-    for name in nm.graph_names() {
-        let Some(g) = nm.graph(name) else { continue };
-        let mut subjects = Subjects::new();
-        for s in g.subjects() {
-            if let Some(node) = g.get(s) {
-                subjects.insert(s.to_string(), node.clone());
-            }
-        }
-        graphs.insert(name.to_string(), subjects);
-    }
+    let mut graphs: BTreeMap<String, Rc<Subjects>> = generate_node_map(expanded_input)
+        .into_graphs()
+        .map(|(name, nodes)| (name, Rc::new(nodes.into_iter().collect())))
+        .collect();
     if !frame_default {
-        let merged = merge_graphs(&graphs);
+        // With only the default graph, merging changes nothing: share it.
+        let merged = match graphs.len() {
+            1 => Rc::clone(&graphs["@default"]),
+            _ => Rc::new(merge_graphs(&graphs)),
+        };
         graphs.insert("@merged".to_string(), merged);
     }
     GraphMaps { graphs }
@@ -405,28 +427,48 @@ fn build_graph_maps(expanded_input: &Json, frame_default: bool) -> GraphMaps {
 /// **Merge Node Maps** (JSON-LD 1.1 API §7.3): fold every graph's node objects into one
 /// `@merged` subject map — non-`@type` keywords copied, `@type` and ordinary property
 /// values merged without duplicates.
-fn merge_graphs(graphs: &BTreeMap<String, Subjects>) -> Subjects {
+fn merge_graphs(graphs: &BTreeMap<String, Rc<Subjects>>) -> Subjects {
     let mut merged = Subjects::new();
     for subjects in graphs.values() {
-        for (id, node) in subjects {
-            let entry = merged
-                .entry(id.clone())
-                .or_insert_with(|| Json::Obj(vec![("@id".to_string(), Json::Str(id.clone()))]));
+        for (id, node) in subjects.iter() {
             let Json::Obj(members) = node else { continue };
+            let Some(entry) = merged.get_mut(id) else {
+                // A subject's first node object: its values are already unique.
+                merged.insert(id.clone(), node.clone());
+                continue;
+            };
             for (prop, value) in members {
                 if prop.starts_with('@') && prop != "@type" {
                     if prop != "@id" {
                         entry.set(prop, value.clone());
                     }
                 } else {
-                    for v in as_slice(value) {
-                        add_unique(entry, prop, v.clone());
-                    }
+                    add_all_unique(entry, prop, as_slice(value));
                 }
             }
         }
     }
     merged
+}
+
+/// Adds each of `values` to the array member `prop` of `obj` (creating it) unless an
+/// equal value is already there, in time linear in the values.
+fn add_all_unique(obj: &mut Json, prop: &str, values: Vec<&Json>) {
+    if obj.get(prop).is_none() {
+        obj.set(prop, Json::Arr(Vec::new()));
+    }
+    let Some(Json::Arr(items)) = output_member_mut(obj, prop) else { return };
+    let key = |v: &Json| {
+        let mut s = String::new();
+        v.write(&mut s);
+        s
+    };
+    let mut seen: std::collections::HashSet<String> = items.iter().map(key).collect();
+    for v in values {
+        if seen.insert(key(v)) {
+            items.push(v.clone());
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -453,7 +495,6 @@ fn match_frame(
     embedded: bool,
 ) -> Result<(), JsonLdError> {
     let _nested = crate::context::budget::nest()?;
-    st.emit(json_bytes(frame))?;
     let frame_obj = validate_frame(frame)?;
     let flags = Flags {
         embed: frame_flag_embed(&frame_obj, st.options)?,
@@ -660,7 +701,7 @@ fn match_frame(
 
         // @default fill: frame properties absent from the output get their @default
         // value (or @null), wrapped under @preserve so compaction keeps them.
-        let Json::Obj(frame_members) = &frame_obj else {
+        let Json::Obj(frame_members) = &*frame_obj else {
             unreachable!("validate_frame returns an object")
         };
         let mut fprops: Vec<&(String, Json)> = frame_members.iter().collect();
@@ -774,11 +815,11 @@ fn implicit_frame(flags: &Flags) -> Json {
 /// Validate a frame (§4.2 step 1): it must be (an array holding) one map, and any
 /// `@id` / `@type` pattern must hold wildcards, `@default` maps, or absolute IRIs —
 /// a blank-node identifier raises `invalid frame`. Returns the frame object.
-fn validate_frame(frame: &Json) -> Result<Json, JsonLdError> {
+fn validate_frame(frame: &Json) -> Result<Cow<'_, Json>, JsonLdError> {
     let obj = match frame {
-        Json::Obj(_) => frame.clone(),
-        Json::Arr(items) if items.len() == 1 && items[0].is_obj() => items[0].clone(),
-        Json::Arr(items) if items.is_empty() => Json::obj(),
+        Json::Obj(_) => Cow::Borrowed(frame),
+        Json::Arr(items) if items.len() == 1 && items[0].is_obj() => Cow::Borrowed(&items[0]),
+        Json::Arr(items) if items.is_empty() => Cow::Owned(Json::obj()),
         _ => {
             return Err(JsonLdError::with_detail(
                 E::InvalidFrame,
@@ -981,7 +1022,7 @@ fn filter_subject(
             let this_frame = frame_values.first();
             let mut has_default = false;
             if let Some(tf) = this_frame {
-                validate_frame(&Json::Arr(vec![(*tf).clone()]))?;
+                validate_frame(tf)?;
                 has_default = tf.get("@default").is_some();
             }
             wildcard = false;
@@ -1190,19 +1231,6 @@ fn output_member_mut<'a>(obj: &'a mut Json, key: &str) -> Option<&'a mut Json> {
     }
 }
 
-/// Append `value` to the array member `prop` of `obj` (creating it), skipping an exact
-/// duplicate of an existing entry (the Merge Node Maps "without duplicates" rule).
-fn add_unique(obj: &mut Json, prop: &str, value: Json) {
-    if obj.get(prop).is_none() {
-        obj.set(prop, Json::Arr(Vec::new()));
-    }
-    if let Some(Json::Arr(items)) = output_member_mut(obj, prop) {
-        if !items.contains(&value) {
-            items.push(value);
-        }
-    }
-}
-
 /// Append `value` to the array member `prop` of `obj` (creating it), retaining
 /// duplicates (framing's add-output rule).
 fn append_value(obj: &mut Json, prop: &str, value: Json) {
@@ -1223,6 +1251,25 @@ fn demote_all_but_last_embed(element: &mut Json, id: &str) {
     if total > 1 {
         let mut seen = 0usize;
         demote_embeds(element, id, total - 1, &mut seen);
+    }
+}
+
+/// Count the full embeds of each of `ids` in `j` (node objects with that `@id` and
+/// other members).
+fn count_all_embeds(j: &Json, ids: &BTreeSet<String>, counts: &mut BTreeMap<String, usize>) {
+    match j {
+        Json::Arr(items) => items.iter().for_each(|i| count_all_embeds(i, ids, counts)),
+        Json::Obj(members) => {
+            if members.len() > 1 {
+                if let Some(id) = members.iter().find(|(k, _)| k == "@id").and_then(|(_, v)| v.as_str()) {
+                    if ids.contains(id) {
+                        *counts.entry(id.to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+            members.iter().for_each(|(_, v)| count_all_embeds(v, ids, counts));
+        }
+        _ => {}
     }
 }
 
@@ -1286,7 +1333,7 @@ fn prune_bnode_ids(j: &mut Json, to_clear: &BTreeSet<String>) {
         }
         Json::Obj(members) => {
             members.retain(|(k, v)| {
-                !(k == "@id" && matches!(v, Json::Str(s) if to_clear.contains(s)))
+                !(k == "@id" && matches!(v, Json::Str(s) if s.starts_with("_:") && to_clear.contains(s)))
             });
             for (_, v) in members {
                 prune_bnode_ids(v, to_clear);

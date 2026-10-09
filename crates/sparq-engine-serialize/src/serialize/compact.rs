@@ -24,7 +24,7 @@
 use super::{coerce_native, NamedGraph};
 use oxrdf::{NamedOrBlankNode, Term, Triple};
 use sparq_jsonld::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
-use sparq_jsonld::frame::{compact_framed, frame_match, FrameOptions};
+use sparq_jsonld::frame::{compact_framed, frame_match_expanded, FrameOptions};
 use sparq_jsonld::compact::compact_expanded;
 use sparq_jsonld::{JsonLdOptions, NoopLoader, ProcessingMode};
 
@@ -252,7 +252,7 @@ pub fn write_jsonld_framed(graphs: &[NamedGraph<'_>], frame_doc: &Json) -> Strin
     let opts = JsonLdOptions::default();
     let fopts = FrameOptions::default();
     let ctx = frame_doc.get("@context").cloned().unwrap_or_default();
-    let out = frame_match(&doc, frame_doc, &opts, &fopts, &NoopLoader).and_then(|matched| {
+    let out = frame_match_expanded(&doc, frame_doc, &opts, &fopts, &NoopLoader).and_then(|matched| {
         let framed = compact_framed(&matched, &ctx, &opts, &fopts, &NoopLoader)?;
         // The match stands; only its compaction is redone for a readable shape.
         Ok(match readable_type_maps(&framed, &ctx) {
