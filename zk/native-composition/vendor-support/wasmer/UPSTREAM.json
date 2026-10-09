@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "recorded_by": "GPT-6",
+  "package": "wasmer-derive",
+  "version": "6.1.0",
+  "archive_url": "https://static.crates.io/crates/wasmer-derive/wasmer-derive-6.1.0.crate",
+  "archive_sha256": "c546f3380840cd63fdcc390f04cd19002f2dfa19b4691b77ecbd27642bd93452",
+  "upstream_vcs": {
+    "git": {
+      "sha1": "3189527eec99cfea7e6991328509e72ed0bec2e0"
+    },
+    "path_in_vcs": "lib/derive"
+  },
+  "package_path": "vendor/wasmer-derive-6.1.0",
+  "patch_path": "diagnostics.patch",
+  "patch_sha256": "d0ad1b881fa16fc4b2867da1dc9dee9196a55102f22869b55117b8750f17be72",
+  "changed_files": [
+    "Cargo.toml",
+    "Cargo.toml.orig",
+    "src/lib.rs",
+    "src/value_type.rs"
+  ],
+  "upstream_license": {
+    "url": "https://raw.githubusercontent.com/wasmerio/wasmer/3189527eec99cfea7e6991328509e72ed0bec2e0/LICENSE",
+    "path": "LICENSE.upstream",
+    "sha256": "76dc7d305458d07478bc62669fe53dbfd3b94b95c5e00fbb45af1f492cbd7284",
+    "archive_contains_license": false
+  },
+  "unchanged_codegen_sha256": {
+    "zero_padding_function": "c482d1a7cb8ad68228ff94edafcd3b90dbc97f79a710689ed127ffb9625f47c4",
+    "unsafe_impl_quote_body": "f771fce996052c25f24056e42fc2bb0c868d05d794bf1b3bd9d333b0a0026694"
+  },
+  "files": {
+    ".cargo_vcs_info.json": {
+      "upstream_sha256": "b1b612782940ab4f0ae6ee5b758c88c3bcdf15d0c8783333dd8ae49d77f2fee9",
+      "patched_sha256": "b1b612782940ab4f0ae6ee5b758c88c3bcdf15d0c8783333dd8ae49d77f2fee9"
+    },
+    "Cargo.lock": {
+      "upstream_sha256": "6e54625591a87a42df2d32cbcc396724bdab65d7cbaef8126b57bc18bbcc4dd3",
+      "patched_sha256": "6e54625591a87a42df2d32cbcc396724bdab65d7cbaef8126b57bc18bbcc4dd3"
+    },
+    "Cargo.toml": {
+      "upstream_sha256": "732b02c7884af17b05c11c76cdb57690f47f347eb4efa6a629487bdcb4ec85b5",
+      "patched_sha256": "7c5ba63429ef4d1a35765299760496e7b1e88aa377a1cfd44c0390dcdaf361f4"
+    },
+    "Cargo.toml.orig": {
+      "upstream_sha256": "8047ad7c5344e7185fe2e29cf1aadbf6f2c6b7abe4498698f718de5e416af5cd",
+      "patched_sha256": "bba87ff87220e8a4d43bb3b2b44a475621f36f84807c6dce4fd5cf596764340e"
+    },
+    "src/lib.rs": {
+      "upstream_sha256": "b8dfc19c116156f2e5dab1f53380b0f1d59fee2ab02959206b40e2eb27657eab",
+      "patched_sha256": "2dc870b170fda898ec0a04403f01906c5661beb2978a19d36e22c71fcc4611d7"
+    },
+    "src/value_type.rs": {
+      "upstream_sha256": "1a1486a26e44f2a8690a6f879b066bfcb440c76f5204a2f9cd0efb85a33a525c",
+      "patched_sha256": "e867a0295d47e7a17da24e2f6232ab730fd39c661659f90c1c23ed5e20ac5541"
+    },
+    "tests/compile-fail/bad-attribute.rs": {
+      "upstream_sha256": "09e2391de99e34fcb37ec6597d3a36eb74fdb9c5ebbc5e28defce14c6be9e865",
+      "patched_sha256": "09e2391de99e34fcb37ec6597d3a36eb74fdb9c5ebbc5e28defce14c6be9e865"
+    },
+    "tests/compile-fail/bad-export-arg.rs": {
+      "upstream_sha256": "9d1d84826af63af06955a3bb2a51411a6680d774baca5c010f1468ac573e25b1",
+      "patched_sha256": "9d1d84826af63af06955a3bb2a51411a6680d774baca5c010f1468ac573e25b1"
+    },
+    "tests/compile-fail/no-lazy-init.rs": {
+      "upstream_sha256": "bece0507379641ae3ffcc381ec8f4095ee63beb23ed4a0e8542c8d25f5e290de",
+      "patched_sha256": "bece0507379641ae3ffcc381ec8f4095ee63beb23ed4a0e8542c8d25f5e290de"
+    },
+    "tests/compiletest.rs": {
+      "upstream_sha256": "be1220d332e23a42d95927a6263ccb640e602dcceb95a6d6921c10f415e483a3",
+      "patched_sha256": "be1220d332e23a42d95927a6263ccb640e602dcceb95a6d6921c10f415e483a3"
+    }
+  },
+  "policy": "audit-as-crates-io must remain true; upstream exact-version audit obligation plus independent full small-package/patch review; no audit or exemption created",
+  "runtime_validation": "pending remote compilation, diagnostics, generated-token and layout controls",
+  "patch_application": "git apply --unidiff-zero -p1; reverse and forward reconstruction required"
+}

@@ -5,7 +5,7 @@ description: Deploy sparq-server or configure the planned native sparq-lws-core 
 
 # Deploy sparq with Helm
 
-> [GPT-5.6] Verified against `deploy/helm/sparq` on 2026-07-15. The chart targets
+> Verified against `deploy/helm/sparq` on 2026-07-15. The chart targets
 > Kubernetes 1.20 or later and does not build images. The `sparq-server` GHCR image
 > is published; the LWS selector becomes runnable only after sq-lmz40 publishes its image.
 
@@ -21,7 +21,7 @@ Treat these as invariants:
   disabled-service-account-token settings.
 - Use `/health` on port 3030 for `sparq-server`; use `/livez` and `/readyz` on
   port 3000 for `lws`.
-- [GPT-5.6] Run exactly one replica of either server. `sparq-server` has an
+- Run exactly one replica of either server. `sparq-server` has an
   unreplicated writable in-memory store. The planned canonical LWS image lacks
   its opt-in Redis replay backend, and Redis alone would not provide a shared blob store.
 

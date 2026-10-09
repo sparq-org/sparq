@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: full-template README — the published sparq-rdf Python bindings. -->
+<!-- sq-inzv: full-template README — the published sparq-rdf Python bindings. -->
 # sparq (Python bindings)
 
 Python bindings for the [sparq](https://github.com/sparq-org/sparq) RDF + SPARQL engine:
@@ -86,6 +86,8 @@ g.ask("PREFIX ex: <http://ex/> ASK { ex:alice ex:knows ex:bob }")   # -> True
   (`maturin build --features arrow`). Which published PyPI wheels ship with `arrow`
   baked in is the broader release-matrix question (sq-v286); until then, build/install
   an `--features arrow` wheel yourself.
+
+`Graph.ask` retains VERSION announcements for ASK and SELECT-count queries; unknown or incompatible labels raise `ValueError`. See the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 
 ## 📚 Learn more
 

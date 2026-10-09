@@ -341,23 +341,21 @@ async fn sd_parses_and_carries_mandatory_terms() {
         "the 1.2-SD version-agnostic sd:SPARQLQuery advertised: {langs:?}"
     );
 
-    // [OPUS-4.8] sq-2msb (gh-917): the REAL served SD (through `service_capabilities`) carries
-    // sd:supportedVersion for exactly the conformance-verified versions — 1.0, 1.1 and the FULL
-    // 1.2 (the engine passes the complete sparql12 suite, so version-1.2, not -basic).
+    // The REAL served SD (through `service_capabilities`) carries sd:supportedVersion 1.0 and
+    // 1.1 only: the announced 1.2 semantics are only partly implemented.
     let versions = objects_of(&triples, &format!("{SD}supportedVersion"));
-    for v in [
-        "http://www.w3.org/ns/sparql#version-1.0",
-        "http://www.w3.org/ns/sparql#version-1.1",
-        "http://www.w3.org/ns/sparql#version-1.2",
-    ] {
-        assert!(
-            versions.contains(&v.to_string()),
-            "sd:supportedVersion {v} advertised: {versions:?}"
-        );
-    }
-    assert!(
-        !versions.iter().any(|v| v.contains("version-1.2-basic")),
-        "must advertise FULL version-1.2, not the -basic profile: {versions:?}"
+    assert_eq!(
+        versions
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>(),
+        [
+            "http://www.w3.org/ns/sparql#version-1.0",
+            "http://www.w3.org/ns/sparql#version-1.1"
+        ]
+        .into_iter()
+        .collect(),
+        "sd:supportedVersion: {versions:?}"
     );
 
     // sd:resultFormat advertises the four SPARQL-results serialisations + the three RDF ones.

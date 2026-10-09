@@ -1,4 +1,4 @@
-<!-- [GPT-5.6] sq-oprna.1: internal-stub README for a publish=false crate. -->
+<!-- sq-oprna.1: internal-stub README for a publish=false crate. -->
 # sparq-http3
 
 ## 🚀 Quick start
