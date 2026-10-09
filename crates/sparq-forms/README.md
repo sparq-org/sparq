@@ -5,8 +5,7 @@ Headless **SHACL-to-form derivation** for sparq: a pure function from
 — DASH-compatible auto-generated data-entry/edit forms, with **no GUI
 dependencies** (wasm-able by construction).
 
-> Model: Claude Fable 5 [FABLE-5] (sq-lsp7k.1.1). Design record
-> `research/competitive-feature-analysis-2026-07.md` §3.
+> Design record: `research/competitive-feature-analysis-2026-07.md` §3.
 
 ## 🚀 Quickstart
 

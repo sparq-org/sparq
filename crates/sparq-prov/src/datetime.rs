@@ -34,7 +34,6 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 mod tests {
     use super::*;
     use sparq_core::temporal::Timeline;
-    const XSD_DATE_TIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 
     #[test]
     fn epoch_zero_is_unix_epoch() {
@@ -55,7 +54,7 @@ mod tests {
         // parser) to exactly the same instant — proving the two are inverse.
         for &secs in &[0, 1, 86_400, 1_000_000_000, 1_700_000_000, 1_582_934_400] {
             let lex = format_utc(secs);
-            let tl = Timeline::parse_datetime_of(&lex, XSD_DATE_TIME).expect("formatted lexical must parse");
+            let tl = Timeline::parse_datetime(&lex).expect("formatted lexical must parse");
             assert_eq!(tl.instant() as i64, secs, "round-trip mismatch for {lex}");
         }
     }
@@ -107,7 +106,7 @@ mod tests {
     fn month_boundary_instants_round_trip() {
         for &secs in &[993_945_600_i64, 1_007_164_800] {
             let lex = format_utc(secs);
-            let tl = Timeline::parse_datetime_of(&lex, XSD_DATE_TIME)
+            let tl = Timeline::parse_datetime(&lex)
                 .unwrap_or_else(|| panic!("month-boundary lexical must parse: {lex}"));
             assert_eq!(tl.instant() as i64, secs, "round-trip mismatch for {}", lex);
         }

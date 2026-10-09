@@ -27,7 +27,7 @@ use sparq_core::Graph;
 use spargebra::term::{NamedNodePattern, TermPattern, TriplePattern};
 use spargebra::Query;
 
-use crate::{PreparedQuery, QueryBudget, QueryResult};
+use crate::{PreparedQuery, QueryBudget, QueryFailure, QueryResult};
 
 /// Executes a CONSTRUCT query, returning the constructed graph as a deduplicated
 /// triple list (an RDF graph is a set; first-production order is preserved).
@@ -51,6 +51,20 @@ pub fn construct_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
+    construct_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
+}
+
+/// Constructs a graph while preserving typed whole-query failures.
+///
+/// # Errors
+/// Returns actual budget/capacity causes or a whole-query evaluation diagnostic.
+/// Ordinary expression errors still omit invalid template instances.
+pub fn construct_prepared_with_budget_detailed(
+    graph: &Graph,
+    prepared: &PreparedQuery,
+    budget: &QueryBudget,
+) -> Result<Vec<Triple>, QueryFailure> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
@@ -58,12 +72,17 @@ pub fn construct_prepared_with_budget(
     let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     match q {
         Query::Construct { template, pattern, .. } => {
-            crate::exec::budget::with_budget(budget, || {
-                let solutions = crate::exec::eval_select(graph, pattern)?;
-                Ok(instantiate(template, &solutions))
+            crate::exec::budget::with_query_budget(budget, semantics, || {
+                let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+                let result = (|| {
+                    let solutions = crate::exec::eval_select(graph, pattern)?;
+                    instantiate(template, &solutions, graph)
+                })();
+                // Read the owning frame before its guard restores parent state.
+                result.map_err(|message| crate::exec::budget::failure().unwrap_or(QueryFailure::Evaluation(message)))
             })
         }
-        _ => Err("construct() requires a CONSTRUCT query".into()),
+        _ => Err(QueryFailure::Evaluation("construct() requires a CONSTRUCT query".into())),
     }
 }
 
@@ -89,6 +108,20 @@ pub fn describe_prepared_with_budget(
     prepared: &PreparedQuery,
     budget: &QueryBudget,
 ) -> Result<Vec<Triple>, String> {
+    describe_prepared_with_budget_detailed(graph, prepared, budget).map_err(|error| error.to_string())
+}
+
+/// Describes resources while preserving typed whole-query failures.
+///
+/// # Errors
+/// Returns actual budget/capacity causes or a whole-query evaluation diagnostic.
+/// The existing outgoing blank-node closure and source terms are unchanged.
+pub fn describe_prepared_with_budget_detailed(
+    graph: &Graph,
+    prepared: &PreparedQuery,
+    budget: &QueryBudget,
+) -> Result<Vec<Triple>, QueryFailure> {
+    let semantics = prepared.resolve_ebv_semantics(budget.ebv_semantics).map_err(QueryFailure::Evaluation)?;
     let q = prepared.query();
     let active = crate::active_dataset(graph, q);
     let graph = active.as_ref().unwrap_or(graph);
@@ -96,12 +129,16 @@ pub fn describe_prepared_with_budget(
     let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
     match q {
         Query::Describe { pattern, .. } => {
-            crate::exec::budget::with_budget(budget, || {
-                let solutions = crate::exec::eval_select(graph, pattern)?;
-                cbd(graph, &solutions)
+            crate::exec::budget::with_query_budget(budget, semantics, || {
+                let _query_base = crate::exec::set_query_base(q.base_iri().map(|b| b.as_str()));
+                let result = (|| {
+                    let solutions = crate::exec::eval_select(graph, pattern)?;
+                    cbd(graph, &solutions)
+                })();
+                result.map_err(|message| crate::exec::budget::failure().unwrap_or(QueryFailure::Evaluation(message)))
             })
         }
-        _ => Err("describe() requires a DESCRIBE query".into()),
+        _ => Err(QueryFailure::Evaluation("describe() requires a DESCRIBE query".into())),
     }
 }
 
@@ -141,9 +178,30 @@ pub fn construct_ntriples(graph: &Graph, sparql: &str) -> Result<String, String>
 }
 
 /// [`construct_ntriples`] under a cooperative [`QueryBudget`].
+///
+/// The budget also bounds the SERIALIZE step (#4344): writing out a large graph is itself
+/// unbounded work, so a deadline or cancellation that falls due during it is reported as
+/// the budget error instead of a complete-but-late body. Row/byte caps were already priced
+/// during evaluation, so the serialize gate checks only the deadline and cancellation.
 pub fn construct_ntriples_with_budget(graph: &Graph, sparql: &str, budget: &QueryBudget) -> Result<String, String> {
     let triples = construct_or_describe_with_budget(graph, sparql, budget)?;
-    Ok(triples_to_ntriples(&triples))
+    crate::exec::budget::with_budget(budget, || ntriples_budgeted(&triples))
+}
+
+/// [`triples_to_ntriples`] under the installed budget: a coarse deadline/cancel re-check
+/// every 1024 triples stops early, and the post-serialization gate turns that (or a trip
+/// after the last re-check) into the budget error, so a late body is never returned.
+fn ntriples_budgeted(triples: &[Triple]) -> Result<String, String> {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(triples.len() * 64);
+    for (i, t) in triples.iter().enumerate() {
+        if i & 1023 == 0 && crate::exec::budget::exhausted(0) {
+            break;
+        }
+        let _ = writeln!(out, "{} {} {} .", t.subject, t.predicate, t.object);
+    }
+    crate::exec::budget::check(0)?;
+    Ok(out)
 }
 
 /// Serialises triples as canonical N-Triples (one `s p o .` line per triple).
@@ -164,29 +222,46 @@ pub fn triples_to_ntriples(triples: &[Triple]) -> String {
 /// Instantiates `template` once per solution row, skipping triples with unbound
 /// or illegal slots, freshening template blank nodes per solution, and
 /// deduplicating the output (set semantics, first-production order).
-fn instantiate(template: &[TriplePattern], solutions: &QueryResult) -> Vec<Triple> {
+fn instantiate(template: &[TriplePattern], solutions: &QueryResult, graph: &Graph) -> Result<Vec<Triple>, String> {
+    #[cfg(feature = "deterministic-blank-nodes")]
+    let namespace = template_namespace(graph, solutions);
+    #[cfg(not(feature = "deterministic-blank-nodes"))]
+    let _ = graph;
     let cols: FxHashMap<&Variable, usize> =
         solutions.vars.iter().enumerate().map(|(i, v)| (v, i)).collect();
     let mut out: Vec<Triple> = Vec::new();
     let mut seen: FxHashSet<Triple> = FxHashSet::default();
-    for row in &solutions.rows {
+    #[cfg(feature = "deterministic-blank-nodes")]
+    let rows = solutions.rows.iter().enumerate();
+    #[cfg(not(feature = "deterministic-blank-nodes"))]
+    let rows = solutions.rows.iter().map(|row| ((), row));
+    for (_row_index, row) in rows {
         let get = |v: &Variable| -> Option<Term> { cols.get(v).and_then(|&i| row[i].clone()) };
         // Blank nodes in the template are scoped to one solution: the same label
         // maps to one fresh node within a row, different nodes across rows.
-        // `BlankNode::default()` is a random 128-bit id, so fresh nodes can never
-        // collide with data blank nodes flowing in from the WHERE solutions.
-        let mut row_bnodes: FxHashMap<&str, BlankNode> = FxHashMap::default();
+        // The optional deterministic namespace is chosen against all
+        // blank nodes in the active dataset and in the solution terms (an
+        // extension function can compute a blank node the dataset never held).
+        #[cfg(not(feature = "deterministic-blank-nodes"))]
+        let mut row_bnodes: TemplateNodes<'_> = FxHashMap::default();
+        #[cfg(feature = "deterministic-blank-nodes")]
+        let mut row_bnodes = TemplateNodes {
+            nodes: FxHashMap::default(),
+            prefix: format!("{namespace}{_row_index}_"),
+        };
         for tp in template {
             let Some(s) = subject_term(&tp.subject, &get, &mut row_bnodes) else { continue };
             let Some(p) = predicate_term(&tp.predicate, &get) else { continue };
             let Some(o) = object_term(&tp.object, &get, &mut row_bnodes) else { continue };
             let t = Triple { subject: s, predicate: p, object: o };
             if seen.insert(t.clone()) {
+                #[cfg(feature = "deterministic-blank-nodes")]
+                crate::exec::budget::check(out.len().checked_add(1).ok_or("CONSTRUCT output capacity")?)?;
                 out.push(t);
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Template subject: an IRI or blank node. A variable bound to a literal (or an
@@ -194,7 +269,7 @@ fn instantiate(template: &[TriplePattern], solutions: &QueryResult) -> Vec<Tripl
 fn subject_term<'a>(
     tp: &'a TermPattern,
     get: &dyn Fn(&Variable) -> Option<Term>,
-    row_bnodes: &mut FxHashMap<&'a str, BlankNode>,
+    row_bnodes: &mut TemplateNodes<'a>,
 ) -> Option<NamedOrBlankNode> {
     match tp {
         TermPattern::NamedNode(n) => Some(NamedOrBlankNode::NamedNode(n.clone())),
@@ -223,7 +298,7 @@ fn predicate_term(p: &NamedNodePattern, get: &dyn Fn(&Variable) -> Option<Term>)
 fn object_term<'a>(
     tp: &'a TermPattern,
     get: &dyn Fn(&Variable) -> Option<Term>,
-    row_bnodes: &mut FxHashMap<&'a str, BlankNode>,
+    row_bnodes: &mut TemplateNodes<'a>,
 ) -> Option<Term> {
     match tp {
         TermPattern::NamedNode(n) => Some(Term::NamedNode(n.clone())),
@@ -241,8 +316,72 @@ fn object_term<'a>(
     }
 }
 
-fn fresh<'a>(label: &'a str, row_bnodes: &mut FxHashMap<&'a str, BlankNode>) -> BlankNode {
+#[cfg(not(feature = "deterministic-blank-nodes"))]
+type TemplateNodes<'a> = FxHashMap<&'a str, BlankNode>;
+
+#[cfg(feature = "deterministic-blank-nodes")]
+struct TemplateNodes<'a> {
+    nodes: FxHashMap<&'a str, BlankNode>,
+    prefix: String,
+}
+
+#[cfg(not(feature = "deterministic-blank-nodes"))]
+fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
     row_bnodes.entry(label).or_default().clone()
+}
+
+#[cfg(feature = "deterministic-blank-nodes")]
+fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
+    let next = row_bnodes.nodes.len();
+    row_bnodes.nodes.entry(label).or_insert_with(|| {
+        BlankNode::new_unchecked(format!("{}{next}", row_bnodes.prefix))
+    }).clone()
+}
+
+#[cfg(feature = "deterministic-blank-nodes")]
+fn template_namespace(graph: &Graph, solutions: &QueryResult) -> String {
+    let mut labels = FxHashSet::default();
+    for (name, _) in &graph.named {
+        if let Term::BlankNode(node) = name {
+            labels.insert(node.as_str().to_owned());
+        }
+    }
+    for graph in std::iter::once(graph).chain(graph.named.iter().map(|(_, graph)| graph)) {
+        let scan = graph.store.scan(&[None, None, None]);
+        for row in scan.rows.iter() {
+            let [subject, _, object] = scan.to_spo(row);
+            blank_labels(vec![graph.dict.term(subject), graph.dict.term(object)], &mut labels);
+        }
+    }
+    for row in &solutions.rows {
+        blank_labels(row.iter().flatten().cloned().collect(), &mut labels);
+    }
+    // These prefixes are disjoint. N source labels occupy at most N prefixes,
+    // so examining N+1 candidates finds an unused namespace without randomness.
+    for index in 0..=labels.len() {
+        let prefix = format!("tc{index}_");
+        if labels.iter().all(|label| !label.starts_with(&prefix)) {
+            return prefix;
+        }
+    }
+    unreachable!("N labels cannot occupy N+1 disjoint namespaces")
+}
+
+/// Adds every blank-node label in `terms`, including inside triple terms.
+#[cfg(feature = "deterministic-blank-nodes")]
+fn blank_labels(mut terms: Vec<Term>, labels: &mut FxHashSet<String>) {
+    while let Some(term) = terms.pop() {
+        match term {
+            Term::BlankNode(node) => { labels.insert(node.as_str().to_owned()); }
+            Term::Triple(triple) => {
+                if let NamedOrBlankNode::BlankNode(node) = triple.subject {
+                    labels.insert(node.as_str().to_owned());
+                }
+                terms.push(triple.object);
+            }
+            _ => {}
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +458,37 @@ mod tests {
 
     fn nts(ts: &[Triple]) -> Vec<String> {
         ts.iter().map(|t| format!("{} {} {} .", t.subject, t.predicate, t.object)).collect()
+    }
+
+    /// #4344: the serialize step is budget-bounded. A cancellation raised after evaluation
+    /// (here: before the serialize step runs) is the answer, not the late body; an
+    /// untripped budget yields the same bytes as the unbudgeted writer.
+    #[test]
+    fn ntriples_serialize_is_budget_bounded() {
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+        let q = "PREFIX ex: <http://ex/> CONSTRUCT { ?s ex:years ?a } WHERE { ?s ex:age ?a }";
+        let triples = construct_or_describe(&g(), q).unwrap();
+        let tripped = QueryBudget::cancelled_by(Arc::new(AtomicBool::new(true)));
+        let err = crate::exec::budget::with_budget(&tripped, || ntriples_budgeted(&triples)).unwrap_err();
+        assert_eq!(err, "query budget exceeded (cancelled)");
+        let ok = QueryBudget::cancelled_by(Arc::new(AtomicBool::new(false)));
+        assert_eq!(construct_ntriples_with_budget(&g(), q, &ok).unwrap(), triples_to_ntriples(&triples));
+    }
+
+    #[test]
+    fn graph_queries_resolve_iri_against_their_own_base() {
+        let g = Graph::load_str("", "n-triples").unwrap();
+        // A previous query's BASE must not leak into a later graph query.
+        crate::query(&g, "BASE <https://other.example/> SELECT (IRI(\"x\") AS ?v) {}").unwrap();
+        let q = |form: &str| format!("BASE <https://example.org/> {form} WHERE {{ BIND(IRI(\"s\") AS ?s) }}");
+        let built = construct(&g, &q("CONSTRUCT { ?s <urn:p> <urn:o> }")).unwrap();
+        assert_eq!(nts(&built), ["<https://example.org/s> <urn:p> <urn:o> ."]);
+        crate::query(&g, "BASE <https://other.example/> SELECT (IRI(\"x\") AS ?v) {}").unwrap();
+        let none = construct(&g, "CONSTRUCT { ?s <urn:p> <urn:o> } WHERE { BIND(IRI(\"s\") AS ?s) }").unwrap();
+        assert!(none.is_empty(), "no BASE: a relative IRI() is a type error, so nothing is built");
+        let both = construct_or_describe(&g, &q("CONSTRUCT { ?s <urn:p> <urn:o> }")).unwrap();
+        assert_eq!(nts(&both), ["<https://example.org/s> <urn:p> <urn:o> ."]);
     }
 
     #[test]

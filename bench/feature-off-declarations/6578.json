@@ -1,0 +1,5 @@
+{
+  "pr": 6578,
+  "date": "2026-09-25",
+  "reason": "[GPT-6] This change replaces only diagnostic handling in the same-version Wasmer derive package used by the detached native-composition workspace, with explicit hosted layout/diagnostic controls and source provenance. It adds no shared core/engine runtime code or root-workspace dependency. Generated layout operations and cryptographic statements are unchanged by the source patch. This is an intent declaration, not measured feature-OFF neutrality; hosted compile, conformance, performance and WASM byte gates remain required. Outstanding native dependency audit and maintenance findings remain explicit."
+}

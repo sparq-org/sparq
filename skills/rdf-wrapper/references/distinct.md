@@ -5,4 +5,4 @@ Implemented behind the default-off `proposed-distinct` feature as the inherent
 Unlike the other implemented proposals, this feature has no `proposed::distinct`
 module.
 
-<!-- [SONNET-4.6] sq-1rg2q.1 -->
+<!-- sq-1rg2q.1 -->

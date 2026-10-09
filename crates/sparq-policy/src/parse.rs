@@ -22,7 +22,7 @@ use crate::model::{
     Operator, Policy, Rule, Value, ODRL_NS,
 };
 use oxrdf::{Literal, Term};
-use sparq_core::temporal::Timeline;
+use sparq_core::temporal::Temporal;
 use sparq_core::Graph;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -531,23 +531,14 @@ fn fold_rights(
             }
         }
         for m in expanded {
-            if seen.insert(node_key(&m), ()).is_none() {
+            // Every collection member is checked before the node-key deduplication. #3902.
+            if let Some(err) = ill_typed_operand(&m) {
+                return Err(err);
+            }
+            if seen.insert(m.to_string(), ()).is_none() {
                 members.push(m);
             }
         }
-    }
-    // An ill-typed temporal operand (a timezone-free `xsd:dateTimeStamp`, #3902) has no value.
-    // Classifying it by its lexical alone would compare a literal the datatype rejects; making
-    // the one constraint unsatisfiable would disable a prohibition it gates. So, like the
-    // malformed collections above, the policy is refused (fail-closed on both rule kinds).
-    if let Some(bad) = members.iter().find_map(|m| match m {
-        Term::Literal(l) if !Timeline::datetime_facets_ok(l.value(), l.datatype().as_str()) => Some(l),
-        _ => None,
-    }) {
-        return Err(format!(
-            "a constraint's rightOperand {bad} is not a valid value of its datatype \
-             (xsd:dateTimeStamp requires a timezone), so the policy is refused (fail-closed)"
-        ));
     }
     Ok(match members.len() {
         0 => None, // no rightOperand object at all → missing-right (unsatisfiable)
@@ -582,7 +573,35 @@ struct RawConstraint {
     left_conflict: bool,
     /// Set when the node carries several DISTINCT `operator` objects. #3832.
     op_conflict: bool,
+    /// The refusal for the first ill-typed right operand seen, recorded BEFORE the
+    /// node-key deduplication could collapse it into a same-lexical sibling. #3902.
+    ill_typed: Option<String>,
 }
+
+/// The refusal for a right operand with no value of its datatype: a timezone-free (or
+/// otherwise ill-formed) `xsd:dateTimeStamp`, whose timezone XSD 1.1 §3.4.28 requires.
+/// Comparing its lexical would decide access on a literal the datatype rejects, and
+/// making just its constraint unsatisfiable would disable a prohibition it gates, so, like
+/// a malformed collection operand, the whole policy is refused (fail-closed on both rule
+/// kinds). Checked on every operand before any deduplication. XSD whitespace collapse
+/// applies first, as the datatype's lexical space requires. #3902.
+fn ill_typed_operand(t: &Term) -> Option<String> {
+    let Term::Literal(l) = t else { return None };
+    if l.datatype().as_str() != DATE_TIME_STAMP {
+        return None;
+    }
+    let collapsed = l.value().trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r'));
+    if Temporal::of_lit(collapsed, DATE_TIME_STAMP).is_some() {
+        return None;
+    }
+    Some(format!(
+        "a constraint's rightOperand {l} is not a valid value of its datatype \
+         (xsd:dateTimeStamp requires a well-formed lexical with a timezone), so the policy \
+         is refused (fail-closed)"
+    ))
+}
+
+const DATE_TIME_STAMP: &str = "http://www.w3.org/2001/XMLSchema#dateTimeStamp";
 
 /// Bind a single-valued field from one result row, flagging `conflict` when a
 /// DIFFERENT value (by node key) has already been bound. #3832.
@@ -615,7 +634,12 @@ impl RawConstraint {
         absorb_single(&mut self.left, &mut self.left_conflict, left);
         absorb_single(&mut self.op, &mut self.op_conflict, op);
         if let Some(r) = right {
-            if self.rights_seen.insert(node_key(&r), ()).is_none() {
+            if self.ill_typed.is_none() {
+                self.ill_typed = ill_typed_operand(&r);
+            }
+            // Full RDF-term identity: a node key ignores a literal's datatype, so it would
+            // collapse `"x"^^A` into a same-lexical `"x"^^B` operand. #3902.
+            if self.rights_seen.insert(r.to_string(), ()).is_none() {
                 self.rights.push(r);
             }
         }
@@ -644,6 +668,9 @@ impl RawConstraint {
                      refused (fail-closed)"
                 ));
             }
+        }
+        if let Some(err) = self.ill_typed {
+            return Err(err);
         }
         let right = fold_rights(self.op.as_ref(), &self.rights, lists)?;
         Ok(build_constraint(self.left, self.op, right))
