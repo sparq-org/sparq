@@ -67,6 +67,7 @@ pub fn parse_policy(graph: &Graph) -> Result<Policy, String> {
     let lists = rdf_list_table(graph)?;
     let permissions = rules(graph, "permission", true, &lists)?;
     let prohibitions = rules(graph, "prohibition", false, &lists)?;
+    refuse_degraded_prohibitions(&prohibitions)?;
     let conflict = policy_conflict(graph)?;
     let party_collections = party_collections(graph)?;
     Ok(Policy {
@@ -458,7 +459,9 @@ fn is_set_operator(op: Option<&Term>) -> bool {
 ///   non-set operator (`eq`, `lt`, …) is ambiguous, and a separator-carrying
 ///   member would corrupt the encoding (splitting into unintended members — a
 ///   fail-OPEN hazard) — both degrade to `None` → the unsatisfiable guard
-///   (fail-closed, consistent with every other malformed-constraint path).
+///   (fail-closed, consistent with every other malformed-constraint path). That guard
+///   is fail-closed only on a permission; on a prohibition the whole policy is refused
+///   instead ([`refuse_degraded_prohibitions`]).
 ///
 /// Members are deduplicated by node key. An empty list (`rdf:nil` directly as the
 /// object) has no cons cell, so it falls through as the plain nil IRI — unmatchable
@@ -995,10 +998,47 @@ fn assemble_logical(
 /// and the compound-operand assembler. [OPUS-4.8] sq-a0zef.
 fn unsatisfiable_constraint() -> Constraint {
     Constraint {
-        left: "urn:sparq-policy:malformed".to_owned(),
+        left: MALFORMED.to_owned(),
         operator: Operator::Neq,
-        right: Value::Iri("urn:sparq-policy:malformed".to_owned()),
+        right: Value::Iri(MALFORMED.to_owned()),
     }
+}
+
+const MALFORMED: &str = "urn:sparq-policy:malformed";
+
+fn is_unsatisfiable_guard(c: &Constraint) -> bool {
+    c.left == MALFORMED
+}
+
+fn node_has_guard(n: &ConstraintNode) -> bool {
+    match n {
+        ConstraintNode::Atomic(c) => is_unsatisfiable_guard(c),
+        ConstraintNode::Compound(lc) => lc.operands.iter().any(node_has_guard),
+    }
+}
+
+/// The unsatisfiable guard fails closed only on a permission. On a prohibition it fails
+/// OPEN: the prohibition can never fire, so a sibling permission grants what the author
+/// forbade. A prohibition carrying a degraded constraint (atomic, or any operand of a
+/// compound) therefore refuses the whole policy, like a malformed collection operand.
+fn refuse_degraded_prohibitions(prohibitions: &[Rule]) -> Result<(), String> {
+    for r in prohibitions {
+        let degraded = r.constraints.iter().any(is_unsatisfiable_guard)
+            || r.logical_constraints
+                .iter()
+                .any(|lc| lc.operands.iter().any(node_has_guard));
+        if degraded {
+            return Err(format!(
+                "prohibition {} has a constraint that cannot be represented (a missing or \
+                 unknown operand or operator, a multi-valued rightOperand under a non-set \
+                 operator, an unencodable set member, or a malformed compound operand); \
+                 dropping it would disable the prohibition and let a sibling permission \
+                 grant, so the policy is refused (fail-closed)",
+                r.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Build a [`Constraint`], turning anything malformed/unknown into an
