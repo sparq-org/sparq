@@ -294,8 +294,15 @@ What the server exposes, all discoverable from the storage description
   put back. While set-aside changes hold 256 MiB or more to put back, new writes are answered
   `503` too (reads go on). A write's container is touched by the task that runs its store
   calls, so a client that goes away mid-write cannot leave the container's date behind. A
-  create whose store reply was lost is removed whole the same way. The set-aside state lives
-  in the process (a crash mid-way is not covered). A container listing never shows a change in
+  create whose store reply was lost is removed whole the same way. A write that changes
+  metadata and a recursive delete first store a durable intent: what each resource it will
+  change holds now, kept as a member of a `urn:` container outside the storage (no request can
+  name it). The intent is cleared once the change is kept or put back; one a process stop left
+  is put back when the server next starts, before it serves anything (what cannot be put back
+  then is set aside as above, and an intent that cannot be read stops the start). When a kept
+  change's intent cannot be cleared, the change is put back instead and the request fails. A
+  create needs none: its metadata is written before its content and removed after it, so no
+  stop leaves content without its metadata. A container listing never shows a change in
   flight to a member: it reads each member under that member's lock, and is read again once the
   change is over (`503` if its members keep changing); removing a member holds its container
   exclusively. A container whose modification time has not yet been, or could not be, moved on
