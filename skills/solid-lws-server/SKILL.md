@@ -223,7 +223,12 @@ visible.
 Set `SOLID_SERVER_PROTOCOL=lws` to serve the W3C Linked Web Storage 1.0 protocol
 (tracking `w3c/lws-protocol` main) instead of the Solid/LDP surface. The mode is
 self-contained in `src/lws/`: its own authorization server, access grants,
-notifications and type index, over the same `Store` backend.
+notifications and type index, over the same `Store` backend. It runs over the
+`memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
+because a remote write reported as failed may still commit later and nothing fences it yet.
+Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
+that; the owner's subscriptions are not counted), the server at most 512 of each (507),
+and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB.
 
 ```bash
 SOLID_SERVER_PROTOCOL=lws \

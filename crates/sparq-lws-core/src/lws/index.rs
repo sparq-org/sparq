@@ -38,6 +38,10 @@ pub const MAX_FILTER_GROUPS: usize = 32;
 /// readable resource.
 pub const MAX_FILTER_IRIS: usize = 256;
 
+/// Largest filter, in bytes. Every page link of a result set carries the filter, base64url-encoded
+/// (a third larger), so a filter is held to a size whose links fit well inside a request head.
+pub const MAX_FILTER_BYTES: usize = 8 * 1024;
+
 /// Relations the search never indexes: structural or protocol ones (section 7.1).
 const STRUCTURAL_RELATIONS: &[&str] = &[
     "type",
@@ -340,6 +344,12 @@ pub async fn handle<S: Store + 'static>(
                 Some(_) => filter_bytes = req.body.to_vec(),
             }
         }
+        if filter_bytes.len() > MAX_FILTER_BYTES {
+            return problem(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some(&format!("a filter is at most {MAX_FILTER_BYTES} bytes")),
+            );
+        }
         filter = match parse_filter(&filter_bytes) {
             Ok(f) => f,
             Err(FilterError::Malformed) => {
@@ -491,6 +501,29 @@ mod tests {
 
     fn parse(s: &str) -> Result<Filter, FilterError> {
         parse_filter(s.as_bytes())
+    }
+
+    /// Review finding: every page link carried the whole filter as sent, so a filter padded to a
+    /// megabyte gave links no request head can carry. A filter is held to its size first.
+    #[tokio::test]
+    async fn search_filters_are_held_to_their_size() {
+        use super::super::test_store;
+        let (state, _) = test_store::state(1).await;
+        let filter = format!(
+            "{{\"type\": [\"https://e.example/T\"], \"@padding\": \"{}\"}}",
+            "x".repeat(MAX_FILTER_BYTES)
+        );
+        let path = format!(
+            "{TYPE_SEARCH_PATH}?q={}&page=1",
+            jose::b64url(filter.as_bytes())
+        );
+        let r = handle(
+            &state,
+            &test_store::request(Method::GET, &path, &[], ""),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 
     #[tokio::test]
