@@ -237,12 +237,14 @@ fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
     })
 }
 
-/// A body sent with a content coding other than `identity` is refused (`415`, with
+/// A body (of POST, PUT, PATCH or QUERY) sent with a content coding other than `identity` is refused (`415`, with
 /// `Accept-Encoding: identity`, RFC 9110 section 15.5.16) before anything reads it: the server
 /// does not decode bodies, and storing the coded bytes as the representation would drop the
 /// coding.
-fn refuse_encoded(req: &LwsRequest) -> Option<Response> {
-    if !matches!(req.method, Method::POST | Method::PUT | Method::PATCH) {
+pub(crate) fn refuse_encoded(req: &LwsRequest) -> Option<Response> {
+    if !matches!(req.method, Method::POST | Method::PUT | Method::PATCH)
+        && req.method.as_str() != "QUERY"
+    {
         return None;
     }
     let codings = req.header_all(header::CONTENT_ENCODING);
@@ -286,9 +288,10 @@ pub(crate) fn read_refusal(req: &LwsRequest, etag: &str) -> Option<StatusCode> {
 }
 
 /// Preconditions are read once, here, from every field line: a list header (`If-Match`,
-/// `If-None-Match`) sent as several lines is all of them, not the first. A precondition that
-/// cannot be read (not visible ASCII, or a date header sent twice) fails the request rather than
-/// being skipped.
+/// `If-None-Match`) sent as several lines is all of them, not the first. An entity-tag list that
+/// cannot be read (not visible ASCII) fails the request rather than being skipped; a date that is
+/// not one valid HTTP-date (unparsable, or sent twice) is ignored, as RFC 9110 sections 13.1.3
+/// and 13.1.4 require.
 fn evaluate(
     headers: &HeaderMap,
     etag: Option<&str>,
@@ -346,12 +349,10 @@ impl Preconditions {
         };
         let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
             let mut lines = headers.get_all(n).iter();
-            match (lines.next(), lines.next()) {
-                (None, _) => Ok(None),
-                // An unparsable date is ignored (RFC 9110 sections 13.1.3 and 13.1.4).
-                (Some(v), None) => Ok(parse_http_date(v.to_str().ok())),
-                (Some(_), Some(_)) => Err(()),
-            }
+            Ok(match (lines.next(), lines.next()) {
+                (Some(v), None) => parse_http_date(v.to_str().ok()),
+                _ => None,
+            })
         };
         Ok(Self {
             if_match: list(header::IF_MATCH)?,
@@ -5283,8 +5284,8 @@ mod tests {
     }
 
     /// Review finding: only the first field line of a conditional header was read, so a second
-    /// `If-None-Match: *` line let a write through. Every line counts now, and a precondition
-    /// that cannot be read fails the request.
+    /// `If-None-Match: *` line let a write through. Every line counts now, an entity-tag list
+    /// that cannot be read fails the request, and a date that is not one valid date is ignored.
     #[tokio::test]
     async fn every_line_of_a_precondition_counts() {
         let st = state().await;
@@ -5292,14 +5293,9 @@ mod tests {
         let r = call(&st, "POST", "/", &[("slug", "x"), text], "a").await;
         assert_eq!(r.status(), StatusCode::CREATED);
         let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
-        let since = "Thu, 01 Jan 2099 00:00:00 GMT";
         for refused in [
             &[("if-none-match", "\"other\""), ("if-none-match", "*")][..],
             &[("if-match", "\"other\""), ("if-match", "\"other2\"")][..],
-            &[
-                ("if-unmodified-since", since),
-                ("if-unmodified-since", since),
-            ][..],
             &[("if-match", "\"caf\u{e9}\"")][..],
             &[("if-none-match", "\"other\""), ("if-none-match", "\u{e9}")][..],
         ] {
@@ -5316,6 +5312,16 @@ mod tests {
         ];
         let r = call(&st, "GET", "/x", &lines, "").await;
         assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        // A date sent twice is not a valid HTTP-date, and is ignored (RFC 9110 section 13.1.4).
+        let past = "Thu, 01 Jan 1970 00:00:00 GMT";
+        let lines = [
+            ("if-unmodified-since", past),
+            ("if-unmodified-since", past),
+            text,
+        ];
+        let r = call(&st, "PUT", "/x", &lines, "b").await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
         let lines = [("if-match", "\"other\""), ("if-match", tag.as_str()), text];
         let r = call(&st, "PUT", "/x", &lines, "b").await;
         assert!(r.status().is_success(), "{}", r.status());

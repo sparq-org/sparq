@@ -272,7 +272,7 @@ What the server exposes, all discoverable from the storage description
   `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`.
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
   `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
-  lines counts every line, and one that cannot be read gets `412`. A `POST` whose name is taken (or is being created,
+  lines counts every line; an entity-tag list that cannot be read gets `412`, and a date that is not one valid HTTP-date is ignored. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. A `PATCH` whose result would exceed the body limit gets `413`, for merge
   patches as well as JSON Patch. Every JSON Patch operation, `move` included, is counted by its
