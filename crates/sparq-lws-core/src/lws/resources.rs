@@ -1497,17 +1497,18 @@ where
 /// admits.
 ///
 /// - Metadata unchanged: one content write, which lands whole or not at all.
-/// - Metadata changed: three writes. The old metadata marked `pending` first (when that fails,
-///   nothing changed); then the content; then the new metadata, which clears the mark. When the
-///   content write is refused the old metadata is put back; a backend failure may follow a
-///   write that committed, so it leaves the mark. Whenever a step after the first fails,
-///   rollback included, the `pending` mark stays and the resource fails closed: only its owner
-///   and creator may act on it (see [`access::allowed`](super::access::allowed)) until a write
-///   completes.
+/// - Metadata changed: three writes, through a [`Journal`](super::Journal). The old metadata
+///   marked `pending` first; then the content; then the new metadata, which clears the mark.
+///   When any step fails, the journal puts back what the steps before it did, the last first, so
+///   the resource is as it was: its content and its metadata. When putting back fails too, the
+///   `pending` mark stays and the resource fails closed: only its owner and creator may act on it
+///   (see [`access::allowed`](super::access::allowed)) until a write completes.
 ///
 /// The writes, a lone content write included, run with the resource's lock (`guard`, handed back
 /// when they are done) held, in the request's own task (see [`hold_locks`]), so a client that goes
 /// away mid-way cancels neither the writes nor the rollback, and nobody sees the steps in between.
+///
+/// The last element says the failure is settled: everything was put back, so nothing changed.
 async fn write_with_meta<S: Store + 'static>(
     state: &LwsState<S>,
     guard: IriGuard,
@@ -1518,6 +1519,7 @@ async fn write_with_meta<S: Store + 'static>(
 ) -> (
     Result<crate::store::sparq::ResourceMeta, ServerError>,
     Option<IriGuard>,
+    bool,
 ) {
     let changed = meta
         .map(|(mut new, old)| {
@@ -1527,42 +1529,41 @@ async fn write_with_meta<S: Store + 'static>(
         .filter(|(new, old)| old.clone().unwrap_or_default() != *new);
     // Metadata that could not be stored is refused before anything is written.
     if let Some(Err(e)) = changed.as_ref().map(|(new, _)| encode_meta(new)) {
-        return (Err(e), Some(guard));
+        return (Err(e), Some(guard), true);
     }
     let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
     let Some((new, old)) = changed else {
         let write = async move { state.store.write(&uri, body, &content_type).await };
         return match hold_locks(guard, write).await {
-            Ok((written, guard)) => (written, Some(guard)),
-            Err(e) => (Err(e), None),
+            Ok((written, guard)) => (written, Some(guard), false),
+            Err(e) => (Err(e), None, false),
         };
     };
     let writes = async move {
-        let mut closed = old.clone().unwrap_or_default();
-        closed.pending = true;
-        state.put_resource_meta(&uri, &closed).await?;
-        let written = match state.store.write(&uri, body, &content_type).await {
-            Ok(m) => m,
-            Err(e) => {
-                // The old metadata goes back only when the store refused the write outright. A
-                // backend failure (a remote store's timeout, a lost reply) may come after the
-                // write committed, and the new content must not be served under the old
-                // metadata: the mark stays, as it does when the rollback fails. Fail closed.
-                if !matches!(e, ServerError::Storage(_)) {
-                    let _ = match &old {
-                        Some(old) => state.put_resource_meta(&uri, old).await,
-                        None => state.store.delete(&meta_key(&uri), None).await,
-                    };
-                }
-                return Err(e);
+        let mut journal = state.journal();
+        let steps = async {
+            let mut closed = old.clone().unwrap_or_default();
+            closed.pending = true;
+            journal.write_meta(&uri, &closed).await?;
+            let written = journal.write(&uri, body, &content_type).await?;
+            journal.write_meta(&uri, &new).await?;
+            Ok(written)
+        }
+        .await;
+        match steps {
+            Ok(written) => {
+                journal.commit();
+                (Ok(written), false)
             }
-        };
-        state.put_resource_meta(&uri, &new).await?;
-        Ok(written)
+            Err(e) => {
+                let undone = journal.rollback().await.is_ok();
+                (Err(e), undone)
+            }
+        }
     };
     match hold_locks(guard, writes).await {
-        Ok((outcome, guard)) => (outcome, Some(guard)),
-        Err(e) => (Err(e), None),
+        Ok(((outcome, undone), guard)) => (outcome, Some(guard), undone),
+        Err(e) => (Err(e), None, false),
     }
 }
 
@@ -1652,7 +1653,7 @@ async fn update<S: Store + 'static>(
     };
     rmeta.types = all_types(&declared, stated);
     rmeta.declared_types = Some(declared);
-    let (written, _guard) = write_with_meta(
+    let (written, _guard, undone) = write_with_meta(
         state,
         guard,
         uri,
@@ -1663,6 +1664,7 @@ async fn update<S: Store + 'static>(
     .await;
     let written = match written {
         Ok(m) => m,
+        Err(e) if undone => return store_error(e),
         Err(e) => {
             drop(listing);
             return unsettled(state, uri, e).await;
@@ -1783,8 +1785,8 @@ async fn delete<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     listing.take();
-    // A removal whose outcome is unknown may have happened: the container is touched for it too.
-    if removed > 0 || matches!(outcome, Err(ServerError::Storage(_))) {
+    // A removal that was put back changed nothing; one that could not be is counted in `removed`.
+    if removed > 0 {
         if let Some(p) = parent {
             touch_container(state, &p).await;
         }
@@ -1857,36 +1859,44 @@ async fn lock_subtree<S: Store + 'static>(
 }
 
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
-/// metadata (which says who may act on it, so it goes only once the resource has). Stops at the
-/// first failure, the metadata's included; returns how many of `doomed`, from the front, were
-/// removed, and the outcome.
+/// metadata (which says who may act on it, so it goes only once the resource has), through one
+/// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
+/// removal before it is put back. Returns how many of `doomed` are gone (all of them, or none
+/// unless putting back failed too), and the outcome. A subtree too large to put back is refused
+/// (409) the same way.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
 ) -> (usize, Result<(), ServerError>) {
+    let mut journal = state.journal();
+    let mut failed = None;
     for (i, (node, parent)) in doomed.iter().enumerate() {
         // The record and its parent's membership edge go in one step, data resources included:
         // removed one after the other, a failure in between would leave a live resource its
         // container no longer lists, which a retried recursive delete would not find.
-        let removed = match super::remove_member(&state.store, node, parent.as_deref()).await {
+        let removed = match journal.remove_member(node, parent.as_deref()).await {
             Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
                 "the container gained a member while it was deleted".into(),
             )),
-            Ok(_) => Ok(()),
+            Ok(_) => journal.delete(&meta_key(node)).await,
             Err(e) => Err(e),
         };
         if let Err(e) = removed {
-            return (i, Err(e));
-        }
-        // The resource is gone; metadata that survives it would describe the next resource at the
-        // IRI, so a failure to remove it is a failure of the delete (and a create replaces such
-        // metadata before it writes any content).
-        match state.store.delete(&meta_key(node), None).await {
-            Ok(_) | Err(ServerError::NotFound) => {}
-            Err(e) => return (i + 1, Err(e)),
+            failed = Some((i, e));
+            break;
         }
     }
-    (doomed.len(), Ok(()))
+    match failed {
+        None => {
+            journal.commit();
+            (doomed.len(), Ok(()))
+        }
+        Some((i, e)) => match journal.rollback().await {
+            Ok(()) => (0, Err(e)),
+            // Something may be gone: report it so the container is touched.
+            Err(_) => (i.max(1), Err(e)),
+        },
+    }
 }
 
 // ---- linksets ----
@@ -3590,9 +3600,99 @@ mod tests {
         );
     }
 
+    /// Review finding: a recursive DELETE removed each descendant on its own, so a failure part way
+    /// left those before it gone; and a PUT that changed metadata kept its new content when the
+    /// last write failed. Every mutation of more than one store step goes through one journal:
+    /// failing each of its steps in turn leaves content, metadata and membership as they were.
+    #[tokio::test]
+    async fn mutations_are_whole_or_not_at_all() {
+        use super::super::test_store::{each_failure_changes_nothing, request as req, state};
+        let container = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let tree = || {
+            let container = container.clone();
+            async move {
+                let (st, store) = state(100).await;
+                let anyone = Agent::anonymous();
+                let post = |path: &str, slug: &str, link: Option<&str>, body: &str| {
+                    let mut h = vec![("slug", slug), ("content-type", "text/turtle")];
+                    if let Some(l) = link {
+                        h.push(("link", l));
+                    }
+                    req(Method::POST, path, &h, body)
+                };
+                for (path, slug, link) in [
+                    ("/", "c", Some(container.as_str())),
+                    ("/c/", "a", None),
+                    ("/c/", "d", Some(container.as_str())),
+                    ("/c/d/", "b", Some("<https://e.example/L>; rel=\"license\"")),
+                ] {
+                    let r = handle(
+                        &st,
+                        &post(path, slug, link, "<> a <https://e.example/T> ."),
+                        &anyone,
+                    )
+                    .await;
+                    assert_eq!(r.status(), StatusCode::CREATED);
+                }
+                let root = st.cfg.storage();
+                // The storage root too: its validators must not move for a change that was undone.
+                let iris: Vec<String> = ["", "c/", "c/a", "c/d/", "c/d/b", "c/n"]
+                    .iter()
+                    .map(|p| format!("{root}{p}"))
+                    .collect();
+                let listings = vec![root, iris[1].clone(), iris[3].clone()];
+                (st, store, iris, listings)
+            }
+        };
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let r = handle(
+                &st,
+                &req(Method::DELETE, "/c/", &[("depth", "infinity")], ""),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(steps >= 8, "a delete of four resources took {steps} steps");
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let h = [
+                ("content-type", "text/turtle"),
+                ("prefer", "set-linkset"),
+                ("link", "<https://e.example/Other>; rel=\"type\""),
+            ];
+            let r = handle(
+                &st,
+                &req(Method::PUT, "/c/d/b", &h, "<> a <https://e.example/U> ."),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(
+            steps >= 3,
+            "a write that changes metadata took {steps} steps"
+        );
+        // Creates: the new member, its metadata and the container's listing, or none of them.
+        let steps = each_failure_changes_nothing(&tree, |st| async move {
+            let h = [("content-type", "text/turtle"), ("slug", "n")];
+            let r = handle(
+                &st,
+                &req(Method::POST, "/c/", &h, "<> a <https://e.example/U> ."),
+                &Agent::anonymous(),
+            )
+            .await;
+            r.status()
+        })
+        .await;
+        assert!(steps >= 2, "a create took {steps} steps");
+    }
+
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
-    /// the next resource created at the IRI; and a create wrote its content before its creator
-    /// metadata, so a failure in between left the new content under the old creator.
+    /// the next resource created at the IRI (a failed delete is now put back whole); and a create
+    /// wrote its content before its creator metadata, so a failure in between left the new
+    /// content under the old creator.
     #[tokio::test]
     async fn stale_metadata_never_describes_new_content() {
         use super::super::test_store::{request as req, FlakyStore};
@@ -3629,8 +3729,15 @@ mod tests {
         let r = handle(&st, &req(Method::DELETE, &px, &[], ""), &owner).await;
         assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
         *store.fail_delete_of.lock().unwrap() = None;
-        assert!(!st.store.exists(&x).await.unwrap());
+        // The delete was put back whole: the resource and its metadata are as they were.
+        assert!(st.store.exists(&x).await.unwrap());
         assert_eq!(st.resource_meta(&x).await.unwrap().creator, bob.subject);
+        // Metadata left behind with no resource (as a store failure before deletes were put back
+        // could leave it).
+        super::super::remove_member(&st.store, &x, Some(&st.cfg.storage()))
+            .await
+            .unwrap();
+        assert!(!st.store.exists(&x).await.unwrap());
         // A create at the IRI whose metadata write fails creates nothing under Bob's metadata.
         *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
         assert!(post(owner.clone()).await.status().is_server_error());
