@@ -959,18 +959,19 @@ fn a_fail_closed_skip_taints_every_later_document() {
     );
 }
 
-/// The math: comparisons compare f64 images (GH #6745 tracks datatype-driven XPath
-/// promotion): integers past 2^53 that share an f64 image compare equal, as before.
+/// The math: comparisons follow XPath numeric promotion by datatype (GH #6745): two
+/// integers past 2^53 compare exactly, while a double operand promotes the integer to
+/// `xsd:double`, where the two share an image and compare equal.
 #[test]
-fn math_comparisons_compare_f64_images() {
+fn math_comparisons_promote_by_datatype() {
     let (c, _) = run("@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
          @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n\
          { 9007199254740993 math:equalTo 9007199254740992 } => { :a :int :eq } .\n\
          { \"9007199254740993\"^^xsd:double math:equalTo 9007199254740992 } => { :a :dbl :eq } .\n\
          { 9007199254740993 math:greaterThan 9007199254740992 } => { :a :int :gt } .");
-    assert!(c.contains(&t("a", "int", "eq")), "{c:?}");
+    assert!(!c.contains(&t("a", "int", "eq")), "{c:?}");
     assert!(c.contains(&t("a", "dbl", "eq")), "{c:?}");
-    assert!(!c.contains(&t("a", "int", "gt")), "{c:?}");
+    assert!(c.contains(&t("a", "int", "gt")), "{c:?}");
 }
 
 /// `string:format`'s `%f` renders an integer or decimal exactly from its digits.
