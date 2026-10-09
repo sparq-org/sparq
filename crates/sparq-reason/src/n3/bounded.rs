@@ -56,30 +56,44 @@ pub(crate) trait Sink {
 /// A run's cut record: the first reason any search of the run was cut short. Every part
 /// of one logical evaluation (nested closures, an explicit-strata pipeline, a query and
 /// the closure it projects over) records into the SAME handle, and it is never reset.
+/// The record also carries the run's [`ClosureLimits`], so every forward closure of the
+/// run (nested ones included) gets the allowance its entry point was given.
 ///
-/// The field is private and there is no `Default`: the only way to make a fresh record
-/// is [`Truncation::top_level`], which a top-level entry point calls once. Every nested
-/// evaluation takes its parent's handle (a `clone` shares the same record), so an inner
-/// cut always reaches the parent.
+/// The fields are private and there is no `Default`: the only ways to make a fresh record
+/// are [`Truncation::top_level`] and [`Truncation::top_level_with`], which a top-level
+/// entry point calls once. Every nested evaluation takes its parent's handle (a `clone`
+/// shares the same record), so an inner cut always reaches the parent.
 #[derive(Clone)]
-pub(crate) struct Truncation(Rc<Cell<Option<&'static str>>>);
+pub(crate) struct Truncation {
+    cut: Rc<Cell<Option<&'static str>>>,
+    limits: ClosureLimits,
+}
 
 impl Truncation {
-    /// The cut record of a new TOP-LEVEL run. A nested run must reuse its parent's.
+    /// The cut record of a new TOP-LEVEL run under the default [`ClosureLimits`]. A nested
+    /// run must reuse its parent's.
     pub(crate) fn top_level() -> Truncation {
-        Truncation(Rc::default())
+        Truncation::top_level_with(ClosureLimits::default())
+    }
+
+    /// The cut record of a new TOP-LEVEL run whose forward closures get `limits`.
+    pub(crate) fn top_level_with(limits: ClosureLimits) -> Truncation {
+        Truncation {
+            cut: Rc::default(),
+            limits,
+        }
     }
 
     /// The first cut the run recorded, if any.
     pub(crate) fn get(&self) -> Option<&'static str> {
-        self.0.get()
+        self.cut.get()
     }
 }
 
 impl Sink for Truncation {
     fn record(&self, why: &'static str) {
-        if self.0.get().is_none() {
-            self.0.set(Some(why));
+        if self.cut.get().is_none() {
+            self.cut.set(Some(why));
         }
     }
 }
@@ -217,6 +231,103 @@ impl Pending {
         Bounded {
             value,
             cut: self.0.get(),
+        }
+    }
+}
+
+/// Default [`ClosureLimits::max_rounds`]. A semi-naive closure runs about one round per
+/// derivation step on its longest chain, so a linear walk of N nodes needs about N rounds;
+/// a rule set that derives a new, syntactically distinct fact every round without end
+/// (GH #6757) is stopped here instead of running until memory runs out.
+const CLOSURE_ROUNDS: usize = 1_000_000;
+/// Default [`ClosureLimits::max_facts`]: facts one forward closure may hold, asserted and
+/// derived together.
+const CLOSURE_FACTS: usize = 50_000_000;
+
+/// Why a forward closure was stopped by its [`ClosureLimits`].
+const CLOSURE_CUT: &str = "forward closure limit exceeded";
+
+/// The iteration allowance of one N3 forward closure: how many rounds it may run and how
+/// many facts it may hold before it is refused.
+///
+/// A rule set that never reaches a fixpoint (each round derives a new, syntactically
+/// distinct fact) would otherwise run forever. When either allowance is spent the closure
+/// fails with an `Err` naming the limit (`"forward closure limit exceeded"`) and records
+/// it as a cut, so no entry point returns the truncated closure as a result. Each forward
+/// closure gets the allowance afresh: a nested `log:conclusion` closure of a run gets the
+/// same limits as the run, not a share of them.
+///
+/// This is an ITERATION bound, not a memory bound: a few rounds over terms that grow (a
+/// string that doubles each round) can still exhaust memory well inside both allowances
+/// (GH #6771).
+///
+/// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits) or
+/// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits); every other
+/// N3 entry point uses [`ClosureLimits::default`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClosureLimits {
+    /// Rounds one forward closure may run (summed over its strata). Default 1,000,000.
+    pub max_rounds: usize,
+    /// Facts one forward closure may hold, asserted and derived together. Default
+    /// 50,000,000.
+    pub max_facts: usize,
+}
+
+impl Default for ClosureLimits {
+    /// 1,000,000 rounds and 50,000,000 facts.
+    fn default() -> Self {
+        ClosureLimits {
+            max_rounds: CLOSURE_ROUNDS,
+            max_facts: CLOSURE_FACTS,
+        }
+    }
+}
+
+/// The round and fact allowance of one forward closure (`run_closure`).
+pub(crate) struct ClosureRounds {
+    /// Rounds the closure may still run.
+    left: usize,
+    /// The allowance it started with.
+    limits: ClosureLimits,
+}
+
+impl ClosureRounds {
+    /// The allowance of a fresh forward closure of the run `run`: its [`ClosureLimits`].
+    pub(crate) fn forward(run: &Truncation) -> Self {
+        #[cfg(test)]
+        let limits = tests::CLOSURE_OVERRIDE.with(Cell::get).map_or(
+            run.limits,
+            |(max_rounds, max_facts)| ClosureLimits {
+                max_rounds,
+                max_facts,
+            },
+        );
+        #[cfg(not(test))]
+        let limits = run.limits;
+        ClosureRounds {
+            left: limits.max_rounds,
+            limits,
+        }
+    }
+
+    /// One more round, the closure now holding `facts` facts. Past the allowance the
+    /// closure is incomplete: the cut is recorded on `cuts` (so every enclosing run's
+    /// negation gate refuses to read it) and the closure fails with an error, so no
+    /// caller takes the truncated fact set for a fixpoint.
+    pub(crate) fn round(&mut self, facts: usize, cuts: &impl Sink) -> Result<(), String> {
+        match self.left.checked_sub(1) {
+            Some(left) if facts <= self.limits.max_facts => {
+                self.left = left;
+                Ok(())
+            }
+            _ => {
+                cuts.record(CLOSURE_CUT);
+                Err(format!(
+                    "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
+                     the rules keep deriving new facts (raise ClosureLimits to allow more)",
+                    self.limits.max_rounds, self.limits.max_facts
+                ))
+            }
         }
     }
 }
@@ -407,10 +518,297 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
 mod tests {
     use super::*;
 
+    thread_local! {
+        /// A test's `(rounds, facts)` closure allowance in place of the defaults.
+        pub(super) static CLOSURE_OVERRIDE: Cell<Option<(usize, usize)>> =
+            const { Cell::new(None) };
+    }
+
     fn cut_of<T>(b: Bounded<T>) -> (T, bool) {
         let sink = Cell::new(false);
         let v = settle(&sink, b);
         (v, sink.get())
+    }
+
+    /// The GH #6757 programs: a backward rule concludes a formula holding a variable (or
+    /// an `@forAll` universal), and a forward rule copies it out. Every backward proof
+    /// renames the variable apart, so each round derives a new, syntactically distinct
+    /// fact and the closure never saturates.
+    const DIVERGING: [&str; 4] = [
+        "@prefix : <http://example.org/#>.\n\
+         { :a :p { ?x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t ?f } } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :b :r ?f } .\n",
+    ];
+
+    /// `f` under a small closure allowance.
+    fn with_allowance<T>(rounds: usize, facts: usize, f: impl FnOnce() -> T) -> T {
+        CLOSURE_OVERRIDE.with(|c| c.set(Some((rounds, facts))));
+        let out = f();
+        CLOSURE_OVERRIDE.with(|c| c.set(None));
+        out
+    }
+
+    fn assert_closure_limit<T: std::fmt::Debug>(what: &str, r: Result<T, String>) {
+        match r {
+            Err(e) => assert!(e.contains(CLOSURE_CUT), "{what}: {e}"),
+            Ok(v) => panic!("{what}: a truncated closure came back as a result: {v:?}"),
+        }
+    }
+
+    /// Every public entry point fails with the closure-limit error on a diverging
+    /// program, instead of returning the truncated closure or running out of memory.
+    fn every_entry_point_refuses(doc: &str, rounds: usize, facts: usize) {
+        use crate::n3::{self, RuleVars};
+        use sparq_core::dict::Dict;
+        with_allowance(rounds, facts, || {
+            assert_closure_limit("reason_n3", n3::reason_n3(&mut Dict::new(), doc));
+            assert_closure_limit(
+                "reason_n3_terms",
+                n3::reason_n3_terms(doc, None).map(|c| c.facts.len()),
+            );
+            assert_closure_limit(
+                "reason_n3_proof",
+                n3::reason_n3_proof(&mut Dict::new(), doc),
+            );
+            assert_closure_limit(
+                "reason_n3_proof_run",
+                n3::reason_n3_proof_run(&mut Dict::new(), doc).map(|r| r.closure),
+            );
+            for vars in [RuleVars::N3, RuleVars::VarIris] {
+                assert_closure_limit("reason_n3_pass_all", n3::reason_n3_pass_all(doc, vars));
+            }
+            let query = "@prefix : <http://example.org/#>. { :a :r ?f } => { :a :answer ?f } .";
+            assert_closure_limit(
+                "reason_n3_query_terms",
+                n3::reason_n3_query_terms(doc, query),
+            );
+            assert_closure_limit(
+                "reason_n3_query",
+                n3::reason_n3_query(&mut Dict::new(), doc, query),
+            );
+            assert_closure_limit(
+                "reason_n3_stratified",
+                n3::reason_n3_stratified(&mut Dict::new(), &["", doc]).map(|c| c.facts),
+            );
+            // The incremental graph's batch fallback refuses the rules the same way.
+            assert_closure_limit(
+                "MaterializedN3Graph::new",
+                crate::MaterializedN3Graph::new(doc, &[]).map(|g| g.closure().len()),
+            );
+        });
+    }
+
+    #[test]
+    fn a_diverging_closure_stops_at_its_limit_with_an_error() {
+        for doc in DIVERGING {
+            every_entry_point_refuses(doc, 64, CLOSURE_FACTS);
+            // The fact allowance trips on its own too.
+            every_entry_point_refuses(doc, CLOSURE_ROUNDS, 32);
+        }
+    }
+
+    #[test]
+    fn a_diverging_closure_with_negation_is_refused() {
+        for doc in DIVERGING {
+            let neg = format!(
+                "{doc}@prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+                 {{ ?s :r ?f. ?s log:notIncludes {{ ?s :never ?f }} }} => {{ ?s :checked ?f }} .\n\
+                 {{ :a :r ?f. (?f {{ :a :r ?f }} ?all) log:collectAllIn _:t. }} => {{ :a :all ?all }} .\n"
+            );
+            every_entry_point_refuses(&neg, 64, CLOSURE_FACTS);
+        }
+    }
+
+    #[test]
+    fn a_terminating_program_reports_no_cut_under_the_default_allowance() {
+        use crate::n3;
+        // A transitive chain and a negation over its closure: hundreds of rounds, no cut.
+        let mut doc = String::from(
+            "@prefix : <http://example.org/#>.\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+             { ?x :p ?y. ?y :p ?z } => { ?x :p ?z } .\n\
+             { :n0 :p ?y. ?scope log:notIncludes { ?y :p :n0 } } => { ?y :reachedFrom :n0 } .\n",
+        );
+        for i in 0..300 {
+            doc.push_str(&format!(":n{i} :p :n{} .\n", i + 1));
+        }
+        let closure = n3::reason_n3_terms(&doc, None).expect("a terminating program closes");
+        assert!(
+            closure.facts.len() > 300 * 301 / 2,
+            "{}",
+            closure.facts.len()
+        );
+        let mut allowance = ClosureRounds::forward(&Truncation::top_level());
+        assert_eq!(allowance.limits, ClosureLimits::default());
+        assert_eq!(
+            ClosureLimits::default(),
+            ClosureLimits {
+                max_rounds: 1_000_000,
+                max_facts: 50_000_000
+            }
+        );
+        let sink = Cell::new(false);
+        assert!(allowance.round(closure.facts.len(), &sink).is_ok());
+        assert!(!sink.get());
+    }
+
+    #[test]
+    fn the_closure_allowance_records_a_cut_when_spent() {
+        let small = ClosureLimits {
+            max_rounds: 2,
+            max_facts: 10,
+        };
+        let sink = Truncation::top_level_with(small);
+        let mut allowance = ClosureRounds::forward(&sink);
+        assert!(allowance.round(10, &sink).is_ok());
+        assert!(allowance.round(10, &sink).is_ok());
+        assert!(sink.get().is_none());
+        assert!(allowance.round(10, &sink).is_err());
+        assert_eq!(sink.get(), Some(CLOSURE_CUT));
+        let fresh = Truncation::top_level_with(small);
+        let mut allowance = ClosureRounds::forward(&fresh);
+        assert!(allowance.round(11, &fresh).is_err());
+        assert_eq!(fresh.get(), Some(CLOSURE_CUT));
+    }
+
+    /// A finite linear walk: `:start :reaches` each node of an `n`-edge `:next` chain.
+    /// It closes in about `n` rounds and holds about `2n` facts.
+    fn linear_chain(n: usize) -> String {
+        let mut doc = String::from(
+            "@prefix : <http://example.org/#>.\n\
+             :start :reaches :n0 .\n\
+             { :start :reaches ?x. ?x :next ?y } => { :start :reaches ?y } .\n",
+        );
+        for i in 0..n {
+            doc.push_str(&format!(":n{i} :next :n{} .\n", i + 1));
+        }
+        doc
+    }
+
+    /// The closure of `doc` under `limits`: its fact count, or the error, and the cut.
+    fn close_under(
+        doc: &str,
+        limits: ClosureLimits,
+    ) -> (Result<usize, String>, Option<&'static str>) {
+        use crate::n3::{self, NegationCycles};
+        let run = Truncation::top_level_with(limits);
+        let r = n3::reason_n3_terms_in(doc, None, None, NegationCycles::Reject, &run);
+        (r.map(|c| c.facts.len()), run.get())
+    }
+
+    /// Rounds the `n`-edge linear chain needs: one per edge, plus the round that finds
+    /// nothing new and the closing check of the stratum.
+    const fn linear_rounds(n: usize) -> usize {
+        n + LINEAR_EXTRA_ROUNDS
+    }
+    const LINEAR_EXTRA_ROUNDS: usize = 2;
+
+    #[test]
+    fn a_long_linear_walk_closes_under_the_default_allowance() {
+        // 100,000 edges: about 100,000 rounds and 200,000 facts, a finite workload a
+        // fixed 100,000-round cap refused. The default allowance closes it, with no cut.
+        let n = 100_000;
+        let (r, cut) = close_under(&linear_chain(n), ClosureLimits::default());
+        assert_eq!(r, Ok(2 * n + 1));
+        assert_eq!(cut, None);
+    }
+
+    #[test]
+    fn a_caller_sets_the_round_allowance_of_a_linear_walk() {
+        use crate::n3::{self, NegationCycles};
+        let n = 2_000;
+        let doc = linear_chain(n);
+        let enough = ClosureLimits {
+            max_rounds: linear_rounds(n),
+            ..ClosureLimits::default()
+        };
+        let short = ClosureLimits {
+            max_rounds: linear_rounds(n) - 1,
+            ..ClosureLimits::default()
+        };
+        // Just enough rounds: the closure completes, with no cut.
+        assert_eq!(close_under(&doc, enough), (Ok(2 * n + 1), None));
+        let closed =
+            n3::reason_n3_terms_with_limits(&doc, None, None, NegationCycles::Reject, enough)
+                .expect("closes within its allowance");
+        assert_eq!(closed.facts.len(), 2 * n + 1);
+        let ids = n3::reason_n3_with_limits(
+            &mut sparq_core::dict::Dict::new(),
+            &doc,
+            NegationCycles::Reject,
+            enough,
+        )
+        .expect("closes within its allowance");
+        assert_eq!(ids.len(), 2 * n + 1);
+        // One round fewer: an error and a cut, never the truncated closure.
+        let (r, cut) = close_under(&doc, short);
+        assert_closure_limit("linear walk, one round short", r);
+        assert_eq!(cut, Some(CLOSURE_CUT));
+        assert_closure_limit(
+            "reason_n3_terms_with_limits",
+            n3::reason_n3_terms_with_limits(&doc, None, None, NegationCycles::Reject, short)
+                .map(|c| c.facts.len()),
+        );
+        assert_closure_limit(
+            "reason_n3_with_limits",
+            n3::reason_n3_with_limits(
+                &mut sparq_core::dict::Dict::new(),
+                &doc,
+                NegationCycles::Reject,
+                short,
+            ),
+        );
+        // A walk shorter than the allowance is unaffected by it.
+        assert_eq!(
+            close_under(&linear_chain(n - 10), short),
+            (Ok(2 * (n - 10) + 1), None)
+        );
+    }
+
+    #[test]
+    fn a_nested_closure_inherits_the_runs_limits() {
+        use crate::n3::{self, NegationCycles};
+        // The walk runs inside a `log:conclusion` closure: the run's limits reach it.
+        let mut inner = String::new();
+        inner.push_str(":start :reaches :n0 . { :start :reaches ?x. ?x :next ?y } => { :start :reaches ?y } . ");
+        for i in 0..50 {
+            inner.push_str(&format!(":n{i} :next :n{} . ", i + 1));
+        }
+        let doc = format!(
+            "@prefix : <http://example.org/#>.\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+             :w :is {{ {inner} }} .\n\
+             {{ :w :is ?f. ?f log:conclusion ?c }} => {{ :w :closed ?c }} .\n"
+        );
+        let roomy = ClosureLimits {
+            max_rounds: 1_000,
+            ..ClosureLimits::default()
+        };
+        assert!(
+            n3::reason_n3_terms_with_limits(&doc, None, None, NegationCycles::Reject, roomy)
+                .is_ok()
+        );
+        let tight = ClosureLimits {
+            max_rounds: 20,
+            ..ClosureLimits::default()
+        };
+        assert_closure_limit(
+            "nested closure under a tight allowance",
+            n3::reason_n3_terms_with_limits(&doc, None, None, NegationCycles::Reject, tight)
+                .map(|c| c.facts.len()),
+        );
     }
 
     #[test]

@@ -102,6 +102,7 @@ pub mod serialize;
 pub(crate) mod bounded;
 mod strata;
 use bounded::{settle, Bounded, Truncation};
+pub use bounded::ClosureLimits;
 pub use strata::NegationCycles;
 
 pub use model::{Rule, Term};
@@ -333,6 +334,18 @@ pub fn reason_n3_with_cycles(
     cycles: NegationCycles,
 ) -> Result<Vec<[Id; 3]>, String> {
     reason_n3_in(dict, src, cycles, &Truncation::top_level())
+}
+
+/// As [`reason_n3_with_cycles`], under the caller's forward-closure allowance
+/// ([`ClosureLimits`]) instead of [`ClosureLimits::default`]. A closure that spends it
+/// fails with an error naming the limit.
+pub fn reason_n3_with_limits(
+    dict: &mut Dict,
+    src: &str,
+    cycles: NegationCycles,
+    limits: ClosureLimits,
+) -> Result<Vec<[Id; 3]>, String> {
+    reason_n3_in(dict, src, cycles, &Truncation::top_level_with(limits))
 }
 
 /// [`reason_n3_with_cycles`] recording into the caller's run record `truncated`.
@@ -956,6 +969,25 @@ pub fn reason_n3_terms_with_cycles(
     reason_n3_terms_in(src, base, resolver, cycles, &Truncation::top_level())
 }
 
+/// As [`reason_n3_terms_with_cycles`], under the caller's forward-closure allowance
+/// ([`ClosureLimits`]) instead of [`ClosureLimits::default`]. A closure that spends it
+/// fails with an error naming the limit.
+pub fn reason_n3_terms_with_limits(
+    src: &str,
+    base: Option<&str>,
+    resolver: Option<&Resolver>,
+    cycles: NegationCycles,
+    limits: ClosureLimits,
+) -> Result<N3Closure, String> {
+    reason_n3_terms_in(
+        src,
+        base,
+        resolver,
+        cycles,
+        &Truncation::top_level_with(limits),
+    )
+}
+
 /// [`reason_n3_terms_with_cycles`] for a crate-internal caller that already has a run:
 /// every cut is recorded on its record `truncated` (e.g. the incremental graph's
 /// fallback).
@@ -1277,6 +1309,10 @@ fn run_closure(
     }
 
     let mut delta: FxHashSet<[Term; 3]> = facts.all.clone(); // round 0: every fact is "new"
+    // The closure's round and fact allowance (the run's `ClosureLimits`): a rule set that
+    // never saturates (GH #6757) stops with a cut and an error instead of running forever.
+    // An iteration bound, not a memory bound (GH #6771).
+    let mut allowance = bounded::ClosureRounds::forward(truncated);
     for (stratum, &close_naively) in close_naively.iter().enumerate() {
         if stratum > 0 {
             // Stratum boundary: everything closed so far is "new" to this stratum's rules.
@@ -1286,6 +1322,7 @@ fn run_closure(
         // The current round is the stratum's closing naive round.
         let mut closing_check = false;
         loop {
+            bounded::ClosureRounds::round(&mut allowance, facts.all.len(), truncated)?;
             // A round with `first_round` set is NAIVE: every rule over the whole fact set.
             let naive_round = first_round;
             let mut produced: Vec<DerivationStep> = Vec::new();

@@ -153,7 +153,7 @@ fn errors_and_limits_go_through_the_bounded_module() {
             if t.starts_with("pub fn ") || t.starts_with("fn ") || t.starts_with("pub(crate) fn ") {
                 current_fn = t.to_string();
             }
-            if code.contains("Truncation::top_level(") && !current_fn.starts_with("pub fn ") {
+            if code.contains("Truncation::top_level") && !current_fn.starts_with("pub fn ") {
                 hits.push(format!(
                     "{rel}:{n}: a fresh cut record outside an entry point ({current_fn}): {}",
                     code.trim()
