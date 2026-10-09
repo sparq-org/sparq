@@ -282,21 +282,21 @@ fn var_graph_precise_denies_readable_but_unwritable_binding() {
 }
 
 #[test]
-fn var_graph_precise_denies_when_a_bound_graph_is_unwritable_control_doc() {
-    // A WHERE matching ANY predicate under team2 also binds `?g` to the team2 `.acl`
-    // graphs (they hold triples). CAROL has Read+Write on team2 content but NO Control,
-    // so she lacks Write on the `.acl` graphs -> the precise check denies (an `.acl`
-    // target needs the Write grant only a Control-holder has), store untouched.
+fn var_graph_never_binds_an_unreadable_control_doc() {
+    // A WHERE matching ANY predicate under team2 scans the team2 `.acl` graphs too (they
+    // hold triples). CAROL has Read+Write on team2 content but NO Control, so she cannot
+    // READ the `.acl` graphs: `?g` ranges over her read view only, exactly as in a query,
+    // and never binds them. The delete clears the content she may read and write, and the
+    // `.acl` graphs are untouched.
     let mut s = wac_store();
     let acl = "https://pod.ex/team2/.acl";
     let before_acl = graph_len(&s, acl);
-    let before_doc = graph_len(&s, TEAM2_DOC);
+    assert!(graph_len(&s, TEAM2_DOC) > 0);
     let upd = "DELETE { GRAPH ?g { ?s ?p ?o } } \
                WHERE  { GRAPH ?g { ?s ?p ?o } FILTER(STRSTARTS(STR(?g), \"https://pod.ex/team2/\")) }";
-    let r = s.update_as(&sess(Some(CAROL)), upd);
-    assert!(r.is_err(), "binding includes team2 .acl docs carol cannot control: {r:?}");
-    assert_eq!(graph_len(&s, acl), before_acl, ".acl untouched on deny");
-    assert_eq!(graph_len(&s, TEAM2_DOC), before_doc, "content untouched on deny (check is pre-apply)");
+    s.update_as(&sess(Some(CAROL)), upd).expect("only readable, writable graphs bind");
+    assert_eq!(graph_len(&s, acl), before_acl, ".acl untouched: carol cannot read it");
+    assert_eq!(graph_len(&s, TEAM2_DOC), 0, "readable content graph cleared");
 }
 
 #[test]
@@ -341,11 +341,9 @@ fn var_graph_empty_binding_is_a_permitted_noop() {
 
 #[test]
 fn var_graph_with_clause_resolves_precisely() {
-    // [OPUS-4.8] sq-cnor: a `WITH`/`USING` re-scope on a variable-GRAPH op is now resolved
-    // PRECISELY (no longer the conservative all-graphs fallback). The binding SELECT is handed
-    // the same active dataset the apply's `build_using` builds — for `WITH` (which re-scopes
-    // only the DEFAULT graph), `named: None` keeps all store named graphs, re-expressed as an
-    // explicit `FROM NAMED` of every store named graph. Every quad here is `GRAPH ?g`-scoped,
+    // [OPUS-4.8] sq-cnor: a `WITH`/`USING` re-scope on a variable-GRAPH op is resolved
+    // PRECISELY (no conservative all-graphs fallback): the write targets are the graphs the
+    // apply instantiates under the re-scoped dataset. Every quad here is `GRAPH ?g`-scoped,
     // so the `WITH` default graph never participates; `?g` resolves to exactly the team2
     // content graphs CAROL owns — so she is now PERMITTED, just as without the WITH clause
     // (var_graph_precise_allows_authorized_subset).
@@ -382,32 +380,25 @@ fn var_graph_with_clause_precise_still_denies_unwritable_binding() {
 }
 
 #[test]
-fn var_graph_with_clause_denies_binding_to_auth_view() {
+fn var_graph_with_clause_never_touches_the_auth_view() {
     // [OPUS-4.8] sq-cnor — the AUTH_GRAPH under-count regression guard at the PRODUCTION
     // `check` boundary. `Dataset::build_using(named: None)` (the `WITH` re-scope) keeps EVERY
-    // store named graph in the active dataset, INCLUDING the reserved `urn:sparq:auth` view.
-    // So a `WITH … DELETE { GRAPH ?g { … } } WHERE { GRAPH ?g { ?s <auth#read> ?o } }` makes
-    // `?g` bind to the auth view and the engine WOULD write it. The prior `rescope_dataset`
-    // dropped the auth view from the materialized `FROM NAMED` set, so the precise resolver
-    // MISSED that binding — the op could be (wrongly) PERMITTED and transiently mutate the
-    // authorization view. With the auth view restored to the materialized set the binding is
-    // resolved, and since no session is ever write-granted on the auth view the op is DENIED
-    // fail-closed. The auth view must be untouched.
+    // store named graph in the active dataset, INCLUDING the reserved `urn:sparq:auth` view,
+    // and `rescope_dataset` keeps it in the precise resolver's set too. On top of that,
+    // `scope_reads` confines `?g` to the session's read view, which never holds the auth
+    // view, so a `WITH … DELETE { GRAPH ?g { … } } WHERE { GRAPH ?g { ?s <auth#read> ?o } }`
+    // binds nothing: a no-op, and the auth view is untouched.
     let mut s = wac_store();
     let auth = "urn:sparq:auth";
     let before = graph_len(&s, auth);
     assert!(before > 0, "materialized auth view holds the WAC grant triples");
-    // `auth#read` triples exist ONLY in the auth view, so `?g` binds exactly {urn:sparq:auth}.
+    // `auth#read` triples exist ONLY in the auth view.
     let upd = "WITH <https://pod.ex/team2/c3/g0/d0.ttl> \
                DELETE { GRAPH ?g { ?s ?p ?o } } \
                WHERE  { GRAPH ?g { ?s <https://sparq.dev/ns/auth#read> ?o . ?s ?p ?o } }";
     let r = s.update_as(&sess(Some(CAROL)), upd);
-    assert!(
-        r.is_err(),
-        "a WITH var-graph op whose ?g binds to the auth view must be DENIED (no write grant on \
-         the auth view); was: {r:?}"
-    );
-    assert_eq!(graph_len(&s, auth), before, "denied op left the auth view untouched");
+    assert!(r.is_ok(), "an empty binding is a permitted no-op: {r:?}");
+    assert_eq!(graph_len(&s, auth), before, "the auth view is untouched");
 }
 
 // --- [OPUS-4.8] sq-3jtd.2: fail-closed-BEFORE-apply — a DENIED update mutates NOTHING ---
@@ -565,9 +556,8 @@ fn positive_control_fully_authorized_multi_op_body_applies() {
 // agent tool surface, an HTTP handler) had no bounded way to apply an update. These tests
 // pin the two properties that variant must have:
 //
-//   1. an EXHAUSTED budget aborts the update as an error and mutates NOTHING, at BOTH
-//      evaluation sites — the authorization check's `GRAPH ?var` binding SELECT and the
-//      apply's `DELETE`/`INSERT … WHERE`;
+//   1. an EXHAUSTED budget aborts the update as an error and mutates NOTHING, including
+//      for a `GRAPH ?var` write target, whose graphs come from the same evaluation;
 //   2. an UNLIMITED budget is the unbudgeted path, byte for byte.
 //
 // The deadline is set to an ALREADY-PASSED `Instant` rather than racing a real
@@ -649,12 +639,9 @@ fn a_row_cap_aborts_the_apply_and_leaves_the_store_unchanged() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn an_exhausted_budget_also_bounds_the_authorization_checks_binding_select() {
-    // The check path evaluates a SELECT of its own to resolve a `GRAPH ?g` template slot
-    // precisely. That evaluation is on the write path too, so it must be bounded — and its
-    // exhaustion must surface as the budget error rather than silently degrading to the
-    // (cheaper) all-graphs wildcard, which could permit an update whose apply would then
-    // have to re-run the very WHERE that just ran out of budget.
+fn an_exhausted_budget_also_bounds_a_variable_target_update() {
+    // A `GRAPH ?g` template's targets come from the WHERE evaluation, so its exhaustion
+    // must surface as the budget error rather than degrade to an all-graphs wildcard.
     let mut s = wac_store();
     let before = store_snapshot(&s);
     let sparql = format!(
@@ -664,12 +651,12 @@ fn an_exhausted_budget_also_bounds_the_authorization_checks_binding_select() {
 
     let e = s
         .update_as_with_budget(&sess(Some(ALICE)), &sparql, &expired())
-        .expect_err("the binding SELECT must be bounded too");
+        .expect_err("a variable-target update must be bounded too");
     assert!(
         e.contains("query budget exceeded"),
         "an exhausted check must report the budget, not fall back silently: {e}"
     );
-    assert_eq!(store_snapshot(&s), before, "nothing is mutated on the check path");
+    assert_eq!(store_snapshot(&s), before, "nothing is mutated");
 }
 
 #[test]
