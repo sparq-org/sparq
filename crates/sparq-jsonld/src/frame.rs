@@ -195,10 +195,14 @@ thread_local! {
 }
 
 /// `frame_doc` expanded in `frameExpansion` mode, reusing [`LAST_FRAME`] when it matches.
-/// Only frames whose contexts cannot reach the loader are cached, since a loader may
-/// resolve the same IRI differently between calls.
+/// Only frames whose contexts (and `expandContext`) cannot reach the loader are cached,
+/// since a loader may resolve the same IRI differently between calls.
 fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn DocumentLoader) -> Result<Rc<Json>, JsonLdError> {
-    let cacheable = contexts_self_contained(frame_doc);
+    let cacheable = contexts_self_contained(frame_doc)
+        && options
+            .expand_context
+            .as_ref()
+            .is_none_or(|c| crate::compact::self_contained(c.get("@context").unwrap_or(c)) && contexts_self_contained(c));
     if cacheable {
         let hit = LAST_FRAME.with(|last| {
             last.borrow()
@@ -717,14 +721,11 @@ fn graph_maps_from_rdf(from_rdf: Json, frame_default: bool) -> GraphMaps {
                     continue;
                 }
                 for value in as_slice(values) {
-                    let items = value.get("@list").map_or(std::slice::from_ref(value), as_slice);
-                    for item in items {
-                        if let Some(rid) = subject_reference_id(item) {
-                            if !graph.contains_key(rid) {
-                                referenced.push(rid.to_string());
-                            }
+                    references(value, &mut |rid| {
+                        if !graph.contains_key(rid) {
+                            referenced.push(rid.to_string());
                         }
-                    }
+                    });
                 }
             }
         }
@@ -771,6 +772,19 @@ fn relabel_node(node: &mut Json, issuer: &mut BlankNodeIssuer) {
             "@graph" => items.iter_mut().for_each(|n| relabel_node(n, issuer)),
             k if k.starts_with('@') => {}
             _ => items.iter_mut().for_each(|v| relabel_value(v, issuer)),
+        }
+    }
+}
+
+/// Calls `found` with the id of each node reference in `value`, through lists nested to
+/// any depth (value objects are opaque).
+fn references<'a>(value: &'a Json, found: &mut impl FnMut(&'a str)) {
+    let mut stack = vec![value];
+    while let Some(v) = stack.pop() {
+        if let Some(items) = v.get("@list") {
+            stack.extend(as_slice(items).iter().rev());
+        } else if let Some(rid) = subject_reference_id(v) {
+            found(rid);
         }
     }
 }
@@ -2241,6 +2255,7 @@ mod tests {
                             .map(|_| match next(4) {
                                 0 => format!(r#"{{"@value":"v{}"}}"#, next(5)),
                                 1 => format!(r#"{{"@list":[{{"@id":"{}"}},{{"@value":"x"}}]}}"#, name(next(12))),
+                                2 if next(2) == 0 => format!(r#"{{"@list":[{{"@list":[{{"@id":"{}"}}]}},{{"@value":"y"}}]}}"#, name(next(12))),
                                 _ => format!(r#"{{"@id":"{}"}}"#, name(next(12))),
                             })
                             .collect();
@@ -2292,6 +2307,67 @@ mod tests {
             sort(&mut doc);
             check(&doc);
         }
+    }
+
+    /// fromRdf output for `:s :p ((:target))`, where `:target` is only referenced from
+    /// inside a nested list, regroups to node map generation's graph maps, and a frame
+    /// selecting `:target` matches it.
+    #[test]
+    fn from_rdf_nested_list_references_are_subjects() {
+        use crate::from_rdf::{from_rdf, FromRdfOptions, RdfQuad, RdfTerm};
+        let rdf = |l: &str| RdfTerm::iri(format!("http://www.w3.org/1999/02/22-rdf-syntax-ns#{l}"));
+        let q = |s: RdfTerm, p: RdfTerm, o: RdfTerm| RdfQuad::new(s, p, o, None);
+        let quads = vec![
+            q(RdfTerm::iri("http://ex/s"), RdfTerm::iri("http://ex/p"), RdfTerm::blank("outer")),
+            q(RdfTerm::blank("outer"), rdf("first"), RdfTerm::blank("inner")),
+            q(RdfTerm::blank("outer"), rdf("rest"), rdf("nil")),
+            q(RdfTerm::blank("inner"), rdf("first"), RdfTerm::iri("http://ex/target")),
+            q(RdfTerm::blank("inner"), rdf("rest"), rdf("nil")),
+        ];
+        let doc = from_rdf(&quads, &FromRdfOptions::default()).expect("fromRdf");
+        let mut text = String::new();
+        doc.write(&mut text);
+        assert!(text.contains(r#"{"@list":[{"@list":[{"@id":"http://ex/target"}]}]}"#), "{text}");
+        let expected = build_graph_maps(&doc, false);
+        let actual = graph_maps_from_rdf(doc.clone(), false);
+        assert_eq!(*actual.graphs["@default"], *expected.graphs["@default"]);
+        assert!(actual.graphs["@default"].contains_key("http://ex/target"));
+        let framed = frame_match_from_rdf(doc, &parse(r#"{"@id":"http://ex/target"}"#), &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader).expect("frame");
+        let mut text = String::new();
+        framed.write(&mut text);
+        assert_eq!(text, r#"[{"@id":"http://ex/target"}]"#);
+    }
+
+    /// A frame expanded with a remote `expandContext` is not reused: each loader's
+    /// definition of `T` selects its own subjects, and a deny-by-default loader still fails.
+    #[test]
+    fn frames_expanded_through_the_loader_are_not_reused() {
+        struct Ctx(&'static str);
+        impl DocumentLoader for Ctx {
+            fn load_document(&self, url: &str) -> Result<crate::loader::RemoteDocument, JsonLdError> {
+                Ok(crate::loader::RemoteDocument {
+                    document: format!(r#"{{"@context":{{"T":"{}"}}}}"#, self.0),
+                    document_url: url.to_string(),
+                    content_type: Some("application/ld+json".to_string()),
+                    context_url: None,
+                    profile: None,
+                })
+            }
+        }
+        let input = || parse(r#"[{"@id":"http://ex/a","@type":["http://ex/A"]},{"@id":"http://ex/b","@type":["http://ex/B"]}]"#);
+        let options = JsonLdOptions { expand_context: Some(Json::Str("http://ex/ctx".to_string())), ..JsonLdOptions::default() };
+        let frame = parse(r#"{"@type":"T"}"#);
+        let ids = |loader: &dyn DocumentLoader| {
+            frame_match_from_rdf(input(), &frame, &options, &FrameOptions::default(), loader).map(|out| {
+                let mut text = String::new();
+                out.write(&mut text);
+                text
+            })
+        };
+        assert!(ids(&Ctx("http://ex/A")).expect("A").contains("http://ex/a"));
+        let b = ids(&Ctx("http://ex/B")).expect("B");
+        assert!(b.contains("http://ex/b") && !b.contains("http://ex/a"), "{b}");
+        assert!(ids(&NoopLoader).is_err());
     }
 
     /// A large numeric `@default` is charged by its length: 1,000 fills of a 64 KiB
