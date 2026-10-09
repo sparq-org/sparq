@@ -793,7 +793,8 @@ fn both_n3_proof_entry_points_key_a_fact_alike() {
     let nest = triple(ex("s"), ex("p"), triple(ex("x"), ex("y"), ex("z")));
     let g = MaterializedN3Graph::new(src, &[]).expect("rules parse");
     let mut dict = Dict::new();
-    let (_closure, steps) = sparq_reason::reason_n3_proof(&mut dict, src).expect("id-level closure");
+    let run = sparq_reason::reason_n3_proof_run(&mut dict, src).expect("id-level closure");
+    let steps = &run.steps;
     let ids = |prov: &[Triple]| -> (HashSet<String>, HashSet<String>) {
         let of = |ty: &str| {
             prov.iter()
@@ -821,7 +822,7 @@ fn both_n3_proof_entry_points_key_a_fact_alike() {
         let key = sparq_reason::n3::serialize::statement_keys(fact);
         let term_level = g.why(fact).unwrap_or_else(|| panic!("term-level proof of {fact:?}"));
         // The id-level proof, rooted STRUCTURALLY at this fact's key.
-        let id_level = sparq_reason::explain::n3_proof_tree_for_key(&dict, &steps, &key, Default::default())
+        let id_level = sparq_reason::explain::n3_proof_tree_for_key(&dict, steps, &key, Default::default())
             .unwrap_or_else(|| panic!("id-level proof of {fact:?}"));
         let keys = |t: &sparq_reason::ProofTree| -> HashSet<[String; 3]> { t.nodes().iter().map(|n| n.key.clone()).collect() };
         assert_eq!(keys(&term_level), keys(&id_level), "{fact:?}");
@@ -834,7 +835,7 @@ fn both_n3_proof_entry_points_key_a_fact_alike() {
     // By ids alone the colliding pair is ambiguous: the id-only bridge refuses to choose.
     let key = |f: &[N3Term; 3]| sparq_reason::n3::serialize::statement_keys(f);
     let target = steps.iter().find(|s| s.conclusion_key == key(&facts[7])).expect("() step").conclusion;
-    let err = sparq_reason::explain::n3_proof_tree(&dict, &steps, target, Default::default()).expect_err("ambiguous");
+    let err = sparq_reason::explain::n3_proof_tree(&dict, &run, target, Default::default()).expect_err("ambiguous");
     assert_eq!(err.keys.len(), 2);
 }
 

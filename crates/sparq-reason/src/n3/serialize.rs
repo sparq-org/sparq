@@ -548,20 +548,22 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
     out.push_str(" .");
 }
 
-/// A lossless, injective key for one term: two keys are equal exactly when the terms are
-/// equal — formulae compared as the SETS of triples N3 makes them (row order and duplicate
-/// rows do not count). One tagged, structural encoding of EVERY field — `I` IRI, `L`
-/// literal (lexical form, datatype, then `@` + tag or `-` for none), `B` blank, `V`
-/// variable (full internal name), `(…)` list, `{…;}` formula (rows sorted and
-/// deduplicated), `<…>` quoted triple — with each string quoted and its `"` and `\`
-/// escaped. Never a rendering: the display writer drops fields (a language-tagged
-/// literal's datatype) and spells different variables alike.
+/// A lossless, injective key for one term: two keys are equal EXACTLY when the terms are
+/// equal under `Term`'s own (derived) equality — the identity the engine uses for facts,
+/// hashing, `log:equalTo` and formula unification. One tagged, prefix-free, structural
+/// encoding of EVERY field — `I` IRI, `L` literal (lexical form, datatype, then `@` + tag
+/// or `-` for none), `B` blank, `V` variable (full internal name), `(…)` list, `{…;}`
+/// formula (rows in their order, duplicates kept), `<…>` quoted triple — with each string
+/// quoted and its `"` and `\` escaped. Never a rendering: the display writer drops fields
+/// (a language-tagged literal's datatype) and spells different variables alike.
 ///
-/// Stable by construction: no interning ids, pointers, hashes, locale or number
-/// formatting, and no dependence on formula row order. Two things are deliberately NOT
-/// normalized, because they are different terms: blank-node labels (no graph-isomorphism
-/// canonicalization), and a backward-chaining copy `__bw<n>___ua.<iri>` of a universal,
-/// which can co-occur with the universal as a distinct variable.
+/// No normalisation the engine does not do: a formula is an ORDERED vector of rows to the
+/// engine, so two formulae with the same rows in another order, or with a duplicated row,
+/// are different facts and get different keys. Blank-node labels and backward-chaining
+/// copies (`__bw<n>___ua.<iri>`) are likewise kept as the distinct terms they are. Stable
+/// by construction: no interning ids, pointers, hashes, locale or number formatting; the
+/// engine's formula producers emit rows in a deterministic order (`log:conclusion` sorts
+/// its derived rows canonically rather than taking hash-set order).
 fn term_key(t: &Term) -> String {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');
@@ -605,22 +607,9 @@ fn term_key(t: &Term) -> String {
                 out.push(')');
             }
             Term::Formula(ts) => {
-                // A formula is a SET of triples: rows in canonical (sorted, deduplicated)
-                // order, so the key does not depend on the order a builtin or a hash-set
-                // iteration happened to produce them in.
-                let mut rows: Vec<String> = ts
-                    .iter()
-                    .map(|row| {
-                        let mut r = String::new();
-                        row.iter().for_each(|m| enc(m, &mut r));
-                        r
-                    })
-                    .collect();
-                rows.sort_unstable();
-                rows.dedup();
                 out.push('{');
-                for r in rows {
-                    out.push_str(&r);
+                for row in ts {
+                    row.iter().for_each(|m| enc(m, out));
                     out.push(';');
                 }
                 out.push('}');

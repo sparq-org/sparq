@@ -326,10 +326,10 @@ fn every_shape_round_trips() {
         let key = statement_keys(s);
         assert_eq!(key, statement_keys(&s.clone()));
         if let Some(prev) = by_key.insert(key, s) {
-            assert_eq!(prev.clone().map(|t| canon(&t)), s.clone().map(|t| canon(&t)), "two different facts share an identity key");
+            assert_eq!(prev, s, "two different facts share an identity key");
         }
     }
-    let distinct: BTreeSet<String> = all.iter().map(|s| format!("{:?}", s.clone().map(|t| canon(&t)))).collect();
+    let distinct: BTreeSet<String> = all.iter().map(|s| format!("{s:?}")).collect();
     assert_eq!(by_key.len(), distinct.len());
 }
 
@@ -520,7 +520,7 @@ fn a_source_variable_spelled_like_the_display_name_stays_distinct() {
 
 /// Codex round 7 (MEDIUM): identity keys are structural over EVERY field of a term — a
 /// language-tagged literal's datatype included, noncanonical combinations included — so
-/// two terms share a key exactly when they are equal.
+/// two terms share a key exactly when they are equal (`Term`'s own `Eq`).
 #[test]
 fn identity_keys_are_injective_over_every_term_field() {
     const LANG: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
@@ -566,38 +566,110 @@ fn identity_keys_are_injective_over_every_term_field() {
     for t in &all {
         let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
         if let Some(prev) = by_key.insert(key, t.clone()) {
-            assert_eq!(canon(&prev), canon(t), "two different terms share an identity key");
+            assert_eq!(&prev, t, "two different terms share an identity key");
         }
     }
-    // Equal keys exactly for equal terms — formulae compared as sets of triples.
-    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{:?}", canon(t))).collect();
+    // Equal keys exactly for equal terms.
+    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{t:?}")).collect();
     assert_eq!(by_key.len(), distinct.len());
 }
 
-/// #6735 review: a key is STABLE — a formula is a set, so its key does not depend on the
-/// row order (or duplicate rows) a builtin or a hash-set iteration produced, at any depth;
-/// while a formula with different triples, or a backward-chaining copy of a universal
-/// (a distinct variable), keeps a different key.
+/// A random term for the key property: IRIs, literals (with and without tags, awkward
+/// characters), blanks, variables (a universal and its copy among them), and — below
+/// `depth` — lists, quoted triples and formulae, each formula also yielding variants with
+/// its rows PERMUTED and with a row DUPLICATED.
+fn key_term(r: &mut Rng, depth: usize, out: &mut Vec<Term>) -> Term {
+    let strs = ["a", "b", "a\"b", "a\\", ""];
+    let s = |r: &mut Rng| strs[r.below(strs.len())].to_string();
+    let t = match (depth, r.below(10)) {
+        (0, _) | (_, 0..=5) => match r.below(6) {
+            0 => Term::Iri(s(r)),
+            1 => Term::Lit(s(r), ["http://ex/d", "http://ex/e"][r.below(2)].into(), None),
+            2 => Term::Lit(s(r), "http://ex/d".into(), [Some("en".to_string()), Some("EN".into()), None][r.below(3)].clone()),
+            3 => Term::Blank(s(r)),
+            4 => var(["x", "__ua.http://ex/x", "__bw0___ua.http://ex/x"][r.below(3)]),
+            _ => var(&s(r)),
+        },
+        (_, 6) => Term::List((0..r.below(3)).map(|_| key_term(r, depth - 1, out)).collect()),
+        (_, 7) => Term::Triple(Box::new([key_term(r, depth - 1, out), iri("http://ex/p"), key_term(r, depth - 1, out)])),
+        _ => {
+            let rows: Vec<[Term; 3]> = (0..1 + r.below(3))
+                .map(|_| [key_term(r, depth - 1, out), iri("http://ex/p"), key_term(r, depth - 1, out)])
+                .collect();
+            // Variants the engine keeps APART from `rows` (unless they happen to be equal).
+            let mut permuted = rows.clone();
+            permuted.rotate_left(1);
+            permuted.reverse();
+            out.push(formula(permuted));
+            let mut duplicated = rows.clone();
+            duplicated.push(rows[r.below(rows.len())].clone());
+            out.push(formula(duplicated));
+            formula(rows)
+        }
+    };
+    out.push(t.clone());
+    t
+}
+
+/// #6735 review round 2: the identity key mirrors the engine's own term identity EXACTLY —
+/// `key(a) == key(b)` if and only if `a == b` under `Term`'s derived `Eq`, which is what
+/// facts, hashing, `log:equalTo` and formula unification use. So a formula's row order and
+/// duplicate rows are part of its key, as they are part of the term; no normalisation the
+/// engine does not do. Seeded generator (xorshift64*, like the round-10 property test).
 #[test]
-fn identity_keys_do_not_depend_on_formula_row_order() {
+fn identity_keys_are_equal_exactly_when_terms_are_equal() {
+    let mut r = Rng(0xD1B5_4A32_D192_ED03);
     let k = iri("http://ex/k");
-    let row = |a: &str, b: &str| [iri(a), k.clone(), iri(b)];
-    let (r1, r2, r3) = (row("http://ex/1", "http://ex/2"), row("http://ex/3", "http://ex/4"), row("http://ex/5", "http://ex/6"));
+    let mut by_key: std::collections::HashMap<[String; 3], Term> = std::collections::HashMap::new();
+    let mut terms: std::collections::HashSet<Term> = std::collections::HashSet::new();
+    let (mut formulas, mut collisions_checked) = (0, 0);
+    for _ in 0..4000 {
+        let mut pool = Vec::new();
+        key_term(&mut r, 3, &mut pool);
+        for t in pool {
+            formulas += usize::from(matches!(t, Term::Formula(_)));
+            let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
+            if let Some(prev) = by_key.get(&key) {
+                assert_eq!(prev, &t, "different terms share a key");
+                collisions_checked += 1;
+            }
+            by_key.insert(key, t.clone());
+            terms.insert(t);
+        }
+    }
+    // Every distinct term got a distinct key, and equal terms (re-generated) the same one.
+    assert_eq!(by_key.len(), terms.len());
+    assert!(formulas > 1000 && collisions_checked > 1000, "{formulas} formulae, {collisions_checked} equal pairs");
+    // The named cases, explicitly: permuted and duplicated rows are different facts.
+    let row = |a: &str| [iri(a), k.clone(), k.clone()];
     let key = |t: Term| statement_keys(&[k.clone(), k.clone(), t]);
-    let f = |rows: Vec<[Term; 3]>| formula(rows);
-    assert_eq!(key(f(vec![r1.clone(), r2.clone(), r3.clone()])), key(f(vec![r3.clone(), r1.clone(), r2.clone()])));
-    assert_eq!(key(f(vec![r1.clone(), r2.clone()])), key(f(vec![r2.clone(), r1.clone(), r2.clone()])));
-    let nested = |a: Term, b: Term| f(vec![[a, k.clone(), b]]);
-    assert_eq!(
-        key(nested(f(vec![r1.clone(), r2.clone()]), Term::List(vec![f(vec![r2.clone(), r3.clone()])]))),
-        key(nested(f(vec![r2.clone(), r1.clone()]), Term::List(vec![f(vec![r3.clone(), r2.clone()])])))
-    );
-    assert_ne!(key(f(vec![r1.clone(), r2.clone()])), key(f(vec![r1.clone(), r3.clone()])));
-    // List order IS significant.
-    assert_ne!(key(Term::List(vec![iri("http://ex/1"), iri("http://ex/2")])), key(Term::List(vec![iri("http://ex/2"), iri("http://ex/1")])));
-    let ua = f(vec![[var("__ua.http://ex/x"), k.clone(), k.clone()]]);
-    let copy = f(vec![[var("__bw0___ua.http://ex/x"), k.clone(), k.clone()]]);
-    assert_ne!(key(ua), key(copy));
+    assert_ne!(key(formula(vec![row("1"), row("2")])), key(formula(vec![row("2"), row("1")])));
+    assert_ne!(key(formula(vec![row("1")])), key(formula(vec![row("1"), row("1")])));
+    assert_ne!(formula(vec![row("1"), row("2")]), formula(vec![row("2"), row("1")]), "the engine keeps them apart too");
+}
+
+/// #6735 review round 2: the one engine producer that built formula rows from hash-set
+/// iteration — `log:conclusion`, whose derived rows came out of the closure's hash set —
+/// now emits them in ONE canonical order (their identity keys), after the formula's own
+/// rows. So the formula value, and its key, do not depend on hash-set order (or the
+/// hasher's word size on wasm32).
+#[test]
+fn log_conclusion_rows_come_out_in_canonical_order() {
+    let src = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>.\n\
+               { { :e :p :f. :a :p :b. :c :p :d. :g :p :h. { ?x :p ?y } => { ?y :q ?x } } log:conclusion ?c } => { :r :is ?c }.\n\
+               :go :go :go.\n";
+    let facts = reason_n3_terms_with_resolver(src, None, None).expect("reasons").facts;
+    let c = facts.iter().find(|f| f[0] == iri("http://ex/r")).expect("log:conclusion ran");
+    let Term::Formula(rows) = &c[2] else { panic!("{c:?}") };
+    let q = iri("http://ex/q");
+    let derived: Vec<&[Term; 3]> = rows.iter().filter(|r| r[1] == q).collect();
+    assert_eq!(derived.len(), 4, "{rows:?}");
+    let keys: Vec<[String; 3]> = derived.iter().map(|r| statement_keys(r)).collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted, "derived rows in canonical key order");
+    // The formula's own rows come first, as written.
+    assert_eq!(rows[0], [iri("http://ex/e"), iri("http://ex/p"), iri("http://ex/f")]);
 }
 
 /// Codex round 5 (3): an IRI holding a decoded backslash goes back out as `\`.

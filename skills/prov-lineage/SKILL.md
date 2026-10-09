@@ -194,7 +194,8 @@ names the same entity) and two different facts never share an entity.
 encoding of every term field (`n3::serialize::statement_keys`), the same from
 both N3 entry points (`MaterializedN3Graph::why` and the id-level
 `explain::n3_proof_tree`, which takes it from the N3 terms each `ProofStep`
-carries, never from the dictionary). Earlier releases hashed the N3 conclusion strings, so **N3
+carries, never from the dictionary). Keys are injective over N3 terms exactly as the
+engine compares them: a formula's row order and duplicate rows are part of its identity. Earlier releases hashed the N3 conclusion strings, so **N3
 entity/activity IRIs changed**: N3 lineage persisted before this change does not
 stitch with regenerated lineage. Regenerate it, or keep the old graph separate.
 Any signed or committed artifact built over N3 lineage (a signature, a Merkle or

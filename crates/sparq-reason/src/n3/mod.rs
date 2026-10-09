@@ -239,6 +239,7 @@ impl<'a> BwCtx<'a> {
 /// fresh blank chain, and the dictionary normalizes literal fields). Proof trees built
 /// from these steps (`explain::n3_proof_tree`) take their node keys from here, so they
 /// agree with `MaterializedN3Graph::why` on every fact.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProofStep {
     pub conclusion: [Id; 3],
     pub rule: usize,
@@ -254,12 +255,33 @@ pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id; 3]>, String> {
     // in the hot loop and the proof-step interning pass entirely.
     let parsed = parser::parse(src)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::None);
-    Ok(intern_closure(dict, &facts, &steps)?.0)
+    Ok(intern_closure(dict, &facts, &steps)?.closure)
 }
 
 /// As [`reason_n3`], but also return the derivation (a [`ProofStep`] for each NEWLY-derived
 /// triple, in derivation order) — the EYE `--proof` analogue.
 pub fn reason_n3_proof(dict: &mut Dict, src: &str) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
+    let run = reason_n3_proof_run(dict, src)?;
+    Ok((run.closure, run.steps))
+}
+
+/// One [`reason_n3_proof_run`]: the closure as id triples, each closure fact's N3 identity
+/// key, and the derivation steps — what `explain::n3_proof_tree` needs to tell apart
+/// distinct N3 facts that intern to one id triple.
+#[derive(Clone, Debug)]
+pub struct N3ProofRun {
+    /// The closure as interned triples (as [`reason_n3_proof`] returns it).
+    pub closure: Vec<[Id; 3]>,
+    /// Parallel to `closure`: each fact's identity key ([`serialize::statement_keys`] of
+    /// the N3 statement it was interned from — asserted and derived facts alike; a list
+    /// chain's rdf:first/rest rows are keyed as those rows).
+    pub closure_keys: Vec<[String; 3]>,
+    /// A [`ProofStep`] per newly-derived fact, in derivation order.
+    pub steps: Vec<ProofStep>,
+}
+
+/// As [`reason_n3_proof`], keeping every closure fact's N3 identity key ([`N3ProofRun`]).
+pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, String> {
     let parsed = parser::parse(src)?;
     let (facts, steps) = run_closure(parsed, None, None, StepMode::Full);
     intern_closure(dict, &facts, &steps)
@@ -541,7 +563,7 @@ pub fn reason_n3_stratified(
         }
         facts = f;
     }
-    Ok(StratifiedN3Closure { facts: intern_closure(dict, &facts, &[])?.0, strata_facts })
+    Ok(StratifiedN3Closure { facts: intern_closure(dict, &facts, &[])?.closure, strata_facts })
 }
 
 /// The smallest `__st{k}_` prefix that no blank label anywhere in `parsed`
@@ -1061,7 +1083,7 @@ fn intern_closure(
     dict: &mut Dict,
     facts: &FactIndex,
     steps: &[DerivationStep],
-) -> Result<(Vec<[Id; 3]>, Vec<ProofStep>), String> {
+) -> Result<N3ProofRun, String> {
     // First-class list values have no dictionary representation — expand them
     // into rdf:first/rest blank-node chains (one chain per list VALUE, shared
     // across the facts that mention it).
@@ -1070,7 +1092,10 @@ fn intern_closure(
     // fresh against THOSE blanks too — seed it from both.
     let step_rows = steps.iter().flat_map(|(g, _, prem)| std::iter::once(g).chain(prem));
     let mut exp = ListExpander::new(fact_rows.iter().chain(step_rows));
+    // Identity keys from the N3 terms BEFORE list expansion and interning.
+    let mut closure_keys: Vec<[String; 3]> = fact_rows.iter().map(serialize::statement_keys).collect();
     let (fact_rows, mut extra) = exp.expand_rows(&fact_rows);
+    closure_keys.extend(extra.iter().map(serialize::statement_keys));
     // Intern the ground closure into the dictionary.
     let mut out = Vec::with_capacity(fact_rows.len() + extra.len());
     let mut rows = fact_rows;
@@ -1097,7 +1122,7 @@ fn intern_closure(
             premise_keys: prem.iter().map(serialize::statement_keys).collect(),
         });
     }
-    Ok((out, proof))
+    Ok(N3ProofRun { closure: out, closure_keys, steps: proof })
 }
 
 /// Expands first-class `Term::List` values into rdf:first/rest blank-node
@@ -2185,13 +2210,16 @@ fn formula_closure(ts: &[[Term; 3]], bw: &BwCtx) -> Vec<[Term; 3]> {
         run_closure(parsed, bw.resolver, Some(bw.visited.clone()), StepMode::None);
     // Original statements (including the rule statements, which cwm keeps in
     // log:conclusion output) plus the derivations.
-    let mut seen: FxHashSet<[Term; 3]> = ts.iter().cloned().collect();
+    // The derivations come out of a hash set, whose iteration order depends on insertion
+    // history and on the hasher's word size (native vs wasm32), so they are appended in
+    // ONE canonical order — their structural identity keys — and the formula this builds
+    // (an ordered vector, as `Term` equality sees it) is the same on every platform and
+    // for every equal input.
+    let seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
+    let mut derived: Vec<[Term; 3]> = closed.all.iter().filter(|f| !seen.contains(f)).cloned().collect();
+    derived.sort_by_cached_key(serialize::statement_keys);
     let mut result: Vec<[Term; 3]> = ts.to_vec();
-    for f in closed.all {
-        if seen.insert(f.clone()) {
-            result.push(f);
-        }
-    }
+    result.extend(derived);
     bw.visited.borrow_mut().remove(&key);
     result
 }

@@ -87,6 +87,7 @@ pub fn inconsistencies(dict: &Dict, triples: &[[Id;3]]) -> Vec<String>;
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_proof(dict: &mut Dict, src: &str)
     -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue; each step also carries conclusion_key / premise_keys (N3 statement_keys, taken before list expansion + interning)
+pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, String>; // { closure, closure_keys (every fact, asserted too), steps } — for explain::n3_proof_tree
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String>; // term-level, no Dict
 pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>; // n3:: only
 // EYE --pass-all / --pass-all-ground: the closure PLUS the document's own rules, echoed
@@ -159,10 +160,12 @@ pub fn why(&self, dict: &Dict, t: [Id;3]) -> Option<ProofTree>;          // RDFS
 pub fn why(&self, fact: &[Term;3])        -> Option<ProofTree>;          // N3 graph
 pub struct ProofTree;  // .nodes() -> &[ProofNode], .root(), .conclusion(), .to_json(), .to_text()
 pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule: String, pub premises: Vec<u32> }  // conclusion = display; key = lossless fact identity (N3: two facts can render alike; the same key from why() and n3_proof_tree) — address facts by key
-// explain::n3_proof_tree(dict, steps, target_ids, opts) -> Result<Option<ProofTree>, AmbiguousN3Target>
-//   — Err when several structurally distinct N3 facts intern to target_ids (e.g. () and an rdf:nil IRI);
-//   explain::n3_proof_tree_for_key(dict, steps, &key, opts) -> Option<ProofTree> roots by ProofStep::conclusion_key.
-// statement_keys compares formulae as SETS (rows sorted + deduplicated); blank labels and __bw copies are not normalized.
+// explain::n3_proof_tree(dict, &run /* N3ProofRun */, target_ids, opts) -> Result<Option<ProofTree>, AmbiguousN3Target>
+//   — Err when several structurally distinct closure facts (asserted OR derived) intern to target_ids
+//   (e.g. () and an rdf:nil IRI); explain::n3_proof_tree_for_key(dict, &run.steps, &key, opts) roots by key.
+// statement_keys is injective w.r.t. Term's own Eq: formula rows keep their order and duplicates (as the
+// engine compares them); blank labels and __bw copies are not normalized. log:conclusion emits its
+// derived rows in canonical key order, so formula values do not depend on hash-set order.
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
