@@ -827,6 +827,16 @@ pub(crate) enum Undo {
     /// put back: until then its resources (`iris`) stay set aside, so no later write to them can
     /// happen while a start could still replay it.
     Forget { record: String, iris: Vec<String> },
+    /// A kept change whose intent could not be recorded as kept (rewritten to name only its
+    /// container, or cleared): the store may have done it anyway, a lost reply. Settled from
+    /// what the intent `record` holds now: cleared, or naming only a container, the change is
+    /// kept; still holding its plan, the change is put back (`undo`, in order) and the intent
+    /// cleared. Until then its resources (`iris`) stay set aside, as for [`Undo::Forget`].
+    Resolve {
+        record: String,
+        undo: Vec<Undo>,
+        iris: Vec<String>,
+    },
 }
 
 impl Undo {
@@ -861,6 +871,15 @@ impl Undo {
             Undo::Remove { iri, parent } => delete_record(store, iri, parent).await,
             Undo::Locked { .. } => Ok(()),
             Undo::Forget { record, .. } => intents::clear(store, record).await,
+            Undo::Resolve { record, undo, .. } => {
+                if intents::kept(store, record).await? {
+                    return Ok(());
+                }
+                for step in undo {
+                    Box::pin(step.apply(store)).await?;
+                }
+                intents::clear(store, record).await
+            }
         }
     }
 
@@ -873,7 +892,9 @@ impl Undo {
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
             Undo::Locked { iri } => vec![iri],
-            Undo::Forget { iris, .. } => iris.iter().map(String::as_str).collect(),
+            Undo::Forget { iris, .. } | Undo::Resolve { iris, .. } => {
+                iris.iter().map(String::as_str).collect()
+            }
         }
     }
 }
@@ -885,24 +906,29 @@ pub(crate) struct Unsettled(Vec<Undo>);
 impl Unsettled {
     /// About how many bytes it holds to put back: each body, and each record at its limit.
     fn bytes(&self) -> usize {
-        self.0
-            .iter()
-            .map(|u| match u {
-                Undo::Restore {
-                    prior: Some((body, _)),
-                    ..
-                }
-                | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
-                Undo::Locked { .. } | Undo::Forget { .. } => 0,
-                _ => MAX_META_BYTES,
-            })
-            .fold(0, usize::saturating_add)
+        bytes_of(&self.0)
     }
 
     /// The resources it is to, each once.
     fn iris(&self) -> Vec<String> {
         iris_of(&self.0)
     }
+}
+
+/// About how many bytes `undo` holds to put back: each body, and each record at its limit.
+fn bytes_of(undo: &[Undo]) -> usize {
+    undo.iter()
+        .map(|u| match u {
+            Undo::Restore {
+                prior: Some((body, _)),
+                ..
+            }
+            | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
+            Undo::Locked { .. } | Undo::Forget { .. } => 0,
+            Undo::Resolve { undo, .. } => bytes_of(undo),
+            _ => MAX_META_BYTES,
+        })
+        .fold(0, usize::saturating_add)
 }
 
 /// The resources `undo` is to, each once.
@@ -1151,9 +1177,14 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     /// Keep every change. When it changed what the container `touch` lists, its intent is
     /// rewritten to name only that container, to be cleared once the container is touched
     /// ([`LwsState::owe_touch`]): a stop before then leaves the container's date for the next
-    /// start to move on. Otherwise its intent is cleared. When that cannot be done, a start could
-    /// still replay the intent over the change, so the change is put back instead and this
-    /// fails, with what could not be put back (to set aside, as for [`Journal::rollback`]).
+    /// start to move on. Otherwise its intent is cleared.
+    ///
+    /// When that fails, the store may have done it anyway (a lost reply): putting the change
+    /// back regardless could leave the intent no longer holding the plan to finish that, should
+    /// the process stop. So the intent is read back: still holding its plan, the change is put
+    /// back; cleared or naming only the container, it is kept. While it cannot be read, this
+    /// fails with an [`Undo::Resolve`], to set aside with the locks, which settles it the same
+    /// way later; meanwhile the container's listing has no date, as after a touch that failed.
     pub(crate) async fn commit(
         self,
         touch: Option<&str>,
@@ -1172,7 +1203,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             }
             None => {
                 let forget = Undo::Forget {
-                    record,
+                    record: record.clone(),
                     iris: Vec::new(),
                 };
                 settle(&self.state.store, vec![forget]).await.is_none()
@@ -1181,10 +1212,44 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         if kept {
             return Ok(());
         }
-        let left = self.rollback().await;
+        // Whether the store did it anyway is read back from the intent: still holding its plan,
+        // the change is put back; cleared or naming only the container, it is kept.
+        let mut wait = std::time::Duration::from_millis(50);
+        for attempt in 1..=UNDO_ATTEMPTS {
+            match intents::kept(&self.state.store, &record).await {
+                Ok(true) => {
+                    if let Some(container) = touch {
+                        self.state.owe_touch(container, record);
+                    }
+                    return Ok(());
+                }
+                Ok(false) => {
+                    return Err((
+                        crate::error::ServerError::Storage(
+                            "the change could not be recorded as kept".into(),
+                        ),
+                        self.rollback().await,
+                    ));
+                }
+                Err(_) if attempt < UNDO_ATTEMPTS => {
+                    tokio::time::sleep(wait).await;
+                    wait *= 4;
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some(container) = touch {
+            self.state.touching(container);
+            self.state.touched(container, false);
+        }
+        let resolve = Undo::Resolve {
+            record,
+            iris: iris_of(&self.planned),
+            undo: self.undo.into_iter().rev().collect(),
+        };
         Err((
             crate::error::ServerError::Storage("the change could not be recorded as kept".into()),
-            left,
+            Some(Unsettled(vec![resolve])),
         ))
     }
 

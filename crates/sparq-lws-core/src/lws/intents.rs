@@ -103,7 +103,7 @@ impl Step {
                 iri: iri.clone(),
                 parent: parent.clone(),
             },
-            Undo::Locked { .. } | Undo::Forget { .. } => return None,
+            Undo::Locked { .. } | Undo::Forget { .. } | Undo::Resolve { .. } => return None,
         })
     }
 
@@ -173,6 +173,20 @@ pub(crate) fn mint(storage: &str) -> String {
     format!("{}{}", container(storage), super::jose::random_id())
 }
 
+/// Whether the intent `record` says its change was kept: it is gone (cleared), or names only
+/// containers to touch. An intent that cannot be read is an error, to try again.
+pub(crate) async fn kept<S: Store>(store: &S, record: &str) -> Result<bool, ServerError> {
+    match store.read(record).await {
+        Ok(r) => {
+            let stored: Stored = serde_json::from_slice(&r.body)
+                .map_err(|e| ServerError::Storage(format!("intent {record}: {e}")))?;
+            Ok(stored.steps.is_empty())
+        }
+        Err(ServerError::NotFound) => Ok(true),
+        Err(e) => Err(e),
+    }
+}
+
 /// Remove the intent `record`; absent is fine. Its membership goes in the same step.
 pub(crate) async fn clear<S: Store>(store: &S, record: &str) -> Result<(), ServerError> {
     let container = record.rfind('/').map_or(record, |i| &record[..=i]);
@@ -223,14 +237,13 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
             .ok_or_else(|| unreadable("a body is not base64".into()))?;
         read.push((record, undo, stored.touch));
     }
+    // Changes cut short are put back first: one may restore a container's metadata from
+    // before a kept change's touch, which must then come after it.
     let mut set_aside = Vec::new();
+    let mut touches = Vec::new();
     for (record, undo, touch) in read {
         if undo.is_empty() {
-            // A kept change: its containers are touched, and the intent goes once they are.
-            for c in touch {
-                state.owe_touch(&c, record.clone());
-                super::resources::touch_container(state, &c).await;
-            }
+            touches.push((record, touch));
             continue;
         }
         let iris = super::iris_of(&undo);
@@ -246,6 +259,21 @@ pub(crate) async fn recover<S: Store + 'static>(state: &LwsState<S>) -> Result<(
             }
         };
         set_aside.extend(left);
+    }
+    // Kept changes: their containers are touched and the intents go once they are. While a
+    // change is still being put back in the background it could restore a container's metadata
+    // after a touch now, so then the touches wait: the containers' listings have no date, and
+    // the intents stay for the next touch of each (or the next start).
+    for (record, containers) in touches {
+        for c in containers {
+            state.owe_touch(&c, record.clone());
+            if set_aside.is_empty() {
+                super::resources::touch_container(state, &c).await;
+            } else {
+                state.touching(&c);
+                state.touched(&c, false);
+            }
+        }
     }
     for left in set_aside {
         state.set_aside(left, ());
@@ -469,6 +497,134 @@ mod tests {
         assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
         assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
         assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// A container `/c/` holding `/c/m`.
+    async fn a_member() -> (LwsState<FlakyStore>, FlakyStore, String, String) {
+        let (st, store) = state(100).await;
+        let container_link = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        let h = [("slug", "c"), ("link", container_link)];
+        assert_eq!(
+            call(&st, Method::POST, "/", &h, "").await,
+            StatusCode::CREATED
+        );
+        let h = [("slug", "m"), ("content-type", "text/plain")];
+        assert_eq!(
+            call(&st, Method::POST, "/c/", &h, "m").await,
+            StatusCode::CREATED
+        );
+        let (c, m) = (st.cfg.absolute("/c/"), st.cfg.absolute("/c/m"));
+        (st, store, c, m)
+    }
+
+    /// A journal that has removed the member `m` of `c` (its intent stored), not yet kept.
+    async fn removing<'a>(
+        st: &'a LwsState<FlakyStore>,
+        c: &str,
+        m: &str,
+    ) -> super::super::Journal<'a, FlakyStore> {
+        let mut journal = st.journal();
+        journal.stage_member(m, Some(c)).await.unwrap();
+        journal.stage(&meta_key(m)).await.unwrap();
+        journal.remove_member(m, Some(c)).await.unwrap();
+        journal.delete_meta(m).await.unwrap();
+        journal
+    }
+
+    /// Review finding: when the store recorded a change as kept but the reply was lost, the
+    /// change was put back from an intent that no longer held the plan to finish that, should
+    /// the process stop. The intent is read back first: it says kept, so the change is kept.
+    #[tokio::test]
+    async fn a_kept_change_whose_reply_was_lost_stays_kept() {
+        let (st, store, c, m) = a_member().await;
+        let journal = removing(&st, &c, &m).await;
+        let record = journal.intent.clone().unwrap();
+        let dated = st.resource_meta(&c).await.unwrap().version;
+        *store.fail_after_write_of.lock().unwrap() = Some(record);
+        assert!(journal.commit(Some(&c)).await.is_ok());
+        *store.fail_after_write_of.lock().unwrap() = None;
+        assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
+        // A stop before the touch: the next start touches the container.
+        let st = restart(&store).await;
+        assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
+        assert!(!st.store.exists(&m).await.unwrap());
+        assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// And when the intent cannot be read back either, the outcome is not known: the request
+    /// fails with the change left to settle from the intent later, kept or put back, by a start
+    /// or in the background, but never put back blindly.
+    #[tokio::test]
+    async fn a_change_whose_outcome_is_unknown_is_settled_from_its_intent() {
+        // The store kept it (the reply was lost); the process stops; the start keeps it.
+        let (st, store, c, m) = a_member().await;
+        let journal = removing(&st, &c, &m).await;
+        let record = journal.intent.clone().unwrap();
+        *store.fail_after_write_of.lock().unwrap() = Some(record.clone());
+        *store.fail_read_of.lock().unwrap() = Some(record.clone());
+        let (_, left) = journal.commit(Some(&c)).await.expect_err("unknown");
+        assert!(matches!(
+            left.as_ref().map(|l| &l.0[..]),
+            Some([Undo::Resolve { .. }])
+        ));
+        *store.fail_after_write_of.lock().unwrap() = None;
+        *store.fail_read_of.lock().unwrap() = None;
+        drop(left);
+        let st = restart(&store).await;
+        assert!(!st.store.exists(&m).await.unwrap(), "the delete is kept");
+        assert_eq!(intents_left(&st).await, 0);
+
+        // The store did not keep it; settled in the background, it is put back.
+        let (st, store, c, m) = a_member().await;
+        let journal = removing(&st, &c, &m).await;
+        let record = journal.intent.clone().unwrap();
+        *store.fail_write_under.lock().unwrap() = Some(container(&st.cfg.storage()));
+        *store.fail_read_of.lock().unwrap() = Some(record);
+        let (_, left) = journal.commit(Some(&c)).await.expect_err("unknown");
+        st.set_aside(left.expect("to settle"), ());
+        *store.fail_write_under.lock().unwrap() = None;
+        *store.fail_read_of.lock().unwrap() = None;
+        let mut waited = 0;
+        while call(&st, Method::GET, "/c/m", &[], "").await != StatusCode::OK {
+            assert!(waited < 100, "still set aside");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            waited += 1;
+        }
+        assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Review finding: a start touched a container for a kept change, and cleared that intent,
+    /// before putting back an earlier change cut short that restores the container's metadata
+    /// from before the touch, so its date went backwards. Changes are put back first.
+    #[tokio::test]
+    async fn a_start_touches_after_putting_back() {
+        let (st, store) = state(100).await;
+        let container_link = "<https://www.w3.org/ns/lws#Container>; rel=\"type\"";
+        let h = [("slug", "c"), ("link", container_link)];
+        assert_eq!(
+            call(&st, Method::POST, "/", &h, "").await,
+            StatusCode::CREATED
+        );
+        let c = st.cfg.absolute("/c/");
+        let dated = st.resource_meta(&c).await.unwrap().version;
+        // Listed first: a kept change still owing its touch of `/c/`.
+        store_intent(&st, std::slice::from_ref(&c)).await;
+        // Then a change cut short that would put `/c/`'s metadata back as it is now.
+        let mut journal = st.journal();
+        journal.stage(&meta_key(&c)).await.unwrap();
+        let mut meta = st.resource_meta(&c).await.unwrap();
+        meta.pending = true;
+        journal.write_meta(&c, &meta).await.unwrap();
+        std::mem::forget(journal);
+        let st = restart(&store).await;
+        assert_ne!(st.resource_meta(&c).await.unwrap().version, dated);
+        assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Store an intent naming only `touch`, as a kept change leaves it.
+    async fn store_intent(st: &LwsState<FlakyStore>, touch: &[String]) {
+        let record = mint(&st.cfg.storage());
+        store(st, &record, false, &[], touch).await.unwrap();
     }
 
     /// Review finding: recovery set aside what it could not yet put back, in tasks that outlived
