@@ -81,19 +81,19 @@ pub fn validate(cfg: &LwsConfig, token: &str) -> Result<Agent, String> {
         return Err("wrong audience".into());
     }
     let now = jose::now_secs();
-    match jws.claim_time("exp") {
-        Some(exp) if exp + LEEWAY_SECS > now => {}
+    match jws.claim_time("exp")? {
+        Some(exp) if exp + LEEWAY_SECS as f64 > now as f64 => {}
         _ => return Err("expired".into()),
     }
     if jws
-        .claim_time("nbf")
-        .is_some_and(|nbf| nbf > now + LEEWAY_SECS)
+        .claim_time("nbf")?
+        .is_some_and(|nbf| nbf > (now + LEEWAY_SECS) as f64)
     {
         return Err("not yet valid".into());
     }
     if jws
-        .claim_time("iat")
-        .is_some_and(|iat| iat > now + LEEWAY_SECS)
+        .claim_time("iat")?
+        .is_some_and(|iat| iat > (now + LEEWAY_SECS) as f64)
     {
         return Err("issued in the future".into());
     }

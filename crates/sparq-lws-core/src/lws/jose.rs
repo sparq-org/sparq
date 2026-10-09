@@ -3,8 +3,8 @@
 //!
 //! LWS access tokens (RFC 9068) are signed ES256 by this server's authorization server. Subject
 //! tokens presented at the token endpoint are verified here too: did:key and controlled identifier
-//! credentials are ES256 (or EdDSA for an Ed25519 key). `alg: none` and every other algorithm
-//! is refused.
+//! credentials are ES256 (or EdDSA for an Ed25519 key), OpenID Connect ID Tokens are ES256 or
+//! RS256. `alg: none` and every other algorithm are refused.
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
@@ -247,6 +247,31 @@ pub fn thumbprint(jwk: &Value) -> String {
     b64url(&sha2::Sha256::digest(canonical.as_bytes()))
 }
 
+/// The RFC 7638 thumbprint of the key a public JWK holds, from the key itself: an EC key from its
+/// point, an OKP key from its 32 bytes, an RSA key from its modulus and exponent without leading
+/// zero bytes. Every spelling of one key (padding, leading zeros) has the one thumbprint, and a JWK
+/// that holds no key of a supported type has none.
+pub fn key_thumbprint(jwk: &Value) -> Option<String> {
+    let get = |k: &str| jwk.get(k).and_then(Value::as_str);
+    let canonical = match get("kty")? {
+        "EC" => public_jwk_of(&ec_public_from_jwk(jwk)?),
+        "OKP" if get("crv")? == "Ed25519" => {
+            let x = b64url_decode(get("x")?).filter(|x| x.len() == 32)?;
+            json!({"kty": "OKP", "crv": "Ed25519", "x": b64url(&x)})
+        }
+        "RSA" => {
+            let unsigned = |k: &str| {
+                let bytes = b64url_decode(get(k)?)?;
+                let start = bytes.iter().position(|b| *b != 0)?;
+                Some(b64url(&bytes[start..]))
+            };
+            json!({"kty": "RSA", "n": unsigned("n")?, "e": unsigned("e")?})
+        }
+        _ => return None,
+    };
+    Some(thumbprint(&canonical))
+}
+
 /// A P-256 public key from a JWK, or `None` when it is not one.
 pub fn ec_public_from_jwk(jwk: &Value) -> Option<PublicKey> {
     if jwk.get("kty")?.as_str()? != "EC" || jwk.get("crv")?.as_str()? != "P-256" {
@@ -316,11 +341,19 @@ impl Jws {
         self.claims.get(name).and_then(Value::as_str)
     }
 
-    /// A NumericDate claim (seconds since the epoch).
-    pub fn claim_time(&self, name: &str) -> Option<i64> {
-        self.claims
-            .get(name)
-            .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+    /// A NumericDate claim: seconds since the epoch, fractions kept (RFC 7519 section 2), between
+    /// the epoch and the end of year 9999. `None` when the token does not carry it, and an error
+    /// when it carries anything else. Every time a token carries is read here, so a time outside
+    /// that range is refused rather than read as absent or rounded into it; within it, every
+    /// whole second is exact, and arithmetic on a claim's time cannot overflow.
+    pub fn claim_time(&self, name: &str) -> Result<Option<f64>, String> {
+        let Some(v) = self.claims.get(name) else {
+            return Ok(None);
+        };
+        v.as_f64()
+            .filter(|t| (0.0..=MAX_TIME as f64).contains(t))
+            .map(Some)
+            .ok_or_else(|| format!("{name} is not a time between 1970 and 9999"))
     }
 
     /// The `aud` claim as a list (a single string is a one-element list).
@@ -405,6 +438,9 @@ impl Jws {
 }
 
 /// Seconds since the Unix epoch.
+/// The latest time [`Jws::claim_time`] reads: 9999-12-31T23:59:59Z.
+pub const MAX_TIME: i64 = 253_402_300_799;
+
 pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

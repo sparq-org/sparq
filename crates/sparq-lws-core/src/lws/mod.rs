@@ -14,8 +14,8 @@
 //!   and RFC 9457 problem details;
 //! - a **linkset** (RFC 9264) per resource, patchable;
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
-//!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
-//!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
+//!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key, controlled
+//!   identifier and OpenID Connect subject tokens; the storage accepts the RFC 9068 access tokens
 //!   it issues ([`tokens`]);
 //! - **access grants and access requests** ([`access`]): the LWS Access Profile;
 //! - **webhook notifications** ([`notify`]), signed per RFC 9421;
@@ -101,9 +101,12 @@ pub struct LwsConfig {
     /// Lifetime of issued access tokens, in seconds.
     pub token_ttl_secs: i64,
     /// Let the authorization server and the notification sender reach `http:` and loopback or
-    /// private addresses (identity documents, webhook inboxes). Development and
+    /// private addresses (identity documents, OpenID providers, webhook inboxes). Development and
     /// conformance testing only.
     pub allow_insecure_fetch: bool,
+    /// OpenID Providers whose identities get the reserved half of the DPoP replay cache (see
+    /// [`subject_tokens::DpopReplay`]). Every other provider shares the other half.
+    pub trusted_oidc_issuers: Vec<String>,
     /// Largest request body read, in bytes; a larger one is refused with 413 before it is
     /// buffered further. The server-wide ceiling (`SOLID_SERVER_MAX_BODY_BYTES`, see
     /// [`crate::body_limit`]), the same one the Solid surface enforces.
@@ -125,6 +128,7 @@ impl LwsConfig {
             notify_key: jose::EcKey::generate("notify-key"),
             token_ttl_secs: 300,
             allow_insecure_fetch: false,
+            trusted_oidc_issuers: Vec::new(),
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
         }
@@ -148,6 +152,8 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
+    /// - `SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS`: comma-separated OpenID Provider issuers whose
+    ///   identities get the reserved half of the DPoP replay cache;
     /// - `SOLID_SERVER_MAX_BODY_BYTES`: the request body ceiling shared with the Solid surface.
     pub fn from_env(base_url: &str) -> Result<Self, String> {
         let mut cfg = Self::new(base_url);
@@ -165,6 +171,15 @@ impl LwsConfig {
         cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
         // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
         cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
+        cfg.trusted_oidc_issuers = var("SOLID_SERVER_LWS_TRUSTED_OIDC_ISSUERS")
+            .map(|v| {
+                v.split(',')
+                    .map(str::trim)
+                    .filter(|i| !i.is_empty())
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
                 .parse()
@@ -491,6 +506,8 @@ pub struct Inner<S: Store> {
     pub http: reqwest::Client,
     /// Serializes conditional writes per resource (see [`resources::IriLocks`]).
     pub locks: resources::IriLocks,
+    /// DPoP proof ids seen at the token endpoint.
+    pub dpop_replay: subject_tokens::DpopReplay,
     /// The bytes set-aside changes hold to put back (see [`LwsState::may_write`]).
     set_aside_bytes: std::sync::atomic::AtomicUsize,
     /// The containers whose own modification time may be behind a change to them: each with
@@ -543,6 +560,7 @@ impl<S: Store + 'static> LwsState<S> {
                 notify,
                 http,
                 locks: Default::default(),
+                dpop_replay: Default::default(),
                 set_aside_bytes: Default::default(),
                 untouched: Default::default(),
             }),
