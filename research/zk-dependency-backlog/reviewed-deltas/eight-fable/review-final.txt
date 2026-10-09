@@ -1,0 +1,76 @@
+Evidence gathering is complete. I have read all eight delta patches, the manifest, and the surrounding old/new source for every substantive hunk. Writing the review now.
+
+# Source review of eight registry deltas (safe-to-deploy)
+
+**Overall result: all eight deltas APPROVE at the source-delta level.** None adds a runtime dependency, network, filesystem, or process behavior. One package (serde) carries a hard prerequisite: it pins a new version of a crate that is not in this package.
+
+Scope of what I did: I read `source/MANIFEST.json`, every `delta.patch`, and the old/new trees around each hunk with Read, Grep, and Glob only. I spot-checked that the patch hunks match the new trees. I did not compute hashes, run builds, tests, or Miri, and I did not access the four local vendor patches or any transcript. All hashes below are copied from the manifest, not recomputed by me. The baseline audit chains cover baselines only and I did not verify them.
+
+## Per-package verdicts
+
+| Package | Delta | Verdict | Old SHA256 (manifest) | New SHA256 (manifest) | Patch SHA256 (manifest) |
+|---|---|---|---|---|---|
+| android_system_properties | 0.1.5→0.1.6 | APPROVE | 819e7219…ee66311 | ae221649…237fbc | 19c29793…68cf07 |
+| arrayvec | 0.7.6→0.7.8 | APPROVE | 7c02d123…92e50 | d3fb67a6…45ad56 | a9bdc709…49cd54 |
+| either | 1.16.0→1.18.0 | APPROVE | 91622ff5…93679e | 252afb9a…8ed34 | ea52a13b…08ef4 |
+| num-integer | 0.1.46→0.1.47 | APPROVE | 7969661f…79858f | 7ce2d95d…8e10b | 2b10d159…21c1d3 |
+| proc-macro2 | 1.0.106→1.0.107 | APPROVE | 8fd00f0b…30934 | 985e7ec9…766d9 | 2210f56e…435b8 |
+| rustversion | 1.0.22→1.0.23 | APPROVE | b39cdef0…8d46d | cf54715a…52e21f | 8239f0ec…d1299 |
+| serde | 1.0.228→1.0.229 | APPROVE, prerequisite | 9a8e94ea…4ae9e | 4148590a…23e0ba | 80e45cc3…3fff90 |
+| smallvec | 1.15.2→1.16.1 | APPROVE | 8ed6a63f…fa7c90 | ba467056…def891 | 08502e40…42bc00 |
+
+Full 64-character hashes are at `source/MANIFEST.json:31`, `:39`, `:45` and the corresponding lines of each unit.
+
+**android_system_properties 0.1.5→0.1.6.** Only `src/lib.rs` and packaging metadata change. Findings:
+- **FFI signature corrected.** The callback is now `unsafe extern "C" fn` and the `__system_property_read_callback` pointer type returns unit instead of a pointer (`source/android_system_properties/new/src/lib.rs:57`, `:62`, `:66`). Bionic declares this function as void with a C-ABI callback, so 0.1.5 declared a Rust-ABI function pointer and a phantom return. The new declaration matches the platform.
+- **Panic removed from the C-called callback.** The `unwrap()` on UTF-8 conversion is gone. Non-UTF-8 values now yield `None` instead of unwinding across the FFI boundary (`:59`, `:194-200`). This removes an abort or undefined-behavior path.
+- Cookie is `*mut Option<String>` on the caller's stack; bionic invokes the callback synchronously, so the pointer lifetime is unchanged from 0.1.5. The `dlopen`/`dlsym`/`dlclose` handle logic is unchanged.
+- Behavior change: a property present but non-UTF-8 returns `None` rather than panicking. Empty values still return `Some("")`.
+- Dependencies: libc requirement unchanged. Cargo.lock bump is dev-only. License string normalized to `MIT OR Apache-2.0`.
+- Platform: all real code is `cfg(target_os = "android")`; other targets get a null handle and `None`.
+
+**arrayvec 0.7.6→0.7.8.** Findings:
+- **ZST double-drop fixed.** In 0.7.6, `extend_from_iter` skipped the write for zero-sized `T`, so the element was dropped at the end of the loop body and again when the vector dropped. 0.7.8 forgets the moved value (`source/arrayvec/new/src/arrayvec.rs:1140-1145`). This is a real soundness fix in the baseline, with a regression test added in `tests/tests.rs`.
+- `spare_capacity_mut` returns `&mut self.xs[len..]` of `MaybeUninit<T>` (`:568-571`). It cannot change `len`, so it is sound by construction.
+- `LenUint` becomes `u16` on 16-bit targets (`source/arrayvec/new/src/lib.rs:31-35`). Every use is a cast at `set_len`, drain, and the extend guard; the capacity assertion skips when `usize` is not wider than `LenUint`, which is correct because `CAP` cannot exceed `usize::MAX`. The `#[repr(C)]` layout shrinks on 16-bit targets only.
+- Lifetime elision on `drain` is cosmetic. Cargo.toml reorders sections with no dependency change. Cargo.lock is new and dev-only.
+
+**either 1.16.0→1.18.0.** No unsafe code, no dependency change, no build script. Findings:
+- New `Extend<Either<L,R>>` and `FromIterator<Either<L,R>>` for `(A, B)` (`source/either/new/src/iterator.rs:42-82`). They route items with a `match` and `iter::once`. They cannot overlap std's tuple impls because the item type constructor differs, and the crate is published so coherence passed. Downstream inference for `.collect()` into tuples may need annotations, which is an API note, not a safety one.
+- Seven `fmt` traits added by macro delegation using fully qualified `fmt::$trait::fmt` (`source/either/new/src/lib.rs:1637-1653`). `Display` behavior is unchanged.
+- README/RELEASES churn only. serde feature untouched.
+
+**num-integer 0.1.46→0.1.47.** No unsafe, no dependency change. The one algorithmic change is a Karatsuba square root for 128-bit values above `u64::MAX` (`source/num-integer/new/src/roots.rs:205-235`, call site `:315-325`). I checked the boundaries by hand:
+- Normalization shifts by an even amount so the top two bits hold at least one set bit, matching the `a3 >= b/4` precondition. The shift is at most 62.
+- The divisor `2*s1` is at least 2^32, so no division by zero. Every intermediate fits in `u128`: the largest are `r1 << 32` under 2^65 and `q*q` at most 2^64.
+- `q` can equal 2^32; I traced `u128::MAX` through the code and it returns 2^64 - 1, which is correct. One correction step suffices because `2s - 1 > q^2` under the normalization.
+- The shipped `tests/roots.rs` exercises `u128` near its maximum and across shifted values, but I did not run it.
+- Cargo.toml gains explicit target tables from newer cargo. The `is_multiple_of` test change avoids the inherent method added in Rust 1.87.
+
+**proc-macro2 1.0.106→1.0.107.** Findings:
+- MSRV rises to 1.71 (`source/proc-macro2/new/Cargo.toml:14`). This is the only consumer-visible change.
+- `is_some_and` replaces `map_or(false, ..)` in `parse.rs` with identical semantics.
+- `invalidate_current_thread_spans` drops a redundant `else` after a diverging `panic!` (`source/proc-macro2/new/src/wrapper.rs:979-987`). Control flow is identical.
+- `build.rs` is unchanged. It already spawned `rustc` probes, which is pre-existing and not part of this delta. Cargo.lock and CI churn are dev-only.
+
+**rustversion 1.0.22→1.0.23.** The single functional change sets `RUSTVERSION=1` in the environment of the spawned `rustc --version` child (`source/rustversion/new/build/build.rs:41-44`). It affects only that child process, adds no I/O, and reads nothing new. The rest is a docs.rs flag, a removed clippy allow, and a dev lockfile rewrite. Proc-macro source is otherwise untouched.
+
+**serde 1.0.228→1.0.229.** The serde crate's own delta is benign, but it is not self-contained:
+- **Prerequisite: serde_core 1.0.229.** The dependency is pinned `=1.0.229` (`source/serde/new/Cargo.toml:77-80`). That crate is not in this package and no baseline chain here covers it.
+- The only Rust change, the in-place `visit_seq` reborrow in `src/core/de/impls.rs:1050-1063`, lives in the docs.rs-only mirror. Normal builds re-export from external `serde_core` (`source/serde/new/src/lib.rs:177-185`, `:252-254`). So the runtime effect of this change must be reviewed in serde_core, not here. The change itself is an explicit reborrow with identical semantics.
+- `build.rs` now sets `no_serde_derive` for rustc below 1.71 instead of 1.61 (`source/serde/new/build.rs:48-51`). On rustc 1.61 through 1.70 the derive support modules disappear. That is a toolchain limitation, not a safety issue.
+- `never_type` is now enabled only under docsrs, which removes a nightly requirement. Lint rename is harmless under `unknown_lints`.
+
+**smallvec 1.15.2→1.16.1.** Findings:
+- **`push` rewrite verified** (`source/smallvec/new/src/lib.rs:1189-1214`). Both branches recreate the raw pointer and length reference after `reserve_one_unchecked`, so no stale pointer survives a reallocation. In the inline branch the raw pointer derives from `data` and the length reference from `capacity`, which are disjoint fields. `inline_mut` is called only when not spilled, which the enum variant requires (`:739-744`). I checked the zero-inline-capacity and zero-sized-item cases; both match the 1.15.2 behavior via `reserve_one_unchecked` (`:1315-1323`).
+- **Feature removed:** `debugger_visualizer` and its dev-dependencies are gone (`source/smallvec/new/Cargo.toml:52-64`). Any consumer enabling it gets a cargo error. The 1.15.2 tarball shipped no natvis file, so that feature could not have built from the registry anyway.
+- The `union` and non-`union` data accessors are unchanged apart from comments. Send/Sync impls unchanged. bincode and serde impls unchanged apart from formatting.
+- Everything else is rustfmt reflow, deprecation allows, and dev lockfile churn.
+
+## What still prevents cargo-vet certification
+
+- **serde_core 1.0.229** needs its own delta audit before serde 1.0.229 can be certified in the graph. If the `derive` feature is active, the resolved serde_derive version also needs coverage. It is not pinned by this delta.
+- **Audit authorship.** This CLI records nothing. The maintainer must write the eight entries in audits.toml with legitimate `who` and `criteria`, and decide whether to cite this review in `notes`.
+- **Reverification.** The invoker's planned byte-for-byte recheck of the frozen source after this review is still pending. My review relies on the manifest hashes and the patches as provided.
+- **Execution evidence.** No tests, Miri, or builds were run here. The arrayvec, smallvec, and num-integer conclusions rest on reading, not execution.
+- **Coverage boundaries.** This is a delta assessment, not a complete-crate re-audit, not an active-graph coverage check, not a cryptographic or ZK audit, and not merge authorization. Baseline chains were accepted as declared.

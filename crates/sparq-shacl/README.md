@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-inzv: README brought to template. -->
+<!-- sq-inzv: README brought to template. -->
 # sparq-shacl
 
 <p>
@@ -13,8 +13,8 @@ index-backed permutation scans (no SPARQL round-trip; terms materialise only at 
 report boundary); `sh:sparql` routes its `sh:select` through `sparq-engine`. Reports:
 `conforms` + per-result detail; `to_turtle()` / `to_ntriples()` (W3C report graph), `to_json()`, and `to_text()`.
 
-Like `sparq-reason`, this crate is **isolated**: no other sparq crate depends on it, so
-the core engine and the default wasm bundle carry zero SHACL code. The browser/JS
+Like `sparq-reason`, this crate is **isolated**: `sparq-core` / `sparq-engine` never depend on
+it, so the core engine and the default wasm bundle carry zero SHACL code. The browser/JS
 consumer opts in through `sparq-wasm`'s non-default `shacl` feature
 (`Store.validate(data, shapes, format)`, a drop-in for `rdf-validate-shacl`).
 
@@ -95,7 +95,7 @@ and call `validate_with_model`. CLI: `cargo run -p sparq-shacl --example validat
 ## 📚 Learn more
 
 - **How-to** — [`skills/shacl-validation/SKILL.md`](../../skills/shacl-validation/SKILL.md)
-  (the exhaustive supported-constraint list and the report shape).
+  (the exhaustive supported-constraint list and the report shape). SPARQL constraints, validators and targets retain VERSION metadata through prebinding. Unsupported labels use the existing ill-formed-shape policy; see the [EBV dialect contract](../../skills/sparql-query/ebv-dialects.md).
 - **API reference** — [docs.rs/sparq-shacl](https://docs.rs/sparq-shacl).
 - **Spec** — W3C SHACL (Core, SPARQL, AF); the surface is pinned by [`tests/`](tests/).
 - **Contribute** — [`AGENTS.md`](../../AGENTS.md).

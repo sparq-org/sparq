@@ -1,0 +1,443 @@
+{
+  "schema_version": 1,
+  "description": "Original temporal lexical/cast boundary cases; historical exact_temporal.json is unchanged. Source whitespace is RDF lexical data, while string casting performs explicit XML preprocessing.",
+  "sources": [
+    "https://www.w3.org/TR/rdf11-concepts/#section-Datatypes",
+    "https://www.w3.org/TR/xmlschema11-2/#dt-lexical-space",
+    "https://www.w3.org/TR/xmlschema11-2/#dt-dateTime",
+    "https://www.w3.org/TR/xpath-functions/#casting-from-strings",
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#func-xsdDateTime"
+  ],
+  "cases": [
+    {
+      "id": "raw-space-literal",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-space-values",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { VALUES ?t { \" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-space-stored",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 2024-02-29T12:34:56.123456789Z \"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { ?s <http://ex/p> ?t }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-xml-literal",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"\\t2024-02-29T12:34:56.123456789Z\\r\\n\"^^xsd:dateTime = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-xml-values",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { VALUES ?t { \"\\t2024-02-29T12:34:56.123456789Z\\r\\n\"^^xsd:dateTime } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-xml-stored",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"\\t2024-02-29T12:34:56.123456789Z\\r\\n\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { ?s <http://ex/p> ?t }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-nbsp-literal",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-nbsp-values",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { VALUES ?t { \" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-nbsp-stored",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 2024-02-29T12:34:56.123456789Z \"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { ?s <http://ex/p> ?t }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-date-literal",
+      "basis": "Date/dateTimeStamp are supported datatype extensions",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\" 2024-02-29Z \"^^xsd:date = \"2024-02-29Z\"^^xsd:date AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-date-values",
+      "basis": "Date/dateTimeStamp are supported datatype extensions",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29Z\"^^xsd:date AS ?v) { VALUES ?t { \" 2024-02-29Z \"^^xsd:date } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-date-stored",
+      "basis": "Date/dateTimeStamp are supported datatype extensions",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \" 2024-02-29Z \"^^<http://www.w3.org/2001/XMLSchema#date> .\n",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29Z\"^^xsd:date AS ?v) { ?s <http://ex/p> ?t }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-stamp-literal",
+      "basis": "Date/dateTimeStamp are supported datatype extensions",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"2024-02-29T12:34:56\"^^xsd:dateTimeStamp = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-stamp-values",
+      "basis": "Date/dateTimeStamp are supported datatype extensions",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { VALUES ?t { \"2024-02-29T12:34:56\"^^xsd:dateTimeStamp } }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-stamp-stored",
+      "basis": "Date/dateTimeStamp are supported datatype extensions",
+      "dataset_ntriples": "<http://ex/s> <http://ex/p> \"2024-02-29T12:34:56\"^^<http://www.w3.org/2001/XMLSchema#dateTimeStamp> .\n",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (?t = \"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime AS ?v) { ?s <http://ex/p> ?t }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-year",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-month",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MONTH(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-day",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (DAY(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-hours",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (HOURS(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-minutes",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (MINUTES(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-seconds",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (SECONDS(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-tz",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (TZ(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-timezone",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (TIMEZONE(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-padded-xsd-datetime",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:dateTime(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "raw-stamp-required-zone-cast",
+      "basis": "dateTimeStamp extension requires timezone",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:dateTime(\"2024-02-29T12:34:56\"^^xsd:dateTimeStamp) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "string-constructor-space",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:dateTime(\" 2024-02-29T12:34:56.123456789Z \") AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"2024-02-29T12:34:56.123456789Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ]
+    },
+    {
+      "id": "string-constructor-xml",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:dateTime(\"\\t2024-02-29T12:34:56.123456789Z\\r\\n\") AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"2024-02-29T12:34:56.123456789Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ]
+    },
+    {
+      "id": "string-constructor-nbsp",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:dateTime(\" 2024-02-29T12:34:56.123456789Z \") AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "constructed-raw-strdt-value",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(STRDT(\" 2024-02-29T12:34:56.123456789Z \",xsd:dateTime)) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "constructed-raw-strdt-term",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (STRDT(\" 2024-02-29T12:34:56.123456789Z \",xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\" 2024-02-29T12:34:56.123456789Z \"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ]
+    },
+    {
+      "id": "raw-term-identity",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (sameTerm(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime,\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ]
+    },
+    {
+      "id": "raw-term-str",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (STR(\" 2024-02-29T12:34:56.123456789Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\" 2024-02-29T12:34:56.123456789Z \""
+        ]
+      ]
+    },
+    {
+      "id": "valid-fraction-offset",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime = \"2024-02-29T13:34:56.123456789+01:00\"^^xsd:dateTime AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ]
+    },
+    {
+      "id": "valid-fraction-distinct",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (\"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime = \"2024-02-29T12:34:56.123456788Z\"^^xsd:dateTime AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+        ]
+      ]
+    },
+    {
+      "id": "valid-typed-identity-cast",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (xsd:dateTime(\"2024-02-29T12:34:56.123456789Z\"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"2024-02-29T12:34:56.123456789Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime>"
+        ]
+      ]
+    },
+    {
+      "id": "padded-wide-year-is-ordinary-error",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (YEAR(\" 1000000001-01-01T00:00:00Z \"^^xsd:dateTime) AS ?v) {  }",
+      "expected_rows": [
+        [
+          null
+        ]
+      ]
+    },
+    {
+      "id": "padded-wide-year-coalesce",
+      "basis": "SPARQL 1.1 with strict RDF typed lexical validation",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(YEAR(\" 1000000001-01-01T00:00:00Z \"^^xsd:dateTime),7) AS ?v) {  }",
+      "expected_rows": [
+        [
+          "\"7\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        ]
+      ]
+    }
+  ],
+  "capacity_cases": [
+    {
+      "id": "constructed-year-capacity-1",
+      "basis": "Implementation capacity, not a normative result golden",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (STR(xsd:dateTime(CONCAT(\" 1000000001\", \"-01-01T00:00:00Z \"))) AS ?v) {}",
+      "expected_error": "query evaluation capacity exceeded (temporal-year)"
+    },
+    {
+      "id": "constructed-year-capacity-2",
+      "basis": "Implementation capacity, not a normative result golden",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (COALESCE(YEAR(xsd:dateTime(CONCAT(\"\\t1000000001\", \"-01-01T00:00:00Z\\n\"))),7) AS ?v) {}",
+      "expected_error": "query evaluation capacity exceeded (temporal-year)"
+    },
+    {
+      "id": "constructed-year-capacity-3",
+      "basis": "Implementation capacity, not a normative result golden",
+      "dataset_ntriples": "",
+      "query": "PREFIX xsd:<http://www.w3.org/2001/XMLSchema#> SELECT (STR(xsd:dateTime(\" 0000-01-01T00:00:00Z \")) AS ?v) {}",
+      "expected_error": "query evaluation capacity exceeded (temporal-year)"
+    }
+  ]
+}
