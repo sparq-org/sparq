@@ -247,6 +247,43 @@ impl EmbeddedSparqClient {
     /// analogue of the HTTP client's request count. A query that fails to BUILD (a rejected untrusted
     /// IRI) returns before ever reaching here, so a fail-closed rejection is correctly NOT counted as
     /// a round-trip.
+    /// The children `q` selects, or `None` once their IRIs pass `max_bytes`.
+    async fn children(
+        &self,
+        q: String,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("list_children", e))?;
+            let child_col = var_col(&result, "child").ok_or_else(|| {
+                SparqError::Backend("fatal: select-children result missing ?child column".into())
+            })?;
+            let mut children = Vec::with_capacity(result.rows.len());
+            let mut bytes = 0usize;
+            for row in &result.rows {
+                // A `SELECT ?child` row MUST carry a bound `child`. A missing/unbound value is a
+                // malformed result, NOT an empty list — surface it as a fatal error (the same
+                // fail-closed posture as the HTTP impl), because `list_children` feeds the
+                // empty-container DELETE check (a silently-shortened list could wrongly allow a
+                // non-empty container's delete).
+                let child =
+                    term_value(row.get(child_col).and_then(|c| c.as_ref())).ok_or_else(|| {
+                        SparqError::Backend(
+                            "fatal: select-children row missing the 'child' binding".into(),
+                        )
+                    })?;
+                bytes = bytes.saturating_add(child.len());
+                if bytes > max_bytes {
+                    return Ok(None);
+                }
+                children.push(child);
+            }
+            Ok(Some(children))
+        })
+        .await
+    }
+
     async fn dispatch<T, F>(&self, f: F) -> Result<T, SparqError>
     where
         F: FnOnce(&mut Graph) -> Result<T, SparqError> + Send + 'static,
@@ -494,35 +531,66 @@ impl SparqClient for EmbeddedSparqClient {
     async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
         let u = sparql::update_remove_child(container, child)?;
         self.dispatch(move |graph| {
-            sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("remove_child", e))
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("remove_child", e))
         })
         .await
     }
 
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
-        let q = sparql::select_children(container)?;
+        let children = self.children(sparql::select_children(container)?, usize::MAX);
+        Ok(children.await?.unwrap_or_default())
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        // Read from the container's own graph's index rather than through a query: the engine
+        // evaluates `GRAPH` whole before a LIMIT applies. The index counts the members exactly
+        // before any is read, so a listing with more than can fit is refused unread, and one
+        // that fits is read whole (nothing is left out).
+        let rows = super::sparq::max_rows(container, max_bytes);
+        let name = oxrdf::NamedNode::new(container)
+            .map_err(|e| SparqError::Backend(format!("container IRI: {e}")))?;
         self.dispatch(move |graph| {
-            let result =
-                sparq_engine::query(graph, &q).map_err(|e| engine_err("list_children", e))?;
-            let child_col = var_col(&result, "child").ok_or_else(|| {
-                SparqError::Backend("fatal: select-children result missing ?child column".into())
-            })?;
-            let mut children = Vec::with_capacity(result.rows.len());
-            for row in &result.rows {
-                // A `SELECT ?child` row MUST carry a bound `child`. A missing/unbound value is a
-                // malformed result, NOT an empty list — surface it as a fatal error (the same
-                // fail-closed posture as the HTTP impl), because `list_children` feeds the
-                // empty-container DELETE check (a silently-shortened list could wrongly allow a
-                // non-empty container's delete).
-                let child =
-                    term_value(row.get(child_col).and_then(|c| c.as_ref())).ok_or_else(|| {
-                        SparqError::Backend(
-                            "fatal: select-children row missing the 'child' binding".into(),
-                        )
-                    })?;
-                children.push(child);
+            let Some(g) = graph.named_graph(&oxrdf::Term::NamedNode(name)) else {
+                return Ok(Some(Vec::new()));
+            };
+            let id = |iri: &str| {
+                let id = g
+                    .dict
+                    .lookup(&oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(
+                        iri,
+                    )));
+                (id != sparq_core::dict::NO_ID).then_some(id)
+            };
+            let (Some(s), Some(p)) = (id(&sparql::s_record()), id(sparql::LDP_CONTAINS)) else {
+                return Ok(Some(Vec::new()));
+            };
+            let pattern = [Some(s), Some(p), None];
+            if g.store.estimate(&pattern) > rows {
+                return Ok(None);
             }
-            Ok(children)
+            let scan = g.store.scan(&pattern);
+            let mut children = Vec::with_capacity(scan.rows.len());
+            let mut bytes = 0usize;
+            for row in scan.rows.iter() {
+                let [_, _, o] = scan.to_spo(row);
+                // A member is an IRI; anything else is a malformed index (see `children`).
+                let oxrdf::Term::NamedNode(child) = g.dict.term(o) else {
+                    return Err(SparqError::Backend(
+                        "fatal: a containment member is not an IRI".into(),
+                    ));
+                };
+                bytes = bytes.saturating_add(child.as_str().len());
+                if bytes > max_bytes {
+                    return Ok(None);
+                }
+                children.push(child.into_string());
+            }
+            Ok(Some(children))
         })
         .await
     }
@@ -792,6 +860,93 @@ mod tests {
                 (N + 2) as u64,
                 "one dispatch per call: 1 put_meta + {} create_child + 1 list_children",
                 N
+            );
+        });
+    }
+
+    /// Review finding: the index read a container's whole listing before charging it. A listing
+    /// read within a budget is counted before it is read, and refused unread when it cannot fit.
+    #[test]
+    fn a_listing_read_within_a_budget_stops_at_it() {
+        block_on(async {
+            let c = client();
+            let container = "http://pod/alice/c/";
+            c.put_meta(container, meta("text/turtle", "cbk", "\"ce\""))
+                .await
+                .unwrap();
+            for i in 0..10 {
+                let child = format!("{container}n{i}");
+                c.create_child(
+                    container,
+                    &child,
+                    meta("text/turtle", &format!("bk{i}"), "\"e\""),
+                )
+                .await
+                .unwrap();
+            }
+            let all: usize = c
+                .list_children(container)
+                .await
+                .unwrap()
+                .iter()
+                .map(String::len)
+                .sum();
+            assert_eq!(
+                c.list_children_within(container, all)
+                    .await
+                    .unwrap()
+                    .map(|v| v.len()),
+                Some(10)
+            );
+            assert_eq!(
+                c.list_children_within(container, all - 1).await.unwrap(),
+                None
+            );
+            assert_eq!(c.list_children_within(container, 0).await.unwrap(), None);
+            let mut read = c
+                .list_children_within(container, all)
+                .await
+                .unwrap()
+                .unwrap();
+            let mut listed = c.list_children(container).await.unwrap();
+            read.sort();
+            listed.sort();
+            assert_eq!(read, listed);
+            // Review finding: members shorter than their container (not below it) fit more of
+            // them in the bytes than the rows asked for, and the rest was silently left out. A
+            // listing with more members than can be below it is refused, never cut short.
+            let other = "http://pod/alice/d/";
+            c.put_meta(other, meta("text/turtle", "dbk", "\"de\""))
+                .await
+                .unwrap();
+            for (i, child) in ["urn:a", "urn:b", "urn:c", "urn:d", "http://pod/alice/d/x"]
+                .iter()
+                .enumerate()
+            {
+                c.create_child(other, child, meta("text/plain", &format!("d{i}"), "\"e\""))
+                    .await
+                    .unwrap();
+            }
+            let budget = 3 * (other.len() + 1);
+            assert_eq!(super::super::sparq::max_rows(other, budget), 3);
+            assert_eq!(c.list_children_within(other, budget).await.unwrap(), None);
+            let memory = super::super::sparq::InMemorySparqClient::new();
+            memory
+                .put_meta(other, meta("text/turtle", "dbk", "\"de\""))
+                .await
+                .unwrap();
+            for (i, child) in ["urn:a", "urn:b", "urn:c", "urn:d", "http://pod/alice/d/x"]
+                .iter()
+                .enumerate()
+            {
+                memory
+                    .create_child(other, child, meta("text/plain", &format!("d{i}"), "\"e\""))
+                    .await
+                    .unwrap();
+            }
+            assert_eq!(
+                memory.list_children_within(other, budget).await.unwrap(),
+                None
             );
         });
     }

@@ -508,6 +508,10 @@ pub struct Inner<S: Store> {
     pub locks: resources::IriLocks,
     /// DPoP proof ids seen at the token endpoint.
     pub dpop_replay: subject_tokens::DpopReplay,
+    /// The resources a failed change could not yet be put back on (see [`LwsState::set_aside`]).
+    set_aside: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// The containers whose own modification time could not be moved on after a change to them.
+    untouched: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl<S: Store> std::ops::Deref for LwsState<S> {
@@ -556,8 +560,62 @@ impl<S: Store + 'static> LwsState<S> {
                 http,
                 locks: Default::default(),
                 dpop_replay: Default::default(),
+                set_aside: Default::default(),
+                untouched: Default::default(),
             }),
         })
+    }
+
+    /// Whether a change to the container `uri` may be later than its stored modification time.
+    pub(crate) fn is_untouched(&self, uri: &str) -> bool {
+        self.untouched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(uri)
+    }
+
+    /// Record whether the container `uri`'s modification time is behind a change to it.
+    pub(crate) fn untouched(&self, uri: &str, behind: bool) {
+        let mut set = self.untouched.lock().unwrap_or_else(|e| e.into_inner());
+        if behind {
+            set.insert(uri.to_string());
+        } else {
+            set.remove(uri);
+        }
+    }
+
+    /// Whether `uri` is set aside: a change to it failed and could not yet be put back, so it is
+    /// answered `503` until it is.
+    pub(crate) fn is_set_aside(&self, uri: &str) -> bool {
+        self.set_aside
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(uri)
+    }
+
+    /// Set aside the resources of a change that could not be put back after a few tries
+    /// ([`settle`]): requests for them are answered `503` from now on, and a task of their own,
+    /// holding the change's `locks` (so nobody acts on them meanwhile) and no request's
+    /// admission slot, keeps putting the change back, waiting longer between tries (up to
+    /// [`UNDO_MAX_WAIT`]). Once it is back the resources are served again and the locks go.
+    pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let iris = left.iris();
+        self.set_aside
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(iris.iter().cloned());
+        let state = self.clone();
+        tokio::spawn(async move {
+            for undo in &left.0 {
+                until_done(|| undo.apply(&state.store)).await;
+            }
+            let mut set = state.set_aside.lock().unwrap_or_else(|e| e.into_inner());
+            for iri in &iris {
+                set.remove(iri);
+            }
+            drop(set);
+            drop(locks);
+        });
     }
 
     /// Whether `agent` may perform `action` on the resource at `uri` (see [`access::allowed`]).
@@ -735,7 +793,7 @@ fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool 
 }
 
 /// How to put back one change a [`Journal`] made.
-enum Undo {
+pub(crate) enum Undo {
     /// `key` as it was: its bytes and record, or absent.
     Restore {
         key: String,
@@ -748,6 +806,8 @@ enum Undo {
         body: Bytes,
         meta: StoredMeta,
     },
+    /// A member that may have been created, removed from its container (see [`delete_record`]).
+    Remove { iri: String, parent: String },
 }
 
 impl Undo {
@@ -779,16 +839,75 @@ impl Undo {
                     .await
                     .map(drop)
             }
+            Undo::Remove { iri, parent } => delete_record(store, iri, parent).await,
+        }
+    }
+
+    /// The resources this change is to: a member's container too, when its listing changes.
+    fn iris(&self) -> Vec<&str> {
+        match self {
+            Undo::Restore { key, .. } => vec![key.strip_suffix(META_SUFFIX).unwrap_or(key)],
+            Undo::Recreate { iri, parent, .. } => std::iter::once(iri.as_str())
+                .chain(parent.as_deref())
+                .collect(),
+            Undo::Remove { iri, parent } => vec![iri, parent],
         }
     }
 }
 
-/// How long, at most, putting a change back waits between attempts.
+/// What is left to put back of a change that could not be put back after a few tries, the next
+/// to apply first.
+pub(crate) struct Unsettled(Vec<Undo>);
+
+impl Unsettled {
+    /// The resources it is to, each once.
+    fn iris(&self) -> Vec<String> {
+        let mut iris: Vec<String> = self
+            .0
+            .iter()
+            .flat_map(Undo::iris)
+            .map(str::to_string)
+            .collect();
+        iris.sort();
+        iris.dedup();
+        iris
+    }
+}
+
+/// How many times each step of putting a change back is tried while the request that made the
+/// change waits on it, before what is left is set aside ([`LwsState::set_aside`]).
+const UNDO_ATTEMPTS: u32 = 3;
+
+/// Apply `undo` in order, each tried a few times ([`UNDO_ATTEMPTS`], with short waits between):
+/// `None` once all are applied, else what is left, from the step that kept failing on.
+pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unsettled> {
+    let mut steps = undo.into_iter();
+    while let Some(step) = steps.next() {
+        let mut wait = std::time::Duration::from_millis(50);
+        let mut done = false;
+        for attempt in 1..=UNDO_ATTEMPTS {
+            if step.apply(store).await.is_ok() {
+                done = true;
+                break;
+            }
+            if attempt < UNDO_ATTEMPTS {
+                tokio::time::sleep(wait).await;
+                wait *= 4;
+            }
+        }
+        if !done {
+            return Some(Unsettled(std::iter::once(step).chain(steps).collect()));
+        }
+    }
+    None
+}
+
+/// How long, at most, a set-aside change waits between attempts to put it back.
 const UNDO_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Run `step` until it succeeds, waiting between attempts (growing to [`UNDO_MAX_WAIT`]): how a
-/// change is put back while the locks that keep anyone else from it are held.
-pub(crate) async fn until_done<T, E, F, Fut>(mut step: F) -> T
+/// set-aside change is put back while the locks that keep anyone else from it are held.
+async fn until_done<T, E, F, Fut>(mut step: F) -> T
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
@@ -924,17 +1043,15 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     /// Keep every change.
     pub(crate) fn commit(self) {}
 
-    /// Put back every change, the last first, with the mutation's locks still held, and keep
-    /// them held until it is done: a step that fails is tried again (waits growing to
-    /// [`UNDO_MAX_WAIT`]) until the store takes it. Nothing can act on what the mutation
-    /// touched until it is back as it was, validators included, so no later write can be
-    /// overwritten by an old undo and no reader sees a state in between. The mutations run in
-    /// a task of their own (see [`resources::hold_locks`]), so a client that goes away does not
-    /// cut this short.
-    pub(crate) async fn rollback(self) {
-        for undo in self.undo.into_iter().rev() {
-            until_done(|| undo.apply(&self.state.store)).await;
-        }
+    /// Put back every change, the last first, with the mutation's locks still held: each step
+    /// is tried a few times ([`settle`]). What is left when one keeps failing comes back, for
+    /// the caller to set aside with the locks ([`LwsState::set_aside`]), so nothing can act on
+    /// what the mutation touched until it is back as it was, validators included: no later
+    /// write can be overwritten by an old undo and no reader sees a state in between. The
+    /// mutations run in a task of their own (see [`resources::hold_locks`]), so a client that
+    /// goes away does not cut this short.
+    pub(crate) async fn rollback(self) -> Option<Unsettled> {
+        settle(&self.state.store, self.undo.into_iter().rev().collect()).await
     }
 }
 
@@ -942,14 +1059,14 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
 /// The index commit is the deletion point: when the store reports a failure but the record no
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
 /// record is gone.
-pub(crate) async fn delete_record<S: Store + 'static>(
-    state: &LwsState<S>,
+pub(crate) async fn delete_record<S: Store>(
+    store: &S,
     iri: &str,
     container: &str,
 ) -> Result<(), crate::error::ServerError> {
-    match remove_member(&state.store, iri, Some(container)).await {
+    match remove_member(store, iri, Some(container)).await {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
-        Err(e) => match state.store.exists(iri).await {
+        Err(e) => match store.exists(iri).await {
             Ok(false) => Ok(()),
             _ => Err(e),
         },
@@ -964,8 +1081,9 @@ pub(crate) async fn delete_record<S: Store + 'static>(
 ///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
 ///   being registered.
 /// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
-///   store's timeout or lost reply), so the record is removed, retried with the container held
-///   until it is gone; only then is `register` (and the quota place it holds) dropped.
+///   store's timeout or lost reply), so the record is removed with the container held, tried a
+///   few times and then set aside with the locks ([`LwsState::set_aside`]); `register` (and the
+///   quota place it holds) is dropped.
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
     container: &str,
@@ -1001,10 +1119,17 @@ where
                 Ok(())
             }
             Err(e) => {
-                // The create may have committed: it is removed, retried until it is, with the
-                // container still held, so the record is never stored without being in force.
+                // The create may have committed: it is removed, with the container still held,
+                // so the record is never stored without being in force; tried a few times, then
+                // set aside with the locks ([`LwsState::set_aside`]).
                 if matches!(e, ServerError::Storage(_)) {
-                    until_done(|| delete_record(&state, &iri, &container)).await;
+                    let undo = vec![Undo::Remove {
+                        iri: iri.clone(),
+                        parent: container.clone(),
+                    }];
+                    if let Some(left) = settle(&state.store, undo).await {
+                        state.set_aside(left, (_shared, _held));
+                    }
                 }
                 drop(register);
                 Err(e)
@@ -1328,12 +1453,18 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
         Err(error) => return state.challenge(Some(error)),
     };
     if path.starts_with(SUBSCRIPTIONS_PATH) {
+        if let Some(unavailable) = resources::set_aside(state, &req) {
+            return unavailable;
+        }
         return notify::handle(state, &req, &agent).await;
     }
     if path == TYPE_INDEX_PATH || path == TYPE_SEARCH_PATH {
         return index::handle(state, &req, &agent).await;
     }
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
+        if let Some(unavailable) = resources::set_aside(state, &req) {
+            return unavailable;
+        }
         return access::handle(state, &req, &agent).await;
     }
     if path.starts_with("/.lws/") || path == "/.lws" {
@@ -2069,6 +2200,16 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             self.inner.list_children(container).await
+        }
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+            if self.fail_list_of.lock().unwrap().as_deref() == Some(container) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.list_children_within(container, max_bytes).await
         }
     }
 

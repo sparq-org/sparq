@@ -1868,7 +1868,10 @@ mod tests {
         let s = "https://alice.example/id";
         let op = "https://op.example";
         let issuer = "<http://www.w3.org/ns/solid/terms#oidcIssuer>";
-        let prefix = format!("@prefix p: <https://p.example/{}#> .\n", "x".repeat(64 * 1024));
+        let prefix = format!(
+            "@prefix p: <https://p.example/{}#> .\n",
+            "x".repeat(64 * 1024)
+        );
         let depth = 100_000;
         let nested = format!(
             "{prefix}<{s}> {issuer} <{op}> .\n<{s}> p:p {}0{} .\n",
@@ -1886,7 +1889,10 @@ mod tests {
             " )".repeat(depth)
         );
         assert_eq!(first_link("text/turtle", listed.as_bytes(), s, op), None);
-        assert_eq!(first_link("application/n-triples", listed.as_bytes(), s, op), None);
+        assert_eq!(
+            first_link("application/n-triples", listed.as_bytes(), s, op),
+            None
+        );
         // A little nesting, and brackets inside IRIs, strings and comments, are fine.
         let shallow = format!(
             "{prefix}# ((((((((([[[[[[[[[\n<{s}> {issuer} <{op}> ; p:p [ p:p [ p:p \"[[[[[[[[[[\" ] ] ; \
@@ -1903,7 +1909,9 @@ mod tests {
     fn turtle_nesting_is_counted_as_the_grammar_reads_it() {
         let deep = "[ ".repeat(MAX_TURTLE_NESTING + 1);
         assert!(!turtle_nesting_ok(deep.as_bytes()));
-        assert!(turtle_nesting_ok("[ ".repeat(MAX_TURTLE_NESTING).as_bytes()));
+        assert!(turtle_nesting_ok(
+            "[ ".repeat(MAX_TURTLE_NESTING).as_bytes()
+        ));
         for hidden in [
             format!("<{deep}>"),
             format!("\"{deep}\""),
@@ -1917,7 +1925,9 @@ mod tests {
         // An escape cannot end an IRI early, and a string's end is where the grammar puts it.
         assert!(!turtle_nesting_ok(format!("<a\\> {deep}").as_bytes()));
         assert!(!turtle_nesting_ok(format!("\"a\" {deep}").as_bytes()));
-        assert!(!turtle_nesting_ok(format!("\"\"\"a\"\"\" {deep}").as_bytes()));
+        assert!(!turtle_nesting_ok(
+            format!("\"\"\"a\"\"\" {deep}").as_bytes()
+        ));
     }
 
     #[test]

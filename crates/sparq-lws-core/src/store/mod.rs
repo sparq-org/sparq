@@ -219,6 +219,19 @@ pub trait Store: Send + Sync {
     /// path.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
 
+    /// [`list_children`](Store::list_children) while it fits (see
+    /// [`SparqClient::list_children_within`]): `None` when it does not, without the whole
+    /// listing having been held. A store that cannot bound its read refuses the call.
+    async fn list_children_within(
+        &self,
+        _container: &str,
+        _max_bytes: usize,
+    ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        Err(ServerError::Storage(
+            "this store cannot read a listing within a bound".into(),
+        ))
+    }
+
     /// ONE combined read-plan lookup for the read path (read-2 — `research/lws-design-records.md`
     /// §7): the target's authoritative metadata + the presence/etag of every ACL candidate, in a
     /// single index round-trip. See [`SparqClient::read_plan`] for the contract (candidate
@@ -646,9 +659,22 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 }
                 Ok(meta)
             }
-            Err(SparqError::NotFound) => Err(ServerError::NotFound),
-            Err(SparqError::QuotaExceeded) => Err(ServerError::InsufficientStorage),
-            Err(SparqError::Backend(e)) => Err(ServerError::Storage(e)),
+            Err(e) => {
+                // A restore is retried until it lands, each attempt under a fresh key: the bytes
+                // of one whose record did not land are reclaimed here, so failed attempts do not
+                // pile up in the blob store. A record that did land (a lost reply) is kept; when
+                // that cannot be told, the bytes are left to the reconciler.
+                match self.sparq.get_meta(iri).await {
+                    Ok(now) if now.blob_key == meta.blob_key => return Ok(meta),
+                    Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&meta.blob_key).await,
+                    Err(_) => {}
+                }
+                Err(match e {
+                    SparqError::NotFound => ServerError::NotFound,
+                    SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                    SparqError::Backend(e) => ServerError::Storage(e),
+                })
+            }
         }
     }
 
@@ -758,26 +784,42 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .list_children(container)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))?;
-        // Validate each raw child IRI (full RFC-3987) at THIS boundary — the point where a
-        // malformed/injected row from storage first crosses into the server's own logic. A malformed
-        // IRI is FAIL-CLOSED OMITTED (never flows unchecked into the render), preserving the render's
-        // prior skip-on-invalid behaviour but moving the guarantee to the architecturally-correct place.
-        // Unreachable via the validated LDP write path (every stored child IRI is RFC-3987-valid by
-        // construction); a store-layer bug that produced one is caught in debug/test by the assert.
-        let mut out = Vec::with_capacity(raw.len());
-        for iri in raw {
-            match ValidatedChildIri::parse(&iri) {
-                Some(v) => out.push(v),
-                None => {
-                    debug_assert!(false, "store yielded a non-RFC-3987 child IRI: {iri}");
-                    eprintln!(
-                        "  STORE: omitting non-RFC-3987 child IRI from list_children: {iri:?}"
-                    );
-                }
+        Ok(validated_children(raw))
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        let raw = self
+            .sparq
+            .list_children_within(container, max_bytes)
+            .await
+            .map_err(|e| ServerError::Storage(format!("{e}")))?;
+        Ok(raw.map(validated_children))
+    }
+}
+
+/// The child IRIs of `raw` that are RFC 3987 IRIs.
+fn validated_children(raw: Vec<String>) -> Vec<ValidatedChildIri> {
+    // Validate each raw child IRI (full RFC-3987) at THIS boundary — the point where a
+    // malformed/injected row from storage first crosses into the server's own logic. A malformed
+    // IRI is FAIL-CLOSED OMITTED (never flows unchecked into the render), preserving the render's
+    // prior skip-on-invalid behaviour but moving the guarantee to the architecturally-correct place.
+    // Unreachable via the validated LDP write path (every stored child IRI is RFC-3987-valid by
+    // construction); a store-layer bug that produced one is caught in debug/test by the assert.
+    let mut out = Vec::with_capacity(raw.len());
+    for iri in raw {
+        match ValidatedChildIri::parse(&iri) {
+            Some(v) => out.push(v),
+            None => {
+                debug_assert!(false, "store yielded a non-RFC-3987 child IRI: {iri}");
+                eprintln!("  STORE: omitting non-RFC-3987 child IRI from list_children: {iri:?}");
             }
         }
-        Ok(out)
     }
+    out
 }
 
 /// A tiny FNV-1a hash used only for the placeholder ETag (NOT a cryptographic digest).
@@ -797,6 +839,32 @@ mod tests {
     use crate::store::sparq::InMemorySparqClient;
 
     type S = CompositeStore<InMemorySparqClient, InMemoryBlobStore>;
+
+    /// Review finding: every attempt at a restore uploaded its bytes under a fresh key, and an
+    /// attempt whose record did not land left them behind, so a restore retried against a
+    /// failing index could fill the blob store. They are reclaimed now.
+    #[tokio::test]
+    async fn a_restore_that_does_not_land_leaves_no_bytes() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let meta = ResourceMeta {
+            content_type: "text/plain".into(),
+            blob_key: String::new(),
+            etag: "\"e\"".into(),
+            last_modified: None,
+        };
+        for _ in 0..3 {
+            let r = store
+                .restore(
+                    "https://pod.example/missing/a",
+                    Some("https://pod.example/missing/"),
+                    Bytes::from_static(b"x"),
+                    &meta,
+                )
+                .await;
+            assert!(matches!(r, Err(ServerError::NotFound)), "{r:?}");
+        }
+        assert!(store.blob.list().await.unwrap().is_empty());
+    }
 
     #[test]
     fn validated_child_iri_accepts_valid_rejects_malformed() {
