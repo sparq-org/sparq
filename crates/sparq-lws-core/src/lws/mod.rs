@@ -977,6 +977,11 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
     if matches!(path, "/livez" | "/readyz") && matches!(req.method, Method::GET | Method::HEAD) {
         return (StatusCode::OK, "ok").into_response();
     }
+    // Every route that takes a body, the token endpoint and the service routes included, refuses
+    // a content coding here, once, before anything reads the body.
+    if let Some(refused) = resources::refuse_encoded(&req) {
+        return refused;
+    }
     if matches!(
         path,
         AS_METADATA_PATH | AS_METADATA_OAUTH_PATH | AS_JWKS_PATH | AS_TOKEN_PATH

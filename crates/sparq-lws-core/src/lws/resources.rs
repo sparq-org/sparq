@@ -71,9 +71,6 @@ async fn handle_now<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
-    if let Some(refused) = refuse_encoded(req) {
-        return refused;
-    }
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         let uri = state.cfg.absolute(stem);
@@ -2586,8 +2583,8 @@ async fn delete<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     listing.take();
-    // A removal that was put back changed nothing; one that could not be is counted in `removed`.
-    if removed > 0 {
+    // A removal that was put back changed nothing; what could not be is in `removed`.
+    if !removed.is_empty() {
         if let Some(p) = parent {
             touch_container(state, &p).await;
         }
@@ -2662,13 +2659,14 @@ async fn lock_subtree<S: Store + 'static>(
 /// Remove the resources of a locked [`subtree`], members before their containers, each before its
 /// metadata (which says who may act on it, so it goes only once the resource has), through one
 /// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
-/// removal before it is put back. Returns how many of `doomed` are gone (all of them, or none
-/// unless putting back failed too), and the outcome. A subtree too large to put back is refused
-/// (409) the same way.
+/// removal before it is put back. Returns which of `doomed` are gone (all of them, or none
+/// unless putting back failed too, when each removed before the failure is looked up again: what
+/// was put back before the rollback stopped is not gone), and the outcome. A subtree too large to
+/// put back is refused (409) the same way.
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
-) -> (usize, Result<(), ServerError>) {
+) -> (Vec<String>, Result<(), ServerError>) {
     let mut journal = state.journal();
     let mut failed = None;
     for (i, (node, parent)) in doomed.iter().enumerate() {
@@ -2690,12 +2688,21 @@ async fn remove<S: Store + 'static>(
     match failed {
         None => {
             journal.commit();
-            (doomed.len(), Ok(()))
+            (doomed.iter().map(|(n, _)| n.clone()).collect(), Ok(()))
         }
         Some((i, e)) => match journal.rollback().await {
-            Ok(()) => (0, Err(e)),
-            // Something may be gone: report it so the container is touched.
-            Err(_) => (i.max(1), Err(e)),
+            Ok(()) => (Vec::new(), Err(e)),
+            // Some may be gone: each one the steps reached is looked up again. One whose lookup
+            // fails too counts as gone, so its container is not left looking unchanged.
+            Err(_) => {
+                let mut gone = Vec::new();
+                for (node, _) in &doomed[..=i] {
+                    if !matches!(state.store.exists(node).await, Ok(true)) {
+                        gone.push(node.clone());
+                    }
+                }
+                (gone, Err(e))
+            }
         },
     }
 }
@@ -4815,6 +4822,11 @@ mod tests {
             call(&st, "GET", "/y", &[], "").await.status(),
             StatusCode::NOT_FOUND
         );
+        // Every route that takes a body, the token endpoint included.
+        let form = ("content-type", "application/x-www-form-urlencoded");
+        let h = [form, ("content-encoding", "gzip")];
+        let r = call(&st, "POST", super::super::AS_TOKEN_PATH, &h, "grant_type=x").await;
+        assert_eq!(r.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
         let h = [text, ("content-encoding", "identity")];
         assert!(call(&st, "PUT", "/x", &h, "c").await.status().is_success());
     }
@@ -5442,6 +5454,38 @@ mod tests {
             steps >= 3,
             "a PATCH that changes metadata took {steps} steps"
         );
+    }
+
+    /// Review finding: when putting a failed delete back failed too, the number of removals
+    /// attempted was reported as gone, so a resource put back before the rollback stopped was
+    /// counted (and announced) as deleted. Each one is looked up again.
+    #[tokio::test]
+    async fn a_failed_rollback_reports_only_what_is_gone() {
+        use super::super::test_store::{request as req, state};
+        let (st, store) = state(100).await;
+        let root = st.cfg.storage();
+        for slug in ["a", "b", "c"] {
+            let h = [("slug", slug), ("content-type", "text/plain")];
+            let r = handle(&st, &req(Method::POST, "/", &h, "x"), &Agent::anonymous()).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let doomed: Vec<(String, Option<String>)> = ["a", "b", "c"]
+            .iter()
+            .map(|n| (format!("{root}{n}"), Some(root.clone())))
+            .collect();
+        // a and b go (two steps each), c fails; putting back restores b's metadata and b, then
+        // fails on a's metadata.
+        *store.fail_delete_of.lock().unwrap() = Some(doomed[2].0.clone());
+        *store.fail_step.lock().unwrap() = Some(7);
+        let (gone, outcome) = remove(&st, &doomed).await;
+        *store.fail_delete_of.lock().unwrap() = None;
+        assert!(
+            store.fail_step.lock().unwrap().take().is_none(),
+            "the rollback failed"
+        );
+        assert!(outcome.is_err());
+        assert_eq!(gone, vec![doomed[0].0.clone()]);
+        assert!(st.store.exists(&doomed[1].0).await.unwrap());
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
