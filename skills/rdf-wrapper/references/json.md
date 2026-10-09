@@ -13,4 +13,4 @@ sorted by IRI, objects by N-Triples form — so the same store projects
 byte-identically twice. Literals are value objects carrying `@value` plus
 `@type`, or `@language` (and `@direction` for an RDF 1.2 directional literal),
 so no datatype or language metadata is discarded. Source: rdfjs/wrapper open
-PR #23. <!-- [SONNET-4.6] sq-1rg2q.11 -->
+PR #23. <!-- sq-1rg2q.11 -->
