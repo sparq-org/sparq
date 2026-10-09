@@ -2599,20 +2599,19 @@ async fn remove<S: Store + 'static>(
     doomed: &[(String, Option<String>)],
 ) -> (usize, Result<(), ServerError>) {
     for (i, (node, parent)) in doomed.iter().enumerate() {
-        let removed = if node.ends_with('/') {
-            match state
-                .store
-                .delete_container_if_empty(node, parent.as_deref())
-                .await
-            {
-                Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
-                    "the container gained a member while it was deleted".into(),
-                )),
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
-            }
-        } else {
-            state.store.delete(node, parent.as_deref()).await
+        // The record and its parent's membership edge go in one step, data resources included:
+        // removed one after the other, a failure in between would leave a live resource its
+        // container no longer lists, which a retried recursive delete would not find.
+        let removed = match state
+            .store
+            .delete_container_if_empty(node, parent.as_deref())
+            .await
+        {
+            Ok(crate::store::DeleteOutcome::NotEmpty) => Err(ServerError::Conflict(
+                "the container gained a member while it was deleted".into(),
+            )),
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
         };
         if let Err(e) = removed {
             return (i, Err(e));
@@ -4614,6 +4613,66 @@ mod tests {
         let r = send(Method::DELETE, &local(&f), &[], "").await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert!(deletes(&got).await.contains(&f));
+    }
+
+    /// Review finding: a data resource was removed in two steps, its parent's membership edge
+    /// first, so a failure of the second left it readable but listed nowhere, and a retried
+    /// recursive delete of its container could then succeed around it. The record and the edge
+    /// now go in one step.
+    #[tokio::test]
+    async fn a_failed_delete_leaves_no_resource_outside_its_container() {
+        use super::super::route;
+        use super::super::test_store::{request as req, state as flaky_state};
+        let (st, store) = flaky_state(100).await;
+        let base = st.cfg.absolute("");
+        let r = route(
+            &st,
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", "d"),
+                    (
+                        "link",
+                        "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                    ),
+                    ("content-type", "text/turtle"),
+                ],
+                "",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let d = hdr(&r, "location");
+        let dp = d.strip_prefix(base.as_str()).unwrap().to_string();
+        let r = route(
+            &st,
+            req(
+                Method::POST,
+                &dp,
+                &[("slug", "x.json"), ("content-type", "application/json")],
+                "{}",
+            ),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = hdr(&r, "location");
+        *store.partial_delete_of.lock().unwrap() = Some(x.clone());
+        for (path, depth) in [(x.clone(), None), (d.clone(), Some("infinity"))] {
+            let p = path.strip_prefix(base.as_str()).unwrap();
+            let headers: Vec<(&str, &str)> = depth.map(|v| ("depth", v)).into_iter().collect();
+            route(&st, req(Method::DELETE, p, &headers, "")).await;
+            let listed = st
+                .store
+                .list_children(&d)
+                .await
+                .map(|c| c.iter().any(|c| c.as_str() == x))
+                .unwrap_or(false);
+            assert!(
+                !st.store.exists(&x).await.unwrap() || listed,
+                "{x} outlived its delete outside its container"
+            );
+        }
     }
 
     /// Review finding: PUT and PATCH committed the content and discarded a failure to write the

@@ -745,6 +745,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "PSS_SPARQ_BACKEND=http requires {ENV_SPARQ_ENDPOINT} (the SPARQ /sparql URL)"
                 )
             })?;
+            // A remote store can report a write as failed (a timeout, a lost reply) while it still
+            // commits later. The LWS surface keeps a resource whose write is in doubt closed to
+            // everyone but its owner and creator, but nothing fences that late commit against a
+            // later write, so LWS runs only over stores whose calls are settled when they return.
+            if std::env::var(ENV_PROTOCOL).is_ok_and(|v| v.trim().eq_ignore_ascii_case("lws")) {
+                return Err("SOLID_SERVER_PROTOCOL=lws needs the memory or embedded SPARQ backend: \
+                     writes to a remote store are not yet fenced"
+                    .into());
+            }
             eprintln!("  STORAGE: SPARQ backend = HTTP (live SPARQL endpoint {endpoint}).");
             build_app_for_backend(
                 HttpSparqClient::new(endpoint),

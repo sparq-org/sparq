@@ -1,7 +1,0 @@
-0	/tmp/claude-1001
-Filesystem     1M-blocks  Used Available Use% Mounted on
-tmpfs               1024  1024         0 100% /tmp
-total 0
-drwxr-xr-x 2 1001 1001 60 Jul 18 18:01 .
-drwxr-xr-x 3 1001 1001 60 Jul 18 17:43 ..
--rw-r--r-- 1 1001 1001  0 Jul 18 18:01 bm2nviz6i.output
