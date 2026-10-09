@@ -396,6 +396,17 @@ fn permission_subsumes(op: &Rule, ip: &Rule) -> SubsumeOne {
     if !op.logical_constraints.is_empty() {
         any_indeterminate = true;
     }
+    // `op` grants only once every duty it carries is discharged, and a constrained duty
+    // never is. So an `op` duty is covered only when it is unconstrained and `ip` requires
+    // the same unconstrained duty (every request `ip` grants has discharged it).
+    // Anything else may leave `op` denying a request `ip` grants: undecided.
+    let duty_covered = |od: &crate::model::Duty| {
+        od.constraints.is_empty()
+            && ip.duties.iter().any(|id| id.constraints.is_empty() && id.action == od.action)
+    };
+    if !op.duties.iter().all(duty_covered) {
+        any_indeterminate = true;
+    }
     if any_indeterminate {
         SubsumeOne::Indeterminate
     } else {

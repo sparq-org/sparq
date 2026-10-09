@@ -2197,7 +2197,8 @@ pub fn materialize_odrl_n3(
     // request, and only when it is exactly the grant that permit covers. The reasoner
     // never grants on its own: where it derives a grant `decide` does not (a prohibition
     // it reads as not applying for lack of evidence, a constrained duty), nothing is
-    // granted.
+    // granted. Denies are the union of what the rules derive and the
+    // reference prohibition match.
     let decision = evaluate(&parsed_policy, request);
     let permitted = decision.permit.as_ref().and_then(|permit| {
         let mode = action_to_mode(permit.action())?;
@@ -2239,6 +2240,18 @@ pub fn materialize_odrl_n3(
 
     if !deny_triples.is_empty() {
         append_bridged_triples(graph, &deny_triples);
+    }
+    // The rules read a prohibition whose constraint has no evidence (no clock, no
+    // purpose) as not applying, so they derive no deny for it. The reference path keeps
+    // such a prohibition in force; materialize its deny too, so an existing grant for
+    // the same party is carved out here exactly as on the Rust path.
+    let reference = materialize_prohibition(graph, &parsed_policy, request);
+    if let Some(found) = reference.deny_triple {
+        let t = triple_of(&found.0, &found.1, &found.2);
+        if !deny_triples.contains(&t) {
+            deny_triples.push(t);
+        }
+        deny_triple = Some(found);
     }
     let mut out = match permitted {
         Some((permit, _)) if derived_grant => emit_allow(graph, permit),

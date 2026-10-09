@@ -556,3 +556,36 @@ fn compound_constrained_outer_makes_containment_unknown() {
         "a compound on the outer permission forbids a Contains verdict"
     );
 }
+
+/// An outer permission grants only once its duties are discharged, and a constrained
+/// duty never is, so a duty-bearing outer permission cannot be proven to cover an inner
+/// one that does not require the same unconstrained duty.
+#[test]
+fn outer_duties_block_a_containment_claim() {
+    let pol = |duty: &str| {
+        parse_policy_str(
+            &format!(
+                r#"
+@prefix odrl: <http://www.w3.org/ns/odrl/2/> .
+<urn:pol/o> a odrl:Set ;
+  odrl:permission [ odrl:action odrl:read ; odrl:target <urn:asset/x> {duty} ] .
+"#
+            ),
+            "turtle",
+        )
+        .unwrap()
+    };
+    let plain = pol("");
+    let constrained = pol(
+        "; odrl:duty [ odrl:action odrl:compensate ; odrl:constraint [ \
+         odrl:leftOperand odrl:payAmount ; odrl:operator odrl:eq ; odrl:rightOperand 5 ] ]",
+    );
+    let unconstrained = pol("; odrl:duty [ odrl:action odrl:attribute ]");
+    assert_eq!(contains(&constrained, &plain), Containment::Unknown);
+    assert_eq!(contains(&constrained, &constrained), Containment::Unknown);
+    assert_eq!(contains(&unconstrained, &plain), Containment::Unknown);
+    // The same unconstrained duty on both sides is discharged on every inner grant.
+    assert_eq!(contains(&unconstrained, &unconstrained), Containment::Contains);
+    // A duty on the inner side only narrows it.
+    assert_eq!(contains(&plain, &constrained), Containment::Contains);
+}
