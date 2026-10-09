@@ -9,7 +9,7 @@
 //! to the same terms — blank labels verbatim, language tags already lowercase, plain strings
 //! re-acquiring `xsd:string`, IRIs `IRIREF`-escaped — or a [`NotRepresentable`] error, never
 //! a fallback spelling; the DISPLAY writers ([`display_lossy`], [`statement_display_lossy`])
-//! always produce text, for people to read only.
+//! always produce text, for people to read only. Identity comes from [`statement_keys`].
 //!
 //! # Echoing rules back out (EYE `--pass-all` / `--pass-all-ground`)
 //!
@@ -281,8 +281,8 @@ enum Unplaced {
 ///
 /// The display writers write every universal, throughout the unit, as a plain variable named the IRI's local name, then `_2`, `_3`, …
 /// until it differs from every variable name in the unit (unspellable variables are
-/// renamed the same way). Two different facts can therefore display alike, so never
-/// address a fact by its display strings.
+/// renamed the same way). Two different facts can therefore display alike, so identity —
+/// provenance addressing — comes from [`statement_keys`], never from display strings.
 struct Unit {
     /// Document-level universals (base names) declared OUTSIDE the unit, before it.
     outer: BTreeSet<String>,
@@ -505,6 +505,102 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
     out.push_str(" .");
 }
 
+/// A lossless, injective key for one term: two keys are equal EXACTLY when the terms are
+/// equal under `Term`'s own (derived) equality — the identity the engine uses for facts,
+/// hashing, `log:equalTo` and formula unification. One tagged, prefix-free, structural
+/// encoding of EVERY field — `I` IRI, `L` literal (lexical form, datatype, then `@` + tag
+/// or `-` for none), `B` blank, `V` variable (full internal name), `(…)` list, `{…;}`
+/// formula (rows in their order, duplicates kept), `<…>` quoted triple — with each string
+/// quoted and its `"` and `\` escaped. Never a rendering: the display writer drops fields
+/// (a language-tagged literal's datatype) and spells different variables alike.
+///
+/// No normalisation the engine does not do: a formula is an ORDERED vector of rows to the
+/// engine, so two formulae with the same rows in another order, or with a duplicated row,
+/// are different facts and get different keys. Blank-node labels and backward-chaining
+/// copies (`__bw<n>___ua.<iri>`) are likewise kept as the distinct terms they are. The
+/// key itself uses no interning ids, pointers, hashes, locale or number formatting, but it is
+/// only as reproducible as the TERMS: it inherits the engine's traversal-order dependence.
+/// An existential's skolem label (`__sk<n>_<label>`) is allocated in hash-set delta order,
+/// and `log:conclusion` appends derived rows in that order, so the same input can key
+/// differently across runs or platforms (as `why()` strings already do on `main`; GH #6749).
+fn term_key(t: &Term) -> String {
+    fn quoted(s: &str, out: &mut String) {
+        out.push('"');
+        for c in s.chars() {
+            if matches!(c, '"' | '\\') {
+                out.push('\\');
+            }
+            out.push(c);
+        }
+        out.push('"');
+    }
+    fn enc(t: &Term, out: &mut String) {
+        match t {
+            Term::Iri(i) => {
+                out.push('I');
+                quoted(i, out);
+            }
+            Term::Lit(v, dt, lang) => {
+                out.push('L');
+                quoted(v, out);
+                quoted(dt, out);
+                match lang {
+                    Some(l) => {
+                        out.push('@');
+                        quoted(l, out);
+                    }
+                    None => out.push('-'),
+                }
+            }
+            Term::Blank(b) => {
+                out.push('B');
+                quoted(b, out);
+            }
+            Term::Var(v) => {
+                out.push('V');
+                quoted(v, out);
+            }
+            Term::List(ms) => {
+                out.push('(');
+                ms.iter().for_each(|m| enc(m, out));
+                out.push(')');
+            }
+            Term::Formula(ts) => {
+                out.push('{');
+                for row in ts {
+                    row.iter().for_each(|m| enc(m, out));
+                    out.push(';');
+                }
+                out.push('}');
+            }
+            Term::Triple(tr) => {
+                out.push('<');
+                tr.iter().for_each(|m| enc(m, out));
+                out.push('>');
+            }
+        }
+    }
+    let mut s = String::new();
+    enc(t, &mut s);
+    s
+}
+
+/// The identity keys of one statement's three terms (`term_key`): equal exactly when the
+/// statements are equal, whatever their renderings. What a proof carries for provenance
+/// addressing (`ProofNode::key`).
+pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
+    #[cfg(test)]
+    KEY_CALLS.with(|c| c.set(c.get() + 1));
+    [term_key(&f[0]), term_key(&f[1]), term_key(&f[2])]
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many statements this thread has keyed — lets tests check that the plain
+    /// (unkeyed) reasoning paths never pay for proof identity.
+    pub(crate) static KEY_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// `t` as its written text re-parses: a backward-chaining copy of a universal
 /// (`__bw<n>___ua.<iri>`) reads back as the universal itself — a change, used only to name
 /// the refusal (the exact writers refuse copies before writing).
@@ -673,7 +769,7 @@ pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
 /// A term as N3-like text for a person to READ — a diagnostic, a proof-node string. Never
 /// fails, and never exact: a universal no `@forAll` can scope is shown as a plain variable
 /// (see `Unit`). Not for anything a parser or the reasoner reads back; use
-/// [`write_term`] for that.
+/// [`write_term`] for that, and [`statement_keys`] for identity.
 pub fn display_lossy(t: &Term) -> String {
     let mut s = String::new();
     Unit::lossy(&[t]).term(t, &mut s);
@@ -689,8 +785,9 @@ pub fn write_statement(f: &[Term; 3], out: &mut String) -> Result<(), NotReprese
 }
 
 /// The three terms of one statement rendered as that ONE unit for a person to read — the
-/// strings a diagnostic shows ([`display_lossy`] semantics: never fails, not exact). Two
-/// different statements can display alike, so never address a fact by these.
+/// strings a proof node shows ([`display_lossy`] semantics: never fails, not exact). A
+/// function of the statement alone, so a fact reads the same in every proof; for identity
+/// use [`statement_keys`].
 pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3] {
     let unit = Unit::lossy(&[&f[0], &f[1], &f[2]]);
     // Index the borrowed terms — the plan is keyed by their formulae's addresses.
@@ -741,74 +838,6 @@ impl DocumentBinders {
             }
         }
         Ok(self.declared.clone())
-    }
-}
-
-/// A term as `MaterializedN3Graph::why` writes it into a proof node — the rendering the
-/// crate had before the exact writers, kept byte-for-byte so the explain/provenance
-/// surface is unchanged: IRIs and datatypes `<…>` unescaped, variables `?<internal name>`,
-/// no `@forAll` declarations. Not N3 to re-parse.
-#[cfg(feature = "explain")]
-pub(crate) fn write_term_raw(t: &Term, out: &mut String) {
-    match t {
-        Term::Iri(i) => {
-            out.push('<');
-            out.push_str(i);
-            out.push('>');
-        }
-        Term::Lit(v, _, Some(lang)) => {
-            out.push('"');
-            quote_into(v, out);
-            out.push('"');
-            out.push('@');
-            out.push_str(lang);
-        }
-        Term::Lit(v, dt, None) => {
-            out.push('"');
-            quote_into(v, out);
-            out.push('"');
-            if dt != XSD_STRING {
-                out.push_str("^^<");
-                out.push_str(dt);
-                out.push('>');
-            }
-        }
-        Term::Blank(l) => {
-            out.push_str("_:");
-            out.push_str(l);
-        }
-        Term::Var(v) => {
-            out.push('?');
-            out.push_str(v);
-        }
-        Term::List(ms) => {
-            out.push('(');
-            for m in ms {
-                out.push(' ');
-                write_term_raw(m, out);
-            }
-            out.push_str(" )");
-        }
-        Term::Formula(ts) => {
-            out.push('{');
-            for t in ts {
-                for m in t {
-                    out.push(' ');
-                    write_term_raw(m, out);
-                }
-                out.push_str(" .");
-            }
-            out.push_str(" }");
-        }
-        Term::Triple(tr) => {
-            out.push_str("<< ");
-            write_term_raw(&tr[0], out);
-            out.push(' ');
-            write_term_raw(&tr[1], out);
-            out.push(' ');
-            write_term_raw(&tr[2], out);
-            out.push_str(" >>");
-        }
     }
 }
 

@@ -17,12 +17,13 @@
 //! `reason_n3_pass_all` either refuses or writes a document whose closure — read directly,
 //! through `log:conclusion` of each formula-valued fact, and through `log:semantics` +
 //! `log:conclusion` of the whole document — equals the source's. On top of that: a
-//! statement renders the same whatever surrounds it, and distinct variables (a universal
-//! and its backward-chaining copy) are never merged.
+//! statement renders the same whatever surrounds it, distinct variables (a universal and
+//! its backward-chaining copy) are never merged, and identity keys (`statement_keys`,
+//! which provenance addresses facts by) are injective over every `Term` field.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use sparq_reason::n3::serialize::{serialize_facts, write_rule, write_statement, NotRepresentable};
+use sparq_reason::n3::serialize::{serialize_facts, statement_keys, write_rule, write_statement, NotRepresentable};
 use sparq_reason::n3::Resolver;
 use sparq_reason::n3::{parser, Rule, RuleKind, Term};
 use sparq_reason::n3::reason_n3_terms_with_resolver;
@@ -259,6 +260,17 @@ fn every_shape_round_trips() {
         }
     }
     assert!(written > 1000 && refused > 200, "{written} written, {refused} refused");
+    // (b) identity keys: distinct statements ↔ distinct keys; the same statement, the same key.
+    let mut by_key: BTreeMap<[String; 3], &[Term; 3]> = BTreeMap::new();
+    for s in &all {
+        let key = statement_keys(s);
+        assert_eq!(key, statement_keys(&s.clone()));
+        if let Some(prev) = by_key.insert(key, s) {
+            assert_eq!(prev, s, "two different facts share an identity key");
+        }
+    }
+    let distinct: BTreeSet<String> = all.iter().map(|s| format!("{s:?}")).collect();
+    assert_eq!(by_key.len(), distinct.len());
 }
 
 const PRE: &str = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>. \
@@ -457,6 +469,136 @@ fn a_source_variable_spelled_like_the_display_name_stays_distinct() {
     let shown = sparq_reason::n3::serialize::statement_display_lossy(&f)[2].clone();
     let vars: Vec<&str> = shown.split_whitespace().filter(|w| w.starts_with('?')).collect();
     assert_eq!(vars, ["?x_3", "?x", "?x_2", "?x_3"], "{shown}");
+}
+
+/// Codex round 7 (MEDIUM): identity keys are structural over EVERY field of a term — a
+/// language-tagged literal's datatype included, noncanonical combinations included — so
+/// two terms share a key exactly when they are equal (`Term`'s own `Eq`).
+#[test]
+fn identity_keys_are_injective_over_every_term_field() {
+    const LANG: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+    const XS: &str = "http://www.w3.org/2001/XMLSchema#string";
+    let strs = ["", "hi", "a\"b", "a\\", "\"", "x"];
+    let dts = [XS, LANG, "http://ex/a", "http://ex/b", ""];
+    let langs = [None, Some("en"), Some(""), Some("EN")];
+    let mut atoms: Vec<Term> = Vec::new();
+    for s in strs {
+        atoms.push(iri(s));
+        atoms.push(Term::Blank(s.into()));
+        atoms.push(var(s));
+        for dt in dts {
+            for l in langs {
+                atoms.push(Term::Lit(s.into(), dt.into(), l.map(str::to_string)));
+            }
+        }
+    }
+    atoms.push(var("__ua.http://ex/x"));
+    atoms.push(var("__bw0___ua.http://ex/x"));
+    let few = [&atoms[0], &atoms[1], &atoms[2], &atoms[7], &atoms[8]];
+    let mut all = atoms.clone();
+    all.push(Term::List(vec![]));
+    all.push(formula(vec![]));
+    all.push(Term::List(vec![Term::List(vec![])]));
+    all.push(Term::List(vec![formula(vec![])]));
+    for a in few {
+        all.push(Term::List(vec![a.clone()]));
+        all.push(Term::Triple(Box::new([a.clone(), a.clone(), a.clone()])));
+        for b in few {
+            all.push(Term::List(vec![a.clone(), b.clone()]));
+            all.push(formula(vec![[a.clone(), b.clone(), a.clone()]]));
+            all.push(formula(vec![[a.clone(), a.clone(), a.clone()], [b.clone(), b.clone(), b.clone()]]));
+            all.push(Term::Triple(Box::new([a.clone(), b.clone(), Term::List(vec![a.clone()])])));
+        }
+    }
+    // The case Codex named: same lexical form and tag, different datatypes.
+    let ha = Term::Lit("hi".into(), "http://ex/a".into(), Some("en".into()));
+    let hb = Term::Lit("hi".into(), "http://ex/b".into(), Some("en".into()));
+    assert!(all.contains(&ha) && all.contains(&hb));
+    let k = iri("http://ex/k");
+    let mut by_key: BTreeMap<[String; 3], Term> = BTreeMap::new();
+    for t in &all {
+        let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
+        if let Some(prev) = by_key.insert(key, t.clone()) {
+            assert_eq!(&prev, t, "two different terms share an identity key");
+        }
+    }
+    // Equal keys exactly for equal terms.
+    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{t:?}")).collect();
+    assert_eq!(by_key.len(), distinct.len());
+}
+
+/// A random term for the key property: IRIs, literals (with and without tags, awkward
+/// characters), blanks, variables (a universal and its copy among them), and — below
+/// `depth` — lists, quoted triples and formulae, each formula also yielding variants with
+/// its rows PERMUTED and with a row DUPLICATED.
+fn key_term(r: &mut Rng, depth: usize, out: &mut Vec<Term>) -> Term {
+    let strs = ["a", "b", "a\"b", "a\\", ""];
+    let s = |r: &mut Rng| strs[r.below(strs.len())].to_string();
+    let t = match (depth, r.below(10)) {
+        (0, _) | (_, 0..=5) => match r.below(6) {
+            0 => Term::Iri(s(r)),
+            1 => Term::Lit(s(r), ["http://ex/d", "http://ex/e"][r.below(2)].into(), None),
+            2 => Term::Lit(s(r), "http://ex/d".into(), [Some("en".to_string()), Some("EN".into()), None][r.below(3)].clone()),
+            3 => Term::Blank(s(r)),
+            4 => var(["x", "__ua.http://ex/x", "__bw0___ua.http://ex/x"][r.below(3)]),
+            _ => var(&s(r)),
+        },
+        (_, 6) => Term::List((0..r.below(3)).map(|_| key_term(r, depth - 1, out)).collect()),
+        (_, 7) => Term::Triple(Box::new([key_term(r, depth - 1, out), iri("http://ex/p"), key_term(r, depth - 1, out)])),
+        _ => {
+            let rows: Vec<[Term; 3]> = (0..1 + r.below(3))
+                .map(|_| [key_term(r, depth - 1, out), iri("http://ex/p"), key_term(r, depth - 1, out)])
+                .collect();
+            // Variants the engine keeps APART from `rows` (unless they happen to be equal).
+            let mut permuted = rows.clone();
+            permuted.rotate_left(1);
+            permuted.reverse();
+            out.push(formula(permuted));
+            let mut duplicated = rows.clone();
+            duplicated.push(rows[r.below(rows.len())].clone());
+            out.push(formula(duplicated));
+            formula(rows)
+        }
+    };
+    out.push(t.clone());
+    t
+}
+
+/// #6735 review round 2: the identity key mirrors the engine's own term identity EXACTLY —
+/// `key(a) == key(b)` if and only if `a == b` under `Term`'s derived `Eq`, which is what
+/// facts, hashing, `log:equalTo` and formula unification use. So a formula's row order and
+/// duplicate rows are part of its key, as they are part of the term; no normalisation the
+/// engine does not do. Seeded generator (xorshift64*, like the round-10 property test).
+#[test]
+fn identity_keys_are_equal_exactly_when_terms_are_equal() {
+    let mut r = Rng(0xD1B5_4A32_D192_ED03);
+    let k = iri("http://ex/k");
+    let mut by_key: std::collections::HashMap<[String; 3], Term> = std::collections::HashMap::new();
+    let mut terms: std::collections::HashSet<Term> = std::collections::HashSet::new();
+    let (mut formulas, mut collisions_checked) = (0, 0);
+    for _ in 0..4000 {
+        let mut pool = Vec::new();
+        key_term(&mut r, 3, &mut pool);
+        for t in pool {
+            formulas += usize::from(matches!(t, Term::Formula(_)));
+            let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
+            if let Some(prev) = by_key.get(&key) {
+                assert_eq!(prev, &t, "different terms share a key");
+                collisions_checked += 1;
+            }
+            by_key.insert(key, t.clone());
+            terms.insert(t);
+        }
+    }
+    // Every distinct term got a distinct key, and equal terms (re-generated) the same one.
+    assert_eq!(by_key.len(), terms.len());
+    assert!(formulas > 1000 && collisions_checked > 1000, "{formulas} formulae, {collisions_checked} equal pairs");
+    // The named cases, explicitly: permuted and duplicated rows are different facts.
+    let row = |a: &str| [iri(a), k.clone(), k.clone()];
+    let key = |t: Term| statement_keys(&[k.clone(), k.clone(), t]);
+    assert_ne!(key(formula(vec![row("1"), row("2")])), key(formula(vec![row("2"), row("1")])));
+    assert_ne!(key(formula(vec![row("1")])), key(formula(vec![row("1"), row("1")])));
+    assert_ne!(formula(vec![row("1"), row("2")]), formula(vec![row("2"), row("1")]), "the engine keeps them apart too");
 }
 
 /// Codex round 5 (3): an IRI holding a decoded backslash goes back out as `\`.

@@ -86,7 +86,8 @@ pub fn inconsistencies(dict: &Dict, triples: &[[Id;3]]) -> Vec<String>;
 // Notation3 / EYE-style forward rules (`{ premise } => { conclusion }` + builtins).
 pub fn reason_n3(dict: &mut Dict, src: &str) -> Result<Vec<[Id;3]>, String>;
 pub fn reason_n3_proof(dict: &mut Dict, src: &str)
-    -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue
+    -> Result<(Vec<[Id;3]>, Vec<ProofStep>), String>;          // EYE --proof analogue; each step also carries conclusion_key / premise_keys (N3 statement_keys, taken before list expansion + interning)
+pub fn reason_n3_proof_run(dict: &mut Dict, src: &str) -> Result<N3ProofRun, String>; // { closure, closure_keys (every fact, asserted too), steps } — for explain::n3_proof_tree
 pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, String>; // term-level, no Dict
 pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> Result<N3Closure, String>; // n3:: only
 // EYE --pass-all / --pass-all-ground: the closure PLUS the document's own rules, echoed
@@ -108,7 +109,8 @@ pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result
 // write_rule / write_term refuse any @forAll universal (only a document can declare it).
 pub enum NotRepresentable { UnrepresentableScope(String), MergesVariables(String), Unspellable(String), Reparse(String) } // Display + Error
 pub fn display_lossy(t: &Term) -> String;                 // DISPLAY only (diagnostics); never re-parse it
-pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3]; // display only; never re-parse it
+pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3]; // proof-node strings; display only
+pub fn statement_keys(f: &[Term; 3]) -> [String; 3];      // structural identity key per term (injective)
 // EYE --query: every INSTANTIATED conclusion of the query document's forward rules over the
 // deductive closure of `data` — a PROJECTION, so a conclusion already in the closure is still
 // an answer (unlike --pass-only-new). The premise uses the chainer's own matcher, so builtins,
@@ -156,7 +158,15 @@ pub enum N3Mode { Counting, Fallback }
 pub fn why(&self, dict: &Dict, t: [Id;3]) -> Option<ProofTree>;          // RDFS / OWL graphs
 pub fn why(&self, fact: &[Term;3])        -> Option<ProofTree>;          // N3 graph
 pub struct ProofTree;  // .nodes() -> &[ProofNode], .root(), .conclusion(), .to_json(), .to_text()
-pub struct ProofNode { pub conclusion: [String;3], pub rule: String, pub premises: Vec<u32> }
+pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule: String, pub premises: Vec<u32> }  // conclusion = display; key = lossless fact identity (N3: two facts can render alike; the same key from why() and n3_proof_tree) — address facts by key
+// explain::n3_proof_tree(dict, &run /* N3ProofRun */, target_ids, opts) -> Result<Option<ProofTree>, AmbiguousN3Target>
+//   — Err when several structurally distinct closure facts (asserted OR derived) intern to target_ids
+//   (e.g. () and an rdf:nil IRI); explain::n3_proof_tree_for_key(dict, &run.steps, &key, opts) roots by key.
+// statement_keys is injective w.r.t. Term's own Eq: formula rows keep their order and duplicates (as the
+// engine compares them); blank labels and __bw copies are not normalized. So a key is only as
+// reproducible as the engine's terms: skolem labels (__sk<n>_e) are allocated in hash-set traversal
+// order, so a fact carrying one (or a log:conclusion formula built from such rules) can key
+// differently across runs/platforms, exactly like its why() strings (pre-existing; GH #6749).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
@@ -670,7 +680,7 @@ use sparq_reason::MaterializedGraph;
 let g = MaterializedGraph::new(&mut dict, &base);
 if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
     println!("{}", tree.to_text());   // indented, root first; rule ids like cax-sco / rdfs9 / prp-trp
-    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"rule":..,"premises":[..]}]}
+    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":..,"premises":[..]}]} — "key" = lossless identity (whyN3 wire field too)
 }
 ```
 
