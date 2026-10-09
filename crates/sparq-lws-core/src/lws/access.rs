@@ -71,6 +71,10 @@ pub const MAX_REQUESTS_PER_AUTHOR: usize = 16;
 /// Largest access request document accepted.
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024;
 
+/// Largest access grant body, in bytes: grants come from the owner, and are held to this while
+/// they are read so a request that turns out not to be the owner's buffers no more.
+pub const MAX_GRANT_BYTES: usize = 256 * 1024;
+
 const LEFT_OPERANDS: &[&str] = &["client", "format", "type", "purpose", "dateTime"];
 const OPERATORS: &[&str] = &["eq", "isAnyOf", "gt", "gteq", "lt", "lteq"];
 
