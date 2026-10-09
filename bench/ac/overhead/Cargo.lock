@@ -385,7 +385,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "sparq-acbench"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "oxrdf",
  "oxttl",
@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hashbrown",
  "oxrdf",
@@ -404,7 +404,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "oxiri",
  "oxrdf",
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "oxiri",
  "oxrdf",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "oxrdf",
  "rustc-hash",
@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hashbrown",
  "oxrdf",

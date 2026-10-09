@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-09
+
+Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub
+Release (no v0.1.4 assets, npm or PyPI packages were published). Publication is not
+implied by this entry; verify the tagged run and every registry and release artifact.
+
+### Fixed
+
+- **Release pipeline:** the Windows matrix rows write their archive, binary and GUI bundle
+  digests in text mode (`<hex>  <name>`). Git Bash's binary-mode `*<name>` record failed the
+  archive-digest collector, which stopped the v0.1.4 run before provenance and the GitHub
+  Release. (#6717)
+- **sparq-policy / sparq-solid (ODRL):** prohibitions are now evaluated three-valued. A
+  prohibition that can't be decided, has a constraint the parser can't represent, or uses an
+  unsupported refined or typed shape now denies or is rejected, instead of letting a matching
+  permission grant. Every ODRL bridge grant now goes through sparq-policy's decision, so
+  constrained duties, other parties' prohibitions and later time windows are honoured. Some
+  policies accepted by v0.1.4 are now rejected at parse time. (#6734, #6737)
+
+
 ### Added
 
 - `sparq-vectors` can open canonical little-endian `.spqv` stores on big-endian hosts by
@@ -15,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Workspace, desktop, and public npm package versions move to 0.1.5, with every
+  path-dependency requirement and lockfile record following.
 - **Breaking (@sparq-org/solid-server):** the optional `fastify` peer dependency is now
   `^5.12.5` (was `^4.28.0 || ^5.0.0`). Fastify 4.x is end of life and has no release that
   fixes GHSA-p68q-wchp-6fh7 (authentication bypass via malformed URLs); fastify releases
@@ -640,7 +662,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sparq-org/sparq/compare/v0.1.1...v0.1.2
