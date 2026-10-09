@@ -69,6 +69,9 @@ async fn handle_now<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
 ) -> Response {
+    if let Some(refused) = refuse_encoded(req) {
+        return refused;
+    }
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         let uri = state.cfg.absolute(stem);
@@ -223,6 +226,36 @@ fn etag_listed(header: &str, etag: &str, weak: bool) -> bool {
     })
 }
 
+/// A body sent with a content coding other than `identity` is refused (`415`, with
+/// `Accept-Encoding: identity`, RFC 9110 section 15.5.16) before anything reads it: the server
+/// does not decode bodies, and storing the coded bytes as the representation would drop the
+/// coding.
+fn refuse_encoded(req: &LwsRequest) -> Option<Response> {
+    if !matches!(req.method, Method::POST | Method::PUT | Method::PATCH) {
+        return None;
+    }
+    let codings = req.header_all(header::CONTENT_ENCODING);
+    let unreadable = req
+        .headers
+        .get_all(header::CONTENT_ENCODING)
+        .iter()
+        .any(|v| v.to_str().is_err());
+    let coded = unreadable
+        || codings
+            .split(',')
+            .map(str::trim)
+            .any(|c| !c.is_empty() && !c.eq_ignore_ascii_case("identity"));
+    if !coded {
+        return None;
+    }
+    let mut resp = problem(
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        Some("content codings are not supported: send the body unencoded"),
+    );
+    set(resp.headers_mut(), header::ACCEPT_ENCODING, "identity");
+    Some(resp)
+}
+
 /// The outcome of evaluating preconditions (RFC 9110 section 13.2.2).
 enum Precondition {
     Proceed,
@@ -230,26 +263,29 @@ enum Precondition {
     Failed,
 }
 
+/// Preconditions are read once, here, from every field line: a list header (`If-Match`,
+/// `If-None-Match`) sent as several lines is all of them, not the first. A precondition that
+/// cannot be read (not visible ASCII, or a date header sent twice) fails the request rather than
+/// being skipped.
 fn evaluate(
     headers: &HeaderMap,
     etag: Option<&str>,
     modified_secs: Option<u64>,
     read: bool,
 ) -> Precondition {
-    let h = |n: header::HeaderName| headers.get(n).and_then(|v| v.to_str().ok());
-    if let Some(im) = h(header::IF_MATCH) {
+    let Ok(pre) = Preconditions::read(headers) else {
+        return Precondition::Failed;
+    };
+    if let Some(im) = pre.if_match.as_deref() {
         if !etag.is_some_and(|e| etag_listed(im, e, false)) {
             return Precondition::Failed;
         }
-    } else if let (Some(since), Some(m)) = (
-        parse_http_date(h(header::IF_UNMODIFIED_SINCE)),
-        modified_secs,
-    ) {
+    } else if let (Some(since), Some(m)) = (pre.if_unmodified_since, modified_secs) {
         if m > since {
             return Precondition::Failed;
         }
     }
-    if let Some(inm) = h(header::IF_NONE_MATCH) {
+    if let Some(inm) = pre.if_none_match.as_deref() {
         if etag.is_some_and(|e| etag_listed(inm, e, true)) {
             return if read {
                 Precondition::NotModified
@@ -258,9 +294,7 @@ fn evaluate(
             };
         }
     } else if read {
-        if let (Some(since), Some(m)) =
-            (parse_http_date(h(header::IF_MODIFIED_SINCE)), modified_secs)
-        {
+        if let (Some(since), Some(m)) = (pre.if_modified_since, modified_secs) {
             let now = to_secs(now_ms());
             if since <= now && m <= since {
                 return Precondition::NotModified;
@@ -268,6 +302,42 @@ fn evaluate(
         }
     }
     Precondition::Proceed
+}
+
+/// A request's preconditions, every field line of each read.
+struct Preconditions {
+    if_match: Option<String>,
+    if_none_match: Option<String>,
+    if_unmodified_since: Option<u64>,
+    if_modified_since: Option<u64>,
+}
+
+impl Preconditions {
+    fn read(headers: &HeaderMap) -> Result<Self, ()> {
+        let list = |n: header::HeaderName| -> Result<Option<String>, ()> {
+            let lines = headers
+                .get_all(n)
+                .iter()
+                .map(|v| v.to_str().map_err(drop))
+                .collect::<Result<Vec<_>, ()>>()?;
+            Ok((!lines.is_empty()).then(|| lines.join(", ")))
+        };
+        let date = |n: header::HeaderName| -> Result<Option<u64>, ()> {
+            let mut lines = headers.get_all(n).iter();
+            match (lines.next(), lines.next()) {
+                (None, _) => Ok(None),
+                // An unparsable date is ignored (RFC 9110 sections 13.1.3 and 13.1.4).
+                (Some(v), None) => Ok(parse_http_date(v.to_str().ok())),
+                (Some(_), Some(_)) => Err(()),
+            }
+        };
+        Ok(Self {
+            if_match: list(header::IF_MATCH)?,
+            if_none_match: list(header::IF_NONE_MATCH)?,
+            if_unmodified_since: date(header::IF_UNMODIFIED_SINCE)?,
+            if_modified_since: date(header::IF_MODIFIED_SINCE)?,
+        })
+    }
 }
 
 /// Whether the request carries a precondition a state-changing method evaluates.
@@ -3188,6 +3258,76 @@ mod tests {
         // The listing changed: the old tag no longer matches.
         let r = call(&st, "POST", "/c/", &[text, ("if-match", &tag)], "x").await;
         assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+    }
+
+    /// Review finding: a gzip body was stored as the representation and its Content-Encoding
+    /// dropped, so a reader got compressed bytes labelled as plain content. Coded bodies are
+    /// refused before anything is written.
+    #[tokio::test]
+    async fn coded_bodies_are_refused() {
+        let st = state().await;
+        let text = ("content-type", "text/plain");
+        let r = call(&st, "POST", "/", &[("slug", "x"), text], "a").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        for coding in ["gzip", "identity, gzip", "x-unknown"] {
+            let h = [text, ("content-encoding", coding), ("slug", "y")];
+            for (method, path) in [("PUT", "/x"), ("POST", "/")] {
+                let r = call(&st, method, path, &h, "b").await;
+                assert_eq!(
+                    r.status(),
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "{method} {coding}"
+                );
+                assert_eq!(hdr(&r, "accept-encoding"), "identity");
+            }
+        }
+        let r = call(&st, "GET", "/x", &[], "").await;
+        assert_eq!(&body_of(r).await[..], b"a");
+        assert_eq!(
+            call(&st, "GET", "/y", &[], "").await.status(),
+            StatusCode::NOT_FOUND
+        );
+        let h = [text, ("content-encoding", "identity")];
+        assert!(call(&st, "PUT", "/x", &h, "c").await.status().is_success());
+    }
+
+    /// Review finding: only the first field line of a conditional header was read, so a second
+    /// `If-None-Match: *` line let a write through. Every line counts now, and a precondition
+    /// that cannot be read fails the request.
+    #[tokio::test]
+    async fn every_line_of_a_precondition_counts() {
+        let st = state().await;
+        let text = ("content-type", "text/plain");
+        let r = call(&st, "POST", "/", &[("slug", "x"), text], "a").await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
+        let since = "Thu, 01 Jan 2099 00:00:00 GMT";
+        for refused in [
+            &[("if-none-match", "\"other\""), ("if-none-match", "*")][..],
+            &[("if-match", "\"other\""), ("if-match", "\"other2\"")][..],
+            &[
+                ("if-unmodified-since", since),
+                ("if-unmodified-since", since),
+            ][..],
+            &[("if-match", "\"caf\u{e9}\"")][..],
+            &[("if-none-match", "\"other\""), ("if-none-match", "\u{e9}")][..],
+        ] {
+            let mut h = vec![text];
+            h.extend_from_slice(refused);
+            let r = call(&st, "PUT", "/x", &h, "b").await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{refused:?}");
+        }
+        let r = call(&st, "GET", "/x", &[], "").await;
+        assert_eq!(hdr(&r, "etag"), tag, "a refused write changed the resource");
+        let lines = [
+            ("if-none-match", "\"other\""),
+            ("if-none-match", tag.as_str()),
+        ];
+        let r = call(&st, "GET", "/x", &lines, "").await;
+        assert_eq!(r.status(), StatusCode::NOT_MODIFIED);
+        let lines = [("if-match", "\"other\""), ("if-match", tag.as_str()), text];
+        let r = call(&st, "PUT", "/x", &lines, "b").await;
+        assert!(r.status().is_success(), "{}", r.status());
     }
 
     /// Review finding: the types a Turtle representation states were deduplicated by scanning

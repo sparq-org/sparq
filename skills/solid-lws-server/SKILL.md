@@ -264,7 +264,9 @@ What the server exposes, all discoverable from the storage description
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `DELETE` (with
   `Depth: infinity` for non-empty containers), and read-only RFC 9264 linksets at
   `{resource}.meta`.
-  Errors are `application/problem+json`. A `POST` whose name is taken (or is being created,
+  Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
+  `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
+  lines counts every line, and one that cannot be read gets `412`. A `POST` whose name is taken (or is being created,
   written or deleted right now) gets a numbered name and then a random suffix; when every try is
   taken it gets `409`. `livez` and `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
