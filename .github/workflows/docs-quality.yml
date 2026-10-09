@@ -186,11 +186,11 @@ jobs:
         # Consumers here: skill-frontmatter + the ci-scripts selection-wiring inspection.
         run: pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Install typos
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: typos@1.47.2
       - name: Install lychee (for the site-links self-test)
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: lychee@0.23.0
 
@@ -878,6 +878,8 @@ jobs:
       # runtime-honesty teeth.
       - name: "Self-test js-sbom lane vs external dev-deps on a published member (sq-pl1p)"
         run: bash scripts/tests/test_js_sbom_external_devdep.sh
+      - name: Self-test native composition fail-closed input selection
+        run: python3 scripts/tests/test_ci_native_composition_paths.py
       # The change-based test-selection stack (scripts/ci_select.py, still used by
       # codeql.yml's change detection and fv_select.py) and its ownership map:
       #   * test_ci_select.py       — the affected-set selector (sq-fmx4u.1):

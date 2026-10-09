@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "scope": "Native V3 model and retained V1/V2 native compatibility; no V3 guest/proof claim",
+  "runtime_source_sha256": {
+    "model/src/v3/result.rs": "1c8cc1f35f69a96361115851eadd0e26b019f2f5a38fa64bccbe26ece3bd10bc",
+    "model/src/v3/evaluate.rs": "c2fcb6cbe38f6a4edc9dae4a06c2341cfef2d59d793a55b9e98c43f10293050a",
+    "model/src/evaluate.rs": "18b39bf5f8e33183767980b2ce9c4de9f1a0ba6f5319db499ad721dbed9f0f67",
+    "model/src/v3.rs": "7c1c0db5a72860b40e8dc6086e30fcc495f11c289ee13efe250e5dc07c198bf8",
+    "model/src/v2.rs": "896dc7ab3551b88d7a78b4dcadcf946d91802a9f017ad189e0a9ec7594bdee62",
+    "model/src/v2/evaluate.rs": "ab2c9b5fc040fe3030de092e92859330c05865dafd4d9a24caeb6a728b796380",
+    "model/src/lib.rs": "53232dcbcb33e84f9e649087105c32e0df8dff5e3c38322301418f0f84aedf9b",
+    "model/Cargo.toml": "cd1d76d00b1230c0d133db62c9d162e969b978ef7a3fbbf12a716ce1e3e6d3a7",
+    "Cargo.lock": "3d1dff4dad5982416a6fe0d59ae981df72802b5b11398d90045f3d6ea68ce44c",
+    "model/tests/graph_results.rs": "4df15050089efcba3019537ecd5456f6ed72e124cc4e25740dee1283cf815e2e"
+  },
+  "mutations": [
+    {
+      "guard": "cross-row-identity",
+      "file": "model/src/v3/result.rs",
+      "test": "whole_table_identity",
+      "mutated_source_sha256": "6c07535c1b20823a682f290c277c47d799c4b63099b489a6ceece9bb48e403a4",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "source-label-copy",
+      "file": "model/src/v3/result.rs",
+      "test": "whole_table_identity",
+      "mutated_source_sha256": "ae212e74354a6959cdc762c088bb0bbcd26feda22fb0604b80dd70695b8e1854",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "duplicate-occurrences",
+      "file": "model/src/v3/result.rs",
+      "test": "whole_table_identity",
+      "mutated_source_sha256": "82b07ac64444580b59563e29c33f4f4367a1ec6ce1f4955a7e85bec094e4eb4e",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "ask-result-capacity",
+      "file": "model/src/v3/evaluate.rs",
+      "test": "every_canonicalization",
+      "mutated_source_sha256": "d952c41b76e3a2d7a50cfc6e07fcb4c6e0eb8723c219e6cb891bb0213c2cb3d0",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "strict-numeric-query-budget",
+      "file": "model/src/evaluate.rs",
+      "test": "dynamic_domain_failures",
+      "mutated_source_sha256": "2e435c6fc9675ee988971d8444466808085710ec6b7d783dba64f4812e46ed1f",
+      "exit_code": 101,
+      "assertion_failed": true
+    },
+    {
+      "guard": "temporal-query-budget",
+      "file": "model/src/evaluate.rs",
+      "test": "dynamic_domain_failures",
+      "mutated_source_sha256": "5e80ac1603dacda9322670e36b1214b5646c8e54c2bed33b23cf7c0bea0d2a76",
+      "exit_code": 101,
+      "assertion_failed": true
+    }
+  ],
+  "restored_exit_code": 0,
+  "restored_native_test_functions": 56,
+  "v3_test_functions": 13,
+  "unchanged_positive_corpus_cases_executed_in_v3": 82,
+  "native_log": "/private/tmp/sparq-v3-model-final.log",
+  "source_checkpoint": "bdc9b59f1bb57b31c4c2481b1327d840072ed269"
+}

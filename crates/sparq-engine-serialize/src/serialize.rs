@@ -1868,20 +1868,20 @@ fn json_str(s: &str, out: &mut String) {
 /// shortest round-trip form rarely equals the RDF lexical (`1.5` vs `1.5E0`), which would
 /// silently change the literal. Keeping them as typed strings is lossless.
 fn coerce_native(value: &str, datatype: &str) -> Option<String> {
-    match datatype {
-        d if d == format!("{XSD}boolean") => match value {
+    match datatype.strip_prefix(XSD)? {
+        "boolean" => match value {
             "true" => Some("true".to_string()),
             "false" => Some("false".to_string()),
             _ => None,
         },
-        d if d == format!("{XSD}integer") => {
+        "integer" => {
             // Reject any lexical whose canonical i64 text differs (leading zeros, '+',
             // spaces, out-of-range) so the re-serialized number is byte-identical.
             value
                 .parse::<i64>()
                 .ok()
-                .filter(|n| n.to_string() == value)
                 .map(|n| n.to_string())
+                .filter(|n| n == value)
         }
         _ => None,
     }
@@ -2269,15 +2269,10 @@ pub fn graph_to_jsonld_with(graph: &Graph, form: JsonLdForm, prefixes: &Prefixes
 }
 
 // ===========================================================================
-// [OPUS-4.8] (sq-ixc3.4) Full W3C JSON-LD 1.1 Compaction.
-//
-// `JsonLdForm::Compacted` above is the *prefix-only* "compacted" form (a
-// `prefix → namespace` `@context` abbreviating IRIs to CURIEs). The `compact`
-// submodule implements the actual W3C JSON-LD 1.1 Compaction Algorithm against a
-// caller-supplied `@context` (term definitions, `@vocab`, type/language/`@container`
-// coercion, `@reverse`, keyword aliasing, value + node + IRI compaction). It is
-// hand-rolled and dependency-free (its own tiny `Json` AST — no serde_json, no
-// json-ld crate), staying inside the `serialize-rdf` feature.
+// W3C JSON-LD 1.1 Compaction against a caller-supplied `@context`.
+// `JsonLdForm::Compacted` above is only the *prefix* form; the `compact` submodule
+// adapts the native `sparq-jsonld` document pipeline (fromRdf → compact), the same
+// code the W3C conformance lane measures.
 // ===========================================================================
 mod compact;
 pub use compact::{parse_context_json, write_jsonld_compact, ActiveContext, Json as JsonLdValue};
@@ -2291,10 +2286,8 @@ pub use compact::{parse_context_json, write_jsonld_compact, ActiveContext, Json 
 ///
 /// `context` is the parsed `@context` JSON (build it with [`parse_context_json`] from a
 /// context string, or construct the [`JsonLdValue`] directly). The compaction is **lossless**:
-/// every coercion it applies is invertible against the same `@context`, so a round-trip
-/// through a JSON-LD-to-RDF processor reconstructs the original triples.
-///
-/// Still **dependency-free** — no `json-ld` crate, no `serde_json` (a hand-rolled `Json` AST).
+/// a round-trip through a JSON-LD-to-RDF processor reconstructs the original dataset. See
+/// [`write_jsonld_compact`] for the behaviour on a rejected `@context`.
 pub fn graph_to_jsonld_compact(graph: &Graph, context: &JsonLdValue) -> String {
     let owned = dataset_graphs(graph);
     let view: Vec<NamedGraph<'_>> = owned
@@ -2318,6 +2311,10 @@ pub fn graph_to_jsonld_compact(graph: &Graph, context: &JsonLdValue) -> String {
 // model builder (no `serde_json`, no `json-ld` crate), inside `serialize-rdf`.
 // ===========================================================================
 mod frame;
+// The pre-native compactor, kept only for the framer above until framing moves onto
+// `sparq_jsonld::frame` in its own change.
+#[allow(dead_code)]
+mod legacy_compact;
 pub use frame::write_jsonld_framed;
 
 /// Frames a [`Graph`] (dataset) against a caller-supplied JSON-LD **frame** document,
@@ -4435,504 +4432,6 @@ ex:bob
         graph_to_jsonld_compact(g, &ctx)
     }
 
-    /// A compaction-aware JSON-LD → N-Quads reader (the inverse of the writer) used to
-    /// prove the lossless round-trip. It reads the document's `@context` into the same
-    /// active-context model the writer uses (term IRIs, `@vocab`, `@type`/`@language`/
-    /// `@container` coercion, `@reverse`, keyword aliases) and re-expands every node.
-    mod reader {
-        use serde_json::{Map, Value};
-        use std::collections::HashMap;
-        use std::fmt::Write as _;
-
-        const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
-        const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
-        const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
-        const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
-        const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
-
-        #[derive(Default, Clone)]
-        struct Def {
-            iri: String,
-            type_mapping: Option<String>,
-            language: Option<String>,
-            container: Option<String>,
-            reverse: bool,
-        }
-
-        #[derive(Default)]
-        struct Ctx {
-            terms: HashMap<String, Def>,
-            vocab: Option<String>,
-            default_language: Option<String>,
-        }
-
-        impl Ctx {
-            /// Term → keyword alias resolution (so `"type"` reads as `@type`, etc.).
-            fn keyword(&self, key: &str) -> String {
-                if let Some(d) = self.terms.get(key) {
-                    if d.iri.starts_with('@') {
-                        return d.iri.clone();
-                    }
-                }
-                key.to_string()
-            }
-
-            /// Expand a property/`@type`/`@id` term to its absolute IRI.
-            fn expand(&self, term: &str, vocab: bool) -> String {
-                if term.starts_with("_:") || term.starts_with("@") {
-                    return term.to_string();
-                }
-                if let Some(d) = self.terms.get(term) {
-                    if !d.iri.starts_with('@') && !d.iri.is_empty() {
-                        return d.iri.clone();
-                    }
-                }
-                if let Some((p, suffix)) = term.split_once(':') {
-                    if suffix.starts_with("//") {
-                        return term.to_string();
-                    }
-                    if let Some(d) = self.terms.get(p) {
-                        return format!("{}{}", d.iri, suffix);
-                    }
-                    return term.to_string();
-                }
-                if vocab {
-                    if let Some(v) = &self.vocab {
-                        return format!("{}{}", v, term);
-                    }
-                }
-                term.to_string()
-            }
-        }
-
-        fn parse_ctx(c: &Map<String, Value>) -> Ctx {
-            let mut ctx = Ctx::default();
-            if let Some(v) = c.get("@vocab").and_then(Value::as_str) {
-                ctx.vocab = Some(v.to_string());
-            }
-            if let Some(l) = c.get("@language").and_then(Value::as_str) {
-                ctx.default_language = Some(l.to_string());
-            }
-            // Two passes so prefix terms resolve for compact-IRI @id definitions.
-            for (term, v) in c {
-                if term.starts_with('@') {
-                    continue;
-                }
-                let mut d = Def::default();
-                match v {
-                    Value::String(s) => d.iri = s.clone(),
-                    Value::Object(o) => {
-                        if let Some(r) = o.get("@reverse").and_then(Value::as_str) {
-                            d.iri = r.to_string();
-                            d.reverse = true;
-                        } else if let Some(id) = o.get("@id").and_then(Value::as_str) {
-                            d.iri = id.to_string();
-                        } else if let Some(v) = &ctx.vocab {
-                            d.iri = format!("{}{}", v, term);
-                        } else {
-                            d.iri = term.clone();
-                        }
-                        d.type_mapping =
-                            o.get("@type").and_then(Value::as_str).map(str::to_string);
-                        d.language = o.get("@language").and_then(Value::as_str).map(str::to_string);
-                        d.container =
-                            o.get("@container").and_then(Value::as_str).map(str::to_string);
-                    }
-                    _ => {}
-                }
-                ctx.terms.insert(term.clone(), d);
-            }
-            // Resolve compact-IRI @id values against now-known prefix terms.
-            let prefixes: HashMap<String, String> = ctx
-                .terms
-                .iter()
-                .map(|(k, d)| (k.clone(), d.iri.clone()))
-                .collect();
-            for d in ctx.terms.values_mut() {
-                if let Some((p, suffix)) = d.iri.split_once(':') {
-                    if !suffix.starts_with("//") && !d.iri.starts_with('@') {
-                        if let Some(ns) = prefixes.get(p) {
-                            if !ns.starts_with('@') {
-                                d.iri = format!("{}{}", ns, suffix);
-                            }
-                        }
-                    }
-                }
-            }
-            ctx
-        }
-
-        fn id_term(id: &str) -> String {
-            if let Some(b) = id.strip_prefix("_:") {
-                format!("_:{b}")
-            } else {
-                format!("<{id}>")
-            }
-        }
-
-        fn escape(lex: &str) -> String {
-            let mut s = String::new();
-            for c in lex.chars() {
-                match c {
-                    '"' => s.push_str("\\\""),
-                    '\\' => s.push_str("\\\\"),
-                    '\n' => s.push_str("\\n"),
-                    '\r' => s.push_str("\\r"),
-                    _ => s.push(c),
-                }
-            }
-            s
-        }
-
-        /// Re-expand one compacted value under property `def` into an N-Triples object term.
-        /// `@list` values append fresh first/rest/nil chains to `out` and return the head.
-        fn object_to_nt(
-            v: &Value,
-            def: Option<&Def>,
-            ctx: &Ctx,
-            graph: &str,
-            counter: &mut u64,
-            out: &mut String,
-        ) -> String {
-            if let Value::Object(o) = v {
-                // Resolve aliased keyword members (`id`→@id, `value`→@value, etc.).
-                let kw_get = |name: &str| -> Option<&Value> {
-                    o.iter().find(|(k, _)| ctx.keyword(k) == name).map(|(_, v)| v)
-                };
-                if let Some(Value::Array(items)) = kw_get("@list") {
-                    return list_to_nt(items, def, ctx, graph, counter, out);
-                }
-                if let Some(val) = kw_get("@value") {
-                    // An explicit `{@value}` object: the ABSENCE of `@language` is meaningful —
-                    // the default `@language` must NOT be applied (the writer emits this exact
-                    // shape precisely to suppress the default), so `from_value_object = true`.
-                    return value_to_nt(
-                        val,
-                        kw_get("@type").and_then(Value::as_str),
-                        kw_get("@language").and_then(Value::as_str),
-                        def,
-                        ctx,
-                        true,
-                    );
-                }
-                if let Some(id) = kw_get("@id").and_then(Value::as_str) {
-                    let id = ctx.expand(id, false);
-                    return if id.starts_with("<<(") { id } else { id_term(&id) };
-                }
-            }
-            // A bare scalar (string/number/bool) compacted from a value object — its
-            // datatype/language is implied by `def` (and the document default @language).
-            match v {
-                Value::String(s) => {
-                    // @type:@id / @vocab coercion → the string is a node IRI.
-                    match def.and_then(|d| d.type_mapping.as_deref()) {
-                        Some("@id") => id_term(&ctx.expand(s, false)),
-                        Some("@vocab") => id_term(&ctx.expand(s, true)),
-                        _ => value_to_nt(v, None, None, def, ctx, false),
-                    }
-                }
-                _ => value_to_nt(v, None, None, def, ctx, false),
-            }
-        }
-
-        fn list_to_nt(
-            items: &[Value],
-            def: Option<&Def>,
-            ctx: &Ctx,
-            graph: &str,
-            counter: &mut u64,
-            out: &mut String,
-        ) -> String {
-            if items.is_empty() {
-                return format!("<{RDF_NIL}>");
-            }
-            let cells: Vec<String> = items
-                .iter()
-                .map(|_| {
-                    *counter += 1;
-                    format!("_:lst{counter}")
-                })
-                .collect();
-            for (i, item) in items.iter().enumerate() {
-                let cell = &cells[i];
-                let first = object_to_nt(item, def, ctx, graph, counter, out);
-                let _ = writeln!(out, "{cell} <{RDF_FIRST}> {first} {graph}.");
-                let rest = if i + 1 < cells.len() {
-                    cells[i + 1].clone()
-                } else {
-                    format!("<{RDF_NIL}>")
-                };
-                let _ = writeln!(out, "{cell} <{RDF_REST}> {rest} {graph}.");
-            }
-            cells[0].clone()
-        }
-
-        /// Reconstruct the typed/lang N-Triples literal from a compacted value + coercion.
-        /// When `from_value_object` is true the value arrived as an explicit `{@value}` object,
-        /// so a *missing* `@language` is meaningful (the document default `@language` is NOT
-        /// applied); a bare scalar (false) does take the term / default `@language`.
-        fn value_to_nt(
-            val: &Value,
-            explicit_type: Option<&str>,
-            explicit_lang: Option<&str>,
-            def: Option<&Def>,
-            ctx: &Ctx,
-            from_value_object: bool,
-        ) -> String {
-            let (lex, native_dt) = match val {
-                Value::Bool(b) => (b.to_string(), Some(format!("{XSD}boolean"))),
-                Value::Number(n) if n.is_i64() || n.is_u64() => {
-                    (n.to_string(), Some(format!("{XSD}integer")))
-                }
-                Value::String(s) => (s.clone(), None),
-                other => panic!("unexpected @value scalar: {other}"),
-            };
-            let esc = escape(&lex);
-            // Language: explicit @language, else the term @language, else — only for a BARE
-            // scalar — the document default. An explicit value object with no @language is a
-            // deliberate "no language" signal and must not pick up the default.
-            let lang = explicit_lang.map(str::to_string).or_else(|| {
-                if from_value_object {
-                    None
-                } else {
-                    def.and_then(|d| d.language.clone())
-                        .or_else(|| ctx.default_language.clone())
-                }
-            });
-            // Datatype: explicit @type, else the term @type coercion, else the native dt.
-            let dt = explicit_type
-                .map(|t| ctx.expand(t, true))
-                .or_else(|| {
-                    def.and_then(|d| d.type_mapping.as_deref())
-                        .filter(|t| !t.starts_with('@'))
-                        .map(|t| ctx.expand(t, true))
-                })
-                .or(native_dt);
-            if let Some(l) = lang.filter(|l| !l.is_empty() && dt.is_none()) {
-                return format!("\"{esc}\"@{l}");
-            }
-            match dt {
-                Some(d) => format!("\"{esc}\"^^<{d}>"),
-                None => format!("\"{esc}\""),
-            }
-        }
-
-        fn node_to_nquads(
-            node: &Map<String, Value>,
-            graph: &str,
-            ctx: &Ctx,
-            counter: &mut u64,
-            out: &mut String,
-        ) {
-            let subj = node
-                .iter()
-                .find(|(k, _)| ctx.keyword(k) == "@id")
-                .and_then(|(_, v)| v.as_str())
-                .map(|s| id_term(&ctx.expand(s, false)))
-                .unwrap_or_else(|| {
-                    *counter += 1;
-                    format!("_:n{counter}")
-                });
-            for (k, v) in node {
-                let kw = ctx.keyword(k);
-                if kw == "@id" || kw == "@graph" {
-                    continue;
-                }
-                if kw == "@type" {
-                    let types: Vec<&Value> = match v {
-                        Value::Array(a) => a.iter().collect(),
-                        other => vec![other],
-                    };
-                    for t in types {
-                        let ty = ctx.expand(t.as_str().expect("@type IRI"), true);
-                        let _ = writeln!(out, "{subj} <{RDF_TYPE}> <{ty}> {graph}.");
-                    }
-                    continue;
-                }
-                if kw == "@reverse" {
-                    // { reverseTerm: <node(s)> } — each object points *back* at this subject.
-                    let rev = v.as_object().expect("@reverse object");
-                    for (rk, rv) in rev {
-                        let pred = ctx.expand(rk, true);
-                        for o in as_array(rv) {
-                            // The object's `@id` may be a keyword alias (e.g. `{"id": …}`),
-                            // so resolve it through `ctx.keyword` ([OPUS-4.8] sq-oy1f.10),
-                            // not a hard-coded `@id` key, before falling back to a bare IRI
-                            // string (the `@type:@id`-coerced node-ref form).
-                            let oid = o
-                                .as_object()
-                                .and_then(|om| {
-                                    om.iter()
-                                        .find(|(k, _)| ctx.keyword(k) == "@id")
-                                        .and_then(|(_, v)| v.as_str())
-                                })
-                                .or_else(|| o.as_str())
-                                .map(|s| id_term(&ctx.expand(s, false)))
-                                .expect("reverse object @id");
-                            let _ = writeln!(out, "{oid} <{pred}> {subj} {graph}.");
-                            // The reverse object may itself be a node with its own props.
-                            if let Value::Object(om) = o {
-                                node_to_nquads(om, graph, ctx, counter, out);
-                            }
-                        }
-                    }
-                    continue;
-                }
-                let def = ctx.terms.get(k).cloned();
-                let pred = ctx.expand(k, true);
-                // [OPUS-4.8] (sq-oy1f.12) A forward member whose term is a `@reverse` term
-                // INVERTS: `{subj: {children: O}}` (children is a @reverse term over
-                // `http://ex/parent`) means `O parent subj`, NOT `subj parent O`. The writer
-                // now emits relocated reverse edges as forward members keyed by the reverse
-                // term (never an `@reverse` block — that double-inverts for a strict
-                // processor), so the reader inverts here exactly once to recover the edge.
-                if def.as_ref().is_some_and(|d| d.reverse) {
-                    for o in as_array(v) {
-                        let mut aux = String::new();
-                        let obj = object_to_nt(o, def.as_ref(), ctx, graph, counter, &mut aux);
-                        let _ = writeln!(out, "{obj} <{pred}> {subj} {graph}.");
-                        out.push_str(&aux);
-                        if let Value::Object(om) = o {
-                            let has_id = om.iter().any(|(k, _)| ctx.keyword(k) == "@id");
-                            let has_value = om.iter().any(|(k, _)| ctx.keyword(k) == "@value");
-                            if has_id && om.len() > 1 && !has_value {
-                                node_to_nquads(om, graph, ctx, counter, out);
-                            }
-                        }
-                    }
-                    continue;
-                }
-                // @language container: { lang: value(s), … }. The reserved key `@none`
-                // ([OPUS-4.8] sq-oy1f.9) holds value(s) with NO language tag (a plain string,
-                // or a typed/native value object); those re-expand via the normal value path
-                // so they keep their datatype, not a bogus `@none` language tag. A language
-                // member's value may be an array ([OPUS-4.8] sq-oy1f.14 — several values share
-                // one language), so iterate strings via `as_array`.
-                if def.as_ref().and_then(|d| d.container.as_deref()) == Some("@language") {
-                    if let Value::Object(langs) = v {
-                        for (lang, lv) in langs {
-                            if lang == "@none" {
-                                for o in as_array(lv) {
-                                    let mut aux = String::new();
-                                    let obj = object_to_nt(
-                                        o,
-                                        def.as_ref(),
-                                        ctx,
-                                        graph,
-                                        counter,
-                                        &mut aux,
-                                    );
-                                    let _ = writeln!(out, "{subj} <{pred}> {obj} {graph}.");
-                                    out.push_str(&aux);
-                                }
-                                continue;
-                            }
-                            for sv in as_array(lv) {
-                                let lex = sv.as_str().expect("language map value");
-                                let _ = writeln!(
-                                    out,
-                                    "{subj} <{pred}> \"{}\"@{lang} {graph}.",
-                                    escape(lex)
-                                );
-                            }
-                        }
-                        continue;
-                    }
-                }
-                // @index container: { idx: value(s), … } — index is transparent to RDF.
-                if def.as_ref().and_then(|d| d.container.as_deref()) == Some("@index") {
-                    if let Value::Object(idx) = v {
-                        for iv in idx.values() {
-                            for o in as_array(iv) {
-                                let mut aux = String::new();
-                                let obj = object_to_nt(o, def.as_ref(), ctx, graph, counter, &mut aux);
-                                let _ = writeln!(out, "{subj} <{pred}> {obj} {graph}.");
-                                out.push_str(&aux);
-                            }
-                        }
-                        continue;
-                    }
-                }
-                // @list container: the bare array IS one ordered list (not N separate values).
-                if def.as_ref().and_then(|d| d.container.as_deref()) == Some("@list") {
-                    if let Value::Array(items) = v {
-                        let mut aux = String::new();
-                        let head = list_to_nt(items, def.as_ref(), ctx, graph, counter, &mut aux);
-                        let _ = writeln!(out, "{subj} <{pred}> {head} {graph}.");
-                        out.push_str(&aux);
-                        continue;
-                    }
-                }
-                for o in as_array(v) {
-                    let mut aux = String::new();
-                    let obj = object_to_nt(o, def.as_ref(), ctx, graph, counter, &mut aux);
-                    let _ = writeln!(out, "{subj} <{pred}> {obj} {graph}.");
-                    out.push_str(&aux);
-                    // A nested node object (alias-aware @id, no @value, has own properties)
-                    // also contributes its own triples.
-                    if let Value::Object(om) = o {
-                        let has_id = om.iter().any(|(k, _)| ctx.keyword(k) == "@id");
-                        let has_value = om.iter().any(|(k, _)| ctx.keyword(k) == "@value");
-                        if has_id && om.len() > 1 && !has_value {
-                            node_to_nquads(om, graph, ctx, counter, out);
-                        }
-                    }
-                }
-            }
-        }
-
-        fn as_array(v: &Value) -> Vec<&Value> {
-            match v {
-                Value::Array(a) => a.iter().collect(),
-                other => vec![other],
-            }
-        }
-
-        /// Full compacted-document → N-Quads.
-        pub fn to_nquads(doc: &str) -> String {
-            let v: Value = serde_json::from_str(doc).expect("valid JSON");
-            let o = v.as_object().expect("compacted doc is an object");
-            let ctx = match o.get("@context") {
-                Some(Value::Object(c)) => parse_ctx(c),
-                _ => Ctx::default(),
-            };
-            let mut out = String::new();
-            let mut counter: u64 = 0;
-            let graph_key = ctx.keyword("@graph");
-            let nodes = o
-                .iter()
-                .find(|(k, _)| ctx.keyword(k) == "@graph")
-                .and_then(|(_, g)| g.as_array())
-                .cloned()
-                .unwrap_or_default();
-            let _ = graph_key;
-            for n in &nodes {
-                let node = n.as_object().expect("node object");
-                // A named-graph sub-object carries its own @graph.
-                let inner = node.iter().find(|(k, _)| ctx.keyword(k) == "@graph");
-                if let Some((_, Value::Array(sub))) = inner {
-                    let gid = node
-                        .iter()
-                        .find(|(k, _)| ctx.keyword(k) == "@id")
-                        .and_then(|(_, v)| v.as_str())
-                        .map(|s| id_term(&ctx.expand(s, false)))
-                        .expect("named graph @id");
-                    for s in sub {
-                        node_to_nquads(
-                            s.as_object().expect("node"),
-                            &format!("{gid} "),
-                            &ctx,
-                            &mut counter,
-                            &mut out,
-                        );
-                    }
-                } else {
-                    node_to_nquads(node, "", &ctx, &mut counter, &mut out);
-                }
-            }
-            out
-        }
-    }
 
     /// Re-expands a compacted document and reloads it into a [`Graph`], asserting the document
     /// is valid JSON along the way. The load-bearing helper behind the round-trip assertions.
@@ -4940,11 +4439,19 @@ ex:bob
         let doc = compact_doc(g0, context);
         let _: serde_json::Value = serde_json::from_str(&doc)
             .unwrap_or_else(|e| panic!("compacted doc invalid JSON: {e}\n{doc}"));
-        let nq = reader::to_nquads(&doc);
-        let g1 = Graph::load_dataset(&nq, "nquads").unwrap_or_else(|e| {
-            panic!("re-parse failed: {e}\n--- doc ---\n{doc}\n--- nq ---\n{nq}")
-        });
+        let g1 = Graph::load_dataset(&doc, "jsonld")
+            .unwrap_or_else(|e| panic!("re-parse failed: {e}\n--- doc ---\n{doc}"));
         (doc, g1)
+    }
+
+    /// The emitted DATA of a compacted document: the document with its `@context` member
+    /// removed, re-serialized (so assertions never match a term definition by accident).
+    fn data_body(doc: &str) -> String {
+        let mut v: serde_json::Value = serde_json::from_str(doc).expect("valid JSON");
+        if let Some(m) = v.as_object_mut() {
+            m.remove("@context");
+        }
+        v.to_string()
     }
 
     /// Asserts a graph survives the full-compaction round-trip against `context`:
@@ -4982,6 +4489,386 @@ ex:bob
             triple_count(&g1),
             "compaction round-trip changed the triple count\n--- doc ---\n{doc}"
         );
+    }
+
+    /// Distinct blank nodes across the dataset (graph names and every graph's terms).
+    fn blank_count(g: &Graph) -> usize {
+        let mut v: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        for graph in std::iter::once(g).chain(g.named.iter().map(|(_, ng)| ng)) {
+            v.extend(nt_sorted(graph).iter().flat_map(|t| t.split(' ').map(str::to_string)));
+        }
+        v.retain(|t| t.starts_with("_:"));
+        v.sort();
+        v.dedup();
+        v.len()
+    }
+
+    /// Per-graph triple counts, keyed by graph name (`""` for the default graph).
+    fn graph_counts(g: &Graph) -> Vec<(String, usize)> {
+        let mut v = vec![(String::new(), g.iter_ids().count())];
+        v.extend(g.named.iter().map(|(n, ng)| (n.to_string(), ng.iter_ids().count())));
+        v.retain(|(_, c)| *c > 0);
+        v.sort();
+        v
+    }
+
+    // A list whose head reference sits in another graph must not be collapsed into that
+    // graph: its cells' triples would move with it.
+    #[test]
+    fn compact_keeps_list_cells_in_their_own_graph() {
+        let g0 = Graph::load_dataset(
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/g1> { <http://ex/s> <http://ex/p> _:l . }
+               <http://ex/g2> { _:l rdf:first "a" ; rdf:rest rdf:nil . }"#,
+            "trig",
+        )
+        .unwrap();
+        let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
+        assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
+    }
+
+    // An explicitly typed list cell keeps its `rdf:type rdf:List` triple.
+    #[test]
+    fn compact_keeps_typed_list_cells() {
+        let g0 = Graph::load_str(
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> _:l .
+               _:l a rdf:List ; rdf:first "a" ; rdf:rest rdf:nil ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_count_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+    }
+
+    // A list cell that also names a graph, or is used as a type, keeps that use.
+    #[test]
+    fn compact_keeps_list_cells_used_elsewhere() {
+        for trig in [
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> _:l . _:l rdf:first "a" ; rdf:rest rdf:nil .
+               _:l { <http://ex/x> <http://ex/q> "b" . }"#,
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> _:l . _:l rdf:first "a" ; rdf:rest rdf:nil .
+               <http://ex/x> a _:l ."#,
+        ] {
+            let g0 = Graph::load_dataset(trig, "trig").unwrap();
+            let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
+            assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
+            // The cell is one node in both uses: as many distinct blank nodes come back.
+            assert_eq!(blank_count(&g0), blank_count(&g1), "{doc}");
+        }
+    }
+
+    // rdf:JSON literals keep their exact lexical form, including arrays, which a
+    // `@type: @json` term would otherwise merge with multiple values.
+    #[test]
+    fn compact_keeps_json_literals_lexically() {
+        let g0 = Graph::load_str(
+            r#"@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               <http://ex/s> <http://ex/p> "[]"^^rdf:JSON , "[1]"^^rdf:JSON , "{ \"a\": 1 }"^^rdf:JSON ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(&g0, r#"{"p":{"@id":"http://ex/p","@type":"@json"}}"#);
+        assert_compact_iso(&g0, r#"{"p":{"@id":"http://ex/p","@type":"@json","@container":"@set"}}"#);
+    }
+
+    // An empty named graph keeps its name in the compacted output (the JSON-LD reader
+    // drops empty graphs on reload, so the document itself is checked).
+    #[test]
+    fn compact_keeps_empty_named_graphs() {
+        let mut g0 = Graph::load_str(r#"<http://ex/s> <http://ex/p> "v" ."#, "turtle").unwrap();
+        g0.ensure_named(&oxrdf::NamedNode::new("http://ex/g").unwrap().into()).unwrap();
+        let (doc, g1) = compact_then_reload(&g0, "{}");
+        assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{doc}");
+        assert!(doc.contains(r#"{"@id":"http://ex/g","@graph":[]}"#), "{doc}");
+    }
+
+    // An `@id` map whose scoped context re-aliases `@id`, and reuses the outer alias for
+    // a data property, keeps that property.
+    #[test]
+    fn frame_id_map_under_scoped_alias_keeps_data() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> . <http://ex/b> <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"id":"@id","p":{"@id":"http://ex/p","@container":"@id",
+                "@context":{"id":"http://ex/data","identifier":"@id"}}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let g1 = Graph::load_dataset(&framed, "jsonld").expect("framed output parses");
+        assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{framed}");
+    }
+
+    // A list cell that is also a subject in another graph stays one node.
+    #[test]
+    fn compact_keeps_cells_spanning_graphs() {
+        let g0 = Graph::load_dataset(
+            r#"@prefix ex: <http://ex/> .
+               @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+               ex:s ex:p _:h .
+               _:h rdf:first "A" ; rdf:rest _:t ; ex:extra "x" .
+               _:t rdf:first "B" ; rdf:rest rdf:nil .
+               ex:g { _:t ex:q "Y" . }"#,
+            "trig",
+        )
+        .unwrap();
+        let (doc, g1) = compact_then_reload(&g0, r#"{"@vocab":"http://ex/"}"#);
+        assert_eq!(graph_counts(&g0), graph_counts(&g1), "{doc}");
+        assert_eq!(blank_count(&g0), blank_count(&g1), "{doc}");
+    }
+
+    // A root context with `@propagate: false` still applies to a lone top-level node.
+    #[test]
+    fn compact_keeps_non_propagated_root_context_semantics() {
+        let g0 = Graph::load_str(r#"<http://ex/s> <http://ex/p> "x" ."#, "turtle").unwrap();
+        assert_compact_iso(&g0, r#"{"@propagate":false,"@language":"en"}"#);
+    }
+
+    // A `@type` map whose scoped context re-aliases `@type`, and reuses the outer alias
+    // for a data property, keeps that property and adds no type.
+    // A `@type` map item whose own type-scoped context re-aliases `@type`, and reuses
+    // the outer alias for data, keeps that data and adds no type.
+    // A type-scoped context's own `@type` alias is not used for the node's types: expansion
+    // finds `@type` entries before applying type-scoped contexts. Checked through both
+    // writers by expansion, since oxjsonld doesn't apply a type-scoped context after `@id`.
+    #[test]
+    fn type_scoped_type_alias_round_trips_through_both_writers() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/s> a <http://ex/T> ; <http://ex/q> "v" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let ctx = r#"{"@vocab":"http://ex/","type":"@type",
+            "T":{"@id":"http://ex/T","@context":{"t":"@type","label":"http://ex/q"}}}"#;
+        let compacted = graph_to_jsonld_compact(&g0, &parse_context_json(ctx).unwrap());
+        let frame = format!(r#"{{"@context":{ctx},"@id":"http://ex/s"}}"#);
+        let framed = graph_to_jsonld_framed(&g0, &parse_context_json(&frame).unwrap());
+        for out in [compacted, framed] {
+            let doc = sparq_jsonld::Json::parse(&out).unwrap();
+            let opts = sparq_jsonld::JsonLdOptions::default();
+            let mut exp = String::new();
+            sparq_jsonld::expand(&doc, &opts, &sparq_jsonld::NoopLoader).unwrap().write(&mut exp);
+            assert!(exp.contains(r#""@type":["http://ex/T"]"#), "{out}\n{exp}");
+            assert!(exp.contains(r#""http://ex/q":[{"@value":"v"}]"#), "{out}\n{exp}");
+            assert!(!exp.contains("http://ex/t\""), "{out}\n{exp}");
+            assert!(!exp.contains("http://ex/label"), "{out}\n{exp}");
+        }
+    }
+
+    // An embedded node under a property-scoped context that redefines the outer `@type`
+    // alias keeps its type: expansion looks for `@type` under that context.
+    // A property-scoped @vocab does not re-read an embedded node's type as another IRI.
+    // A list wrapper is read under the property's scoped context, so its @list alias
+    // comes from there; the list survives as a list.
+    #[test]
+    fn list_wrapper_survives_a_scoped_alias() {
+        let g0 = Graph::load_str(r#"<http://ex/s> <http://ex/p> ("a") ."#, "turtle").unwrap();
+        let ctx = r#"{"l":"@list","p":{"@id":"http://ex/p","@context":{"l":"http://ex/data"}}}"#;
+        assert_compact_count_iso(&g0, ctx);
+        // Compacted, not the expanded fallback.
+        let doc = compact_doc(&g0, ctx);
+        assert!(doc.contains(r#""@context""#) && doc.contains(r#""@list""#), "{doc}");
+    }
+
+    // A type-map key that the enclosing context reads as another type stays on the node.
+    // Lists nested far deeper than the walks allow are written without exhausting the
+    // stack, and re-read with every triple.
+    #[test]
+    fn deeply_nested_lists_are_written_losslessly() {
+        let n = 1000;
+        let mut nt = String::from("<http://ex/s> <http://ex/p> _:l0 .\n");
+        for i in 0..n {
+            let first = if i + 1 < n { format!("_:l{}", i + 1) } else { "\"x\"".to_string() };
+            nt.push_str(&format!(
+                "_:l{i} <http://www.w3.org/1999/02/22-rdf-syntax-ns#first> {first} .\n\
+                 _:l{i} <http://www.w3.org/1999/02/22-rdf-syntax-ns#rest> \
+                 <http://www.w3.org/1999/02/22-rdf-syntax-ns#nil> .\n"
+            ));
+        }
+        let g0 = Graph::load_str(&nt, "ntriples").unwrap();
+        assert_compact_count_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+    }
+
+    // A framed chain embedded deeper than the walks allow falls back to the expanded
+    // document instead of exhausting the stack.
+    // Same-document references with a colon in the query or fragment stay relative to
+    // the whole base (no "./" that would drop its last segment).
+    #[test]
+    fn compact_keeps_same_document_refs_with_colons() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/doc#part:one> <http://ex/p> <http://ex/doc?q=a:b> ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(
+            &g0,
+            r#"{"@base":"http://ex/doc","p":{"@id":"http://ex/p","@type":"@id"}}"#,
+        );
+    }
+
+    // Two lists on one `@list`-container property both survive.
+    #[test]
+    fn compact_keeps_several_lists_on_a_list_term() {
+        let g0 = Graph::load_str(
+            r#"@prefix ex: <http://ex/> . ex:s ex:p ("A"), ("B"), ("C") ."#,
+            "turtle",
+        )
+        .unwrap();
+        let (doc, g1) =
+            compact_then_reload(&g0, r#"{"items":{"@id":"http://ex/p","@container":"@list"}}"#);
+        // Blank-node labels differ, so compare the list members per head.
+        let firsts = |g: &Graph| {
+            let mut v: Vec<String> = nt_sorted(g)
+                .into_iter()
+                .filter(|t| t.contains("#first>"))
+                .map(|t| t.split("#first> ").nth(1).unwrap().to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(nt_sorted(&g1).len(), 9, "{doc}");
+        assert_eq!(firsts(&g1), firsts(&g0), "{doc}");
+    }
+
+    // A further list on a `@list` term with a scoped context keeps its values' meaning.
+    #[test]
+    fn compact_keeps_further_lists_outside_the_terms_scope() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/s> <http://ex/p> ("a"@en), ("b"@en) ."#,
+            "turtle",
+        )
+        .unwrap();
+        let (doc, g1) = compact_then_reload(
+            &g0,
+            r#"{"l":{"@id":"http://ex/p","@container":"@list","@context":{"@language":"en"}}}"#,
+        );
+        let tagged = |g: &Graph| nt_sorted(g).iter().filter(|t| t.contains("\"@en")).count();
+        assert_eq!(nt_sorted(&g1).len(), 6, "{doc}");
+        assert_eq!(tagged(&g1), 2, "{doc}");
+    }
+
+    // Type maps holding node objects are written as plain properties, which sparq's
+    // reader can load; type maps of bare references stay.
+    #[test]
+    fn type_maps_stay_readable() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> , <http://ex/c> .
+               <http://ex/b> a <http://ex/T> ; <http://ex/data> "kept" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let ctx = r#"{"p":{"@id":"http://ex/p","@container":"@type"},"q":"http://ex/p","data":"http://ex/data"}"#;
+        let frame = parse_context_json(&format!(r#"{{"@context":{ctx},"@id":"http://ex/a"}}"#)).unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+        let (doc, g1) = compact_then_reload(&g0, ctx);
+        assert_eq!(nt_sorted(&g1), nt_sorted(&g0), "{doc}");
+        let refs = Graph::load_str(r#"<http://ex/a> <http://ex/p> <http://ex/b> ."#, "turtle").unwrap();
+        let (doc, g1) = compact_then_reload(
+            &refs,
+            r#"{"p":{"@id":"http://ex/p","@container":"@type","@type":"@id"}}"#,
+        );
+        assert!(doc.contains(r#""@container":"@type""#), "{doc}");
+        assert_eq!(nt_sorted(&g1), nt_sorted(&refs), "{doc}");
+    }
+
+    // The readable re-rendering keeps what the frame matched: a type-map frame still
+    // selects by type, and a `["@type"]` container is dropped whole.
+    // A property-valued index under a scoped context that renames the index property keys
+    // on the right value and keeps the data property.
+    #[test]
+    fn frame_index_map_under_scoped_names_keeps_predicates() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> .
+               <http://ex/b> <http://ex/label> "K" ; <http://ex/data> "D" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"label":"http://ex/label","p":{"@id":"http://ex/p","@container":"@index",
+                "@index":"label","@context":{"label":"http://ex/data","key":"http://ex/label"}}},
+                "@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+        // Readers differ on which context resolves the index name here, so the value is
+        // not used as a key at all.
+        assert!(framed.contains(r#""p":{"@none":"#), "{framed}");
+    }
+
+    // The readable re-rendering of a type map keeps the frame's `@null` defaults.
+    // A property-valued index whose value reads as an `@none` alias stays on the node.
+    #[test]
+    fn frame_index_map_keeps_values_spelled_like_none() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/a> <http://ex/p> <http://ex/b> . <http://ex/b> <http://ex/label> "none" ."#,
+            "turtle",
+        )
+        .unwrap();
+        let frame = parse_context_json(
+            r#"{"@context":{"none":"@none","label":"http://ex/label",
+                "p":{"@id":"http://ex/p","@container":"@index","@index":"label"}},"@id":"http://ex/a"}"#,
+        )
+        .unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let back = Graph::load_str(&framed, "jsonld").unwrap();
+        assert_eq!(nt_sorted(&back), nt_sorted(&g0), "{framed}");
+    }
+
+    // An `@id` map key that would read back as an `@none` alias keeps the full IRI.
+    #[test]
+    fn compact_id_map_key_never_reads_as_none() {
+        let g0 = Graph::load_str(r#"<http://ex/a> <http://ex/p> <http://ex/none> ."#, "turtle").unwrap();
+        assert_compact_iso(
+            &g0,
+            r#"{"@base":"http://ex/","none":"@none","p":{"@id":"http://ex/p","@container":"@id"}}"#,
+        );
+    }
+
+    // Node ids and `@type: @id` values whose base-relative form spells a keyword alias
+    // keep expanding to the same IRI.
+    #[test]
+    fn compact_relative_ids_never_read_as_aliases() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/id> <http://ex/p> "v" . <http://ex/s> <http://ex/r> <http://ex/id> ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(
+            &g0,
+            r#"{"@base":"http://ex/","id":"@id","r":{"@id":"http://ex/r","@type":"@id"}}"#,
+        );
+    }
+
+    // A predicate whose @vocab suffix has a colon keeps its full IRI.
+    #[test]
+    fn compact_keeps_colon_suffix_iris() {
+        let g0 = Graph::load_str(r#"<http://ex/s> <http://ex/a:b> "v" ."#, "turtle").unwrap();
+        assert_compact_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+    }
+
+    // A malformed rdf:JSON literal is admissible RDF; the writers keep it as a typed
+    // string instead of panicking.
+    #[test]
+    fn compact_and_frame_keep_malformed_json_literals() {
+        let g0 = Graph::load_str(
+            r#"<http://ex/s> <http://ex/p> "not JSON"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> ;
+                  <http://ex/q> "{\"a\":1}"^^<http://www.w3.org/1999/02/22-rdf-syntax-ns#JSON> ."#,
+            "turtle",
+        )
+        .unwrap();
+        assert_compact_iso(&g0, r#"{"@vocab":"http://ex/"}"#);
+        let frame = parse_context_json(r#"{"@context":{"@vocab":"http://ex/"}}"#).unwrap();
+        let framed = graph_to_jsonld_framed(&g0, &frame);
+        let g1 = Graph::load_dataset(&framed, "jsonld").expect("framed output parses");
+        assert_eq!(nt_sorted(&g0), nt_sorted(&g1), "{framed}");
     }
 
     #[test]
@@ -5121,8 +5008,7 @@ ex:bob
             "@list container → bare array:\n{doc}"
         );
         // No `@list` wrapper survives in the @graph body (the term decl in @context is fine).
-        let body = &doc[doc.find("@graph").unwrap()..];
-        assert!(!body.contains("@list"), "no @list wrapper remains in @graph:\n{doc}");
+        assert!(!data_body(&doc).contains("@list"), "no @list wrapper remains:\n{doc}");
         // List-cell blank nodes are renamed on re-materialisation, so use the count-based check.
         assert_compact_count_iso(&g, ctx);
     }
@@ -5406,14 +5292,10 @@ ex:bob
     // `assert_compact_iso` guard additionally pins the sparq self-round-trip.
     // =======================================================================
 
-    /// [OPUS-4.8] sq-oy1f.12 — a `@reverse`-term edge must be emitted as a FORWARD member
-    /// keyed by the reverse term, never inside an `@reverse` block. A reverse-term key inside
-    /// an `@reverse` block DOUBLE-INVERTS: pyld applies the block's inversion AND the term's
-    /// inversion, reading the edge backwards (`<alice> <parent> <bob>` instead of
-    /// `<bob> <parent> <alice>`). The forward-member shape inverts exactly once.
-    ///
-    /// pyld differential (verified): the doc below `toRdf`s to exactly the two source triples
-    /// `<bob> <parent> <alice>` + `<alice> <name> "Alice"`, NOT the inverted edge.
+    /// [OPUS-4.8] sq-oy1f.12 — a forward edge whose predicate only has a `@reverse` term must
+    /// never be emitted inside an `@reverse` block: a reverse-term key inside a block
+    /// DOUBLE-INVERTS for a strict processor (pyld reads `<alice> <parent> <bob>`). fromRdf
+    /// yields no reverse properties, so the edge stays a forward member under its full IRI.
     #[test]
     fn compact_reverse_term_as_forward_member_not_block() {
         let g = Graph::load_str(
@@ -5423,32 +5305,18 @@ ex:bob
             "turtle",
         )
         .unwrap();
-        // `children` is a @reverse term over ex:parent; the predicate has no plain @vocab
-        // spelling, so the ONLY way to express the edge is via the reverse term.
         let ctx = r#"{"children":{"@reverse":"http://ex/parent","@type":"@id"},
                       "name":"http://ex/name"}"#;
         let doc = compact_doc(&g, ctx);
-        // Inspect the @graph body only (the @context legitimately mentions `@reverse` in the
-        // term definition; we are asserting on the emitted DATA, not the context).
-        let body = doc.split("\"@graph\":").nth(1).expect("doc has @graph");
-        // The reverse term appears as a FORWARD member of the object node (ex:alice), with
-        // the subject (ex:bob) as its value. The pyld-verified faithful shape.
+        let body = data_body(&doc);
         assert!(
-            body.contains(r#""children":"http://ex/bob""#),
-            "reverse term emitted as forward member:\n{doc}"
+            body.contains(r#""http://ex/parent":{"@id":"http://ex/alice"}"#),
+            "forward edge under its full IRI:\n{doc}"
         );
-        // NO `@reverse` block is emitted in the data (that double-inverts for a strict
-        // processor); the only `@reverse` occurrence is the context term definition.
         assert!(
-            !body.contains("@reverse"),
-            "no @reverse block in the @graph body (it would double-invert):\n{doc}"
+            !body.contains("@reverse") && !body.contains("children"),
+            "no @reverse block / reverse term in the data (it would double-invert):\n{doc}"
         );
-        // And the internal relocation sentinel never leaks into the document.
-        assert!(
-            !doc.contains("sparq-reverse"),
-            "internal sentinel must not appear:\n{doc}"
-        );
-        // Losslessness through sparq's own reader (the conformance oracle): exact-label match.
         assert_compact_iso(&g, ctx);
     }
 
@@ -5572,13 +5440,10 @@ ex:bob
         assert_compact_iso(&g, ctx);
     }
 
-    /// [OPUS-4.8] sq-oy1f.14 — an `@id` / `@graph` container that fromRdf cannot losslessly
-    /// populate must FALL BACK to the default (no-container) framing, not emit a node ref
-    /// under the container term. Emitting `{"@id": …}` under a `@container:@id` term made a
-    /// strict processor reject the document (`illegal key … @id` on a value object).
-    ///
-    /// pyld differential (verified): the buggy container shape THROWS in pyld; the default
-    /// framing (node ref under the full IRI key) `toRdf`s to both source triples.
+    /// [OPUS-4.8] sq-oy1f.14 — a node reference under a `@container: @id` term must become an
+    /// `@id` map entry keyed by the node IRI, never a `{"@id": …}` value under the container
+    /// term (a strict processor rejects that: `illegal key … @id`). The `@id` map is the
+    /// spec Compaction shape and re-expands to the same edge.
     #[test]
     fn compact_id_container_falls_back_to_default_framing() {
         let g = Graph::load_str(
@@ -5591,20 +5456,12 @@ ex:bob
         let ctx = r#"{"@vocab":"http://ex/","id":"@id",
                       "members":{"@id":"http://ex/members","@container":"@id"}}"#;
         let doc = compact_doc(&g, ctx);
-        // Inspect the @graph body (the @context legitimately defines the `members` term).
-        let body = doc.split("\"@graph\":").nth(1).expect("doc has @graph");
-        // The edge is emitted under the full-IRI key (default framing), NOT the `members`
-        // container term, so the value is a plain node reference pyld can read.
+        let body = data_body(&doc);
         assert!(
-            body.contains(r#""http://ex/members":{"id":"http://ex/m1"}"#),
-            "default framing under full IRI key:\n{doc}"
+            body.contains(r#""members":{"http://ex/m1":{}}"#),
+            "node reference as an @id map entry:\n{doc}"
         );
-        // The `members` container term is NOT used as a key in the data (that yields a broken
-        // @id map a strict processor rejects).
-        assert!(
-            !body.contains(r#""members":"#),
-            "the @id-container term must not be a key:\n{doc}"
-        );
+        assert!(!body.contains(r#""members":{"id""#), "no node ref under the container:\n{doc}");
         assert_compact_iso(&g, ctx);
     }
 

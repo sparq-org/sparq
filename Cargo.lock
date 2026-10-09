@@ -5441,6 +5441,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-query-protocol"
+version = "0.1.4"
+
+[[package]]
 name = "sparq-reason"
 version = "0.1.4"
 dependencies = [
@@ -5873,10 +5877,13 @@ dependencies = [
 name = "sparq-zk-compose"
 version = "0.1.4"
 dependencies = [
+ "blake3",
  "libc",
  "oxrdf 0.3.3",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "sparq-spargebra",
  "sparq-zk",
 ]
 

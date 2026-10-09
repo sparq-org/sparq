@@ -1,6 +1,6 @@
 //! [OPUS-4.8] (sq-oy1f.17) Full **W3C JSON-LD 1.1 Framing** — hand-rolled, dependency-free.
 //!
-//! The sibling [`compact`](super::compact) module implements the W3C JSON-LD 1.1
+//! The sibling [`compact`](super::legacy_compact) module implements the W3C JSON-LD 1.1
 //! **Compaction** Algorithm (sq-ixc3.4/#963/#978). Framing is the complementary
 //! shaping operation: given a **frame document** (a JSON-LD document acting as an
 //! example / template), reshape the flattened input graph into a deterministic
@@ -12,8 +12,8 @@
 //! (<https://www.w3.org/TR/json-ld11-framing/#framing-algorithm>) applied to an RDF
 //! graph plus a caller **frame**. Like compaction it stays inside the
 //! dependency-free `serialize-rdf` feature: it reuses the compaction module's tiny
-//! [`Json`](super::compact::Json) AST and its `fromRdf` model builder
-//! ([`graph_to_expanded`](super::compact::graph_to_expanded)) — it pulls in **zero**
+//! [`Json`](super::legacy_compact::Json) AST and its `fromRdf` model builder
+//! ([`graph_to_expanded`](super::legacy_compact::graph_to_expanded)) — it pulls in **zero**
 //! new crates and **no** `json-ld` library (no Rust JSON-LD crate ships framing, so
 //! it must be hand-rolled regardless — see sq-oy1f.6).
 //!
@@ -32,7 +32,7 @@
 //!    link table** that breaks blank-node cycles), apply `@explicit` (prune to framed
 //!    properties), and fill `@default` / preserve-`null` markers for absent ones.
 //! 4. **Compaction** — compact the framed expanded model against the frame's
-//!    `@context` (reusing [`ActiveContext::compact`](super::compact::ActiveContext)),
+//!    `@context` (reusing [`ActiveContext::compact`](super::legacy_compact::ActiveContext)),
 //!    wrap in the `@graph` envelope (omitted for a single result unless forced), and
 //!    serialize.
 //!
@@ -70,7 +70,7 @@
 //! back to `@always` (see the flag note above). See the crate README +
 //! `skills/data-formats/SKILL.md` for the full boundary.
 
-use super::compact::{flatten, graph_to_expanded, ActiveContext, Json};
+use super::legacy_compact::{flatten, graph_to_expanded, ActiveContext, Json};
 use super::NamedGraph;
 use oxrdf::{Term, Triple};
 use std::collections::{BTreeMap, BTreeSet};
@@ -821,7 +821,7 @@ fn finalize_nulls(v: &Json) -> Json {
 /// **framed + compacted** JSON-LD 1.1 document.
 ///
 /// `graphs` is the dataset (default graph + named graphs); `frame` is the parsed frame JSON
-/// (build it with [`parse_context_json`](super::compact::parse_context_json) from a frame
+/// (build it with [`parse_context_json`](super::legacy_compact::parse_context_json) from a frame
 /// string, or construct the [`Json`] directly). The result selects the input subjects that
 /// match the frame's node pattern, embeds referenced nodes inline per the `@embed` flag
 /// (breaking blank-node cycles), prunes to the framed properties under `@explicit`, fills

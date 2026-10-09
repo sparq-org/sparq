@@ -1,0 +1,90 @@
+{
+  "authored_by": "GPT-6",
+  "sources": [
+    "https://www.w3.org/TR/2013/REC-sparql11-query-20130321/#ebv",
+    "https://www.w3.org/TR/2026/WD-sparql12-query-20260912/#ebv",
+    "https://www.w3.org/TR/2026/WD-sparql12-query-20260912/#syntaxVersionAnnouncement"
+  ],
+  "scope": "Existing proof dialect pins REC2013 EBV. Conflicting or unsupported query announcements reject; manual expected RDF terms remain independent of the engine.",
+  "cases": [
+    {
+      "id": "default-rec",
+      "query": "SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": true,
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "declared-rec",
+      "query": "VERSION '1.1' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": true,
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "conflicting-wd",
+      "query": "VERSION '1.2' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": false
+    },
+    {
+      "id": "conflicting-wd-basic",
+      "query": "VERSION '1.2-basic' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": false
+    },
+    {
+      "id": "unknown-version",
+      "query": "VERSION 'unknown' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": false
+    },
+    {
+      "id": "contradictory-declarations",
+      "query": "VERSION '1.1' VERSION '1.2' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": false
+    },
+    {
+      "id": "repeated-rec",
+      "query": "VERSION '1.1' VERSION '1.1' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": true,
+      "expected_result": {
+        "Select": {
+          "variables": [
+            "v"
+          ],
+          "order": "Bag",
+          "rows": [
+            [
+              "\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>"
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "id": "compatible-draft-labels-conflict-with-proof-rec",
+      "query": "VERSION '1.2' VERSION '1.2-basic' VERSION '1.2' SELECT (!!\"z\"^^<http://www.w3.org/2001/XMLSchema#boolean> AS ?v) {}",
+      "admitted": false
+    }
+  ]
+}

@@ -727,3 +727,47 @@ fn output_is_the_json_arr_variant() {
     let doc = from_rdf(&[], &FromRdfOptions::default()).expect("empty dataset");
     assert!(matches!(doc, Json::Arr(items) if items.is_empty()));
 }
+
+/// Lists nested in one another in a cycle are reachable from no emitted node; one of
+/// them stays an ordinary node, so every triple survives.
+#[test]
+fn lists_nested_in_a_cycle_keep_their_triples() {
+    let (a, b) = (RdfTerm::blank("a"), RdfTerm::blank("b"));
+    let quads = [
+        q(a.clone(), rdf("first"), b.clone()),
+        q(a.clone(), rdf("rest"), rdf("nil")),
+        q(b.clone(), rdf("first"), a.clone()),
+        q(b.clone(), rdf("rest"), rdf("nil")),
+    ];
+    let out = render_default(&quads);
+    assert!(out.contains(r#""@id":"_:a""#) || out.contains(r#""@id":"_:b""#), "{out}");
+    assert!(out.contains(r#""@list""#), "{out}");
+}
+
+/// Deeply nested lists are collapsed only so far: the rest stay ordinary nodes, so the
+/// document nests within the walks' bound and every triple survives.
+#[test]
+fn deeply_nested_lists_stay_shallow() {
+    let n = 1000;
+    let cell = |i: usize| RdfTerm::blank(format!("l{i}"));
+    let mut quads = vec![q(RdfTerm::iri("http://ex/s"), RdfTerm::iri("http://ex/p"), cell(0))];
+    for i in 0..n {
+        let first = if i + 1 < n { cell(i + 1) } else { RdfTerm::lang_literal("x", "en") };
+        quads.push(q(cell(i), rdf("first"), first));
+        quads.push(q(cell(i), rdf("rest"), rdf("nil")));
+    }
+    let doc = from_rdf(&quads, &FromRdfOptions::default()).unwrap();
+    fn depth(j: &Json) -> usize {
+        match j {
+            Json::Arr(a) => 1 + a.iter().map(depth).max().unwrap_or(0),
+            Json::Obj(m) => 1 + m.iter().map(|(_, v)| depth(v)).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+    assert!(depth(&doc) < 100, "depth {}", depth(&doc));
+    // Every cell is either collapsed into a list or emitted as a node: count rdf:first.
+    let out = render_default(&quads);
+    let firsts = out.matches(&format!("{RDF_NS}first")).count();
+    let lists = out.matches(r#""@list""#).count();
+    assert_eq!(firsts + lists, n, "{out}");
+}

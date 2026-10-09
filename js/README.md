@@ -379,9 +379,13 @@ verified warm-up from `GET /dictionary/{dict-id}` for the *next* request.
   percent-encoded over the full `IRIREF`-illegal set (`< > " { } | ^` `` ` ``
   `\` and `#x00–#x20`, so a `>` in an ACL-pointer IRI becomes `%3E`) and literal
   values escape `"`, `\` and all control chars — the same rules QLever's lexer
-  enforces. This is proved end-to-end against the engine's real parser in
-  `test/injection.test.mjs`. Note percent-encoding is canonicalising: an IRI
-  value that *contains* illegal chars stores under its encoded form.
+  enforces. Blank-node labels, language tags and base directions have no
+  escape form, so `termToNT` validates them instead (`BLANK_NODE_LABEL`,
+  `LANGTAG`, `ltr`/`rtl`) and throws on anything else, as it does for a lone
+  UTF-16 surrogate in an IRI or literal. This is proved end-to-end against the
+  engine's real parser in `test/injection.test.mjs`. Note percent-encoding is
+  canonicalising: an IRI value that *contains* illegal chars stores under its
+  encoded form.
 
 ## Benchmarks
 

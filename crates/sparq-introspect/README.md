@@ -1,4 +1,4 @@
-<!-- [OPUS-4.8] sq-4lvq: README brought to template (deferred from sq-inzv). -->
+<!-- sq-4lvq: README brought to template (deferred from sq-inzv). -->
 # sparq-introspect
 
 **Ontology / schema introspection** for the sparq RDF engine — an **opt-in** crate
@@ -45,7 +45,7 @@ let f = facets(&graph, &FacetRequest { class: Some("http://e/Person".into()),
   per-predicate triple counts (avg multiplicity), and the `rdf:type` histogram of its
   subjects. Top sets retained, exact tail aggregates.
 - **Facet counts** (`facets`) — deterministic type/predicate/value distributions; default-off
-  `numeric-facets` adds finite XSD numeric min/max/count plus ten equal-width buckets. [GPT-5.6]
+  `numeric-facets` adds finite XSD numeric min/max/count plus ten equal-width buckets.
 - **Schema summary** — classes with instance counts; per-class predicate usage with
   subject/triple counts, **coverage ratios**, and **per-class sample object labels**
   (`ClassPredicate::samples`, drawn only from *this* class's triples, so a minority class
@@ -95,8 +95,8 @@ let f = facets(&graph, &FacetRequest { class: Some("http://e/Person".into()),
 
   [named-graph]: https://docs.rs/sparq-core/latest/sparq_core/struct.Graph.html#method.named_graph
 - **Cost & zero impact** — `O(|G| + |dict|)` time, output-sized memory plus the subject→types
-  map. Separate opt-in crate: no core crate depends on it, the default build does not compile
-  it, and it is read-only over `sparq-core`'s public scan surface.
+  map. Separate opt-in crate: no core crate depends on it (the server reaches it only through
+  opt-in features), and it is read-only over `sparq-core`'s public scan surface.
 
 The `olympics_introspect` example reports load / build / `to_json` / `to_text_summary` time
 over the olympics (1.78M triples) and qlever-synthetic (10M) fixtures (paths via
@@ -117,4 +117,4 @@ cargo run -p sparq-introspect --example olympics_introspect --release
 
 ## License
 
-MIT. [OPUS-4.8] sq-4lvq
+MIT. sq-4lvq
