@@ -47,7 +47,10 @@ class ProvenanceTests(unittest.TestCase):
         p = self.native / "vendor-support/wasmer/lock-delta.json"
         original = json.loads(p.read_text())
         current = original["candidate_lock_sha256"]
+        first = original["later_refreshes"][0]
         loop = {"base_lock_sha256": current, "candidate_lock_sha256": current}
+        empty = {k: v for k, v in first.items() if k not in ("added_packages", "removed_packages", "changed_dependency_edges")}
+        back = {**first, "base_lock_sha256": current, "candidate_lock_sha256": first["base_lock_sha256"]}
         cases = {
             "missing root": ({k: v for k, v in original.items() if k != "chain_root_lock_sha256"}, "chain root"),
             "missing history": ({k: v for k, v in original.items() if k != "later_refreshes"}, "history missing"),
@@ -55,7 +58,11 @@ class ProvenanceTests(unittest.TestCase):
                 {**original, "chain_root_lock_sha256": "0" * 64,
                  "later_refreshes": [{**original["later_refreshes"][0], "base_lock_sha256": "0" * 64},
                                      *original["later_refreshes"][1:]]}, "chain root"),
-            "self loop": ({**original, "later_refreshes": [*original["later_refreshes"], loop]}, "repeats"),
+            "broken link": ({**original, "later_refreshes": [{**first, "base_lock_sha256": "2" * 64}]}, "does not chain"),
+            "self loop": ({**original, "later_refreshes": [*original["later_refreshes"], loop]}, "degenerate"),
+            "empty delta": ({**original, "later_refreshes": [empty]}, "degenerate"),
+            "cycle": ({**original, "later_refreshes": [*original["later_refreshes"], back]}, "repeats"),
+            "wrong tail": ({**original, "later_refreshes": []}, "does not reach"),
         }
         for name, (delta, message) in cases.items():
             with self.subTest(name=name):

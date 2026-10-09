@@ -93,6 +93,9 @@ def verify(native=NATIVE, policy=None):
     chained, seen = CHAIN_ROOT_LOCK_SHA256, {CHAIN_ROOT_LOCK_SHA256}
     for refresh in refreshes:
         require(refresh["base_lock_sha256"] == chained, "lock refresh does not chain")
+        require(refresh["candidate_lock_sha256"] != refresh["base_lock_sha256"]
+                and any(refresh.get(k) for k in ("added_packages", "removed_packages", "changed_dependency_edges")),
+                "degenerate lock refresh")
         chained = refresh["candidate_lock_sha256"]
         require(chained not in seen, "lock refresh repeats a lock")
         seen.add(chained)
