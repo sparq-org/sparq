@@ -1799,6 +1799,33 @@ fn union_policy_graph(dataset: &str) -> Result<sparq_core::Graph, String> {
     sparq_core::Graph::load_str(&nt, "ntriples")
 }
 
+/// The `(member, collection)` asset-membership edges (`member odrl:partOf collection`)
+/// the dataset states, in any graph, for a `collection` among `targets`. Being a rule
+/// target makes it an asset collection here, even when the policy parser also reads
+/// the `odrl:partOf` edge as declaring a party collection. Sorted and deduplicated.
+#[cfg(feature = "odrl-authz")]
+fn asset_members(
+    dataset: &str,
+    targets: &std::collections::BTreeSet<String>,
+) -> Result<std::collections::BTreeSet<(String, String)>, String> {
+    const PART_OF: &str = "http://www.w3.org/ns/odrl/2/partOf";
+    let mut out = std::collections::BTreeSet::new();
+    for quad in oxttl::NQuadsParser::new().for_slice(dataset.as_bytes()) {
+        let quad = quad.map_err(|e| e.to_string())?;
+        if quad.predicate.as_str() != PART_OF {
+            continue;
+        }
+        let (oxrdf::NamedOrBlankNode::NamedNode(m), oxrdf::Term::NamedNode(c)) = (&quad.subject, &quad.object)
+        else {
+            continue;
+        };
+        if targets.contains(c.as_str()) {
+            out.insert((m.as_str().to_owned(), c.as_str().to_owned()));
+        }
+    }
+    Ok(out)
+}
+
 /// Run the ODRL lane over an already WAC/ACP-materialised `store`: parse the dataset's
 /// ODRL policy and materialise its bridged grants/denies (both sides, deny-overrides)
 /// into the auth view for the request's `(party, action, target)` per rule target.
@@ -1877,10 +1904,19 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
             }
         }
     }
-    // 6. Materialise BOTH sides of the policy per target. Each call is independently
-    //    fail-closed (a non-matching / unevidenced rule materialises nothing) and
-    //    idempotent; the deny side wins at enforcement (∪ allow ∖ ∪ deny).
-    for target in &targets {
+    // 6. Materialise BOTH sides of the policy per target, and per member of a target
+    //    the dataset places in it (`member odrl:partOf target`): a rule on an asset
+    //    collection matches each of its members, carrying that membership as the
+    //    request's asset evidence. Each call is independently fail-closed (a
+    //    non-matching / unevidenced rule materialises nothing) and idempotent; the deny
+    //    side wins at enforcement (∪ allow ∖ ∪ deny).
+    let members = asset_members(&req.dataset, &targets)
+        .map_err(|_| json_error(StatusCode::BAD_REQUEST, "'dataset' is not valid N-Quads"))?;
+    let evaluated = targets
+        .iter()
+        .map(|t| (t.clone(), None))
+        .chain(members.into_iter().map(|(m, c)| (m, Some(c))));
+    for (target, collection) in evaluated {
         let mut request = sparq_policy::Request::new(action)
             .on(target.clone())
             .by(agent)
@@ -1891,6 +1927,9 @@ fn apply_odrl_lane(store: &mut PodStore, req: &AuthzRequest, mode: Mode) -> Resu
             );
         if let Some(now) = req.now.as_deref() {
             request = request.at(now);
+        }
+        if let Some(collection) = collection {
+            request = request.with_asset_membership(target, collection);
         }
         let outcome = store.materialize_odrl_policy(&policy, &request);
         if outcome.refused {
