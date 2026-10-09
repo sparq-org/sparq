@@ -99,7 +99,9 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // log:conclusion / log:supports closure) counts as EVERY predicate; list builtins depend on
 // rdf:first/rdf:rest. Every negation/aggregation evaluation also passes ONE gate that refuses
 // a store some search cut short (backward depth limit, containment budget, list-walk cap,
-// import-cycle-unclosed nested closure): the run errors unless SinglePass. A cycle through
+// a regex the engine cannot compile, import-cycle-unclosed nested closure; the flag is shared
+// across nested closures, explicit strata and a query's data closure): the run errors unless
+// SinglePass. A stratum closes only after a naive round over every rule derives nothing. A cycle through
 // negation (e.g. `a ?c` concluded beside a negated `a :Flagged`, or a variable-predicate
 // conclusion beside store-scoped negation) is an ERROR by
 // default at every entry point, nested closures included; only the rules on/after the cycle
@@ -191,7 +193,7 @@ pub fn compile_with_cycles(src: &str, cycles: NegationCycles) -> Result<Compiled
 impl BoundRuleSet<'_> { pub fn eval(&self, dict: &mut Dict, facts: &[[Id;3]]) -> Vec<[Id;3]>; }
 ```
 
-Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (store-scoped `log:notIncludes`, stratified automatically like `reason_n3`, whose subject must be an IRI, a non-`true` literal, or a variable used only as a `log:notIncludes` subject — `{}` (the empty formula) or a bindable subject is a `compile` error, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
+Compiled-rules scope is EXACTLY the WAC/ACP/ODRL-spike corpus subset (store-scoped `log:notIncludes`, stratified automatically like `reason_n3`, whose subject must be an IRI, a non-`true` literal, or a variable used only as a `log:notIncludes` subject — `{}` (the empty formula) or a bindable subject is a `compile` error, `log:uri`, `log:(not)equalTo`, `string:` concatenation / encodeForUri / scrape (a regex that cannot compile is a `compile` error) / notGreaterThan) **plus RDF 1.2 triple terms in premises** (`sq-6d43t`); anything else is a loud `compile` error — full N3 stays with `reason_n3`. Closure set-equality vs `reason_n3` is pinned by `crates/sparq-reason/tests/compiled_equivalence.rs`.
 
 **Compiled-rules triple terms (`sq-6d43t`).** A GROUND `<< s p o >>` is an ordinary symbol-table constant anywhere (fact, pattern position, builtin argument, conclusion): `bind` interns it through the Dict's content-addressed RDF 1.2 triple-term path, so it resolves to the SAME id a store-loaded `<<( s p o )>>` carries. A quotation that still contains VARIABLES is admitted in PREMISE positions and compiles to a component-indexed unpack step — the enclosing join binds the candidate's triple-term id, then the unpack reads its three component ids straight out of the dictionary record (no term reconstruction, no allocation) and binds first occurrences / filters already-bound variables and constants, left to right, nesting through the OBJECT. Three shapes are deliberately loud `compile` errors instead: a quotation with variables inside a `log:notIncludes` body (the anti-join runs a flat list of plain patterns), a quotation with variables in a CONCLUSION (minting a triple term from bound components can violate RDF 1.2's structural constraints at derivation time, which `eval` has no channel to report), and a nested quotation in SUBJECT position (no dictionary triple term can have a triple-term subject, so such a pattern could only ever fire zero times). Each falls back to `reason_n3`, which handles all three.
 
