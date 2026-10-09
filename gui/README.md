@@ -125,8 +125,8 @@ Turtle ODRL policy, evaluate a (party, action, target) request — decision + ma
 constraints — then run the SAME SPARQL query ungated AND per requester over the named graphs the
 **policy's own verdict** (`sparq_policy::decide`, one `read` request per graph) lets that requester
 read, through the same fail-closed view path as `PodStore::query_json_as`. Nothing is
-materialized, so the panes show what the policy says. A sparq v0.1.5 server enforces ODRL policies
-conservatively and may deny more than the preview shows; the UI notes this beside the panes. A malformed policy grants **nothing** — deny-everything with
+materialized, so the panes show what the policy says. Enforcement on a sparq v0.1.5 server can differ
+from the preview; the UI notes this beside the panes. A malformed policy grants **nothing** — deny-everything with
 the parser's verbatim reason — and an `odrl:prohibition` visibly flips a previously visible named
 graph to hidden in that requester's pane. The browser build labels the tool **native-only** (the ODRL stack is not
 in the wasm bundle) instead of pretending.

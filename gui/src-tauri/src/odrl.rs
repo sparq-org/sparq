@@ -12,8 +12,8 @@
 // `sparq_policy::decide(policy, read <graph> by <requester>)` for every named graph, evaluated
 // per request. Nothing is materialized into an enforcement store, so the preview does not
 // inherit the bridge's storage limits (since #6734 it stores a lasting grant only for an
-// unconstrained permission naming exactly one party). A v0.1.5 server enforces ODRL policies
-// conservatively and may deny more than the preview shows; the UI says so next to the panes.
+// unconstrained permission naming exactly one party). Enforcement on a v0.1.5 server can differ
+// from the preview; the UI says so next to the panes.
 //
 // OPT-IN: the capability sits behind this crate's non-default `odrl` cargo feature (pulling
 // the optional `sparq-policy` + `sparq-solid` crates). A lean build compiles a stub that
