@@ -1350,6 +1350,20 @@ impl PodStore {
         // anything is applied (fail-closed); this static check fails fast.
         let auth = Arc::clone(&self.auth);
         let permit = update::check(&self.graph, &auth, s, sparql, self.group_docs(), budget)?;
+        // An update made only of INSERT DATA / DELETE DATA has effects its text alone gives,
+        // on exactly the graphs the static check just authorized (with the same needs). When it
+        // leaves the rules alone there is nothing to try out first: commit it, with no fork.
+        if !permit.rematerialize {
+            if let Some(effects) = sparq_engine::data_update_effects(sparql, budget)? {
+                debug_assert_eq!(
+                    update::check_effects(&self.graph, &auth, s, &effects, self.group_docs()),
+                    Ok(false),
+                    "the static check covers a data-only update's effects"
+                );
+                return sparq_engine::apply_effects(&mut self.graph, &effects)
+                    .map_err(|e| format!("the update could not be committed: {e}"));
+            }
+        }
         // Run the update on a fork, capturing what it actually did. An error (a failing
         // operation, a budget overrun) discards the fork: nothing is applied.
         let mut candidate = self.graph.fork();

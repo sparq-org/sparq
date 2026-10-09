@@ -151,7 +151,7 @@ pub use explain_json::{
     SlowQueryRing,
 };
 pub use update::{
-    apply_effects, parse_update_rec2013, update, update_in_place, update_in_place_atomic,
+    apply_effects, data_update_effects, parse_update_rec2013, update, update_in_place, update_in_place_atomic,
     update_in_place_atomic_with_budget, update_in_place_capturing, update_in_place_with_budget,
     with_load_base, UpdateEffect,
 };
