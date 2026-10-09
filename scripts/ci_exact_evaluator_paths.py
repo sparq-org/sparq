@@ -22,6 +22,9 @@ EXACT_FILES = {
     "scripts/tests/test_ci_exact_evaluator_evidence.py",
     "scripts/tests/test_ci_exact_evaluator_paths.py",
     "crates/sparq-conformance/examples/proof_corpus.rs",
+    # Read by the job's bench/zk-bindings regression tests.
+    "bench/differential-divergences.json", "crates/sparq-bench/src/fuzz.rs",
+    ".github/workflows/zk-toolchain.yml",
 }
 SCOPES = ("exact-evaluator",)
 
