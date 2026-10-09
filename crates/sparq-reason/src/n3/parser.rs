@@ -257,6 +257,8 @@ struct Parser<'a> {
     keywords: Option<std::collections::HashSet<String>>,
     bnode: usize,
     pathvar: usize,
+    /// Formula-level `@forAll` declarations so far: each one's binder number.
+    binders: usize,
     /// Current `{`/`(`/`[` nesting depth — bounded so pathological inputs
     /// produce a parse ERROR instead of exhausting the stack (the recursive-
     /// descent parser recurses per nesting level).
@@ -278,6 +280,7 @@ impl<'a> Parser<'a> {
             keywords: None,
             bnode: 0,
             pathvar: 0,
+            binders: 0,
             depth: 0,
         }
     }
@@ -359,6 +362,12 @@ impl<'a> Parser<'a> {
     /// declared IRI thereafter reads as a variable (forAll) or an existential
     /// blank (forSome) within that scope. Names derive from the IRI so the
     /// same declaration in two documents (action vs reference) compares equal.
+    ///
+    /// A universal keeps its BINDER: a document-level declaration reads as `__ua_<local>`;
+    /// a FORMULA-level one is numbered, `__uf<n>_<local>`, so two declarations of one IRI
+    /// in different formulae (a rule's premise and its conclusion, sibling formulae, a
+    /// nested formula shadowing an outer one) are different variables, as N3's scoping
+    /// makes them. Re-declaring an IRI in the SAME scope keeps its one variable.
     fn directive_quantifier(&mut self) -> Result<(), String> {
         let universal = self.starts_with("@forAll");
         self.i += if universal { 7 } else { 8 };
@@ -372,7 +381,16 @@ impl<'a> Parser<'a> {
                 },
             };
             let local = iri.rsplit(['#', '/']).next().unwrap_or(&iri).to_string();
-            let term = if universal {
+            if universal && matches!(self.quants.last().and_then(|f| f.get(&iri)), Some(Term::Var(_))) {
+                if !self.eat(b',') {
+                    break;
+                }
+                continue;
+            }
+            let term = if universal && self.quants.len() > 1 {
+                self.binders += 1;
+                Term::Var(format!("__uf{}_{local}", self.binders - 1))
+            } else if universal {
                 Term::Var(format!("__ua_{local}"))
             } else {
                 Term::Blank(format!("__ex_{local}"))
