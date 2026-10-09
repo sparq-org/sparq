@@ -1,11 +1,11 @@
 # deploy-terraform-lint — static validation for the multi-cloud Terraform module (sq-sos84)
 #
-# [SONNET] Runs: terraform init -backend=false + terraform validate + terraform fmt -check
+# Runs: terraform init -backend=false + terraform validate + terraform fmt -check
 # per submodule, plus a secret-literal grep (R4).
 #
 # This workflow is NON-GATING (design record §4): "a cloud-CLI outage or a provider-
 # credential gap must never redden the engine's merge gate."
-# Job names contain "advisory" so the ci-summary gate aggregator excludes them.
+# Job names contain "advisory" and are declared in .github/advisory-registry.json.
 #
 # Triggers: push/PR changes to deploy/terraform/**, or workflow_dispatch.
 # No cloud credentials required — static analysis only.
@@ -68,7 +68,7 @@ jobs:
           # Find variable "auth_token" block
           m = re.search(r'variable\s+"auth_token"\s*\{([^}]+(?:\{[^}]*\}[^}]*)*)\}', text, re.DOTALL)
           if not m:
-              # [GPT-5.6] Missing security input is a failure, not a skippable case.
+              # Missing security input is a failure, not a skippable case.
               print(f"ERROR: no auth_token variable in {sys.argv[1]}")
               sys.exit(1)
           block = m.group(1)
@@ -111,7 +111,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
-          # [GPT-5.6] Keep CI on the validator version used for this review.
+          # Keep CI on the validator version used for this review.
           terraform_version: 1.15.8
 
       - name: terraform init (no backend)

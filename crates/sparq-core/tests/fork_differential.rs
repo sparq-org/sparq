@@ -49,7 +49,9 @@ fn assert_reads_match(forked: &Graph, reference: &[[Term; 3]], ctx: &str) {
     // Probe a battery of patterns built from terms that exist in either graph plus
     // guaranteed misses, across every bound/unbound shape and every sort column.
     let mut probe_terms: Vec<Term> = Vec::new();
-    for t in reference.iter().take(8) {
+    // Fewer probe terms under Miri: the pattern battery is cubic in them, and the full one
+    // overruns the nightly lane's per-test cap (sq-0s15k).
+    for t in reference.iter().take(if cfg!(miri) { 2 } else { 8 }) {
         probe_terms.push(t[0].clone());
         probe_terms.push(t[1].clone());
         probe_terms.push(t[2].clone());
@@ -153,7 +155,7 @@ fn fork_chain_matches_flat_rebuild() {
     let mut rng = Rng(0x5EED_CAFE);
     let term = |kind: &str, i: usize| iri(&format!("http://ex/{kind}{i}"));
     let mut reference: Vec<[Term; 3]> = Vec::new();
-    for _ in 0..400 {
+    for _ in 0..if cfg!(miri) { 100 } else { 400 } {
         reference.push([
             term("s", rng.below(60)),
             term("p", rng.below(7)),
@@ -175,7 +177,8 @@ fn fork_chain_matches_flat_rebuild() {
     // Chain of generations: gen[k+1] = fork(gen[k]) + a random batch. Holds every
     // generation alive (the ring shape) and re-checks old ones for isolation.
     let mut generations: Vec<(Graph, Vec<[Term; 3]>)> = vec![(base, reference)];
-    for gen in 0..8 {
+    // Three generations under Miri still reach the gen-2 mid-chain compaction (sq-0s15k).
+    for gen in 0..if cfg!(miri) { 3 } else { 8 } {
         let (cur, cur_ref) = generations.last().unwrap();
         let mut g = cur.fork();
         let mut reference = cur_ref.clone();

@@ -19,7 +19,7 @@
 // No performance claim is made anywhere here.
 
 import type { SparqlResults, SparqlTerm, SparqlBinding } from "./index.js";
-import { formatTerm } from "./index.js";
+import { formatTerm, termValue } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Reading a SPARQL-JSON results document.
@@ -94,7 +94,7 @@ export function extractTable(results: SparqlResults): ResultTable {
  * projection variable exports as an empty cell.
  */
 function exportValue(t: SparqlTerm | undefined): string {
-  return t ? t.value : "";
+  return termValue(t) ?? "";
 }
 
 /**

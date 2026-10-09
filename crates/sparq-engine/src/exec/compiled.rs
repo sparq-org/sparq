@@ -15,10 +15,14 @@ use super::*;
 pub(super) enum CompiledExpr {
     /// Pre-resolved column: `Some(c)` → `row[c]`; `None` → variable not in scope (always unbound).
     Var(Option<usize>),
+    /// An outer EXISTS term, including blank nodes and computed literals.
+    Captured(Term),
+    CapturedBound,
     /// `BOUND(?v)`: `Some(c)` → `row[c] != NO_ID`; `None` → always `false`.
     BoundCol(Option<usize>),
     NamedNode(oxrdf::NamedNode),
-    Literal(Literal),
+    /// A constant; the flag caches whether it is a valid exact-numeric lexical.
+    Literal(Literal, bool),
     And(Box<Self>, Box<Self>),
     Or(Box<Self>, Box<Self>),
     Not(Box<Self>),
@@ -122,61 +126,75 @@ pub(super) fn idfast_rewrite(e: &mut CompiledExpr, nonlit_cols: &FxHashSet<usize
         }
         C::IdEqNonLit(..)
         | C::Var(_)
+        | C::Captured(_)
+        | C::CapturedBound
         | C::BoundCol(_)
         | C::NamedNode(_)
-        | C::Literal(_)
+        | C::Literal(..)
         | C::Exists(_) => {}
     }
 }
 
+/// A compiled constant with its exact-numeric validity checked once, not per row.
+pub(super) fn compiled_literal(l: &Literal) -> CompiledExpr {
+    CompiledExpr::Literal(l.clone(), exact_lexical_of_literal(l).is_some())
+}
+
 /// Walk `e` once, resolving all `Variable`/`Bound` nodes to column indices. sq-7d3dj.4.
-pub(super) fn compile_expr(e: &Expression, b: &Bindings) -> CompiledExpr {
+pub(super) fn compile_expr(e: &Expression, b: &Bindings, local: &LocalVocab) -> CompiledExpr {
     use Expression::*;
     match e {
-        Variable(v) => CompiledExpr::Var(b.col(v)),
+        Variable(v) => match local.correlation.get(v) {
+            Some(Term::NamedNode(n)) => CompiledExpr::NamedNode(n.clone()),
+            Some(Term::Literal(l)) => compiled_literal(l),
+            Some(term) => CompiledExpr::Captured(term.clone()),
+            None => CompiledExpr::Var(b.col(v)),
+        },
+        Bound(v) if local.correlation.contains_key(v) => CompiledExpr::CapturedBound,
         Bound(v) => CompiledExpr::BoundCol(b.col(v)),
         NamedNode(n) => CompiledExpr::NamedNode(n.clone()),
-        Literal(l) => CompiledExpr::Literal(l.clone()),
-        And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b))),
-        Equal(a, d) => CompiledExpr::Equal(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        SameTerm(a, d) => CompiledExpr::SameTerm(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Greater(a, d) => CompiledExpr::Greater(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
+        Literal(l) => compiled_literal(l),
+        And(a, d) => CompiledExpr::And(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Or(a, d) => CompiledExpr::Or(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Not(a) => CompiledExpr::Not(Box::new(compile_expr(a, b, local))),
+        Equal(a, d) => CompiledExpr::Equal(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        SameTerm(a, d) => CompiledExpr::SameTerm(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Greater(a, d) => CompiledExpr::Greater(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         GreaterOrEqual(a, d) => {
-            CompiledExpr::GreaterOrEqual(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b)))
+            CompiledExpr::GreaterOrEqual(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local)))
         }
-        Less(a, d) => CompiledExpr::Less(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
+        Less(a, d) => CompiledExpr::Less(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
         LessOrEqual(a, d) => {
-            CompiledExpr::LessOrEqual(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b)))
+            CompiledExpr::LessOrEqual(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local)))
         }
-        Add(a, d) => CompiledExpr::Add(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Subtract(a, d) => CompiledExpr::Subtract(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Multiply(a, d) => CompiledExpr::Multiply(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        Divide(a, d) => CompiledExpr::Divide(Box::new(compile_expr(a, b)), Box::new(compile_expr(d, b))),
-        UnaryPlus(a) => CompiledExpr::UnaryPlus(Box::new(compile_expr(a, b))),
-        UnaryMinus(a) => CompiledExpr::UnaryMinus(Box::new(compile_expr(a, b))),
+        Add(a, d) => CompiledExpr::Add(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Subtract(a, d) => CompiledExpr::Subtract(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Multiply(a, d) => CompiledExpr::Multiply(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        Divide(a, d) => CompiledExpr::Divide(Box::new(compile_expr(a, b, local)), Box::new(compile_expr(d, b, local))),
+        UnaryPlus(a) => CompiledExpr::UnaryPlus(Box::new(compile_expr(a, b, local))),
+        UnaryMinus(a) => CompiledExpr::UnaryMinus(Box::new(compile_expr(a, b, local))),
         If(cond, t, f) => CompiledExpr::If(
-            Box::new(compile_expr(cond, b)),
-            Box::new(compile_expr(t, b)),
-            Box::new(compile_expr(f, b)),
+            Box::new(compile_expr(cond, b, local)),
+            Box::new(compile_expr(t, b, local)),
+            Box::new(compile_expr(f, b, local)),
         ),
-        Coalesce(es) => CompiledExpr::Coalesce(es.iter().map(|ce| compile_expr(ce, b)).collect()),
+        Coalesce(es) => CompiledExpr::Coalesce(es.iter().map(|ce| compile_expr(ce, b, local)).collect()),
         In(a, list) => {
-            CompiledExpr::In(Box::new(compile_expr(a, b)), list.iter().map(|ce| compile_expr(ce, b)).collect())
+            CompiledExpr::In(Box::new(compile_expr(a, b, local)), list.iter().map(|ce| compile_expr(ce, b, local)).collect())
         }
         FunctionCall(f, args) => {
-            CompiledExpr::FunctionCall(f.clone(), args.iter().map(|ce| compile_expr(ce, b)).collect())
+            CompiledExpr::FunctionCall(f.clone(), args.iter().map(|ce| compile_expr(ce, b, local)).collect())
         }
         Exists(inner) => CompiledExpr::Exists(inner.clone()),
     }
 }
 
-/// Whether a compiled expression contains an arithmetic sub-expression (`+ - *`). sq-7d3dj.4.
+/// Whether a compiled expression contains an arithmetic sub-expression (`+ - * /`). Mirrors
+/// [`expr_has_arith`]. sq-7d3dj.4.
 pub(super) fn compiled_expr_has_arith(e: &CompiledExpr) -> bool {
     use CompiledExpr::*;
     match e {
-        Add(..) | Subtract(..) | Multiply(..) => true,
+        Add(..) | Subtract(..) | Multiply(..) | Divide(..) => true,
         UnaryPlus(a) | UnaryMinus(a) => compiled_expr_has_arith(a),
         _ => false,
     }
@@ -196,36 +214,45 @@ pub(super) fn num_canonical_term(n: Num) -> Value {
     Value::Term(Term::Literal(Literal::new_typed_literal(n.canonical_lexical(), n.datatype())))
 }
 
-pub(super) fn effective_boolean(v: &Value) -> bool {
-    ebv(v) == Some(true)
+pub(super) fn effective_boolean(v: &Value, semantics: crate::EbvSemantics) -> bool {
+    ebv(v, semantics) == Some(true)
 }
 
 /// SPARQL effective boolean value, three-valued: `None` is a TYPE ERROR (unbound,
-/// non-literal terms, literals of unknown datatypes, ill-formed boolean / numeric
-/// lexicals) — it matters because `!error` must stay an error, not become true.
-pub(super) fn ebv(v: &Value) -> Option<bool> {
+/// non-literal terms and unknown datatypes). Invalid numeric/boolean lexicals
+/// instead have false EBV per SPARQL 1.1 §17.2.2, or error under the pinned
+/// 1.2 draft, independently of arithmetic capacity errors.
+pub(super) fn ebv(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
     match v {
         Value::Bool(b) => Some(*b),
         Value::Num(n) => Some(!n.is_zero() && !n.is_nan()),
         Value::Unbound | Value::Error => None,
         Value::Term(Term::Literal(l)) => {
             if l.language().is_some() {
-                // rdf:langString / rdf:dirLangString is NOT xsd:string: its EBV is a
-                // type error per SPARQL (1.2 `expression/not-not` pins this down).
-                return None;
+                // SPARQL 1.1 §17.2.2 gives every plain literal, language-tagged ones
+                // included, a length-based EBV. The 1.2 draft makes rdf:langString /
+                // rdf:dirLangString a type error (`expression/not-not` pins this down);
+                // directional strings postdate the Recommendation, so they error in both.
+                return (semantics == crate::EbvSemantics::Rec2013 && l.direction().is_none())
+                    .then(|| !l.value().is_empty());
             }
             let dt = l.datatype().as_str();
             if dt == xsd::BOOLEAN.as_str() {
-                match l.value() {
-                    "true" | "1" => Some(true),
-                    "false" | "0" => Some(false),
-                    _ => None,
-                }
+                // Raw RDF booleans have exactly four lexical forms.
+                // Constructor whitespace normalization applies only to string inputs.
+                as_bool_val(v).or_else(|| (semantics == crate::EbvSemantics::Rec2013).then_some(false))
             } else if is_numeric_dt(l) {
-                // sq-rkzhr: XSD acceptance set (via `parse_xsd_f64`) — a
-                // numeric-typed literal with an ill-formed lexical is a type error (`None`),
-                // matching `as_num` rather than silently swallowing Rust-only spellings.
-                parse_xsd_f64(l.value()).map(|n| n != 0.0 && !n.is_nan())
+                // EBV needs zero/NaN classification, not finite arithmetic.
+                // Validate datatype facets before inspecting exact decimal digits;
+                // converting them to f64 could underflow a nonzero value to false.
+                if !sparq_core::numeric_literal_valid(l.value(), dt) {
+                    (semantics == crate::EbvSemantics::Rec2013).then_some(false)
+                } else if sparq_core::is_integer_datatype(dt) || dt == xsd::DECIMAL.as_str() {
+                    Some(l.value().bytes().any(|b| matches!(b, b'1'..=b'9')))
+                } else {
+                    // Float/double zero is measured in that datatype's value space.
+                    Num::of_literal(l).map(|n| !n.is_zero() && !n.is_nan())
+                }
             } else if dt == xsd::STRING.as_str() {
                 Some(!l.value().is_empty())
             } else {
@@ -236,47 +263,59 @@ pub(super) fn ebv(v: &Value) -> Option<bool> {
     }
 }
 
+/// General expression operands share the constructor capacity boundary.
+pub(super) fn checked_term_value(term: Term) -> Result<Value, String> {
+    if let Term::Literal(literal) = &term {
+        budget::check_temporal(literal.value(), literal.datatype().as_str())?;
+    }
+    Ok(Value::Term(term))
+}
+
 pub(super) fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Result<Value, String> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => checked_term_value(local.correlation[v].clone()),
         Variable(v) => match b.col(v) {
             // Always return the original term so term identity is preserved
             // (sameTerm, BIND passthrough, STR, etc.). The numeric fast path that
             // skips this materialisation lives in `eval_numeric`, used only by the
             // arithmetic / comparison operators where only the value matters.
-            Some(c) if row[c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[c]).unwrap())),
+            Some(c) if row[c] != NO_ID => checked_term_value(term_of(graph, local, row[c]).unwrap()),
             _ => Ok(Value::Unbound),
         },
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
+        Literal(l) => {
+            budget::check_temporal(l.value(), l.datatype().as_str())?;
+            Ok(Value::Term(Term::Literal(l.clone())))
+        },
         And(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: false dominates, so once the
             // left is false we return false WITHOUT evaluating the right (which may be
             // an error or an unsupported expression that would otherwise abort).
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
             // SPARQL 3-valued logic, short-circuiting: true dominates.
-            let x = ebv3(&eval_expr(graph, local, b, row, a)?);
+            let x = ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_expr(graph, local, b, row, c)?);
+            let y = ebv3(&eval_expr(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_expr(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error, // !error = error
         }),
         Equal(a, c) => equal_expr(graph, local, b, row, a, c),
         SameTerm(a, c) => {
             let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-            Ok(Value::Bool(matches!((&x, &y), (Value::Term(p), Value::Term(q)) if p == q)))
+            Ok(same_term_value(&x, &y))
         }
         Greater(a, c) => cmp_expr(graph, local, b, row, a, c, |o| o == Ordering::Greater),
         GreaterOrEqual(a, c) => cmp_expr(graph, local, b, row, a, c, |o| o != Ordering::Less),
@@ -286,18 +325,19 @@ pub(super) fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[
         Subtract(a, c) => arith(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_expr(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_expr(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             // Typed negation: the result keeps the argument's (promoted) numeric
             // datatype; a non-numeric operand is a type error.
             let v = eval_expr(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
-        Bound(v) => Ok(Value::Bool(b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
+        Bound(v) => Ok(Value::Bool(local.correlation.contains_key(v)
+            || b.col(v).map(|c| row[c] != NO_ID).unwrap_or(false))),
         If(cond, t, f) => {
             // A type error in the condition propagates (it does NOT silently select
             // the else branch).
-            match ebv3(&eval_expr(graph, local, b, row, cond)?) {
+            match ebv3(&eval_expr(graph, local, b, row, cond)?, local.ebv_semantics) {
                 Some(true) => eval_expr(graph, local, b, row, t),
                 Some(false) => eval_expr(graph, local, b, row, f),
                 None => Ok(Value::Error),
@@ -336,12 +376,12 @@ pub(super) fn eval_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[
     }
 }
 
-/// Correlated `EXISTS { inner }` for one outer solution row: evaluate `inner` and
-/// test whether any of its solutions is join-compatible with the row on the
-/// variables they share (same term, or unbound on the inner side). Working at the
-/// id/term level — rather than substituting the row's terms into the pattern AST —
-/// keeps blank-node-valued bindings expressible (spargebra has no ground blank-node
-/// term pattern).
+/// Correlated `EXISTS { inner }` for one outer solution row. The bounded
+/// BGP/Join/UNION/FILTER/MINUS branch constrains captured IRI/literal values and
+/// removes their columns before MINUS observes child domains, per SPARQL 1.1.
+/// Other shapes retain the native practical compatibility evaluation, including
+/// the unresolved blank-node and variable-only-position substitution cases.
+/// These fallbacks are not a claim of complete published-2013 correlation support.
 ///
 /// The inner pattern is evaluated against `graph`, which inside `GRAPH <g> { … }`
 /// is the active named graph — so an EXISTS nested in a GRAPH pattern sees the same
@@ -373,7 +413,13 @@ pub(super) fn eval_exists(graph: &Graph, local: &LocalVocab, b: &Bindings, row: 
     eval_exists_inner(graph, local, b, row, inner)
 }
 
-pub(super) fn eval_exists_inner(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], inner: &GraphPattern) -> Result<bool, String> {
+pub(super) fn eval_exists_inner(
+    graph: &Graph,
+    local: &LocalVocab,
+    b: &Bindings,
+    row: &[Id],
+    inner: &GraphPattern,
+) -> Result<bool, String> {
     // zk-trace: the inner pattern is re-run per outer row; tag its scans
     // `in_exists` and suppress their steps / filter obligations (EXISTS is
     // outside the stage-1 verifiable fragment — sparq-zk::verify rejects it;
@@ -381,59 +427,82 @@ pub(super) fn eval_exists_inner(graph: &Graph, local: &LocalVocab, b: &Bindings,
     #[cfg(feature = "zk")]
     let _zk = crate::zk::exists_scope();
 
-    // Uncorrelated EXISTS: no in-scope inner variable is also a BOUND outer column,
-    // so no inner solution can be ruled out by compatibility — existence alone
-    // decides it. `on_in_scope_variable` is spargebra's authoritative in-scope set
-    // (exactly the columns `eval_graph_pattern` would expose), so this never misses a
-    // genuinely-shared variable (which would make an early `true` unsound).
+    // SPARQL 1.1 §18.6 substitutes every bound outer variable,
+    // including variables used only in FILTER expressions. A separate local
+    // vocabulary preserves actual term identity across graph/local ID spaces.
+    let mut inner_local = LocalVocab {
+        ebv_semantics: local.ebv_semantics,
+        correlation: local.correlation.clone(),
+        dataset: local.dataset,
+        ..LocalVocab::default()
+    };
+    for (column, variable) in b.vars.iter().enumerate() {
+        if let Some(term) = term_of(graph, local, row[column]) {
+            inner_local
+                .correlation
+                .entry(variable.clone())
+                .or_insert(term);
+        }
+    }
+
+    // MINUS observes solution domains before final compatibility. For
+    // the admitted BGP/Join/UNION/FILTER/MINUS shape, restrict and remove each
+    // bound IRI/literal column before its parent operator can inspect domains.
+    if exists_domain::required(inner, &inner_local.correlation) {
+        inner_local.substitute_exists_domains = true;
+        let result = eval_graph_pattern(graph, &mut inner_local, inner)?;
+        return Ok(!result.rows.is_empty());
+    }
+
+    // Only shared solution columns require the compatibility scan below.
+    // Expression-only dependencies are already captured in inner_local and
+    // therefore remain valid under the first-solution shortcut.
     let mut correlated = false;
     inner.on_in_scope_variable(|v| {
-        if b.col(v).is_some_and(|oc| row[oc] != NO_ID) {
+        if inner_local.correlation.contains_key(v) {
             correlated = true;
         }
     });
     if !correlated {
         // First-solution stop, reusing the ASK machinery (count pushdown / capped
         // single-pattern scan). zk-trace stays armed inside via the scope above.
-        let sliced = GraphPattern::Slice { inner: Box::new(inner.clone()), start: 0, length: Some(1) };
-        let mut inner_local = LocalVocab::default();
+        let sliced = GraphPattern::Slice {
+            inner: Box::new(inner.clone()),
+            start: 0,
+            length: Some(1),
+        };
         let b1 = eval_modified(graph, &mut inner_local, &sliced)?;
         budget::check(b1.rows.len())?;
         return Ok(!b1.rows.is_empty());
     }
 
-    let mut inner_local = LocalVocab::default();
     let inner_b = eval_graph_pattern(graph, &mut inner_local, inner)?;
     budget::check(inner_b.rows.len())?;
-    // Columns shared between the inner solutions and the (bound part of the) outer row.
-    let shared: Vec<(usize, usize)> = inner_b
+    // Include inherited captures: a nested EXISTS can refer to a
+    // grandparent variable absent from its immediate parent's solution columns.
+    let shared: Vec<(usize, &Term, Option<Id>)> = inner_b
         .vars
         .iter()
         .enumerate()
-        .filter_map(|(ic, v)| b.col(v).map(|oc| (oc, ic)))
-        .filter(|&(oc, _)| row[oc] != NO_ID)
+        .filter_map(|(ic, v)| {
+            inner_local
+                .correlation
+                .get(v)
+                .map(|term| (ic, term, graph.id_of(term)))
+        })
         .collect();
     Ok(inner_b.rows.iter().any(|irow| {
-        shared
-            .iter()
-            .all(|&(oc, ic)| exists_compatible(graph, local, row[oc], &inner_local, irow[ic]))
+        shared.iter().all(|&(ic, expected, graph_id)| {
+            let actual = irow[ic];
+            actual == NO_ID
+                || if !is_local(actual) {
+                    graph_id == Some(actual)
+                } else {
+                    inner_local.term(actual) == expected
+                }
+        })
     }))
 }
-
-/// Join-compatibility of an outer cell with an inner EXISTS cell, where the two rows
-/// were produced against different local vocabs: unbound inner is compatible; ids in
-/// the shared spaces (graph dictionary / inline integers) compare directly; anything
-/// involving a local id falls back to term equality.
-pub(super) fn exists_compatible(graph: &Graph, outer_local: &LocalVocab, o: Id, inner_local: &LocalVocab, i: Id) -> bool {
-    if i == NO_ID {
-        return true;
-    }
-    if !is_local(o) && !is_local(i) {
-        return o == i;
-    }
-    term_of(graph, outer_local, o) == term_of(graph, inner_local, i)
-}
-
 
 /// Fast numeric evaluation that never materialises a term: a numeric variable
 /// resolves to its value via the dictionary cache, a numeric literal via one
@@ -443,6 +512,7 @@ pub(super) fn exists_compatible(graph: &Graph, outer_local: &LocalVocab, o: Id, 
 pub(super) fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<f64> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let c = b.col(v)?;
             let id = row[c];
@@ -456,7 +526,7 @@ pub(super) fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row:
                 graph.numeric_value(id)
             }
         }
-        // sq-6b1lj: the CONSTANT operand is datatype-aware/trimmed too
+        // sq-6b1lj: the CONSTANT operand is datatype-aware and validated verbatim too
         // (`numeric_cache_f64`), so a datatype-ill-formed literal constant (`"1.5"^^xsd:integer`)
         // is a type error on this fast comparison path exactly as the graph-term side is.
         Literal(l) => numeric_cache_f64(l),
@@ -472,14 +542,15 @@ pub(super) fn eval_numeric(graph: &Graph, local: &LocalVocab, b: &Bindings, row:
 
 /// Fast temporal (xsd:dateTime / xsd:dateTimeStamp / xsd:date) evaluation that never
 /// materialises a term: a variable bound to a graph term resolves through the
-/// load-time `temporals` cache (O(1), no lexical re-parse); a constant literal and a
-/// BIND-computed (local-vocab) term parse once here. Returns `None` for anything
+/// borrowed dictionary lexical; constants and BIND-computed terms borrow their
+/// original literal too. Parsing is linear in the literal length. Returns `None` for anything
 /// non-temporal or ill-formed, so the caller falls back to the general path (which
 /// yields the exact type-error semantics). Used only where the VALUE matters
 /// (comparison operators); term identity is never needed there.
-pub(super) fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
+pub(super) fn eval_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, b: &Bindings, row: &[Id], e: &'a Expression) -> Option<ExactTemporal<'a>> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let c = b.col(v)?;
             let id = row[c];
@@ -489,7 +560,7 @@ pub(super) fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row
                 // Computed values are rare; parse through the local vocab term.
                 temporal_of_term(local.term(id))
             } else {
-                graph.temporal_value(id)
+                temporal_of_id(graph, id)
             }
         }
         Literal(l) => temporal_of_lit(l),
@@ -498,18 +569,98 @@ pub(super) fn eval_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row
 }
 
 /// The temporal value of a term, if it is a well-formed dateTime/date literal.
-pub(super) fn temporal_of_term(t: &Term) -> Option<Temporal> {
+pub(super) fn temporal_of_term(t: &Term) -> Option<ExactTemporal<'_>> {
     match t {
         Term::Literal(l) => temporal_of_lit(l),
         _ => None,
     }
 }
 
-pub(super) fn temporal_of_lit(l: &Literal) -> Option<Temporal> {
+pub(super) fn temporal_of_lit(l: &Literal) -> Option<ExactTemporal<'_>> {
     if l.language().is_some() {
         return None;
     }
-    Temporal::of_lit(l.value(), l.datatype().as_str())
+    budget::check_temporal(l.value(), l.datatype().as_str()).ok()?;
+    ExactTemporal::of_lit(l.value(), l.datatype().as_str())
+}
+
+/// Stored temporal values obey the same evaluation domain as constructors.
+pub(super) fn temporal_of_id(graph: &Graph, id: Id) -> Option<ExactTemporal<'_>> {
+    if dict::is_inline(id) { return None; }
+    // Capacity checks remain input-based even for malformed/out-of-cache values.
+    // Native unbounded evaluation avoids dictionary/year parsing on the hot path.
+    if budget::temporal_capacity_active() {
+        if let dict::TermParts::Lit { value, datatype, .. } = graph.dict.term_parts(id) {
+            budget::check_temporal(value, datatype).ok()?;
+        }
+    }
+    graph.exact_temporal_value(id)
+}
+
+/// Compares a stored temporal id with an exact constant, skipping the exact key when
+/// the cached f64 instants alone decide the order.
+///
+/// The cached instant of a value is within a few ulps (plus a sub-femtosecond
+/// fraction error) of its exact instant, so a cached difference beyond `margin`
+/// (and beyond the fourteen-hour window for mixed timezone presence) has the sign
+/// of the exact difference. Everything closer, every capacity-checked evaluation
+/// and every id without a cached value takes the exact comparison.
+#[inline]
+pub(super) fn temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>, approx: Option<Temporal>) -> Option<std::cmp::Ordering> {
+    if let Some(c) = approx {
+        if !budget::temporal_capacity_active() {
+            if let Some(v) = graph.temporal_value(id) {
+                if v.kind != c.kind {
+                    return None;
+                }
+                if let Some(order) = approx_temporal_order(v, c) {
+                    return Some(order);
+                }
+            }
+        }
+    }
+    exact_temporal_cmp_of_id(graph, id, exact)
+}
+
+/// The exact fallback of [`temporal_cmp_of_id`], kept out of line so the cached
+/// fast path stays small enough to inline into scans.
+#[inline(never)]
+pub(super) fn exact_temporal_cmp_of_id(graph: &Graph, id: Id, exact: ExactTemporal<'_>) -> Option<std::cmp::Ordering> {
+    temporal_of_id(graph, id).and_then(|v| ExactTemporal::compare(v, exact))
+}
+
+/// The order of two same-family cached temporals when their f64 instants alone
+/// decide it (see [`temporal_cmp_of_id`]); `None` means "use the exact keys".
+#[inline]
+pub(super) fn approx_temporal_order(v: Temporal, c: Temporal) -> Option<std::cmp::Ordering> {
+    let d = v.instant - c.instant;
+    let margin = 1.0 + 8.0 * f64::EPSILON * (v.instant.abs() + c.instant.abs());
+    let band = if v.has_tz == c.has_tz { 0.0 } else { 14.0 * 3600.0 };
+    if d > band + margin {
+        Some(std::cmp::Ordering::Greater)
+    } else if d < -(band + margin) {
+        Some(std::cmp::Ordering::Less)
+    } else {
+        None
+    }
+}
+
+/// The cached approximate temporal of a graph-term variable or a constant, for
+/// [`approx_temporal_order`] only. `None` (including under an active temporal
+/// capacity budget) sends the caller to the exact path.
+pub(super) fn eval_approx_temporal(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Temporal> {
+    if budget::temporal_capacity_active() {
+        return None;
+    }
+    match e {
+        Expression::Variable(v) if local.correlation.contains_key(v) => None,
+        Expression::Variable(v) => {
+            let id = row[b.col(v)?];
+            if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
+        }
+        Expression::Literal(l) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
+        _ => None,
+    }
 }
 
 /// The lexical form of an expression IF it is an exact-valued numeric operand (an
@@ -519,6 +670,7 @@ pub(super) fn temporal_of_lit(l: &Literal) -> Option<Temporal> {
 pub(super) fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<String> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let id = row[b.col(v)?];
             if id == NO_ID {
@@ -542,14 +694,15 @@ pub(super) fn eval_exact_lexical(graph: &Graph, local: &LocalVocab, b: &Bindings
     }
 }
 
+// Every exact lexical shortcut validates the original RDF datatype first.
+pub(super) fn exact_lexical_of_literal(l: &Literal) -> Option<&str> {
+    (l.language().is_none() && sparq_core::exact_numeric_literal_valid(l.value(), l.datatype().as_str()))
+        .then_some(l.value())
+}
+
 pub(super) fn exact_lexical_of_term(t: &Term) -> Option<String> {
     match t {
-        Term::Literal(l)
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL) =>
-        {
-            Some(l.value().to_string())
-        }
+        Term::Literal(l) => exact_lexical_of_literal(l).map(str::to_owned),
         _ => None,
     }
 }
@@ -568,8 +721,8 @@ pub(super) fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id
             let id = row[c];
             if id == NO_ID { None } else if is_local(id) { local.numeric(id) } else { graph.numeric_value(id) }
         }
-        // sq-6b1lj: datatype-aware/trimmed constant, matching `eval_numeric`.
-        Literal(l) => numeric_cache_f64(l),
+        // sq-6b1lj: datatype-aware, verbatim-validated constant, matching `eval_numeric`.
+        Literal(l, _) => numeric_cache_f64(l),
         Add(a, d) => Some(eval_compiled_numeric(graph, local, row, a)? + eval_compiled_numeric(graph, local, row, d)?),
         Subtract(a, d) => {
             Some(eval_compiled_numeric(graph, local, row, a)? - eval_compiled_numeric(graph, local, row, d)?)
@@ -587,7 +740,7 @@ pub(super) fn eval_compiled_numeric(graph: &Graph, local: &LocalVocab, row: &[Id
 }
 
 /// Fast temporal evaluation on a pre-compiled expression. Mirrors [`eval_temporal`]. sq-7d3dj.4.
-pub(super) fn eval_compiled_temporal(graph: &Graph, local: &LocalVocab, row: &[Id], e: &CompiledExpr) -> Option<Temporal> {
+pub(super) fn eval_compiled_temporal<'a>(graph: &'a Graph, local: &'a LocalVocab, row: &[Id], e: &'a CompiledExpr) -> Option<ExactTemporal<'a>> {
     use CompiledExpr::*;
     match e {
         Var(col) => {
@@ -598,10 +751,25 @@ pub(super) fn eval_compiled_temporal(graph: &Graph, local: &LocalVocab, row: &[I
             } else if is_local(id) {
                 temporal_of_term(local.term(id))
             } else {
-                graph.temporal_value(id)
+                temporal_of_id(graph, id)
             }
         }
-        Literal(l) => temporal_of_lit(l),
+        Literal(l, _) => temporal_of_lit(l),
+        _ => None,
+    }
+}
+
+/// Mirrors [`eval_approx_temporal`] on a pre-compiled expression.
+pub(super) fn eval_compiled_approx_temporal(graph: &Graph, row: &[Id], e: &CompiledExpr) -> Option<Temporal> {
+    if budget::temporal_capacity_active() {
+        return None;
+    }
+    match e {
+        CompiledExpr::Var(col) => {
+            let id = row[(*col)?];
+            if id == NO_ID || is_local(id) { None } else { graph.temporal_value(id) }
+        }
+        CompiledExpr::Literal(l, _) if l.language().is_none() => Temporal::of_lit(l.value(), l.datatype().as_str()),
         _ => None,
     }
 }
@@ -621,9 +789,7 @@ pub(super) fn eval_compiled_dec(graph: &Graph, local: &LocalVocab, row: &[Id], e
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l, exact) => if *exact { Dec::parse(l.value()) } else { None },
         Add(a, d) => eval_compiled_dec(graph, local, row, a)?.checked_add(eval_compiled_dec(graph, local, row, d)?),
         Subtract(a, d) => {
             eval_compiled_dec(graph, local, row, a)?.checked_sub(eval_compiled_dec(graph, local, row, d)?)
@@ -655,17 +821,7 @@ pub(super) fn eval_compiled_exact_lexical(graph: &Graph, local: &LocalVocab, row
                 graph.exact_numeric_lexical(id)
             }
         }
-        Literal(l) => {
-            // Avoid a `Term` allocation: check directly whether the literal has an exact
-            // integer/decimal lexical form (same condition as `exact_lexical_of_term`).
-            if l.language().is_none()
-                && (sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL)
-            {
-                Some(l.value().to_string())
-            } else {
-                None
-            }
-        }
+        Literal(l, exact) => exact.then(|| l.value().to_owned()),
         UnaryPlus(a) => eval_compiled_exact_lexical(graph, local, row, a),
         UnaryMinus(a) => eval_compiled_exact_lexical(graph, local, row, a).map(|s| match s.strip_prefix('-') {
             Some(r) => r.to_string(),
@@ -726,14 +882,16 @@ pub(super) fn sig_digits(s: &str) -> usize {
     }
 }
 
-/// `true` if the expression performs arithmetic (`+ - *` / unary sign), so a comparison
-/// over it must be evaluated EXACTLY rather than via f64 — the only case where f64 can
-/// produce a wrong ordering for integer/decimal data (value comparison is monotonic;
-/// arithmetic introduces flippable rounding error).
+/// `true` if the expression performs arithmetic (`+ - * /`, possibly under a unary sign), so a
+/// comparison over it must not use the untyped f64 fast path: integer/decimal arithmetic is
+/// decided exactly, and float/double arithmetic in its promoted tier by the typed evaluator
+/// (value comparison is monotonic; arithmetic introduces rounding the tier determines). The
+/// unary sign alone is exact in every tier, and numeric functions are not evaluated by the
+/// fast path at all.
 pub(super) fn expr_has_arith(e: &Expression) -> bool {
     use Expression::*;
     match e {
-        Add(..) | Subtract(..) | Multiply(..) => true,
+        Add(..) | Subtract(..) | Multiply(..) | Divide(..) => true,
         UnaryPlus(a) | UnaryMinus(a) => expr_has_arith(a),
         _ => false,
     }
@@ -745,6 +903,7 @@ pub(super) fn expr_has_arith(e: &Expression) -> bool {
 pub(super) fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], e: &Expression) -> Option<Dec> {
     use Expression::*;
     match e {
+        Variable(v) if local.correlation.contains_key(v) => None,
         Variable(v) => {
             let id = row[b.col(v)?];
             if id == NO_ID {
@@ -755,9 +914,7 @@ pub(super) fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
                 Dec::parse(&graph.exact_numeric_lexical(id)?)
             }
         }
-        Literal(l) if sparq_core::is_integer_datatype(l.datatype().as_str()) || l.datatype() == xsd::DECIMAL => {
-            Dec::parse(l.value())
-        }
+        Literal(l) => Dec::parse(exact_lexical_of_literal(l)?),
         Add(a, c) => eval_dec(graph, local, b, row, a)?.checked_add(eval_dec(graph, local, b, row, c)?),
         Subtract(a, c) => eval_dec(graph, local, b, row, a)?.checked_sub(eval_dec(graph, local, b, row, c)?),
         Multiply(a, c) => eval_dec(graph, local, b, row, a)?.checked_mul(eval_dec(graph, local, b, row, c)?),
@@ -776,10 +933,18 @@ pub(super) fn eval_dec(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
 /// turns into "excluded". (Distinct from the lenient total order `compare_values`
 /// used by ORDER BY / MIN / MAX, which must order across every type.)
 pub(super) fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, f: impl Fn(Ordering) -> bool) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
     // EXACT path: integer/decimal arithmetic (`+ - *`) must not round through f64, which
     // can flip an ordering (`0.1 + 0.2` < `0.3` in f64). Only attempted when arithmetic is
     // present (the common, arithmetic-free comparison keeps the f64 fast path below).
-    if expr_has_arith(a) || expr_has_arith(c) {
+    let arith = expr_has_arith(a) || expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
             if let Some(o) = da.cmp(db) {
                 return Ok(Value::Bool(f(o)));
@@ -789,7 +954,12 @@ pub(super) fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
     // Fast path: both sides numeric -> compare f64 directly, no term materialised.
     // Reaching here means BOTH operands are numeric, so a `None` partial_cmp is a
     // NaN value (op:numeric ordering of NaN is false) — NOT a cross-type error.
-    if let (Some(x), Some(y)) = (eval_numeric(graph, local, b, row, a), eval_numeric(graph, local, b, row, c)) {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith { None } else { eval_numeric(graph, local, b, row, a).zip(eval_numeric(graph, local, b, row, c)) };
+    if let Some((x, y)) = fast {
         // f64 rounding is monotonic — it only ever COLLAPSES distinct values to equal,
         // never flips an ordering. So re-check exactly ONLY when f64 says equal (catches
         // integers > 2^53 and high-precision decimals that share an f64).
@@ -800,28 +970,62 @@ pub(super) fn cmp_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[I
                 }
             }
         }
-        return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        }
     }
-    // Fast path: both sides temporal -> compare cached/parsed timeline values, no term
+    // Cached f64 instants decide same-family pairs that are far apart; anything
+    // closer falls through to the exact keys below.
+    if let (Some(va), Some(vb)) = (eval_approx_temporal(graph, local, b, row, a), eval_approx_temporal(graph, local, b, row, c)) {
+        if va.kind == vb.kind {
+            if let Some(o) = approx_temporal_order(va, vb) {
+                return Ok(Value::Bool(f(o)));
+            }
+        }
+    }
+    // Fast path: both sides temporal -> compare exact borrowed timeline values, no term
     // materialised. `None` from `cmp_t` is exactly the strict path's type-error cases
     // (cross-family dateTime vs date, or mixed timezone presence inside the ±14h window).
     if let (Some(ta), Some(tb)) = (eval_temporal(graph, local, b, row, a), eval_temporal(graph, local, b, row, c)) {
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(f(o)),
             None => Value::Error,
         });
     }
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
-    Ok(match value_compare_strict(&x, &y) {
+    Ok(relational_value(&x, &y, arith, f))
+}
+
+/// The typed result of a relational operator (`<`, `<=`, `>`, `>=`) once both operands are
+/// evaluated. An incomparable pair is a type error, EXCEPT two numerics that are unordered
+/// because one is NaN: XPath `op:numeric-less-than` / `-greater-than` return false there,
+/// whether the NaN is stored or computed. Other unordered numeric pairs are false only when
+/// `arith` sent the comparison here (an arithmetic operand the f64 fast path used to decide).
+pub(super) fn relational_value(x: &Value, y: &Value, arith: bool, f: impl Fn(Ordering) -> bool) -> Value {
+    // A NaN operand (stored NaN misses the numeric cache and lands here) is false, never a
+    // type error, matching the strict-capacity path and XPath numeric comparisons.
+    if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+        if a.is_nan() || b.is_nan() {
+            return Value::Bool(false);
+        }
+    }
+    match value_compare_strict(x, y) {
         Some(o) => Value::Bool(f(o)),
+        None if arith && as_numeric(x).is_some() && as_numeric(y).is_some() => Value::Bool(false),
         None => Value::Error,
-    })
+    }
 }
 
 /// SPARQL `=` (and, negated, `!=`). See [`values_equal`].
 pub(super) fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // EXACT integer/decimal arithmetic equality (see `cmp_expr`) — `0.1 + 0.2 = 0.3`.
-    if expr_has_arith(a) || expr_has_arith(c) {
+    let arith = expr_has_arith(a) || expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) = (eval_dec(graph, local, b, row, a), eval_dec(graph, local, b, row, c)) {
             if let Some(o) = da.cmp(db) {
                 return Ok(Value::Bool(o == Ordering::Equal));
@@ -829,7 +1033,12 @@ pub(super) fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &
         }
     }
     // Fast path: both numeric (NaN == NaN is false, matching op:numeric-equal).
-    if let (Some(x), Some(y)) = (eval_numeric(graph, local, b, row, a), eval_numeric(graph, local, b, row, c)) {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith { None } else { eval_numeric(graph, local, b, row, a).zip(eval_numeric(graph, local, b, row, c)) };
+    if let Some((x, y)) = fast {
         // Re-check exactly when f64 says equal (see `cmp_expr`): distinct integers > 2^53
         // or high-precision decimals can share an f64 and must not be reported equal.
         if x == y {
@@ -839,7 +1048,10 @@ pub(super) fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &
                 }
             }
         }
-        return Ok(Value::Bool(x == y));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x == y));
+        }
     }
     // Fast path: both temporal. Same-family operands decide by timeline (`None` =
     // the indeterminate mixed-timezone window -> type error); dateTime and date are
@@ -848,7 +1060,7 @@ pub(super) fn equal_expr(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &
         if ta.kind != tb.kind {
             return Ok(Value::Bool(false));
         }
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(o == Ordering::Equal),
             None => Value::Error,
         });
@@ -870,9 +1082,9 @@ pub(super) enum LitKind<'a> {
     /// A boolean-datatype operand; `None` = ill-formed lexical.
     Bool(Option<bool>),
     /// xsd:dateTime / xsd:dateTimeStamp on the timeline; `None` = ill-formed.
-    DateTime(Option<Timeline>),
+    DateTime(Option<ExactTimeline<'a>>),
     /// xsd:date on the timeline (midnight); `None` = ill-formed.
-    Date(Option<Timeline>),
+    Date(Option<ExactTimeline<'a>>),
     /// Another XSD datatype (time, duration, gYear, …): (datatype IRI, lexical).
     OtherXsd(&'a str, &'a str),
     /// Language-tagged: (lowercased tag, value).
@@ -892,15 +1104,15 @@ pub(super) fn lit_kind(v: &Value) -> LitKind<'_> {
             }
             let dt = l.datatype();
             if is_numeric_dt(l) {
-                LitKind::Num(Num::of_literal(l))
+                LitKind::Num(numeric_capacity::operand(l))
             } else if dt == xsd::STRING {
                 LitKind::Str(l.value())
             } else if dt == xsd::BOOLEAN {
                 LitKind::Bool(as_bool_val(v))
             } else if dt == xsd::DATE_TIME || dt == xsd::DATE_TIME_STAMP {
-                LitKind::DateTime(Timeline::parse_datetime(l.value()))
+                LitKind::DateTime(temporal_of_lit(l).map(|value| value.timeline))
             } else if dt == xsd::DATE {
-                LitKind::Date(Timeline::parse_date(l.value()))
+                LitKind::Date(temporal_of_lit(l).map(|value| value.timeline))
             } else if dt.as_str().starts_with("http://www.w3.org/2001/XMLSchema#") {
                 LitKind::OtherXsd(dt.as_str(), l.value())
             } else {
@@ -911,8 +1123,31 @@ pub(super) fn lit_kind(v: &Value) -> LitKind<'_> {
     }
 }
 
-// `Timeline` (the parsed xsd:date/dateTime value) and its comparison rules live in
-// `sparq_core::temporal`, shared with the graph's load-time `temporals` cache.
+/// Whether `t` is an `xsd:double` / `xsd:float` `NaN` literal: the one RDF term that is
+/// not `=` to itself (op:numeric-equal), so identical-term shortcuts must skip it.
+pub(super) fn term_is_nan_literal(t: &Term) -> bool {
+    matches!(t, Term::Literal(l) if l.language().is_none() && is_nan_lexical(l.value(), l.datatype().as_str()))
+}
+
+/// [`term_is_nan_literal`] for an id, without materialising the term.
+#[cfg(feature = "id-filter-fastpath")]
+pub(super) fn id_is_nan_literal(graph: &Graph, local: &LocalVocab, id: Id) -> bool {
+    if id == NO_ID || dict::is_inline(id) {
+        false
+    } else if is_local(id) {
+        term_is_nan_literal(local.term(id))
+    } else {
+        matches!(graph.dict.term_parts(id), dict::TermParts::Lit { value, datatype, lang: None } if is_nan_lexical(value, datatype))
+    }
+}
+
+/// XSD's only `NaN` lexical is the exact string `NaN` (no padding, no sign).
+pub(super) fn is_nan_lexical(value: &str, datatype: &str) -> bool {
+    value == "NaN" && (datatype == xsd::DOUBLE.as_str() || datatype == xsd::FLOAT.as_str())
+}
+
+// Exact borrowed date/dateTime keys live in core; approximate load-time epoch
+// caches remain available separately for representation consumers.
 
 /// SPARQL `=` (and, negated, `!=`) as a three-valued result: `Some(true/false)` for a
 /// decided comparison, `None` for a type error. OPEN-WORLD rules: identical terms are
@@ -922,12 +1157,21 @@ pub(super) fn lit_kind(v: &Value) -> LitKind<'_> {
 /// ill-formed lexicals, cross-family pairs — is a TYPE ERROR (`"a"^^ex:dt != "b"^^ex:other`
 /// filters the row out rather than evaluating to true).
 pub(super) fn values_equal(x: &Value, y: &Value) -> Option<bool> {
+    if budget::strict_numeric() {
+        // Equality of identical terms may otherwise bypass every numeric consumer.
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            // NaN is not numerically equal to itself, even with identical RDF terms.
+            return Some(num_compare(a, b) == Some(Ordering::Equal));
+        }
+    }
     if matches!(x, Value::Unbound | Value::Error) || matches!(y, Value::Unbound | Value::Error) {
         return None;
     }
     if let (Value::Term(p), Value::Term(q)) = (x, y) {
         if p == q {
-            return Some(true); // sameTerm decides even for unknown datatypes
+            // sameTerm decides even for unknown datatypes, except a float/double NaN:
+            // op:numeric-equal(NaN, NaN) is false, matching the strict-capacity path above.
+            return Some(!term_is_nan_literal(p));
         }
         // RDF 1.2 triple terms compare componentwise, with VALUE equality on the
         // objects (`<<(:a :b 01)>> = <<(:a :b 1)>>` is true, errors propagate).
@@ -952,11 +1196,14 @@ pub(super) fn values_equal(x: &Value, y: &Value) -> Option<bool> {
         (Str(a), Str(b)) => Some(a == b),
         (Bool(Some(a)), Bool(Some(b))) => Some(a == b),
         (Bool(_), Bool(_)) => None,
-        (DateTime(Some(a)), DateTime(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
-        (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b).map(|o| o == Ordering::Equal),
+        (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
+        (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b).map(|o| o == Ordering::Equal),
         (DateTime(_), DateTime(_)) | (Date(_), Date(_)) => None,
         // date and dateTime values are disjoint -> known different.
-        (DateTime(_), Date(_)) | (Date(_), DateTime(_)) => Some(false),
+        // An ill-formed operand (e.g. a timezone-free dateTimeStamp) is not a value: error.
+        (DateTime(Some(_)), Date(Some(_))) | (Date(Some(_)), DateTime(Some(_))) => Some(false),
+        // Nor is it known different from a language-tagged literal (#3902): still an error.
+        (DateTime(None) | Date(None), _) | (_, DateTime(None) | Date(None)) => None,
         // A language-tagged literal equals only a literal with the same (ci) tag.
         (Lang(t1, v1), Lang(t2, v2)) => Some(t1 == t2 && v1 == v2),
         (Lang(..), _) | (_, Lang(..)) => Some(false),
@@ -975,8 +1222,8 @@ pub(super) fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
         (Num(Some(a)), Num(Some(b))) => num_compare(a, b),
         (Str(a), Str(b)) => Some(a.cmp(b)),
         (Bool(Some(a)), Bool(Some(b))) => Some(a.cmp(&b)),
-        (DateTime(Some(a)), DateTime(Some(b))) => Timeline::cmp_tl(a, b),
-        (Date(Some(a)), Date(Some(b))) => Timeline::cmp_tl(a, b),
+        (DateTime(Some(a)), DateTime(Some(b))) => ExactTimeline::compare(a, b),
+        (Date(Some(a)), Date(Some(b))) => ExactTimeline::compare(a, b),
         // Same language tag: compare values (the suites' lenient extension).
         (Lang(t1, v1), Lang(t2, v2)) if t1 == t2 => Some(v1.cmp(v2)),
         // Same other-XSD datatype: lexical order (correct for time, gYear, …).
@@ -993,7 +1240,7 @@ pub(super) fn value_compare_strict(x: &Value, y: &Value) -> Option<Ordering> {
 pub(super) fn temporal_total_cmp(x: &Value, y: &Value) -> Option<Ordering> {
     match (lit_kind(x), lit_kind(y)) {
         (LitKind::DateTime(Some(a)), LitKind::DateTime(Some(b)))
-        | (LitKind::Date(Some(a)), LitKind::Date(Some(b))) => Some(Timeline::cmp_tl_total(a, b)),
+        | (LitKind::Date(Some(a)), LitKind::Date(Some(b))) => Some(ExactTimeline::compare_total(a, b)),
         _ => None,
     }
 }
@@ -1012,8 +1259,8 @@ pub(super) fn as_bool_val(v: &Value) -> Option<bool> {
 
 /// Three-valued effective boolean: `None` is a SPARQL error (type error or unbound),
 /// used by the logical operators to implement SPARQL's 3-valued `&&` / `||` / `!`.
-pub(super) fn ebv3(v: &Value) -> Option<bool> {
-    ebv(v)
+pub(super) fn ebv3(v: &Value, semantics: crate::EbvSemantics) -> Option<bool> {
+    ebv(v, semantics)
 }
 
 pub(super) fn and3(x: Option<bool>, y: Option<bool>) -> Value {
@@ -1040,7 +1287,7 @@ pub(super) fn or3(x: Option<bool>, y: Option<bool>) -> Value {
 pub(super) fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id], a: &Expression, c: &Expression, op: ArithOp) -> Result<Value, String> {
     let (x, y) = (eval_expr(graph, local, b, row, a)?, eval_expr(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -1051,27 +1298,81 @@ pub(super) fn arith(graph: &Graph, local: &LocalVocab, b: &Bindings, row: &[Id],
 pub(super) fn as_numeric(v: &Value) -> Option<Num> {
     match v {
         Value::Num(n) => Some(*n),
-        Value::Term(Term::Literal(l)) => Num::of_literal(l),
+        Value::Term(Term::Literal(l)) => numeric_capacity::operand(l),
         _ => None,
     }
 }
 
+// XPath numeric-unary-plus returns its numeric operand unchanged.
+// Validate the value space without imposing the arithmetic representation bound.
+pub(super) fn unary_plus(value: Value) -> Value {
+    match &value {
+        Value::Num(_) => value,
+        Value::Term(Term::Literal(l))
+            if sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) => value,
+        _ => Value::Error,
+    }
+}
+
+// SUBSTR's SPARQL signature requires integer operands, not numeric coercion.
+pub(super) fn integer_argument(v: &Value) -> Option<i128> {
+    match v {
+        Value::Num(Num::Int(n)) => Some(i128::from(*n)),
+        Value::Term(Term::Literal(l))
+            if l.language().is_none()
+                && sparq_core::is_integer_datatype(l.datatype().as_str())
+                && sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str()) =>
+        {
+            numeric_capacity::representable(true,
+                l.value().parse().ok())
+        }
+        _ => None,
+    }
+}
+
+/// The lexical of a well-formed `xsd:decimal`, `xsd:integer` or unbounded integer-subtype
+/// literal too large for the i128 tower (`Num::of_literal` declines it). Such a value is
+/// still a number: the ORDER BY total order compares it exactly by its lexical instead of
+/// as an opaque string. The raw lexical is validated as is by `numeric_literal_valid`
+/// (no trimming of any whitespace, ASCII or Unicode), which also checks a subtype's sign
+/// facet. The bounded subtypes (`xsd:long`, ...) cannot hold such a value, so they stay `None`.
+pub(super) fn beyond_tower_lexical(v: &Value) -> Option<&str> {
+    let Value::Term(Term::Literal(l)) = v else { return None };
+    if l.language().is_some() || Num::of_literal(l).is_some() {
+        return None;
+    }
+    let dt = l.datatype();
+    let unbounded = dt == xsd::DECIMAL
+        || dt == xsd::INTEGER
+        || dt == xsd::NEGATIVE_INTEGER
+        || dt == xsd::NON_POSITIVE_INTEGER
+        || dt == xsd::POSITIVE_INTEGER
+        || dt == xsd::NON_NEGATIVE_INTEGER;
+    let lex = l.value();
+    (unbounded && sparq_core::numeric_literal_valid(lex, dt.as_str()) && split_decimal(lex).is_some())
+        .then_some(lex)
+}
+
+/// An exact decimal lexical for a numeric `Value`: an integer/decimal (in or beyond the
+/// tower). `None` for float/double, whose exact value is its `f64`.
+#[cold]
+pub(super) fn exact_decimal_lexical(v: &Value) -> Option<String> {
+    match as_numeric(v) {
+        Some(n) if n.to_dec().is_some() => Some(n.lexical()),
+        Some(_) => None,
+        None => beyond_tower_lexical(v).map(str::to_string),
+    }
+}
+
 pub(super) fn as_num(v: &Value) -> Option<f64> {
+    if budget::strict_numeric() && !matches!(v, Value::Bool(_)) {
+        return as_numeric(v).map(Num::f64);
+    }
     match v {
         Value::Num(n) => Some(n.f64()),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
-        // sq-74oy4 / sq-6b1lj: route the lexical→f64 arm through the DATATYPE-AWARE
-        // `numeric_cache_f64` — the SAME acceptance the graph `numeric_value` cache and
-        // `LocalVocab::intern` use. This keeps the lenient relational `<`/`>` seam in lock-step
-        // with the equality reference `Num::of_literal` on BOTH residuals sq-9781x left open:
-        // (a) whitespace — the value is TRIMMED (XSD `collapse` facet), so a padded
-        // `" 1"^^xsd:integer` is value-1 on `<`/`>` exactly as it is on `=` (was: type-error
-        // on `<`/`>`, cache-miss, but value-1 on `=` via the trimming cache); (b) per-datatype
-        // well-formedness — a lexical ill-formed FOR its datatype (`"1.5"^^xsd:integer`,
-        // `"1E2"^^xsd:decimal`, an i128-overflow decimal) is `None` here, a type error on
-        // `<`/`>` matching `of_literal` (was: compared as f64). The XSD f64 SPELLINGS
-        // (INF/+INF/-INF/NaN yes; Rust-only inf/infinity/nan no) are still enforced by the
-        // underlying `parse_xsd_f64` image.
+        // Keep scalar comparisons and caches on the same raw
+        // lexical/facet acceptance path; string constructors preprocess separately.
         Value::Term(Term::Literal(l)) => numeric_cache_f64(l),
         _ => None,
     }
@@ -1085,25 +1386,12 @@ pub(super) fn is_numeric_dt(l: &Literal) -> bool {
         || dt == xsd::FLOAT.as_str()
 }
 
-/// The DATATYPE-AWARE cached/lenient f64 of a numeric literal, matching the graph's
-/// `Graph::numeric_value` cache acceptance (sparq-core `cached_numeric_f64`): `Some` iff the
-/// lexical is well-formed FOR ITS DATATYPE (`Num::of_literal` accepts it), imaged by the
-/// shared `parse_xsd_f64` on the TRIMMED lexical so the value is bit-identical to what the
-/// graph cache and `LocalVocab::intern` store for the same term. `None` (a datatype-ill-formed
-/// lexical like `"1.5"^^xsd:integer`, or a non-numeric) is a SPARQL type error.
-///
-/// (sq-74oy4 / sq-6b1lj) This is the single acceptance the lenient relational seam
-/// (`as_num`/`as_f64`), the local-vocab numeric cache (`LocalVocab::intern`), and the graph
-/// cache now all share — closing the pre-fix asymmetry where `as_num`/`intern` parsed
-/// datatype-agnostically (and un-trimmed) while `Num::of_literal` (the equality reference)
-/// did not, so a padded or per-datatype-ill-formed lexical compared numerically on `<`/`>`
-/// yet type-errored on `=`. Acceptance is gated on `Num::of_literal` (the strictest, so the
-/// datatype rules can never drift); the f64 image is `parse_xsd_f64` (every lexical
-/// `of_literal` accepts, `parse_xsd_f64` also accepts, for the same value).
+/// Returns the raw literal's numeric image within the shared cache lane.
+/// Invalid lexical forms, subtype facets and unsupported representations return None.
 #[inline]
 pub(super) fn numeric_cache_f64(l: &Literal) -> Option<f64> {
     if is_numeric_dt(l) && Num::of_literal(l).is_some() {
-        parse_xsd_f64(l.value().trim())
+        sparq_core::numeric_lexical_f64(l.value(), l.datatype().as_str())
     } else {
         None
     }
@@ -1140,7 +1428,9 @@ impl CompareTerm for Value {
         // one kind with boolean LITERALS (both order `false < true` via `strict_cmp`).
         match lit_kind(self) {
             LitKind::Bool(_) => LiteralKind::Boolean,
-            LitKind::Num(_) if as_num(self).is_some() => LiteralKind::Numeric,
+            LitKind::Num(_) if as_num(self).is_some() || beyond_tower_lexical(self).is_some() => {
+                LiteralKind::Numeric
+            }
             LitKind::Str(_) => LiteralKind::String,
             LitKind::Lang(..) => LiteralKind::Lang,
             LitKind::DateTime(Some(_)) => LiteralKind::DateTime,
@@ -1156,7 +1446,10 @@ impl CompareTerm for Value {
     }
     #[inline]
     fn as_f64(&self) -> Option<f64> {
-        as_num(self)
+        // A well-formed integer/decimal beyond the i128 tower has no `Num`, but it is still a
+        // number: its correctly-rounded f64 (monotonic, possibly +-INF) orders it, and an f64
+        // tie is rechecked exactly in `exact_cmp`.
+        as_num(self).or_else(|| beyond_tower_lexical(self).and_then(parse_xsd_f64))
     }
     #[inline]
     fn exact_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -1167,12 +1460,34 @@ impl CompareTerm for Value {
         // expansion for the MIXED exact/inexact pair (the pre-fix `num_compare`
         // fallback kept the collapsed f64 verdict there, which made the order
         // intransitive at the 2^53 collapse — witness 1 of sq-wjl8i). The relational
-        // `<`/`=` (`cmp_expr`) and MIN/MAX (`minmax_values`) deliberately KEEP the
-        // XPath promoted semantics via `num_compare`; this total order refines only
-        // their ties. `None` (a lexical beyond the exact tower) keeps the tie.
+        // `<`/`=` (`cmp_expr`, via `num_compare`) deliberately KEEPS its own semantics; this total
+        // order refines only their ties. `None` (a lexical beyond the exact tower) keeps the tie.
         match (as_numeric(self), as_numeric(other)) {
-            (Some(a), Some(b)) => Some(a.cmp_total(b)),
-            _ => None,
+            (Some(a), Some(b)) => {
+                if !numeric_capacity::comparable(a, b) {
+                    return None;
+                }
+                // Two in-tower decimals whose scale alignment overflows i128 would fall
+                // back to their (equal) f64 images; compare their exact lexicals instead,
+                // the same exact order a beyond-tower lexical gets below, so the total
+                // order stays transitive across the tower boundary.
+                if let (Some(x), Some(y)) = (a.to_dec(), b.to_dec()) {
+                    if x.cmp(y).is_none() {
+                        return cmp_decimal_str(&a.lexical(), &b.lexical());
+                    }
+                }
+                Some(a.cmp_total(b))
+            }
+            // A strict numeric budget has already failed capacity on a lexical beyond the tower.
+            _ if budget::strict_numeric() => None,
+            // At least one side is beyond the i128 tower: compare exact decimal lexicals
+            // (arbitrary precision), or an exact lexical against a float/double's value.
+            _ => match (exact_decimal_lexical(self), exact_decimal_lexical(other)) {
+                (Some(a), Some(b)) => cmp_decimal_str(&a, &b),
+                (Some(a), None) => Some(cmp_exact_lex_f64(&a, as_num(other)?)),
+                (None, Some(b)) => Some(cmp_exact_lex_f64(&b, as_num(self)?).reverse()),
+                (None, None) => None,
+            },
         }
     }
     #[inline]
@@ -1220,6 +1535,11 @@ impl CompareTerm for Value {
 /// vs a documented extension). Relational `<` / `=` semantics are UNTOUCHED.
 #[inline]
 pub(super) fn compare_values(x: &Value, y: &Value) -> Option<Ordering> {
+    if budget::strict_numeric() {
+        if let (Some(a), Some(b)) = (as_numeric(x), as_numeric(y)) {
+            return numeric_capacity::comparable(a, b).then(|| a.cmp_total(b));
+        }
+    }
     compare_terms(x, y)
 }
 
@@ -1332,21 +1652,26 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 Some(x) => x,
                 None => return Ok(Value::Error),
             };
-            let start = match as_num(&ev(1)?) {
-                Some(n) => n as i64,
+            let start = match integer_argument(&ev(1)?) {
+                Some(n) => n,
                 None => return Ok(Value::Error),
             };
-            let chars: Vec<char> = s.chars().collect();
-            let from = (start.max(1) - 1) as usize; // SPARQL SUBSTR is 1-indexed by codepoint
-            let out: String = if nargs >= 3 {
-                let len = match as_num(&ev(2)?) {
-                    Some(n) => n.max(0.0) as usize,
+            // XPath positions satisfy start <= position < start+length.
+            // Clipping the start before adding length incorrectly extends slices
+            // that start before position one. Widen before addition to avoid overflow.
+            let end = if nargs >= 3 {
+                let len = match integer_argument(&ev(2)?) {
+                    Some(n) => n.max(0),
                     None => return Ok(Value::Error),
                 };
-                chars.iter().skip(from).take(len).collect()
+                start.saturating_add(len)
             } else {
-                chars.iter().skip(from).collect()
+                i128::MAX
             };
+            let out = s.chars().enumerate().take_while(|(i, _)| (*i as i128 + 1) < end).filter_map(|(i, ch)| {
+                let position = i as i128 + 1;
+                (position >= start && position < end).then_some(ch)
+            }).collect();
             lit_with_lang(out, lang.as_deref())
         }
         // ENCODE_FOR_URI's operand is a STRING LITERAL, per SPARQL 1.1
@@ -1383,19 +1708,20 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::IsNumeric => match ev(0)? {
             Value::Unbound | Value::Error => Value::Error,
             Value::Num(_) => Value::Bool(true),
-            Value::Term(Term::Literal(l)) => Value::Bool(is_numeric_dt(&l)),
+            Value::Term(Term::Literal(l)) => Value::Bool(sparq_core::numeric_literal_valid(l.value(), l.datatype().as_str())),
             _ => Value::Bool(false),
         },
         // ABS/CEIL/FLOOR/ROUND preserve the argument's numeric DATATYPE
         // (CEIL("2.5"^^xsd:decimal) is "3"^^xsd:decimal, not xsd:integer).
-        F::Abs => as_numeric(&ev(0)?).map(|n| Value::Num(n.abs())).unwrap_or(Value::Error),
-        F::Ceil => as_numeric(&ev(0)?).map(|n| Value::Num(n.ceil())).unwrap_or(Value::Error),
-        F::Floor => as_numeric(&ev(0)?).map(|n| Value::Num(n.floor())).unwrap_or(Value::Error),
-        F::Round => as_numeric(&ev(0)?).map(|n| Value::Num(n.round())).unwrap_or(Value::Error),
+        F::Abs => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::abs)).map(Value::Num).unwrap_or(Value::Error),
+        F::Ceil => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::ceil)).map(Value::Num).unwrap_or(Value::Error),
+        F::Floor => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::floor)).map(Value::Num).unwrap_or(Value::Error),
+        F::Round => as_numeric(&ev(0)?).and_then(|n| numeric_capacity::unary(n, Num::round)).map(Value::Num).unwrap_or(Value::Error),
         // STRDT(lexical, datatypeIRI) -> typed literal. The first argument must be a
         // SIMPLE literal (= xsd:string in RDF 1.1) — lang-tagged / typed input errors.
         F::StrDt => match (str_lit(&ev(0)?), ev(1)?) {
             (Some((lex, None)), Value::Term(Term::NamedNode(dt))) => {
+                budget::check_temporal(&lex, dt.as_str())?;
                 Value::Term(Term::Literal(Literal::new_typed_literal(lex, dt)))
             }
             _ => Value::Error,
@@ -1488,16 +1814,16 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         // NOW(): the execution's pinned instant as xsd:dateTime. RAND(): xsd:double in
         // [0, 1) from a per-thread splitmix64 seeded once from the OS RNG (see
         // `rand_unit`) — both native-only for the same reason as UUID()/STRUUID().
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Now => Value::Term(Term::Literal(Literal::new_typed_literal(now_lexical(), xsd::DATE_TIME))),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Rand => Value::Num(Num::Double(rand_unit::next())),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::Uuid => Value::Term(Term::NamedNode(oxrdf::NamedNode::new_unchecked(format!(
             "urn:uuid:{}",
             uuid::Uuid::new_v4()
         )))),
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
         F::StrUuid => simple(uuid::Uuid::new_v4().to_string()),
         // xsd:dateTime accessors — parse the lexical form and return the numeric component.
         F::Year => datetime_field(&ev(0)?, 0),
@@ -1632,6 +1958,14 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                 vals.push(ev(i)?);
             }
             if vals.len() == 1 {
+                if let Value::Term(Term::Literal(literal)) = &vals[0] {
+                    // Capacity applies to the constructed lexical after the
+                    // string-cast preprocessing, while raw typed terms stay strict.
+                    let lexical = if literal.datatype() == xsd::STRING && nn.as_str() == xsd::DATE_TIME.as_str() {
+                        literal.value().trim_matches([' ', '\t', '\r', '\n'])
+                    } else { literal.value() };
+                    budget::check_temporal(lexical, nn.as_str())?;
+                }
                 if let Some(out) = eval_cast(nn.as_str(), &vals[0]) {
                     return Ok(out);
                 }
@@ -1650,7 +1984,12 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
                     }
                 }
                 return Ok(match f(&terms) {
-                    Ok(t) => Value::Term(t),
+                    Ok(t) => {
+                        if let Term::Literal(literal) = &t {
+                            budget::check_temporal(literal.value(), literal.datatype().as_str())?;
+                        }
+                        Value::Term(t)
+                    }
                     Err(_) => Value::Error,
                 });
             }
@@ -1691,7 +2030,15 @@ pub(super) fn cmp_compiled(
     c: &CompiledExpr,
     f: impl Fn(Ordering) -> bool,
 ) -> Result<Value, String> {
-    if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        if let (Some(a), Some(b)) = (as_numeric(&x), as_numeric(&y)) {
+            if a.is_nan() || b.is_nan() { return Ok(Value::Bool(false)); }
+        }
+        return Ok(value_compare_strict(&x, &y).map(|o| Value::Bool(f(o))).unwrap_or(Value::Error));
+    }
+    let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
         {
@@ -1700,9 +2047,16 @@ pub(super) fn cmp_compiled(
             }
         }
     }
-    if let (Some(x), Some(y)) =
-        (eval_compiled_numeric(graph, local, row, a), eval_compiled_numeric(graph, local, row, c))
-    {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith {
+        None
+    } else {
+        eval_compiled_numeric(graph, local, row, a).zip(eval_compiled_numeric(graph, local, row, c))
+    };
+    if let Some((x, y)) = fast {
         if x == y {
             if let (Some(la), Some(lb)) = (
                 eval_compiled_exact_lexical(graph, local, row, a),
@@ -1713,21 +2067,31 @@ pub(super) fn cmp_compiled(
                 }
             }
         }
-        return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x.partial_cmp(&y).map(&f).unwrap_or(false)));
+        }
+    }
+    // Mirrors `cmp_expr`: cached instants decide far-apart same-family pairs.
+    if let (Some(va), Some(vb)) =
+        (eval_compiled_approx_temporal(graph, row, a), eval_compiled_approx_temporal(graph, row, c))
+    {
+        if va.kind == vb.kind {
+            if let Some(o) = approx_temporal_order(va, vb) {
+                return Ok(Value::Bool(f(o)));
+            }
+        }
     }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
     {
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(f(o)),
             None => Value::Error,
         });
     }
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-    Ok(match value_compare_strict(&x, &y) {
-        Some(o) => Value::Bool(f(o)),
-        None => Value::Error,
-    })
+    Ok(relational_value(&x, &y, arith, f))
 }
 
 /// (sq-7d3dj.30.11) The single RAW ID an operand resolves to, if it is a bound column
@@ -1776,6 +2140,10 @@ pub(super) fn equal_compiled(
     a: &CompiledExpr,
     c: &CompiledExpr,
 ) -> Result<Value, String> {
+    if budget::strict_numeric() {
+        let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
+        return Ok(values_equal(&x, &y).map(Value::Bool).unwrap_or(Value::Error));
+    }
     // (sq-7d3dj.30.11) Fast path (b): EQUAL ids of ANY kind are the SAME term (the
     // canonicalising dict gives each term one id), so `=` is `true` — mirroring the `p == q`
     // sameTerm short-circuit `values_equal` takes today, which is safe even for ill-typed
@@ -1783,13 +2151,17 @@ pub(super) fn equal_compiled(
     // single-id terms and BOTH bound (an unbound `NO_ID` column would be a type error, not
     // equal). UNEQUAL ids fall through to the exact path unchanged — crucially, unequal ids of
     // value-equal literals (`"1"^^integer` = `"1.0"^^decimal`, sq-lr2ii) must NOT be decided here.
+    // An active temporal year range must still see both operands, so it takes the exact path.
     #[cfg(feature = "id-filter-fastpath")]
-    if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
-        if ida != NO_ID && ida == idc {
-            return Ok(Value::Bool(true));
+    if !budget::temporal_capacity_active() {
+        if let (Some(ida), Some(idc)) = (operand_single_id(graph, row, a), operand_single_id(graph, row, c)) {
+            if ida != NO_ID && ida == idc && !id_is_nan_literal(graph, local, ida) {
+                return Ok(Value::Bool(true));
+            }
         }
     }
-    if compiled_expr_has_arith(a) || compiled_expr_has_arith(c) {
+    let arith = compiled_expr_has_arith(a) || compiled_expr_has_arith(c);
+    if arith {
         if let (Some(da), Some(db)) =
             (eval_compiled_dec(graph, local, row, a), eval_compiled_dec(graph, local, row, c))
         {
@@ -1798,9 +2170,16 @@ pub(super) fn equal_compiled(
             }
         }
     }
-    if let (Some(x), Some(y)) =
-        (eval_compiled_numeric(graph, local, row, a), eval_compiled_numeric(graph, local, row, c))
-    {
+    // The f64 fast path below evaluates arithmetic UNTYPED (always in f64), but XPath evaluates
+    // it in the promoted tier: `"16777217"^^xsd:float + 1` is a FLOAT and rounds to 16777216.
+    // Arithmetic the exact path above did not decide (a float/double operand) takes the typed
+    // evaluator instead.
+    let fast = if arith {
+        None
+    } else {
+        eval_compiled_numeric(graph, local, row, a).zip(eval_compiled_numeric(graph, local, row, c))
+    };
+    if let Some((x, y)) = fast {
         if x == y {
             if let (Some(la), Some(lb)) = (
                 eval_compiled_exact_lexical(graph, local, row, a),
@@ -1811,7 +2190,10 @@ pub(super) fn equal_compiled(
                 }
             }
         }
-        return Ok(Value::Bool(x == y));
+        // An unequal pair that `xs:float` promotion could tie takes the typed path below.
+        if x == y || !f32_promotion_may_tie(x, y) {
+            return Ok(Value::Bool(x == y));
+        }
     }
     if let (Some(ta), Some(tb)) =
         (eval_compiled_temporal(graph, local, row, a), eval_compiled_temporal(graph, local, row, c))
@@ -1819,7 +2201,7 @@ pub(super) fn equal_compiled(
         if ta.kind != tb.kind {
             return Ok(Value::Bool(false));
         }
-        return Ok(match Temporal::cmp_t(ta, tb) {
+        return Ok(match ExactTemporal::compare(ta, tb) {
             Some(o) => Value::Bool(o == Ordering::Equal),
             None => Value::Error,
         });
@@ -1842,7 +2224,7 @@ pub(super) fn arith_compiled(
 ) -> Result<Value, String> {
     let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
     Ok(match (as_numeric(&x), as_numeric(&y)) {
-        (Some(p), Some(q)) => p.binop(q, op).map(Value::Num).unwrap_or(Value::Error),
+        (Some(p), Some(q)) => numeric_capacity::binop(p, q, op).map(Value::Num).unwrap_or(Value::Error),
         _ => Value::Error,
     })
 }
@@ -1860,29 +2242,34 @@ pub(super) fn eval_compiled(
     use CompiledExpr::*;
     match e {
         Var(col) => match col {
-            Some(c) if row[*c] != NO_ID => Ok(Value::Term(term_of(graph, local, row[*c]).unwrap())),
+            Some(c) if row[*c] != NO_ID => checked_term_value(term_of(graph, local, row[*c]).unwrap()),
             _ => Ok(Value::Unbound),
         },
+        Captured(term) => checked_term_value(term.clone()),
+        CapturedBound => Ok(Value::Bool(true)),
         BoundCol(col) => Ok(Value::Bool(col.map(|c| row[c] != NO_ID).unwrap_or(false))),
         NamedNode(n) => Ok(Value::Term(Term::NamedNode(n.clone()))),
-        Literal(l) => Ok(Value::Term(Term::Literal(l.clone()))),
+        Literal(l, _) => {
+            budget::check_temporal(l.value(), l.datatype().as_str())?;
+            Ok(Value::Term(Term::Literal(l.clone())))
+        },
         And(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(false) {
                 return Ok(Value::Bool(false));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(and3(x, y))
         }
         Or(a, c) => {
-            let x = ebv3(&eval_compiled(graph, local, b, row, a)?);
+            let x = ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics);
             if x == Some(true) {
                 return Ok(Value::Bool(true));
             }
-            let y = ebv3(&eval_compiled(graph, local, b, row, c)?);
+            let y = ebv3(&eval_compiled(graph, local, b, row, c)?, local.ebv_semantics);
             Ok(or3(x, y))
         }
-        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?) {
+        Not(a) => Ok(match ebv3(&eval_compiled(graph, local, b, row, a)?, local.ebv_semantics) {
             Some(v) => Value::Bool(!v),
             None => Value::Error,
         }),
@@ -1891,7 +2278,7 @@ pub(super) fn eval_compiled(
         IdEqNonLit(a, c) => Ok(equal_idfast(graph, row, a, c)),
         SameTerm(a, c) => {
             let (x, y) = (eval_compiled(graph, local, b, row, a)?, eval_compiled(graph, local, b, row, c)?);
-            Ok(Value::Bool(matches!((&x, &y), (Value::Term(p), Value::Term(q)) if p == q)))
+            Ok(same_term_value(&x, &y))
         }
         Greater(a, c) => cmp_compiled(graph, local, b, row, a, c, |o| o == Ordering::Greater),
         GreaterOrEqual(a, c) => cmp_compiled(graph, local, b, row, a, c, |o| o != Ordering::Less),
@@ -1901,12 +2288,12 @@ pub(super) fn eval_compiled(
         Subtract(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Sub),
         Multiply(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Mul),
         Divide(a, c) => arith_compiled(graph, local, b, row, a, c, ArithOp::Div),
-        UnaryPlus(a) => eval_compiled(graph, local, b, row, a),
+        UnaryPlus(a) => Ok(unary_plus(eval_compiled(graph, local, b, row, a)?)),
         UnaryMinus(a) => {
             let v = eval_compiled(graph, local, b, row, a)?;
-            Ok(as_numeric(&v).map(|n| Value::Num(n.neg())).unwrap_or(Value::Error))
+            Ok(as_numeric(&v).and_then(|n| numeric_capacity::unary(n, Num::neg)).map(Value::Num).unwrap_or(Value::Error))
         }
-        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?) {
+        If(cond, t, f) => match ebv3(&eval_compiled(graph, local, b, row, cond)?, local.ebv_semantics) {
             Some(true) => eval_compiled(graph, local, b, row, t),
             Some(false) => eval_compiled(graph, local, b, row, f),
             None => Ok(Value::Error),
@@ -1959,7 +2346,8 @@ pub(super) fn dec_trim_min1(d: Dec) -> String {
         d.scale -= 1;
     }
     if d.scale == 0 {
-        d = Dec { mant: d.mant.saturating_mul(10), scale: 1 };
+        // Adding a lexical fraction digit must not overflow the numeric mantissa.
+        return format!("{}.0", d.mant);
     }
     d.lexical()
 }
@@ -1985,7 +2373,8 @@ pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     // (language-tagged literals and non-string types are NOT castable as strings).
     let src_str = || match v {
         Value::Term(Term::Literal(l)) if l.language().is_none() && l.datatype() == xsd::STRING => {
-            Some(l.value().trim().to_string())
+            // XSD whitespace collapse excludes Unicode spaces such as NBSP.
+            Some(l.value().trim_matches([' ', '\t', '\r', '\n']).to_string())
         }
         _ => None,
     };
@@ -2032,7 +2421,8 @@ pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
     if target == xsd::DATE_TIME.as_str() {
         return Some(match v {
             Value::Term(Term::Literal(l))
-                if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP =>
+                if (l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP)
+                    && temporal_of_lit(l).is_some() =>
             {
                 typed(l.value().to_string(), xsd::DATE_TIME)
             }
@@ -2057,18 +2447,31 @@ pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         if let Some(n) = src_num() {
             return Some(match n {
                 Num::Int(i) => Value::Num(Num::Int(i)),
-                Num::Dec(d) => Value::Num(Num::Int((d.mant / 10i128.pow(d.scale)) as i64)),
+                Num::Dec(d) => {
+                    // An unrepresentable power means |value| < 1, so
+                    // truncation is zero. Reject an out-of-range integer instead
+                    // of wrapping its i128 mantissa through an `as i64` cast.
+                    let integer = 10i128.checked_pow(d.scale).map_or(0, |p| d.mant / p);
+                    numeric_capacity::representable(true, i64::try_from(integer).ok())
+                        .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error)
+                },
                 Num::Float(_) | Num::Double(_) => {
                     let f = n.f64();
-                    if f.is_finite() && f.abs() < 9.2e18 {
+                    // i64::MAX rounds up to 2^63 in f64: use an exclusive
+                    // positive bound and inclusive negative bound.
+                    let lower = i64::MIN as f64;
+                    if (lower..-lower).contains(&f) {
                         Value::Num(Num::Int(f.trunc() as i64))
                     } else {
+                        let _ = numeric_capacity::representable::<()>(f.is_finite(), None);
                         Value::Error
                     }
                 }
             });
         }
-        return Some(src_str().and_then(|s| s.parse::<i64>().ok()).map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
+        return Some(src_str().and_then(|s| numeric_capacity::representable(
+            sparq_core::numeric_literal_valid(&s, xsd::INTEGER.as_str()), s.parse::<i64>().ok()))
+            .map(|i| Value::Num(Num::Int(i))).unwrap_or(Value::Error));
     }
     if is_dec {
         if let Some(b) = as_bool_val(v) {
@@ -2095,7 +2498,7 @@ pub(super) fn eval_cast(target: &str, v: &Value) -> Option<Value> {
         // fraction digit ("+33.3300" -> "33.33", "0" -> "0.0").
         return Some(
             src_str()
-                .and_then(|s| Dec::parse_lexical(&s))
+                .and_then(|s| numeric_capacity::decimal_cast(&s))
                 .map(|d| typed(dec_trim_min1(d), xsd::DECIMAL))
                 .unwrap_or(Value::Error),
         );
@@ -2157,6 +2560,23 @@ pub(crate) fn set_query_base(base: Option<&str>) -> QueryBaseGuard {
     QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(new))) }
 }
 
+/// The calling thread's query base, for re-installing on rayon workers with
+/// [`query_base_worker_install`] (a worker thread has its own, empty, `QUERY_BASE`).
+#[cfg_attr(not(feature = "parallel"), allow(dead_code))]
+pub(crate) fn query_base_snapshot() -> Option<oxiri::Iri<String>> {
+    QUERY_BASE.with(|b| b.borrow().clone())
+}
+
+/// Installs a [`query_base_snapshot`] on the current (worker) thread until the guard drops.
+/// Free when the query declares no BASE and the worker has none installed.
+#[cfg_attr(not(feature = "parallel"), allow(dead_code))]
+pub(crate) fn query_base_worker_install(base: &Option<oxiri::Iri<String>>) -> QueryBaseGuard {
+    if base.is_none() && QUERY_BASE.with(|b| b.borrow().is_none()) {
+        return QueryBaseGuard { previous: None };
+    }
+    QueryBaseGuard { previous: Some(QUERY_BASE.with(|b| b.replace(base.clone()))) }
+}
+
 /// Restores the enclosing query's base IRI on drop; see [`set_query_base`].
 #[must_use = "the query base is restored when the guard drops; bind it to a named variable"]
 pub(crate) struct QueryBaseGuard {
@@ -2200,7 +2620,7 @@ thread_local! {
 /// scope pinned in `eval_modified`, so every `NOW()` in one execution — across rows,
 /// rayon workers and `EXISTS` re-entry — formats the SAME value (SPARQL 1.1
 /// §17.4.5.1); an un-scoped call falls back to a fresh sample. sq-98w7z.1
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 pub(super) fn now_lexical() -> String {
     let secs = query_now::epoch_secs();
     let days = secs.div_euclid(86400);
@@ -2312,6 +2732,7 @@ pub(super) fn datetime_arg_tz(v: &Value) -> Option<String> {
         }
         _ => return None,
     };
+    temporal_of_lit(l)?; // Shared datatype validation includes dateTimeStamp's required timezone.
     let s = l.value();
     parse_datetime(s)?; // lexical shape check
     let (_, time) = s.split_once('T')?;
@@ -2393,11 +2814,24 @@ pub(super) fn encode_for_uri(s: &str) -> String {
 /// form. YEAR…MINUTES return xsd:integer; SECONDS returns xsd:decimal (per SPARQL),
 /// parsed from the lexical so fractional seconds stay exact.
 pub(super) fn datetime_field(v: &Value, idx: usize) -> Value {
-    let s = match value_str(v) {
-        Some(s) => s,
-        None => return Value::Error,
+    // Date accessors accept typed dateTime values, not strings or IRIs
+    // whose text happens to look like a timestamp.
+    let s = match v {
+        Value::Term(Term::Literal(l))
+            if l.datatype() == xsd::DATE_TIME || l.datatype() == xsd::DATE_TIME_STAMP => {
+                // `parse_datetime` below validates the lexical; this adds only the checks
+                // `temporal_of_lit` makes beyond it, without a second full parse.
+                if budget::check_temporal(l.value(), l.datatype().as_str()).is_err()
+                    || (l.datatype() == xsd::DATE_TIME_STAMP
+                        && !l.value().split_once('T').is_some_and(|(_, time)| time.contains(['Z', '+', '-'])))
+                {
+                    return Value::Error;
+                }
+                l.value()
+            },
+        _ => return Value::Error,
     };
-    let fields = match parse_datetime(&s) {
+    let fields = match parse_datetime(s) {
         Some(f) => f,
         None => return Value::Error,
     };
@@ -2407,8 +2841,22 @@ pub(super) fn datetime_field(v: &Value, idx: usize) -> Value {
             .split_once('T')
             .map(|(_, t)| if let Some(i) = t.find(['Z', '+', '-']) { &t[..i] } else { t })
             .and_then(|t| t.rsplit_once(':').map(|(_, sec)| sec));
-        return match lex.and_then(Dec::parse_lexical) {
-            Some(d) => Value::Num(Num::Dec(d)),
+        return match lex {
+            Some(lex) => match Dec::parse_lexical(lex) {
+                Some(d) => Value::Num(Num::Dec(d)),
+                None => {
+                    // Accessor output is lexical, not bounded-decimal arithmetic.
+                    // Preserve every validated fractional digit without f64/i128 rounding.
+                    let (whole, fraction) = lex.split_once('.').unwrap_or((lex, ""));
+                    let whole = whole.trim_start_matches('0');
+                    let fraction = fraction.trim_end_matches('0');
+                    Value::Term(Term::Literal(Literal::new_typed_literal(
+                        format!("{}.{}", if whole.is_empty() { "0" } else { whole },
+                            if fraction.is_empty() { "0" } else { fraction }),
+                        xsd::DECIMAL,
+                    )))
+                }
+            },
             None => Value::Error,
         };
     }
@@ -2419,20 +2867,41 @@ pub(super) fn datetime_field(v: &Value, idx: usize) -> Value {
 /// `[year, month, day, hours, minutes, seconds]`. Timezone is stripped (component accessors are on
 /// the local time per SPARQL); seconds keeps any fractional part.
 pub(super) fn parse_datetime(s: &str) -> Option<[f64; 6]> {
+    // One validation boundary also serves the graph's temporal cache and
+    // comparison fast paths. Component extraction below preserves local time
+    // and reads fixed-width digits the validator has already checked.
+    ExactTimeline::parse_datetime(s)?;
     let (date, time) = s.split_once('T')?;
     let neg = date.starts_with('-');
-    let mut d = date.strip_prefix('-').unwrap_or(date).split('-');
-    let year: f64 = d.next()?.parse().ok()?;
-    let year = if neg { -year } else { year };
-    let month: f64 = d.next()?.parse().ok()?;
-    let day: f64 = d.next()?.parse().ok()?;
+    let date = date.strip_prefix('-').unwrap_or(date);
+    let (year_lex, month_day) = date.split_at(date.len().checked_sub(6)?);
+    let two = |b: &[u8]| i64::from(b[0] - b'0') * 10 + i64::from(b[1] - b'0');
+    let (md, tb) = (month_day.as_bytes(), time.as_bytes());
+    let mut year: i64 = year_lex.parse().ok()?;
+    if neg {
+        year = -year;
+    }
+    let (mut month, mut day) = (two(&md[1..3]), two(&md[4..6]));
+    let (mut hours, minutes) = (two(&tb[0..2]), two(&tb[3..5]));
     // Strip the timezone (Z, or +hh:mm / -hh:mm after the seconds — the time part itself has no '-').
-    let time = if let Some(i) = time.find(['Z', '+', '-']) { &time[..i] } else { time };
-    let mut t = time.split(':');
-    let hours: f64 = t.next()?.parse().ok()?;
-    let minutes: f64 = t.next()?.parse().ok()?;
-    let seconds: f64 = t.next()?.parse().ok()?;
-    Some([year, month, day, hours, minutes, seconds])
+    let seconds_lex = &time[6..time.find(['Z', '+', '-']).unwrap_or(time.len())];
+    let seconds: f64 = seconds_lex.parse().ok()?;
+    // XPath component extraction uses the value: 24:00 is next-day midnight.
+    // Reuse the shared calendar validator for month length and leap years.
+    if hours == 24 {
+        hours = 0;
+        day += 1;
+        let next_date = format!("{}{}-{:02}-{:02}", if neg { "-" } else { "" }, year_lex, month, day);
+        if sparq_core::temporal::parse_civil_date(&next_date).is_none() {
+            day = 1;
+            month += 1;
+            if month == 13 {
+                month = 1;
+                year += 1; // XSD 1.1 counts through year zero.
+            }
+        }
+    }
+    Some([year as f64, month as f64, day as f64, hours as f64, minutes as f64, seconds])
 }
 
 pub(super) fn value_str(v: &Value) -> Option<String> {
@@ -2493,6 +2962,19 @@ pub(super) fn value_to_id(graph: &Graph, local: &mut LocalVocab, v: &Value) -> I
         }
     };
     local.intern(term)
+}
+
+/// `sameTerm` over evaluated operands. Computed numerics and booleans compare as the
+/// literal a BIND of them would produce, so `sameTerm(1 + 0, 1)` is true; an unbound
+/// or error operand is a type error rather than `false`.
+pub(super) fn same_term_value(x: &Value, y: &Value) -> Value {
+    if let (Value::Term(p), Value::Term(q)) = (x, y) {
+        return Value::Bool(p == q);
+    }
+    match (value_as_term(x), value_as_term(y)) {
+        (Some(p), Some(q)) => Value::Bool(p == q),
+        _ => Value::Error,
+    }
 }
 
 /// A computed value as a concrete RDF term (`None` for unbound / type error).

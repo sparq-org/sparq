@@ -1,16 +1,17 @@
 ---
 name: rdf-wrapper
-description: "Traverse sparq RDF graphs as native Rust objects with the opt-in sparq-wrapper crate: bind a focus Term to an owned or borrowed Store, follow outgoing/incoming NamedNode predicates with iterators, unwrap values, convert typed literals to str/i64/bool, mutate owned stores, and optionally use the unlanded distinct-result, typed-cardinality, literal-codec, typed-focus, and effective-change observation proposals. Use when Rust code should work with focus objects instead of raw triples or dictionary IDs; SHACL-to-Rust code generation is a later surface."
+description: "Traverse sparq RDF graphs as native Rust objects with the opt-in sparq-wrapper crate: bind a focus Term to an owned or borrowed Store, follow outgoing/incoming NamedNode predicates with iterators, unwrap values, convert typed literals to str/i64/bool, mutate owned stores, and optionally use the unlanded distinct-result, typed-cardinality, literal-codec, typed-focus, effective-change observation, async store/node/event, and graph-scope (plus projected event) proposals. Use when Rust code should work with focus objects instead of raw triples or dictionary IDs; SHACL-to-Rust code generation is a later surface."
 ---
 
 # Use sparq-wrapper
 
-Add the opt-in crate explicitly:
+Add the opt-in crate explicitly. It is `publish = false` (not on crates.io), so
+take it and `sparq-core` from the same git source to share one `Graph` type:
 
 ```toml
 [dependencies]
-sparq-core = "0.1"
-sparq-wrapper = "0.1"
+sparq-core = { git = "https://github.com/sparq-org/sparq" }
+sparq-wrapper = { git = "https://github.com/sparq-org/sparq" }
 oxrdf = "0.3"
 ```
 
@@ -48,7 +49,7 @@ Choose ownership deliberately:
   `insert`/`remove`. Nodes borrow the store, so stop using them before a write
   and reacquire them afterwards.
 - Traversal addresses the default graph in M1. Reach named graphs through the
-  raw graph until a scoped-dataset surface lands.
+  opt-in `proposed-graph-scope` `GraphScope` (below) or the raw graph.
 
 Typed accessors are strict:
 
@@ -66,7 +67,7 @@ Eleven explicitly experimental, default-off features track proposals that
 remain unlanded in rdfjs/wrapper:
 
 ```toml
-sparq-wrapper = { version = "0.1", features = [
+sparq-wrapper = { git = "https://github.com/sparq-org/sparq", features = [
   "proposed-async-events",
   "proposed-async-node",
   "proposed-async-store",
@@ -81,13 +82,13 @@ sparq-wrapper = { version = "0.1", features = [
 ] }
 ```
 
-The async events, async node, and graph-scope events features currently
-expose reserved, empty modules; enabling them adds no API.
-Every other proposal feature is implemented. `proposed-distinct` is exposed as
+Every proposal feature is implemented. `proposed-distinct` is exposed as
 inherent `Dataset` methods in the crate root rather than through a `proposed::`
-module. See the
-[per-feature proposal status pages](references/README.md) for the
-implemented and reserved feature inventory. <!-- [SONNET-4.6] sq-1rg2q.1 -->
+module. The async node and async events features imply `proposed-async-store`;
+graph-scope events implies `proposed-graph-scope`; the event features reuse
+`proposed-observe`'s `ChangeEvent` / `SubscriptionId`. See the
+[per-feature proposal status pages](references/README.md) for the feature
+inventory. <!-- sq-1rg2q.7/.9/.10 -->
 
 `proposed-async-store` adds `sparq_wrapper::proposed::async_store` — the
 wrapper shape over a store whose reads are not synchronous (an HTTP endpoint, a
@@ -117,8 +118,53 @@ async ecosystem forwards to its own stream in one line. A `!Unpin` backend
 stream should be exposed as `Pin<Box<S>>`, which implements `TermStream`.
 `add`/`has`/`delete` validate the subject position synchronously (a literal
 subject is rejected before the backend is asked to do anything) and return the
-backend future, so the call site reads `store.add(s, p, o)?.await?`.
-<!-- [SONNET-4.6] sq-1rg2q.8 -->
+backend future, so the call site reads `store.add(s, p, o)?.await?`. `add` /
+`delete` resolve to whether that write changed the store; a backend must decide
+this atomically with the write, not from an earlier `has`.
+<!-- sq-1rg2q.8 -->
+
+`proposed-async-node` adds `sparq_wrapper::proposed::async_node`, the async
+counterpart of the mapped cardinality reads (rdfjs/wrapper draft PR #98).
+`required(&node, &p, map).await` and `optional(...)` pull at most two streamed
+values — a second value already proves the violation, so the rest of a remote
+result set is dropped, and `CardinalityError::found` is then the lower bound
+`2`. `many` maps every streamed value. Mappers receive an `AsyncNode`, so term
+identity stays synchronous and the mapped node can keep traversing.
+`live_set(&store, focus, p, decode, encode)` returns an `AsyncLiveSet` whose
+`values` / `contains` / `insert` / `remove` await the backend on every call;
+`insert` / `remove` return `true` only for an effective change, as reported by
+the backend's atomic write, so the result holds against other writers. Errors are `AsyncMapError`
+(`Store`, `Cardinality`, `Conversion`). <!-- sq-1rg2q.9 -->
+
+`proposed-async-events` adds `proposed::async_events::AsyncObservableStore`
+(rdfjs/wrapper draft PR #99). `subscribe(|event| async move { .. })` registers
+a listener returning a future; an effective `add` / `delete` awaits each
+listener in subscription order and resolves only after the last one finishes.
+The change report comes from the backend write itself, so duplicate adds and
+absent deletes notify nobody even when other wrappers or clients share the
+backend and win a race to the same change. Writes
+made through `store()` or the backend bypass listeners. Listener futures are
+not `Send`, matching the executor-free async surface.
+<!-- sq-1rg2q.10 -->
+
+```rust
+# async fn demo<B: sparq_wrapper::proposed::async_store::AsyncStoreBackend>(backend: B)
+#     -> Result<(), Box<dyn std::error::Error>> {
+use oxrdf::NamedNode;
+use sparq_wrapper::proposed::async_events::AsyncObservableStore;
+
+let mut store = AsyncObservableStore::new(backend);
+store.subscribe(|event| async move {
+    println!("{:?} {}", event.kind, event.object); // awaited before add resolves
+});
+let alice = NamedNode::new("http://example.org/alice")?;
+let knows = NamedNode::new("http://example.org/knows")?;
+let bob = NamedNode::new("http://example.org/bob")?;
+assert!(store.add(alice.clone(), knows.clone(), bob.clone()).await?);
+assert!(!store.add(alice, knows, bob).await?); // duplicate: no listener runs
+# Ok(())
+# }
+```
 
 `proposed-graph-scope` adds a read-many/write-one `GraphScope` based on
 rdfjs/wrapper draft PR #95. Its reads are the deduplicated projection of
@@ -126,7 +172,9 @@ exactly the named graphs supplied to `GraphScope::new`; call
 `with_default_graph()` to include the default graph explicitly. Scoped nodes
 retain the projection for chained `out`/`in` traversal, while node- or
 scope-level `insert`/`remove` operations affect only the configured named write
-graph and leave copies elsewhere untouched. <!-- [GPT-5.6] sq-1rg2q.6 -->
+graph and leave copies elsewhere untouched. The write graph must be an IRI or a
+blank node; otherwise writes fail with `GraphScopeError::InvalidGraphName`
+before any graph is created. <!-- sq-1rg2q.6 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
@@ -150,6 +198,42 @@ alice.insert(tag, Literal::new_simple_literal("rust"))?; // writes only g1
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+`GraphScope::projection()` returns the scope's read `Projection` (also built
+directly with `Projection::new(graphs).with_default_graph()`).
+`proposed-graph-scope-events` adds
+`proposed::graph_scope_events::ObservableDataset` (rdfjs/wrapper draft PR #96):
+it owns a dataset, mutates quads with `insert(graph, s, p, o)` /
+`remove(graph, s, p, o)` (`None` is the default graph), and
+`subscribe(projection, |event, projection, committed| ..)` reports the
+projected union change — an add only for the first in-scope copy of a triple,
+a delete only for the last, nothing for graphs outside the projection.
+Removing from an absent named graph is a no-op that does not create it. A
+named graph must be an IRI or a blank node; any other name fails with
+`ObserveError::InvalidGraphName` before a graph is created.
+<!-- sq-1rg2q.7 -->
+
+```rust
+use oxrdf::{Literal, NamedNode, Term};
+use sparq_wrapper::proposed::graph_scope::Projection;
+use sparq_wrapper::proposed::graph_scope_events::ObservableDataset;
+
+let g1 = Term::NamedNode(NamedNode::new("http://example.org/g1")?);
+let g2 = Term::NamedNode(NamedNode::new("http://example.org/g2")?);
+let alice = NamedNode::new("http://example.org/alice")?;
+let tag = NamedNode::new("http://example.org/tag")?;
+let rdf = Literal::new_simple_literal("rdf");
+
+let mut dataset = ObservableDataset::new();
+dataset.subscribe(Projection::new([g1.clone(), g2.clone()]), |event, _, _| {
+    println!("{:?}", event.kind); // fires once on the add, once on the delete
+});
+dataset.insert(Some(&g1), alice.clone(), tag.clone(), rdf.clone())?; // Add
+dataset.insert(Some(&g2), alice.clone(), tag.clone(), rdf.clone())?; // silent
+dataset.remove(Some(&g1), alice.clone(), tag.clone(), rdf.clone())?; // silent
+dataset.remove(Some(&g2), alice, tag, rdf)?; // Delete
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
 `proposed-distinct` adds `Dataset::subjects_of` / `objects_of` and yields each
 term once ([issue #25](https://github.com/rdfjs/wrapper/issues/25),
 [draft PR #88](https://github.com/rdfjs/wrapper/pull/88)).
@@ -164,7 +248,7 @@ Use the mapped reads when a property has an explicit RDF cardinality. The
 required and optional variants wrap M1 `CardinalityError` data in
 `CardinalityViewError`; `many` returns a `Vec`, preserving every distinct RDF
 term even when two terms map to equal Rust values. A mapper error is returned
-without changing the store. <!-- [GPT-5.6] sq-1rg2q.3 -->
+without changing the store. <!-- sq-1rg2q.3 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
@@ -216,7 +300,7 @@ and #94. Dataset callbacks receive a typed `ChangeEvent`; `LiveValues::subscribe
 filters by subject and predicate and maps the changed RDF object into an
 application `ValueChange<T>`. Duplicate adds and absent deletes stay silent,
 and callbacks receive the committed graph only after the mutable graph borrow
-has ended. <!-- [GPT-5.6] sq-1rg2q.5 -->
+has ended. <!-- sq-1rg2q.5 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode};
@@ -245,15 +329,16 @@ assert!(store.unsubscribe(subscription));
 `decode_i128` round-trip the full Rust `i128` range as exact `xsd:integer`
 literals. The decoder accepts only that exact datatype and returns
 `CodecError::InvalidInteger` for malformed or out-of-range lexical forms.
-Because `xsd:integer` fixes XML Schema's `whiteSpace` facet to `collapse`,
-boundary whitespace is normalized away before the lexical-to-value mapping, so
-`" 7"^^xsd:integer` decodes as `7` — matching how the query engine values a
-padded numeric lexical — while interior whitespace such as `"+ 1"` is rejected.
+The proposed wrapper codec currently normalizes boundary XML whitespace:
+`" 7"^^xsd:integer` decodes as `7`, while interior whitespace such as `"+ 1"`
+is rejected. This is the codec's existing behavior, distinct from the
+query engine's strict raw RDF lexical validation. The engine normalizes only
+string-sourced constructors; this change does not alter the proposed codec.
 `encode_lang_string` validates a BCP47 language tag and produces an
 `rdf:langString`; `decode_lang_string` returns an owned `LangString` containing
 both `value` and `language`, so a round trip cannot discard the tag. Datatype,
 integer, language-tag, and missing-language failures are represented by the
-typed `CodecError` variants. <!-- [GPT-5.6] sq-1rg2q.4 -->
+typed `CodecError` variants. <!-- sq-1rg2q.4 -->
 
 ```rust
 use oxrdf::Literal;
@@ -284,7 +369,7 @@ Its `NodeFactory` binds one borrowed graph, store, or dataset view and can wrap
 many terms without cloning the graph. Kind-specific constructors return a
 `TypedNode` whose available traversals reflect the term's legal positions;
 `NodeFactory::term` instead returns `AnyNode`, whose enum variant preserves the
-concrete focus kind at run time. <!-- [GPT-5.6] sq-1rg2q.2 -->
+concrete focus kind at run time. <!-- sq-1rg2q.2 -->
 
 ```rust
 use oxrdf::{Literal, NamedNode, Term};
@@ -330,7 +415,7 @@ ancestors of the node being written, so a diamond is expanded once per path;
 `RepeatedFocus::OnRepeat` references every node expanded earlier in the
 document, so each node is expanded at most once. `with_max_depth` bounds
 recursion depth (default `DEFAULT_MAX_DEPTH`), truncating to the same reference
-form. <!-- [SONNET-4.6] sq-1rg2q.11 -->
+form. <!-- sq-1rg2q.11 -->
 
 Output is deterministic — predicates in lexicographic IRI order, each
 predicate's objects in lexicographic N-Triples order — so projecting the same

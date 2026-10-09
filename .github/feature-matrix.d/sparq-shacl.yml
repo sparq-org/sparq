@@ -4,20 +4,20 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py
 # (the `setup` job emits the combined matrix as JSON consumed via fromJSON). Adding a
 # leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs for
-# DIFFERENT crates never textually conflict (bead sq-ibrze). [OPUS-4.8]
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# DIFFERENT crates never textually conflict (bead sq-ibrze).
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 # Fields: name (required -> check-run name), crate (required), features (required,
 # non-empty comma list), test (bool — run `cargo test` for the leg).
 
-# [FABLE-5] sq-uz0 (#3405): shapes-graph assembly — the `imports` module
+# sq-uz0 (#3405): shapes-graph assembly — the `imports` module
 # (sparq-shacl/src/imports.rs: sh:shapesGraph discovery + transitive owl:imports
 # closure, W3C SHACL §§3.1/3.3 (shapes-graph)) and its acceptance tests (tests/imports.rs, whole-file
 # `#[cfg(feature = "imports")]`) are entirely feature-gated, so without this leg
@@ -28,7 +28,7 @@
   features: "imports"
   test: true
 
-# [OPUS-4.8] sq-wuft: SHACL Advanced Features (SHACL-AF) rules — the `sh:rule`
+# sq-wuft: SHACL Advanced Features (SHACL-AF) rules — the `sh:rule`
 # module (sparq-shacl/src/rules.rs + the gated arms of eval.rs/model.rs/lib.rs) is
 # entirely `#[cfg(feature = "shacl-af")]`, so the default build/clippy/test never
 # compiled it. This leg compiles it, runs `clippy --all-targets -D warnings` with the
@@ -40,7 +40,7 @@
   features: "shacl-af"
   test: true
 
-# [FABLE-5] sq-tonhr.3: SHACL Compact Syntax (SCS) — the `scs` parser module
+# sq-tonhr.3: SHACL Compact Syntax (SCS) — the `scs` parser module
 # (sparq-shacl/src/scs.rs) and its tests (`tests/scs_roundtrip.rs` +
 # `tests/scs_error_paths.rs`, both whole-file `#[cfg(feature = "scs")]`) are
 # entirely feature-gated, so before this leg they ran in NO gating CI (they were

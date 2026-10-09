@@ -13,6 +13,10 @@ cosine-identical so their scores are directly comparable. Embeddings are produce
 **out-of-process** (you supply the `Embedder`); the crate never runs a model and the
 default engine build does not even compile it.
 
+Query rewrites and pre-binding retain VERSION announcements and their
+[version-pinned EBV rules](../sparql-query/ebv-dialects.md). Unknown labels follow
+the surface's existing query/ill-formed-input error policy.
+
 ## Quickstart
 
 `crates/sparq-vectors/Cargo.toml` (it consumes `sparq-core`; no features needed for the
@@ -106,7 +110,7 @@ store.fingerprint() -> Option<Fingerprint>;  store.check_graph(&Graph) -> Result
 //   (Graph::open -- mmaps the FROZEN id order) to resolve query terms; NEVER re-parse the source RDF (Graph::load_str etc.).
 //   (Graph::save/open need sparq-core's `mmap` feature.) Round-trip vs re-parse trap pinned in tests/staleness_contract.rs.
 
-// --- embedding provenance (.spqv v3) (src/spqv_provenance.rs) --- [FABLE-5] sq-lhcot.1 (review gap 1; spec sq-rvgr2.4)
+// --- embedding provenance (.spqv v3) (src/spqv_provenance.rs) --- sq-lhcot.1 (review gap 1; spec sq-rvgr2.4)
 // The v3 header records the EMBEDDING PIPELINE identity so an INCOMPATIBLE query embedder is REJECTED (not silently-wrong
 // neighbours). v3 READ path always compiled; the v3 WRITE path is behind the opt-in `spqv-provenance` feature (LEAN, no new dep).
 EmbeddingProvenance { model_id, model_version, content_version, metric: EmbeddingMetric, normalization: Normalization,
@@ -114,7 +118,7 @@ EmbeddingProvenance { model_id, model_version, content_version, metric: Embeddin
 EmbeddingProvenance::new(model_id, EmbeddingMetric, Normalization)   // other axes empty; set fields directly (NOT Default — metric/norm load-bearing)
 EmbeddingMetric::{Cosine, Dot, Euclidean};  Normalization::{None, L2}   // typed axes; from_tag() fail-closed on an unknown tag
 prov.compatible_with(&query_prov) -> Result<(), String>   // compatible IFF every DEFINED axis equal; reserved area EXCLUDED (KERN boundary)
-prov.to_rdf(store: NamedNodeRef, dim) -> Vec<Triple>   // [SONNET-4.6] sq-tb9p0 VG-PROV-5: the record as RDF in prov_vocab
+prov.to_rdf(store: NamedNodeRef, dim) -> Vec<Triple>   // sq-tb9p0 VG-PROV-5: the record as RDF in prov_vocab
 //   (spqvp:) terms — model/metric/normalization/dimension always; version/verbalization axes only when non-empty
 // KERN BOUNDARY: `reserved` is a versioned OPAQUE TLV — extension fields RESERVED pending the cross-implementation profile (#1746).
 //   NO encoder-version-hash / codebook-hash / D semantics defined; it round-trips byte-for-byte and does NOT gate compatibility.
@@ -129,7 +133,7 @@ LegacyMode::{Reject, Allow}   // Reject (DEFAULT, fail-closed): a legacy no-prov
 //   RDF vocab: prov_vocab::{SPQVP_NS, MODEL, MODEL_VERSION, CONTENT_VERSION, METRIC, NORMALIZATION, DIMENSION, VERBALIZATION} (http://sparq.dev/spqv-prov#)
 //   `compact` (delta feature) carries the provenance forward (a v3 store stays v3); SPQV_VERSION_V3 = 3. NEGATIVE tests: tests/spqv_v3_provenance.rs.
 
-// --- incremental add/remove/update (src/delta.rs) --- feature = "delta" ONLY; LEAN, no new dep [OPUS-4.8] sq-pi44
+// --- incremental add/remove/update (src/delta.rs) --- feature = "delta" ONLY; LEAN, no new dep sq-pi44
 // In-RAM DELTA SIDECAR over the immutable base: append map + tombstone set. No file rebuild; a single graph change no
 // longer forces a full re-embed. get/iter/len (hence search) transparently union base+delta and honour tombstones.
 store.add(id, &[f32]) -> Result<(), String>      // NEW id; errs if id already present (use update) or on the put validation
@@ -138,7 +142,7 @@ store.update(id, &[f32]) -> Result<(), String>   // replace an EXISTING id's vec
 store.compact(out_path, &Graph) -> Result<VectorStore, String>  // fold delta into a FRESH base == a from-scratch rebuild
 store.has_delta() -> bool;  store.delta() -> Option<&VectorDelta>;  store.take_delta() -> Option<VectorDelta>
 store.apply_delta(VectorDelta) -> Result<(), String>  // GENERATION TIE: rejects a delta whose fingerprint != this base's
-// --- PERSISTED on-disk delta sidecar (.spqd) --- [OPUS-4.8] sq-7e50; same `delta` feature, no new dep
+// --- PERSISTED on-disk delta sidecar (.spqd) --- sq-7e50; same `delta` feature, no new dep
 store.save_delta() -> Result<PathBuf, String>          // persist the in-RAM delta to a sibling .spqd (tmp+fsync+rename)
 store.save_delta_to(path) -> Result<(), String>        // …to an explicit path; an unstarted delta persists empty+gen-bound
 VectorStore::open_with_delta(base) -> Result<VectorStore, String>   // open base mmap + replay the persisted sibling .spqd
@@ -152,7 +156,7 @@ VectorStore::sibling_delta_path(&Path) -> PathBuf;  VectorStore::has_persisted_d
 
 // --- search (src/ann.rs) --- all return cosine in [-1,1], best first; zero query -> empty
 nearest_exact(&VectorStore, query: &[f32], k) -> Vec<(Id, f32)>                 // ground-truth full scan; ascending-id ties
-nearest_exact_tiebreak(&VectorStore, &Graph, query: &[f32], k, exclude: Option<Id>) -> Result<Vec<(Id, f32)>, String>  // [SONNET-4.6] sq-tb9p0
+nearest_exact_tiebreak(&VectorStore, &Graph, query: &[f32], k, exclude: Option<Id>) -> Result<Vec<(Id, f32)>, String>  // sq-tb9p0
 //   VG-TIE-1 (spec site/specs/sparql-vector-genai.typ): membership at a BOUNDARY score tie is decided by ascending
 //   Unicode-codepoint order of the candidates' canonical N-Triples serialisations (reproducible ACROSS implementations,
 //   unlike id order); keys computed only for the boundary tie group. FAIL-CLOSED domain guard: a candidate containing a
@@ -165,20 +169,20 @@ nearest_exact_with_meta(&VectorStore, query: &[f32], k) -> Vec<(Id, f32, Option<
 nearest_term_exact(&VectorStore, &Graph, &Term, k) -> Vec<(Term, f32)>          // UNCHECKED: stale store -> silently wrong
 nearest_term_exact_checked(&VectorStore, &Graph, &Term, k) -> Result<Vec<(Term, f32)>, String>  // errs on stale store
 cosine(a: &[f32], b: &[f32]) -> f32
-// HNSW = the APPROXIMATE backend: feature = "approx-ann" ONLY [OPUS-4.8] sq-ip3a (the ONLY thing
+// HNSW = the APPROXIMATE backend: feature = "approx-ann" ONLY sq-ip3a (the ONLY thing
 // pulling instant-distance; default build has NO third-party ANN dep). recall < 1.0 — NOT exact.
 VectorIndex::build(&store) / ::build_with(&store, HnswConfig{ef_search, ef_construction, seed})
-// [OPUS-4.8] sq-ose80: HnswConfig::fast_build() (efc=40, ~3x faster build) / ::high_recall() (efc=200) — pure config, default unchanged, recall floor-preserved
+// sq-ose80: HnswConfig::fast_build() (efc=40, ~3x faster build) / ::high_recall() (efc=200) — pure config, default unchanged, recall floor-preserved
 HnswConfig::default() / ::fast_build() / ::high_recall()
 impl VectorIndex { fn nearest(&self, query: &[f32], k) -> Vec<(Id, f32)>;
-                   fn nearest_with_ef(&self, query: &[f32], k, ef_search: usize) -> Vec<(Id, f32)>;  // [SONNET-4.6] sq-jo6ty: per-query ef_search sweep (Pareto API)
+                   fn nearest_with_ef(&self, query: &[f32], k, ef_search: usize) -> Vec<(Id, f32)>;  // sq-jo6ty: per-query ef_search sweep (Pareto API)
                    // nearest_with_ef: when ef==build_ef_search uses the primary map (zero overhead); other ef values
                    // trigger a lazy one-time build of a secondary map (same ef_construction/seed/points, only ef_search
                    // differs) cached by ef level — amortised for sweeps. Monotone-recall: higher ef >= lower ef recall.
                    fn nearest_term(&self, &Term, &Graph, &VectorStore, k) -> Vec<(Term, f32)>;
                    fn nearest_term_checked(..) -> Result<Vec<(Term, f32)>, String> }
 
-// --- recall-gated concept ANN + dedup (src/dedup.rs) --- feature = "approx-ann" ONLY [FABLE-5] #2251
+// --- recall-gated concept ANN + dedup (src/dedup.rs) --- feature = "approx-ann" ONLY #2251
 // HNSW over RAW (id, vector) pairs (no VectorStore needed) + type-level dedup whose merges are
 // emitted ONLY after measured ANN recall vs an exact O(m^2) ground truth clears a pre-registered
 // gate (fail-closed: below the gate dedup() is Err and NO merge is computed). Recipe 22.
@@ -195,16 +199,16 @@ DedupReport { recall: f64, merges: Vec<(Id /*dup*/, Id /*canonical=smallest*/)>,
 // --- persistent on-disk ANN (src/diskann.rs) ---
 DiskAnnIndex::build(&VectorStore, path) / ::build_with(&store, path, VamanaConfig{degree, build_beam, search_beam, alpha, seed})
 DiskAnnIndex::build_for(&store, path, &Graph) / ::build_with_for(&store, path, cfg, &Graph)  // embeds the graph fingerprint
-DiskAnnIndex::build_with_pq(&store, path, cfg, PqConfig) -> Result<..>          // [OPUS-4.8] sq-qamd: + a PQ candidate cache (search on codes, re-rank off mmap); persisted as a trailing .spqg section (encoding tag 1)
+DiskAnnIndex::build_with_pq(&store, path, cfg, PqConfig) -> Result<..>          // sq-qamd: + a PQ candidate cache (search on codes, re-rank off mmap); persisted as a trailing .spqg section (encoding tag 1)
 DiskAnnIndex::open(path) -> Result<DiskAnnIndex, String>                        // mmap + header check, NO rebuild (reloads any PQ section)
-DiskAnnIndex::open_from_bytes(bytes: Vec<u8>) -> Result<DiskAnnIndex, String>   // [FABLE-5] sq-98c: filesystem-less/wasm — identical validation, result-identical search
+DiskAnnIndex::open_from_bytes(bytes: Vec<u8>) -> Result<DiskAnnIndex, String>   // sq-98c: filesystem-less/wasm — identical validation, result-identical search
 impl DiskAnnIndex { fn nearest(&self, &[f32], k) -> Vec<(Id, f32)>; fn nearest_term(..) -> Vec<(Term, f32)>; fn len()/dim();
-                    fn has_pq_cache() -> bool;                                  // [OPUS-4.8] sq-qamd: PQ-guided search when true
+                    fn has_pq_cache() -> bool;                                  // sq-qamd: PQ-guided search when true
                     fn fingerprint() -> Option<Fingerprint>; fn check_graph(&store, &Graph) -> Result<(), String>;
                     fn nearest_term_checked(&Term, &Graph, &store, k) -> Result<Vec<(Term, f32)>, String> }
 sibling_graph_path(&Path) -> PathBuf                                            // foo.spqv -> foo.spqg
 
-// --- predicate-constrained (filtered) ANN (src/filter.rs) --- feature = "filtered-ann" ONLY; LEAN, no new dep [OPUS-4.8] sq-1wc1
+// --- predicate-constrained (filtered) ANN (src/filter.rs) --- feature = "filtered-ann" ONLY; LEAN, no new dep sq-1wc1
 IdMask::new() / ::from_ids(impl IntoIterator<Item=Id>) / FromIterator<Id>   // the BGP-selected "visit mask" of permitted dict-ids
 impl IdMask { fn insert(&mut self, Id) -> &mut Self; fn contains(Id)->bool; fn len()/is_empty(); fn iter() -> impl Iterator<Item=Id> }
 nearest_exact_filtered(&VectorStore, query: &[f32], &IdMask, k) -> Vec<(Id, f32)>   // EXACT ground truth = pre-filter strategy (scan only the mask)
@@ -215,7 +219,7 @@ impl DiskAnnIndex { fn nearest_filtered(&self, &[f32], &IdMask, &VectorStore, k)
 impl VectorIndex  { fn nearest_filtered(&self, &[f32], &IdMask, &VectorStore, k) -> Vec<(Id, f32)> }   // HNSW: exact pre-filter only (instant-distance adjacency not exposed)
 // empty mask -> no results; full mask -> equals the unfiltered search; every returned id is guaranteed in the mask
 
-// --- pre-filter vs post-filter cost model (src/cost.rs) --- feature = "filtered-ann" ONLY [OPUS-4.8] sq-7hx6 (subsumes sq-ic0n)
+// --- pre-filter vs post-filter cost model (src/cost.rs) --- feature = "filtered-ann" ONLY sq-7hx6 (subsumes sq-ic0n)
 CostModel { scatter_penalty: f32 /*2.0*/ }                                       // scattered masked-row cost vs sequential full-scan row; >= 1.0
 impl CostModel { fn decide(mask_len, store_len, k) -> CostEstimate }             // pre-filter iff mask_len * scatter_penalty <= store_len
 Strategy::{PreFilter, PostFilter}                                                // the chosen branch (assert the decision)
@@ -223,13 +227,13 @@ CostEstimate { mask_len, store_len, k, prefilter_cost, postfilter_cost, strategy
 postfilter_exact(&VectorStore, query: &[f32], &IdMask, k) -> Vec<(Id, f32)>      // scan WHOLE store, drop non-masked -> IDENTICAL to nearest_exact_filtered (no over-fetch boundary: full ranking)
 nearest_filtered_costed(&VectorStore, &[f32], &IdMask, k, &CostModel) -> (Vec<(Id, f32)>, CostEstimate)   // decide + run chosen branch; ascending-id ties
 nearest_filtered_costed_tiebreak(&VectorStore, &Graph, &[f32], &IdMask, k, exclude: Option<Id>, &CostModel) -> Result<(Vec<(Id, f32)>, CostEstimate), String>
-//   [SONNET-4.6] the same decide+run with VG-TIE-1 boundary-tie membership over the mask-ADMITTED pool, `exclude` (seed)
+//   the same decide+run with VG-TIE-1 boundary-tie membership over the mask-ADMITTED pool, `exclude` (seed)
 //   dropped BEFORE the boundary is determined — what the filtered `vec:` rewrite path calls (keeps VG-FILT-2 exact);
 //   Err = the same fail-closed blank-node domain guard as nearest_exact_tiebreak
 overfetch_target(k, mask_len, store_len) -> usize                               // ceil(k/selectivity) clamped; the FIRST fetch size for the iterative over-fetch path below (exact backend never under-fills, so it's a no-op there)
 // HEURISTIC over an ESTIMATE, not optimal: scatter_penalty is one modelled constant; pre/post return the IDENTICAL top-k either way (answer-safe)
 
-// --- pluggable ANN backend + iterative over-fetch FILTERED path (src/backend.rs) --- feature = "filtered-ann" [OPUS-4.8] sq-ip3a (follow-up to sq-7hx6)
+// --- pluggable ANN backend + iterative over-fetch FILTERED path (src/backend.rs) --- feature = "filtered-ann" sq-ip3a (follow-up to sq-7hx6)
 trait AnnBackend { fn candidates(&self, query: &[f32], fetch) -> Vec<(Id, f32)>; fn len()/is_empty(); }  // ranked top-`fetch`, best-first, prefix-stable
 ExactBackend::new(&VectorStore)                                                  // answer-EXACT (full scan); fetch>=len => complete ranking => recall 1.0; NO third-party dep
 ApproxBackend::new(&DiskAnnIndex)                                                // feature = "approx-ann" ALSO; APPROXIMATE (bounded beam) => recall < 1.0 — NOT exact
@@ -241,22 +245,22 @@ nearest_filtered_overfetch_default(&backend, query, &IdMask, k) -> Vec<(Id, f32)
 // --- quantization for large stores (src/quant.rs) ---
 ScalarQuantizer::fit(dim, vectors: impl IntoIterator<Item=&[f32]>) -> Result<ScalarQuantizer, String>   // f32->u8, 4x
 ProductQuantizer::fit(dim, vectors, PqConfig{m, k, iters, seed}) -> Result<ProductQuantizer, String>    // M bytes/vec, 8-32x
-ProductQuantizer::to_bytes() -> Vec<u8> / ::from_bytes(&[u8]) -> Result<ProductQuantizer, String>       // [OPUS-4.8] sq-qamd: persist/reload the codebook (e.g. in a .spqg PQ section)
+ProductQuantizer::to_bytes() -> Vec<u8> / ::from_bytes(&[u8]) -> Result<ProductQuantizer, String>       // sq-qamd: persist/reload the codebook (e.g. in a .spqg PQ section)
 impl {Scalar,Product}Quantizer { fn encode(&self, &[f32]) -> Vec<u8>; fn reconstruct(&self, &[u8]) -> Vec<f32>;
                                   fn encode_store(&self, &VectorStore) -> Result<EncodedStore, String> }
 DistanceTable::new(&ProductQuantizer, query: &[f32]);  fn distance(&self, code)->f32; fn cosine(&self, code)->f32  // ADC
 EncodedStore::rank_pq(&self, &DistanceTable, k) -> Vec<(Id, f32)>;  cosine_from_sq_dist(sq: f32) -> f32
-EncodedStore::from_parts(ids, codes, stride) -> Result<EncodedStore, String> / ::codes() -> &[u8]       // [OPUS-4.8] sq-qamd: reload a persisted candidate cache
+EncodedStore::from_parts(ids, codes, stride) -> Result<EncodedStore, String> / ::codes() -> &[u8]       // sq-qamd: reload a persisted candidate cache
 
 // --- hybrid fusion (src/fuse.rs) --- lists are (item, f64) best-first; deterministic ties
 fuse_rrf(lists: &[&[(T, f64)]], k: f64 /*RRF_K=60.0*/, top_k) -> Vec<(T, f64)>
 fuse_rrf_weighted(lists: &[(&[(T, f64)], f64)], k, top_k) -> Vec<(T, f64)>      // weight 0.0 mutes a list entirely
 fuse_scores(a: &[(T,f64)], b: &[(T,f64)], alpha /*1.0=a only*/, top_k) -> Vec<(T, f64)>
 // one-call hybrid: run N retriever closures on one query, fuse by item via RRF, dedup
-hybrid_search(query: &Q, top_k, k /*RRF_K*/, &mut [Retriever<'_, Q, T>]) -> Vec<(T, f64)>   // [OPUS-4.8] lifetime on alias use
+hybrid_search(query: &Q, top_k, k /*RRF_K*/, &mut [Retriever<'_, Q, T>]) -> Vec<(T, f64)>   // lifetime on alias use
 //   Retriever<'r, Q, T> = &'r mut dyn FnMut(&Q) -> Vec<(T, f64)>  (e.g. nearest_term / most_similar closures)
 
-// --- `vec:` magic predicate (src/rewrite.rs) --- feature = "vec-predicate" ONLY; pulls sparq-engine [OPUS-4.8] sq-k6ex
+// --- `vec:` magic predicate (src/rewrite.rs) --- feature = "vec-predicate" ONLY; pulls sparq-engine sq-k6ex
 query_vec(&Graph, sparql: &str, &VectorStore) -> Result<QueryResult, String>      // parse + rewrite + evaluate
 query_vec_with_budget(&Graph, &str, &VectorStore, &QueryBudget) -> Result<QueryResult, String>
 prepare_vec(&Graph, &str, &VectorStore) -> Result<PreparedQuery, String>          // compose with engine *_prepared entry points
@@ -266,15 +270,15 @@ rewrite_query(Query, &Graph, &VectorStore) -> Result<Query, String>             
 //   with the VG-TIE-1 boundary tie-break (nearest_exact_tiebreak); the VG-VOC-1 unknown-predicate error reports
 //   VOCAB_REVISION (VG-GOV-3). vec:hybrid is PROVISIONAL: implemented ahead of the spec amendment, so it is listed in
 //   vocab::PROVISIONAL and does NOT bump VOCAB_REVISION — its shape may change when that spec revision lands.
-// [SONNET-4.6] sq-tb9p0 VG-MET-4 (mainline): prepare/query REJECT a store whose v3 provenance declares a NON-cosine
+// sq-tb9p0 VG-MET-4 (mainline): prepare/query REJECT a store whose v3 provenance declares a NON-cosine
 //   metric (the vec: surface evaluates cosine only); a legacy no-provenance store keeps the implicit-cosine behaviour
-// [OPUS-4.8] sq-z589: with `approx-ann` ALSO on, the *_approx twins take a &DiskAnnIndex and run the
+// sq-z589: with `approx-ann` ALSO on, the *_approx twins take a &DiskAnnIndex and run the
 //   UNFILTERED vec: k-NN through that Vamana index instead of the full scan (APPROXIMATE, recall < 1.0):
 query_vec_approx(&Graph, &str, &VectorStore, &DiskAnnIndex) -> Result<QueryResult, String>   // feature = "vec-predicate" + "approx-ann"
 query_vec_approx_with_budget(&Graph, &str, &VectorStore, &DiskAnnIndex, &QueryBudget) -> Result<QueryResult, String>
 prepare_vec_approx(&Graph, &str, &VectorStore, &DiskAnnIndex) -> Result<PreparedQuery, String>
 //   The FILTERED path is unchanged (still cost-model'd nearest_filtered_costed_tiebreak); approx seam = unfiltered scan only.
-// [OPUS-4.8] sq-36ol: with `filtered-ann` ALSO on, the BGP→IdMask a constrained `vec:` neighbour
+// sq-36ol: with `filtered-ann` ALSO on, the BGP→IdMask a constrained `vec:` neighbour
 //   derives is CACHED across prepares, keyed by (constraining sub-BGP, graph Fingerprint). The
 //   fingerprint folds dict_len + triple_count + a content hash over the dict term SET in a
 //   dict-id-order-INDEPENDENT (sorted) order (sq-xhiv), so ANY genuine graph change misses the cache
@@ -282,7 +286,7 @@ prepare_vec_approx(&Graph, &str, &VectorStore, &DiskAnnIndex) -> Result<Prepared
 //   while a thread-count-only dict-id permutation of an unchanged graph correctly HITS (same mask).
 //   The cache is thread-local and transparent (no API change; same answers).
 
-// --- hybrid retrieval + reranking (src/hybrid.rs + `vec:hybrid`) --- feature = "vec-predicate" ONLY [SONNET-4.6] sq-lhcot.4
+// --- hybrid retrieval + reranking (src/hybrid.rs + `vec:hybrid`) --- feature = "vec-predicate" ONLY sq-lhcot.4
 // SPARQL surface (subject list is PREFIX-OPTIONAL: ?node | ( ?node ?score ) | ( ?node ?score ?rank ) | + ?prov):
 //   ( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )
 //   <query> = node IRI | "0.1,0.9" (plain literal = dense query vector) | "machine learning"@en (LANG-TAGGED = text query,
@@ -296,7 +300,7 @@ prepare_vec_hybrid(&Graph, &str, &VectorStore, &HybridConfig) -> Result<Prepared
 rewrite_query_hybrid(Query, &Graph, &VectorStore, &HybridConfig) -> Result<Query, String>       //   plain query_vec ERRORS
 // HybridConfig (builder; the DENSE arm is built in under the reserved name VECTOR_ARM="vector" and runs the SAME path
 //   vec:search takes — filtered-ann mask + VG-TIE-1 tie-break included):
-// [OPUS-4.8] review #4519 — arm results are UNTRUSTED. An id outside the graph dictionary's domain (0, or past
+// review #4519 — arm results are UNTRUSTED. An id outside the graph dictionary's domain (0, or past
 //   dict.len() and not an inline-integer id) is a HARD arm-named query error, never a hit that resolves to the
 //   dictionary's out-of-range placeholder term and is then silently dropped from the inlined VALUES table. With
 //   `filtered-ann`, EVERY arm's ranking is then restricted to the SAME BGP-derived mask the dense arm searched under
@@ -308,7 +312,7 @@ HybridConfig::new().arm(name, weight, ArmFn).vector_weight(w /*0.0 mutes -> pure
 //   .query_embedder(QueryEmbedder).reranker(&dyn Reranker, RerankPolicy::{FailOpen,FailClosed})
 //   ArmFn = Box<dyn Fn(&ArmQuery, usize) -> Result<Vec<(Id, f64)>, String>>   // an arm Err is a HARD query error:
 //     an arm that prefers availability returns an EMPTY list itself (the policy switch is for the SECOND stage)
-// [OPUS-4.8] review #4519 round 2 — PAGING CONTRACT (`filtered-ann`): masking one candidates(k)-long response can only
+// review #4519 round 2 — PAGING CONTRACT (`filtered-ann`): masking one candidates(k)-long response can only
 //   COMPACT the page the arm returned, so an arm whose admissible hits all sit below it would still lose them. When the
 //   mask leaves an arm short, the query path RE-ASKS that arm with a doubled count until it has candidates(k) admissible
 //   hits, has every admissible id, the arm returns fewer than asked (exhausted), or the request hits the per-request
@@ -378,7 +382,7 @@ HNSW (`VectorIndex`) is the APPROXIMATE backend behind the **opt-in `approx-ann`
 only thing pulling `instant-distance`, so the default build has NO third-party ANN dep (lean core).
 It is approximate: recall < 1.0 (NOT answer-exact). Build with `--features approx-ann`.
 
-[OPUS-4.8] (sq-lfo84) The HNSW squared-Euclidean distance is computed by an **explicit-SIMD kernel**
+(sq-lfo84) The HNSW squared-Euclidean distance is computed by an **explicit-SIMD kernel**
 (`src/simd.rs`, `approx-ann`-only, no new dependency): runtime-detected **NEON** on aarch64 and
 **AVX2+FMA** on x86_64, with a scalar fallback numerically bit-identical to the previous
 auto-vectorised loop. It measurably cuts the graph-build time and lifts query QPS. **Recall is
@@ -390,7 +394,7 @@ The deterministic exact / DiskANN / PQ paths keep the scalar reduction, so their
 `bench/vector/expected.tsv` deficits are byte-stable. Full recall-QPS + build-time evaluation matrix (SIMD vs instant-distance-scalar vs
 hnsw_rs, NON-CANONICAL): `research/gap-vector-ann-simd-2026-07.md`.
 
-[SONNET-4.6] (#5065) Which kernel actually runs is decided at runtime, so a test that only checks
+(#5065) Which kernel actually runs is decided at runtime, so a test that only checks
 the dispatcher against a reference is satisfied by the scalar fallback and proves nothing about the
 intrinsic kernel. `simd::tests` therefore asserts the SELECTED kernel: on x86_64 it fails closed
 when `CI` is set and AVX2+FMA are absent, rather than reporting green on an unexecuted `l2_sq_avx2`.
@@ -411,7 +415,7 @@ let hits = nearest_exact(&store, query, 10);          // Vec<(Id, f32)>
 let index = VectorIndex::build_with(&store, HnswConfig { ef_search: 100, ef_construction: 100, seed: 0 });
 let approx = index.nearest(query, 10);                // APPROXIMATE: ef_search must be >= k; recall@10 < 1.0 (run tests/recall.rs)
 
-// [OPUS-4.8] (sq-ose80) BUILD-TIME presets — ef_construction is the dominant build knob. The
+// (sq-ose80) BUILD-TIME presets — ef_construction is the dominant build knob. The
 // instant-distance build is ALREADY rayon-parallel (per-layer into_par_iter); its cost is the
 // per-insert greedy distance search whose beam width IS ef_construction. fast_build (efc=40) built
 // ~3x faster than the default (efc=100) and ~4.4x faster than efc=200 on a 200k SIFT slice at
@@ -440,7 +444,7 @@ let hits = index.nearest(query, 10);                    // Vec<(Id, cosine)>, re
 ### 4. Quantize a large store, then PQ-filter + full-precision re-rank (the DiskANN loop)
 
 PQ codes are a coarse RAM-resident *filter*, not a final ranking — re-rank the candidates
-against the full-precision store. [OPUS-4.8] sq-qamd: `DiskAnnIndex::build_with_pq` now drives
+against the full-precision store. sq-qamd: `DiskAnnIndex::build_with_pq` now drives
 this loop INSIDE the index (rank each visited node's neighbours on the in-RAM codes, re-rank the
 final beam off the mmap — `nearest` reports the exact full-precision cosine), and persists the
 codebook + codes as a trailing `.spqg` section so `open` reloads the cache with no rebuild:
@@ -503,7 +507,7 @@ use sparq_vectors::{hybrid_search, RRF_K};
 let fused = hybrid_search(&query, 10, RRF_K, &mut [
     &mut |t: &oxrdf::Term| index.nearest_term(t, &graph, &store, 50)
         .into_iter().map(|(t, s)| (t, s as f64)).collect(),   // ANN (cosine)
-    &mut |t: &oxrdf::Term| sparq_sim::Sim::new(&graph).most_similar(t, 50),  // structural (Jaccard) [OPUS-4.8] FQ path: block has no `use Sim`
+    &mut |t: &oxrdf::Term| sparq_sim::Sim::new(&graph).most_similar(t, 50),  // structural (Jaccard) FQ path: block has no `use Sim`
 ]);
 ```
 
@@ -863,7 +867,7 @@ after `finalize`) — `add` is the additive path.
 
 ### 13. Structure-aware preprocessing — closure + type-constrained negatives (opt-in, feature = `structure`)
 
-<!-- [OPUS-4.8] sq-0wo9e.1 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §5.A/§2). -->
+<!-- sq-0wo9e.1 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §5.A/§2). -->
 Research-grade **P0** of the structure-aware-vectorisation epic. Two additive, buildable primitives an
 **out-of-process** KGE trainer consumes — this crate **trains nothing** (embeddings are produced
 outside it) and serves no exact answer.
@@ -890,7 +894,7 @@ let constraints = TypeConstraints::mine(&closed.graph);                  // decl
 let sampler = NegativeSampler::new(&closed.graph, &constraints, SamplingMode::TypeConstrained);
 let negatives = sampler.sample([h, r, t], Corrupt::Tail, 16, /*seed*/ 42);  // type-valid tail corruptions
 
-// [GPT-5.6] RDF 1.2 triple terms remain excluded by default. The explicit ablation arm admits
+// RDF 1.2 triple terms remain excluded by default. The explicit ablation arm admits
 // them, with atomic slots drawing only atomic candidates and triple-term slots only triple terms.
 let scoped = NegativeSampler::new_scoped(
     &closed.graph,
@@ -919,7 +923,7 @@ term's internal `(s, p, o)` remains opaque. `NegativeSampler::new` retains the d
 
 ### 14. KGE measurement foundation — DistMult/ComplEx trainer + filtered link-prediction ablation (opt-in, feature = `kge`)
 
-<!-- [OPUS-4.8] sq-0wo9e.8 / P6 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §P6 + sq-0wo9e.8). -->
+<!-- sq-0wo9e.8 / P6 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §P6 + sq-0wo9e.8). -->
 The `kge` feature (implies `structure`) is the **measurement foundation** for the epic: a **thin,
 CPU-only, deterministically-seeded shallow KGE** that *consumes* the P0 closure + type-constrained
 negatives to produce embeddings, plus the standard **filtered link-prediction** harness that measures
@@ -1005,7 +1009,7 @@ subset), on a **canonical machine**, under the **asymmetric model**, with **mult
 
 ### 14a. UFO/gUFO priors — answer-safe serve-time disjointness mask (opt-in, feature = `kge`)
 
-<!-- [GPT-5.6] PR #2143 / issue #2149: document the public UFO-prior surface. -->
+<!-- PR #2143 / issue #2149: document the public UFO-prior surface. -->
 The gUFO-prior cell is wired as an explicitly selected serve-time ablation. `EvalConfig::small`
 sets `gufo_prior = false`, so the default run does not construct the mask and retains the baseline
 ranking path. Set it to `true` to mine only UFO-provable disjointness from the input graph and remove
@@ -1026,10 +1030,10 @@ assert!(cells.iter().all(|cell| cell.gufo_prior));
 # Ok::<(), String>(())
 ```
 
-The `structure` feature exposes the read-only `UfoPriors`, `UfoVocabulary`, `Rigidity`,
-`OntologicalNature`, and `GUFO_NS` API without the trainer. Use `UfoPriors::mine(graph)` for the
+The `structure` feature exposes the read-only `UfoPriors`, `MetaType`, `Rigidity`,
+`Nature`, and `GUFO_NS` API without the trainer. Use `UfoPriors::mine(graph)` for the
 canonical namespace or `mine_with_namespace(graph, ns)` when the dataset explicitly uses another
-namespace. `proven_disjoint_pairs()` and `proven_subsumptions()` return dictionary-id facts only;
+namespace. `provable_disjoint_pairs()` and `proven_subsumptions()` return dictionary-id facts only;
 `augment_oracle()` feeds the proven pairs into `DisjointnessOracle::absorb_proven_pairs`. These APIs
 do not mint terms or write inferred triples back into the graph.
 
@@ -1038,7 +1042,7 @@ the already opt-in `structure` feature, `EvalConfig::small` keeps the behavioura
 tests compare OFF runs deterministically plus ON/OFF output exactly on a gUFO-free graph. The mask
 may improve or preserve a filtered rank, never remove the held-out answer.
 
-**RDF 1.2 triple-term visibility is also default-off.** [GPT-5.6] Every `TrainConfig` preset sets
+**RDF 1.2 triple-term visibility is also default-off.** Every `TrainConfig` preset sets
 `term_scope` to `TermScope::IriBlank`, preserving the existing pipeline. To measure statement-level
 structure, use `synthetic_rdf12_ttl` (or your own N-Triples data with `rdf:reifies`) and the paired
 `run_quoted_ablation` runner. Its `QuotedAblation` reports common-random-number ON−OFF deltas; split
@@ -1046,7 +1050,7 @@ membership and the ranking pool remain atomic in both arms, so the comparison ch
 visibility. `synthetic_rdf12_parts` exposes the generated fixture partitions when a caller needs to
 audit them. This is a measurement surface, not an accuracy claim.
 
-**Statement-level quoted-triple encoding is compositional and derived (sq-1e5kk).** [SONNET-4.6]
+**Statement-level quoted-triple encoding is compositional and derived (sq-1e5kk).**
 `TrainedModel::encode_quoted_term(&graph, id)` (and the unpacked forms `encode_statement(h, r, t)` /
 `encode_statement_rows`) returns a triple term's per-component interaction vector composed from
 its `(s, p, o)` constituents' trained rows — DistMult `h∘r∘t` (sums to the score), ComplEx
@@ -1059,7 +1063,7 @@ representation stays measurement-gated.
 
 ### 14b. Provenance-weighting `w(t)` — weight training by PROV-O/DQV quality (opt-in, feature = `structure`; measurement under `kge`)
 
-<!-- [OPUS-4.8] sq-2489d.4 (epic sq-2489d, GenAI-KB Phase 4; design research/provenance-driven-genai-kb.md §USE-1 / §5 Phase 4). -->
+<!-- sq-2489d.4 (epic sq-2489d, GenAI-KB Phase 4; design research/provenance-driven-genai-kb.md §USE-1 / §5 Phase 4). -->
 Research-grade **Phase 4** of the provenance-driven GenAI-KB epic: derive a per-triple
 **provenance-quality weight** `w(t) ∈ (0,1]` from a graph's PROV-O / DQV annotations so a
 high-assurance fact contributes a full-strength training gradient and a low-assurance / low-source
@@ -1214,7 +1218,7 @@ must be re-measured on a real, provenance-bearing KG.
 
 ### 15. Typed-literal encoders — order-preserving numeric / boolean / date + schema header (opt-in, feature = `structure`)
 
-<!-- [OPUS-4.8] sq-0wo9e.2 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §3.1/§3.2/§6.A). -->
+<!-- sq-0wo9e.2 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §3.1/§3.2/§6.A). -->
 Research-grade **P1**: the typed-literal encoders that turn a node vector into a **structured
 partitioned object** (design §3). All are **pure functions keyed by datatype** in the `encode`
 module — no training, no graph state, no I/O.
@@ -1257,11 +1261,11 @@ link-prediction / retrieval is **empirical and dataset-dependent** (design §6.B
 claim is made. The encoder-quality ablation runner is `examples/bench_typed_encoders.rs` (P1 ON vs
 OFF, with a long-tail slice); its numbers are **work-box NON-CANONICAL**. The encoders are inputs a
 trainer would consume — the thin KGE trainer that consumes them now exists behind the `kge` feature
-(recipe 14). <!-- [OPUS-4.8] sq-0wo9e.8 -->
+(recipe 14). <!-- sq-0wo9e.8 -->
 
 ### 16. SHACL/OWL priors + QUDT unit-normalisation — enum codebook / cardinality pooling / SI magnitudes (opt-in, `structure` + `structure-shacl`)
 
-<!-- [OPUS-4.8] sq-0wo9e.3 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §2 + §7). -->
+<!-- sq-0wo9e.3 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §2 + §7). -->
 Research-grade **P2**: read the schema sparq already holds — `sh:in` enums, `sh:datatype`,
 `sh:min/maxCount`, `owl:FunctionalProperty`, and QUDT units — as **priors over the encoder layout**,
 not post-hoc filters. Two slices:
@@ -1313,7 +1317,7 @@ declared shape simply gets **no** prior (fail-open, the encoder falls back to th
 
 ### 17. Taxonomy block + disjointness repulsion/mask (opt-in, feature = `structure`)
 
-<!-- [OPUS-4.8] sq-0wo9e.4 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §2/§3.3/§6.A/§9). -->
+<!-- sq-0wo9e.4 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §2/§3.3/§6.A/§9). -->
 Research-grade **P3**: two priors over the `rdfs:subClassOf` DAG, in the `taxonomy` module. Read them
 over a **closed** graph (`close_for_vectorise` first, recipe 13) so the `subClassOf` closure and
 entailed disjointness are materialised.
@@ -1356,7 +1360,7 @@ accuracy claim; the gate adopts non-Euclidean only on **measured** lift. The gUF
 
 ### 18. Flexible minimal-complete grounding — modality chosen per request (opt-in, feature = `structure`)
 
-<!-- [OPUS-4.8] sq-0wo9e.5 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §4). -->
+<!-- sq-0wo9e.5 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §4). -->
 Research-grade **P4**: grounding is a function `(node, graph) -> minimal-and-complete OBJECT` whose
 **modality is chosen per request** by a dispatcher on the *consumer's declared output type* — the
 same node projected into whichever object a tool needs. `ground` (the `grounding` module) returns a
@@ -1375,7 +1379,7 @@ same node projected into whichever object a tool needs. `ground` (the `grounding
 - **`Modality::TypedValue`** — a single typed slot filled directly: `TypedValue::{Boolean, Number,
   Quantity, Enum}`. **Exact** (no cosine threshold, no recall loss).
 
-<!-- [OPUS-4.8] sq-t80n4: cross-unit reconciliation (consumes the P2 units.rs table, sq-0wo9e.3). -->
+<!-- sq-t80n4: cross-unit reconciliation (consumes the P2 units.rs table, sq-0wo9e.3). -->
 **Cross-unit reconciliation (opt-in `GroundingConfig::reconcile_units`, default off).** A quantity
 renders **as declared** by default. Set `reconcile_units` and each quantity whose unit is **known** to
 the P2 table (recipe 16, `units::normalise`) is rendered in the **canonical SI unit of its
@@ -1416,7 +1420,7 @@ the P2 QUDT `normalise` (recipe 16; sq-0wo9e.3, sq-t80n4), unknown/compound unit
 
 ### 19. Neuro-symbolic propose-then-verify grounding (opt-in, feature = `neuro-symbolic`)
 
-<!-- [OPUS-4.8] sq-0wo9e.6 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §5 (B) + §6.A). -->
+<!-- sq-0wo9e.6 (epic sq-0wo9e; design research/structure-aware-vectorisation.md §5 (B) + §6.A). -->
 Research-grade **P5**: grounding a tool slot `(subject, predicate, ?)` has two halves with
 **deliberately asymmetric guarantees**, and the `verify` module keeps them honestly separate:
 
@@ -1545,7 +1549,7 @@ score)` sequence and deterministic tie-break are identical to the undecorated se
 and writer are both feature-gated; enable `metadata-sidecar` in every process that opens a tagged
 store. A feature-off build continues to support the pre-existing v1/v2/v3 formats only.
 
-### 22. Recall-gated concept dedup + k-NN over raw vectors (opt-in, feature = `approx-ann`) [FABLE-5] #2251
+### 22. Recall-gated concept dedup + k-NN over raw vectors (opt-in, feature = `approx-ann`) #2251
 
 For a **raw concept-vector matrix** (no sparq `Graph` / `VectorStore` — e.g. the
 Kernel-of-Truth's structure-aware concept vectors) that needs **type-level near-duplicate
@@ -1594,7 +1598,7 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
 
 ## Gotchas / feature flags / prerequisites
 
-- **Opt-in.** Nothing in the workspace depends on `sparq-vectors`; the default engine
+- **Opt-in.** Only `sparq-terse` depends on `sparq-vectors` (optionally); the default engine
   build does not compile it. The core Rust flow (store/ANN/embed) is a standalone library
   over sparq-core's public read API — you wire it into application code yourself. The **one**
   SPARQL-level integration is the optional `vec:` magic predicate (recipe 8 below), behind
@@ -1651,7 +1655,7 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
   ablation deltas off the asymmetric ComplEx, multi-seed.**
 - **`approx-ann` is the ONLY heavy ANN dependency, and it is OFF by default (sq-ip3a).** The HNSW
   index (`VectorIndex`/`HnswConfig`), the `ApproxBackend`, and the recall-gated concept-ANN dedup
-  surface (`build_ann`/`knn`/`dedup`, recipe 22 — [FABLE-5] #2251) are gated behind it — it is the
+  surface (`build_ann`/`knn`/`dedup`, recipe 22 — #2251) are gated behind it — it is the
   only thing pulling `instant-distance`. With it OFF the default build is lean: exact brute-force
   (`nearest_exact`, answer-exact) + the hand-rolled on-disk Vamana graph (`DiskAnnIndex`, no extra
   dep). Approximate search is **APPROXIMATE** — recall < 1.0, NOT answer-exact (recipes 2 & 11);
@@ -1715,7 +1719,7 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
   when a PQ cache is present, `search_slots` dispatches to `search_slots_pq` — rank on the
   RAM-resident codes, re-rank the final beam off the mmap. Build it via
   `DiskAnnIndex::build_with_pq` and check `has_pq_cache()`; recipe 4 shows the same loop the
-  index now drives internally. <!-- [OPUS-4.8] de-staled: PQ cache wired into search_slots (sq-qamd/#620) -->
+  index now drives internally. <!-- de-staled: PQ cache wired into search_slots (sq-qamd/#620) -->
   Without a PQ cache, search stays full-precision-from-mmap as above.
 - **Filtered ANN (`filtered-ann` feature):** predicate-constrained search returns only ids in the
   `IdMask`, and **every returned id is guaranteed in the mask**. An **empty** mask -> no results
@@ -1727,7 +1731,9 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
   adjacency is not exposed, so the HNSW graph cannot be walked with predicate-aware acceptance);
   use `DiskAnnIndex` for filtered traversal over a broad mask. Lean feature: no new dependency, no
   engine pull. NON-CANONICAL timing.
-- **Little-endian only.** `.spqv`/`.spqg` reject big-endian targets at create/open.
+- **Canonical little-endian files.** `.spqv` readers support big-endian hosts by validating the
+  complete LE container and swapping only its dense f32 region into aligned owned storage; `.spqv`
+  writers remain little-endian-host only. `.spqg` still rejects big-endian hosts at create/open.
 - **Determinism:** ties break on ascending id (searchers) or first appearance (fusion);
   HNSW/Vamana/PQ seeds are fixed by default so builds are reproducible.
 
@@ -1738,3 +1744,10 @@ gate/threshold outside its range, an all-zero/non-finite/duplicate-id input.
 - `hdt-format`, `fused-decompress-parse`, `rust-parallel-parsing` — getting RDF into the
   `Graph` you then embed.
 - `mpc-protocols`, `noir-circuit-patterns` — unrelated sibling skills in this workspace.
+
+### Temporal year parsing (GPT-6)
+
+The `gYear` epoch lane preserves the four-digit year width, including the sign,
+when constructing the civil-date input. Conversion to epoch seconds is checked;
+invalid lexicals and unrepresentable values return `None`. The shared civil-date
+parser remains strict, and the existing global ordering regression stays intact.

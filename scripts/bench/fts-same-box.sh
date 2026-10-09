@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.2 — same-box FULL-TEXT-SEARCH comparison harness:
+# sq-hmd7l.2 — same-box FULL-TEXT-SEARCH comparison harness:
 # sparq-text (embedded BM25 inverted index) vs Apache Jena Fuseki + jena-text
 # (Lucene) on the SAME synthetic Zipf corpus and the SAME pinned 200-pair query
 # set, emitting one canonical-competitor-results ENVELOPE per run (the

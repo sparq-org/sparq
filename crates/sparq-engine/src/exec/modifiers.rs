@@ -31,8 +31,8 @@ pub(super) fn slice_bindings(b: &mut Bindings, start: usize, length: Option<usiz
 /// its CACHED comparison value + id — no term materialised, no per-comparison lexical
 /// re-parse (the q09-class fix: ORDER BY dateTime was re-parsing both lexicals on every
 /// comparison of the sort). Everything else keeps the identity-preserving `Value`.
-pub(super) enum SortCell {
-    Temp { t: Temporal, id: Id },
+pub(super) enum SortCell<'graph> {
+    Temp { id: Id, key: ExactTemporal<'graph> },
     /// A numeric GRAPH term: the cached f64 for the fast compare PLUS its dictionary id, so
     /// an f64 TIE can be rechecked EXACTLY from the id's exact lexical — distinct integers
     /// beyond 2^53 / high-precision decimals that share one f64 (the numerics cache stores
@@ -93,7 +93,7 @@ pub(super) enum SortCell {
 /// (same lexical kind), never a per-comparison `lit_kind` / `is_numeric_dt` /
 /// `value_str`-allocation re-derivation. sq-7d3dj.30.12
 #[inline]
-pub(super) fn sort_cell_val(v: Value) -> SortCell {
+pub(super) fn sort_cell_val(v: Value) -> SortCell<'static> {
     let class = v.term_class() as u8;
     // Only the literal class consults the kind rank; skip the (cheap but non-trivial)
     // `lit_kind` dispatch entirely for the non-literal classes.
@@ -123,23 +123,18 @@ pub(super) fn sort_cell_val(v: Value) -> SortCell {
 }
 
 /// Compares two ORDER BY key cells under the lenient total order, reproducing
-/// `compare_values` exactly: two temporals by `Temporal::cmp_t_total` (kind-first, then
+/// `compare_values` exactly: two temporals by `ExactTemporal::compare_total` (kind-first, then
 /// the timeline order extended over the indeterminate mixed-timezone window — the same
 /// definition `compare_values` reaches through `CompareTerm::strict_cmp`); a temporal
 /// against any other key materialises the term lazily (rare: only mixed-type columns)
 /// and defers to `compare_values` itself.
 #[inline]
-pub(super) fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c: &SortCell) -> Ordering {
+pub(super) fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell<'_>, c: &SortCell<'_>) -> Ordering {
     match (a, c) {
-        (SortCell::Temp { t: ta, .. }, SortCell::Temp { t: tb, .. }) => {
-            // sq-wjl8i KIND-FIRST + sq-2k5py: both now live in the
-            // shared `Temporal::cmp_t_total` — a dateTime never value-compares against a
-            // date (`LiteralKind::DateTime < Date`), and within one kind the timeline order
-            // is TOTAL (instant, then timezone presence). The former lexical fallback for
-            // the indeterminate window is gone: it mixed timeline-decided and
-            // lexical-decided pairs inside one kind, which is intransitive. Ill-formed
-            // temporals never enter the cache, so both cells here are well-formed.
-            Temporal::cmp_t_total(*ta, *tb)
+        (SortCell::Temp { key: a, .. }, SortCell::Temp { key: b, .. }) => {
+            // Keys already borrow validated lexicals; no dictionary lookup,
+            // calendar parsing, allocation, or validity assertion occurs here.
+            ExactTemporal::compare_total(*a, *b)
         }
         // Two numeric graph terms: f64 fast compare, with the EXACT tie recheck below.
         (SortCell::Num { f: fa, id: ia }, SortCell::Num { f: fb, id: ib }) => {
@@ -161,11 +156,14 @@ pub(super) fn cmp_sort_cells(graph: &Graph, local: &LocalVocab, a: &SortCell, c:
         (SortCell::Temp { id, .. }, SortCell::Num { f, .. }) => {
             compare_values(&sort_cell_term(graph, local, *id), &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Num { f, .. }, SortCell::Val { v, .. }) => {
-            compare_values(&Value::Num(Num::Double(*f)), v).unwrap_or(Ordering::Equal)
+        // A stored numeric against a computed value compares the stored term EXACTLY: its
+        // cached f64 would collapse a high-precision decimal or a big integer and misorder it
+        // against an exact computed key in the same column.
+        (SortCell::Num { id, .. }, SortCell::Val { v, .. }) => {
+            compare_values(&sort_cell_term(graph, local, *id), v).unwrap_or(Ordering::Equal)
         }
-        (SortCell::Val { v, .. }, SortCell::Num { f, .. }) => {
-            compare_values(v, &Value::Num(Num::Double(*f))).unwrap_or(Ordering::Equal)
+        (SortCell::Val { v, .. }, SortCell::Num { id, .. }) => {
+            compare_values(v, &sort_cell_term(graph, local, *id)).unwrap_or(Ordering::Equal)
         }
         // Two IRI sort cells: direct string comparison — no allocation, no term_class
         // dispatch. sq-7d3dj.30.2
@@ -332,7 +330,7 @@ pub(super) fn cmp_exact_lex_f64(lex: &str, f: f64) -> Ordering {
 }
 
 // sq-2k5py: the lexical-form fallback for temporal sort cells (`cmp_sort_cells_lex`)
-// is GONE — `Temporal::cmp_t_total` decides every temporal pair by value now, and a lexical
+// is GONE — `ExactTemporal::compare_total` decides every temporal pair by value now, and a lexical
 // fallback inside one temporal kind is exactly the intransitivity this bead removed.
 
 /// Materialises a temporal sort cell's term for the (rare) mixed-type-column
@@ -413,19 +411,22 @@ pub(super) fn order_bindings(
     let compiled_order: Vec<(bool, CompiledExpr)> = exprs
         .iter()
         .map(|oe| match oe {
-            OrderExpression::Asc(e) => (false, compile_expr(e, b)),
-            OrderExpression::Desc(e) => (true, compile_expr(e, b)),
+            OrderExpression::Asc(e) => (false, compile_expr(e, b, local)),
+            OrderExpression::Desc(e) => (true, compile_expr(e, b, local)),
         })
         .collect();
 
     // The sort key cell for one compiled ORDER expression of one row. Numeric keys use the
-    // numerics cache and temporal keys the temporals cache (no per-comparison reparse); IRI
+    // numerics cache; temporal keys borrow prevalidated exact cache entries. IRI
     // terms precompute the IRI string once (SortCell::Iri) — eliminating per-comparison
     // term_of materialisation + value_str allocation for IRI ORDER BY columns; other
     // expressions fall back to identity-preserving evaluation. The plain-variable case is
     // unpacked here so the column lookup and the cache probes happen exactly once per row
     // (column index was pre-resolved above). sq-7d3dj.4 / sq-7d3dj.30.2 (Iri).
     let cell_of = |row: &Row, e: &CompiledExpr| -> Result<SortCell, String> {
+        if budget::strict_numeric() {
+            return Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?));
+        }
         if let CompiledExpr::Var(Some(c)) = e {
             let id = row[*c];
             if id != NO_ID && !is_local(id) {
@@ -434,8 +435,8 @@ pub(super) fn order_bindings(
                     // exactly (integers > 2^53 / high-precision decimals sharing one f64).
                     return Ok(SortCell::Num { f: n, id });
                 }
-                if let Some(t) = graph.temporal_value(id) {
-                    return Ok(SortCell::Temp { t, id });
+                if let Some(key) = temporal_of_id(graph, id) {
+                    return Ok(SortCell::Temp { id, key });
                 }
                 // sq-7d3dj.30.21 — LAZY STRING-LITERAL key: a plain `xsd:string`
                 // store-literal becomes a zero-allocation `SortCell::StrId(id)` (compared via
@@ -460,10 +461,13 @@ pub(super) fn order_bindings(
                 return Ok(sort_cell_val(Value::Term(term)));
             }
         }
-        Ok(match eval_compiled_numeric(graph, local, row, e) {
-            Some(n) => sort_cell_val(Value::Num(Num::Double(n))),
-            None => sort_cell_val(eval_compiled(graph, local, b, row, e)?),
-        })
+        // A computed key (arithmetic, a BIND-computed local value, any other expression)
+        // keeps its EXACT value: an `f64` fast path here collapsed integers beyond 2^53 and
+        // high-precision decimals into one tie, kept their input order, and turned an
+        // integer/decimal division by zero (a type error, so an unbound key) into infinity.
+        // The exact `Value` is ordered by `compare_values`, which already rechecks numeric
+        // ties exactly — the same order `cmp_expr` and MIN/MAX give (#3198).
+        Ok(sort_cell_val(eval_compiled(graph, local, b, row, e)?))
     };
     // The sort key (vector of (descending, SortCell)) for one row.
     let key_of = |row: &Row| -> Result<Vec<(bool, SortCell)>, String> {
@@ -506,7 +510,7 @@ pub(super) fn order_bindings(
             // sq-7d3dj.30.23
             // Use Vec<_> to avoid the clippy::type_complexity lint on the explicit type.
             #[cfg(feature = "parallel")]
-            let mut keyed: Vec<_> = if n >= PAR_THRESHOLD {
+            let mut keyed: Vec<_> = if n >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
                 use rayon::prelude::*;
                 // sq-6aefu: mirror FILTER/BIND worker_install pattern — key_of -> eval_compiled
                 // can re-enter EXISTS / custom extension functions / spatial expressions on rayon
@@ -521,6 +525,7 @@ pub(super) fn order_bindings(
                 let lsv = local_services::snapshot();
                 #[cfg(not(target_arch = "wasm32"))]
                 let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+                let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
                 b.rows
                     .par_iter()
                     .enumerate()
@@ -532,6 +537,7 @@ pub(super) fn order_bindings(
                         let _lsv = local_services::worker_install(&lsv);
                         #[cfg(not(target_arch = "wasm32"))]
                         let _qn = query_now::worker_install(qn);
+                        let _qb = query_base_worker_install(&qb);
                         Ok((key_of(row)?, i))
                     })
                     .collect::<Result<Vec<_>, String>>()?
@@ -587,7 +593,7 @@ pub(super) fn order_bindings(
     // Full stable sort path (unchanged). Precompute the keys (independent, read-only)
     // — in parallel for large result sets.
     #[cfg(feature = "parallel")]
-    let mut keyed: Vec<(Vec<(bool, SortCell)>, Row)> = if n >= PAR_THRESHOLD {
+    let mut keyed: Vec<(Vec<(bool, SortCell)>, Row)> = if n >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // sq-6aefu: mirror FILTER/BIND worker_install pattern — same rationale as the
         // top-k path above: key_of -> eval_compiled can re-enter EXISTS / custom
@@ -601,6 +607,7 @@ pub(super) fn order_bindings(
         let lsv = local_services::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         b.rows
             .par_iter()
             .map(|row| {
@@ -611,6 +618,7 @@ pub(super) fn order_bindings(
                 let _lsv = local_services::worker_install(&lsv);
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
+                let _qb = query_base_worker_install(&qb);
                 Ok((key_of(row)?, row.clone()))
             })
             .collect::<Result<_, String>>()?
@@ -643,7 +651,7 @@ pub(super) fn order_bindings(
     // tie-break defect in this sort. So no total-order tie-breaker is added: it would cost a
     // term materialisation per tied row for an order the spec does not constrain.
     #[cfg(feature = "parallel")]
-    if keyed.len() >= PAR_THRESHOLD {
+    if keyed.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         keyed.par_sort_by(cmp);
     } else {

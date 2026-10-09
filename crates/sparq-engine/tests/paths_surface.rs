@@ -6,6 +6,17 @@ use sparq_engine::{explain_paths, query, query_paths};
 
 const PATHS: &str = "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = ex:a END ?e = ex:d VIA ex:p";
 
+// Inner PATHS patterns use the REC-only extension contract.
+#[test]
+fn paths_refuses_unimplemented_version_announcements() {
+    let graph = diamond();
+    let baseline = query_paths(&graph, PATHS).unwrap();
+    assert_eq!(query_paths(&graph, &format!("VERSION '1.1' {PATHS}")).unwrap().rows, baseline.rows);
+    for label in ["1.2", "1.2-basic", "unknown"] {
+        assert!(query_paths(&graph, &format!("VERSION '{label}' {PATHS}")).is_err());
+    }
+}
+
 fn diamond() -> Graph {
     Graph::load_str(
         "@prefix ex: <http://ex/> . ex:a ex:p ex:b, ex:c . ex:b ex:p ex:d . ex:c ex:p ex:d .",
@@ -89,6 +100,37 @@ fn malformed_paths_are_loud() {
 fn explain_contains_typed_paths_operator() {
     assert_eq!(
         explain_paths(&diamond(), PATHS).unwrap(),
-        "Paths mode=shortest cyclic=false via=<http://ex/p> maxLength=none"
+        "Paths mode=shortest cyclic=false start=<http://ex/a> end=<http://ex/d> via=<http://ex/p> maxLength=none"
     );
+}
+
+/// #3994 — the START/END restriction is part of the rendered plan, so two plans that
+/// differ only there no longer explain identically.
+#[test]
+fn explain_renders_endpoint_restrictions() {
+    let g = diamond();
+    assert_eq!(
+        explain_paths(&g, "PATHS ALL START ?s END ?e VIA <http://ex/p> MAX LENGTH 2").unwrap(),
+        "Paths mode=all cyclic=false start=none end=none via=<http://ex/p> maxLength=2"
+    );
+    let pattern = explain_paths(
+        &g,
+        "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = { ?s ex:p ex:b } END ?e = ex:d VIA ex:p",
+    )
+    .unwrap();
+    assert!(pattern.contains(" end=<http://ex/d> "), "{pattern}");
+    assert!(pattern.contains(" start=?s { ") && !pattern.contains("start=none"), "{pattern}");
+    // The same pattern selecting its object instead must render differently.
+    let object = explain_paths(
+        &g,
+        "PREFIX ex: <http://ex/> PATHS SHORTEST START ?x = { ?s ex:p ?x } END ?e = ex:d VIA ex:p",
+    )
+    .unwrap();
+    let subject = explain_paths(
+        &g,
+        "PREFIX ex: <http://ex/> PATHS SHORTEST START ?s = { ?s ex:p ?x } END ?e = ex:d VIA ex:p",
+    )
+    .unwrap();
+    assert!(object.contains(" start=?x { "), "{object}");
+    assert!(subject.contains(" start=?s { "), "{subject}");
 }

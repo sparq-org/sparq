@@ -27,6 +27,27 @@ assert_eq!(count, 1);
 # Ok(()) }
 ```
 
+## Literal validation and evaluation caches
+
+`numeric_literal_valid(value, datatype)` checks lexical forms and integer
+subtype facets on the raw RDF lexical form, independently of finite arithmetic
+capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
+representation and the existing NaN sentinel; larger literals can remain valid.
+
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
+keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
+Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
+
+**Legacy mmap archives:** `Graph::open` ignores the old unversioned
+`numerics.bin`/`temporals.bin` and both v2 caches, rebuilding in memory while
+preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bin`; missing or
+wrong-sized current files also trigger rebuilds.
+
+Legacy opens cost a dictionary scan and cache allocation until migrated with
+`Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
+Versions mark semantic compatibility, not integrity; the trusted-storage contract
+still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md).
+
 ## ✨ Features
 
 - **RDF parsing & ingest** — load Turtle, N-Triples, N-Quads, and TriG from a `&str` or any
@@ -50,7 +71,7 @@ assert_eq!(count, 1);
 - **Incremental updates** — start from `Graph::new()` / `Graph::default()` (an empty graph) and
   `insert_triple(s, p, o)` / `remove_triple(s, p, o)` a single triple from `oxrdf` terms, or apply
   a whole batch with `apply_delta` — in place, with an optional write-ahead log.
-- **Experimental deletion projections** — [GPT-6 Astra] enable the default-off
+- **Experimental deletion projections** — enable the default-off
   `overlay-deleted-projections` Cargo feature on `sparq-core` to cache sorted
   tombstone projections for repeated range counts. The default uses the original
   linear deletion scan and carries no deletion projection slots. Each requested
@@ -69,7 +90,7 @@ assert_eq!(count, 1);
   point lookups for an id that is ABSENT from the permutation (result-equivalent, never
   serialised; for a PRESENT id the zone map already narrows the candidate window to about one
   block, so there is little left to skip).
-  [GPT-6] Persisted predicate statistics have deterministic record order across builds and
+  Persisted predicate statistics have deterministic record order across builds and
   re-saves; older unordered statistics files remain readable.
 - **Compressed-seek column codecs (prototype)** — the opt-in `elias-fano` feature adds
   Elias-Fano and Partitioned-Elias-Fano codecs whose `next_geq(target)` answers a successor

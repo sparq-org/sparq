@@ -6,16 +6,16 @@ thread_local! {
     static ACTIVE: RefCell<Option<Arc<CustomAggregateRegistry>>> = const { RefCell::new(None) };
 }
 
-pub(crate) struct Guard;
+pub(crate) struct Guard(Option<Arc<CustomAggregateRegistry>>);
 impl Drop for Guard {
     fn drop(&mut self) {
-        ACTIVE.with(|a| a.borrow_mut().take());
+        let prev = self.0.take();
+        ACTIVE.with(|a| *a.borrow_mut() = prev);
     }
 }
 
 pub(crate) fn install(reg: &CustomAggregateRegistry) -> Guard {
-    ACTIVE.with(|a| *a.borrow_mut() = Some(Arc::new(reg.clone())));
-    Guard
+    Guard(ACTIVE.with(|a| a.borrow_mut().replace(Arc::new(reg.clone()))))
 }
 
 #[cfg_attr(not(feature = "parallel"), allow(dead_code))]

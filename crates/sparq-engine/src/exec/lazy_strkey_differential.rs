@@ -64,7 +64,7 @@ fn graph_with(terms: &[Term]) -> (Graph, Vec<(Term, Id)>) {
 }
 
 /// The eager cell the feature-OFF path builds for a term.
-fn eager(t: &Term) -> SortCell {
+fn eager(t: &Term) -> SortCell<'static> {
     sort_cell_val(Value::Term(t.clone()))
 }
 

@@ -385,3 +385,5 @@ variables in the reserved `?__tx_*` namespace the rewrite mints.
   § 3.4 certification-scope, § 4 response provenance encoding, § 7 honesty / trust anchors)
   and `research/solid-trust-graph-authz-design.md` § 6.0 (pod-side epic `sq-pfae`,
   issue #940) — the design records.
+- [`site/specs/trust-expression.typ`](../../site/specs/trust-expression.typ) — the trust-expression
+  specification (#6652), with stable `[TE-…]` assertion ids for the contract above.

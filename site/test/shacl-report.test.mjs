@@ -98,3 +98,75 @@ test("reportToTurtle emits the per-violation W3C vocabulary", () => {
   // The blank-node and the report both terminate correctly.
   assert.match(ttl, /\] \./);
 });
+
+// #6719: message text and IRIs go through the shared sparq-client writer.
+const ECHAR = { t: "\t", b: "\b", n: "\n", r: "\r", f: "\f", '"': '"', "'": "'", "\\": "\\" };
+
+/** Re-parses the Turtle `STRING_LITERAL_QUOTE` starting at `open` (a `"`): its value and the
+ *  index after the closing quote. Throws on raw CR/LF, a bad escape or no closing quote. */
+function parseStringLiteralQuote(text, open) {
+  assert.equal(text[open], '"', "literal starts with a double quote");
+  let value = "";
+  let i = open + 1;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"') return { value, end: i + 1 };
+    if (c === "\n" || c === "\r") throw new Error(`raw line break at ${i}`);
+    if (c !== "\\") {
+      value += c;
+      i += 1;
+      continue;
+    }
+    const e = text[i + 1];
+    if (e in ECHAR) {
+      value += ECHAR[e];
+      i += 2;
+    } else if (e === "u" || e === "U") {
+      const n = e === "u" ? 4 : 8;
+      const hex = text.slice(i + 2, i + 2 + n);
+      if (hex.length !== n || !/^[0-9A-Fa-f]+$/.test(hex)) throw new Error(`bad UCHAR at ${i}`);
+      value += String.fromCodePoint(parseInt(hex, 16));
+      i += 2 + n;
+    } else {
+      throw new Error(`bad escape \\${e} at ${i}`);
+    }
+  }
+  throw new Error("unterminated literal");
+}
+
+const MESSAGES = [
+  'a "quoted" value',
+  "back\\slash",
+  "line one\nline two",
+  "CR\ronly and CRLF\r\nend",
+  "angle > bracket <x>",
+  'tab\t, bell\u0007, del\u007f and "] . <urn:x> <urn:y> <urn:z> .',
+  "ünïcödé 😀",
+];
+
+test("reportToTurtle: a resultMessage re-parses to the same value", () => {
+  for (const message of MESSAGES) {
+    const result = { ...DATATYPE_VIOLATION.results[0], message };
+    const ttl = reportToTurtle({ conforms: false, results: [result] });
+    const at = ttl.indexOf("sh:resultMessage ") + "sh:resultMessage ".length;
+    const { value, end } = parseStringLiteralQuote(ttl, at);
+    assert.equal(value, message, JSON.stringify(message));
+    assert.equal(ttl.slice(end), "\n  ] .\n");
+    // The message adds no lines: one per property plus the report header and brackets.
+    const clean = reportToTurtle({ conforms: false, results: [{ ...result, message: "m" }] });
+    assert.equal(ttl.split("\n").length, clean.split("\n").length, JSON.stringify(message));
+  }
+});
+
+test("reportToTurtle: an IRI that cannot be written as-is is refused", () => {
+  const base = DATATYPE_VIOLATION.results[0];
+  for (const bad of [
+    { severity: "http://www.w3.org/ns/shacl#Violation> . <urn:x> <urn:y> <urn:z" },
+    { sourceConstraintComponent: "http://x/a\nb" },
+  ]) {
+    assert.throws(
+      () => reportToTurtle({ conforms: false, results: [{ ...base, ...bad }] }),
+      /N-Triples IRI cannot hold/,
+    );
+  }
+});

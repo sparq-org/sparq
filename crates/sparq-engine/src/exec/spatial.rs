@@ -6,16 +6,16 @@ thread_local! {
     static ACTIVE: RefCell<Option<Arc<dyn SpatialProvider>>> = const { RefCell::new(None) };
 }
 
-pub(crate) struct Guard;
+pub(crate) struct Guard(Option<Arc<dyn SpatialProvider>>);
 impl Drop for Guard {
     fn drop(&mut self) {
-        ACTIVE.with(|a| a.borrow_mut().take());
+        let prev = self.0.take();
+        ACTIVE.with(|a| *a.borrow_mut() = prev);
     }
 }
 
 pub(crate) fn install(idx: Arc<dyn SpatialProvider>) -> Guard {
-    ACTIVE.with(|a| *a.borrow_mut() = Some(idx));
-    Guard
+    Guard(ACTIVE.with(|a| a.borrow_mut().replace(idx)))
 }
 
 /// The installed spatial index, if any.

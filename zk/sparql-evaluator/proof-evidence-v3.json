@@ -1,0 +1,144 @@
+{
+  "schema": "sparq-evaluator-v3-local-evidence-v1",
+  "source_commit": "d7ce154401e9cb54a3d1714045a8451984ade114",
+  "completed": true,
+  "publication_ready": false,
+  "scope": "Local execution of the V3 artifact, including retained V1/V2 wire tests; no hosted or standalone earlier artifact attestation. Experimental backend, not an external cryptographic audit.",
+  "artifact_sha256": "e9132da3701d17ee9b3a8b2a7d9b6fb9416a6dca37d724881da20c8385fd1514",
+  "image_id": [
+    756879700,
+    1076600889,
+    2782574747,
+    2292050452,
+    289457482,
+    461315384,
+    1206799807,
+    548772028
+  ],
+  "source_inventory_sha256": "6a283c2a0610389984a78f68014ee15a18ce9c68aaaf278c6adbf740bfc67985",
+  "toolchains": {
+    "host_rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)\nbinary: rustc\ncommit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452\ncommit-date: 2026-07-14\nhost: aarch64-apple-darwin\nrelease: 1.97.1\nLLVM version: 22.1.6",
+    "host_cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "guest_rustc": "rustc 1.97.0-dev (e638c6cfe 2026-07-15)\nbinary: rustc\ncommit-hash: e638c6cfea1eff5fbbb24a27e60538e3760d21b8\ncommit-date: 2026-07-15\nhost: aarch64-apple-darwin\nrelease: 1.97.0-dev\nLLVM version: 22.1.6",
+    "r0vm_version": "risc0-r0vm 3.0.6",
+    "r0vm_sha256": "dce243fc350c17cb6ca34b9b82fb8c3098aa1e3a8da7ef0b98a837cc437c2cff",
+    "guest_rustc_sha256": "0c103b8fff89933298ea4858dc777a52be022204057daf9d21945f6c4fdc62eb"
+  },
+  "build_environment": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "RISC0_BUILD_LOCKED": "1",
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CARGO_PROFILE_RELEASE_DEBUG": null
+  },
+  "receipts": {
+    "v1-holder-bag": {
+      "sha256": "59221e1bb8aab085d0ddad39277b673594356552a0d9596f11cd74927f56c214",
+      "bytes": 585682
+    },
+    "v1-verifier-false-ask": {
+      "sha256": "1ece6bb4d4944e77775e613b7c67134f58cdbf512333ff92e9e7aad2df2318cd",
+      "bytes": 586031
+    },
+    "v1-verifier-select": {
+      "sha256": "fd5bc278d58415e9c3ddbeb0e1d9245d8fc5b2afb61584db709218531d504a76",
+      "bytes": 586226
+    },
+    "v2-holder-false-ask": {
+      "sha256": "079c14cf86776cc650beb32ec9a5d4b58d0bde65fce1d7bd323833f01b513b94",
+      "bytes": 584830
+    },
+    "v2-verifier-catalog": {
+      "sha256": "db590e4e2ae3cab8a507fad34dbbb5266184fe7e66291faf00b9a287bff46067",
+      "bytes": 586282
+    },
+    "v3-holder-bag": {
+      "sha256": "102ead4d09be1f76cb8d152657e0bdcdc6d8e403819c093f2f7f60d0bd8dc3fa",
+      "bytes": 586905
+    },
+    "v3-holder-describe": {
+      "sha256": "15168eeb08c909ffbfc4186a670047623ff04e887f2defe136a959399ea76a54",
+      "bytes": 585582
+    },
+    "v3-verifier-construct": {
+      "sha256": "a788f79a169b9f51178c096ea557d6909338383d76faffdfa864f23120e43259",
+      "bytes": 586418
+    }
+  },
+  "native_test_functions": 60,
+  "host_test_functions": 31,
+  "retained_guest_case_inventories": {
+    "wire_versions": [
+      1,
+      2
+    ],
+    "builtin_rec_derived": 167,
+    "prior_unbounded_capacity_controls_rejected": 2,
+    "aggregate_admitted": 12,
+    "aggregate_profile_rejected": 12,
+    "temporal_rec_derived": 28,
+    "temporal_capacity_rejected": 13,
+    "numeric_capacity_rejected": 21,
+    "numeric_success_control": 1
+  },
+  "captured_bound_guest_inventory": {
+    "wire_versions": [
+      1,
+      2,
+      3
+    ],
+    "accepted_per_version": 8,
+    "rejected_per_version": 12
+  },
+  "v3_graph_guest_inventory": {
+    "test_functions": 4,
+    "relation_rejections": 25,
+    "transport_rejections": 4
+  },
+  "hal_execution_targets_observed": [
+    "risc0_circuit_rv32im::prove::hal::cpu",
+    "risc0_zkp::hal::cpu"
+  ],
+  "hal_observation_limit": "Logged execution targets, not hardware inference; unlogged stages are not attributed.",
+  "checks": {
+    "all_commands_exit_zero": true,
+    "source_snapshot_unchanged": true,
+    "exported_artifact_unchanged": true,
+    "strict_relation_error_classification": true,
+    "strict_succinct_and_independent_verification": true,
+    "fake_and_dev_modes_rejected": true,
+    "detached_workspace_clippy": "passed -D warnings"
+  },
+  "run_directory": "/private/tmp/sparq-exact-v3-d7ce15440-local-ipc",
+  "campaign_evidence_sha256": "cfd2479830e551ebe1b82072c7efbd5b890e84d7181804deb63d52bec28f70f6",
+  "execution_command": "python3 scripts/ci_exact_evaluator_evidence.py --local --output /private/tmp/sparq-exact-v3-d7ce15440-local-ipc",
+  "independent_source_review": {
+    "reviewer": "actual GPT-6 /root/zk_result_path",
+    "head": "d7ce154401e9cb54a3d1714045a8451984ade114",
+    "base": "6825d96df780a57772486f9c3bee697dac95cde5",
+    "verdict": "APPROVE; no P1/P2; source-only, no cryptographic/performance/full-conformance certification",
+    "report_sha256": "9fd1a2fcc87bc5db633a1f13d3a12b6ba6de5855fb6047305cc9947e7ce4da08"
+  },
+  "historical_artifacts": [
+    "proof-evidence-v2.json",
+    "hosted-a2-evidence.json",
+    "proof-evidence.json"
+  ],
+  "remaining_release_requirements": [
+    "Required hosted checks including default-feature and WASM/performance floors",
+    "Repository integration and landing requirements",
+    "Any later runtime integration requires its own source/artifact-bound execution evidence"
+  ],
+  "known_followups_after_source_freeze": [
+    {
+      "scope": "Later source review found strict numeric EBV capacity bypass for extremely small decimal values; current executed fixtures do not cover that input.",
+      "source_report_sha256": "1feb49ac780c2482cb8de80710ff20b3b85ffd8cd708c5d043739ee59eae01f4",
+      "disposition": "Required shared correction and new source/artifact evidence before publication readiness."
+    },
+    {
+      "scope": "Temporal append memo work and expanded MINUS correlation are later separately reviewed source changes, absent from d7.",
+      "disposition": "Integrate only in a subsequent source freeze; retain this campaign as exact historical evidence."
+    }
+  ]
+}

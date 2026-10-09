@@ -2,7 +2,7 @@
 # Assemble the feature-matrix `opt-in-features` strategy matrix from the per-crate
 # fragment files in .github/feature-matrix.d/*.yml and emit it as ONE JSON object,
 # `{"include": [ {name, crate, features, test}, ... ]}`, ready for `fromJSON` in the
-# workflow. [OPUS-4.8] bead sq-ibrze.
+# workflow. bead sq-ibrze.
 #
 # WHY: the opt-in feature matrix used to be a single static `include:` list inside
 # feature-matrix.yml. Every opt-in-feature PR appended a leg to that ONE shared list,
@@ -30,16 +30,16 @@
 #                                                         #   names ("opt-in <name>"), one
 #                                                         #   per line (for the gate-name
 #                                                         #   preservation proof / tests)
-#   ... --select-mode <mode> --affected '<json array>'    # [FABLE-5] sq-fmx4u.3: when
+#   ... --select-mode <mode> --affected '<json array>'    # sq-fmx4u.3: when
 #                                                         #   mode == "selected", keep only
 #                                                         #   legs whose crate is affected;
 #                                                         #   ANY other/malformed input
 #                                                         #   fail-closes to the FULL set
-#   ... --event <name> --tier <test|check> [--shard e|r]  # [SONNET-4.6] sq-ldg8c: tier +
+#   ... --event <name> --tier <test|check> [--shard e|r]  # sq-ldg8c: tier +
 #                                                         #   event awareness (see below)
 # Exit non-zero (with a diagnostic on stderr) on any malformed fragment.
 #
-# THE TWO-FILE SCOPE RULE ([SONNET-4.6] issue #2384). The rule keys off the emitted
+# THE TWO-FILE SCOPE RULE (issue #2384). The rule keys off the emitted
 # leg-NAME set, nothing else. Adding, renaming or removing a leg is a TWO-FILE change:
 # the crate fragment AND the gate-name golden
 # `scripts/tests/feature-matrix-legnames.golden.txt`, which test_feature_matrix_assemble.py
@@ -97,21 +97,21 @@ FRAGMENT_DIR = os.path.join(
 )
 
 REQUIRED_KEYS = {"name", "crate", "features", "test"}
-# [SONNET-4.6] sq-ldg8c: keys a fragment leg MAY carry in addition to REQUIRED_KEYS.
+# sq-ldg8c: keys a fragment leg MAY carry in addition to REQUIRED_KEYS.
 # `tier` demotes a leg to the check tier (see the header); `tier-reason` is an override
 # the ENFORCER (feature-matrix-tiers.py) reads — the assembler only allows the key.
-# [FABLE-5] CI-economy grouping: `weight` (positive number) is an OPTIONAL explicit
+# CI-economy grouping: `weight` (positive number) is an OPTIONAL explicit
 # cost estimate for the leg (unit ≈ minutes of marginal work on a warm dependency
 # cache). When absent, a crate-source-size heuristic supplies the default — see
 # leg_weight(). The weight only steers bin-packing (--grouped); it never changes
 # WHICH legs run or their gate-critical `opt-in <name>` check-run names.
-# [OPUS-5] `test-reason` is a second enforcer-only key: a written justification on a
+# `test-reason` is a second enforcer-only key: a written justification on a
 # `test: false` leg for why that (crate, feature)'s coverage lives outside `cargo test`.
 # Like `tier-reason` the assembler only ALLOWS it; feature-matrix-tiers.py reads it.
 OPTIONAL_KEYS = {"tier", "tier-reason", "test-reason", "weight"}
 VALID_TIERS = ("test", "check")
 
-# [FABLE-5] CI-economy grouping (maintainer directive 2026-07-18): bin-pack the
+# CI-economy grouping (maintainer directive 2026-07-18): bin-pack the
 # per-leg matrix into a SMALL number of grouped runner jobs, each targeting <5 min
 # wall time. GROUP_CAPACITY is the per-group weight budget in the same unit as
 # `weight` (≈ minutes of marginal work on a warm dependency cache — the group job
@@ -152,7 +152,7 @@ def leg_weight(leg):
     kb = _crate_rs_kb(leg["crate"])
     return round(0.3 + kb / 2000.0 + (0.2 if leg["test"] else 0.0), 3)
 
-# [SONNET-4.6] sq-ldg8c: events on which the leg set is PARTITIONED by tier. Every other
+# sq-ldg8c: events on which the leg set is PARTITIONED by tier. Every other
 # event (push/schedule/workflow_dispatch/unknown/absent) is a FULL per-merge backstop —
 # ALL legs run as full legs and the check tier is empty (byte-identical to today).
 TIERED_EVENTS = frozenset({"pull_request", "merge_group"})
@@ -189,7 +189,7 @@ def load_legs():
                 sys.stderr.write(f"error: {where}: leg must be a mapping\n")
                 sys.exit(1)
             keys = set(leg.keys())
-            # [SONNET-4.6] sq-ldg8c: REQUIRED_KEYS must all be present; extras are allowed
+            # sq-ldg8c: REQUIRED_KEYS must all be present; extras are allowed
             # ONLY from OPTIONAL_KEYS (tier / tier-reason / test-reason / weight). Any other
             # key is still a HARD error (the pre-tier behaviour, minus the optional keys).
             missing = REQUIRED_KEYS - keys
@@ -219,7 +219,7 @@ def load_legs():
             if not isinstance(leg["test"], bool):
                 sys.stderr.write(f"error: {where}: `test` must be a boolean\n")
                 sys.exit(1)
-            # [SONNET-4.6] sq-ldg8c: normalise the optional tier. A MISSING tier defaults
+            # sq-ldg8c: normalise the optional tier. A MISSING tier defaults
             # to `test` (a full leg — behaviour-preserving). A present-but-unrecognised
             # value (typo, null, non-string) is a HARD ERROR: a demotion is only ever a
             # reviewed `tier: check` edit, never inferred from a malformed value.
@@ -231,7 +231,7 @@ def load_legs():
                     f"unrecognised value is never silently demoted to the check tier.\n"
                 )
                 sys.exit(1)
-            # [FABLE-5] CI-economy grouping: optional explicit weight — a positive,
+            # CI-economy grouping: optional explicit weight — a positive,
             # finite number. Anything else is a HARD error (a malformed weight must
             # never silently skew the bin-packing).
             weight = leg.get("weight")
@@ -274,7 +274,7 @@ def load_legs():
 
 
 def filter_legs_by_selection(legs, select_mode, affected_json):
-    """[FABLE-5] sq-fmx4u.3 (design §5.2): change-based selection over the leg list.
+    """sq-fmx4u.3 (design §5.2): change-based selection over the leg list.
 
     Keep only the legs whose `crate` is in the affected closure — but ONLY when
     the selection pre-job says `--select-mode selected`. Every other input is
@@ -311,7 +311,7 @@ def filter_legs_by_selection(legs, select_mode, affected_json):
 
 
 def filter_legs_by_tier(legs, event, tier):
-    """[SONNET-4.6] sq-ldg8c (design §3/§5): partition the leg list by tier for `event`.
+    """sq-ldg8c (design §3/§5): partition the leg list by tier for `event`.
 
     - TIERED event (pull_request / merge_group): return the legs whose effective
       tier equals the requested tier. `tier: check` legs are thus EXCLUDED from the
@@ -338,7 +338,7 @@ def filter_legs_by_tier(legs, event, tier):
 
 
 def filter_legs_by_shard(legs, shard):
-    """[SONNET-4.6] sq-ldg8c (design §3): split the (already tier/selection-filtered)
+    """sq-ldg8c (design §3): split the (already tier/selection-filtered)
     legs into the T1 check-tier's two build shards.
 
       * shard == "engine" => the sparq-engine legs (each recompiles the engine
@@ -362,7 +362,7 @@ def filter_legs_by_shard(legs, shard):
 
 
 def group_legs(legs, capacity=GROUP_CAPACITY):
-    """[FABLE-5] CI-economy grouping: deterministically bin-pack legs into groups.
+    """CI-economy grouping: deterministically bin-pack legs into groups.
 
     Same-crate legs are clustered FIRST (they share the group's warm target dir —
     consecutive feature-states of one crate recompile only the crate itself, never
@@ -476,7 +476,7 @@ def main():
         for leg in legs
     ]
     if "--grouped" in argv:
-        # [FABLE-5] CI-economy grouping: emit ONE matrix entry per bin-packed GROUP
+        # CI-economy grouping: emit ONE matrix entry per bin-packed GROUP
         # of legs. `legs` is a JSON-encoded STRING (GitHub matrix values must be
         # scalars) — the group job passes it to scripts/run-feature-matrix-group.py,
         # which runs each leg and emits its gate-critical `opt-in <name>` check-run

@@ -16,7 +16,7 @@ fn var_expr(v: &str) -> Expression {
 
 /// `eval_expr` == `eval_compiled` for every row of `b` with expression `e`.
 fn assert_compiled_matches_original(graph: &Graph, local: &LocalVocab, b: &Bindings, e: &Expression) {
-    let compiled = compile_expr(e, b);
+    let compiled = compile_expr(e, b, local);
     for row in &b.rows {
         let expected = eval_expr(graph, local, b, row, e).expect("eval_expr error");
         let got = eval_compiled(graph, local, b, row, &compiled).expect("eval_compiled error");
@@ -66,7 +66,7 @@ fn compiled_filter_is_byte_identical_to_eval_expr() {
             .iter()
             .filter(|row| {
                 eval_expr(&g, &local, &b_ref, row, expr)
-                    .map(|val| effective_boolean(&val))
+                    .map(|val| effective_boolean(&val, crate::EbvSemantics::Rec2013))
                     .unwrap_or(false)
             })
             .cloned()
@@ -344,5 +344,14 @@ fn compile_expr_matches_eval_expr_for_all_variants() {
 
     for e in &exprs {
         assert_compiled_matches_original(&g, &local, &b, e);
+    }
+    // Compare all expression lanes with captured outer terms too.
+    // Inner columns deliberately contain different values (and UNBOUND).
+    let mut captured = LocalVocab::default();
+    captured.correlation.insert(va, Term::BlankNode(BlankNode::new_unchecked("outer")));
+    captured.correlation.insert(vb, Term::Literal(Literal::new_typed_literal("9007199254740993", xsd::INTEGER)));
+    captured.correlation.insert(vc, Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/outer")));
+    for e in &exprs {
+        assert_compiled_matches_original(&g, &captured, &b, e);
     }
 }

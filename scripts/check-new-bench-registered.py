@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Gate G3 — new-bench->registry+dashboard (bead sq-ncvq.6, epic sq-ncvq).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Gate G3 — new-bench->registry+dashboard (bead sq-ncvq.6, epic sq-ncvq).
 #
 # The PROACTIVE / merge-time half of the maintenance flow-on system
 # (research/maintenance-flow-on-automation-design.md §2.1, gate G3). Sibling of
@@ -9,7 +8,7 @@
 # ISSUE after a PR merges; THIS gate flags the gap BEFORE merge so a new bench
 # suite never lands invisible to the registry + capability dashboard.
 #
-# [OPUS-4.8] sq-ncvq.10 doc-sync: this gate is the "Enforced by: **G3**" cell of
+# sq-ncvq.10 doc-sync: this gate is the "Enforced by: **G3**" cell of
 # the "new bench suite" row in the AGENTS.md "Post-batch re-evaluation checklist"
 # table (alongside the reactive `flow-on:new-bench-dashboard-row` rule). That
 # table row and this docstring are the two halves of the same rule — change one

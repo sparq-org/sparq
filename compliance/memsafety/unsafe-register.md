@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**92 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
+**93 `unsafe` sites** across 9 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -73,17 +73,17 @@ Recurring invariant shorthands used below:
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/lib.rs:285` | slice reinterpret (read) | page-align; `numerics.bin` is whole f64 | mmap base ≥ 8-byte f64 align; `n = len/8`. Mapped-file open validates size == `dict.len()*8`. |
+| `src/lib.rs:285` | slice reinterpret (read) | page-align; `numerics-v3.bin` is whole f64 | mmap base ≥ 8-byte f64 align; `n = len/8`. Mapped-file open validates size == `dict.len()*8`. |
 | `src/lib.rs:389` | ptr read | page-align; instant section is `n` f64 at offset 0 | `i < n` checked at the call; f64 at `base+i`. |
 | `src/lib.rs:456` | slice reinterpret (read) | page-align; instants are `n` f64 at offset 0 | `n = mapped_len`; materialises the cells. |
-| `src/lib.rs:577` | slice reinterpret (write) | POD-bytes | reinterpret the f64 column as bytes to write `temporals.bin`. |
-| `src/lib.rs:1584` | `Mmap::map` | own-for-lifetime | `numerics.bin` opened only if `size == dict.len()*8` (length pre-validated). |
-| `src/lib.rs:1592` | `Mmap::map` | own-for-lifetime | `temporals.bin` opened only if `size == dict.len()*9` (length pre-validated). |
+| `src/lib.rs:577` | slice reinterpret (write) | POD-bytes | reinterpret the f64 column as bytes to write `temporals-v3.bin`. |
+| `src/lib.rs:1584` | `Mmap::map` | own-for-lifetime | `numerics-v3.bin` opened only if `size == dict.len()*8` (length pre-validated). |
+| `src/lib.rs:1592` | `Mmap::map` | own-for-lifetime | `temporals-v3.bin` opened only if `size == dict.len()*9` (length pre-validated). |
 | `src/lib.rs:1885` | slice reinterpret (read) | page-align; perm0 is whole `[u32;3]` rows | `n` from `map_perm`; map outlives the loop. Written by us above. |
 | `src/lib.rs:2303` | slice reinterpret (read) | page-align; perm0 is whole `[u32;3]` rows | same as 1885 (external-build path). |
-| `src/lib.rs:3728` | slice reinterpret (write) | POD-bytes | reinterpret the f64 numerics cache as bytes to write `numerics.bin`. |
+| `src/lib.rs:3728` | slice reinterpret (write) | POD-bytes | reinterpret the f64 numerics cache as bytes to write `numerics-v3.bin`. |
 | `src/lib.rs:3761` | slice reinterpret (write) | POD-bytes | (sq-7ph8) `stream_write_numerics` flush: reinterprets a reusable `Vec<f64>` BLOCK as bytes for `write_all`. (a) `buf` is a live `Vec<f64>` of `buf.len()` elems; `size_of_val(&buf[..]) = len*8` covers the initialised contiguous region exactly. (b) target `u8` has align 1; the f64 source is over-aligned — no misalignment. (c) bytes are only READ (passed to `write_all`), never written through the alias. (d) the `&[u8]` is consumed inside the closure before `buf.clear()`; no provenance/lifetime escape past the source borrow. (e) NATIVE-endian reinterpret, identical to `write_numerics` (3728) it replaces and symmetric with the native-endian READ at `NumData::as_slice` (285): write-native + read-native round-trips on the same arch (the established cache contract; the cache is rebuilt, never shipped cross-arch). Test `streamed_caches_byte_identical_to_dense` asserts byte-identity to the dense write. **GX-5**. [OPUS-4.8] |
-| `src/lib.rs:3805` | slice reinterpret (write) | POD-bytes | (sq-7ph8) `stream_write_temporals` flush_f: reinterprets a reusable `Vec<f64>` instant BLOCK as bytes for `write_all`. Same invariants (a)–(e) as 3761: full-length `len*8` byte view of a live `Vec<f64>`, `u8` align 1, read-only, no escape, native-endian — symmetric with the native-endian temporal read (`temporals.bin` first `n` f64; rows 285/389/456) and byte-identical to `write_temporals` (577). The trailing flag-byte column is written from a `Vec<u8>` (no unsafe). **GX-5**. [OPUS-4.8] |
+| `src/lib.rs:3805` | slice reinterpret (write) | POD-bytes | (sq-7ph8) `stream_write_temporals` flush_f: reinterprets a reusable `Vec<f64>` instant BLOCK as bytes for `write_all`. Same invariants (a)–(e) as 3761: full-length `len*8` byte view of a live `Vec<f64>`, `u8` align 1, read-only, no escape, native-endian — symmetric with the native-endian temporal read (`temporals-v3.bin` first `n` f64; rows 285/389/456) and byte-identical to `write_temporals` (577). The trailing flag-byte column is written from a `Vec<u8>` (no unsafe). **GX-5**. |
 | `src/lib.rs:3934` | `_mm_prefetch` (x86_64) | hint-only | prefetch is defined for any address; the hint is dropped on a bad one — cannot fault. |
 | `src/lib.rs:3939` | `prfm` asm (aarch64) | hint-only | `prfm pldl1keep` is a hint; `nostack, preserves_flags`; cannot fault or write memory/regs. |
 | `src/lib.rs:3994` | ptr `add` (prefetch arg) | `id-1 < remap.len()` for every dict id | only computes an address for the hint-only `prefetch_read`; never dereferenced here. |
@@ -131,24 +131,24 @@ Recurring invariant shorthands used below:
 The extra row was a stale duplicate: `VectorStore::open` and `DiskAnnIndex::open` used to each
 carry their own `Mmap::map`, and sq-98c unified both behind the single `store::open_backing`
 helper + the `Bytes` backing enum, so the `.spqv` and `.spqg` loaders now share **one** map site
-(`store.rs:195`). On `wasm32` (memmap2 target-gated out) `open_backing` takes the owned
+(`store.rs:285`). On `wasm32` (memmap2 target-gated out) `open_backing` takes the owned
 `AlignedBytes` branch instead, which contains no `unsafe` of its own. Every file:line below was
 re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
-| `src/store.rs:146` | mut slice reinterpret | `words` is u32-aligned, holds ≥ `len` bytes; region exclusively owned | `AlignedBytes::from_vec` over-allocates to a word boundary (`len.div_ceil(4)` u32s); `copy_from_slice` fills exactly `len` bytes of the freshly-allocated, unaliased buffer. |
-| `src/store.rs:154` | slice reinterpret (read) | u32-aligned, ≥ `len` initialised bytes | `AlignedBytes::as_bytes` reads the bytes copied in above; base ≥ 4-byte aligned by construction (review 1874). |
-| `src/store.rs:195` | `Mmap::map` (`open_backing`) | own-for-lifetime | the SINGLE read-backing map site, shared by `VectorStore::open` (`.spqv`) and `DiskAnnIndex::open` (`.spqg`); `open_validated` bounds every offset afterwards. Native-only — wasm32 takes the owned-bytes branch. **B5**. |
-| `src/store.rs:653` | slice reinterpret (write) | f32 has no invalid bit patterns; `align(f32) ≥ align(u8)` | `finalize`: the f32 data section → LE bytes for `write_all`; big-endian targets rejected at create/open. |
-| `src/store.rs:939` | slice reinterpret (read) | `start` is a multiple of 4 ⇒ f32-aligned; range validated in `open` | `slot_vector`: the backing is u32-aligned for BOTH branches — page-aligned map, or `AlignedBytes` (review 1874 fixed a UB align bug here); `debug_assert_eq!` checks it; f32 accepts any bit pattern. **B5**. |
-| `src/store.rs:1459` | slice reinterpret (write) | f32 no invalid patterns; align ok | the streaming builder's `put`: f32→LE bytes for `write_all` after `validate_vector`. |
+| `src/store.rs:213` | mut slice reinterpret | `words` is u32-aligned, holds ≥ `len` bytes; region exclusively owned | `AlignedBytes::from_vec` over-allocates to a word boundary (`len.div_ceil(4)` u32s); `copy_from_slice` fills exactly `len` bytes of the freshly-allocated, unaliased buffer. |
+| `src/store.rs:221` | slice reinterpret (read) | u32-aligned, ≥ `len` initialised bytes | `AlignedBytes::as_bytes` reads the bytes copied in above; base ≥ 4-byte aligned by construction (review 1874). |
+| `src/store.rs:285` | `Mmap::map` (`open_backing`) | own-for-lifetime | the SINGLE read-backing map site, shared by `VectorStore::open` (`.spqv`) and `DiskAnnIndex::open` (`.spqg`); `open_validated` bounds every offset afterwards. Native-only — wasm32 takes the owned-bytes branch. **B5**. |
+| `src/store.rs:773` | slice reinterpret (write) | f32 has no invalid bit patterns; `align(f32) ≥ align(u8)` | `finalize`: the f32 data section → LE bytes for `write_all`; big-endian hosts are rejected by the WRITER (`create`/`create_inner`). The READER accepts them: `open_validated` validates the complete little-endian structure first and only then byte-swaps the dense f32 words into owned aligned storage (sq-i7w), so no `unsafe` site gains a new precondition. |
+| `src/store.rs:1059` | slice reinterpret (read) | `start` is a multiple of 4 ⇒ f32-aligned; range validated in `open` | `slot_vector`: the backing is u32-aligned for BOTH branches — page-aligned map, or `AlignedBytes` (review 1874 fixed a UB align bug here); `debug_assert_eq!` checks it; f32 accepts any bit pattern. **B5**. |
+| `src/store.rs:1579` | slice reinterpret (write) | f32 no invalid patterns; align ok | the streaming builder's `put`: f32→LE bytes for `write_all` after `validate_vector`. |
 | `src/diskann.rs:461` | slice reinterpret (read) | f32 no invalid patterns; align ok | build path: f32→LE bytes copied into the fixed-width record; LE target asserted; borrows `b.vectors`. |
 | `src/diskann.rs:808` | slice reinterpret (read) | `start` a multiple of 4 ⇒ f32-aligned; range validated in `open_validated` | `node_vector`: `debug_assert_eq!` checks alignment; both backings are ≥ 4-byte aligned; f32 accepts any bit pattern; borrows the backing. **B5**. |
-| `src/simd.rs:96` (`approx-ann`) | `#[target_feature(enable="neon")]` call | the `neon` ISA extension is present at runtime | entered ONLY when `active_kernel()` answers `Neon`, which it does ONLY inside `if is_aarch64_feature_detected!("neon")`; `l2_sq_neon` reads exactly `a.len()==b.len()` lanes. [OPUS-4.8] sq-lfo84 |
-| `src/simd.rs:106` (`approx-ann`) | `#[target_feature(enable="avx2,fma")]` call | both `avx2` and `fma` are present at runtime | entered ONLY when `active_kernel()` answers `Avx2`, which it does ONLY inside `if is_x86_feature_detected!("avx2") && …("fma")`; `l2_sq_avx2` reads exactly `a.len()` lanes via unaligned loads. [OPUS-4.8] sq-lfo84 |
-| `src/simd.rs:142` (`approx-ann`) | `unsafe fn l2_sq_neon` (NEON L2² kernel) | caller confirmed `neon`; `a.len()==b.len()` | 16-wide FMA body + 4-wide drain + scalar tail (`get_unchecked` only for `i<len`), so every `vld1q_f32` load is in-bounds. Verified vs an f64 reference for dim 0..=257 (`simd::tests`), **executed on a real aarch64 host** by the `vectors-aarch64` lane (#5028) — before that lane this kernel was compile-checked only, since every test lane was x86_64. [OPUS-4.8] sq-lfo84 [SONNET-4.6] #5028 |
-| `src/simd.rs:185` (`approx-ann`) | `unsafe fn l2_sq_avx2` (AVX2+FMA L2² kernel) | caller confirmed `avx2`+`fma`; `a.len()==b.len()` | 16-wide FMA body + 8-wide drain + scalar tail (`get_unchecked` only for `i<len`); `_mm256_loadu_ps` is unaligned so no alignment precondition. Numeric output verified by `simd::tests` on the x86_64 CI runner — `ci.yml`'s nextest matrix is `ubuntu-latest` (the aarch64 work box sq-lfo84 was authored on cannot execute AVX2). Those guards are arch-GENERIC and the scalar fallback satisfies them, so that evidence was previously compatible with the kernel never having run; `simd::tests::avx2_kernel_is_the_one_the_dispatcher_actually_ran` now asserts `active_kernel() == Avx2` and **fails closed under `CI`**, so a runner without AVX2+FMA reds the lane instead of silently supplying scalar-path evidence. [OPUS-4.8] sq-lfo84 [SONNET-4.6] #5065 |
+| `src/simd.rs:98` (`approx-ann`) | `#[target_feature(enable="neon")]` call | the `neon` ISA extension is present at runtime | entered ONLY when `active_kernel()` answers `Neon`, which it does ONLY inside `if is_aarch64_feature_detected!("neon")`; `l2_sq_neon` reads exactly `a.len()==b.len()` lanes. sq-lfo84 |
+| `src/simd.rs:108` (`approx-ann`) | `#[target_feature(enable="avx2,fma")]` call | both `avx2` and `fma` are present at runtime | entered ONLY when `active_kernel()` answers `Avx2`, which it does ONLY inside `if is_x86_feature_detected!("avx2") && …("fma")`; `l2_sq_avx2` reads exactly `a.len()` lanes via unaligned loads. sq-lfo84 |
+| `src/simd.rs:144` (`approx-ann`) | `unsafe fn l2_sq_neon` (NEON L2² kernel) | caller confirmed `neon`; `a.len()==b.len()` | 16-wide FMA body + 4-wide drain + scalar tail (`get_unchecked` only for `i<len`), so every `vld1q_f32` load is in-bounds. Verified vs an f64 reference for dim 0..=257 (`simd::tests`), **executed on a real aarch64 host** by the `vectors-aarch64` lane (#5028) — before that lane this kernel was compile-checked only, since every test lane was x86_64. sq-lfo84 #5028 |
+| `src/simd.rs:187` (`approx-ann`) | `unsafe fn l2_sq_avx2` (AVX2+FMA L2² kernel) | caller confirmed `avx2`+`fma`; `a.len()==b.len()` | 16-wide FMA body + 8-wide drain + scalar tail (`get_unchecked` only for `i<len`); `_mm256_loadu_ps` is unaligned so no alignment precondition. Numeric output verified by `simd::tests` on the x86_64 CI runner — `ci.yml`'s nextest matrix is `ubuntu-latest` (the aarch64 work box sq-lfo84 was authored on cannot execute AVX2). Those guards are arch-GENERIC and the scalar fallback satisfies them, so that evidence was previously compatible with the kernel never having run; `simd::tests::avx2_kernel_is_the_one_the_dispatcher_actually_ran` now asserts `active_kernel() == Avx2` and **fails closed under `CI`**, so a runner without AVX2+FMA reds the lane instead of silently supplying scalar-path evidence. sq-lfo84 #5065 |
 
 ### `sparq-cli` — 2 sites (the `dump-perm` debug command)
 
@@ -157,12 +157,13 @@ re-derived from `scripts/unsafe-gate.py --list`. [OPUS-5]
 | `src/main.rs:492` | `Mmap::map` | own-for-lifetime | read-only map of a perm file held open for the call. |
 | `src/main.rs:495` | slice reinterpret (read) | page-align; whole `[u32;3]` rows | `n = len/12`; `n==0` handled. CLI utility over a file the operator named. |
 
-### `sparq-zk-compose` — 2 sites (cross-process advisory file lock)
+### `sparq-zk-compose` — 3 sites (cross-process advisory file locks)
 
 | File:line | Kind | Invariant relied on | Why sound / how bounded |
 |---|---|---|---|
 | `src/verifier.rs:967` | `libc::flock(LOCK_EX)` | `fd` is a valid open fd owned by `file` for the call | the `MutexGuard` keeps `file` (hence `fd`) alive; an error fails closed (`return false`). |
 | `src/verifier.rs:975` | `libc::flock(LOCK_UN)` | same valid, locked fd | unlock helper run on every return path so the advisory lock is never leaked (a leak would deadlock the next caller). |
+| `src/driver.rs:144` | `libc::flock(LOCK_EX)` | the private `NargoCacheLock` exclusively owns the valid open file descriptor across the call | no pointer arguments or descriptor ownership transfer; errors reject, and scope-owned `File` closure releases the lock on return/unwind. Four-process exclusion and real concurrent compilation regressions exercise OS behavior; Miri does not model this external OS lock. |
 
 ### `sparq-bench` — 1 site (peak-RSS measurement; non-shipping bench binary)
 
@@ -339,10 +340,9 @@ scripts/unsafe-gate.py --list         # file:line:text of every counted site
 ```
 
 The **`unsafe-register (count ratchet)`** CI lane (`.github/workflows/ci.yml`) runs
-`--check` on every PR and merge-queue ref. Because it does **not** contain the word
-"advisory"/"informational", the `ci-summary / gate` aggregator treats it as a
-**required** (gating) check — distinct from the pre-existing non-gating
+`--check` nightly (and on `workflow_dispatch`); it is a failing (not informational) job but,
+since the `ci-summary` aggregator was deleted, **not** a required merge check — distinct from the pre-existing non-gating
 `unsafe report (cargo-geiger, informational)` lane, which stays as a visibility-only
-report. A PR that adds an `unsafe` site therefore fails CI until the author adds a
+report. A change that adds an `unsafe` site therefore reds the nightly run until the author adds a
 register row here, a `// SAFETY:` comment in source, and re-seeds the snapshot — all
 three changes land in the same reviewable diff.

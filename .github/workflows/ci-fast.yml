@@ -1,26 +1,18 @@
 name: ci-fast
 
-# ci-fast — a FAST, SELF-CONTAINED required check, proposed to replace `ci-summary / gate`.
-#
-# WHY: today's single required check (`gate`, ci-summary.yml -> scripts/ci_summary_gate.py)
-# does no work of its own. It POLLS ~30 sibling check-runs across many workflows and passes
-# when none failed, with an adaptive budget capped at 80 minutes. It occupies a runner slot
-# while it waits, it is coupled to every sibling's name/registration/cancellation, and in
-# practice it times out more often than tests actually fail (median merge-queue CI ~81 min).
+# ci-fast — the ONE required check (docs/branch-protection.md). Fast and self-contained.
 #
 # WHAT: one workflow whose jobs are ordinary `needs:` edges — no cross-workflow polling.
 # Three parallel work jobs cover the core crates, and one aggregating job named `ci-fast`
-# is the check the ruleset would require:
+# is the check the ruleset requires:
 #   * lint        — clippy -D warnings on the core crates (fmt is informational: see below)
 #   * test        — nextest + doctests on the core crates, default features
 #   * conformance — the W3C SPARQL conformance ratchet, the same command + floor as ci.yml
 #   * ci-fast     — `if: always()`; green iff every job above concluded `success`
 #
 # SCOPE: the heavy suites (full-workspace matrix, coverage, wasm, MSRV, SHACL/inference
-# conformance, fuzz, …) are NOT moved or edited by this file; they keep running where they
-# are and are expected to move to post-merge / nightly in a later change. Switching the
-# ruleset's required check from `gate` to `ci-fast` (and turning off the merge queue) is a
-# separate, maintainer-approved settings change — this workflow alone changes no gating.
+# conformance, fuzz, …) run nightly and on dispatch in their own workflows (ci.yml,
+# feature-matrix.yml, fuzz.yml, …); they do not block merges.
 #
 # CORE CRATES: kept in ONE env var below so the three jobs cannot drift apart.
 on:
@@ -34,16 +26,18 @@ on:
 permissions:
   contents: read
 
-# One run per PR (a new push cancels the stale run); push-to-main / merge_group /
-# dispatch runs are never cancelled (each has its own ref or run id in the group).
+# One run per PR (a new push cancels the stale run) and one per pushed branch: a newer
+# push to main cancels the superseded main run, since the newest commit's run covers it
+# and shared runners otherwise queue a run per merge. merge_group / dispatch runs are
+# never cancelled (the run id is in their group).
 concurrency:
-  group: ci-fast-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('{0}-{1}', github.ref, github.run_id) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-fast-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('{0}-{1}', github.ref, github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 # Same build env as ci.yml (copied verbatim, see the sq-6vshe.1 note there): no
 # incremental, thin debuginfo, lld. Keeping it IDENTICAL also keeps Swatinem/rust-cache's
-# env hash identical, so the `lint` / `conformance` jobs here restore the caches that
-# ci.yml's same-named jobs save on push-to-main.
+# env hash identical, so the `lint` / `conformance` jobs here can restore the caches that
+# ci.yml's same-named jobs save from main.
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -97,7 +91,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-nextest
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: nextest
       # `--profile ci` = the retry policy in .config/nextest.toml (a retried-then-passed

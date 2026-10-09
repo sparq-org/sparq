@@ -185,7 +185,8 @@ pub fn numeric_value(lexical: &str) -> Option<f64> {
 pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
     match datatype {
         dt::DATE_TIME | dt::DATE_TIME_STAMP => {
-            sparq_core::temporal::Timeline::parse_datetime(lexical).map(|t| t.instant())
+            // Datatype-aware: a timezone-free dateTimeStamp has no value to encode (#3902).
+            sparq_core::temporal::Temporal::of_lit(lexical, datatype).map(|t| t.instant)
         }
         dt::DATE => sparq_core::temporal::Timeline::parse_date(lexical).map(|t| t.instant()),
         dt::G_YEAR => {
@@ -194,8 +195,10 @@ pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
             // it shares the temporal lane's order with date/dateTime.
             let year = parse_gyear(lexical)?;
             // days_from_civil(year-01-01) * seconds-per-day. Reuse the core civil-date parser.
-            let days = sparq_core::temporal::parse_civil_date(&format!("{}-01-01", year))?;
-            Some((days * 86_400) as f64)
+            // Preserve XSD's four-digit minimum after parsing the signed year.
+            let sign = if year < 0 { "-" } else { "" };
+            let days = sparq_core::temporal::parse_civil_date(&format!("{sign}{:04}-01-01", year.unsigned_abs()))?;
+            Some(days.checked_mul(86_400)? as f64)
         }
         _ => None,
     }
@@ -204,7 +207,7 @@ pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
 /// Parse an `xsd:gYear` lexical (`[-]YYYY`, with an optional trailing timezone we ignore for
 /// ordering) to a signed year. The lexical space requires at least 4 digits.
 fn parse_gyear(lexical: &str) -> Option<i64> {
-    let s = lexical.trim();
+    let s = lexical.trim_matches([' ', '\t', '\r', '\n']);
     // Strip a trailing timezone suffix (`Z` or `±hh:mm`) if present — it does not affect the year
     // for ordering purposes.
     let core = if let Some(stripped) = s.strip_suffix('Z') {
@@ -212,6 +215,7 @@ fn parse_gyear(lexical: &str) -> Option<i64> {
     } else if s.len() > 6 && (s.as_bytes()[s.len() - 6] == b'+' || s.as_bytes()[s.len() - 6] == b'-')
         && s.as_bytes()[s.len() - 3] == b':'
     {
+        sparq_core::temporal::parse_tz(&s[s.len() - 6..])?;
         &s[..s.len() - 6]
     } else {
         s
@@ -220,7 +224,7 @@ fn parse_gyear(lexical: &str) -> Option<i64> {
         Some(rest) => (true, rest),
         None => (false, core),
     };
-    if digits.len() < 4 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    if digits.len() < 4 || (digits.len() > 4 && digits.starts_with('0')) || !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     let y: i64 = digits.parse().ok()?;
@@ -961,6 +965,10 @@ mod tests {
         assert!(b <= c, "2020-06-15 date <= same-day noon dateTime");
         assert_eq!(temporal_value("garbage", dt::DATE), None);
         assert_eq!(temporal_value("2020-01-01", dt::INTEGER), None); // wrong datatype
+        // xsd:dateTimeStamp requires a timezone (#3902); the same lexical is a valid dateTime.
+        assert_eq!(temporal_value("2020-06-15T12:00:00", dt::DATE_TIME_STAMP), None);
+        assert!(temporal_value("2020-06-15T12:00:00", dt::DATE_TIME).is_some());
+        assert_eq!(temporal_value("2020-06-15T12:00:00Z", dt::DATE_TIME_STAMP), Some(c));
     }
 
     #[test]
@@ -971,6 +979,22 @@ mod tests {
         assert_eq!(parse_gyear("2020+05:00"), Some(2020));
         assert_eq!(parse_gyear("20"), None); // < 4 digits
         assert_eq!(parse_gyear("abcd"), None);
+    }
+
+    // Signed short years must survive the shared parser's lexical validation.
+    #[test]
+    fn gyear_epoch_preserves_padding_and_fails_soft_on_capacity() {
+        for year in ["0000", "-0000", "0001", "0009", "0500", "-0001", "-0009", "-0500", "12000"] {
+            assert_eq!(
+                temporal_value(year, dt::G_YEAR),
+                temporal_value(&format!("{year}-01-01"), dt::DATE),
+                "{year}"
+            );
+            assert!(temporal_value(year, dt::G_YEAR).is_some());
+        }
+        for year in ["00001", "9223372036854775807", "é000", "0001+é:00", "0001+15:00"] {
+            assert!(temporal_value(year, dt::G_YEAR).is_none(), "{year}");
+        }
     }
 
     #[test]

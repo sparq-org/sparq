@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Model-free read-payload A/B measurer for the ast-grep+outline
-# intervention (bead sq-lhwo.4, epic sq-lhwo). Authored by Opus 4.8 (Fable
-# unavailable; flag for re-review when Fable returns). 🤖 SPARQ agent.
+# Model-free read-payload A/B measurer for the ast-grep+outline
+# intervention (bead sq-lhwo.4, epic sq-lhwo). 🤖 SPARQ agent.
 #
 # WHAT IT MEASURES — and the honest scope
 # --------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-9qz6 — wasm dependency-graph guard.
+# sq-9qz6 — wasm dependency-graph guard.
 #
 # The browser/wasm bundles must stay lean and pure-Rust: the native-only heavy deps
 # (parallelism + the compression codecs + the parallel parser crate) must NEVER
@@ -24,7 +24,7 @@
 # sparq-rsp-wasm carries NO regex (sparq-rsp + its engine/core are no-default-features), so
 # its graph is among the leanest — guarded by the same forbidden set.
 # sparq-text-wasm's `unicode-segmentation` (UAX #29 tokenizer) is likewise pure-Rust +
-# wasm-portable and NOT forbidden. [OPUS-4.8] sq-jbe6
+# wasm-portable and NOT forbidden. sq-jbe6
 #
 # Run: scripts/wasm-deps-guard.sh   (exit 0 = clean, exit 1 = a forbidden crate is present)
 set -euo pipefail
@@ -37,7 +37,16 @@ FORBIDDEN=(rayon flate2 zstd zstd-safe bzip2 sparq-parse mio tokio)
 
 fail=0
 for pkg in "${BUNDLES[@]}"; do
-  tree="$(cargo tree -p "$pkg" --target "$TARGET" -e no-dev 2>/dev/null)"
+  # Fail LOUD, not silently (#6093): under `set -e` a failing `cargo tree` (unfetched
+  # registry, offline runner, manifest/lockfile error) used to abort here with zero output.
+  tree_err="$(mktemp)"
+  if ! tree="$(cargo tree -p "$pkg" --target "$TARGET" -e no-dev 2>"$tree_err")"; then
+    echo "::error::cargo tree failed for ${pkg} — the ${TARGET} dependency graph could not be computed (not a forbidden-crate finding)"
+    sed 's/^/  cargo tree: /' "$tree_err" | head -20
+    rm -f "$tree_err"
+    exit 1
+  fi
+  rm -f "$tree_err"
   for crate in "${FORBIDDEN[@]}"; do
     # Match a tree line whose package name is exactly $crate (followed by a space+version
     # or end-of-line), ignoring the leading tree-drawing glyphs.

@@ -244,7 +244,7 @@ fn bench_bound_endpoint_pushdown_1m_edges() {
     let mut rows = 0usize;
     for &s in &starts {
         let t = Instant::now();
-        let r = path_pairs(&g, &plus, PathEnds { s: Some(s), o: None }).unwrap();
+        let r = path_pairs(&g, &plus, PathEnds::terms(Some(s), None)).unwrap();
         times.push(t.elapsed().as_secs_f64());
         rows += r.len();
     }
@@ -267,18 +267,18 @@ fn bench_bound_endpoint_pushdown_1m_edges() {
     let (a, hit, miss) = (id(0), id(SIZE - 1), id(SIZE)); // same cluster / next cluster
     let t = Instant::now();
     for _ in 0..100 {
-        let _ = path_pairs(&g, &plus, PathEnds { s: Some(a), o: Some(hit) }).unwrap();
+        let _ = path_pairs(&g, &plus, PathEnds::terms(Some(a), Some(hit))).unwrap();
     }
     eprintln!("both-bound (hit, early exit): {:.3?}/iter", t.elapsed() / 100);
     let t = Instant::now();
     for _ in 0..100 {
-        let r = path_pairs(&g, &plus, PathEnds { s: Some(a), o: Some(miss) }).unwrap();
+        let r = path_pairs(&g, &plus, PathEnds::terms(Some(a), Some(miss))).unwrap();
         assert!(!r.iter().any(|&(_, y)| y == miss));
     }
     eprintln!("both-bound (miss, cluster exhausted): {:.3?}/iter", t.elapsed() / 100);
     let t = Instant::now();
     for _ in 0..100 {
-        let _ = path_pairs(&g, &plus, PathEnds { s: None, o: Some(a) }).unwrap();
+        let _ = path_pairs(&g, &plus, PathEnds::terms(None, Some(a))).unwrap();
     }
     eprintln!("bound-object reverse traversal: {:.3?}/iter", t.elapsed() / 100);
 }

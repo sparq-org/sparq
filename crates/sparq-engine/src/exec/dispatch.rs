@@ -6,7 +6,8 @@ pub(super) fn eval_modified(graph: &Graph, local: &mut LocalVocab, p: &GraphPatt
     // Pin NOW() for this execution (SPARQL 1.1 §17.4.5.1). Outermost call samples
     // the clock once; the recursive / EXISTS re-entries see it active and keep the
     // outer instant (a Cell read). sq-98w7z.1
-    #[cfg(not(target_arch = "wasm32"))]
+    // A proof guest has no wall clock; its wrapper rejects NOW().
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
     let _query_now = query_now::scope();
     match p {
         GraphPattern::Project { inner, variables } => {
@@ -1992,14 +1993,11 @@ pub(super) fn count_single_filtered(
             .iter()
             .filter(|row| graph.numeric_value(scan.to_spo(row)[pos]).is_some_and(|x| cmp.test(x)))
             .count(),
-        [(pos, ScanCmp::Temp(op, t))] => scan
+        [(pos, ScanCmp::Temp(op, t, approx))] => scan
             .rows
             .iter()
             .filter(|row| {
-                graph
-                    .temporal_value(scan.to_spo(row)[pos])
-                    .and_then(|v| Temporal::cmp_t(v, t))
-                    .is_some_and(|o| op.eval(o))
+                temporal_cmp_of_id(graph, scan.to_spo(row)[pos], t, approx).is_some_and(|o| op.eval(o))
             })
             .count(),
         _ => scan
@@ -2211,7 +2209,12 @@ pub(super) fn eval_graph_named_pref(
         // default (wasm) build is byte-identical.
         #[cfg(feature = "zk")]
         let _zk = crate::zk::graph_scope(gname);
-        let mut sub_local = LocalVocab::default();
+        let mut sub_local = LocalVocab {
+            ebv_semantics: local.ebv_semantics,
+            correlation: local.correlation.clone(),
+            dataset: local.dataset,
+            ..LocalVocab::default()
+        };
         let b = eval_graph_pattern(sub, &mut sub_local, inner)?;
         let rows: Vec<Row> = b
             .rows
@@ -2227,6 +2230,7 @@ pub(super) fn eval_graph_named_pref(
             .collect();
         Ok(Bindings::unsorted(b.vars, rows))
     }
+    let dataset = local.dataset.unwrap_or(graph);
     match name {
         NamedNodePattern::NamedNode(n) => {
             let target = Term::NamedNode(n.clone());
@@ -2234,7 +2238,7 @@ pub(super) fn eval_graph_named_pref(
             // branch below: non-visible must be INDISTINGUISHABLE from absent
             // (the L1 view's security property).
             let sub = if view::allows(&target) {
-                graph.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
+                dataset.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
             } else {
                 None
             };
@@ -2258,7 +2262,7 @@ pub(super) fn eval_graph_named_pref(
                     #[cfg(feature = "zk")]
                     let _zk = crate::zk::graph_scope(&target);
                     let empty = Graph::load_str("", "ntriples").map_err(|e| e.to_string())?;
-                    let mut el = LocalVocab::default();
+                    let mut el = LocalVocab { ebv_semantics: local.ebv_semantics, dataset: local.dataset, ..LocalVocab::default() };
                     let mut b = eval_graph_pattern(&empty, &mut el, inner)?;
                     b.rows.clear();
                     Ok(b)
@@ -2345,7 +2349,7 @@ pub(super) fn eval_graph_named_pref(
                 // The view-visibility (L1) check stays — a non-visible graph is still skipped.
                 Some(pref) => {
                     let mut err: Option<String> = None;
-                    graph.for_named_graphs_with_prefix(pref, |gname, sub| {
+                    dataset.for_named_graphs_with_prefix(pref, |gname, sub| {
                         if err.is_some() || !view::allows(gname) {
                             return;
                         }
@@ -2359,7 +2363,7 @@ pub(super) fn eval_graph_named_pref(
                 }
                 // Full enumeration (no prefix restriction).
                 None => {
-                    for (gname, sub) in &graph.named {
+                    for (gname, sub) in &dataset.named {
                         if !view::allows(gname) {
                             continue; // not visible under the installed dataset view (L1)
                         }
@@ -2462,7 +2466,22 @@ pub(super) fn trace_label(p: &GraphPattern) -> String {
     }
 }
 
+
 pub(super) fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
+    let bindings = eval_graph_pattern_unsubstituted(graph, local, p)?;
+    if !local.substitute_exists_domains {
+        return Ok(bindings);
+    }
+    // Charge the materialized intermediate before capture filtering and
+    // projection reduce it. Tracing then sees the actual substituted output.
+    let previous = budget::set_width(bindings.vars.len());
+    let result = budget::check(bindings.rows.len());
+    budget::restore_width(previous);
+    result?;
+    Ok(exists_domain::restrict(graph, local, bindings))
+}
+
+pub(super) fn eval_graph_pattern_unsubstituted(graph: &Graph, local: &mut LocalVocab, p: &GraphPattern) -> Result<Bindings, String> {
     budget::check(0)?; // coarse cooperative cancellation: once per operator entry
     if is_conjunctive(p) {
         let mut patterns = Vec::new();
@@ -2532,26 +2551,29 @@ pub(super) fn eval_graph_pattern_inner(graph: &Graph, local: &mut LocalVocab, p:
             Ok(b)
         }
         GraphPattern::Join { left, right } => {
-            let l = eval_graph_pattern(graph, local, left)?;
-            // Bind-join pushdown: if the RIGHT side is a SERVICE and the left has
-            // already bound its join variables, push those bindings to the remote as a
-            // VALUES block instead of materialising the whole remote relation. Join is
+            // Bind-join pushdown: if one side is a SERVICE and the other has already
+            // bound its join variables, push those bindings to the remote as a VALUES
+            // block instead of materialising the whole remote relation. Join is
             // symmetric, so try either side as the SERVICE. (sq-sjkj)
+            //
+            // SERVICE on the left (and not on the right): evaluate the right FIRST and
+            // the SERVICE at most once — evaluating it eagerly and again on a declined
+            // pushdown fetched the endpoint (or ran a local handler) twice (#4438).
             #[cfg(feature = "service")]
+            if matches!(left.as_ref(), GraphPattern::Service { .. })
+                && !matches!(right.as_ref(), GraphPattern::Service { .. })
             {
-                if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
-                    return Ok(join_bindings(l, r));
+                let r = eval_graph_pattern(graph, local, right)?;
+                if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
+                    return Ok(join_bindings(r, sl));
                 }
-                // Symmetric: SERVICE on the left, bindings produced by the right.
-                if matches!(left.as_ref(), GraphPattern::Service { .. }) {
-                    let r = eval_graph_pattern(graph, local, right)?;
-                    if let Some(sl) = try_bound_join_service(graph, local, &r, left)? {
-                        return Ok(join_bindings(r, sl));
-                    }
-                    // Fall through with the already-evaluated right; recompute left verbatim.
-                    let l2 = eval_graph_pattern(graph, local, left)?;
-                    return Ok(join_bindings(l2, r));
-                }
+                let l = eval_graph_pattern(graph, local, left)?;
+                return Ok(join_bindings(l, r));
+            }
+            let l = eval_graph_pattern(graph, local, left)?;
+            #[cfg(feature = "service")]
+            if let Some(r) = try_bound_join_service(graph, local, &l, right)? {
+                return Ok(join_bindings(l, r));
             }
             // Sideways information passing (SIP): when the already-evaluated `l` is
             // SMALL, evaluate the big `right` child CORRELATED on it — seeding scans

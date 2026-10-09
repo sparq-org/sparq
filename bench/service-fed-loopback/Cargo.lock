@@ -226,9 +226,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.20"
+version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1262,22 +1262,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46715eb957d1fe960cbbc0b713da8f78e2cb19df315b48fb09c9467a1c84f656"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf",
- "peg",
- "rand",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "sparq-conformance"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "oxrdfxml",
@@ -1285,22 +1271,22 @@ dependencies = [
  "quick-xml 0.41.0",
  "rustc-hash",
  "serde_json",
- "spargebra",
  "sparq-conformance-floors",
  "sparq-core",
  "sparq-engine",
  "sparq-reason",
  "sparq-server",
+ "sparq-spargebra",
  "tokio",
 ]
 
 [[package]]
 name = "sparq-conformance-floors"
-version = "0.1.3"
+version = "0.1.4"
 
 [[package]]
 name = "sparq-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown",
  "memchr",
@@ -1314,7 +1300,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1325,26 +1311,27 @@ dependencies = [
  "sha1 0.11.0",
  "sha2",
  "smallvec",
- "spargebra",
  "sparq-core",
  "sparq-engine-serialize",
  "sparq-engine-service",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
+ "rustc-hash",
  "sparq-core",
  "sparq-jsonld",
 ]
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "quick-xml 0.41.0",
@@ -1357,13 +1344,15 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.3"
+version = "0.1.4"
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
+ "oxiri",
  "oxrdf",
+ "percent-encoding",
  "rayon",
  "regex",
  "rustc-hash",
@@ -1373,19 +1362,19 @@ dependencies = [
 
 [[package]]
 name = "sparq-serve"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "arc-swap",
  "oxrdf",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-spargebra",
 ]
 
 [[package]]
 name = "sparq-server"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "axum",
  "flate2",
@@ -1398,10 +1387,10 @@ dependencies = [
  "oxrdfxml",
  "oxttl",
  "serde_json",
- "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-serve",
+ "sparq-spargebra",
  "tokio",
  "tower",
  "tower-http",
@@ -1410,8 +1399,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf",
+ "peg",
+ "rand",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "sparq-substrate"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown",
  "oxrdf",

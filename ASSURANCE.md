@@ -13,18 +13,18 @@ and [`CONTRIBUTING.md`](CONTRIBUTING.md) (the contributor-facing gate).
 
 ## The 5-minute version
 
-**One check summarizes tree health: `ci-summary / gate`.** It is the single required
-branch-protection status on `main` ([`docs/branch-protection.md`](docs/branch-protection.md)):
-it polls **every other check-run on the same commit** — build + tests, `clippy -D warnings`,
-the conformance / coverage / unsafe-count ratchets, the opt-in feature matrix, supply-chain,
-and the docs-honesty gates — and passes only when none failed. (**CodeQL is NOT among them** —
-it has been disabled since 2026-07-18; see §11.) So:
+**One check blocks a merge: `ci-fast`.** It is the single required branch-protection status
+on `main` ([`docs/branch-protection.md`](docs/branch-protection.md)): `clippy -D warnings`,
+nextest + doctests on the core crates, and the W3C SPARQL conformance ratchet. The heavy
+suites — the full workspace build + tests, every conformance / coverage / unsafe-count
+ratchet, the opt-in feature matrix, fuzzing and formal verification — run **nightly and on
+demand** against `main`; supply-chain also runs on every push to `main`. (**CodeQL is
+disabled** since 2026-07-18; see §11.) So:
 
-1. Open any merged PR (or the latest commit on `main`) and look at its **checks list** —
-   green `ci-summary / gate` ≈ everything below in this document that gates was green.
-   Definition: [`.github/workflows/ci-summary.yml`](.github/workflows/ci-summary.yml), logic in
-   [`scripts/ci_summary_gate.py`](scripts/ci_summary_gate.py) (itself unit-tested in CI by
-   [`scripts/tests/test_ci_summary_gate.py`](scripts/tests/test_ci_summary_gate.py)).
+1. Open any merged PR and look at its **checks list** — green `ci-fast` means the fast core
+   gate passed. For everything else, look at the latest **nightly runs on `main`** in the
+   Actions tab (`ci.yml`, `feature-matrix.yml`, `fuzz.yml`, `formal-verification.yml`,
+   `supply-chain.yml`). Definition: [`.github/workflows/ci-fast.yml`](.github/workflows/ci-fast.yml).
 2. For the *"does it implement the specs?"* question, open the **conformance scoreboard**: the
    job summary of the conformance job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
    renders every suite with its ratchet floor. Locally:
@@ -124,13 +124,14 @@ multibyte strings, pre-1970 `xs:dateTime`) — the cases beads `sq-3x7dl.4`–`.
 - **Limits:** the sparq lane is nightly (see qualifier above); oracle scope is bounded by what
   the reference engines implement. The M1 xpath oracle is **verification, not proof**: its TCB is
   the (itself unaudited) sparq Rust XSD evaluator, the sampled corpus, and the trusted
-  Noir→ACIR→Barretenberg lowering — `nargo test` exercises witness generation only. Two live
-  divergences where *sparq's own evaluator* is wrong against XPath F&O are recorded in the
-  generated file's header. Those rows are still asserted **live**, but against the F&O value and
-  labelled `SPEC-REFERENCE` — read them as *circuit vs the spec*, not *circuit vs sparq* — so the
-  edges stay executable and a `noir_XPath` regression on one fails the lane. Unit tests pin that
-  no assertion is ever emitted commented out, and self-expiring tests retire the special-casing
-  the day the engine is fixed.
+  Noir→ACIR→Barretenberg lowering — `nargo test` exercises witness generation only. The
+  `xs:double` answers are cross-checked against native `f64` and the `fn:substring` answers
+  against an F&O window reference, and a disagreement aborts generation; the other answers
+  (string length, string predicates, mixed-comparison results, casts, dateTime) rest on sparq-engine
+  alone. The two engine bugs the cross-checks found (`SUBSTR` with `start < 1`, the sign of a
+  zero `ROUND`) were fixed in sparq-engine. Unit tests
+  pin that no assertion is ever emitted commented out and that those edges reach the circuit
+  live with their F&O values.
 
 ## 3. Metamorphic self-checks (TLP / NoREC)
 
@@ -284,9 +285,9 @@ measured figures live only in the [benchmarks dashboard](https://sparq.jeswr.org
 never in markdown), terminology, internal-links (lychee), typos, markdownlint, README-template,
 and "a new public API/config key must be documented in the same diff" gates.
 
-- **See it run:** [`docs-quality.yml`](.github/workflows/docs-quality.yml) and
-  [`flow-on-gates.yml`](.github/workflows/flow-on-gates.yml), on every PR. Locally:
-  `bash scripts/check-privacy-claims.sh`.
+- **See it run:** [`docs-quality.yml`](.github/workflows/docs-quality.yml), on every PR.
+  Locally: `bash scripts/check-privacy-claims.sh`, or `python3 scripts/preflight.py` for the
+  diff-scoped new-crate / public-API → skill / config-documented gates.
 - **Green means:** no unqualified crypto claim, no baked-in perf number, no dead internal
   link on the gated surface.
 - **Limits:** it is a phrase/pattern gate, not semantic review — it raises the floor on

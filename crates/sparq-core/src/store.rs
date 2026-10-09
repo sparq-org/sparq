@@ -1027,11 +1027,14 @@ impl TripleStore {
         self.overlay.as_ref().map_or(0, |ov| ov.added.len() + ov.deleted.len())
     }
 
-    /// Heap footprint of the permutation indexes in bytes (for benchmarking). Memory-
-    /// mapped permutations contribute 0 — their resident pages are OS page cache.
+    /// Heap footprint of the permutation indexes, the overlay and the planner's
+    /// per-predicate statistics map in bytes (for benchmarking). Memory-mapped
+    /// permutations contribute 0 — their resident pages are OS page cache. The stats map
+    /// is counted as capacity × (entry + 1 control byte), like `Dict`'s tables (#3115).
     pub fn heap_bytes(&self) -> usize {
         self.perms.iter().map(PermData::heap_bytes).sum::<usize>()
             + self.overlay.as_ref().map_or(0, |ov| ov.heap_bytes())
+            + self.pred_stats.capacity() * (std::mem::size_of::<(Id, PredStat)>() + 1)
     }
 
     /// Chooses the permutation whose sort order places all bound pattern
@@ -1418,7 +1421,13 @@ mod tests {
             (3_000_000, 900, 5_000_000), // all multi-byte
         ];
         for (si, pi, oi) in shapes {
-            for n in [0usize, 1, 2, 997, 6_000] {
+            // Under Miri only the small sizes: the edge cases are all in them (sq-0s15k).
+            let sizes: &[usize] = if cfg!(miri) {
+                &[0, 1, 2, 97]
+            } else {
+                &[0, 1, 2, 997, 6_000]
+            };
+            for &n in sizes {
                 let mut triples: Vec<[Id; 3]> = (0..n)
                     .map(|_| [1 + rng() % si, 1 + rng() % pi, 1 + rng() % oi])
                     .collect();
@@ -1895,7 +1904,7 @@ mod tests {
             st
         };
         let mut triples: Vec<[Id; 3]> = Vec::new();
-        for _ in 0..20_000 {
+        for _ in 0..if cfg!(miri) { 600 } else { 20_000 } {
             triples.push([1 + rng() % 400, 1 + rng() % 9, 1 + rng() % 2000]);
         }
         let mut store = TripleStore::from_triples(triples.clone());
@@ -2136,6 +2145,25 @@ mod tests {
         for pat in [pat7, pat_p, pat_o, [Some(50), None, None]] {
             assert_eq!(store.scan(&pat).rows, rebuilt.scan(&pat).rows, "reverted cross-perm rows differ for {pat:?}");
         }
+    }
+
+    /// `heap_bytes` must count the planner's per-predicate statistics map (`pred_stats`),
+    /// not only the permutations + overlay (#3115). Wide-predicate corpora (Wikidata has
+    /// ~100k properties) carry MBs here; it was silently uncounted.
+    #[test]
+    fn heap_bytes_counts_pred_stats() {
+        // 1_000 distinct predicates so the stats map is non-trivially sized.
+        let triples: Vec<[Id; 3]> = (0..1_000u64).map(|p| [1, p as Id, 2]).collect();
+        let store = TripleStore::from_triples(triples);
+        assert_eq!(store.pred_stats.len(), 1_000);
+        let perms: usize = store.perms.iter().map(PermData::heap_bytes).sum();
+        let stats = store.pred_stats.capacity() * (std::mem::size_of::<(Id, PredStat)>() + 1);
+        assert!(stats > 0);
+        assert_eq!(
+            store.heap_bytes(),
+            perms + stats,
+            "heap_bytes must include pred_stats"
+        );
     }
 
     /// [SONNET-4.6 sq-7d3dj.32.1] Each built raw-mode permutation Vec must carry zero

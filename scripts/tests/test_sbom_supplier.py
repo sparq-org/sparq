@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.26 (GS-1 / NTIA N1): hermetic tests for scripts/check-sbom-supplier.py.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-toze.26 (GS-1 / NTIA N1): hermetic tests for scripts/check-sbom-supplier.py.
 #
 # Hermetic w.r.t. git/network: imports the check module and drives its pure evaluate() +
 # the file parser against in-tmpdir fixtures. NO subprocess, NO live git. A final test
@@ -28,7 +27,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
-# [OPUS-4.8] sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
+# sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
 # fetch is TRANSIENTLY flaky on hosted runners (observed `curl ... [16] Error in the HTTP2
 # framing layer` -> non-zero exit at ~9-12s). PR #750 wrapped the cyclonedx invocation in the
 # WORKFLOW STEPS, but this live-SBOM self-test runs its OWN `cargo cyclonedx` (it executes
@@ -161,7 +160,7 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
             self.skipTest("cargo-cyclonedx / jq not available")
         normalize = REPO_ROOT / "scripts" / "sbom-normalize.jq"
         with tempfile.TemporaryDirectory() as d:
-            # [OPUS-4.8] sq-90ew: GENERATION only, with the transient-flake retry. The GS-1
+            # sq-90ew: GENERATION only, with the transient-flake retry. The GS-1
             # supplier assertion below runs ONCE on the produced files (NOT retried).
             _generate_workspace_sbom()
             try:
@@ -201,6 +200,44 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
             finally:
                 for f in REPO_ROOT.glob("crates/**/*.cdx.json"):
                     f.unlink()
+
+
+class TestDetachedSuppliers(unittest.TestCase):
+    """Explicit first-party members and patched-byte distributor identity."""
+
+    def test_detached_and_patched_sources_keep_honest_supplier_identity(self):
+        if not shutil.which("jq"):
+            self.skipTest("jq not available")
+        pairs = [
+            ("sparq-proved-evaluator", "zk/sparql-evaluator/host", "Jesse Wright"),
+            ("sparq-proved-evaluator-model", "zk/sparql-evaluator/model", "Jesse Wright"),
+            ("sparq-proved-evaluator-methods", "zk/sparql-evaluator/methods", "Jesse Wright"),
+            ("sparq-exact-guest", "zk/sparql-evaluator/methods/guest", "Jesse Wright"),
+            # zkp-14.5: the separately pinned V5 guest, by exact path and name.
+            ("sparq-authrdf-guest", "zk/sparql-evaluator/methods/guest-authrdf", "Jesse Wright"),
+            ("sparq-authrdf-guest", "zk/sparql-evaluator/methods/guest-other", None),
+            ("sparq-authrdf-guest-extra", "zk/sparql-evaluator/methods/guest-authrdf", None),
+            ("sparq_proved_evaluator", "zk/sparql-evaluator/host", "Jesse Wright"),
+            ("sparq_proved_evaluator_model", "zk/sparql-evaluator/model", "Jesse Wright"),
+            ("sparq_proved_evaluator_methods", "zk/sparql-evaluator/methods", "Jesse Wright"),
+            ("ark-relations", "vendor/zk-sdk/ark-relations-0.5.1", "Jesse Wright"),
+            ("spargebra", "vendor/spargebra", "crates.io"),
+            ("unrelated", "zk/sparql-evaluator/model", None),
+            ("sparq-proved-evaluator-model", "elsewhere/model", None),
+        ]
+        raw = {"components": [{"name": name, "bom-ref": f"path+file:///build/{path}#0.1.0"}
+                               for name, path, _ in pairs]}
+        output = subprocess.check_output(
+            ["jq", "-f", str(REPO_ROOT / "scripts/sbom-normalize.jq")],
+            input=json.dumps(raw).encode(),
+        )
+        normalized = json.loads(output)
+        for component, (_, _, supplier) in zip(normalized["components"], pairs):
+            self.assertEqual(component.get("supplier", {}).get("name"), supplier)
+        twice = subprocess.check_output(
+            ["jq", "-f", str(REPO_ROOT / "scripts/sbom-normalize.jq")], input=output,
+        )
+        self.assertEqual(output, twice)
 
 
 if __name__ == "__main__":

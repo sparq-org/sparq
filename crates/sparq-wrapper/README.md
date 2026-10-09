@@ -5,8 +5,6 @@ store, follow predicates, and convert literal values without handling raw
 dictionary IDs or triples. The crate is opt-in; `sparq-core` and
 `sparq-engine` do not depend on it.
 
-> Model: GPT-5.6 [GPT-5.6] (sq-1rg2q M1).
-
 ## 🚀 Quickstart
 
 ```rust
@@ -54,12 +52,12 @@ hatch.
   `live_mapped` write-through collections based on rdfjs/wrapper issue #8 and
   draft PR #92. Live collection reads re-query the store, and value-to-term
   conversion completes before mutation so conversion failures leave the graph
-  unchanged. This proposal is not landed upstream. <!-- [GPT-5.6] sq-1rg2q.3 -->
+  unchanged. This proposal is not landed upstream. <!-- sq-1rg2q.3 -->
 - `proposed-graph-scope` adds `proposed::graph_scope::GraphScope`, an explicit
   deduplicated read projection over selected named graphs (plus the default
   graph when requested) whose insert/remove operations target one configured
   named graph. This proposal follows rdfjs/wrapper draft PR #95 and is not
-  landed upstream. <!-- [GPT-5.6] sq-1rg2q.6 -->
+  landed upstream. <!-- sq-1rg2q.6 -->
 - `proposed-async-store` adds `proposed::async_store::AsyncStore`, the same
   focus/traverse shape over a remote or disk-backed backend. Traversal streams
   each term as a wrapped node instead of collecting a result set, dropping a
@@ -67,18 +65,27 @@ hatch.
   traversal for a backend honouring the trait's laziness and drop-cancellation
   contract), and no async runtime is pulled in. This
   proposal follows rdfjs/wrapper issue #10 and draft PR #97 and is not landed
-  upstream. <!-- [SONNET-4.6] sq-1rg2q.8 -->
+  upstream. <!-- sq-1rg2q.8 -->
 - `proposed-json` adds `proposed::json::JsonProjection`, a JSON projection of a
   focus node and its outgoing reachable subgraph that is total on cyclic graphs
   (a repeated node becomes a `{"@ref": …}` term reference under an explicit
   `RepeatedFocus` policy) and deterministic (predicates sorted by IRI, objects
   by N-Triples form), and that keeps each literal's datatype, language tag, and
   base direction. This proposal follows rdfjs/wrapper open PR #23 and is not
-  landed upstream. <!-- [SONNET-4.6] sq-1rg2q.11 -->
-- The reserved `proposed-graph-scope-events`, `proposed-async-node`, and
-  `proposed-async-events` seams are default-off placeholders. Their APIs are
-  intentionally empty until the corresponding proposal work lands.
-  <!-- [SONNET-4.6] sq-1rg2q.1 -->
+  landed upstream. <!-- sq-1rg2q.11 -->
+- `proposed-async-node` adds `proposed::async_node`: `required` / `optional` /
+  `many` mapped reads over an `AsyncNode` (singular reads stop after the second
+  streamed value) and the write-through `AsyncLiveSet`. This proposal follows
+  rdfjs/wrapper draft PR #98. <!-- sq-1rg2q.9 -->
+- `proposed-async-events` adds `proposed::async_events::AsyncObservableStore`,
+  whose effective mutations await every listener in subscription order before
+  resolving. This proposal follows rdfjs/wrapper draft PR #99.
+  <!-- sq-1rg2q.10 -->
+- `proposed-graph-scope-events` adds
+  `proposed::graph_scope_events::ObservableDataset`, whose listeners see a
+  graph scope's projected union change: add at the first in-scope copy, delete
+  at the last. This proposal follows rdfjs/wrapper draft PR #96.
+  <!-- sq-1rg2q.7 -->
 - All crate features are off by default, and the dependency on `sparq-core`
   disables its default features to keep this capability isolated.
 

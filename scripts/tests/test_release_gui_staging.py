@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""[GPT-6] Execute the real GUI staging step against hermetic installer fixtures.
+"""Execute the real GUI staging step against hermetic installer fixtures.
 
 Uses /bin/bash (3.2 on macOS), overridable with RELEASE_TEST_BASH. No builds,
 network, GitHub credentials, or publication calls are needed.
@@ -12,7 +12,14 @@ import subprocess
 import tempfile
 import unittest
 
-import yaml
+import sys
+
+# #5820: local runs without PyYAML skip this module instead of erroring; CI still
+# hard-fails on a missing PyYAML (see scripts/tests/_yaml_seam.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _yaml_seam import yaml_or_local_skip  # noqa: E402
+
+yaml = yaml_or_local_skip()
 
 
 ROOT = Path(__file__).resolve().parents[2]

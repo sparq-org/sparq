@@ -76,7 +76,10 @@ mod gated {
     #[test]
     fn ql_arm_stays_out_of_scope_with_an_exhaustive_taxonomy() {
         let root = rdf_tests_root();
-        if !root.join("sparql/sparql11/entailment/manifest.ttl").exists() {
+        if !root
+            .join("sparql/sparql11/entailment/manifest.ttl")
+            .exists()
+        {
             eprintln!(
                 "SKIP: rdf-tests `sparql11/entailment` not present under {} — run \
                  scripts/fetch-inference-suites.sh",

@@ -60,6 +60,17 @@ use oxrdf::{Literal, NamedNode, Term};
 use oxttl::{NQuadsParser, NTriplesParser, TriGParser, TurtleParser};
 use store::{Pattern, TripleStore};
 
+// Semantic cache versions: legacy files may contain values admitted by
+// older lexical/facet/calendar rules. Their layouts still decode, so length is
+// insufficient to establish compatibility. Missing current files are rebuilt
+// in memory by Graph::open; dictionary and permutation files remain unchanged.
+#[cfg(feature = "mmap")]
+const NUMERIC_CACHE_FILE: &str = "numerics-v3.bin";
+#[cfg(feature = "mmap")]
+// V2 cached padded raw lexicals and timezone-less dateTimeStamp values; V3 rejected
+// the XSD 1.1 year zero.
+const TEMPORAL_CACHE_FILE: &str = "temporals-v4.bin";
+
 /// An immutable, dictionary-encoded RDF graph ready for querying.
 pub struct Graph {
     /// Term dictionary. [GPT-6 Astra] Direct writes bypass numeric/temporal cache
@@ -74,12 +85,12 @@ pub struct Graph {
     /// / ORDER BY without materialising the term and parsing its string each time
     /// — a lightweight, u32-id-preserving stand-in for QLever's inline ValueIds.
     numerics: NumData,
-    /// Parallel to the dictionary: the precomputed comparison key of each
-    /// `xsd:dateTime`/`xsd:dateTimeStamp`/`xsd:date` literal (see
-    /// [`temporal::Temporal`]). The temporal twin of `numerics`: dateTime
-    /// FILTER / ORDER BY / MIN/MAX read the timeline value O(1) from the cache
-    /// instead of materialising the term and re-parsing its lexical per row.
+    /// Approximate persisted epoch values, retained for representation APIs and
+    /// temporal classification. Exact comparison keys live in `exact_temporals`.
     temporals: TempData,
+    /// Lazy sparse exact keys. Fraction offsets borrow dictionary storage;
+    /// no extra allocation is made for graphs that never query a temporal value.
+    exact_temporals: std::sync::OnceLock<rustc_hash::FxHashMap<Id, temporal::ExactCacheCell>>,
     /// [OPUS-4.8] (sq-lr2ii) Memoised guard against the engine's f64 sargable-FILTER fast
     /// path deciding a comparison wrongly for an f64-INEXACT decimal. `0` = not yet computed,
     /// `1` = known to hold NO such decimal (fast path safe), `2` = holds at least one (the
@@ -89,6 +100,10 @@ pub struct Graph {
     /// dictionary. Interior-mutable so a shared `&Graph` can populate it; never observable in
     /// results (pure correctness gate).
     high_precision_decimal: std::sync::atomic::AtomicU8,
+    /// The `xsd:float` twin of `high_precision_decimal` (same `0`/`1`/`2` encoding, same
+    /// reset rule): whether the graph holds any `xsd:float` literal. Filled lazily by
+    /// [`has_float_literal`](Self::has_float_literal).
+    float_literal: std::sync::atomic::AtomicU8,
     /// Named graphs (each a self-contained `Graph`), keyed by their name term. Empty for the
     /// usual single-default-graph load; populated by [`load_dataset`](Self::load_dataset) from
     /// N-Quads / TriG so the engine can evaluate `GRAPH <iri> { … }` / `GRAPH ?g { … }`.
@@ -338,10 +353,13 @@ impl NumData {
             NumData::Owned(v) => v,
             #[cfg(feature = "mmap")]
             NumData::Mapped(m, _) => {
-                let n = m.len() / std::mem::size_of::<f64>();
-                // SAFETY: numerics.bin is a whole number of f64; the mmap base is
-                // page-aligned (>= the 8-byte f64 alignment).
-                unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<f64>(), n) }
+                // `Graph::open` maps only a file that is the 8-byte `NUMERICS_MAGIC` header
+                // followed by a whole number of f64 (it recomputes anything else).
+                let body = &m[NUMERICS_MAGIC.len()..];
+                let n = body.len() / std::mem::size_of::<f64>();
+                // SAFETY: `body` is a whole number of f64 starting 8 bytes past the
+                // page-aligned mmap base, so it is 8-byte (f64) aligned.
+                unsafe { std::slice::from_raw_parts(body.as_ptr().cast::<f64>(), n) }
             }
             NumData::Sparse(_) => unreachable!("as_slice on a sparse numeric cache"),
             NumData::Forked { .. } => unreachable!("as_slice on a forked numeric cache"),
@@ -390,14 +408,14 @@ impl NumData {
 
 /// Backing storage for the temporal-value cache, mirroring [`NumData`]: owned dense in
 /// RAM (two parallel columns — a flag byte per term and an f64 instant per term), mmap'd
-/// from `temporals.bin` (out-of-core), or SPARSE (only the temporal literals, the right
+/// from `temporals-v4.bin` (out-of-core), or SPARSE (only the temporal literals, the right
 /// shape for the memory-bound browser store — most terms are not dates).
 enum TempData {
     /// `cells[id-1]` — flag (see [`temp_flag`]; 0 = not temporal) + instant in ONE
     /// 16-byte cell, so a cache probe touches a single cache line (the probes are
     /// random-access from row order; split columns would double the misses).
     Owned(Vec<TempCell>),
-    /// The mmap'd dense cache (`temporals.bin`: `n` little-endian f64 instants then `n`
+    /// The mmap'd dense cache (`temporals-v4.bin`: `n` little-endian f64 instants then `n`
     /// flag bytes), plus a side map for terms APPENDED after open (delta-overlay growth).
     #[cfg(feature = "mmap")]
     Mapped(memmap2::Mmap, rustc_hash::FxHashMap<Id, Temporal>),
@@ -454,7 +472,32 @@ impl TempData {
         }
     }
 
-    /// Number of terms covered by a mapped `temporals.bin` (9 bytes per term).
+    // Walk only cached IDs for sparse/forked graphs, avoiding a full
+    // dictionary scan when one temporal term appears in otherwise unrelated data.
+    fn for_each_id(&self, visit: &mut impl FnMut(Id)) {
+        match self {
+            TempData::Owned(cells) => {
+                for (index, cell) in cells.iter().enumerate() {
+                    if matches!(cell.flag, 1..=4) { visit(index as Id + 1); }
+                }
+            }
+            TempData::Sparse(cells) => cells.keys().copied().for_each(visit),
+            TempData::Forked { base, extra } => {
+                base.for_each_id(visit);
+                extra.keys().copied().for_each(visit);
+            }
+            #[cfg(feature = "mmap")]
+            TempData::Mapped(bytes, extra) => {
+                let count = Self::mapped_len(bytes);
+                for (index, flag) in bytes[count * 8..].iter().enumerate() {
+                    if matches!(flag, 1..=4) { visit(index as Id + 1); }
+                }
+                extra.keys().copied().for_each(visit);
+            }
+        }
+    }
+
+    /// Number of terms covered by a mapped `temporals-v4.bin` (9 bytes per term).
     #[cfg(feature = "mmap")]
     #[inline]
     fn mapped_len(m: &memmap2::Mmap) -> usize {
@@ -639,37 +682,14 @@ fn write_temporals(path: &std::path::Path, flags: &[u8], instants: &[f64]) -> st
     f.flush()
 }
 
-/// [FABLE-5] (sq-9781x) Parse a numeric-literal lexical to its f64 image using the XSD
-/// `doubleRep` lexical space — the SINGLE shared routine for the XSD f64 SPELLING rules.
+/// Parses an XSD floating-point lexical without normalizing whitespace.
 ///
-/// This function is DATATYPE-AGNOSTIC: it decides only whether a lexical is a well-formed
-/// XSD double lexical (specials + scientific form), NOT whether it is well-formed for a
-/// specific integer/decimal datatype. The numeric-value CACHE
-/// (`numerics_of`/`numeric_of`/`cached_numeric_f64`) layers the datatype-AWARE gate
-/// `numeric_datatype_wellformed` ON TOP of this, so a cache HIT is now equivalent to
-/// `sparq_substrate::numeric::Num::of_literal` acceptance (sq-6b1lj — integers scale-0,
-/// decimals no-exponent, i128-fit), NOT merely to this f64-seam acceptance. The lenient
-/// engine `as_num`/`as_f64` and reasoner `as_f64` seams are also datatype-aware as of
-/// sq-74oy4, so `"1.5"^^xsd:integer` now uniformly type-errors on `=`/`<`/`>` (cache-miss →
-/// exact evaluator) instead of the pre-fix fast-path-only over-inclusion; the substrate
-/// differential test `cache_f64_seam_vs_as_numeric_differential` pins that agreement.
-///
-/// It is the lowest-tier home of the parser `sparq_substrate::numeric::parse_xsd_f64`
-/// re-exports (the substrate depends on `sparq-core`, not the reverse, so the shared body
-/// must live here). The acceptance set is XSD's, not Rust's:
-///
-/// - The XSD specials `NaN` / `INF` / `+INF` / `-INF` parse; Rust-`FromStr`-only spellings
-///   the XSD lexical space FORBIDS (`inf` / `infinity` / `-inf` / `nan` / `Infinity` …) are
-///   REJECTED, even though `str::parse::<f64>` would accept them. This is load-bearing: the
-///   old raw `str::parse::<f64>` cache stored `inf` for `"inf"^^xsd:double`, which the
-///   evaluator type-errors — a cache MORE lenient than the evaluator.
-/// - No trimming here (byte-identical to the substrate re-export). Callers that must match
-///   the evaluator's TRIMMING acceptance path (`Num::of_literal`, XSD `collapse` facet) trim
-///   the lexical themselves before calling — `cached_numeric_f64` does exactly that, and
-///   the lenient `as_num`/`as_f64` seams trim too as of sq-74oy4 (so a whitespace-padded
-///   `" 1"^^xsd:integer` is value-1 uniformly on `=`, `<`, `>`, not a `<`/`>` type error).
-///
-/// `None` for an ill-formed lexical.
+/// This shared, datatype-agnostic parser rejects Rust-only spellings
+/// such as `inf` and `infinity`. Raw RDF literals must additionally satisfy
+/// their declared datatype's lexical space and facets. XPath string constructors
+/// normalize XML whitespace before calling the target parser; raw typed literals
+/// never receive that preprocessing.
+/// Returns `None` for an ill-formed lexical.
 #[inline]
 pub fn parse_xsd_f64(v: &str) -> Option<f64> {
     match v {
@@ -683,41 +703,22 @@ pub fn parse_xsd_f64(v: &str) -> Option<f64> {
     }
 }
 
-/// `true` iff `v` (already TRIMMED) is a well-formed lexical FOR its numeric `datatype`
-/// under XSD's per-datatype lexical space — the datatype-AWARE gate that mirrors
-/// `sparq_substrate::numeric::Num::of_literal`'s ACCEPTANCE set (not its typed value).
+/// Checks raw numeric membership and the cache's finite representation capacity.
 ///
-/// [FABLE-5] (sq-74oy4 / sq-6b1lj) This is the second half of the numeric-cache alignment:
-/// sq-9781x aligned the cache's f64 SPELLINGS + trimming with the evaluator's f64 seam, but
-/// left the cache datatype-AGNOSTIC — it stored an f64 for a lexical ill-formed FOR ITS
-/// DATATYPE (`"1.5"^^xsd:integer`, `"1E2"^^xsd:decimal`, a >38-digit decimal) that
-/// `Num::of_literal` type-errors, so the sargable `=`/`<` fast path and `JKey::Num`
-/// value-join over-included such a row. This gate reproduces `of_literal`'s per-datatype
-/// acceptance so a cache HIT is now equivalent to `of_literal` acceptance for the SAME f64.
-///
-/// `sparq-core` is the leanest tier and cannot depend on `sparq-substrate` (which owns
-/// `Num`/`Dec`), so the acceptance rules are re-derived here from the SAME grammar
-/// (`split_decimal`-style digit scan + i128 fit); an anti-drift differential test pins this
-/// against `Num::of_literal` over a lexical×datatype matrix in `sparq-substrate`.
-///
-/// - **integer family** (`is_integer_datatype`): a SCALE-0 decimal lexical (NO exponent)
-///   that fits `i128` — matching `Num::of_literal`, which routes an over-`i64` integer
-///   through `Dec::parse` and accepts scale 0. So `"5"`, `"+3"`, `"007"`, `"5."`, `"5.0"`,
-///   `"5.00"` (all value-5 integers) are well-formed; `"1.5"` (scale 1), `".5"`,
-///   `"1E2"^^xsd:integer`, and a >i128 integer are ill-formed.
-/// - **`xsd:decimal`**: `[+-]?digits(.digits)?` (NO exponent) with the mantissa within
-///   `i128`. `"1E2"^^xsd:decimal` / a >i128-mantissa decimal are ill-formed.
-/// - **`xsd:float` / `xsd:double`**: the full XSD `doubleRep` lexical space — exactly
-///   [`parse_xsd_f64`] (`Some`), which already matches `of_literal`.
-/// - any non-numeric datatype: `false`.
+/// This mirrors `Num::of_literal`: signed integer digits with subtype
+/// facets, decimal notation without exponents, and XSD floating-point spellings.
+/// Integer/decimal mantissas must also fit the current i128 representation.
+/// The substrate differential test checks agreement across the two layers.
 fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
+    if !numeric_literal_valid(v, datatype) {
+        return false;
+    }
     // Parse `[+-]?digits(.digits)?` (no exponent) into its i128-fit mantissa + written scale
     // — the shared decimal-lexical scan `Num::of_literal`'s integer/decimal paths ride on
     // (`Dec::parse` / `Dec::parse_lexical` in sparq-substrate). `None` = ill-formed (bad char,
     // empty, or mantissa beyond i128). The scale is the NUMBER OF TRAILING FRACTION DIGITS
-    // as WRITTEN — for the scale-0 integer test, trailing zeros do NOT count (`Dec::parse`
-    // normalises them: `"5.0"` is scale-0). So compute the NORMALISED scale (strip trailing
-    // fraction zeros) exactly as `of_literal` sees it.
+    // as WRITTEN, normalized by removing trailing fraction zeros as `Dec::parse` does.
+    // Integer lexicals have already passed the stricter digits-only guard above.
     fn scan_decimal(v: &str) -> Option<u32> {
         let body = v.strip_prefix(['+', '-']).unwrap_or(v);
         let (int, frac) = body.split_once('.').unwrap_or((body, ""));
@@ -732,12 +733,11 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
             mag = mag.checked_mul(10).and_then(|m| m.checked_add((ch - b'0') as i128))?;
         }
         // Normalised scale: trailing fraction zeros are insignificant (`Dec::parse` drops
-        // them), so `"5.00"` is scale-0, matching `of_literal`'s scale-0 integer acceptance.
+        // them), so `"5.00"` is scale-0, matching `of_literal`'s decimal normalization.
         Some(frac.trim_end_matches('0').len() as u32)
     }
     if is_integer_datatype(datatype) {
-        // scale-0, i128-fit — `Num::of_literal` accepts `"5"`, `"+3"`, `"007"`, `"5."`,
-        // `"5.0"` (all value-5 integers) but NOT `"5.5"` (scale 1) or a >i128 mantissa.
+        // The shared lexical/facet guard already excludes decimal notation.
         return matches!(scan_decimal(v), Some(0));
     }
     if datatype == xsd::DECIMAL.as_str() {
@@ -748,20 +748,107 @@ fn numeric_datatype_wellformed(v: &str, datatype: &str) -> bool {
     (datatype == xsd::FLOAT.as_str() || datatype == xsd::DOUBLE.as_str()) && parse_xsd_f64(v).is_some()
 }
 
-/// The DATATYPE-AWARE cached f64 of a numeric literal `(value, datatype)`, or `NaN` (the
-/// cache's not-a-value sentinel) when the lexical is ill-formed FOR its datatype. Trims the
-/// lexical (XSD `collapse` whitespace facet — the same trim `Num::of_literal` /
-/// `Dec::parse_lexical` apply) then gates the f64 on [`numeric_datatype_wellformed`], so a
-/// cache HIT is equivalent to `of_literal` acceptance for the same f64. [FABLE-5]
-/// (sq-74oy4 / sq-6b1lj)
+/// Validates numeric lexical forms and integer subtype facets.
+///
+/// This validates datatype membership, independently of the evaluator's
+/// finite arithmetic capacity. A valid large integer/decimal can be numeric even
+/// when it cannot be represented by the numeric cache or arithmetic value tower.
+/// Raw RDF lexical forms are checked verbatim, including boundary whitespace.
+/// String constructors must apply their own XML whitespace preprocessing first.
+/// Unknown datatypes return `false`.
+///
+/// # Examples
+/// ```
+/// use sparq_core::numeric_literal_valid;
+/// assert!(numeric_literal_valid("+007", "http://www.w3.org/2001/XMLSchema#integer"));
+/// assert!(!numeric_literal_valid(" 1 ", "http://www.w3.org/2001/XMLSchema#integer"));
+/// assert!(!numeric_literal_valid("1200", "http://www.w3.org/2001/XMLSchema#byte"));
+/// assert!(!numeric_literal_valid("5.0", "http://www.w3.org/2001/XMLSchema#integer"));
+/// ```
+// Numeric facets retain XSD 1.1 unsigned lexical signs; temporal version rules are separate.
+/// `true` iff `value` is a valid exact-numeric (integer-family or `xsd:decimal`)
+/// lexical for `datatype`. Checks the two common datatypes before the subtype list.
+#[inline]
+pub fn exact_numeric_literal_valid(value: &str, datatype: &str) -> bool {
+    if datatype == xsd::INTEGER.as_str() {
+        let body = match value.as_bytes().first() {
+            Some(b'+' | b'-') => &value[1..],
+            _ => value,
+        };
+        return !body.is_empty() && body.bytes().all(|b| b.is_ascii_digit());
+    }
+    (datatype == xsd::DECIMAL.as_str() || is_integer_datatype(datatype)) && numeric_literal_valid(value, datatype)
+}
+
+pub fn numeric_literal_valid(value: &str, datatype: &str) -> bool {
+    let body = match value.as_bytes().first() {
+        Some(b'+' | b'-') => &value[1..],
+        _ => value,
+    };
+    if is_integer_datatype(datatype) {
+        if body.is_empty() || !body.bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+        let zero = body.bytes().all(|b| b == b'0');
+        let negative = value.starts_with('-') && !zero;
+        if datatype == xsd::INTEGER.as_str() { return true; }
+        if datatype == xsd::POSITIVE_INTEGER.as_str() { return !negative && !zero; }
+        if datatype == xsd::NON_NEGATIVE_INTEGER.as_str() { return !negative; }
+        if datatype == xsd::NEGATIVE_INTEGER.as_str() { return negative; }
+        if datatype == xsd::NON_POSITIVE_INTEGER.as_str() { return negative || zero; }
+        let Ok(n) = value.parse::<i128>() else { return false };
+        if datatype == xsd::LONG.as_str() { return i64::try_from(n).is_ok(); }
+        if datatype == xsd::INT.as_str() { return i32::try_from(n).is_ok(); }
+        if datatype == xsd::SHORT.as_str() { return i16::try_from(n).is_ok(); }
+        if datatype == xsd::BYTE.as_str() { return i8::try_from(n).is_ok(); }
+        if datatype == xsd::UNSIGNED_LONG.as_str() { return u64::try_from(n).is_ok(); }
+        if datatype == xsd::UNSIGNED_INT.as_str() { return u32::try_from(n).is_ok(); }
+        if datatype == xsd::UNSIGNED_SHORT.as_str() { return u16::try_from(n).is_ok(); }
+        return datatype == xsd::UNSIGNED_BYTE.as_str() && u8::try_from(n).is_ok();
+    }
+    if datatype == xsd::DECIMAL.as_str() {
+        // At most one '.', and at least one digit on either side of it.
+        let (mut dots, mut digits) = (0, 0);
+        for b in body.bytes() {
+            match b {
+                b'.' => dots += 1,
+                b'0'..=b'9' => digits += 1,
+                _ => return false,
+            }
+        }
+        return dots <= 1 && digits > 0;
+    }
+    (datatype == xsd::FLOAT.as_str() || datatype == xsd::DOUBLE.as_str())
+        && parse_xsd_f64(value).is_some()
+}
+
+/// Returns a raw numeric literal's cached value, or the NaN miss sentinel.
+///
+/// Lexical/facet validation and finite cache capacity match
+/// `Num::of_literal`. Raw typed whitespace is not normalized.
 #[inline]
 pub(crate) fn cached_numeric_f64(value: &str, datatype: &str) -> f64 {
-    let v = value.trim();
+    let v = value;
     if numeric_datatype_wellformed(v, datatype) {
-        parse_xsd_f64(v).unwrap_or(f64::NAN)
+        numeric_lexical_f64(v, datatype).unwrap_or(f64::NAN)
     } else {
         f64::NAN
     }
+}
+
+/// The `f64` image of a numeric lexical's VALUE (`v` already trimmed and accepted): the
+/// nearest `f64` to the lexical, except for `xsd:float`, whose value is the `f32` nearest
+/// the lexical, widened exactly (XPath compares an `xs:float` by promoting THAT value). The
+/// nearest `f64` skips the `f32` rounding, so `"4611686293305294849"^^xsd:float` compared
+/// unequal to its own value `"4611686568183201792"^^xsd:double` (#3825). Rust's decimal
+/// parser is correctly rounded at both widths, so this is one rounding of the true value.
+pub fn numeric_lexical_f64(v: &str, datatype: &str) -> Option<f64> {
+    let wide = parse_xsd_f64(v)?;
+    if datatype == xsd::FLOAT.as_str() && wide.is_finite() {
+        // Overflow saturates to ±INF, which is the xs:float value of such a lexical.
+        return v.parse::<f32>().ok().map(f64::from);
+    }
+    Some(wide)
 }
 
 /// The numeric-value CACHE's acceptance of a literal `(value, datatype)`: `Some(f64)` iff the
@@ -1611,42 +1698,16 @@ impl Graph {
         std::thread::scope(|scope| -> Result<(), String> {
             // Stage 1 — read (the caller's decompressor) on its own thread, emitting
             // newline-aligned FULL blocks: loop `read()` until the block is full or EOF.
-            let producer = scope.spawn(move || -> Result<(), String> {
-                let mut reader = reader;
-                let mut readbuf = vec![0u8; block_size];
-                let mut carry: Vec<u8> = Vec::new();
-                loop {
-                    let mut filled = 0;
-                    while filled < block_size {
-                        let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                        if n == 0 {
-                            break;
-                        }
-                        filled += n;
-                    }
-                    if filled == 0 {
-                        // EOF: a final line without a trailing newline lives in `carry`.
-                        if !carry.is_empty() {
-                            let _ = tx.send(std::mem::take(&mut carry));
-                        }
-                        return Ok(());
-                    }
-                    // Emit `carry + readbuf[..filled]` up to the last newline; carry the
-                    // remainder (a partial line split across the block boundary) forward.
-                    let mut block = std::mem::take(&mut carry);
-                    block.extend_from_slice(&readbuf[..filled]);
-                    let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                    carry = block[cut..].to_vec();
-                    block.truncate(cut);
-                    if !block.is_empty() && tx.send(block).is_err() {
-                        return Ok(()); // a downstream stage errored and dropped the receiver
-                    }
-                }
+            let producer = scope.spawn(move || {
+                read_line_blocks(reader, block_size, |block| tx.send(block).is_ok())
             });
             // Stage 2 — parse+intern each block in parallel (per-chunk local dicts, no
             // shared state), forwarding the partials to the merge stage.
             let parser = scope.spawn(move || -> Result<(), String> {
                 for block in rx {
+                    if block.is_empty() {
+                        continue; // a liveness probe from a newline-free round
+                    }
                     let partials = parse_block(&block)?;
                     if ptx.send(partials).is_err() {
                         return Ok(()); // the merge stage errored and dropped the receiver
@@ -1694,7 +1755,9 @@ impl Graph {
             store,
             numerics,
             temporals,
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named: Vec::new(),
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -1731,7 +1794,9 @@ impl Graph {
             numerics: self.numerics.into_sparse_if_worthwhile(),
             temporals: self.temporals.into_sparse_if_worthwhile(),
             // sq-lr2ii: re-encoding keeps the same values; recompute the guard lazily.
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named,
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
@@ -1763,8 +1828,8 @@ impl Graph {
         // (`dense_numerics`/`dense_temporals`) first — bounding the finalize RSS peak for a
         // SPARSE/FORKED cache (the common non-numeric/non-temporal case).
         let n = self.dict.len();
-        stream_write_numerics(&dir.join("numerics.bin"), n, &self.numerics)?;
-        stream_write_temporals(&dir.join("temporals.bin"), n, &self.temporals)?;
+        stream_write_numerics(&dir.join(NUMERIC_CACHE_FILE), n, &self.numerics)?;
+        stream_write_temporals(&dir.join(TEMPORAL_CACHE_FILE), n, &self.temporals)?;
         self.save_named(dir, false)
     }
 
@@ -1780,8 +1845,8 @@ impl Graph {
         self.dict.save_mmap(dir)?;
         // [OPUS-4.8] (sq-7ph8) Stream the caches block-by-block — see `save` for the rationale.
         let n = self.dict.len();
-        stream_write_numerics(&dir.join("numerics.bin"), n, &self.numerics)?;
-        stream_write_temporals(&dir.join("temporals.bin"), n, &self.temporals)?;
+        stream_write_numerics(&dir.join(NUMERIC_CACHE_FILE), n, &self.numerics)?;
+        stream_write_temporals(&dir.join(TEMPORAL_CACHE_FILE), n, &self.temporals)?;
         // [OPUS-4.8] (sq-3ui0) Named graphs are persisted block-compressed too.
         self.save_named(dir, true)
     }
@@ -1889,9 +1954,10 @@ impl Graph {
     /// Opens a graph saved by [`save`](Self::save) with its permutation indexes AND
     /// numeric-value cache MEMORY-MAPPED (paged in on demand) — so a large out-of-core
     /// dataset opens near-instantly without re-parsing every term, and the cache stays
-    /// off the heap. The dictionary is loaded into RAM; the big indexes stay on disk. If
-    /// `numerics.bin` is absent or stale (a graph saved before this cache existed), the
-    /// cache is recomputed, preserving backward compatibility.
+    /// off the heap. The dictionary is loaded into RAM; the big indexes stay on disk.
+    /// A missing or wrong-sized current cache is recomputed in memory. Legacy
+    /// unversioned caches are ignored because they used older validation rules.
+    /// Saving to a new directory persists current cache files without changing RDF.
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
         // [OPUS-4.8] (review 1593) Finish or roll back any compaction directory swap that a
@@ -1918,15 +1984,26 @@ impl Graph {
                 Dict::open_mmap(dir)?
             }
         };
-        let np = dir.join("numerics.bin");
+        let np = dir.join(NUMERIC_CACHE_FILE);
+        // Map the cache only when it carries the CURRENT semantics marker and covers the
+        // dictionary. Anything else — absent, stale-sized, or an unversioned cache written
+        // before the marker existed (which valued an `xsd:float` lexical at the nearest f64,
+        // not its f32 value) — is recomputed from the dictionary.
         let numerics = match std::fs::File::open(&np) {
-            Ok(f) if f.metadata()?.len() as usize == dict.len() * std::mem::size_of::<f64>() => {
+            Ok(f) if f.metadata()?.len() as usize
+                == NUMERICS_MAGIC.len() + dict.len() * std::mem::size_of::<f64>() =>
+            {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
-                NumData::Mapped(unsafe { memmap2::Mmap::map(&f)? }, rustc_hash::FxHashMap::default())
+                let m = unsafe { memmap2::Mmap::map(&f)? };
+                if m[..NUMERICS_MAGIC.len()] == NUMERICS_MAGIC {
+                    NumData::Mapped(m, rustc_hash::FxHashMap::default())
+                } else {
+                    NumData::Owned(numerics_of(&dict))
+                }
             }
             _ => NumData::Owned(numerics_of(&dict)),
         };
-        let tp = dir.join("temporals.bin");
+        let tp = dir.join(TEMPORAL_CACHE_FILE);
         let temporals = match std::fs::File::open(&tp) {
             Ok(f) if f.metadata()?.len() as usize == dict.len() * 9 => {
                 // SAFETY: the file is owned by this graph for its lifetime and not mutated.
@@ -1945,7 +2022,9 @@ impl Graph {
             store,
             numerics,
             temporals,
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named,
             graph_prefix_index: std::sync::Mutex::new(None),
             wal: None,
@@ -2252,12 +2331,12 @@ impl Graph {
             let dict_ref = &dict;
             let finalize = scope.spawn(move || -> Result<(), String> {
                 dict_ref.save_mmap(dir).map_err(|e| e.to_string())?;
-                write_numerics(&dir.join("numerics.bin"), &numerics_of(dict_ref)).map_err(|e| e.to_string())?;
+                write_numerics(&dir.join(NUMERIC_CACHE_FILE), &numerics_of(dict_ref)).map_err(|e| e.to_string())?;
                 let (tf, ti) = {
                     let cells = temporals_of(dict_ref);
                     (cells.iter().map(|c| c.flag).collect::<Vec<u8>>(), cells.iter().map(|c| c.instant).collect::<Vec<f64>>())
                 };
-                write_temporals(&dir.join("temporals.bin"), &tf, &ti).map_err(|e| e.to_string())?;
+                write_temporals(&dir.join(TEMPORAL_CACHE_FILE), &tf, &ti).map_err(|e| e.to_string())?;
                 Ok(())
             });
             #[cfg(feature = "parallel")]
@@ -2698,9 +2777,9 @@ impl Graph {
     }
 
     /// The temporal (xsd:dateTime / xsd:dateTimeStamp / xsd:date) value of a term id,
-    /// or `None` if it is not a well-formed temporal literal. O(1), no allocation, no
-    /// lexical re-parse — the engine's fast path for dateTime FILTER / ORDER BY /
-    /// MIN/MAX, the temporal twin of [`numeric_value`](Self::numeric_value).
+    /// or `None` if it is not a well-formed temporal literal. This O(1) legacy
+    /// cache uses an approximate f64 epoch; it must not decide exact equality/order.
+    /// Use [`exact_temporal_value`](Self::exact_temporal_value) for value decisions.
     #[inline]
     pub fn temporal_value(&self, id: Id) -> Option<Temporal> {
         if dict::is_inline(id) {
@@ -2709,18 +2788,52 @@ impl Graph {
         self.temporals.lookup(id)
     }
 
+    /// Returns an exact temporal key from a lazily memoized sparse cache.
+    ///
+    /// The first temporal lookup parses valid temporal dictionary entries.
+    /// Later lookups reuse checked seconds/flags and borrow fractional digits by
+    /// offset. Whole-second values need no dictionary read. The cache is in memory
+    /// only. Forks start cold; dictionary appends preserve initialized entries and
+    /// parse only new temporal IDs. Source terms and persisted caches are unchanged.
+    /// A cold mmap lookup still sweeps the temporal flags and parses all valid
+    /// temporal IDs; this memo does not establish cold-read performance neutrality.
+    pub fn exact_temporal_value(&self, id: Id) -> Option<temporal::ExactTemporal<'_>> {
+        if id == dict::NO_ID || dict::is_inline(id) || self.temporals.lookup(id).is_none() {
+            return None;
+        }
+        let cells = self.exact_temporals.get_or_init(|| {
+            let mut cells = rustc_hash::FxHashMap::default();
+            self.temporals.for_each_id(&mut |id| {
+                if let dict::TermParts::Lit { value, datatype, lang: None } = self.dict.term_parts(id) {
+                    if let Some(cell) = temporal::ExactCacheCell::of_lit(value, datatype) {
+                        cells.insert(id, cell);
+                    }
+                }
+            });
+            cells
+        });
+        let cell = *cells.get(&id)?;
+        if !cell.has_fraction() {
+            return cell.borrow(None);
+        }
+        match self.dict.term_parts(id) {
+            dict::TermParts::Lit { value, .. } => cell.borrow(Some(value)),
+            _ => None,
+        }
+    }
+
     /// The lexical form of a term id IF it is an exact-valued numeric literal (an
     /// `xsd:integer` subtype or `xsd:decimal` — NOT float/double, whose value IS its f64).
     /// Used to disambiguate comparisons that the f64 fast path collapses (integers > 2^53,
-    /// high-precision decimals); only reached when the f64 values compared equal, so the
-    /// allocation is rare. Inline-integer ids format their value directly.
+    /// high-precision decimals) and to evaluate exact arithmetic comparisons. Invalid
+    /// lexical forms and subtype facets return `None`. Inline integers format directly.
     pub fn exact_numeric_lexical(&self, id: Id) -> Option<String> {
         if dict::is_inline(id) {
             return Some((id - dict::INLINE_BASE).to_string());
         }
         match self.dict.term_parts(id) {
             dict::TermParts::Lit { value, datatype, lang: None }
-                if is_integer_datatype(datatype) || datatype == xsd::DECIMAL.as_str() =>
+                if exact_numeric_literal_valid(value, datatype) =>
             {
                 Some(value.to_string())
             }
@@ -2759,6 +2872,30 @@ impl Graph {
         }
     }
 
+    /// `true` if the graph holds any `xsd:float` literal. The engine's f64 sargable-FILTER
+    /// fast path compares a scanned value against the constant as two `f64`s, but XPath
+    /// compares an `xs:float` against an integer/decimal constant in the FLOAT tier (the
+    /// constant rounded to `f32`): `"0.1"^^xsd:float = 0.1` is true although the two `f64`
+    /// images differ. The engine consults this to decline that fast path for a constant the
+    /// float tier would round (one not exactly an `f32`). Memoised and reset exactly like
+    /// [`has_high_precision_decimal`](Self::has_high_precision_decimal).
+    pub fn has_float_literal(&self) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        match self.float_literal.load(Relaxed) {
+            2 => true,
+            1 => false,
+            _ => {
+                let found = (1..=self.dict.len() as Id).any(|id| {
+                    self.numerics.lookup(id).is_some()
+                        && matches!(self.dict.term_parts(id),
+                            dict::TermParts::Lit { datatype, lang: None, .. } if datatype == xsd::FLOAT.as_str())
+                });
+                self.float_literal.store(if found { 2 } else { 1 }, Relaxed);
+                found
+            }
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.store.len()
     }
@@ -2771,6 +2908,9 @@ impl Graph {
     /// the six permutation indexes), for benchmarking.
     pub fn heap_bytes(&self) -> usize {
         self.dict.heap_bytes() + self.store.heap_bytes() + self.numerics.heap_bytes() + self.temporals.heap_bytes()
+            + self.exact_temporals.get().map_or(0, |cells| {
+                cells.capacity() * (std::mem::size_of::<Id>() + std::mem::size_of::<temporal::ExactCacheCell>())
+            })
     }
 
     /// Resolves a term to its id, or `None` if the term is absent (so a pattern
@@ -2894,7 +3034,9 @@ impl Graph {
             numerics: self.numerics.fork(),
             temporals: self.temporals.fork(),
             // sq-lr2ii: the fork shares the same values; recompute the guard lazily.
+            exact_temporals: std::sync::OnceLock::new(),
             high_precision_decimal: std::sync::atomic::AtomicU8::new(0),
+            float_literal: std::sync::atomic::AtomicU8::new(0),
             named: self.named.iter().map(|(name, g)| (name.clone(), g.fork())).collect(),
             // A fork is a fresh logical copy; rebuild the prefix index lazily on first use.
             graph_prefix_index: std::sync::Mutex::new(None),
@@ -3389,6 +3531,20 @@ impl Graph {
         // Keep the numeric- and temporal-filter caches covering the grown dictionary.
         self.numerics.extend_for(&self.dict, old_len);
         self.temporals.extend_for(&self.dict, old_len);
+        // Dictionary IDs and lexical slices are append-only. Preserve
+        // initialized exact cells and validate only new temporal IDs, using the
+        // existing exclusive Graph borrow rather than a lookup-path lock.
+        if let Some(cells) = self.exact_temporals.get_mut() {
+            for i in old_len..self.dict.len() {
+                let id = i as Id + 1;
+                if self.temporals.lookup(id).is_none() { continue; }
+                if let dict::TermParts::Lit { value, datatype, lang: None } = self.dict.term_parts(id) {
+                    if let Some(cell) = temporal::ExactCacheCell::of_lit(value, datatype) {
+                        cells.insert(id, cell);
+                    }
+                }
+            }
+        }
         // sq-lr2ii: an inserted term may be an f64-inexact decimal. If the sargable-safety
         // guard was memoised as "no such decimal" (1), reset it to recompute over the grown
         // dictionary; a "found" (2) verdict is monotonic (terms are never removed) and stays.
@@ -3396,12 +3552,14 @@ impl Graph {
         // Equal lengths therefore preserve every term/numeric value read by the memo.
         // Any future path changing existing terms or cached values must invalidate it.
         if self.dict.len() != old_len {
-            let _ = self.high_precision_decimal.compare_exchange(
-                1,
-                0,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-            );
+            for memo in [&self.high_precision_decimal, &self.float_literal] {
+                let _ = memo.compare_exchange(
+                    1,
+                    0,
+                    std::sync::atomic::Ordering::Relaxed,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
         }
         self.store.apply_delta(&ins_ids, &del_ids);
     }
@@ -4277,15 +4435,8 @@ fn numerics_of(dict: &Dict) -> Vec<f64> {
     let n = dict.len();
     let numeric_of_parts = |i: usize| -> f64 {
         match dict.term_parts(i as Id + 1) {
-            // [FABLE-5] (sq-9781x / sq-74oy4 / sq-6b1lj) Route through the DATATYPE-AWARE
-            // acceptance (`cached_numeric_f64` → `numeric_datatype_wellformed`) on the TRIMMED
-            // value, so a cache HIT is equivalent to `Num::of_literal` acceptance for exactly
-            // the same f64. This admits the whitespace-padded lexical (` 1`^^xsd:integer) AND
-            // rejects both the Rust-only `inf`/`infinity`/`nan` spellings (already so since
-            // sq-9781x) AND the per-datatype-ill-formed lexicals `of_literal` type-errors
-            // (`"1.5"^^xsd:integer`, `"1E2"^^xsd:decimal`, an i128-overflow decimal — sq-6b1lj):
-            // they now fold to the NaN cache-miss sentinel, so the sargable `=`/`<` fast path
-            // and `JKey::Num` value-join defer to the exact evaluator and agree with it.
+            // Cache only raw lexical/facet-valid values within the numeric
+            // representation lane; invalid raw whitespace remains a cache miss.
             dict::TermParts::Lit { value, datatype, lang: None } if is_numeric_datatype_str(datatype) => {
                 cached_numeric_f64(value, datatype)
             }
@@ -4303,16 +4454,28 @@ fn numerics_of(dict: &Dict) -> Vec<f64> {
     }
 }
 
-/// Writes the numeric-value cache to disk (raw little-endian f64) so it can be
-/// memory-mapped on open instead of recomputed.
+/// The 8-byte header of `numerics-v3.bin`, naming the cache's VALUE semantics. Bump it whenever
+/// the f64 a lexical caches to changes, so [`Graph::open`] recomputes an older cache instead
+/// of mapping stale values. `SPQNUM02`: an `xsd:float` lexical caches its `f32` value (#3825);
+/// the unversioned layout before it (raw f64, no header) cached the nearest `f64`. An 8-byte
+/// header keeps the f64 body 8-byte aligned in the page-aligned mapping.
+#[cfg_attr(not(feature = "mmap"), allow(dead_code))]
+pub(crate) const NUMERICS_MAGIC: [u8; 8] = *b"SPQNUM02";
+
+/// Writes the numeric-value cache to disk (the [`NUMERICS_MAGIC`] header, then raw f64) so it
+/// can be memory-mapped on open instead of recomputed.
 #[cfg(feature = "mmap")]
 fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
+    use std::io::Write;
     // SAFETY: reinterpret the contiguous f64 cache as bytes for writing.
     let bytes = unsafe { std::slice::from_raw_parts(nums.as_ptr().cast::<u8>(), std::mem::size_of_val(nums)) };
-    std::fs::write(path, bytes)
+    let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    w.write_all(&NUMERICS_MAGIC)?;
+    w.write_all(bytes)?;
+    w.flush()
 }
 
-/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `numerics.bin` (`n` little-endian f64, the
+/// (sq-7ph8) STREAM-writes the dense `numerics-v3.bin` (the header, `n` f64, the
 /// same layout [`write_numerics`] emits and [`Graph::open`] mmaps) DIRECTLY from the cache,
 /// in fixed-size blocks, without first materialising a whole-dictionary dense `Vec<f64>`.
 ///
@@ -4326,6 +4489,7 @@ fn write_numerics(path: &std::path::Path, nums: &[f64]) -> std::io::Result<()> {
 fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std::io::Result<()> {
     use std::io::Write;
     let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+    w.write_all(&NUMERICS_MAGIC)?;
     const BLOCK: usize = 1 << 16; // ids per flush (512 KiB of f64)
     let mut buf: Vec<f64> = Vec::with_capacity(BLOCK.min(n));
     let flush = |w: &mut std::io::BufWriter<std::fs::File>, buf: &mut Vec<f64>| -> std::io::Result<()> {
@@ -4358,7 +4522,7 @@ fn stream_write_numerics(path: &std::path::Path, n: usize, num: &NumData) -> std
     w.flush()
 }
 
-/// [OPUS-4.8] (sq-7ph8) STREAM-writes the dense `temporals.bin` (`n` little-endian f64
+/// (sq-7ph8) STREAM-writes the dense `temporals-v4.bin` (`n` little-endian f64
 /// instants then `n` flag bytes — the layout [`write_temporals`] emits and
 /// [`TempData::lookup`]/[`Graph::open`] read) DIRECTLY from the cache, without first
 /// materialising the two whole-dictionary dense columns `dense_temporals` builds.
@@ -5612,39 +5776,8 @@ fn build_external_ntriples_parallel<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress + read on its own thread, emitting newline-aligned blocks.
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                // Fill the read buffer (a single read may return less than requested).
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    // EOF: a final line without a trailing newline lives in `carry`.
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                // Emit `carry + readbuf[..filled]` up to the last newline; carry the
-                // remainder (a partial line split across the read boundary) to the next.
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(()); // a downstream stage errored and dropped the receiver
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
 
         // Stage 2 — parse+intern each block in parallel (per-chunk local dicts, no shared
         // state), forwarding the partials to the merge stage. Concurrent with stage 3.
@@ -5722,35 +5855,8 @@ fn build_external_ntriples_sharded<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress (identical to the non-sharded pipeline).
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(());
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
         // Stage 2 — parse (identical).
         // [OPUS-4.8] (sq-t3rt) The sharded consolidation now handles RDF 1.2 triple terms
         // (`ShardedDict::intern_partials` interns them structurally into a dedicated triple
@@ -5876,35 +5982,8 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
 
     std::thread::scope(|scope| -> Result<(), String> {
         // Stage 1 — decompress (identical to the sharded pipeline).
-        let producer = scope.spawn(move || -> Result<(), String> {
-            let mut reader = reader;
-            let mut readbuf = vec![0u8; BLOCK];
-            let mut carry: Vec<u8> = Vec::new();
-            loop {
-                let mut filled = 0;
-                while filled < BLOCK {
-                    let n = reader.read(&mut readbuf[filled..]).map_err(|e| e.to_string())?;
-                    if n == 0 {
-                        break;
-                    }
-                    filled += n;
-                }
-                if filled == 0 {
-                    if !carry.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut carry));
-                    }
-                    return Ok(());
-                }
-                let mut block = std::mem::take(&mut carry);
-                block.extend_from_slice(&readbuf[..filled]);
-                let cut = block.iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1);
-                carry = block[cut..].to_vec();
-                block.truncate(cut);
-                if tx.send(block).is_err() {
-                    return Ok(());
-                }
-            }
-        });
+        let producer =
+            scope.spawn(move || read_line_blocks(reader, BLOCK, |block| tx.send(block).is_ok()));
         // Stage 2 — parse (identical).
         let parser = scope.spawn(move || -> Result<(), String> {
             for block in rx {
@@ -5930,6 +6009,79 @@ fn build_external_ntriples_dictspill<R: std::io::Read + Send>(
         parser.join().map_err(|_| "parse thread panicked".to_string())??;
         producer.join().map_err(|_| "decompression thread panicked".to_string())?
     })
+}
+
+/// Stage 1 of every pipelined N-Triples ingest: reads `reader` in rounds of up to
+/// `block_size` fresh bytes (looping over short `read()`s — a gzip/zstd decoder returns
+/// 0.4–1.6 MB per call) and hands `emit` each newline-aligned block, in document order.
+///
+/// A block is `carry + fresh` cut after its LAST `\n`; the remainder (a line split
+/// across the boundary) is carried into the next round. Fresh bytes are read straight
+/// into the block being built (no separate read buffer, so no full-block copy); only the
+/// sub-line carry is copied, via one reused scratch `Vec` (no per-block carry allocation),
+/// into the head of the next block's buffer. Each block buffer is a fresh zeroed allocation
+/// (`calloc`: large sizes are lazily-zeroed pages, no memset), so any `Read` works without
+/// `read_buf` support. A round with no `\n` (a line longer than a block) grows the same
+/// buffer in place and emits an EMPTY block as a liveness probe (consumers skip empty
+/// blocks), so a downstream hang-up still stops the read. At EOF a final line without a
+/// trailing newline is emitted as-is. `emit` returns `false` when the downstream stage hung up (it errored
+/// and dropped its receiver), which stops reading with `Ok(())`; the final EOF emit ignores
+/// it. Read errors propagate as `Err`.
+#[cfg(feature = "parallel")]
+fn read_line_blocks<R: std::io::Read>(
+    mut reader: R,
+    block_size: usize,
+    mut emit: impl FnMut(Vec<u8>) -> bool,
+) -> Result<(), String> {
+    // Invariant: `buf[..carried]` is the carry (no `\n`) and `buf.len() >= carried + block_size`.
+    let mut buf = vec![0u8; block_size];
+    let mut carried = 0;
+    let mut tail: Vec<u8> = Vec::new();
+    loop {
+        let mut filled = 0;
+        while filled < block_size {
+            let n = reader
+                .read(&mut buf[carried + filled..carried + block_size])
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            filled += n;
+        }
+        if filled == 0 {
+            if carried > 0 {
+                buf.truncate(carried);
+                let _ = emit(buf);
+            }
+            return Ok(());
+        }
+        let end = carried + filled;
+        // The carry holds no `\n`, so only the fresh bytes need scanning.
+        let Some(nl) = buf[carried..end].iter().rposition(|&b| b == b'\n') else {
+            // Nothing to send, but probe the consumer with an empty (non-allocating) block so
+            // a downstream that errored still stops a long newline-free read.
+            if !emit(Vec::new()) {
+                return Ok(());
+            }
+            carried = end;
+            if buf.len() < carried + block_size {
+                buf.resize(carried + block_size, 0);
+            }
+            continue;
+        };
+        let cut = carried + nl + 1;
+        // Park the (sub-line) tail in the reused `tail` buffer and allocate the next block
+        // only AFTER the send, so a producer blocked on a full channel holds no extra block.
+        tail.clear();
+        tail.extend_from_slice(&buf[cut..end]);
+        buf.truncate(cut);
+        if !emit(buf) {
+            return Ok(());
+        }
+        carried = tail.len();
+        buf = vec![0u8; carried + block_size];
+        buf[..carried].copy_from_slice(&tail);
+    }
 }
 
 /// Parses one (complete-line) N-Triples byte block in parallel into per-chunk partial
@@ -6129,6 +6281,21 @@ mod build_timing {
             assert!(line.contains("intern(parallel-occupancy) 10.00s"), "{line}");
             assert!(!line.contains("(serial)"), "{line}");
         }
+    }
+}
+
+/// Corpus size for a heavy test: `full` natively, about a tenth under Miri (sq-0s15k).
+///
+/// Miri interprets every instruction, so the multi-thousand-statement loader differentials
+/// overran the nightly lane's per-test cap and returned no verdict at all. The chunked paths
+/// take an explicit `target`, so a small corpus still fans out and still puts chunk boundaries
+/// between every statement shape; only the number of repetitions shrinks.
+#[cfg(all(test, feature = "parallel"))]
+pub(crate) const fn miri_n(full: usize) -> usize {
+    if cfg!(miri) {
+        full / 10 + 2
+    } else {
+        full
     }
 }
 
@@ -6599,26 +6766,26 @@ mod tests {
         let mut ttl = String::from(
             "@prefix : <http://ex/> .\n@prefix ex: <http://example.org/foo.bar#> .\n# header . comment\n",
         );
-        for i in 0..500 {
+        for i in 0..miri_n(500) {
             ttl.push_str(&format!(
                 ":s{i} :dec {i}.5 ; :s \"a.b.c\" , \"x\\\"y.z\" ; :iri ex:rel{i} .\n\
                  :s{i} ex:m \"\"\"l1 . still\nl2.\"\"\" ; :p <http://x.y/a.b.{i}> . # trailing . c\n",
             ));
         }
-        assert!(ttl.len() > 8192);
+        assert!(cfg!(miri) || ttl.len() > 8192);
         assert!(turtle_chunks(ttl.as_bytes(), 32).is_some(), "blank-node-free doc should fan out");
         let (pd, pt) = parse_turtle_parallel(ttl.as_bytes()).unwrap();
         let mut sd = Dict::new();
         let st = parse_turtle_chunk(ttl.as_bytes(), &mut sd).unwrap();
         assert_eq!(decoded(&pd, &pt), decoded(&sd, &st), "parallel split must equal serial");
-        assert!(pt.len() >= 1500);
+        assert!(pt.len() >= 3 * miri_n(500));
 
         // Blank-node docs fan out too (the dict merge unifies labels by term equality — see
         // turtle_chunks). The differential coverage lives in
         // parallel_turtle_bnodes_match_serial; here just pin that the splitter no longer bails.
         let bn = format!(
             "@prefix : <http://ex/> .\n{}",
-            ":a :p [ :q :r ] .\n:x :y ( :i1 :i2 ) .\n_:b :z :w .\n".repeat(300)
+            ":a :p [ :q :r ] .\n:x :y ( :i1 :i2 ) .\n_:b :z :w .\n".repeat(miri_n(300))
         );
         assert!(turtle_chunks(bn.as_bytes(), 32).is_some(), "blank nodes must no longer bail to serial");
     }
@@ -6639,6 +6806,8 @@ mod tests {
     /// timings are non-canonical — only the coarse linear/quadratic distinction is asserted.
     #[cfg(feature = "parallel")]
     #[test]
+    // A wall-clock ceiling: Miri's interpreter overhead fails it by construction (sq-0s15k).
+    #[cfg_attr(miri, ignore = "wall-clock ceiling (sq-0s15k)")]
     fn parallel_turtle_terminator_scan_is_linear_not_quadratic() {
         // A quote/backslash-free body forces the bounded second-pass arm (`b == None`) — the exact
         // shape that triggered the quadratic full-tail re-scan. 20k statements ⇒ ~1 MB, comfortably
@@ -6768,33 +6937,33 @@ mod tests {
         //     puts chunk boundaries BETWEEN triple-term statements. The `>` inside `>>` and the
         //     `<` of `<<(` must not desync the terminator scan.
         let mut plain = String::from("@prefix : <http://ex/> .\n");
-        for i in 0..500 {
+        for i in 0..miri_n(500) {
             plain.push_str(&format!(":s{i} :annotates <<( :a{i} :age {i} )>> .\n"));
         }
-        assert!(plain.len() > 8192);
+        assert!(cfg!(miri) || plain.len() > 8192);
         let (p, s) = differential(&plain, 32, true);
         assert_eq!(p, s);
-        assert_eq!(p, 500, "every quoted-triple statement must parse");
+        assert_eq!(p, miri_n(500), "every quoted-triple statement must parse");
 
         // (b) A DECIMAL inside the triple term (`3.5`) — the `.` is inside the `<…>`-skipped span,
         //     so it must NOT be read as a statement terminator. Plus a `.`-bearing IRI inside.
         let mut decimals = String::from("@prefix : <http://ex/> .\n@prefix ex: <http://e.x/foo.bar#> .\n");
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             decimals.push_str(&format!(
                 ":m{i} :stmt <<( ex:r{i} :weight {i}.5 )>> ; :note <<( :a :seeAlso <http://x.y/p.{i}> )>> .\n"
             ));
         }
-        assert!(decimals.len() > 8192);
+        assert!(cfg!(miri) || decimals.len() > 8192);
         differential(&decimals, 32, true);
 
         // (c) The `{| … |}` annotation form: each statement expands to the asserted base triple,
         //     a fresh `rdf:reifies <<( … )>>`, and the annotation triple — all of which must
         //     survive chunking identically (anonymous reifier ids canonicalised by position).
         let mut annot = String::from("@prefix : <http://ex/> .\n");
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             annot.push_str(&format!(":a{i} :age {i} {{| :certainty {i}.5 ; :by :src{i} |}} .\n"));
         }
-        assert!(annot.len() > 8192);
+        assert!(cfg!(miri) || annot.len() > 8192);
         differential(&annot, 32, true);
 
         // (d) A SINGLE large triple-term statement (long IRIs, internal newlines/decimals)
@@ -6802,19 +6971,19 @@ mod tests {
         //     the big statement's terminator — exercising the boundary-adjacent case without
         //     splitting the term itself. chunked == serial is the witness it stayed intact.
         let mut boundary = String::from("@prefix : <http://ex/> .\n");
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             boundary.push_str(&format!(":prefix{i} :predicate :object{i} .\n"));
         }
         boundary.push_str(
             ":big :annotates\n  <<( <http://very.long/iri.with.dots/subject>\n      :measuredAt\n      3.14159 )>> .\n",
         );
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             boundary.push_str(&format!(":postfix{i} :predicate :object{i} .\n"));
         }
-        assert!(boundary.len() > 8192, "len={}", boundary.len());
+        assert!(cfg!(miri) || boundary.len() > 8192, "len={}", boundary.len());
         let (p, s) = differential(&boundary, 32, true);
         assert_eq!(p, s);
-        assert_eq!(p, 801, "400 pre + 1 quoted + 400 post");
+        assert_eq!(p, 2 * miri_n(400) + 1, "400 pre + 1 quoted + 400 post");
     }
 
     /// [OPUS-4.8] (sq-87bq) END-TO-END semantics of the RDF 1.2 Turtle reification surface
@@ -7010,7 +7179,7 @@ mod tests {
             "@prefix : <http://ex/> .\n@prefix ex: <http://example.org/v#> .\n@base <http://base/> .\n",
         );
         ttl.push_str("_:shared :starts :here .\n");
-        for i in 0..500 {
+        for i in 0..miri_n(500) {
             ttl.push_str(&format!(
                 ":s{i} :p :o{i} ; :rel ex:r{i} ; :iri <doc/{i}> .\n"
             ));
@@ -7024,7 +7193,7 @@ mod tests {
             ));
         }
         ttl.push_str("_:shared :ends :here .\n");
-        assert!(ttl.len() > 8192);
+        assert!(cfg!(miri) || ttl.len() > 8192);
 
         let target = 32;
         let chunks = turtle_chunks(ttl.as_bytes(), target).expect("doc must fan out");
@@ -7056,7 +7225,7 @@ mod tests {
             canon_bnodes(&sd, &st),
             "sharded chunked merge must equal serial up to anonymous bnode ids"
         );
-        assert!(pt.len() >= 2000, "expected the full triple set, got {}", pt.len());
+        assert!(pt.len() >= 4 * miri_n(500), "expected the full triple set, got {}", pt.len());
     }
 
     /// [OPUS-4.8] Regression for review 1398: a PN_LOCAL_ESC `\#` in a prefixed-name local
@@ -7150,21 +7319,21 @@ mod tests {
         let mut redef = String::from("@prefix p: <http://v0/> .\n");
         for round in 0..6 {
             redef.push_str(&format!("@prefix p: <http://v{round}/> .\n"));
-            for i in 0..80 {
+            for i in 0..miri_n(80) {
                 redef.push_str(&format!("p:s{round}_{i} p:p p:o{i} .\n"));
             }
         }
-        assert!(redef.len() > 8192);
+        assert!(cfg!(miri) || redef.len() > 8192);
         differential(&redef, 32, true);
 
         // 2. Relative `@base` redefinition mid-body with relative-IRI subjects/objects that
         //    resolve against the running base; new prefixes appear partway through too.
         let mut mixed = String::from("@base <http://b0/> .\n@prefix a: <http://a/> .\n");
-        for i in 0..100 {
+        for i in 0..miri_n(100) {
             mixed.push_str(&format!("<s{i}> a:p <o{i}> .\n"));
         }
         mixed.push_str("@base <http://b1/> .\n@prefix b: <http://bb/> .\n");
-        for i in 100..200 {
+        for i in miri_n(100)..2 * miri_n(100) {
             mixed.push_str(&format!("<s{i}> a:p b:o{i} .\n"));
         }
         differential(&mixed, 16, true);
@@ -7173,7 +7342,7 @@ mod tests {
         //    as the very last top-level unit before EOF (no following statement) — the trailing
         //    directive simply contributes to no later chunk.
         let mut adjacent = String::from("@prefix x: <http://x/> .\n");
-        for i in 0..60 {
+        for i in 0..miri_n(60) {
             adjacent.push_str(&format!("x:s{i} x:p x:o{i} .\n"));
         }
         adjacent.push_str("@prefix y: <http://y/> .\nx:last y:p x:o .\n@prefix z: <http://z/> .\n");
@@ -7187,21 +7356,21 @@ mod tests {
         let mut sparql = String::from("PREFIX s: <http://s0/>\nBASE <http://base0/>\n");
         for round in 0..8 {
             sparql.push_str(&format!("PREFIX s: <http://s{round}/>\nBASE <http://base{round}/>\n"));
-            for i in 0..120 {
+            for i in 0..miri_n(120) {
                 sparql.push_str(&format!("s:longkey{round}_{i} s:longpred <relative-iri-{i}> .\n"));
             }
         }
-        assert!(sparql.len() > 8192);
+        assert!(cfg!(miri) || sparql.len() > 8192);
         differential(&sparql, 32, true);
 
         // 5. MIXED `@`-form and SPARQL-style directives in the SAME document, interleaved with
         //    statements — both forms must be tracked in the same ordered snapshot.
         let mut mixedforms = String::from("@prefix a: <http://a/> .\nPREFIX b: <http://b/>\n");
-        for i in 0..80 {
+        for i in 0..miri_n(80) {
             mixedforms.push_str(&format!("a:s{i} b:p a:o{i} .\n"));
         }
         mixedforms.push_str("@base <http://base/> .\nPREFIX c: <http://c/>\n");
-        for i in 80..160 {
+        for i in miri_n(80)..2 * miri_n(80) {
             mixedforms.push_str(&format!("<s{i}> b:p c:o{i} .\n"));
         }
         differential(&mixedforms, 16, true);
@@ -7214,7 +7383,7 @@ mod tests {
             commented.push_str(&format!(
                 "PREFIX p: #redef <bogus> .\n <http://c{round}/>\nBASE # base <x> .\n <http://b{round}/>\n"
             ));
-            for i in 0..50 {
+            for i in 0..miri_n(50) {
                 commented.push_str(&format!("p:s{round}_{i} p:p <rel{i}> .\n"));
             }
         }
@@ -7277,7 +7446,7 @@ mod tests {
         //    core per-graph routing across chunk boundaries. The same predicate/object recur in
         //    different graphs (each graph has its OWN dict, exactly as the serial path builds).
         let mut multi = String::new();
-        for i in 0..600 {
+        for i in 0..miri_n(600) {
             let g = i % 4; // 0 -> default, 1..3 -> named graphs g1..g3
             if g == 0 {
                 multi.push_str(&format!("<http://ex/s{i}> <http://ex/p> <http://ex/o{i}> .\n"));
@@ -7294,7 +7463,7 @@ mod tests {
         //    chained between adjacent quads, so the per-graph dict merge must unify each label to
         //    one node — the cross-chunk bnode-scope risk.
         let mut bn = String::from("_:shared <http://ex/starts> <http://ex/here> .\n");
-        for i in 0..500 {
+        for i in 0..miri_n(500) {
             bn.push_str(&format!(
                 "_:n{} <http://ex/next> _:n{} .\n<http://ex/s{i}> <http://ex/p> <http://ex/o{i}> <http://ex/g1> .\n",
                 i / 3,
@@ -7309,7 +7478,7 @@ mod tests {
         //    dict), while a SAME-labelled `_:g` used as a subject in the default graph is a normal
         //    bnode there — the two must not be conflated.
         let mut bgraph = String::new();
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             if i % 2 == 0 {
                 bgraph.push_str(&format!("_:x{i} <http://ex/p> \"v{i}\" _:g .\n"));
             } else {
@@ -7324,7 +7493,7 @@ mod tests {
         //    casing-normalisation parity: the byte parser must lowercase the tag to the SAME slot
         //    oxttl produces, or this differential check fails on the language column.
         let mut lits = String::new();
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             let g = if i % 3 == 0 { String::new() } else { format!(" <http://g.x/{}.n>", i % 3) };
             lits.push_str(&format!(
                 "<http://ex/s{i}> <http://ex/p> \"val.{i} \\\"q\\\" x\"@en-us{g} .\n\
@@ -7338,7 +7507,7 @@ mod tests {
         // 5. RDF 1.2 triple-term objects in a named graph (forces the serial `merge_remap` branch
         //    of the per-graph merge, since the sharded merge cannot represent triple terms).
         let mut tt = String::new();
-        for i in 0..300 {
+        for i in 0..miri_n(300) {
             tt.push_str(&format!(
                 "<http://ex/r{i}> <http://ex/reifies> <<( <http://ex/a{i}> <http://ex/age> \"{i}\"^^<http://www.w3.org/2001/XMLSchema#integer> )>> <http://ex/meta> .\n\
                  <http://ex/s{i}> <http://ex/p> <http://ex/o{i}> .\n"
@@ -7349,7 +7518,7 @@ mod tests {
         // 6. Empty + whitespace + comment-only lines interleaved (the parser must skip them
         //    identically to oxttl, and a chunk boundary may land on a blank line).
         let mut sparse = String::new();
-        for i in 0..400 {
+        for i in 0..miri_n(400) {
             sparse.push_str("# a comment . with a dot\n\n");
             let g = if i % 2 == 0 { " <http://ex/g7>" } else { "" };
             sparse.push_str(&format!("<http://ex/s{i}> <http://ex/p> <http://ex/o{i}>{g} .\n"));
@@ -7363,7 +7532,7 @@ mod tests {
         //    and reused as a graph name), so the per-graph merge must unify the dotted labels too;
         //    a dotted graph name `_:g.{k}` must not be conflated with a same-spelled S/O bnode.
         let mut dotted = String::from("_:sh.ared <http://ex/starts> _:o.0 .\n");
-        for i in 0..500 {
+        for i in 0..miri_n(500) {
             dotted.push_str(&format!(
                 "_:n.{} <http://ex/next> _:n.{} _:g.{} .\n\
                  <http://ex/s{i}> <http://ex/p> _:n.{} .\n",
@@ -7698,7 +7867,7 @@ mod tests {
     #[test]
     fn load_dataset_nquads_public_entry_matches_serial() {
         let mut nq = String::from("_:shared <http://ex/a> <http://ex/b> .\n");
-        for i in 0..2000 {
+        for i in 0..miri_n(2000) {
             let g = if i % 3 == 0 { "" } else { " <http://ex/g1>" };
             nq.push_str(&format!("<http://ex/s{i}> <http://ex/p> _:n{i}{g} .\n"));
         }
@@ -8236,6 +8405,48 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// #3825 — a `numerics.bin` written before the [`NUMERICS_MAGIC`] header existed (raw f64,
+    /// no header) cached an `xsd:float` lexical at its NEAREST f64. `open` must recompute such a
+    /// cache, not map it, so the float keeps its `f32` value across the upgrade; a cache saved
+    /// with the current header is still mapped.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn open_recomputes_an_unversioned_numerics_cache() {
+        let ttl = "<http://ex/a> <http://ex/f> \"0.1\"^^<http://www.w3.org/2001/XMLSchema#float> .\n\
+                   <http://ex/a> <http://ex/d> \"2.5\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n";
+        let lit = |v: &str, dt: &str| {
+            Term::Literal(Literal::new_typed_literal(v, NamedNode::new_unchecked(format!("http://www.w3.org/2001/XMLSchema#{dt}"))))
+        };
+        let g = Graph::load_str(ttl, "turtle").unwrap();
+        let (fid, did) = (g.id_of(&lit("0.1", "float")).unwrap(), g.id_of(&lit("2.5", "decimal")).unwrap());
+        let dir = std::env::temp_dir().join(format!("sparq_unversioned_numerics_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        g.save(&dir).unwrap();
+        assert!(matches!(Graph::open(&dir).unwrap().numerics, NumData::Mapped(..)), "a current cache is mapped");
+
+        // Rewrite the numerics cache exactly as the pre-header layout stored it: `n` native f64, the
+        // float valued at the nearest f64 of its lexical (`0.1`, not `0.1f32`).
+        let old: Vec<u8> = (1..=g.dict.len() as Id)
+            .map(|id| if id == fid { 0.1f64 } else { g.numeric_value(id).unwrap_or(f64::NAN) })
+            .flat_map(f64::to_ne_bytes)
+            .collect();
+        std::fs::write(dir.join(NUMERIC_CACHE_FILE), old).unwrap();
+
+        let g2 = Graph::open(&dir).unwrap();
+        assert_eq!(g2.numeric_value(fid), Some(f64::from(0.1f32)), "stale float value mapped from an old cache");
+        assert_eq!(g2.numeric_value(did), Some(2.5));
+        // Saving the reopened graph writes the current, mappable format.
+        let dir2 = dir.with_extension("resaved");
+        std::fs::remove_dir_all(&dir2).ok();
+        g2.save(&dir2).unwrap();
+        let g3 = Graph::open(&dir2).unwrap();
+        assert!(matches!(g3.numerics, NumData::Mapped(..)));
+        assert_eq!(g3.numeric_value(fid), Some(f64::from(0.1f32)));
+        drop((g2, g3));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&dir2).ok();
+    }
+
     /// [OPUS-4.8] (gh-1122) `insert_triple` / `remove_triple` against a DIRECTORY-BACKED graph
     /// flow through the SAME durable `apply_delta` path as a batch: each is WAL-logged + fsync'd,
     /// so a crash-style reopen (no save/compact in between) recovers the insert and honours the
@@ -8284,7 +8495,7 @@ mod tests {
             ));
         }
         nt.push_str("<http://ex/n0> <http://ex/name> \"caf\\u00e9\"@fr .\n");
-        // Temporal literals so the temporals.bin round-trip below has real cells:
+        // Temporal literals so the temporals-v4.bin round-trip below has real cells:
         // zoned + floating dateTimes (sub-second), a date, and an ill-formed dateTime
         // (must stay uncached on both sides).
         nt.push_str("<http://ex/n1> <http://ex/at> \"2024-03-15T13:00:00.25Z\"^^<http://www.w3.org/2001/XMLSchema#dateTime> .\n");
@@ -8314,7 +8525,7 @@ mod tests {
 
         // The numeric-value cache must round-trip through its memory-mapped form: every
         // numeric literal resolves to the same f64 (and non-numerics to None) as before.
-        assert!(dir.join("numerics.bin").exists(), "numerics cache not persisted");
+        assert!(dir.join(NUMERIC_CACHE_FILE).exists(), "numerics cache not persisted");
         assert!(matches!(g2.numerics, NumData::Mapped(..)), "numerics not mmap'd on open");
         for v in [0u32, 1, 42, 250, 499] {
             let lit = Term::Literal(Literal::new_typed_literal(v.to_string(), xsd::INTEGER));
@@ -8331,7 +8542,7 @@ mod tests {
         // The temporal-value cache must round-trip through its memory-mapped form too:
         // every cached cell (instant bits, tz presence, family) identical, and
         // non-temporal terms None in both.
-        assert!(dir.join("temporals.bin").exists(), "temporals cache not persisted");
+        assert!(dir.join(TEMPORAL_CACHE_FILE).exists(), "temporals cache not persisted");
         assert!(matches!(g2.temporals, TempData::Mapped(..)), "temporals not mmap'd on open");
         for i in 1..=g.dict.len() as Id {
             match (g.temporal_value(i), g2.temporal_value(i)) {
@@ -8833,7 +9044,7 @@ mod tests {
     /// previously-uncovered `intern_batch`/`consolidate`/`remap_staged`/`ShardWindow`
     /// pipeline. The dataset deliberately mixes inline integers (passthrough), repeated
     /// IRIs (prefix factoring + dedup), language-tagged + datatyped literals, a numeric
-    /// literal (numerics.bin), an xsd:dateTime (temporals.bin), and blank nodes.
+    /// literal (numerics-v3.bin), an xsd:dateTime (temporals-v4.bin), and blank nodes.
     #[cfg(feature = "dict-spill")]
     #[test]
     fn dict_spill_build_byte_identical_to_sharded() {
@@ -8878,7 +9089,7 @@ mod tests {
         // path's — the design's central claim.
         let files = [
             "dict-meta.bin", "dict-terms.bin", "dict-offs.bin",
-            "dict-hash.bin", "dict-hid.bin", "numerics.bin", "temporals.bin",
+            "dict-hash.bin", "dict-hid.bin", NUMERIC_CACHE_FILE, TEMPORAL_CACHE_FILE,
         ];
         for f in files {
             let a = std::fs::read(sharded_dir.join(f))
@@ -9176,7 +9387,7 @@ mod tests {
     #[test]
     fn load_reader_parallel_handles_triple_terms() {
         let mut nt = String::new();
-        for i in 0..1500u32 {
+        for i in 0..miri_n(1500) as u32 {
             nt.push_str(&format!(
                 "<http://ex/n{}> <http://ex/p{}> \"{}\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
                 i % 97,
@@ -9425,7 +9636,7 @@ mod tests {
             }
         }
         let mut nt = String::new();
-        for i in 0..3000u32 {
+        for i in 0..if cfg!(miri) { 60 } else { 3000 } {
             nt.push_str(&format!(
                 "<http://ex/n{}> <http://ex/p{}> \"{}\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
                 i % 211,
@@ -9470,6 +9681,148 @@ mod tests {
         // A malformed document must surface the parse error, not hang the pipeline.
         let bad = Graph::load_reader_parallel(ShortReader { data: b"not ntriples\n", pos: 0, max: 5 }, "ntriples");
         assert!(bad.is_err());
+    }
+
+    /// `read_line_blocks` (stage 1 of every pipelined N-Triples ingest) must cut blocks
+    /// exactly where the former fixed-read-buffer loop did — `carry + up to block_size fresh
+    /// bytes`, cut after the last `\n` — minus that loop's empty blocks: covering short
+    /// reads, no trailing newline, a line longer than a block, empty input, CRLF lines,
+    /// downstream hang-up and read-error propagation.
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn read_line_blocks_cuts_at_newlines() {
+        struct ShortReader<'a> {
+            data: &'a [u8],
+            pos: usize,
+            max: usize,
+        }
+        impl std::io::Read for ShortReader<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = (self.data.len() - self.pos).min(self.max).min(buf.len());
+                buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+                self.pos += n;
+                Ok(n)
+            }
+        }
+        fn run(data: &[u8], block: usize, max: usize) -> Vec<Vec<u8>> {
+            let mut out = Vec::new();
+            read_line_blocks(ShortReader { data, pos: 0, max }, block, |b| {
+                if !b.is_empty() {
+                    out.push(b);
+                }
+                true
+            })
+            .unwrap();
+            out
+        }
+        // The pre-refactor algorithm (fixed read buffer + `carry.to_vec()`), as the oracle.
+        fn reference(data: &[u8], block: usize) -> Vec<Vec<u8>> {
+            let (mut out, mut carry, mut pos) = (Vec::new(), Vec::new(), 0);
+            loop {
+                let filled = (data.len() - pos).min(block);
+                if filled == 0 {
+                    if !carry.is_empty() {
+                        out.push(carry);
+                    }
+                    return out;
+                }
+                let mut b = std::mem::take(&mut carry);
+                b.extend_from_slice(&data[pos..pos + filled]);
+                pos += filled;
+                let cut = b.iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1);
+                carry = b[cut..].to_vec();
+                b.truncate(cut);
+                if !b.is_empty() {
+                    out.push(b);
+                }
+            }
+        }
+        let mut lines = String::new();
+        for i in 0..500u32 {
+            lines.push_str(&format!(
+                "<http://ex/s{i}> <http://ex/p> \"{}\" .\n",
+                "x".repeat((i % 37) as usize)
+            ));
+        }
+        let crlf = lines.replace('\n', "\r\n");
+        let no_trailing = format!("{lines}<http://ex/last> <http://ex/p> \"tail\" .");
+        let long_line = format!(
+            "{lines}<http://ex/s> <http://ex/p> \"{}\" .\n{lines}",
+            "L".repeat(10_000)
+        );
+        for (name, data) in [
+            ("lf", lines.as_str()),
+            ("crlf", crlf.as_str()),
+            ("no trailing newline", no_trailing.as_str()),
+            ("line longer than a block", long_line.as_str()),
+            ("empty", ""),
+            ("newline only", "\n"),
+        ] {
+            let data = data.as_bytes();
+            for block in [1usize, 64, 4096, 1 << 20] {
+                for max in [1usize, 7, 1000, usize::MAX] {
+                    let got = run(data, block, max);
+                    let ctx = format!("{name} block={block} max={max}");
+                    let want = reference(data, block);
+                    assert_eq!(got, want, "{ctx}: blocks differ from the reference cut");
+                    assert_eq!(got.concat(), data, "{ctx}: blocks do not reassemble");
+                    assert!(got.iter().all(|b| !b.is_empty()), "{ctx}: empty block");
+                    if let Some((last, init)) = got.split_last() {
+                        let aligned = init.iter().all(|b| b.ends_with(b"\n"));
+                        assert!(aligned, "{ctx}: block not newline-aligned");
+                        let ends_nl = last.ends_with(b"\n");
+                        assert_eq!(ends_nl, data.ends_with(b"\n"), "{ctx}: final partial line");
+                    }
+                    if name == "crlf" {
+                        let pairs = got.iter().all(|b| b.ends_with(b"\r\n"));
+                        assert!(pairs, "{ctx}: CRLF pair split");
+                    }
+                }
+            }
+        }
+        assert!(run(b"", 64, 7).is_empty(), "empty input must emit nothing");
+        // Downstream hang-up: `emit` returning false stops reading cleanly after that block.
+        let mut calls = 0;
+        read_line_blocks(lines.as_bytes(), 64, |_| {
+            calls += 1;
+            false
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        // A read error propagates as `Err`.
+        struct Failing;
+        impl std::io::Read for Failing {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("boom"))
+            }
+        }
+        let err = read_line_blocks(Failing, 64, |_| true).unwrap_err();
+        assert!(err.contains("boom"), "{err}");
+        // A hang-up during a newline-free run stops the read: "!\n" then an endless line.
+        struct Endless {
+            head: &'static [u8],
+            served: usize,
+        }
+        impl std::io::Read for Endless {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = buf.len().min(4096);
+                for (i, b) in buf[..n].iter_mut().enumerate() {
+                    *b = self.head.get(self.served + i).copied().unwrap_or(b'a');
+                }
+                self.served += n;
+                assert!(self.served < 1 << 20, "reader kept going after the hang-up");
+                Ok(n)
+            }
+        }
+        // The first block is accepted (sent), then the parser rejects it and hangs up, so
+        // every later emit fails; only the empty probes can observe that.
+        let mut calls = 0;
+        read_line_blocks(Endless { head: b"!\n", served: 0 }, 64, |_| {
+            calls += 1;
+            calls == 1
+        })
+        .unwrap();
+        assert_eq!(calls, 2);
     }
 
     #[test]
@@ -10762,7 +11115,7 @@ mod tests {
     }
 
     /// [OPUS-4.8] (sq-7ph8) The streamed numerics/temporals save must write BYTE-IDENTICAL
-    /// `numerics.bin`/`temporals.bin` to the old dense-materialise path — for a DENSE-owned
+    /// `numerics-v3.bin`/`temporals-v4.bin` to the old dense-materialise path — for a DENSE-owned
     /// cache, a SPARSE cache (`into_compressed`), AND a graph carrying temporal literals — so
     /// the bounded-RSS finalize is purely a memory optimisation, never an on-disk format change.
     /// We prove it by comparing the streamed files against a reference dense computation done
@@ -10782,7 +11135,7 @@ mod tests {
         // `n` LE f64 numerics; then `n` LE f64 temporal instants followed by `n` flag bytes.
         let reference = |dict: &Dict| -> (Vec<u8>, Vec<u8>) {
             let n = dict.len();
-            let mut num = Vec::new();
+            let mut num = NUMERICS_MAGIC.to_vec();
             let mut inst = Vec::new();
             let mut flags = Vec::new();
             for id in 1..=n as Id {
@@ -10798,7 +11151,7 @@ mod tests {
                     }
                 }
             }
-            inst.extend_from_slice(&flags); // temporals.bin = instants || flags
+            inst.extend_from_slice(&flags); // temporals-v4.bin = instants || flags
             (num, inst)
         };
 
@@ -10818,17 +11171,17 @@ mod tests {
                     g.save(&dir).unwrap();
                 }
 
-                let got_num = std::fs::read(dir.join("numerics.bin")).unwrap();
-                let got_temp = std::fs::read(dir.join("temporals.bin")).unwrap();
+                let got_num = std::fs::read(dir.join(NUMERIC_CACHE_FILE)).unwrap();
+                let got_temp = std::fs::read(dir.join(TEMPORAL_CACHE_FILE)).unwrap();
                 let n = g.dict.len();
-                assert_eq!(got_num.len(), n * 8, "numerics.bin size (sparse={sparse} compressed={compressed})");
-                assert_eq!(got_temp.len(), n * 9, "temporals.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_num.len(), 8 + n * 8, "numerics-v3.bin size (sparse={sparse} compressed={compressed})");
+                assert_eq!(got_temp.len(), n * 9, "temporals-v4.bin size (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_num, want_num, "streamed numerics != dense (sparse={sparse} compressed={compressed})");
                 assert_eq!(got_temp, want_temp, "streamed temporals != dense (sparse={sparse} compressed={compressed})");
 
                 // And the caches still resolve after a re-open (mmap path).
                 let g2 = Graph::open(&dir).unwrap();
-                // 42 is an xsd:integer, inline-encoded into its id (never in numerics.bin); the
+                // 42 is an xsd:integer, inline-encoded into its id (never in numerics-v3.bin); the
                 // decimals 1.5/2.5 are the cache entries that must round-trip.
                 let nums: Vec<f64> = g2.dict.iter().filter_map(|(id, _)| g2.numeric_value(id)).collect();
                 assert!(nums.contains(&1.5) && nums.contains(&2.5), "numerics survive: {nums:?}");
@@ -10879,7 +11232,7 @@ mod tests {
     /// [FABLE-5] (sq-9781x) Direct unit test for the shared public `parse_xsd_f64`: the XSD
     /// lexical space (specials `NaN`/`INF`/`+INF`/`-INF`), the Rust-only spellings it MUST
     /// reject, ordinary decimals/exponents, and untrimmed padding (this fn does NOT trim —
-    /// callers trim). Kept in lock-step with the substrate re-export's own test.
+    /// string constructors preprocess separately). Kept in lock-step with the substrate re-export's own test.
     #[test]
     fn parse_xsd_f64_shared_acceptance_set() {
         assert_eq!(parse_xsd_f64("NaN").map(f64::to_bits), Some(f64::NAN.to_bits()));
@@ -10903,8 +11256,8 @@ mod tests {
 
     /// [FABLE-5] (sq-74oy4 / sq-6b1lj) DIRECT unit test of the public DATATYPE-AWARE cache
     /// acceptance `numeric_cache_value` (and thereby `cached_numeric_f64` /
-    /// `numeric_datatype_wellformed`): trims, per-datatype well-formedness, and the exact
-    /// scale-0 integer rule (`"5."`/`"5.0"` accepted as integers, `"5.5"` not). This is the
+    /// `numeric_datatype_wellformed`): raw lexical/facet validation and finite capacity.
+    /// Decimal notation and boundary whitespace are invalid integer lexicals. This is the
     /// in-crate coverage anchor for the new fns; the CROSS-crate agreement with
     /// `Num::of_literal` is pinned in `sparq-substrate`'s `cache_f64_seam_vs_as_numeric_differential`.
     #[test]
@@ -10913,12 +11266,12 @@ mod tests {
         let xd = xsd::DECIMAL.as_str();
         let xdbl = xsd::DOUBLE.as_str();
         let xf = xsd::FLOAT.as_str();
-        // integers: scale-0 (after trailing-zero normalisation), i128-fit, trimmed.
+        // Raw integer lexicals are signed digits, without XML preprocessing.
         assert_eq!(numeric_cache_value("5", xi), Some(5.0));
-        assert_eq!(numeric_cache_value(" 5 ", xi), Some(5.0)); // XSD collapse: trimmed
+        assert_eq!(numeric_cache_value(" 5 ", xi), None); // raw RDF lexical, not a string cast
         assert_eq!(numeric_cache_value("+7", xi), Some(7.0));
-        assert_eq!(numeric_cache_value("5.", xi), Some(5.0)); // trailing dot, no fraction
-        assert_eq!(numeric_cache_value("5.0", xi), Some(5.0)); // trailing-zero fraction
+        assert_eq!(numeric_cache_value("5.", xi), None); // decimal notation is not an integer lexical
+        assert_eq!(numeric_cache_value("5.0", xi), None); // zero fractional value does not change the grammar
         assert_eq!(numeric_cache_value("5.5", xi), None); // fraction on an integer
         assert_eq!(numeric_cache_value(".5", xi), None); // no integer part, scale 1
         assert_eq!(numeric_cache_value("1E2", xi), None); // exponent on an integer
@@ -10955,7 +11308,7 @@ mod tests {
     fn numeric_cache_hit_matches_shared_parse_xsd_f64_plumbing() {
         // (lexical, datatype-suffix). Each becomes one distinct dictionary literal.
         let cases: &[(&str, &str)] = &[
-            (" 1", "xsd:integer"),      // whitespace-padded (leading) — trim-then-parse
+            (" 1", "xsd:integer"),      // whitespace-padded (leading): invalid raw lexical
             ("1 ", "xsd:integer"),      // whitespace-padded (trailing)
             ("\t2\n", "xsd:integer"),   // other whitespace
             ("+3", "xsd:integer"),      // leading +
@@ -11008,7 +11361,7 @@ mod tests {
                 continue;
             }
             // Model: the cache's OWN datatype-aware acceptance (`numeric_cache_value`), which
-            // trims, gates on per-datatype well-formedness, and folds a NaN value to a miss.
+            // gates on raw lexical/facet validity and folds a NaN value to a miss.
             let model = numeric_cache_value(value, datatype);
             let cached = g.numeric_value(id);
             match (model, cached) {
@@ -11032,12 +11385,9 @@ mod tests {
         }
     }
 
-    /// [FABLE-5] (sq-9781x) The specific latent bugs the alignment fixes, asserted directly
-    /// against the pre-fix raw `str::parse::<f64>` behaviour: (a) a whitespace-padded numeric
-    /// literal now HITS the cache (was a miss); (b) a Rust-only `inf`/`nan` spelling now MISSES
-    /// the cache (the raw parse wrongly cached `inf`/`NaN`), matching the evaluator's rejection.
+    /// Raw whitespace and Rust-only spellings must miss the numeric cache.
     #[test]
-    fn numeric_cache_alignment_fixes_both_divergences() {
+    fn numeric_cache_rejects_raw_whitespace_and_non_xsd_spellings() {
         let ttl = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n\
             @prefix ex: <http://ex/> .\n\
             ex:pad  ex:v \" 7 \"^^xsd:decimal .\n\
@@ -11051,8 +11401,8 @@ mod tests {
                 _ => None,
             }).flatten()
         };
-        // (a) previously a raw-parse MISS, now a value-7.0 HIT (trim-then-parse).
-        assert_eq!(by_val(" 7 "), Some(7.0), "padded decimal must now hit the cache");
+        // Earlier alignment tests wrongly normalized this raw RDF lexical.
+        assert_eq!(by_val(" 7 "), None, "padded raw decimal must miss the cache");
         // (b) previously a raw-parse HIT storing inf/NaN, now a MISS (XSD rejects the spelling).
         assert_eq!(by_val("inf"), None, "'inf'^^xsd:double must NOT hit the cache");
         assert_eq!(by_val("nan"), None, "'nan'^^xsd:double must NOT hit the cache");
@@ -11460,5 +11810,158 @@ mod dir_roundtrip_test {
         };
         assert!(same_base, "fork after compact must share the folded cache base");
         assert_eq!(f2.numeric_value(id), Some(4.5));
+    }
+}
+
+#[cfg(test)]
+mod exact_temporal_cache_tests {
+    // Cache reuse and graph lifecycle behavior, including fractional storage.
+    use super::*;
+    use std::cmp::Ordering;
+
+    fn literal(value: &str) -> Term {
+        Term::Literal(oxrdf::Literal::new_typed_literal(value, oxrdf::NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#dateTime")))
+    }
+
+    #[test]
+    fn exact_cache_reuses_validation_and_preserves_fractional_precision() {
+        for compressed in [false, true] {
+            let first = "2024-01-01T00:00:00.000000001Z";
+            let later = "2024-01-01T00:00:00.000000002Z";
+            let nt = format!("<http://ex/s> <http://ex/p> {} .\n<http://ex/s> <http://ex/p> {} .", literal(first), literal(later));
+            let graph = Graph::load_str(&nt, "nt").unwrap();
+            let graph = if compressed { graph.into_compressed() } else { graph };
+            let a = graph.id_of(&literal(first)).unwrap();
+            let b = graph.id_of(&literal(later)).unwrap();
+            assert!(graph.exact_temporals.get().is_none());
+            for absent in [dict::NO_ID, dict::INLINE_BASE, Id::MAX] {
+                assert!(graph.exact_temporal_value(absent).is_none());
+            }
+            assert_eq!(graph.exact_temporal_value(a).unwrap().compare(graph.exact_temporal_value(b).unwrap()), Some(Ordering::Less));
+            let parsed = temporal::EXACT_PARSE_CALLS.with(|calls| calls.get());
+            for _ in 0..100 {
+                assert_eq!(graph.exact_temporal_value(a).unwrap().compare(graph.exact_temporal_value(b).unwrap()), Some(Ordering::Less));
+            }
+            assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()), parsed, "warm lookups must not reparse dates");
+            assert_eq!(graph.exact_temporals.get().unwrap().len(), 2);
+        }
+    }
+
+    fn append_fixture() -> Graph {
+        let source = (2000..2128).map(|year| {
+            format!("<http://ex/s> <http://ex/p> {} .", literal(&format!("{year}-01-01T00:00:00.000000001Z")))
+        }).collect::<Vec<_>>().join("\n");
+        Graph::load_str(&source, "nt").unwrap()
+    }
+
+    fn assert_incremental_parse_work(mut graph: Graph) {
+        let old = literal("2000-01-01T00:00:00.000000001Z");
+        let later = literal("2200-01-01T00:00:00.000000002Z");
+        let old_id = graph.id_of(&old).unwrap();
+        graph.exact_temporal_value(old_id).unwrap();
+        let parsed = temporal::EXACT_PARSE_CALLS.with(|calls| calls.get());
+        let iri = |s| Term::NamedNode(oxrdf::NamedNode::new_unchecked(s));
+        let ordinary = [iri("http://ex/unrelated"), iri("http://ex/text"), Term::Literal(oxrdf::Literal::new_simple_literal("ordinary new value"))];
+        graph.apply_delta(std::slice::from_ref(&ordinary), &[]).unwrap();
+        graph.exact_temporal_value(old_id).unwrap();
+        assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()), parsed,
+            "an unrelated dictionary append must not reparse old temporal values");
+        let triple = [iri("http://ex/new"), iri("http://ex/p"), later.clone()];
+        graph.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+        let new_id = graph.id_of(&later).unwrap();
+        assert_eq!(graph.exact_temporal_value(old_id).unwrap().compare(graph.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
+        assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()) - parsed, 2,
+            "one new temporal value is validated once for each approximate/exact cache");
+        let parsed = temporal::EXACT_PARSE_CALLS.with(|calls| calls.get());
+        for _ in 0..8 {
+            graph.apply_delta(std::slice::from_ref(&triple), &[]).unwrap();
+            graph.exact_temporal_value(old_id).unwrap();
+            graph.exact_temporal_value(new_id).unwrap();
+        }
+        graph.apply_delta(&[], &[ordinary, triple]).unwrap();
+        graph.exact_temporal_value(old_id).unwrap();
+        assert_eq!(temporal::EXACT_PARSE_CALLS.with(|calls| calls.get()), parsed,
+            "existing-ID insertions, deletes and warm lookups reuse all parsed cells");
+        assert_eq!(graph.exact_temporals.get().unwrap().len(), 129);
+    }
+
+    #[test]
+    fn appends_parse_only_new_temporal_ids_in_dense_compressed_and_forked_graphs() {
+        assert_incremental_parse_work(append_fixture());
+        assert_incremental_parse_work(append_fixture().into_compressed());
+        assert_incremental_parse_work(append_fixture().fork());
+    }
+
+    #[test]
+    fn appends_preserve_initialized_memo_with_sparse_temporal_backing() {
+        // Compression alone does not select sparse temporal storage:
+        // more than three quarters of dictionary terms must be non-temporal.
+        let mut graph = append_fixture();
+        let strings: Vec<_> = (0..512).map(|i| [
+            Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")),
+            Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/text")),
+            Term::Literal(oxrdf::Literal::new_simple_literal(format!("ordinary {i}"))),
+        ]).collect();
+        graph.apply_delta(&strings, &[]).unwrap();
+        let sparse = graph.into_compressed();
+        assert!(matches!(sparse.temporals, TempData::Sparse(_)), "fixture must activate sparse backing");
+        let fork = sparse.fork();
+        assert!(matches!(&fork.temporals, TempData::Forked { base, .. }
+            if matches!(base.as_ref(), TempData::Sparse(_))));
+        assert_incremental_parse_work(sparse);
+        assert_incremental_parse_work(fork);
+    }
+
+    #[test]
+    fn appends_do_not_initialize_an_unused_exact_memo() {
+        let mut graph = append_fixture();
+        let new = literal("2300-01-01T00:00:00Z");
+        graph.apply_delta(&[[Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")), Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/p")), new]], &[]).unwrap();
+        assert!(graph.exact_temporals.get().is_none());
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn mapped_dictionary_appends_preserve_the_initialized_exact_memo() {
+        let dir = std::env::temp_dir().join(format!("sparq_exact_append_{}", std::process::id()));
+        append_fixture().save(&dir).unwrap();
+        assert_incremental_parse_work(Graph::open(&dir).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn exact_cache_tracks_fork_compression_and_dictionary_appends() {
+        let old = literal("2024-01-01T00:00:00Z");
+        let new = literal("2024-01-01T00:00:00.000000001Z");
+        let mut graph = Graph::load_str(&format!("<http://ex/s> <http://ex/p> {old} ."), "nt").unwrap();
+        let id = graph.id_of(&old).unwrap();
+        graph.exact_temporal_value(id).unwrap();
+        let fork = graph.fork();
+        assert!(fork.exact_temporals.get().is_none());
+        assert_eq!(fork.exact_temporal_value(id).unwrap().compare(graph.exact_temporal_value(id).unwrap()), Some(Ordering::Equal));
+        graph.apply_delta(&[[Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/s")), Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/p")), new.clone()]], &[]).unwrap();
+        assert_eq!(graph.exact_temporals.get().unwrap().len(), 2);
+        let new_id = graph.id_of(&new).unwrap();
+        assert_eq!(graph.exact_temporal_value(id).unwrap().compare(graph.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
+        assert!(fork.id_of(&new).is_none());
+        let compressed = graph.into_compressed();
+        assert!(compressed.exact_temporals.get().is_none());
+        assert_eq!(compressed.exact_temporal_value(id).unwrap().compare(compressed.exact_temporal_value(new_id).unwrap()), Some(Ordering::Less));
+    }
+
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn exact_cache_is_rebuilt_from_persisted_lexicals() {
+        let dir = std::env::temp_dir().join(format!("sparq_exact_cache_{}", std::process::id()));
+        let a = literal("2024-01-01T00:00:00.000000000000000000000000000000001Z");
+        let b = literal("2024-01-01T00:00:00.000000000000000000000000000000002Z");
+        let graph = Graph::load_str(&format!("<http://ex/s> <http://ex/p> {a} .\n<http://ex/s> <http://ex/p> {b} ."), "nt").unwrap();
+        graph.exact_temporal_value(graph.id_of(&a).unwrap()).unwrap();
+        graph.save(&dir).unwrap();
+        let reopened = Graph::open(&dir).unwrap();
+        assert!(reopened.exact_temporals.get().is_none());
+        assert_eq!(reopened.exact_temporal_value(reopened.id_of(&a).unwrap()).unwrap().compare(reopened.exact_temporal_value(reopened.id_of(&b).unwrap()).unwrap()), Some(Ordering::Less));
+        drop(reopened);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -19,6 +19,7 @@ import {
   askValue,
   streamQueryRows,
   COMMON_PREFIXES,
+  termValue,
   type SparqlBinding,
   type SparqlResults,
   type WasmStore,
@@ -56,6 +57,7 @@ import {
 // RDFS / OWL 2 RL reasoner (crates/sparq-reason via sparq-reason-wasm), lazy-loaded so the lean
 // query engine pays nothing until a workspace turns inference on.
 import { loadReasoner, modeToProfile, type WasmReasoner } from "@/lib/reason-wasm";
+import { classifyQuery } from "@/lib/query-form";
 // [FABLE-5] sq-ixc3.20 — canonical triple identity for the inferred-fact affordance (the
 // entailed fact cache the results views consult) + the shared N-Triples term writer (moved out
 // of this file so the click-to-explain path and the snapshot writer share ONE writer).
@@ -481,23 +483,6 @@ export interface EngineContextValue {
 
 const EngineContext = React.createContext<EngineContextValue | null>(null);
 
-/** Heuristic SPARQL form classifier (the WASM Store has separate verbs per form). */
-function classifyQuery(q: string): "select" | "ask" | "construct" | "describe" | "update" {
-  // Strip comments + leading PREFIX/BASE declarations to find the first significant keyword.
-  const body = q
-    .replace(/(^|\s)#[^\n]*/g, " ")
-    .replace(/\b(PREFIX\s+\S+\s+<[^>]*>|BASE\s+<[^>]*>)/gi, " ")
-    .trim();
-  const m = body.match(/\b(SELECT|ASK|CONSTRUCT|DESCRIBE|INSERT|DELETE|LOAD|CLEAR|CREATE|DROP|COPY|MOVE|ADD)\b/i);
-  const kw = m ? m[1].toUpperCase() : "SELECT";
-  if (kw === "ASK") return "ask";
-  if (kw === "CONSTRUCT") return "construct";
-  if (kw === "DESCRIBE") return "describe";
-  if (["INSERT", "DELETE", "LOAD", "CLEAR", "CREATE", "DROP", "COPY", "MOVE", "ADD"].includes(kw))
-    return "update";
-  return "select";
-}
-
 // [OPUS-4.8] sq-ixc3.13 — the all-quads N-Quads (de)serialisation the Import drawer's MERGE
 // path uses. The wasm `Store.serialize` binding does NOT emit N-Triples/N-Quads (only
 // turtle/trig/jsonld — see `serializeStore` below), and the framework-agnostic `@sparq/client`
@@ -598,8 +583,8 @@ function summariseGraphs(store: WasmStore): { size: number; graphs: GraphSummary
     );
     const parsed = JSON.parse(json) as SparqlResults;
     for (const b of parsed.results?.bindings ?? []) {
-      const g = b["g"]?.value ?? null;
-      const c = Number.parseInt(b["c"]?.value ?? "0", 10) || 0;
+      const g = termValue(b["g"]) ?? null;
+      const c = Number.parseInt(termValue(b["c"]) ?? "0", 10) || 0;
       if (g) {
         graphs.push({ graph: g, count: c });
         size += c;

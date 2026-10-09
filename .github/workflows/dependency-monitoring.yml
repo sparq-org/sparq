@@ -6,7 +6,7 @@
 # Distinct from supply-chain.yml's `audit` job: that gates PRs/pushes; this is a
 # scheduled watchdog that turns findings into an actionable, deduplicated issue.
 #
-# Third-party actions pinned by full commit SHA. [OPUS-4.8]
+# Third-party actions pinned by full commit SHA.
 name: dependency-monitoring
 
 on:
@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -41,7 +41,7 @@ jobs:
           rustup default stable
           rustup show active-toolchain
       - name: Install cargo-deny
-        uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
           tool: cargo-deny
       # Run advisories only; capture the human-readable report. `|| true` so we
@@ -50,7 +50,7 @@ jobs:
         id: deny
         run: |
           set +e
-          REPORT="$(cargo deny check advisories 2>&1)"
+          REPORT="$(python3 scripts/rust-dependency-graphs.py deny-advisories 2>&1)"
           CODE=$?
           echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
           {

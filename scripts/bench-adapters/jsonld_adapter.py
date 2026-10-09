@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [FABLE-5] sq-hmd7l.15 — Titanium JSON-LD (Java) adapter for the bench/jsonld
+# sq-hmd7l.15 — Titanium JSON-LD (Java) adapter for the bench/jsonld
 # suite (registered in bench/competitors.json, id: titanium-json-ld). GATHER-ONLY:
 # the jars are NOT committed dependencies — download at gather time and point
 # TITANIUM_CP at ALL FIVE (titanium 1.7.x splits its RDF primitives into

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-toze.29 (GS-5): CI drift-check — VEX ignore-list vs deny.toml.
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# sq-toze.29 (GS-5): CI drift-check — VEX ignore-list vs deny.toml.
 #
 # WHY (the GS-5 concern): the supply-chain story has two places that name the
 # advisories sparq deliberately tolerates:
@@ -8,8 +7,9 @@
 #                                        PR on any advisory not on this list.
 #   • supply-chain/vex.cdx.json        — the PUBLISHED VEX (Vulnerability
 #                                        Exploitability eXchange) that tells a
-#                                        downstream consumer *why* each tolerated
-#                                        advisory is `not_affected`.
+#                                        downstream consumer the scope of each
+#                                        tolerated advisory and any established
+#                                        exploitability analysis.
 # If an advisory is added to one but not the other, the public VEX and the real
 # gate DISAGREE — either the SBOM/VEX claims an exploitability verdict for an
 # advisory the gate no longer suppresses, or the gate silently suppresses an
@@ -56,7 +56,7 @@ _ID_RE = re.compile(r"^(RUSTSEC|CVE)-\d{4}-\d{3,}$")
 # allowed to appear on ONLY ONE side without failing the gate. This MUST stay
 # empty unless there is a real, documented reason an advisory belongs in deny.toml
 # but not the VEX (or vice-versa); each entry is reviewed like a deny.toml ignore.
-# [OPUS-4.8] Empty today: deny.toml and the VEX are 1:1 in sync.
+# Empty today: deny.toml and the VEX are 1:1 in sync.
 JUSTIFIED_DRIFT: dict[str, str] = {}
 
 

@@ -6,18 +6,19 @@ thread_local! {
     static ACTIVE: RefCell<Option<Arc<FunctionRegistry>>> = const { RefCell::new(None) };
 }
 
-/// Uninstalls the registry when the installing entry point returns (also on
-/// error/unwind, so a poisoned thread never leaks a stale registry).
-pub(crate) struct Guard;
+/// Restores the PREVIOUS registry when the installing entry point returns (also
+/// on error/unwind). Restoring rather than clearing keeps a nested install from
+/// unregistering the outer scope's functions for the rest of that scope (#4467).
+pub(crate) struct Guard(Option<Arc<FunctionRegistry>>);
 impl Drop for Guard {
     fn drop(&mut self) {
-        ACTIVE.with(|a| a.borrow_mut().take());
+        let prev = self.0.take();
+        ACTIVE.with(|a| *a.borrow_mut() = prev);
     }
 }
 
 pub(crate) fn install(fns: &FunctionRegistry) -> Guard {
-    ACTIVE.with(|a| *a.borrow_mut() = Some(Arc::new(fns.clone())));
-    Guard
+    Guard(ACTIVE.with(|a| a.borrow_mut().replace(Arc::new(fns.clone()))))
 }
 
 /// Snapshot of the installed registry for the rayon-parallel branches

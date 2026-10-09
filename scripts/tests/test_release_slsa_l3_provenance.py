@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] sq-toze.25 (archives) + #4570 (every other file-shaped artifact) / GX-11 —
+# sq-toze.25 (archives) + #4570 (every other file-shaped artifact) / GX-11 —
 # the SLSA **Build L3** isolation contract for sparq's released artifacts.
 #
 # WHY THIS TEST EXISTS. `release.yml` runs only on `v*` tags and `workflow_dispatch`, and
@@ -70,7 +70,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 RELEASE = REPO_ROOT / ".github" / "workflows" / "release.yml"
 BUILD_MATRIX = REPO_ROOT / ".github" / "workflows" / "build-matrix.yml"
 DIST = REPO_ROOT / ".github" / "workflows" / "dist.yml"
-# [OPUS-5] #4572 — the pin-POLICY half of the contract (see `check_pin_policy` below).
+# #4572 — the pin-POLICY half of the contract (see `check_pin_policy` below).
 DEPENDABOT = REPO_ROOT / ".github" / "dependabot.yml"
 PIN_REVIEW = REPO_ROOT / ".github" / "workflows" / "slsa-builder-pin-review.yml"
 PIN_POLICY_DOC = REPO_ROOT / "compliance" / "slsa" / "trusted-builder-pin-policy.md"
@@ -81,7 +81,7 @@ TRUSTED_BUILDER = re.compile(
     r"^slsa-framework/slsa-github-generator/\.github/workflows/"
     r"generator_generic_slsa3\.yml@v\d+\.\d+\.\d+$"
 )
-# [OPUS-5] #4635 — lane 4's builder. Same tag-not-SHA rule, for the same reason.
+# #4635 — lane 4's builder. Same tag-not-SHA rule, for the same reason.
 CONTAINER_BUILDER = re.compile(
     r"^slsa-framework/slsa-github-generator/\.github/workflows/"
     r"generator_container_slsa3\.yml@v\d+\.\d+\.\d+$"
@@ -288,7 +288,7 @@ def check_trusted_builder(
 def check_container_builder(
     prov: list[str] | None, docker: list[str] | None
 ) -> list[str]:
-    """[OPUS-5] #4635 — lane 4: the ghcr image's isolated provenance.
+    """#4635 — lane 4: the ghcr image's isolated provenance.
 
     Same isolation contract as lanes 1-3 (bare `uses:`, semver tag, own OIDC identity, nothing of
     ours executing inside), but over the container generator's `image`/`digest` interface. Two
@@ -446,7 +446,7 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
                 f"the docs claim L3 coverage; found: {sorted(rel_needs)!r}"
             )
     sums = index_of(rel, SHA256SUMS_CMD)
-    # [GPT-5] An empty name makes download-artifact fetch the entire run. v0.1.3 reached
+    # An empty name makes download-artifact fetch the entire run. v0.1.3 reached
     # SHA256SUMS with every artifact directory because both output keys were misspelled.
     guard = step_block(rel, "Validate signed provenance artifact names")
     if guard is None:
@@ -607,7 +607,7 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------------------
-# [OPUS-5] #4572 — THE PIN POLICY. `check` above proves each lane is on *a* semver tag. That
+# #4572 — THE PIN POLICY. `check` above proves each lane is on *a* semver tag. That
 # leaves three ways the deliberate-tag exception decays, none of which `check` can see:
 #
 #   1. THE LANES DRIFT APART. Two lanes on different tags means one release carrying provenance
@@ -624,7 +624,7 @@ def check(release_text: str, matrix_text: str, dist_text: str) -> list[str]:
 #
 # All three are one-line edits that read as tidying. Pinned here, mutation-proved below.
 # --------------------------------------------------------------------------------------
-# [OPUS-5] #4635: BOTH generator flavours. The container lane is a different reusable workflow but
+# #4635: BOTH generator flavours. The container lane is a different reusable workflow but
 # the SAME trust anchor — leaving it out of this regex would let it drift onto a second tag while
 # `check` (which only proves each lane is on *a* semver tag) stayed green, which is failure mode 1.
 BUILDER_USES = re.compile(
@@ -822,7 +822,7 @@ MUTATIONS = {
     "archive digests use GNU-only sha256sum on the mac rows": _sub(
         "matrix",
         '          if command -v sha256sum >/dev/null 2>&1; then\n'
-        '            sha256sum -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"\n'
+        '            sha256sum --text -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"\n'
         '          else\n'
         '            shasum -a 256 -- "${archives[@]}" > "archive-hashes-${{ matrix.tier }}.txt"\n'
         '          fi',
@@ -860,7 +860,7 @@ MUTATIONS = {
     "GUI digests use GNU-only sha256sum on the mac rows": _sub(
         "release",
         '          if command -v sha256sum >/dev/null 2>&1; then\n'
-        '            sha256sum -- "${bundles[@]}" > "$OUT"\n'
+        '            sha256sum --text -- "${bundles[@]}" > "$OUT"\n'
         '          else\n'
         '            shasum -a 256 -- "${bundles[@]}" > "$OUT"\n'
         '          fi',
@@ -890,7 +890,7 @@ MUTATIONS = {
         ARTIFACTS_PROVENANCE_EXPR,
         "name: sbom-vex",
     ),
-    # [GPT-5] v0.1.3's real failure: `provenance-download-name` is not an output of the pinned
+    # v0.1.3's real failure: `provenance-download-name` is not an output of the pinned
     # generator, so the action received no name and downloaded every artifact in the run.
     "archive provenance uses nonexistent output": _sub(
         "release",
@@ -935,7 +935,7 @@ MUTATIONS = {
     "dist binary digests use GNU-only sha256sum on the mac rows": _sub(
         "matrix",
         '          if command -v sha256sum >/dev/null 2>&1; then\n'
-        '            sha256sum -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"\n'
+        '            sha256sum --text -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"\n'
         '          else\n'
         '            shasum -a 256 -- "${binaries[@]}" > "binary-hashes-${{ matrix.tier }}.txt"\n'
         '          fi',
@@ -1000,7 +1000,7 @@ MUTATIONS = {
 
 
 # --------------------------------------------------------------------------------------
-# [OPUS-5] #4572 — the same discipline for `check_pin_policy`. State is the 5-tuple
+# #4572 — the same discipline for `check_pin_policy`. State is the 5-tuple
 # (release, dist, dependabot, review, policy_doc_present).
 # --------------------------------------------------------------------------------------
 _PIN_FIELDS = ("release", "dist", "dependabot", "review")
@@ -1078,7 +1078,7 @@ PIN_POLICY_MUTATIONS = {
     ),
     # PP8 — the policy record is deleted; the SHA-pin exception loses its owner and rationale.
     "the pin policy record is deleted": _drop_policy_doc,
-    # [OPUS-5] #4635 — the container lane is a DIFFERENT reusable workflow on the SAME trust
+    # #4635 — the container lane is a DIFFERENT reusable workflow on the SAME trust
     # anchor, so it decays the same two ways and must be counted the same.
     # PP9 — the container lane bumped on its own: `check` still passes (it is on *a* semver tag),
     # but one release would then carry provenance from two different builder identities.
@@ -1132,7 +1132,7 @@ class TestSlsaL3IsolationContract(unittest.TestCase):
                     f"mutation {name!r} was NOT caught — the assertion covering it is vacuous",
                 )
 
-    # ---- [OPUS-5] #4572: the tag-pin review/bump policy. ----
+    # ---- #4572: the tag-pin review/bump policy. ----
     def test_pin_policy_holds(self):
         failures = check_pin_policy(*self.pin_state)
         self.assertEqual(

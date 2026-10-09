@@ -1,0 +1,135 @@
+# Issue #6467 — ADVISORY lane: run sparq's N3 reasoner over the community
+# notation3tests suite (https://codeberg.org/phochste/notation3tests) and publish
+# the pass/fail report as the job summary + an artifact.
+#
+# WHAT: clones the suite (fetched, never vendored), builds the
+# `sparq-notation3tests` runner (crates/sparq-conformance/src/notation3tests.rs),
+# and runs every `tests/**/*.n3` case (the suite's case directory; HELLO.n3,
+# lib/ and extra/ are support files, not cases) through
+# `sparq_reason::n3::reason_n3_terms_with_resolver`. Each case is scored by the
+# suite's own expectation, keyed by its name: `success-*` must derive its pass
+# signal, `fail-*` (negative) must derive no verdict, `crash-*` input must be
+# rejected. Buckets follow the reference harness (pass / nonconform /
+# incomplete / crashed), plus timeout and unavailable (the case needed an
+# external resource the offline runner cannot serve); each case runs in its
+# own process with a timeout. A missing tests/ directory exits the runner with an error, which this
+# advisory step tolerates.
+#
+# ADVISORY: this lane measures, it does not gate. The run step never fails on
+# test outcomes, and an unreachable codeberg.org records "unmeasured" in the
+# summary and exits 0 — an external host's availability must never red a PR.
+# There is no pass-count floor yet; add `--min-pass N` only once a measured
+# baseline exists (the first run's summary records the count and the suite SHA).
+#
+# PIN: NOTATION3TESTS_REF is the suite revision. It starts at the default branch
+# because no baseline was measurable when this lane was added (codeberg.org was
+# unreachable from the authoring sandbox); the resolved SHA is printed in every
+# report — replace the ref with that SHA so pass counts stay comparable.
+#
+# Third-party actions are pinned by full commit SHA; pins match datalog-souffle.yml.
+name: notation3tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: notation3tests git ref (branch, tag or commit SHA)
+        required: false
+        default: ""
+  schedule:
+    # Weekly, Mondays 05:11 UTC — offset from the nightly heavy-tier stagger.
+    - cron: "11 5 * * 1"
+  pull_request:
+    paths:
+      - "crates/sparq-reason/src/n3/**"
+      - "crates/sparq-conformance/src/notation3tests.rs"
+      - "crates/sparq-conformance/src/bin/notation3tests.rs"
+      - ".github/workflows/notation3tests.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notation3tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  NOTATION3TESTS_URL: https://codeberg.org/phochste/notation3tests
+  NOTATION3TESTS_REF: main
+
+jobs:
+  notation3tests:
+    name: notation3tests (advisory)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build runner
+        run: cargo build --release -p sparq-conformance --bin sparq-notation3tests
+
+      - name: Fetch notation3tests
+        id: fetch
+        env:
+          INPUT_REF: ${{ github.event.inputs.ref }}
+        run: |
+          set -u
+          ref="${INPUT_REF:-$NOTATION3TESTS_REF}"
+          ok=false
+          for delay in 2 4 8 16; do
+            rm -rf tests/notation3tests
+            if git clone --quiet "$NOTATION3TESTS_URL" tests/notation3tests \
+               && git -C tests/notation3tests checkout --quiet "$ref"; then
+              ok=true; break
+            fi
+            sleep "$delay"
+          done
+          if [ "$ok" = true ]; then
+            echo "rev=$(git -C tests/notation3tests rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+
+      - name: Run notation3tests
+        if: steps.fetch.outputs.ok == 'true'
+        env:
+          SUITE_REV: ${{ steps.fetch.outputs.rev }}
+        run: |
+          ./target/release/sparq-notation3tests \
+            --suite tests/notation3tests \
+            --rev "$SUITE_REV" \
+            --timeout 30 \
+            --report notation3tests-report.md \
+            --json notation3tests.json || true
+          if [ -f notation3tests-report.md ]; then
+            cat notation3tests-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          # Also surface the headline as a check-run annotation, which the REST API
+          # exposes (step summaries and artifacts are not reachable from every client).
+          if [ -f notation3tests.json ]; then
+            jq -r '"::notice title=notation3tests::\(.pass)/\(.total) pass at \(.suite_rev // "unknown rev"); buckets \(.buckets | tojson)"' notation3tests.json
+          fi
+
+      - name: Record unmeasured
+        if: steps.fetch.outputs.ok != 'true'
+        run: |
+          echo "::warning::notation3tests could not be fetched from $NOTATION3TESTS_URL; result UNMEASURED"
+          echo "# notation3tests report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**UNMEASURED** — the suite could not be fetched from $NOTATION3TESTS_URL." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report
+        if: steps.fetch.outputs.ok == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: notation3tests-report
+          path: |
+            notation3tests-report.md
+            notation3tests.json
+          if-no-files-found: ignore

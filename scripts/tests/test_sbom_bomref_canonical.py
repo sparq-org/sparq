@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] sq-9gli (GS-6 / F-6): hermetic regression test for the BOM-REF half of
-# scripts/sbom-normalize.jq. Authored by Opus 4.8 (Fable unavailable; flag for
-# re-review when Fable returns).
+# sq-9gli (GS-6 / F-6): hermetic regression test for the BOM-REF half of
+# scripts/sbom-normalize.jq.
 #
 # WHY THIS, ON TOP OF test_sbom_purl_canonical.py:
 # GS-6 (F-6, sq-toze.30) is specifically that cargo-cyclonedx 0.5.9 stamps the absolute
@@ -48,7 +47,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 NORMALIZE_JQ = REPO_ROOT / "scripts" / "sbom-normalize.jq"
 
-# [OPUS-4.8] sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
+# sq-90ew: `cargo cyclonedx` internally runs `cargo metadata`, whose crates.io
 # fetch is TRANSIENTLY flaky on hosted runners (observed `curl ... [16] Error in the HTTP2
 # framing layer` -> non-zero exit at ~9-12s). PR #750 wrapped the cyclonedx invocation in the
 # WORKFLOW STEPS, but this live-SBOM self-test (run in the GATING GS-6/GS-7 job) executes its
@@ -139,7 +138,7 @@ def _leaky_sbom() -> dict:
     abs_cli = "path+file:///home/runner/work/sparq/sparq/crates/sparq-cli#0.1.0"
     abs_core = "path+file:///home/runner/work/sparq/sparq/crates/sparq-core#0.1.0"
     reg_serde = "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0"
-    # [FABLE-5] sq-gg0qq.2 (GS-6): the exact 0.5.9 GIT-dependency shape (sparq-lws-core's
+    # sq-gg0qq.2 (GS-6): the exact 0.5.9 GIT-dependency shape (sparq-lws-core's
     # pinned solid-oidc-verifier) — bom-ref carries the rev query + a bare-version fragment,
     # the purl a vcs_url qualifier. Both must canonicalise; supplier must derive (GS-1).
     git_sov = (
@@ -220,6 +219,22 @@ class TestBomRefNormalization(unittest.TestCase):
         root = self.norm["metadata"]["component"]["bom-ref"]
         self.assertEqual(root, "pkg:cargo/sparq-cli@0.1.0")
 
+    def test_explicit_package_identity_differs_from_directory(self):
+        # Real detached member refs use #name@version, including targets.
+        raw = "path+file:///build/zk/sparql-evaluator/host#sparq-proved-evaluator@0.1.0"
+        canonical = "pkg:cargo/sparq-proved-evaluator@0.1.0"
+        doc = {"components": [{"name": "sparq-proved-evaluator", "bom-ref": raw,
+                               "components": [{"name": "sparq_proved_evaluator",
+                                               "bom-ref": raw + " bin-target-0"}]}],
+               "dependencies": [{"ref": raw, "dependsOn": [raw + " bin-target-0"]}]}
+        result = _normalize(doc)
+        self.assertEqual(result["components"][0]["bom-ref"], canonical)
+        self.assertEqual(result["components"][0]["components"][0]["bom-ref"],
+                         canonical + " bin-target-0")
+        self.assertEqual(result["dependencies"],
+                         [{"ref": canonical, "dependsOn": [canonical + " bin-target-0"]}])
+        self.assertEqual(_normalize(result), result)
+
     def test_nested_build_target_suffix_is_preserved(self):
         # canon_ref preserves the trailing build-target suffix while stripping the path.
         sub = self.norm["metadata"]["component"]["components"][0]["bom-ref"]
@@ -230,7 +245,7 @@ class TestBomRefNormalization(unittest.TestCase):
         self.assertEqual(core["bom-ref"], "pkg:cargo/sparq-core@0.1.0")
 
     def test_git_dep_bomref_purl_and_supplier(self):
-        # [FABLE-5] sq-gg0qq.2: a git dep canonicalises like everything else (GS-6/GS-7)
+        # sq-gg0qq.2: a git dep canonicalises like everything else (GS-6/GS-7)
         # and gets the honestly-derivable repository-owner supplier (GS-1).
         sov = next(
             c for c in self.norm["components"] if c["name"] == "solid-oidc-verifier"
@@ -270,7 +285,7 @@ class TestBomRefNormalization(unittest.TestCase):
                 [
                     "pkg:cargo/sparq-core@0.1.0",
                     "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0",
-                    # [FABLE-5] sq-gg0qq.2: the git dep, canonicalised in lock-step too.
+                    # sq-gg0qq.2: the git dep, canonicalised in lock-step too.
                     "pkg:cargo/solid-oidc-verifier@0.1.0",
                 ]
             ),
@@ -296,7 +311,7 @@ class TestLiveWorkspaceSBOM(unittest.TestCase):
     def test_real_normalized_sbom_has_no_host_path_in_refs(self):
         if not shutil.which("cargo-cyclonedx") or not _jq_available():
             self.skipTest("cargo-cyclonedx / jq not available")
-        # [OPUS-4.8] sq-90ew: GENERATION only, with the transient-flake retry. The GS-6
+        # sq-90ew: GENERATION only, with the transient-flake retry. The GS-6
         # host-path / bom-ref assertions below run ONCE on the produced files (NOT retried).
         _generate_workspace_sbom()
         try:

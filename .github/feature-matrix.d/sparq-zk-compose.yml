@@ -4,17 +4,17 @@
 # feature-matrix `opt-in-features` strategy by scripts/assemble-feature-matrix.py.
 # Adding a leg for THIS crate edits no OTHER crate's fragment, so concurrent opt-in-feature PRs
 # for DIFFERENT crates never textually conflict (bead sq-ibrze).
-# SCOPE ([SONNET-4.6] issue #2384): adding/removing/renaming a leg changes the emitted
+# SCOPE (issue #2384): adding/removing/renaming a leg changes the emitted
 # leg-name set, and THAT is a TWO-FILE change — this fragment AND
 # scripts/tests/feature-matrix-legnames.golden.txt. Every other edit here (features,
 # test, tier, tier-reason, comments) leaves the name set alone and is a SINGLE-file
 # change. See README.md in this directory.
 #
-# CONTRACT (gate-critical): each leg's emitted check-run NAME is `opt-in <name>`,
-# discovered as a REQUIRED check by the ci-summary `gate` aggregator BY NAME. Keep
-# `name` free of the whole words "advisory"/"informational" or the leg stops gating.
+# CONTRACT: each leg's emitted check-run NAME is `opt-in <name>` (pinned by the golden
+# leg-name file). Keep `name` free of the whole words "advisory"/"informational", which
+# mark a check as non-blocking.
 
-# [OPUS-5] sq-5xdlk: the default-OFF `dual-leaf` VALUE LANE of sparq-zk-compose.
+# sq-5xdlk: the default-OFF `dual-leaf` VALUE LANE of sparq-zk-compose.
 # ci.yml's workspace lane passes no `--features`, so the value-lane surface — the
 # `CircuitId::FilterValueDl{,F64,Decimal}` members, the `dispatch` fail-closed
 # `(method × circuit)` matrix, the dedicated `filter_value_dl_*_prover_toml`
@@ -28,4 +28,11 @@
 - name: "sparq-zk-compose (dual-leaf — value-lane members + dispatch matrix + boolean-lane cross-vectors)"
   crate: "sparq-zk-compose"
   features: "dual-leaf"
+  test: true
+
+# Ordinary CI must execute this default-off result contract's host tests.
+# The pinned zk-toolchain workflow separately executes its real proof tests.
+- name: "sparq-zk-compose (successful-results — selected answers and private witnesses)"
+  crate: "sparq-zk-compose"
+  features: "successful-results"
   test: true

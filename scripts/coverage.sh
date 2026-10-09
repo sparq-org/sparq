@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] PER-CRATE line-coverage measurement (sq-hbg7).
+# PER-CRATE line-coverage measurement (sq-hbg7).
 #
 # WHY PER-CRATE (and not one `cargo llvm-cov --workspace` run)
 # -----------------------------------------------------------
@@ -31,11 +31,11 @@
 #                     no-op for the number (measured identical: 91.23% either way) — it is
 #                     stated EXPLICITLY so a future refactor that decouples dict-spill from
 #                     mmap cannot silently drop the security-code coverage this gate exists
-#                     to enforce. [OPUS-4.8]
+#                     to enforce.
 #                       * rdfxml      -> the OPT-IN RDF/XML parse arm in `parse_to_triples` /
 #                                       `…_with_base` (`#[cfg(feature = "rdfxml")]`) + its
 #                                       direct unit tests are otherwise compiled out / 0%.
-#                                       [OPUS-4.8] sq-f47w1 (survey §B1).
+#                                       sq-f47w1 (survey §B1).
 #   - sparq-reason    MUST be measured with `--features datalog`. The crate is NOT empty
 #                     by default (RDFS/OWL-RL/N3 are default-on), but the stratified
 #                     Datalog module (`src/datalog/`) is entirely `#[cfg(feature =
@@ -43,7 +43,7 @@
 #                     denominator that EXCLUDES it — the module could rot to 0% without
 #                     moving this crate's floor. See the case arm in measure() for why
 #                     only `datalog` (and not the crate's other default-off features) is
-#                     named. [SONNET-4.6] sq-iwf3c
+#                     named. sq-iwf3c
 #   - sparq-vectors   the two `*_recall_at_10_vs_brute_force_on_50k` tests (HNSW +
 #                     DiskANN) are EXCLUDED from the per-commit subset via `--skip`
 #                     (they dominate wall-clock under instrumentation). They are
@@ -111,7 +111,7 @@ TIER="${COVERAGE_TIER:-per-commit}"          # per-commit | nightly | full
 OUT="${COVERAGE_OUT:-$ROOT/target/coverage/coverage-summary.json}"
 FETCH_FIXTURES="${COVERAGE_FETCH_FIXTURES:-1}"
 
-# [SONNET-4.6] sq-3dr4t: --print-crates — resolve the tier/shard selection AND the
+# sq-3dr4t: --print-crates — resolve the tier/shard selection AND the
 # COVERAGE_CONE filter, print the crate list, exit. NO cargo, NO fixtures, NO measurement,
 # so the selection+filter logic is unit-testable hermetically (scripts/tests/
 # test_cone_coverage.py drives it) instead of only being observable by reading the log of
@@ -133,7 +133,7 @@ PER_COMMIT_CRATES=(
   sparq-parse sparq-gpu sparq-wasm sparq-zk sparq-zk-compose
   sparq-vectors                # measured with the two 50k tests SKIPPED (see below)
   sparq-conformance            # low %, floor 0 (test driver) — kept for presence
-  # [OPUS-4.8] sq-bif.1: the three OPT-IN native crates that were untracked by BOTH
+  # sq-bif.1: the three OPT-IN native crates that were untracked by BOTH
   # coverage gates. Their whole surface is feature-gated (fedclient/fedplan empty by
   # default; prov has a `reason` extra), so they MUST be measured WITH those features
   # on — the `case` in measure() below names them, or a default-feature build would
@@ -143,20 +143,20 @@ PER_COMMIT_CRATES=(
   # misleadingly-low artifact (measured 55-79% native; same class as sparq-cli's
   # subprocess artifact) — they are floor-0 + presence-gated in the JSONs instead.
   sparq-fedclient sparq-fedplan sparq-prov
-  # [FABLE-5] sq-lsp7k.1.1: sparq-forms — opt-in headless SHACL-to-form derivation.
+  # sq-lsp7k.1.1: sparq-forms — opt-in headless SHACL-to-form derivation.
   # No cargo features (whole surface default-compiled), so no measure() case arm.
   sparq-forms
-  # [SONNET-4.6] sq-97cxm: sparq-jsonld — native JSON-LD 1.1 processing and RDF conversion.
+  # sq-97cxm: sparq-jsonld — native JSON-LD 1.1 processing and RDF conversion.
   # No cargo features (whole surface default-compiled), so no measure() case arm.
   sparq-jsonld
-  # [OPUS-4.8] sq-bif.7: the OPT-IN ODRL usage-control policy crate, untracked by BOTH
+  # sq-bif.7: the OPT-IN ODRL usage-control policy crate, untracked by BOTH
   # gates. The STATELESS evaluator (parse/eval/compare/hierarchy) is default-on, but the
   # stateful `odrl:count` counter stores (the `count`/`count_file`/`count_backend` modules
   # + their tests) are `#![cfg(feature = "count-enforcement")]`. So it MUST be measured
   # WITH --features count-enforcement (the `case` in measure() below names it) — a default
   # build compiles that whole surface out and reports a non-representative number.
   sparq-policy
-  # [OPUS-4.8] sq-bif.8 / sq-bif.9: two OPT-IN, standalone crates that nothing in the
+  # sq-bif.8 / sq-bif.9: two OPT-IN, standalone crates that nothing in the
   # default build depends on, both untracked by BOTH gates. Unlike the federation/policy
   # crates above they have NO opt-in features (sparq-algos: `default = []` only; sparq-canon:
   # no `[features]` table), so their WHOLE surface is compiled in a default-feature build —
@@ -165,7 +165,7 @@ PER_COMMIT_CRATES=(
   # the focused bnode-isomorphism / oxrdf-bridge unit cases; sparq-algos' reflects the inline
   # PageRank/centrality/community oracles plus the tests/topology_oracles.rs integration suite.
   sparq-algos sparq-canon
-  # [OPUS-4.8] sq-qcnn.23 (epic sq-qcnn): the two CORE OWL 2 reasoners that were
+  # sq-qcnn.23 (epic sq-qcnn): the two CORE OWL 2 reasoners that were
   # untracked by BOTH coverage gates.  Their whole gate-exercising surface is behind
   # DEFAULT-OFF features, so a default-feature `cargo llvm-cov -p <crate>` would build
   # the crate with the EL classifier / QL rewriter compiled OUT and report a
@@ -184,9 +184,9 @@ PER_COMMIT_CRATES=(
   # abox are separately tracked beads).  Nothing in the workspace depends on these crates
   # by default, so their tests are otherwise run ONLY by the feature-matrix leg; wiring
   # them here brings both cores under the line-coverage ratchet ("no crate silently
-  # dropped", matching sparq-substrate/sparq-canon above). [OPUS-4.8]
+  # dropped", matching sparq-substrate/sparq-canon above).
   sparq-reason-el sparq-reason-ql
-  # [OPUS-4.8] sq-qcnn.3 (epic sq-qcnn, umbrella sq-qonbz): the shared zero-overhead
+  # sq-qcnn.3 (epic sq-qcnn, umbrella sq-qonbz): the shared zero-overhead
   # evaluation SUBSTRATE — the correctness core (the id-tuple Row/Key/Posting vocabulary,
   # the XSD numeric value tower, the four id-tuple join kernels, and the SPARQL term total
   # order). Its ENTIRE surface is behind DEFAULT-OFF features (numeric/join/compare/rows),
@@ -198,13 +198,13 @@ PER_COMMIT_CRATES=(
   # here brings the correctness core under the line-coverage ratchet ("no crate silently
   # dropped").
   sparq-substrate
-  # [OPUS-4.8] sq-6vshe.4: seam 1 of the sparq-engine facade split — the RDF writer matrix
+  # sq-6vshe.4: seam 1 of the sparq-engine facade split — the RDF writer matrix
   # (Turtle/TriG/N-Quads/JSON-LD, buffered + streaming) peeled into an internal sub-crate. Its
   # whole surface is behind DEFAULT-OFF `serialize-rdf`, so it MUST be measured WITH
   # `serialize-rdf,streaming-serialization` (the `case` in measure() below names them). Bringing
   # the moved writer + its ~2.9k test LOC under the ratchet keeps "no crate silently dropped".
   sparq-engine-serialize
-  # [OPUS-4.8] sq-6vshe.4: seam A2 of the sparq-engine facade split — the SPARQL 1.1 federated-
+  # sq-6vshe.4: seam A2 of the sparq-engine facade split — the SPARQL 1.1 federated-
   # SERVICE client (HTTP transport, SPARQL-Results JSON/XML parse, bound-join batching, SSRF
   # egress policy) peeled into an internal sub-crate. Its whole surface is behind DEFAULT-OFF
   # `service`, so it MUST be measured WITH `service` (the `case` in measure() below names it).
@@ -214,7 +214,7 @@ PER_COMMIT_CRATES=(
 # Crates whose HEAVY tests are only run in the nightly tier.
 NIGHTLY_ONLY_NOTE="sparq-vectors heavy 50k recall/diskann tests run only in nightly tier"
 
-# ---- per-commit MATRIX shard groups (sq-p0hcd) [OPUS-4.8] --------------------
+# ---- per-commit MATRIX shard groups (sq-p0hcd) --------------------
 # WHY: the per-commit `coverage` job measured ALL of PER_COMMIT_CRATES in ONE serial
 # loop, which ran ~28 min wall-clock (2026-07-02 CI profile, run 28624093902): a single
 # `Measure + enforce` step = 1691s, of which the per-crate loop was 1676s, DOMINATED by
@@ -223,7 +223,7 @@ NIGHTLY_ONLY_NOTE="sparq-vectors heavy 50k recall/diskann tests run only in nigh
 # path. Splitting the loop across parallel MATRIX shards makes crates measure concurrently;
 # the wall-clock then floors at the slowest single shard.
 #
-# The groups are LPT-bin-packed by that measured per-crate wall time. [FABLE-5] sq-piapk:
+# The groups are LPT-bin-packed by that measured per-crate wall time. sq-piapk:
 # the sparq-engine elephant (668s) — which WAS the slowest shard ALONE — is no longer here;
 # it moved to the dedicated cross-runner SPLIT pipeline (DEDICATED_PIPELINE_CRATES below),
 # so the slowest of these 3 remaining shards (~336s of measured work EACH, balanced) now sets
@@ -235,7 +235,7 @@ NIGHTLY_ONLY_NOTE="sparq-vectors heavy 50k recall/diskann tests run only in nigh
 # shard also re-builds the shared instrumented deps — so keep the count SMALL: more shards
 # only add duplicated build overhead without lowering the (now non-engine) wall-clock floor.
 #
-# [FABLE-5] sq-piapk: sparq-engine is NO LONGER a SHARD_GROUPS entry — it is measured by a
+# sq-piapk: sparq-engine is NO LONGER a SHARD_GROUPS entry — it is measured by a
 # DEDICATED CROSS-RUNNER SPLIT pipeline (scripts/coverage-engine-shard.sh + the
 # coverage-engine-{archive,run,merge} jobs in ci.yml). Its per-commit `floor` is STILL
 # enforced — by that pipeline's merge+`coverage-gate.py --check` — so it must NOT appear in
@@ -253,7 +253,7 @@ DEDICATED_PIPELINE_CRATES=(sparq-engine)
 # => floor unenforced), and a crate in BOTH a shard and the dedicated set (double-measured)
 # also fails loudly.
 SHARD_GROUPS=(
-  # [FABLE-5] sq-piapk: shard 1 (sparq-engine, ~668s ALONE) was REMOVED — engine now has the
+  # sq-piapk: shard 1 (sparq-engine, ~668s ALONE) was REMOVED — engine now has the
   # dedicated cross-runner split pipeline (DEDICATED_PIPELINE_CRATES). The 3 remaining shards
   # are the old shards 2-4, unchanged. Their COVERAGE_SHARD indices renumber 1..3, but each
   # shard's CRATE SET is byte-identical to before, so every non-engine floor is enforced by
@@ -275,7 +275,7 @@ if [ "${1:-}" = "--check-shards" ]; then
 import sys
 total = int(sys.argv[1])
 per_commit = sys.argv[2].split()
-dedicated = sys.argv[3].split()      # [FABLE-5] sq-piapk: gated OUTSIDE SHARD_GROUPS
+dedicated = sys.argv[3].split()      # sq-piapk: gated OUTSIDE SHARD_GROUPS
 groups = [g.split() for g in sys.argv[4:]]
 assert len(groups) == total, f"SHARD_TOTAL={total} but {len(groups)} groups"
 flat = [c for g in groups for c in g] + dedicated
@@ -307,7 +307,7 @@ fi
 # DOCUMENTED here so the exclusion is never silent.
 VECTORS_HEAVY_SKIP="recall_at_10_vs_brute_force_on_50k"   # matches HNSW + DiskANN 50k
 
-# ---- conformance-binary merge (sq-bjct, NIGHTLY tier only) [OPUS-4.8] --------
+# ---- conformance-binary merge (sq-bjct, NIGHTLY tier only) --------
 # The W3C SPARQL + inference suites run as the sparq-conformance /
 # sparq-inference-conformance BINARIES (`cargo run`), NOT as `cargo test`. So a
 # plain `cargo llvm-cov --package sparq-core` (which only runs that crate's
@@ -360,7 +360,7 @@ if [ "$FETCH_FIXTURES" = "1" ]; then
 fi
 
 # ---- pick the crate list for this run --------------------------------------
-# Precedence (sq-p0hcd) [OPUS-4.8]:
+# Precedence (sq-p0hcd):
 #   1. COVERAGE_CRATES  — explicit subset (ad-hoc runs AND the robust gate's targeted
 #      re-measure of sub-floor crates; must win so a shard re-measures only ITS offenders).
 #   2. COVERAGE_SHARD=N — 1-based matrix shard index: measure SHARD_GROUPS[N-1] (the
@@ -381,7 +381,7 @@ else
   CRATES=("${PER_COMMIT_CRATES[@]}")
 fi
 
-# ---- changed-cone filter (sq-3dr4t) [SONNET-4.6] ----------------------------
+# ---- changed-cone filter (sq-3dr4t) ----------------------------
 # INTERSECT the selection above with COVERAGE_CONE (see the COVERAGE_CONE header block).
 # Pure narrowing: a cone entry that is not in the selection is ignored, so this can never
 # widen what is measured, and an unset/empty COVERAGE_CONE is a no-op. Precedence-wise it
@@ -427,7 +427,7 @@ trap 'rm -rf "$WORK"' EXIT
 declare -a ROWS=()
 TOTAL_START=$(date +%s)
 
-# [OPUS-4.8] sq-bjct: decide whether THIS crate's measurement should merge the
+# sq-bjct: decide whether THIS crate's measurement should merge the
 # conformance binaries' coverage. Yes only when (a) the crate is one of the
 # CONFORMANCE_MERGE_CRATES, AND (b) the merge is enabled for this tier: "auto"
 # enables it for any tier except per-commit (it ~doubles core/engine cost), and an
@@ -443,7 +443,7 @@ want_conformance_merge() {
   esac
 }
 
-# [OPUS-4.8] sq-bjct: measure ONE crate with the conformance binaries MERGED into its
+# sq-bjct: measure ONE crate with the conformance binaries MERGED into its
 # report (nightly tier). Uses cargo-llvm-cov's accumulate-then-report flow — see the
 # CONFORMANCE-BINARY MERGE header block for the full rationale. Emits the SAME JSON row
 # shape as measure(), tagging features += "conformance-merge" so the summary records that
@@ -457,7 +457,7 @@ measure_merged() {
   local -a features=("conformance-merge")
   local -a feat_flags=()
   # sparq-core keeps its mmap,dict-spill security surface (see PER-CRATE QUIRKS).
-  # [OPUS-4.8] sq-f47w1 (survey §B1): `rdfxml` is added so the OPT-IN RDF/XML parse arm
+  # sq-f47w1 (survey §B1): `rdfxml` is added so the OPT-IN RDF/XML parse arm
   # (`#[cfg(feature = "rdfxml")]` in `parse_to_triples` / `…_with_base`) is COMPILED and its
   # direct unit tests run, MEASURING the new lines for the coverage ratchet (without the
   # feature those lines are cfg'd out and never enter the report).
@@ -522,7 +522,7 @@ PY
 
 measure() {
   local crate="$1"; shift
-  # [OPUS-4.8] sq-bjct: in the nightly/full tiers, sparq-core / sparq-engine are
+  # sq-bjct: in the nightly/full tiers, sparq-core / sparq-engine are
   # measured with the W3C conformance binaries MERGED into the report (those suites
   # run as BINARIES, not `cargo test`, so the plain per-crate measurement misses
   # their deep exercise of these crates). Per-commit is unchanged.
@@ -533,7 +533,7 @@ measure() {
   local features=()           # array of feature names recorded in JSON
   local skips=()              # array of skipped-test substrings recorded in JSON
   local -a cargo_args=(--package "$crate")
-  # [OPUS-4.8] sq-x4jy (2nd flake): ALWAYS run the per-crate test set SERIALLY
+  # sq-x4jy (2nd flake): ALWAYS run the per-crate test set SERIALLY
   # (`--test-threads=1`). This kills a profraw-merge race behind a DISTINCT flake from
   # the env-var race fixed in ea0ca3e: `coverage ratchet` intermittently reported
   # sparq-core ~71% (between the dict-spill-only ~65% and the full ~91%) as a VALID
@@ -557,8 +557,8 @@ measure() {
     sparq-core)
       # mmap is named EXPLICITLY (not relied on via the dict-spill -> mmap transitive
       # dep) so the on-disk-store security surface this gate guards is always compiled +
-      # exercised. See the PER-CRATE QUIRKS header for the full rationale. [OPUS-4.8]
-      # [OPUS-4.8] sq-f47w1: `rdfxml` so the OPT-IN RDF/XML parse arm is compiled + its
+      # exercised. See the PER-CRATE QUIRKS header for the full rationale.
+      # sq-f47w1: `rdfxml` so the OPT-IN RDF/XML parse arm is compiled + its
       # direct tests run (measured by the ratchet); cfg'd out otherwise. Mirrors line 227.
       cargo_args+=(--features mmap,dict-spill,rdfxml); features+=("mmap" "dict-spill" "rdfxml") ;;
     sparq-vectors)
@@ -566,7 +566,7 @@ measure() {
       if [ "$TIER" = "per-commit" ]; then
         subcmd="test"; test_args+=(--skip "$VECTORS_HEAVY_SKIP"); skips+=("$VECTORS_HEAVY_SKIP")
       fi ;;
-    # [OPUS-4.8] sq-bif.1: the opt-in federation/provenance crates are ENTIRELY
+    # sq-bif.1: the opt-in federation/provenance crates are ENTIRELY
     # feature-gated — a default-feature `cargo llvm-cov -p <crate>` would build an
     # empty crate and report a meaningless number. Name the features that turn the
     # whole surface ON so the measured line% reflects the real (feature-on) code the
@@ -585,14 +585,14 @@ measure() {
       # (its integration test, tests/reason_prov.rs, is gated on it). The CONSTRUCT/
       # update lineage core is default-on.
       cargo_args+=(--features reason); features+=("reason") ;;
-    # [OPUS-4.8] sq-bif.7: `count-enforcement` turns on the stateful `odrl:count`
+    # sq-bif.7: `count-enforcement` turns on the stateful `odrl:count`
     # counter-store surface (the `count`/`count_file`/`count_backend` modules + their
     # `#![cfg(feature = "count-enforcement")]` integration tests). The stateless ODRL
     # evaluator is default-on; without this feature that whole surface is compiled out
     # and the number is non-representative. (Mirrors the sparq-prov `reason` quirk above.)
     sparq-policy)
       cargo_args+=(--features count-enforcement); features+=("count-enforcement") ;;
-    # [OPUS-4.8] sq-qcnn.3 (epic sq-qcnn): the shared eval SUBSTRATE's whole surface is
+    # sq-qcnn.3 (epic sq-qcnn): the shared eval SUBSTRATE's whole surface is
     # DEFAULT-OFF — measure it with the four features that turn the correctness core ON
     # (`numeric` = XSD value tower, `join` = the four id-tuple join kernels, `compare` =
     # the SPARQL term total order, `rows` = the id-tuple Row/Key/Posting vocabulary). A
@@ -600,7 +600,7 @@ measure() {
     # names the CORRECTNESS-CORE set so the measured line% reflects the real code the floor
     # gates, exactly as sparq-core/-fedclient/-policy above name their whole-surface features.
     #
-    # [OPUS-5] PR #3799: do NOT add `overhead` here. It used to be true that this was also the
+    # PR #3799: do NOT add `overhead` here. It used to be true that this was also the
     # crate's MAXIMAL feature set; it no longer is — the feature-matrix leg now enables
     # `rows,numeric,join,compare,overhead` so `src/overhead.rs`'s tests actually gate (they
     # were compiled by NO required check before). `overhead` is the zero-overhead DELTA
@@ -612,7 +612,7 @@ measure() {
     sparq-substrate)
       cargo_args+=(--features numeric,join,compare,rows)
       features+=("numeric" "join" "compare" "rows") ;;
-    # [OPUS-4.8] sq-qcnn.23 (epic sq-qcnn): OWL 2 EL consequence-based classifier.
+    # sq-qcnn.23 (epic sq-qcnn): OWL 2 EL consequence-based classifier.
     # Whole gate-exercising surface is behind DEFAULT-OFF `rbox` + `hasse`:
     #   * `rbox`  — CR10/CR11 role-inclusion + property-chain automaton (Phase E2).
     #   * `hasse` — DirectHierarchy transitive reduction to direct-subsumer diagram (E3).
@@ -624,7 +624,7 @@ measure() {
     sparq-reason-el)
       cargo_args+=(--features rbox,hasse)
       features+=("rbox" "hasse") ;;
-    # [SONNET-4.6] sq-iwf3c (epic sq-6tykl, design record
+    # sq-iwf3c (epic sq-6tykl, design record
     # research/stratified-datalog-rules.md §5/§6 item 8): the OPT-IN STRATIFIED DATALOG
     # module. Unlike the crates above, sparq-reason is NOT empty by default — the
     # RDFS/OWL-RL/N3 chainers are default-on — but `crates/sparq-reason/src/datalog/`
@@ -646,17 +646,17 @@ measure() {
     # test -p sparq-reason --features datalog` runs the whole suite with no extra args.
     sparq-reason)
       cargo_args+=(--features datalog); features+=("datalog") ;;
-    # [OPUS-4.8] sq-qcnn.23 (epic sq-qcnn): OWL 2 QL query-rewriting reasoner.
+    # sq-qcnn.23 (epic sq-qcnn): OWL 2 QL query-rewriting reasoner.
     # Whole gate-exercising surface is behind DEFAULT-OFF `experimental`:
     # without it only the cheap CQ-shape gate types compile in and the PerfectRef
     # rewriter is compiled OUT — a non-representative (low) number. Mirrors the
     # sparq-reason-el rbox+hasse quirk and the sparq-fedplan `fedplan` quirk above.
-    # [FABLE-5] sq-p6yb7: + `ql-consistency` (the DL-Lite_R violation-query consistency
+    # sq-p6yb7: + `ql-consistency` (the DL-Lite_R violation-query consistency
     # check module; without it consistency.rs compiles out and its tests run zero).
     sparq-reason-ql)
       cargo_args+=(--features experimental,ql-consistency)
       features+=("experimental" "ql-consistency") ;;
-    # [OPUS-4.8] sq-6vshe.4: seam 1 of the sparq-engine facade split — the RDF writer matrix
+    # sq-6vshe.4: seam 1 of the sparq-engine facade split — the RDF writer matrix
     # (Turtle/TriG/N-Quads/JSON-LD) peeled into this internal sub-crate. Its WHOLE surface is
     # behind DEFAULT-OFF `serialize-rdf` (mirroring the gating it had inside sparq-engine), so a
     # default-feature `cargo llvm-cov -p sparq-engine-serialize` builds an EMPTY crate — measure
@@ -666,7 +666,7 @@ measure() {
     sparq-engine-serialize)
       cargo_args+=(--features serialize-rdf,streaming-serialization)
       features+=("serialize-rdf" "streaming-serialization") ;;
-    # [OPUS-4.8] sq-6vshe.4: seam A2 of the sparq-engine facade split — the SPARQL 1.1 federated-
+    # sq-6vshe.4: seam A2 of the sparq-engine facade split — the SPARQL 1.1 federated-
     # SERVICE client peeled into this internal sub-crate. Its WHOLE surface is behind DEFAULT-OFF
     # `service` (mirroring the gating it had inside sparq-engine), so a default-feature
     # `cargo llvm-cov -p sparq-engine-service` builds an EMPTY crate — measure it WITH `service`
@@ -679,7 +679,7 @@ measure() {
 
   local start end rc=0 json="$WORK/$crate.json"
   start=$(date +%s)
-  # [OPUS-4.8] sq-x4jy: retry a per-crate measurement up to MEASURE_ATTEMPTS times, but
+  # sq-x4jy: retry a per-crate measurement up to MEASURE_ATTEMPTS times, but
   # ONLY on the aborted-binary signature: a non-zero rc (e.g. rc=101 when a test binary
   # aborts / "was never executed") OR a missing/empty JSON output (a partial profraw that
   # llvm-cov couldn't summarise). A run that exits 0 with a valid, non-empty JSON is taken
@@ -710,7 +710,7 @@ measure() {
     rc=0
     # Both invocation forms pass the libtest args after `--` (cargo llvm-cov accepts
     # `[SUBCOMMAND] [OPTIONS] [-- <args>...]`), so `--test-threads=1` (and any `--skip`)
-    # apply whether or not a `test` subcommand is used. [OPUS-4.8] sq-x4jy
+    # apply whether or not a `test` subcommand is used. sq-x4jy
     if [ -n "$subcmd" ]; then
       cargo llvm-cov "$subcmd" "${cargo_args[@]}" --summary-only --json \
         --output-path "$json" -- "${test_args[@]}" >/dev/null 2>"$WORK/$crate.err" || rc=$?
@@ -759,7 +759,7 @@ PY
     "$([ ${#skips[@]} -gt 0 ] && echo "  skip=${skips[*]}")"
 }
 
-# [OPUS-4.8] (sq-v411r) Start from a CLEAN instrumented build so the per-crate line
+# (sq-v411r) Start from a CLEAN instrumented build so the per-crate line
 # DENOMINATOR is deterministic. cargo-llvm-cov reuses `target/llvm-cov-target` object
 # files between invocations; if a RESTORED cache (Swatinem/rust-cache) or an earlier
 # wider-feature build left a crate's object compiled with extra OPT-IN features baked
@@ -782,7 +782,7 @@ TOTAL_END=$(date +%s)
 ROWS_FILE="$WORK/rows.ndjson"
 : > "$ROWS_FILE"
 [ ${#ROWS[@]} -gt 0 ] && printf '%s\n' "${ROWS[@]}" > "$ROWS_FILE"
-# [SONNET-4.6] sq-3dr4t: pass the cone filter + the crates it SKIPPED so the summary
+# sq-3dr4t: pass the cone filter + the crates it SKIPPED so the summary
 # records the skip explicitly (AGENTS.md "no silent truncation"): coverage-gate.py prints
 # them as INHERITED rather than the indistinguishable MISSING, and cone_coverage.py
 # --mode report renders them as inherited rows.

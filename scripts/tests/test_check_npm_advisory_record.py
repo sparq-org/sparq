@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] #3767: hermetic tests for scripts/check-npm-advisory-record.py.
+# #3767: hermetic tests for scripts/check-npm-advisory-record.py.
 #
 # Hermetic w.r.t. git/network: drives the pure evaluate()/parse_record()/lock_instances()
 # against in-tmpdir fixtures. NO subprocess, NO live git, NO npm. The final test runs the
@@ -294,7 +294,7 @@ class LiveRepo(unittest.TestCase):
         record = chk.parse_record(REPO_ROOT / chk.RECORD_PATH)
         self.assertEqual(
             {p["name"] for p in record["packages"]},
-            {"brace-expansion", "postcss", "sharp"},
+            {"braces", "extract-zip", "basic-ftp"},
         )
 
     def test_main_exits_zero_on_the_live_repo(self):

@@ -88,9 +88,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "autocfg"
@@ -306,9 +306,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1160,7 +1160,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "sparq-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "memchr",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1191,7 +1191,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bzip2 0.6.1",
  "crc",
@@ -1204,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-parse"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "flate2",
  "rayon",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf",

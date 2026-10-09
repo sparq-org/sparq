@@ -2,24 +2,13 @@
 
 **Shared zero-overhead evaluation substrate** for the sparq SPARQL engine and the
 reasoners — an **opt-in**, **leaf** crate (epic sq-qonbz) that depends **only** on
-`sparq-core`, never on `sparq-engine`. It hosts the parts of evaluation that are genuinely
-common to both the query engine and every reasoner: the id-tuple **row/key** vocabulary, the
-XSD **numeric value tower**, the four **join kernels**, and the SPARQL **term total order**.
-Placing them in a leaf crate lets both consumers reach them with **no dependency cycle**, while
-keeping `sparq-core` and the lean wasm bundle untouched.
+`sparq-core`, never on `sparq-engine`. It shares the id-tuple **row/key** vocabulary,
+XSD **numeric tower**, **join kernels** and SPARQL **term order** without dependency
+cycles or default-feature growth in core/WASM consumers.
 
-> **Status (sq-vezew — Phase 4 of the epic).** The SPARQL **term total order** —
-> `compare::compare_terms` (the engine's `compare_values`: error/unbound < blank < IRI <
-> literal < triple, numeric-aware + strict typed/temporal + string fallback + recursive
-> triple-term order) — has now **moved here** from `sparq-engine`, generalised over a tiny
-> `CompareTerm` trait the consumer implements for its term type, so the engine AND a future
-> reasoner share one ordering body **monomorphically** — no `Box<dyn>`. Phase 3 (sq-hknqs)
-> moved the four **join kernels** (behind a generic `JoinKeys` descriptor + a `Budget` hook)
-> and Phase 2 (sq-ev41x) the **numeric value tower** the same way. All are behaviour-neutral
-> code-moves (the W3C SPARQL conformance floor is bit-identical; the join/scan/BGP/sort
-> micro-benches are within noise). The engine's `Value` enum stays engine-resident — it also
-> drives the relational operators — and is surfaced to the ordering algorithm through the
-> trait. See `research/shared-eval-substrate.md` for the extraction plan and perf-neutrality proof.
+Monomorphized consumer traits share these bodies; the engine retains `Value` and relational operators.
+See the [substrate design](../../research/shared-eval-substrate.md) for the boundary
+and extraction evidence.
 
 ## 🚀 Quickstart
 
@@ -27,7 +16,7 @@ Everything is behind **default-off** features — opt into exactly the slice you
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["rows", "numeric", "join", "compare"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["rows", "numeric", "join", "compare"] }
 ```
 
 ```rust,ignore
@@ -42,6 +31,17 @@ use sparq_substrate::numeric::{Num, as_numeric};
 let lit = oxrdf::Literal::new_typed_literal("0.1", oxrdf::vocab::xsd::DECIMAL);
 let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
 ```
+
+## Numeric validity and capacity
+
+`numeric::Num::of_literal` and `as_numeric` use the shared
+`sparq_core::numeric_literal_valid` grammar/facets: `"5.0"^^xsd:integer` and
+`"1200"^^xsd:byte` are invalid; raw boundary whitespace is invalid too.
+
+The finite tower uses `i64` integers, `i128` decimal mantissas and binary floats.
+Larger valid literals can return `None` here while validation returns `true`;
+overflow promotion is unchanged. Validation adds a lexical scan on decode;
+cached values avoid per-row parsing. [Numeric guide](../../skills/substrate/SKILL.md).
 
 ## ✨ Features
 
@@ -64,7 +64,7 @@ let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
   `build_table` / `build_partitioned` / `probe_emit` / `probe_gather_indices` / `hash_probe_serial`
   (hash, `JoinTable` type alias backed by `hashbrown::HashMap<Key, Posting, FxBuildHasher>`,
   single-hash probe + batch-reserve), `bind_combine` (indexed groups) / `bind_combine_rows`
-  (contiguous row slices; appends rows, preserves duplicates and existing output; [GPT-6-ASTRA]),
+  (contiguous row slices; appends rows, preserves duplicates and existing output),
   `lftj_recurse` over `Trie` / `TrieIter` (WCOJ), plus `compatible` / `merge_rows` / `any_unbound`.
   `probe_gather_indices` is the M4 batch-emission contract (gather indices, materialise once
   per chunk, sq-pntvh.7). Also `join::delta::DeltaTable` — persistent build-side table with
@@ -94,7 +94,7 @@ let n: Option<Num> = as_numeric(&lit);  // exact xsd:decimal (no f64 rounding)
   records. It MEASURES the "zero measured marginal overhead" claim; a non-zero delta carries an
   honest `root_cause`, never bent to the claim. Implies `join`+`numeric`+`compare`; links no new
   dep. Run: `cargo run -p sparq-substrate --example substrate_overhead --features overhead
-  --release -- --json` (add `--canonical` only on a dedicated quiet host). [FABLE-5] sq-atjue
+  --release -- --json` (add `--canonical` only on a dedicated quiet host). sq-atjue
 
 All features are **off by default**. The crate is `forbid(unsafe_code)`.
 

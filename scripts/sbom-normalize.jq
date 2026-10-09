@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-toze.30 (GS-6 / F-6): deterministic, idempotent normalization of a
+# sq-toze.30 (GS-6 / F-6): deterministic, idempotent normalization of a
 # cargo-cyclonedx CycloneDX SBOM so the PUBLISHED document carries NO host-revealing
 # absolute build path.
 #
@@ -33,6 +33,7 @@
 
 # Canonicalise a single bom-ref / dependsOn string.
 #   path+file:///abs/.../<name>#<version><suffix>  ->  pkg:cargo/<name>@<version><suffix>
+#   path+file:///abs/.../<directory>#<name>@<version><suffix> uses the explicit name.
 # where <suffix> is whatever trails the version (e.g. " bin-target-0"); usually empty.
 def canon_ref:
   if type == "string" and startswith("path+file://") and test("#") then
@@ -40,9 +41,13 @@ def canon_ref:
     | (sub("^[^#]*#"; "")) as $rest                      # everything after the first '#'
     | ($rest | sub("^(?<v>[^ ]*)"; "")) as $suffix       # trailing suffix after the version token
     | ($rest | sub("^(?<v>[^ ]*).*$"; "\(.v)")) as $version
-    | "pkg:cargo/\($name)@\($version)\($suffix)"
+    # Cargo includes name@version when the package name differs from
+    # its directory (e.g. evaluator/host). Preserve that explicit identity.
+    | if ($version | test("^[A-Za-z0-9_-]+@[^@]+$")) then
+        "pkg:cargo/\($version)\($suffix)"
+      else "pkg:cargo/\($name)@\($version)\($suffix)" end
   elif type == "string" and startswith("git+") and test("#") then
-    # [FABLE-5] sq-gg0qq.2 (GS-6): a GIT dependency (today only jeswr/solid-oidc-verifier).
+    # sq-gg0qq.2 (GS-6): a GIT dependency (today only jeswr/solid-oidc-verifier).
     # cargo-cyclonedx 0.5.9 emits
     #   git+https://<host>/<owner>/<repo>?rev=<sha>#<version>
     # (the fragment is the bare version; the crate name is the repo basename — true for
@@ -63,7 +68,7 @@ def canon_ref:
 # purl is `pkg:cargo/<name>@<version>`. We strip both, but ONLY when the workspace-local
 # download_url qualifier is present, so registry purls
 #   (pkg:cargo/<name>@<version>, no qualifier, no subpath) are returned byte-for-byte unchanged.
-# [OPUS-4.8] sq-uujh: extend GS-6/sq-toze.30 to the build-target `#src/...` subpath, which the
+# sq-uujh: extend GS-6/sq-toze.30 to the build-target `#src/...` subpath, which the
 # original filter left behind (it stripped the query up to `#` but preserved the fragment),
 # leaving the only non-canonical purls in the SBOM and a purl/bom-ref mismatch on those rows.
 def canon_purl:
@@ -71,7 +76,7 @@ def canon_purl:
     # Drop the download_url qualifier together with any trailing host-derived #subpath.
     sub("[?&]download_url=file://.*$"; "")
   elif type == "string" and test("[?&]vcs_url=") then
-    # [FABLE-5] sq-gg0qq.2 (GS-7): a GIT dependency's purl —
+    # sq-gg0qq.2 (GS-7): a GIT dependency's purl —
     #   pkg:cargo/<name>@<version>?vcs_url=git%2Bhttps://<host>/<owner>/<repo>%40<sha>
     # The canonical cargo purl carries NO query/fragment (scripts/check-sbom-purl-canonical.py
     # asserts ^pkg:cargo/[^?#]+@[^?#]+$); the exact rev pin remains in Cargo.lock +
@@ -82,7 +87,7 @@ def canon_purl:
     .
   end;
 
-# [OPUS-4.8] sq-toze.26 (GS-1 / N1): emit a per-component CycloneDX `supplier`
+# sq-toze.26 (GS-1 / N1): emit a per-component CycloneDX `supplier`
 # (organizationalEntity, NTIA "Supplier Name" slot) — derived HONESTLY from the
 # component's identity in the RAW cargo-cyclonedx output, never fabricated.
 #
@@ -99,6 +104,12 @@ def canon_purl:
 #          supplier.url = the crate's crates.io page (derived from the name). The crate's
 #          own `author` (where present) is carried into `publisher` (the originator who
 #          published it) — distinct from the distributing supplier.
+#   * path+file://<abs>/zk/sparql-evaluator/<member>#<ver>
+#       -> the explicitly named first-party evaluator members and both guest
+#          workspaces (exact and V5); same supplier below.
+#   * path+file://<abs>/vendor/zk-sdk/<name>#<ver>
+#       -> the project supplies modified upstream bytes; UPSTREAM.json and patches
+#          accompany the SBOM and identify the registry base plus exact delta.
 #   * path+file://<abs>/crates/sparq-*#<ver>
 #       -> a FIRST-PARTY workspace crate this project authors and ships. Supplier = the
 #          project, matching the top-level supplier in supply-chain/vex.cdx.json
@@ -112,15 +123,15 @@ def canon_purl:
 #   * git+https://github.com/jeswr/<repo>?rev=<sha>#<version>
 #       -> a GIT dependency pinned to the maintainer's own repository (today only
 #          solid-oidc-verifier, sq-gg0qq.2). Supplier = the repository owner (the same
-#          identity as the VEX top-level supplier), url = the repository. [FABLE-5]
+#          identity as the VEX top-level supplier), url = the repository.
 #   * anything else (none today)
 #       -> supplier NOT determinable -> OMITTED (no supplier emitted). Honest per NTIA.
 #
 # Idempotent + non-destructive: we never overwrite a `supplier` already present (so a future
 # cargo-cyclonedx that populates it wins), and the derivation is a pure function of the raw
 # bom-ref / author, so a second pass is byte-identical. Build-target sub-components (the root
-# component's bin/lib targets) inherit via the fix_component recursion: they are under
-# /crates/sparq-* and so get the first-party supplier, matching their parent.
+# component's bin/lib targets) are classified by the same raw source path and
+# first-party package or underscore target name, matching their parent.
 
 # The crates.io project page for a published crate. Keyed off the component's own `name`
 # field (always present + correct), NOT the bom-ref basename — the registry bom-ref's
@@ -135,6 +146,14 @@ def derive_supplier($author):
   (."bom-ref" // "") as $ref
   | if ($ref | startswith("registry+https://github.com/rust-lang/crates.io-index")) then
       {name: "crates.io", url: [cratesio_url]}
+    elif ($ref | test("^path\\+file://.*/vendor/zk-sdk/")) then
+      # This repository supplies the patched bytes; upstream registry
+      # provenance is recorded separately in the accompanying UPSTREAM.json.
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
+    # zkp-14.5: plus the separately pinned V5 guest workspace, by exact name.
+    elif (($ref | test("^path\\+file://.*/zk/sparql-evaluator/(host|model|methods|methods/guest|methods/guest-authrdf)#"))
+          and (.name | test("^sparq[-_](proved[-_]evaluator([-_]model|[-_]methods)?|exact[-_]guest|authrdf[-_]guest)$"))) then
+      {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     elif ($ref | test("^path\\+file://.*/vendor/")) then
       # vendored [patch.crates-io] upstream crate -> crates.io is the supplier-of-record
       {name: "crates.io", url: [cratesio_url]}
@@ -142,7 +161,7 @@ def derive_supplier($author):
       # first-party workspace crate -> the project (matches the VEX top-level supplier)
       {name: "Jesse Wright", url: ["https://github.com/sparq-org/sparq"]}
     elif ($ref | test("^git\\+https://github\\.com/jeswr/")) then
-      # [FABLE-5] sq-gg0qq.2 (GS-1): a GIT dependency pinned to the MAINTAINER'S OWN
+      # sq-gg0qq.2 (GS-1): a GIT dependency pinned to the MAINTAINER'S OWN
       # repository (today only solid-oidc-verifier; deny.toml's sources allow-list keeps
       # this set closed). Supplier-of-record = the repository owner — the same identity as
       # the VEX top-level supplier, honestly determinable from the pinned source URL.
@@ -172,7 +191,7 @@ def fix_component:
   | (if has("purl") then .purl |= canon_purl else . end)
   | (if has("components") then .components |= map(fix_component) else . end);
 
-# [OPUS-4.8] sq-toze.28 (GS-4 / CDX-3): the SBOM generator now emits CycloneDX 1.5
+# sq-toze.28 (GS-4 / CDX-3): the SBOM generator now emits CycloneDX 1.5
 # natively (cargo-cyclonedx --spec-version 1.5). On a 1.5 document, populate the
 # 1.5-only `metadata.lifecycles` slot with the single phase we can honestly assert:
 # the BOM is produced from the fully-resolved dependency tree during the build, i.e.

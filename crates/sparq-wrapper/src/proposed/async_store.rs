@@ -90,15 +90,21 @@ impl<S: TermStream + ?Sized> TermStream for Pin<Box<S>> {
 /// it. An eagerly started operation is still expressible, but it breaks those
 /// guarantees for every caller of the wrapper: the handle it returns no longer
 /// has anything to cancel on drop.
+///
+/// Writes report whether they changed the store. That report must come from
+/// the write itself — one atomic check-and-mutate in the backend — rather than
+/// from an earlier [`has`](Self::has): only then does `true` mean *this* write
+/// made the change even when other clients share the backend, which is what
+/// effective-change reporting above this trait relies on.
 pub trait AsyncStoreBackend {
     /// The stream of matched terms returned by the traversal methods.
     type Stream: TermStream;
     /// The future returned by [`add`](Self::add).
-    type Add: Future<Output = Result<(), AsyncStoreError>>;
+    type Add: Future<Output = Result<bool, AsyncStoreError>>;
     /// The future returned by [`has`](Self::has).
     type Has: Future<Output = Result<bool, AsyncStoreError>>;
     /// The future returned by [`delete`](Self::delete).
-    type Delete: Future<Output = Result<(), AsyncStoreError>>;
+    type Delete: Future<Output = Result<bool, AsyncStoreError>>;
 
     /// Streams the objects of every `(subject, predicate, ?)` triple.
     fn objects(&self, subject: Term, predicate: NamedNode) -> Self::Stream;
@@ -106,13 +112,14 @@ pub trait AsyncStoreBackend {
     /// Streams the subjects of every `(?, predicate, object)` triple.
     fn subjects(&self, predicate: NamedNode, object: Term) -> Self::Stream;
 
-    /// Adds one triple to the store.
+    /// Adds one triple, resolving to whether it was absent before this write.
     fn add(&self, subject: Term, predicate: NamedNode, object: Term) -> Self::Add;
 
     /// Reports whether the store contains one triple.
     fn has(&self, subject: Term, predicate: NamedNode, object: Term) -> Self::Has;
 
-    /// Deletes one triple from the store, succeeding when it was absent.
+    /// Deletes one triple, resolving to whether it was present before this
+    /// write; deleting an absent triple succeeds with `false`.
     fn delete(&self, subject: Term, predicate: NamedNode, object: Term) -> Self::Delete;
 }
 
@@ -154,7 +161,8 @@ impl<B: AsyncStoreBackend> AsyncStore<B> {
         }
     }
 
-    /// Adds one triple, returning the backend future that performs the write.
+    /// Adds one triple, returning the backend future that performs the write
+    /// and resolves to whether it changed the store.
     ///
     /// The subject position is validated synchronously, so a literal subject is
     /// rejected before the backend is asked to do any work.
@@ -182,7 +190,8 @@ impl<B: AsyncStoreBackend> AsyncStore<B> {
         Ok(self.backend.has(subject, predicate, object.into()))
     }
 
-    /// Deletes one triple, returning the backend future that performs the write.
+    /// Deletes one triple, returning the backend future that performs the
+    /// write and resolves to whether it changed the store.
     pub fn delete(
         &self,
         subject: impl Into<Term>,

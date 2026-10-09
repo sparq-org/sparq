@@ -362,6 +362,268 @@ async fn streamed_select_large_multichunk_is_byte_identical() {
 }
 
 // ---------------------------------------------------------------------------
+// Streamed CONSTRUCT / DESCRIBE bodies (sq-0kq6k)
+//
+// Same contract as the streamed SELECT above: a small result keeps its buffered
+// `Content-Length` wire shape; a result too big for one chunk streams under chunked
+// transfer-encoding; either way the bytes equal the buffered serialiser's output exactly.
+// ---------------------------------------------------------------------------
+
+/// A graph whose `?s ?p ?o` CONSTRUCT renders to well over the 64 KiB chunk threshold, so the
+/// response is a genuinely multi-chunk stream over real HTTP.
+fn big_graph_ttl() -> String {
+    let mut ttl = String::from("@prefix ex: <http://ex/> .\n");
+    for i in 0..3000 {
+        ttl.push_str(&format!(
+            "ex:subject{i} ex:somePredicate \"value-{i}-padding-padding-padding\" .\n"
+        ));
+    }
+    ttl
+}
+
+/// Boots a server over `ttl` and returns its base URL (the shared `spawn` uses `DATA`).
+async fn spawn_over(ttl: &str) -> String {
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let app = router(AppState::new(graph));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+/// The buffered rendering the streamed body must equal, computed independently of the server:
+/// run the same CONSTRUCT on the engine, serialise with the public buffered writer.
+fn expected_graph_body(ttl: &str, query: &str, fmt: &str) -> String {
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let triples = sparq_engine::construct_or_describe(&graph, query).unwrap();
+    match fmt {
+        "turtle" => sparq_server::graph::triples_to_turtle(&triples).unwrap(),
+        _ => sparq_server::graph::triples_to_ntriples(&triples).unwrap(),
+    }
+}
+
+/// A CONSTRUCT small enough to fit one chunk keeps the pre-streaming wire shape: a
+/// `Content-Length`, no chunked transfer-encoding, and the buffered serialiser's exact bytes.
+#[tokio::test]
+async fn small_construct_stays_buffered_with_content_length() {
+    let base = spawn().await;
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let advertised: usize = resp.headers()["content-length"].to_str().unwrap().parse().unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(body.len(), advertised, "Content-Length must match the buffered body");
+    assert_eq!(body, expected_graph_body(DATA, q, "ntriples"));
+}
+
+/// The load-bearing test: a CONSTRUCT too large for one chunk STREAMS (no `Content-Length`)
+/// and the streamed bytes are identical to the buffered serialiser's output.
+#[tokio::test]
+async fn streamed_construct_large_multichunk_is_byte_identical() {
+    let ttl = big_graph_ttl();
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let expect = expected_graph_body(&ttl, q, "ntriples");
+    assert!(expect.len() > 64 * 1024, "the fixture must exceed one chunk");
+
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-type"], "application/n-triples; charset=utf-8");
+    assert!(
+        resp.headers().get("content-length").is_none(),
+        "a streamed multi-chunk graph result must not advertise Content-Length"
+    );
+    assert_eq!(resp.text().await.unwrap(), expect);
+}
+
+/// The same invariant through the prefix-compacting Turtle writer — the format whose
+/// serialiser carries subject/predicate grouping state across chunk boundaries, so it is the
+/// one that could actually differ if the chunking leaked into the rendering.
+#[tokio::test]
+async fn streamed_construct_turtle_is_byte_identical() {
+    let ttl = big_graph_ttl();
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let expect = expected_graph_body(&ttl, q, "turtle");
+    assert!(expect.len() > 64 * 1024, "the fixture must exceed one chunk");
+
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .header("accept", "text/turtle")
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-type"], "text/turtle; charset=utf-8");
+    let body = resp.text().await.unwrap();
+    assert_eq!(body, expect);
+    // …and it is still a Turtle document that re-parses to the same triple count.
+    assert_eq!(Graph::load_str(&body, "turtle").unwrap().len(), 3000);
+}
+
+/// HEAD keeps the buffered path so it can still advertise the `Content-Length` the GET body
+/// would have had — the documented "HEAD mirrors GET" contract survives the streaming change
+/// even for a result that a GET would stream.
+#[tokio::test]
+async fn head_large_construct_still_advertises_content_length() {
+    let ttl = big_graph_ttl();
+    let q = "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }";
+    let expect = expected_graph_body(&ttl, q, "ntriples");
+
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .head(format!("{base}/sparql"))
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let advertised: usize = resp.headers()["content-length"].to_str().unwrap().parse().unwrap();
+    assert_eq!(advertised, expect.len(), "HEAD must advertise the GET body length");
+    assert_eq!(resp.text().await.unwrap(), "", "HEAD carries no body");
+}
+
+/// A CONSTRUCT that matches nothing still answers `200` with an empty body and a zero
+/// `Content-Length` — the empty document must not look like "the worker produced no stream".
+#[tokio::test]
+async fn empty_construct_is_200_with_empty_body() {
+    let base = spawn().await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .query(&[("query", "CONSTRUCT { ?s ?p ?o } WHERE { ?s <http://ex/nope> ?o }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.headers()["content-length"], "0");
+    assert_eq!(resp.text().await.unwrap(), "");
+}
+
+/// A budget refusal on a streamed-eligible CONSTRUCT is still a clean `413`, never a truncated
+/// `200`: the engine materialises the whole graph before any byte is rendered, so the status is
+/// always decided pre-first-byte.
+#[tokio::test]
+async fn large_construct_row_cap_is_a_clean_413() {
+    use sparq_server::ServerConfig;
+    let ttl = big_graph_ttl();
+    let graph = Graph::load_str(&ttl, "turtle").unwrap();
+    let config = ServerConfig { max_results: Some(10), ..ServerConfig::default() };
+    let app = router(AppState::with_config(graph, config));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let resp = client()
+        .get(format!("http://{addr}/sparql"))
+        .query(&[("query", "CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }")])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 413, "a row-cap refusal must be a clean 413, not a truncated 200");
+}
+
+// ---------------------------------------------------------------------------
+// Streamed CSV / TSV / XML SELECT bodies (#5517)
+//
+// The CONSTRUCT contract above, for the SELECT formats rendered from a materialised
+// `QueryResult`: a result larger than one chunk streams with no `Content-Length`, a small one
+// keeps it, HEAD still advertises the GET length, and the bytes equal the buffered writer's.
+// ---------------------------------------------------------------------------
+
+const SELECT_ALL: &str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
+
+/// `(Accept, content type, buffered rendering)` for each materialised SELECT format.
+fn select_formats(ttl: &str, query: &str) -> Vec<(&'static str, &'static str, String)> {
+    let graph = Graph::load_str(ttl, "turtle").unwrap();
+    let r = sparq_engine::query(&graph, query).unwrap();
+    vec![
+        ("text/csv", "text/csv; charset=utf-8", sparq_server::results::select_to_csv(&r)),
+        ("text/tab-separated-values", "text/tab-separated-values; charset=utf-8", sparq_server::results::select_to_tsv(&r)),
+        ("application/sparql-results+xml", "application/sparql-results+xml", sparq_server::results::select_to_xml(&r)),
+    ]
+}
+
+#[tokio::test]
+async fn streamed_select_csv_tsv_xml_large_multichunk_is_byte_identical() {
+    assert_select_formats_stream(&big_graph_ttl()).await;
+}
+
+/// #6708 review: a single row whose one literal is many chunks long. The writers stream
+/// it term-piece by term-piece rather than rendering the row first, and the body must still
+/// be byte-identical and chunked. The literal is dense with characters each format escapes
+/// or quotes (XML entity expansion, CSV quote doubling, TSV backslash escapes).
+#[tokio::test]
+async fn streamed_select_single_huge_literal_is_byte_identical_and_chunked() {
+    let unit = "ab&c<d>e\\\"f,g\\th\\\\i "; // turtle-escaped: ab&c<d>e"f,g<TAB>h\i
+    let ttl = format!("<http://ex/s> <http://ex/p> \"{}\" .\n", unit.repeat(40_000));
+    assert_select_formats_stream(&ttl).await;
+}
+
+async fn assert_select_formats_stream(ttl: &str) {
+    let base = spawn_over(ttl).await;
+    for (accept, ct, expect) in select_formats(ttl, SELECT_ALL) {
+        assert!(expect.len() > 64 * 1024, "{accept}: the fixture must exceed one chunk");
+        let resp = client()
+            .get(format!("{base}/sparql"))
+            .header("accept", accept)
+            .query(&[("query", SELECT_ALL)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "{accept}");
+        assert_eq!(resp.headers()["content-type"], ct, "{accept}");
+        assert!(
+            resp.headers().get("content-length").is_none(),
+            "{accept}: a streamed multi-chunk SELECT must not advertise Content-Length"
+        );
+        assert_eq!(resp.text().await.unwrap(), expect, "{accept}");
+
+        let head = client()
+            .head(format!("{base}/sparql"))
+            .header("accept", accept)
+            .query(&[("query", SELECT_ALL)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(head.status(), 200, "{accept}");
+        let advertised: usize = head.headers()["content-length"].to_str().unwrap().parse().unwrap();
+        assert_eq!(advertised, expect.len(), "{accept}: HEAD must advertise the GET body length");
+    }
+}
+
+#[tokio::test]
+async fn small_select_csv_tsv_xml_stays_buffered_with_content_length() {
+    let base = spawn().await;
+    for (accept, _ct, expect) in select_formats(DATA, SELECT_ALL) {
+        let resp = client()
+            .get(format!("{base}/sparql"))
+            .header("accept", accept)
+            .query(&[("query", SELECT_ALL)])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 200, "{accept}");
+        let advertised: usize = resp.headers()["content-length"].to_str().unwrap().parse().unwrap();
+        assert_eq!(advertised, expect.len(), "{accept}");
+        assert_eq!(resp.text().await.unwrap(), expect, "{accept}");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP semantics: 400 / 405 / 501 / HEAD
 // ---------------------------------------------------------------------------
 
@@ -1165,4 +1427,61 @@ async fn gsp_put_turtle_get_rdfxml_cross_format() {
     let triples = sparq_server::graph::parse_rdfxml(body.as_bytes(), None).unwrap();
     assert_eq!(triples.len(), 1, "cross-format round-trip lost the triple: {body}");
     assert_eq!(triples[0].object.to_string(), "<http://ex/o>");
+}
+
+/// A graph result the RDF/XML writer refuses part-way through (`rdf:about` cannot be a
+/// predicate in RDF/XML) must not come back as a `200` with a truncated document.
+fn rdfxml_refusal(fill_bytes: usize) -> (String, &'static str) {
+    let ttl = format!("<http://ex/a> <http://ex/fill> \"{}\" .\n", "x".repeat(fill_bytes));
+    let q = "CONSTRUCT { <http://ex/a> <http://ex/fill> ?f . \
+        <http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#about> \"bad\" } \
+        WHERE { <http://ex/a> <http://ex/fill> ?f }";
+    (ttl, q)
+}
+
+#[tokio::test]
+async fn rdfxml_refusal_after_one_chunk_is_an_error_status() {
+    let (ttl, q) = rdfxml_refusal(70 * 1024);
+    let base = spawn_over(&ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql"))
+        .header("accept", "application/rdf+xml")
+        .query(&[("query", q)])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 500, "a refused serialisation must not answer 200");
+}
+
+#[tokio::test]
+async fn rdfxml_refusal_mid_stream_aborts_the_body() {
+    let (ttl, q) = rdfxml_refusal(300 * 1024);
+    let base = spawn_over(&ttl).await;
+    let sent = client()
+        .get(format!("{base}/sparql"))
+        .header("accept", "application/rdf+xml")
+        .query(&[("query", q)])
+        .send()
+        .await;
+    // The stream had started, so the connection is aborted: either before the client sees
+    // the head (hyper had not flushed it yet) or mid-body. It must never end cleanly.
+    let clean = match sent {
+        Ok(resp) => resp.bytes().await.is_ok(),
+        Err(_) => false,
+    };
+    assert!(!clean, "a refused serialisation must abort the chunked body");
+}
+
+/// The buffered GSP read reports the same refusal instead of a truncated document.
+#[tokio::test]
+async fn rdfxml_refusal_on_a_buffered_read_is_an_error_status() {
+    let ttl = "<http://ex/a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#about> \"bad\" .\n";
+    let base = spawn_over(ttl).await;
+    let resp = client()
+        .get(format!("{base}/sparql/graph?default"))
+        .header("accept", "application/rdf+xml")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 500);
 }

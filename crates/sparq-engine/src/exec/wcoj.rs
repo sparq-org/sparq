@@ -375,7 +375,7 @@ pub(super) fn scan_to_bindings(
 
     // No LIMIT and a large relation: build the rows in parallel (order-preserving).
     #[cfg(feature = "parallel")]
-    if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD {
+    if limit.is_none() && scan_rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let rows: Vec<Row> = scan_rows.par_iter().filter_map(build_row).collect();
         return Bindings { vars, rows, sorted_by };
@@ -493,7 +493,7 @@ pub(super) fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // JoinTable = hashbrown::HashMap<Key, Posting, FxBuildHasher>; the type inference here
     // avoids a dependency on rustc_hash::FxHashMap in the type annotation. sq-7d3dj.19
     #[cfg(feature = "parallel")]
-    let tables = if build.rows.len() >= PAR_THRESHOLD {
+    let tables = if build.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let parts: Vec<u8> = build
             .rows
@@ -509,7 +509,7 @@ pub(super) fn hash_join_ref(left: &Bindings, right: &Bindings) -> Bindings {
     // The probe is read-only over the (partitioned) table, so for a large probe side build the
     // output in parallel on native.
     #[cfg(feature = "parallel")]
-    if probe.rows.len() >= PAR_THRESHOLD {
+    if probe.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // Budget snapshot for the workers (the installing thread's thread-local is
         // invisible to them): a worker that hits the limits stops adding to its own

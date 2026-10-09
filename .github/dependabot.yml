@@ -9,7 +9,6 @@
 #   - GitHub Actions are version-pinned by SHA in the workflows; Dependabot
 #     still tracks them (it follows the trailing `# vX.Y.Z` comment) and will
 #     bump the pin + comment together.
-# [OPUS-4.8]
 version: 2
 
 updates:
@@ -53,7 +52,7 @@ updates:
           - minor
           - patch
     ignore:
-      # [OPUS-4.8] sq-sski: do NOT let Dependabot version-bump dtolnay/rust-toolchain.
+      # sq-sski: do NOT let Dependabot version-bump dtolnay/rust-toolchain.
       # Its release tags are *Rust toolchain versions*, not action releases — the
       # trailing `# 1.88` comment on the MSRV-check pin in .github/workflows/ci.yml is
       # the declared workspace floor (root Cargo.toml `[workspace.package]
@@ -70,7 +69,7 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-major"
-      # [OPUS-5] #4572: do NOT let Dependabot version-bump the SLSA trusted builder.
+      # #4572: do NOT let Dependabot version-bump the SLSA trusted builder.
       # Both of its reusable builders are referenced by TAG, on ONE shared tag, across the four
       # isolated-provenance lanes: `generator_generic_slsa3.yml` in release.yml#provenance,
       # release.yml#provenance-artifacts and dist.yml#provenance, and (#4635)
@@ -98,7 +97,7 @@ updates:
           - "version-update:semver-major"
 
   # ---- npm (the whole workspace: js, site, gui/*, packages/*) ----
-  # [SONNET-4.6] sq-bqjv: this entry pointed at "/js" — a WORKSPACE MEMBER, not a
+  # sq-bqjv: this entry pointed at "/js" — a WORKSPACE MEMBER, not a
   # resolvable npm tree. Per-member locks are deliberately gitignored as redundant
   # (.gitignore "/js/package-lock.json" et al); the repo-root `package-lock.json` is
   # the only tracked lock FOR THE WORKSPACE and it spans all nine members. (The two
@@ -128,6 +127,42 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # eslint 10 breaks `next lint` in site/ and gui/app: eslint-config-next 15 fails
+      # to load ("Failed to patch ESLint because the calling module was not
+      # recognized"). Hold the major until both apps move to Next 16 and the ESLint
+      # CLI. Only version updates are held; security updates still come through.
+      - dependency-name: "eslint"
+        update-types:
+          - version-update:semver-major
+      # site/scripts/vr.sh runs the visual tests in a Playwright container pinned by
+      # version and digest, and refuses to run when the locked @playwright/test
+      # differs. Bump Playwright by hand together with that pin and regenerated
+      # baselines. Security updates still come through.
+      - dependency-name: "@playwright/test"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: "playwright"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+      - dependency-name: "playwright-core"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
+      # The ZK verifier is pinned to Barretenberg 5.0.0-nightly.20260324 (see
+      # skills/zk-query-proofs/SKILL.md); other bb.js versions can change the proof
+      # and public-input layout the site's in-tab verify relies on. Bump it by hand
+      # with the Noir toolchain. Security updates still come through.
+      - dependency-name: "@aztec/bb.js"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+          - version-update:semver-patch
 
   # ---- pip (the `sparq` Python bindings build/test deps) ----
   - package-ecosystem: pip
@@ -149,7 +184,7 @@ updates:
           - patch
 
   # ---- Docker base images ----
-  # [SONNET-4.6] sq-bqjv: the two Dockerfiles that build from THIRD-PARTY bases (this
+  # sq-bqjv: the two Dockerfiles that build from THIRD-PARTY bases (this
   # root one and crates/sparq-lws-core) pin them by DIGEST
   # (`rust:1.88-slim-bookworm@sha256:…`, `gcr.io/distroless/cc-debian12:nonroot@sha256:…`).
   # A digest pin is reproducible but FROZEN: a Debian/distroless security rebuild

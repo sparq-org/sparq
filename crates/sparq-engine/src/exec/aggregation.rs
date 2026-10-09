@@ -13,7 +13,7 @@ use super::*;
 /// variable is never bound (no column) — its key id is then `NO_ID` (unbound) for every row.
 pub(super) fn build_groups(b: &Bindings, key_cols: &[Option<usize>]) -> (Vec<Key>, Vec<Vec<usize>>) {
     #[cfg(feature = "parallel")]
-    if b.rows.len() >= PAR_THRESHOLD {
+    if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         use std::hash::{Hash, Hasher};
         const P: usize = 64;
@@ -124,7 +124,7 @@ pub(super) fn group_aggregate(
     // in the sequential path, one group at a time), interning and pushing each batch's rows
     // before evaluating the next, so only a bounded slice of `Value`s is live.
     #[cfg(feature = "parallel")]
-    let parallel_eval = b.rows.len() >= PAR_THRESHOLD;
+    let parallel_eval = b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active();
     #[cfg(not(feature = "parallel"))]
     let parallel_eval = false;
 
@@ -146,6 +146,7 @@ pub(super) fn group_aggregate(
         let aggs = self::aggregates::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         // Process `members`/`order` in PAR_THRESHOLD-sized batches: evaluate + read-only
         // resolve each batch in parallel, then serially intern only that batch's genuinely
         // new terms and emit its rows. Peak `Value` footprint is one batch, not all groups.
@@ -164,6 +165,7 @@ pub(super) fn group_aggregate(
                     let _aggs = self::aggregates::worker_install(&aggs);
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
+                    let _qb = query_base_worker_install(&qb);
                     aggregates
                         .iter()
                         .map(|(_, agg)| eval_aggregate(graph, lv, bref, members, agg).map(|v| value_to_id_readonly(graph, lv, &v)))
@@ -289,9 +291,9 @@ pub(super) fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, me
             Ok(Value::Num(Num::Int(n as i64)))
         }
         AggregateExpression::FunctionCall { name, expr, distinct } => {
-            // MIN/MAX over an all-temporal column: fold at the ID level through the
-            // temporals cache — no term materialised, no per-comparison lexical
-            // re-parse. Falls through to the general path on any non-temporal member.
+            // MIN/MAX over an all-temporal column: borrow exact lexical keys by ID.
+            // No term is materialised; parsing is linear in the literal length.
+            // Fall through to the general path on any non-temporal member.
             if let AggregateFunction::Min | AggregateFunction::Max = name {
                 let is_min = matches!(name, AggregateFunction::Min);
                 if let Some(v) = minmax_temporal(graph, local, b, members, expr, *distinct, is_min) {
@@ -361,13 +363,12 @@ pub(super) fn eval_aggregate(graph: &Graph, local: &LocalVocab, b: &Bindings, me
                         return Ok(Value::Num(Num::Int(0))); // AVG({}) = 0 per SPARQL
                     }
                     Ok(sum_values(&vals, errored)
-                        .and_then(|s| s.binop(Num::Int(vals.len() as i64), ArithOp::Div))
+                        .and_then(|s| numeric_capacity::binop(s, Num::Int(vals.len() as i64), ArithOp::Div))
                         .map(Value::Num)
                         .unwrap_or(Value::Error))
                 }
-                // MIN/MAX over an all-numeric group return the typed VALUE (promoted,
-                // canonically serialised — "2.0E-1"^^xsd:double); mixed groups keep the
-                // lenient term path.
+                // MIN/MAX select an input RDF term. Numeric comparisons
+                // must not replace its lexical form or datatype with a new term.
                 AggregateFunction::Min => Ok(minmax_values(vals, Ordering::Less)),
                 AggregateFunction::Max => Ok(minmax_values(vals, Ordering::Greater)),
                 AggregateFunction::GroupConcat { separator } => {
@@ -441,48 +442,57 @@ pub(super) fn sum_values(vals: &[Value], errored: bool) -> Option<Num> {
     }
     let mut acc = Num::Int(0);
     for v in vals {
-        acc = acc.binop(as_numeric(v)?, ArithOp::Add)?;
+        acc = numeric_capacity::binop(acc, as_numeric(v)?, ArithOp::Add)?;
     }
     Some(acc)
 }
 
 /// MIN/MAX: an all-numeric group compares by VALUE (exact for int/decimal) and returns
-/// the typed value; any non-numeric member falls back to the lenient total-order term
+/// the selected original operand; any non-numeric member uses the total-order term
 /// comparison (which must order across types for the SPARQL MIN/MAX-over-anything case).
-pub(super) fn minmax_values(vals: Vec<Value>, keep: Ordering) -> Value {
+pub(super) fn minmax_values(mut vals: Vec<Value>, keep: Ordering) -> Value {
     if vals.is_empty() {
         return Value::Unbound;
     }
-    let nums: Option<Vec<Num>> = vals.iter().map(as_numeric).collect();
-    match nums {
-        Some(nums) => {
-            let mut best = nums[0];
-            for &n in &nums[1..] {
-                if num_compare(n, best) == Some(keep) {
-                    best = n;
-                }
+    // One order for MIN/MAX and ORDER BY: `compare_values(..).unwrap_or(Equal)`, with MIN
+    // keeping the FIRST of equal members and MAX the LAST (`Iterator::min_by`/`max_by`).
+    // Two in-tower int/decimal members with a decidable, unequal exact order are settled
+    // by that order first, which `compare_values` refines but never contradicts; every
+    // other pair (a tie, a float, a scale overflow, a strict-capacity pair) goes to it.
+    // Reading each member as a number also records a strict-budget capacity failure.
+    let nums: Vec<Option<Num>> = vals.iter().map(as_numeric).collect();
+    let decs: Vec<_> = if budget::strict_numeric() {
+        Vec::new()
+    } else {
+        nums.iter().map(|n| n.and_then(Num::to_dec)).collect()
+    };
+    let ord = |i: usize, j: usize| {
+        if let (Some(Some(x)), Some(Some(y))) = (decs.get(i), decs.get(j)) {
+            if let Some(o) = (*x).cmp(*y).filter(|o| *o != Ordering::Equal) {
+                return o;
             }
-            num_canonical_term(best)
         }
-        None => {
-            let cmp = |a: &Value, c: &Value| compare_values(a, c).unwrap_or(Ordering::Equal);
-            match keep {
-                Ordering::Less => vals.into_iter().min_by(cmp).unwrap(),
-                _ => vals.into_iter().max_by(cmp).unwrap(),
-            }
+        compare_values(&vals[i], &vals[j]).unwrap_or(Ordering::Equal)
+    };
+    let mut best = 0;
+    for i in 1..vals.len() {
+        let o = ord(i, best);
+        if if keep == Ordering::Less { o == Ordering::Less } else { o != Ordering::Less } {
+            best = i;
         }
     }
+    vals.swap_remove(best)
 }
 
 /// MIN/MAX over a variable whose group members are ALL well-formed temporal
-/// (dateTime/date) graph terms, folded at the id level through the temporals cache.
+/// (dateTime/date) graph terms, folded through exact borrowed lexical keys.
 /// `None` falls back to the general (materialise + compare_values) path: any unbound
 /// member is skipped (as the general path skips it), but a local-vocab or
 /// non-temporal member aborts the fast path entirely.
 ///
 /// Tie semantics replicate `minmax_values` exactly: the comparator is
 /// `compare_values(..).unwrap_or(Equal)` — which for two temporals IS
-/// `Temporal::cmp_t_total` (kind-first, then the timeline order extended over the
+/// `ExactTemporal::compare_total` (kind-first, then the timeline order extended over the
 /// indeterminate mixed-timezone window) — with MIN keeping the FIRST of
 /// equal members (`Iterator::min_by`) and MAX the LAST (`Iterator::max_by`); DISTINCT
 /// drops later duplicate terms first (same term ⇔ same id for graph terms), which can
@@ -500,7 +510,7 @@ pub(super) fn minmax_temporal(
     let Expression::Variable(v) = expr else { return None };
     let col = b.col(v)?;
     let mut seen: FxHashSet<Id> = FxHashSet::default();
-    let mut best: Option<(Temporal, Id)> = None;
+    let mut best: Option<(ExactTemporal<'_>, Id)> = None;
     for &ri in members {
         let id = b.rows[ri][col];
         if id == NO_ID {
@@ -509,7 +519,7 @@ pub(super) fn minmax_temporal(
         if is_local(id) {
             return None; // computed term: general path
         }
-        let t = graph.temporal_value(id)?; // non-temporal/ill-formed: general path
+        let t = temporal_of_id(graph, id)?; // non-temporal/ill-formed: general path
         if distinct && !seen.insert(id) {
             continue;
         }
@@ -517,12 +527,12 @@ pub(super) fn minmax_temporal(
             None => (t, id),
             Some((bt, bid)) => {
                 // sq-wjl8i KIND-FIRST + sq-2k5py, both now in the
-                // shared `Temporal::cmp_t_total`, so this fold cannot drift from
+                // shared `ExactTemporal::compare_total`, so this fold cannot drift from
                 // `compare_values`: a cross-kind (dateTime vs date) pair ranks by
                 // `LiteralKind` (DateTime < Date), never lexically, and within a kind the
                 // timeline order is TOTAL (instant, then timezone presence) — the former
                 // lexical fallback for the indeterminate window was intransitive.
-                let ord = Temporal::cmp_t_total(t, bt);
+                let ord = ExactTemporal::compare_total(t, bt);
                 let replace = if is_min { ord == Ordering::Less } else { ord != Ordering::Less };
                 if replace {
                     (t, id)
@@ -539,13 +549,37 @@ pub(super) fn minmax_temporal(
 }
 
 /// Value comparison of two typed numerics: exact when both are int/decimal, f64 otherwise.
+///
+/// XPath `op:numeric-*` promotion via [`Num::cmp_relational`]: an `xs:float` against an
+/// integer/decimal compares in the FLOAT tier (`"0.1"^^xsd:float = 0.1` is true), not as two
+/// `f64`s.
 pub(super) fn num_compare(a: Num, c: Num) -> Option<Ordering> {
-    if let (Some(x), Some(y)) = (a.to_dec(), c.to_dec()) {
-        if let Some(o) = x.cmp(y) {
-            return Some(o);
-        }
+    if budget::strict_numeric() {
+        return numeric_capacity::comparable(a, c).then(|| a.cmp_relational(c)).flatten();
     }
-    a.f64().partial_cmp(&c.f64())
+    a.cmp_relational(c)
+}
+
+/// Whether two DISTINCT cached `f64` operand values could still compare EQUAL under XPath
+/// promotion to `xs:float`. The numeric caches are untyped, but `"0.1"^^xsd:float` caches its
+/// `f32` value (0.100000001490116…) while `0.1` caches 0.1: unequal as `f64`, equal once the
+/// decimal is promoted to float. `f32` rounding is monotonic, so promotion can only turn an
+/// `f64` inequality into a tie, never flip an order — and only when both values round to the
+/// same `f32`. A cached decimal's `f64` may sit one rounding away from its exact value, so
+/// adjacent `f32`s count too. The fast paths decide every other unequal pair by `f64` and send
+/// this rare one to the typed evaluator.
+#[inline]
+pub(super) fn f32_promotion_may_tie(x: f64, y: f64) -> bool {
+    #[inline]
+    fn key(f: f32) -> i64 {
+        let b = f.to_bits() as i32;
+        i64::from(if b < 0 { -(b & i32::MAX) } else { b })
+    }
+    if x.is_nan() || y.is_nan() {
+        return false;
+    }
+    let (a, b) = (x as f32, y as f32);
+    a == b || key(a).abs_diff(key(b)) <= 1
 }
 
 pub(super) fn dedup_values(vals: &mut Vec<Value>) {

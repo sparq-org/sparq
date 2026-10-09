@@ -84,7 +84,11 @@ impl Runner {
             Runner::CrateTest { krate, target } => {
                 format!("cargo test -p {krate} --test {target}")
             }
-            Runner::FeatureGatedCrateTest { krate, target, feature } => {
+            Runner::FeatureGatedCrateTest {
+                krate,
+                target,
+                feature,
+            } => {
                 format!("cargo test -p {krate} --features {feature} --test {target}")
             }
         }
@@ -1301,33 +1305,29 @@ pub const SUITES: &[Suite] = &[
     // loader, the with-base TriG dataset loader) and self-skips when the pinned
     // w3c/rdf-tests clone is not fetched; the `conformance` CI job fetches it
     // explicitly and runs the ratchet. Floors are the MEASURED pass counts at the
-    // pinned revision — NT 60/70 and NQ 76/87 honestly record the native byte-level
-    // parser's audited divergences (bead sq-w64x5: no IRI/blank-node-label/lang-tag
-    // validation = 9+1 lenient accepts of negative cases, plus one over-strict reject
-    // of `minimal_whitespace`; the companion differential gate
-    // `tests/parser_differential.rs` pins the SAME cases as an exact adjudicated set),
-    // TriG passes all 356. Floors may only RISE (fixing sq-w64x5 raises NT/NQ).
+    // pinned revision — NT 70/70 and NQ 87/87 (the native byte-level parser's former
+    // IRI/blank-node-label/lang-tag divergences, bead sq-w64x5, were fixed under #2716;
+    // the companion differential gate `tests/parser_differential.rs` pins an empty
+    // adjudicated set), TriG passes all 356. Floors may only RISE.
     Suite {
         label: "W3C N-Triples syntax (rdf11 rdf-n-triples)",
         family: "W3C RDF",
         runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf_line_syntax_ratchet" },
         ci_job: "conformance",
-        ratchet_floor: 60,
+        ratchet_floor: 70,
         floor_basis: "pass",
         note: "positive+negative syntax through the REAL native chunk-parallel nt.rs \
-               path; the 10 recorded FAILs are the audited sq-w64x5 validation \
-               divergences, never summed in",
+               path; every entry passes",
     },
     Suite {
         label: "W3C N-Quads syntax (rdf11 rdf-n-quads)",
         family: "W3C RDF",
         runner: Runner::CrateTest { krate: "sparq-conformance", target: "rdf_line_syntax_ratchet" },
         ci_job: "conformance",
-        ratchet_floor: 76,
+        ratchet_floor: 87,
         floor_basis: "pass",
         note: "positive+negative syntax through the REAL chunk-parallel N-Quads dataset \
-               loader (named graphs preserved); the 11 recorded FAILs are the shared \
-               nt.rs sq-w64x5 divergences plus the graph-position IRI case",
+               loader (named graphs preserved); every entry passes",
     },
     Suite {
         label: "W3C TriG syntax + eval (rdf11 rdf-trig)",
@@ -1371,10 +1371,7 @@ pub fn render_scoreboard() -> String {
          consolidated total below counts ONLY the standards-conformance suites; the \
          extension rows are reported separately.\n"
     );
-    let _ = writeln!(
-        md,
-        "| suite | family | floor | basis | CI job | run |"
-    );
+    let _ = writeln!(md, "| suite | family | floor | basis | CI job | run |");
     let _ = writeln!(md, "|---|---|---:|---|---|---|");
     for s in SUITES {
         let _ = writeln!(
@@ -1469,7 +1466,11 @@ pub fn scoreboard_json() -> String {
                 "kind": "crate-test",
                 "target": target,
             }),
-            Runner::FeatureGatedCrateTest { krate, target, feature } => json!({
+            Runner::FeatureGatedCrateTest {
+                krate,
+                target,
+                feature,
+            } => json!({
                 "crate": krate,
                 "feature": feature,
                 "kind": "feature-gated-crate-test",
@@ -1496,11 +1497,17 @@ pub fn scoreboard_json() -> String {
         })
         .collect();
 
-    let conformance_floor_total: usize =
-        SUITES.iter().filter(|s| !is_extension(s)).map(|s| s.ratchet_floor).sum();
+    let conformance_floor_total: usize = SUITES
+        .iter()
+        .filter(|s| !is_extension(s))
+        .map(|s| s.ratchet_floor)
+        .sum();
     let conformance_suites = SUITES.iter().filter(|s| !is_extension(s)).count();
-    let extension_assertion_total: usize =
-        SUITES.iter().filter(|s| is_extension(s)).map(|s| s.ratchet_floor).sum();
+    let extension_assertion_total: usize = SUITES
+        .iter()
+        .filter(|s| is_extension(s))
+        .map(|s| s.ratchet_floor)
+        .sum();
     let extension_suites = SUITES.iter().filter(|s| is_extension(s)).count();
 
     let doc = json!({
@@ -1563,7 +1570,9 @@ mod tests {
                 s.ratchet_floor
             );
             assert_eq!(
-                row["is_extension"].as_bool().expect("is_extension is a bool"),
+                row["is_extension"]
+                    .as_bool()
+                    .expect("is_extension is a bool"),
                 s.family == "sparq extension"
             );
         }
@@ -1581,8 +1590,14 @@ mod tests {
             .map(|s| s.ratchet_floor)
             .sum();
         let totals = &doc["totals"];
-        assert_eq!(totals["conformance_floor_total"].as_u64().unwrap() as usize, conf);
-        assert_eq!(totals["extension_assertion_total"].as_u64().unwrap() as usize, ext);
+        assert_eq!(
+            totals["conformance_floor_total"].as_u64().unwrap() as usize,
+            conf
+        );
+        assert_eq!(
+            totals["extension_assertion_total"].as_u64().unwrap() as usize,
+            ext
+        );
         assert_eq!(
             totals["conformance_suites"].as_u64().unwrap() as usize
                 + totals["extension_suites"].as_u64().unwrap() as usize,

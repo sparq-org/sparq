@@ -1,4 +1,4 @@
-use crate::QueryBudget;
+use crate::{BudgetExceeded, EvaluationCapacity, QueryBudget, QueryFailure};
 use sparq_core::dict::Id;
 use std::cell::Cell;
 use std::ptr::NonNull;
@@ -56,6 +56,9 @@ pub(in crate::exec) struct Limits {
     /// the row cap also misses. A running high-water sum, added to the working-set
     /// estimate on every check.
     extra_bytes: usize,
+    temporal_year_range: Option<(i64, i64)>,
+    strict_numeric_capacity: bool,
+    ebv_semantics: crate::EbvSemantics,
     cancel: Option<CancelPtr>,
 }
 
@@ -67,6 +70,9 @@ const OFF: Limits = Limits {
     max_bytes: usize::MAX,
     byte_width: BYTES_PER_ID,
     extra_bytes: 0,
+    temporal_year_range: None,
+    strict_numeric_capacity: false,
+    ebv_semantics: crate::EbvSemantics::Rec2013,
     cancel: None,
 };
 
@@ -81,30 +87,30 @@ impl Limits {
     /// WHY the limits are hit at `rows`, or `None` when they are not — the pure (no
     /// thread-local) counterpart of [`exhausted`]'s reason, for rayon closures where
     /// the installing thread's sticky flag is out of reach. The reasons are the SAME
-    /// strings [`exhausted`] records, so a worker can raise EXACTLY the error
+    /// typed causes [`exhausted`] records, so a worker can raise EXACTLY the error
     /// [`check`] would rather than inventing one (or guessing a result).
     /// (sq-qk6ac)
     #[cfg_attr(not(feature = "parallel"), allow(dead_code))]
     #[inline]
-    pub(in crate::exec) fn why(&self, rows: usize) -> Option<&'static str> {
+    pub(in crate::exec) fn why(&self, rows: usize) -> Option<BudgetExceeded> {
         if !self.on {
             return None;
         }
         if rows > self.max_rows {
-            return Some("max-rows");
+            return Some(BudgetExceeded::Rows);
         }
         if self.bytes(rows) > self.max_bytes {
-            return Some("max-bytes");
+            return Some(BudgetExceeded::Bytes);
         }
         #[cfg(not(target_arch = "wasm32"))]
         if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-            return Some("timeout");
+            return Some(BudgetExceeded::Deadline);
         }
         if let Some(cancel) = self.cancel {
             // SAFETY: `CancelPtr`'s nested-frame invariant keeps the owning
             // QueryBudget alive until this scoped snapshot load finishes.
             if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-                return Some("cancelled");
+                return Some(BudgetExceeded::Cancelled);
             }
         }
         None
@@ -125,13 +131,16 @@ impl Limits {
 
 thread_local! {
     static ACTIVE: Cell<Limits> = const { Cell::new(OFF) };
-    static EXCEEDED: Cell<Option<&'static str>> = const { Cell::new(None) };
+    static EXCEEDED: Cell<Option<BudgetExceeded>> = const { Cell::new(None) };
+    // Semantic capacity cannot be refunded by a SERVICE byte rollback.
+    static CAPACITY_EXCEEDED: Cell<Option<EvaluationCapacity>> = const { Cell::new(None) };
 }
 
 // Private: callers cannot forget or drop a frame out of order.
 struct Guard<'a> {
     previous: Limits,
-    exceeded: Option<&'static str>,
+    exceeded: Option<BudgetExceeded>,
+    capacity_exceeded: Option<EvaluationCapacity>,
     _budget: std::marker::PhantomData<&'a QueryBudget>,
     _not_send: std::marker::PhantomData<std::rc::Rc<()>>,
 }
@@ -139,6 +148,7 @@ impl Drop for Guard<'_> {
     fn drop(&mut self) {
         ACTIVE.with(|a| a.set(self.previous));
         EXCEEDED.with(|e| e.set(self.exceeded));
+        CAPACITY_EXCEEDED.with(|e| e.set(self.capacity_exceeded));
     }
 }
 
@@ -151,9 +161,11 @@ fn install(b: &QueryBudget) -> Guard<'_> {
     let on = b.deadline.is_some()
         || b.max_rows.is_some()
         || b.max_bytes.is_some()
+        || b.temporal_year_range.is_some()
+        || b.strict_numeric_capacity
         || cancel.is_some();
     #[cfg(target_arch = "wasm32")]
-    let on = b.max_rows.is_some() || b.max_bytes.is_some() || cancel.is_some();
+    let on = b.max_rows.is_some() || b.max_bytes.is_some() || b.temporal_year_range.is_some() || b.strict_numeric_capacity || cancel.is_some();
     let previous = ACTIVE.with(|a| {
         a.replace(Limits {
             on,
@@ -163,16 +175,37 @@ fn install(b: &QueryBudget) -> Guard<'_> {
             max_bytes: b.max_bytes.unwrap_or(usize::MAX),
             byte_width: BYTES_PER_ID,
             extra_bytes: 0,
+            temporal_year_range: b.temporal_year_range,
+            strict_numeric_capacity: b.strict_numeric_capacity,
+            ebv_semantics: b.ebv_semantics.unwrap_or_default(),
             cancel,
         })
     });
     let exceeded = EXCEEDED.with(|e| e.replace(None));
+    let capacity_exceeded = CAPACITY_EXCEEDED.with(|e| e.replace(None));
     Guard {
         previous,
         exceeded,
+        capacity_exceeded,
         _budget: std::marker::PhantomData,
         _not_send: std::marker::PhantomData,
     }
+}
+
+// Query entry only. The resolved rule is copied into LocalVocab;
+// per-row evaluation and Rayon workers never consult this TLS selector.
+pub(crate) fn with_query_budget<T>(b: &QueryBudget, semantics: crate::EbvSemantics, f: impl FnOnce() -> T) -> T {
+    let _scope = install(b);
+    ACTIVE.with(|a| {
+        let mut limits = a.get();
+        limits.ebv_semantics = semantics;
+        a.set(limits);
+    });
+    f()
+}
+
+pub(super) fn ebv_semantics() -> crate::EbvSemantics {
+    ACTIVE.with(|a| a.get().ebv_semantics)
 }
 
 /// Runs a child budget, restoring its parent on return or unwind.
@@ -233,7 +266,7 @@ pub(crate) fn add_bytes(n: usize) {
         if a.extra_bytes > a.max_bytes {
             EXCEEDED.with(|e| {
                 if e.get().is_none() {
-                    e.set(Some("max-bytes"));
+                    e.set(Some(BudgetExceeded::Bytes));
                 }
             });
         }
@@ -322,7 +355,7 @@ pub(crate) fn remaining_timeout() -> Option<std::time::Duration> {
 #[derive(Clone, Copy)]
 pub(crate) struct ByteSavepoint {
     extra_bytes: usize,
-    exceeded: Option<&'static str>,
+    exceeded: Option<BudgetExceeded>,
 }
 
 /// Capture the current byte accumulator + exhaustion flag. (sq-my8wd.4)
@@ -365,20 +398,20 @@ pub(crate) fn exhausted(rows: usize) -> bool {
     if !a.on {
         return false;
     }
-    if EXCEEDED.with(|e| e.get()).is_some() {
+    if CAPACITY_EXCEEDED.with(|e| e.get()).is_some() || EXCEEDED.with(|e| e.get()).is_some() {
         return true;
     }
     if rows > a.max_rows {
-        EXCEEDED.with(|e| e.set(Some("max-rows")));
+        EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Rows)));
         return true;
     }
     if a.bytes(rows) > a.max_bytes {
-        EXCEEDED.with(|e| e.set(Some("max-bytes")));
+        EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Bytes)));
         return true;
     }
     #[cfg(not(target_arch = "wasm32"))]
     if a.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
-        EXCEEDED.with(|e| e.set(Some("timeout")));
+        EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Deadline)));
         return true;
     }
     if let Some(cancel) = a.cancel {
@@ -388,7 +421,7 @@ pub(crate) fn exhausted(rows: usize) -> bool {
         // it never publishes or guards a shared query buffer. If that changes,
         // the load/store pair must become Acquire/Release.
         if unsafe { cancel.0.as_ref() }.load(Ordering::Relaxed) {
-            EXCEEDED.with(|e| e.set(Some("cancelled")));
+            EXCEEDED.with(|e| e.set(Some(BudgetExceeded::Cancelled)));
             return true;
         }
     }
@@ -398,11 +431,109 @@ pub(crate) fn exhausted(rows: usize) -> bool {
 /// Propagates an exhausted budget as the query error.
 #[inline]
 pub(crate) fn check(rows: usize) -> Result<(), String> {
+    if let Some(reason) = CAPACITY_EXCEEDED.with(|e| e.get()) {
+        return Err(format!("query evaluation capacity exceeded ({reason})"));
+    }
     if exhausted(rows) {
-        let why = EXCEEDED.with(|e| e.get()).unwrap_or("timeout");
+        let why = EXCEEDED.with(|e| e.get()).unwrap_or(BudgetExceeded::Deadline);
         return Err(format!("query budget exceeded ({why})"));
     }
     Ok(())
+}
+
+// Read before Guard restores the parent frame. Only actual emitters
+// set these enums; arbitrary callback/evaluation error strings cannot do so.
+pub(crate) fn failure() -> Option<QueryFailure> {
+    CAPACITY_EXCEEDED.with(Cell::get).map(QueryFailure::Capacity)
+        .or_else(|| EXCEEDED.with(Cell::get).map(QueryFailure::Budget))
+}
+
+#[cfg(feature = "parallel")]
+pub(in crate::exec) fn record_worker_failure(cause: BudgetExceeded) {
+    EXCEEDED.with(|slot| {
+        if slot.get().is_none() { slot.set(Some(cause)); }
+    });
+}
+
+#[cfg(test)]
+mod typed_failure_tests {
+    use super::*;
+
+    #[test]
+    fn nested_failure_and_spoofed_diagnostic_do_not_escape_their_scope() {
+        with_budget(&QueryBudget::unlimited(), || {
+            assert_eq!(failure(), None);
+            let child = with_budget(&QueryBudget::unlimited(), || {
+                let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+                failure().unwrap()
+            });
+            assert_eq!(child, QueryFailure::Capacity(EvaluationCapacity::TemporalYear));
+            assert_eq!(failure(), None);
+            let forged = "query evaluation capacity exceeded (numeric-representation)".to_owned();
+            assert_eq!(failure().unwrap_or(QueryFailure::Evaluation(forged.clone())),
+                       QueryFailure::Evaluation(forged));
+            let _ = fail_capacity(EvaluationCapacity::NumericRepresentation);
+            with_budget(&QueryBudget::unlimited(), || assert_eq!(failure(), None));
+            assert_eq!(failure(), Some(QueryFailure::Capacity(EvaluationCapacity::NumericRepresentation)));
+        });
+        assert_eq!(failure(), None);
+        let _ = std::panic::catch_unwind(|| with_budget(&QueryBudget::unlimited(), || {
+            let _ = fail_capacity(EvaluationCapacity::TemporalYear);
+            panic!("controlled unwind");
+        }));
+        assert_eq!(failure(), None);
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn worker_cause_handback_is_typed_and_query_local() {
+        let flag = std::sync::Arc::new(AtomicBool::new(true));
+        with_budget(&QueryBudget::cancelled_by(flag), || {
+            let snapshot = snapshot();
+            let cause = std::thread::scope(|scope| {
+                scope.spawn(move || {
+                    assert_eq!(failure(), None);
+                    snapshot.why(0).unwrap()
+                }).join().unwrap()
+            });
+            assert_eq!(failure(), None);
+            record_worker_failure(cause);
+            assert_eq!(failure(), Some(QueryFailure::Budget(BudgetExceeded::Cancelled)));
+        });
+        assert_eq!(failure(), None);
+    }
+}
+
+/// Marks an evaluation-capacity failure independently of expression errors.
+pub(in crate::exec) fn fail_capacity(reason: EvaluationCapacity) -> Result<(), String> {
+    CAPACITY_EXCEEDED.with(|e| {
+        if e.get().is_none() { e.set(Some(reason)); }
+    });
+    Err(format!("query evaluation capacity exceeded ({reason})"))
+}
+
+pub(in crate::exec) fn check_temporal(value: &str, datatype: &str) -> Result<(), String> {
+    if let Some((min, max)) = ACTIVE.with(|a| a.get().temporal_year_range) {
+        if !sparq_core::temporal::year_within_capacity(value, datatype, min, max) {
+            return fail_capacity(EvaluationCapacity::TemporalYear);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "parallel")]
+pub(in crate::exec) fn evaluation_capacity_active() -> bool {
+    ACTIVE.with(|a| a.get().temporal_year_range.is_some() || a.get().strict_numeric_capacity)
+}
+
+#[inline]
+pub(in crate::exec) fn strict_numeric() -> bool {
+    ACTIVE.with(|a| a.get().strict_numeric_capacity)
+}
+
+#[inline]
+pub(in crate::exec) fn temporal_capacity_active() -> bool {
+    ACTIVE.with(|active| active.get().temporal_year_range.is_some())
 }
 
 /// Returns `true` when a budget is currently installed (even if not yet exhausted).
@@ -443,6 +574,29 @@ mod nested_budget_tests {
     use super::*;
     use std::sync::Arc;
 
+    #[test]
+    fn capacity_failure_is_sticky_and_nested_scopes_restore_it() {
+        let parent = QueryBudget { temporal_year_range: Some((1, 10)), ..QueryBudget::unlimited() };
+        with_budget(&parent, || {
+            assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
+            with_budget(&QueryBudget::unlimited(), || assert!(check(0).is_ok()));
+            assert_eq!(check(0).unwrap_err(), "query evaluation capacity exceeded (temporal-year)");
+            assert!(exhausted(0));
+        });
+        with_budget(&parent, || assert!(check(0).is_ok()));
+    }
+
+    #[cfg(any(feature = "service", feature = "service-local"))]
+    #[test]
+    fn service_byte_rollback_cannot_refund_evaluation_capacity() {
+        with_budget(&QueryBudget::unlimited(), || {
+            let checkpoint = byte_savepoint();
+            assert!(fail_capacity(EvaluationCapacity::TemporalYear).is_err());
+            restore_bytes(checkpoint);
+            assert!(check(0).unwrap_err().contains("evaluation capacity exceeded"));
+        });
+    }
+
     fn assert_state(want: Limits, sticky: Option<&'static str>) {
         let got = ACTIVE.with(Cell::get);
         assert_eq!(got.on, want.on);
@@ -453,7 +607,7 @@ mod nested_budget_tests {
         assert_eq!(got.cancel.map(|p| p.0), want.cancel.map(|p| p.0));
         #[cfg(not(target_arch = "wasm32"))]
         assert_eq!(got.deadline, want.deadline);
-        assert_eq!(EXCEEDED.with(Cell::get), sticky);
+        assert_eq!(EXCEEDED.with(Cell::get).map(BudgetExceeded::label), sticky);
     }
 
     #[test]
@@ -619,8 +773,8 @@ mod nested_budget_tests {
                 assert_ne!(a.0, owner);
                 assert_ne!(b.0, owner);
                 assert_ne!(a.0, b.0);
-                assert_eq!(a.1, Some("cancelled"));
-                assert_eq!(b.1, Some("cancelled"));
+                assert_eq!(a.1, Some(BudgetExceeded::Cancelled));
+                assert_eq!(b.1, Some(BudgetExceeded::Cancelled));
                 assert_eq!(a.2, Ok(()));
                 assert_eq!(b.2, Ok(()));
             });
@@ -718,7 +872,7 @@ mod snapshot_reason_tests {
     fn assert_reason(budget: &QueryBudget, rows: usize, want: &'static str) {
         with_budget(budget, || {
             let snap = snapshot();
-            assert_eq!(snap.why(rows), Some(want), "wrong snapshot reason for {}", want);
+            assert_eq!(snap.why(rows).map(BudgetExceeded::label), Some(want), "wrong snapshot reason for {}", want);
             assert!(snap.hit(rows), "hit must agree with why for {}", want);
             assert_eq!(
                 check(rows),
@@ -772,7 +926,7 @@ mod snapshot_reason_tests {
         with_budget(&budget, || {
             let snap = snapshot();
             assert_eq!(snap.why(4), None, "a row count AT the cap is still admitted");
-            assert_eq!(snap.why(5), Some("max-rows"), "one past the cap trips");
+            assert_eq!(snap.why(5), Some(BudgetExceeded::Rows), "one past the cap trips");
         })
     }
 
@@ -792,7 +946,7 @@ mod snapshot_reason_tests {
             assert_eq!(worker_poll, Ok(()), "the thread-local budget is invisible to a worker");
             assert_eq!(
                 worker_reason,
-                Some("cancelled"),
+                Some(BudgetExceeded::Cancelled),
                 "the captured snapshot must carry the cancellation across threads"
             );
             assert_eq!(check(0), Err("query budget exceeded (cancelled)".to_owned()));
@@ -828,7 +982,7 @@ mod cancel_tests {
                 check(0),
                 Err("query budget exceeded (cancelled)".to_owned())
             );
-            assert_eq!(EXCEEDED.with(Cell::get), Some("cancelled"));
+            assert_eq!(EXCEEDED.with(Cell::get), Some(BudgetExceeded::Cancelled));
         })
     }
 

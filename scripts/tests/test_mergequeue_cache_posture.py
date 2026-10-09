@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [SONNET-4.6] sq-6vshe.15 — INSPECTION test for the merge-queue cache/artifact
+# sq-6vshe.15 — INSPECTION test for the merge-queue cache/artifact
 # posture (research/ci-mergequeue-speedup-2026-07.md §3.2, lever 2 of the CI
 # structural-speedup program sq-6vshe; extends sq-6vshe.5, which owns key schema
 # and backend sizing).
@@ -7,12 +7,13 @@
 # WHY a test at all: both properties this bead establishes are single YAML lines
 # that are invisible when absent. Nothing goes red if a future edit drops them —
 # CI just silently gets slower and the shared cache budget silently churns again.
-# So the two lines are PINNED here, structurally, over every workflow that still
-# triggers on `merge_group`:
+# So the two lines are PINNED here, structurally, over every workflow that can run
+# on a non-main ref: anything triggered by `pull_request` or `merge_group`, plus the
+# heavy lanes that are routinely dispatched on a branch (BRANCH_DISPATCH_LANES):
 #
-#   1. CACHE-SAVE DISCIPLINE. Every `Swatinem/rust-cache` step in a
-#      merge_group-triggered workflow must carry
-#      `save-if: ${{ github.ref == 'refs/heads/main' }}`.
+#   1. CACHE-SAVE DISCIPLINE. Every `Swatinem/rust-cache` step in such a workflow
+#      must carry `save-if: ${{ github.ref == 'refs/heads/main' }}` (extended from
+#      merge_group lanes to every branch-ref lane by the #6135 port).
 #      A save from a merge-queue entry is DEAD ON ARRIVAL: Actions cache scoping
 #      makes an entry written from `refs/heads/gh-readonly-queue/<base>/pr-<N>-<sha>`
 #      visible to that ref alone, and GitHub deletes that ref as soon as the entry
@@ -41,6 +42,7 @@
 # here, and no verdict on it should be inferred from this file's silence.
 #
 # Hermetic: stdlib only (no PyYAML, no network, no gh) so it runs anywhere.
+# (The file keeps its historical name; it now covers every branch-ref lane.)
 # Run:  python3 scripts/tests/test_mergequeue_cache_posture.py
 
 from __future__ import annotations
@@ -59,6 +61,10 @@ SAVE_IF_KEY = "save-if:"
 # stop main from ever seeding a cache, so every job would restore nothing forever.
 # The value is pinned exactly for that reason.
 SAVE_IF_VALUE = "${{ github.ref == 'refs/heads/main' }}"
+
+# Nightly/dispatch-only lanes whose documented way to run on a branch is
+# `gh workflow run <file> --ref <branch>`; a save from that run is branch-scoped.
+BRANCH_DISPATCH_LANES = ("ci.yml", "feature-matrix.yml", "formal-verification.yml", "fuzz.yml")
 
 NEXTEST_ARCHIVE_ARTIFACT = "nextest-archive"
 UPLOAD_ARTIFACT = "actions/upload-artifact@"
@@ -80,8 +86,8 @@ def _is_comment(line: str) -> bool:
     return line.lstrip().startswith("#")
 
 
-def triggers_on_merge_group(path: Path) -> bool:
-    """True iff the workflow's top-level `on:` block declares `merge_group`.
+def triggers_on(path: Path, event: str) -> bool:
+    """True iff the workflow's top-level `on:` block declares `event`.
 
     Comment lines are ignored: several workflows carry a prose note explaining
     that `merge_group` was REMOVED (2026-07-18 maintainer directive), and
@@ -103,7 +109,19 @@ def triggers_on_merge_group(path: Path) -> bool:
             break
     block = lines[start:end]
     return any(
-        re.match(r"^\s+merge_group:", l) for l in block if not _is_comment(l)
+        re.match(rf"^\s+{event}:", l) for l in block if not _is_comment(l)
+    )
+
+
+def triggers_on_merge_group(path: Path) -> bool:
+    return triggers_on(path, "merge_group")
+
+
+def runs_on_branch_refs(path: Path) -> bool:
+    return (
+        triggers_on(path, "merge_group")
+        or triggers_on(path, "pull_request")
+        or path.name in BRANCH_DISPATCH_LANES
     )
 
 
@@ -142,11 +160,11 @@ def with_value(body: list[str], key: str) -> str | None:
     return None
 
 
-def merge_group_workflows_with_rust_cache() -> list[Path]:
+def branch_ref_workflows_with_rust_cache() -> list[Path]:
     return sorted(
         p
         for p in WORKFLOWS.glob("*.yml")
-        if RUST_CACHE in p.read_text() and triggers_on_merge_group(p)
+        if RUST_CACHE in p.read_text() and runs_on_branch_refs(p)
     )
 
 
@@ -155,14 +173,15 @@ class TestParserNonVacuity(unittest.TestCase):
     returns nothing, every other test in this file passes while checking NOTHING.
     Pin the discovery itself."""
 
-    def test_ci_yml_is_discovered_as_a_merge_group_lane(self) -> None:
-        names = [p.name for p in merge_group_workflows_with_rust_cache()]
-        self.assertIn(
-            "ci.yml",
-            names,
-            "ci.yml is THE merge-queue pole (research §2.1) and carries rust-cache "
-            f"steps; the on:-block parser failed to see its merge_group trigger. Found: {names}",
-        )
+    def test_known_lanes_are_discovered(self) -> None:
+        names = [p.name for p in branch_ref_workflows_with_rust_cache()]
+        for lane in ("ci-fast.yml", "ci.yml", "python.yml"):
+            self.assertIn(
+                lane,
+                names,
+                f"{lane} carries rust-cache steps and runs on branch refs; the on:-block "
+                f"parser failed to see it. Found: {names}",
+            )
 
     def test_removed_merge_group_comment_is_not_a_trigger(self) -> None:
         # zk-toolchain.yml documents in PROSE that merge_group was removed. If the
@@ -178,7 +197,7 @@ class TestParserNonVacuity(unittest.TestCase):
         )
 
     def test_step_walker_finds_every_rust_cache_step(self) -> None:
-        for wf in merge_group_workflows_with_rust_cache():
+        for wf in branch_ref_workflows_with_rust_cache():
             text = wf.read_text()
             found = steps_using(text.split("\n"), RUST_CACHE)
             self.assertEqual(
@@ -191,18 +210,17 @@ class TestParserNonVacuity(unittest.TestCase):
 
 
 class TestCacheSaveDiscipline(unittest.TestCase):
-    def test_every_merge_group_rust_cache_step_saves_on_main_only(self) -> None:
-        for wf in merge_group_workflows_with_rust_cache():
+    def test_every_branch_ref_rust_cache_step_saves_on_main_only(self) -> None:
+        for wf in branch_ref_workflows_with_rust_cache():
             lines = _lines(wf)
             for idx, body in steps_using(lines, RUST_CACHE):
                 where = f"{wf.name}:{idx + 1}"
                 got = with_value(body, SAVE_IF_KEY)
                 self.assertIsNotNone(
                     got,
-                    f"{where}: rust-cache step in a merge_group-triggered workflow has no "
-                    f"`save-if`. Saves from a `gh-readonly-queue/*` ref are unrestorable "
-                    f"(the ref is deleted at merge) — add "
-                    f"`save-if: {SAVE_IF_VALUE}` (sq-6vshe.15 lever 2).",
+                    f"{where}: rust-cache step in a workflow that runs on branch refs has "
+                    f"no `save-if`. A branch-scoped save is unreachable from main and churns "
+                    f"the shared cache budget — add `save-if: {SAVE_IF_VALUE}` (sq-3sbrr).",
                 )
                 self.assertEqual(
                     got,
@@ -216,7 +234,7 @@ class TestCacheSaveDiscipline(unittest.TestCase):
         # `save-if` gates SAVING only — the whole design depends on queue refs and PR
         # heads still RESTORING main's entry. `lookup-only` would break that silently
         # (a cache "hit" that unpacks nothing).
-        for wf in merge_group_workflows_with_rust_cache():
+        for wf in branch_ref_workflows_with_rust_cache():
             lines = _lines(wf)
             for idx, body in steps_using(lines, RUST_CACHE):
                 self.assertIsNone(
@@ -224,6 +242,62 @@ class TestCacheSaveDiscipline(unittest.TestCase):
                     f"{wf.name}:{idx + 1}: rust-cache `lookup-only` would disable RESTORE; "
                     "sq-6vshe.15 restricts SAVING only.",
                 )
+
+
+def _ci_cache_steps_by_job() -> list[tuple[str, int, list[str]]]:
+    """(job id, 0-based line, body) for every rust-cache step in ci.yml."""
+    lines = _lines(CI_YML)
+    out = []
+    for idx, body in steps_using(lines, RUST_CACHE):
+        job = None
+        for j in range(idx, -1, -1):
+            m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", lines[j])
+            if m:
+                job = m.group(1)
+                break
+        out.append((job, idx, body))
+    return out
+
+
+class TestCiCacheKeys(unittest.TestCase):
+    """#5213/#5214 (ported from closed PRs #6195/#6220): every rust-cache step in ci.yml
+    names an explicit `shared-key`. `key:` alone still gets the job id appended, so it
+    is rename-fragile and can never be restored by another job."""
+
+    CONFORMANCE_SUITE = {
+        "geo-conformance", "solid-conformance", "odrl-conformance",
+        "text-oracle", "rsp-oracle", "jsonld-conformance",
+    }
+
+    def test_every_ci_cache_step_declares_shared_key(self) -> None:
+        steps = _ci_cache_steps_by_job()
+        self.assertTrue(steps, "no rust-cache steps found in ci.yml; re-point this test")
+        for job, idx, body in steps:
+            self.assertIsNotNone(
+                with_value(body, "shared-key:"),
+                f"ci.yml:{idx + 1} ({job}): rust-cache step without an explicit `shared-key`.",
+            )
+            self.assertIsNone(
+                with_value(body, "key:"),
+                f"ci.yml:{idx + 1} ({job}): use `shared-key`, not `key` — `key` still "
+                "appends the job id, so no other job can restore the entry.",
+            )
+
+    def test_conformance_suite_membership(self) -> None:
+        members = {
+            job for job, _, body in _ci_cache_steps_by_job()
+            if with_value(body, "shared-key:") == "conformance-suite"
+        }
+        self.assertEqual(members, self.CONFORMANCE_SUITE)
+
+    def test_coverage_engine_run_and_merge_share_one_key(self) -> None:
+        keys = {
+            job: with_value(body, "shared-key:")
+            for job, _, body in _ci_cache_steps_by_job()
+            if job in ("coverage-engine-run", "coverage-engine-merge")
+        }
+        self.assertEqual(set(keys), {"coverage-engine-run", "coverage-engine-merge"})
+        self.assertEqual(len(set(keys.values())), 1, f"keys differ: {keys}")
 
 
 class TestNextestArchiveDiet(unittest.TestCase):

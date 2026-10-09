@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] sq-tg6b — apply a tc/netem LAN or WAN profile to the loopback
+# sq-tg6b — apply a tc/netem LAN or WAN profile to the loopback
 # interface and run the MPC network-tier driver under it (Tier 3 of the MPC
 # benchmark matrix). The unshaped loopback run is Tier 2 (no privilege needed);
 # the LAN/WAN-shaped runs are Tier 3 and need CAP_NET_ADMIN (root / sudo) for
@@ -14,7 +14,7 @@
 # `netem_args_render_the_literature_profiles` pins the canonical strings).
 #
 # Profiles (design record §5.3 — MP-SPDZ / Secrecy / ORQ canonical values).
-# [OPUS-4.8] PR #96: the `tc` `delay` value is ONE-WAY; the emulated RTT is twice
+# PR #96: the `tc` `delay` value is ONE-WAY; the emulated RTT is twice
 # it (matching NetemProfile::rtt_ms() == 2 × delay_ms). Labels state the RTT.
 #   loopback : unshaped, ~0 RTT                                 (Tier 2 — no tc, no privilege)
 #   lan      : delay 1ms  rate 1000000kbit                      (1 Gbit/s,  1ms one-way ⇒ 2ms RTT)
@@ -88,7 +88,7 @@ run_cell() {
     apply_profile "$profile" "$iface"
     applied=1
   fi
-  # [OPUS-4.8] PR #96: crash-safety via an EXIT trap, NOT RETURN. Under `set -e` a
+  # PR #96: crash-safety via an EXIT trap, NOT RETURN. Under `set -e` a
   # failing `cargo run` aborts the whole script, so a RETURN trap (which only fires
   # on normal function return) would never run and the host would stay shaped. An
   # EXIT trap fires on any termination — including the `set -e` abort and Ctrl-C.

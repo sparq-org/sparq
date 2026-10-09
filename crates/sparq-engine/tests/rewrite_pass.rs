@@ -278,3 +278,26 @@ fn antijoin_declines_without_shared_variable() {
     assert_eq!(rewrite_query(raw.clone()), raw, "must decline: A and B share no variable");
     assert_eq!(result_bag(&g, &q), result_bag_raw(&g, &q), "on == off when the pass declines");
 }
+
+/// A zero-length-capable path endpoint is NOT substituted: `ex:missing ex:p* ?o` matches
+/// `(ex:missing, ex:missing)` on any graph, while `?s ex:p* ?o FILTER(?s = ex:missing)` only
+/// ranges `?s` over graph terms. Rewritten and un-rewritten results must agree.
+#[test]
+fn zero_length_path_endpoint_not_substituted() {
+    let g = load("<http://ex/a> <http://ex/q> <http://ex/b> .\n<http://ex/a> <http://ex/missing> <http://ex/b> .\n");
+    for path in ["ex:p*", "ex:p?", "^ex:p*", "ex:p*/ex:q?", "ex:p*|ex:q", "(ex:p?)+", "(ex:p*)+"] {
+        for (s, o) in [("?s", "?o"), ("?o", "?s")] {
+            let q = format!("{PFX} SELECT ?s ?o WHERE {{ {s} {path} {o} FILTER(?s = ex:missing) }}");
+            assert_eq!(result_bag(&g, &q), result_bag_raw(&g, &q), "{q}");
+            assert!(result_bag(&g, &q).is_empty(), "{q}");
+            let raw = SparqlParser::new().parse_query(&q).unwrap();
+            assert_eq!(rewrite_query(raw.clone()), raw, "must decline: {q}");
+        }
+    }
+    let c = format!("{PFX} CONSTRUCT {{ ?s ex:r ?o }} WHERE {{ ?s ex:p* ?o FILTER(?s = ex:missing) }}");
+    assert!(sparq_engine::construct_or_describe(&g, &c).unwrap().is_empty());
+    // A path that needs at least one step is still substituted.
+    let q = format!("{PFX} SELECT ?s ?o WHERE {{ ?s ex:p+ ?o FILTER(?s = ex:missing) }}");
+    let raw = SparqlParser::new().parse_query(&q).unwrap();
+    assert_ne!(rewrite_query(raw.clone()), raw);
+}

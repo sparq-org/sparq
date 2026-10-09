@@ -215,12 +215,16 @@ pub fn read_manifest(root: &Path, cat: &str) -> Result<Vec<Entry>, String> {
             .and_then(Value::as_str)
             .map(str::to_string);
         // [FABLE-5] sq-oy1f.27 — compact-manifest options (None elsewhere).
-        let compact_arrays = opt.and_then(|o| o.get("compactArrays")).and_then(Value::as_bool);
+        let compact_arrays = opt
+            .and_then(|o| o.get("compactArrays"))
+            .and_then(Value::as_bool);
         let compact_to_relative = opt
             .and_then(|o| o.get("compactToRelative"))
             .and_then(Value::as_bool);
         // [FABLE-5] sq-oy1f.29 — frame-manifest options (None elsewhere).
-        let omit_graph = opt.and_then(|o| o.get("omitGraph")).and_then(Value::as_bool);
+        let omit_graph = opt
+            .and_then(|o| o.get("omitGraph"))
+            .and_then(Value::as_bool);
         let ordered = opt.and_then(|o| o.get("ordered")).and_then(Value::as_bool);
         out.push(Entry {
             id,

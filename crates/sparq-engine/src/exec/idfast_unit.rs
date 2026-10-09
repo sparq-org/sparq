@@ -46,11 +46,11 @@ fn eval_filter_fast(
     expr: &Expression,
     nonlit_cols: &FxHashSet<usize>,
 ) -> Vec<Option<bool>> {
-    let mut compiled = compile_expr(expr, b);
+    let mut compiled = compile_expr(expr, b, local);
     idfast_rewrite(&mut compiled, nonlit_cols);
     b.rows
         .iter()
-        .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap()))
+        .map(|row| ebv3(&eval_compiled(graph, local, b, row, &compiled).unwrap(), crate::EbvSemantics::Rec2013))
         .collect()
 }
 
@@ -588,7 +588,7 @@ fn predrange_fires_on_q08_shape_witness() {
         Box::new(Expression::Variable(var("a"))),
         Box::new(Expression::Variable(var("b"))),
     );
-    let mut compiled = compile_expr(&expr, &b);
+    let mut compiled = compile_expr(&expr, &b, &LocalVocab::default());
     idfast_rewrite(&mut compiled, &cols);
     assert!(
         matches!(compiled, CompiledExpr::IdEqNonLit(..)),
@@ -732,7 +732,7 @@ fn mutation_wrong_shortcircuit_would_be_caught() {
     // ...so an inverted verdict (false) would be a detectable mismatch.
     let mutated = Value::Bool(false);
     assert_ne!(
-        ebv3(&mutated),
+        ebv3(&mutated, crate::EbvSemantics::Rec2013),
         reference_equal(&g, &local, id, id),
         "an inverted equal-id verdict must disagree with the oracle"
     );

@@ -1,6 +1,13 @@
 // [SONNET-4.6] #3602 — pure SELECT-result to node-link graph derivation for the workbench.
 
-import { COMMON_PREFIXES, type SparqlResults, type SparqlTerm } from "@sparq/client";
+import {
+  formatTerm,
+  termValue,
+  type SparqlResults,
+  type SparqlTerm,
+} from "@sparq/client";
+
+import { abbreviateIri } from "./iri-label.js";
 
 export const MAX_SELECT_GRAPH_NODES = 24;
 
@@ -33,20 +40,15 @@ function termKey(term: SparqlTerm): string {
     term.value,
     term.type === "literal" ? (term.datatype ?? "") : "",
     term.type === "literal" ? (term["xml:lang"] ?? "") : "",
+    // RDF 1.2 base direction is part of the literal's identity.
+    term.type === "literal" ? (term["its:dir"] ?? "") : "",
   ]);
 }
 
-function iriLabel(iri: string): string {
-  for (const { prefix, iri: namespace } of COMMON_PREFIXES) {
-    if (iri.startsWith(namespace)) return `${prefix}:${iri.slice(namespace.length)}`;
-  }
-  const cut = Math.max(iri.lastIndexOf("#"), iri.lastIndexOf("/"));
-  return cut >= 0 && cut < iri.length - 1 ? iri.slice(cut + 1) : iri;
-}
-
 function termLabel(term: SparqlTerm): string {
-  if (term.type === "uri") return iriLabel(term.value);
+  if (term.type === "uri") return abbreviateIri(term.value);
   if (term.type === "bnode") return `_:${term.value}`;
+  if (term.type === "triple") return formatTerm(term);
   return `"${term.value}"`;
 }
 
@@ -65,7 +67,7 @@ export function deriveSelectResultGraph(results: SparqlResults): SelectResultGra
     allNodes.add(id);
     if (!nodes.has(id)) {
       if (nodes.size >= MAX_SELECT_GRAPH_NODES) return null;
-      nodes.set(id, { id, label: termLabel(term), kind: term.type, value: term.value });
+      nodes.set(id, { id, label: termLabel(term), kind: term.type, value: termValue(term) ?? "" });
     }
     return id;
   };

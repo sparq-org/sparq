@@ -73,37 +73,37 @@ impl CmpOp {
 }
 
 /// A sargable FILTER predicate pushed down into a pattern scan: numeric (via the f64
-/// `numerics` cache) or temporal (via the `temporals` cache — dateTime/date vs a
+/// `numerics` cache) or temporal (via exact borrowed dateTime/date lexicals vs a
 /// temporal constant).
 #[derive(Clone, Copy)]
-pub(crate) enum ScanCmp {
+pub(crate) enum ScanCmp<'a> {
     Num(NumCmp),
     /// `value OP temporal-constant`. A row passes when the comparison is DECIDABLE and
     /// satisfies the operator; an indeterminate (mixed-timezone window), cross-family
     /// (dateTime vs date) or non-temporal operand is a FILTER type error — the row is
     /// excluded, which `false` reproduces exactly. (For `=`, cross-family is "known
     /// different" rather than an error — also excluded, also `false`.)
-    Temp(CmpOp, Temporal),
+    /// The cached approximate key of the constant (when it has one) only lets
+    /// [`temporal_cmp_of_id`] skip the exact key for rows far from the constant.
+    Temp(CmpOp, ExactTemporal<'a>, Option<Temporal>),
 }
 
-impl ScanCmp {
+impl ScanCmp<'_> {
     /// Human-readable comparison for EXPLAIN output, e.g. `> 28`.
     pub(crate) fn render(&self) -> String {
         match *self {
             ScanCmp::Num(c) => c.render(),
-            ScanCmp::Temp(op, t) => format!("{} temporal(instant {})", op.render(), t.instant),
+            ScanCmp::Temp(op, t, _) => format!("{} exact temporal {:?}", op.render(), t.timeline),
         }
     }
 
     /// Evaluates the pushed-down predicate against one scanned column id, through the
-    /// graph's numeric / temporal value cache — O(1), no term materialised.
+    /// numeric cache or exact borrowed temporal key; no term is materialised.
     #[inline]
     pub(super) fn test_id(&self, graph: &Graph, id: Id) -> bool {
         match *self {
             ScanCmp::Num(c) => graph.numeric_value(id).is_some_and(|x| c.test(x)),
-            ScanCmp::Temp(op, t) => {
-                graph.temporal_value(id).and_then(|v| Temporal::cmp_t(v, t)).is_some_and(|o| op.eval(o))
-            }
+            ScanCmp::Temp(op, t, approx) => temporal_cmp_of_id(graph, id, t, approx).is_some_and(|o| op.eval(o)),
         }
     }
 }
@@ -146,11 +146,13 @@ pub(super) fn inline_pass_values(cmp: ScanCmp) -> Option<(u32, u32)> {
 /// `"1.000000000000000001"^^xsd:decimal` collapses onto the f64 `1.0`), so such comparisons
 /// fall back to the exact general evaluator instead. Temporal pushdown is unaffected, and a
 /// graph with no f64-inexact decimal keeps the numeric fast path.
-pub(super) fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variable, ScanCmp)> {
-    fn lit_num(e: &Expression) -> Option<f64> {
+pub(super) fn extract_sargable<'a>(graph: &Graph, e: &'a Expression) -> Option<(Variable, ScanCmp<'a>)> {
+    if budget::strict_numeric() { return None; }
+    // (threshold, whether the float tier could round it) — see the decline below.
+    fn lit_num(e: &Expression) -> Option<(f64, bool)> {
         match e {
             Expression::Literal(l) if is_numeric_dt(l) => {
-                // sq-6b1lj: datatype-aware/trimmed constant (`numeric_cache_f64`).
+                // sq-6b1lj: datatype-aware, verbatim-validated constant (`numeric_cache_f64`).
                 // A datatype-ill-formed threshold (`"1.5"^^xsd:integer`) yields `None`, so
                 // `extract_sargable` DECLINES the numeric fast path and the FILTER takes the
                 // exact general comparison — which type-errors the ill-formed constant,
@@ -161,10 +163,19 @@ pub(super) fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variabl
                 // large integers or high-precision decimals) makes the sargable f64 scan
                 // unsafe; decline so the filter takes the exact general comparison path.
                 if sig_digits(l.value()) > 15 {
-                    None
-                } else {
-                    Some(v)
+                    return None;
                 }
+                // XPath compares an `xs:float` against a non-double operand in the FLOAT tier,
+                // which the untyped f64 cache cannot reproduce (`"0.1"^^xsd:float = 0.1` is
+                // true; their f64 images differ). A FLOAT constant is never pushed down (any
+                // integer/decimal row would need f32 promotion); an integer/decimal constant
+                // is unsafe only if it is not exactly an `f32`, and only against a float row.
+                // A double constant promotes every row to double: the f64 compare is exact.
+                let dt = l.datatype();
+                if dt == xsd::FLOAT {
+                    return None;
+                }
+                Some((v, dt != xsd::DOUBLE && f64::from(v as f32) != v))
             }
             _ => None,
         }
@@ -172,7 +183,7 @@ pub(super) fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variabl
     // A well-formed dateTime/dateTimeStamp/date constant: its cached-comparable value.
     // (The runtime compare through the cache is bit-identical to the per-row parse, so
     // no precision guard is needed — unlike the f64 numeric threshold above.)
-    fn lit_temp(e: &Expression) -> Option<Temporal> {
+    fn lit_temp(e: &Expression) -> Option<ExactTemporal<'_>> {
         match e {
             Expression::Literal(l) => temporal_of_lit(l),
             _ => None,
@@ -204,18 +215,23 @@ pub(super) fn extract_sargable(graph: &Graph, e: &Expression) -> Option<(Variabl
     };
     for (var, konst, op) in [(l, r, on_left), (r, l, on_right)] {
         let Some(v) = var_of(var) else { continue };
-        if let Some(c) = lit_num(konst) {
+        if let Some((c, float_tier_rounds)) = lit_num(konst) {
             // sq-lr2ii: decline the f64 numeric fast path when the graph holds an f64-inexact
             // decimal — the scan's per-row f64 compare could be wrong for it. A numeric
             // constant is never also a temporal one, so declining here yields `None` for this
             // orientation; the exact general evaluator handles the residual FILTER correctly.
-            if !graph.has_high_precision_decimal() {
+            // Likewise when a float row would compare against an `f32`-rounded constant.
+            if !graph.has_high_precision_decimal() && !(float_tier_rounds && graph.has_float_literal()) {
                 return Some((v, num_cmp(op, c)));
             }
             continue;
         }
         if let Some(t) = lit_temp(konst) {
-            return Some((v, ScanCmp::Temp(op, t)));
+            let approx = match konst {
+                Expression::Literal(l) => Temporal::of_lit(l.value(), l.datatype().as_str()),
+                _ => None,
+            };
+            return Some((v, ScanCmp::Temp(op, t, approx)));
         }
     }
     None
@@ -239,7 +255,7 @@ pub(super) fn pattern_var_pos(tp: &TriplePattern, var: &Variable) -> Option<usiz
 /// Splits FILTERs into per-pattern sargable numeric predicates (pushed into the
 /// scan of the first pattern that binds the variable) and the residual filters
 /// (applied normally afterwards).
-pub(crate) fn split_sargable(graph: &Graph, patterns: &[TriplePattern], filters: &[Expression]) -> (Vec<Option<(usize, ScanCmp)>>, Vec<Expression>) {
+pub(crate) fn split_sargable<'a>(graph: &Graph, patterns: &[TriplePattern], filters: &'a [Expression]) -> (Vec<Option<(usize, ScanCmp<'a>)>>, Vec<Expression>) {
     // zk-trace: a sargable FILTER pushed into the scan would make the scan
     // record only the POST-filter rows (the rows that PASSED), losing the
     // FILTER obligation and under-capturing the input set — the proof must

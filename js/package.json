@@ -1,6 +1,6 @@
 {
   "name": "@sparq-org/sparq",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "RDF/JS interface to the sparq SPARQL engine (Rust → WebAssembly): an in-memory, dictionary-encoded RDF store with SELECT/ASK and SPARQL Update.",
   "license": "MIT",
   "repository": {
@@ -24,7 +24,8 @@
       "types": "./wasm-node/sparq_wasm.d.ts",
       "require": "./wasm-node/sparq_wasm.js",
       "default": "./wasm-node/sparq_wasm.js"
-    }
+    },
+    "./wasm/*": "./wasm/*"
   },
   "files": [
     "dist",
@@ -43,7 +44,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "_copy:wasm": "rm -rf wasm && mkdir wasm && cp ../crates/sparq-wasm/pkg/sparq_wasm.js ../crates/sparq-wasm/pkg/sparq_wasm.d.ts ../crates/sparq-wasm/pkg/sparq_wasm_bg.wasm ../crates/sparq-wasm/pkg/sparq_wasm_bg.wasm.d.ts wasm/",
+    "_copy:wasm": "node scripts/copy-wasm.mjs",
     "build:wasm": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm",
     "build:wasm:lean": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false && npm run _copy:wasm",
     "_copy:wasm:node": "node scripts/copy-wasm-node.mjs",
@@ -73,11 +74,11 @@
     "linked-data"
   ],
   "devDependencies": {
-    "@rdfjs/dataset": "^2.0.2",
+    "@rdfjs/dataset": "^2.0.3",
     "@rdfjs/types": "^2.0.1",
-    "@types/n3": "^1.26.1",
-    "@types/node": "^26.1.2",
-    "n3": "^2.1.1",
+    "@types/n3": "^1.26.4",
+    "@types/node": "^26.6.4",
+    "n3": "^2.13.8",
     "typescript": "^6.0.3"
   },
   "dependencies": {

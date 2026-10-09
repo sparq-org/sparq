@@ -1,7 +1,7 @@
 use super::*;
 
 pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult, String> {
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     // Final budget gate: converts a row-capped/timed-out evaluation (including the
     // uninstrumented rayon branches) into the error before the expensive term
@@ -25,7 +25,7 @@ pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult,
         col_of.iter().map(|c| c.and_then(|i| term_of(graph, &local, row[i]))).collect()
     };
     #[cfg(feature = "parallel")]
-    let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD {
+    let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         bindings.rows.par_iter().map(materialise).collect()
     } else {
@@ -220,7 +220,7 @@ pub(super) fn single_pattern_scan_json_emit(
     // the overrun to ~one chunk per worker. A blanket !budget-active → true flip is
     // REJECTED (see `parallel_json_fanout`).
     #[cfg(feature = "parallel")]
-    if scan_rows.len() >= PAR_THRESHOLD {
+    if scan_rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         if let Some(limits) = budget::parallel_json_fanout() {
             use rayon::prelude::*;
             // One string per chunk (≈ per worker), not per row — avoids one heap
@@ -259,7 +259,8 @@ pub(super) fn single_pattern_scan_json_emit(
             // deadline-only budget, the now-past wall clock: sets the sticky flag the
             // caller's `budget::check(0)` converts into the budget error (a chunk skipped
             // above means the deadline is globally past, so this fires deterministically).
-            let _ = budget::exhausted(frags.iter().map(|(n, _)| n).sum());
+            let total: usize = frags.iter().map(|(n, _)| n).sum();
+            budget::exhausted(total);
             // Accumulate into `pending` and hand a chunk to `emit` at each flush boundary
             // (byte-identical concatenation to the old `emit_chunk` Vec layout — only the
             // chunk *boundaries* differ, and the concat is what the byte-identity contract
@@ -275,14 +276,26 @@ pub(super) fn single_pattern_scan_json_emit(
                 }
                 wrote = true;
                 pending.push_str(&f);
-                if flush.is_some_and(|n| pending.len() >= n)
-                    && emit(std::mem::take(&mut pending)).is_break()
-                {
-                    return Some(());
+                if flush.is_some_and(|n| pending.len() >= n) {
+                    if emit(std::mem::take(&mut pending)).is_break() {
+                        return Some(());
+                    }
+                    // A cancellation (possibly set by the sink itself) or a deadline that
+                    // passed while emitting stops the stream here, rechecked per chunk.
+                    if budget::exhausted(total) {
+                        return Some(());
+                    }
                 }
             }
-            pending.push_str("]}}");
-            let _ = emit(pending);
+            // Never close the document over a result the budget cut short (#4239): the
+            // caller reports the abort, and a sink that saw `]}}` would hold a complete-
+            // looking but truncated body. Rechecked here, not cached from before emission.
+            if !budget::exhausted(total) {
+                pending.push_str("]}}");
+            }
+            if !pending.is_empty() {
+                let _ = emit(pending);
+            }
             return Some(());
         }
     }
@@ -301,13 +314,20 @@ pub(super) fn single_pattern_scan_json_emit(
         }
         written += 1;
         write_row(row, &mut s);
-        if flush.is_some_and(|n| s.len() >= n) && emit(std::mem::take(&mut s)).is_break() {
+        if flush.is_some_and(|n| s.len() >= n)
+            && (emit(std::mem::take(&mut s)).is_break() || budget::exhausted(written))
+        {
             return Some(());
         }
     }
-    let _ = budget::exhausted(written); // final row-count gate (sticky)
-    s.push_str("]}}");
-    let _ = emit(s);
+    // Final row-count gate (sticky). An exhausted budget leaves the document unclosed
+    // (#4239), as above.
+    if !budget::exhausted(written) {
+        s.push_str("]}}");
+    }
+    if !s.is_empty() {
+        let _ = emit(s);
+    }
     Some(())
 }
 
@@ -373,7 +393,7 @@ pub fn eval_select_json_emit(
         budget::check(0)?; // sticky: the streaming loop may have stopped mid-scan
         return Ok(());
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
 
@@ -422,7 +442,7 @@ pub fn eval_select_json_emit(
     // mid-serialize and gate the final chunk on `budget::check` — a late-but-complete
     // result is reported as the budget error, never returned as if it were in time.
     #[cfg(feature = "parallel")]
-    if bindings.rows.len() >= PAR_THRESHOLD {
+    if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // Limit snapshot the workers re-check at each par-chunk boundary (the installing
         // thread's sticky flag is out of reach inside rayon).
@@ -517,10 +537,11 @@ pub fn eval_ask(graph: &Graph, pattern: &GraphPattern) -> Result<bool, String> {
     let simplified = ask_simplify(pattern);
     // Exact-count fast path (a single-pattern BGP answers from the index).
     if let Some(n) = try_count(graph, &simplified) {
+        budget::check(0)?;
         return Ok(n > 0);
     }
     let sliced = GraphPattern::Slice { inner: Box::new(simplified), start: 0, length: Some(1) };
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let b = eval_modified(graph, &mut local, &sliced)?;
     budget::check(b.rows.len())?;
     Ok(!b.rows.is_empty())
@@ -566,9 +587,10 @@ pub(super) fn ask_simplify(p: &GraphPattern) -> GraphPattern {
 /// evaluates and counts the rows.
 pub fn count_select(graph: &Graph, pattern: &GraphPattern) -> Result<usize, String> {
     if let Some(n) = try_count(graph, pattern) {
+        budget::check(0)?;
         return Ok(n);
     }
-    let mut local = LocalVocab::default();
+    let mut local = LocalVocab::for_dataset(graph);
     let bindings = eval_modified(graph, &mut local, pattern)?;
     budget::check(bindings.rows.len())?; // final gate (see eval_select)
     Ok(bindings.rows.len())

@@ -1,4 +1,4 @@
-# [FABLE-5] Standing nightly metamorphic (TLP/NoREC) lane (bead sq-3dyje.9,
+# Standing nightly metamorphic (TLP/NoREC) lane (bead sq-3dyje.9,
 # design record research/testing-strategy-assessment-2026-07.md §7.3).
 #
 # WHAT: drives crates/sparq-metamorph's SINGLE-ENGINE metamorphic oracles — TLP
@@ -43,8 +43,7 @@
 #
 # TRIGGER — NIGHTLY/HEAVY tier ONLY (schedule + workflow_dispatch), like
 # differential.yml: this workflow never produces a check-run on a PR head
-# commit, so the `ci-summary / gate` aggregator never sees it and the per-PR
-# gate is unaffected. The per-PR guarantee for this crate is its self-test suite
+# commit. The per-PR guarantee for this crate is its self-test suite
 # (which includes the driver's non-vacuity tests) in the normal CI lanes.
 #
 # Third-party actions are pinned by full commit SHA (supply-chain hardening); the
@@ -108,7 +107,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Rust (preinstalled stable)
-        # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
+        # CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
         # toolchain install stable` re-downloads the whole toolchain whenever
         # the image lags the newest release. Use the preinstalled one —
@@ -210,7 +209,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .beads/issues.jsonl
           git commit -m "chore(beads): auto-file metamorph P1 bug bead (${SHARD}) [skip ci]" \
-                     -m "Nightly metamorphic lane finding (sq-3dyje.9). [FABLE-5]"
+                     -m "Nightly metamorphic lane finding (sq-3dyje.9)."
           # Best-effort push, exactly the differential.yml fail-soft pattern: the
           # protected-main ruleset (GH013) rejects direct pushes until a bypass
           # exists (sq-roe3); the GitHub issue filed above is the reliable channel.

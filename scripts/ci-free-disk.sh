@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [OPUS-4.8] Reclaim disk on a GitHub-hosted ubuntu runner before the heavy
+# Reclaim disk on a GitHub-hosted ubuntu runner before the heavy
 # build / nextest-archive / sharded-test steps (bead sq-c76x).
 #
 # WHY: the load-aware test shards were recurringly failing with
@@ -55,7 +55,7 @@ for p in "${PURGE_PATHS[@]}"; do
   fi
 done
 
-# [OPUS-4.8] sq-6uc7: the hosted-toolcache root (env-named, NOT a fixed path) —
+# sq-6uc7: the hosted-toolcache root (env-named, NOT a fixed path) —
 # folded from the closed #462. It holds preinstalled language runtimes
 # (Node/Python/Go/…) keyed by version that this Rust workspace never uses; on a
 # hosted image it is several GB. Handled SEPARATELY from PURGE_PATHS because:

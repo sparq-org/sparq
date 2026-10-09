@@ -1,7 +1,7 @@
 # OpenSSF Scorecard (sq-hdfn) — automated assessment of the repo's security
 # posture (branch protection, token permissions, pinned deps, SAST, etc.).
 #
-# [OPUS-4.8] sq-toze.15 — Scorecard's value here is the PUBLIC SCORE + BADGE
+# sq-toze.15 — Scorecard's value here is the PUBLIC SCORE + BADGE
 # (`publish_results: true` → the OpenSSF dashboard / api.securityscorecards.dev),
 # NOT the GitHub Security tab. We DO NOT upload the SARIF to code-scanning: every
 # Scorecard "finding" is a posture SCORE, not a code vulnerability, and the ones
@@ -11,7 +11,7 @@
 # (the standing requirement is ZERO open code-scanning alerts). The `Vulnerabilities`
 # check likewise only re-surfaces the `unmaintained`/availability RustSec advisories
 # already triaged-with-a-bead in `deny.toml` (RUSTSEC-2024-0436 `paste`, RUSTSEC-2025-0141
-# `bincode`, RUSTSEC-2026-0194/0195 `quick-xml`) — no fixable advisory. ([OPUS-5]
+# `bincode`, RUSTSEC-2026-0194/0195 `quick-xml`) — no fixable advisory. (
 # RUSTSEC-2025-0134 `rustls-pemfile` / sq-5ah3p is gone from this list: the mTLS PEM parse
 # migrated to `rustls-pki-types`' `PemObject`, so the archived crate left the tree.)
 # So Scorecard stays as
@@ -29,6 +29,11 @@ on:
   schedule:
     - cron: "27 6 * * 1" # Mondays 06:27 UTC
   workflow_dispatch:
+
+# A newer push to main supersedes a queued or running analysis of an older commit.
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
 
 # Top-level: read-only. The analysis job opts into exactly what it needs.
 permissions:

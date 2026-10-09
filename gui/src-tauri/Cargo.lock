@@ -99,9 +99,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.102"
+version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
+checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "atk"
@@ -149,6 +149,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bincode"
@@ -609,9 +615,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "dc74980687109a3b14c72fd458107bf0baa1da1a1a805e178d15501ba9b86d9d"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -2651,13 +2657,13 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "plist"
-version = "1.9.0"
+version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "092791278e026273c1b65bbdcfbba3a300f2994c896bd01ab01da613c29c46f1"
+checksum = "2896bade328c13f7042a297ea5ac5b0951f6cf989dea5f32c2fd98da398195cb"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "indexmap 2.14.0",
- "quick-xml 0.39.4",
+ "quick-xml 0.42.0",
  "serde",
  "time",
 ]
@@ -2782,18 +2788,18 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.39.4"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "memchr",
 ]
 
 [[package]]
 name = "quick-xml"
-version = "0.41.0"
+version = "0.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
 dependencies = [
  "memchr",
 ]
@@ -3586,22 +3592,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "spargebra"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46715eb957d1fe960cbbc0b713da8f78e2cb19df315b48fb09c9467a1c84f656"
-dependencies = [
- "oxilangtag",
- "oxiri",
- "oxrdf",
- "peg 0.8.6",
- "rand 0.9.4",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "sparq-core"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "memchr",
@@ -3614,7 +3606,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "md-5",
  "oxiri",
@@ -3625,26 +3617,27 @@ dependencies = [
  "sha1",
  "sha2 0.11.0",
  "smallvec",
- "spargebra",
  "sparq-core",
  "sparq-engine-serialize",
  "sparq-engine-service",
+ "sparq-spargebra",
  "sparq-substrate",
  "uuid",
 ]
 
 [[package]]
 name = "sparq-engine-serialize"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
+ "rustc-hash",
  "sparq-core",
  "sparq-jsonld",
 ]
 
 [[package]]
 name = "sparq-engine-service"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "quick-xml 0.41.0",
@@ -3657,7 +3650,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-forms"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "getrandom 0.3.4",
  "oxrdf",
@@ -3668,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-gui"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bzip2",
  "flate2",
@@ -3690,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-hdt"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "bzip2",
  "crc",
@@ -3703,11 +3696,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-jsonld"
-version = "0.1.3"
+version = "0.1.4"
 
 [[package]]
 name = "sparq-policy"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "sparq-core",
@@ -3716,9 +3709,11 @@ dependencies = [
 
 [[package]]
 name = "sparq-reason"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
+ "oxiri",
  "oxrdf",
+ "percent-encoding",
  "regex",
  "rustc-hash",
  "smallvec",
@@ -3728,33 +3723,45 @@ dependencies = [
 
 [[package]]
 name = "sparq-shacl"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "oxttl",
  "regex",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
+ "sparq-spargebra",
 ]
 
 [[package]]
 name = "sparq-solid"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "oxrdf",
  "rustc-hash",
- "spargebra",
  "sparq-core",
  "sparq-engine",
  "sparq-policy",
  "sparq-reason",
+ "sparq-spargebra",
+]
+
+[[package]]
+name = "sparq-spargebra"
+version = "0.4.6"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "oxrdf",
+ "peg 0.8.6",
+ "rand 0.9.4",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf",

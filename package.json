@@ -14,7 +14,7 @@
   "devDependencies": {
     "@solid/acl-check": "^0.4.5",
     "@solidlab/policy-engine": "^0.0.2",
-    "n3": "^2.1.1"
+    "n3": "^2.13.8"
   },
   "overrides": {
     "parse-url": "8.1.0",
@@ -23,8 +23,11 @@
     "got": "11.8.5",
     "git-up": "7.0.0",
     "next": {
-      "postcss": "8.5.15"
+      "postcss": "8.5.29"
     },
-    "postcss": "8.5.15"
+    "postcss": "8.5.29",
+    "compression": "1.8.2",
+    "http-cache-semantics": "4.3.0",
+    "basic-ftp": "6.2.2"
   }
 }

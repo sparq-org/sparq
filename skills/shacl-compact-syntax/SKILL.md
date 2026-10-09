@@ -9,7 +9,7 @@ Use `sparq-shaclc` as a separate opt-in parser/writer crate. Its crate-root API
 emits `oxrdf::Triple` values; add `sparq-shacl` only when the resulting shapes
 must be validated against data.
 
-<!-- [GPT-5.6] PR #2136: public usage surface for sparq-shaclc. -->
+<!-- PR #2136: public usage surface for sparq-shaclc. -->
 
 ## Parse shapes
 

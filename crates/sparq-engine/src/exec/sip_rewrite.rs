@@ -6,8 +6,8 @@ pub(super) const SIP_MAX_SMALL_ROWS: usize = 64;
 
 /// Certain (always-bound) REAL variables of a graph pattern — a sound
 /// UNDER-approximation of the SPARQL bound set: it never adds a variable that some
-/// solution may leave unbound, so any variable it reports is safe to substitute as a
-/// constant. Blank-node slots are excluded (we never substitute into them).
+/// solution may leave unbound. These are substitution candidates; `subst_pattern`
+/// separately checks the algebra and expression scopes. Blank-node slots are excluded.
 pub(super) fn certain_vars(p: &GraphPattern, out: &mut FxHashSet<Variable>) {
     use GraphPattern as G;
     // A directly-positioned (non-quoted, non-blank) query variable of a term slot.
@@ -300,87 +300,58 @@ pub(super) fn nnp_var_ref(p: &NamedNodePattern) -> Option<&Variable> {
     }
 }
 
-/// Substitutes each `var -> IRI` in `sub` throughout a graph pattern, returning `None`
-/// when substitution is not clearly sound (e.g. a `SERVICE`, a sub-`SELECT`/aggregate
-/// that projects a substituted variable, or a `BOUND(?v)` on a substituted variable) —
-/// in which case the caller falls back to cold evaluation.
+/// Restricts positive patterns by IRI bindings without crossing scopes.
+/// Both ordinary SIP and the theta anti-join seed path use this admission rule.
+/// Other algebra uses ordinary evaluation: constant replacement is not selection
+/// through binding, negative, nullable-domain, or solution-modifier boundaries.
 pub(super) fn subst_pattern(p: &GraphPattern, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Option<GraphPattern> {
     use GraphPattern as G;
     Some(match p {
         G::Bgp { patterns } => G::Bgp {
             patterns: patterns.iter().map(|tp| subst_triple(tp, sub)).collect::<Option<Vec<_>>>()?,
         },
-        G::Path { subject, path, object } => G::Path {
-            subject: subst_term(subject, sub)?,
-            path: path.clone(),
-            object: subst_term(object, sub)?,
+        G::Path { subject, path, object } => {
+            // Variable-bearing triple terms are decomposed only in
+            // BGPs. Grounding one here would erase the ordinary path error.
+            if matches!(subject, TermPattern::Triple(_)) || matches!(object, TermPattern::Triple(_)) {
+                return None;
+            }
+            let substituted = |term: &TermPattern| {
+                matches!(term, TermPattern::Variable(v) if sub.contains_key(v))
+            };
+            if path_nullable(path) && (substituted(subject) || substituted(object)) {
+                return None;
+            }
+            G::Path {
+                subject: subst_term(subject, sub)?,
+                path: path.clone(),
+                object: subst_term(object, sub)?,
+            }
         },
         G::Join { left, right } => G::Join {
             left: Box::new(subst_pattern(left, sub)?),
             right: Box::new(subst_pattern(right, sub)?),
         },
-        G::LeftJoin { left, right, expression } => G::LeftJoin {
-            left: Box::new(subst_pattern(left, sub)?),
-            right: Box::new(subst_pattern(right, sub)?),
-            expression: match expression {
-                Some(e) => Some(subst_expr(e, sub)?),
-                None => None,
-            },
-        },
-        G::Filter { expr, inner } => G::Filter {
-            expr: subst_expr(expr, sub)?,
-            inner: Box::new(subst_pattern(inner, sub)?),
-        },
         G::Union { left, right } => G::Union {
             left: Box::new(subst_pattern(left, sub)?),
             right: Box::new(subst_pattern(right, sub)?),
         },
-        G::Graph { name, inner } => G::Graph {
-            name: subst_nnp(name, sub),
-            inner: Box::new(subst_pattern(inner, sub)?),
-        },
-        G::Minus { left, right } => G::Minus {
-            left: Box::new(subst_pattern(left, sub)?),
-            right: Box::new(subst_pattern(right, sub)?),
-        },
-        G::Extend { inner, variable, expression } => {
-            // A BIND target that is itself a substituted variable would shadow the
-            // constant — bail conservatively.
-            if sub.contains_key(variable) {
+        G::Filter { expr, inner } => {
+            // A binding supplied by a sibling is not in this FILTER's input.
+            // Rewriting it would turn an unbound/error expression into a value.
+            let mut bound = FxHashSet::default();
+            certain_vars(inner, &mut bound);
+            if !sub.keys().all(|v| bound.contains(v)) {
                 return None;
             }
-            G::Extend {
+            G::Filter {
+                expr: subst_expr(expr, sub)?,
                 inner: Box::new(subst_pattern(inner, sub)?),
-                variable: variable.clone(),
-                expression: subst_expr(expression, sub)?,
             }
-        }
-        G::Values { variables, bindings } => {
-            if variables.iter().any(|v| sub.contains_key(v)) {
-                return None;
-            }
-            G::Values { variables: variables.clone(), bindings: bindings.clone() }
-        }
-        G::OrderBy { inner, expression } => G::OrderBy {
-            inner: Box::new(subst_pattern(inner, sub)?),
-            expression: expression.iter().map(|oe| subst_order(oe, sub)).collect::<Option<Vec<_>>>()?,
         },
-        G::Distinct { inner } => G::Distinct { inner: Box::new(subst_pattern(inner, sub)?) },
-        G::Reduced { inner } => G::Reduced { inner: Box::new(subst_pattern(inner, sub)?) },
-        G::Slice { inner, start, length } => G::Slice {
-            inner: Box::new(subst_pattern(inner, sub)?),
-            start: *start,
-            length: *length,
-        },
-        // A sub-SELECT / GROUP that projects a substituted variable would emit it
-        // unbound; if it does not project any, the substitution is still sound.
-        G::Project { inner, variables } => {
-            if variables.iter().any(|v| sub.contains_key(v)) {
-                return None;
-            }
-            G::Project { inner: Box::new(subst_pattern(inner, sub)?), variables: variables.clone() }
-        }
-        // Aggregation and everything else (Service, …): conservative bail.
+        // MINUS depends on domains and its full right relation; OPTIONAL and
+        // binders introduce scopes; projection/modifiers can change which rows
+        // exist. Graph/service boundaries also stay outside this positive shape.
         _ => return None,
     })
 }
@@ -413,13 +384,6 @@ pub(super) fn subst_nnp(p: &NamedNodePattern, sub: &FxHashMap<Variable, oxrdf::N
         },
         NamedNodePattern::NamedNode(_) => p.clone(),
     }
-}
-
-pub(super) fn subst_order(oe: &OrderExpression, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Option<OrderExpression> {
-    Some(match oe {
-        OrderExpression::Asc(e) => OrderExpression::Asc(subst_expr(e, sub)?),
-        OrderExpression::Desc(e) => OrderExpression::Desc(subst_expr(e, sub)?),
-    })
 }
 
 pub(super) fn subst_expr(e: &Expression, sub: &FxHashMap<Variable, oxrdf::NamedNode>) -> Option<Expression> {
@@ -456,11 +420,16 @@ pub(super) fn subst_expr(e: &Expression, sub: &FxHashMap<Variable, oxrdf::NamedN
             bx(subst_expr(f, sub))?,
         ),
         E::Coalesce(list) => E::Coalesce(list.iter().map(|x| subst_expr(x, sub)).collect::<Option<Vec<_>>>()?),
-        E::FunctionCall(f, args) => E::FunctionCall(
-            f.clone(),
-            args.iter().map(|x| subst_expr(x, sub)).collect::<Option<Vec<_>>>()?,
-        ),
-        E::Exists(gp) => E::Exists(Box::new(subst_pattern(gp, sub)?)),
+        E::FunctionCall(f, args) => {
+            use spargebra::algebra::Function as F;
+            // Volatile or externally supplied behavior must not be duplicated
+            // across the optimizer's binding partitions.
+            if matches!(f, F::Now | F::Rand | F::Uuid | F::StrUuid | F::BNode | F::Custom(_)) {
+                return None;
+            }
+            E::FunctionCall(f.clone(), args.iter().map(|x| subst_expr(x, sub)).collect::<Option<Vec<_>>>()?)
+        },
+        E::Exists(_) => return None,
         // `BOUND(?v)` on a substituted (certainly-bound) variable is always true, but
         // rewriting it changes nothing measurable here — bail conservatively rather
         // than synthesise a boolean literal.

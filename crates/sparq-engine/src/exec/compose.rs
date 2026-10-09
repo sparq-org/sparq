@@ -58,7 +58,7 @@ pub(super) fn left_outer_join(graph: &Graph, local: &mut LocalVocab, left: Bindi
                 None => true,
                 Some(e) => {
                     let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                    effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                 }
             };
             if keep {
@@ -123,7 +123,7 @@ pub(super) fn left_outer_merge(
                     None => true,
                     Some(e) => {
                         let tmp = Bindings { vars: out_vars.clone(), rows: vec![], sorted_by: None };
-                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?)
+                        effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics)
                     }
                 };
                 if keep {

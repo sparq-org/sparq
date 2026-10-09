@@ -81,7 +81,9 @@ fn batch_returns_one_response_per_request_in_order() {
             {"jsonrpc":"2.0","id":"two","method":"tools/list"}]"#,
     );
 
-    let batch = response.as_array().expect("a batch is answered with an array");
+    let batch = response
+        .as_array()
+        .expect("a batch is answered with an array");
     assert_eq!(batch.len(), 2, "one response per non-notification element");
     assert_eq!(batch[0]["id"], 1);
     assert_eq!(batch[0]["result"], serde_json::json!({}));
@@ -99,7 +101,9 @@ fn batch_omits_notification_entries() {
             {"jsonrpc":"2.0","method":"nonesuch"}]"#,
     );
 
-    let batch = response.as_array().expect("a batch is answered with an array");
+    let batch = response
+        .as_array()
+        .expect("a batch is answered with an array");
     assert_eq!(
         batch.len(),
         1,
@@ -149,7 +153,9 @@ fn malformed_batch_element_does_not_void_the_rest_of_the_batch() {
             {"jsonrpc":"2.0","id":3,"method":"ping"}]"#,
     );
 
-    let batch = response.as_array().expect("a batch is answered with an array");
+    let batch = response
+        .as_array()
+        .expect("a batch is answered with an array");
     assert_eq!(batch.len(), 3);
     assert_eq!(batch[0]["id"], 1);
     assert!(batch[0]["error"].is_null(), "the valid elements still run");
@@ -166,7 +172,10 @@ fn malformed_batch_element_does_not_void_the_rest_of_the_batch() {
 fn batch_dispatch_sees_state_written_by_an_earlier_element() {
     // Elements are dispatched in order against the SAME server, so a batch is not a
     // set of independent calls: element 2 must observe element 1's write.
-    let config = ServerConfig { allow_update: true, ..ServerConfig::default() };
+    let config = ServerConfig {
+        allow_update: true,
+        ..ServerConfig::default()
+    };
     let mut server = McpServer::with_config(graph(), config);
     let response = call(
         &mut server,
@@ -174,7 +183,9 @@ fn batch_dispatch_sees_state_written_by_an_earlier_element() {
             {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"query","arguments":{"sparql":"SELECT ?n WHERE { <http://ex/bob> <http://ex/name> ?n }"}}}]"#,
     );
 
-    let batch = response.as_array().expect("a batch is answered with an array");
+    let batch = response
+        .as_array()
+        .expect("a batch is answered with an array");
     assert_eq!(batch.len(), 2);
     let rows = batch[1]["result"]["content"][0]["text"]
         .as_str()

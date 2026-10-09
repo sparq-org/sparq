@@ -18,7 +18,8 @@ const DATA: &str = "<http://ex/a> <http://ex/p> <http://ex/b> .\n";
 
 /// Write `DATA` to a test-unique file and return its path (the caller removes it).
 fn data_file(tag: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("sparq-mcp-bin-{}-{}.nt", tag, std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("sparq-mcp-bin-{}-{}.nt", tag, std::process::id()));
     std::fs::write(&path, DATA).expect("write test data");
     path
 }
@@ -80,7 +81,12 @@ fn serves_the_loaded_dataset_read_only_by_default() {
     std::fs::remove_file(&path).ok();
 
     assert!(ok, "the binary exited non-zero");
-    assert_eq!(responses.len(), 4, "one response per request: {:?}", responses);
+    assert_eq!(
+        responses.len(),
+        4,
+        "one response per request: {:?}",
+        responses
+    );
     assert_eq!(responses[0]["result"]["serverInfo"]["name"], "sparq-mcp");
 
     // The DATA_FILE really was loaded into the served graph.
@@ -136,7 +142,9 @@ fn allow_update_flag_enables_the_mutating_tool() {
 fn without_a_data_file_it_serves_an_empty_graph() {
     let (responses, ok) = run(
         &[],
-        &[r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stats","arguments":{}}}"#],
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"stats","arguments":{}}}"#,
+        ],
     );
     assert!(ok, "the binary exited non-zero");
     let stats: Value = serde_json::from_str(tool_text(&responses[0])).expect("stats json");

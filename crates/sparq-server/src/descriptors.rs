@@ -71,28 +71,17 @@ const SD_SPARQL_UPDATE: &str = "http://www.w3.org/ns/sparql-service-description#
 /// namespace (`http://www.w3.org/ns/sparql#`), advertised via `sd:supportedVersion`. These are
 /// the version IRIs the SPARQL 1.2 SD (ED) defines: `version-1.0`, `version-1.1`,
 /// `version-1.2-basic` (SPARQL 1.2 Query with RDF 1.2 BASIC conformance) and `version-1.2` (full
-/// RDF 1.2 conformance). sparq advertises exactly the versions whose W3C conformance suite this
-/// build genuinely passes — see [`Capabilities::sparql_versions`] for the honesty gate.
+/// RDF 1.2 conformance). See [`Capabilities::sparql_versions`] for the emitted labels.
 const SPARQL_VERSION_1_0: &str = "http://www.w3.org/ns/sparql#version-1.0";
 /// [OPUS-4.8] sq-2msb: `sparql:version-1.1`.
 const SPARQL_VERSION_1_1: &str = "http://www.w3.org/ns/sparql#version-1.1";
-/// [OPUS-4.8] sq-2msb: `sparql:version-1.2` — FULL SPARQL 1.2 / RDF 1.2 conformance.
-const SPARQL_VERSION_1_2: &str = "http://www.w3.org/ns/sparql#version-1.2";
-
-/// [OPUS-4.8] sq-2msb (gh-917): the SPARQL language VERSIONS this build conformance-verifies, in
-/// ascending order — the single documented source of truth for the `sd:supportedVersion`
-/// posture, so the honesty gate lives in ONE place.
+/// The SPARQL language versions advertised via `sd:supportedVersion`, in ascending order.
 ///
-/// HONESTY GATE: this advertises `version-1.0`, `version-1.1` AND the FULL `version-1.2` (not the
-/// `version-1.2-basic` profile) because the engine PASSES the complete official W3C suites for
-/// all three — SPARQL 1.0/1.1 query+update and the SPARQL 1.2 evaluation + syntax groups (triple
-/// terms, `dir`-tagged literals, codepoint escapes, the version functions) — at 100% in this
-/// repo's tracked `conformance-report.md`. SPARQL 1.2 evaluation is compiled into the base engine
-/// (no `sparql12`/`rdf12` cargo feature to key off), so the gate IS this conformance state, not a
-/// `cfg!`. If any 1.2 group ever regressed to a partial pass, the honest edit is to drop
-/// `version-1.2` to `version-1.2-basic` (or remove it) HERE — never to keep over-promising.
-pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] =
-    &[SPARQL_VERSION_1_0, SPARQL_VERSION_1_1, SPARQL_VERSION_1_2];
+/// `sparql:version-1.2` is not advertised: `sd:supportedVersion` claims the whole language
+/// version, but `VERSION "1.2"` selects only the pinned 2026-09-12 WD EBV rule, temporal
+/// values keep the REC 2013 (XSD 1.0) lexical space (no year `0000`), and UPDATE refuses 1.2
+/// announcements. Advertise 1.2 again only once those semantics follow the announced version.
+pub const CONFORMANCE_VERIFIED_VERSIONS: &[&str] = &[SPARQL_VERSION_1_0, SPARQL_VERSION_1_1];
 
 /// [OPUS-4.8] sq-qfcb: `sd:BasicFederatedQuery` — the SPARQL 1.1 Federated Query feature
 /// (the `SERVICE` clause). Advertised ONLY when the server is built with the `service`
@@ -182,18 +171,19 @@ fn is_wildcard_only(accept: &str) -> bool {
 
 /// Serialises a triple list in the negotiated [`GraphFormat`], reusing the crate's graph
 /// serialisers (the same writers the GSP-read path uses), so the descriptor is guaranteed
-/// well-formed in whichever syntax is chosen.
-fn serialise(triples: &[Triple], fmt: GraphFormat) -> (&'static str, String) {
+/// well-formed in whichever syntax is chosen. A writer that refuses the graph (RDF/XML cannot
+/// encode some predicates) is an `Err`, never a truncated descriptor.
+fn serialise(triples: &[Triple], fmt: GraphFormat) -> Result<(&'static str, String), String> {
     let body = match fmt {
-        GraphFormat::NTriples => crate::graph::triples_to_ntriples(triples),
-        GraphFormat::Turtle => crate::graph::triples_to_turtle(triples),
-        GraphFormat::RdfXml => crate::graph::triples_to_rdfxml(triples),
+        GraphFormat::NTriples => crate::graph::triples_to_ntriples(triples)?,
+        GraphFormat::Turtle => crate::graph::triples_to_turtle(triples)?,
+        GraphFormat::RdfXml => crate::graph::triples_to_rdfxml(triples)?,
         // [OPUS-4.8] sq-oy1f.1: a descriptor may be requested as JSON-LD too (only matchable
         // when the `jsonld` feature is on; the variant does not exist otherwise).
         #[cfg(feature = "jsonld")]
         GraphFormat::JsonLd => crate::graph::triples_to_jsonld(triples),
     };
-    (fmt.content_type(), body)
+    Ok((fmt.content_type(), body))
 }
 
 /// Parses an N-Triples document (the output of [`Introspection::to_void`] / [`sd_ntriples`])
@@ -230,7 +220,7 @@ pub fn void_descriptor(
     let nt = Introspection::build(graph).to_void_with_cs(dataset_iri);
     let triples = parse_ntriples(&nt)?;
     let fmt = negotiate_descriptor(accept);
-    let (content_type, body) = serialise(&triples, fmt);
+    let (content_type, body) = serialise(&triples, fmt)?;
     Ok(Descriptor { content_type, body })
 }
 
@@ -273,10 +263,8 @@ pub struct Capabilities {
     /// the BASE `sparq-engine` and always on, so this is NOT keyed off a `cfg!(feature = …)`.
     /// Instead it is keyed off the engine's DOCUMENTED, conformance-verified state: this list
     /// must name exactly the versions whose official W3C suites this build PASSES, never an
-    /// aspiration. A blanket `version-1.2` may be advertised ONLY while the full `sparql12`
-    /// suite is green (it is — see `conformance-report.md`); were any 1.2 group to fall to a
-    /// partial pass, the honest move is to drop to `version-1.2-basic` or omit 1.2 here, NOT to
-    /// keep over-promising. The caller ([`service_capabilities`](crate::descriptors)) sources it
+    /// aspiration. `version-1.2` is omitted while the announced 1.2 semantics are only partly
+    /// implemented (see [`CONFORMANCE_VERIFIED_VERSIONS`]). The caller ([`service_capabilities`](crate::descriptors)) sources it
     /// from a single documented constant so the gate stays visible in one place.
     ///
     /// EMPTY by [`Default`] (the same fail-closed default as every other capability), so a unit
@@ -361,7 +349,7 @@ pub fn service_description(
     let nt = sd_ntriples(service_iri, endpoint_iri, dataset_iri, caps, named_graphs);
     let triples = parse_ntriples(&nt)?;
     let fmt = negotiate_descriptor(accept);
-    let (content_type, body) = serialise(&triples, fmt);
+    let (content_type, body) = serialise(&triples, fmt)?;
     Ok(Descriptor { content_type, body })
 }
 
@@ -921,19 +909,32 @@ mod tests {
                 "must advertise sd:supportedVersion <{ver}>: {b}"
             );
         }
-        // Full SPARQL 1.2 (not the -basic profile) is advertised — the engine passes the full
-        // sparql12 suite (see CONFORMANCE_VERIFIED_VERSIONS). The -basic IRI must NOT appear.
+        // 1.2 is not advertised while the announced 1.2 semantics are only partly implemented.
         assert!(
-            b.contains("<http://www.w3.org/ns/sparql#version-1.2>"),
-            "full version-1.2 must be advertised: {b}"
-        );
-        assert!(
-            !b.contains("version-1.2-basic"),
-            "must advertise full version-1.2, NOT the -basic profile: {b}"
+            !b.contains("http://www.w3.org/ns/sparql#version-1.2"),
+            "version-1.2 must not be advertised: {b}"
         );
         for r in oxttl::NTriplesParser::new().for_slice(b.as_bytes()) {
             r.expect("SD with sd:supportedVersion must be valid N-Triples");
         }
+
+        // Tripwire: once UPDATE accepts 1.2, revisit CONFORMANCE_VERIFIED_VERSIONS. Year 0000
+        // (XSD 1.1) is already admitted, under every VERSION.
+        assert!(sparq_engine::parse_update_rec2013(
+            "VERSION \"1.2\" INSERT DATA { <urn:s> <urn:p> <urn:o> }"
+        )
+        .is_err());
+        let empty = sparq_core::Graph::load_str("", "turtle").unwrap();
+        let year_zero = sparq_engine::query(
+            &empty,
+            "VERSION \"1.2\" PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> \
+             SELECT (YEAR(\"0000-01-01T00:00:00Z\"^^xsd:dateTime) AS ?y) WHERE {}",
+        )
+        .unwrap();
+        let Some(oxrdf::Term::Literal(y)) = &year_zero.rows[0][0] else {
+            panic!("YEAR of a year-zero dateTime is bound: {:?}", year_zero.rows[0][0]);
+        };
+        assert_eq!(y.value(), "0");
     }
 
     #[test]

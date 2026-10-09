@@ -98,9 +98,13 @@ tarball ships those prebuilt). Add to the consumer's `package.json`:
 ```
 
 A git-pinned install needs the Rust → wasm toolchain on the build machine
-(`rustup target add wasm32-unknown-unknown` + `cargo install wasm-pack`); without
-it `prepare` fails loudly with the install command rather than silently shipping
-an engine-less binding. After install, verify the engine actually landed:
+(`rustup target add wasm32-unknown-unknown` + `cargo install wasm-pack --locked
+--version =0.15.0`); without it `prepare` fails loudly with the install command
+rather than silently shipping an engine-less binding. Name that version rather
+than letting it float: it is the pin CI's `js` lane installs, and each wasm-pack
+release bundles its own wasm-bindgen CLI. (`=0.15.0` is cargo's exact
+requirement — a bare `0.15.0` means the `^0.15.0` range.) After install, verify
+the engine actually landed:
 
 ```sh
 node -e "import('@sparq-org/sparq').then(m=>m.SparqStore.fromString('<a> <b> <c> .','ntriples')).then(s=>{s.free?.();console.log('ok')})"
@@ -375,9 +379,13 @@ verified warm-up from `GET /dictionary/{dict-id}` for the *next* request.
   percent-encoded over the full `IRIREF`-illegal set (`< > " { } | ^` `` ` ``
   `\` and `#x00–#x20`, so a `>` in an ACL-pointer IRI becomes `%3E`) and literal
   values escape `"`, `\` and all control chars — the same rules QLever's lexer
-  enforces. This is proved end-to-end against the engine's real parser in
-  `test/injection.test.mjs`. Note percent-encoding is canonicalising: an IRI
-  value that *contains* illegal chars stores under its encoded form.
+  enforces. Blank-node labels, language tags and base directions have no
+  escape form, so `termToNT` validates them instead (`BLANK_NODE_LABEL`,
+  `LANGTAG`, `ltr`/`rtl`) and throws on anything else, as it does for a lone
+  UTF-16 surrogate in an IRI or literal. This is proved end-to-end against the
+  engine's real parser in `test/injection.test.mjs`. Note percent-encoding is
+  canonicalising: an IRI value that *contains* illegal chars stores under its
+  encoded form.
 
 ## Benchmarks
 

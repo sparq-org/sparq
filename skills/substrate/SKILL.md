@@ -1,6 +1,6 @@
 ---
 name: substrate
-description: The opt-in shared zero-overhead evaluation substrate for the sparq engine and the reasoners — id-tuple row/key/posting vocabulary (`rows`), the XSD numeric value tower (`numeric`), the four id-tuple join kernels (`join`), and the SPARQL term total order (`compare`). All features are DEFAULT-OFF; opt in to exactly the slice you need. Use this crate when wiring a new reasoner that shares joins or numeric evaluation with the engine, or when working on the sparq-substrate crate itself. [SONNET-4.6] sq-qonbz.4
+description: The opt-in shared zero-overhead evaluation substrate for the sparq engine and the reasoners — id-tuple row/key/posting vocabulary (`rows`), the XSD numeric value tower (`numeric`), the four id-tuple join kernels (`join`), and the SPARQL term total order (`compare`). All features are DEFAULT-OFF; opt in to exactly the slice you need. Use this crate when wiring a new reasoner that shares joins or numeric evaluation with the engine, or when working on the sparq-substrate crate itself. sq-qonbz.4
 ---
 
 # sparq-substrate
@@ -23,7 +23,7 @@ re-exported inline-integer id helpers `inline_id_of_int`, `is_inline`, and `NO_I
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["rows"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["rows"] }
 ```
 
 ```rust,ignore
@@ -42,15 +42,23 @@ the fixed-point `Dec` struct (EXACT integer/decimal arithmetic, no f64 rounding)
 tower), and the XSD lexical helpers `split_decimal`, `parse_xsd_f64`, `parse_xsd_f32`,
 `fmt_xsd_double`. `parse_xsd_f64` delegates to `sparq_core::parse_xsd_f64` (sq-9781x) — the
 shared XSD f64 SPELLING body. The `sparq-core` numeric-value cache layers a DATATYPE-AWARE
-gate on top (`sparq_core::numeric_cache_value`, sq-74oy4/sq-6b1lj: integers scale-0, decimals
-no-exponent, i128-fit, trimmed), so a cache-hit ⟺ `Num::of_literal` accepts — a lexical
-ill-formed for its datatype (`"1.5"^^xsd:integer`) misses the cache exactly as `of_literal`
-type-errors it, uniformly on `=`/`<`/`>`. The differential test
-`cache_f64_seam_vs_as_numeric_differential` pins that agreement.
+gate on top (`sparq_core::numeric_cache_value`: integer digit grammar and subtype
+facets and decimals without exponents). Raw RDF lexical bytes are
+validated verbatim; boundary whitespace is invalid. Cache representation and
+arithmetic capacity remain separate from validity, so a cache miss alone is not
+proof of an ill-typed literal. String-sourced SPARQL constructors normalize XML
+boundary whitespace before calling these raw parsers.
+`Num::of_literal` and `as_numeric` share the lexical/facet check
+`sparq_core::numeric_literal_valid`. Decimal spellings such as `"5.0"^^xsd:integer`
+and out-of-range subtype values such as `"1200"^^xsd:byte` return `None`.
+A valid integer or decimal beyond the tower's finite mantissa capacity also returns
+`None`; use `numeric_literal_valid` when asking about datatype membership instead
+of arithmetic representability. The existing overflow promotion policy is unchanged.
+
 Pulls `oxrdf` only when enabled. Two ordering methods on `Num`:
 - `Num::cmp_total` — ORDER BY / MIN/MAX total order; NaN totalised FIRST.
 - `Num::cmp_relational` — SPARQL `<`/`>` / D-entailment / RIF numeric equality; NaN → `None`
-  (type error). [OPUS-4.8] sq-v5evr.
+  (type error). sq-v5evr.
 
 **`xs:float` promotion rounds ONCE.** `Num::f32` (and `Dec::f32` under it) is the single
 shared helper the float tier of `binop` — and the `overhead` kernel's inline replica of it —
@@ -63,14 +71,14 @@ rational arithmetic: the `i64` value `4611686293305294849` has correctly-rounded
 2^53. `parse_xsd_f32` likewise parses `&str -> f32` DIRECTLY (its ACCEPTANCE still delegates
 to the shared `sparq_core::parse_xsd_f64` spelling rules, so which lexicals are well-formed
 is unchanged). Regression tests assert `f32::to_bits()`, not a formatted decimal — the two
-candidates are ADJACENT floats that print identically. [OPUS-5] issue #3796.
+candidates are ADJACENT floats that print identically. issue #3796.
 
 **Which tier a mixed comparison uses.** XPath promotes the operands of a comparison to the
 **LEAST common type** in `xs:integer -> xs:decimal -> xs:float -> xs:double`, NOT always to
 `xs:double`: `xs:double` is the common type only when an operand really IS a double.
 `Num::cmp_relational` is therefore rank-aware — both `Int`/`Dec` compare exactly via
 `Dec::cmp`; a `Double` operand promotes the pair to `f64`; otherwise a `Float` operand
-promotes the pair to **`f32`** through `Num::f32`. [OPUS-5] #3796
+promotes the pair to **`f32`** through `Num::f32`. #3796
 
 > **CORRECTION — this section previously said the opposite, and was wrong.** It asserted
 > that `cmp_relational` comparing any mixed pair in the `f64` tier is CORRECT and "must not
@@ -82,26 +90,21 @@ promotes the pair to **`f32`** through `Num::f32`. [OPUS-5] #3796
 > `cmp_relational_integer_and_decimal_vs_float_compare_in_the_float_tier`. Do not
 > re-introduce the unconditional `f64` fallback.
 
-A second, unrelated `xsd:float` defect is still open in a different crate:
+A second, related `xsd:float` defect lived in a different crate and is now fixed:
 
-> **REMAINING BOUNDARY — the engine's `=`/`<` on an `xsd:float` still do not see the `f32`
-> value.** This is a DIFFERENT defect from the one above, in a different crate, and it is
-> still open. `sparq-engine` does not call `cmp_relational` at all; its `=`/`<` ride the
-> numeric-value CACHE — `sparq_core::cached_numeric_f64` and the engine's
-> `numeric_cache_f64`, which drive the sargable `=`/`<` fast path, `JKey::Num` value-joins
-> and the `ORDER BY` numeric rank — and that still values an `xsd:float` literal as
-> `parse_xsd_f64(lexical)`, i.e. the f64 nearest the LEXICAL rather than the f64 image of
-> its correctly-rounded `f32`. Measured through `sparq_engine::query`:
-> `"4611686293305294849"^^xsd:float = "4611686568183201792"^^xsd:double` is `false` (XPath
-> requires `true`) and the same `<` is `true`, yet `+ "0.0"^^xsd:float` yields
-> `4.6116866E18`. NOT a regression from #3796 — that path never consumed the `f32` value.
-> Not fixed here because the cache f64 is shared bit-identically with the spilled on-disk
-> dict cache and `LocalVocab::intern`, so correcting it must be validated against the W3C
-> conformance ratchet. Tracked as issue #3825; #3796 stays OPEN for it. [OPUS-5]
+> **Engine comparison paths value an `xsd:float` at its `f32` (#3825, fixed by #6671).**
+> `sparq-engine` does not call `cmp_relational`; its `=`/`<` ride the numeric-value CACHE
+> (the sargable `=`/`<` fast path, `JKey::Num` value-joins and the `ORDER BY` numeric rank),
+> which previously valued an `xsd:float` literal as the f64 nearest its LEXICAL. The cache
+> now values it as its correctly-rounded `f32`, widened exactly (`sparq_core::numeric_lexical_f64`),
+> so `"4611686293305294849"^^xsd:float = "4611686568183201792"^^xsd:double` is `true` on
+> every path, and a float against an integer/decimal compares in the float tier. A
+> `numerics.bin` cache saved before the change is recomputed on `Graph::open`. Regression
+> suite: `crates/sparq-engine/tests/float_value_tier.rs`.
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["numeric"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["numeric"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 
@@ -136,7 +139,7 @@ The four id-tuple join kernels over `&[Row]` slices. Requires `rows`; pulls `rus
 | `probe_gather_indices` | M4 batch-emission primitive — collect build-row indices WITHOUT materialising `Row`s; morsel pipeline calls this, then materialises per output chunk (sq-pntvh.7) |
 | `hash_probe_serial` | probe loop: calls `probe_emit` per row with a `Budget` cooperative-cancel poll |
 | `bind_combine` | index-nested-loop combine step for indexed groups |
-| `bind_combine_rows` | contiguous row-slice combine; appends one row per input, preserving duplicates and existing output ([GPT-6-ASTRA]) |
+| `bind_combine_rows` | contiguous row-slice combine; appends one row per input, preserving duplicates and existing output |
 | `lftj_recurse` over `Trie`/`TrieIter` | leapfrog trie-join (WCOJ) |
 | `join::delta::DeltaTable` | persistent build-side table for semi-naive Δ-vs-full shapes (built for the OWL-RL fixpoint; drives `sparq-rsp`'s Delta/Snapshot window diff) |
 
@@ -147,13 +150,13 @@ Pass `&rows[start..end]`, one match's `new_vals`, and `&mut out` to
 All kernels are generic over a `JoinKeys` column descriptor and a `Budget` cooperative-cancel
 hook — both monomorphised, never a trait object. Use `NoBudget` for an unbounded join.
 
-**Single-hash optimisation ([SONNET-4.6] sq-7d3dj.19):** `probe_emit` and `probe_gather_indices`
+**Single-hash optimisation (sq-7d3dj.19):** `probe_emit` and `probe_gather_indices`
 compute `key_hash` ONCE — it selects the radix partition AND drives `raw_entry().from_hash` on
 the `JoinTable`, eliminating the previous double-hash in the partitioned probe path. `probe_emit`
 calls `out.reserve(matches.len())` before the emit loop (batch-emission contract the sq-pntvh M4
 morsel pipeline inherits: reserve then materialise, not per-match).
 
-**Single-column key fast path ([OPUS-4.8] sq-4r8uy):** `JoinKeys::left_key`/`right_key` special-case
+**Single-column key fast path (sq-4r8uy):** `JoinKeys::left_key`/`right_key` special-case
 the dominant `key_cols.len() == 1` case — the whole per-row key projection collapses to a direct
 one-element `Key` push instead of iterating the heap `key_cols` `Vec` and running the general
 `SmallVec::from_iter` collect. It is **result-identical** to the general projection (same length,
@@ -164,7 +167,7 @@ closes most of the `hash_probe` descriptor-projection overhead the #1810 delta m
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["join"] }  # implies "rows"
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["join"] }  # implies "rows"
 ```
 
 ```rust,ignore
@@ -209,7 +212,7 @@ ORDER BY total order refines promoted ties and positions NaN.
 
 ```toml
 [dependencies]
-sparq-substrate = { version = "0.1.3", features = ["compare"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["compare"] }
 ```
 
 **Machine-checked order laws (Kani, sq-sqtk2.4 + sq-wjl8i).** `src/compare.rs` hosts a
@@ -261,7 +264,7 @@ cargo run -p sparq-substrate --example substrate_overhead --features overhead --
 
 The envelope's `canonical` flag is true ONLY for a `--canonical` run; a work-box run is
 `environment="indicative"`. Registered in `bench/benchmarks.toml` as `substrate-overhead-delta`
-(`featured = false` — an internal micro-instrument). [FABLE-5] sq-atjue
+(`featured = false` — an internal micro-instrument). sq-atjue
 
 ## Cargo feature summary
 
@@ -273,8 +276,10 @@ The envelope's `canonical` flag is true ONLY for a `--canonical` run; a work-box
 | `compare` | `sparq_substrate::compare` | — |
 | `overhead` | `sparq_substrate::overhead` (implies `join`+`numeric`+`compare`) | — |
 
-All features are off by default. The default build compiles nothing from this crate (byte-
-identical wasm bundle). The crate is `forbid(unsafe_code)`.
+All features are off by default, so a bare dependency compiles nothing from this crate.
+`sparq-engine` depends on it unconditionally with `numeric` + `join` + `compare` (the
+code-moved kernels), so those modules are in every engine build, wasm included; `overhead`
+stays opt-in. The crate is `forbid(unsafe_code)`.
 
 ## When to use
 
@@ -282,7 +287,7 @@ identical wasm bundle). The crate is `forbid(unsafe_code)`.
   the engine — depend on `sparq-substrate` directly (it is below `sparq-engine`, so no cycle).
   Direct consumers today: `sparq-engine` (all four seams), `sparq-reason` (`substrate-join`,
   opt-in), and `sparq-rsp` (`join::delta::DeltaTable` for the windowed-materialisation
-  Delta/Snapshot diff). [FABLE-5] sq-2n1q3.4
+  Delta/Snapshot diff). sq-2n1q3.4
 - **Working on the substrate crate itself** — see `research/shared-eval-substrate.md` for the
   full design record (what is shareable vs engine-private, the options considered, the
   perf-neutrality proof).
@@ -295,7 +300,23 @@ identical wasm bundle). The crate is `forbid(unsafe_code)`.
 - `crates/sparq-engine` — the primary consumer: keeps its planner, `Bindings`, and `Value`
   private; calls the shared kernels through thin adapters.
 
-_Status: publishable (sq-qonbz.4 [SONNET-4.6]). All four modules implemented and behaviour-
+_Status: publishable (sq-qonbz.4). All four modules implemented and behaviour-
 neutral vs the pre-move engine baseline (W3C SPARQL conformance floor bit-identical; join/
 numeric/compare micro-benches within noise). Phase-5 reasoner adoption (consuming `join` from
 `sparq-reason` / `sparq-reason-el`) is tracked separately._
+
+### Borrowed numeric operands (GPT-6)
+
+`numeric::Num::of_parts(value, datatype)` is the allocation-free parser shared
+by `Num::of_literal` and the reasoner comparator. Both validate numeric lexical
+syntax and integer facets before the finite arithmetic tower; raw boundary
+whitespace is rejected, not stripped.
+The core `Graph::exact_numeric_lexical` and engine exact-decimal comparison
+helpers apply the same validity gate before preserving the original lexical.
+This keeps cached, scalar and compiled arithmetic errors aligned; it does not
+expand arithmetic magnitude capacity or change D-entailment's distinct keys.
+
+Numeric unsigned signs follow [XSD 1.1 §3.4.21](https://www.w3.org/TR/xmlschema11-2/#unsignedLong):
+`+1` and `-0` remain valid within range. This matches the datatype reference in
+[RDF 1.1 Concepts §5.1](https://www.w3.org/TR/rdf11-concepts/#xsd-datatypes);
+it does not change the separately bounded temporal representation.

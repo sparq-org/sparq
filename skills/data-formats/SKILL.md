@@ -17,6 +17,37 @@ loaders live in `sparq-core`; the binary HDT archive format (including content-s
 > formatter) and JSON-LD (`graph_to_jsonld_pretty`); the N-Triples writer (`triples_to_ntriples`)
 > is always on. See recipe 6.
 
+## Literal validity and cache eligibility
+
+RDF ingestion preserves ill-typed literals. To check numeric datatype
+membership, call `sparq_core::numeric_literal_valid(value, datatype_iri)`: this
+checks raw lexical grammar and integer subtype facets, rejecting all boundary
+whitespace. This includes the
+range of `xsd:byte` and unsigned integer types. It does not impose the evaluator's
+finite mantissa capacity. `numeric_cache_value` can return `None` for a valid large
+number; a missing cache value is not a datatype-validity result.
+
+`temporal::Timeline::parse_datetime`, `parse_date`, `parse_civil_date` and
+`parse_tz` reject raw boundary whitespace, malformed calendar/timezone values and timestamps outside their
+representation, including the existing checked BCE range. For exact value decisions,
+use `temporal::ExactTimeline`, `ExactTemporal`, or `Graph::exact_temporal_value(id)`.
+These borrow the original fraction and compare integer seconds plus lexical digits,
+without allocation; work is linear in literal length. Legacy `Timeline`/`Temporal`
+and `Graph::temporal_value` contain approximate floating values; vector/cache consumers
+retain them, but query equality/order must use the exact keys. `year_within_capacity`
+checks an explicit year range separately from ordinary datatype validity.
+Malformed Unicode returns `None` without slicing panics. `dateTimeStamp` requires a timezone.
+Raw RDF temporal literals undergo no XML preprocessing; string casts are separate constructors.
+`Graph::open` ignores legacy `numerics.bin`/`temporals.bin` and both v2 caches,
+which could contain padded raw literals, and recomputes values from the dictionary.
+It does not rewrite old caches or drop ill-typed RDF terms. Current writers use
+`numerics-v3.bin` and `temporals-v4.bin` across ordinary, compressed and external
+builds; absent or wrong-sized current caches are rebuilt in memory. To persist a
+migrated archive, call `Graph::open(old)?.save(new)?` with a separate destination.
+Until saved, legacy opens repeat the dictionary scan and cache allocation.
+Cache versions signal semantic compatibility; they do not authenticate archive
+bytes or change the existing trusted-storage assumption.
+
 ## Quickstart
 
 Add the dependency (HDT is a separate, native-only crate):
@@ -39,10 +70,10 @@ use sparq_core::Graph;
 //   "trig"|"application/trig". An UNRECOGNISED format string is an `Err` — NOT silently
 //   parsed as Turtle (sq-m2pc). JSON-LD ("jsonld"/"json-ld"/"application/ld+json") needs the
 //   `jsonld` feature on the `sparq-core` LIBRARY dep (OFF by default — the library stays lean);
-//   without it those strings also error rather than mis-parsing. [OPUS-4.8] sq-oy1f.4: the
+//   without it those strings also error rather than mis-parsing. sq-oy1f.4: the
 //   `sparq-cli` and `sparq-server` BINARIES enable `jsonld` by DEFAULT (a maintainer-directed
 //   exception), so they read/write JSON-LD out of the box; a library embedder opts in explicitly.
-//   [OPUS-4.8] sq-f47w1 (survey §B1): RDF/XML ("rdfxml"/"rdf-xml"/"application/rdf+xml")
+//   sq-f47w1 (survey §B1): RDF/XML ("rdfxml"/"rdf-xml"/"application/rdf+xml")
 //   likewise needs the OPT-IN `rdfxml` feature on `sparq-core` (OFF by default — it links
 //   `oxrdfxml`/`quick-xml`, kept off the lean wasm bundle); without it those strings error
 //   rather than mis-parsing. RDF/XML has no named-graph syntax, so it loads via `load_str` /
@@ -60,7 +91,7 @@ Or from the CLI:
 
 ```bash
 sparq-cli query data.ttl turtle 'SELECT * WHERE { ?s ?p ?o } LIMIT 5'
-# HDT needs the opt-in feature (its MSRV is 1.87, above the 1.85 workspace floor):
+# HDT needs the opt-in `hdt` CLI feature:
 cargo build -p sparq-cli --features hdt
 ./target/.../sparq-cli query dataset.hdt hdt 'SELECT (COUNT(*) AS ?n) WHERE { ?s ?p ?o }'
 ```
@@ -84,7 +115,7 @@ pub fn load_str_with_base(text: &str, format: &str, base: &str) -> Result<Graph,
 // graphs come out in first-occurrence document order (deterministic).
 pub fn load_dataset(text: &str, format: &str) -> Result<Graph, String>
 
-// [FABLE-5] sq-tonhr.2 — load_dataset with a base IRI for the document's relative
+// sq-tonhr.2 — load_dataset with a base IRI for the document's relative
 // IRIs (the DATASET companion to load_str_with_base): named graphs preserved,
 // SERIAL parse (base-relative docs are small — manifests, W3C test actions; the
 // rdf-trig conformance lane drives this). N-Quads has no relative IRIs (base
@@ -101,8 +132,13 @@ pub fn load_reader<R: std::io::Read>(reader: R, format: &str) -> Result<Graph, S
 // is a separate, opt-in mechanism that covers N-Triples AND N-Quads.)
 pub fn load_reader_parallel<R: std::io::Read + Send>(reader: R, format: &str) -> Result<Graph, String>
 
-// [OPUS-4.8] sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs
-// against RFC-3987 by default (it trusts input; the serial oxttl path DOES validate). The
+// sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs against
+// RFC-3987 by default (the serial oxttl path DOES). It does enforce the N-Triples grammar
+// (#2716): IRIREF characters, UCHAR-only IRI escapes, an absolute scheme, BLANK_NODE_LABEL
+// (full PN_CHARS ranges; a label may abut the next term, `_:s<p>`), string ECHAR/UCHAR and
+// no raw line breaks, LANGTAG (direction ltr/rtl), IRI-only predicates and no literal
+// subjects, one statement per line (no line break inside a statement; only WS and a comment
+// after its `.`), and it accepts RDF 1.2 `VERSION "..."` directives. The
 // OPT-IN `iri-fast` feature on `sparq-core` (OFF by default) turns that validation on for the
 // byte parser via a prefix-memoized fast path IN FRONT of `oxiri` — a last-N validated
 // `scheme://authority/` memo + a one-pass ASCII `iunreserved`/sub-delims suffix scan, falling
@@ -113,7 +149,7 @@ pub fn load_reader_parallel<R: std::io::Read + Send>(reader: R, format: &str) ->
 // deterministic generator, so a malformed IRI can never be wrong-accepted into the store.
 // The `oxiri` dep is already in-tree (via oxttl), so the feature adds zero new compilation.
 
-// [OPUS-4.8] sq-jocpn — the OPT-IN `native-ttl` feature on `sparq-core` (OFF by default) swaps the
+// sq-jocpn — the OPT-IN `native-ttl` feature on `sparq-core` (OFF by default) swaps the
 // oxttl Turtle path for a hand-rolled byte-level tokenizer/parser (`sparq_core`'s `ttl` module) that
 // interns S/P/O directly into the Dict — the Turtle analogue of the byte-level N-Triples parser. It
 // handles the FULL Turtle grammar (prefixes/@base, collections `()`, blank-node property lists `[]`,
@@ -146,7 +182,7 @@ pub fn new() -> Graph                 // also: Graph::default()
 `sparq_core::Dict` — compact FILTERED rebuild on the `(Dict, triples)` seam:
 
 ```rust
-// [GPT-5.6] sq-eiv — consume the Dict, keep only the real ids `retain` accepts, and get
+// sq-eiv — consume the Dict, keep only the real ids `retain` accepts, and get
 // back a dense rebuilt Dict plus an old→new remap (`remap[(old_id - 1) as usize]`; NO_ID
 // = dropped) for rewriting triple ids before `from_parts`. Inline integer ids are not
 // dictionary records: never passed to `retain`, unchanged under remapping. Dependency-aware
@@ -198,7 +234,7 @@ pub fn fork(&self) -> Graph               // mutable structural fork (Arc-shares
 pub fn load(path: impl AsRef<Path>) -> Result<Graph, Error>         // sniffs .hdt.gz/.hdt.zst/.hdt.bz2
 pub fn load_reader<R: BufRead>(reader: R) -> Result<Graph, Error>   // any buffered source
 
-// [GPT-5.6] sq-lsp7k.24 — opt-in `load-filter`; None means wildcard. Filtering
+// sq-lsp7k.24 — opt-in `load-filter`; None means wildcard. Filtering
 // runs during the one-shot SPO walk and only accepted triples' terms enter the
 // returned Graph. An all-None pattern is identical to load_reader.
 #[cfg(feature = "load-filter")]
@@ -285,7 +321,7 @@ let pattern: sparq_hdt::TriplePattern = (
     Some(oxrdf::NamedNode::new("http://www.w3.org/2000/01/rdf-schema#label")?),
     None,
 );
-// [GPT-5.6] sq-obhf1: count matches without constructing a result Graph/Dict.
+// sq-obhf1: count matches without constructing a result Graph/Dict.
 let label_stats = sparq_hdt::stats_reader_filtered(std::io::Cursor::new(bytes.clone()), &pattern)?;
 let labels = sparq_hdt::load_reader_filtered(std::io::Cursor::new(bytes), &pattern)?;
 assert_eq!(label_stats.triples, labels.len());
@@ -324,9 +360,10 @@ unchanged even when on: the JSON-LD writer emits JSON by hand, no json-ld/serde 
 LIBRARY embedder it is opt-in (the engine library default stays lean): enable with
 `sparq-engine = { version = "0.1", features = ["serialize-rdf"] }`. The `sparq-cli` and
 `sparq-server` BINARIES pull it into their default build via the default-on `jsonld` feature
-([OPUS-4.8] sq-oy1f.4), so `dump …` and the server's `application/ld+json` work out of the box.
+(sq-oy1f.4), so `dump …` and the server's `application/ld+json` work out of the box.
 The N-Triples writer (`triples_to_ntriples`) is always on. Internally the writer matrix is
-housed in the `sparq-engine-serialize` sub-crate (`publish = false`, [FABLE-5] sq-6vshe.4) and
+housed in the `sparq-engine-serialize` sub-crate (published only to satisfy `sparq-engine`'s
+crates.io dependency closure, sq-6vshe.4) and
 re-exported verbatim — the `sparq_engine::serialize::*` paths and feature names above are
 unchanged and remain the supported surface.
 
@@ -354,7 +391,8 @@ Lower-level entry points take `&[oxrdf::Triple]` (e.g. CONSTRUCT output) directl
 ordered `(prefix, iri)` pair list (e.g. a query's parsed `PREFIX` lines or a `[[prefix, iri], …]`
 array). The `graph_to_*_with` convenience wrappers (`graph_to_turtle_with`, `graph_to_trig_with`,
 `graph_to_jsonld_with`, and the pretty `*_with`) take that same map, so the whole-graph path can
-also serialise under an explicit prefix policy. Only prefixes actually used are emitted (the
+also serialise under an explicit prefix policy. When several prefixes match an IRI, the longest
+namespace wins (equal lengths: first label in map order). Only prefixes actually used are emitted (the
 Turtle/TriG header, or the JSON-LD compacted `@context`). Round-trip (parse → serialize → re-parse) is isomorphic
 for every form. **JSON-LD specifics:** `xsd:string`/`rdf:langString` stay implicit
 (`@value` + optional `@language`); every other datatype is preserved as `@type`; canonical
@@ -366,8 +404,10 @@ a list cell referenced more than once, carrying an extra predicate, cyclic, or n
 by `rdf:nil` — is left as ordinary `rdf:first`/`rdf:rest` triples, so the round-trip stays
 lossless either way (the empty list `()` stays an `rdf:nil` reference, never `@list`).
 
-**Comparative throughput** for the writer matrix is measured by `bench/serialize/run.sh`
-(registered `serialize-bench`, [FABLE-5] sq-hmd7l.14): sparq's buffered/streaming/pretty
+A same-box Turtle-only comparison against oxttl's `TurtleSerializer` (Oxigraph 0.5's writer)
+on a document-shaped graph is `cargo run --release -p sparq-engine-serialize --features
+serialize-rdf --example turtle_vs_oxttl` (#4898). **Comparative throughput** for the writer matrix is measured by `bench/serialize/run.sh`
+(registered `serialize-bench`, sq-hmd7l.14): sparq's buffered/streaming/pretty
 regimes in-process, plus a cross-engine pipeline panel vs serd/rapper/Jena riot/oxrdfio —
 every emitted document round-trip-gated (re-parse == source store) before its timing row
 is trusted. First-read analysis: `research/gap-serialize-2026-07.md`.
@@ -408,8 +448,12 @@ opt-in `streaming-serialization` feature adds `write_turtle_streaming(triples, &
 and `write_trig_streaming(&named_graphs, &prefixes, &mut w)` (plus the whole-graph
 `graph_to_turtle_streaming(&g, &prefixes, &mut w)` / `graph_to_trig_streaming`) that render the body
 directly into any `W: std::io::Write`, buffering only **one subject block at a time** (emitting on
-subject change) — so the whole rendered output is never materialised, enabling HTTP chunked
-CONSTRUCT/DESCRIBE responses (first bytes flushed after the first subject, not the last). The
+subject change) — so the whole rendered output is never materialised. <!-- sq-0kq6k -->
+These are the writers behind `sparq-cli dump <file> <in> turtle|trig` under the CLI feature of the
+same name. They are **not** what serves an HTTP CONSTRUCT/DESCRIBE: `sparq-server` renders a graph
+response with `oxttl` / `oxrdfxml` (a different writer with a different output shape) and streams
+through *those* serialisers' `io::Write` seam, so its response bytes are unchanged — see
+`skills/http-server/SKILL.md`. The
 streamed bytes are **byte-identical** to the buffered `write_turtle` / `write_trig` for the same
 graph (same used-prefix header, same subject grouping, same ordering): both share the prefix-header
 and per-subject-block rendering, and graph-sourced triples are subject-contiguous (`iter_ids()` walks
@@ -450,11 +494,16 @@ with a compact IRI on read-back, sq-oy1f.11; a plain **literal** value under a `
 term moves to a non-coerced key so it does not read back as a node IRI, sq-oy1f.13). Build the
 context with `parse_context_json(r#"{…}"#)` (a string → `JsonLdValue`, returns `None` if not a JSON
 object) or construct the `JsonLdValue` directly; the parsed `ActiveContext` drives compaction. The
-output is a `{"@context":…,"@graph":[…]}` document and the compaction is **lossless** — every
-coercion is invertible against the same `@context`, so a JSON-LD-to-RDF round-trip reconstructs the
-original triples. *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always emits
-RDF, so the input is a `Graph`, not an arbitrary remote document; scoped/typed contexts,
-`@propagate`, remote `@context` fetching, `@import`, `@protected` are out of scope (JSON-LD
+output is the W3C Compaction Algorithm's document: `@context` merged into the single top-level node,
+or `@context` plus a `@graph` array when there are several, with nodes in code-point order of their
+expanded `@id`. The compaction is **lossless** — every coercion is invertible against the same
+`@context`, so a JSON-LD-to-RDF round-trip reconstructs the original dataset (list cells typed
+`rdf:List`, referenced from another graph, naming a graph or used as a type stay explicit nodes;
+`rdf:JSON` literals stay typed strings with their exact lexical form; a predicate whose `@vocab`
+suffix holds a `:` keeps its full IRI; an empty named graph is kept as `{"@id":…,"@graph":[]}`; when a `@type` map would hold a node object, which sparq's oxjsonld reader cannot load, the output is redone with that context's `@type` containers removed, and the emitted `@context` shows it). *Scope:* this is the fromRdf-then-compact (serialise) path — sparq always
+emits RDF, so the input is a `Graph`, not an arbitrary remote document. Scoped and type-scoped
+contexts, `@propagate` and `@protected` follow the W3C algorithm; a remote `@context` or `@import` is
+never fetched, so such a context yields the lossless expanded document instead (JSON-LD
 **Framing** is its own recipe below, sq-oy1f.17). *Strict third-party faithfulness:* the compaction
 round-trip is verified both against sparq's own JSON-LD→RDF reader **and** differentially against the
 **pyld** W3C reference processor (`expand`/`toRdf`) for the `@reverse`, language-map, `@type:@id`,
@@ -643,10 +692,10 @@ cargo build -p sparq-cli --features serialize-rdf
   free disk aborts cleanly through the spill pipeline's resource gate, and a spill-built store
   reloads via `Graph::open` (and re-saves raw/compressed) to identical content. External build
   folds N-Quads/TriG named graphs into the default graph (only `load_dataset` preserves them).
-  [GPT-6] All store writers emit `predstats.bin` in ascending predicate-ID order, so equal
+  All store writers emit `predstats.bin` in ascending predicate-ID order, so equal
   statistics serialize identically after reload. Older unordered files remain readable.
-- **HDT is opt-in and native-only.** `sparq-hdt` MSRV is **1.87** (the wrapped `hdt` crate),
-  above the workspace's 1.85 — in the CLI it is gated behind `--features hdt`. It carries
+- **HDT is opt-in and native-only.** `sparq-hdt` declares MSRV **1.87** (the wrapped `hdt` crate;
+  the workspace floor is now 1.88) — in the CLI it is gated behind `--features hdt`. It carries
   zero code into the wasm build. Compression containers are detected by **magic bytes, not
   file extension**, so a mislabeled `.hdt` still loads; all three (`gz`/`zst`/`bz2`) decode
   in a streaming fashion.
@@ -732,9 +781,9 @@ cargo build -p sparq-cli --features serialize-rdf
     `compress::with_emit_format(EmitFormat::V2, || …)` on a thread, or `SPARQ_EMIT_FORMAT=v2` for a
     process, routes the store's `save_compressed`, the streaming `CompressedPermWriter`, AND the
     in-RAM compressed profile (`TripleStore::from_triples_compressed` / `Graph::into_compressed`,
-    i.e. `SPARQ_STORE_PROFILE=compressed` — [FABLE-5] sq-559dp) through the V2 encoder. On the CLI
+    i.e. `SPARQ_STORE_PROFILE=compressed` — sq-559dp) through the V2 encoder. On the CLI
     that same choice is a per-invocation FLAG — `sparq-cli save …
-    compressed --format-v2` / `sparq-cli recompress … --v2` ([SONNET-4.6] sq-kmve2) — which maps
+    compressed --format-v2` / `sparq-cli recompress … --v2` (sq-kmve2) — which maps
     onto the per-thread override (so it beats the env var) and is a hard exit-2 error on a build
     without `spqcprm2`, never a silent V1 write. `CompressedPerm::encode_v2` builds a `V2` perm directly; `encode_emit` honours
     the gate in one place. With the feature OFF, `emit_format()` is a `const V1`, so the default

@@ -17,9 +17,8 @@ fn minmax_empty_is_unbound() {
 fn min_over_integers_is_smallest() {
     let vals = vec![Value::Num(Num::Int(5)), Value::Num(Num::Int(2)), Value::Num(Num::Int(8))];
     let min = minmax_values(vals, std::cmp::Ordering::Less);
-    // MIN over an all-integer set is the smallest member (2). `minmax_values` returns
-    // it via `num_canonical_term`, i.e. a `Value::Term` carrying the canonical
-    // xsd:integer literal "2". Assert the EXACT lexical value AND datatype — NOT a
+    // MIN over an all-integer set selects the smallest member (2), preserving
+    // its representation. Assert the EXACT lexical value AND datatype — NOT a
     // substring `contains('2')`, which is vacuous because the xsd:integer datatype
     // IRI (…/2001/XMLSchema#integer) already contains '2' regardless of the value.
     match min {
@@ -41,8 +40,8 @@ fn min_over_integers_is_smallest() {
 fn max_over_integers_is_largest() {
     let vals = vec![Value::Num(Num::Int(5)), Value::Num(Num::Int(2)), Value::Num(Num::Int(8))];
     let max = minmax_values(vals, std::cmp::Ordering::Greater);
-    // MAX over an all-integer set is the largest member (8), returned as a canonical
-    // xsd:integer `Value::Term`. Assert the EXACT lexical value AND datatype — a
+    // MAX over an all-integer set selects the largest member (8), preserving
+    // its representation. Assert the EXACT lexical value AND datatype — a
     // substring `contains('8')` would also pass for wrong values like 18 or 80, so it
     // is not an acceptable check for the `Value::Term` representation.
     match max {

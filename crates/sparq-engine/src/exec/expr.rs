@@ -14,9 +14,11 @@ pub(super) fn apply_filter(graph: &Graph, local: &LocalVocab, b: &mut Bindings, 
     // delegation for tie/unknown lanes. Declines (→ scalar path) for anything not provably
     // byte-identical to `apply_filter_scalar`. I5 probe counters updated on each call.
     #[cfg(feature = "vectorized")]
-    if let Some(rows) = columnar_filter(graph, local, b, expr)? {
-        b.rows = rows;
-        return Ok(());
+    if local.correlation.is_empty() {
+        if let Some(rows) = columnar_filter(graph, local, b, expr)? {
+            b.rows = rows;
+            return Ok(());
+        }
     }
     apply_filter_scalar(graph, local, b, expr)
 }
@@ -215,7 +217,7 @@ pub(super) fn columnar_filter(
             let global_idx = start + local_idx;
             let row = &rows[global_idx];
             let val = eval_expr(graph, local, b, row.as_ref(), expr)?;
-            if effective_boolean(&val) {
+            if effective_boolean(&val, local.ebv_semantics) {
                 delegated_passes.push(local_idx);
             }
         }
@@ -406,7 +408,7 @@ pub(super) fn columnar_aggregate(
                                 let sum_i64 = crate::reduce::narrow_sum_to_i64(sum_i128)?;
                                 // integer / integer → Decimal (SPARQL §17.4.4.3).
                                 // Mirrors: sum_values → binop(Div) → value_to_id.
-                                let result = Num::Int(sum_i64).binop(Num::Int(count_i64), ArithOp::Div)?;
+                                let result = numeric_capacity::binop(Num::Int(sum_i64), Num::Int(count_i64), ArithOp::Div)?;
                                 value_to_id(graph, local, &Value::Num(result))
                             }
                         }
@@ -472,7 +474,7 @@ pub(super) fn with_idfast_nonlit_cols<R>(cols: FxHashSet<usize>, f: impl FnOnce(
 pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bindings, expr: &Expression) -> Result<(), String> {
     // Pre-resolve Variable → column index once before the row loop. sq-7d3dj.4.
     #[cfg_attr(not(feature = "id-filter-fastpath"), allow(unused_mut))]
-    let mut compiled = compile_expr(expr, b);
+    let mut compiled = compile_expr(expr, b, local);
     // (sq-7d3dj.30.11) Rewrite eligible `=` nodes into the id-level fast path using the
     // non-literal columns the FILTER dispatch computed for THIS operator (empty for every other
     // caller → no-op). Done ONCE, before the row loop; rayon workers see the rewritten program.
@@ -494,7 +496,7 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
     let scope = b.rows.as_ptr() as usize;
     #[cfg(feature = "parallel")]
-    let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD {
+    let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         // The extension-function registry and the dataset view are thread-local:
         // snapshot them here and re-install per worker item (free when neither is
@@ -510,6 +512,7 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
         let lsv = local_services::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         b.rows
             .par_iter()
             .enumerate()
@@ -521,15 +524,16 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
                 let _lsv = local_services::worker_install(&lsv);
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
+                let _qb = query_base_worker_install(&qb);
                 ROW_SCOPE.set((scope, i));
-                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?))
+                Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics))
             })
             .collect::<Result<Vec<bool>, String>>()?
     } else {
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };
@@ -538,7 +542,7 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
             ROW_SCOPE.set((scope, i));
-            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?));
+            keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
     };

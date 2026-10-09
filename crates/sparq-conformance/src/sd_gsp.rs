@@ -155,7 +155,11 @@ fn service_description_assertions(report: &mut SuiteReport, addr: SocketAddr) {
     ) {
         Ok(resp) => resp,
         Err(e) => {
-            report_record(report, "fetch Service Description (GET /sparql, no query)", Outcome::Fail(e));
+            report_record(
+                report,
+                "fetch Service Description (GET /sparql, no query)",
+                Outcome::Fail(e),
+            );
             return;
         }
     };
@@ -182,10 +186,7 @@ fn service_description_assertions(report: &mut SuiteReport, addr: SocketAddr) {
         report,
         "SD types an sd:Service with an sd:endpoint",
         body,
-        &[
-            &iri_obj("Service", SD),
-            &pred(SD, "endpoint"),
-        ],
+        &[&iri_obj("Service", SD), &pred(SD, "endpoint")],
     );
 
     // Supported LANGUAGES: both the legacy 1.1 terms and the version-agnostic 1.2-SD terms.
@@ -217,23 +218,22 @@ fn service_description_assertions(report: &mut SuiteReport, addr: SocketAddr) {
         200,
     );
 
-    // Supported VERSIONS: the conformance-verified 1.0 / 1.1 / 1.2 (full, not -basic).
+    // Supported VERSIONS: 1.0 / 1.1. 1.2 is not advertised while the announced 1.2 semantics
+    // are only partly implemented.
     assert_contains(
         report,
-        "SD advertises sd:supportedVersion 1.0 / 1.1 / 1.2",
+        "SD advertises sd:supportedVersion 1.0 / 1.1",
         body,
         &[
             "<http://www.w3.org/ns/sparql#version-1.0>",
             "<http://www.w3.org/ns/sparql#version-1.1>",
-            "<http://www.w3.org/ns/sparql#version-1.2>",
         ],
     );
-    // Full 1.2, NOT the -basic profile (the engine passes the full sparql12 suite).
     assert_absent(
         report,
-        "SD advertises full version-1.2, NOT the -basic profile",
+        "SD does not advertise sparql:version-1.2",
         body,
-        "version-1.2-basic",
+        "sparql#version-1.2",
     );
 
     // RESULT formats it can RETURN — and each is cross-checked against the live server below.
@@ -252,7 +252,11 @@ fn service_description_assertions(report: &mut SuiteReport, addr: SocketAddr) {
         report,
         "SD advertises sd:resultFormat for Turtle / N-Triples / RDF-XML (graphs)",
         body,
-        &[&fmt_obj("Turtle"), &fmt_obj("N-Triples"), &fmt_obj("RDF_XML")],
+        &[
+            &fmt_obj("Turtle"),
+            &fmt_obj("N-Triples"),
+            &fmt_obj("RDF_XML"),
+        ],
     );
     // INPUT formats it can PARSE on a GSP / LOAD write.
     assert_contains(
@@ -289,10 +293,22 @@ fn service_description_assertions(report: &mut SuiteReport, addr: SocketAddr) {
     let select = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
     let sel = format!("/sparql?query={}", url_encode(select));
     for (label, accept, want_ct) in [
-        ("SRJ", "application/sparql-results+json", "application/sparql-results+json"),
-        ("SRX", "application/sparql-results+xml", "application/sparql-results+xml"),
+        (
+            "SRJ",
+            "application/sparql-results+json",
+            "application/sparql-results+json",
+        ),
+        (
+            "SRX",
+            "application/sparql-results+xml",
+            "application/sparql-results+xml",
+        ),
         ("CSV", "text/csv", "text/csv"),
-        ("TSV", "text/tab-separated-values", "text/tab-separated-values"),
+        (
+            "TSV",
+            "text/tab-separated-values",
+            "text/tab-separated-values",
+        ),
     ] {
         assert_status_ct(
             report,
@@ -627,7 +643,10 @@ fn assert_absent(report: &mut SuiteReport, label: &str, body: &str, needle: &str
         report_record(
             report,
             label,
-            Outcome::Fail(format!("Service Description unexpectedly contains {:?}", needle)),
+            Outcome::Fail(format!(
+                "Service Description unexpectedly contains {:?}",
+                needle
+            )),
         );
     } else {
         report_record(report, label, Outcome::Pass);
@@ -635,20 +654,36 @@ fn assert_absent(report: &mut SuiteReport, label: &str, body: &str, needle: &str
 }
 
 /// Assert the response to `req` has exactly `status`. A write asked-for-200 accepts any 2xx.
-fn assert_status(report: &mut SuiteReport, label: &str, addr: SocketAddr, req: &HttpRequest, status: u16) {
+fn assert_status(
+    report: &mut SuiteReport,
+    label: &str,
+    addr: SocketAddr,
+    req: &HttpRequest,
+    status: u16,
+) {
     match send(addr, req) {
         Ok(resp) if status_ok(resp.status, status) => report_record(report, label, Outcome::Pass),
         Ok(resp) => report_record(
             report,
             label,
-            Outcome::Fail(format!("expected status {}, got {} (body {:?})", status, resp.status, resp.body)),
+            Outcome::Fail(format!(
+                "expected status {}, got {} (body {:?})",
+                status, resp.status, resp.body
+            )),
         ),
         Err(e) => report_record(report, label, Outcome::Fail(e)),
     }
 }
 
 /// Assert status + a `Content-Type` prefix.
-fn assert_status_ct(report: &mut SuiteReport, label: &str, addr: SocketAddr, req: &HttpRequest, status: u16, ct: &str) {
+fn assert_status_ct(
+    report: &mut SuiteReport,
+    label: &str,
+    addr: SocketAddr,
+    req: &HttpRequest,
+    status: u16,
+    ct: &str,
+) {
     match send(addr, req) {
         Ok(resp) if resp.status == status && content_type_is(resp.content_type(), ct) => {
             report_record(report, label, Outcome::Pass)
@@ -691,7 +726,10 @@ fn assert_get_graph_has(
                 report_record(
                     report,
                     label,
-                    Outcome::Fail(format!("graph is missing {:?}; body = {:?}", missing, resp.body)),
+                    Outcome::Fail(format!(
+                        "graph is missing {:?}; body = {:?}",
+                        missing, resp.body
+                    )),
                 );
                 return;
             }
@@ -699,7 +737,10 @@ fn assert_get_graph_has(
                 report_record(
                     report,
                     label,
-                    Outcome::Fail(format!("graph unexpectedly still contains {:?}; body = {:?}", leaked, resp.body)),
+                    Outcome::Fail(format!(
+                        "graph unexpectedly still contains {:?}; body = {:?}",
+                        leaked, resp.body
+                    )),
                 );
                 return;
             }
@@ -710,7 +751,12 @@ fn assert_get_graph_has(
 }
 
 /// Assert a 405 response that carries the protocol-mandated `Allow` header.
-fn assert_405_with_allow(report: &mut SuiteReport, label: &str, addr: SocketAddr, req: &HttpRequest) {
+fn assert_405_with_allow(
+    report: &mut SuiteReport,
+    label: &str,
+    addr: SocketAddr,
+    req: &HttpRequest,
+) {
     match send(addr, req) {
         Ok(resp) if resp.status == 405 && resp.header("allow").is_some() => {
             report_record(report, label, Outcome::Pass)
@@ -755,7 +801,10 @@ mod tests {
             iri_obj("Service", SD),
             "<http://www.w3.org/ns/sparql-service-description#Service>"
         );
-        assert_eq!(pred(SD, "endpoint"), "<http://www.w3.org/ns/sparql-service-description#endpoint>");
+        assert_eq!(
+            pred(SD, "endpoint"),
+            "<http://www.w3.org/ns/sparql-service-description#endpoint>"
+        );
         assert_eq!(fmt_obj("Turtle"), "<http://www.w3.org/ns/formats/Turtle>");
     }
 
@@ -777,7 +826,10 @@ mod tests {
         let req = gsp_write("PUT", "/sparql/graph?default", "<a> <b> <c> .");
         assert_eq!(req.method, "PUT");
         assert_eq!(req.target, "/sparql/graph?default");
-        assert_eq!(req.headers, vec![("Content-Type".to_string(), "text/turtle".to_string())]);
+        assert_eq!(
+            req.headers,
+            vec![("Content-Type".to_string(), "text/turtle".to_string())]
+        );
         assert_eq!(req.body, b"<a> <b> <c> .".to_vec());
     }
 
@@ -785,7 +837,10 @@ mod tests {
     fn gsp_read_requests_ntriples() {
         let req = gsp_read("/graphs/x");
         assert_eq!(req.method, "GET");
-        assert_eq!(req.headers, vec![("Accept".to_string(), "application/n-triples".to_string())]);
+        assert_eq!(
+            req.headers,
+            vec![("Accept".to_string(), "application/n-triples".to_string())]
+        );
         assert!(req.body.is_empty());
     }
 

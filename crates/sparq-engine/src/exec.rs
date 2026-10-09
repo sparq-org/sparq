@@ -12,7 +12,7 @@ use oxrdf::{BlankNode, Literal, NamedOrBlankNode, Term, Variable};
 use rustc_hash::FxHashMap;
 use sparq_core::dict::{self, Id, NO_ID};
 use sparq_core::store::Pattern as IdPattern;
-use sparq_core::temporal::{Temporal, Timeline};
+use sparq_core::temporal::{ExactTemporal, ExactTimeline, Temporal};
 use sparq_core::Graph;
 // sq-ev41x (epic sq-qonbz): the id-level numeric value tower (`Num` / `Dec` /
 // `ArithOp` / `RoundMode` and the XSD lexical helpers) now lives in the `sparq-substrate`
@@ -56,6 +56,9 @@ use std::cmp::Ordering;
 #[path = "eqjoin.rs"]
 mod eqjoin;
 
+#[path = "numeric_capacity.rs"]
+mod numeric_capacity;
+
 // ---- Cooperative query budget (T15 server hardening) -------------------------
 //
 // A thread-local, cooperatively-checked budget installed by the
@@ -88,8 +91,9 @@ pub(crate) mod trace;
 //
 // Soundness (bag semantics): `A ⋈ B = ⊎_C (A_C ⋈ B)` where `A_C` partitions `A` by the
 // pushed-variable values `C`, and `A_C ⋈ B = A_C ⋈ σ_{P=C}(B)`. Because every pushed
-// variable is a CERTAIN variable of `B` (bound in every `B` solution), substituting the
-// constant is exactly `σ_{P=C}(B)` with the pushed columns projected out (re-supplied by
+// variable is a CERTAIN variable of `B` (bound in every `B` solution), and the
+// admitted shape is positive and scope-preserving, substituting the constant is
+// `σ_{P=C}(B)` with the pushed columns projected out (re-supplied by
 // `A_C`). Pushed values are restricted to IRIs (term identity — no literal value-space /
 // numeric-precision hazard), matching the design record (research/
 // sp2bench-complex-shape-deficit.md §2.2). SP2Bench q08/q12b: the 1-row `?erdoes` side
@@ -238,7 +242,7 @@ pub(crate) mod multiplicity;
 // `Copy`) and re-install it around each item exactly like the `functions` / `view`
 // / `spatial` registries above, restoring the previous value on drop (rayon runs
 // some items on the installing thread itself).
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 pub(crate) mod query_now;
 
 // ---- Spatial index (sq-mg9) ----------------------------------------------------
@@ -361,7 +365,8 @@ fn local_term_bytes(t: &Term) -> usize {
 /// Per-query vocabulary for terms produced during evaluation (BIND, aggregates)
 /// that are not in the graph dictionary.
 #[derive(Default)]
-pub struct LocalVocab {
+pub struct LocalVocab<'dataset> {
+    ebv_semantics: crate::EbvSemantics,
     terms: Vec<Term>,
     ids: FxHashMap<Term, Id>,
     /// Parallel to `terms`: the f64 value of each numeric local literal (NaN
@@ -369,12 +374,33 @@ pub struct LocalVocab {
     /// FILTER/comparison over a BIND-computed numeric does not clone + re-parse
     /// the term per row.
     nums: Vec<f64>,
+    /// Bound outer terms for EXISTS expression substitution. Kept with
+    /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
+    /// inherit another evaluation's bindings through thread-local state.
+    correlation: FxHashMap<Variable, Term>,
+    /// The active dataset catalog is independent of the active graph.
+    /// Nested GRAPH switches graph dictionaries without losing this borrowed
+    /// catalog; it is scoped to this evaluation, with no cloning or global state.
+    dataset: Option<&'dataset Graph>,
+    /// Remove substituted variables before domain-sensitive operators.
+    substitute_exists_domains: bool,
 }
 
-impl LocalVocab {
+impl<'dataset> LocalVocab<'dataset> {
+    fn for_query() -> Self {
+        Self { ebv_semantics: budget::ebv_semantics(), ..Self::default() }
+    }
+
+    fn for_dataset(dataset: &'dataset Graph) -> Self {
+        Self { dataset: Some(dataset), ..Self::for_query() }
+    }
     /// Interns a term, returning a stable id: equal terms get the same id so
     /// DISTINCT, GROUP BY, joins and equality work on computed values.
     fn intern(&mut self, t: Term) -> Id {
+        if let Term::Literal(literal) = &t {
+            // Sticky: interning cannot turn an evaluation-capacity failure into unbound.
+            let _ = budget::check_temporal(literal.value(), literal.datatype().as_str());
+        }
         if let Some(&id) = self.ids.get(&t) {
             return id;
         }
@@ -383,7 +409,7 @@ impl LocalVocab {
             // sq-74oy4 / sq-6b1lj: cache the DATATYPE-AWARE f64 (`numeric_cache_f64`)
             // — the SAME acceptance the graph `numeric_value` cache and the lenient `as_num`
             // seam use — so a computed (BIND/aggregate) numeric term joins/compares identically
-            // to a graph term. It TRIMS (XSD `collapse` facet) and rejects a per-datatype-
+            // to a graph term. It validates raw RDF lexical bytes verbatim and rejects a per-datatype-
             // ill-formed lexical (`"1.5"^^xsd:integer`); either folds to the NaN cache-miss
             // sentinel, deferring `=`/`<`/`>` to the exact evaluator (which type-errors it).
             Term::Literal(l) => numeric_cache_f64(l).unwrap_or(f64::NAN),
@@ -475,6 +501,8 @@ pub(crate) use self::dispatch::*;
 // Test-only observations pin retained preparation work, not timing.
 #[cfg(test)]
 mod indexed_topk_preparation_tests;
+#[path = "exists_domain.rs"]
+mod exists_domain;
 /// Test/embedder seam for the SERVICE HTTP transport. By default `with` runs the
 /// closure against the production `sparq_engine_service::service::HttpTransport`; tests install a
 /// fake (loopback / canned) transport for the duration of a scope so SERVICE can be
@@ -527,6 +555,7 @@ use sjoin::{key_hash, JOIN_PARTS};
 /// Bag equivalence, bounded per-key scans, and real-query reachability for bind-join
 /// grouping. Test-only counters observe the chosen path without depending on hash-map
 /// iteration order; the randomized oracle is independent of either grouping strategy.
+///
 #[cfg(test)]
 mod bind_join_run_grouping;
 
@@ -578,7 +607,7 @@ pub(crate) use self::compiled::*;
 /// per thread per process), rayon workers get independent streams, and `EXISTS`
 /// re-entry merely draws the next value — there is no layout- or query-dependent
 /// state to leak. Deliberately NOT deterministic or query-constant.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "zkvm")))]
 mod rand_unit;
 /// Per-thread `REGEX()`/`REPLACE()` compile memo (sq-98w7z.1).
 ///
@@ -641,8 +670,8 @@ mod builtin_memo_tests;
 /// SPEC, NOT BUG-FOR-BUG. The probes encode the SPARQL 1.1 / 1.2 SPEC-correct
 /// outcome. Where the engine diverged (STRLEN / ENCODE_FOR_URI / LANGMATCHES wrongly
 /// `STR()`-coerced an IRI/number instead of erroring), the divergence was FIXED in the
-/// builtin dispatch (the STRLEN / ENCODE_FOR_URI / LANGMATCHES arms) so these rows pass
-/// on the corrected behaviour; a row that the engine cannot yet satisfy correctly would be `#[ignore]`d
+/// dispatch above (see the `` arms) so these rows pass on the corrected
+/// behaviour; a row that the engine cannot yet satisfy correctly would be `#[ignore]`d
 /// with a comment + a filed bead rather than asserting the wrong value as "expected".
 ///
 /// The table shape (a variant-indexed list of probes, driven once) mirrors
@@ -736,7 +765,7 @@ mod columnar_filter_seam;
 // coverage of paths reachable only from inside the crate: `minus_bindings` (disjoint
 // fast path + fully-bound fast path + the unbound-shared-variable general compatibility
 // scan), `effective_boolean` / `ebv` error arms, aggregate-error propagation via
-// `sum_values(_, errored=true)`, and the `minmax_values` numeric-promotion + mixed-type
+// `sum_values(_, errored=true)`, and the `minmax_values` numeric-selection + mixed-type
 // fallback paths.
 
 /// Direct unit tests for `minus_bindings` — exercises the fast-path (disjoint
@@ -753,7 +782,7 @@ mod effective_boolean_unit;
 /// `errored=true` → `None` branch and the integer-only and decimal-promotion paths.
 #[cfg(test)]
 mod sum_values_unit;
-/// Direct unit tests for `minmax_values` — numeric promotion path and empty-set path.
+/// Direct unit tests for `minmax_values` — numeric selection path and empty-set path.
 #[cfg(test)]
 mod minmax_values_unit;
 // (sq-pntvh.4, M4 Phase 4) Seam-level differential for the columnar
@@ -806,3 +835,17 @@ mod order_bindings_worker_reinstall;
 // Actual public-query path and physical RHS-work witness for #3105.
 #[cfg(test)]
 mod capped_rhs_tests;
+
+// Nullable path semantics have an independent bottom-up test oracle.
+#[cfg(test)]
+#[path = "nullable_path_tests.rs"]
+mod nullable_path_tests;
+
+#[cfg(test)]
+mod exact_temporal_sort_cache_tests;
+
+/// #4467 — the scoped registry guards restore the registry the install replaced
+/// (rather than clearing it), so a nested install hands the outer scope its own
+/// registry back, on normal return and on unwind alike.
+#[cfg(test)]
+mod scoped_registry_tests;

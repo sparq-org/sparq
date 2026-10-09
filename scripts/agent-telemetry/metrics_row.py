@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-4.8] Per-PR / per-task metrics-collection harness (bead sq-lhwo.1, epic sq-lhwo).
-# Authored by Opus 4.8 (Fable unavailable; flag for re-review when Fable returns).
+# Per-PR / per-task metrics-collection harness (bead sq-lhwo.1, epic sq-lhwo).
 #
 # WHY THIS EXISTS
 # --------------------------------------------------------------------------------

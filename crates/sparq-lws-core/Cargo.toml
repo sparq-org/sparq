@@ -256,7 +256,7 @@ sparq-trust = { path = "../sparq-trust", optional = true }
 # already a transitive dep of sparq-trust, so the feature adds no crate; making it an optional
 # normal dep rather than an unconditional dev-dep keeps the research ZK estate out of the
 # default `cargo test` of this core crate. Run with `--features trust-graph`.
-sparq-zk = { path = "../sparq-zk", version = "0.1.3", optional = true }
+sparq-zk = { path = "../sparq-zk", version = "0.1.4", optional = true }
 object_store = "0.14"
 pin-project-lite = "0.2"
 hyper = { version = "1", features = ["client", "http1"] }

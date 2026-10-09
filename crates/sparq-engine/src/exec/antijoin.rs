@@ -282,7 +282,7 @@ pub(super) fn try_theta_antijoin(
         // path: today the build truncates to nothing and the caller's operator-exit
         // `budget::check` raises this same message, just after the wasted work.
         #[cfg(feature = "parallel")]
-        if left_b.rows.len() >= PAR_THRESHOLD {
+        if left_b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
             use rayon::prelude::*;
             let limits = budget::snapshot();
             let fns = functions::snapshot();
@@ -294,6 +294,7 @@ pub(super) fn try_theta_antijoin(
             let lsv = local_services::snapshot();
             #[cfg(not(target_arch = "wasm32"))]
             let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+            let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
             let verdicts: Vec<bool> = left_b
                 .rows
                 .par_iter()
@@ -301,7 +302,7 @@ pub(super) fn try_theta_antijoin(
                     // One non-tripping `Instant` read per row under a deadline budget, and
                     // a single `on` test when no budget is installed.
                     if let Some(why) = limits.why(0) {
-                        return Err(format!("query budget exceeded ({})", why));
+                        return Err((Some(why), format!("query budget exceeded ({})", why)));
                     }
                     let _fns = functions::worker_install(&fns);
                     let _vw = view::worker_install(&vw);
@@ -310,9 +311,14 @@ pub(super) fn try_theta_antijoin(
                     let _lsv = local_services::worker_install(&lsv);
                     #[cfg(not(target_arch = "wasm32"))]
                     let _qn = query_now::worker_install(qn);
-                    eliminated(lrow)
+                    let _qb = query_base_worker_install(&qb);
+                    eliminated(lrow).map_err(|message| (None, message))
                 })
-                .collect::<Result<Vec<bool>, String>>()?;
+                .collect::<Result<Vec<bool>, (Option<crate::BudgetExceeded>, String)>>()
+                .map_err(|(cause, message)| {
+                    if let Some(cause) = cause { budget::record_worker_failure(cause); }
+                    message
+                })?;
 
             // Serial ordered build + budget truncation: identical to the serial probe
             // loop's `if !matched { push } ; break on budget` — the survivor prefix and
@@ -352,7 +358,7 @@ pub(super) fn try_theta_antijoin(
 
     // ---- SIP-seed anti-join (small correlation cardinality / literal keys) ----
     let mut fired = false;
-    for key in &order {
+    'groups: for key in &order {
         let members = &groups[key];
         let ri0 = members[0];
 
@@ -420,8 +426,11 @@ pub(super) fn try_theta_antijoin(
         let all_cands: Vec<usize> = (0..b_prime.rows.len()).collect();
         for &ri in members {
             let lrow = &left_b.rows[ri];
+            // Stop the whole SIP strategy, not just this correlation group, so it ends
+            // exactly like the hash strategy: no further seeded `B'` is evaluated and the
+            // caller's operator-exit check raises the budget error (#4158).
             if budget::exhausted(result_rows.len()) {
-                break;
+                break 'groups;
             }
             let matched = antijoin_row_matches(
                 graph, local, lrow, &b_prime, &all_cands, &shared, &out_src, &tmp_vars, &checks,
@@ -519,7 +528,7 @@ pub(super) fn antijoin_row_matches(
             .collect();
         let mut ok = true;
         for e in checks {
-            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?) {
+            if !effective_boolean(&eval_expr(graph, local, &tmp, &combined, e)?, local.ebv_semantics) {
                 ok = false;
                 break;
             }
@@ -845,7 +854,7 @@ pub(super) fn values_bindings(graph: &Graph, local: &mut LocalVocab, variables: 
 
 pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bindings, var: &Variable, expr: &Expression) -> Result<Bindings, String> {
     // Pre-resolve Variable → column index once before the row loop. sq-7d3dj.4.
-    let compiled = compile_expr(expr, &b);
+    let compiled = compile_expr(expr, &b, local);
     // BIND was fully serial because each row's computed value was interned immediately. Split it
     // (T1.0b): a PARALLEL pass evaluates the expression (read-only) and resolves the value to an
     // id read-only (inline / graph-dict / already-local); only genuinely new terms fall through to
@@ -855,7 +864,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
     let scope = b.rows.as_ptr() as usize;
     #[cfg(feature = "parallel")]
-    let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD {
+    let resolved: Vec<Result<Id, Term>> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         let lv: &LocalVocab = local;
         let bref = &b;
@@ -871,6 +880,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
         let lsv = local_services::snapshot();
         #[cfg(not(target_arch = "wasm32"))]
         let qn = query_now::snapshot(); // sq-98w7z.1: keep NOW() pinned on workers
+        let qb = query_base_snapshot(); // keep BASE visible to IRI()/URI() on workers
         b.rows
             .par_iter()
             .enumerate()
@@ -882,6 +892,7 @@ pub(super) fn extend_bindings(graph: &Graph, local: &mut LocalVocab, mut b: Bind
                 let _lsv = local_services::worker_install(&lsv);
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
+                let _qb = query_base_worker_install(&qb);
                 ROW_SCOPE.set((scope, i));
                 let v = eval_compiled(graph, lv, bref, row, &compiled)?;
                 Ok(value_to_id_readonly(graph, lv, &v))

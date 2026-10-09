@@ -18,15 +18,18 @@
 //! ## The algorithm is single-sourced
 //!
 //! The RDFC-1.0 algorithm itself (issuer / first-degree + n-degree hashing /
-//! the HNDQ recursion) is the maintained zkp-ld [`rdf_canon`] crate, validated
-//! against the [W3C rdf-canon test suite] (see `tests/rdf_canon_suite.rs`).
-//! `rdf_canon` speaks oxrdf 0.2 while sparq speaks oxrdf 0.3, so this crate
+//! the HNDQ recursion) is the zkp-ld [`rdf-canon`] 0.15.3 crate, vendored as a
+//! private module with sparq's label-independence patches (`src/rdfc/`, see
+//! `SPARQ-PATCHES.md` there) and validated against the [W3C rdf-canon test suite]
+//! (see `tests/rdf_canon_suite.rs`). That core speaks oxrdf 0.2 while sparq
+//! speaks oxrdf 0.3, so this crate
 //! owns the single **canonical N-Quads text bridge** that every sparq consumer
 //! shares: serialize 0.3 terms with their canonical `Display` form, parse with
 //! oxttl 0.1 into 0.2 quads, canonicalize, parse the canonical N-Quads back.
 //! N-Quads is the interchange form RDFC-1.0 is defined over, so the seam is
 //! lossless by construction.
 //!
+//! [`rdf-canon`]: https://crates.io/crates/rdf-canon
 //! [W3C rdf-canon test suite]: https://github.com/w3c/rdf-canon
 //!
 //! ## API shape
@@ -43,7 +46,7 @@
 //!
 //! ## Pathological inputs
 //!
-//! RDFC-1.0 has worst-case blow-ups. `rdf_canon`'s HNDQ-call-limit guard is
+//! RDFC-1.0 has worst-case blow-ups. The vendored core's HNDQ-call-limit guard is
 //! kept at its default; limit hits surface as [`CanonError::Canonicalization`]
 //! so a caller can fail closed on poison graphs.
 //!
@@ -54,7 +57,10 @@
 //!
 //! Triple terms (`Term::Triple`, the RDF-1.2 `<<( s p o )>>` object) are
 //! **outside** the W3C RDFC-1.0 data model, so the standard paths above fail
-//! closed with [`CanonError::TripleTerm`]. Enabling the **opt-in, off-by-default**
+//! closed with [`CanonError::TripleTerm`]. RDF-1.2 directional-language
+//! literals (`"…"@en--ltr`) are likewise outside that RDF-1.1 data model and
+//! fail closed with [`CanonError::DirectionalLiteral`] on the standard paths.
+//! Enabling the **opt-in, off-by-default**
 //! `rdf12-triple-terms` cargo feature adds a *separate, clearly non-standard* v2
 //! profile (`canonicalize_rdf12`, `canonicalize_triples_rdf12`, …) that
 //! natively re-implements the RDFC-1.0 algorithm over oxrdf-0.3 and **descends
@@ -80,6 +86,11 @@ use oxrdf::{GraphName, Quad, Triple};
 use oxttl::NQuadsParser;
 use sparq_core::Graph;
 use std::collections::HashMap;
+
+mod bounded;
+pub use bounded::{
+    CanonicalizationLimits, canonicalize_quads_bounded_with, issue_quads_bounded_with,
+};
 
 // ---------------------------------------------------------------------------
 // Text-in / text-out API ([OPUS-4.8] sq-1dd5t). A self-contained N-Quads
@@ -129,6 +140,8 @@ fn parse_nquads_03(input: &str) -> Result<Vec<Quad>, CanonError> {
     Ok(quads)
 }
 
+mod rdfc;
+
 /// **NON-STANDARD, opt-in (`rdf12-triple-terms` feature).** Native RDF-1.2
 /// triple-term canonicalization profile — see the [module docs](rdf12) and the
 /// crate-level banner. Not W3C RDFC-1.0.
@@ -139,9 +152,8 @@ pub mod rdf12;
 pub use rdf12::{
     canonicalize_graph_content_rdf12, canonicalize_graph_content_rdf12_ground_terms,
     canonicalize_graph_content_rdf12_ground_terms_with, canonicalize_graph_content_rdf12_with,
-    canonicalize_rdf12,
-    canonicalize_rdf12_ground_terms, canonicalize_rdf12_ground_terms_with, canonicalize_rdf12_with,
-    canonicalize_triples_rdf12, canonicalize_triples_rdf12_ground_terms,
+    canonicalize_rdf12, canonicalize_rdf12_ground_terms, canonicalize_rdf12_ground_terms_with,
+    canonicalize_rdf12_with, canonicalize_triples_rdf12, canonicalize_triples_rdf12_ground_terms,
     canonicalize_triples_rdf12_ground_terms_with, canonicalize_triples_rdf12_with,
     issue_dataset_rdf12, issue_dataset_rdf12_ground_terms, issue_dataset_rdf12_ground_terms_with,
     issue_dataset_rdf12_with,
@@ -209,10 +221,18 @@ pub enum CanonError {
     /// present (not feature-gated), per the `NestedBlankNode` precedent.
     /// [FABLE-5] sq-x3oj2.
     TripleTermDepthExceeded,
+    /// An RDF 1.2 directional-language literal (`"…"@lang--ltr` / `--rtl`,
+    /// [`oxrdf::BaseDirection`]) reached a **standard** (`rdf-canon`-backed)
+    /// entry point. RDFC-1.0 is defined over RDF 1.1, and the standard path's
+    /// oxrdf-0.2 bridge cannot represent a base direction, so these paths fail
+    /// closed with this typed error instead of a generic [`CanonError::Bridge`].
+    /// The opt-in, non-standard `rdf12-triple-terms` profile (`canonicalize_rdf12`
+    /// and siblings) canonicalizes directional literals natively. GitHub #5359.
+    DirectionalLiteral,
     /// Bridge serialization/parse failure (should not happen for RDFC-1.0-model
     /// content; surfaced rather than swallowed).
     Bridge(String),
-    /// `rdf_canon` rejected the dataset (including the HNDQ poison-graph limit).
+    /// The RDFC-1.0 core rejected the dataset (including the HNDQ poison-graph limit).
     Canonicalization(String),
 }
 
@@ -240,6 +260,13 @@ impl std::fmt::Display for CanonError {
                     "RDF 1.2 triple term nests deeper than the crate-wide bound of \
                      {MAX_TRIPLE_TERM_DEPTH} levels; failing closed (deeply-nested \
                      triple terms are a stack-overflow vector for recursive descent)"
+                )
+            }
+            CanonError::DirectionalLiteral => {
+                write!(
+                    f,
+                    "RDF 1.2 directional-language literals are outside the W3C RDFC-1.0 \
+                     data model; enable the `rdf12-triple-terms` profile to canonicalize them"
                 )
             }
             CanonError::Bridge(e) => write!(f, "oxrdf bridge error: {e}"),
@@ -306,10 +333,10 @@ pub fn canonicalize(dataset: &[Quad]) -> Result<String, CanonError> {
 }
 
 /// Alias of [`canonicalize`] for callers that prefer the explicit `_quads`
-/// name (mirrors [`rdf_canon::canonicalize_quads`]).
+/// name (mirrors upstream `rdf_canon::canonicalize_quads`).
 pub fn canonicalize_quads(dataset: &[Quad]) -> Result<String, CanonError> {
     let quads02 = bridge_to_02(dataset)?;
-    rdf_canon::canonicalize_quads(&quads02).map_err(|e| CanonError::Canonicalization(e.to_string()))
+    rdfc::canonicalize_quads(&quads02).map_err(|e| CanonError::Canonicalization(e.to_string()))
 }
 
 /// Like [`canonicalize_quads`] but parameterized over the RDFC-1.0 hash
@@ -317,8 +344,8 @@ pub fn canonicalize_quads(dataset: &[Quad]) -> Result<String, CanonError> {
 /// SHA-384 profile). Uses the default HNDQ call limit.
 pub fn canonicalize_quads_with<D: Digest>(dataset: &[Quad]) -> Result<String, CanonError> {
     let quads02 = bridge_to_02(dataset)?;
-    let opts = rdf_canon::CanonicalizationOptions::default();
-    rdf_canon::canonicalize_quads_with::<D>(&quads02, &opts)
+    let opts = rdfc::CanonicalizationOptions::default();
+    rdfc::canonicalize_quads_with::<D>(&quads02, &opts)
         .map_err(|e| CanonError::Canonicalization(e.to_string()))
 }
 
@@ -340,8 +367,8 @@ pub fn issue_quads_with<D: Digest>(
     dataset: &[Quad],
 ) -> Result<HashMap<String, String>, CanonError> {
     let quads02 = bridge_to_02(dataset)?;
-    let opts = rdf_canon::CanonicalizationOptions::default();
-    let map = rdf_canon::issue_quads_with::<D>(&quads02, &opts)
+    let opts = rdfc::CanonicalizationOptions::default();
+    let map = rdfc::issue_quads_with::<D>(&quads02, &opts)
         .map_err(|e| CanonError::Canonicalization(e.to_string()))?;
     Ok(map.into_iter().collect())
 }
@@ -353,11 +380,11 @@ pub fn issued_identifiers(dataset: &[Quad]) -> Result<HashMap<String, String>, C
     issue_quads(dataset)
 }
 
-/// Alias of [`issued_identifiers`] (mirrors [`rdf_canon::issue_quads`]).
+/// Alias of [`issued_identifiers`] (mirrors upstream `rdf_canon::issue_quads`).
 pub fn issue_quads(dataset: &[Quad]) -> Result<HashMap<String, String>, CanonError> {
     let quads02 = bridge_to_02(dataset)?;
-    let map = rdf_canon::issue_quads(&quads02)
-        .map_err(|e| CanonError::Canonicalization(e.to_string()))?;
+    let map =
+        rdfc::issue_quads(&quads02).map_err(|e| CanonError::Canonicalization(e.to_string()))?;
     Ok(map.into_iter().collect())
 }
 
@@ -375,7 +402,7 @@ pub fn canonicalize_triples(triples: &[Triple]) -> Result<CanonicalGraph, CanonE
         }
     }
     let quads02 = bridge_triples_to_02(triples)?;
-    let canonical = rdf_canon::canonicalize_quads(&quads02)
+    let canonical = rdfc::canonicalize_quads(&quads02)
         .map_err(|e| CanonError::Canonicalization(e.to_string()))?;
     parse_canonical(&canonical)
 }
@@ -396,8 +423,8 @@ pub fn issue_triples(triples: &[Triple]) -> Result<HashMap<String, String>, Cano
         }
     }
     let quads02 = bridge_triples_to_02(triples)?;
-    let map = rdf_canon::issue_quads(&quads02)
-        .map_err(|e| CanonError::Canonicalization(e.to_string()))?;
+    let map =
+        rdfc::issue_quads(&quads02).map_err(|e| CanonError::Canonicalization(e.to_string()))?;
     Ok(map.into_iter().collect())
 }
 
@@ -418,10 +445,11 @@ pub fn graph_triples(g: &Graph) -> Result<Vec<Triple>, CanonError> {
 // ---------------------------------------------------------------------------
 
 /// Serialize oxrdf-0.3 quads to canonical N-Quads text and parse into oxrdf-0.2
-/// quads for `rdf_canon`. `GraphName::Display` renders the default graph as the
+/// quads for the RDFC-1.0 core. `GraphName::Display` renders the default graph as the
 /// literal word `DEFAULT`, so the default graph is emitted explicitly as a
 /// 3-term line.
 fn bridge_to_02(dataset: &[Quad]) -> Result<Vec<oxrdf02::Quad>, CanonError> {
+    reject_unbridgeable(dataset.iter().map(|q| &q.object))?;
     let doc = serialize_quads(dataset)?;
     parse_02(&doc)
 }
@@ -479,6 +507,7 @@ fn serialize_quads(dataset: &[Quad]) -> Result<String, CanonError> {
 }
 
 fn bridge_triples_to_02(triples: &[Triple]) -> Result<Vec<oxrdf02::Quad>, CanonError> {
+    reject_unbridgeable(triples.iter().map(|t| &t.object))?;
     let mut doc = String::new();
     #[cfg(feature = "bridge-lowcopy")]
     use std::fmt::Write as _;
@@ -538,6 +567,29 @@ fn parse_canonical(canonical: &str) -> Result<CanonicalGraph, CanonError> {
     Ok(CanonicalGraph { lines, triples })
 }
 
+/// Fails closed on object terms the RDF-1.1 oxrdf-0.2 bridge cannot carry,
+/// before serialization: triple terms ([`CanonError::TripleTerm`], which takes
+/// precedence) and directional-language literals
+/// ([`CanonError::DirectionalLiteral`]). Literals only occur in object
+/// position, and triple terms are rejected outright, so the top-level objects
+/// are the only places a base direction can appear. GitHub #5359.
+fn reject_unbridgeable<'a>(
+    objects: impl Iterator<Item = &'a oxrdf::Term>,
+) -> Result<(), CanonError> {
+    let mut directional = false;
+    for o in objects {
+        match o {
+            oxrdf::Term::Triple(_) => return Err(CanonError::TripleTerm),
+            oxrdf::Term::Literal(l) if l.direction().is_some() => directional = true,
+            _ => {}
+        }
+    }
+    if directional {
+        return Err(CanonError::DirectionalLiteral);
+    }
+    Ok(())
+}
+
 fn contains_triple_term(t: &Triple) -> bool {
     matches!(t.object, oxrdf::Term::Triple(_))
 }
@@ -576,7 +628,7 @@ mod tests {
             assert_eq!(lowcopy_doc.as_bytes(), default_doc.as_bytes());
 
             let default_quads = parse_02(&default_doc).unwrap();
-            let default_canonical = rdf_canon::canonicalize_quads(&default_quads).unwrap();
+            let default_canonical = rdfc::canonicalize_quads(&default_quads).unwrap();
             assert_eq!(canonicalize(&dataset).unwrap(), default_canonical);
         }
     }
@@ -591,10 +643,18 @@ mod tests {
     #[test]
     fn canonicalize_nquads_deduplicates_repeated_quads() {
         let doc = "_:b0 <http://ex/p> \"x\" .\n<http://ex/s> <http://ex/p> \"y\" .\n_:b0 <http://ex/p> \"x\" .\n";
-        assert_eq!(parse_nquads(doc).unwrap().len(), 3, "the parse itself keeps duplicates");
+        assert_eq!(
+            parse_nquads(doc).unwrap().len(),
+            3,
+            "the parse itself keeps duplicates"
+        );
         let canon = canonicalize_nquads(doc).unwrap();
         let canon_quads = parse_nquads(&canon).unwrap();
-        assert_eq!(canon_quads.len(), 2, "canonical form is a set: the duplicate collapses");
+        assert_eq!(
+            canon_quads.len(),
+            2,
+            "canonical form is a set: the duplicate collapses"
+        );
         // Idempotence: re-canonicalizing the canonical form is a fixed point.
         assert_eq!(canonicalize_nquads(&canon).unwrap(), canon);
     }
@@ -612,7 +672,11 @@ mod tests {
         // Multiple quads: ensure each is returned.
         let two = "<http://ex/s> <http://ex/p> <http://ex/a> .\n\
                    <http://ex/s> <http://ex/q> <http://ex/b> .\n";
-        assert_eq!(parse_nquads(two).unwrap().len(), 2, "two lines -> two quads");
+        assert_eq!(
+            parse_nquads(two).unwrap().len(),
+            2,
+            "two lines -> two quads"
+        );
     }
 
     /// `parse_nquads` error path: malformed N-Quads must return `CanonError::Bridge`,
@@ -731,16 +795,21 @@ mod tests {
     #[test]
     fn graph_triples_materializes_exact_terms() {
         use sparq_core::Graph;
-        let g = Graph::load_str(
-            "<http://ex/s> <http://ex/p> <http://ex/o> .\n",
-            "ntriples",
-        )
-        .expect("load_str");
+        let g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .\n", "ntriples")
+            .expect("load_str");
         let triples = graph_triples(&g).unwrap();
-        assert_eq!(triples.len(), 1, "one stored triple -> one materialized triple");
+        assert_eq!(
+            triples.len(),
+            1,
+            "one stored triple -> one materialized triple"
+        );
         let t = &triples[0];
         assert_eq!(t.subject.to_string(), "<http://ex/s>", "subject preserved");
-        assert_eq!(t.predicate.to_string(), "<http://ex/p>", "predicate preserved");
+        assert_eq!(
+            t.predicate.to_string(),
+            "<http://ex/p>",
+            "predicate preserved"
+        );
         assert_eq!(t.object.to_string(), "<http://ex/o>", "object preserved");
     }
 
@@ -750,11 +819,8 @@ mod tests {
     #[test]
     fn canonicalize_graph_content_relabels_bnode() {
         use sparq_core::Graph;
-        let g = Graph::load_str(
-            "_:b0 <http://ex/p> <http://ex/o> .\n",
-            "ntriples",
-        )
-        .expect("load_str");
+        let g =
+            Graph::load_str("_:b0 <http://ex/p> <http://ex/o> .\n", "ntriples").expect("load_str");
         let c = canonicalize_graph_content(&g).unwrap();
         assert_eq!(c.lines.len(), 1, "one stored triple -> one canonical line");
         assert!(

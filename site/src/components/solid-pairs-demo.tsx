@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import {
   loadSparq,
   formatTerm,
+  termValue,
   resultVars,
   resultRows,
   isAskResult,
@@ -495,7 +496,7 @@ function SessionResult({
 function graphSet(rows: SparqlResults["results"]["bindings"]): Set<string> {
   const s = new Set<string>();
   for (const r of rows) {
-    const g = r["graph"]?.value;
+    const g = termValue(r["graph"]);
     if (g) s.add(g);
   }
   return s;

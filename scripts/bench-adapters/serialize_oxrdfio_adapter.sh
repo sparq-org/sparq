@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-hmd7l.14 — oxrdfio (Oxigraph's RDF I/O crate) adapter for the
+# sq-hmd7l.14 — oxrdfio (Oxigraph's RDF I/O crate) adapter for the
 # bench/serialize serialization-throughput panel.
 #
 # oxrdfio ships no CLI, so this adapter scaffolds a tiny scratch cargo project

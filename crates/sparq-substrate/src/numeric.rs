@@ -172,7 +172,9 @@ impl Dec {
                 match mode {
                     RoundMode::Floor => q,
                     RoundMode::Ceil => q + i128::from(r > 0),
-                    RoundMode::HalfUp => q + i128::from(r * 2 >= p),
+                    // Compare against the half threshold without doubling
+                    // a remainder near 10^38, which can overflow signed i128.
+                    RoundMode::HalfUp => q + i128::from(r >= p / 2 + p % 2),
                 }
             }
             None => match mode {
@@ -191,7 +193,22 @@ impl Dec {
     /// exact value lives in `mant`/`scale`). Used by the LENIENT order / arithmetic fallback.
     #[inline]
     pub fn f64(self) -> f64 {
-        self.mant as f64 / 10f64.powi(self.scale as i32)
+        // One rounding (#3800). When the mantissa and `10^scale` are both exact `f64`s
+        // (|mant| <= 2^53, scale <= 22), the IEEE division is the single correctly-rounded
+        // step. Otherwise `mant as f64` would round first and the division round again, so
+        // re-parse the exact lexical instead (Rust's decimal parser is correctly rounded).
+        const POW10: [f64; 23] = [
+            1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+            1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+        ];
+        if self.mant.unsigned_abs() <= 1 << 53 && (self.scale as usize) < POW10.len() {
+            return self.mant as f64 / POW10[self.scale as usize];
+        }
+        match self.lexical().parse::<f64>() {
+            Ok(f) => f,
+            // Unreachable (`Dec::lexical` writes `[-]digits[.digits]`); stay total.
+            Err(_) => self.mant as f64 / 10f64.powi(self.scale as i32),
+        }
     }
 
     /// The value as an `f32`, rounded to single precision **exactly once** — the
@@ -695,7 +712,7 @@ impl Num {
                 } else if f == f32::NEG_INFINITY {
                     "-INF".to_string()
                 } else if f.fract() == 0.0 && f.abs() < 1e15 {
-                    format!("{}", f as i64)
+                    integral_lexical(f as i64, f.is_sign_negative())
                 } else {
                     let s = format!("{f:E}");
                     match s.split_once('E') {
@@ -764,37 +781,57 @@ impl Num {
     }
 
     /// The typed numeric value of a literal, or `None` if the literal is not a
-    /// well-formed numeric (an ill-formed numeric operand is a SPARQL type error).
+    /// valid, representable numeric (an invalid operand is a SPARQL type error).
+    /// Valid integer/decimal values beyond the finite mantissa capacity also return `None`.
     /// This is the EXACT engine lexical path: `parse_xsd_f32`/`parse_xsd_f64` (with the
     /// XSD `INF`/`-INF`/`NaN`/exponent spellings) for float/double, and the
     /// scale-preserving [`Dec::parse_lexical`] for decimal.
     #[inline]
     pub fn of_literal(l: &oxrdf::Literal) -> Option<Num> {
-        use oxrdf::vocab::xsd;
         if l.language().is_some() {
             return None;
         }
-        let dt = l.datatype();
-        let v = l.value().trim();
-        if sparq_core::is_integer_datatype(dt.as_str()) {
+        Self::of_parts(l.value(), l.datatype().as_str())
+    }
+
+    /// Parses borrowed numeric literal parts using the shared datatype and capacity rules.
+    ///
+    /// Equivalent to [`Self::of_literal`] for a literal without a language tag.
+    /// Returns `None` for invalid lexicals, subtype facet violations, nonnumeric
+    /// datatypes, or values beyond this arithmetic tower's finite representation.
+    #[inline]
+    pub fn of_parts(value: &str, datatype: &str) -> Option<Num> {
+        use oxrdf::vocab::xsd;
+        let v = value;
+        // The two common datatypes first: i64's parser accepts exactly an optional
+        // sign and ASCII digits, and `parse_lexical` validates decimal digits once
+        // whitespace (outside the lexical space) is ruled out.
+        if datatype == xsd::INTEGER.as_str() {
             if let Ok(i) = v.parse::<i64>() {
                 return Some(Num::Int(i));
             }
-            // Integer beyond i64: exact i128 mantissa if it fits (scale 0 = integer
-            // lexical), else not representable -> double.
+        } else if datatype == xsd::DECIMAL.as_str() {
+            return if v.trim().len() == v.len() { Dec::parse_lexical(v).map(Num::Dec) } else { None };
+        }
+        if !sparq_core::numeric_literal_valid(v, datatype) {
+            return None;
+        }
+        if sparq_core::is_integer_datatype(datatype) {
+            if let Ok(i) = v.parse::<i64>() {
+                return Some(Num::Int(i));
+            }
             return match Dec::parse(v) {
                 Some(d) if d.scale == 0 => Some(Num::Dec(d)),
-                Some(_) => None, // "1.5"^^xsd:integer is ill-formed
-                None => None,
+                _ => None,
             };
         }
-        if dt == xsd::DECIMAL {
+        if datatype == xsd::DECIMAL.as_str() {
             return Dec::parse_lexical(v).map(Num::Dec);
         }
-        if dt == xsd::FLOAT {
+        if datatype == xsd::FLOAT.as_str() {
             return parse_xsd_f32(v).map(Num::Float);
         }
-        if dt == xsd::DOUBLE {
+        if datatype == xsd::DOUBLE.as_str() {
             return parse_xsd_f64(v).map(Num::Double);
         }
         None
@@ -857,10 +894,13 @@ fn apply_f32(a: f32, b: f32, op: ArithOp) -> f32 {
 #[inline]
 fn round_half_to_pos_inf(x: f64) -> f64 {
     let fl = x.floor();
-    if x - fl >= 0.5 {
-        fl + 1.0
+    let r = if x - fl >= 0.5 { fl + 1.0 } else { fl };
+    // F&O 3.1 §4.4.4: a negative argument in [-0.5, 0) rounds to NEGATIVE zero, but
+    // `-1.0 + 1.0` is +0.0 — so a zero result takes the argument's sign (#4276).
+    if r == 0.0 {
+        r.copysign(x)
     } else {
-        fl
+        r
     }
 }
 
@@ -907,6 +947,16 @@ pub fn parse_xsd_f32(v: &str) -> Option<f32> {
     v.parse::<f32>().ok()
 }
 
+/// The plain-integral lexical of a float/double: `i` as digits, except that negative zero
+/// keeps its sign ("-0"), since XSD's float/double value spaces distinguish it (#4276).
+fn integral_lexical(i: i64, negative: bool) -> String {
+    if i == 0 && negative {
+        "-0".to_string()
+    } else {
+        i.to_string()
+    }
+}
+
 /// Float/double serialisation: an INTEGRAL value prints as a plain integer ("6",
 /// "1050" — matching the dominant convention across the W3C expected results, which
 /// mix plain and scientific forms); anything else uses the XSD canonical
@@ -922,7 +972,7 @@ pub fn fmt_xsd_double(v: f64) -> String {
         return "-INF".to_string();
     }
     if v.fract() == 0.0 && v.abs() < 1e15 {
-        return format!("{}", v as i64);
+        return integral_lexical(v as i64, v.is_sign_negative());
     }
     let s = format!("{v:E}"); // shortest round-trip mantissa, e.g. "2E-1"
     match s.split_once('E') {
@@ -933,6 +983,19 @@ pub fn fmt_xsd_double(v: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn round_large_scale_remainder_does_not_overflow() {
+        for (lexical, expected) in [
+            ("0.99999999999999999999999999999999999999", 1),
+            ("-0.00000000000000000000000000000000000001", 0),
+            ("0.49999999999999999999999999999999999999", 0),
+            ("-0.50000000000000000000000000000000000001", -1),
+        ] {
+            let d = super::Dec::parse_lexical(lexical).unwrap();
+            assert_eq!(d.round_to_int(super::RoundMode::HalfUp).mant, expected);
+        }
+    }
+
     use super::*;
     use oxrdf::vocab::xsd;
     use oxrdf::Literal;
@@ -1074,6 +1137,11 @@ mod tests {
         assert_eq!(round_half_to_pos_inf(1.5), 2.0);
         assert_eq!(round_half_to_pos_inf(2.5), 3.0);
         assert_eq!(round_half_to_pos_inf(-0.5), 0.0); // towards +INF, not -1
+        // ...and the zero keeps the argument's sign (#4276).
+        assert!(round_half_to_pos_inf(-0.5).is_sign_negative());
+        assert!(round_half_to_pos_inf(-0.2).is_sign_negative());
+        assert!(round_half_to_pos_inf(-0.0).is_sign_negative());
+        assert!(round_half_to_pos_inf(0.2).is_sign_positive());
         assert_eq!(round_half_to_pos_inf(-1.5), -1.0);
         assert_eq!(round_half_to_pos_inf(-2.5), -2.0);
         assert_eq!(round_half_to_pos_inf(2.4), 2.0);
@@ -1123,6 +1191,10 @@ mod tests {
         assert_eq!(fmt_xsd_double(0.2), "2.0E-1");
         assert_eq!(fmt_xsd_double(f64::INFINITY), "INF");
         assert_eq!(fmt_xsd_double(f64::NAN), "NaN");
+        assert_eq!(fmt_xsd_double(-0.0), "-0");
+        assert_eq!(fmt_xsd_double(0.0), "0");
+        assert_eq!(Num::Float(-0.0).lexical(), "-0");
+        assert_eq!(Num::Double(-0.0).canonical_lexical(), "-0.0E0");
     }
 
     #[test]
@@ -2028,6 +2100,22 @@ mod tests {
         );
     }
 
+    // Independent expectations prevent shared trimming from passing parity.
+    #[test]
+    fn raw_numeric_whitespace_is_invalid_in_both_layers() {
+        for dt in [xsd::INTEGER, xsd::BYTE, xsd::UNSIGNED_LONG, xsd::DECIMAL, xsd::FLOAT, xsd::DOUBLE] {
+            for lexical in [" 1 ", "\t1\r\n", "\u{a0}1", "\u{b}1"] {
+                assert!(!sparq_core::numeric_literal_valid(lexical, dt.as_str()));
+                assert_eq!(sparq_core::numeric_cache_value(lexical, dt.as_str()), None);
+                assert!(as_numeric(&typed(lexical, dt)).is_none());
+            }
+        }
+        for lexical in ["+1", "-0"] {
+            assert!(sparq_core::numeric_literal_valid(lexical, xsd::UNSIGNED_LONG.as_str()));
+            assert!(as_numeric(&typed(lexical, xsd::UNSIGNED_LONG)).is_some());
+        }
+    }
+
     /// [FABLE-5] (sq-9781x / sq-74oy4 / sq-6b1lj) TRUE cross-seam differential: the sparq-core
     /// numeric-value CACHE acceptance (`sparq_core::numeric_cache_value` — the EXACT acceptance
     /// `numerics_of`/`numeric_of`/`dictspill` compute, NOT a re-implementation, so this is not
@@ -2045,17 +2133,17 @@ mod tests {
         let cases: &[(&str, oxrdf::NamedNodeRef<'_>)] = &[
             // ---- both accept (well-formed for datatype), same f64 image ----
             ("42", xsd::INTEGER),
-            (" 7 ", xsd::DECIMAL),      // whitespace collapse — both trim
+            (" 7 ", xsd::DECIMAL),      // invalid raw lexical: both reject
             ("+3", xsd::INTEGER),
-            (" 1 ", xsd::INTEGER),      // padded integer: both value-1 (sq-74oy4)
+            (" 1 ", xsd::INTEGER),      // invalid raw lexical: both reject
             ("1.5", xsd::DECIMAL),
             ("1.5E2", xsd::DOUBLE),
             ("INF", xsd::DOUBLE),
             ("3.0", xsd::FLOAT),
-            // scale-0-after-normalisation integers `of_literal` accepts as `Dec` (mant, scale 0):
-            ("5.", xsd::INTEGER),        // trailing dot, no fraction -> value 5
-            ("5.0", xsd::INTEGER),       // trailing zero fraction -> normalised scale 0
-            ("5.00", xsd::INTEGER),      // ditto
+            // Both reject decimal notation for an integer datatype.
+            ("5.", xsd::INTEGER),
+            ("5.0", xsd::INTEGER),
+            ("5.00", xsd::INTEGER),
             ("-0", xsd::INTEGER),        // signed zero
             (".5", xsd::DECIMAL),        // empty integer part
             ("5.5", xsd::DECIMAL),       // ordinary decimal
@@ -2107,5 +2195,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// #3800 — `Dec::f64` rounds once. Each witness's two-rounding image
+    /// (`mant as f64 / 10^scale`) differs from the correctly-rounded `f64`, which is
+    /// what parsing its exact decimal lexical gives.
+    #[test]
+    fn dec_f64_is_correctly_rounded_where_two_roundings_differ() {
+        for (mant, scale, lex) in [
+            (1_657_193_426_554_050_932_993i128, 15u32, "1657193.426554050932993"),
+            (8_178_004_666_638_016_248_042, 22, "0.8178004666638016248042"),
+            (1_964_143_770_713_488_765_677, 17, "19641.43770713488765677"),
+            (-471_625_210_719_485_281_189, 18, "-471.625210719485281189"),
+        ] {
+            let d = Dec { mant, scale };
+            let want: f64 = lex.parse().unwrap();
+            assert_ne!((mant as f64 / 10f64.powi(scale as i32)).to_bits(), want.to_bits(), "not a witness: {lex}");
+            assert_eq!(d.f64().to_bits(), want.to_bits(), "{lex}");
+        }
+        // The exact fast path: small mantissa and scale.
+        assert_eq!(Dec { mant: 15, scale: 1 }.f64(), 1.5);
+        assert_eq!(Dec { mant: -1, scale: 22 }.f64(), -1e-22);
     }
 }

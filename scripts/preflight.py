@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [OPUS-5] Pre-submit runner — shift the mechanical merge-gates LEFT, into the
+# Pre-submit runner — shift the mechanical merge-gates LEFT, into the
 # worker's own worktree, BEFORE the PR exists (bead sq-presubmit, see the
 # "first-pass review yield" analysis in the PR body).
 #
@@ -259,7 +259,7 @@ def added_symbols(added_lines: dict[str, list[str]]) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# What text counts as A TEST.  [OPUS-5]
+# What text counts as A TEST.  
 # ---------------------------------------------------------------------------
 # BUG THIS REPLACES (found in review; the checker committed the very defect it
 # exists to prevent). The first version admitted a whole file on a FILE-LEVEL
@@ -434,7 +434,7 @@ def rust_cfg_test_spans(masked: str) -> list[tuple[int, int]]:
                 while e < n and depth:
                     depth += (masked[e] == "{") - (masked[e] == "}")
                     e += 1
-                # [OPUS-5] An UNBALANCED walk is not a test region. The only way to
+                # An UNBALANCED walk is not a test region. The only way to
                 # reach EOF with the block still open is malformed input — an
                 # unterminated string literal blanks the rest of the file, so the
                 # closing `}` disappears and the span would run to EOF, dragging
@@ -450,7 +450,7 @@ def rust_cfg_test_spans(masked: str) -> list[tuple[int, int]]:
 
 
 # ---------------------------------------------------------------------------
-# `#[cfg(test)] mod X;` — the test body lives in ANOTHER FILE.  [OPUS-5]
+# `#[cfg(test)] mod X;` — the test body lives in ANOTHER FILE.  
 # ---------------------------------------------------------------------------
 # Round-3 blocking finding. A bodyless `mod X;` under a test cfg is a MINORITY
 # form here — counted: 611 `crates/*/tests/*.rs` integration files, 421 src files
@@ -559,7 +559,7 @@ PY_TEST_CLASS_NAME_RE = re.compile(r"^\w*[Tt]est\w*$")
 def python_test_regions(text: str) -> str:
     """Bodies of top-level `def *self_test*` / `def test_*` / `class *Test*`.
 
-    Read out of Python's OWN parse tree, not off an indentation heuristic.  [OPUS-5]
+    Read out of Python's OWN parse tree, not off an indentation heuristic.  
 
     ROUND-3 CORRECTION. The previous version walked lines: the region was the
     header plus every following line that was blank or began with a space, a tab
@@ -741,7 +741,9 @@ DELEGATES = [
              pass_changed_files=True),
     Delegate("G6 new-config-to-docs", ["python3", "scripts/check-config-documented.py"],
              pass_changed_files=True),
-    Delegate("no-perf-numbers", ["python3", "scripts/check-no-perf-numbers.py", "--enforce"],
+    Delegate("no-perf-numbers", ["python3", "scripts/check-no-perf-numbers.py", "--enforce",
+                                 # #5396: same research/-bench/ exemptions as the CI gate
+                                 "--honour-allowlist"],
              path_filter=re.compile(r"\.(md|typ)$"), pass_changed_paths=True),
     Delegate("readme-template", ["python3", "scripts/check-readme-template.py", "--enforce"],
              path_filter=re.compile(r"^crates/[^/]+/README\.md$"), pass_changed_paths=True),
@@ -756,7 +758,7 @@ def run_delegates(changed: list[str], root: Path, changed_files_path: Path | Non
         if d.path_filter and not matched:
             res.skipped.append(f"{d.name} (no matching path in the diff)")
             continue
-        # [OPUS-5] FAIL CLOSED on a missing gate script. This was a `skipped`
+        # FAIL CLOSED on a missing gate script. This was a `skipped`
         # entry, so renaming or deleting any gate script silently degraded that
         # gate to a skip and preflight still exited 0 — a gate that does not run
         # reported as a gate that passed. "The script is gone" is a finding

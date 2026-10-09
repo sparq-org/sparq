@@ -52,6 +52,8 @@ pub struct SubscriptionId(u64);
 pub enum ObserveError {
     /// RDF literals cannot occupy the subject position.
     LiteralSubject,
+    /// A named graph can only be named by an IRI or a blank node.
+    InvalidGraphName(Term),
     /// The backing graph rejected the mutation.
     Graph(String),
 }
@@ -60,6 +62,7 @@ impl fmt::Display for ObserveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::LiteralSubject => f.write_str("RDF literals cannot be triple subjects"),
+            Self::InvalidGraphName(name) => write!(f, "{name} cannot name a graph"),
             Self::Graph(message) => write!(f, "graph mutation failed: {message}"),
         }
     }
@@ -67,7 +70,56 @@ impl fmt::Display for ObserveError {
 
 impl std::error::Error for ObserveError {}
 
-type Observer = Box<dyn FnMut(&ChangeEvent, &Graph)>;
+impl ChangeKind {
+    /// Whether this mutation changes a graph in which the triple's presence is `present`.
+    pub(crate) fn is_effective(self, present: bool) -> bool {
+        match self {
+            Self::Add => !present,
+            Self::Delete => present,
+        }
+    }
+}
+
+/// An ordered subscriber registry shared by every observed wrapper surface.
+// sq-1rg2q.7/.9/.10: the async and graph-scope event surfaces reuse this.
+pub(crate) struct Subscribers<F: ?Sized> {
+    entries: Vec<(SubscriptionId, Box<F>)>,
+    next: u64,
+}
+
+impl<F: ?Sized> Subscribers<F> {
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            next: 0,
+        }
+    }
+
+    pub(crate) fn add(&mut self, subscriber: Box<F>) -> SubscriptionId {
+        let id = SubscriptionId(self.next);
+        self.next = self
+            .next
+            .checked_add(1)
+            .expect("subscription identifier space exhausted");
+        self.entries.push((id, subscriber));
+        id
+    }
+
+    pub(crate) fn remove(&mut self, id: SubscriptionId) -> bool {
+        let old_len = self.entries.len();
+        self.entries.retain(|(candidate, _)| *candidate != id);
+        self.entries.len() != old_len
+    }
+
+    /// Subscribers in subscription order.
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut F> {
+        self.entries
+            .iter_mut()
+            .map(|(_, subscriber)| &mut **subscriber)
+    }
+}
+
+type Observer = dyn FnMut(&ChangeEvent, &Graph);
 
 /// An owned graph with synchronous effective-change subscriptions.
 ///
@@ -77,8 +129,7 @@ type Observer = Box<dyn FnMut(&ChangeEvent, &Graph)>;
 /// with an unknown or already-removed handle is a no-op.
 pub struct ObservableStore {
     graph: Graph,
-    observers: Vec<(SubscriptionId, Observer)>,
-    next_subscription: u64,
+    observers: Subscribers<Observer>,
 }
 
 impl ObservableStore {
@@ -91,8 +142,7 @@ impl ObservableStore {
     pub fn from_graph(graph: Graph) -> Self {
         Self {
             graph,
-            observers: Vec::new(),
-            next_subscription: 0,
+            observers: Subscribers::new(),
         }
     }
 
@@ -114,20 +164,12 @@ impl ObservableStore {
         &mut self,
         observer: impl FnMut(&ChangeEvent, &Graph) + 'static,
     ) -> SubscriptionId {
-        let id = SubscriptionId(self.next_subscription);
-        self.next_subscription = self
-            .next_subscription
-            .checked_add(1)
-            .expect("subscription identifier space exhausted");
-        self.observers.push((id, Box::new(observer)));
-        id
+        self.observers.add(Box::new(observer))
     }
 
     /// Removes a subscription and reports whether it was present.
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
-        let old_len = self.observers.len();
-        self.observers.retain(|(candidate, _)| *candidate != id);
-        self.observers.len() != old_len
+        self.observers.remove(id)
     }
 
     /// Returns a mutation view bound to one RDF subject.
@@ -162,29 +204,13 @@ impl ObservableStore {
             return Err(ObserveError::LiteralSubject);
         }
 
-        let present = contains(&self.graph, &subject, &predicate, &object);
-        let changed = match kind {
-            ChangeKind::Add => !present,
-            ChangeKind::Delete => present,
-        };
-        if !changed {
+        if !kind.is_effective(contains(&self.graph, &subject, &predicate, &object)) {
             return Ok(false);
         }
 
-        // Keep the mutable graph borrow inside this block. Event callbacks run
-        // only after it ends and observe the committed graph state.
-        {
-            let graph = &mut self.graph;
-            match kind {
-                ChangeKind::Add => {
-                    graph.insert_triple(subject.clone(), predicate.clone(), object.clone())
-                }
-                ChangeKind::Delete => {
-                    graph.remove_triple(subject.clone(), predicate.clone(), object.clone())
-                }
-            }
-            .map_err(ObserveError::Graph)?;
-        }
+        // The mutable graph borrow ends here. Event callbacks run only after it
+        // and observe the committed graph state.
+        apply(&mut self.graph, kind, &subject, &predicate, &object)?;
 
         let event = ChangeEvent {
             kind,
@@ -193,7 +219,7 @@ impl ObservableStore {
             object,
         };
         let graph = &self.graph;
-        for (_, observer) in &mut self.observers {
+        for observer in self.observers.iter_mut() {
             observer(&event, graph);
         }
         Ok(true)
@@ -317,10 +343,31 @@ impl LiveValues<'_> {
     }
 }
 
-fn contains(graph: &Graph, subject: &Term, predicate: &NamedNode, object: &Term) -> bool {
+pub(crate) fn contains(
+    graph: &Graph,
+    subject: &Term,
+    predicate: &NamedNode,
+    object: &Term,
+) -> bool {
     graph
         .pattern(Some(subject), Some(predicate), Some(object))
         .is_some_and(|pattern| !graph.store.scan(&pattern).rows.is_empty())
+}
+
+/// Applies one mutation to `graph`, which the caller has already found effective.
+pub(crate) fn apply(
+    graph: &mut Graph,
+    kind: ChangeKind,
+    subject: &Term,
+    predicate: &NamedNode,
+    object: &Term,
+) -> Result<(), ObserveError> {
+    let (s, p, o) = (subject.clone(), predicate.clone(), object.clone());
+    match kind {
+        ChangeKind::Add => graph.insert_triple(s, p, o),
+        ChangeKind::Delete => graph.remove_triple(s, p, o),
+    }
+    .map_err(ObserveError::Graph)
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# [FABLE-5] sq-7d3dj.34 — INSTANCE-side canonical HTTP/TTFB competitor gather.
+# sq-7d3dj.34 — INSTANCE-side canonical HTTP/TTFB competitor gather.
 #
 # Runs ON the dedicated quiet EC2 box (launched by scripts/bench/canonical-competitor-bench.sh)
 # from a cloned sparq checkout, as root. Produces the D9/D10 panel the 2026-07 perf-dominance
@@ -34,7 +34,7 @@ OXI_SHA256_X86_64="${OXI_SHA256_X86_64:-4be355715ba3945e8fb8c94a06662a29808683bf
 step() { echo "[STEP $(date -u +%Y-%m-%dT%H:%M:%SZ)] $*" | tee -a /root/GATHER_STEP >&2; }
 
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."   # repo root
-# [OPUS-5] sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
+# sq-ffaa9 — durable result egress. bench_egress_push is a successful no-op
 # unless the launcher passed BENCH_RESULTS_S3_URI in, so a run without the instance
 # profile attached behaves exactly as before (console + SSH pull only).
 . scripts/bench/bench-result-egress.sh
@@ -63,7 +63,7 @@ VIRTUOSO_DIG=$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 
 QLEVER_DIG=$(docker inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' "$QLEVER_IMG" 2>/dev/null || echo "$QLEVER_IMG")
 
 # --- generate corpora (deterministic; only for the SELECTED suites) ---
-# [FABLE-5] a FAILED generation is a LOUD "FATAL" step (with the gen stderr tail inlined),
+# a FAILED generation is a LOUD "FATAL" step (with the gen stderr tail inlined),
 # not a silent empty variable — run 1 (2026-07-07) skipped the whole watdiv suite as a
 # quiet "NO CORPUS" because the box was missing Boost and nothing shouted.
 SP2B_CORPUS=""; WATDIV_CORPUS=""

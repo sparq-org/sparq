@@ -1,10 +1,11 @@
-// [FABLE-5] #2323: integration tests for the `@sparq-org/solid-server/fastify` plugin — a REAL
+// #2323: integration tests for the `@sparq-org/solid-server/fastify` plugin — a REAL
 // Fastify instance driving the REAL wasm pod (no stubs), via fastify's bundled inject()
 // (light-my-request), so no listener socket is needed.
 //
-// Both majors of the `^4.28.0 || ^5.0.0` peer range are exercised: `fastify` (v5) and the
-// aliased `fastify-v4` (npm:fastify@^4) are workspace devDependencies installed by the root
-// `npm ci`, so a failed import is a broken environment and FAILS the suite — it never skips.
+// The `^5.12.5` peer range is exercised through the `fastify` workspace devDependency
+// installed by the root `npm ci`, so a failed import is a broken environment and FAILS the
+// suite — it never skips. (Fastify 4.x was dropped: it is end of life with no release fixing
+// GHSA-p68q-wchp-6fh7.)
 // The ONLY skip is the wasm artifact (`npm run build:lws-wasm`), a build product this suite
 // needs like server.test.mjs; the js CI lane builds it in the same job before `npm test`, so
 // the skip can only fire locally, never silently in CI.
@@ -19,11 +20,8 @@ const baseUrl = 'http://127.0.0.1';
 const ownerWebid = 'https://id.example/alice#me';
 const turtle = '<http://127.0.0.1/card> <http://xmlns.com/foaf/0.1/name> "Ada" .\n';
 
-// Both claimed peer majors, driven through the identical suite below.
-const FASTIFY_MAJORS = [
-  { expected: /^5\./, label: 'fastify v5', specifier: 'fastify' },
-  { expected: /^4\./, label: 'fastify v4', specifier: 'fastify-v4' },
-];
+// The claimed peer major, driven through the suite below.
+const FASTIFY_MAJORS = [{ expected: /^5\./, label: 'fastify v5', specifier: 'fastify' }];
 
 async function buildApp(specifier, expected) {
   // Dynamic imports: a missing fastify install must fail INSIDE the test (loud, not a silent

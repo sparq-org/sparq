@@ -6,7 +6,7 @@
 # POLICY — codeowner review-requests are RESERVED for the rare, genuinely
 # security-critical surfaces. Everything else in the repo is covered by the
 # automated review pipeline (adversarial/mechanical verify + the Copilot review)
-# and the single required `ci-summary / gate` aggregator; it does NOT auto-request
+# and the single required `ci-fast` check; it does NOT auto-request
 # a human review. A prior catch-all `* @jeswr` (plus high-churn /crates/sparq-core/,
 # /crates/sparq-server/, and /.github/ entries) auto-requested the maintainer on
 # EVERY pull request — an unsustainable review-notification load with no security

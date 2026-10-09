@@ -13,9 +13,9 @@ standardised** wording from the W3C specifications — not the older community-g
 names that pre-date standardisation.
 
 When you write or edit any doc that mentions an RDF or SPARQL feature, check the
-preferred term here first. A `scripts/check-terminology.py` HARD gate (the
-`terminology` job in `docs-quality.yml`) fails the build on the banned spellings, so
-using the wrong term blocks the merge — fix the wording or, for a *legitimate*
+preferred term here first. A `scripts/check-terminology.py` gate (the `terminology`
+step of the `quick-gates` job in `docs-quality.yml`, run on every PR) fails that check on
+the banned spellings — fix the wording or, for a *legitimate*
 historical / proper-noun mention, carry the inline `terminology-allow: <why>` marker
 (see [§ Allowed exceptions](#allowed-exceptions)).
 
@@ -92,8 +92,8 @@ Two things that rule out a blind find-and-replace here:
   is deliberately **not** matched.
 
 Why the surface matters: this gate used to scan `*.md` only, so a banned term reached a
-merged-ready PR as a `pub` Rust type **and** a published `rdfs:comment` with a fully green
-`ci-summary / gate` (issue #3811). A term banned from public API must be checked in the
+merged-ready PR as a `pub` Rust type **and** a published `rdfs:comment` with fully
+green CI (issue #3811). A term banned from public API must be checked in the
 files that carry public API.
 
 ## Allowed exceptions
