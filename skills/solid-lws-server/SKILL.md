@@ -284,10 +284,12 @@ What the server exposes, all discoverable from the storage description
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
-  anything is removed. When putting back fails too, the resource is left **fail-closed**: only
-  the owner and its creator may act on it until a write completes, and what could not be put
-  back is kept and retried in the background, unless a later write or create (even of the same
-  bytes) replaces it first.
+  anything is removed. When putting back fails too, it is retried with the resource's locks still
+  held until it succeeds, so no other request sees the half-done state in between; a create
+  whose store reply was lost is removed whole the same way.
+- A `Link` target that is not a URI reference is refused with `400`; entity tags in
+  `If-Match`/`If-None-Match` compare byte for byte, obs-text included, and an empty list matches
+  nothing.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
