@@ -1121,12 +1121,12 @@ fn names_issuer_in(
     {
         return Some(links);
     }
-    // The parser holds a term for every level of nesting open before it yields a triple, so a
-    // short document nesting deeply under a long prefix could take far more than the expansion
-    // budget before that budget sees a triple. Nesting is bounded before the parser runs, and
-    // parsing stops at the first error, so the parser never resynchronises past what was
-    // checked.
-    if !turtle_nesting_ok(body) {
+    // Before it yields a triple, the parser holds a term for every level of nesting open and an
+    // expanded IRI for every prefix declared, so a short document could make it take far more
+    // than the expansion budget before that budget sees anything. What it can hold is bounded
+    // before it runs (see [`turtle_state_bounded`]), and parsing stops at the first error, so the
+    // parser never resynchronises past what was counted.
+    if !turtle_state_bounded(body, base.len()) {
         return None;
     }
     let parser = oxttl::TurtleParser::new().with_base_iri(base).ok()?;
@@ -1138,57 +1138,31 @@ fn names_issuer_in(
     )
 }
 
-/// Most `[ … ]` and `( … )` an identity document may nest, one inside another.
-const MAX_TURTLE_NESTING: usize = 8;
+/// Most bytes the Turtle parser may hold, by [`turtle_state_bounded`]'s count, before it yields
+/// a triple.
+const MAX_TURTLE_STATE: usize = 32 << 20;
 
-/// Whether `body`, read as Turtle, nests no deeper than [`MAX_TURTLE_NESTING`]: brackets are
-/// counted outside IRIs, string literals and comments, as the grammar reads them (an IRI ends at
-/// its first `>`, which no escape in an IRI can stand for).
-fn turtle_nesting_ok(body: &[u8]) -> bool {
-    let mut depth = 0usize;
-    let mut i = 0;
-    while i < body.len() {
-        match body[i] {
-            b'#' => {
-                while i < body.len() && !matches!(body[i], b'\n' | b'\r') {
-                    i += 1;
-                }
-            }
-            b'<' => {
-                while i < body.len() && body[i] != b'>' {
-                    i += 1;
-                }
-            }
-            q @ (b'"' | b'\'') => {
-                let long = body[i..].starts_with(&[q, q, q]);
-                i += if long { 3 } else { 1 };
-                while i < body.len() {
-                    if body[i] == b'\\' {
-                        i += 2;
-                        continue;
-                    }
-                    if long && body[i..].starts_with(&[q, q, q]) {
-                        i += 2;
-                        break;
-                    }
-                    if !long && body[i] == q {
-                        break;
-                    }
-                    i += 1;
-                }
-            }
-            b'[' | b'(' => {
-                depth += 1;
-                if depth > MAX_TURTLE_NESTING {
-                    return false;
-                }
-            }
-            b']' | b')' => depth = depth.saturating_sub(1),
-            _ => {}
+/// Whether what the Turtle parser can hold of `body` (read against a base of `base_len` bytes)
+/// stays within [`MAX_TURTLE_STATE`], counted without reading the grammar, so no escape or
+/// unusual token can hide from it. Every term the parser holds is at most one IRI resolved
+/// against the base in force, and no base (each relative to the last) or expanded name is longer
+/// than the base, plus the document twice over. It holds one such term for each place that
+/// opens a level of nesting (a `[`, `(`, `<<` or `{` byte anywhere, which over-counts those in
+/// IRIs, strings and comments) and one for each directive (any `prefix` or `base`, in any
+/// case, anywhere).
+fn turtle_state_bounded(body: &[u8], base_len: usize) -> bool {
+    let mut held = 0usize;
+    for (i, &c) in body.iter().enumerate() {
+        let rest = &body[i..];
+        let opens = matches!(c, b'[' | b'(' | b'{') || rest.starts_with(b"<<");
+        let directive =
+            |word: &[u8]| rest.len() >= word.len() && rest[..word.len()].eq_ignore_ascii_case(word);
+        if opens || directive(b"prefix") || directive(b"base") {
+            held += 1;
         }
-        i += 1;
     }
-    true
+    let term = base_len.saturating_add(body.len().saturating_mul(2)).max(1);
+    held.saturating_add(1).saturating_mul(term) <= MAX_TURTLE_STATE
 }
 
 /// Remote contexts whose definitions of the keys read from a compact document (`id`, `type`,
@@ -1904,30 +1878,54 @@ mod tests {
         );
     }
 
-    /// The scan agrees with the grammar on where IRIs, strings and comments end.
+    /// Review findings: escaped punctuation in prefixed names (`p:p\)`) hid nesting from a
+    /// grammar-reading scan, and declarations under a long base held an expanded prefix each
+    /// before any triple was yielded. The bound counts bytes, not tokens, so neither hides.
     #[test]
-    fn turtle_nesting_is_counted_as_the_grammar_reads_it() {
-        let deep = "[ ".repeat(MAX_TURTLE_NESTING + 1);
-        assert!(!turtle_nesting_ok(deep.as_bytes()));
-        assert!(turtle_nesting_ok(
-            "[ ".repeat(MAX_TURTLE_NESTING).as_bytes()
-        ));
-        for hidden in [
-            format!("<{deep}>"),
-            format!("\"{deep}\""),
-            format!("'{deep}'"),
-            format!("\"\"\"{deep}\"\"\""),
-            format!("# {deep}\n"),
-            format!("\"a\\\"{deep}\""),
-        ] {
-            assert!(turtle_nesting_ok(hidden.as_bytes()), "{hidden}");
+    fn turtle_parser_state_is_bounded_whatever_the_tokens() {
+        let s = "https://alice.example/id";
+        let op = "https://op.example";
+        let issuer = "<http://www.w3.org/ns/solid/terms#oidcIssuer>";
+        let long = "x".repeat(64 * 1024);
+        let escaped = format!(
+            "@prefix p: <https://p.example/{long}#> .\n<{s}> {issuer} <{op}> .\n<{s}> p:p {}0 .\n",
+            "[ p:p\\) ".repeat(90_000)
+        );
+        let base = format!("@base <https://b.example/{long}/> .\n");
+        let prefixes = format!(
+            "{base}<{s}> {issuer} <{op}> .\n{}",
+            (0..40_000)
+                .map(|i| format!("@prefix p{i}: <> .\n"))
+                .collect::<String>()
+        );
+        let shouting = prefixes
+            .replace("@prefix", "PREFIX")
+            .replace(" .\nPREFIX", "\nPREFIX");
+        for doc in [&escaped, &prefixes, &shouting] {
+            assert!(doc.len() < MAX_DOC);
+            assert!(!turtle_state_bounded(doc.as_bytes(), 32));
+            let started = std::time::Instant::now();
+            assert_eq!(first_link("text/turtle", doc.as_bytes(), s, op), None);
+            assert!(started.elapsed() < std::time::Duration::from_secs(5));
         }
-        // An escape cannot end an IRI early, and a string's end is where the grammar puts it.
-        assert!(!turtle_nesting_ok(format!("<a\\> {deep}").as_bytes()));
-        assert!(!turtle_nesting_ok(format!("\"a\" {deep}").as_bytes()));
-        assert!(!turtle_nesting_ok(
-            format!("\"\"\"a\"\"\" {deep}").as_bytes()
-        ));
+        // RDF 1.2 triple terms and annotations open levels too.
+        for opener in ["<< ", "<<( ", "{| "] {
+            assert!(
+                !turtle_state_bounded(opener.repeat(100_000).as_bytes(), 32),
+                "{opener}"
+            );
+        }
+        // A long prefix used many times is held once by the parser, and its expansions are
+        // charged to the expansion budget as they are yielded.
+        let reused = format!(
+            "@prefix p: <https://p.example/{long}#> .\n<{s}> {issuer} <{op}> .\n{}",
+            "p:a p:b p:c .\n".repeat(60_000)
+        );
+        assert!(reused.len() < MAX_DOC);
+        assert!(turtle_state_bounded(reused.as_bytes(), 32));
+        let started = std::time::Instant::now();
+        assert_eq!(first_link("text/turtle", reused.as_bytes(), s, op), None);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     #[test]
