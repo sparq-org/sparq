@@ -9,7 +9,7 @@
 //! to the same terms — blank labels verbatim, language tags already lowercase, plain strings
 //! re-acquiring `xsd:string`, IRIs `IRIREF`-escaped — or a [`NotRepresentable`] error, never
 //! a fallback spelling; the DISPLAY writers ([`display_lossy`], [`statement_display_lossy`])
-//! always produce text, for people to read only. Identity comes from [`statement_keys`].
+//! always produce text, for people to read only.
 //!
 //! # Echoing rules back out (EYE `--pass-all` / `--pass-all-ground`)
 //!
@@ -259,19 +259,23 @@ impl std::error::Error for NotRepresentable {}
 ///   triples cannot be reordered around a declaration.
 ///
 /// A variable whose internal name has no legal spelling (it holds a `.`, say) is refused
-/// too: a renamed spelling could meet a source variable of another statement.
+/// too: a renamed spelling could meet a source variable of another statement. So is a unit
+/// holding two distinct variables for one universal (the universal and a backward-chaining
+/// copy of it, or two copies): both can only be spelled as its IRI, which would merge them.
 ///
 /// The display writers instead write such a universal, throughout the unit, as a plain
 /// variable named the IRI's local name, then `_2`, `_3`, … until it differs from every
 /// variable name in the unit (unspellable variables are renamed the same way). Within a
-/// unit that is a bijection, but two different facts can render alike, so identity —
-/// provenance addressing — comes from [`statement_keys`], never from display strings.
+/// unit that is a bijection, but two different facts can render alike, so never address
+/// a fact by its display strings.
 struct Unit {
     /// Universals written as a plain variable (display only) → that variable's name.
     names: BTreeMap<String, String>,
     /// Non-universal variables whose internal name is not a legal variable name (display
     /// only) → their written name.
     renamed: BTreeMap<String, String>,
+    /// [`statement_internal`] only: every variable by its raw internal name, no `@forAll`.
+    raw: bool,
 }
 
 impl Unit {
@@ -296,10 +300,22 @@ impl Unit {
         }
         let mut vars = BTreeSet::new();
         terms.iter().for_each(|t| all_vars(t, &mut vars));
+        let mut by_iri: BTreeMap<&str, &str> = BTreeMap::new();
+        for v in &vars {
+            if let Some(iri) = universal_iri(v) {
+                if let Some(other) = by_iri.insert(iri, v) {
+                    return Err(NotRepresentable(format!(
+                        "the variables `{other}` and `{v}` are distinct, but both are the @forAll \
+                         universal <{iri}> (one a backward-chaining copy) and N3 text can only spell \
+                         either as <{iri}>, which would merge them"
+                    )));
+                }
+            }
+        }
         if let Some(v) = vars.iter().find(|v| universal_iri(v).is_none() && !spellable_var(v)) {
             return Err(NotRepresentable(format!("the variable `{v}` has no N3 spelling")));
         }
-        Ok(Unit { names: BTreeMap::new(), renamed: BTreeMap::new() })
+        Ok(Unit { names: BTreeMap::new(), renamed: BTreeMap::new(), raw: false })
     }
 
     /// Plan the unit made of `terms` for DISPLAY: always succeeds; what [`Unit::exact`]
@@ -331,7 +347,7 @@ impl Unit {
             .filter(|v| universal_iri(v).is_none() && !spellable_var(v))
             .map(|v| (v.to_string(), fresh(sanitize_name(v))))
             .collect();
-        Unit { names, renamed }
+        Unit { names, renamed, raw: false }
     }
 
     /// Write `t`, a term at the unit's top level.
@@ -363,6 +379,10 @@ impl Unit {
                 out.push_str("_:");
                 out.push_str(l);
             }
+            Term::Var(v) if self.raw => {
+                out.push('?');
+                out.push_str(v);
+            }
             Term::Var(v) => match universal_iri(v) {
                 Some(iri) if here.contains(iri) => write_iriref(iri, out),
                 Some(iri) => {
@@ -389,7 +409,7 @@ impl Unit {
                 let mut at: BTreeMap<usize, Vec<&str>> = BTreeMap::new();
                 let mut declared = BTreeSet::new();
                 for (iri, i) in first_uses(ts) {
-                    if !self.names.contains_key(iri) {
+                    if !self.raw && !self.names.contains_key(iri) {
                         at.entry(i).or_default().push(iri);
                         declared.insert(iri);
                     }
@@ -454,81 +474,6 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
     out.push_str(" .");
 }
 
-/// A lossless, injective key for one term: two keys are equal exactly when the terms are.
-/// One tagged, structural encoding of EVERY field — `I` IRI, `L` literal (lexical form,
-/// datatype, then `@` + tag or `-` for none), `B` blank, `V` variable (full internal name),
-/// `(…)` list, `{…;}` formula, `<…>` quoted triple — with each string quoted and its `"`
-/// and `\` escaped. Never a rendering: the display writer drops fields (a language-tagged
-/// literal's datatype) and spells different variables alike.
-fn term_key(t: &Term) -> String {
-    fn quoted(s: &str, out: &mut String) {
-        out.push('"');
-        for c in s.chars() {
-            if matches!(c, '"' | '\\') {
-                out.push('\\');
-            }
-            out.push(c);
-        }
-        out.push('"');
-    }
-    fn enc(t: &Term, out: &mut String) {
-        match t {
-            Term::Iri(i) => {
-                out.push('I');
-                quoted(i, out);
-            }
-            Term::Lit(v, dt, lang) => {
-                out.push('L');
-                quoted(v, out);
-                quoted(dt, out);
-                match lang {
-                    Some(l) => {
-                        out.push('@');
-                        quoted(l, out);
-                    }
-                    None => out.push('-'),
-                }
-            }
-            Term::Blank(b) => {
-                out.push('B');
-                quoted(b, out);
-            }
-            Term::Var(v) => {
-                out.push('V');
-                quoted(v, out);
-            }
-            Term::List(ms) => {
-                out.push('(');
-                ms.iter().for_each(|m| enc(m, out));
-                out.push(')');
-            }
-            Term::Formula(ts) => {
-                out.push('{');
-                for row in ts {
-                    row.iter().for_each(|m| enc(m, out));
-                    out.push(';');
-                }
-                out.push('}');
-            }
-            Term::Triple(tr) => {
-                out.push('<');
-                tr.iter().for_each(|m| enc(m, out));
-                out.push('>');
-            }
-        }
-    }
-    let mut s = String::new();
-    enc(t, &mut s);
-    s
-}
-
-/// The identity keys of one statement's three terms ([`term_key`]): equal exactly when the
-/// statements are equal, whatever their renderings. What a proof carries for provenance
-/// addressing (`ProofNode::key`).
-pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
-    f.clone().map(|t| term_key(&t))
-}
-
 /// `t` as an exact rendering of it re-parses: a backward-chaining copy of a universal
 /// (`__bw<n>___ua.<iri>`) reads back as the universal itself — the one normalisation the
 /// exact writers document.
@@ -545,14 +490,85 @@ fn as_reparsed(t: &Term) -> Term {
     }
 }
 
+/// A one-to-one pairing of names (variables, or the blank nodes of one formula) between the
+/// terms a writer was given and the terms its output re-parses to.
+#[derive(Default)]
+struct Bijection<'a> {
+    fwd: HashMap<&'a str, &'a str>,
+    back: HashMap<&'a str, &'a str>,
+}
+
+impl<'a> Bijection<'a> {
+    /// Pair `w` (given) with `g` (re-parsed): true if consistent with every pair so far in
+    /// BOTH directions — so two distinct names never meet one name, and one name never
+    /// splits into two.
+    fn pair(&mut self, w: &'a str, g: &'a str) -> bool {
+        match (self.fwd.get(w), self.back.get(g)) {
+            (None, None) => {
+                self.fwd.insert(w, g);
+                self.back.insert(g, w);
+                true
+            }
+            (Some(&x), Some(&y)) => x == g && y == w,
+            _ => false,
+        }
+    }
+}
+
+/// Is `g` (re-parsed) the term `w` (given), up to a BIJECTIVE renaming — never by name?
+///
+/// * Variables pair one-to-one across the whole unit (an N3 variable is quantified in the
+///   outermost formula), and a universal must stay a universal OF THE SAME IRI (its identity
+///   is what other documents' formulae compare against); a non-universal stays a
+///   non-universal. A backward-chaining copy `__bw<n>___ua.<iri>` may therefore read back as
+///   `__ua.<iri>` — but only while no other variable does: a universal and its copy, or two
+///   copies, are distinct variables and must not merge.
+/// * Blank nodes pair one-to-one within each formula, the scope a blank node has in N3 —
+///   each `{ … }` starts a fresh pairing — and within the unit's top level.
+/// * Everything else must be equal.
+fn same<'a>(w: &'a Term, g: &'a Term, vars: &mut Bijection<'a>, blanks: &mut Bijection<'a>) -> bool {
+    match (w, g) {
+        (Term::Var(a), Term::Var(b)) => universal_iri(a) == universal_iri(b) && vars.pair(a, b),
+        (Term::Blank(a), Term::Blank(b)) => blanks.pair(a, b),
+        (Term::List(a), Term::List(b)) => a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same(x, y, vars, blanks)),
+        (Term::Triple(a), Term::Triple(b)) => a.iter().zip(b.iter()).all(|(x, y)| same(x, y, vars, blanks)),
+        (Term::Formula(a), Term::Formula(b)) => {
+            let mut inner = Bijection::default();
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(r, q)| r.iter().zip(q).all(|(x, y)| same(x, y, vars, &mut inner)))
+        }
+        _ => w == g,
+    }
+}
+
+/// [`same`] over parallel term sequences sharing one variable and one top-level blank
+/// pairing; on a mismatch, a message naming the term (or the merge).
+fn same_terms(want: &[Term], got: &[Term]) -> Result<(), String> {
+    let (mut vars, mut blanks) = (Bijection::default(), Bijection::default());
+    if want.len() == got.len() && want.iter().zip(got).all(|(w, g)| same(w, g, &mut vars, &mut blanks)) {
+        return Ok(());
+    }
+    let normalized: Vec<Term> = want.iter().map(as_reparsed).collect();
+    if normalized == got {
+        return Err("writing it would merge distinct variables into one (a universal and its \
+                    backward-chaining copy, or two copies, all spell as the same @forAll IRI)"
+            .into());
+    }
+    let k = (0..want.len().min(got.len())).find(|&k| normalized[k] != got[k]).unwrap_or(0);
+    Err(format!(
+        "the term {} re-parses as {} (the N3 parser normalizes it)",
+        shown(&normalized[k], &got[k]),
+        shown(&got[k], &normalized[k])
+    ))
+}
+
 /// The exactness CHECK every exact writer runs on its own output: parse `text` back with the
-/// crate's N3 parser and require exactly the statement `want` (after [`as_reparsed`]). This
+/// crate's N3 parser and require the statement `want` up to a bijective renaming ([`same`]). This
 /// is what makes "exact or refused" hold by construction rather than by enumerating the
 /// parser's normalisations (a lowercased language tag, `rdf:nil` read as `()`, a
 /// formula-`log:implies`-formula statement read as a rule, an IRI the `IRIREF` grammar
 /// rejects, …): whatever the parser would change, the writer refuses, naming the term.
 fn verify_statement(text: &str, want: &[Term; 3]) -> Result<(), NotRepresentable> {
-    let want = want.clone().map(|t| as_reparsed(&t));
     let p = super::parser::parse(text)
         .map_err(|e| NotRepresentable(format!("its N3 form does not re-parse ({e})")))?;
     if !p.rules.is_empty() || !p.backward_rules.is_empty() {
@@ -563,15 +579,7 @@ fn verify_statement(text: &str, want: &[Term; 3]) -> Result<(), NotRepresentable
         ));
     }
     match p.facts.as_slice() {
-        [got] if *got == want => Ok(()),
-        [got] => {
-            let k = (0..3).find(|&k| got[k] != want[k]).unwrap_or(0);
-            Err(NotRepresentable(format!(
-                "the term {} re-parses as {} (the N3 parser normalizes it)",
-                shown(&want[k], &got[k]),
-                shown(&got[k], &want[k])
-            )))
-        }
+        [got] => same_terms(want, got).map_err(NotRepresentable),
         _ => Err(NotRepresentable(format!("its N3 form re-parses as {} statements", p.facts.len()))),
     }
 }
@@ -598,7 +606,7 @@ pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable> {
 /// A term as N3-like text for a person to READ — a diagnostic, a proof-node string. Never
 /// fails, and never exact: a universal no `@forAll` can scope is shown as a plain variable
 /// (see [`Unit`]). Not for anything a parser or the reasoner reads back; use
-/// [`write_term`] for that, and [`statement_keys`] for identity.
+/// [`write_term`] for that.
 pub fn display_lossy(t: &Term) -> String {
     let mut s = String::new();
     Unit::lossy(&[t]).term(t, &mut s);
@@ -617,11 +625,26 @@ pub fn write_statement(f: &[Term; 3], out: &mut String) -> Result<(), NotReprese
 }
 
 /// The three terms of one statement rendered as that ONE unit for a person to read — the
-/// strings a proof node shows ([`display_lossy`] semantics: never fails, not exact). A
-/// function of the statement alone, so a fact reads the same in every proof; for identity
-/// use [`statement_keys`].
+/// strings a diagnostic shows ([`display_lossy`] semantics: never fails, not exact). Two
+/// different statements can display alike, so never address a fact by these.
 pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3] {
     let unit = Unit::lossy(&[&f[0], &f[1], &f[2]]);
+    f.clone().map(|t| {
+        let mut s = String::new();
+        unit.term(&t, &mut s);
+        s
+    })
+}
+
+/// The three terms of one statement with every variable written by its RAW internal name
+/// (`?__ua.<iri>` for an `@forAll` universal, `?__bw0_x` for a backward-chaining copy) and
+/// no `@forAll` declarations — the strings `MaterializedN3Graph::why` puts in a proof
+/// node's `conclusion`. Not N3 to re-parse (a `.` is not a variable character), but
+/// injective over variables: distinct variables never render alike, so provenance that
+/// hashes these strings (`sparq-prov`) keeps distinct facts apart.
+#[cfg(feature = "explain")]
+pub(crate) fn statement_internal(f: &[Term; 3]) -> [String; 3] {
+    let unit = Unit { names: BTreeMap::new(), renamed: BTreeMap::new(), raw: true };
     f.clone().map(|t| {
         let mut s = String::new();
         unit.term(&t, &mut s);
@@ -728,8 +751,8 @@ pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) ->
 
 /// [`verify_statement`] for a rule: `text` must re-parse as exactly one rule of `kind`
 /// whose sides, put through the same premise-blank decoding ([`rule_sides`] with
-/// [`RuleVars::N3`]), equal `want`. The parser's rule index inside a premise-blank name
-/// (`__bn.<i>.x`) is the one difference this allows — it is decoded away on both sides.
+/// [`RuleVars::N3`]), are `want` up to a bijective renaming ([`same`]; the parser's rule
+/// index inside a premise-blank name, `__bn.<i>.x`, is decoded away on both sides).
 fn verify_rule(text: &str, want: &[Term; 2], kind: RuleKind) -> Result<(), NotRepresentable> {
     let p = super::parser::parse(text)
         .map_err(|e| NotRepresentable(format!("its N3 form does not re-parse ({e})")))?;
@@ -737,23 +760,15 @@ fn verify_rule(text: &str, want: &[Term; 2], kind: RuleKind) -> Result<(), NotRe
         (RuleKind::Forward, true, [r], []) | (RuleKind::Backward, true, [], [r]) => rule_sides(r, kind, RuleVars::N3),
         _ => return Err(NotRepresentable("its N3 form re-parses as something other than one rule".into())),
     };
-    let want = want.clone().map(|t| as_reparsed(&t));
-    match (0..2).find(|&k| got[k] != want[k]) {
-        None => Ok(()),
-        Some(k) => Err(NotRepresentable(format!(
-            "its {} re-parses as `{}` (the N3 parser normalizes a term in it)",
-            if k == 0 { "left side" } else { "right side" },
-            shown(&got[k], &want[k])
-        ))),
-    }
+    same_terms(want, &got).map_err(NotRepresentable)
 }
 
-/// `t` for a refusal message: its display form, plus its structural key when that display
+/// `t` for a refusal message: its display form, plus its full structure when that display
 /// form is the same as `other`'s (they differ in a field the surface syntax does not show,
 /// such as a language-tagged literal's datatype).
 fn shown(t: &Term, other: &Term) -> String {
     let d = display_lossy(t);
-    if d == display_lossy(other) { format!("`{d}` ({})", term_key(t)) } else { format!("`{d}`") }
+    if d == display_lossy(other) { format!("`{d}` ({t:?})") } else { format!("`{d}`") }
 }
 
 /// A rule's two sides as formula TERMS in written order (left of the arrow first), each
@@ -1017,6 +1032,35 @@ mod tests {
             rendered(&f),
             "{ <http://ex/m> <http://ex/r> <http://ex/x> . @forAll <http://ex/x> . <http://ex/x> <http://ex/p> <http://ex/b> . }"
         );
+    }
+
+    /// GH #6701 review round 9: the re-parse comparison is a BIJECTION, never by name —
+    /// variables one-to-one across the unit, blank nodes one-to-one within each formula.
+    #[test]
+    fn the_reparse_check_is_a_bijection() {
+        let v = |s: &str| Term::Var(s.into());
+        let b = |s: &str| Term::Blank(s.into());
+        let k = Term::Iri("http://ex/k".into());
+        let f = |rows: Vec<[Term; 3]>| Term::Formula(rows);
+        let (ua, c0) = (v("__ua.http://ex/x"), v("__bw0___ua.http://ex/x"));
+        // A universal and its copy read back as ONE variable: a merge, refused.
+        let e = same_terms(&[f(vec![[ua.clone(), k.clone(), c0.clone()]])], &[f(vec![[ua.clone(), k.clone(), ua.clone()]])]);
+        assert!(e.unwrap_err().contains("merge"));
+        // A lone copy reading back as the universal is a bijection.
+        assert!(same_terms(&[f(vec![[c0.clone(), k.clone(), k.clone()]])], &[f(vec![[ua.clone(), k.clone(), k.clone()]])]).is_ok());
+        // A universal never becomes a plain variable, nor another IRI's universal.
+        assert!(same_terms(std::slice::from_ref(&ua), &[v("x")]).is_err());
+        assert!(same_terms(std::slice::from_ref(&ua), &[v("__ua.http://ex/y")]).is_err());
+        // Two variables never split from one, nor merge.
+        assert!(same_terms(&[v("a"), v("a")], &[v("p"), v("q")]).is_err());
+        assert!(same_terms(&[v("a"), v("b")], &[v("p"), v("p")]).is_err());
+        // Blank nodes: one-to-one within a formula …
+        let two = f(vec![[b("a"), k.clone(), b("b")]]);
+        assert!(same_terms(std::slice::from_ref(&two), &[f(vec![[b("c"), k.clone(), b("c")]])]).is_err());
+        assert!(same_terms(std::slice::from_ref(&two), &[f(vec![[b("c"), k.clone(), b("d")]])]).is_ok());
+        // … and scoped to it: each formula pairs its own blanks.
+        let a1 = f(vec![[b("a"), k.clone(), k.clone()]]);
+        assert!(same_terms(&[a1.clone(), a1.clone()], &[f(vec![[b("x"), k.clone(), k.clone()]]), f(vec![[b("y"), k.clone(), k.clone()]])]).is_ok());
     }
 
     /// The one character the parser can decode into an IRI but not read raw is `\`.

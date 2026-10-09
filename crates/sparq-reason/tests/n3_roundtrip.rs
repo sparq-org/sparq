@@ -1,4 +1,4 @@
-//! GH #6701 review rounds 1–7: the N3 writer's contract, checked over an enumeration of
+//! GH #6701 review rounds 1–9: the N3 writer's contract, checked over an enumeration of
 //! term shapes and a corpus of documents rather than one example per review round.
 //!
 //! The contract (`n3::serialize`, the `Unit` docs): every RE-REASONABLE writer is exact or
@@ -13,12 +13,12 @@
 //! `reason_n3_pass_all` either refuses or writes a document whose closure — read directly,
 //! through `log:conclusion` of each formula-valued fact, and through `log:semantics` +
 //! `log:conclusion` of the whole document — equals the source's. On top of that: a
-//! statement renders the same whatever surrounds it, and identity keys (`statement_keys`,
-//! which provenance addresses facts by) are injective over every `Term` field.
+//! statement renders the same whatever surrounds it, and distinct variables (a universal
+//! and its backward-chaining copy) are never merged.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-use sparq_reason::n3::serialize::{serialize_facts, statement_keys, write_statement};
+use sparq_reason::n3::serialize::{serialize_facts, write_statement};
 use sparq_reason::n3::Resolver;
 use sparq_reason::n3::{parser, Term};
 use sparq_reason::n3::reason_n3_terms_with_resolver;
@@ -140,7 +140,26 @@ fn has_placeholder(t: &Term) -> bool {
 
 /// Does the oracle say `s` has no lossless form?
 fn lossy(s: &[Term; 3]) -> bool {
-    s.iter().any(|t| has_placeholder(&expect(&normalise(t), &BTreeSet::new())))
+    s.iter().any(|t| has_placeholder(&expect(&normalise(t), &BTreeSet::new()))) || merges(s)
+}
+
+/// Would normalising `s` merge two distinct variables (a universal and a copy of it)?
+fn merges(s: &[Term; 3]) -> bool {
+    fn vars(t: &Term, out: &mut BTreeSet<String>) {
+        match t {
+            Term::Var(v) => {
+                out.insert(v.clone());
+            }
+            Term::List(ms) => ms.iter().for_each(|m| vars(m, out)),
+            Term::Triple(tr) => tr.iter().for_each(|m| vars(m, out)),
+            Term::Formula(ts) => ts.iter().flatten().for_each(|m| vars(m, out)),
+            _ => {}
+        }
+    }
+    let mut all = BTreeSet::new();
+    s.iter().for_each(|t| vars(t, &mut all));
+    let images: BTreeSet<String> = all.iter().map(|v| format!("{:?}", normalise(&var(v)))).collect();
+    images.len() < all.len()
 }
 
 /// Check one statement: exact or refused (exactly when the oracle says lossy), and the same
@@ -260,17 +279,6 @@ fn every_shape_round_trips() {
         }
     }
     assert!(written > 1000 && refused > 200, "{written} written, {refused} refused");
-    // (b) identity keys: distinct statements ↔ distinct keys; the same statement, the same key.
-    let mut by_key: BTreeMap<[String; 3], &[Term; 3]> = BTreeMap::new();
-    for s in &all {
-        let key = statement_keys(s);
-        assert_eq!(key, statement_keys(&s.clone()));
-        if let Some(prev) = by_key.insert(key, s) {
-            assert_eq!(prev, s, "two different facts share an identity key");
-        }
-    }
-    let distinct: BTreeSet<String> = all.iter().map(|s| format!("{s:?}")).collect();
-    assert_eq!(by_key.len(), distinct.len());
 }
 
 const PRE: &str = "@prefix : <http://ex/>. @prefix log: <http://www.w3.org/2000/10/swap/log#>. \
@@ -452,61 +460,6 @@ fn a_source_variable_spelled_like_the_display_name_stays_distinct() {
     assert_eq!(vars, ["?x_3", "?x", "?x_2", "?x_3"], "{shown}");
 }
 
-/// Codex round 7 (MEDIUM): identity keys are structural over EVERY field of a term — a
-/// language-tagged literal's datatype included, noncanonical combinations included — so
-/// two terms share a key exactly when they are equal.
-#[test]
-fn identity_keys_are_injective_over_every_term_field() {
-    const LANG: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
-    const XS: &str = "http://www.w3.org/2001/XMLSchema#string";
-    let strs = ["", "hi", "a\"b", "a\\", "\"", "x"];
-    let dts = [XS, LANG, "http://ex/a", "http://ex/b", ""];
-    let langs = [None, Some("en"), Some(""), Some("EN")];
-    let mut atoms: Vec<Term> = Vec::new();
-    for s in strs {
-        atoms.push(iri(s));
-        atoms.push(Term::Blank(s.into()));
-        atoms.push(var(s));
-        for dt in dts {
-            for l in langs {
-                atoms.push(Term::Lit(s.into(), dt.into(), l.map(str::to_string)));
-            }
-        }
-    }
-    atoms.push(var("__ua.http://ex/x"));
-    atoms.push(var("__bw0___ua.http://ex/x"));
-    let few = [&atoms[0], &atoms[1], &atoms[2], &atoms[7], &atoms[8]];
-    let mut all = atoms.clone();
-    all.push(Term::List(vec![]));
-    all.push(formula(vec![]));
-    all.push(Term::List(vec![Term::List(vec![])]));
-    all.push(Term::List(vec![formula(vec![])]));
-    for a in few {
-        all.push(Term::List(vec![a.clone()]));
-        all.push(Term::Triple(Box::new([a.clone(), a.clone(), a.clone()])));
-        for b in few {
-            all.push(Term::List(vec![a.clone(), b.clone()]));
-            all.push(formula(vec![[a.clone(), b.clone(), a.clone()]]));
-            all.push(formula(vec![[a.clone(), a.clone(), a.clone()], [b.clone(), b.clone(), b.clone()]]));
-            all.push(Term::Triple(Box::new([a.clone(), b.clone(), Term::List(vec![a.clone()])])));
-        }
-    }
-    // The case Codex named: same lexical form and tag, different datatypes.
-    let ha = Term::Lit("hi".into(), "http://ex/a".into(), Some("en".into()));
-    let hb = Term::Lit("hi".into(), "http://ex/b".into(), Some("en".into()));
-    assert!(all.contains(&ha) && all.contains(&hb));
-    let k = iri("http://ex/k");
-    let mut by_key: BTreeMap<[String; 3], Term> = BTreeMap::new();
-    for t in &all {
-        let key = statement_keys(&[k.clone(), k.clone(), t.clone()]);
-        if let Some(prev) = by_key.insert(key, t.clone()) {
-            assert_eq!(&prev, t, "two different terms share an identity key");
-        }
-    }
-    let distinct: BTreeSet<String> = all.iter().map(|t| format!("{t:?}")).collect();
-    assert_eq!(by_key.len(), distinct.len());
-}
-
 /// Codex round 5 (3): an IRI holding a decoded backslash goes back out as `\`.
 #[test]
 fn a_backslash_iri_round_trips() {
@@ -517,4 +470,26 @@ fn a_backslash_iri_round_trips() {
     for f in &parser::parse(src).unwrap().facts {
         assert!(back.facts.contains(f), "{f:?} lost:\n{doc}");
     }
+}
+
+/// Codex round 9: a universal and its backward-chaining copy — or two copies — are
+/// DISTINCT variables, and N3 text can spell each only as the universal's IRI. Writing them
+/// would merge them, so every exact writer refuses; neither may ever come back as one.
+#[test]
+fn a_universal_and_its_copies_are_never_merged() {
+    let (ua, c0, c1) = (var("__ua.http://ex/x"), var("__bw0___ua.http://ex/x"), var("__bw1___ua.http://ex/x"));
+    let k = iri("http://ex/k");
+    for (a, b) in [(&ua, &c0), (&c0, &c1), (&c1, &ua)] {
+        let f = [k.clone(), k.clone(), formula(vec![[a.clone(), k.clone(), b.clone()]])];
+        let mut out = String::new();
+        let e = write_statement(&f, &mut out).expect_err("would merge two variables");
+        assert!(out.is_empty() && e.to_string().contains("merge"), "{e}");
+        // Also across formulae of one statement (a variable spans the statement).
+        let g = [formula(vec![[a.clone(), k.clone(), k.clone()]]), k.clone(), formula(vec![[b.clone(), k.clone(), k.clone()]])];
+        assert!(write_statement(&g, &mut out).is_err() && out.is_empty());
+        assert!(check_statement(&f).is_none());
+    }
+    // One copy on its own is fine: it reads back as the universal, merging nothing.
+    let lone = [k.clone(), k.clone(), formula(vec![[c0.clone(), k.clone(), k.clone()]])];
+    assert!(check_statement(&lone).is_some());
 }

@@ -8,8 +8,7 @@
 //! relationship PROV-O exists to record. `sparq-reason` already computes, per
 //! materialized triple, a [`sparq_reason::ProofTree`]: a flat DAG of
 //! [`sparq_reason::ProofNode`]s where every node carries a `conclusion`
-//! (the fact, as display strings), a lossless identity `key` (what entities are
-//! addressed by), a `rule` id (`"asserted"` for a base fact, `axiom-*` for a
+//! (the fact), a `rule` id (`"asserted"` for a base fact, `axiom-*` for a
 //! tautology, a W3C/engine rule id otherwise — `cax-sco`, `rdfs9`, `prp-trp`,
 //! `n3-rule-<i>`, …), and the indices of its `premises`. That proof tree is a
 //! *finer-grained* derivation record than a single CONSTRUCT-style PROV activity:
@@ -130,13 +129,11 @@ pub fn prov_from_proof(proof: &ProofTree, config: &ProvProofConfig) -> Vec<Tripl
         });
     };
 
-    // First pass: a stable entity IRI per node, content-addressed by the fact's lossless
-    // identity key (`ProofNode::key`), never by its display strings: two different N3
-    // facts can render alike (GH #6701 review round 6).
+    // First pass: a stable entity IRI per node (content-addressed by conclusion).
     let entity_iris: Vec<NamedNode> = proof
         .nodes()
         .iter()
-        .map(|n| fact_entity(&config.namespace, &n.key))
+        .map(|n| fact_entity(&config.namespace, &n.conclusion))
         .collect();
 
     for (i, node) in proof.nodes().iter().enumerate() {
@@ -166,7 +163,7 @@ pub fn prov_from_proof(proof: &ProofTree, config: &ProvProofConfig) -> Vec<Tripl
         }
 
         // An internal node: the rule fired to GENERATE this fact from its premises.
-        let activity_iri = rule_activity(&config.namespace, &node.rule, &node.key);
+        let activity_iri = rule_activity(&config.namespace, &node.rule, &node.conclusion);
         let activity = NamedOrBlankNode::NamedNode(activity_iri.clone());
         push(
             activity.clone(),
@@ -227,10 +224,9 @@ pub fn prov_ntriples(proof: &ProofTree, config: &ProvProofConfig) -> String {
     sparq_engine::triples_to_ntriples(&prov_from_proof(proof, config))
 }
 
-/// Mint a stable `…fact:<hash>` entity IRI from a fact's identity key
-/// (`ProofNode::key`, one lossless key per term). Equal keys mean equal facts,
-/// so the same fact always names the same entity — letting lineage from
-/// different proofs stitch — and two different facts never share one.
+/// Mint a stable `…fact:<hash>` entity IRI from a fact's term strings. The
+/// conclusion strings are canonical (one rendering per term), so the same fact
+/// always names the same entity — letting lineage from different proofs stitch.
 fn fact_entity(ns: &str, conclusion: &[String; 3]) -> NamedNode {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for part in conclusion {

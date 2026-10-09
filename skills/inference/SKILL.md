@@ -95,15 +95,15 @@ pub fn reason_n3_terms_with_resolver(src, base, resolver: Option<&Resolver>) -> 
 // order — full <…> IRIs, no @prefix reconstruction, so NOT byte-identical to EYE's writer.
 // Err (besides a parse error) when the document could not re-reason exactly as the input:
 // an @forAll universal outside every formula of a statement, or sharing a formula with a plain
-// mention of its own IRI at/after its first use there. No fallback spelling is ever written.
+// mention of its own IRI at/after its first use there, or any term the parser would normalize
+// (each writer re-parses its own output to check). No fallback spelling is ever written.
 pub fn reason_n3_pass_all(src: &str, vars: RuleVars) -> Result<String, String>;
 // n3::serialize — EXACT writers (output parses back to the same terms, or Err; never lossy):
 pub fn write_term(t: &Term, out: &mut String) -> Result<(), NotRepresentable>;      // + write_statement(&[Term;3], out)
 pub fn write_rule(r: &Rule, kind: RuleKind, vars: RuleVars, out: &mut String) -> Result<(), NotRepresentable>;
 pub fn serialize_facts<'a>(facts: impl Iterator<Item = &'a [Term; 3]>) -> Result<String, NotRepresentable>;
 pub fn display_lossy(t: &Term) -> String;                 // DISPLAY only (diagnostics); never re-parse it
-pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3]; // proof-node strings; display only
-pub fn statement_keys(f: &[Term; 3]) -> [String; 3];      // structural identity key per term (injective)
+pub fn statement_display_lossy(f: &[Term; 3]) -> [String; 3]; // display only; never re-parse it
 // EYE --query: every INSTANTIATED conclusion of the query document's forward rules over the
 // deductive closure of `data` — a PROJECTION, so a conclusion already in the closure is still
 // an answer (unlike --pass-only-new). The premise uses the chainer's own matcher, so builtins,
@@ -151,7 +151,7 @@ pub enum N3Mode { Counting, Fallback }
 pub fn why(&self, dict: &Dict, t: [Id;3]) -> Option<ProofTree>;          // RDFS / OWL graphs
 pub fn why(&self, fact: &[Term;3])        -> Option<ProofTree>;          // N3 graph
 pub struct ProofTree;  // .nodes() -> &[ProofNode], .root(), .conclusion(), .to_json(), .to_text()
-pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule: String, pub premises: Vec<u32> }  // conclusion = display; key = lossless fact identity (N3: two facts can render alike) — address facts by key
+pub struct ProofNode { pub conclusion: [String;3], pub rule: String, pub premises: Vec<u32> }
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
@@ -665,7 +665,7 @@ use sparq_reason::MaterializedGraph;
 let g = MaterializedGraph::new(&mut dict, &base);
 if let Some(tree) = g.why(&dict, [alice, ty, agent]) {
     println!("{}", tree.to_text());   // indented, root first; rule ids like cax-sco / rdfs9 / prp-trp
-    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"key":[ks,kp,ko],"rule":..,"premises":[..]}]} — "key" = lossless identity (whyN3 wire field too)
+    let json = tree.to_json();        // {"root":R,"nodes":[{"id":..,"conclusion":[s,p,o],"rule":..,"premises":[..]}]}
 }
 ```
 
