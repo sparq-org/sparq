@@ -219,6 +219,19 @@ pub trait Store: Send + Sync {
     /// path.
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>>;
 
+    /// [`list_children`](Store::list_children) while it fits (see
+    /// [`SparqClient::list_children_within`]): `None` when it does not, without the whole
+    /// listing having been held. A store that cannot bound its read refuses the call.
+    async fn list_children_within(
+        &self,
+        _container: &str,
+        _max_bytes: usize,
+    ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        Err(ServerError::Storage(
+            "this store cannot read a listing within a bound".into(),
+        ))
+    }
+
     /// ONE combined read-plan lookup for the read path (read-2 — `research/lws-design-records.md`
     /// §7): the target's authoritative metadata + the presence/etag of every ACL candidate, in a
     /// single index round-trip. See [`SparqClient::read_plan`] for the contract (candidate
@@ -771,26 +784,42 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .list_children(container)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))?;
-        // Validate each raw child IRI (full RFC-3987) at THIS boundary — the point where a
-        // malformed/injected row from storage first crosses into the server's own logic. A malformed
-        // IRI is FAIL-CLOSED OMITTED (never flows unchecked into the render), preserving the render's
-        // prior skip-on-invalid behaviour but moving the guarantee to the architecturally-correct place.
-        // Unreachable via the validated LDP write path (every stored child IRI is RFC-3987-valid by
-        // construction); a store-layer bug that produced one is caught in debug/test by the assert.
-        let mut out = Vec::with_capacity(raw.len());
-        for iri in raw {
-            match ValidatedChildIri::parse(&iri) {
-                Some(v) => out.push(v),
-                None => {
-                    debug_assert!(false, "store yielded a non-RFC-3987 child IRI: {iri}");
-                    eprintln!(
-                        "  STORE: omitting non-RFC-3987 child IRI from list_children: {iri:?}"
-                    );
-                }
+        Ok(validated_children(raw))
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+        let raw = self
+            .sparq
+            .list_children_within(container, max_bytes)
+            .await
+            .map_err(|e| ServerError::Storage(format!("{e}")))?;
+        Ok(raw.map(validated_children))
+    }
+}
+
+/// The child IRIs of `raw` that are RFC 3987 IRIs.
+fn validated_children(raw: Vec<String>) -> Vec<ValidatedChildIri> {
+    // Validate each raw child IRI (full RFC-3987) at THIS boundary — the point where a
+    // malformed/injected row from storage first crosses into the server's own logic. A malformed
+    // IRI is FAIL-CLOSED OMITTED (never flows unchecked into the render), preserving the render's
+    // prior skip-on-invalid behaviour but moving the guarantee to the architecturally-correct place.
+    // Unreachable via the validated LDP write path (every stored child IRI is RFC-3987-valid by
+    // construction); a store-layer bug that produced one is caught in debug/test by the assert.
+    let mut out = Vec::with_capacity(raw.len());
+    for iri in raw {
+        match ValidatedChildIri::parse(&iri) {
+            Some(v) => out.push(v),
+            None => {
+                debug_assert!(false, "store yielded a non-RFC-3987 child IRI: {iri}");
+                eprintln!("  STORE: omitting non-RFC-3987 child IRI from list_children: {iri:?}");
             }
         }
-        Ok(out)
     }
+    out
 }
 
 /// A tiny FNV-1a hash used only for the placeholder ETag (NOT a cryptographic digest).

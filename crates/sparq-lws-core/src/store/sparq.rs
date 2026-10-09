@@ -194,6 +194,22 @@ pub trait SparqClient: Send + Sync {
     /// List the IRIs of `container`'s direct children (its `ldp:contains` members).
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError>;
 
+    /// [`list_children`](SparqClient::list_children) while it fits: at most
+    /// [`max_rows`]`(container, max_bytes)` members whose IRIs come to at most `max_bytes`;
+    /// `None` past either. A backend reads no more of the listing than that, and establishes
+    /// that nothing was left out (an exact count, or one row past the bound asked for), so a
+    /// listing too large to keep is refused without being held whole. A backend that cannot
+    /// bound its read refuses the call.
+    async fn list_children_within(
+        &self,
+        _container: &str,
+        _max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        Err(SparqError::Backend(
+            "this backend cannot read a listing within a bound".into(),
+        ))
+    }
+
     /// The set of blob-store keys that ANY index record currently references (the `pss:blobKey`
     /// pointers across every resource graph).
     ///
@@ -306,6 +322,13 @@ impl InMemorySparqClient {
         }
         Ok(())
     }
+}
+
+/// The most members a listing of `container` read within `max_bytes` may have: a member lies
+/// below its container, so its IRI is longer, and more of them than this cannot fit. A listing
+/// with more (members that are not below it included) is refused, never cut short.
+pub(crate) fn max_rows(container: &str, max_bytes: usize) -> usize {
+    max_bytes / (container.len() + 1)
 }
 
 #[async_trait]
@@ -446,6 +469,33 @@ impl SparqClient for InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         Ok(guard.children.get(container).cloned().unwrap_or_default())
+    }
+
+    async fn list_children_within(
+        &self,
+        container: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Vec<String>>, SparqError> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let Some(all) = guard.children.get(container) else {
+            return Ok(Some(Vec::new()));
+        };
+        if all.len() > max_rows(container, max_bytes) {
+            return Ok(None);
+        }
+        let mut out = Vec::new();
+        let mut bytes = 0usize;
+        for c in all {
+            bytes = bytes.saturating_add(c.len());
+            if bytes > max_bytes {
+                return Ok(None);
+            }
+            out.push(c.clone());
+        }
+        Ok(Some(out))
     }
 
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {

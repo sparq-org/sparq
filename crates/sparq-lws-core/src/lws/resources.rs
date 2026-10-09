@@ -18,7 +18,7 @@ use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
     problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
     JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, MERGE_PATCH,
-    META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH,
+    META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -1288,6 +1288,8 @@ pub fn storage_description<S: Store>(state: &LwsState<S>) -> Value {
             grants,
             requests,
             notifications,
+            service("type-index", "TypeIndexService", cfg.absolute(TYPE_INDEX_PATH)),
+            service("type-search", "TypeSearchService", cfg.absolute(TYPE_SEARCH_PATH)),
         ],
         "verificationMethod": [{
             "id": key_id,

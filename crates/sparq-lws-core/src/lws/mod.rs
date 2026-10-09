@@ -18,7 +18,8 @@
 //!   controlled identifier subject tokens; the storage accepts the RFC 9068 access tokens
 //!   it issues ([`tokens`]);
 //! - **access grants and access requests** ([`access`]): the LWS Access Profile;
-//! - **webhook notifications** ([`notify`]), signed per RFC 9421.
+//! - **webhook notifications** ([`notify`]), signed per RFC 9421;
+//! - the **type index and type search** services ([`index`]).
 //!
 //! Authorization: the storage owner (`SOLID_SERVER_LWS_OWNER`) may do anything, the agent that
 //! created a resource may do anything with it, and anyone else what an access grant gives them.
@@ -26,6 +27,7 @@
 
 pub mod access;
 pub mod authz_server;
+pub mod index;
 pub mod jose;
 pub mod notify;
 pub mod resources;
@@ -67,6 +69,8 @@ pub const PROBLEM_JSON: &str = "application/problem+json";
 pub const GRANTS_PATH: &str = "/.lws/grants/";
 pub const REQUESTS_PATH: &str = "/.lws/requests/";
 pub const SUBSCRIPTIONS_PATH: &str = "/.lws/subscriptions/";
+pub const TYPE_INDEX_PATH: &str = "/.lws/types/index";
+pub const TYPE_SEARCH_PATH: &str = "/.lws/types/search";
 pub const AS_METADATA_PATH: &str = "/.well-known/lws-configuration";
 pub const AS_METADATA_OAUTH_PATH: &str = "/.well-known/oauth-authorization-server";
 pub const AS_JWKS_PATH: &str = "/.well-known/lws/jwks";
@@ -1458,13 +1462,15 @@ pub async fn router<S: Store + 'static>(store: S, cfg: LwsConfig) -> Result<Rout
 }
 
 /// The largest body a request to `path` may carry: the service routes that anyone may send to
-/// (access requests, subscriptions) are held to their own limits while the body is
+/// (access requests, subscriptions, type search) are held to their own limits while the body is
 /// read, so no more than that is ever buffered for them; everything else to `max_body`.
 fn body_limit(path: &str, max_body: usize) -> usize {
     let limit = if path.starts_with(REQUESTS_PATH) {
         access::MAX_REQUEST_BYTES
     } else if path.starts_with(SUBSCRIPTIONS_PATH) {
         notify::MAX_SUBSCRIPTION_BYTES
+    } else if path == TYPE_SEARCH_PATH {
+        index::MAX_FILTER_BYTES
     } else if path.starts_with(GRANTS_PATH) {
         access::MAX_GRANT_BYTES
     } else {
@@ -1573,6 +1579,9 @@ async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Resp
             return unavailable;
         }
         return notify::handle(state, &req, &agent).await;
+    }
+    if path == TYPE_INDEX_PATH || path == TYPE_SEARCH_PATH {
+        return index::handle(state, &req, &agent).await;
     }
     if path.starts_with(GRANTS_PATH) || path.starts_with(REQUESTS_PATH) {
         if let Some(unavailable) = resources::unavailable(state, &req) {
@@ -2004,6 +2013,8 @@ pub(crate) mod test_store {
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone fails with a backend error.
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// `list_children` of this container alone fails with a backend error.
+        pub fail_list_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// When set, how many more writes succeed; every write past them fails, as in a store
@@ -2071,6 +2082,7 @@ pub(crate) mod test_store {
                 fail_write_of: Default::default(),
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
+                fail_list_of: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
                 refuse_write_of: Default::default(),
@@ -2306,7 +2318,20 @@ pub(crate) mod test_store {
             Ok(outcome)
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            if self.fail_list_of.lock().unwrap().as_deref() == Some(container) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.list_children(container).await
+        }
+        async fn list_children_within(
+            &self,
+            container: &str,
+            max_bytes: usize,
+        ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+            if self.fail_list_of.lock().unwrap().as_deref() == Some(container) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.list_children_within(container, max_bytes).await
         }
     }
 
@@ -2627,6 +2652,7 @@ mod tests {
         let routes = [
             ("POST", REQUESTS_PATH, access::MAX_REQUEST_BYTES),
             ("POST", SUBSCRIPTIONS_PATH, notify::MAX_SUBSCRIPTION_BYTES),
+            ("QUERY", TYPE_SEARCH_PATH, index::MAX_FILTER_BYTES),
             ("POST", GRANTS_PATH, access::MAX_GRANT_BYTES),
             ("POST", "/", max),
             ("PUT", "/x", max),
@@ -2986,5 +3012,64 @@ mod tests {
         assert_eq!(meta_key("http://h/a/b"), "http://h/a/b.meta");
         assert_eq!(meta_key("http://h/a/b/"), "http://h/a/b/.meta");
         assert_eq!(meta_key("http://h/"), "http://h/.meta");
+    }
+
+    /// Review finding: cross-cutting rules were applied per handler, and some routes missed
+    /// them. Every route is walked: each that takes a body refuses a coded one, and each that
+    /// serves a representation answers its preconditions.
+    #[tokio::test]
+    async fn every_route_refuses_codings_and_answers_preconditions() {
+        let (st, _store) = test_store::state(4).await;
+        let bodied = [
+            AS_TOKEN_PATH,
+            SUBSCRIPTIONS_PATH,
+            TYPE_INDEX_PATH,
+            TYPE_SEARCH_PATH,
+            GRANTS_PATH,
+            REQUESTS_PATH,
+            "/",
+            "/x",
+            "/.lws/elsewhere",
+        ];
+        for path in bodied {
+            for method in ["POST", "PUT", "PATCH", "QUERY"] {
+                let m = Method::from_bytes(method.as_bytes()).unwrap();
+                let h = [
+                    ("content-type", "application/json"),
+                    ("content-encoding", "gzip"),
+                ];
+                let r = route(&st, request(m, path, &h, "{}")).await;
+                assert_eq!(
+                    r.status(),
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    "{method} {path}"
+                );
+                assert_eq!(r.headers()["accept-encoding"], "identity");
+            }
+        }
+        for path in [
+            "/",
+            TYPE_INDEX_PATH,
+            GRANTS_PATH,
+            REQUESTS_PATH,
+            SUBSCRIPTIONS_PATH,
+        ] {
+            let r = route(&st, request(Method::GET, path, &[], "")).await;
+            assert_eq!(r.status(), StatusCode::OK, "GET {path}");
+            let tag = r.headers()["etag"].to_str().unwrap().to_string();
+            for (h, want) in [
+                ("if-none-match", StatusCode::NOT_MODIFIED),
+                ("if-match", StatusCode::OK),
+            ] {
+                let r = route(&st, request(Method::GET, path, &[(h, &tag)], "")).await;
+                assert_eq!(r.status(), want, "GET {path} {h}");
+            }
+            let r = route(
+                &st,
+                request(Method::GET, path, &[("if-match", "\"other\"")], ""),
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "GET {path}");
+        }
     }
 }
