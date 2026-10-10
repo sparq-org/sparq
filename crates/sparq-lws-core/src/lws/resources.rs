@@ -2183,7 +2183,7 @@ async fn update<S: Store + 'static>(
 /// The most a patched document may grow to, in serialized bytes, whatever the configured body
 /// limit. A JSON Patch `copy` doubles what it copies, so without a bound a few dozen operations
 /// exhaust memory. A server patches within the smaller of this and its request body limit
-/// ([`patch_budget`]).
+/// (`patch_budget`).
 pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
 
 /// How far a patched document may grow on this server: no larger than a request body may be (a
