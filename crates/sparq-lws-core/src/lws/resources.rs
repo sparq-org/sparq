@@ -3681,16 +3681,28 @@ async fn linkset<S: Store + 'static>(
             if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
                 return r;
             }
-            let patched = match patch.apply(&document, patch_budget(state)) {
+            // The patch holds its numbers as their text, so the linkset is read the same way,
+            // and written back with every number restored. A linkset holds no numbers, so one a
+            // patch adds is refused below, whatever its size.
+            let held = serde_json::to_string(&document)
+                .ok()
+                .and_then(|text| serde_json::from_str::<Value>(&numbers_as_text(&text)).ok());
+            let Some(held) = held else {
+                return problem(StatusCode::INTERNAL_SERVER_ERROR, None);
+            };
+            let patched = match patch.apply(&held, patch_budget(state)) {
                 Ok(v) => v,
                 Err(r) => return r,
             };
-            if !valid_linkset(&patched) {
+            let patched = serde_json::to_string(&patched)
+                .ok()
+                .and_then(|text| serde_json::from_str::<Value>(&numbers_from_text(&text)).ok());
+            let Some(patched) = patched.filter(valid_linkset) else {
                 return problem(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     Some("the result is not a linkset document"),
                 );
-            }
+            };
             // Relative references are resolved once, here, against the linkset's own URI: what
             // is stored, served and indexed is then the same absolute link.
             let base = format!("{uri}{META_SUFFIX}");
@@ -4167,6 +4179,29 @@ mod tests {
 
     /// A linkset PATCH in another format is a 415 whatever its validators, and a JSON Patch with
     /// a stale one a 412.
+    /// A linkset holds no numbers: one a patch adds is refused as a number, not taken as the
+    /// text the patch holds it as.
+    #[tokio::test]
+    async fn a_linkset_patch_cannot_add_a_number() {
+        let st = state().await;
+        let uri = post(&st, "f.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        for value in ["5", "1e400", r#"[{"href":"https://ex.org/l","title":5}]"#] {
+            let ops = format!(r#"[{{"op":"add","path":"/linkset/0/license","value":{value}}}]"#);
+            let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
+            assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+        }
+        let ops = r#"[{"op":"add","path":"/linkset/0/license","value":[{"href":"https://ex.org/l","title":"\ue0005"}]}]"#;
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], ops).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let r = call(&st, "GET", &meta, &[], "").await;
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let doc: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(doc["linkset"][0]["license"][0]["title"], "\u{E000}5");
+    }
+
     #[tokio::test]
     async fn a_linkset_patch_checks_its_format_before_its_preconditions() {
         let st = state().await;
