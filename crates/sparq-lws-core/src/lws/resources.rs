@@ -16,12 +16,13 @@ use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
     problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, JSON,
-    LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
+    JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
 };
 use crate::error::ServerError;
 use crate::store::Store;
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+const ACCEPT_PATCH: &str = "application/json-patch+json";
 const LINKSET_ALLOW: &str = "GET, HEAD";
 
 /// Relations that are server-managed or protocol-level: never taken from a client's Link header
@@ -137,6 +138,7 @@ async fn handle_now<S: Store + 'static>(
             Some("a partial PUT (Content-Range) is not supported"),
         ),
         Method::PUT => update(state, req, agent, &uri).await,
+        Method::PATCH => patch(state, req, agent, &uri).await,
         Method::DELETE => delete(state, req, agent, &uri).await,
         Method::OPTIONS => options(state, &uri).await,
         _ => method_not_allowed(&allow_for(&uri, is_root)),
@@ -184,7 +186,7 @@ fn allow_for(uri: &str, is_root: bool) -> String {
     } else if uri.ends_with('/') {
         "GET, HEAD, OPTIONS, POST, DELETE".into()
     } else {
-        "GET, HEAD, OPTIONS, PUT, DELETE".into()
+        "GET, HEAD, OPTIONS, PUT, PATCH, DELETE".into()
     }
 }
 
@@ -200,6 +202,13 @@ async fn options<S: Store + 'static>(state: &LwsState<S>, uri: &str) -> Response
         header::ALLOW,
         &allow_for(uri, uri == state.cfg.storage()),
     );
+    if !uri.ends_with('/') {
+        set(
+            resp.headers_mut(),
+            header::HeaderName::from_static("accept-patch"),
+            ACCEPT_PATCH,
+        );
+    }
     resp
 }
 
@@ -2166,6 +2175,636 @@ async fn update<S: Store + 'static>(
             "set-linkset",
         );
     }
+    resp
+}
+
+// ---- patch ----
+
+/// The most a patched document may grow to, in serialized bytes, whatever the configured body
+/// limit. A JSON Patch `copy` doubles what it copies, so without a bound a few dozen operations
+/// exhaust memory. A server patches within the smaller of this and its request body limit
+/// ([`patch_budget`]).
+pub const PATCH_BUDGET: usize = 64 * 1024 * 1024;
+
+/// How far a patched document may grow on this server: no larger than a request body may be (a
+/// document a PUT could not store is no more acceptable from a PATCH), and never past
+/// [`PATCH_BUDGET`]. The work a JSON Patch may do follows from it.
+fn patch_budget<S: Store + 'static>(state: &LwsState<S>) -> usize {
+    state.cfg.max_body.min(PATCH_BUDGET)
+}
+
+/// How many operations a JSON Patch may have.
+pub const MAX_PATCH_OPS: usize = 1000;
+
+/// The work a JSON Patch may do, in bytes measured, cloned or compared, as a multiple of
+/// [`PATCH_BUDGET`].
+pub const PATCH_WORK_FACTOR: usize = 4;
+
+/// The least work any JSON Patch may do, however small its size budget.
+pub const MIN_PATCH_WORK: usize = 1 << 20;
+
+/// How deeply a patched document may nest, in arrays and objects: the deepest document
+/// `serde_json` parses back (its recursion limit). The parser bounds every document a request
+/// carries, but JSON Patch builds new ones: each `move` or `copy` may nest an existing value under
+/// another, so without this bound a patch could build a document deep enough to overflow the stack
+/// when it is serialized, compared, cloned or dropped.
+pub const MAX_JSON_DEPTH: usize = 127;
+
+/// How deeply `v` nests arrays and objects: 0 for a scalar, 1 for `[]` or `{}`. Iterative, so it is
+/// safe on a value of any depth.
+fn json_depth(v: &Value) -> usize {
+    let mut deepest = 0;
+    let mut stack = vec![(v, 0usize)];
+    while let Some((v, d)) = stack.pop() {
+        match v {
+            Value::Array(a) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(a.iter().map(|c| (c, d + 1)));
+            }
+            Value::Object(m) => {
+                deepest = deepest.max(d + 1);
+                stack.extend(m.values().map(|c| (c, d + 1)));
+            }
+            _ => {}
+        }
+    }
+    deepest
+}
+
+/// Why a JSON Patch was not applied.
+#[derive(Debug, PartialEq)]
+pub enum PatchError {
+    /// The patch document is not an RFC 6902 patch: not an array, an unknown `op`, or a member an
+    /// operation requires missing or of the wrong type (400).
+    Malformed(&'static str),
+    /// A well-formed operation cannot be applied to the target: a path that does not exist, or a
+    /// failed `test` (RFC 5789 section 2.2).
+    Failed,
+    /// The result would outgrow [`PATCH_BUDGET`].
+    TooLarge,
+    /// The result would nest deeper than [`MAX_JSON_DEPTH`] (422).
+    TooDeep,
+}
+
+/// Check that `ops` is an RFC 6902 patch document, without applying it.
+pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
+    let ops = ops.as_array().ok_or(PatchError::Malformed(
+        "a JSON Patch is an array of operations",
+    ))?;
+    let pointer = |v: Option<&Value>| v.and_then(Value::as_str).and_then(Pointer::parse).is_some();
+    for op in ops {
+        let kind = op
+            .get("op")
+            .and_then(Value::as_str)
+            .ok_or(PatchError::Malformed("every operation needs an op"))?;
+        if !pointer(op.get("path")) {
+            return Err(PatchError::Malformed(
+                "every operation needs a JSON Pointer path",
+            ));
+        }
+        match kind {
+            "add" | "replace" | "test" if op.get("value").is_none() => {
+                return Err(PatchError::Malformed("add, replace and test need a value"));
+            }
+            "move" | "copy" if !pointer(op.get("from")) => {
+                return Err(PatchError::Malformed(
+                    "move and copy need a JSON Pointer from",
+                ));
+            }
+            "add" | "remove" | "replace" | "move" | "copy" | "test" => {}
+            _ => return Err(PatchError::Malformed("unknown JSON Patch operation")),
+        }
+    }
+    Ok(ops)
+}
+
+/// Whether a JSON Patch observes the target's content: `test` compares a value and `copy` / `move`
+/// read one, so applying it reveals what the patcher may not be allowed to read.
+pub fn json_patch_reads(ops: &Value) -> bool {
+    ops.as_array().is_some_and(|ops| {
+        ops.iter().any(|op| {
+            matches!(
+                op.get("op").and_then(Value::as_str),
+                Some("test" | "copy" | "move")
+            )
+        })
+    })
+}
+
+/// The serialized size of `v`, in bytes.
+fn json_size(v: &Value) -> usize {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0 += buf.len();
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut c = Count(0);
+    let _ = serde_json::to_writer(&mut c, v);
+    c.0
+}
+
+/// RFC 6902 JSON Patch, applied whole or not at all, within `budget` serialized bytes.
+pub fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
+    use PatchError::Failed;
+    let ops = validate_json_patch(ops)?;
+    if ops.len() > MAX_PATCH_OPS {
+        return Err(PatchError::TooLarge);
+    }
+    let mut doc = target.clone();
+    // The document's size, kept as an upper bound: every operation that adds checks the budget
+    // before it clones or inserts anything.
+    let mut size = json_size(&doc);
+    // The work done, in bytes measured, cloned or compared: a patch within the size budget can
+    // still repeat costly operations (a copy of a large value over itself, again and again), so
+    // the total is held to a budget of its own.
+    let work_budget = budget.saturating_mul(PATCH_WORK_FACTOR).max(MIN_PATCH_WORK);
+    let mut work = size;
+    let charge = |work: &mut usize, bytes: usize| {
+        *work = work.saturating_add(bytes);
+        if *work > work_budget {
+            return Err(PatchError::TooLarge);
+        }
+        Ok(())
+    };
+    // Every pointer was parsed when the patch was validated; it is parsed the same way here.
+    let pointer_of = |op: &Value, k: &str| {
+        op[k]
+            .as_str()
+            .and_then(Pointer::parse)
+            .ok_or(PatchError::Malformed("a JSON Pointer is malformed"))
+    };
+    for op in ops {
+        let path = pointer_of(op, "path")?;
+        // What an add at `path` would overwrite: an existing object member is replaced.
+        let replaced = |doc: &Value| -> usize {
+            let Some((parent, _)) = path.split() else {
+                return json_size(doc);
+            };
+            match (walk(doc, parent), path.get(doc)) {
+                (Some(Value::Object(_)), Some(old)) => json_size(old),
+                _ => 0,
+            }
+        };
+        // A value placed at `path` sits under one container per pointer segment.
+        let fits = |v: &Value| {
+            if path.0.len() + json_depth(v) > MAX_JSON_DEPTH {
+                return Err(PatchError::TooDeep);
+            }
+            Ok(())
+        };
+        let grow = |size: &mut usize, by: usize, minus: usize| {
+            let next = size.saturating_sub(minus).saturating_add(by);
+            if next > budget {
+                return Err(PatchError::TooLarge);
+            }
+            *size = next;
+            Ok(())
+        };
+        match op["op"].as_str().unwrap_or_default() {
+            "add" => {
+                let v = &op["value"];
+                fits(v)?;
+                let minus = replaced(&doc);
+                let value = json_size(v);
+                charge(&mut work, 2 * value + minus + shift_cost(&doc, &path, true))?;
+                let by = value + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
+                pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
+            }
+            "remove" => {
+                let overhead = member_overhead(&doc, &path, false);
+                charge(&mut work, shift_cost(&doc, &path, false))?;
+                let old = pointer_remove(&mut doc, &path).ok_or(Failed)?;
+                let gone = json_size(&old);
+                charge(&mut work, gone)?;
+                size = size.saturating_sub(gone + overhead);
+            }
+            "replace" => {
+                let v = &op["value"];
+                fits(v)?;
+                let old = path.get(&doc).ok_or(Failed)?;
+                let minus = json_size(old);
+                let value = json_size(v);
+                // Taken out and put back: an array member shifts the rest of its array twice.
+                let shifts = 2 * shift_cost(&doc, &path, false);
+                charge(&mut work, 2 * value + minus + shifts)?;
+                grow(&mut size, value, minus)?;
+                pointer_remove(&mut doc, &path).ok_or(Failed)?;
+                pointer_add(&mut doc, &path, v.clone()).ok_or(Failed)?;
+            }
+            "move" => {
+                let from = pointer_of(op, "from")?;
+                // A value cannot move into itself (RFC 6902 section 4.4).
+                if from.0.len() < path.0.len() && path.0.starts_with(&from.0) {
+                    return Err(Failed);
+                }
+                // The value moves; what changes is the member around it (its key, a separator), and
+                // what an add at `path` replaces.
+                let overhead = member_overhead(&doc, &from, false);
+                charge(&mut work, shift_cost(&doc, &from, false))?;
+                let v = pointer_remove(&mut doc, &from).ok_or(Failed)?;
+                fits(&v)?;
+                let moved = json_size(&v);
+                size = size.saturating_sub(moved + overhead);
+                let minus = replaced(&doc);
+                charge(&mut work, 2 * moved + minus + shift_cost(&doc, &path, true))?;
+                let by = moved + member_overhead(&doc, &path, true);
+                grow(&mut size, by, minus)?;
+                pointer_add(&mut doc, &path, v).ok_or(Failed)?;
+            }
+            "copy" => {
+                let from = pointer_of(op, "from")?;
+                let source = from.get(&doc).ok_or(Failed)?;
+                fits(source)?;
+                let copied = json_size(source);
+                let added = copied + member_overhead(&doc, &path, true);
+                let minus = replaced(&doc);
+                charge(
+                    &mut work,
+                    2 * copied + minus + shift_cost(&doc, &path, true),
+                )?;
+                grow(&mut size, added, minus)?;
+                let v = from.get(&doc).ok_or(Failed)?.clone();
+                pointer_add(&mut doc, &path, v).ok_or(Failed)?;
+            }
+            "test" => {
+                // A comparison walks no more of the document than the value it is given.
+                charge(&mut work, json_size(&op["value"]))?;
+                if !json_equal(path.get(&doc).ok_or(Failed)?, &op["value"]) {
+                    return Err(Failed);
+                }
+            }
+            _ => unreachable!("validated"),
+        }
+    }
+    // The running size is an upper bound kept without serializing; the result itself is held to
+    // the budget too.
+    if json_size(&doc) > budget {
+        return Err(PatchError::TooLarge);
+    }
+    Ok(doc)
+}
+
+/// The bytes a member at `path` of `doc` takes beside its value: in an object its key (quoted and
+/// escaped) and colon, and in either container the comma between it and a sibling. `adding`: for a
+/// member about to be added (nothing for an object member that would be replaced); otherwise for
+/// the member there now.
+fn member_overhead(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
+        return 0;
+    };
+    let comma = |others: usize| usize::from(others > 0);
+    match walk(doc, parent) {
+        Some(Value::Object(m)) => {
+            let present = m.contains_key(key);
+            if adding && present {
+                return 0;
+            }
+            let others = m.len() - usize::from(present);
+            json_size(&Value::String(key.to_string())) + 1 + comma(others)
+        }
+        Some(Value::Array(a)) => comma(if adding {
+            a.len()
+        } else {
+            a.len().saturating_sub(1)
+        }),
+        _ => 0,
+    }
+}
+
+/// The work of the shift an insertion (`adding`) or a removal at `path` makes in the array that
+/// holds it, if one does: every member after the index moves, each counted as the bytes a `Value`
+/// takes in memory. An append, or a member of an object, moves nothing.
+fn shift_cost(doc: &Value, path: &Pointer, adding: bool) -> usize {
+    let Some((parent, key)) = path.split() else {
+        return 0;
+    };
+    let Some(Value::Array(a)) = walk(doc, parent) else {
+        return 0;
+    };
+    let Some(i) = array_index(key, a.len(), adding) else {
+        return 0;
+    };
+    let moved = if adding {
+        a.len().saturating_sub(i)
+    } else {
+        a.len().saturating_sub(i + 1)
+    };
+    moved.saturating_mul(std::mem::size_of::<Value>())
+}
+
+/// RFC 6902 section 4.6 equality: numbers are equal when their values are (`1` and `1.0`), strings
+/// and literals when they are identical, arrays element by element, objects member by member
+/// whatever their order. Integers compare exactly (two distinct large integers never meet through
+/// a float), and an integer equals a float only when the float is exactly that integer.
+fn json_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => numbers_equal(x, y),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(x, y)| json_equal(x, y))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| json_equal(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
+fn numbers_equal(x: &serde_json::Number, y: &serde_json::Number) -> bool {
+    let int = |n: &serde_json::Number| {
+        n.as_i64()
+            .map(i128::from)
+            .or_else(|| n.as_u64().map(i128::from))
+    };
+    // An integral, finite float within range, as the integer it is exactly.
+    let integral =
+        |f: f64| (f.is_finite() && f.fract() == 0.0 && f.abs() < 1e38).then_some(f as i128);
+    match (int(x), int(y)) {
+        (Some(i), Some(j)) => i == j,
+        (Some(i), None) => y.as_f64().and_then(integral) == Some(i),
+        (None, Some(j)) => x.as_f64().and_then(integral) == Some(j),
+        (None, None) => x.as_f64().is_some_and(|f| y.as_f64() == Some(f)),
+    }
+}
+
+/// An RFC 6901 JSON Pointer, parsed once: its reference tokens, unescaped. Every JSON Patch
+/// operation reads its paths through this one parser, so no operation accepts a pointer (or an
+/// array index) that another refuses.
+struct Pointer(Vec<String>);
+
+impl Pointer {
+    /// `None` for anything RFC 6901 does not allow: a non-empty pointer not starting with `/`,
+    /// or a `~` not followed by `0` or `1`.
+    fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() {
+            return Some(Pointer(Vec::new()));
+        }
+        let tokens = s.strip_prefix('/')?.split('/').map(|t| {
+            let mut out = String::with_capacity(t.len());
+            let mut chars = t.chars();
+            while let Some(c) = chars.next() {
+                out.push(if c != '~' {
+                    c
+                } else {
+                    match chars.next()? {
+                        '0' => '~',
+                        '1' => '/',
+                        _ => return None,
+                    }
+                });
+            }
+            Some(out)
+        });
+        tokens.collect::<Option<Vec<_>>>().map(Pointer)
+    }
+
+    /// The tokens of the container and the last token; `None` for the whole document.
+    fn split(&self) -> Option<(&[String], &str)> {
+        let (last, parent) = self.0.split_last()?;
+        Some((parent, last))
+    }
+
+    fn get<'a>(&self, doc: &'a Value) -> Option<&'a Value> {
+        walk(doc, &self.0)
+    }
+}
+
+/// The value `tokens` reference in `doc`.
+fn walk<'a>(doc: &'a Value, tokens: &[String]) -> Option<&'a Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get(t),
+        Value::Array(a) => a.get(array_index(t, a.len(), false)?),
+        _ => None,
+    })
+}
+
+fn walk_mut<'a>(doc: &'a mut Value, tokens: &[String]) -> Option<&'a mut Value> {
+    tokens.iter().try_fold(doc, |v, t| match v {
+        Value::Object(m) => m.get_mut(t),
+        Value::Array(a) => {
+            let i = array_index(t, a.len(), false)?;
+            a.get_mut(i)
+        }
+        _ => None,
+    })
+}
+
+/// An array index token (RFC 6901 section 4): `0`, or digits without a leading zero, below `len`;
+/// when `adding`, also `len` itself and `-` (the end). No sign, no leading zero, no overflow.
+fn array_index(token: &str, len: usize, adding: bool) -> Option<usize> {
+    if adding && token == "-" {
+        return Some(len);
+    }
+    let b = token.as_bytes();
+    let well_formed = token == "0"
+        || (matches!(b.first(), Some(b'1'..=b'9')) && b.iter().all(u8::is_ascii_digit));
+    let i: usize = token.parse().ok().filter(|_| well_formed)?;
+    (i < len || (adding && i == len)).then_some(i)
+}
+
+fn pointer_add(doc: &mut Value, path: &Pointer, value: Value) -> Option<()> {
+    let Some((parent, key)) = path.split() else {
+        *doc = value;
+        return Some(());
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => {
+            m.insert(key.to_string(), value);
+        }
+        Value::Array(a) => {
+            let i = array_index(key, a.len(), true)?;
+            a.insert(i, value);
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+fn pointer_remove(doc: &mut Value, path: &Pointer) -> Option<Value> {
+    let Some((parent, key)) = path.split() else {
+        return Some(std::mem::replace(doc, Value::Null));
+    };
+    match walk_mut(doc, parent)? {
+        Value::Object(m) => m.remove(key),
+        Value::Array(a) => {
+            let i = array_index(key, a.len(), false)?;
+            Some(a.remove(i))
+        }
+        _ => None,
+    }
+}
+
+/// A patch document a request carries.
+enum Patch {
+    /// RFC 6902 JSON Patch, already checked to be well-formed.
+    Json(Value),
+}
+
+impl Patch {
+    /// Parse the request body by its Content-Type. `Err` carries the response: 415 for another
+    /// format, 400 for a body that is not JSON or not a well-formed patch.
+    fn parse(req: &LwsRequest) -> Result<Self, Response> {
+        let ct = req.content_type().unwrap_or_default();
+        if ct != JSON_PATCH {
+            let mut r = problem(StatusCode::UNSUPPORTED_MEDIA_TYPE, None);
+            set(
+                r.headers_mut(),
+                header::HeaderName::from_static("accept-patch"),
+                ACCEPT_PATCH,
+            );
+            return Err(r);
+        }
+        let Ok(patch) = serde_json::from_slice::<Value>(&req.body) else {
+            return Err(problem(
+                StatusCode::BAD_REQUEST,
+                Some("the patch is not JSON"),
+            ));
+        };
+        if let Err(PatchError::Malformed(why)) = validate_json_patch(&patch) {
+            return Err(problem(StatusCode::BAD_REQUEST, Some(why)));
+        }
+        Ok(Patch::Json(patch))
+    }
+
+    /// Whether applying the patch observes the target's content (see [`json_patch_reads`]).
+    fn reads_content(&self) -> bool {
+        matches!(self, Patch::Json(ops) if json_patch_reads(ops))
+    }
+
+    /// Apply the patch to `target` within `budget` serialized bytes. `Err` carries the response.
+    fn apply(&self, target: &Value, budget: usize) -> Result<Value, Response> {
+        match self {
+            Patch::Json(ops) => json_patch(target, ops, budget),
+        }
+        .map_err(|e| match e {
+            PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
+            PatchError::Failed => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the JSON Patch cannot be applied"),
+            ),
+            PatchError::TooLarge => problem(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Some("the patched document would be too large"),
+            ),
+            PatchError::TooDeep => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Some("the patched document would nest too deeply"),
+            ),
+        })
+    }
+}
+
+/// A patch that observes content (see [`Patch::reads_content`]) needs Read as well as Modify:
+/// otherwise 403, or the challenge for an anonymous caller.
+async fn patch_read_check<S: Store + 'static>(
+    state: &LwsState<S>,
+    patch: &Patch,
+    uri: &str,
+    agent: &Agent,
+) -> Result<(), Response> {
+    if patch.reads_content() {
+        return recheck(state, Action::Read, uri, agent).await;
+    }
+    Ok(())
+}
+
+async fn patch<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+) -> Response {
+    let Some(guard) = state.locks.lock(uri).await else {
+        return set_aside_meanwhile();
+    };
+    let listing = match listing_guard(state, uri).await {
+        Ok(listing) => listing,
+        Err(r) => return r,
+    };
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    if uri.ends_with('/') {
+        return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
+    }
+    if let Precondition::Failed | Precondition::NotModified = evaluate(
+        &req.headers,
+        Some(&quoted(&meta.etag)),
+        meta.last_modified.map(|t| to_secs(epoch_ms(t))),
+        false,
+    ) {
+        return problem(StatusCode::PRECONDITION_FAILED, None);
+    }
+    let patch = match Patch::parse(req) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
+        return r;
+    }
+    let body = match state.store.read_at(uri, &meta).await {
+        Ok(b) => b,
+        Err(e) => return store_error(e),
+    };
+    let target = if body.is_empty() {
+        Value::Object(Map::new())
+    } else {
+        match serde_json::from_slice::<Value>(&body) {
+            Ok(v) => v,
+            Err(_) => {
+                // The stored representation is not JSON, so neither patch format applies to it.
+                let mut r = problem(
+                    StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                    Some("the resource is not JSON"),
+                );
+                set(
+                    r.headers_mut(),
+                    header::HeaderName::from_static("accept-patch"),
+                    ACCEPT_PATCH,
+                );
+                return r;
+            }
+        }
+    };
+    let patched = match patch.apply(&target, patch_budget(state)) {
+        Ok(v) => v,
+        Err(r) => return r,
+    };
+    let ct = if meta.content_type.contains("json") {
+        meta.content_type.clone()
+    } else {
+        JSON.to_string()
+    };
+    // The linkset is left alone: a PATCH changes the content only.
+    // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
+    // which touches the container once they are over.
+    let (written, _guard, _) = write_with_meta(
+        state,
+        (guard, listing),
+        uri,
+        Bytes::from(serde_json::to_vec(&patched).unwrap_or_default()),
+        &ct,
+        None,
+        req.admission.clone(),
+    )
+    .await;
+    let written = match written {
+        Ok(m) => m,
+        Err(e) => return store_error(e),
+    };
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     resp
 }
 
@@ -5693,5 +6332,412 @@ mod tests {
             let r = call(&st, m, &p, &[("if-none-match", &tag)], "").await;
             assert_eq!(r.status(), StatusCode::NOT_MODIFIED, "{m}");
         }
+    }
+
+    /// Review finding: a JSON Patch `move` was not counted against the budget at all, and adds and
+    /// copies counted their values but not the keys and separators around them, so a patch could
+    /// build a document larger than the budget.
+    #[test]
+    fn json_patch_counts_keys_separators_and_moves() {
+        let long = "k".repeat(1000);
+        // Many members with long keys and empty values: the keys are most of the document.
+        let ops: Vec<Value> = (0..20)
+            .map(|i| json!({"op": "add", "path": format!("/{long}{i}"), "value": 0}))
+            .collect();
+        let ops = Value::Array(ops);
+        let built = json_patch(&json!({}), &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&built);
+        assert!(size > 20_000);
+        // Exact: the budget the result takes is enough, a byte less is not.
+        assert_eq!(json_patch(&json!({}), &ops, size), Ok(built));
+        assert_eq!(
+            json_patch(&json!({}), &ops, size - 1),
+            Err(PatchError::TooLarge)
+        );
+        // A move to a longer key grows the document by the difference.
+        let doc = json!({"a": [1, 2, 3], "b": {}});
+        let ops = json!([{"op": "move", "from": "/a", "path": format!("/b/{long}")}]);
+        let moved = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        let size = json_size(&moved);
+        assert_eq!(json_patch(&doc, &ops, size), Ok(moved));
+        assert_eq!(json_patch(&doc, &ops, size - 1), Err(PatchError::TooLarge));
+        // Moves, copies, removes and escaped keys, counted exactly along the way.
+        let ops = json!([
+            {"op": "add", "path": "/x", "value": {"q\"uote": [1, 2]}},
+            {"op": "copy", "from": "/x", "path": "/y~1z"},
+            {"op": "move", "from": "/x/q\"uote/0", "path": "/x/q\"uote/-"},
+            {"op": "remove", "path": "/b"},
+            {"op": "add", "path": "/arr", "value": []},
+            {"op": "move", "from": "/a", "path": "/arr/0"},
+        ]);
+        let out = json_patch(&doc, &ops, PATCH_BUDGET).unwrap();
+        // The largest the document gets along the way.
+        let peak = (1..=ops.as_array().unwrap().len())
+            .map(|n| {
+                let prefix = Value::Array(ops.as_array().unwrap()[..n].to_vec());
+                json_size(&json_patch(&doc, &prefix, PATCH_BUDGET).unwrap())
+            })
+            .max()
+            .unwrap();
+        assert_eq!(json_patch(&doc, &ops, peak).as_ref(), Ok(&out));
+        assert_eq!(json_patch(&doc, &ops, peak - 1), Err(PatchError::TooLarge));
+    }
+
+    /// Review finding: array indexes were parsed with `str::parse`, so `01` and `+1` named
+    /// member 1 in some operations, and escapes other than `~0` and `~1` passed. Every operation
+    /// now reads its pointers through one RFC 6901 parser.
+    #[test]
+    fn json_pointers_follow_rfc_6901() {
+        let doc = json!({"a": [10, 11, 12], "~/": 1});
+        let run = |ops: Value| json_patch(&doc, &ops, PATCH_BUDGET);
+        for index in [
+            "01",
+            "+1",
+            "1.0",
+            " 1",
+            "1 ",
+            "-1",
+            "3",
+            "18446744073709551616",
+            "-",
+        ] {
+            let path = format!("/a/{index}");
+            for op in [
+                json!({"op": "remove", "path": path}),
+                json!({"op": "replace", "path": path, "value": 0}),
+                json!({"op": "test", "path": path, "value": 11}),
+                json!({"op": "copy", "from": path, "path": "/b"}),
+                json!({"op": "move", "from": path, "path": "/b"}),
+            ] {
+                assert_eq!(run(json!([op])), Err(PatchError::Failed), "{op}");
+            }
+            if index != "3" && index != "-" {
+                let add = json!([{"op": "add", "path": path, "value": 0}]);
+                assert_eq!(run(add), Err(PatchError::Failed), "add at {index}");
+            }
+        }
+        for bad in ["a", "/~2", "/~", "/a~"] {
+            let op = json!([{"op": "test", "path": bad, "value": 1}]);
+            assert!(matches!(run(op), Err(PatchError::Malformed(_))), "{bad}");
+        }
+        let ops = json!([
+            {"op": "test", "path": "/a/0", "value": 10},
+            {"op": "test", "path": "/~0~1", "value": 1},
+            {"op": "add", "path": "/a/3", "value": 13},
+            {"op": "add", "path": "/a/-", "value": 14},
+            {"op": "move", "from": "/a/1", "path": "/a/1"},
+        ]);
+        assert_eq!(run(ops).unwrap()["a"], json!([10, 11, 12, 13, 14]));
+    }
+
+    /// Review finding: the work budget charged what an operation adds, not the array members an
+    /// insertion or a removal shifts. A thousand adds at the front of a long array passed both
+    /// budgets while moving the whole array each time.
+    #[test]
+    fn json_patch_charges_array_shifts() {
+        let long = Value::Array(vec![json!(0); 100_000]);
+        let budget = 8 << 20;
+        let at = |op: &str, path: &str| match op {
+            "remove" => json!({"op": "remove", "path": path}),
+            _ => json!({"op": op, "path": path, "value": 1}),
+        };
+        for (op, path) in [("add", "/0"), ("remove", "/0"), ("replace", "/0")] {
+            let few = Value::Array(vec![at(op, path); 3]);
+            assert!(json_patch(&long, &few, budget).is_ok(), "{op}");
+            let many = Value::Array(vec![at(op, path); MAX_PATCH_OPS]);
+            assert_eq!(
+                json_patch(&long, &many, budget),
+                Err(PatchError::TooLarge),
+                "{op}"
+            );
+        }
+        let moves = json!({"op": "move", "from": "/0", "path": "/1"});
+        let many = Value::Array(vec![moves; MAX_PATCH_OPS]);
+        assert_eq!(json_patch(&long, &many, budget), Err(PatchError::TooLarge));
+        // Appends and removals at the end move nothing.
+        let appends = Value::Array(vec![at("add", "/-"); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &appends, budget).is_ok());
+        let last = format!("/{}", 100_000 - 1);
+        let ops = Value::Array(vec![at("replace", &last); MAX_PATCH_OPS]);
+        assert!(json_patch(&long, &ops, budget).is_ok());
+    }
+
+    /// Review finding: a JSON Patch could repeat a costly operation without end within the size
+    /// budget (a copy of a large value over itself replaces it, so the document never grows). The
+    /// operations are counted, and the work they do is held to a budget of its own.
+    #[test]
+    fn json_patch_work_is_bounded() {
+        let big = json!({ "a": "x".repeat(1 << 20) });
+        let over_itself = json!({"op": "copy", "from": "/a", "path": "/a"});
+        // A few are fine; enough to do many times the budget's work are refused.
+        let few = Value::Array(vec![over_itself.clone(); 3]);
+        assert_eq!(json_patch(&big, &few, 8 << 20), Ok(big.clone()));
+        let many = Value::Array(vec![over_itself; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // Tests count too.
+        let probe = json!({"op": "test", "path": "/a", "value": "x".repeat(1 << 20)});
+        let many = Value::Array(vec![probe; 100]);
+        assert_eq!(json_patch(&big, &many, 8 << 20), Err(PatchError::TooLarge));
+        // And so do operations, however cheap.
+        let cheap = json!({"op": "test", "path": "/b", "value": 1});
+        let ops = Value::Array(vec![cheap.clone(); MAX_PATCH_OPS]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Ok(json!({"b": 1}))
+        );
+        let ops = Value::Array(vec![cheap; MAX_PATCH_OPS + 1]);
+        assert_eq!(
+            json_patch(&json!({"b": 1}), &ops, PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn json_patch_copy_is_held_to_a_budget() {
+        let mut ops = Vec::new();
+        for _ in 0..40 {
+            ops.push(json!({"op": "copy", "from": "/a", "path": "/a/-"}));
+        }
+        let r = json_patch(&json!({"a": [1, 2, 3, 4]}), &Value::Array(ops), 4096);
+        assert_eq!(r, Err(PatchError::TooLarge));
+        // Within the budget, copies apply.
+        let ok = json_patch(
+            &json!({"a": [1]}),
+            &json!([{"op": "copy", "from": "/a", "path": "/b"}]),
+            4096,
+        );
+        assert_eq!(ok, Ok(json!({"a": [1], "b": [1]})));
+        // Replacing a member does not count the old value twice.
+        let mut ops = Vec::new();
+        for _ in 0..100 {
+            ops.push(json!({"op": "copy", "from": "/a", "path": "/b"}));
+        }
+        let big = json!({"a": "x".repeat(100)});
+        assert!(json_patch(&big, &Value::Array(ops), 1024).is_ok());
+    }
+
+    #[tokio::test]
+    async fn content_reading_patches_need_read() {
+        let st = state_with(false).await;
+        let anonymous = Agent::anonymous();
+        let reads = Patch::Json(json!([{"op": "test", "path": "/a", "value": 1}]));
+        let blind = Patch::Json(json!([{"op": "add", "path": "/a", "value": 1}]));
+        assert!(reads.reads_content());
+        assert!(!blind.reads_content());
+        for op in ["copy", "move"] {
+            assert!(json_patch_reads(
+                &json!([{"op": op, "from": "/a", "path": "/b"}])
+            ));
+        }
+        let uri = format!("{BASE}/");
+        let denied = patch_read_check(&st, &reads, &uri, &anonymous)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let someone = Agent {
+            subject: Some("https://someone.example/#me".into()),
+            client: None,
+        };
+        let denied = patch_read_check(&st, &reads, &uri, &someone)
+            .await
+            .unwrap_err();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        assert!(patch_read_check(&st, &blind, &uri, &anonymous)
+            .await
+            .is_ok());
+    }
+
+    /// `doc` with its `/d` wrapped in `n` more objects, by add and move alone.
+    fn nesting_ops(n: usize) -> Value {
+        let mut ops = Vec::new();
+        for _ in 0..n {
+            ops.push(json!({"op": "add", "path": "/w", "value": {}}));
+            ops.push(json!({"op": "move", "from": "/d", "path": "/w/d"}));
+            ops.push(json!({"op": "move", "from": "/w", "path": "/d"}));
+        }
+        Value::Array(ops)
+    }
+
+    /// Review finding: add and move can nest a document without bound (each op is small, so the
+    /// size budget never trips), deep enough to overflow the stack when it is serialized, cloned
+    /// or dropped.
+    #[tokio::test]
+    async fn json_patch_bounds_the_nesting_depth() {
+        let doc = json!({"d": 0});
+        // The root object and 126 wrappers: the deepest document serde_json parses back.
+        let ok = json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH - 1), PATCH_BUDGET).unwrap();
+        assert_eq!(json_depth(&ok), MAX_JSON_DEPTH);
+        let text = serde_json::to_string(&ok).unwrap();
+        assert!(serde_json::from_str::<Value>(&text).is_ok());
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_JSON_DEPTH), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Far past the bound: refused, not a stack overflow (by the operation count first, and by
+        // the depth bound for as many as are allowed).
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(100_000), PATCH_BUDGET),
+            Err(PatchError::TooLarge)
+        );
+        assert_eq!(
+            json_patch(&doc, &nesting_ops(MAX_PATCH_OPS / 3), PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // A copy into itself doubles the depth; add places a deep value under a deep path.
+        let deep = (0..100).fold(json!(0), |v, _| json!({ "d": v }));
+        let into = format!("/a{}", "/d".repeat(50));
+        let copy = json!([{"op": "copy", "from": "/a", "path": into}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep.clone() }), &copy, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        let path = format!("/a{}", "/d".repeat(99));
+        // 1 + 99 segments + a 30-deep value: over the bound, though each part alone parses.
+        let value = (0..30).fold(json!(1), |v, _| json!([v]));
+        let add = json!([{"op": "add", "path": path, "value": value}]);
+        assert_eq!(
+            json_patch(&json!({ "a": deep }), &add, PATCH_BUDGET),
+            Err(PatchError::TooDeep)
+        );
+        // Over HTTP: 422, and the resource is untouched.
+        let st = state().await;
+        let uri = post(&st, "deep.json", "application/json", "{\"d\": 0}", &[]).await;
+        let r = call(
+            &st,
+            "PATCH",
+            path_of(&uri),
+            &[("content-type", JSON_PATCH)],
+            &nesting_ops(MAX_JSON_DEPTH).to_string(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = body_of(call(&st, "GET", path_of(&uri), &[], "").await).await;
+        assert_eq!(body, Bytes::from("{\"d\": 0}"));
+    }
+
+    /// Review finding: `test` compared with `Value` equality, so `1` and `1.0` differed; RFC 6902
+    /// section 4.6 compares numbers by value.
+    #[test]
+    fn json_patch_test_compares_numbers_by_value() {
+        let doc = json!({"n": 1, "f": 1.5, "big": u64::MAX, "a": [1, {"x": 2}], "o": {"p": 10, "q": [0]}});
+        let test = |path: &str, value: Value| {
+            json_patch(
+                &doc,
+                &json!([{"op": "test", "path": path, "value": value}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(test("/n", json!(1.0)));
+        assert!(test("/f", json!(1.5)));
+        assert!(test("/a", json!([1.0, {"x": 2.0}])));
+        assert!(test("/o", json!({"q": [0.0], "p": 1e1})));
+        assert!(test("/big", json!(u64::MAX)));
+        assert!(!test("/n", json!(1.5)));
+        assert!(!test("/n", json!("1")));
+        assert!(!test("/big", json!(u64::MAX - 1)));
+        // Distinct large integers never meet through a float.
+        let near = json!({"n": 9_007_199_254_740_993_i64});
+        let t = |v: Value| {
+            json_patch(
+                &near,
+                &json!([{"op": "test", "path": "/n", "value": v}]),
+                PATCH_BUDGET,
+            )
+            .is_ok()
+        };
+        assert!(!t(json!(9_007_199_254_740_992_i64)));
+        assert!(!t(json!(9_007_199_254_740_992.0)));
+        assert!(t(json!(9_007_199_254_740_993_i64)));
+    }
+
+    /// Review finding: a resource PATCH was held to the fixed [`PATCH_BUDGET`], so a
+    /// small patch could grow a document far past the configured body limit. Its result is now
+    /// held to `max_body`.
+    #[tokio::test]
+    async fn a_patch_is_held_to_the_body_limit() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.open = true;
+        cfg.max_body = 64 << 10;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let doc = json!({ "a": "x".repeat(20 << 10) }).to_string();
+        let json = ("content-type", "application/json");
+        let r = call(&st, "POST", "/", &[json, ("slug", "d.json")], &doc).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let patch = ("content-type", "application/json-patch+json");
+        let copies = |n: usize| {
+            let ops: Vec<Value> = (0..n)
+                .map(|i| json!({"op": "copy", "from": "/a", "path": format!("/b{i}")}))
+                .collect();
+            Value::Array(ops).to_string()
+        };
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(1)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        let r = call(&st, "PATCH", "/d.json", &[patch], &copies(4)).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn malformed_json_patch_is_400_and_a_failing_one_422() {
+        let st = state().await;
+        let uri = post(&st, "k.json", JSON, r#"{"a":1}"#, &[]).await;
+        let p = path_of(&uri);
+        for bad in [
+            r#"{"op":"add"}"#,
+            r#"[{"op":"frobnicate","path":"/a"}]"#,
+            r#"[{"op":"add","path":"/b"}]"#,
+            r#"[{"op":"copy","path":"/b"}]"#,
+            r#"[{"path":"/a"}]"#,
+            r#"[{"op":"remove","path":"a"}]"#,
+        ] {
+            let r = call(&st, "PATCH", p, &[("content-type", JSON_PATCH)], bad).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{bad}");
+        }
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"remove","path":"/nope"}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let r = call(
+            &st,
+            "PATCH",
+            p,
+            &[("content-type", JSON_PATCH)],
+            r#"[{"op":"test","path":"/a","value":2}]"#,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn patches() {
+        let t = json!({"title": "a", "keep": 1, "drop": true});
+        let p = json!([{"op": "add", "path": "/added", "value": 42}, {"op": "remove", "path": "/drop"},
+                       {"op": "replace", "path": "/title", "value": "b"}, {"op": "test", "path": "/keep", "value": 1}]);
+        assert_eq!(
+            json_patch(&t, &p, PATCH_BUDGET),
+            Ok(json!({"title": "b", "keep": 1, "added": 42}))
+        );
+        assert_eq!(
+            json_patch(
+                &t,
+                &json!([{"op": "test", "path": "/keep", "value": 2}]),
+                PATCH_BUDGET
+            ),
+            Err(PatchError::Failed)
+        );
+        assert_eq!(
+            json_patch(
+                &json!({"a": [1, 2]}),
+                &json!([{"op": "add", "path": "/a/-", "value": 3}]),
+                PATCH_BUDGET
+            ),
+            Ok(json!({"a": [1, 2, 3]}))
+        );
     }
 }

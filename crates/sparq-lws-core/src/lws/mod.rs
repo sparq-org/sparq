@@ -10,7 +10,8 @@
 //! - the **storage description** (`application/lws+cid`) at the storage URI, linked from every
 //!   response with `rel="https://www.w3.org/ns/lws#storage"`;
 //! - **containers** (`application/lws+json`, paginated) and **data resources**, with ETag and date
-//!   validators, single byte ranges, `Depth: infinity` deletes, and RFC 9457 problem details;
+//!   validators, single byte ranges, JSON Patch, `Depth: infinity` deletes, and RFC 9457 problem
+//!   details;
 //! - a **linkset** (RFC 9264) per resource, read-only;
 //! - an **authorization server** ([`authz_server`]): RFC 8414 metadata at
 //!   `/.well-known/lws-configuration`, a JWKS, and RFC 8693 token exchange for did:key and
@@ -54,6 +55,7 @@ pub const LWS_CID: &str = "application/lws+cid";
 pub const LD_JSON: &str = "application/ld+json";
 pub const JSON: &str = "application/json";
 pub const LINKSET_JSON: &str = "application/linkset+json";
+pub const JSON_PATCH: &str = "application/json-patch+json";
 pub const PROBLEM_JSON: &str = "application/problem+json";
 
 pub const AS_METADATA_PATH: &str = "/.well-known/lws-configuration";
