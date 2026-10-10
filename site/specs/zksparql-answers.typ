@@ -166,7 +166,9 @@ anything the holder returns.
     accepts, in order of preference. Each entry has `id`, `version`, `artifact` and
     `parameters`: the proof method's settings that the statement depends on, such as its
     capacity bounds, in the encoding the proof method publishes (section 9). An empty
-    object means the proof method's published defaults.],
+    object means the proof method's published defaults. Two entries MUST NOT have the same
+    `id` and `version`, so that the pair identifies one entry, artifact and parameters
+    included.],
   [`limits`], [object], [REQUIRED. `maxPresentationBytes` (integer) bounds the encoded
     presentation; `maxResultRows` (integer) bounds the solutions in a SELECT result or the
     triples in a CONSTRUCT result.],
@@ -393,8 +395,9 @@ check that fails. It returns no partial result and no warning instead of a rejec
   `notBefore` to `notAfter`, or if a presentation for this request was already accepted.
   Reject if the encoded presentation is larger than that request's
   `limits.maxPresentationBytes`.
-+ Reject unless `proofMethod` names an entry of the request's `proofMethods`, and load that
-  entry's verification artifact from the verifier's own configuration.
++ Reject unless `proofMethod` names an entry of the request's `proofMethods`. Load that
+  entry's verification artifact from the verifier's own configuration, and reject unless it
+  matches the entry's `artifact` (for example, its digest or image identifier).
 + Reject unless `answerKind` and `input.kind` equal the request's. For a verifier-agreed input,
   reject unless `input.commitment` equals the request's.
 + If the request has `signatureModes`, reject unless `signatureMode` is one of them. In the
@@ -587,6 +590,8 @@ What differs or is missing:
 + The adapters accept a narrower query surface than section 4: they reject a `baseIri` and
   SELECT queries with ORDER BY. Their request stores times as Unix seconds, so the RFC 3339
   strings need a fixed conversion.
++ The RISC Zero methods' `imageId` is eight 32-bit words; the code encodes it as the words in
+  order, each little-endian. A wire profile has to fix that encoding.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
   (a verifier-agreed SELECT); its other five combinations have run only in tests without
   proving.
