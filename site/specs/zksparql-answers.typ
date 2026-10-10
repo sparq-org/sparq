@@ -111,9 +111,11 @@ SPARQL 1.1 semantics. It also uses:
   mode, the signed messages.
 / Signed message: The bytes an issuer's signature is computed over, as the cryptosuite defines
   them. For `eddsa-rdfc-2022` #cite("VC-DI-EDDSA") it is the SHA-256 hash of the canonical
-  proof configuration followed by the SHA-256 hash of the canonical credential document. A
-  cryptosuite that signs a Merkle root over a credential's RDF terms has the root as its signed
-  message.
+  proof configuration followed by the SHA-256 hash of the canonical credential document. The
+  Merkle-root cryptosuites #cite("ZK-MERKLE-CRYPTOSUITE") (`eddsa-sha256-merkle-2026`,
+  `schnorr-poseidon2-merkle-2026` and `mldsa44-sha256-merkle-2026`) sign a salted digest of the
+  root of a Merkle tree over the credential's canonical quads, the number of quads and the
+  proof configuration.
 
 = Data model conventions
 
@@ -279,6 +281,10 @@ the request, and put it in `input.commitment`. The presentation's commitment MUS
 Exact answer is then complete over the dataset the verifier agreed to. How the verifier comes
 to accept a commitment is outside this document; for example, it may receive the commitment in
 an earlier exchange in which it also learned which credentials the dataset holds.
+
+A proof method may compute the dataset commitment differently in each signature mode. A
+verifier-agreed commitment is then valid only for the mode it was computed under, and a
+request that carries it MUST list only that mode in `signatureModes`.
 
 Input kind is separate from issuer checking. If the request's `issuers` is not empty, the
 proof MUST show that every credential in $D$ carries a valid proof from one of the listed keys,
@@ -506,8 +512,10 @@ version 1.
   align: (left, left, left),
   table.header[Identifier][Evidence kind][What it is],
   [`disclosed-reevaluation`], [disclosed credentials], [The holder sends the signed
-    credentials; the verifier checks the signatures and evaluates the query itself. A baseline
-    for comparison: it hides nothing.],
+    credentials and the salt; the verifier checks the signatures and evaluates the query
+    itself. Its `input.commitment` is the dataset commitment of `risc0-authenticated-rdf`
+    version 5 over the same credentials and salt, so one verifier-agreed commitment serves both
+    methods. A baseline for comparison: it hides nothing.],
   [`selective-disclosure-reevaluation`], [disclosed credentials, selectively], [The holder
     discloses, with `bbs-2023` or `ecdsa-sd-2023`, the claims each returned solution uses,
     together with any claims the issuer made mandatory to disclose and the structure the
@@ -553,8 +561,8 @@ message and issuer key, and so the number of credentials. A signature and its si
 are the same in every presentation of that credential, so verifiers can link presentations of
 the same credential. When the signed message is an unsalted hash of the credential, as with
 `eddsa-rdfc-2022`, a verifier who can guess a credential's full content can confirm the guess
-by hashing it. A cryptosuite that salts what it signs avoids the second problem but not the
-first. Whether signatures can be forged by an attacker with a quantum computer depends on the
+by hashing it. The Merkle-root cryptosuites sign a salted digest, which avoids the second
+problem but not the first. Whether signatures can be forged by an attacker with a quantum computer depends on the
 cryptosuite, not on the mode: for Ed25519, the public key alone is enough.
 
 In the disclosed signature mode the verifier learns everything the disclosed credentials or
@@ -594,8 +602,9 @@ What differs or is missing:
   not over JCS. Two implementations could not yet agree on a digest.
 + Results are in the proof's own canonical form (N-Triples term strings), not SPARQL Query
   Results JSON; the conversion of section 5.1 is not written.
-+ Every proof method implements only the hidden signature mode. The revealed mode, and a
-  cryptosuite that signs a Merkle root over a credential's RDF terms, are not built yet.
++ The version 5 RISC Zero method implements only the hidden signature mode. Its revealed
+  mode and the Merkle-root cryptosuites are written but not yet merged. The Noir circuits
+  support both modes, but that method cannot yet produce a version 1 presentation (below).
 + The Noir Supported proof method cannot produce a version 1 presentation. It keeps graph
   roots and salts private, so it has no dataset commitment to publish, and it requires a
   credential-status root that version 1 has no member for. It needs a new version of its
@@ -718,6 +727,9 @@ presents and agrees inputs, not what the holder sends.
     Canonicalization]. W3C Recommendation, 21 May 2024. https://www.w3.org/TR/rdf-canon/.]),
   ("VC-DATA-MODEL-2.0", [Sporny, M.; et al. (eds). #emph[Verifiable Credentials Data Model
     v2.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-data-model-2.0/.]),
+  ("ZK-MERKLE-CRYPTOSUITE", [The sparq project. #emph[Merkle-Root Cryptosuites for RDF
+    Verifiable Credentials]. Unofficial Proposal Draft, 2026. Published on this site as
+    `zk-merkle-cryptosuite`.]),
   ("VC-DATA-INTEGRITY", [Sporny, M.; Longley, D.; et al. (eds). #emph[Verifiable Credential
     Data Integrity 1.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-data-integrity/.]),
   ("VC-DI-BBS", [Sporny, M.; Longley, D.; et al. (eds). #emph[Data Integrity BBS Cryptosuites
