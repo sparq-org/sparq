@@ -298,7 +298,8 @@ What the server exposes, all discoverable from the storage description
   listed, the create answers `201` and the record is in force; not listed, `500`; not known
   (the listing cannot be read), `500` "not known" with the request open to retry, and the
   record is put in force once the listing shows it. A revocation (or a request's withdrawal)
-  takes the grant out of force while the removal runs, and keeps it out only once the removal
+  takes the record's lock and the container's the same way (at most two seconds, then `503`),
+  and takes the grant out of force while the removal runs, and keeps it out only once the removal
   is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
   revoked; `500` "still in force" when the record is still listed; `500` "not known" when it
   cannot be read again, with the grant left in force. A record holds its place in the request

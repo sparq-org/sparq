@@ -925,6 +925,16 @@ pub async fn handle<S: Store + 'static>(
             // force (read again, the record is listed as it was), or not known (it could not be
             // read again: the grant is left as it was, and the request may be retried). The steps
             // run in a task of their own, so a client that goes away cannot cut them short.
+            // Both locks are taken here, in the request, waiting a bounded time: a removal that
+            // stalls in the store answers later requests `503` rather than queueing them.
+            let own = match super::within_wait(state.locks.lock(&iri)).await {
+                Ok(own) => own,
+                Err(refused) => return refused,
+            };
+            let listing = match super::within_wait(state.locks.read(&container)).await {
+                Ok(listing) => listing,
+                Err(refused) => return refused,
+            };
             let revoke = {
                 let (state, iri, container, id, admission) = (
                     state.clone(),
@@ -935,12 +945,6 @@ pub async fn handle<S: Store + 'static>(
                 );
                 async move {
                     let _admission = admission;
-                    let Some(own) = state.locks.lock(&iri).await else {
-                        return Err(None);
-                    };
-                    let Some(listing) = state.locks.read(&container).await else {
-                        return Err(None);
-                    };
                     // Out of force while its removal runs (its policies are set aside), but still
                     // counted, as it is still stored; it leaves only once it is confirmed gone.
                     let held = {
@@ -971,14 +975,14 @@ pub async fn handle<S: Store + 'static>(
                     drop((own, listing));
                     match gone {
                         Some(true) => Ok(true),
-                        Some(false) => Err(Some(ServerError::Storage(
+                        Some(false) => Err(ServerError::Storage(
                             "the record could not be removed; it is still in force".into(),
-                        ))),
-                        None => Err(Some(ServerError::Storage(
+                        )),
+                        None => Err(ServerError::Storage(
                             "whether the record was removed is not known; it is left as it \
                              was, and the request may be retried"
                                 .into(),
-                        ))),
+                        )),
                     }
                 }
             };
@@ -986,8 +990,7 @@ pub async fn handle<S: Store + 'static>(
                 Ok(Ok(true)) => problem(StatusCode::NO_CONTENT, None),
                 // Revoked by another request while this one waited.
                 Ok(Ok(false)) => problem(StatusCode::NOT_FOUND, None),
-                Ok(Err(None)) => super::resources::set_aside_meanwhile(),
-                Ok(Err(Some(e))) => problem(
+                Ok(Err(e)) => problem(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Some(&format!("cannot delete {iri}: {e}")),
                 ),
@@ -2430,6 +2433,46 @@ mod tests {
         drop(held);
         let r = handle(&state, &post, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::CREATED);
+    }
+
+    /// Review finding: a revocation or a conditional create waited for its locks inside a task
+    /// of its own, so while one removal stalled in the store, repeated requests queued detached
+    /// tasks that kept their admission past the client's timeout. The locks are taken in the
+    /// request, waiting a bounded time, before any task starts.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stalled_removal_answers_later_requests_promptly() {
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let iri = granted(&state).await;
+        let path = iri.strip_prefix(&state.cfg.base_url).unwrap().to_string();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        let first = {
+            let state = state.clone();
+            let delete = test_store::request(Method::DELETE, &path, &[], "");
+            tokio::spawn(async move { handle(&state, &delete, &Agent::anonymous()).await.status() })
+        };
+        eventually("the removal is pending", || {
+            store.hold_next_delete_of.lock().unwrap().is_none()
+        })
+        .await;
+        let started = std::time::Instant::now();
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        // A conditional create needs the container exclusively, held shared by the removal.
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[("if-match", "*")],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        gate.add_permits(1);
+        assert_eq!(first.await.unwrap(), StatusCode::NO_CONTENT);
+        assert!(state.access.grant_policies().is_empty());
     }
 
     /// What a request answered, whether the grant was in force in the process that answered it,

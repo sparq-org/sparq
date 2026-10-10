@@ -1438,16 +1438,30 @@ pub(crate) async fn still_listed<S: Store>(
     }
 }
 
-/// How long a create waits for its container before answering `503`: a request never queues
-/// behind a container held by a change that is being put back.
-const CONTAINER_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long a request to a service container (a create, a revocation) waits for a lock before
+/// answering `503`: a request never queues behind a lock held by a change that is being put
+/// back, or by a store call that stalls.
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Take a lock (`lock`, from [`resources::IriLocks`]) in the request path, waiting at most
+/// [`LOCK_WAIT`]: `503` when it is busy, or set aside. Only once it is held may the request
+/// start a task of its own, so no request leaves a detached task waiting on a lock.
+pub(crate) async fn within_wait<T>(
+    lock: impl std::future::Future<Output = Option<T>>,
+) -> Result<T, Response> {
+    match tokio::time::timeout(LOCK_WAIT, lock).await {
+        Ok(Some(guard)) => Ok(guard),
+        Ok(None) => Err(resources::set_aside_meanwhile()),
+        Err(_) => Err(resources::retry_later("the resource is busy")),
+    }
+}
 
 /// Store a new record (an access grant or request) at `iri` in `container` in one write and,
 /// once it is confirmed stored, put it in force in memory with `register`. Memory follows the
 /// store, and the answer says only what is confirmed:
 ///
 /// - The container is taken (shared, unless the caller holds it exclusively) in the request,
-///   waiting at most [`CONTAINER_WAIT`] (then `503`), so a conditional create sees no member
+///   waiting at most [`LOCK_WAIT`] (then `503`), so a conditional create sees no member
 ///   arrive between its check and its own registration. The write and the registration then run
 ///   in a task of their own, holding the request's share of its admission permit (`admission`):
 ///   a client that goes away cannot stop a stored record from being registered.
@@ -1476,11 +1490,7 @@ where
     let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
     let shared = match held {
         Some(_) => None,
-        None => match tokio::time::timeout(CONTAINER_WAIT, state.locks.read(container)).await {
-            Ok(Some(guard)) => Some(guard),
-            Ok(None) => return Err(resources::set_aside_meanwhile()),
-            Err(_) => return Err(resources::retry_later("the container is busy")),
-        },
+        None => Some(within_wait(state.locks.read(container)).await?),
     };
     // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
     // taking it under the container's cannot deadlock.
@@ -1552,9 +1562,7 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
     if !resources::is_conditional(req) {
         return Ok(None);
     }
-    let Some(guard) = state.locks.lock(container).await else {
-        return Err(resources::set_aside_meanwhile());
-    };
+    let guard = within_wait(state.locks.lock(container)).await?;
     let current = listing(&resources::plain_get(req));
     if !current.status().is_success() {
         return Err(current);
