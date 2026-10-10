@@ -89,3 +89,25 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
   `zk/native-composition` (SELECT DISTINCT over a BGP; per-triple Dock BBS+ signatures, slot
   disclosure, verifier re-checks). It is not W3C `bbs-2023` (no JSON pointers, no HMAC blank-node
   labels); cite it with that caveat. No `bbs-2023` implementation is planned.
+
+## First measurements and coverage (ZK code landing, 10 October, executor runs of the accepted V5 image)
+Records: project files `zk/paper-measurements/`; coverage manifest
+`zk/sparql-evaluator/coverage-authenticated-rdf.json` in draft #6791. Not yet evidence records in this
+branch: cite only after they are frozen under research/zk-paper-evidence/ and bound in
+paper-evidence.json.
+- Coverage: blank nodes in credential data supported. All 42 supported feature cases run in the
+  guest (BGPs, OPTIONAL, UNION, MINUS, BIND, VALUES, subqueries, comparisons on every literal type,
+  STRSTARTS, CONTAINS, REGEX, LANGMATCHES, COUNT, SUM, MIN, MAX, HAVING, DISTINCT, ORDER BY with
+  LIMIT/OFFSET, all property-path forms, all four query forms). FILTER EXISTS / NOT EXISTS only when
+  no presented credential contains a blank node, else rejected. GRAPH and FROM accepted but return
+  nothing (credentials form the default graph). Rejected: SERVICE, BNODE(), NOW(), RAND(), nested
+  EXISTS, triple terms, custom functions.
+- V5 limits: 4 credentials, 128 statements per credential, 256 in total, 8 KB per document. Sweep
+  uses n in {1, 4} and sizes 32 and 64 (not 16 credentials or 256 statements).
+- Q1, n=1, user cycles: eddsa-rdfc-2022 hidden 7.10M, revealed 3.83M; Merkle suite hidden 6.57M,
+  revealed 3.26M. In-guest signature verification is the largest phase in eddsa hidden mode (about
+  3.3M cycles). The Merkle suite cuts the document phase from 1.39M to 0.80M. Appendix sweep (816
+  configurations) running; proving on the m7i next.
+- Pending spec change (#6786 at 9738935, not confirmed): an Exact answer becomes "a result SPARQL 1.1
+  permits for Q over D, with nothing added or omitted; where SPARQL leaves a choice open, the holder
+  makes it". Do not rely on it until confirmed.
