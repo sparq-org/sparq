@@ -20,8 +20,10 @@
   query and what kind of answer the verifier needs: a #dfn[Supported] answer, in which every
   returned solution is genuine, or an #dfn[Exact] answer, which is the complete result over a
   stated input. It also states who fixed that input: the holder (#dfn[holder-declared]) or the
-  verifier, in advance (#dfn[verifier-agreed]). Proof systems plug in through an identifier and
-  a version. The proof systems in the sparq repository are research prototypes and have not
+  verifier, in advance (#dfn[verifier-agreed]). A third choice says whether the issuers'
+  signatures stay hidden inside the proof or are revealed to the verifier, which makes the
+  proof much cheaper at the cost of disclosing the signatures. Proof systems plug in through an
+  identifier and a version. The proof systems in the sparq repository are research prototypes and have not
   been externally audited.
 ]
 
@@ -71,7 +73,7 @@ A Supported answer can only say `true`: it shows that some returned payment exis
 missing row proves nothing. To learn `false`, the lender needs an Exact answer. If the holder
 picked the input, `false` means only "no returned payment in the credentials the holder chose
 to include". If the lender first agreed the input, for example the statements its own process
-obtained, `false` is a statement about that agreed input. Section 6.3 shows the full request
+obtained, `false` is a statement about that agreed input. Section 6.4 shows the full request
 and presentation for this case.
 
 = Conformance and terminology
@@ -101,7 +103,13 @@ SPARQL 1.1 semantics. It also uses:
   together with the verification artifact (a verification key or program image) that checks
   its proofs.
 / Statement: The public values a proof is about: the request digest, the answer kind, the
-  input kind, the dataset commitment and the result.
+  input kind, the dataset commitment, the result, the signature mode and, in the revealed
+  mode, the signed messages.
+/ Signed message: The bytes an issuer's signature is computed over, as the cryptosuite defines
+  them. For `eddsa-rdfc-2022` #cite("VC-DI-EDDSA") it is the SHA-256 hash of the canonical
+  proof configuration followed by the SHA-256 hash of the canonical credential document. A
+  cryptosuite that signs a Merkle root over a credential's RDF terms has the root as its signed
+  message.
 
 = Data model conventions
 
@@ -145,6 +153,9 @@ anything the holder returns.
     has `issuer` (IRI), `verificationMethod` (IRI) and `cryptosuite` (string, for example
     `"eddsa-rdfc-2022"`) and MAY have `publicKeyMultibase`. An empty array means the verifier
     accepts an input dataset whose credentials are not checked against any issuer key.],
+  [`signatureModes`], [array of strings], [REQUIRED if `issuers` is not empty, and absent
+    otherwise. The signature modes the verifier accepts: `"hidden"`, `"revealed"` or both.
+    Section 6.3.],
   [`proofSystems`], [array of objects], [REQUIRED, non-empty. The proof systems the verifier
     accepts, in order of preference. Each entry has `id`, `version` and `artifact` (section 9).],
   [`limits`], [object], [REQUIRED. `maxPresentationBytes` (integer) bounds the encoded
@@ -189,11 +200,18 @@ The holder service returns one answer presentation for one query request.
   [`answerKind`], [string], [REQUIRED. Equal to the request's `answerKind`.],
   [`input`], [object], [REQUIRED. `kind`, equal to the request's input kind, and
     `commitment`, the dataset commitment of the input dataset.],
+  [`signatureMode`], [string], [REQUIRED if the request has `signatureModes`, and absent
+    otherwise. One of the request's `signatureModes`.],
+  [`signatures`], [array of objects], [REQUIRED in the revealed mode, and absent otherwise.
+    One entry per credential in the input dataset, each with `verificationMethod`,
+    `cryptosuite`, `signedMessage` (byte string) and `proofValue` (the signature, as the
+    cryptosuite encodes it). Section 6.3.],
   [`result`], [object], [REQUIRED. The query result, encoded as in section 5.1.],
   [`proof`], [byte string], [REQUIRED. The proof, in the encoding the proof system defines.],
 )
 
-The presentation carries no credential, no issuer identity and no per-row provenance. What
+The presentation carries no credential and no per-row provenance. In the hidden signature
+mode it also carries no issuer identity. What
 the verifier learns is listed in section 10.2.
 
 == Result encoding
@@ -254,6 +272,27 @@ proof MUST show that every credential in $D$ carries a valid proof from one of t
 whichever input kind is used. Checking issuers never turns a holder-declared input into a
 verifier-agreed one.
 
+== Signature modes
+
+When the request lists issuer keys, the proof must show that every credential in $D$ is signed
+by one of them. There are two ways to do that, and the verifier chooses which it accepts.
+
+In the #emph[hidden] mode, the proof shows that the holder knows a valid signature from one of
+the listed keys on every credential in $D$. The signatures, the signed messages and which key
+signed which credential stay hidden. Checking a signature inside the proof is usually the most
+expensive part of proving.
+
+In the #emph[revealed] mode, the presentation's `signatures` member gives each credential's
+signature and signed message. The verifier checks each signature itself, outside the proof,
+against a key in `issuers`. The proof then only has to show that $D$ is exactly the data those
+signed messages cover, and that the result is correct over $D$. This is cheaper to prove, but
+discloses the signatures, the signed messages, the issuer keys used and the number of
+credentials (section 10.2).
+
+A proof system states which modes it supports for each cryptosuite (section 9). Other
+trade-offs between what is hidden and what is revealed, such as revealing only which issuers
+signed, can be added as further mode values in a later version of this document.
+
 == Worked example
 
 This example is informative. Long values are shortened with `…`. The lender's request, for an
@@ -271,6 +310,7 @@ Exact answer over an input it agreed earlier:
     "verificationMethod": "https://bank.example/keys#2026",
     "cryptosuite": "eddsa-rdfc-2022"
   }],
+  "signatureModes": ["hidden"],
   "proofSystems": [{
     "id": "urn:sparq:vcq:method:risc0-authenticated-rdf",
     "version": 5,
@@ -294,6 +334,7 @@ The holder's presentation:
   "proofSystem": { "id": "urn:sparq:vcq:method:risc0-authenticated-rdf", "version": 5 },
   "answerKind": "exact",
   "input": { "kind": "verifier-agreed", "commitment": "q0Lx…" },
+  "signatureMode": "hidden",
   "result": { "head": {}, "boolean": false },
   "proof": "AAEC…"
 }
@@ -315,6 +356,9 @@ proof for one statement does not verify for another. In particular:
   verifier does not verify for another.
 + The result MUST be bound. The verifier takes the result only from what the proof proves.
 + The input kind and the dataset commitment MUST be bound.
++ The signature mode MUST be bound. In the revealed mode, every signed message MUST be bound,
+  and the proof MUST show that $D$ is built from exactly the data those messages cover, so that
+  a verifier who checks the signatures outside the proof knows they cover $D$.
 + The proof system identifier and version MUST select the verification artifact. A verifier
   MUST NOT take a verification key or program from the presentation.
 
@@ -337,6 +381,9 @@ check that fails. It returns no partial result and no warning instead of a rejec
   entry's verification artifact from the verifier's own configuration.
 + Reject unless `answerKind` and `input.kind` equal the request's. For a verifier-agreed input,
   reject unless `input.commitment` equals the request's.
++ If the request has `signatureModes`, reject unless `signatureMode` is one of them. In the
+  revealed mode, reject unless every entry of `signatures` verifies under its cryptosuite, with
+  a `verificationMethod` and `cryptosuite` that match an entry of the request's `issuers`.
 + Reject if the result breaks section 5.1 or 6.1: the wrong shape for the query form, a
   Supported ASK of `false`, an empty Supported SELECT, duplicate rows in a Supported SELECT, or
   more than `limits.maxResultRows` rows or triples.
@@ -359,6 +406,7 @@ system MUST publish:
 - the query forms, answer kinds and input kinds it supports, and the SPARQL fragment it accepts
   (a proof system MAY accept only part of SPARQL 1.1);
 - how it builds the input dataset from credentials, and which cryptosuites it can check;
+- the signature modes it supports for each cryptosuite;
 - the canonical encoding of the statement and how the proof binds it (section 7);
 - its proof encoding and any size or capacity bounds.
 
@@ -406,6 +454,15 @@ system used and the dataset commitment. A Supported answer also reveals that the
 exist, and the size of the result can reveal more than its values (for example, the number of
 payments that match). Requests with narrow results, such as an ASK, reveal least.
 
+In the revealed signature mode the verifier also learns each credential's signature, signed
+message and issuer key, and so the number of credentials. A signature and its signed message
+are the same in every presentation of that credential, so verifiers can link presentations of
+the same credential. When the signed message is an unsalted hash of the credential, as with
+`eddsa-rdfc-2022`, a verifier who can guess a credential's full content can confirm the guess
+by hashing it. A cryptosuite that salts what it signs avoids the second problem but not the
+first. Whether signatures can be forged by an attacker with a quantum computer depends on the
+cryptosuite, not on the mode: for Ed25519, the public key alone is enough.
+
 A holder service SHOULD use a fresh salt for each holder-declared presentation. A reused
 salt over the same credentials repeats the commitment, which lets verifiers link
 presentations. A verifier-agreed commitment is linkable by design, to the verifier that agreed
@@ -440,6 +497,8 @@ What differs or is missing:
   not over JCS. Two implementations could not yet agree on a digest.
 + Results are in the proof's own canonical form (N-Triples term strings), not SPARQL Query
   Results JSON; the conversion of section 5.1 is not written.
++ Every proof system implements only the hidden signature mode. The revealed mode, and a
+  cryptosuite that signs a Merkle root over a credential's RDF terms, are not built yet.
 + The Noir Supported proof system has its own request and result types and is not reached
   through the `sparq-query-protocol` adapters.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
@@ -472,7 +531,7 @@ define one, here called
   [Authorization request `dcql_query`], [One credential query with `"format": "sparql_answer"`,
     `"multiple": false` and `"require_cryptographic_holder_binding": false`. Its `meta` object
     holds the query request members `query`, `baseIri`, `answerKind`, `input`, `issuers`,
-    `proofSystems` and `limits`.],
+    `signatureModes`, `proofSystems` and `limits`.],
   [Authorization request `nonce`], [The source of `challenge`: the holder service and the
     verifier set `challenge` to SHA-256 of the `nonce` string, which gives 32 bytes from
     OpenID4VP's string nonce.],
@@ -552,6 +611,8 @@ presents and agrees inputs, not what the holder sends.
     Canonicalization]. W3C Recommendation, 21 May 2024. https://www.w3.org/TR/rdf-canon/.]),
   ("VC-DATA-MODEL-2.0", [Sporny, M.; et al. (eds). #emph[Verifiable Credentials Data Model
     v2.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-data-model-2.0/.]),
+  ("VC-DI-EDDSA", [Sporny, M.; Longley, D.; et al. (eds). #emph[Data Integrity EdDSA
+    Cryptosuites v1.0]. W3C Recommendation, 15 May 2025. https://www.w3.org/TR/vc-di-eddsa/.]),
   ("OID4VP", [Terbu, O.; Lodderstedt, T.; Yasuda, K.; Fett, D.; Heenan, J. #emph[OpenID for
     Verifiable Presentations 1.0]. OpenID Foundation, Final Specification, 9 July 2025.
     https://openid.net/specs/openid-4-verifiable-presentations-1_0.html.]),
