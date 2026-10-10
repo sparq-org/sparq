@@ -12,11 +12,13 @@
 // paper-evidence.json through #headline(...) (canonical records) or #ev(...) (the preliminary
 // pilot timings, in the supplementary material); none is typed into prose, and counts from
 // different experiments are never added. Experiments without the internal re-check carry a dagger
-// in the evidence table. Facts not yet frozen as evidence records (guest coverage, cryptosuite
-// implementation state, the gate breakdown) appear only qualitatively, each with a TODO(evidence)
-// comment; the proof-method comparison with QuickSilver has no evidence record and is not reported,
-// even qualitatively. Executor cycle counts are shown in millions through one
-// display helper (mcycles). Pending measurements are visible todo-results placeholders.
+// in the evidence table. Facts not yet frozen as evidence records (cryptosuite implementation
+// state, the gate breakdown) appear only qualitatively, each with a TODO(evidence) comment; the
+// guest's query coverage comes from the bound executor sweep. The proof-method comparison with
+// QuickSilver has no evidence record and is not reported, even qualitatively. The prototype's
+// capacity limits are code constants, cited in a source comment. Executor cycle counts are shown in
+// millions through one display helper (mcycles). Pending measurements are visible todo-results
+// placeholders.
 
 #import "_lib/bench.typ": headline, ev, provenance, authors, anon, paper_heading_numbering
 
