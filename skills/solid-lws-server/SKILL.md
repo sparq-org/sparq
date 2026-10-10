@@ -236,7 +236,8 @@ same `Store` backend. It runs over the
 because a remote write reported as failed may still commit later and nothing fences it yet.
 Anyone authenticated may hold at most 16 access requests (429 past that), the server at most
 512 (507), and an access request body is at most 16 KiB (413) and an access grant at most
-256 KiB; these limits apply while the body is read. A request's Link headers may declare at most 128 relations holding
+256 KiB; these limits apply while the body is read. An access document nested too deeply to
+store and read back gets 400. A request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
 A resource's types, links and linkset are at most 256 KiB together, as stored: a write that would

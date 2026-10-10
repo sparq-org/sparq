@@ -491,9 +491,10 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
-                // A grant a change put back at start is still settling is not read at all: what
-                // it holds may be from before that change.
-                if grants && !visible(child.as_str()) {
+                // A record a change put back at start is still settling is not read at all: what
+                // it holds may be from before that change, and a withdrawn request must not come
+                // back (readable, and counted against the quota) while its removal lands.
+                if !visible(child.as_str()) {
                     continue;
                 }
                 // Every stored request counts against the request quota, so one that cannot be read
@@ -1090,6 +1091,17 @@ async fn create<S: Store + 'static>(
     else {
         return problem(StatusCode::BAD_REQUEST, Some("not a valid access document"));
     };
+    // The record wraps the document one level deeper than the body was parsed, so a document
+    // nested to the parser's limit would be stored and then not read back, which stops every later
+    // start. What is stored must parse back.
+    let wrapped = json!({"document": &body, "author": agent.subject});
+    if serde_json::from_str::<Value>(&wrapped.to_string()).is_err() {
+        return problem(
+            StatusCode::BAD_REQUEST,
+            Some("the access document nests too deeply to store"),
+        );
+    }
+    drop(wrapped);
     // Each request is stored as a resource is: requests are held to a share of their own, overall
     // and per author, so asking can never fill the storage that resources and grants need. The
     // place is reserved before anything is stored and held until the request is registered.
@@ -2222,6 +2234,87 @@ mod tests {
         assert!(!state.store.exists(&location).await.unwrap());
         let state = restart(&store).await;
         assert!(state.access.grant_policies().is_empty());
+    }
+
+    /// Review finding: a document nested to the parser's limit was stored one level deeper inside
+    /// its record, which then did not parse, and every later start failed. It is refused.
+    #[tokio::test]
+    async fn an_access_document_too_deep_to_store_is_refused() {
+        let (state, store) = test_store::state(100).await;
+        for (path, kind) in [
+            (GRANTS_PATH, "AccessGrant"),
+            (REQUESTS_PATH, "AccessRequest"),
+        ] {
+            let base: Value = serde_json::from_str(&access_doc(kind, "https://a/", None)).unwrap();
+            let nested = |d: usize| format!("{}1{}", "[".repeat(d), "]".repeat(d));
+            let with = |d: usize| {
+                let mut doc = base.clone();
+                doc["x"] = serde_json::from_str(&nested(d)).unwrap();
+                doc
+            };
+            // The deepest document the parser accepts.
+            let deepest = (1..200)
+                .take_while(|&d| {
+                    serde_json::from_str::<Value>(&nested(d)).is_ok()
+                        && serde_json::from_str::<Value>(&with(d).to_string()).is_ok()
+                })
+                .last()
+                .unwrap();
+            let doc = with(deepest);
+            let post = test_store::request(Method::POST, path, &[], &doc.to_string());
+            let resp = handle(&state, &post, &Agent::anonymous()).await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{kind}");
+        }
+        // Nothing was stored, and the server starts again.
+        restart(&store).await;
+    }
+
+    /// Review finding: a withdrawal that could neither mark the request unsettled nor remove it
+    /// left it hidden, but the next start loaded hidden requests, so the request came back,
+    /// readable and counted, until its removal landed. Hidden records of both kinds are skipped.
+    #[tokio::test]
+    async fn a_withdrawal_cut_short_stays_withdrawn_after_a_restart() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let post = test_store::request(
+            Method::POST,
+            REQUESTS_PATH,
+            &[],
+            &access_doc("AccessRequest", "https://a/", None),
+        );
+        let resp = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let location = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let path = location
+            .strip_prefix(&state.cfg.base_url)
+            .unwrap()
+            .to_string();
+        *store.refuse_write_of.lock().unwrap() = Some(location.clone());
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(state.store.exists(&location).await.unwrap());
+        // The process stops; the next start cannot remove it yet either, and keeps it out.
+        let state = restart(&store).await;
+        assert!(
+            state.access.requests.read().unwrap().is_empty(),
+            "the withdrawn request came back"
+        );
+        let get = test_store::request(Method::GET, &path, &[], "");
+        assert_eq!(
+            handle(&state, &get, &Agent::anonymous()).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        *store.refuse_write_of.lock().unwrap() = None;
+        store.fail_delete.store(false, Ordering::SeqCst);
+        eventually("removed", || state.visible(&location)).await;
+        assert!(!state.store.exists(&location).await.unwrap());
+        let state = restart(&store).await;
+        assert!(state.access.requests.read().unwrap().is_empty());
     }
 
     /// Review finding: a grant whose create landed under its own type but could not be told to
