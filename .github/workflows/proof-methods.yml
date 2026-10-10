@@ -51,7 +51,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Format
-        run: cargo fmt --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed --check
+        run: cargo fmt --manifest-path proof-methods/Cargo.toml -p sparq-vcq-disclosed -p sparq-vcq-tee --check
 
       - name: Tests
         run: cargo test --locked --release --manifest-path proof-methods/Cargo.toml --all-features

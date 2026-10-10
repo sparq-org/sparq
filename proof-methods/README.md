@@ -15,6 +15,7 @@ bundle.
 |---|---|---|
 | `disclosed` | `urn:sparq:vcq:method:disclosed-reevaluation` v1 | disclosed credentials |
 | `vole` (scripts, not a crate) | prototype for `urn:sparq:vcq:method:vole-designated-verifier` | zero-knowledge proof, interactive, designated verifier |
+| `tee` | `urn:sparq:vcq:method:tee-attestation` v1, platform `aws-nitro` | attestation |
 
 `disclosed` runs the relation that the `risc0-authenticated-rdf` v5 guest
 proves (`zk/sparql-evaluator/model`, `authenticated_rdf::evaluate`) natively,
@@ -38,6 +39,22 @@ not rely on it.
 `vole` proves the ACIR of the `zk/compose` circuits with QuickSilver instead
 of UltraHonk, so both proof systems can be compared on the same statement; see
 [`vole/README.md`](vole/README.md).
+
+`tee` runs the same relation inside an AWS Nitro Enclave. The enclave asks
+the Nitro Secure Module for an attestation document whose `user_data` is the
+SHA-256 statement digest and whose `nonce` is the request nonce; the verifier
+validates the document's certificate path to the pinned AWS Nitro Enclaves
+root G1 (RFC 5280, at the document's time and at verification time), its
+ES384 COSE signature, its age, the enclave image measurement (PCR0) against
+the ones it accepts, and the binding of statement and nonce. A document
+verifies again until it is too old, so the verifier prevents replay by
+issuing a fresh request nonce and accepting each nonce once. The verifier must
+trust AWS's attestation keys and hypervisor, the measured program and the
+enclave's isolation; it learns the statement and the attestation document, but
+not the credentials. The evidence is publicly verifiable and transferable.
+Tests run the verifier against a test certificate authority of the same shape;
+`tee/nitro/run.sh` builds the enclave image and runs Q1–Q5 on an instance with
+Nitro Enclaves enabled. Only the hidden signature mode is supported.
 
 Research prototypes, not externally audited.
 

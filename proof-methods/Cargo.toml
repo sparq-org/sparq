@@ -2,7 +2,7 @@
 # zkVM programs, and for comparison baselines. It is not a member of the root
 # workspace, so the engine, the default build and the wasm bundle are unchanged.
 [workspace]
-members = ["disclosed"]
+members = ["disclosed", "tee"]
 resolver = "2"
 
 [workspace.package]
