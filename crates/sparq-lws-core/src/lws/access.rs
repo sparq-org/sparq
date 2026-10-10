@@ -523,14 +523,21 @@ impl AccessStore {
                         }
                         continue;
                     }
-                    Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
-                    Err(_) => None,
+                    Ok(r) => serde_json::from_slice::<Value>(&r.body)
+                        .ok()
+                        .filter(|v| v.get("document").is_some_and(Value::is_object)),
+                    // Listed but gone: nothing of it can be read again.
+                    Err(crate::error::ServerError::NotFound) => None,
+                    // A read that fails says nothing of what the record holds: the start stops
+                    // rather than decide without it (a later start reads it again).
+                    Err(e) => return Err(format!("store: {}: {e}", child.as_str())),
                 };
-                // A record that cannot be read or parsed never stops the start: it is kept by its
-                // IRI, quarantined (see [`Record::quarantined`]).
+                // A record whose stored body is not a record never stops the start: it is kept
+                // by its IRI, quarantined (see [`Record::quarantined`]). What makes it so is what
+                // is stored, so every later start quarantines it too, until the owner deletes it.
                 let Some(stored) = stored else {
                     eprintln!(
-                        "lws: access {} {} cannot be read; it is quarantined until deleted",
+                        "lws: access {} {} is not a record; it is quarantined until deleted",
                         if grants { "grant" } else { "request" },
                         child.as_str()
                     );
@@ -972,32 +979,39 @@ pub async fn handle<S: Store + 'static>(
                     let record = super::intents::mint(&state.cfg.storage());
                     let stored =
                         super::intents::store(&state, &record, false, &[&remove], &[]).await;
-                    // An intent whose write failed but may have landed is withdrawn as far as
-                    // the store allows. One left behind can only remove the grant at the next
-                    // start, so the grant is answered for as if no intent were stored: the
-                    // client is never told it is out of force while a restart could restore it.
-                    if stored.is_err() && super::may_have_happened(&stored) {
-                        let forget = super::Undo::Forget {
-                            record: record.clone(),
-                            iris: vec![iri.clone()],
-                        };
-                        let _ = super::settle(&state.store, vec![forget]).await;
-                    }
-                    let intent = stored.is_ok().then_some(record);
+                    // An intent whose write failed but may have landed is withdrawn if the store
+                    // allows. If it does not, the intent may still remove the record at the next
+                    // start: the revocation goes ahead, and is uncertain until something durable
+                    // says it happened.
+                    let forget = || super::Undo::Forget {
+                        record: record.clone(),
+                        iris: vec![iri.clone()],
+                    };
+                    let mut uncertain = stored.is_err()
+                        && super::may_have_happened(&stored)
+                        && super::settle(&state.store, vec![forget()]).await.is_some();
+                    let intent = stored.is_ok() || uncertain;
                     let marked = match state.store.read(&iri).await {
-                        Ok(stored) => matches!(
-                            super::retype(&state.store, &iri, stored.body, super::UNSETTLED_TYPE)
-                                .await,
-                            Ok(true)
-                        ),
+                        Ok(stored) => {
+                            let retyped = super::retype(
+                                &state.store,
+                                &iri,
+                                stored.body,
+                                super::UNSETTLED_TYPE,
+                            )
+                            .await;
+                            // A mark whose write failed may have landed too: the next start
+                            // would then remove the record.
+                            uncertain |= retyped.is_err() && super::may_have_happened(&retyped);
+                            matches!(retyped, Ok(true))
+                        }
                         Err(_) => false,
                     };
                     let mut undo = vec![remove];
-                    undo.extend(intent.iter().map(|record| super::Undo::Forget {
-                        record: record.clone(),
-                        iris: vec![iri.clone()],
-                    }));
-                    if intent.is_none() && !marked {
+                    if intent {
+                        undo.push(forget());
+                    }
+                    if !intent && !marked && !uncertain {
                         // Nothing durable says it is revoked: removed now, or left in force.
                         if super::settle(&state.store, undo).await.is_some() {
                             return Err(Some(ServerError::Storage(
@@ -1012,9 +1026,15 @@ pub async fn handle<S: Store + 'static>(
                     state.access.bump(grants);
                     if let Some(left) = super::settle(&state.store, undo).await {
                         state.set_aside(left, (own, listing));
-                        return Err(Some(ServerError::Storage(
-                            "the record could not be removed yet; it is out of force".into(),
-                        )));
+                        // The removal goes on in the background; until it lands, a start may find
+                        // nothing durable of the revocation, and put the record back in force.
+                        let why = if stored.is_ok() || marked {
+                            "the record could not be removed yet; it is out of force"
+                        } else {
+                            "the revocation's outcome is not known yet; it is out of force \
+                             until it is, and may be retried"
+                        };
+                        return Err(Some(ServerError::Storage(why.into())));
                     }
                     Ok(true)
                 }
@@ -1431,8 +1451,11 @@ mod tests {
     /// Review findings: a stored access request that could not be read at startup was skipped,
     /// and so left out of the request quota while it stayed stored; then one that could not be
     /// read stopped every start; then one held back kept its place for good, as nothing could
-    /// remove it. A record that cannot be read is quarantined under its IRI: never served or in
-    /// force, listed and counted, and the owner's DELETE removes it and frees its place.
+    /// remove it; then a grant quarantined because a read failed came back in force at the next
+    /// healthy start. A read that fails stops the start (nothing is decided without the record);
+    /// a record whose stored body is not one is quarantined under its IRI, at every start: never
+    /// served or in force, listed and counted, until the owner's DELETE removes it and frees its
+    /// place.
     #[tokio::test]
     async fn records_that_cannot_be_read_are_quarantined_until_deleted() {
         let (state, store) = test_store::state(100).await;
@@ -1479,7 +1502,15 @@ mod tests {
             .to_str()
             .unwrap()
             .to_string();
-        // One unreadable, one stored but not a record, and an unreadable grant.
+        // A read that fails stops the start, whichever record it is.
+        for iri in [&request, &grant] {
+            *store.fail_read_of_any.lock().unwrap() = vec![iri.clone()];
+            let mut cfg = LwsConfig::new("http://localhost:3000");
+            cfg.open = true;
+            assert!(LwsState::new(store.clone(), cfg).await.is_err(), "{iri}");
+        }
+        store.fail_read_of_any.lock().unwrap().clear();
+        // Two requests and a grant whose stored bodies are not records.
         let requests = state.cfg.absolute(REQUESTS_PATH);
         let garbled = format!("{requests}garbled");
         state
@@ -1492,13 +1523,19 @@ mod tests {
             )
             .await
             .unwrap();
-        store
-            .fail_read_of_any
-            .lock()
-            .unwrap()
-            .extend([request.clone(), grant.clone()]);
+        for iri in [&request, &grant] {
+            state
+                .store
+                .write(iri, Bytes::from_static(b"[]"), LWS_JSON)
+                .await
+                .unwrap();
+        }
         let state = restart(&store).await;
-        store.fail_read_of_any.lock().unwrap().clear();
+        // A healthy start after it quarantines them again.
+        let state = {
+            drop(state);
+            restart(&store).await
+        };
         let quarantined = |grants: bool| -> Vec<String> {
             let map = state.access.map(grants).read().unwrap();
             map.values()
@@ -2450,6 +2487,52 @@ mod tests {
         assert!(state.access.requests.read().unwrap().is_empty());
     }
 
+    /// Review finding: a revocation whose intent landed though its write reported a failure,
+    /// and which could then neither withdraw that intent, nor mark the grant, nor remove it, was
+    /// answered "still in force"; the intent then removed the grant at the next start. Such a
+    /// revocation is answered as uncertain, takes the grant out of force, and goes on in the
+    /// background; a start then finds it revoked.
+    #[tokio::test]
+    async fn a_revocation_whose_intent_may_have_landed_is_never_answered_as_failed() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        let resp = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let location = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let path = location
+            .strip_prefix(&state.cfg.base_url)
+            .unwrap()
+            .to_string();
+        store.lose_next_intent_create.store(true, Ordering::SeqCst);
+        *store.refuse_write_of.lock().unwrap() = Some(location.clone());
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let delete = test_store::request(Method::DELETE, &path, &[], "");
+        let resp = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known"), "{body}");
+        assert!(state.access.grant_policies().is_empty(), "left in force");
+        // The process stops; the store recovers; the intent removes the grant.
+        drop(state);
+        *store.refuse_write_of.lock().unwrap() = None;
+        store.fail_delete.store(false, Ordering::SeqCst);
+        let state = restart(&store).await;
+        assert!(state.access.grant_policies().is_empty(), "came back");
+        assert!(!state.store.exists(&location).await.unwrap());
+    }
+
     /// Review finding: a grant whose create landed under its own type but could not be told to
     /// have (the reply lost, and looking it up failed), and whose removal failed too, was left
     /// stored for the next start to put in force although its create had failed. Its durable
@@ -2684,6 +2767,17 @@ mod tests {
                 } else {
                     c.status == StatusCode::CREATED
                 };
+                // A revocation answered as uncertain is out of force until it is known; a
+                // start may find either outcome.
+                if delete && c.body.contains("not known") {
+                    assert!(
+                        !c.in_force_before,
+                        "revocation stopped at step {n}: {}",
+                        c.body
+                    );
+                    n += 1;
+                    continue;
+                }
                 assert_eq!(
                     c.in_force_before, kept,
                     "{what} stopped at step {n}: {} {}",

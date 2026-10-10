@@ -305,12 +305,14 @@ What the server exposes, all discoverable from the storage description
   out of force at once and keeps removing it in the background. An access request is created
   and withdrawn the same way, so one whose create or withdrawal was cut short never comes back
   at the next start. A create refuses a name already stored. A stored grant or request that
-  cannot be read or parsed never stops a start: it is kept as a quarantined entry that grants
-  nothing, is listed and counts against its quota, answers `500` to a read, and frees its place
-  once the owner deletes it. A request still being removed counts against the quota too. A
-  revocation or withdrawal whose intent write fails is answered as if no intent were stored
-  (the intent is withdrawn as far as the store allows; one left behind only removes the record
-  at the next start).
+  cannot be read stops the start (a later start reads it again); one whose stored body is not a
+  record is quarantined at every start until the owner deletes it: it grants nothing, is listed
+  and counts against its quota, and answers `500` to a read. A request still being removed
+  counts against the quota too. An intent whose write failed but may have landed is withdrawn,
+  or set aside and withdrawn in the background. A revocation or withdrawal that cannot tell
+  whether anything durable records it is answered `500` saying its outcome is not known: the
+  record is out of force meanwhile, its removal goes on in the background, and a start may find
+  it either way; only one known to have left nothing durable is answered "still in force".
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

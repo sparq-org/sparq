@@ -1543,14 +1543,17 @@ where
         let stored = intents::store(&state, &record, false, &[&plan], &[]).await;
         let uncertain = may_have_happened(&stored);
         if let Err(e) = stored {
-            // The intent may have landed all the same: it is cleared now, or by the next start
-            // (whose plan then removes a record that was never created).
+            // The intent may have landed all the same: it is cleared now or, when the store
+            // will not yet, set aside with the record's name and cleared in the background (and
+            // by the next start, whose plan then removes a record that was never created).
             if uncertain {
                 let forget = Undo::Forget {
                     record: record.clone(),
-                    iris: Vec::new(),
+                    iris: vec![iri.clone()],
                 };
-                let _ = settle(&state.store, vec![forget]).await;
+                if let Some(left) = settle(&state.store, vec![forget]).await {
+                    state.set_aside(left, own);
+                }
             }
             drop(register);
             return Err(e);
@@ -2450,6 +2453,8 @@ pub(crate) mod test_store {
         /// commits, then reports a backend failure, as when a remote store's reply is lost after
         /// the update landed.
         pub fail_after_create: Arc<AtomicBool>,
+        /// The next `create_in_container` of an intent commits, then reports a backend failure.
+        pub lose_next_intent_create: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `delete` of this IRI detaches it from its parent, then fails with the record still
@@ -2497,6 +2502,7 @@ pub(crate) mod test_store {
                 fail_read_of_any: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
+                lose_next_intent_create: Default::default(),
                 fail_meta: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
@@ -2683,6 +2689,12 @@ pub(crate) mod test_store {
                 .await;
             if self.fail_after_create.load(Ordering::SeqCst)
                 && !container.starts_with(super::intents::PREFIX)
+            {
+                created?;
+                return Err(ServerError::Storage("the reply was lost".into()));
+            }
+            if container.starts_with(super::intents::PREFIX)
+                && self.lose_next_intent_create.swap(false, Ordering::SeqCst)
             {
                 created?;
                 return Err(ServerError::Storage("the reply was lost".into()));
