@@ -418,6 +418,10 @@ pub struct Record {
     pub policies: Vec<Policy>,
     pub author: Option<String>,
     pub etag: String,
+    /// Stored, but not readable as a record at the start: it grants nothing and is served to
+    /// nobody, but is listed, counted against the request quota, and removed (its place freed)
+    /// by the owner's DELETE of its IRI, as any record is.
+    pub quarantined: bool,
 }
 
 /// The grants and requests of the storage, in memory and in the store.
@@ -428,10 +432,6 @@ pub struct AccessStore {
     requests_etag: RwLock<String>,
     /// The share of the store access requests may take (see [`super::Quota`]).
     request_quota: super::Quota,
-    /// Stored requests the start did not load: unreadable, malformed, or still being removed.
-    /// Each is counted against the request quota until the next start, as it may still be
-    /// stored.
-    held_back: std::sync::atomic::AtomicUsize,
 }
 
 fn new_etag() -> String {
@@ -448,6 +448,7 @@ impl AccessStore {
             policies,
             author: None,
             etag: new_etag(),
+            quarantined: false,
         };
         self.grants.write().expect("lock").insert(id.into(), record);
     }
@@ -466,7 +467,6 @@ impl AccessStore {
             grants_etag: RwLock::new(new_etag()),
             requests_etag: RwLock::new(new_etag()),
             request_quota: super::Quota::new(MAX_REQUESTS, MAX_REQUESTS_PER_AUTHOR),
-            held_back: Default::default(),
         }
     }
 
@@ -496,22 +496,18 @@ impl AccessStore {
                 .await
                 .map_err(|e| format!("store: {e}"))?;
             for child in children {
-                // A request the start does not load still counts against the quota (it may
-                // still be stored): one that cannot be read never stops the start, and never
-                // frees a place it may hold.
-                let hold_back = || {
-                    if !grants {
-                        me.held_back
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    }
-                };
                 // A record a change put back at start is still settling is not read at all: what
                 // it holds may be from before that change, and a withdrawn request must not come
-                // back (readable) while its removal lands.
+                // back while its removal lands.
                 if !visible(child.as_str()) {
-                    hold_back();
                     continue;
                 }
+                let id = child
+                    .as_str()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
                 let stored = match store.read(child.as_str()).await {
                     // A record stored as unsettled was being created or revoked when the server
                     // stopped, or its outcome was unknown (see [`super::UNSETTLED_TYPE`]): it is
@@ -520,7 +516,6 @@ impl AccessStore {
                     Ok(r) if r.meta.content_type == super::UNSETTLED_TYPE => {
                         let removed = super::delete_record(store, child.as_str(), &container).await;
                         if removed.is_err() {
-                            hold_back();
                             stuck.push(super::Undo::Remove {
                                 iri: child.as_str().to_string(),
                                 parent: container.clone(),
@@ -531,23 +526,25 @@ impl AccessStore {
                     Ok(r) => serde_json::from_slice::<Value>(&r.body).ok(),
                     Err(_) => None,
                 };
-                // A record that cannot be read or parsed is kept out: a grant grants nothing, and
-                // a request is held back.
+                // A record that cannot be read or parsed never stops the start: it is kept by its
+                // IRI, quarantined (see [`Record::quarantined`]).
                 let Some(stored) = stored else {
                     eprintln!(
-                        "lws: access {} {} cannot be read; it is not loaded",
+                        "lws: access {} {} cannot be read; it is quarantined until deleted",
                         if grants { "grant" } else { "request" },
                         child.as_str()
                     );
-                    hold_back();
+                    let record = Record {
+                        id: id.clone(),
+                        document: Value::Null,
+                        policies: Vec::new(),
+                        author: None,
+                        etag: new_etag(),
+                        quarantined: true,
+                    };
+                    me.map(grants).write().expect("lock").insert(id, record);
                     continue;
                 };
-                let id = child
-                    .as_str()
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or_default()
-                    .to_string();
                 let document = stored.get("document").cloned().unwrap_or(Value::Null);
                 let author = stored
                     .get("author")
@@ -569,6 +566,7 @@ impl AccessStore {
                     policies,
                     author,
                     etag: new_etag(),
+                    quarantined: false,
                 };
                 me.map(grants).write().expect("lock").insert(id, record);
             }
@@ -580,10 +578,6 @@ impl AccessStore {
     pub(crate) fn replace(&self, loaded: AccessStore) {
         *self.grants.write().expect("lock") = loaded.grants.into_inner().expect("lock");
         *self.requests.write().expect("lock") = loaded.requests.into_inner().expect("lock");
-        self.held_back.store(
-            loaded.held_back.into_inner(),
-            std::sync::atomic::Ordering::SeqCst,
-        );
         self.bump(true);
         self.bump(false);
     }
@@ -900,6 +894,13 @@ pub async fn handle<S: Store + 'static>(
     if !mine {
         return state.deny(agent);
     }
+    // A quarantined record (unreadable at the start) is never served; the owner deletes it.
+    if record.quarantined && matches!(req.method, Method::GET | Method::HEAD) {
+        return problem(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Some("this record could not be read; deleting it frees its place"),
+        );
+    }
     let iri = format!("{container}{id}");
     if linkset {
         return service_linkset(&state.cfg, req, &iri);
@@ -969,10 +970,20 @@ pub async fn handle<S: Store + 'static>(
                         parent: container.clone(),
                     };
                     let record = super::intents::mint(&state.cfg.storage());
-                    let intent = super::intents::store(&state, &record, false, &[&remove], &[])
-                        .await
-                        .is_ok()
-                        .then_some(record);
+                    let stored =
+                        super::intents::store(&state, &record, false, &[&remove], &[]).await;
+                    // An intent whose write failed but may have landed is withdrawn as far as
+                    // the store allows. One left behind can only remove the grant at the next
+                    // start, so the grant is answered for as if no intent were stored: the
+                    // client is never told it is out of force while a restart could restore it.
+                    if stored.is_err() && super::may_have_happened(&stored) {
+                        let forget = super::Undo::Forget {
+                            record: record.clone(),
+                            iris: vec![iri.clone()],
+                        };
+                        let _ = super::settle(&state.store, vec![forget]).await;
+                    }
+                    let intent = stored.is_ok().then_some(record);
                     let marked = match state.store.read(&iri).await {
                         Ok(stored) => matches!(
                             super::retype(&state.store, &iri, stored.body, super::UNSETTLED_TYPE)
@@ -1126,11 +1137,7 @@ async fn create<S: Store + 'static>(
                     .values()
                     .filter(|r| r.author == agent.subject)
                     .count();
-                let held_back = state
-                    .access
-                    .held_back
-                    .load(std::sync::atomic::Ordering::SeqCst);
-                (requests.len() + held_back, mine)
+                (requests.len(), mine)
             });
         match reserved {
             Ok(slot) => Some(slot),
@@ -1150,6 +1157,7 @@ async fn create<S: Store + 'static>(
         policies: if grants { parsed } else { Vec::new() },
         author: agent.subject.clone(),
         etag: new_etag(),
+        quarantined: false,
     };
     let register = {
         let state = state.clone();
@@ -1421,66 +1429,137 @@ mod tests {
     }
 
     /// Review findings: a stored access request that could not be read at startup was skipped,
-    /// and so left out of the request quota while it stayed stored; and then one that could not
-    /// be read (or parsed) stopped every start. It is held back: not loaded, never stopping the
-    /// start, and counted against the quota until the next start.
+    /// and so left out of the request quota while it stayed stored; then one that could not be
+    /// read stopped every start; then one held back kept its place for good, as nothing could
+    /// remove it. A record that cannot be read is quarantined under its IRI: never served or in
+    /// force, listed and counted, and the owner's DELETE removes it and frees its place.
     #[tokio::test]
-    async fn requests_that_cannot_be_read_are_held_back() {
-        use std::sync::atomic::Ordering;
+    async fn records_that_cannot_be_read_are_quarantined_until_deleted() {
         let (state, store) = test_store::state(100).await;
-        let req = test_store::request(
-            Method::POST,
+        let post = |state: &LwsState<test_store::FlakyStore>,
+                    path: &'static str,
+                    kind: &'static str,
+                    who: String| {
+            let state = state.clone();
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    path,
+                    &[("content-type", LWS_JSON)],
+                    &access_doc(kind, "https://a/", None),
+                );
+                let who = Agent {
+                    subject: Some(who),
+                    client: None,
+                };
+                handle(&state, &req, &who).await
+            }
+        };
+        let resp = post(
+            &state,
             REQUESTS_PATH,
-            &[("content-type", LWS_JSON)],
-            &access_doc("AccessRequest", "https://a/", None),
-        );
-        let resp = handle(&state, &req, &Agent::anonymous()).await;
+            "AccessRequest",
+            "https://r.example/#me".into(),
+        )
+        .await;
         assert_eq!(resp.status(), StatusCode::CREATED);
-        let iri = resp.headers()[header::LOCATION]
+        let request = resp.headers()[header::LOCATION]
             .to_str()
             .unwrap()
             .to_string();
-        let loaded = AccessStore::load(&store, &state.cfg).await.unwrap();
-        assert_eq!(loaded.requests.read().unwrap().len(), 1);
-        assert_eq!(loaded.held_back.load(Ordering::SeqCst), 0);
-        // Unreadable, and stored but not a record: neither stops the start.
-        *store.fail_read_of.lock().unwrap() = Some(iri);
+        let resp = post(
+            &state,
+            GRANTS_PATH,
+            "AccessGrant",
+            "https://g.example/#me".into(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let grant = resp.headers()[header::LOCATION]
+            .to_str()
+            .unwrap()
+            .to_string();
+        // One unreadable, one stored but not a record, and an unreadable grant.
         let requests = state.cfg.absolute(REQUESTS_PATH);
+        let garbled = format!("{requests}garbled");
         state
             .store
             .create_in_container(
                 &requests,
-                &format!("{requests}garbled"),
+                &garbled,
                 Bytes::from_static(b"{not json"),
                 LWS_JSON,
             )
             .await
             .unwrap();
+        store
+            .fail_read_of_any
+            .lock()
+            .unwrap()
+            .extend([request.clone(), grant.clone()]);
         let state = restart(&store).await;
-        assert!(state.access.requests.read().unwrap().is_empty());
-        assert_eq!(state.access.held_back.load(Ordering::SeqCst), 2);
-        // Both still count: the quota is full two places early.
+        store.fail_read_of_any.lock().unwrap().clear();
+        let quarantined = |grants: bool| -> Vec<String> {
+            let map = state.access.map(grants).read().unwrap();
+            map.values()
+                .filter(|r| r.quarantined)
+                .map(|r| r.id.clone())
+                .collect()
+        };
+        assert_eq!(quarantined(false).len(), 2);
+        assert_eq!(quarantined(true).len(), 1);
+        assert!(
+            state.access.grant_policies().is_empty(),
+            "a quarantined grant grants"
+        );
+        let path = |iri: &str| iri.strip_prefix(&state.cfg.base_url).unwrap().to_string();
+        let anyone = Agent::anonymous();
+        let get = test_store::request(Method::GET, &path(&request), &[], "");
+        assert_eq!(
+            handle(&state, &get, &anyone).await.status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        // Both requests still count: the quota is full two places early.
         let mut created = 0;
-        loop {
-            let doc = access_doc("AccessRequest", &format!("https://a/{created}"), None);
-            let post = test_store::request(
-                Method::POST,
-                REQUESTS_PATH,
-                &[("content-type", LWS_JSON)],
-                &doc,
-            );
-            let who = Agent {
-                subject: Some(format!("https://agent{created}.example/#me")),
-                client: None,
-            };
-            let resp = handle(&state, &post, &who).await;
-            if resp.status() != StatusCode::CREATED {
-                assert_eq!(resp.status(), StatusCode::INSUFFICIENT_STORAGE);
-                break;
-            }
+        while post(
+            &state,
+            REQUESTS_PATH,
+            "AccessRequest",
+            format!("https://a{created}.example/#me"),
+        )
+        .await
+        .status()
+            == StatusCode::CREATED
+        {
             created += 1;
         }
         assert_eq!(created, MAX_REQUESTS - 2);
+        // The owner deletes them by IRI, which frees their places, and revokes the grant.
+        for iri in [&request, &garbled, &grant] {
+            let delete = test_store::request(Method::DELETE, &path(iri), &[], "");
+            assert_eq!(
+                handle(&state, &delete, &anyone).await.status(),
+                StatusCode::NO_CONTENT,
+                "{iri}"
+            );
+            assert!(!state.store.exists(iri).await.unwrap());
+        }
+        assert!(quarantined(false).is_empty() && quarantined(true).is_empty());
+        let resp = post(
+            &state,
+            REQUESTS_PATH,
+            "AccessRequest",
+            "https://late.example/#me".into(),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        // And none comes back.
+        let state = restart(&store).await;
+        assert_eq!(
+            state.access.requests.read().unwrap().len(),
+            MAX_REQUESTS - 1
+        );
+        assert!(state.access.grants.read().unwrap().is_empty());
     }
 
     /// Review finding (atomicity): a request's store record, its registration and its place in
@@ -1867,6 +1946,8 @@ mod tests {
         // fail too, so the container is set aside until the store answers.
         *store.fail_step.lock().unwrap() = Some(1);
         store.fail_delete.store(true, Ordering::SeqCst);
+        // The check that the name is free still answers.
+        store.exists_answers.store(1, Ordering::SeqCst);
         store.fail_exists.store(true, Ordering::SeqCst);
         let r = handle(&state, &post, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);

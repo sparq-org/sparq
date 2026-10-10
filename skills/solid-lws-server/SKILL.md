@@ -304,9 +304,13 @@ What the server exposes, all discoverable from the storage description
   held across its create and its revocation. A revocation whose removal fails takes the grant
   out of force at once and keeps removing it in the background. An access request is created
   and withdrawn the same way, so one whose create or withdrawal was cut short never comes back
-  at the next start. A stored grant or request that cannot be read or parsed never stops a
-  start: a grant grants nothing, and a request is not loaded but still counts against the
-  request quota until the next start, as does one still being removed.
+  at the next start. A create refuses a name already stored. A stored grant or request that
+  cannot be read or parsed never stops a start: it is kept as a quarantined entry that grants
+  nothing, is listed and counts against its quota, answers `500` to a read, and frees its place
+  once the owner deletes it. A request still being removed counts against the quota too. A
+  revocation or withdrawal whose intent write fails is answered as if no intent were stored
+  (the intent is withdrawn as far as the store allows; one left behind only removes the record
+  at the next start).
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,

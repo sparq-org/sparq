@@ -913,7 +913,7 @@ type StoredMeta = crate::store::ResourceMeta;
 
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
-fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
+pub(crate) fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError>) -> bool {
     matches!(outcome, Ok(_) | Err(crate::error::ServerError::Storage(_)))
 }
 
@@ -1514,11 +1514,23 @@ where
         };
         let _held = held;
         // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
-        // taking it under the container's cannot deadlock.
+        // taking it under the container's cannot deadlock. Under the lock, the name must not be
+        // stored either (a record quarantined at the start holds its name, and no lock).
         let Some(own) = state.locks.try_lock(&iri) else {
             drop(register);
             return Err(ServerError::Conflict("the record's name is taken".into()));
         };
+        match state.store.exists(&iri).await {
+            Ok(false) => {}
+            Ok(true) => {
+                drop(register);
+                return Err(ServerError::Conflict("the record's name is taken".into()));
+            }
+            Err(e) => {
+                drop(register);
+                return Err(e);
+            }
+        }
         // A create first stores a durable intent to remove the record: until the create is
         // known to have landed whole (the intent is cleared), a stop leaves the next start
         // removing it, so a grant is never in force there, nor a request counted or served,
@@ -1528,7 +1540,18 @@ where
             iri: iri.clone(),
             parent: container.clone(),
         };
-        if let Err(e) = intents::store(&state, &record, false, &[&plan], &[]).await {
+        let stored = intents::store(&state, &record, false, &[&plan], &[]).await;
+        let uncertain = may_have_happened(&stored);
+        if let Err(e) = stored {
+            // The intent may have landed all the same: it is cleared now, or by the next start
+            // (whose plan then removes a record that was never created).
+            if uncertain {
+                let forget = Undo::Forget {
+                    record: record.clone(),
+                    iris: Vec::new(),
+                };
+                let _ = settle(&state.store, vec![forget]).await;
+            }
             drop(register);
             return Err(e);
         }
@@ -2385,6 +2408,7 @@ pub(crate) mod test_store {
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
         /// fails with a backend error.
         pub fail_read_of: Arc<std::sync::Mutex<Option<String>>>,
+        pub fail_read_of_any: Arc<std::sync::Mutex<Vec<String>>>,
         /// `write` of this IRI alone fails with a backend error.
         pub fail_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `write` of every IRI that starts with this fails with a backend error.
@@ -2419,6 +2443,9 @@ pub(crate) mod test_store {
         pub fail_after_write_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
+        /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
+        /// before the rest fail.
+        pub exists_answers: Arc<std::sync::atomic::AtomicUsize>,
         /// `create_in_container` of a resource (not of an intent, see the `intents` module)
         /// commits, then reports a backend failure, as when a remote store's reply is lost after
         /// the update landed.
@@ -2467,9 +2494,11 @@ pub(crate) mod test_store {
                 fail_write_under: Default::default(),
                 write_budget: Default::default(),
                 fail_read_of: Default::default(),
+                fail_read_of_any: Default::default(),
                 hide: Default::default(),
                 fail_after_write_of: Default::default(),
                 fail_meta: Default::default(),
+                exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
@@ -2534,7 +2563,13 @@ pub(crate) mod test_store {
                 .as_deref()
                 .is_some_and(|of| {
                     of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
-                });
+                })
+                || self
+                    .fail_read_of_any
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|of| of == iri);
             if failing {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
@@ -2551,7 +2586,12 @@ pub(crate) mod test_store {
             self.inner.meta(iri).await
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
-            if self.fail_exists.load(Ordering::SeqCst) {
+            if self.fail_exists.load(Ordering::SeqCst)
+                && self
+                    .exists_answers
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                    .is_err()
+            {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             if self.fail_exists_of.lock().unwrap().as_deref() == Some(iri) {
