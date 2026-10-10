@@ -421,7 +421,9 @@ vcdiqr:
 fips204:
   type: reference
   title: "FIPS 204: Module-Lattice-Based Digital Signature Standard"
-  author: "National Institute of Standards and Technology"
+  # An organisation, given as a single name so that the style does not split it into a person.
+  author:
+    name: "National Institute of Standards and Technology"
   date: 2024
   publisher: NIST
 
@@ -468,3 +470,19 @@ quicksilver21:
   parent:
     type: proceedings
     title: "ACM SIGSAC Conference on Computer and Communications Security (CCS)"
+
+# [OPUS-5.5] The companion drafts. The paper replaces both entries with anonymised ones (no
+# author, repository or URL) when it is built with `--input anon=true`; see its bibliography call.
+zksparqlspec:
+  type: reference
+  title: "Zero-Knowledge SPARQL Answers: Request and Presentation Data Model (draft specification)"
+  author: "Wright, Jesse"
+  date: 2026
+  url: "https://github.com/sparq-org/sparq/pull/6786"
+
+merklesuites:
+  type: reference
+  title: "Merkle-Root Cryptosuites for RDF Verifiable Credentials (draft specification)"
+  author: "Wright, Jesse"
+  date: 2026
+  url: "https://github.com/sparq-org/sparq/pull/6789"

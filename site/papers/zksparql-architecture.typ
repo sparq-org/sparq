@@ -298,10 +298,8 @@ answers keep the open-world reading of RDF, and an Exact answer shows absence on
 @fig-architecture shows the three parties. The verifier service sends a query request and stores its
 own copy. The holder service builds the input dataset from some of the holder's credentials,
 evaluates the query, and returns an answer presentation: the result with one proof. A companion
-specification defines both objects in JSON; an answer presentation is not a W3C verifiable
-presentation.
-// TODO(citation): the companion specification "Zero-Knowledge SPARQL Answers" (sparq-org/sparq#6786);
-// cite it anonymously or as supplementary material under double-blind review.
+specification @zksparqlspec defines both objects in JSON; an answer presentation is not a W3C
+verifiable presentation.
 
 #[
 #show figure: set block(breakable: false)
@@ -569,12 +567,12 @@ disclosed mode; only `bbs-2023` derived proofs are unlinkable.
 
 === Our Merkle-based cryptosuites <merkle-suites>
 
-We propose Merkle-based cryptosuites designed for proving.
-// TODO(citation): the Merkle-based cryptosuite draft (sparq-org/sparq#6789); cite it anonymously
-// or as supplementary material under double-blind review.
-The issuer builds a Merkle tree with one leaf per canonical quad of the credential. It signs a
-digest of the suite identifier, a fresh 32-byte salt, the number of quads, the Merkle root and the
-digest of the canonical proof configuration. Each leaf encodes the typed terms of its quad, and a
+We propose Merkle-based cryptosuites designed for proving @merklesuites. The issuer builds a Merkle
+tree with one leaf per canonical quad of the credential. It signs a digest of the suite identifier,
+a fresh 32-byte salt, the number of quads, the Merkle root and the digest of the canonical proof
+configuration.
+// Source: the cryptosuite draft (sparq-org/sparq#6789) specifies all three members below, and its
+// Poseidon2 member signs P(3, suite, salt, n, root, c1, c0), which includes the suite identifier. Each leaf encodes the typed terms of its quad, and a
 literal's encoding carries a comparison key: an order-preserving encoding of its value, for numbers,
 date-times, booleans and strings.
 
@@ -595,8 +593,8 @@ The family has three members. `eddsa-sha256-merkle-2026` uses a SHA-256 tree and
 a later build of our guest program verifies it, and we measured its cycles without proving
 (§#ref(<cost>, supplement: none)).
 `schnorr-poseidon2-merkle-2026` uses a Poseidon2 tree and Schnorr signatures over Baby Jubjub, for
-circuits, and the post-quantum `mldsa44-sha256-merkle-2026` uses ML-DSA-44. These two are specified
-but not implemented.
+circuits, and the post-quantum `mldsa44-sha256-merkle-2026` uses ML-DSA-44. The draft specifies
+these two, but we have not implemented them.
 
 === Security and disclosure <security>
 
@@ -929,7 +927,7 @@ select credentials and the claims to disclose. A query request could travel in i
 credential format, but the protocol has no step in which a verifier agrees an input in advance.
 
 _Other proof methods._ A proof method need not produce a zero-knowledge proof. The companion
-specification proposes attestation by a TEE that a measured program evaluated the query and checked
+specification @zksparqlspec proposes attestation by a TEE that a measured program evaluated the query and checked
 the signatures. It also proposes QuickSilver @quicksilver21, a designated-verifier proof that is
 interactive and that only the verifier taking part can check. We have built neither as a proof
 method.
@@ -986,7 +984,30 @@ credentials, proving times and an external audit remain to be done.
 
 #pagebreak(weak: true)
 #heading(level: 2, numbering: none)[References]
-#bibliography("zksparql-architecture.refs.yml", style: "ieee", title: none)
+// The bibliography is read from the YAML file so that the double-blind build (`anon`) can replace
+// the entries for our own companion drafts with anonymised ones: no author, repository or URL.
+#let bib-entries = yaml("zksparql-architecture.refs.yml")
+#let bib-entries = if anon {
+  bib-entries + (
+    zksparqlspec: (
+      type: "reference",
+      title: "Companion specification of query requests and answer presentations (anonymised for review)",
+      author: "Anonymous",
+      date: 2026,
+    ),
+    merklesuites: (
+      type: "reference",
+      title: "Draft specification of the Merkle-based cryptosuites (anonymised for review)",
+      author: "Anonymous",
+      date: 2026,
+    ),
+  )
+} else { bib-entries }
+#bibliography(
+  bytes(yaml.encode(bib-entries)),
+  style: "springer-lecture-notes-in-computer-science",
+  title: none,
+)
 
 // ---------------------------------------------------------------------------------------------
 // Appendix: at most two LNCS pages after the references. It states what an accepted presentation

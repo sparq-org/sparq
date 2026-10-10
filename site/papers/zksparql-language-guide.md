@@ -48,7 +48,7 @@ Rules 1 to 6 are firm. Rules 7 to 16 are strong preferences, broken only where p
 - **`eddsa-rdfc-2022`:** Ed25519 signs the SHA-256 hash of the canonical proof configuration followed by that of the canonical document (EdDSA §3.2). It is unsalted, so whoever sees the hashes can test a guessed document.
 - **`ecdsa-rdfc-2019`:** the same with ECDSA, P-256 with SHA-256 or P-384 with SHA-384. **`mldsa44-rdfc-2024`:** ML-DSA-44 with SHA-256, post-quantum; First Public Working Draft of Quantum-Resistant Cryptosuites v1.0, 16 June 2026.
 - **`bbs-2023`, `ecdsa-sd-2023`:** the holder derives from the issuer's base proof a proof disclosing selected claims. Only `bbs-2023` derived proofs are unlinkable (VC-DI-ECDSA §5.1).
-- **Our Merkle-based cryptosuites** sign the digest of decision 5: `eddsa-sha256-merkle-2026` (SHA-256 tree, Ed25519), verified in the zkVM, and `schnorr-poseidon2-merkle-2026` (draft identifier; Poseidon2 tree, Schnorr over Baby Jubjub), the member for Noir. Neither is post-quantum (suite draft §1.2, §3.5, §5).
+- **Our Merkle-based cryptosuites** sign the digest of decision 5. The suite draft specifies three members: `eddsa-sha256-merkle-2026` (SHA-256 tree, Ed25519), verified in the zkVM; `schnorr-poseidon2-merkle-2026` (draft identifier; Poseidon2 tree, Schnorr over Baby Jubjub), the member for Noir; and `mldsa44-sha256-merkle-2026` (SHA-256 tree, ML-DSA-44). Only the ML-DSA-44 member is post-quantum, and only the Ed25519 member is implemented (suite draft §1.2, §3.5, §5). Cite the draft as `merklesuites`.
 - **Credential status:** whether the issuer has revoked or suspended the credential.
 - **Credential validity period:** `validFrom` to `validUntil`; distinct from a proof's `created` and `expires` and from a key's validity.
 - **Holder binding:** the party presenting is the subject, or controls a key bound to the credential.
@@ -186,11 +186,14 @@ Each appears in full once, in its home (rule 7).
 5. **Merkle-based cryptosuites** sign a digest of the suite identifier, a 32-byte salt, the quad count, the Merkle root (one leaf per canonical quad) and the proof-configuration digest.
 6. **Wording:** "publicly verifiable", "designated-verifier", "monotone query", "a Data Integrity proof (a signature)", `verificationKey` (formerly `artifact`), "image ID"; no "pins".
 
+**Resolved** (10 October 2026):
+
+- **Poseidon2 message:** the suite draft (#6789) now has the Poseidon2 member sign `P(3, suite, salt, n, root, c1, c0)`, with `suite` a digest of `schnorr-poseidon2-merkle-2026`, so every member signs the fields of decision 5. The draft specifies all three members. The paper cites it (`merklesuites`) and the companion specification (`zksparqlspec`); both entries are anonymised in the double-blind build.
+
 **Open:**
 
 1. **Unpublished ISWC 2025 manuscript** (the earlier results-only interface): cite it anonymously, or describe it uncited?
-2. **Poseidon2 message:** suite draft §5, also at the head of #6789, signs `P(3, salt, n, root, c1, c0)`, without the suite identifier of decision 5. Align one of them.
-3. **Choices our evaluator fixes:** which open choices of decision 2 does the evaluator fix, and where is that published? Until then, an Exact claim means one permitted result, chosen by the holder.
+2. **Choices our evaluator fixes:** which open choices of decision 2 does the evaluator fix, and where is that published? Until then, an Exact claim means one permitted result, chosen by the holder.
 
 ## 8. Sources
 
