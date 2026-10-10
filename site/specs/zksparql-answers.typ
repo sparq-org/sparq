@@ -218,8 +218,9 @@ The holder service returns one answer presentation for one query request.
     otherwise. One of the request's `signatureModes`.],
   [`signatures`], [array of objects], [REQUIRED in the revealed mode, and absent otherwise.
     One entry per credential in the input dataset, each with `verificationMethod`,
-    `cryptosuite`, `signedMessage` (byte string) and `proofValue` (the signature, as the
-    cryptosuite encodes it). Section 6.3.],
+    `cryptosuite`, `signedMessage` (byte string) and `signature` (byte string: the
+    signature alone, without any other value the cryptosuite's `proofValue` carries).
+    Section 6.3.],
   [`result`], [object], [REQUIRED. The query result, encoded as in section 5.1.],
   [`proof`], [byte string], [REQUIRED. The proof, in the encoding the proof method defines.],
 )
@@ -306,7 +307,11 @@ signature and signed message. The verifier checks each signature itself, outside
 against a key in `issuers`. The proof then only has to show that $D$ is exactly the data those
 signed messages cover, and that the result is correct over $D$. This is cheaper to prove, but
 discloses the signatures, the signed messages, the issuer keys used and the number of
-credentials (section 10.2).
+credentials (section 10.2). The `signature` member carries only the signature bytes. Where a
+cryptosuite's `proofValue` also carries other values, as the Merkle-root cryptosuites append
+the tree salt #cite("ZK-MERKLE-CRYPTOSUITE"), the holder service MUST NOT send them, and the
+salt stays private: the verifier checks the signature over `signedMessage` and does not need
+the salt.
 
 In the #emph[disclosed] mode, used only by proof methods whose evidence is disclosed
 credentials (section 9), the `proof` member carries the credentials, or presentations derived
@@ -562,7 +567,8 @@ are the same in every presentation of that credential, so verifiers can link pre
 the same credential. When the signed message is an unsalted hash of the credential, as with
 `eddsa-rdfc-2022`, a verifier who can guess a credential's full content can confirm the guess
 by hashing it. The Merkle-root cryptosuites sign a salted digest, which avoids the second
-problem but not the first. Whether signatures can be forged by an attacker with a quantum computer depends on the
+problem while the salt stays private, but not the first. For this reason the revealed mode
+sends the signature without the salt (section 6.3). Whether signatures can be forged by an attacker with a quantum computer depends on the
 cryptosuite, not on the mode: for Ed25519, the public key alone is enough.
 
 In the disclosed signature mode the verifier learns everything the disclosed credentials or
