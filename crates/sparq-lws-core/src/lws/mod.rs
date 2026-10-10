@@ -516,14 +516,11 @@ impl<S: Store + 'static> LwsState<S> {
         // succeeded: a start that fails leaves nothing running to put an old state back over a
         // later start's writes, and grants are loaded while what is hidden stays hidden.
         let hidden = intents::recover(&state).await?;
-        let (loaded, stuck) =
+        let loaded =
             access::AccessStore::load_with(&state.store, &state.cfg, |iri| state.visible(iri))
                 .await?;
         state.access.replace(loaded);
         state.settle_hidden(hidden);
-        if !stuck.is_empty() {
-            state.set_aside(Unsettled(stuck), ());
-        }
         Ok(state)
     }
 
@@ -1419,8 +1416,8 @@ pub(crate) async fn delete_record<S: Store>(
     }
 }
 
-/// Whether the record `iri` is stored as a start would load it: listed in `container`, there to
-/// read, and not stored as unsettled ([`UNSETTLED_TYPE`]). An error when that cannot be told.
+/// Whether the record `iri` is stored as a start would load it: listed in `container` and there
+/// to read. An error when that cannot be told.
 pub(crate) async fn still_listed<S: Store>(
     store: &S,
     iri: &str,
@@ -1435,72 +1432,32 @@ pub(crate) async fn still_listed<S: Store>(
         return Ok(false);
     }
     match store.read(iri).await {
-        Ok(r) => Ok(r.meta.content_type != UNSETTLED_TYPE),
+        Ok(_) => Ok(true),
         Err(crate::error::ServerError::NotFound) => Ok(false),
         Err(e) => Err(e),
     }
 }
 
-/// The content type a service record (a grant or a request) is stored under while it is not
-/// settled: a grant from when it is created until it is in force, and any record from when its
-/// revocation starts. A record stored so is never put in force at boot, and the boot removes it
-/// (see [`access::AccessStore::load`]): a crash, or a store failure whose outcome is unknown,
-/// leaves the record out of force rather than in. It is the record itself that says so, so
-/// nothing is left behind once it is gone, and it takes no room of its own.
-pub(crate) const UNSETTLED_TYPE: &str = "application/vnd.sparq.unsettled+json";
+/// How long a create waits for its container before answering `503`: a request never queues
+/// behind a container held by a change that is being put back.
+const CONTAINER_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// How many times the outcome of a store write that failed is looked up ([`retype`]).
-const LOOKUPS: u32 = 3;
-
-/// Store the record `iri` again, as `body` under `content_type`: `Ok(true)` once it is known to
-/// be stored so, `Ok(false)` once it is known not to be, and an error when that cannot be told (a
-/// write that failed in the backend may have landed, and looking it up failed too).
-pub(crate) async fn retype<S: Store>(
-    store: &S,
-    iri: &str,
-    body: Bytes,
-    content_type: &str,
-) -> Result<bool, crate::error::ServerError> {
-    let written = store.write(iri, body, content_type).await;
-    if written.is_ok() {
-        return Ok(true);
-    }
-    if !may_have_happened(&written) {
-        return Ok(false);
-    }
-    let mut last = written.err().unwrap_or(crate::error::ServerError::NotFound);
-    for _ in 0..LOOKUPS {
-        match store.meta(iri).await {
-            Ok(Some(m)) => return Ok(m.content_type == content_type),
-            Ok(None) => return Ok(false),
-            Err(e) => last = e,
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
-    Err(last)
-}
-
-/// Store a new record (an access grant or request) at `iri` in `container` and,
-/// once it is stored, put it in force in memory with `register`. Every record in the store is
-/// loaded, and so in force, at the next boot, so the two never part:
+/// Store a new record (an access grant or request) at `iri` in `container` in one write and,
+/// once it is confirmed stored, put it in force in memory with `register`. Memory follows the
+/// store, and the answer says only what is confirmed:
 ///
-/// - The writes and the registration run in a task of their own, holding the request's share of
-///   its admission permit (`admission`): a client that goes away cannot stop a stored record from
-///   being registered.
-/// - A durable intent to remove
-///   the record is stored first (see the `intents` module), the record is created under
-///   [`UNSETTLED_TYPE`], stored again under its own type, and only once the intent is cleared
-///   put in force: a crash or restart before then leaves the next start removing the record, and
-///   a second write whose outcome is not known leaves it out of force and removed, as a failed
-///   create is. When clearing the intent fails it is read back: cleared after all, the grant is
-///   put in force; still stored, the record is removed; while it cannot be read, the request
-///   fails and a task holding the record's locks settles it the same way later.
-/// - The record's own lock is held from before it is created until it is in force (or
-///   removed), so a revocation of it waits for that.
-/// - A refusal stores nothing. A backend failure may follow a create that committed (a remote
-///   store's timeout or lost reply), so the record is removed with the container held, tried a
-///   few times and then set aside with the locks ([`LwsState::set_aside`]); `register` (and the
-///   quota place it holds) is dropped.
+/// - The container is taken (shared, unless the caller holds it exclusively) in the request,
+///   waiting at most [`CONTAINER_WAIT`] (then `503`), so a conditional create sees no member
+///   arrive between its check and its own registration. The write and the registration then run
+///   in a task of their own, holding the request's share of its admission permit (`admission`):
+///   a client that goes away cannot stop a stored record from being registered.
+/// - The record's own lock is held from before it is created until it is registered, so a
+///   revocation of it waits for that. A name already stored is refused.
+/// - A write that succeeds registers the record. One that fails is checked against the listing
+///   ([`still_listed`]): stored after all, it is registered; not stored, `register` (and the
+///   quota place it holds) is dropped and the create fails; not known, the create answers that,
+///   and a task holding no lock but the quota place settles it from the listing once the store
+///   answers. A start loads whatever the listing holds.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
@@ -1510,187 +1467,73 @@ pub(crate) async fn create_record<S, F>(
     admission: Option<crate::overload::AdmissionSlot>,
     held: Option<resources::IriGuard>,
     register: F,
-) -> Result<(), crate::error::ServerError>
+) -> Result<(), Response>
 where
     S: Store + 'static,
     F: FnOnce() + Send + 'static,
 {
     use crate::error::ServerError;
+    let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    let shared = match held {
+        Some(_) => None,
+        None => match tokio::time::timeout(CONTAINER_WAIT, state.locks.read(container)).await {
+            Ok(Some(guard)) => Some(guard),
+            Ok(None) => return Err(resources::set_aside_meanwhile()),
+            Err(_) => return Err(resources::retry_later("the container is busy")),
+        },
+    };
+    // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
+    // taking it under the container's cannot deadlock.
+    let Some(own) = state.locks.try_lock(iri) else {
+        return Err(failed(ServerError::Conflict(
+            "the record's name is taken".into(),
+        )));
+    };
     let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        // The container's listing changes once the record is registered: a create holds the
-        // container (shared, unless the caller holds it exclusively) until then, so a conditional
-        // create sees no member arrive between its check and its own registration.
-        let _shared = match held {
-            None => match state.locks.read(&container).await {
-                Some(guard) => Some(guard),
-                None => {
-                    drop(register);
-                    return Err(ServerError::Storage(
-                        "a failed change to the container is still being put back".into(),
-                    ));
-                }
-            },
-            Some(_) => None,
-        };
-        let _held = held;
-        // A new IRI: its lock is free unless the name was just taken, and it is only tried, so
-        // taking it under the container's cannot deadlock. Under the lock, the name must not be
-        // stored either (a record quarantined at the start holds its name, and no lock).
-        let Some(own) = state.locks.try_lock(&iri) else {
-            drop(register);
-            return Err(ServerError::Conflict("the record's name is taken".into()));
-        };
+        let _container = (shared, held);
+        // Under the lock, the name must not be stored either (a quarantined record holds its
+        // name, and no lock).
         match state.store.exists(&iri).await {
             Ok(false) => {}
-            Ok(true) => {
-                drop(register);
-                return Err(ServerError::Conflict("the record's name is taken".into()));
-            }
-            Err(e) => {
-                drop(register);
-                return Err(e);
-            }
+            Ok(true) => return Err(ServerError::Conflict("the record's name is taken".into())),
+            Err(e) => return Err(e),
         }
-        // A create first stores a durable intent to remove the record: until the create is
-        // known to have landed whole (the intent is cleared), a stop leaves the next start
-        // removing it, so a grant is never in force there, nor a request counted or served,
-        // unless it was here.
-        let record = intents::mint(&state.cfg.storage());
-        let plan = Undo::Remove {
-            iri: iri.clone(),
-            parent: container.clone(),
-        };
-        let stored = intents::store(&state, &record, false, &[&plan], &[]).await;
-        let uncertain = may_have_happened(&stored);
-        if let Err(e) = stored {
-            // The intent may have landed all the same: it is cleared now or, when the store
-            // will not yet, set aside with the record's name and cleared in the background (and
-            // by the next start, whose plan then removes a record that was never created).
-            if uncertain {
-                let forget = Undo::Forget {
-                    record: record.clone(),
-                    iris: vec![iri.clone()],
-                };
-                if let Some(left) = settle(&state.store, vec![forget]).await {
-                    state.set_aside(left, own);
-                }
-            }
-            drop(register);
-            return Err(e);
-        }
-        let intent = Some(record);
-        // What removes the record, and then its intent.
-        let removal = || {
-            let mut undo = vec![Undo::Remove {
-                iri: iri.clone(),
-                parent: container.clone(),
-            }];
-            undo.extend(intent.iter().map(|record| Undo::Forget {
-                record: record.clone(),
-                iris: vec![iri.clone()],
-            }));
-            undo
-        };
-        match state
+        let written = state
             .store
-            .create_in_container(&container, &iri, body.clone(), UNSETTLED_TYPE)
-            .await
-        {
-            Ok(_) => {
-                let settled = retype(&state.store, &iri, body, LWS_JSON).await;
-                if let Ok(true) = settled {
-                    let Some(record) = intent.clone() else {
-                        register();
-                        return Ok(());
-                    };
-                    return match landed(&state.store, &record).await {
-                        Some(true) => {
-                            register();
-                            Ok(())
-                        }
-                        Some(false) => {
-                            if let Some(left) = settle(&state.store, removal()).await {
-                                state.set_aside(left, (own, _shared, _held));
-                            }
-                            drop(register);
-                            Err(ServerError::Storage(
-                                "the record could not be put in force".into(),
-                            ))
-                        }
-                        // Whether the intent was cleared is not known: settled from it once it
-                        // can be read, with the record's locks held, put in force or removed.
-                        None => {
-                            let removal = removal();
-                            let state = state.clone();
-                            tokio::spawn(async move {
-                                let _locks = (own, _shared, _held);
-                                if until_done(|| intents::kept(&state.store, &record)).await {
-                                    register();
-                                    return;
-                                }
-                                for undo in &removal {
-                                    until_done(|| undo.apply(&state.store)).await;
-                                }
-                            });
-                            Err(ServerError::Storage(
-                                "whether the record is in force is not known yet".into(),
-                            ))
-                        }
-                    };
-                }
-                // Not known to be stored under its own type: never put in force, and removed as
-                // a failed create is (see below). Until it is, the boot removes it.
-                if let Some(left) = settle(&state.store, removal()).await {
-                    state.set_aside(left, (own, _shared, _held));
-                }
-                drop(register);
-                Err(settled.err().unwrap_or_else(|| {
-                    ServerError::Storage("the record could not be put in force".into())
-                }))
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await;
+        let Err(e) = written else {
+            register();
+            return Ok(());
+        };
+        match still_listed(&state.store, &iri, &container).await {
+            Ok(true) => {
+                register();
+                Ok(())
             }
-            Err(e) => {
-                // The create may have committed: it is removed, with the container still held,
-                // so the record is never stored without being in force; tried a few times, then
-                // set aside with the locks ([`LwsState::set_aside`]).
-                if matches!(e, ServerError::Storage(_)) || intent.is_some() {
-                    if let Some(left) = settle(&state.store, removal()).await {
-                        state.set_aside(left, (own, _shared, _held));
+            Ok(false) => Err(e),
+            Err(_) => {
+                // Settled holding the record's own lock (a revocation of it waits), never the
+                // container's.
+                let state = state.clone();
+                tokio::spawn(async move {
+                    let _own = own;
+                    if until_done(|| still_listed(&state.store, &iri, &container)).await {
+                        register();
                     }
-                }
-                drop(register);
-                Err(e)
+                });
+                Err(ServerError::Storage(
+                    "whether the record was stored is not known; the request may be retried".into(),
+                ))
             }
         }
     };
     tokio::spawn(task)
         .await
         .unwrap_or_else(|e| Err(ServerError::Storage(format!("the create failed: {e}"))))
-}
-
-/// Clear the intent `record` of a change done whole: `Some(true)` once it is known to be cleared
-/// (the change is kept), `Some(false)` once it is known to be still stored (the change is to be
-/// put back from it), `None` while that cannot be told.
-async fn landed<S: Store>(store: &S, record: &str) -> Option<bool> {
-    let forget = Undo::Forget {
-        record: record.to_string(),
-        iris: Vec::new(),
-    };
-    if settle(store, vec![forget]).await.is_none() {
-        return Some(true);
-    }
-    let mut wait = std::time::Duration::from_millis(50);
-    for attempt in 1..=UNDO_ATTEMPTS {
-        if let Ok(kept) = intents::kept(store, record).await {
-            return Some(kept);
-        }
-        if attempt < UNDO_ATTEMPTS {
-            tokio::time::sleep(wait).await;
-            wait *= 4;
-        }
-    }
-    None
+        .map_err(failed)
 }
 
 /// The preconditions of a create in a service container (grants, requests),

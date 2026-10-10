@@ -76,7 +76,7 @@ pub(crate) fn set_aside<S: Store + 'static>(
 }
 
 /// `503` with a `Retry-After`, for `why`.
-fn retry_later(why: &str) -> Response {
+pub(crate) fn retry_later(why: &str) -> Response {
     let mut resp = problem(StatusCode::SERVICE_UNAVAILABLE, Some(why));
     set(resp.headers_mut(), header::RETRY_AFTER, "5");
     resp

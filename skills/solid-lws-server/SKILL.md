@@ -290,27 +290,24 @@ What the server exposes, all discoverable from the storage description
   `storage`. A `purpose` constraint never holds, because the draft does not say how a
   request states its purpose. A `format` constraint compares media types as RFC 9110 does
   (case-insensitive type, subtype and parameter names, quoted or bare values, any parameter
-  order). The owner and a resource's creator are always allowed. A grant is in force at
-  boot only when its create was known to land: a create first stores a durable intent to
-  remove the record, creates it under an unsettled content type, stores it again under its
-  own, and puts it in force only once that intent is cleared (read back when clearing fails;
-  while it cannot be read, the create fails and the grant is settled from it later). So a
-  crash or a store failure with an unknown outcome leaves a new grant out of force, and the next
-  start removes it (before loading grants; a grant whose removal fails then is not read at all,
-  and is removed in the background, out of force meanwhile). Nothing a start puts back in the
-  background begins until every step of the start that can fail has succeeded. A revocation
-  removes the record in one step, and memory follows the store: the grant is out of force while
-  the removal runs, and stays out only once the removal is confirmed (it succeeded, or the store,
-  read again, no longer lists the record). The answer says only what is confirmed: `204` once
-  revoked; `500` "still in force" when, read again, the record is listed as it was; `500` "not
-  known" when it cannot be read again, with the grant left in force and the request open to
-  retry. Each record's own lock is held across its create and its revocation. An access request
-  is created and withdrawn the same way. A create refuses a name already stored. A stored grant
-  or request that cannot be read stops the start (a later start reads it again); one listed but
-  gone is skipped; one whose stored body is not a record is quarantined at every start until the
-  owner deletes it: it grants nothing, is listed and counts against its quota, and answers `500`
-  to a read. A request still being removed counts against the quota too. A create intent whose
-  write failed but may have landed is withdrawn, or set aside and withdrawn in the background.
+  order). The owner and a resource's creator are always allowed. Grants and access requests
+  are created and removed in one store step each, and memory follows the store: what the
+  container lists is what a start puts in force. A create takes the container (waiting at most
+  two seconds, then `503` with `Retry-After`) and the record's own lock, refuses a name already
+  stored, and writes the record. A write that reports a failure is checked against the listing:
+  listed, the create answers `201` and the record is in force; not listed, `500`; not known
+  (the listing cannot be read), `500` "not known" with the request open to retry, and the
+  record is put in force once the listing shows it. A revocation (or a request's withdrawal)
+  takes the grant out of force while the removal runs, and keeps it out only once the removal
+  is confirmed (it succeeded, or the store, read again, no longer lists the record): `204` once
+  revoked; `500` "still in force" when the record is still listed; `500` "not known" when it
+  cannot be read again, with the grant left in force. A record holds its place in the request
+  quota until the store confirms it is gone: while its create's outcome is not known and while
+  its withdrawal runs. Nothing a start puts back in the background begins until every step of
+  the start that can fail has succeeded. A stored grant or request that cannot be read stops
+  the start (a later start reads it again); one listed but gone is skipped; one whose stored
+  body is not a record is quarantined at every start until the owner deletes it: it grants
+  nothing, is listed and counts against its quota, and answers `500` to a read.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
