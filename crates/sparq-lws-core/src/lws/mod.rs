@@ -1472,8 +1472,8 @@ pub(crate) async fn within_wait<T>(
 /// - A write that succeeds registers the record. One that fails is checked against the listing
 ///   ([`still_listed`]): stored after all, it is registered; not stored, `register` (and the
 ///   quota place it holds) is dropped and the create fails; not known, the create answers that,
-///   and a task holding no lock but the quota place settles it from the listing once the store
-///   answers. A start loads whatever the listing holds.
+///   and a task holding the record's lock and the quota place settles it from the listing once
+///   the store answers, registering it under the container's lock, shared. A start loads whatever the listing holds.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_record<S, F>(
     state: &LwsState<S>,
@@ -1527,12 +1527,19 @@ where
             }
             Ok(false) => Err(e),
             Err(_) => {
-                // Settled holding the record's own lock (a revocation of it waits), never the
-                // container's.
+                // Settled holding the record's own lock (a revocation of it waits); the
+                // container's is taken only to register it.
                 let state = state.clone();
                 tokio::spawn(async move {
                     let _own = own;
                     if until_done(|| still_listed(&state.store, &iri, &container)).await {
+                        // Registered under the container's lock, shared (taken after the
+                        // record's, as a revocation takes them), so no conditional create sees
+                        // the listing change between its check and its own registration. This
+                        // task holds no admission, so it may wait for it.
+                        let _listing =
+                            until_done(|| async { state.locks.read(&container).await.ok_or(()) })
+                                .await;
                         register();
                     }
                 });

@@ -2338,6 +2338,36 @@ mod tests {
         assert_eq!(state.access.grant_policies().len(), 2);
     }
 
+    /// Review finding: a create whose outcome was settled later registered it without the
+    /// container's lock, so the listing could change under a conditional create holding the
+    /// container. It is registered only once it holds the container's lock, shared.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_settled_create_registers_under_the_container_lock() {
+        use std::sync::atomic::Ordering;
+        let (state, store) = test_store::state(100).await;
+        let container = state.cfg.absolute(GRANTS_PATH);
+        let post = test_store::request(
+            Method::POST,
+            GRANTS_PATH,
+            &[],
+            &access_doc("AccessGrant", "https://a/", None),
+        );
+        store.fail_after_create.store(true, Ordering::SeqCst);
+        store.fail_list.store(true, Ordering::SeqCst);
+        let r = handle(&state, &post, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let held = state.locks.lock(&container).await.expect("held");
+        store.fail_after_create.store(false, Ordering::SeqCst);
+        store.fail_list.store(false, Ordering::SeqCst);
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(state.access.grant_policies().is_empty());
+        drop(held);
+        eventually("the stored grant is put in force", || {
+            state.access.grant_policies().len() == 1
+        })
+        .await;
+    }
+
     /// Review finding: a request whose create was not known to be stored gave its place back,
     /// and one being withdrawn left the count while it was still stored, so concurrent creates
     /// could hold more than their share. A place is held until the store confirms it is free.
