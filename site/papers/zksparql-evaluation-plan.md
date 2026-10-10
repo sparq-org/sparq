@@ -128,3 +128,19 @@ For each mode and cryptosuite:
   BN254 field element derived from the root, quad count, tree depth and proof-configuration digest.
 - Modes: the Noir path supports `hidden` and `revealed`. The RISC Zero V5 path supports `hidden`
   today; `revealed` is next.
+
+## 9. Canonical main-body queries (fixed by ZK code landing, 10 October 2026)
+
+All five use the 16-statement payment credential behind the payment `ASK` evidence: three settled
+`xsd:decimal` payments, signed with `eddsa-rdfc-2022`.
+
+- Q1 `ASK`: is any payment's status `bank:Returned`? (false)
+- Q2 `SELECT ?amount` over a two-pattern BGP; a bag, because two amounts are equal.
+- Q3 `CONSTRUCT` over the same BGP.
+- Q4 `FILTER(?amount > 1300.00)`.
+- Q5 `FILTER(STRSTARTS(STR(?p), "https://bank.example/payments/2026-07"))`: a string comparison
+  over `STR` of an IRI, since the credential has no plain string literal. A comparison on a string
+  literal belongs in the appendix sweep.
+
+The Merkle-root suite now has two members: `eddsa-sha256-merkle-2026` (zkVM, built into V5) and a
+Poseidon2 member specified for Noir.
