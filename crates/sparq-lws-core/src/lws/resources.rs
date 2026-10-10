@@ -1335,6 +1335,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     // Repeats are found with a set, as in [`content_types`].
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
+    let mut targets = 0usize;
     for (target, params) in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = params.get("rel") else {
             continue;
@@ -1367,6 +1368,18 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
             } else if !STRUCTURAL_RELATIONS.contains(&key.as_str())
                 && seen.insert((key.clone(), resolved.clone()))
             {
+                // Held to the caps a linkset PATCH holds its result to, so the linkset these
+                // links make can always be patched.
+                targets += 1;
+                if key.len() > MAX_LINKSET_FIELD
+                    || resolved.len() > MAX_LINKSET_FIELD
+                    || targets > MAX_LINKSET_TARGETS
+                {
+                    return Err(problem(
+                        StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+                        Some("the Link header declares more than a linkset may hold"),
+                    ));
+                }
                 links.entry(key).or_default().push(resolved.clone());
             }
         }
@@ -2575,15 +2588,38 @@ fn serialized_size(v: &Value) -> usize {
 /// and `ops` hold their numbers as text ([`read_numbers_as_text`]): a string starting with
 /// [`NUMBER_MARK`] is a number here, so this is private to the module that reads them so.
 fn json_patch(target: &Value, ops: &Value, budget: usize) -> Result<Value, PatchError> {
+    json_patch_within(target, ops, budget, 0)
+}
+
+/// [`json_patch`], with every value the document holds charged `per_value` bytes beyond its
+/// serialized size: what a value costs in memory, however short its serialized form. The
+/// target is charged before it is copied, and each value an operation adds before it is
+/// cloned, so a patch past the budget allocates nothing to find that out.
+fn json_patch_within(
+    target: &Value,
+    ops: &Value,
+    budget: usize,
+    per_value: usize,
+) -> Result<Value, PatchError> {
+    let json_size = |v: &Value| {
+        let bytes = json_size(v);
+        if per_value == 0 {
+            return bytes;
+        }
+        bytes.saturating_add(json_values(v).saturating_mul(per_value))
+    };
     use PatchError::Failed;
     let ops = validate_json_patch(ops)?;
     if ops.len() > MAX_PATCH_OPS {
         return Err(PatchError::TooLarge);
     }
-    let mut doc = target.clone();
     // The document's size, kept as an upper bound: every operation that adds checks the budget
-    // before it clones or inserts anything.
-    let mut size = json_size(&doc);
+    // before it clones or inserts anything, and the target is checked before it is copied.
+    let mut size = json_size(target);
+    if size > budget {
+        return Err(PatchError::TooLarge);
+    }
+    let mut doc = target.clone();
     // The work done, in bytes measured, cloned or compared: a patch within the size budget can
     // still repeat costly operations (a copy of a large value over itself, again and again), so
     // the total is held to a budget of its own.
@@ -2996,21 +3032,39 @@ impl Patch {
         match self {
             Patch::Json(ops) => json_patch(target, ops, budget),
         }
-        .map_err(|e| match e {
-            PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
-            PatchError::Failed => problem(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Some("the JSON Patch cannot be applied"),
-            ),
-            PatchError::TooLarge => problem(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                Some("the patched document would be too large"),
-            ),
-            PatchError::TooDeep => problem(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Some("the patched document would nest too deeply"),
-            ),
-        })
+        .map_err(patch_refused)
+    }
+
+    /// [`Patch::apply`], charging each value `per_value` bytes too ([`json_patch_within`]).
+    fn apply_within(
+        &self,
+        target: &Value,
+        budget: usize,
+        per_value: usize,
+    ) -> Result<Value, Response> {
+        match self {
+            Patch::Json(ops) => json_patch_within(target, ops, budget, per_value),
+        }
+        .map_err(patch_refused)
+    }
+}
+
+/// The response to a JSON Patch that cannot be applied.
+fn patch_refused(e: PatchError) -> Response {
+    match e {
+        PatchError::Malformed(why) => problem(StatusCode::BAD_REQUEST, Some(why)),
+        PatchError::Failed => problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("the JSON Patch cannot be applied"),
+        ),
+        PatchError::TooLarge => problem(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Some("the patched document would be too large"),
+        ),
+        PatchError::TooDeep => problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some("the patched document would nest too deeply"),
+        ),
     }
 }
 
@@ -3424,6 +3478,16 @@ const LINKSET_PATCH_BYTES: usize = super::MAX_META_BYTES;
 /// what the linkset itself may be.
 const LINKSET_COST_BUDGET: usize = 4 * LINKSET_PATCH_BYTES;
 
+/// The most values a JSON text of these bytes can hold: each value after the first follows a
+/// `,` or opens with `[` or `{` (or a member's `:`), so a count of those bytes, wherever they
+/// are, bounds them without parsing anything.
+fn values_bound(json: &[u8]) -> usize {
+    1 + json
+        .iter()
+        .filter(|b| matches!(b, b',' | b'[' | b'{' | b':'))
+        .count()
+}
+
 /// Restore, in place, the strings of a document read with its numbers as text
 /// ([`read_numbers_as_text`]): `false` when it holds a number.
 fn strings_without_numbers(v: &mut Value) -> bool {
@@ -3803,7 +3867,13 @@ async fn linkset<S: Store + 'static>(
             // before it is parsed, and applied within it. Every copy the handler then makes
             // (the patched document, its resolved form, the indexed links, the rebuilt metadata)
             // is of a document held to that size, a fixed number of times.
-            if req.body.len() > LINKSET_PATCH_BYTES {
+            // The patch is held, before it is parsed, to what parsing it may allocate: every value
+            // it can hold (one per separator or opening bracket, counted from its bytes) charged
+            // as `linkset_cost` charges it.
+            let parsed_cost = values_bound(&req.body)
+                .saturating_mul(LINKSET_OVERHEAD)
+                .saturating_add(req.body.len());
+            if req.body.len() > LINKSET_PATCH_BYTES || parsed_cost > LINKSET_COST_BUDGET {
                 return problem(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     Some("a linkset patch is at most the size of a resource's metadata"),
@@ -3831,7 +3901,10 @@ async fn linkset<S: Store + 'static>(
             let Some(held) = held else {
                 return problem(StatusCode::INTERNAL_SERVER_ERROR, None);
             };
-            let mut patched = match patch.apply(&held, LINKSET_PATCH_BYTES) {
+            // Applied within the cost budget with every value charged as `linkset_cost` charges
+            // it, so no clone the patch makes is past what resolving the result may cost.
+            let mut patched = match patch.apply_within(&held, LINKSET_COST_BUDGET, LINKSET_OVERHEAD)
+            {
                 Ok(v) => v,
                 Err(r) => return r,
             };
@@ -4357,6 +4430,29 @@ mod tests {
         assert_eq!(doc["linkset"][0]["license"][0]["title"], "\u{E000}5");
     }
 
+    /// Every value is charged before it is copied: a compact array is refused for what it holds,
+    /// before the target or a copy of it is cloned.
+    #[test]
+    fn a_weighted_patch_charges_values_before_cloning_them() {
+        let many = Value::Array(vec![json!(""); 1000]);
+        let doc = json!({"a": many});
+        let none = json!([]);
+        let bytes = json_size(&doc);
+        assert!(json_patch_within(&doc, &none, bytes, 0).is_ok());
+        assert_eq!(
+            json_patch_within(&doc, &none, bytes, 64),
+            Err(PatchError::TooLarge)
+        );
+        let small = json!({"a": []});
+        let copy = json!([{"op": "add", "path": "/b", "value": many}]);
+        let budget = json_size(&small) + 64 * json_values(&small) + 1000 * 3;
+        assert_eq!(
+            json_patch_within(&small, &copy, budget, 64),
+            Err(PatchError::TooLarge)
+        );
+        assert!(json_patch_within(&small, &copy, budget, 0).is_ok());
+    }
+
     /// Review finding: a linkset patch was applied, written out and parsed again before its size
     /// was checked, so one adding a target with half a million empty extension strings took tens
     /// of MiB; and metadata past its size limit was answered as nesting too deeply. A linkset
@@ -4370,6 +4466,14 @@ mod tests {
         let ops = format!(
             r#"[{{"op":"add","path":"/linkset/0/license","value":[{{"href":"https://ex.org/l","ext":[{empties}]}}]}}]"#
         );
+        let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
+        assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // Within the body limit, but holding more values than parsing it may allocate.
+        let empties = vec!["\"\""; 60_000].join(",");
+        let ops = format!(
+            r#"[{{"op":"add","path":"/linkset/0/license","value":[{{"href":"https://ex.org/l","ext":[{empties}]}}]}}]"#
+        );
+        assert!(ops.len() < LINKSET_PATCH_BYTES);
         let r = call(&st, "PATCH", &meta, &[("content-type", JSON_PATCH)], &ops).await;
         assert_eq!(r.status(), StatusCode::PAYLOAD_TOO_LARGE);
         // Within the body limit, but copied past the metadata's size.
@@ -4417,6 +4521,39 @@ mod tests {
             .unwrap();
         assert_eq!(mine["license"][0]["href"], "https://ex.org/l");
         assert!(Resolved::stored(json!({"linkset": [{"anchor": ["x"]}]})).is_none());
+    }
+
+    /// Review note: links a create accepted could make a linkset no PATCH could keep. A Link
+    /// header is held to the same caps as a patched linkset.
+    #[tokio::test]
+    async fn a_link_header_is_held_to_the_linkset_caps() {
+        let st = state().await;
+        let long = format!(
+            "<https://ex.org/{}>; rel=\"license\"",
+            "a".repeat(MAX_LINKSET_FIELD)
+        );
+        let r = call(
+            &st,
+            "POST",
+            "/",
+            &[("content-type", "text/plain"), ("link", &long)],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
+        let many = (0..=MAX_LINKSET_TARGETS)
+            .map(|i| format!("<https://e.org/{i}>; rel=\"license\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let r = call(
+            &st,
+            "POST",
+            "/",
+            &[("content-type", "text/plain"), ("link", &many)],
+            "x",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE);
     }
 
     #[tokio::test]
