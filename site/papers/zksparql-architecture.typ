@@ -924,8 +924,8 @@ Realistic credentials, the cost measurements and an external audit remain to be 
 
 == What an accepted presentation shows <app-relation>
 
-We argue informally that, under assumptions A1 to A5 below, an accepted presentation means what
-§#ref(<meaning>, supplement: none) says.
+For a zkVM proof method in the hidden or revealed mode, we argue informally that, under assumptions
+A1 to A5 below, an accepted presentation means what §#ref(<meaning>, supplement: none) says.
 
 *Relation.* Let $Q$ be the query of the request whose request digest is a public input
 (§#ref(<linkage>, supplement: none)). The witness consists of the credentials, a salt and, in the
@@ -955,8 +955,8 @@ hidden mode, the credentials' signatures. Public inputs and witness satisfy the 
 / A4: The verifier service performs the checks of §#ref(<validation>, supplement: none) against its
   stored request, with the image ID from its own configuration, and takes the result only from the
   journal.
-/ A5: The cryptosuite's signatures are unforgeable, and only the issuer named in a key's entry can
-  sign under that key.
+/ A5: The cryptosuite's signatures are unforgeable, each listed key belongs to the issuer that its
+  entry names, and that issuer keeps the private key secret.
 
 Tests support A2 and A4 (Appendix #ref(<app-inventories>, supplement: none)); A1, A3 and A5 concern
 the proof system, the hash function and the issuers.
@@ -973,16 +973,17 @@ For a Supported answer, each returned row $mu$ is in $[| Q' |]_D$. As $Q'$ is a 
 is also in $[| Q' |]_(D')$ for every dataset $D'$ that contains $D$ graph by graph, so the row stays
 a solution when the holder's other credentials are added.
 
-In the prototype, the guest program's request holds a SHA-256 hash of the stored request and its
-proof-method entry (§#ref(<capabilities>, supplement: none)). Under A3, the journal therefore also
-binds the challenge, audience and validity period.
+In the prototype, the journal binds the stored request through a SHA-256 hash
+(§#ref(<capabilities>, supplement: none)), so under A3 it also binds the challenge, audience and
+validity period.
 
 *Public inputs computable from the result.* Suppose the pattern of $Q$ is a single basic graph
-pattern without blank nodes, and a returned row $mu$ binds all its variables. Then $mu$ is a
-solution over $D$ exactly when, for each triple pattern $t$, $mu(t)$ is in the default graph of $D$.
-A circuit that takes each $mu(t)$ as a public input, and checks that it is in $D$ and signed,
-therefore shows the same statement as one that finds these triples in its witness. It discloses
-nothing that the verifier cannot compute from $mu$. The baseline and public-triple circuits of
+pattern without blank nodes, and a returned row binds each of its variables to an IRI or a literal.
+The row is then a solution of the pattern over $D$ exactly when every triple obtained by
+substituting the row into the pattern is in the default graph of $D$. A circuit that takes these
+triples as public inputs, and checks that each is in $D$ and signed, therefore shows the same
+statement as one that finds them in its witness. It discloses nothing that the verifier cannot
+compute from the row. The baseline and public-triple circuits of
 §#ref(<pilot-evidence>, supplement: none) differ in exactly this way.
 
 == Test cases per experiment <app-inventories>
@@ -990,8 +991,8 @@ nothing that the verifier cannot compute from $mu$. The baseline and public-trip
 @test-cases-table shows the Exact answers that each zkVM experiment of @evidence-table proved, by
 input kind. The inputs were small synthetic graphs or, with signature checks, the W3C test vector
 for `eddsa-rdfc-2022` and the payment credential of §#ref(<v5-evidence>, supplement: none). The
-supplementary material lists every test and negative test (§#ref(<supp-records>, supplement: none))
-and every source commit and guest binary (§#ref(<repro>, supplement: none)).
+supplementary material gives the tests and negative tests (§#ref(<supp-records>, supplement: none)),
+and the source commits and guest binaries (§#ref(<repro>, supplement: none)).
 
 #[
 #show figure: set block(breakable: false)
@@ -1021,8 +1022,8 @@ and every source commit and guest binary (§#ref(<repro>, supplement: none)).
   caption: [
     Exact answers proved, by input kind: H holder-declared, V verifier-agreed; an entry may stand
     for several receipts. The columns are the rows of @evidence-table with receipts: the
-    evaluator's CI build and its run with our services; with signature checks, the first test case,
-    the payment question and the remaining test cases. † No internal check.
+    evaluator's CI build, the evaluator with our services and, with signature checks, the first test
+    case, the payment question and the remaining test cases. † No internal check.
   ],
 ) <test-cases-table>
 ]
@@ -1071,7 +1072,7 @@ status or holder binding.
         mode], [Schnorr signatures over Baby Jubjub, inside the proof],
       [Credential status], [Not checked], [Not checked], [Checked against a snapshot that the
         verifier accepted],
-      [Presentations of the specification], [Through our services, in a binary encoding], [Same],
+      [Presentations of the specification], [Not yet: our services use a binary encoding], [Same],
         [Not yet: no dataset commitment],
     )
   },
@@ -1079,29 +1080,29 @@ status or holder binding.
 ) <methods-table>
 ]
 
-*Request formats.* The evaluator reads requests in three formats, each extending the one before: the
-default-graph format; the named-graph format, which adds named graphs, `GRAPH`, `FROM` and
-`FROM NAMED`; and the graph-result format, which adds `CONSTRUCT`, `DESCRIBE` and blank nodes in the
-input and the result. Both builds use the graph-result format behind our services. The services
-encode the query request in binary rather than in the specification's JSON, compute the request
-digest over that encoding, and store times as Unix seconds.
+*Request formats.* The CI build of the evaluator read requests in three formats, each extending the
+one before: the default-graph format; the named-graph format, which adds named graphs, `GRAPH`,
+`FROM` and `FROM NAMED`; and the graph-result format, which adds `CONSTRUCT`, `DESCRIBE` and blank
+nodes in the input and the result. Behind our services, both builds use the graph-result format, and
+the current evaluator rejects `FROM` and `FROM NAMED` (§#ref(<prototype>, supplement: none)). The
+services encode the query request in binary rather than in the specification's JSON, compute the
+request digest over that encoding, and store times as Unix seconds.
 
-*How the stored request reaches the proof.* The holder service puts a SHA-256 hash of the stored
-request and of its proof-method entry into the request it gives the guest program. That request also
-carries the query, the input kind and any agreed commitment. The guest program writes the digest of
-this request to the journal, and the verifier service recomputes the digest from its own copies. The
-journal therefore binds every member of the stored request, including the challenge, audience and
-validity period. With signature checks, the proof-method entry contains a digest of the accepted
-issuer keys and evaluation limits, so changing any key, issuer or verification method changes the
-entry.
+*How the stored request reaches the proof.* The holder service gives the guest program the query,
+the input kind, any agreed commitment, the evaluation limits and a SHA-256 hash of the stored
+request and its proof-method entry. The guest program writes a digest of these values to the
+journal, and the verifier service recomputes it from its own copies. The journal therefore binds
+every member of the stored request, including the challenge, audience and validity period. With
+signature checks, the proof-method entry contains a digest of the request's issuer keys and the
+evaluation limits, so changing any key, issuer or verification method changes the entry.
 
 *Dataset commitments.* Without signature checks, the evaluator commits with SHA-256 to a format tag,
 its capacity limits, the salt, the names of any named graphs and the exact bytes of the N-Triples or
 N-Quads input. It does not canonicalise the input, so equivalent serialisations give different
-commitments. With signature checks, the commitment covers the digest of the accepted issuer keys and
-evaluation limits, the salt, the number of credentials and, for each credential, the hashes of the
-canonical document and proof configuration that the issuer signed. A commitment agreed under one
-list of issuer keys therefore cannot serve another.
+commitments. With signature checks, the commitment covers the digest of the request's issuer keys
+and the evaluation limits, the salt, the number of credentials and, for each credential, the hashes
+of the canonical document and proof configuration that the issuer signed. A commitment agreed under
+one list of issuer keys therefore cannot serve another.
 
 == Experiment records <supp-records>
 
@@ -1130,8 +1131,9 @@ tests.
       [Proofs from re-execution], [#headline("zkvcq.exact_replay_proofs")],
       table.cell(colspan: 2)[_Evaluator with signature checks: tests_],
       [Tests passed, outside the zkVM], [#headline("zkvcq.v5_auth_tests_passed")],
-      [Of these, new integration tests], [#headline("zkvcq.v5_new_integration_tests")],
-      [Of these, new unit tests], [#headline("zkvcq.v5_new_unit_tests")],
+      [Of these, integration tests of the signature checks],
+        [#headline("zkvcq.v5_new_integration_tests")],
+      [Of these, unit tests of the signature checks], [#headline("zkvcq.v5_new_unit_tests")],
       [Proofs], [#headline("zkvcq.v5_proofs")],
       table.cell(colspan: 2)[_Evaluator with signature checks: executed directly_],
       [Tests passed, outside the zkVM], [#headline("zkvcq.v5g_native_tests_passed")],
@@ -1159,7 +1161,7 @@ tests.
 
 A CI job built the evaluator and its guest program from source with locked dependencies. It ran the
 evaluator's tests, then the tests that run the guest program, one at a time. These produced
-#headline("zkvcq.exact_hosted_receipts") receipts, for these queries:
+#headline("zkvcq.exact_hosted_receipts") receipts, one for each of these queries:
 
 - in the default-graph format, a `SELECT` with `UNION` and `VALUES` whose result keeps duplicate
   rows and an unbound value (holder-declared); a `SELECT` with a counting subquery, `OPTIONAL`,
@@ -1173,9 +1175,9 @@ evaluator's tests, then the tests that run the guest program, one at a time. The
   that creates fresh blank nodes (verifier-agreed).
 
 Each test compares the journal with the result of the evaluator run outside the zkVM. Some also
-check that verification fails after a change to the query, the request's limits, the input kind or
-the agreed commitment, after a journal byte is flipped, under another image ID and for a fake
-receipt, and that a second verification of the same receipt fails as a replay.
+check that verification fails after a change to the query, the request's limits, the input kind, the
+agreed commitment or one journal byte. They also check that it fails under another image ID and for
+a fake receipt, and that a second verification of the same receipt fails as a replay.
 
 Our services ran a separately built guest program of the same evaluator on another machine
 (§#ref(<repro>, supplement: none)). Their test cases query a small synthetic graph in which triples
@@ -1183,24 +1185,25 @@ share an object, so the `SELECT` result has duplicate rows.
 
 === The evaluator with signature checks <supp-signed>
 
-Three runs tested this build without proving (@tests-table). Its tests outside the zkVM use the W3C
-test vector and synthetic keys. They cover valid signatures under the wrong issuer, verification
-method, proof purpose or cryptosuite, the signed lexical forms, each credential's blank-node scope,
-the binding of the accepted issuer keys into the request and the commitment, and `SELECT`, `ASK` and
-`CONSTRUCT` under both input kinds. Executed directly, the guest program accepted the test vector
-under both input kinds. Besides the altered credentials of §#ref(<v5-evidence>, supplement: none),
-it rejected input that was not in canonical form or used another encoding. A positive control
-preceded each group of negative tests. The evaluator without signature checks rejected input meant
-for this build and still accepted its own. The tests of our services check that changing any
-accepted key, issuer, verification method or limit changes every digest, while reordering the keys
-does not. They also check that a mismatched proof-method entry, guest program or image ID, and a
-fake or foreign receipt, are rejected before the request is marked as answered.
+@tests-table lists the runs that tested this build without proving. Its tests outside the zkVM use
+the W3C test vector and synthetic keys. They check that valid signatures under the wrong issuer,
+verification method, proof purpose or cryptosuite are rejected, and that signed lexical forms and
+each credential's blank-node scope are kept. They also check that the request's issuer keys are
+bound into the request and the commitment, and they evaluate `SELECT`, `ASK` and `CONSTRUCT` under
+both input kinds. Executed without proving, the guest program accepted the test vector under both
+input kinds. Besides the altered credentials of §#ref(<v5-evidence>, supplement: none), it rejected
+input that was not in canonical form or used another encoding. A positive control preceded each
+group of negative tests. The evaluator without signature checks rejected input meant for this build
+and still accepted its own. The tests of our services check that changing a listed key, issuer,
+verification method or limit changes the proof-method entry's digest and the digest in the journal,
+while reordering the keys does not. They also check that a mismatched proof-method entry, guest
+program or image ID, and a fake or foreign receipt, are rejected before the request is marked as
+answered.
 
 The receipts came from three experiments (Appendix #ref(<app-inventories>, supplement: none)), with
-different machines and guest binaries (§#ref(<repro>, supplement: none)). The internal check of the
-first test case found #headline("zkvcq.vcqg_source_files_verified") source files unchanged during
-the run and equal to the repository's. It recomputed the hashes of the receipt, the journal and
-#headline("zkvcq.vcqg_archive_verified_files") archived files.
+different machines and guest binaries (§#ref(<repro>, supplement: none)). For the first test case,
+the internal check covered #headline("zkvcq.vcqg_source_files_verified") source files, unchanged
+during the run, and #headline("zkvcq.vcqg_archive_verified_files") archived files.
 
 === Negative tests <supp-negative>
 
@@ -1231,9 +1234,9 @@ test case, so none produced a proof. A store in memory recorded which requests w
       [Another proof-method entry digest], [#headline("zkvcq.ctl_wrong_descriptor_digest")], [Yes],
       [Receipt checked against the other build's image ID], [–], [Yes],
       table.cell(colspan: 3)[_Issuer keys and limits held by the verifier_],
-      [Another key, issuer or verification method, an added key, or a lower row capacity; each with
-        the presentation unchanged, and with its proof-method entry digest replaced to match], [–],
-        [Yes],
+      [Another key, issuer or verification method, an added key, or a lower evaluation limit; each
+        with the presentation unchanged, and with its proof-method entry digest replaced to match],
+        [–], [Yes],
       table.cell(colspan: 3)[_Input kind and commitment_],
       [Holder-declared proof for a verifier-agreed request],
         [#headline("zkvcq.ctl_scope_holder_to_agreed")], [Holder-declared receipts],
@@ -1274,11 +1277,13 @@ and policy that the verifier accepted. The status roots, salts and positions sta
 verifier obtains the status snapshot, and how fresh it is, are left to the deployment. Their tests
 cover a finite set of valid and absent matches and of adversarial witnesses.
 
-// Paired differences (public-triple minus baseline) and "median (range)" cells of the pilot.
-#let pairs = range(1, headline("zkvcq.pp_measured_pairs") + 1)
-#let prove-diffs = pairs.map(i => ev("zkvcq.pilot_pair" + str(i) + "_prove_diff"))
-#let verify-diffs = pairs.map(i => ev("zkvcq.pilot_pair" + str(i) + "_verify_diff"))
+// "Median (range)" cells of the pilot, and the per-pair differences (public-triple minus baseline):
+// pairs 1 to n ran one credential and pairs n + 1 to 2n two, with n timed runs per cell. Every value
+// is looked up; nothing is computed from the values.
 #let pilot-cell(stem) = [#pilot(stem + "_median") (#pilot(stem + "_min")–#pilot(stem + "_max"))]
+#let per-cell = headline("zkvcq.pp_n_per_cell")
+#let pilot-diffs(kind, first) = range(first, first + per-cell).map(i => pilot(
+  "zkvcq.pilot_pair" + str(i) + "_" + kind + "_diff")).join(", ")
 
 #block(inset: 8pt, stroke: 0.5pt + gray, width: 100%, breakable: false)[
   *Preliminary timings.* We timed #headline("zkvcq.pp_n_per_cell") runs per circuit and number of
@@ -1296,21 +1301,20 @@ cover a finite set of valid and absent matches and of adversarial witnesses.
         pilot-cell("zkvcq.pilot_k1_v1_verify"),
       [One], [Public-triple], pilot-cell("zkvcq.pilot_k1_v4_prove"),
         pilot-cell("zkvcq.pilot_k1_v4_verify"),
+      [One], [Difference per pair], [#pilot-diffs("prove", 1)], [#pilot-diffs("verify", 1)],
       [Two], [Baseline], pilot-cell("zkvcq.pilot_k2_v1_prove"),
         pilot-cell("zkvcq.pilot_k2_v1_verify"),
       [Two], [Public-triple], pilot-cell("zkvcq.pilot_k2_v4_prove"),
         pilot-cell("zkvcq.pilot_k2_v4_verify"),
+      [Two], [Difference per pair], [#pilot-diffs("prove", 1 + per-cell)],
+        [#pilot-diffs("verify", 1 + per-cell)],
     ),
     caption: [Preliminary prove and verify times of the circuit pilot
-      (§#ref(<pilot-evidence>, supplement: none)).],
+      (§#ref(<pilot-evidence>, supplement: none)): median and range per circuit, and the difference,
+      public-triple minus baseline, for each pair of runs.],
   ) <pilot-table>
 
-  Paired differences, public-triple minus baseline, ranged from #fmt3(calc.min(..prove-diffs)) to
-  #fmt3(calc.max(..prove-diffs)) s for proving, negative in
-  #prove-diffs.filter(x => x < 0).len() of #prove-diffs.len() pairs, and from
-  #fmt3(calc.min(..verify-diffs)) to #fmt3(calc.max(..verify-diffs)) s for verifying, negative in
-  #verify-diffs.filter(x => x < 0).len() of #verify-diffs.len() pairs. The largest verifying
-  difference came from one slow baseline run.
+  The verifying difference of largest magnitude came from one slow baseline run.
 ]
 
 == An earlier fixed-circuit design <legacy>
@@ -1318,11 +1322,11 @@ cover a finite set of valid and absent matches and of adversarial witnesses.
 Before the zkVM evaluator, we built a family of Noir circuits with one kind of circuit per operator.
 It proves that each returned solution is a solution, as a Supported answer does, for `SELECT` and
 `ASK` queries built from basic graph patterns, joins and numeric `FILTER`s, with projection,
-`DISTINCT`, `REDUCED`, `LIMIT` and `OFFSET`. It excludes `OPTIONAL`, `MINUS`, `NOT EXISTS`,
-aggregates and `ORDER BY`, because more data could change their results. It also rejects a join that
-binds a shared variable to blank nodes from two credentials, because a blank node is scoped to its
-graph. The baseline and public-triple circuits of §#ref(<supp-pilot>, supplement: none) are later
-members of this family.
+`DISTINCT`, `REDUCED`, `LIMIT` and `OFFSET`. It excludes `OPTIONAL`, `MINUS`, `NOT EXISTS` and
+aggregates, whose results more data could invalidate, and `ORDER BY`, whose order it does not prove.
+It also rejects a join on blank nodes from two credentials, because each credential's blank nodes
+are scoped to it. The baseline and public-triple circuits of §#ref(<supp-pilot>, supplement: none)
+are later members of this family.
 
 The issuer canonicalises each credential's graph with RDFC-1.0, commits to it with Poseidon2 over
 the BN254 scalar field, and signs the commitment with a Schnorr signature over Baby Jubjub.
@@ -1354,7 +1358,7 @@ challenge once. @legacy-table gives the sizes of the circuits.
       [Credential not revoked], [#headline("zkarch.gates_revoke")],
       [Hidden issuer: Schnorr signature and key-list membership],
         [#headline("zkarch.gates_hidden_issuer")],
-      [Hidden holder; not yet sound], [#headline("zkarch.gates_holder_pok")],
+      [Hidden holder; does not yet establish holder binding], [#headline("zkarch.gates_holder_pok")],
     )
   },
   caption: [
@@ -1369,28 +1373,29 @@ challenge once. @legacy-table gives the sizes of the circuits.
 An internal review of an earlier version of this verifier found
 #headline("cozk.single_prover_audit_issues") issues. Among them were public inputs it did not
 reconstruct, verification keys taken from the prover, unsigned commitments, replayable manifests and
-`FILTER` operators not bound to the query. For #headline("zkarch.forge_findings_mapped") of them, a
-regression test now builds the forgery and expects rejection. The circuits for a hidden holder are
-not yet sound and are off by default. The design cannot prove Exact answers, checks the standard
-cryptosuites only outside the circuit, and hides every term that an operator uses. Exact answers,
-signature checks inside the proof and the public-input rule address these limits.
+`FILTER` operators not bound to the query. A regression test that builds the forgery and expects
+rejection now covers #headline("zkarch.forge_findings_mapped") of them. The circuits for a hidden
+holder do not yet establish holder binding and are off by default. The design cannot prove Exact
+answers, checks the standard cryptosuites only outside the circuit, and hides every term that an
+operator uses. Exact answers, signature checks inside the proof and the public-input rule address
+these limits.
 
 == Combining BBS+ proofs with circuits <composition>
 
 A tempting design verifies BBS+-signed credentials with BBS+ proofs, disclosing public terms, and
 passes hidden values to a circuit for conditions that BBS+ proofs cannot express. A shared challenge
 does not bind the two proofs: it shows that both belong to one exchange, not that they concern the
-same value. Binding them needs a commitment to each hidden value that both proof systems open
-consistently, a fixed encoding of bytes into field elements, range checks where the fields differ,
-domain separation, and an argument that knowledge soundness holds for the combination. We have not
-built this binding.
+same value. One way to bind them is to prove in both systems that the proofs use the same committed
+hidden value, with one encoding of bytes into field elements, range checks where the fields differ,
+and domain separation. This also needs an argument that knowledge soundness holds for the
+combination. We have not built this binding.
 
 We built two experimental parts. The first combines BBS+ signatures over BLS12-381 with Circom
 circuits proved with LegoGroth16 over the same field. The second uses BBS+ proofs alone to show that
-the triples of one basic graph pattern, rebuilt from public terms, are signed by an issuer that the
-verifier lists and are not revoked. It discloses which signed messages it uses and their status
-references, supports no condition on hidden values, has no link to the Noir circuits and evaluates
-no other SPARQL.
+the triples of one basic graph pattern, rebuilt from public terms, come from credentials signed by
+an issuer that the verifier lists, none of which the status list marks as revoked. It discloses
+which signed messages it uses and their status references, supports no condition on hidden values,
+has no link to the Noir circuits and evaluates no other SPARQL.
 
 In one CI run over a finite set of test cases, the second part produced
 #headline("zkvcq.nc_distinct_proofs") distinct BBS+ proofs under
