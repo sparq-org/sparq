@@ -61,6 +61,17 @@ export const SPECS: Spec[] = [
       "Proving SPARQL query answers over committed RDF graphs in zero knowledge, transcribed from the sparq codebase — an explicit threat model, the committed data model (RDFC-1.0 + Poseidon2/BN254 sponge, Schnorr/Baby-Jubjub attestation), a scoped query fragment and circuit family with a per-construct disposition table plus phase-gated property-path and expression extensions, the ProofManifest member schema, and the fail-closed verifier obligations and four audit gates. Research-grade and NOT externally audited (sq-qhy4).",
   },
   {
+    slug: "zksparql-answers",
+    source: "zksparql-answers.typ",
+    title: "Zero-Knowledge SPARQL Answers: Request and Presentation Data Model",
+    shortName: "zksparql-answers",
+    status: "unofficial",
+    date: "2026-10-10",
+    editors: "Jesse Wright · the sparq project",
+    blurb:
+      "The query request a verifier service sends and the answer presentation a holder service returns, as RDF with a JSON-LD serialization, a companion context and a vocabulary: the SPARQL 1.2 query, the trusted issuers, accepted cryptosuites and proof methods, hidden or revealed signatures, an optional agreed input dataset, and the result with its proof as a verifiable presentation. Includes a check against OpenID for Verifiable Presentations 1.0. Proof methods plug in by IRI, zero-knowledge or not; the ones built so far are research prototypes without an external audit.",
+  },
+  {
     slug: "zk-merkle-cryptosuite",
     source: "zk-merkle-cryptosuite.typ",
     title: "Merkle-Root Cryptosuites for RDF Verifiable Credentials",
