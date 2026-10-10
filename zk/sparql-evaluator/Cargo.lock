@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base16ct",
  "digest 0.10.7",
@@ -2321,7 +2321,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf 0.3.3",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "md-5",
  "oxiri",
@@ -2387,7 +2387,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-query-protocol"
-version = "0.1.4"
+version = "0.1.5"
 
 [[package]]
 name = "sparq-spargebra"
@@ -2403,7 +2403,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf 0.3.3",

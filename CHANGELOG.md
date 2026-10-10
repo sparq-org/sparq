@@ -7,14 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-10
+
+Fix-forward release after the v0.1.4 release workflow failed before creating a GitHub
+Release (no v0.1.4 assets, npm or PyPI packages were published). Publication is not
+implied by this entry; verify the tagged run and every registry and release artifact.
+
+### Fixed
+
+- **Release pipeline:** the Windows matrix rows write their archive, binary and GUI bundle
+  digests in text mode (`<hex>  <name>`). Git Bash's binary-mode `*<name>` record failed the
+  archive-digest collector, which stopped the v0.1.4 run before provenance and the GitHub
+  Release. (#6717)
+- **sparq-policy / sparq-solid (ODRL):** hardened ODRL policy evaluation and the ODRL
+  authorization bridge. Some policies accepted by v0.1.4 are now rejected at parse time.
+  (#6734, #6737)
+- **sparq-solid:** a SPARQL Update's WHERE clause is now evaluated against the session's read
+  view, the same as a query, and graphs named in `USING` / `USING NAMED` need Read access.
+  (#6763)
+- **sparq-solid:** a SPARQL Update request with more than one operation can no longer include a
+  `DELETE`/`INSERT … WHERE` with a variable `GRAPH` target; send that operation on its own.
+  (#6763)
+- **sparq-server / sparq-lws-core (ODRL):** rules that target an `odrl:AssetCollection` now
+  apply to the collection's `odrl:partOf` members on the server's ODRL lane and the LWS ODRL
+  gate. (#6773)
+- **sparq-solid:** if rebuilding the authorization view fails after an accepted `.acl` / `.acr`
+  change, the store denies every request until a rebuild succeeds, instead of continuing to
+  enforce the previous rules. (#6742)
+- **sparq-reason:** `@forAll` universals are named by their full IRI, so `@forAll a:x, b:x`
+  are two variables and `reason_n3_pass_all` no longer prints internal `__ua_` names. Exact
+  writers refuse a document that would not re-read the same way. (#6701)
+- **sparq-reason:** a forward N3 closure that never reaches a fixpoint stops with an error once
+  it exceeds the configurable `ClosureLimits` round or fact count. The limits count rounds and
+  facts, not bytes, so rules that grow a term each round can still use unbounded memory. (#6769)
+- **sparq-reason:** `math:` comparisons promote numeric types as XPath does. (#6772)
+- **sparq-reason:** the RDFS closure reaches its fixpoint when schema properties have schemas
+  of their own, including with `why()` and incremental updates. (#6736)
+- **sparq-core / sparq-engine:** `xsd:dateTimeStamp` without a timezone is ill-formed (#6725),
+  and XSD 1.1 year zero is accepted (#6747).
+- **sparq-engine:** integers and decimals beyond `i128` order by value (#6697), `ROUND` keeps a
+  negative zero (#6703), CONSTRUCT and DESCRIBE go through `PreparedQuery` and honour `BASE`
+  (#6677), and the query budget bounds CONSTRUCT / DESCRIBE N-Triples output (#6714).
+- **sparq-canon:** tied RDFC-1.0 N-degree hashes break ties independently of blank-node labels
+  (#6645), and RDF 1.2 permutation enumeration is lazy and budgeted (#6702).
+- **sparq-shacl:** date and dateTime comparisons use the shared exact temporal comparator.
+  (#6733)
+- **sparq-server:** CSV, TSV and XML SELECT results are streamed instead of rendered whole.
+  (#6708)
+- **sparq-lws-core:** durable intents restore changes that a process stop interrupted. (#6767)
+- **sparq-client:** the shared N-Triples writer validates term parts. (#6716)
+- **@sparq-org/sparq:** `@sparq-org/sparq/wasm/*` resolves through the package `exports` map,
+  and the wasm copy step runs on any platform Node runs on. (#6739)
+- **sparq-forms:** update terms that can't be written safely are rejected. (#6707)
+- **Desktop GUI:** Graph view refuses UPDATE (#6704), full-text search terms and SHACL report
+  strings are escaped (#6741), and the ODRL preview shows the policy's own per-request verdict
+  (#6760).
+- **Site and wasm:** horizontally scrolling tables and code blocks are keyboard-focusable
+  (#6777), and the parser size optimisation applies again after the spargebra rename (#6782).
+- **Dependencies:** Rust dependency updates in the root and side lockfiles (#6694), and an
+  npm override for `basic-ftp` (#6751).
+
 ### Added
 
+- **sparq-solid:** `PodStore::attach_odrl_policy` keeps an ODRL policy on the store and
+  evaluates its prohibitions for the requesting session on every read, query, decision and
+  update path. (#6759)
+- **sparq-lws-core:** `SOLID_SERVER_PROTOCOL=lws` serves the LWS 1.0 storage surface:
+  storage description, paged containers, data resources with preconditions and byte ranges,
+  `POST` / `PUT` / `DELETE` and read-only linksets. Experimental. (#6728)
+- **Research prototypes** (zk/ and proof-methods/, not part of the shipped runtime): the
+  stacked ZK and credential-query work (#6647), a revealed-signature mode for the zkVM
+  eddsa-rdfc-2022 relation (#6787), the `eddsa-sha256-merkle-2026` Merkle-root cryptosuite and
+  spec (#6789), a disclosed-credential re-evaluation method (#6788), a QuickSilver prover for
+  the zk/compose circuits (#6790) and an AWS Nitro Enclaves attestation method (#6794).
 - `sparq-vectors` can open canonical little-endian `.spqv` stores on big-endian hosts by
   validating the file and byte-swapping its dense f32 region into aligned owned storage; `.spqv`
   writers and the `.spqg` reader/writer remain little-endian-host only.
 
 ### Changed
 
+- **Breaking (sparq-reason):** an N3 document whose rules cycle through negation
+  (`log:notIncludes`, `log:collectAllIn`, `log:forAllIn` over a predicate the same document
+  derives) now returns an error naming the negated predicate, at every N3 entry point. Acyclic
+  documents are evaluated stratum by stratum. The `*_with_cycles` variants opt in to the
+  previous acceptance. (#6705)
+- **Breaking (sparq-engine, JSON-LD compaction):** `graph_to_jsonld_compact`, the CLI's
+  `jsonld-compact` and the wasm serializer now produce JSON-LD 1.1 compaction output. The RDF is
+  unchanged, but a single top-level node has no `@graph` wrapper, nodes come out in `@id`
+  order, and `@id`/`@type` maps and reverse properties follow the spec. (#6674)
+- **Breaking (sparq-engine, JSON-LD framing):** `graph_to_jsonld_framed`, `write_jsonld_framed`
+  and the wasm framed serializer now use the JSON-LD 1.1 framing algorithm. Frames match over
+  the merged graph, so matches no longer carry named-graph wrappers, `@link` behaves as
+  `@once`, and a frame that matches nothing returns `{}`. (#6727)
+- **Breaking (sparq-core):** the native N-Triples / N-Quads parser follows the W3C grammar.
+  IRIs must be absolute, may not contain the excluded characters and allow only `\u` / `\U`
+  escapes, so input it used to accept may now fail to parse. (#6723)
+- **Breaking (sparq-core):** the native N-Triples / N-Quads parser requires well-formed BCP47
+  language tags and an exact `ltr` / `rtl` base direction, matching the serial parser. (#6740)
+- **Breaking (sparq-mcp):** `container_list` leaves out members the session cannot read, the
+  stdio transport refuses requests larger than `ServerConfig::max_request_bytes`, and a new
+  `query_timeout_ms` setting bounds query time. (#6700)
+- Workspace, desktop, and public npm package versions move to 0.1.5, with every
+  path-dependency requirement and lockfile record following.
 - **Breaking (@sparq-org/solid-server):** the optional `fastify` peer dependency is now
   `^5.12.5` (was `^4.28.0 || ^5.0.0`). Fastify 4.x is end of life and has no release that
   fixes GHSA-p68q-wchp-6fh7 (authentication bypass via malformed URLs); fastify releases
@@ -640,7 +734,8 @@ reproduce):
   single-pattern/FILTER comparisons short-circuit via index range-counting and are excluded
   from the claims above.
 
-[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/sparq-org/sparq/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/sparq-org/sparq/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/sparq-org/sparq/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/sparq-org/sparq/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/sparq-org/sparq/compare/v0.1.1...v0.1.2

@@ -1201,7 +1201,7 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "sparq-canon"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "base16ct",
  "digest 0.10.7",
@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hashbrown 0.17.1",
  "memchr",
@@ -1229,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-engine"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "md-5",
  "oxiri",
@@ -1260,7 +1260,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-substrate"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "hashbrown 0.17.1",
  "oxrdf 0.3.3",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "sparq-zk"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "ark-bn254",
  "ark-ec",

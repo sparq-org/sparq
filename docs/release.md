@@ -137,6 +137,15 @@ Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` (Keep-a-Changelog form
 Added / Changed / Fixed / Removed). Performance claims go in only with a pointer to the
 measurement (e.g. `bench/qlever-baselines.md`). Add the compare/tag link at the bottom.
 
+### v0.1.5 fix-forward
+
+The `v0.1.4` tag (a3871259) ran `release.yml` on 2026-10-08 and stopped at "collect archive
+digests": the Windows rows wrote binary-mode `<hex> *<name>` records, fixed in #6717. No
+GitHub Release, npm or PyPI package was published for v0.1.4; its container image was
+pushed. Per §3b the tag stays fixed and the release fixes forward as **v0.1.5**, following
+the same sequence below with 0.1.5 in place of 0.1.4 (the 24-hour cadence guard still
+applies). v0.1.5 is also the first crates.io bootstrap target.
+
 ### v0.1.4 recovery sequence
 
 > [GPT-5] v0.1.4 is the new candidate after the v0.1.3 provenance-download failure.
