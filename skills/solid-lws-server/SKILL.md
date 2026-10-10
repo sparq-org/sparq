@@ -263,8 +263,26 @@ What the server exposes, all discoverable from the storage description
 - **Storage**: `application/lws+json` containers with paging links, data resources with
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
-  `Depth: infinity` for non-empty containers), and read-only RFC 9264 linksets at
-  `{resource}.meta`.
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
+  which take `PATCH` with JSON Patch (advertised in `Allow` and `Accept-Patch`; a failed
+  precondition gets `412`). A linkset `PATCH` changes only user-managed links: the
+  server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
+  values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
+  `href` values are resolved against the linkset's own URI (RFC 9264 section 4) and stored
+  absolute; one that is not a URI reference gets `422`, as does a target attribute not shaped as
+  RFC 9264 section 4.2.4 says (`title`, `type`, `media` strings; `hreflang` and extension
+  attributes arrays of strings; `name*` arrays of `{value, language}`). A linkset is stored in
+  its resource's metadata, so a linkset patch over 256 KiB is refused with `413` before it is
+  parsed, as is one that could hold more values (counted from its bytes, each charged 64 bytes)
+  than 1 MiB pays for. It is applied within 1 MiB with every value charged 64 bytes beyond its
+  size, checked before each value is copied. Before anything is resolved the result is held to
+  256 entries, 1024 targets and 4096 bytes per anchor, relation and `href`, and its worst-case
+  cost (every value it holds, its size twice, and each reference grown by the base) to 1 MiB;
+  past any of these, `413`. A `Link` header on a create or replace is held to the same target
+  and length caps (`431` past them), so a linkset it makes can always be patched. It is also measured as it will be served, with the
+  server-managed links put back: metadata past its size limit gets `413`, and one that nests too
+  deeply to store `422`. The links the type index matches are the stored linkset's own. A
+  `Link` header's `rel="anchor"` is never taken as a link (`anchor` names an entry's context).
   Errors are `application/problem+json`. Bodies are stored as sent, so a body with a
   `Content-Encoding` other than `identity` gets `415`. A precondition header sent as several
   lines counts every line; an entity-tag list that cannot be read by the RFC 9110 grammar gets
