@@ -591,20 +591,27 @@ cryptographic audit.
     returned solutions are solutions: ASK when `true`, and SELECT over basic graph patterns
     with integer FILTERs; not usable with this document yet (@sec-impl)], [Schnorr
     signatures over the sparq commitment format, inside the proof],
+  [`urn:sparq:vcq:method:` \ `disclosed-reevaluation:v1` (`proof-methods/disclosed`)],
+    [The full result; the holder sends the signed credentials and the salt, and the verifier
+    checks the signatures and evaluates the query itself. Its dataset commitment is the one
+    `risc0-authenticated-rdf:v5` computes, so one agreed commitment serves both. A baseline
+    that hides nothing.], [`eddsa-rdfc-2022` against `IssuerKeys`, by the verifier],
+  [`urn:sparq:vcq:method:` \ `tee-attestation:v1` (`proof-methods/tee`)], [The full result,
+    attested by a program in an AWS Nitro Enclave whose attestation document carries the
+    statement digest. Only the `aws-nitro` platform is built.], [`eddsa-rdfc-2022`, inside the
+    enclave; hidden mode only],
 )
 
-The following methods are proposed and not built. Their IRIs use the same prefix and end in
+A prototype of `vole-designated-verifier:v1`, an interactive proof based on vector oblivious
+linear evaluation (VOLE) as in QuickSilver, proves the ACIR of the Noir circuits
+(`proof-methods/vole`); it is not yet a proof method in the sense of this section. The
+following methods are proposed and not built. Their IRIs use the same prefix and end in
 `:v1`.
 
 #table(
   columns: (1.5fr, 1fr, 2fr),
   align: (left, left, left),
   table.header[Name][Evidence kind][What it is],
-  [`disclosed-reevaluation`], [disclosed credentials], [The holder sends the signed
-    credentials and the salt; the verifier checks the signatures and evaluates the query
-    itself. Its dataset commitment is the one `risc0-authenticated-rdf:v5` computes over the
-    same credentials and salt, so one agreed commitment serves both methods. A baseline for
-    comparison: it hides nothing.],
   [`selective-disclosure-reevaluation`], [disclosed credentials, selectively], [The holder
     discloses, with `bbs-2023` or `ecdsa-sd-2023`, the claims each returned solution uses,
     together with any claims the issuer made mandatory to disclose and the structure the
@@ -612,12 +619,9 @@ The following methods are proposed and not built. Their IRIs use the same prefix
     show only that returned solutions are solutions, so it supports the same results as the
     Noir method above.],
   [`vole-designated-verifier`], [zero-knowledge proof, interactive, designated-verifier],
-  [An interactive proof based on vector oblivious linear evaluation (VOLE), as in QuickSilver.
-    It convinces only the verifier that took part.],
-  [`tee-attestation`], [attestation], [A program running in a TEE evaluates the query and
-    checks the signatures; the TEE's signed report contains the statement digest. The
-    `parameters` name the platform: `intel-tdx`, `amd-sev-snp`, `aws-nitro` or
-    `nvidia-cc`.],
+  [An interactive proof based on VOLE. It convinces only the verifier that took part.],
+  [`tee-attestation` on other platforms], [attestation], [The `parameters` name the platform:
+    `intel-tdx`, `amd-sev-snp` or `nvidia-cc`.],
 )
 
 = Security and privacy considerations <sec-security>
@@ -739,14 +743,19 @@ What differs or is missing:
 + The evaluator implements SPARQL 1.1 and has no triple terms. The adapters also reject
   SELECT queries with ORDER BY, and the evaluator does not support SERVICE, DESCRIBE, FROM or
   nested EXISTS. Each method's published list of excluded features has still to be written.
-+ The version 5 RISC Zero method implements only the hidden signature mode. Its revealed
-  mode and the Merkle-root cryptosuites are written but not yet merged. The Noir circuits
-  support both modes, but that method cannot yet produce a presentation for this document:
++ The version 5 RISC Zero method implements the hidden and revealed signature modes for
+  `eddsa-rdfc-2022`, and the zkVM relation implements `eddsa-sha256-merkle-2026`; the other
+  Merkle-root cryptosuites are specified only. The Noir circuits support both modes, but that method cannot yet produce a presentation for this document:
   it keeps graph roots and salts private, so it has no dataset commitment to publish, and it
   requires a credential-status root that this document has no property for.
 + The version 5 policy (issuer keys and capacity bounds) has no RDF encoding yet, so the
   mapping from `trustedIssuers` and `parameters` to the adapter's parameter digest is not
   defined.
++ The code names methods by an identifier without the `:vN` suffix plus a separate version
+  number; this document folds the version into the IRI.
++ The methods in `proof-methods/` work on the internal version 5 request and statement, which
+  do not bind the domain, the validity period, the accepted methods or the signature mode,
+  and they define no canonical statement or proof encoding yet.
 + The RISC Zero methods' image ID is eight 32-bit words; the code encodes it as the words in
   order, each little-endian.
 + Only one end-to-end proof of the version 5 adapter has been made and independently checked
