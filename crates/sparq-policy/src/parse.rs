@@ -21,7 +21,9 @@ use crate::model::{
     Action, ConflictStrategy, Constraint, ConstraintNode, Duty, LogicalConstraint, LogicalOperator,
     Operator, Policy, Rule, Value, ODRL_NS,
 };
+use crate::validate::ValidatedPolicy;
 use oxrdf::{Literal, Term};
+use sparq_core::temporal::Temporal;
 use sparq_core::Graph;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -38,9 +40,64 @@ const RDF_NS: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 /// malformed RDF-collection `odrl:rightOperand` — see [`parse_policy`]). A
 /// well-formed RDF document with no ODRL rules parses to an empty [`Policy`]
 /// (which then denies everything — fail-closed).
-pub fn parse_policy_str(rdf: &str, format: &str) -> Result<Policy, String> {
+pub fn parse_policy_str(rdf: &str, format: &str) -> Result<ValidatedPolicy, String> {
     let graph = Graph::load_str(rdf, format)?;
     parse_policy(&graph)
+}
+
+/// [`parse_policy_str`] plus the document's [`target_memberships`]: the policy and the
+/// `(member, collection)` asset evidence for its collection targets, from one load.
+///
+/// # Errors
+///
+/// As [`parse_policy_str`].
+pub fn parse_policy_str_with_memberships(
+    rdf: &str,
+    format: &str,
+) -> Result<(ValidatedPolicy, BTreeSet<(String, String)>), String> {
+    let graph = Graph::load_str(rdf, format)?;
+    let policy = parse_policy(&graph)?;
+    let members = target_memberships(&policy, &graph)?;
+    Ok((policy, members))
+}
+
+/// The `member odrl:partOf collection` edges `graph` states (default graph) whose
+/// `collection` is the target of one of `policy`'s rules, as `(member, collection)`.
+///
+/// A rule matches a request on an asset that is the rule's target or a member of it under
+/// the request's asset evidence ([`crate::Request::asset_matches`]). An enforcement point
+/// that evaluates a policy per target graph therefore evaluates each of these members too,
+/// with the edge as the request's [`crate::Request::with_asset_membership`] evidence.
+/// Being a rule target makes `collection` an asset collection here, whatever
+/// [`Policy::party_collections`] also records for it. Blank nodes and literals are skipped.
+///
+/// # Errors
+///
+/// Returns `Err` if the query over the graph fails.
+pub fn target_memberships(
+    policy: &Policy,
+    graph: &Graph,
+) -> Result<BTreeSet<(String, String)>, String> {
+    let targets: BTreeSet<&str> = policy
+        .permissions
+        .iter()
+        .chain(policy.prohibitions.iter())
+        .filter_map(|r| r.target.as_deref())
+        .collect();
+    if targets.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let res = sparq_engine::query(graph, &format!("SELECT ?m ?c WHERE {{ ?m <{ODRL_NS}partOf> ?c }}"))?;
+    Ok(res
+        .rows
+        .into_iter()
+        .filter_map(|r| match (r.first().cloned().flatten(), r.get(1).cloned().flatten()) {
+            (Some(Term::NamedNode(m)), Some(Term::NamedNode(c))) if targets.contains(c.as_str()) => {
+                Some((m.into_string(), c.into_string()))
+            }
+            _ => None,
+        })
+        .collect())
 }
 
 /// Parse an ODRL policy from an already-loaded [`Graph`].
@@ -57,8 +114,8 @@ pub fn parse_policy_str(rdf: &str, format: &str) -> Result<Policy, String> {
 /// member-less cell asserting `rdf:rest` with no `rdf:first`) collection
 /// (`fold_rights` — honouring its valid prefix, or reading a member-less head as
 /// an ordinary unmatchable value, would drop authored members from the set
-/// encoding, likewise widening).
-pub fn parse_policy(graph: &Graph) -> Result<Policy, String> {
+/// encoding, likewise widening). The result is validated ([`Policy::validate`]).
+pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
     let iri = policy_iri(graph)?;
     // Bulk-load the graph's RDF collection shapes ONCE (cons cells + the member-less
     // rest-only heads), so a multi-valued `odrl:rightOperand ( <a> <b> )` list can be
@@ -67,15 +124,17 @@ pub fn parse_policy(graph: &Graph) -> Result<Policy, String> {
     let lists = rdf_list_table(graph)?;
     let permissions = rules(graph, "permission", true, &lists)?;
     let prohibitions = rules(graph, "prohibition", false, &lists)?;
+    refuse_unsupported_rule_heads(graph)?;
     let conflict = policy_conflict(graph)?;
     let party_collections = party_collections(graph)?;
-    Ok(Policy {
+    Policy {
         iri,
         permissions,
         prohibitions,
         conflict,
         party_collections,
-    })
+    }
+    .validate()
 }
 
 /// The IRIs this graph identifies as an `odrl:PartyCollection` — retained on the
@@ -458,7 +517,9 @@ fn is_set_operator(op: Option<&Term>) -> bool {
 ///   non-set operator (`eq`, `lt`, …) is ambiguous, and a separator-carrying
 ///   member would corrupt the encoding (splitting into unintended members — a
 ///   fail-OPEN hazard) — both degrade to `None` → the unsatisfiable guard
-///   (fail-closed, consistent with every other malformed-constraint path).
+///   (fail-closed, consistent with every other malformed-constraint path). That guard
+///   is fail-closed only on a permission; on a prohibition the whole policy is refused
+///   instead ([`Policy::validate`]).
 ///
 /// Members are deduplicated by node key. An empty list (`rdf:nil` directly as the
 /// object) has no cons cell, so it falls through as the plain nil IRI — unmatchable
@@ -530,6 +591,10 @@ fn fold_rights(
             }
         }
         for m in expanded {
+            // Every collection member is checked before the node-key deduplication. #3902.
+            if let Some(err) = ill_typed_operand(&m) {
+                return Err(err);
+            }
             if seen.insert(node_key(&m), ()).is_none() {
                 members.push(m);
             }
@@ -541,6 +606,12 @@ fn fold_rights(
         _ => {
             if !is_set_operator(op) {
                 return Ok(None); // ambiguous multi-value under a non-set operator
+            }
+            // The set encoding is textual: a typed member (a number, a dateTime) would
+            // lose its type and match a same-lexical string, so the set degrades to the
+            // guard (Unknown) instead.
+            if members.iter().any(typed_member) {
+                return Ok(None);
             }
             let strs: Vec<String> = members.iter().map(term_str).collect();
             if strs.iter().any(|s| {
@@ -568,7 +639,39 @@ struct RawConstraint {
     left_conflict: bool,
     /// Set when the node carries several DISTINCT `operator` objects. #3832.
     op_conflict: bool,
+    /// Set when the node uses a feature the evaluator does not implement (an
+    /// `odrl:unit`). Such a constraint becomes the unsatisfiable guard, which the
+    /// evaluator reads as Unknown.
+    unsupported: bool,
+    /// The refusal for the first ill-typed right operand seen, recorded BEFORE the
+    /// node-key deduplication could collapse it into a same-lexical sibling. #3902.
+    ill_typed: Option<String>,
 }
+
+/// The refusal for a right operand with no value of its datatype: a timezone-free (or
+/// otherwise ill-formed) `xsd:dateTimeStamp`, whose timezone XSD 1.1 §3.4.28 requires.
+/// Comparing its lexical would decide access on a literal the datatype rejects, and
+/// making just its constraint unsatisfiable would disable a prohibition it gates, so, like
+/// a malformed collection operand, the whole policy is refused (fail-closed on both rule
+/// kinds). Checked on every operand before any deduplication. XSD whitespace collapse
+/// applies first, as the datatype's lexical space requires. #3902.
+fn ill_typed_operand(t: &Term) -> Option<String> {
+    let Term::Literal(l) = t else { return None };
+    if l.datatype().as_str() != DATE_TIME_STAMP {
+        return None;
+    }
+    let collapsed = l.value().trim_matches(|c| matches!(c, ' ' | '\t' | '\n' | '\r'));
+    if Temporal::of_lit(collapsed, DATE_TIME_STAMP).is_some() {
+        return None;
+    }
+    Some(format!(
+        "a constraint's rightOperand {l} is not a valid value of its datatype \
+         (xsd:dateTimeStamp requires a well-formed lexical with a timezone), so the policy \
+         is refused (fail-closed)"
+    ))
+}
+
+const DATE_TIME_STAMP: &str = "http://www.w3.org/2001/XMLSchema#dateTimeStamp";
 
 /// Bind a single-valued field from one result row, flagging `conflict` when a
 /// DIFFERENT value (by node key) has already been bound. #3832.
@@ -601,6 +704,9 @@ impl RawConstraint {
         absorb_single(&mut self.left, &mut self.left_conflict, left);
         absorb_single(&mut self.op, &mut self.op_conflict, op);
         if let Some(r) = right {
+            if self.ill_typed.is_none() {
+                self.ill_typed = ill_typed_operand(&r);
+            }
             if self.rights_seen.insert(node_key(&r), ()).is_none() {
                 self.rights.push(r);
             }
@@ -631,7 +737,13 @@ impl RawConstraint {
                 ));
             }
         }
+        if let Some(err) = self.ill_typed {
+            return Err(err);
+        }
         let right = fold_rights(self.op.as_ref(), &self.rights, lists)?;
+        if self.unsupported {
+            return Ok(unsatisfiable_constraint());
+        }
         Ok(build_constraint(self.left, self.op, right))
     }
 }
@@ -663,7 +775,7 @@ fn constraints_for(
     // binds iff the node is a LogicalConstraint (any of the three combinators), so
     // such a node is routed to logical_constraints_for instead of here.
     let q = format!(
-        "SELECT ?rule ?c ?left ?op ?right ?and WHERE {{ \
+        "SELECT ?rule ?c ?left ?op ?right ?and ?unit WHERE {{ \
            ?policy <{ODRL_NS}{kind}> ?rule . \
            ?rule <{ODRL_NS}{pred}> ?c . \
            OPTIONAL {{ ?c <{ODRL_NS}leftOperand> ?left }} \
@@ -672,6 +784,7 @@ fn constraints_for(
            OPTIONAL {{ ?c <{ODRL_NS}rightOperandReference> ?right }} \
            OPTIONAL {{ ?c ?logop ?and . \
              VALUES ?logop {{ <{ODRL_NS}and> <{ODRL_NS}or> <{ODRL_NS}xone> }} }} \
+           OPTIONAL {{ ?c <{ODRL_NS}unit> ?unit }} \
          }}"
     );
     let res = sparq_engine::query(graph, &q)?;
@@ -688,6 +801,7 @@ fn constraints_for(
         let op = it.next().flatten();
         let right = it.next().flatten();
         let is_logical = it.next().flatten().is_some();
+        let has_unit = it.next().flatten().is_some();
         let (Some(rule_t), Some(c_t)) = (rule_t, c_t) else {
             continue;
         };
@@ -696,9 +810,9 @@ fn constraints_for(
         if !acc.contains_key(&ckey) {
             order.push((rkey, ckey.clone()));
         }
-        acc.entry(ckey)
-            .or_default()
-            .absorb(left, op, right, is_logical);
+        let raw = acc.entry(ckey).or_default();
+        raw.unsupported |= has_unit;
+        raw.absorb(left, op, right, is_logical);
     }
     let mut out: BTreeMap<String, Vec<Constraint>> = BTreeMap::new();
     for (rkey, ckey) in order {
@@ -778,11 +892,12 @@ fn logical_constraints_for(
     // (2) Every atomic constraint node's fields, keyed by node. A node with no
     // combinator edge but with these fields is an atomic operand.
     let atoms_q = format!(
-        "SELECT ?c ?left ?op ?right WHERE {{ \
+        "SELECT ?c ?left ?op ?right ?unit WHERE {{ \
            ?c <{ODRL_NS}leftOperand> ?left . \
            OPTIONAL {{ ?c <{ODRL_NS}operator> ?op }} \
            OPTIONAL {{ ?c <{ODRL_NS}rightOperand> ?right }} \
            OPTIONAL {{ ?c <{ODRL_NS}rightOperandReference> ?right }} \
+           OPTIONAL {{ ?c <{ODRL_NS}unit> ?unit }} \
          }}"
     );
     let atoms_res = sparq_engine::query(graph, &atoms_q)?;
@@ -797,11 +912,11 @@ fn logical_constraints_for(
         let left = it.next().flatten();
         let op = it.next().flatten();
         let right = it.next().flatten();
+        let has_unit = it.next().flatten().is_some();
         let Some(c_t) = c_t else { continue };
-        atom_acc
-            .entry(node_key(&c_t))
-            .or_default()
-            .absorb(left, op, right, false);
+        let raw = atom_acc.entry(node_key(&c_t)).or_default();
+        raw.unsupported |= has_unit;
+        raw.absorb(left, op, right, false);
     }
     let atoms: BTreeMap<String, Constraint> = atom_acc
         .into_iter()
@@ -990,15 +1105,73 @@ fn assemble_logical(
     }
 }
 
+/// A literal set member that is not a plain, `xsd:string` or language-tagged string.
+fn typed_member(t: &Term) -> bool {
+    let Term::Literal(l) = t else { return false };
+    l.language().is_none() && l.datatype().as_str() != "http://www.w3.org/2001/XMLSchema#string"
+}
+
 /// The unsatisfiable-guard atomic constraint used for a malformed/unknown operand
 /// (a constraint that can never be satisfied — fail-closed). Shared by [`build_constraint`]
 /// and the compound-operand assembler. [OPUS-4.8] sq-a0zef.
 fn unsatisfiable_constraint() -> Constraint {
     Constraint {
-        left: "urn:sparq-policy:malformed".to_owned(),
+        left: MALFORMED.to_owned(),
         operator: Operator::Neq,
-        right: Value::Iri("urn:sparq-policy:malformed".to_owned()),
+        right: Value::Iri(MALFORMED.to_owned()),
     }
+}
+
+pub(crate) const MALFORMED: &str = "urn:sparq-policy:malformed";
+
+pub(crate) fn is_unsatisfiable_guard(c: &Constraint) -> bool {
+    c.left == MALFORMED
+}
+
+pub(crate) fn node_has_guard(n: &ConstraintNode) -> bool {
+    match n {
+        ConstraintNode::Atomic(c) => is_unsatisfiable_guard(c),
+        ConstraintNode::Compound(lc) => lc.operands.iter().any(node_has_guard),
+    }
+}
+
+/// `odrl:refinement` on a rule's action, target or assignee is not supported: the rule
+/// would be read without it, so a refined permission grants more than authored. And a
+/// prohibition whose action, target or assignee is a blank node (a refined action, an
+/// anonymous collection) can never match a request, so it never fires and a sibling
+/// permission grants. Both shapes refuse the whole policy (fail-closed).
+fn refuse_unsupported_rule_heads(graph: &Graph) -> Result<(), String> {
+    let q = format!(
+        "SELECT ?rule ?n WHERE {{ \
+           {{ ?policy <{ODRL_NS}permission> ?rule }} UNION {{ ?policy <{ODRL_NS}prohibition> ?rule }} \
+           ?rule <{ODRL_NS}action>|<{ODRL_NS}target>|<{ODRL_NS}assignee> ?n . \
+           ?n <{ODRL_NS}refinement> ?r \
+         }} LIMIT 1"
+    );
+    if let Some(row) = sparq_engine::query(graph, &q)?.rows.into_iter().next() {
+        let n = row.get(1).cloned().flatten().map(|t| node_key(&t)).unwrap_or_default();
+        return Err(format!(
+            "a rule's action, target or assignee ({n}) carries an odrl:refinement, which is \
+             not supported; reading the rule without it would widen what it grants or \
+             disable what it forbids, so the policy is refused (fail-closed)"
+        ));
+    }
+    let q = format!(
+        "SELECT ?rule ?n WHERE {{ \
+           ?policy <{ODRL_NS}prohibition> ?rule . \
+           ?rule <{ODRL_NS}action>|<{ODRL_NS}target>|<{ODRL_NS}assignee> ?n . \
+           FILTER(isBlank(?n)) \
+         }} LIMIT 1"
+    );
+    if let Some(row) = sparq_engine::query(graph, &q)?.rows.into_iter().next() {
+        let r = row.first().cloned().flatten().map(|t| node_key(&t)).unwrap_or_default();
+        return Err(format!(
+            "prohibition {r} has a blank-node action, target or assignee, which can never \
+             match a request; the prohibition would never fire and a sibling permission \
+             would grant, so the policy is refused (fail-closed)"
+        ));
+    }
+    Ok(())
 }
 
 /// Build a [`Constraint`], turning anything malformed/unknown into an
@@ -1023,10 +1196,11 @@ fn build_constraint(left: Option<Term>, op: Option<Term>, right: Option<Value>) 
 /// Parse duties (and their actions/constraints) per rule node.
 fn duties_for(graph: &Graph, kind: &str) -> Result<BTreeMap<String, Vec<Duty>>, String> {
     let q = format!(
-        "SELECT ?rule ?d ?a WHERE {{ \
+        "SELECT ?rule ?d ?a ?dc WHERE {{ \
            ?policy <{ODRL_NS}{kind}> ?rule . \
            ?rule <{ODRL_NS}duty> ?d . \
            OPTIONAL {{ ?d <{ODRL_NS}action> ?a }} \
+           OPTIONAL {{ ?d <{ODRL_NS}constraint> ?dc }} \
          }}"
     );
     let res = sparq_engine::query(graph, &q)?;
@@ -1037,6 +1211,9 @@ fn duties_for(graph: &Graph, kind: &str) -> Result<BTreeMap<String, Vec<Duty>>, 
         let rule_t = it.next().flatten();
         let d_t = it.next().flatten();
         let a_t = it.next().flatten();
+        // A duty's constraints are not evaluated: record one as the guard so the duty
+        // is never treated as discharged by its action alone.
+        let constrained = it.next().flatten().is_some();
         let (Some(rule_t), Some(d_t)) = (rule_t, d_t) else {
             continue;
         };
@@ -1051,7 +1228,7 @@ fn duties_for(graph: &Graph, kind: &str) -> Result<BTreeMap<String, Vec<Duty>>, 
         out.entry(rkey).or_default().push(Duty {
             id: term_str(&d_t),
             action,
-            constraints: Vec::new(),
+            constraints: if constrained { vec![unsatisfiable_constraint()] } else { Vec::new() },
         });
     }
     Ok(out)

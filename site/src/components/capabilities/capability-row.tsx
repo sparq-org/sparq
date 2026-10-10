@@ -195,7 +195,7 @@ function NativeTile({ surface, accent }: { surface: Surface; accent: string }) {
       cta={null}
       details={
         <div className="mt-3 space-y-2 border-t pt-2.5">
-          <code className="block overflow-x-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[11.5px] text-foreground">
+          <code tabIndex={0} className="block overflow-x-auto rounded-md bg-muted px-2.5 py-2 font-mono text-[11.5px] text-foreground">
             {native.snippet}
           </code>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12px]">

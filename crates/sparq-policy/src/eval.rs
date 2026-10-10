@@ -12,6 +12,11 @@
 //!    out" a forbidden sub-set — ODRL Formal Semantics §conflict).
 //! 4. **Fail-closed default:** no matching+discharged permission, OR any matching
 //!    prohibition, ⇒ DENY. An empty/malformed policy denies everything.
+//! 5. **Three-valued constraints:** each constraint and compound is True, False or
+//!    Unknown. Missing evidence, an unsupported or malformed constraint (the parser's
+//!    guard), and an incomparable pair are all Unknown, and `and`/`or`/`xone` propagate
+//!    it (Kleene). A permission grants only on True; a prohibition fires on True **or**
+//!    Unknown, so it stops applying only when one of its constraints is definitely False.
 //!
 //! [OPUS-4.8]
 
@@ -19,6 +24,7 @@ use crate::model::{
     Action, Constraint, ConstraintNode, LogicalConstraint, LogicalOperator, Operator, Policy, Rule,
     Value,
 };
+use crate::validate::ValidatedPolicy;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The `odrl:purpose` left-operand IRI — the dimension a *purpose constraint*
@@ -60,7 +66,7 @@ pub const ODRL_SPATIAL: &str = "http://www.w3.org/ns/odrl/2/spatial";
 /// (fail-closed). [OPUS-4.8] sq-idnv.
 pub const ODRL_DATETIME: &str = "http://www.w3.org/ns/odrl/2/dateTime";
 
-/// An access request evaluated against a [`Policy`]: who wants to do what, to
+/// An access request evaluated against a [`Policy`](crate::Policy): who wants to do what, to
 /// what, in what context (the "evaluation request" + "state of the world" of the
 /// ODRL Formal Semantics, folded into one node-local view).
 #[derive(Debug, Clone, Default)]
@@ -389,8 +395,8 @@ impl Request {
 
     /// Whether the request's target asset is `target` or a member of the collection
     /// `target` (`asset odrl:partOf target`) under the supplied membership evidence.
-    /// [OPUS-4.8] sq-k7itg.
-    pub(crate) fn asset_matches(&self, target: &str) -> bool {
+    /// This is the target test [`decide`] applies to a rule.
+    pub fn asset_matches(&self, target: &str) -> bool {
         match self.target.as_deref() {
             Some(a) => {
                 a == target
@@ -403,8 +409,64 @@ impl Request {
     }
 }
 
-/// The result of evaluating a policy against a request.
+/// Proof that [`decide`] granted a request: the only value a grant materialiser can
+/// act on. Its fields are private and it has no public constructor, so nothing outside
+/// this crate can produce one without a granting decision.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Permit {
+    rule: String,
+    action: String,
+    target: Option<String>,
+    party: Option<String>,
+    recipient: Option<String>,
+    lasting: bool,
+}
+
+impl Permit {
+    /// The id of the permission that granted.
+    pub fn rule(&self) -> &str {
+        &self.rule
+    }
+    /// The requested action the grant covers.
+    pub fn action(&self) -> &str {
+        &self.action
+    }
+    /// The requested target the grant covers, if the request named one.
+    pub fn target(&self) -> Option<&str> {
+        self.target.as_deref()
+    }
+    /// The requesting party the grant covers, if the request named one.
+    pub fn party(&self) -> Option<&str> {
+        self.party.as_deref()
+    }
+    /// The recipient the decision checked recipient constraints against: the explicit
+    /// `odrl:recipient` context value, else the party.
+    pub fn recipient(&self) -> Option<&str> {
+        self.recipient.as_deref()
+    }
+    /// Whether the grant depends on nothing that can change, so a stored grant, which
+    /// records only party, mode and target, stands for it. Only one shape qualifies: a
+    /// permission with no constraints, logical constraints or duties, assigned to
+    /// exactly the requesting party (not a party collection), targeting exactly the
+    /// requested asset or every asset, decided without membership evidence, in a policy
+    /// with no prohibitions. A grant that is stored rather than re-checked per request
+    /// is sound only when this holds.
+    pub fn lasting(&self) -> bool {
+        self.lasting
+    }
+
+    /// This grant, marked as not lasting: the decision that made it left out a
+    /// constraint (a usage count) that can end it.
+    #[cfg(feature = "count-enforcement")]
+    pub(crate) fn transient(self) -> Permit {
+        Permit { lasting: false, ..self }
+    }
+}
+
+/// The result of evaluating a policy against a request. Only [`decide`] builds one, so
+/// `allow` is true exactly when [`permit`](Decision::permit) carries a [`Permit`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Decision {
     /// `true` ⇒ ALLOW (a permission matched, was un-prohibited, and all its
     /// duties were discharged). `false` ⇒ DENY (fail-closed).
@@ -417,19 +479,53 @@ pub struct Decision {
     /// (unmet constraint, undischarged duty, overriding prohibition). Empty on a
     /// clean ALLOW with no caveats.
     pub unmet_constraints: Vec<String>,
+    /// The grant itself, present exactly when `allow` is true.
+    pub permit: Option<Permit>,
 }
 
 impl Decision {
-    fn deny(matched: Vec<String>, unmet: Vec<String>) -> Decision {
+    pub(crate) fn deny(matched: Vec<String>, unmet: Vec<String>) -> Decision {
         Decision {
             allow: false,
             matched_rules: matched,
             unmet_constraints: unmet,
+            permit: None,
+        }
+    }
+
+    fn grant(rule: &Rule, request: &Request, lasting: bool) -> Decision {
+        Decision {
+            allow: true,
+            matched_rules: vec![rule.id.clone()],
+            unmet_constraints: Vec::new(),
+            permit: Some(Permit {
+                rule: rule.id.clone(),
+                action: request.action.clone(),
+                target: request.target.clone(),
+                party: request.party.clone(),
+                recipient: request
+                    .context
+                    .get(ODRL_RECIPIENT)
+                    .or(request.recipient_party.as_ref())
+                    .map(|v| v.as_str().to_owned()),
+                lasting,
+            }),
         }
     }
 }
 
-/// Evaluate `policy` against `request`, returning a fail-closed [`Decision`].
+/// Evaluate `policy` against `request`; the same as [`decide`].
+pub fn evaluate(policy: &ValidatedPolicy, request: &Request) -> Decision {
+    decide(policy, request)
+}
+
+/// The one decision point: evaluate `policy` against `request`, returning a fail-closed
+/// [`Decision`] that carries a [`Permit`] on a grant.
+///
+/// It applies, in order: the declared `odrl:conflict` strategy (one this engine cannot
+/// honour denies, see [`crate::conflict_admissibility`]); the prohibitions, each firing
+/// unless it definitely does not apply; then the permissions, one granting only on a
+/// definite yes with every duty discharged (a constrained duty never is).
 ///
 /// See the module docs for the exact semantics. This is the single-node
 /// base case of ODRL — it reduces to the same allow/deny shape `sparq-solid`'s
@@ -439,26 +535,48 @@ impl Decision {
 /// # Examples
 ///
 /// ```
-/// use sparq_policy::{evaluate, Policy, Request};
+/// use sparq_policy::{decide, Policy, Request};
 /// // An empty policy denies everything (fail-closed).
-/// let d = evaluate(&Policy::default(), &Request::new("http://www.w3.org/ns/odrl/2/read"));
+/// let d = decide(&Policy::default().validate().unwrap(), &Request::new("http://www.w3.org/ns/odrl/2/read"));
 /// assert!(!d.allow);
 /// ```
-pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
+pub fn decide(policy: &ValidatedPolicy, request: &Request) -> Decision {
     let req_action = Action(request.action.clone());
 
-    // 1. A matching prohibition overrides everything (fail-closed carve-out).
+    // 0. A conflict strategy this engine cannot honour decides nothing (fail-closed).
+    if let Err(why) = crate::compare::conflict_admissibility(policy) {
+        return Decision::deny(Vec::new(), vec![why]);
+    }
+    // The default recipient is the party `Request::by` set. A party changed afterwards
+    // would be granted on another identity's recipient evidence.
+    if request
+        .recipient_party
+        .as_ref()
+        .is_some_and(|r| request.party.as_deref() != Some(r.as_str()))
+    {
+        return Decision::deny(
+            Vec::new(),
+            vec!["the request's party no longer matches its recipient evidence; build it with Request::by".to_owned()],
+        );
+    }
+
+    // 1. A prohibition overrides everything unless it DEFINITELY does not apply: one
+    //    whose constraints are Unknown (no evidence, unsupported, incomparable) still
+    //    fires (fail-closed carve-out). A permission below grants only on a definite yes.
     let mut blocking: Vec<String> = Vec::new();
+    let mut why: Vec<String> = Vec::new();
     for rule in &policy.prohibitions {
-        if rule_matches(rule, request, &req_action).is_match {
-            blocking.push(rule.id.clone());
+        match classify_prohibition(rule, request, &req_action) {
+            RuleClass::Match => why.push(format!("prohibition {} matches the request", rule.id)),
+            RuleClass::Ambiguous => why.push(format!(
+                "prohibition {} may match the request (a constraint is unknown)",
+                rule.id
+            )),
+            RuleClass::DefinitelyNo => continue,
         }
+        blocking.push(rule.id.clone());
     }
     if !blocking.is_empty() {
-        let why = blocking
-            .iter()
-            .map(|id| format!("prohibition {id} matches the request"))
-            .collect();
         return Decision::deny(blocking, why);
     }
 
@@ -470,19 +588,16 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
             caveats.extend(m.reasons);
             continue;
         }
-        // Matched — now require every duty discharged.
+        // Matched — now require every duty discharged. A duty's own constraints are
+        // not evaluated, so a constrained duty is never provably discharged.
         let undischarged: Vec<&str> = rule
             .duties
             .iter()
-            .filter(|d| !request.discharged_duties.contains(&d.action.0))
+            .filter(|d| !duty_discharged(d, request))
             .map(|d| d.action.0.as_str())
             .collect();
         if undischarged.is_empty() {
-            return Decision {
-                allow: true,
-                matched_rules: vec![rule.id.clone()],
-                unmet_constraints: Vec::new(),
-            };
+            return Decision::grant(rule, request, static_grant(policy, rule, request));
         }
         for a in undischarged {
             caveats.push(format!(
@@ -499,10 +614,45 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
     Decision::deny(Vec::new(), caveats)
 }
 
-/// The first [`Prohibition`](crate::model::Rule) in `policy` that **matches**
+/// Whether a grant `rule` made for `request` depends on nothing that can change: the
+/// one shape a stored grant, which records only party, mode and target, can stand for.
+///
+/// That is a permission with no constraints, logical constraints or duties, assigned
+/// to exactly the requesting party (a named IRI, not a declared party collection),
+/// targeting exactly the requested asset or every asset, decided without any party or
+/// asset membership evidence, in a policy with no prohibitions. Every other grant
+/// depends on the clock, a counter, request context, membership evidence or a
+/// prohibition's reach, so it is not lasting.
+fn static_grant(policy: &Policy, rule: &Rule, request: &Request) -> bool {
+    let named_party = rule.assignee.as_deref().is_some_and(|a| {
+        request.party.as_deref() == Some(a)
+            && !a.starts_with("_:")
+            && !policy.party_collections.contains(a)
+    });
+    let exact_target = rule
+        .target
+        .as_deref()
+        .is_none_or(|t| request.target.as_deref() == Some(t));
+    rule.constraints.is_empty()
+        && rule.logical_constraints.is_empty()
+        && rule.duties.is_empty()
+        && named_party
+        && exact_target
+        && request.party_memberships.is_empty()
+        && request.asset_memberships.is_empty()
+        && policy.prohibitions.is_empty()
+}
+
+/// Whether `request` reports `duty` discharged. A duty's own constraints are not
+/// evaluated, so a constrained duty is never provably discharged.
+pub fn duty_discharged(duty: &crate::model::Duty, request: &Request) -> bool {
+    duty.constraints.is_empty() && request.discharged_duties.contains(&duty.action.0)
+}
+
+/// The first [`Prohibition`](crate::model::Rule) in `policy` that **applies** to
 /// `request` (its action permits the requested action, its target/assignee agree,
-/// and every constraint is satisfied), or `None` if no prohibition carves the
-/// request out. [OPUS-4.8] sq-w693.
+/// and no constraint is definitely false — an Unknown constraint still applies), or
+/// `None` if no prohibition carves the request out. [OPUS-4.8] sq-w693.
 ///
 /// This is the same match test [`evaluate`] applies in step 1 (a matching
 /// prohibition overrides everything) — exposed so the `sparq-solid` ODRL→AUTH_GRAPH
@@ -530,32 +680,30 @@ pub fn evaluate(policy: &Policy, request: &Request) -> Decision {
 ///     .on("https://pod.ex/n1").by("https://bob.ex/card#me");
 /// assert!(matched_prohibition(&pol, &other).is_none());
 /// ```
-pub fn matched_prohibition<'p>(policy: &'p Policy, request: &Request) -> Option<&'p Rule> {
+pub fn matched_prohibition<'p>(policy: &'p ValidatedPolicy, request: &Request) -> Option<&'p Rule> {
     let req_action = Action(request.action.clone());
     policy
         .prohibitions
         .iter()
-        .find(|rule| rule_matches(rule, request, &req_action).is_match)
+        .find(|rule| !matches!(classify_prohibition(rule, request, &req_action), RuleClass::DefinitelyNo))
 }
 
 /// Whether `policy`'s prohibitions still carve `request` out — and, when they do
 /// not, **whether that is a definite no or merely unprovable**. [OPUS-4.8] sq-2pcf.
 ///
-/// This is the *deny-retraction dual* of [`matched_prohibition`]. A bare
-/// `matched_prohibition(..).is_none()` collapses two semantically different worlds:
+/// This is the *deny-retraction dual* of [`matched_prohibition`], which (like
+/// [`evaluate`]) treats a prohibition as applying unless it is definitely withdrawn.
+/// This function additionally separates a definite match from an Unknown one:
 ///
 /// - the prohibition was genuinely **withdrawn / no longer structurally applies**
 ///   (its action/target/assignee no longer name this request, or a constraint it
 ///   carries is *definitely* false because the request supplies evidence that fails
 ///   the bound), and
 /// - the prohibition still structurally names this request but a constraint is
-///   **unprovable** because the request lacks evidence for that dimension
-///   (`constraint_satisfied` returns `false` on a missing context value).
+///   **unprovable** (Unknown: no evidence, unsupported, or incomparable).
 ///
-/// For a *grant* both collapse to "deny access" — fail-closed. But for **retracting a
-/// materialized `auth:deny*`** they must NOT: retracting on the second case would
-/// RESTORE access on missing evidence (fail-OPEN). This function keeps them apart so
-/// the bridge only retracts a deny on a *definite* "no longer holds".
+/// Only the first may retract a materialized `auth:deny*`: retracting on the second
+/// would RESTORE access on missing evidence (fail-OPEN).
 ///
 /// Returns:
 /// - [`ProhibitionStatus::Applies`] if some prohibition still carves the request out
@@ -596,7 +744,7 @@ pub fn matched_prohibition<'p>(policy: &'p Policy, request: &Request) -> Option<
 /// // NO evidence for the window → unprovable → ambiguous (keep the deny).
 /// assert_eq!(prohibition_status(&pol, &base), ProhibitionStatus::Ambiguous);
 /// ```
-pub fn prohibition_status(policy: &Policy, request: &Request) -> ProhibitionStatus {
+pub fn prohibition_status(policy: &ValidatedPolicy, request: &Request) -> ProhibitionStatus {
     let req_action = Action(request.action.clone());
     let mut any_ambiguous = false;
     for rule in &policy.prohibitions {
@@ -1051,16 +1199,22 @@ fn classify_prohibition(rule: &Rule, request: &Request, req_action: &Action) -> 
     // assignee use the SAME action-hierarchy + collection-membership matching as the
     // grant path (sq-euhr3 / sq-k7itg) so a deny carved by a collection/`use` rule is
     // classified consistently.
-    if !rule.action.permits(req_action) {
+    // A blank-node head (a refined action, an anonymous collection) names nothing the
+    // request can be matched against, so the structural answer is Unknown, not "no".
+    let opaque = |s: &str| s.starts_with("_:");
+    let mut any_ambiguous = opaque(&rule.action.0)
+        || rule.target.as_deref().is_some_and(opaque)
+        || rule.assignee.as_deref().is_some_and(opaque);
+    if !rule.action.permits(req_action) && !opaque(&rule.action.0) {
         return RuleClass::DefinitelyNo;
     }
     if let Some(t) = &rule.target {
-        if !request.asset_matches(t) {
+        if !request.asset_matches(t) && !opaque(t) {
             return RuleClass::DefinitelyNo;
         }
     }
     if let Some(a) = &rule.assignee {
-        if !request.party_matches(a) {
+        if !request.party_matches(a) && !opaque(a) {
             return RuleClass::DefinitelyNo;
         }
     }
@@ -1068,7 +1222,6 @@ fn classify_prohibition(rule: &Rule, request: &Request, req_action: &Action) -> 
     // *definitely* false (we have evidence and it fails) is a definite no; one that is
     // unprovable for lack of evidence is ambiguous (a deny must NOT be retracted on it).
     // Atomic and compound (logical) constraints fold in identically.
-    let mut any_ambiguous = false;
     for c in &rule.constraints {
         match constraint_status(c, request) {
             ConstraintStatus::Satisfied => {}
@@ -1104,8 +1257,16 @@ enum ConstraintStatus {
 }
 
 fn constraint_status(c: &Constraint, request: &Request) -> ConstraintStatus {
+    // The parser's guard for an unsupported or malformed constraint is Unknown, never
+    // a definite false: a prohibition carrying it still fires.
+    if c.left == crate::parse::MALFORMED {
+        return ConstraintStatus::Unprovable;
+    }
     match resolve_actual(c, request) {
         None => ConstraintStatus::Unprovable,
+        // An incomparable pair (mismatched types, an unparseable dateTime, a typed set
+        // member) is Unknown too, so it can neither satisfy nor refute a constraint.
+        Some(actual) if !comparable(actual, c.operator, &c.right) => ConstraintStatus::Unprovable,
         Some(actual) => {
             if compare_constraint(c, actual, request) {
                 ConstraintStatus::Satisfied
@@ -1141,12 +1302,12 @@ fn constraint_node_status(node: &ConstraintNode, request: &Request) -> Constrain
 ///   (a compound that asserts nothing is not a positive grant — fail-closed).
 /// - **`or`** — `Satisfied` iff ANY operand is `Satisfied`; `DefinitelyUnsatisfied` iff
 ///   EVERY operand is `DefinitelyUnsatisfied`; else `Unprovable`. An empty operand set is
-///   `DefinitelyUnsatisfied` (a disjunction with no operand can never hold).
+///   `Unprovable`, like every empty compound.
 /// - **`xone`** — exclusive-or, `Satisfied` iff EXACTLY ONE operand is `Satisfied` AND
 ///   no operand is `Unprovable` (an unprovable operand could be the disqualifying second
 ///   true, so the exact-one count is not provable → `Unprovable`, never silently
 ///   `Satisfied`). `DefinitelyUnsatisfied` iff the count of `Satisfied` is provably ≠ 1
-///   (0 with no unprovable operand, or ≥ 2). Otherwise `Unprovable`.
+///   (≥ 2 whatever the rest, or 0 with no unprovable operand). Otherwise `Unprovable`.
 fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> ConstraintStatus {
     use ConstraintStatus::*;
     let mut n_sat = 0usize;
@@ -1160,6 +1321,8 @@ fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> Const
         }
     }
     match lc.operator {
+        // An empty compound asserts nothing decidable: Unknown for every combinator.
+        _ if lc.operands.is_empty() => Unprovable,
         LogicalOperator::And => {
             if n_unsat > 0 {
                 DefinitelyUnsatisfied
@@ -1175,12 +1338,14 @@ fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> Const
             } else if n_unprov > 0 {
                 Unprovable
             } else {
-                // every operand definitely-unsatisfied (incl. the empty set)
                 DefinitelyUnsatisfied
             }
         }
         LogicalOperator::Xone => {
-            if n_unprov > 0 {
+            if n_sat >= 2 {
+                // Two definite trues already rule out "exactly one", whatever the rest.
+                DefinitelyUnsatisfied
+            } else if n_unprov > 0 {
                 // An unprovable operand could flip the satisfied-count → not provable.
                 Unprovable
             } else if n_sat == 1 {
@@ -1438,10 +1603,7 @@ fn rule_matches(rule: &Rule, request: &Request, req_action: &Action) -> Match {
 /// meets a constraint we have no evidence about — including a `recipient neq X`
 /// constraint with no identity to compare).
 fn constraint_satisfied(c: &Constraint, request: &Request) -> bool {
-    let Some(actual) = resolve_actual(c, request) else {
-        return false; // no evidence for this dimension → fail-closed
-    };
-    compare_constraint(c, actual, request)
+    constraint_status(c, request) == ConstraintStatus::Satisfied
 }
 
 /// Compare an actual request value against a constraint right-operand under an
@@ -1566,11 +1728,30 @@ fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
     matches!(actual, Value::Iri(_) | Value::Str(_)) && matches!(bound, Value::Iri(_) | Value::Str(_))
 }
 
+/// Whether `actual op bound` has a defined answer. Equality needs operands of one
+/// kind (two numbers, two parseable dateTimes, or IRI/string values); an order
+/// operator needs [`order`] to succeed; set membership compares IRI/string values
+/// only. Anything else is Unknown to the evaluator, not false.
+pub(crate) fn comparable(actual: &Value, op: Operator, bound: &Value) -> bool {
+    let textual = |v: &Value| matches!(v, Value::Iri(_) | Value::Str(_));
+    match op {
+        Operator::Eq | Operator::IsA | Operator::Neq => match (actual, bound) {
+            (Value::Num(_), Value::Num(_)) => true,
+            (Value::DateTime(x), Value::DateTime(y)) => {
+                parse_instant(x).is_some() && parse_instant(y).is_some()
+            }
+            _ => textual(actual) && textual(bound),
+        },
+        Operator::Lt | Operator::Lteq | Operator::Gt | Operator::Gteq => order(actual, bound).is_some(),
+        Operator::IsPartOf | Operator::IsAnyOf | Operator::IsNoneOf => textual(actual) && textual(bound),
+    }
+}
+
 /// A total-ish order for orderable values: numeric by magnitude, dateTime by
 /// the **instant** the lexical form denotes (mixed timezone offsets are
 /// normalized to UTC before comparing — sq-qj2q). Returns `None` for
 /// incomparable pairs (e.g. an unparseable dateTime under an order operator).
-fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
+pub(crate) fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
     match (a, b) {
         (Value::Num(x), Value::Num(y)) => x.partial_cmp(y),
         (Value::DateTime(x), Value::DateTime(y)) => cmp_datetime(x, y),
@@ -1605,14 +1786,6 @@ fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
 /// the evaluator's `odrl:dateTime` constraint was, rather than on `str::cmp`.
 pub fn cmp_datetime(x: &str, y: &str) -> Option<std::cmp::Ordering> {
     Some(parse_instant(x)?.cmp(&parse_instant(y)?))
-}
-
-/// Crate-internal accessor for [`cmp_datetime`] so [`crate::compare`]'s static
-/// containment analysis orders dateTime bounds by the **same** instant normalizer
-/// the evaluator uses (one source of truth — no duplicated xsd:dateTime parser).
-/// [OPUS-4.8] sq-zabv.
-pub(crate) fn cmp_datetime_pub(x: &str, y: &str) -> Option<std::cmp::Ordering> {
-    cmp_datetime(x, y)
 }
 
 /// A point on the UTC timeline, as `(days-since-epoch, nanoseconds-into-day)`

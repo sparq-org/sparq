@@ -2,8 +2,8 @@
 
 // [FABLE-5] sq-ixc3.15 — pure helpers + fixtures for the ODRL policy tool.
 //
-// The ODRL usage-control stack (the sparq-policy evaluator + sparq-solid's PodStore/odrl-bridge
-// enforcement) is NOT in the in-tab wasm bundle, so the tool is NATIVE-ONLY: the desktop shell
+// The ODRL usage-control stack (the sparq-policy evaluator + sparq-solid's read rewrite)
+// is NOT in the in-tab wasm bundle, so the tool is NATIVE-ONLY: the desktop shell
 // runs the whole round-trip in one Rust command (`odrl_preview`, gui/src-tauri/src/odrl.rs) and
 // the hosted web build degrades HONESTLY with the message below — never a fabricated decision.
 //
@@ -14,8 +14,9 @@ import type { SparqlResults } from "@sparq/client";
 
 /**
  * One requester's pane — byte-for-byte the Rust `OdrlPane` (gui/src-tauri/src/odrl.rs): the
- * ODRL decision for the explicit request, the bridge's materialization notes, and the gated
- * result set (SPARQL 1.1 JSON) from `PodStore::query_json_as` under that requester's session.
+ * ODRL decision for the explicit request, the policy's read verdict per named graph
+ * (`bridge_notes`, a historical name), and the gated result set (SPARQL 1.1 JSON) over the
+ * graphs that verdict grants.
  */
 export interface OdrlPane {
   requester: string;
@@ -28,7 +29,7 @@ export interface OdrlPane {
 
 /**
  * The whole preview — byte-for-byte the Rust `OdrlPreview`. `policy_ok === false` means the
- * policy did not parse: NOTHING was materialized (deny-everything, fail-closed) and
+ * policy did not parse: NOTHING is granted (deny-everything, fail-closed) and
  * `policy_error` carries the verbatim parse error as the visible reason.
  */
 export interface OdrlPreviewResult {
@@ -143,7 +144,7 @@ export function hiddenGraphs(
  */
 export function describeMalformedPolicy(reason: string): string {
   return (
-    "Malformed policy — denying everything (fail-closed). Nothing was materialized; every " +
+    "Malformed policy — denying everything (fail-closed). Nothing is granted; every " +
     `requester sees zero rows. Parser: ${reason}`
   );
 }

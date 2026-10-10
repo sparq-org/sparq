@@ -373,7 +373,7 @@ fn datetime_xsd_typed_constant_roundtrips() {
 // of matched_prohibition (Applies / Ambiguous / Withdrawn). The bridge uses this to
 // retract a materialized deny ONLY on a DEFINITE withdrawal, never on missing evidence.
 // ---------------------------------------------------------------------------
-fn windowed_prohibition() -> sparq_policy::Policy {
+fn windowed_prohibition() -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .
@@ -478,7 +478,7 @@ const RESEARCH: &str = "urn:purpose/research";
 const MARKETING: &str = "urn:purpose/marketing";
 
 /// alice MAY use asset-X, gated on purpose = research (exact IRI).
-fn purpose_permission() -> sparq_policy::Policy {
+fn purpose_permission() -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .
@@ -691,7 +691,7 @@ const BOB: &str = "https://bob.ex/card#me";
 const CAROL: &str = "https://carol.ex/card#me";
 
 /// "everyone EXCEPT bob may read asset-X" — recipient neq bob.
-fn recipient_neq_permission() -> sparq_policy::Policy {
+fn recipient_neq_permission() -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .
@@ -911,7 +911,7 @@ fn recipient_eq_a_and_neq_b_prohibition_dual() {
 // ===========================================================================
 
 /// "may read asset-X ONLY until 2026-12-31T23:59:59Z" — an upper time bound.
-fn windowed_read_permission() -> sparq_policy::Policy {
+fn windowed_read_permission() -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .
@@ -1061,7 +1061,7 @@ fn datetime_not_constrained_when_absent() {
 // ---------------------------------------------------------------------------
 
 /// A `dateTime lteq T` policy whose upper bound `T` is supplied with an offset.
-fn lteq_window(bound: &str) -> sparq_policy::Policy {
+fn lteq_window(bound: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <{ODRL}> .

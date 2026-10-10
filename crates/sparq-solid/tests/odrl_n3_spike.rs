@@ -14,7 +14,7 @@ use oxrdf::Term;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
 use sparq_policy::{parse_policy_str, Request};
-use sparq_reason::reason_n3;
+use sparq_reason::{reason_n3_with_cycles, NegationCycles};
 use sparq_solid::odrl_bridge::materialize_policy;
 use sparq_solid::AUTH_NS;
 
@@ -73,7 +73,11 @@ fn n3_set(policy_ttl: &str, action_local: &str, target: &str, party: &str, at: O
         ODRL, policy_ttl, request, RULES
     );
     let mut dict = Dict::new();
-    let closure = reason_n3(&mut dict, &src).expect("N3 reasons");
+    // odrl-spike.n3 concludes a variable predicate next to store-scoped negation, so it
+    // cannot be stratified yet: keep single-pass semantics by explicit opt-in. Follow-up:
+    // rewrite it with one concrete conclusion per mode and drop the opt-in.
+    let closure =
+        reason_n3_with_cycles(&mut dict, &src, NegationCycles::SinglePass).expect("N3 reasons");
     let mut set: AuthSet = Vec::new();
     for t in &closure {
         let p = dict.term(t[1]);
@@ -119,7 +123,13 @@ fn assert_case(
 
 #[test]
 fn a1_allow_within_datetime_window() {
-    assert_case("A1", POLICY_A, "read", "urn:alice", Some("2026-07-05T00:00:00Z"), &[("urn:alice", "read", "urn:t/1")]);
+    // The spike's rules derive the grant inside the window, but the bridge stores
+    // nothing: the window closes and a stored triple is never re-checked against the
+    // clock.
+    let at = Some("2026-07-05T00:00:00Z");
+    let want = expect(&[("urn:alice", "read", "urn:t/1")]);
+    assert_eq!(n3_set(POLICY_A, "read", "urn:t/1", "urn:alice", at), want, "A1: N3 rules");
+    assert!(rust_set(POLICY_A, "read", "urn:t/1", "urn:alice", at).is_empty(), "A1: bridge");
 }
 
 #[test]

@@ -33,12 +33,32 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # Two commits: a pull_request checkout is GitHub's test merge, whose
+          # first parent is the base tip it merged into.
+          fetch-depth: 2
+
+      - name: Resolve pull request merge parent
+        id: merge_parent
+        if: github.event_name == 'pull_request'
+        # Diff the test merge against its first parent: exactly the PR's change on
+        # the current base. The stale base.sha diff also counted every base commit
+        # the head lacked. Anything but a two-parent merge at github.sha leaves this
+        # empty, so classification falls back to base.sha (still fail closed).
+        env:
+          MERGE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          parents=$(git rev-list --parents -n 1 HEAD)
+          read -r commit first second extra <<< "$parents" || true
+          if [ "$commit" = "$MERGE_SHA" ] && [ -n "${second:-}" ] && [ -z "${extra:-}" ]; then
+            echo "sha=$first" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Classify exact-evaluator inputs (fail closed)
         id: changes
         env:
-          EXACT_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
-          EXACT_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          EXACT_BASE_SHA: ${{ steps.merge_parent.outputs.sha || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          EXACT_HEAD_SHA: ${{ steps.merge_parent.outputs.sha && github.sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         run: python3 scripts/ci_exact_evaluator_paths.py
 
       - name: Require explicit classification output

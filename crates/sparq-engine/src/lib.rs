@@ -152,8 +152,8 @@ pub use explain_json::{
 };
 pub use update::{
     apply_effects, parse_update_rec2013, update, update_in_place, update_in_place_atomic,
-    update_in_place_atomic_with_budget, update_in_place_capturing, update_in_place_with_budget,
-    with_load_base, UpdateEffect,
+    update_in_place_algebra_with_budget, update_in_place_atomic_with_budget, update_in_place_capturing,
+    update_in_place_with_budget, with_load_base, UpdateEffect, WriteAuthorizer,
 };
 
 /// Test/measurement hooks for sideways information passing (SIP) — the correlated
@@ -1090,7 +1090,7 @@ pub fn update_in_place_prepared_with_budget(
     prepared: &PreparedUpdate,
     budget: &QueryBudget,
 ) -> Result<(), String> {
-    update::update_in_place_prepared_with_budget(graph, &prepared.update, budget)
+    update::update_in_place_algebra_with_budget(graph, &prepared.update, None, None, budget)
 }
 
 /// Executes a SPARQL query string against a graph, materialising the solutions.
@@ -2607,6 +2607,42 @@ mod tests {
         let s = one("SELECT (STRUUID() AS ?s) {}").unwrap();
         assert_eq!(s.len(), 38); // quoted 36-char UUID
         assert_ne!(one("SELECT (STRUUID() AS ?s) {}").unwrap(), s);
+    }
+
+    /// #4275: SUBSTR keeps the F&O 3.1 §5.4.3 window `[start, start + length)`, NOT shifted
+    /// when start < 1. SPARQL 1.1 types both bounds `xsd:integer`, so a non-integer is an error.
+    #[test]
+    fn substr_window_is_not_shifted_below_one() {
+        let one = |q: &str| {
+            let r = query(&g(), &format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ({q} AS ?x) {{}}")).unwrap();
+            r.rows[0][0].as_ref().map(|t| t.to_string())
+        };
+        assert_eq!(one("SUBSTR(\"12345\", 0, 3)").unwrap(), "\"12\"");
+        assert_eq!(one("SUBSTR(\"hello\", -2, 4)").unwrap(), "\"h\"");
+        assert_eq!(one("SUBSTR(\"12345\", -3, 5)").unwrap(), "\"1\"");
+        assert_eq!(one("SUBSTR(\"hello\", -100, 3)").unwrap(), "\"\"");
+        assert_eq!(one("SUBSTR(\"hello\", 0)").unwrap(), "\"hello\"");
+        assert_eq!(one("SUBSTR(\"hello\", 2, 3)").unwrap(), "\"ell\"");
+        assert_eq!(one("SUBSTR(\"hello\", 4, 10)").unwrap(), "\"lo\"");
+        assert_eq!(one("SUBSTR(\"hello\", 2, -1)").unwrap(), "\"\"");
+        assert_eq!(one("SUBSTR(\"日本語\", 2, 1)").unwrap(), "\"本\"");
+        assert_eq!(one("SUBSTR(\"12345\", 1.5, 2.6)"), None);
+        assert_eq!(one("SUBSTR(\"hello\", xsd:double(\"NaN\"))"), None);
+    }
+
+    /// #4276: ROUND of a double in [-0.5, 0) is NEGATIVE zero (F&O 3.1 §4.4.4).
+    #[test]
+    fn round_keeps_the_sign_of_a_zero_result() {
+        let one = |q: &str| {
+            let r = query(&g(), &format!("PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> SELECT ({q} AS ?x) {{}}")).unwrap();
+            r.rows[0][0].as_ref().map(|t| t.to_string()).unwrap()
+        };
+        let v = one("ROUND(xsd:double(\"-0.5\"))");
+        assert!(v.starts_with("\"-0"), "{v}");
+        assert!(one("ROUND(xsd:double(\"-0.2\"))").starts_with("\"-0"));
+        assert!(one("ROUND(xsd:float(\"-0.5\"))").starts_with("\"-0"));
+        assert!(!one("ROUND(xsd:double(\"0.2\"))").starts_with("\"-"));
+        assert!(one("ROUND(xsd:double(\"-1.5\"))").starts_with("\"-1"));
     }
 
     #[test]

@@ -38,27 +38,31 @@ mod compare;
 mod eval;
 pub mod model;
 mod parse;
+mod validate;
 
 pub use compare::{
     conflict_admissibility, contains, detect_conflicts, Conflict, Containment, Overlap,
 };
 pub use eval::{
-    cmp_datetime, datetime_status, evaluate, matched_prohibition, prohibition_status,
-    purpose_status, recipient_status, spatial_status, DateTimeMatch, Decision, ProhibitionStatus,
-    PurposeMatch, RecipientMatch, Request, SpatialMatch, ODRL_COUNT, ODRL_DATETIME, ODRL_PURPOSE,
+    cmp_datetime, datetime_status, decide, duty_discharged, evaluate, matched_prohibition,
+    prohibition_status, purpose_status, recipient_status, spatial_status, DateTimeMatch, Decision,
+    Permit, ProhibitionStatus, PurposeMatch, RecipientMatch, Request, SpatialMatch, ODRL_COUNT, ODRL_DATETIME, ODRL_PURPOSE,
     ODRL_RECIPIENT, ODRL_SPATIAL,
 };
 pub use model::{
     Action, ConflictStrategy, Constraint, ConstraintNode, Duty, LogicalConstraint, LogicalOperator,
     Operator, Policy, Rule, Value, ODRL_NS,
 };
-pub use parse::{parse_policy, parse_policy_str};
+pub use parse::{
+    parse_policy, parse_policy_str, parse_policy_str_with_memberships, target_memberships,
+};
+pub use validate::ValidatedPolicy;
 
 // [OPUS-4.8] sq-zi5w: re-export the count-enforcement surface at the crate root when the
 // feature is on (matches how the stateless evaluator surface is flat-exported).
 #[cfg(feature = "count-enforcement")]
 pub use count::{
-    count_status, evaluate_and_exercise, ConsumeResult, CountKey, CountStatus, ExerciseDecision,
+    base_decision, count_status, evaluate_and_exercise, ConsumeResult, CountKey, CountStatus, ExerciseDecision,
     InMemoryCounterStore, UsageCounterStore,
 };
 

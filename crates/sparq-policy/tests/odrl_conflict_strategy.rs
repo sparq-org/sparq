@@ -17,7 +17,7 @@ use sparq_policy::{conflict_admissibility, parse_policy_str, ConflictStrategy};
 /// A conflicting permission/prohibition pair (same action/target/assignee) — the shape
 /// `detect_conflicts` flags as a `Certain` conflict — with the given `odrl:conflict`
 /// clause spliced in (empty string = leave it unset).
-fn conflicting_policy(conflict_clause: &str) -> sparq_policy::Policy {
+fn conflicting_policy(conflict_clause: &str) -> sparq_policy::ValidatedPolicy {
     let ttl = format!(
         r#"
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
@@ -100,8 +100,9 @@ fn invalid_strategy_with_conflict_is_refused() {
     assert!(err.contains("invalid"), "error names the strategy: {err}");
 }
 
-/// `odrl:conflict odrl:invalid` with NO detected conflict (disjoint targets) → nothing to
-/// void → admissible.
+/// `odrl:conflict odrl:invalid` with NO detected conflict (disjoint actions) → nothing to
+/// void → admissible. Disjoint targets are not enough: asset membership evidence can
+/// place one inside the other.
 #[test]
 fn invalid_strategy_without_conflict_is_admissible() {
     let ttl = r#"
@@ -109,7 +110,7 @@ fn invalid_strategy_without_conflict_is_admissible() {
 <urn:pol/p> a odrl:Set ;
   odrl:conflict odrl:invalid ;
   odrl:permission  [ odrl:action odrl:read ; odrl:target <urn:asset/x> ] ;
-  odrl:prohibition [ odrl:action odrl:read ; odrl:target <urn:asset/y> ] .
+  odrl:prohibition [ odrl:action odrl:modify ; odrl:target <urn:asset/x> ] .
 "#;
     let p = parse_policy_str(ttl, "turtle").unwrap();
     assert_eq!(p.conflict, Some(ConflictStrategy::Invalid));

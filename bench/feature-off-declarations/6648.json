@@ -1,0 +1,5 @@
+{
+  "pr": 6648,
+  "date": "2026-10-05",
+  "reason": "Behaviour-free refactor: crates/sparq-engine/src/exec.rs is split into child modules under crates/sparq-engine/src/exec/. No code changes meaning, no feature gate is added or widened (the yannakakis items move under one equivalent module-level gate), no dependency is added and there is no `unsafe`. Moving always-compiled code between files changes the file!()/line!() panic-location metadata and may perturb codegen ordering, so the feature-OFF sparq-wasm bundle bytes can move without any semantic change. Bundle SIZE remains governed separately by the metrics.wasm_bundle_bytes floor ratchet in bench.yml."
+}

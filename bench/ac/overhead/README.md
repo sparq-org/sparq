@@ -8,7 +8,9 @@ Measures what ODRL enforcement **costs**: the sibling `bench/ac/` (oracle) + `be
 unguarded latency**, fail-closed on any correctness disagreement while timing.
 
 - **Lane A** — policy-materialization cost sweep (kind × count: bare permission,
-  permission+prohibition, conditional recipient re-check, counted `odrl:count`).
+  permission+prohibition, conditional recipient, counted `odrl:count`). Only the bare
+  permission is stored; the other kinds are refused (a constraint or prohibition can change
+  while a stored grant stands), so their rows time the refusal and assert no access.
 - **Lane B** — steady-state per-query overhead: `PodStore::query_as` over an ODRL-materialized
   `<urn:sparq:auth>` vs the SAME query unguarded (`sparq_engine::query`) on a data-only twin
   where the permitted subset is physically the whole store — identical result sets asserted
