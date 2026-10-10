@@ -115,3 +115,16 @@ For each mode and cryptosuite:
    1. S3 (`mldsa44-rdfc-2024`);
    2. S2 (`ecdsa-rdfc-2019`);
    3. a post-quantum root signature for S4.
+
+## 8. State of the implementation (from ZK code landing, 10 October 2026)
+
+- `eddsa-rdfc-2022` is verified natively and inside the RISC Zero V5 guest. `ecdsa-rdfc-2019` is
+  verified natively only. `bbs-2023` and `ecdsa-sd-2023` are not verified yet.
+- S4 draft: `schnorr-poseidon2-merkle-2026`, Schnorr over Baby Jubjub with a Poseidon2 challenge
+  (not post-quantum). A post-quantum variant could sign the same root
+  (`mldsa44-poseidon2-merkle-2026`). The tree is a binary Poseidon2 tree whose leaves are the
+  RDFC-1.0 canonical quads. Each leaf encodes subject, predicate, object and graph with a typed term
+  encoding that includes an order-preserving lane for numbers and dates. The signed message is one
+  BN254 field element derived from the root, quad count, tree depth and proof-configuration digest.
+- Modes: the Noir path supports `hidden` and `revealed`. The RISC Zero V5 path supports `hidden`
+  today; `revealed` is next.
