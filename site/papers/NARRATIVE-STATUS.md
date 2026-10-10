@@ -85,3 +85,7 @@ Branch `claude/zk-paper-narrative`, following `opus-5-5-narrative-proposal.md`
   100k constraints (fixed setup about 0.8 s, 18 MB). Plain re-evaluation over four disclosed
   credentials (#6788) about 1.5 ms. Describe VOLE as "proposed, not built" (no transcript binding).
   Cite only once frozen as evidence records.
+- Selective-disclosure baseline to be measured: the existing `native-rdf` feature in
+  `zk/native-composition` (SELECT DISTINCT over a BGP; per-triple Dock BBS+ signatures, slot
+  disclosure, verifier re-checks). It is not W3C `bbs-2023` (no JSON pointers, no HMAC blank-node
+  labels); cite it with that caveat. No `bbs-2023` implementation is planned.
