@@ -420,16 +420,19 @@ Integrity #cite("VC-DATA-INTEGRITY"): the presentation names one by identifier a
 and the verifier accepts only the methods its request lists.
 
 A proof method need not be zero-knowledge. Besides zero-knowledge proofs, a method may produce
-a succinct proof that hides nothing, or an attestation signed by a trusted execution
-environment (TEE) stating that a measured program evaluated the query over the input and
-checked the signatures. What a verifier relies on differs between these, so each method
-states it explicitly.
+a proof that hides nothing, an attestation signed by a trusted execution environment (TEE)
+stating that a measured program evaluated the query over the input and checked the
+signatures, or the signed credentials themselves (in full or selectively disclosed) for the
+verifier to check and evaluate the query over. What a verifier relies on differs between
+these, so each method states it explicitly.
 
 Each proof method MUST publish:
 
 - its identifier (an IRI) and version (a positive integer);
 - the #strong[kind of evidence]: a zero-knowledge proof, a proof that is not zero-knowledge,
-  or an attestation;
+  an attestation, or disclosed credentials;
+- whether the evidence is #strong[transferable] (anyone holding it and the request can check
+  it) or #strong[designated-verifier] (it convinces only the verifier that took part);
 - #strong[what it shows]: the statement it binds (section 7), and the query forms, answer
   kinds, input kinds and SPARQL fragment it supports (a method MAY support only part of
   SPARQL 1.1);
@@ -448,6 +451,12 @@ Each proof method MUST publish:
 - the canonical encoding of the statement and how the evidence binds it (section 7); for an
   attestation, the statement digest MUST be in the signed report;
 - the encoding of the `proof` member and any size or capacity bounds.
+
+A proof method MAY be interactive, with the verifier taking part in producing the evidence.
+Such a method defines the channel and the messages, MUST bind the request digest into the
+protocol transcript, and defines what the `proof` member then carries (for example the
+transcript, or an identifier of the completed session). For such a method, the step of
+section 8 that verifies the proof means completing the protocol and checking its outcome.
 
 A new version of a proof method is a new proof method: a verifier that accepts version 5 does
 not thereby accept version 6. A method is defined by what the verifier checks, not by how the
@@ -473,6 +482,30 @@ cryptographic audit.
     SELECT (positive basic graph patterns with integer FILTERs)], [holder-declared; not usable
     with version 1 of this document yet (section 11)], [Schnorr signatures over the sparq
     commitment format, inside the proof],
+)
+
+The following methods are proposed and not built. Their identifiers use the same prefix and
+version 1.
+
+#table(
+  columns: (1.5fr, 1fr, 2fr),
+  align: (left, left, left),
+  table.header[Identifier][Evidence kind][What it is],
+  [`disclosed-reevaluation`], [disclosed credentials], [The holder sends the signed
+    credentials; the verifier checks the signatures and evaluates the query itself. A baseline
+    for comparison: it hides nothing.],
+  [`selective-disclosure-reevaluation`], [disclosed credentials, selectively], [The holder
+    discloses, with `bbs-2023` or `ecdsa-sd-2023`, only the triples each returned solution
+    uses; the verifier checks them and evaluates the query over them. Supported answers only,
+    for queries whose solutions remain solutions when data is added (no negation, OPTIONAL or
+    aggregation).],
+  [`vole-designated-verifier`], [zero-knowledge proof, interactive, designated-verifier],
+  [An interactive proof based on vector oblivious linear evaluation (VOLE), as in QuickSilver.
+    It convinces only the verifier that took part.],
+  [`tee-attestation`], [attestation], [A program running in a TEE evaluates the query and
+    checks the signatures; the TEE's signed report contains the statement digest. The
+    `parameters` member names the platform: `intel-tdx`, `amd-sev-snp`, `aws-nitro` or
+    `nvidia-cc`.],
 )
 
 = Security and privacy considerations
